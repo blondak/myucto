@@ -54,6 +54,8 @@ export function useDocumentDimensions(docType: DimensionDocType) {
   const itemDims = reactive(new WeakMap<object, DimensionMap>())
   /** Typy, které vyplnilo předvyplnění (typ → hodnota). */
   const autoFilled = ref<Record<number, number>>({})
+  /** Položky s ručně rozbaleným řádkem dimenzí (jinak platí hlavička z Klasifikace). */
+  const openItems = reactive(new WeakSet<object>())
   let prefillSeq = 0
 
   function itemDimsOf(item: object): DimensionMap {
@@ -64,6 +66,24 @@ export function useDocumentDimensions(docType: DimensionDocType) {
     itemDims.set(item, map)
   }
 
+  function itemHasDims(item: object): boolean {
+    return Object.values(itemDimsOf(item)).some(v => !!v)
+  }
+
+  /** Řádek dimenzí položky je vidět, když ho uživatel rozbalil nebo položka dimenze má. */
+  function isItemOpen(item: object): boolean {
+    return openItems.has(item) || itemHasDims(item)
+  }
+
+  function toggleItem(item: object) {
+    if (isItemOpen(item)) {
+      openItems.delete(item)
+      itemDims.set(item, {})
+    } else {
+      openItems.add(item)
+    }
+  }
+
   async function load(docId: number, items: object[] = []): Promise<void> {
     if (!dims.enabled.value || docId <= 0) return
     try {
@@ -71,8 +91,7 @@ export function useDocumentDimensions(docType: DimensionDocType) {
       const data = await dimensionsApi.getDocument(docType, docId)
       header.value = { ...data.header }
       autoFilled.value = {}
-      items.forEach((item, i) => itemDims.set(item, { ...(data.items[i + 1] ?? {}) }))
-    } catch {
+      items.forEach((item, i) => itemDims.set(item, { ...(data.items[i + 1] ?? {}) }))    } catch {
       // Doklad se musí otevřít i bez dimenzí (např. bez práva na účetnictví).
     }
   }
@@ -147,6 +166,9 @@ export function useDocumentDimensions(docType: DimensionDocType) {
     autoFilled,
     hasAutoFilled,
     itemDimsOf,
+    itemHasDims,
+    isItemOpen,
+    toggleItem,
     setItemDims,
     load,
     applyDefaults,

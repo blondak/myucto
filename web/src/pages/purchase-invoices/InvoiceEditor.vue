@@ -1910,9 +1910,12 @@ function fieldErr(key: string): string | null {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(it, i) in form.items" :key="rowKey(it)" class="border-t border-neutral-200">
+            <template v-for="(it, i) in form.items" :key="rowKey(it)">
+            <tr class="border-t border-neutral-200">
               <td class="py-2 pl-5 pr-2">
+                <div class="flex items-start gap-1">
                 <StockDescriptionField
+                  class="min-w-0 flex-1"
                   v-model:description="it.description"
                   :stock-item-id="it.stock_item_id ?? null"
                   :stock-enabled="stockEnabled"
@@ -1928,11 +1931,11 @@ function fieldErr(key: string): string | null {
                   @search="(q: string) => onStockSearch(i, q)"
                   @select="(v: number | null) => onStockSelect(i, v)"
                 />
+                <ItemDimensionsToggle v-if="docDims.enabled.value" class="mt-1"
+                  :open="docDims.isItemOpen(it)" :filled="docDims.itemHasDims(it)" :disabled="!docDims.canEdit.value"
+                  @toggle="docDims.toggleItem(it)" />
+                </div>
                 <p v-if="fieldErr(`items.${i}.description`)" class="text-xs text-danger-600 mt-1">{{ fieldErr(`items.${i}.description`) }}</p>
-                <DimensionFields v-if="docDims.enabled.value" class="mt-1" compact teleport
-                  :model-value="docDims.itemDimsOf(it)" :disabled="!docDims.canEdit.value"
-                  data-test="purchase-item-dimensions"
-                  @update:model-value="docDims.setItemDims(it, $event)" />
               </td>
               <td class="py-2 px-1">
                 <DurationInput v-if="isTimeItem(it)" v-model="it.quantity" v-model:duration-minutes="it.duration_minutes" :allow-negative="true" />
@@ -1992,6 +1995,18 @@ function fieldErr(key: string): string | null {
                 <button type="button" @click="removeItem(i)" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center text-neutral-400 hover:text-danger-600 hover:bg-danger-50 rounded" :title="t('purchase_invoice.items.remove')">✕</button>
               </td>
             </tr>
+            <tr v-if="docDims.enabled.value && docDims.isItemOpen(it)">
+              <td colspan="8" class="pb-2 pl-5 pr-3">
+                <div class="flex items-center gap-2">
+                  <span class="shrink-0 text-xs text-neutral-500">{{ t('dimensions.items_title') }}</span>
+                  <DimensionFields class="flex-1 flex-nowrap!" compact teleport
+                    :model-value="docDims.itemDimsOf(it)" :disabled="!docDims.canEdit.value"
+                    data-test="purchase-item-dimensions"
+                    @update:model-value="docDims.setItemDims(it, $event)" />
+                </div>
+              </td>
+            </tr>
+            </template>
           </tbody>
         </table>
         </div>
@@ -2001,6 +2016,10 @@ function fieldErr(key: string): string | null {
           <div v-for="(it, i) in form.items" :key="`m-${rowKey(it)}`" class="p-3 space-y-2">
             <div class="flex items-center justify-between text-xs text-neutral-500">
               <span class="font-mono">#{{ i + 1 }}</span>
+              <span class="flex-1"></span>
+              <ItemDimensionsToggle v-if="docDims.enabled.value" class="mr-2"
+                :open="docDims.isItemOpen(it)" :filled="docDims.itemHasDims(it)" :disabled="!docDims.canEdit.value"
+                @toggle="docDims.toggleItem(it)" />
               <button type="button" @click="removeItem(i)" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-danger-500/40 text-danger-500 hover:bg-danger-50 rounded text-lg leading-none" :title="t('purchase_invoice.items.remove')">✕</button>
             </div>
             <div>
@@ -2084,7 +2103,7 @@ function fieldErr(key: string): string | null {
                 </div>
               </template>
             </div>
-            <div v-if="docDims.enabled.value">
+            <div v-if="docDims.enabled.value && docDims.isItemOpen(it)">
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('dimensions.items_title') }}</label>
               <DimensionFields compact :model-value="docDims.itemDimsOf(it)" :disabled="!docDims.canEdit.value"
                 @update:model-value="docDims.setItemDims(it, $event)" />

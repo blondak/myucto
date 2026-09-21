@@ -27081,6 +27081,8 @@
     "panel_title": "Dimenze",
     "header_title": "Dimenze dokladu",
     "items_title": "Dimenze položky",
+    "item_toggle_open": "Jiné dimenze pro tuto položku (jinak platí dimenze celého dokladu)",
+    "item_toggle_close": "Zrušit dimenze položky - platí dimenze celého dokladu",
     "line_title": "Dimenze řádku",
     "save": "Uložit dimenze",
     "saved": "Dimenze jsou uložené.",

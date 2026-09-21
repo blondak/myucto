@@ -48,6 +48,7 @@ import { appIsoDate, addDaysIso } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import DurationInput from '@/components/ui/DurationInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 import { durationTotal, isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, syncCreditNoteItemSign, timeItemTotals, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
 import { groupInvoiceStockAvailability, invoiceStockAvailabilityKey } from './invoiceStockAvailability'
@@ -2691,7 +2692,9 @@ async function deleteDraft() {
                 <button type="button" @click="moveDown(i)" :disabled="i === form.items.length - 1" class="block w-5 h-4 hover:text-neutral-700 disabled:opacity-30">▼</button>
               </td>
               <td class="px-3 py-2">
+                <div class="flex items-start gap-1">
                 <StockDescriptionField
+                  class="min-w-0 flex-1"
                   v-model:description="item.description"
                   :stock-item-id="item.stock_item_id ?? null"
                   :stock-enabled="stockEnabled"
@@ -2710,6 +2713,10 @@ async function deleteDraft() {
                   @search="(q: string) => onStockSearch(i, q)"
                   @select="(v: number | null) => onStockSelect(i, v)"
                 />
+                <ItemDimensionsToggle v-if="docDims.enabled.value" class="mt-1"
+                  :open="docDims.isItemOpen(item)" :filled="docDims.itemHasDims(item)" :disabled="!docDims.canEdit.value"
+                  @toggle="docDims.toggleItem(item)" />
+                </div>
                 <label v-if="stockEnabled && item.stock_item_id && stockWarehouses.length > 0"
                   class="mt-1.5 flex items-center gap-2 text-xs text-neutral-500">
                   <span class="whitespace-nowrap">{{ t('stock.receipt.field_warehouse') }}</span>
@@ -2726,10 +2733,6 @@ async function deleteDraft() {
                   <span v-if="stockRowPriceBadge(item)" :title="t('invoice.stock_pricing.source_hint')"
                     class="px-1.5 py-0.5 rounded-full border whitespace-nowrap" :class="stockRowPriceBadge(item)!.cls">{{ stockRowPriceBadge(item)!.label }}</span>
                 </div>
-                <DimensionFields v-if="docDims.enabled.value" class="mt-1" compact teleport
-                  :model-value="docDims.itemDimsOf(item)" :disabled="!docDims.canEdit.value"
-                  data-test="invoice-item-dimensions"
-                  @update:model-value="docDims.setItemDims(item, $event)" />
               </td>
               <td class="px-3 py-2">
                 <DurationInput v-if="isTimeItem(item)" v-model="item.quantity" v-model:duration-minutes="item.duration_minutes" :allow-negative="true" />
@@ -2794,6 +2797,18 @@ async function deleteDraft() {
                   <span v-if="assetKeyOf(item)" class="text-xs text-neutral-400">
                     {{ item.asset_id ? t('invoice.asset_sale.posts_641') : t('invoice.asset_sale.posts_642') }}
                   </span>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="docDims.enabled.value && docDims.isItemOpen(item)" :class="['border-t-0!', itemHasBothNegative(item) ? 'bg-danger-50' : '']">
+              <td></td>
+              <td :colspan="supplierIsVatPayer ? 7 : 6" class="px-3 pb-2">
+                <div class="flex items-center gap-2">
+                  <span class="shrink-0 text-xs text-neutral-500">{{ t('dimensions.items_title') }}</span>
+                  <DimensionFields class="flex-1 flex-nowrap!" compact teleport
+                    :model-value="docDims.itemDimsOf(item)" :disabled="!docDims.canEdit.value"
+                    data-test="invoice-item-dimensions"
+                    @update:model-value="docDims.setItemDims(item, $event)" />
                 </div>
               </td>
             </tr>
@@ -2866,12 +2881,15 @@ async function deleteDraft() {
             <div class="flex items-center justify-between text-xs text-neutral-500">
               <span class="font-mono">#{{ i + 1 }}</span>
               <div class="flex items-center gap-2">
+                <ItemDimensionsToggle v-if="docDims.enabled.value"
+                  :open="docDims.isItemOpen(item)" :filled="docDims.itemHasDims(item)" :disabled="!docDims.canEdit.value"
+                  @toggle="docDims.toggleItem(item)" />
                 <button type="button" @click="moveUp(i)" :disabled="i === 0" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-neutral-300 rounded hover:bg-neutral-50 disabled:opacity-30 disabled:cursor-not-allowed">▲</button>
                 <button type="button" @click="moveDown(i)" :disabled="i === form.items.length - 1" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-neutral-300 rounded hover:bg-neutral-50 disabled:opacity-30 disabled:cursor-not-allowed">▼</button>
                 <button type="button" @click="removeItem(i)" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-danger-500/40 text-danger-500 hover:bg-danger-50 rounded text-lg leading-none">×</button>
               </div>
             </div>
-            <div v-if="docDims.enabled.value">
+            <div v-if="docDims.enabled.value && docDims.isItemOpen(item)">
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('dimensions.items_title') }}</label>
               <DimensionFields compact :model-value="docDims.itemDimsOf(item)" :disabled="!docDims.canEdit.value"
                 @update:model-value="docDims.setItemDims(item, $event)" />

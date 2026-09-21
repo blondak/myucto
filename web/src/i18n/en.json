@@ -27081,6 +27081,8 @@
     "panel_title": "Dimensions",
     "header_title": "Document dimensions",
     "items_title": "Item dimensions",
+    "item_toggle_open": "Different dimensions for this item (otherwise the document dimensions apply)",
+    "item_toggle_close": "Remove item dimensions - the document dimensions apply",
     "line_title": "Line dimensions",
     "save": "Save dimensions",
     "saved": "Dimensions saved.",
