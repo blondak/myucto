@@ -179,6 +179,49 @@ describe('StatementMapping.vue', () => {
     })])
   })
 
+  it('(g) výjimka pro skupinu účtů je vidět u každého účtu skupiny i s poznámkou a jde upravit dole', async () => {
+    m.getStatementOverrides.mockResolvedValue(overview({
+      overrides: [{ id: 5, version_id: 1, account_prefix: '365.', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: 'Návrh z podaného přiznání' }],
+      accounts: overview().accounts.map(a => ({ ...a, mappings: [{ row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', source: 'override' }] })),
+    }))
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    const row = wrapper.find('[data-test="account-365.200"]')
+    const select = row.find('[data-test="row-select"]')
+    expect((select.element as HTMLSelectElement).value).toBe('')
+    expect(select.find('option').text()).toBe('accounting.statements.mapping.row_inherited:{"prefix":"365."}')
+    expect(row.find('[data-test="inherited-note"]').text()).toContain('Návrh z podaného přiznání')
+    expect(row.find('[data-test="remove"]').exists()).toBe(false)
+
+    const group = wrapper.find('[data-test="group-365."]')
+    expect(group.text()).toContain('accounting.statements.mapping.orphans_accounts:{"count":2}')
+    await group.find('input[type="text"]').setValue('dlouhodobá půjčka')
+    await group.find('input[type="text"]').trigger('change')
+    await wrapper.find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveStatementOverrides).toHaveBeenCalledWith(1, [
+      { account_prefix: '365.', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: 'dlouhodobá půjčka' },
+    ])
+  })
+
+  it('(h) vlastní výjimka účtu má přednost před výjimkou skupiny', async () => {
+    m.getStatementOverrides.mockResolvedValue(overview({
+      overrides: [
+        { id: 5, version_id: 1, account_prefix: '365.', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null },
+        { id: 6, version_id: 1, account_prefix: '365.100', row_code: 'P.C.II.8.1.', target: 'gross', balance_condition: 'any', sign: 1, note: 'krátkodobá' },
+      ],
+    }))
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    const own = wrapper.find('[data-test="account-365.100"] [data-test="row-select"]')
+    expect((own.element as HTMLSelectElement).value).toBe('P.C.II.8.1.')
+    expect(own.find('option').text()).toBe('accounting.statements.mapping.row_global')
+    expect(wrapper.find('[data-test="account-365.100"] [data-test="inherited-note"]').exists()).toBe(false)
+  })
+
   it('(f) bez podaného přiznání je návrh zašedlý s vysvětlením', async () => {
     m.getStatementOverrides.mockResolvedValue(overview())
     const wrapper = mount(StatementMapping)

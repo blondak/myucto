@@ -104,6 +104,33 @@ function overrideFor(code: string): StatementOverride | undefined {
   return draft.value.find(o => o.account_prefix === code)
 }
 
+/**
+ * Výjimka pro skupinu účtů (prefix `062.`), která na účet dopadá, když účet nemá vlastní.
+ * Vyhrává nejdelší prefix, stejně jako v StatementMapResolver::longestMatching.
+ */
+function inheritedOverride(code: string): StatementOverride | undefined {
+  if (overrideFor(code)) return undefined
+  let best: StatementOverride | undefined
+  for (const o of draft.value) {
+    if (o.account_prefix !== code && code.startsWith(o.account_prefix)
+      && (!best || o.account_prefix.length > best.account_prefix.length)) {
+      best = o
+    }
+  }
+  return best
+}
+
+function globalOptionLabel(code: string): string {
+  const inherited = inheritedOverride(code)
+  return inherited
+    ? t('accounting.statements.mapping.row_inherited', { prefix: inherited.account_prefix })
+    : t('accounting.statements.mapping.row_global')
+}
+
+function groupSize(prefix: string): number {
+  return (overview.value?.accounts ?? []).filter(a => a.account_code !== prefix && a.account_code.startsWith(prefix)).length
+}
+
 async function loadPeriods() {
   periods.value = await accountingApi.listPeriods()
   if (periods.value.length > 0 && !periodId.value) {
@@ -504,7 +531,7 @@ onMounted(async () => {
               </thead>
               <tbody class="divide-y divide-neutral-100">
                 <tr v-for="a in filteredAccounts" :key="a.account_code" :data-test="`account-${a.account_code}`"
-                    :class="overrideFor(a.account_code) ? 'bg-primary-50/40' : ''">
+                    :class="overrideFor(a.account_code) ? 'bg-primary-50/40' : inheritedOverride(a.account_code) ? 'bg-primary-50/20' : ''">
                   <td class="px-3 py-1.5">
                     <div class="flex items-baseline gap-2">
                       <span class="font-mono whitespace-nowrap" :class="a.is_synthetic ? 'font-semibold' : ''">{{ a.account_code }}</span>
@@ -523,8 +550,9 @@ onMounted(async () => {
                   <td class="px-2 py-1.5">
                     <select :value="overrideFor(a.account_code)?.row_code ?? ''" :disabled="!canWrite" data-test="row-select"
                             class="h-8 px-2 border border-neutral-300 rounded-md bg-surface text-xs max-w-[18rem]"
+                            :title="inheritedOverride(a.account_code) ? t('accounting.statements.mapping.inherited_hint', { prefix: inheritedOverride(a.account_code)!.account_prefix }) : undefined"
                             @change="setRow(a.account_code, ($event.target as HTMLSelectElement).value)">
-                      <option value="">{{ t('accounting.statements.mapping.row_global') }}</option>
+                      <option value="">{{ globalOptionLabel(a.account_code) }}</option>
                       <option v-for="r in rowOptions" :key="r.row_code" :value="r.row_code">{{ rowOptionLabel(r) }}</option>
                     </select>
                     <label v-if="overrideFor(a.account_code) && sectionOf(overrideFor(a.account_code)!.row_code) === 'assets'"
@@ -546,6 +574,10 @@ onMounted(async () => {
                            :placeholder="t('accounting.statements.mapping.note_placeholder')"
                            class="h-8 px-2 border border-neutral-300 rounded-md bg-surface text-xs w-full min-w-[10rem]"
                            @change="setField(a.account_code, { note: ($event.target as HTMLInputElement).value || null })" />
+                    <span v-else-if="inheritedOverride(a.account_code)" data-test="inherited-note" class="text-neutral-500 italic">
+                      <span class="font-mono not-italic">{{ inheritedOverride(a.account_code)!.account_prefix }}</span>
+                      {{ inheritedOverride(a.account_code)!.note ?? '' }}
+                    </span>
                   </td>
                   <td class="px-3 py-1.5 text-right">
                     <button v-if="canWrite && overrideFor(a.account_code)" type="button" data-test="remove"
@@ -579,7 +611,7 @@ onMounted(async () => {
               <select :value="overrideFor(a.account_code)?.row_code ?? ''" :disabled="!canWrite"
                       class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-xs w-full"
                       @change="setRow(a.account_code, ($event.target as HTMLSelectElement).value)">
-                <option value="">{{ t('accounting.statements.mapping.row_global') }}</option>
+                <option value="">{{ globalOptionLabel(a.account_code) }}</option>
                 <option v-for="r in rowOptions" :key="r.row_code" :value="r.row_code">{{ rowOptionLabel(r) }}</option>
               </select>
               <template v-if="overrideFor(a.account_code)">
@@ -602,12 +634,27 @@ onMounted(async () => {
         </div>
       </template>
 
-      <!-- Výjimky, jejichž prefix v osnově není účtem -->
-      <div v-if="orphans.length > 0" class="mt-4 bg-surface border border-warning-200 rounded-lg shadow-sm">
-        <p class="px-4 py-2 text-xs font-medium text-warning-800 bg-warning-50 border-b border-warning-200">{{ t('accounting.statements.mapping.orphans_title') }}</p>
+      <!-- Výjimky pro skupinu účtů: prefix, který v osnově není samostatným účtem (062., 351.) -->
+      <div v-if="orphans.length > 0" class="mt-4 bg-surface border border-primary-200 rounded-lg shadow-sm" data-test="group-overrides">
+        <div class="px-4 py-2 bg-primary-50 border-b border-primary-200">
+          <p class="text-xs font-medium text-primary-800">{{ t('accounting.statements.mapping.orphans_title') }}</p>
+          <p class="text-[11px] text-neutral-600 mt-0.5">{{ t('accounting.statements.mapping.orphans_hint') }}</p>
+        </div>
         <ul class="divide-y divide-neutral-100">
-          <li v-for="o in orphans" :key="keyOf(o)" class="px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-2">
-            <span><span class="font-mono">{{ o.account_prefix }}</span> → {{ rowText(rowsByCode.get(o.row_code), o.row_code) }}</span>
+          <li v-for="o in orphans" :key="keyOf(o)" class="px-4 py-2 text-xs flex flex-wrap items-center gap-2" :data-test="`group-${o.account_prefix}`">
+            <span class="min-w-[16rem] flex-1">
+              <span class="font-mono">{{ o.account_prefix }}</span> → {{ rowText(rowsByCode.get(o.row_code), o.row_code) }}
+              <span class="text-neutral-500">({{ t('accounting.statements.mapping.orphans_accounts', { count: groupSize(o.account_prefix) }) }})</span>
+            </span>
+            <select :value="o.balance_condition" :disabled="!canWrite"
+                    class="h-8 px-2 border border-neutral-300 rounded-md bg-surface text-xs"
+                    @change="setField(o.account_prefix, { balance_condition: ($event.target as HTMLSelectElement).value as StatementBalanceCondition })">
+              <option v-for="c in CONDITIONS" :key="c" :value="c">{{ t(`accounting.statements.mapping.condition_${c}`) }}</option>
+            </select>
+            <input type="text" maxlength="255" :value="o.note ?? ''" :disabled="!canWrite"
+                   :placeholder="t('accounting.statements.mapping.note_placeholder')"
+                   class="h-8 px-2 border border-neutral-300 rounded-md bg-surface text-xs flex-1 min-w-[12rem]"
+                   @change="setField(o.account_prefix, { note: ($event.target as HTMLInputElement).value || null })" />
             <button v-if="canWrite" type="button" :class="btnIconSm('danger')" :title="t('accounting.statements.mapping.remove')"
                     :aria-label="t('accounting.statements.mapping.remove')" @click="removeOverride(o.account_prefix)">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
