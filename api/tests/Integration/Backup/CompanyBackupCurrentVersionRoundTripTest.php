@@ -129,7 +129,9 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             . 'id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,'
             . 'supplier_id BIGINT UNSIGNED NOT NULL,'
             . 'invoice_number VARCHAR(64) NOT NULL,'
-            . 'imported_pdf_path VARCHAR(255) NULL'
+            . 'imported_pdf_path VARCHAR(255) NULL,'
+            . 'pdf_path VARCHAR(255) NULL,'
+            . 'pdf_generated_at DATETIME NULL'
             . ') ENGINE=InnoDB',
         );
         $pdo->exec(
@@ -212,6 +214,11 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             self::purchaseSourcePath(7), hash('sha256', 'original'), 'isdocx', 8, 'existing.isdocx',
         ]));
         self::assertTrue($sourceUpdate->closeCursor());
+        $pdo->exec("UPDATE invoices SET pdf_path='sup-7/rendered.pdf',"
+            . " pdf_generated_at='2025-01-01 10:00:00' WHERE id=101");
+        $cacheDirectory = $this->root . '/live/invoices/sup-7';
+        self::assertTrue(mkdir($cacheDirectory, 0700, true));
+        self::assertSame(8, file_put_contents($cacheDirectory . '/rendered.pdf', 'original'));
         $pdfFilename = '20250131-120000-aaaaaaaa-invoice.pdf';
         $pdfContents = "existing-tenant-archived-pdf\n";
         $pdfInsert = $pdo->prepare(
@@ -418,10 +425,12 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         self::assertSame([
             ['id' => 101, 'supplier_id' => 7,
                 'invoice_number' => 'existing-invoice',
-                'imported_pdf_path' => 'supplier-7/ab/abcdef0123456789.pdf'],
+                'imported_pdf_path' => 'supplier-7/ab/abcdef0123456789.pdf',
+                'pdf_path' => 'sup-7/rendered.pdf', 'pdf_generated_at' => '2025-01-01 10:00:00'],
             ['id' => 102, 'supplier_id' => 8,
                 'invoice_number' => 'restored-invoice',
-                'imported_pdf_path' => 'supplier-8/ab/abcdef0123456789.pdf'],
+                'imported_pdf_path' => 'supplier-8/ab/abcdef0123456789.pdf',
+                'pdf_path' => null, 'pdf_generated_at' => null],
         ], $this->invoiceRows($pdo));
         self::assertSame([
             ['id' => 11, 'invoice_id' => 101, 'filename' => 'same.pdf'],
@@ -506,6 +515,9 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
             $importedRoot . '/supplier-7/ab/abcdef0123456789.pdf',
         ));
         self::assertDirectoryDoesNotExist($this->root . '/live/invoices-imported');
+        self::assertSame('original', file_get_contents($this->root . '/live/invoices/sup-7/rendered.pdf'));
+        self::assertFileDoesNotExist($this->root . '/live/invoices/sup-8/rendered.pdf');
+
         self::assertSame([
             ['id' => 201, 'supplier_id' => 7,
                 'pdf_path' => 'supplier-7/1234567890abcdef.pdf', 'pdf_hash' => null],
@@ -569,6 +581,8 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 'supplier_id' => 7,
                 'invoice_number' => 'restored-invoice',
                 'imported_pdf_path' => 'supplier-7/ab/abcdef0123456789.pdf',
+                'pdf_path' => 'sup-7/rendered.pdf',
+                'pdf_generated_at' => '2025-01-01 10:00:00',
             ]],
             'table:purchase_invoices' => [[
                 'id' => 201, 'supplier_id' => 7,
@@ -935,9 +949,10 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                 $this->tableDefinition(
                     'table:invoices',
                     TenantDataPolicy::TenantOwned,
-                    ['id', 'supplier_id', 'invoice_number', 'imported_pdf_path'],
+                    ['id', 'supplier_id', 'invoice_number', 'imported_pdf_path', 'pdf_path', 'pdf_generated_at'],
                     ['strategy' => 'supplier_id', 'column' => 'supplier_id'],
                     [$this->reference('supplier_id', 'table:supplier')],
+                    \MyInvoice\Service\Backup\Company\CompanyBackupInvoicesProjection::restoreOverrides(),
                 ),
                 $this->tableDefinition(
                     'table:' . $this->recordsTable,
@@ -1000,6 +1015,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
      * @param list<string> $columns
      * @param array<string,mixed> $ownership
      * @param list<array<string,mixed>> $references
+     * @param array<string,mixed> $restoreOverrides
      */
     private function tableDefinition(
         string $key,
@@ -1007,6 +1023,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         array $columns,
         array $ownership,
         array $references,
+        array $restoreOverrides = [],
     ): TenantDataDefinition {
         return new TenantDataDefinition(
             $key,
@@ -1023,7 +1040,7 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
                     'generated_columns' => [],
                     'omit_columns' => [],
                     'references' => $references,
-                    'restore_overrides' => [],
+                    'restore_overrides' => $restoreOverrides,
                 ],
             ],
         );
@@ -1105,18 +1122,20 @@ final class CompanyBackupCurrentVersionRoundTripTest extends TestCase
         ], $rows);
     }
 
-    /** @return list<array{id:int,supplier_id:int,invoice_number:string,imported_pdf_path:?string}> */
+    /** @return list<array{id:int,supplier_id:int,invoice_number:string,imported_pdf_path:?string,pdf_path:?string,pdf_generated_at:?string}> */
     private function invoiceRows(PDO $pdo): array
     {
         $rows = $this->fetchRows(
             $pdo,
-            'SELECT id, supplier_id, invoice_number, imported_pdf_path FROM invoices ORDER BY id',
+            'SELECT id, supplier_id, invoice_number, imported_pdf_path, pdf_path, pdf_generated_at FROM invoices ORDER BY id',
         );
         return array_map(static fn (array $row): array => [
             'id' => (int) $row['id'],
             'supplier_id' => (int) $row['supplier_id'],
             'invoice_number' => (string) $row['invoice_number'],
             'imported_pdf_path' => is_string($row['imported_pdf_path']) ? $row['imported_pdf_path'] : null,
+            'pdf_path' => is_string($row['pdf_path']) ? $row['pdf_path'] : null,
+            'pdf_generated_at' => is_string($row['pdf_generated_at']) ? $row['pdf_generated_at'] : null,
         ], $rows);
     }
 

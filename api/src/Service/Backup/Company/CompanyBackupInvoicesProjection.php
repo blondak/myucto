@@ -57,6 +57,17 @@ final class CompanyBackupInvoicesProjection
         return ['idoklad_id', 'fakturoid_id'];
     }
 
+    /** @return array<string,array{value:null,reason:string}> */
+    public static function restoreOverrides(): array
+    {
+        // Obě hodnoty resetovat společně: původní cesta nesmí být dostupná a čas
+        // generování nesmí povolit opětovné použití osiřelé cache na disku.
+        return [
+            'pdf_path' => ['value' => null, 'reason' => 'regenerate_invoice_pdf_cache_after_restore'],
+            'pdf_generated_at' => ['value' => null, 'reason' => 'regenerate_invoice_pdf_cache_after_restore'],
+        ];
+    }
+
     /** @return array<string,array{policy:string,reason?:string}> */
     public static function secretPolicies(): array
     {

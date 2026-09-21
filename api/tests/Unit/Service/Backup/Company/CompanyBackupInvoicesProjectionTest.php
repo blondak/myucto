@@ -9,6 +9,7 @@ use MyInvoice\Service\Backup\Company\CompanyBackupReference;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceConstraint;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceMapping;
 use MyInvoice\Service\Backup\Company\CompanyBackupReferenceSet;
+use MyInvoice\Service\Backup\Company\CompanyBackupRestoreOverrideSet;
 use MyInvoice\Service\Backup\Registry\TenantSecretPolicy;
 use PHPUnit\Framework\TestCase;
 
@@ -123,6 +124,34 @@ final class CompanyBackupInvoicesProjectionTest extends TestCase
                 self::assertSame($value, $mapped[$column], $column);
             }
         }
+        self::assertSame($original, $row);
+    }
+
+    public function testRestoreResetsOnlyGeneratedPdfCache(): void
+    {
+        $columns = CompanyBackupInvoicesProjection::dataColumns();
+        $references = CompanyBackupReferenceSet::fromArray(
+            CompanyBackupInvoicesProjection::references(), 'table:invoices',
+        );
+        $overrides = CompanyBackupRestoreOverrideSet::fromArray(
+            CompanyBackupInvoicesProjection::restoreOverrides(), 'table:invoices',
+            $columns, ['id'], $references,
+        );
+        $row = array_fill_keys($columns, null);
+        $row['pdf_path'] = 'storage/source/invoice.pdf';
+        $row['pdf_generated_at'] = '2026-01-02 03:04:05';
+        $row['imported_pdf_path'] = 'storage/imported/source.pdf';
+        $row['imported_pdf_hash'] = str_repeat('b', 64);
+        $row['imported_pdf_size_bytes'] = 1234;
+        $row['imported_pdf_original_name'] = 'source.pdf';
+        $row['paid_total'] = '50.0000';
+        $row['total_vat'] = '21.0000';
+        $original = $row;
+
+        $expected = $row;
+        $expected['pdf_path'] = null;
+        $expected['pdf_generated_at'] = null;
+        self::assertSame($expected, $overrides->apply($row));
         self::assertSame($original, $row);
     }
 
