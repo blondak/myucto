@@ -82,7 +82,7 @@ final class AssetRepository
                          GROUP BY asset_id
                        ) ai ON ai.asset_id = a.id
                  WHERE {$whereSql}
-                 ORDER BY a.inventory_number ASC, a.id ASC
+                 ORDER BY COALESCE(a.put_into_use_date, a.acquisition_date) DESC, a.id DESC
                  LIMIT ? OFFSET ?";
 
         $stmt = $this->db->pdo()->prepare($sql);
