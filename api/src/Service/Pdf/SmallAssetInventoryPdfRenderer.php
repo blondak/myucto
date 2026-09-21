@@ -19,7 +19,7 @@ final class SmallAssetInventoryPdfRenderer extends ReportPdfRendererBase
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Soupis drobného majetku k ' . (string) ($data['as_of'] ?? ''));
         $this->withPageNumbers($mpdf, 'Soupis drobného majetku');
-        $mpdf->WriteHTML($body);
+        ChunkedHtmlWriter::write($mpdf, $body);
         return $mpdf->Output('', 'S');
     }
 }

@@ -18,7 +18,8 @@ final class TrialBalancePdfRenderer extends ReportPdfRendererBase
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Obratová předvaha ' . (string) ($data['period']['fiscal_year'] ?? ''));
         $this->withPageNumbers($mpdf, 'Obratová předvaha');
-        $mpdf->WriteHTML($body);
+        // Konzistentně s ostatními velkými sestavami, viz ChunkedHtmlWriter.
+        ChunkedHtmlWriter::write($mpdf, $body);
         return $mpdf->Output('', 'S');
     }
 }

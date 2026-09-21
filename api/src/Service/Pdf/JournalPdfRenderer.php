@@ -18,7 +18,9 @@ final class JournalPdfRenderer extends ReportPdfRendererBase
         $mpdf = $this->mpdf(['format' => 'A4', 'orientation' => 'L']);
         $mpdf->SetTitle('Účetní deník');
         $this->withPageNumbers($mpdf, 'Účetní deník');
-        $mpdf->WriteHTML($body);
+        // Velké firmy mívají desítky tisíc zápisů/rok — jedno WriteHTML() na celý
+        // dokument naráží na pcre.backtrack_limit, proto po dávkách (viz ChunkedHtmlWriter).
+        ChunkedHtmlWriter::write($mpdf, $body);
         return $mpdf->Output('', 'S');
     }
 }

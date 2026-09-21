@@ -20,7 +20,8 @@ final class GeneralLedgerPdfRenderer extends ReportPdfRendererBase
         $label = !empty($data['all_periods']) ? 'všechna období' : (string) ($data['period']['fiscal_year'] ?? '');
         $mpdf->SetTitle('Hlavní kniha ' . $label);
         $this->withPageNumbers($mpdf, 'Hlavní kniha');
-        $mpdf->WriteHTML($body);
+        // Hodně účtů × měsíční rozpad = velké HTML, viz ChunkedHtmlWriter.
+        ChunkedHtmlWriter::write($mpdf, $body);
         return $mpdf->Output('', 'S');
     }
 }

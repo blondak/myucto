@@ -26,7 +26,8 @@ final class AssetDepreciationCardPdfRenderer extends ReportPdfRendererBase
             : 'Inventární karta dlouhodobého majetku';
         $mpdf->SetTitle($title);
         $this->withPageNumbers($mpdf, 'Inventární karta dlouhodobého majetku');
-        $mpdf->WriteHTML($body);
+        // Firmy s mnoha kartami majetku v jednom PDF, viz ChunkedHtmlWriter.
+        ChunkedHtmlWriter::write($mpdf, $body);
         return $mpdf->Output('', 'S');
     }
 }

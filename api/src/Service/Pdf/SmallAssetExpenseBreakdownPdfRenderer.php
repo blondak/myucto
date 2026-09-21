@@ -17,7 +17,7 @@ final class SmallAssetExpenseBreakdownPdfRenderer extends ReportPdfRendererBase
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Rozpis 501 dle druhu výdaje');
         $this->withPageNumbers($mpdf, 'Rozpis 501 dle druhu výdaje');
-        $mpdf->WriteHTML($body);
+        ChunkedHtmlWriter::write($mpdf, $body);
         return $mpdf->Output('', 'S');
     }
 }
