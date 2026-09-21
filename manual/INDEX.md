@@ -162,6 +162,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 106. [MCP server (napojení AI asistenta)](106_MCP_server.md)
 107. [Přechod z POHODY](107_Prechod_z_POHODY.md)
 108. [Přechod z PAMICA](108_Prechod_z_PAMICA.md)
+109. [Přechod z PREMIER](109_Prechod_z_PREMIER.md)
 
 ### Reference
 
