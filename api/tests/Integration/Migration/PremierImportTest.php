@@ -415,6 +415,31 @@ final class PremierImportTest extends TestCase
         self::assertEqualsWithDelta(0.0, (float) ($september['1']['base'] ?? 0), 0.005, 'OSS plnění do tuzemského ř. 1 nepatří.');
     }
 
+    /**
+     * OSS doklad v EUR: tuzemská evidence zůstává v Kč z deníku, ale do OSS podání jdou eura
+     * z dokladu - ne koruny přepočtené zpátky kurzem ECB konce čtvrtletí (stejně jako POHODA).
+     */
+    public function testEurOssDocumentGoesToReturnInEurosFromTheDocument(): void
+    {
+        $supplierId = $this->supplier();
+        $this->db->pdo()->prepare(
+            "UPDATE supplier SET oss_enabled = 1, oss_identification_country = 'CZ', oss_return_currency = 'EUR', oss_valid_from = '2025-01-01', oss_valid_to = NULL WHERE id = ?"
+        )->execute([$supplierId]);
+        $this->foreignRate(SyntheticPremierBackup::OSS_COUNTRY, SyntheticPremierBackup::OSS_RATE);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(true, ['oss_eur' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['1', '1000.00', '230.00', '40.00', '9.20']], $this->fetch(
+            'SELECT it.oss_applicable, it.total_without_vat, it.total_vat, it.oss_taxable_amount_return, it.oss_vat_amount_return
+               FROM invoices i JOIN invoice_items it ON it.invoice_id = i.id WHERE i.supplier_id = ? AND i.varsymbol = ?', $supplierId, false, [SyntheticPremierBackup::OSS_DOCUMENT]));
+
+        $preview = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Oss\OssLedgerService::class)->preview($supplierId, SyntheticPremierBackup::YEAR1, 3);
+        $sk = array_column($preview['countries'], null, 'country')[SyntheticPremierBackup::OSS_COUNTRY] ?? null;
+        self::assertNotNull($sk, json_encode($preview, JSON_UNESCAPED_UNICODE));
+        self::assertEqualsWithDelta(40.0, (float) $sk['base'], 0.001);
+        self::assertEqualsWithDelta(9.2, (float) $sk['vat'], 0.001);
+    }
+
     /** Bez zapnutého OSS se cizí daň do tuzemského přiznání nepustí - doklad se nepřevezme, zbytek ano. */
     public function testIssuedDocumentOutsideReturnWithVatIsNotDomesticWhenOssIsOff(): void
     {

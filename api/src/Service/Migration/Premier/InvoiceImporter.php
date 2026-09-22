@@ -185,7 +185,10 @@ final class InvoiceImporter
                 if ($plan['rate_id'] !== null) {
                     $items[$i]['rate_id'] = $plan['rate_id'];
                     $items[$i]['rate'] = $plan['rate_percent'];
-                    $items[$i]['oss'] = $plan['columns'];
+                    // Doklad v EUR: do OSS podání jdou eura z položky, ne koruny přepočtené
+                    // zpátky kurzem ECB konce čtvrtletí (jako POHODA). Tuzemská evidence zůstává v Kč.
+                    $items[$i]['oss'] = $plan['columns']
+                        + $this->oss->returnAmounts($ctx->supplierId, $doc['currency'], $item['foreign_base'] ?? null, $item['foreign_vat'] ?? null);
                     $ossItems++;
                     foreach ($plan['warnings'] as $w) {
                         $p->warn($step, 'oss_item_warning', "Doklad {$label} (režim OSS): {$w}", ['document_no' => $label]);

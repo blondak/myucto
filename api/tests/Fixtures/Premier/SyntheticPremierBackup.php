@@ -141,6 +141,7 @@ final class SyntheticPremierBackup
      *                           VF 250007 uhrazená zápočtem 321/311 (ID 5); EUR účet (řada BE, 221002)
      *                           s vkladem 1 000 EUR a kurzovým přeceněním s částkou v měně 0
      *   `reduced_deduction`     tuzemský kód odpočtu je krácený (§ 76, `IS_KRACENY`)
+     *   `oss_eur`               s `$oss`: VF 250003 v EUR (40 EUR + 9,20 EUR daň, kurz 25 = deník 1 000 + 230 Kč)
      *   `rc_uncoded_line`       služba z EU PF 250002 má navíc položku 200 Kč bez kódu DPH (poplatek mimo přiznání)
      *   `cash_duplicate`        další dva pokladní doklady PP 1 z 2. 1. 2025 (jiný sborník), tedy tři
      *                           doklady se stejnou řadou i číslem a dva i se stejným datem
@@ -385,6 +386,20 @@ final class SyntheticPremierBackup
                 }
             }
             unset($code);
+        }
+        if (!empty($flags['oss_eur'])) {
+            foreach ($tables['FA_OUT'][1] as &$header) {
+                if ($header['INTER'] === 3) {
+                    $header = ['MENA' => 'EUR', 'KURS' => 25, 'M_KURS' => 1] + $header;
+                }
+            }
+            unset($header);
+            foreach ($tables['POLOZKY'][1] as &$item) {
+                if ($item['FAKTURA'] === 3) {
+                    $item = ['CENA' => 40.0, 'CENA_DPH' => 9.2] + $item;
+                }
+            }
+            unset($item);
         }
         if (!empty($flags['rc_uncoded_line'])) {
             $euVendor = ['CISLO_ODB' => '3', 'NAZEV_ODB' => 'Fiktiv Software GmbH', 'DIC_ODB' => self::EU_VENDOR_DIC, 'STAT_ODB' => 'Německo', 'ID_PAR' => 'P3'];
