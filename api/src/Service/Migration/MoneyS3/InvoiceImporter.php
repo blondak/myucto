@@ -27,11 +27,16 @@ use MyInvoice\Service\Stats\StatsRecomputer;
  *
  * Doklad zaúčtovaný deníkem z Money ({@see DocumentLinker}) má stav „zaúčtováno" nebo
  * „uhrazeno". **Doklad, jehož daňovou povahu z Money spolehlivě neznáme, se převezme
- * jako koncept k ruční kontrole** ({@see classify()}): zálohové a jiné než běžné
- * faktury, dobropisy, stornované a neúčtované doklady, cizí měna a členění DPH mimo
- * tuzemské řádky přiznání. Koncept do DPH evidence ani do účtování nevstoupí, dokud ho
- * účetní neopraví a nepotvrdí — hádat by znamenalo zálohu vedle konečné faktury
- * započíst do DPH dvakrát nebo přenesenou daňovou povinnost vykázat jako tuzemské plnění.
+ * jako koncept k ruční kontrole** ({@see classify()}): neznámý druh dokladu, dobropis
+ * zálohy, stornované a neúčtované doklady a členění DPH, které převod nezná. Koncept do
+ * DPH evidence ani do účtování nevstoupí, dokud ho účetní neopraví a nepotvrdí — hádat
+ * by znamenalo zálohu vedle konečné faktury započíst do DPH dvakrát nebo přenesenou
+ * daňovou povinnost vykázat jako tuzemské plnění.
+ *
+ * **Doklad v cizí měně koncept není**: Money drží základ i daň po sazbách v Kč (kurzem,
+ * kterým doklad zaúčtovalo a vykázalo v přiznání), převezme se tedy jako daňový doklad
+ * v Kč bez kurzu. Částky DPH jsou tak přesně ty, které Money vykázalo; přepočet
+ * z cizí měny by je jen rozházel o zaokrouhlení kurzu.
  */
 final class InvoiceImporter
 {

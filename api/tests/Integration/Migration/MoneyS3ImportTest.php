@@ -231,6 +231,9 @@ final class MoneyS3ImportTest extends TestCase
         self::assertSame(['invoice', 'draft'], [$byNumber['RC-2025-001']['document_kind'], $byNumber['RC-2025-001']['status']]);
         self::assertNull($byNumber['RC-2025-001']['booked_at'], 'Koncept k ruční kontrole nesmí být zamčený jako zaúčtovaný.');
         self::assertSame('booked', $byNumber['EU-2025-001']['status']);
+        // Doklad v EUR není koncept: převezme se v Kč z Money (základ 2 500, daň 525) bez kurzu.
+        self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId,
+            "vendor_invoice_number = 'EU-2025-001' AND exchange_rate IS NULL AND total_without_vat = 2500.00 AND total_vat = 525.00"));
         self::assertSame(1, $this->rowCount('invoices', $supplierId, "invoice_type = 'proforma' AND status = 'sent' AND booked_at IS NULL AND varsymbol = 'ZV25001'"));
         self::assertSame(0, $this->rowCount('invoices', $supplierId, "status = 'draft'"));
 
