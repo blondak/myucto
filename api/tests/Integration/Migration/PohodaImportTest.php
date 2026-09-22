@@ -212,6 +212,18 @@ final class PohodaImportTest extends TestCase
         self::assertSame(0, $this->rows('invoices', $supplierId, sprintf("varsymbol <> '%s' AND reverse_charge = 1", SyntheticPohodaExport::REVERSE_SALE)));
     }
 
+    /** Dvě firmy v jednom procesu: kontakty každé dostanou měnu z číselníku své firmy. */
+    public function testPartnerCurrencyBelongsToItsOwnSupplier(): void
+    {
+        foreach ([$this->supplier(), $this->supplier()] as $supplierId) {
+            $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open(SyntheticPohodaExport::write($this->tmp . '/' . $supplierId)), false);
+            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+            self::assertGreaterThan(0, $this->rows('clients', $supplierId));
+            self::assertSame(0, $this->rows('clients', $supplierId,
+                'NOT EXISTS (SELECT 1 FROM currencies cu WHERE cu.id = clients.currency_default_id AND cu.supplier_id = clients.supplier_id)'));
+        }
+    }
+
     public function testDryRunLeavesNothingBehind(): void
     {
         $supplierId = $this->supplier();
