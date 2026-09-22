@@ -15,6 +15,7 @@ use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationTakeoverFacts;
 use MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalService;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverAbsenceWriter;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverDeductionsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInstitutionWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverOpeningMonth;
@@ -97,6 +98,7 @@ final class PayrollImporter
         private readonly PayrollTakeoverInstitutionWriter $institutions,
         private readonly PayrollTakeoverAbsenceWriter $absences,
         private readonly PayrollRulesetProvider $rulesets,
+        private readonly PayrollTakeoverDeductionsWriter $deductionsWriter,
     ) {}
 
     public function import(PremierContext $ctx): void
@@ -162,11 +164,15 @@ final class PayrollImporter
         $deductions = [];
         /** @var array<string,string> osobní číslo => poslední měsíc s vyloučenou dobou */
         $excluded = [];
+        // Trvalé srážky (`MZ_SRAZ`) převod zakládá; bez nich zbývají jen sražené částky měsíců.
+        $deductionCards = $ctx->backup->hasRows('MZ_SRAZ');
+        $created = [];
         foreach ($relations as $relation) {
             $pair = $this->inSavepoint($ctx, $relation, fn (): ?array => $this->relation($ctx, $relation));
             if ($pair === null) {
                 continue;
             }
+            $created[] = $relation;
             [$employeeId, $employmentId] = $pair;
             $activity = $this->activityCode($ctx->supplierId, $employmentId);
             $number = (string) $relation['personal_number'];
@@ -174,7 +180,7 @@ final class PayrollImporter
                 if ($period > $lastPeriod) {
                     continue;
                 }
-                if ($m['deductions'] > 0) {
+                if ($m['deductions'] > 0 && !$deductionCards) {
                     $deductions[$number] = ($deductions[$number] ?? 0.0) + $m['deductions'];
                 }
                 // Vyloučenou dobu bez nepřítomností s daty (starší zálohy bez `DNY`) převod nezná.
@@ -204,6 +210,9 @@ final class PayrollImporter
             $ctx->supplierId, PremierPayrollInstitutions::read($ctx->backup), $ctx->year, $ctx->userOrNull(), PremierPayrollTakeover::policy(), $this->state,
             ' (není v číselníku pojišťoven ani v nastavení mezd)',
         ));
+        if ($deductionCards) {
+            $this->deductions($ctx, $created, $payroll);
+        }
         $this->identifierSummary($p);
         $this->cardSummary($p);
         $this->timeSummary($p, $ctx->year);
@@ -214,6 +223,40 @@ final class PayrollImporter
         $this->openingBalances($ctx, $byEmployee, $payroll);
         $this->postingMap($ctx);
         $this->reconcile($ctx, $payroll);
+    }
+
+    /**
+     * Trvalé srážky, exekuce a insolvence (`MZ_SRAZ`, {@see PremierPayrollDeductions})
+     * společným zápisem srážek. Srážka je stav ke konci zpracovaných mezd, ne údaj roku:
+     * zakládá se až v běhu roku, ve kterém PREMIER mzdy naposledy zpracoval (nejpozději
+     * měsíc před začátkem vedení mezd v MyÚčtu), a jen ta, která tehdy trvá.
+     *
+     * @param list<array<string,mixed>> $relations vztahy, které převod v tomto běhu zapsal
+     */
+    private function deductions(PremierContext $ctx, array $relations, PremierPayroll $payroll): void
+    {
+        $last = null;
+        foreach ($payroll->relations as $relation) {
+            $period = array_key_last($relation['months']);
+            $last = $period !== null && ($last === null || (string) $period > $last) ? (string) $period : $last;
+        }
+        if ($last === null) {
+            return;
+        }
+        if ($this->moduleStart !== null) {
+            $last = min($last, (new \DateTimeImmutable(substr($this->moduleStart, 0, 7) . '-01'))->modify('-1 month')->format('Y-m'));
+        }
+        // Běh dřívějšího roku by srážku zakládal podle stavu, který už neplatí. Běh pozdějšího
+        // roku je neškodný: mapa převodu zapsané srážky přeskočí.
+        if ((int) substr($last, 0, 4) > $ctx->year) {
+            return;
+        }
+        $result = PremierPayrollDeductions::read($ctx->backup, $relations, $last, $ctx->year);
+        if ($result['ended'] > 0) {
+            $ctx->protocol->count(self::STEP, 'deductions_ended', $result['ended']);
+        }
+        $this->deductionsWriter->write($ctx->supplierId, $ctx->userOrNull(), $result, $ctx->year, $ctx->protocol, self::STEP,
+            PremierPayrollTakeover::policy(), new PremierPayrollDeductionMap($this->map), $ctx->runId);
     }
 
     /**

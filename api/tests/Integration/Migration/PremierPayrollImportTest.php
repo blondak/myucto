@@ -390,6 +390,36 @@ final class PremierPayrollImportTest extends TestCase
         self::assertCount(2, $this->fetch($absences, $supplierId), 'Opakovaný převod nepřítomnosti nezdvojí.');
     }
 
+    /**
+     * Trvalé srážky z PREMIER: exekuce jako nedoložený exekuční případ se zbývající
+     * pohledávkou, odbory jako dohoda o srážkách, skončené spoření jen v počtu. Zakládají se
+     * až v běhu roku posledních zpracovaných mezd.
+     */
+    public function testDeductionsFromStandingDeductionCards(): void
+    {
+        $supplierId = $this->supplier(true);
+        $backup = $this->backup(['payroll' => true, 'payroll_detail' => true]);
+        $first = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        self::assertArrayNotHasKey('deductions_not_converted', self::stepCounts($first, 'payroll'), 'Trvalé srážky ze zálohy převod zakládá, nehlásí je jako nepřevedené.');
+        self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_enforcement_cases WHERE supplier_id = ?', $supplierId), 'Rok 2025 ještě není konec zpracovaných mezd.');
+
+        $next = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR2, false);
+        self::assertFalse($next->hasErrors(), $this->explain($next));
+        $counts = self::stepCounts($next, 'payroll');
+        self::assertSame([1, 1, 1, 1], [$counts['enforcement_cases'] ?? 0, $counts['deduction_agreements'] ?? 0, $counts['deductions_ended'] ?? 0,
+            $counts['recipient_accounts'] ?? 0], $this->explain($next));
+        self::assertSame([['non_priority', '4700000']], $this->fetch('SELECT c.category, c.outstanding_minor_units FROM payroll_enforcement_claims c
+            JOIN payroll_enforcement_cases k ON k.id = c.case_id WHERE k.supplier_id = ?', $supplierId));
+        self::assertSame([['contribution', '15000', 'active']], $this->fetch('SELECT deduction_kind, requested_minor, status FROM payroll_deduction_agreements
+            WHERE supplier_id = ?', $supplierId));
+        self::assertContains('deductions_evidence_pending', $this->messageCodes($next));
+
+        $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR2, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame(2, self::stepCounts($again, 'payroll')['deductions_existing'] ?? 0, 'Opakovaný převod srážky nezdvojí.');
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);

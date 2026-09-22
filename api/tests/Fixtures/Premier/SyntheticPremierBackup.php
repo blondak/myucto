@@ -534,7 +534,8 @@ final class SyntheticPremierBackup
      *            o nástupu ČSSZ (`MZ_PRISO`); výplatní účet se změnou 9/2025 (`MZ_PERH`), dítě
      *            se zvýhodněním (`PER_DETI`, `MZ_DETI`) a dítě bez něj; dovolená 8/2025 a pracovní
      *            neschopnost od 10. 11. 2025 do 20. 1. 2026 (`DNY`, `MZ_HDPN`), stav dovolené
-     *            v hodinách (`DOV_DNY`), průměry čtvrtletí (`PER_PRU`)
+     *            v hodinách (`DOV_DNY`), průměry čtvrtletí (`PER_PRU`); trvalé složky `MZ_SRAZ`
+     *            (osobní ohodnocení, exekuce, skončené spoření, odbory)
      *   INTER 6  DPP 4-6/2025 (kategorie `DPP`), osoba s bydlištěm na Slovensku (stát názvem
      *            „Slovenská republika"); OIČ jen na kartě osoby (bez formuláře JMHZ), přijatá
      *            oznámení ČSSZ o nástupu i skončení; pobírá důchod (`MZ_DUCHOD`), výplata v hotovosti
@@ -697,6 +698,23 @@ final class SyntheticPremierBackup
             self::item5(2025, 11, '600', 0, ['DATUM_OD' => '2025-11-24', 'DATUM_DO' => '2025-11-30', 'N_DNY' => 7, 'TYP' => 3]),
             self::item5(2025, 12, '600', 0, ['DATUM_OD' => '2025-12-01', 'DATUM_DO' => '2025-12-31', 'N_DNY' => 31, 'TYP' => 3]),
         );
+        // Trvalé složky vztahu: osobní ohodnocení (příjem, ne srážka), exekuce od 10/2025,
+        // spoření skončené v 6/2025 a odborové příspěvky.
+        $card = static fn (int $sra, string $code, string $text, array $values): array => $values + ['S_INTER' => 5, 'S_SRAINT' => $sra, 'S_KOD' => $code,
+            'S_POPIS' => $text, 'ID' => "SR5-{$sra}"];
+        $tables['MZ_SRAZ'] = [
+            [['S_INTER', 'N', 10], ['S_KOD', 'C', 3], ['S_SRAINT', 'N', 10], ['S_POPIS', 'C', 64], ['S_CASTKA', 'N', 12, 3], ['S_CAST_SR', 'N', 12, 2],
+                ['S_EXEKUCE', 'L'], ['S_DOCDAT', 'D'], ['S_PORADI', 'N', 2], ['S_MES_OD', 'N', 2], ['S_ROK_OD', 'N', 4], ['S_MES_DO', 'N', 2], ['S_ROK_DO', 'N', 4],
+                ['S_DORUCIT', 'C', 64], ['S_UCET', 'C', 35], ['S_BANKOD', 'C', 11], ['S_VAR', 'C', 10], ['S_KONS', 'C', 4], ['ID', 'C', 36]],
+            [
+                $card(1, '303', 'Osobní ohodnocení', ['S_CASTKA' => 2000, 'S_MES_OD' => 1, 'S_ROK_OD' => 2025]),
+                $card(2, '702', 'Exekuce - syntetická', ['S_CASTKA' => 50000, 'S_CAST_SR' => 1000, 'S_EXEKUCE' => true, 'S_DOCDAT' => '2025-09-15', 'S_PORADI' => 1,
+                    'S_MES_OD' => 10, 'S_ROK_OD' => 2025, 'S_DORUCIT' => 'Exekutorský úřad Fiktivní', 'S_UCET' => '2000145399', 'S_BANKOD' => '0100',
+                    'S_VAR' => '1234', 'S_KONS' => '558']),
+                $card(3, '700', 'Spoření', ['S_CASTKA' => 500, 'S_MES_OD' => 1, 'S_ROK_OD' => 2025, 'S_MES_DO' => 6, 'S_ROK_DO' => 2025]),
+                $card(4, '720', 'Odbory', ['S_CASTKA' => 150, 'S_MES_OD' => 1, 'S_ROK_OD' => 2025]),
+            ],
+        ];
         $tables['MZ_HDPN'] = [[['INTER', 'N', 10], ['HDPN_OD', 'D'], ['HDPN_DO', 'D'], ['TYP_NP', 'C', 3], ['C_LISTKU', 'C', 20], ['ID', 'C', 36]],
             [['INTER' => 5, 'HDPN_OD' => '2025-11-10', 'HDPN_DO' => '2026-01-20', 'TYP_NP' => 'DPN', 'C_LISTKU' => 'SYN-1', 'ID' => 'HD5']]];
         // Stav dovolené v hodinách: nárok 193,75 h, do 12/2025 vyčerpáno 38,75 h.
