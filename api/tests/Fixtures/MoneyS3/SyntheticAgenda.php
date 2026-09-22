@@ -717,6 +717,34 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda s vydanou FV25002 v tuzemském přenesení daňové povinnosti u stavebních prací
+     * (`19Ř25_S`, 1 000 Kč bez daně) a jejím zápisem v deníku.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithDomesticReverseSale(): array
+    {
+        $files = self::files();
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        $append('ROK.002/UcDenik.DAT', self::JOURNAL_FIELDS, [
+            ['Cislo' => 50, 'Zdroj' => 'FV', 'Doklad' => 'FV25002', 'Datum' => '2025-08-04', 'DatPlnDPH' => '2025-08-04', 'Popis' => 'Stavební práce', 'UcMD' => '311000', 'UcD' => '602000', 'Castka' => 1000.0],
+        ]);
+        $append('ROK.002/VFaktury.DAT', self::ISSUED_FIELDS, [[
+            'O_ICO' => self::CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::CUSTOMER_ICO, 'O_Nazev' => 'Odběratel Beta a.s.',
+            'O_Ulice' => 'Ukázková 7', 'O_Mesto' => 'Ostrava', 'O_Psc' => '702 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => '19Ř25_S', 'Uhrada' => 'převodem',
+            'Doklad' => 'FV25002', 'VarSymbol' => '2025003',
+            'Vystaveno' => '2025-08-04', 'DatUcPr' => '2025-08-04', 'PlnenoDPH' => '2025-08-04', 'Splatno' => '2025-08-18',
+            'Zaklad_2' => 1000.0, 'DPH_2' => 0.0, 'CelkemSDPH' => 1000.0, 'Popis' => 'Stavební práce',
+        ]]);
+        return $files;
+    }
+
+    /**
      * Záloha agendy z daných souborů (varianty agendy pro jednotlivé testy).
      *
      * @param array<string,string> $files

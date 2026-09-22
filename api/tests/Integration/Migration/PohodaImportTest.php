@@ -199,6 +199,19 @@ final class PohodaImportTest extends TestCase
         self::assertEqualsWithDelta(105.0, (float) ($return['summary']['lines']['40']['vat'] ?? 0), 0.005);
     }
 
+    /** Vydaný doklad v tuzemském přenesení daňové povinnosti (ř. 25) nese příznak na hlavičce. */
+    public function testDomesticReverseSaleIsFlagged(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withDomesticReverseSale($dir);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, $this->rows('invoices', $supplierId, sprintf("varsymbol = '%s' AND vat_classification_code = '25s' AND reverse_charge = 1 AND status <> 'draft'", SyntheticPohodaExport::REVERSE_SALE)), $this->explain($protocol));
+        self::assertSame(0, $this->rows('invoices', $supplierId, sprintf("varsymbol <> '%s' AND reverse_charge = 1", SyntheticPohodaExport::REVERSE_SALE)));
+    }
+
     public function testDryRunLeavesNothingBehind(): void
     {
         $supplierId = $this->supplier();

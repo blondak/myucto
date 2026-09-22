@@ -621,6 +621,21 @@ final class MoneyS3ImportTest extends TestCase
         self::assertEqualsWithDelta(315.0, (float) ($march['40']['vat'] ?? 0), 0.005, 'FP25002 210 + DZ25001 210 - DP25001 105 jako bez příznaku.');
     }
 
+    /** Vydaná faktura v tuzemském přenesení (19Ř25_S) nese příznak na hlavičce; daň se nemění. */
+    public function testDomesticReverseSaleIsFlagged(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/pdp.lz', SyntheticAgenda::filesWithDomesticReverseSale());
+        $backup = Ms3Backup::extract($this->tmp . '/pdp.lz', $this->tmp . '/pdp');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertSame(1, $this->rowCount('invoices', $supplierId, "varsymbol = 'FV25002' AND vat_classification_code = '25s' AND reverse_charge = 1 AND status <> 'draft'"), $this->explain($protocol));
+        self::assertSame(0, $this->rowCount('invoices', $supplierId, "varsymbol <> 'FV25002' AND reverse_charge = 1"));
+        $august = $this->container(DphPriznaniBuilder::class)->build($supplierId, 2025, 8, 'monthly')['summary']['lines'];
+        self::assertEqualsWithDelta(1000.0, (float) ($august['25']['base'] ?? 0), 0.005, json_encode($august, JSON_UNESCAPED_UNICODE) ?: '');
+    }
+
     public function testForeignAccountOpeningIsAnchoredToLedger(): void
     {
         $supplierId = $this->supplier();

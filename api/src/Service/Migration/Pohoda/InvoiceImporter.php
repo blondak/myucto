@@ -14,6 +14,7 @@ use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
 use MyInvoice\Service\Migration\Shared\MigratedPurchaseDocument;
 use MyInvoice\Service\Migration\Shared\MigrationHomeCurrency;
 use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
+use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Support\Sql\PayablePredicate;
 
@@ -276,8 +277,8 @@ final class InvoiceImporter
                 exchangeRate: null,
                 // Položky i rekapitulace Pohody jsou bez DPH.
                 pricesIncludeVat: false,
-                // Vydaný doklad v přenesené povinnosti nese kód zařazení položek, ne příznak hlavičky.
-                reverseCharge: false,
+                // Tuzemské přenesení daňové povinnosti (ř. 25) nese kód zařazení i příznak hlavičky.
+                reverseCharge: VatReturnLineClassifier::isDomesticReverseSale([$class['code'], ...array_column($amounts['items'], 'code')]),
                 noteAboveItems: $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
                 noteBelowItems: self::note($doc['number'], $class['reasons'], $previous, $doc['foreign'], $notes),
                 clientSnapshot: PartnerImporter::snapshotJson($snapshot),

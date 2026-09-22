@@ -13,6 +13,7 @@ use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
 use MyInvoice\Service\Migration\Shared\MigratedPurchaseDocument;
 use MyInvoice\Service\Migration\Shared\MigrationHomeCurrency;
 use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
+use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier;
 use MyInvoice\Service\Stats\StatsRecomputer;
 
 /**
@@ -292,8 +293,9 @@ final class InvoiceImporter
                     exchangeRate: null,
                     // Položky vznikají ze základů po sazbách - ceny jsou vždy bez DPH.
                     pricesIncludeVat: false,
-                    // Členění přenesené povinnosti na výstupu vede doklad do konceptu (classify()).
-                    reverseCharge: false,
+                    // Tuzemské přenesení daňové povinnosti (19Ř25, 19Ř25_S) nese kód zařazení
+                    // i příznak hlavičky; jiné členění přenesené povinnosti jde do konceptu (classify()).
+                    reverseCharge: VatReturnLineClassifier::isDomesticReverseSale([$class['code']]),
                     noteAboveItems: mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
                     noteBelowItems: self::note($docNo, $class['reasons']),
                     clientSnapshot: self::snapshotJson($snapshot),
@@ -409,7 +411,7 @@ final class InvoiceImporter
                 currencyId: $currencyId,
                 exchangeRate: null,
                 pricesIncludeVat: false,
-                reverseCharge: false,
+                reverseCharge: VatReturnLineClassifier::isDomesticReverseSale([$resolved['code']]),
                 noteAboveItems: mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
                 noteBelowItems: 'Převzato z Money S3, ostatní pohledávka ' . $docNo,
                 clientSnapshot: self::snapshotJson($snapshot),
