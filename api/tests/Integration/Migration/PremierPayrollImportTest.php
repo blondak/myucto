@@ -394,6 +394,37 @@ final class PremierPayrollImportTest extends TestCase
     }
 
     /**
+     * Neschopnost přes konec roku: převod po letech ji zapíše jako dvě nepřítomnosti
+     * (do 31. 12. a od 1. 1.). Druhá musí navázat na okno náhrady mzdy první, jinak by
+     * MyÚčto od 1. 1. vyplatilo čtrnáct dnů náhrady znovu.
+     */
+    public function testSicknessAcrossYearEndContinuesCompensationWindow(): void
+    {
+        $flags = ['payroll' => true, 'payroll_detail' => true];
+        $dir = $this->tmp . DIRECTORY_SEPARATOR . 'backup_sickness_year_end';
+        SyntheticPremierBackup::writeDir($dir, false, $flags);
+        $tables = SyntheticPremierBackup::tables(false, $flags);
+        // Bez případu eNeschopenky: rok 2025 skončí neschopnost 31. 12., leden nese rok 2026.
+        DbfWriter::write($dir . DIRECTORY_SEPARATOR . 'MZ_HDPN.DBF', $tables['MZ_HDPN'][0], []);
+        [$fields, $rows] = $tables['DNY'];
+        $rows[] = ['INTER' => 5, 'DATUM_OD' => '2026-01-01', 'DATUM_DO' => '2026-01-20', 'KOD' => '600', 'CASTKA' => 0, 'N_DNY' => 20,
+            'DNY_ROK' => 2026, 'DNY_MES' => 1, 'TYP' => 3, 'ID' => 'D5-SY-2026-1'];
+        DbfWriter::write($dir . DIRECTORY_SEPARATOR . 'DNY.DBF', $fields, $rows);
+        $backup = PremierBackup::open($dir);
+
+        $supplierId = $this->supplier(true);
+        $first = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        $next = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR2, false);
+        self::assertFalse($next->hasErrors(), $this->explain($next));
+
+        self::assertSame([['2025-11-10', '2025-12-31', '0'], ['2026-01-01', '2026-01-20', '14']],
+            $this->fetch("SELECT a.date_from, a.date_to, a.sickness_window_carried_days FROM payroll_absences a JOIN payroll_employments e ON e.id = a.employment_id
+                WHERE e.supplier_id = ? AND e.code = '5' AND a.absence_type = 'dpn' ORDER BY a.date_from", $supplierId), $this->explain($next));
+        self::assertSame(1, self::stepCounts($next, 'payroll')['sickness_window_continued'] ?? 0);
+    }
+
+    /**
      * Příznak jednatele proti druhu činnosti z hlášení JMHZ přijatého ČSSZ: vztah vznikne
      * podle hlášení a protokol řekne, jaký druh zvolil, podle čeho a proč.
      */
