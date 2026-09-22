@@ -9,24 +9,33 @@ use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Migration\ImportYears;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollImporter;
+use MyInvoice\Service\Migration\Shared\AbstractImportJobService;
+use MyInvoice\Service\Migration\Shared\ChunkedUploadStore;
 
 /**
  * Převod z POHODY na pozadí (`import_jobs.source = pohoda_import`, migrace 1844).
  *
  * Job dělá dvě věci: zpracuje nahraný ZIP exportu (`params.mode = prepare`: kontrolní
  * součet, rozbalení, přehled agend) a spustí převod vybraných roků (`params.years`
- * vzestupně, každý rok vlastní běh a protokol; {@see PohodaImporter}).
- * Převod drží po celou dobu zámek firmy ({@see PohodaImportRepository::acquireLock()}).
- * Zkouška nanečisto běží v jedné transakci, průběh do řádku jobu během ní nezapisuje
- * (stejně jako u Money S3).
+ * vzestupně, každý rok vlastní běh a protokol; {@see PohodaImporter}). Kostra jobu je
+ * společná s ostatními převody ({@see AbstractImportJobService}).
  */
-final class PohodaImportJobService
+final class PohodaImportJobService extends AbstractImportJobService
 {
     public const SOURCE = 'pohoda_import';
-    public const MODE_PREPARE = 'prepare';
-    private const PREPARE_FAILED = 'Export z POHODY se nepodařilo přečíst.';
 
-    private const STEP_LABELS = [
+    protected const LOG_PREFIX = 'POHODA';
+    protected const UPLOAD_NOUN = 'exportu';
+    protected const EXCEPTION_CLASS = PohodaException::class;
+    protected const PREPARE_FAILED = 'Export z POHODY se nepodařilo přečíst.';
+    protected const RUN_FAILED = 'Převod z POHODY selhal na neočekávané chybě, podrobnosti jsou v logu serveru.';
+    protected const PREPARE_BUSY = 'Export už zpracovává jiný proces.';
+    protected const UPLOAD_INCOMPLETE = 'Export není nahraný celý, nahrajte ho znovu.';
+    protected const DEFAULT_FILE_NAME = 'pohoda_export.zip';
+    protected const UPLOADED_EVENT = 'import.pohoda_uploaded';
+    protected const PREPARE_STEPS = ['Kontrolní součet exportu', 'Rozbaluji export', 'Čtu agendy exportu'];
+
+    protected const STEP_LABELS = [
         'chart' => 'Účtová osnova',
         'journal' => 'Účetní období a deník',
         'accounting_mode' => 'Režim účetní jednotky',
@@ -53,49 +62,47 @@ final class PohodaImportJobService
     ];
 
     public function __construct(
-        private readonly ImportJobRepository $jobs,
-        private readonly PohodaImportRepository $runs,
+        ImportJobRepository $jobs,
+        PohodaImportRepository $runs,
         private readonly PohodaImporter $importer,
-        private readonly ActivityLogger $logger,
+        ActivityLogger $logger,
         private readonly PohodaPayrollImporter $payroll,
-    ) {}
-
-    /** @param array<string,mixed> $job řádek import_jobs */
-    public static function isPrepareJob(array $job): bool
-    {
-        return is_array($job['params'] ?? null) && ($job['params']['mode'] ?? null) === self::MODE_PREPARE;
+    ) {
+        parent::__construct($jobs, $runs, $logger);
     }
 
-    public function run(int $jobId): void
+    protected function uploads(): ChunkedUploadStore
     {
-        $job = $this->jobs->findById($jobId);
-        if ($job === null || !$this->jobs->markRunning($jobId)) {
-            return;
+        return PohodaUploads::store();
+    }
+
+    protected function extractUpload(string $part, int $supplierId, string $token): mixed
+    {
+        $root = PohodaUploads::exportDir($supplierId, $token);
+        PohodaExport::extractArchive($part, $root);
+        return $root;
+    }
+
+    protected function describeUpload(mixed $extracted, int $supplierId, string $token): array
+    {
+        $agendas = PohodaExport::overview($extracted);
+        if ($agendas === []) {
+            throw new PohodaException('no_agenda', 'ZIP neobsahuje export agendy z POHODY (složku IČO_rok s účetním deníkem). Nahrajte ZIP, který vytvořil exportní nástroj.');
         }
-        $supplierId = (int) $job['supplier_id'];
-        if (self::isPrepareJob($job)) {
-            $this->prepare($jobId, $job, $supplierId);
-            return;
-        }
-        if (!$this->runs->acquireLock($supplierId)) {
-            $this->jobs->markFailed($jobId, 'Převod této firmy už běží v jiném procesu, druhý se nespouští.');
-            return;
-        }
-        try {
-            $this->runLocked($jobId, $job, $supplierId);
-        } finally {
-            $this->runs->releaseLock($supplierId);
-        }
+        return [
+            'meta' => ['agendas' => $agendas],
+            'activity' => ['agendas' => array_map(static fn (array $a): string => $a['ico'] . '/' . $a['year'], $agendas)],
+            'log' => 'Export z POHODY načten (' . count($agendas) . ' agend).',
+        ];
     }
 
     /**
-     * Vybrané roky jdou vzestupně, každý s vlastním záznamem běhu a protokolem. Rok, který
-     * skončí chybou nebo zrušením, zastaví i roky po něm (stavěly by na neúplném základu).
-     * Výsledný stav jobu je nejhorší ze stavů roků.
+     * Vybrané roky jdou vzestupně, každý s vlastním záznamem běhu a protokolem
+     * ({@see AbstractImportJobService::runYears()}).
      *
      * @param array<string,mixed> $job
      */
-    private function runLocked(int $jobId, array $job, int $supplierId): void
+    protected function runLocked(int $jobId, array $job, int $supplierId): void
     {
         $userId = (int) ($job['created_by'] ?? 0);
         $params = is_array($job['params'] ?? null) ? $job['params'] : [];
@@ -109,74 +116,23 @@ final class PohodaImportJobService
 
         try {
             // Zámek exportu: denní úklid ani nové nahrání nesmaže export, ze kterého se převádí.
-            $lock = PohodaUploads::acquireJobLock($supplierId, $token);
-            if ($lock === null) {
-                throw new PohodaException('upload_busy', 'Export právě zpracovává jiný proces, nebo už byl uklizen - nahrajte ho znovu.');
-            }
-            $interrupted = $this->runs->closeInterruptedRuns($supplierId);
-            if ($interrupted > 0) {
-                $this->jobs->appendLog($jobId, "Uzavřeno {$interrupted} přerušených běhů převodu.");
-            }
+            $lock = $this->acquireRunUploadLock($supplierId, $token, 'Export právě zpracovává jiný proces, nebo už byl uklizen - nahrajte ho znovu.');
+            $this->closeInterruptedRuns($jobId, $supplierId);
             $meta = PohodaUploads::meta($supplierId, $token);
             $plan = self::plan($meta, $ico, ImportYears::fromParams($params), $payroll, $supplierId, $token);
             $planYears = array_column($plan, 'year');
-            $total = count($plan);
-            if ($total > 1) {
-                $this->jobs->appendLog($jobId, 'Převádí se ' . $total . ' roky vzestupně: ' . implode(', ', $planYears) . '.');
-                if ($dryRun) {
-                    $this->jobs->appendLog($jobId, ImportYears::DRY_RUN_NOTE);
-                }
-            }
             $steps = $payroll ? PohodaPayrollImporter::stepKeys() : PohodaImporter::stepKeys();
-            $this->jobs->updateProgress($jobId, [
-                'total_items' => count($steps) * $total,
-                'processed' => 0,
-                'current_step' => $dryRun ? 'Zkouška nanečisto běží' : 'Připravuji převod',
-            ]);
 
-            $totals = ['created' => 0, 'skipped' => 0, 'failed' => 0];
-            $results = [];
-            foreach ($plan as $index => $item) {
-                if ($index > 0 && $this->jobs->isCancelRequested($jobId)) {
-                    $results[] = ['status' => 'cancelled', 'year' => $item['year'], 'run_id' => null, 'error' => null];
-                    $this->jobs->appendLog($jobId, 'Převod zrušen, roky ' . implode(', ', array_slice($planYears, $index)) . ' se nespouštějí.');
-                    break;
-                }
-                $result = $this->runYear($jobId, $params, $meta, $supplierId, $userId, $item, $index, $planYears, $steps, $totals);
-                $results[] = $result;
-                if (in_array($result['status'], ['failed', 'cancelled'], true)) {
-                    $rest = array_slice($planYears, $index + 1);
-                    if ($rest !== []) {
-                        $this->jobs->appendLog($jobId, sprintf('Rok %d skončil %s, roky %s se nespouštějí.',
-                            $item['year'], $result['status'] === 'failed' ? 'chybou' : 'zrušením', implode(', ', $rest)));
-                    }
-                    break;
-                }
-            }
-            $status = ImportYears::worstStatus(array_column($results, 'status'));
-            $this->jobs->updateProgress($jobId, ['current_step' => $status === 'cancelled' ? 'Zrušeno uživatelem' : 'Hotovo']);
-            $failed = array_values(array_filter($results, static fn (array $r): bool => $r['status'] === 'failed'));
-            if ($status === 'cancelled') {
-                $this->jobs->markCancelled($jobId);
-            } elseif ($status === 'failed') {
-                $this->jobs->markFailed($jobId, (string) ($failed[0]['error'] ?? 'Převod se nepodařil.'));
-            } elseif ($status === 'completed_with_warnings') {
-                $this->jobs->markCompletedWithWarnings($jobId);
-            } else {
-                $this->jobs->markCompleted($jobId);
-            }
+            $status = $this->runYears($jobId, $planYears, $dryRun, $steps,
+                function (int $index, array &$totals) use ($jobId, $params, $meta, $supplierId, $userId, $plan, $planYears, $steps): array {
+                    return $this->runPlanYear($jobId, $params, $meta, $supplierId, $userId, $plan[$index], $index, $planYears, $steps, $totals);
+                });
             // Export se po převodu smaže, jen když z něj nic nezbývá: prošly všechny agendy
             // firmy a žádná nemá druhou část (účetnictví / mzdy).
             $purge = !$dryRun && ($status === 'completed' || $status === 'completed_with_warnings')
                 && self::nothingLeft($meta, $ico, $planYears, $payroll);
         } catch (\Throwable $e) {
-            if ($e instanceof PohodaException) {
-                $message = $e->getMessage();
-            } else {
-                error_log(sprintf('POHODA: převod exportu %s firmy %d selhal: %s', $token, $supplierId, (string) $e));
-                $message = 'Převod z POHODY selhal na neočekávané chybě, podrobnosti jsou v logu serveru.';
-            }
-            $this->jobs->markFailed($jobId, $message);
+            $this->jobs->markFailed($jobId, $this->failureMessage($e, sprintf('převod exportu %s firmy %d selhal', $token, $supplierId), static::RUN_FAILED));
         } finally {
             if ($lock !== null) {
                 PohodaUploads::releaseJobLock($lock);
@@ -199,110 +155,51 @@ final class PohodaImportJobService
      * @param array{created:int,skipped:int,failed:int} $totals MĚNÍ SE: počty za celý job
      * @return array{status:string,year:int,run_id:?int,error:?string}
      */
-    private function runYear(int $jobId, array $params, array $meta, int $supplierId, int $userId, array $item, int $index, array $planYears, array $steps, array &$totals): array
+    private function runPlanYear(int $jobId, array $params, array $meta, int $supplierId, int $userId, array $item, int $index, array $planYears, array $steps, array &$totals): array
     {
-        $token = (string) ($params['token'] ?? '');
-        $mode = ($params['mode'] ?? '') === 'import' ? 'import' : 'dry_run';
-        $dryRun = $mode === 'dry_run';
-        $payroll = ($params['kind'] ?? '') === 'payroll';
-        $year = $item['year'];
-        $total = count($planYears);
-        $label = $total > 1 ? sprintf('Rok %d (%d z %d)', $year, $index + 1, $total) : "Rok {$year}";
-        $offset = count($steps) * $index;
-        $runId = null;
-        try {
-            $agenda = self::agenda($meta, (string) ($params['ico'] ?? ''), $year);
-            if ($agenda === null) {
-                throw new PohodaException('agenda_not_found', "Export neobsahuje agendu roku {$year} této firmy.");
-            }
-            $agendaDir = PohodaUploads::exportDir($supplierId, $token) . DIRECTORY_SEPARATOR . $agenda['dir'];
-            if ($payroll && !$agenda['has_payroll']) {
-                throw new PohodaException('payroll_missing', "Export roku {$year} neobsahuje mzdy (91_mzdy.xml).");
-            }
-            if (!$payroll && !$agenda['has_accounting']) {
-                throw new PohodaException('accounting_missing', "Export roku {$year} obsahuje jen mzdy, účetnictví v něm není.");
-            }
-            $export = $payroll ? null : PohodaExport::open($agendaDir);
-            $runId = $this->runs->startRun($supplierId, $jobId, $mode, [
-                'ico' => $export !== null ? $export->ico : $agenda['ico'],
-                'year' => $export !== null ? $export->year : $agenda['year'],
-                'program' => $export !== null ? $export->info['program'] : 'POHODA Mzdy',
-                'sha256' => $meta['sha256'] ?? null,
-            ], $userId > 0 ? $userId : null);
-
-            $this->jobs->updateProgress($jobId, [
-                'processed' => $offset,
-                'current_step' => mb_substr($label . ': ' . ($dryRun ? 'zkouška nanečisto běží' : 'připravuji převod'), 0, 120),
-            ]);
-            $included = array_values(array_diff($item['later'], $item['skip']));
-            $this->jobs->appendLog($jobId, ($dryRun ? 'Zkouška nanečisto' : 'Ostrý převod') . ($payroll ? ' mezd' : ' agendy')
-                . " IČO {$agenda['ico']}, rok {$agenda['year']}"
-                . ($included !== [] ? ' (včetně dokladů roku ' . implode(', ', $included) . ')' : '')
-                . ($item['skip'] !== [] ? ', bez dokladů nevybraného roku ' . implode(', ', $item['skip']) : '') . '.');
-
-            $progress = $dryRun ? null : function (string $step, int $done, int $all) use ($jobId, $steps, $offset, $label): void {
-                $position = array_search($step, $steps, true);
-                $this->jobs->updateProgress($jobId, [
-                    'processed' => $offset + ($position === false ? count($steps) : (int) $position),
-                    'current_step' => mb_substr($label . ': ' . (self::STEP_LABELS[$step] ?? $step), 0, 120),
-                ]);
-            };
-            $cancel = $dryRun ? null : fn (): bool => $this->jobs->isCancelRequested($jobId);
-
-            $protocol = $export === null
-                ? $this->payroll->run($supplierId, $userId, $agendaDir . DIRECTORY_SEPARATOR . PohodaExport::FILES['payroll'], (int) $agenda['year'], $dryRun, $runId, $progress, $cancel,
-                    (bool) ($params['confirm_identifiers'] ?? false), (bool) ($params['approve_taken_over'] ?? false))
-                : $this->importer->run($supplierId, $userId, $export, $dryRun, $runId, $progress, $cancel, $item['skip']);
-            $result = $protocol->toArray() + ['kind' => $payroll ? 'payroll' : 'accounting'];
-            if ($total > 1) {
-                $result['job_years'] = ['years' => $planYears, 'index' => $index + 1, 'dry_run_isolated' => $dryRun];
-            }
-            $cancelled = $result['failure'] === 'cancelled';
-            $status = $cancelled ? 'cancelled' : $protocol->status();
-            $this->runs->finishRun($runId, $supplierId, $status, $result);
-
-            $byStep = array_column($result['steps'], null, 'key');
-            $journal = $payroll
-                ? ['entries' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['months'] ?? 0, 'existing' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['existing'] ?? 0]
-                : $byStep['journal']['counts'] ?? [];
-            $errors = 0;
-            $warnings = 0;
-            foreach ($result['steps'] as $s) {
-                foreach ($s['messages'] as $m) {
-                    $errors += $m['level'] === 'error' ? 1 : 0;
-                    $warnings += $m['level'] === 'warning' ? 1 : 0;
+        return $this->runYear($jobId, $params, $supplierId, $index, $planYears, $steps, $totals,
+            function () use ($jobId, $params, $meta, $supplierId, $userId, $item): array {
+                $token = (string) ($params['token'] ?? '');
+                $mode = ($params['mode'] ?? '') === 'import' ? 'import' : 'dry_run';
+                $dryRun = $mode === 'dry_run';
+                $payroll = ($params['kind'] ?? '') === 'payroll';
+                $year = $item['year'];
+                $agenda = self::agenda($meta, (string) ($params['ico'] ?? ''), $year);
+                if ($agenda === null) {
+                    throw new PohodaException('agenda_not_found', "Export neobsahuje agendu roku {$year} této firmy.");
                 }
-            }
-            $totals['created'] += (int) ($journal['entries'] ?? 0);
-            $totals['skipped'] += (int) ($journal['existing'] ?? 0);
-            $totals['failed'] += $errors;
-            $this->jobs->updateProgress($jobId, [
-                'processed' => $offset + count($steps),
-                'created_count' => $totals['created'],
-                'skipped_count' => $totals['skipped'],
-                'failed_count' => $totals['failed'],
-                'current_step' => mb_substr($label . ': ' . ($cancelled ? 'zrušeno uživatelem' : 'hotovo'), 0, 120),
-            ]);
-            $this->jobs->appendLog($jobId, sprintf('%s: protokol #%d, %d chyb, %d upozornění.', $label, $runId, $errors, $warnings));
-            return [
-                'status' => $status,
-                'year' => $year,
-                'run_id' => $runId,
-                'error' => $status === 'failed' ? "Převod roku {$year} nedoběhl nebo nesedí rekonciliace - podrobnosti v protokolu #{$runId}." : null,
-            ];
-        } catch (\Throwable $e) {
-            if ($e instanceof PohodaException) {
-                $message = $e->getMessage();
-            } else {
-                error_log(sprintf('POHODA: převod exportu %s firmy %d, rok %d selhal: %s', $token, $supplierId, $year, (string) $e));
-                $message = 'Převod z POHODY selhal na neočekávané chybě, podrobnosti jsou v logu serveru.';
-            }
-            if ($runId !== null) {
-                $this->runs->finishRun($runId, $supplierId, 'failed', ['mode' => $mode, 'status' => 'failed', 'failure' => 'unexpected', 'error' => $message, 'steps' => []]);
-            }
-            $this->jobs->appendLog($jobId, "{$label}: {$message}");
-            return ['status' => 'failed', 'year' => $year, 'run_id' => $runId, 'error' => $message];
-        }
+                $agendaDir = PohodaUploads::exportDir($supplierId, $token) . DIRECTORY_SEPARATOR . $agenda['dir'];
+                if ($payroll && !$agenda['has_payroll']) {
+                    throw new PohodaException('payroll_missing', "Export roku {$year} neobsahuje mzdy (91_mzdy.xml).");
+                }
+                if (!$payroll && !$agenda['has_accounting']) {
+                    throw new PohodaException('accounting_missing', "Export roku {$year} obsahuje jen mzdy, účetnictví v něm není.");
+                }
+                $export = $payroll ? null : PohodaExport::open($agendaDir);
+                $runId = $this->runs->startRun($supplierId, $jobId, $mode, [
+                    'ico' => $export !== null ? $export->ico : $agenda['ico'],
+                    'year' => $export !== null ? $export->year : $agenda['year'],
+                    'program' => $export !== null ? $export->info['program'] : 'POHODA Mzdy',
+                    'sha256' => $meta['sha256'] ?? null,
+                ], $userId > 0 ? $userId : null);
+
+                $included = array_values(array_diff($item['later'], $item['skip']));
+                return [
+                    'run_id' => $runId,
+                    'log' => ($dryRun ? 'Zkouška nanečisto' : 'Ostrý převod') . ($payroll ? ' mezd' : ' agendy')
+                        . " IČO {$agenda['ico']}, rok {$agenda['year']}"
+                        . ($included !== [] ? ' (včetně dokladů roku ' . implode(', ', $included) . ')' : '')
+                        . ($item['skip'] !== [] ? ', bez dokladů nevybraného roku ' . implode(', ', $item['skip']) : '') . '.',
+                    'kind' => $payroll ? 'payroll' : 'accounting',
+                    'import' => fn (?callable $progress, ?callable $cancel): object => $export === null
+                        ? $this->payroll->run($supplierId, $userId, $agendaDir . DIRECTORY_SEPARATOR . PohodaExport::FILES['payroll'], (int) $agenda['year'], $dryRun, $runId, $progress, $cancel,
+                            (bool) ($params['confirm_identifiers'] ?? false), (bool) ($params['approve_taken_over'] ?? false))
+                        : $this->importer->run($supplierId, $userId, $export, $dryRun, $runId, $progress, $cancel, $item['skip']),
+                    'journal' => static fn (array $byStep): array => $payroll
+                        ? ['entries' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['months'] ?? 0, 'existing' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['existing'] ?? 0]
+                        : $byStep['journal']['counts'] ?? [],
+                ];
+            });
     }
 
     /**
@@ -407,86 +304,5 @@ final class PohodaImportJobService
             }
         }
         return null;
-    }
-
-    /**
-     * ZIP exportu nahraný po částech: kontrolní součet, rozbalení (jen XML agend), přehled
-     * agend a `meta.json`. Chyba se uloží do stavu nahrávání, odkud ji průvodce ukáže.
-     *
-     * @param array<string,mixed> $job
-     */
-    private function prepare(int $jobId, array $job, int $supplierId): void
-    {
-        $params = (array) $job['params'];
-        $token = (string) ($params['token'] ?? '');
-        try {
-            $lock = PohodaUploads::acquireJobLock($supplierId, $token);
-        } catch (PohodaException $e) {
-            $this->jobs->markFailed($jobId, $e->getMessage());
-            return;
-        }
-        if ($lock === null) {
-            $this->jobs->markFailed($jobId, 'Export už zpracovává jiný proces.');
-            return;
-        }
-        try {
-            $state = PohodaUploads::state($supplierId, $token);
-            if ($state === null) {
-                throw new PohodaException('upload_not_found', 'Nahraný export nebyl nalezen (mohl být už uklizen).', [], 404);
-            }
-            $size = (int) ($state['size'] ?? 0);
-            if (PohodaUploads::partSize($supplierId, $token) !== $size || $size <= 0) {
-                throw new PohodaException('upload_incomplete', 'Export není nahraný celý, nahrajte ho znovu.');
-            }
-            PohodaUploads::updateState($supplierId, $token, ['status' => PohodaUploads::STATUS_PROCESSING, 'job_id' => $jobId, 'error' => null]);
-            $this->jobs->updateProgress($jobId, ['total_items' => 3, 'processed' => 0, 'current_step' => 'Kontrolní součet exportu']);
-            $part = PohodaUploads::partPath($supplierId, $token);
-            $sha = (string) hash_file('sha256', $part);
-
-            $this->jobs->updateProgress($jobId, ['processed' => 1, 'current_step' => 'Rozbaluji export']);
-            $root = PohodaUploads::exportDir($supplierId, $token);
-            PohodaExport::extractArchive($part, $root);
-            @unlink($part);
-
-            $this->jobs->updateProgress($jobId, ['processed' => 2, 'current_step' => 'Čtu agendy exportu']);
-            $agendas = PohodaExport::overview($root);
-            if ($agendas === []) {
-                throw new PohodaException('no_agenda', 'ZIP neobsahuje export agendy z POHODY (složku IČO_rok s účetním deníkem). Nahrajte ZIP, který vytvořil exportní nástroj.');
-            }
-            $userId = (int) ($state['uploaded_by'] ?? 0);
-            PohodaUploads::writeMeta($supplierId, $token, [
-                'token' => $token,
-                'file_name' => (string) ($state['file_name'] ?? 'pohoda_export.zip'),
-                'sha256' => $sha,
-                'uploaded_at' => date('c'),
-                'uploaded_by' => $userId,
-                'agendas' => $agendas,
-            ]);
-            PohodaUploads::updateState($supplierId, $token, ['status' => PohodaUploads::STATUS_READY, 'error' => null]);
-            $this->logger->log('import.pohoda_uploaded', $userId > 0 ? $userId : null, 'supplier', $supplierId,
-                ['agendas' => array_map(static fn (array $a): string => $a['ico'] . '/' . $a['year'], $agendas)],
-                isset($params['ip']) ? (string) $params['ip'] : null,
-                isset($params['user_agent']) ? (string) $params['user_agent'] : null);
-
-            $this->jobs->updateProgress($jobId, ['processed' => 3, 'current_step' => 'Hotovo']);
-            $this->jobs->appendLog($jobId, 'Export z POHODY načten (' . count($agendas) . ' agend).');
-            $this->jobs->markCompleted($jobId);
-        } catch (\Throwable $e) {
-            if ($e instanceof PohodaException) {
-                $message = $e->getMessage();
-            } else {
-                error_log(sprintf('POHODA: zpracování exportu %s firmy %d selhalo: %s', $token, $supplierId, (string) $e));
-                $message = self::PREPARE_FAILED;
-            }
-            PohodaUploads::discardData($supplierId, $token);
-            try {
-                PohodaUploads::updateState($supplierId, $token, ['status' => PohodaUploads::STATUS_FAILED, 'error' => $message]);
-            } catch (\Throwable) {
-                // adresář exportu mezitím zmizel - chyba zůstane aspoň u jobu
-            }
-            $this->jobs->markFailed($jobId, $message);
-        } finally {
-            PohodaUploads::releaseJobLock($lock);
-        }
     }
 }

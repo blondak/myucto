@@ -53,6 +53,11 @@ final class ChunkedUploadStore
         private readonly array $activityGlobs = [],
     ) {}
 
+    public function messages(): ChunkedUploadMessages
+    {
+        return $this->messages;
+    }
+
     public function base(int $supplierId): string
     {
         return RuntimePaths::storage($this->storageDir . '/' . $supplierId);
