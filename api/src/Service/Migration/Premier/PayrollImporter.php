@@ -92,6 +92,15 @@ final class PayrollImporter
                 $p->count(self::STEP, 'employees_later');
                 continue;
             }
+            if ($relation['relation_type'] === PremierPayroll::APPRENTICE) {
+                $p->count(self::STEP, 'apprentices');
+                $months = count(array_filter(array_keys($relation['months']), static fn (string $m): bool => $m <= $lastPeriod));
+                $this->warn($p, 'relation_apprentice', "Osobní číslo {$relation['personal_number']}: PREMIER vede vztah jako učně (kategorie „{$relation['category']}\"). "
+                    . 'MyÚčto pro žáka ani učně druh vztahu nemá a pracovní poměr to není, vztah se proto nezaložil'
+                    . ($months > 0 ? " a jeho mzdové měsíce ({$months}) se nepřevzaly" : '') . '. K ověření: zadejte ho ručně.',
+                    ['personal_number' => (string) $relation['personal_number']]);
+                continue;
+            }
             $relations[] = $relation;
         }
         $blocker = $this->prerequisite($ctx->supplierId);

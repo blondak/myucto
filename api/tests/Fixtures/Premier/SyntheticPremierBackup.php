@@ -133,6 +133,7 @@ final class SyntheticPremierBackup
      *   `payroll`               zaměstnanci a mzdy (`PERSONAL`, `PER_MAIN`, `PERSON2`, `MZDY`, `MZDY_POL`…)
      *                           se zaúčtováním v deníku, viz {@see payroll()}
      *   `payroll_mismatch`      s `payroll`: jeden měsíc deníku nesedí na mzdy
+     *   `payroll_detail`        s `payroll`: další vztahy a evidence mzdového modulu, viz {@see payrollDetail()}
      *   `bank_split`            výpis BV 8 z 15. 10. 2025 se čtyřmi pohyby a dvěma řádky bez pohybu: výběr hotovosti,
      *                           úhrada VF 250005 (1 209,60, VS jen ve `VAR_DAL`, údaje homebankingu
      *                           `H*`/`PARTRAN`) s haléřovým vyrovnáním 548/311 0,40 (vazba na tutéž
@@ -368,7 +369,7 @@ final class SyntheticPremierBackup
         if (!empty($flags['payroll'])) {
             array_push($chart, ['331', '100', 'Zaměstnanci'], ['336', '100', 'Zúčtování sociálního pojištění'], ['336', '200', 'Zúčtování zdravotního pojištění'],
                 ['342', '200', 'Srážková daň'], ['342', '100', 'Záloha na daň ze závislé činnosti'], ['521', '100', 'Mzdové náklady'], ['524', '100', 'Zákonné pojištění']);
-            self::payroll($tables, !empty($flags['payroll_mismatch']));
+            self::payroll($tables, !empty($flags['payroll_mismatch']), !empty($flags['payroll_detail']));
         }
         if (!empty($flags['bank_split'])) {
             self::bankSplit($tables, $chart);
@@ -406,7 +407,7 @@ final class SyntheticPremierBackup
      *
      * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
      */
-    private static function payroll(array &$tables, bool $mismatch): void
+    private static function payroll(array &$tables, bool $mismatch, bool $detail = false): void
     {
         $tables['PERSONAL'] = [
             [['INTER', 'N', 8], ['CISLO', 'N', 10], ['VSTUP', 'D'], ['VYSTUP', 'D'], ['BANKA_UCET', 'C', 30], ['BANKA_KOD', 'C', 20], ['UVA_KATE', 'C', 3],
@@ -477,6 +478,10 @@ final class SyntheticPremierBackup
         $months[] = [3, 2026, 2, ['MZ_HRUBA' => 40000, 'VYM_SOC' => 40000, 'VYM_ZDR' => 40000, 'MZ_SOC' => 2840, 'MZ_ZDR' => 1800, 'MZ_SOCF' => 9920, 'MZ_ZDRF' => 3600,
             'MZ_ZDANI' => 40000, 'MZ_DAN' => 3430, 'NEZD_VLAS' => 2570, 'POD_DAN' => true, 'NEZD_A' => true, 'MZ_CISTA' => 31930, 'MZ_VYPLATA' => 31930,
             'POJIS_SO' => true, 'ZKR_POJ' => '201', 'DNY_ODPR' => 19, 'UVA_DOBA' => 8]];
+        $mzdyFields = [];
+        if ($detail) {
+            $mzdyFields = self::payrollDetail($tables, $months);
+        }
 
         $rows = [];
         $inter = 300;
@@ -509,9 +514,28 @@ final class SyntheticPremierBackup
                 ['MZ_SOC', 'N', 12, 2], ['MZ_ZDR', 'N', 12, 2], ['MZ_SOCF', 'N', 15, 2], ['MZ_ZDRF', 'N', 15, 2], ['MZ_ZDANI', 'N', 15, 2], ['MZ_DAN', 'N', 15, 2],
                 ['MZ_SDANI', 'N', 15, 2], ['MZ_SDAN', 'N', 15, 2], ['MZ_BONUS', 'N', 15, 2], ['NEZD_VLAS', 'N', 12, 2], ['NEZD_DETI', 'N', 12, 2],
                 ['MZ_CISTA', 'N', 15, 2], ['MZ_VYPLATA', 'N', 15, 2], ['SRAZ_DAN', 'L'], ['POD_DAN', 'L'], ['NEZD_A', 'L'], ['POJIS_SO', 'L'],
-                ['KAL_DNY', 'N', 2], ['KAL_DNYPP', 'N', 5, 1], ['DNY_ODPR', 'N', 5, 2], ['UVA_DOBA', 'N', 7, 4], ['VYL_DND', 'N', 6, 2], ['ZKR_POJ', 'C', 3], ['ID', 'C', 36]],
+                ['KAL_DNY', 'N', 2], ['KAL_DNYPP', 'N', 5, 1], ['DNY_ODPR', 'N', 5, 2], ['UVA_DOBA', 'N', 7, 4], ['VYL_DND', 'N', 6, 2], ['ZKR_POJ', 'C', 3], ['ID', 'C', 36],
+                ...$mzdyFields],
             $rows,
         ];
+    }
+
+    /**
+     * Další vztahy a evidence mzdového modulu (`payroll_detail`), syntetické osoby:
+     *
+     *   INTER 4  učeň (kategorie `UCN`, `KODPP_SO` prázdné jako v reálných zálohách), bez mezd
+     *
+     * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
+     * @param list<array{0:int,1:int,2:int,3:array<string,mixed>}> $months MĚNÍ SE
+     * @return list<array{0:string,1:string,2?:int,3?:int}> další sloupce `MZDY`
+     */
+    private static function payrollDetail(array &$tables, array &$months): array
+    {
+        $tables['PERSONAL'][1][] = ['INTER' => 4, 'CISLO' => 4, 'VSTUP' => '2025-09-01', 'UVA_KATE' => 'UCN', 'UVA_PROF' => 'učeň', 'KODPP_SO' => '',
+            'OSS_ZEME' => 'CZ', 'SUP_ID' => 'OS-D', 'ID' => 'PP-4'];
+        $tables['PER_MAIN'][1][] = ['ID' => 'OS-D', 'RC_1' => '080312', 'RC_2' => '0000', 'PRIJMENI' => 'Učňovský', 'JMENO' => 'Adam', 'NAROZENI' => '2008-03-12',
+            'ULICE' => 'Školní', 'CISLOP' => '3', 'PSC' => '60200', 'MESTO' => 'Brno', 'STAT' => 'CZ', 'STAT_N' => 'CZ'];
+        return [];
     }
 
     /**

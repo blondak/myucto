@@ -63,6 +63,17 @@ final class PremierPayrollTest extends TestCase
         self::assertSame(2570.0, $employee['months']['2026-02']['non_refundable']);
     }
 
+    /**
+     * `KODPP_SO` je v zálohách prázdný a druh vztahu vychází z kategorie. Učeň (`UCN`)
+     * dřív padal do výchozího pracovního poměru s příznakem odvození.
+     */
+    public function testApprenticeIsNotAnEmploymentRelation(): void
+    {
+        $relations = PremierPayroll::fromBackup($this->backup(['payroll' => true, 'payroll_detail' => true]))->relations;
+        $apprentice = array_values(array_filter($relations, static fn (array $r): bool => $r['key'] === '4'))[0];
+        self::assertSame([PremierPayroll::APPRENTICE, false], [$apprentice['relation_type'], $apprentice['relation_type_derived']]);
+    }
+
     public function testMonthTotalsMatchJournalPostings(): void
     {
         $backup = $this->backup(['payroll' => true]);

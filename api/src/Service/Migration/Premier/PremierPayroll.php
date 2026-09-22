@@ -35,6 +35,13 @@ final class PremierPayroll
     private const DPP_CODES = ['T', 'D'];
 
     /**
+     * Druh vztahu učně (kategorie `UCN`). MyÚčto pro žáka nebo učně druh vztahu nemá
+     * a pracovní poměr to není: odměna za produktivní činnost nezakládá účast na
+     * pojištění jako mzda zaměstnance. Převod takový vztah nezakládá a ohlásí ho.
+     */
+    public const APPRENTICE = 'apprentice';
+
+    /**
      * @param list<array<string,mixed>> $relations
      * @param list<string> $missingTables
      */
@@ -316,6 +323,11 @@ final class PremierPayroll
         $category = mb_strtoupper(self::text($row['UVA_KATE'] ?? '') . ' ' . self::text($row['KATEGO'] ?? ''));
         if (($row['JEDNATEL'] ?? false) === true || $activity === 'S' || preg_match('/\bSJK\b|JEDNATEL|STATUT/u', $category) === 1) {
             return ['statutory_body', false];
+        }
+        // `KODPP_SO` je v zálohách prázdný, učeň se pozná jen podle kategorie. Bez tohohle
+        // pravidla padal do výchozího pracovního poměru.
+        if (preg_match('/\bUCN\b|UČE[NŇ]/u', $category) === 1) {
+            return [self::APPRENTICE, false];
         }
         if (in_array($activity, self::DPP_CODES, true) || preg_match('/\bDPP\b|PROVEDEN/u', $category) === 1) {
             return ['dpp', false];

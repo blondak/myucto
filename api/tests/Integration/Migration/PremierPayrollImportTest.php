@@ -215,6 +215,17 @@ final class PremierPayrollImportTest extends TestCase
         self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_absences a JOIN payroll_employments e ON e.id = a.employment_id WHERE e.supplier_id = ?', $supplierId));
     }
 
+    /** Učeň nesmí vzniknout jako pracovní poměr; převod ho nezaloží a řekne to. */
+    public function testApprenticeIsReportedInsteadOfCreatedAsEmployment(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_employments WHERE supplier_id = ? AND code = '4'", $supplierId), $this->explain($protocol));
+        self::assertContains('relation_apprentice', $this->messageCodes($protocol));
+        self::assertSame(1, self::stepCounts($protocol, 'payroll')['apprentices'] ?? 0);
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);
