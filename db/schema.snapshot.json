@@ -850,7 +850,7 @@
         "1863_payment_matches_supplier_doc_index.sql",
         "1864_stereo_nx_import.sql",
         "1865_import_jobs_stereo_nx.sql",
-        "XXXX_vat_classification_purchase_outside_scope.sql"
+        "1866_vat_classification_purchase_outside_scope.sql"
     ],
     "tables": {
         "accounting_archives": {
