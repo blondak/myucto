@@ -160,6 +160,55 @@ final class PremierJournalTest extends TestCase
         self::assertArrayNotHasKey('PS|1|2024-01-01||0', $doc, 'Počáteční stavy taky ne.');
     }
 
+    /**
+     * Doklad bankovní řady se dělí po pohybech: řádek bez pohybu jde k pohybu, který hradí
+     * stejnou fakturu, zbytek do zápisu dokladu. Kurzové přecenění EUR účtu pohyb není.
+     */
+    public function testBankDocumentSplitsIntoOneEntryPerMovement(): void
+    {
+        $journal = PremierJournal::fromRows([
+            self::row(1, '2025-10-15', 'BV', '8', 0.40, '548000', '311000'),
+            self::row(2, '2025-10-15', 'BV', '8', 1209.60, '221001', '311000'),
+            self::row(3, '2025-10-15', 'BV', '8', 2420, '221001', '311000'),
+            self::row(4, '2025-10-15', 'BV', '8', 25, '568000', '221001'),
+            self::row(5, '2025-10-15', 'BV', '8', 5, '311000', '663000'),
+            self::row(6, '2025-10-15', 'ID', '1', 10, '568000', '221001'),
+            self::row(7, '2025-12-31', 'BE', '2', 500, '221002', '663000', ['MENA' => 'EUR', 'ZCASTKA' => 0]),
+            self::row(8, '2025-12-31', 'BE', '2', 2500, '221002', '411000', ['MENA' => 'EUR', 'ZCASTKA' => 100]),
+            self::row(9, '2025-12-31', 'BE', '3', 300, '221002', '663000', ['MENA' => 'EUR', 'ZCASTKA' => 0]),
+        ], [
+            ['DOKLAD' => 'BV', 'TOK' => 2, 'MD' => '221', 'MDA' => '001', 'MENA' => 'CZK'],
+            ['DOKLAD' => 'BE', 'TOK' => 2, 'MD' => '221', 'MDA' => '002', 'MENA' => 'EUR'],
+        ]);
+        $journal->usePaymentLinks([
+            1 => [['direction' => 'issued', 'inter' => 6]],
+            2 => [['direction' => 'issued', 'inter' => 6]],
+            3 => [['direction' => 'issued', 'inter' => 7]],
+        ]);
+
+        $docs = $journal->documents(2025);
+        self::assertSame([
+            'BV|8|2025-10-15||0|#2' => [2, 1],
+            'BV|8|2025-10-15||0|#3' => [3],
+            'BV|8|2025-10-15||0|#4' => [4],
+            'BV|8|2025-10-15||0|#' => [5],
+            'ID|1|2025-10-15||0' => [6],
+            'BE|2|2025-12-31||0|#8' => [8],
+            'BE|2|2025-12-31||0|#' => [7],
+            'BE|3|2025-12-31||0' => [9],
+        ], array_map(static fn (array $rows): array => array_column($rows, 'inter'), $docs));
+        self::assertSame('BV|8|2025-10-15||0', PremierJournal::groupKey('BV|8|2025-10-15||0|#2'));
+        self::assertSame('BV|8|2025-10-15||0', PremierJournal::groupKey('BV|8|2025-10-15||0|#'));
+        self::assertCount(5, $journal->groups(2025)['BV|8|2025-10-15||0']);
+
+        self::assertSame(1209.60, $journal->bankAmount($journal->row(2)));
+        self::assertSame(-25.0, $journal->bankAmount($journal->row(4)));
+        self::assertSame(100.0, $journal->bankAmount($journal->row(8)), 'Pohyb EUR účtu je v měně účtu.');
+        self::assertNull($journal->bankAmount($journal->row(7)), 'Kurzové přecenění (částka v měně 0) pohyb není.');
+        self::assertNull($journal->bankAmount($journal->row(1)), 'Řádek výpisu mimo účet banky pohyb není.');
+        self::assertNull($journal->bankAmount($journal->row(6)), 'Řádek na 221 mimo bankovní řadu pohyb není.');
+    }
+
     public function testRowIsNormalized(): void
     {
         $row = PremierJournal::fromRows([self::row(1, '2025-07-01', ' pf ', '250004', 10051.724, '518100', '321000', [

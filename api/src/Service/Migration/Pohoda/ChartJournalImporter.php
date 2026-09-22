@@ -111,8 +111,9 @@ final class ChartJournalImporter
     {
         $p = $ctx->protocol;
         $year = $ctx->year();
-        $period = $this->ensurePeriod($ctx);
+        $period = $this->ensurePeriod($ctx, $year);
         $ctx->period = $period;
+        $ctx->periods = [$year => $period];
 
         $groups = [];
         $closingRows = 0;
@@ -141,8 +142,9 @@ final class ChartJournalImporter
         }
 
         $existing = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY);
-        $stats = ['year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0, 'skipped_rows' => 0, 'swapped_rows' => 0];
+        $stats = ['year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0, 'skipped_rows' => 0, 'swapped_rows' => 0, 'relocated' => 0, 'later_year_skipped' => 0];
         $moved = [];
+        $later = [];
         $now = date('Y-m-d H:i:s');
         $done = 0;
         $total = count($groups);
@@ -152,12 +154,31 @@ final class ChartJournalImporter
                 $ctx->report(self::STEP_JOURNAL, $done, $total);
             }
             $key = $year . '|' . $groupKey;
+            // Doklad roku agendy, který už přinesla agenda minulého roku (vedla i doklady
+            // po svém konci a převod je zapsal do tohoto období) - tentýž zápis podruhé nevzniká.
+            $carried = $existing[($year - 1) . '|' . $groupKey] ?? null;
+            if ($carried !== null && !isset($existing[$key]) && $groupKey !== PohodaJournal::OPENING_KEY) {
+                $stats['existing']++;
+                continue;
+            }
             if (isset($existing[$key])) {
                 $stats['existing']++;
+                $date = PohodaXml::date($rows[0], 'date') ?? '';
+                $target = $date > $period['ends_on'] ? $this->laterPeriod($ctx, $date) : null;
+                if ($target !== null) {
+                    $later[$target['year']] = ($later[$target['year']] ?? 0) + 1;
+                    if ($this->relocate($ctx, $existing[$key], $period, $target, $date)) {
+                        $stats['relocated']++;
+                    }
+                }
                 continue;
             }
             $isOpening = $groupKey === PohodaJournal::OPENING_KEY;
             $first = $rows[0];
+            if (!$isOpening && $ctx->skipsDate(PohodaXml::date($first, 'date'))) {
+                $stats['later_year_skipped']++;
+                continue;
+            }
             $number = PohodaJournal::number($first);
 
             $lines = [];
@@ -193,7 +214,13 @@ final class ChartJournalImporter
                 $p->error(self::STEP_JOURNAL, 'entry_without_date', "Doklad {$number} nemá datum zápisu - nepřenesen.", ['document_no' => $number]);
                 continue;
             }
-            if ($entryDate < $period['starts_on'] || $entryDate > $period['ends_on']) {
+            // Agenda POHODY vede i doklady po konci roku (výpisy a faktury ledna až srpna
+            // dalšího roku). Ty patří do svého období, ne k 31. 12. - období se založí
+            // otevřené a uzávěrku s převodem zůstatků udělá účetní.
+            $entryPeriod = $entryDate > $period['ends_on'] ? $this->laterPeriod($ctx, $entryDate) : null;
+            if ($entryPeriod !== null) {
+                $later[$entryPeriod['year']] = ($later[$entryPeriod['year']] ?? 0) + 1;
+            } elseif ($entryDate < $period['starts_on'] || $entryDate > $period['ends_on']) {
                 $documentDate ??= $entryDate;
                 $entryDate = $entryDate < $period['starts_on'] ? $period['starts_on'] : $period['ends_on'];
                 $moved[] = $number ?: $groupKey;
@@ -215,7 +242,7 @@ final class ChartJournalImporter
 
             $entryId = $this->journal->insert([
                 'supplier_id' => $ctx->supplierId,
-                'period_id' => $period['id'],
+                'period_id' => ($entryPeriod ?? $period)['id'],
                 'entry_date' => $entryDate,
                 'document_date' => $documentDate,
                 'document_no' => $isOpening ? null : (mb_substr($number, 0, 50) ?: null),
@@ -241,6 +268,27 @@ final class ChartJournalImporter
         foreach (['entries', 'existing', 'lines', 'skipped_rows'] as $k) {
             $p->setCount(self::STEP_JOURNAL, $k, $stats[$k]);
         }
+        if ($stats['relocated'] > 0) {
+            $p->setCount(self::STEP_JOURNAL, 'relocated', $stats['relocated']);
+        }
+        if ($stats['later_year_skipped'] > 0) {
+            $p->setCount(self::STEP_JOURNAL, 'later_year_skipped', $stats['later_year_skipped']);
+            $p->info(self::STEP_JOURNAL, 'later_year_skipped', sprintf(
+                '%d zápisů s datem v nevybraném roce %s se nepřevedlo. Opakovaný převod s tímto rokem je doplní.',
+                $stats['later_year_skipped'], implode(', ', $ctx->skippedYearList()),
+            ), ['entries' => $stats['later_year_skipped'], 'years' => $ctx->skippedYearList()]);
+        }
+        foreach ($ctx->periods as $periodYear => $target) {
+            if ($periodYear === $year) {
+                continue;
+            }
+            $p->info(self::STEP_JOURNAL, 'later_period', sprintf(
+                'Agenda %d obsahuje doklady roku %d: %d zápisů je v účetním období %d podle skutečného data%s. Rok %d zůstává neuzavřený - uzávěrku a převod zůstatků do roku %d provede účetní v MyÚčtu.',
+                $year, $periodYear, $later[$periodYear] ?? 0, $periodYear,
+                $stats['relocated'] > 0 ? " (z toho {$stats['relocated']} dříve převzatých zápisů přesunuto z 31. 12. {$year})" : '',
+                $year, $periodYear,
+            ), ['year' => $periodYear, 'period_id' => $target['id'], 'entries' => $later[$periodYear] ?? 0]);
+        }
         if ($stats['swapped_rows'] > 0) {
             $p->info(self::STEP_JOURNAL, 'negative_amounts', "{$stats['swapped_rows']} řádků se zápornou částkou přeneseno s prohozenými stranami (účetně totéž).");
         }
@@ -259,7 +307,8 @@ final class ChartJournalImporter
 
     /**
      * Zápisy období, které nevznikly převodem (ani uzávěrkou nad ním) - do rozjeté
-     * účetní evidence se deník z Pohody nepřimíchává.
+     * účetní evidence se deník z Pohody nepřimíchává. Převodem vznikly i zápisy úhrad,
+     * které převod odvodil u pohybů bez zápisu v deníku POHODY, a jejich storna.
      */
     public function foreignEntryCount(int $supplierId, int $periodId): int
     {
@@ -270,17 +319,92 @@ final class ChartJournalImporter
                 AND e.source_type NOT IN ('closing', 'fx_revaluation')
                 AND NOT EXISTS (
                     SELECT 1 FROM pohoda_import_map m
-                     WHERE m.supplier_id = e.supplier_id AND m.kind = 'journal_entry' AND m.target_id = e.id
+                     WHERE m.supplier_id = e.supplier_id AND m.kind IN (?, ?) AND m.target_id = e.id
                 )"
         );
-        $stmt->execute([$supplierId, $periodId]);
+        $stmt->execute([$supplierId, $periodId, PohodaImportRepository::KIND_JOURNAL_ENTRY, PohodaImportRepository::KIND_DERIVED_ENTRY]);
         return (int) $stmt->fetchColumn();
     }
 
-    /** @return array{id:int,starts_on:string,ends_on:string,status:string,locked:bool} */
-    private function ensurePeriod(PohodaContext $ctx): array
+    /**
+     * Roky po roce agendy, do kterých padají zápisy deníku (agenda POHODY vede doklady
+     * i po 31. 12.) - převod je dá do jejich vlastního účetního období.
+     *
+     * @return list<int>
+     */
+    public static function laterYears(PohodaExport $export): array
     {
-        $year = $ctx->year();
+        $years = [];
+        foreach ($export->records('journal', 'accountingItem') as $item) {
+            $year = PohodaJournal::laterYear($item, $export->year);
+            if ($year !== null) {
+                $years[$year] = true;
+            }
+        }
+        ksort($years);
+        return array_keys($years);
+    }
+
+    /**
+     * Otevřené období pro zápis s datem po konci roku agendy. `null` = zápis zůstane
+     * v období agendy k jeho poslednímu dni (období je uzavřené nebo ho nejde založit
+     * bez překryvu s řadou období firmy).
+     *
+     * Období se zakládá stejně jako období agendy ({@see ensurePeriod()}): převod běží
+     * dřív, než firma podvojné účetnictví vede, takže {@see \MyInvoice\Service\Accounting\AccountingPeriodProvisioner}
+     * (ten zakládá jen firmě v podvojném účetnictví) tu použít nejde.
+     *
+     * @return array{id:int,starts_on:string,ends_on:string,status:string,locked:bool,year:int}|null
+     */
+    private function laterPeriod(PohodaContext $ctx, string $date): ?array
+    {
+        $year = (int) substr($date, 0, 4);
+        if (!array_key_exists($year, $ctx->periods)) {
+            $found = $this->periods->findForDate($ctx->supplierId, $date);
+            $foreignShape = $found !== null
+                ? (int) $found['fiscal_year'] !== $year
+                : $this->periods->overlapping($ctx->supplierId, sprintf('%04d-01-01', $year), sprintf('%04d-12-31', $year)) !== null;
+            $period = $foreignShape ? null : $this->ensurePeriod($ctx, $year);
+            if ($period !== null && $period['locked']) {
+                $ctx->protocol->warn(self::STEP_JOURNAL, 'later_period_closed', "Účetní období {$year} je v MyÚčtu uzavřené, zápisy roku {$year} z agendy zůstávají k 31. 12. {$ctx->year()}.", ['year' => $year]);
+                $period = null;
+            }
+            $ctx->periods[$year] = $period;
+        }
+        $period = $ctx->periods[$year];
+        return $period === null ? null : $period + ['year' => $year];
+    }
+
+    /**
+     * Zápis, který dřívější převod posunul k 31. 12. roku agendy, se přesune do období
+     * podle skutečného data. Jen v otevřených obdobích a mimo uzamčené datum (podané DPH).
+     *
+     * @param array{id:int,ends_on:string,locked:bool} $from
+     * @param array{id:int,locked:bool} $to
+     */
+    private function relocate(PohodaContext $ctx, int $entryId, array $from, array $to, string $date): bool
+    {
+        if ($from['locked'] || $to['locked']) {
+            return false;
+        }
+        $pdo = $this->db->pdo();
+        $lock = $pdo->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ?');
+        $lock->execute([$ctx->supplierId]);
+        $lockedUntil = $lock->fetchColumn();
+        if (is_string($lockedUntil) && $lockedUntil >= $from['ends_on']) {
+            return false;
+        }
+        $stmt = $pdo->prepare(
+            'UPDATE journal_entries SET period_id = ?, entry_date = ?, document_date = COALESCE(document_date, ?)
+              WHERE id = ? AND supplier_id = ? AND period_id = ? AND entry_date = ? AND reversed_by IS NULL'
+        );
+        $stmt->execute([$to['id'], $date, $date, $entryId, $ctx->supplierId, $from['id'], $from['ends_on']]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /** @return array{id:int,starts_on:string,ends_on:string,status:string,locked:bool} */
+    private function ensurePeriod(PohodaContext $ctx, int $year): array
+    {
         $existing = $this->periods->findByYear($ctx->supplierId, $year);
         if ($existing === null) {
             $starts = sprintf('%04d-01-01', $year);

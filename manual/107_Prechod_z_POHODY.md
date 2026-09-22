@@ -2,7 +2,7 @@
 
 **Cesta: `Systém → Přechod z POHODA`**
 
-Průvodce převede účetní rok z programu POHODA do firmy v MyÚčtu. Vstupem je ZIP
+Průvodce převede vybrané účetní roky z programu POHODA do firmy v MyÚčtu. Vstupem je ZIP
 s XML, který připravíte jednou ze dvou cest: exportem přes XML rozhraní POHODY,
 nebo místním převodem kopie datového souboru MDB na Windows. Nástroje stáhnete
 přímo z průvodce. Zdrojová data jen čtou, v POHODĚ nic nemění.
@@ -77,8 +77,8 @@ Export jen čte. Do POHODY nic nezapisuje a nic v ní nemění.
 ### 107.1.3 Co je v exportu
 
 - POHODA vede každý účetní rok samostatně a export obsahuje jednu agendu za
-  každou kombinaci IČO a roku. Převádí se vždy jeden rok, doporučujeme
-  nejnovější. Starší roky zůstávají v POHODĚ.
+  každou kombinaci IČO a roku. Převádějí se roky, které zaškrtnete v náhledu
+  (jeden i víc najednou). Nevybrané roky zůstávají v POHODĚ.
 - Majetek a mzdy XML export POHODY neobsahuje. Nástroj je čte přímo
   z datového souboru a přidá do exportu jako `90_majetek.xml`
   a `91_mzdy.xml`, viz 107.1.4. Tento průvodce ale zpracuje jen
@@ -214,7 +214,12 @@ a doklad jde doplnit ručně.
 **Zaúčtování se nepřepočítává.** Deník je přesná kopie toho, co bylo v POHODĚ,
 a doklady se k němu jen připojí podle čísla dokladu. Z dokladu je proto vidět
 jeho zápis a naopak a automatika už doklad znovu nezaúčtuje. Uzávěrkové zápisy
-se nepřebírají. Doklad s datem mimo převáděný rok se zaúčtuje k hranici období.
+se nepřebírají. Agenda POHODY často vede i doklady po konci roku (výpisy
+a faktury dalších měsíců). Jejich zápisy převod dá do účetního období podle
+skutečného data; chybějící období následujícího roku založí otevřené. Převáděný
+rok zůstane neuzavřený, uzávěrku a převod zůstatků do dalšího roku provede
+účetní v MyÚčtu. Doklad s datem před převáděným rokem se zaúčtuje k prvnímu dni
+období.
 
 **Popisy zápisů se dogenerují.** POHODA veze v řádku deníku jen volný text, který
 je u celé řady dokladů shodný („Fakturujeme Vám za …"). Po navázání dokladů proto
@@ -283,22 +288,45 @@ zápisy v deníku, samostatný doklad z nich nevzniká.
    i několik minut; obnovení stránky mezitím průvodce nepřeruší.
 2. **Náhled a volby.** Tabulka ukáže všechny agendy v exportu: IČO, firmu,
    rok, počty řádků deníku, počátečních stavů, dokladů a partnerů a rozsah
-   zápisů. Převést jde jen agendu s IČO firmy v MyÚčtu. Vyberte převáděný rok,
-   výchozí je nejnovější. Soubory exportu, které POHODA vrátila prázdné nebo
-   které v exportu chybí, průvodce vypíše jako informaci.
+   zápisů. Převést jde jen agendu s IČO firmy v MyÚčtu. Roky k převodu
+   zaškrtněte v prvním sloupci tabulky; předvybrané jsou všechny roky agend
+   s IČO firmy. Soubory exportu, které POHODA vrátila prázdné nebo které
+   v exportu chybí, průvodce vypíše jako informaci.
 
-   Kontrola před převodem zvoleného roku zastaví převod, když:
+   Agenda POHODY často vede i doklady po konci roku. Každý takový pozdější
+   rok průvodce nabídne jako samostatný řádek pod agendou („Doklady roku 2026
+   vedené v agendě 2025"), starší doklady přenesené jako neuhrazené z minulých
+   let samostatný rok netvoří. Pozdější rok jde převést jen spolu s rokem
+   agendy: jeho zaškrtnutí vybere i rok agendy, odškrtnutí roku agendy ho
+   zruší. Nevybraný pozdější rok převod přeskočí: zápisy deníku, pohyby
+   v bance a pokladně, faktury a úhrady s datem v něm nepřevede a protokol
+   uvede jejich počty. Faktura uhrazená až v nevybraném roce zůstane
+   v MyÚčtu neuhrazená. Chcete-li třeba jen rok 2025, zaškrtněte jen jeho
+   agendu; rok 2026 doplníte později opakovaným převodem (107.7).
+
+   Kontrola před převodem se ukáže pro každý vybraný rok zvlášť. Převod
+   zastaví, když u kteréhokoli vybraného roku:
    - export patří firmě s jiným IČO,
    - v exportu chybí nebo nejde přečíst účetní deník, osnova nebo členění DPH,
    - účetní období v MyÚčtu už obsahuje zápisy, které nevznikly převodem,
    - období je v MyÚčtu uzavřené.
-3. **Zkouška nanečisto.** Proběhne celý převod zvoleného roku včetně
-   rekonciliace, na konci se ale všechno vrátí. Výsledkem je protokol;
-   v MyÚčtu nic nezůstane a nastavení automatiky se nezmění. Zkouška běží
-   v jedné databázové transakci, spouštějte ji proto mimo běžnou práci ve firmě.
-4. **Ostrý převod.** Po potvrzení běží na pozadí, stránku můžete zavřít. Po
-   dokončení průvodce nabídne účetní deník a obratovou předvahu. Převod jedné
-   firmy běží vždy jen jeden, druhý se do jeho konce nespustí.
+
+   Obojí platí i pro vybrané období následujícího roku, do kterého padají
+   doklady agendy s pozdějším datem.
+3. **Zkouška nanečisto.** Proběhne celý převod vybraných roků včetně
+   rekonciliace, na konci se ale všechno vrátí. Výsledkem je protokol za každý
+   rok; v MyÚčtu nic nezůstane a nastavení automatiky se nezmění. Každý rok se
+   zkouší samostatně a hned po své zkoušce se vrátí, pozdější rok proto ve
+   zkoušce nevidí data předchozího roku (počáteční stavy, převzaté doklady
+   a úhrady) a jeho výsledek se od ostrého převodu může lišit. Zkouška běží
+   v databázové transakci, spouštějte ji proto mimo běžnou práci ve firmě.
+4. **Ostrý převod.** Potvrzení vyjmenuje převáděné roky. Převod běží na
+   pozadí, stránku můžete zavřít. Roky se převádějí vzestupně jeden po druhém
+   a průběh ukazuje, kolikátý rok z kolika právě běží. Skončí-li rok chybou
+   nebo převod zrušíte, další roky se nespustí a průvodce je vypíše. Po
+   dokončení průvodce ukáže protokoly všech převedených roků a nabídne účetní
+   deník a obratovou předvahu. Převod jedné firmy běží vždy jen jeden, druhý
+   se do jeho konce nespustí.
 
 ### 107.4.1 Navázání na existující číselnou řadu
 
@@ -322,7 +350,7 @@ Vlastní řadu může mít i jednotlivý zákazník nebo kategorie tržby; pole 
 
 ## 107.5 Rekonciliace a protokol
 
-Každý běh (zkouška i převod) končí protokolem. Najdete v něm kroky převodu
+Každý převáděný rok (ve zkoušce i v převodu) má vlastní běh a protokol. Najdete v něm kroky převodu
 s počty, upozornění a chyby a rekonciliaci převáděného roku:
 
 - obratová předvaha MyÚčta proti předvaze spočtené přímo z deníku POHODY
@@ -351,6 +379,34 @@ a protokol ji vypíše k ručnímu spárování. Úhrada zápočtem nebo záloho
 jako úhrada bankou ani pokladnou nepáruje. Spárovaná faktura dostane stav
 uhrazeno.
 
+### 107.5.1 Pohyby, které POHODA nezaúčtovala
+
+Bankovní pohyb s předkontací „Nevím" v deníku POHODY zápis nemá. Bývá to
+úhrada faktury, kterou účetní ještě nezlikvidovala. Převod ji spáruje
+s fakturou a rovnou zaúčtuje úhradu (321/221, u příjmu 221/311, na analytiku
+předpisu faktury a banky) jako bankovní zápis pohybu, ale jen když je shoda
+jednoznačná. Rozhoduje v tomto pořadí:
+
+1. úhrada, kterou u faktury eviduje POHODA,
+2. párovací symbol pohybu nebo jeho položky (číslo nebo VS otevřené faktury)
+   a částka,
+3. variabilní symbol pohybu a částka,
+4. účet protistrany uvedený na přijaté faktuře, částka a datum platby
+   v rozumném okně kolem splatnosti.
+
+Výdaj se páruje jen s přijatou fakturou, příjem jen s vydanou. Faktura musí
+být jediná pro pohyb a pohyb jediný pro fakturu. Nejistou shodu (víc faktur
+se stejnou částkou, jiná částka při shodném symbolu) převod jen navrhne,
+návrh najdete u výpisu. Platby kartou a ostatní pohyby zůstávají
+k zaúčtování v Účetnictví → Doúčtovat doklady. Úhradu dokladu, jehož saldo
+je v počátečních stavech nebo který v deníku POHODY zápis nemá, převod spáruje,
+ale nezaúčtuje a protokol ji vypíše.
+
+Zaúčtuje-li POHODA takový pohyb později sama, opakovaný převod novějšího
+exportu odvozený zápis stornuje a pohyb nese zápis z deníku POHODY; úhrada
+v deníku není dvakrát. Rekonciliace se zápisy odvozených úhrad počítá
+a protokol uvede jejich počet.
+
 Protokoly všech běhů zůstávají v přehledu pod průvodcem.
 
 ## 107.6 Režim účetnictví a automatika
@@ -369,7 +425,12 @@ vypnutá, dokud převod nedoběhne bez chyb.
 Převod si pamatuje, co z které agendy už vzniklo. Opakovaný převod téhož nebo
 novějšího exportu založí jen to, co ještě chybí, a nic nezdvojí. Převod
 přerušený chybou tak stačí po opravě spustit znovu. Takhle se převádí i další
-rok: nahrajte export a zvolte jiný rok.
+rok: nahrajte export a zaškrtněte jiný rok. Stejně se doplní pozdější rok
+agendy, který jste napoprvé nevybrali: převod založí jen jeho zápisy, pohyby,
+doklady a úhrady a doklady uhrazené v tomto roce označí jako uhrazené. Zápisy, které do období dalšího roku
+přinesla už agenda minulého roku, převod dalšího roku podruhé nezaloží.
+Zápis, který dřívější převod posunul k 31. 12., opakovaný převod přesune do
+období podle jeho data (jen v otevřených obdobích a mimo uzamčené datum).
 
 Už převedené doklady ani zápisy deníku opakovaný převod nepřepisuje, protože
 mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změnila-li se
@@ -379,11 +440,13 @@ a ponechanou v MyÚčtu; upravte ji ručně.
 ## 107.8 Omezení
 
 - Převádí se kalendářní účetní rok, období se vždy založí od 1. 1. do 31. 12.
+  (i období následujícího roku pro doklady agendy s pozdějším datem).
 - Převod čte jen export vytvořený nástrojem, nikdy živou databázi POHODY.
-- Jeden běh převede jeden rok jedné firmy. Agenda roku musí mít IČO firmy
-  v MyÚčtu.
-- Nahraný export zůstává na serveru pro další běh. Po úspěšném ostrém
-  převodu se smaže, jinak ho aplikace smaže po týdnu bez práce s ním.
+- Jeden běh převede vybrané roky jedné firmy, každý rok s vlastním
+  protokolem. Agenda roku musí mít IČO firmy v MyÚčtu.
+- Nahraný export zůstává na serveru pro další běh. Smaže se po úspěšném
+  ostrém převodu, který prošel všechny agendy firmy v exportu, jinak ho
+  aplikace smaže po týdnu bez práce s ním.
   Obsahuje-li export i `91_mzdy.xml`, nahrajte ho beze změny i do průvodce
   [Přechod z PAMICA](108_Prechod_z_PAMICA.md) — mzdy tento průvodce
   nepřevede.

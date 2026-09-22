@@ -89,6 +89,50 @@ final class PohodaMdbAccountingTest extends TestCase
         self::assertSame('33.25', $records[1]['bankSummary']['homeCurrency']['priceNone']);
     }
 
+    /**
+     * Úhradu bankou váže POHODA na bankovní doklad id (`Uhrady.RelIDU`) i z položky pohybu
+     * (`BVpol.RelIDUhrady`); opis čísla v úhradě (`CisloU`) může mířit na doklad jiného roku
+     * se stejným číslem. Párovací symboly pohybu a položek jdou do exportu pro párování.
+     */
+    public function testPaymentLinksAndPairingSymbolsComeFromIdsNotFromCopiedNumbers(): void
+    {
+        $mapper = $this->mapper([
+            'FA' => [['ID' => '10', 'RelTpFak' => '11', 'Cislo' => 'TEST-P1', 'Datum' => '2026-02-03', 'Kc2' => '100', 'KcDPH2' => '21']],
+            'BV' => [
+                ['ID' => '1', 'RelTpBV' => '2', 'Cislo' => 'TEST-B1', 'Kc0' => '121', 'ParSym' => 'TEST-P1'],
+                ['ID' => '2', 'RelTpBV' => '2', 'Cislo' => 'TEST-B2', 'Kc0' => '50'],
+            ],
+            'BVpol' => [['ID' => '5', 'RefAg' => '1', 'RelIDUhrady' => '7', 'ParSym' => '2026007', 'Kc' => '121']],
+            'Uhrady' => [
+                // RelIDU chybí, CisloU je opis čísla dokladu jiného roku - platí vazba z položky pohybu.
+                ['ID' => '7', 'RelIDH' => '10', 'RelAgH' => '3', 'RelAgU' => '28', 'DatumU' => '2026-02-10', 'CisloU' => 'TEST-B2', 'KcU' => '121'],
+                ['ID' => '8', 'RelIDH' => '10', 'RelAgH' => '3', 'RelAgU' => '28', 'DatumU' => '2026-02-11', 'RelIDU' => '2', 'CisloU' => 'TEST-OLD', 'KcU' => '1'],
+            ],
+        ]);
+        $invoice = iterator_to_array($mapper->records('received'))[0];
+        $liquidations = $invoice['liquidations']['liquidation'];
+        self::assertSame(['id' => '1', 'number' => 'TEST-B1'], $liquidations[0]['sourceDocument']);
+        self::assertSame(['id' => '2', 'number' => 'TEST-B2'], $liquidations[1]['sourceDocument']);
+
+        $bank = iterator_to_array($mapper->records('bank'));
+        self::assertSame('TEST-P1', $bank[0]['bankHeader']['symPar']);
+        self::assertSame('2026007', $bank[0]['bankDetail']['bankItem'][0]['symPar']);
+        self::assertSame('', $bank[1]['bankHeader']['symPar']);
+    }
+
+    /** Export staršího převodníku (bez sloupců pro párování) se čte beze změny. */
+    public function testExportWithoutPairingColumnsKeepsCopiedPaymentNumber(): void
+    {
+        $mapper = $this->mapper([
+            'FA' => [['ID' => '10', 'RelTpFak' => '11', 'Cislo' => 'TEST-P1', 'Datum' => '2026-02-03', 'Kc2' => '100', 'KcDPH2' => '21']],
+            'BV' => [['ID' => '1', 'RelTpBV' => '2', 'Cislo' => 'TEST-B1', 'Kc0' => '121']],
+            'Uhrady' => [['ID' => '7', 'RelIDH' => '10', 'RelAgH' => '3', 'RelAgU' => '28', 'DatumU' => '2026-02-10', 'CisloU' => 'TEST-B1', 'KcU' => '121']],
+        ]);
+        $invoice = iterator_to_array($mapper->records('received'))[0];
+        self::assertSame(['id' => '', 'number' => 'TEST-B1'], $invoice['liquidations']['liquidation'][0]['sourceDocument']);
+        self::assertSame('', iterator_to_array($mapper->records('bank'))[0]['bankHeader']['symPar']);
+    }
+
     #[DataProvider('unknownTypes')]
     public function testUnknownTypesFailInsteadOfGuessing(array $tables, string $key, string $code): void
     {

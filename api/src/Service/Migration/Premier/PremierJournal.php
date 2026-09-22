@@ -35,16 +35,27 @@ final class PremierJournal
     /** @var array<string,list<array<string,mixed>>> „SB_KOD|SBORNIK" → řádky dokladu ve sborníku */
     private array $byDocument = [];
 
+    /** @var array<string,array{account:string,number:string,bank:string,iban:string,currency:string,label:string}> bankovní řady deníku */
+    private array $bankSeries = [];
+
+    /** @var array<int,list<string>> INTER řádku deníku → faktury, které hradí („směr|INTER faktury") */
+    private array $paymentTargets = [];
+
     public function __construct(PremierBackup $backup)
     {
         $this->load($backup->rows('PUB_UCTO'));
+        $this->loadBankSeries($backup->rows('DOKL_PU'));
     }
 
-    /** @param iterable<array<string,mixed>> $rows řádky ve tvaru `PUB_UCTO` (testy) */
-    public static function fromRows(iterable $rows): self
+    /**
+     * @param iterable<array<string,mixed>> $rows řádky ve tvaru `PUB_UCTO` (testy)
+     * @param iterable<array<string,mixed>> $seriesRows číselník řad `DOKL_PU`
+     */
+    public static function fromRows(iterable $rows, iterable $seriesRows = []): self
     {
         $self = (new \ReflectionClass(self::class))->newInstanceWithoutConstructor();
         $self->load($rows);
+        $self->loadBankSeries($seriesRows);
         return $self;
     }
 
@@ -144,12 +155,33 @@ final class PremierJournal
     }
 
     /**
+     * Zápisy deníku roku. Doklad ({@see groups()}) je jeden zápis, jen doklad bankovní řady
+     * se dělí po pohybech: MyÚčto bere pohyb za zaúčtovaný, když má vlastní zápis se zdrojem
+     * `bank`, a jeden zápis smí mít jen jeden zdroj. Každý pohyb ({@see bankAmount()}) je
+     * zápis s klíčem `doklad|#INTER`; ostatní řádky výpisu (haléřové a kurzové rozdíly…)
+     * jdou do zápisu pohybu, který hradí stejnou fakturu (vazby `VAZBY`), zbylé do zápisu
+     * `doklad|#`. Každý řádek je sám vyrovnaný, dělení na obratech nic nemění.
+     *
+     * @return array<string,list<array<string,mixed>>> klíč zápisu → řádky
+     */
+    public function documents(int $year): array
+    {
+        $out = [];
+        foreach ($this->groups($year) as $key => $rows) {
+            foreach ($this->splitByMovement($key, $rows) as $part => $partRows) {
+                $out[$part] = $partRows;
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Doklady roku: řádky se stejnou řadou, číslem, datem a vazbou do sborníku tvoří
-     * jeden zápis (bankovní výpis s pohyby více dnů je tak zápis na každý den).
+     * jeden doklad (bankovní výpis s pohyby více dnů je tak doklad na každý den).
      *
      * @return array<string,list<array<string,mixed>>> klíč dokladu → řádky
      */
-    public function documents(int $year): array
+    public function groups(int $year): array
     {
         $out = [];
         foreach ($this->year($year) as $r) {
@@ -162,6 +194,148 @@ final class PremierJournal
     public static function documentKey(array $r): string
     {
         return $r['series'] . '|' . $r['number'] . '|' . $r['date'] . '|' . $r['sb_kod'] . '|' . $r['sbornik'];
+    }
+
+    /** Klíč dokladu ({@see groups()}), ze kterého zápis ({@see documents()}) vznikl. */
+    public static function groupKey(string $entryKey): string
+    {
+        return (string) preg_replace('/\|#\d*$/', '', $entryKey);
+    }
+
+    /**
+     * Úhrady faktur po řádcích deníku ({@see PremierDocuments::paymentLinks()}) - podle nich
+     * se řádky bankovního dokladu přiřazují k pohybům.
+     *
+     * @param array<int,list<array{direction:string,inter:int}>> $links
+     */
+    public function usePaymentLinks(array $links): void
+    {
+        $this->paymentTargets = [];
+        foreach ($links as $inter => $targets) {
+            foreach ($targets as $t) {
+                $this->paymentTargets[(int) $inter][] = $t['direction'] . '|' . $t['inter'];
+            }
+        }
+    }
+
+    /**
+     * Bankovní řady deníku z číselníku řad PREMIER (`DOKL_PU.TOK` = 2).
+     *
+     * @return array<string,array{account:string,number:string,bank:string,iban:string,currency:string,label:string}>
+     */
+    public function bankSeries(): array
+    {
+        return $this->bankSeries;
+    }
+
+    /**
+     * Pohyb na bankovním účtu: řádek bankovní řady na účtu řady s nenulovou částkou v měně
+     * účtu (+ příjem, - výdej); jinak `null`. Kurzové přecenění účtu v cizí měně (částka
+     * v měně 0) pohyb není - zůstává jen v deníku.
+     *
+     * @param array<string,mixed> $r
+     */
+    public function bankAmount(array $r): ?float
+    {
+        $s = $this->bankSeries[$r['series']] ?? null;
+        if ($s === null || ($r['md'] !== $s['account'] && $r['dal'] !== $s['account'])) {
+            return null;
+        }
+        $amount = self::accountAmount($r, $s['account'], $s['currency'] !== 'CZK');
+        return abs($amount) < 0.005 ? null : $amount;
+    }
+
+    /**
+     * Pohyb řádku na účtu v měně účtu (+ příjem, - výdej).
+     *
+     * @param array<string,mixed> $r
+     */
+    public static function accountAmount(array $r, string $account, bool $foreign): float
+    {
+        $movement = self::movement($r, $account);
+        if (!$foreign || abs($movement) < 0.005) {
+            return $movement;
+        }
+        $value = abs((float) $r['amount_foreign']);
+        return round($movement < 0 ? -$value : $value, 2);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return array<string,list<array<string,mixed>>>
+     */
+    private function splitByMovement(string $key, array $rows): array
+    {
+        if (!isset($this->bankSeries[$rows[0]['series']])) {
+            return [$key => $rows];
+        }
+        $movements = [];
+        $owners = [];
+        foreach ($rows as $r) {
+            if ($this->bankAmount($r) !== null) {
+                $movements[$r['inter']] = [$r];
+                foreach ($this->paymentTargets[$r['inter']] ?? [] as $target) {
+                    $owners[$target] ??= $r['inter'];
+                }
+            }
+        }
+        if ($movements === []) {
+            return [$key => $rows];
+        }
+        $rest = [];
+        foreach ($rows as $r) {
+            if (isset($movements[$r['inter']])) {
+                continue;
+            }
+            $owner = null;
+            foreach ($this->paymentTargets[$r['inter']] ?? [] as $target) {
+                if (isset($owners[$target])) {
+                    $owner = $owners[$target];
+                    break;
+                }
+            }
+            if ($owner !== null) {
+                $movements[$owner][] = $r;
+            } else {
+                $rest[] = $r;
+            }
+        }
+        $out = [];
+        foreach ($movements as $inter => $movementRows) {
+            $out[$key . '|#' . $inter] = $movementRows;
+        }
+        if ($rest !== []) {
+            $out[$key . '|#'] = $rest;
+        }
+        return $out;
+    }
+
+    /** @param iterable<array<string,mixed>> $rows */
+    private function loadBankSeries(iterable $rows): void
+    {
+        foreach ($rows as $r) {
+            if ((int) ($r['TOK'] ?? 0) !== 2) {
+                continue;
+            }
+            $code = strtoupper(trim((string) ($r['DOKLAD'] ?? '')));
+            $account = trim((string) ($r['MD'] ?? '')) . trim((string) ($r['MDA'] ?? ''));
+            if ($account === '' || !ctype_digit($account)) {
+                $account = trim((string) ($r['DAL'] ?? '')) . trim((string) ($r['DALA'] ?? ''));
+            }
+            if ($code === '' || !ctype_digit($account) || AccountCode::fromMoney($account) === null) {
+                continue;
+            }
+            $currency = strtoupper(trim((string) ($r['MENA'] ?? '')));
+            $this->bankSeries[$code] = [
+                'account' => $account,
+                'number' => str_replace(' ', '', trim((string) ($r['CISLO_U'] ?? ''))),
+                'bank' => trim((string) ($r['KOD_U'] ?? '')),
+                'iban' => str_replace(' ', '', trim((string) ($r['IBAN'] ?? ''))),
+                // Řada bez měny v číselníku (termínovaný vklad v EUR…) - měna z deníku.
+                'currency' => preg_match('/^[A-Z]{3}$/', $currency) === 1 ? $currency : $this->accountCurrency($account),
+                'label' => trim((string) ($r['NAZEV_B'] ?? '')) ?: (trim((string) ($r['TEXT'] ?? '')) ?: $code),
+            ];
+        }
     }
 
     /**
@@ -311,6 +485,14 @@ final class PremierJournal
             'rate' => (float) ($r['KURS'] ?? 0),
             'rate_units' => max(1, (int) ($r['M_KURS'] ?? 1)),
             'variable_symbol' => trim((string) ($r['VARIABL'] ?? '')),
+            // Údaje bankovního pohybu: VS příjmu (`VAR_DAL`) a z homebankingu (`H*`, `PARTRAN`).
+            'variable_symbol_credit' => trim((string) ($r['VAR_DAL'] ?? '')),
+            'bank_variable_symbol' => trim((string) ($r['HVAR'] ?? '')),
+            'bank_account' => trim((string) ($r['HUCET'] ?? '')),
+            'bank_constant_symbol' => trim((string) ($r['HKS'] ?? '')),
+            'bank_specific_symbol' => trim((string) ($r['HSPEC'] ?? '')),
+            'bank_message' => trim((string) ($r['HZPR_PRIJ'] ?? '')),
+            'bank_ref' => trim((string) ($r['PARTRAN'] ?? '')),
             'partner_no' => trim((string) ($r['CISLO_ODB'] ?? '')),
             'partner_name' => trim((string) ($r['NAZEV_ODB'] ?? '')),
             'partner_ico' => trim((string) ($r['ICO_ODB'] ?? '')),

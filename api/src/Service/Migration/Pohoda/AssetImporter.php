@@ -139,7 +139,7 @@ final class AssetImporter
             }
             $number = PohodaJournal::number($item);
             $date = (string) PohodaXml::date($item, 'date');
-            if ($number === '' || $date === '' || preg_match('/^0[78]/', $effect['credit']) !== 1) {
+            if ($number === '' || $date === '' || $ctx->skipsDate($date) || preg_match('/^0[78]/', $effect['credit']) !== 1) {
                 continue;
             }
             $accumulated[$number] ??= $effect['credit'];

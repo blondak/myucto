@@ -7,12 +7,14 @@ namespace MyInvoice\Service\Migration\Premier;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Migration\ImportYears;
 
 /**
  * Převod z PREMIER na pozadí (`import_jobs.source = premier_import`, migrace 1859).
  *
  * Job dělá dvě věci: zpracuje nahranou zálohu (`params.mode = prepare`: kontrolní součet,
- * rozbalení, přehled účetních let) a spustí převod zvoleného roku ({@see PremierImporter}).
+ * rozbalení, přehled účetních let) a spustí převod vybraných roků (`params.years`
+ * vzestupně, každý rok vlastní běh a protokol; {@see PremierImporter}).
  * Převod drží po celou dobu zámek firmy ({@see PremierImportRepository::acquireLock()}).
  * Zkouška nanečisto běží v jedné transakci, průběh do řádku jobu během ní nezapisuje
  * (stejně jako u POHODY a Money S3).
@@ -83,16 +85,19 @@ final class PremierImportJobService
         }
     }
 
-    /** @param array<string,mixed> $job */
+    /**
+     * Vybrané roky jdou vzestupně, každý s vlastním záznamem běhu a protokolem. Rok, který
+     * skončí chybou nebo zrušením, zastaví i roky po něm (stavěly by na neúplném základu).
+     * Výsledný stav jobu je nejhorší ze stavů roků.
+     *
+     * @param array<string,mixed> $job
+     */
     private function runLocked(int $jobId, array $job, int $supplierId): void
     {
         $userId = (int) ($job['created_by'] ?? 0);
         $params = is_array($job['params'] ?? null) ? $job['params'] : [];
         $token = (string) ($params['token'] ?? '');
-        $mode = ($params['mode'] ?? '') === 'import' ? 'import' : 'dry_run';
-        $dryRun = $mode === 'dry_run';
-        $year = (int) ($params['year'] ?? 0);
-        $runId = null;
+        $dryRun = ($params['mode'] ?? '') !== 'import';
         $lock = null;
 
         try {
@@ -106,6 +111,92 @@ final class PremierImportJobService
                 $this->jobs->appendLog($jobId, "Uzavřeno {$interrupted} přerušených běhů převodu.");
             }
             $meta = PremierUploads::meta($supplierId, $token);
+            $years = ImportYears::fromParams($params);
+            if ($years === []) {
+                throw new PremierException('invalid_year', 'Vyberte aspoň jeden rok převodu.');
+            }
+            $total = count($years);
+            if ($total > 1) {
+                $this->jobs->appendLog($jobId, 'Převádí se ' . $total . ' roky vzestupně: ' . implode(', ', $years) . '.');
+                if ($dryRun) {
+                    $this->jobs->appendLog($jobId, ImportYears::DRY_RUN_NOTE);
+                }
+            }
+            $steps = PremierImporter::stepKeys();
+            $this->jobs->updateProgress($jobId, [
+                'total_items' => count($steps) * $total,
+                'processed' => 0,
+                'current_step' => $dryRun ? 'Zkouška nanečisto běží' : 'Připravuji převod',
+            ]);
+
+            $totals = ['created' => 0, 'skipped' => 0, 'failed' => 0];
+            $results = [];
+            foreach ($years as $index => $year) {
+                if ($index > 0 && $this->jobs->isCancelRequested($jobId)) {
+                    $results[] = ['status' => 'cancelled', 'year' => $year, 'run_id' => null, 'error' => null];
+                    $this->jobs->appendLog($jobId, 'Převod zrušen, roky ' . implode(', ', array_slice($years, $index)) . ' se nespouštějí.');
+                    break;
+                }
+                $result = $this->runYear($jobId, $params, $meta, $supplierId, $userId, $index, $years, $steps, $totals);
+                $results[] = $result;
+                if (in_array($result['status'], ['failed', 'cancelled'], true)) {
+                    $rest = array_slice($years, $index + 1);
+                    if ($rest !== []) {
+                        $this->jobs->appendLog($jobId, sprintf('Rok %d skončil %s, roky %s se nespouštějí.',
+                            $year, $result['status'] === 'failed' ? 'chybou' : 'zrušením', implode(', ', $rest)));
+                    }
+                    break;
+                }
+            }
+            $status = ImportYears::worstStatus(array_column($results, 'status'));
+            $this->jobs->updateProgress($jobId, ['current_step' => $status === 'cancelled' ? 'Zrušeno uživatelem' : 'Hotovo']);
+            $failed = array_values(array_filter($results, static fn (array $r): bool => $r['status'] === 'failed'));
+            if ($status === 'cancelled') {
+                $this->jobs->markCancelled($jobId);
+            } elseif ($status === 'failed') {
+                $this->jobs->markFailed($jobId, (string) ($failed[0]['error'] ?? 'Převod se nepodařil.'));
+            } elseif ($status === 'completed_with_warnings') {
+                $this->jobs->markCompletedWithWarnings($jobId);
+            } else {
+                $this->jobs->markCompleted($jobId);
+            }
+        } catch (\Throwable $e) {
+            if ($e instanceof PremierException) {
+                $message = $e->getMessage();
+            } else {
+                error_log(sprintf('PREMIER: převod zálohy %s firmy %d selhal: %s', $token, $supplierId, (string) $e));
+                $message = 'Převod z PREMIER selhal na neočekávané chybě, podrobnosti jsou v logu serveru.';
+            }
+            $this->jobs->markFailed($jobId, $message);
+        } finally {
+            if ($lock !== null) {
+                PremierUploads::releaseJobLock($lock);
+            }
+        }
+        // Záloha zůstává (drží ostatní roky) - úklid ji nechává denní údržbě.
+    }
+
+    /**
+     * Převod jednoho účetního roku s vlastním záznamem běhu a protokolem.
+     *
+     * @param array<string,mixed> $params
+     * @param array<string,mixed> $meta
+     * @param list<int> $years
+     * @param list<string> $steps
+     * @param array{created:int,skipped:int,failed:int} $totals MĚNÍ SE: počty za celý job
+     * @return array{status:string,year:int,run_id:?int,error:?string}
+     */
+    private function runYear(int $jobId, array $params, array $meta, int $supplierId, int $userId, int $index, array $years, array $steps, array &$totals): array
+    {
+        $token = (string) ($params['token'] ?? '');
+        $mode = ($params['mode'] ?? '') === 'import' ? 'import' : 'dry_run';
+        $dryRun = $mode === 'dry_run';
+        $year = $years[$index];
+        $total = count($years);
+        $label = $total > 1 ? sprintf('Rok %d (%d z %d)', $year, $index + 1, $total) : "Rok {$year}";
+        $offset = count($steps) * $index;
+        $runId = null;
+        try {
             $agenda = self::agenda($meta, (string) ($params['ico'] ?? ''), $year);
             if ($agenda === null) {
                 throw new PremierException('agenda_not_found', "Záloha neobsahuje účetní rok {$year} této firmy.");
@@ -118,25 +209,26 @@ final class PremierImportJobService
                 'sha256' => $meta['sha256'] ?? null,
             ], $userId > 0 ? $userId : null);
 
-            $steps = PremierImporter::stepKeys();
             $this->jobs->updateProgress($jobId, [
-                'total_items' => count($steps),
-                'processed' => 0,
-                'current_step' => $dryRun ? 'Zkouška nanečisto běží' : 'Připravuji převod',
+                'processed' => $offset,
+                'current_step' => mb_substr($label . ': ' . ($dryRun ? 'zkouška nanečisto běží' : 'připravuji převod'), 0, 120),
             ]);
             $this->jobs->appendLog($jobId, ($dryRun ? 'Zkouška nanečisto' : 'Ostrý převod') . " agendy IČO {$agenda['ico']}, rok {$year}.");
 
-            $progress = $dryRun ? null : function (string $step, int $done, int $total) use ($jobId, $steps): void {
-                $index = array_search($step, $steps, true);
+            $progress = $dryRun ? null : function (string $step, int $done, int $all) use ($jobId, $steps, $offset, $label): void {
+                $position = array_search($step, $steps, true);
                 $this->jobs->updateProgress($jobId, [
-                    'processed' => $index === false ? count($steps) : (int) $index,
-                    'current_step' => mb_substr(self::STEP_LABELS[$step] ?? $step, 0, 120),
+                    'processed' => $offset + ($position === false ? count($steps) : (int) $position),
+                    'current_step' => mb_substr($label . ': ' . (self::STEP_LABELS[$step] ?? $step), 0, 120),
                 ]);
             };
             $cancel = $dryRun ? null : fn (): bool => $this->jobs->isCancelRequested($jobId);
 
             $protocol = $this->importer->run($supplierId, $userId, $backup, $year, $dryRun, $runId, $progress, $cancel);
             $result = $protocol->toArray() + ['kind' => 'accounting'];
+            if ($total > 1) {
+                $result['job_years'] = ['years' => $years, 'index' => $index + 1, 'dry_run_isolated' => $dryRun];
+            }
             $cancelled = $result['failure'] === 'cancelled';
             $status = $cancelled ? 'cancelled' : $protocol->status();
             $this->runs->finishRun($runId, $supplierId, $status, $result);
@@ -151,41 +243,36 @@ final class PremierImportJobService
                     $warnings += $m['level'] === 'warning' ? 1 : 0;
                 }
             }
+            $totals['created'] += (int) ($journal['entries'] ?? 0);
+            $totals['skipped'] += (int) ($journal['existing'] ?? 0);
+            $totals['failed'] += $errors;
             $this->jobs->updateProgress($jobId, [
-                'processed' => count($steps),
-                'created_count' => (int) ($journal['entries'] ?? 0),
-                'skipped_count' => (int) ($journal['existing'] ?? 0),
-                'failed_count' => $errors,
-                'current_step' => $cancelled ? 'Zrušeno uživatelem' : 'Hotovo',
+                'processed' => $offset + count($steps),
+                'created_count' => $totals['created'],
+                'skipped_count' => $totals['skipped'],
+                'failed_count' => $totals['failed'],
+                'current_step' => mb_substr($label . ': ' . ($cancelled ? 'zrušeno uživatelem' : 'hotovo'), 0, 120),
             ]);
-            $this->jobs->appendLog($jobId, sprintf('Protokol #%d: %d chyb, %d upozornění.', $runId, $errors, $warnings));
-
-            if ($cancelled) {
-                $this->jobs->markCancelled($jobId);
-            } elseif ($status === 'failed') {
-                $this->jobs->markFailed($jobId, 'Převod nedoběhl nebo nesedí rekonciliace - podrobnosti v protokolu #' . $runId . '.');
-            } elseif ($status === 'completed_with_warnings') {
-                $this->jobs->markCompletedWithWarnings($jobId);
-            } else {
-                $this->jobs->markCompleted($jobId);
-            }
+            $this->jobs->appendLog($jobId, sprintf('%s: protokol #%d, %d chyb, %d upozornění.', $label, $runId, $errors, $warnings));
+            return [
+                'status' => $status,
+                'year' => $year,
+                'run_id' => $runId,
+                'error' => $status === 'failed' ? "Převod roku {$year} nedoběhl nebo nesedí rekonciliace - podrobnosti v protokolu #{$runId}." : null,
+            ];
         } catch (\Throwable $e) {
             if ($e instanceof PremierException) {
                 $message = $e->getMessage();
             } else {
-                error_log(sprintf('PREMIER: převod zálohy %s firmy %d selhal: %s', $token, $supplierId, (string) $e));
+                error_log(sprintf('PREMIER: převod zálohy %s firmy %d, rok %d selhal: %s', $token, $supplierId, $year, (string) $e));
                 $message = 'Převod z PREMIER selhal na neočekávané chybě, podrobnosti jsou v logu serveru.';
             }
             if ($runId !== null) {
                 $this->runs->finishRun($runId, $supplierId, 'failed', ['mode' => $mode, 'status' => 'failed', 'failure' => 'unexpected', 'error' => $message, 'steps' => []]);
             }
-            $this->jobs->markFailed($jobId, $message);
-        } finally {
-            if ($lock !== null) {
-                PremierUploads::releaseJobLock($lock);
-            }
+            $this->jobs->appendLog($jobId, "{$label}: {$message}");
+            return ['status' => 'failed', 'year' => $year, 'run_id' => $runId, 'error' => $message];
         }
-        // Záloha zůstává (drží ostatní roky) - úklid ji nechává denní údržbě.
     }
 
     /**

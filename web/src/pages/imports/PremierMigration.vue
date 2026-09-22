@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { isPremierUploadReady, premierApi, type PremierRun, type PremierUpload } from '@/api/premier'
 import { cancelImportJob, fetchImportJob, type FileImportJob } from '@/api/imports'
@@ -12,7 +12,8 @@ import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
 
 /**
  * Průvodce převodem z PREMIER: záloha dat (Správce → Záloha dat, F11) → náhled agend
- * a volba roku → zkouška nanečisto → ostrý převod. Nahraná záloha zůstává na serveru
+ * a výběr roků → zkouška nanečisto → ostrý převod (vybrané roky vzestupně v jednom jobu,
+ * každý rok vlastní protokol). Nahraná záloha zůstává na serveru
  * pod tokenem, takže obnovení stránky průvodce nevrátí na začátek (token drží
  * sessionStorage).
  *
@@ -40,10 +41,12 @@ const fileHelpItems = computed(() => list('file_help_items'))
 const currentStep = ref(1)
 const upload = ref<PremierUpload | null>(null)
 const file = ref<File | null>(null)
-const year = ref<number | null>(null)
+const selectedYears = ref<number[]>([])
 const job = ref<FileImportJob | null>(null)
 const jobMode = ref<'dry_run' | 'import' | null>(null)
 const run = ref<PremierRun | null>(null)
+// Běhy (protokoly) aktuálního jobu vzestupně: job víc roků má běh za každý rok.
+const jobRuns = ref<PremierRun[]>([])
 const runs = ref<PremierRun[]>([])
 const busy = ref(false)
 const cancelling = ref(false)
@@ -75,22 +78,49 @@ const agendas = computed(() => (upload.value?.agendas ?? []).filter(a => a.has_a
 // převádět od nejstaršího nepřevedeného roku, protože počáteční stavy roku vycházejí
 // z let předchozích v záloze.
 const years = computed(() => [...new Set(agendas.value.filter(a => a.ico === upload.value?.supplier_ico).map(a => a.year))].sort((a, b) => a - b))
-const selectedAgenda = computed(() => agendas.value.find(a => a.ico === upload.value?.supplier_ico && a.year === year.value) ?? null)
-const preflight = computed(() => (year.value === null ? [] : upload.value?.preflight?.[String(year.value)] ?? []))
-const preflightErrors = computed(() => preflight.value.filter(m => m.level === 'error'))
+const ownAgenda = computed(() => agendas.value.find(a => a.ico === upload.value?.supplier_ico) ?? null)
+function isSelected(y: number): boolean {
+  return selectedYears.value.includes(y)
+}
+function toggleYear(y: number, checked: boolean): void {
+  const next = new Set(selectedYears.value)
+  if (checked) next.add(y)
+  else next.delete(y)
+  selectedYears.value = [...next].sort((a, b) => a - b)
+}
+const yearsLabel = computed(() => selectedYears.value.join(', '))
+// Kontrola před převodem po vybraných rocích vzestupně.
+const preflightGroups = computed(() => selectedYears.value.map(y => ({ year: y, messages: upload.value?.preflight?.[String(y)] ?? [] })))
+const preflightErrors = computed(() => preflightGroups.value.flatMap(g => g.messages).filter(m => m.level === 'error'))
 const missingRights = computed<PermissionKey[]>(() => (['accounting.journal.write', 'settings.company.write'] as PermissionKey[]).filter(key => !auth.canWrite(key)))
 const rightsMessage = computed(() => tt('rights_missing', { rights: missingRights.value.join(', ') }))
-const blocked = computed(() => year.value === null || preflightErrors.value.length > 0)
+const blocked = computed(() => selectedYears.value.length === 0 || preflightErrors.value.length > 0)
 const jobRunning = computed(() => job.value?.status === 'queued' || job.value?.status === 'running')
 const blockedReason = computed(() => jobRunning.value && !blocked.value
   ? tt(jobMode.value === 'import' ? 'import_running' : 'dry_run_running')
-  : year.value === null ? tt('choose_year_first') : tt('preflight_blocked'))
+  : selectedYears.value.length === 0 ? tt('choose_year_first') : tt('preflight_blocked'))
 const percent = computed(() => {
   if (jobMode.value !== 'import' || !job.value?.total_items) return null
   return Math.min(100, Math.round(job.value.processed / job.value.total_items * 100))
 })
-const importDone = computed(() => jobMode.value === 'import' && !jobRunning.value && run.value?.mode === 'import'
-  && (run.value.status === 'completed' || run.value.status === 'completed_with_warnings'))
+const jobSucceeded = computed(() => job.value?.status === 'completed' || job.value?.status === 'completed_with_warnings')
+const importDone = computed(() => jobMode.value === 'import' && !jobRunning.value && jobSucceeded.value
+  && jobRuns.value.length > 0 && jobRuns.value.every(r => r.mode === 'import'))
+// Roky jobu, které se po chybě nebo zrušení předchozího roku nespustily.
+const yearsNotRun = computed(() => {
+  const planned = jobRuns.value.map(r => r.protocol?.job_years?.years).find(Boolean) ?? []
+  const done = new Set(jobRuns.value.map(r => r.agenda_year))
+  return planned.filter(y => !done.has(y))
+})
+function statusClass(status: string): string {
+  return status === 'completed' ? 'bg-success-50 text-success-600' : status === 'failed' ? 'bg-danger-50 text-danger-600'
+    : status === 'completed_with_warnings' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600'
+}
+
+watch(selectedYears, () => {
+  dryRunPassed.value = false
+  confirmed.value = false
+})
 
 function canGoTo(step: number): boolean {
   if (busy.value || jobRunning.value || step === currentStep.value) return false
@@ -137,7 +167,8 @@ async function waitForUpload(token: string): Promise<void> {
       const result = await premierApi.show(token)
       if (isPremierUploadReady(result)) {
         upload.value = result
-        year.value = result.default_year !== null && years.value.includes(result.default_year) ? result.default_year : (years.value[0] ?? null)
+        // Předvybrané všechny roky zálohy s IČO firmy.
+        selectedYears.value = [...years.value]
         dryRunPassed.value = false
         confirmed.value = false
         run.value = null
@@ -160,8 +191,9 @@ async function waitForUpload(token: string): Promise<void> {
 function resetUpload(): void {
   upload.value = null
   file.value = null
-  year.value = null
+  selectedYears.value = []
   run.value = null
+  jobRuns.value = []
   dryRunPassed.value = false
   confirmed.value = false
   writeToken(null)
@@ -169,12 +201,13 @@ function resetUpload(): void {
 }
 
 async function start(mode: 'dry_run' | 'import'): Promise<void> {
-  if (!upload.value || year.value === null) return
+  if (!upload.value || selectedYears.value.length === 0) return
   busy.value = true
   try {
-    const started = await premierApi.start(upload.value.token, { mode, year: year.value })
+    const started = await premierApi.start(upload.value.token, { mode, years: [...selectedYears.value] })
     jobMode.value = mode
     run.value = null
+    jobRuns.value = []
     currentStep.value = mode === 'dry_run' ? 3 : 4
     await pollJob(started.job_id)
   } catch (error: any) {
@@ -191,9 +224,11 @@ async function pollJob(id: number): Promise<void> {
     return
   }
   await loadRuns()
-  const finished = runs.value.find(r => r.job_id === id)
-  run.value = finished ? await premierApi.run(finished.id) : null
-  const ok = run.value?.status === 'completed' || run.value?.status === 'completed_with_warnings'
+  // Job víc roků má běh a protokol za každý rok - průvodce ukazuje všechny, vzestupně.
+  const ids = runs.value.filter(r => r.job_id === id).map(r => r.id).sort((a, b) => a - b)
+  jobRuns.value = await Promise.all(ids.map(runId => premierApi.run(runId)))
+  run.value = jobRuns.value[jobRuns.value.length - 1] ?? null
+  const ok = jobRuns.value.length > 0 && jobSucceeded.value
   if (jobMode.value === 'dry_run') {
     dryRunPassed.value = ok
   } else if (jobMode.value === 'import' && ok) {
@@ -359,6 +394,7 @@ onBeforeUnmount(() => {
           <table class="min-w-full text-sm">
             <thead class="bg-neutral-50 text-left text-xs text-neutral-500">
               <tr>
+                <th class="w-10 px-3 py-2 whitespace-nowrap">{{ tt('col_select') }}</th>
                 <th class="px-3 py-2">{{ tt('col_ico') }}</th>
                 <th class="px-3 py-2">{{ tt('col_company') }}</th>
                 <th class="px-3 py-2">{{ tt('col_year') }}</th>
@@ -367,7 +403,12 @@ onBeforeUnmount(() => {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="a in agendas" :key="`${a.ico}-${a.year}`" :class="a.ico === upload.supplier_ico && a.year === year ? 'bg-primary-50/60' : ''">
+              <tr v-for="a in agendas" :key="`${a.ico}-${a.year}`" :class="a.ico === upload.supplier_ico && isSelected(a.year) ? 'bg-primary-50/60' : ''">
+                <td class="px-3 py-2">
+                  <input v-if="a.ico === upload.supplier_ico" type="checkbox" class="rounded border-neutral-300 text-primary-600" :checked="isSelected(a.year)"
+                    :aria-label="tt('select_year', { year: a.year })" :data-testid="`premier-year-${a.year}`"
+                    @change="toggleYear(a.year, ($event.target as HTMLInputElement).checked)" />
+                </td>
                 <td class="px-3 py-2 font-mono whitespace-nowrap">{{ a.ico || '—' }}</td>
                 <td class="px-3 py-2">
                   {{ a.company || '—' }}
@@ -386,38 +427,52 @@ onBeforeUnmount(() => {
           {{ upload.supplier_ico ? tt('no_matching_agenda', { ico: upload.supplier_ico }) : tt('supplier_ico_missing') }}
         </p>
         <template v-else>
-          <label class="mb-1 block max-w-xs text-sm font-medium">{{ tt('year') }}
-            <select v-model="year" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 text-sm" data-testid="premier-year">
-              <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
-            </select>
-          </label>
-          <p class="mb-5 text-sm text-neutral-500">{{ tt('year_hint') }}</p>
+          <div class="mb-5 text-sm" data-testid="premier-years">
+            <p class="font-medium">{{ tt('year') }}: <span data-testid="premier-years-selected">{{ yearsLabel || '—' }}</span></p>
+            <p class="mt-1 text-neutral-500">{{ tt('year_hint') }}</p>
+          </div>
 
-          <h3 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ tt('preflight_title', { year: year ?? '' }) }}</h3>
-          <ul v-if="preflight.length" class="mb-5 space-y-2">
-            <li v-for="m in preflight" :key="m.code + m.message" class="rounded-lg border px-3 py-2 text-sm"
-              :class="m.level === 'error' ? 'border-danger-500/30 bg-danger-50 text-danger-600' : m.level === 'warning' ? 'border-warning-500/30 bg-warning-50 text-warning-700' : 'border-primary-500/30 bg-primary-50 text-primary-700'">
-              {{ m.message }}
-            </li>
-          </ul>
-          <p v-else class="mb-5 rounded-lg border border-success-500/30 bg-success-50 px-3 py-2 text-sm text-success-600">{{ tt('preflight_ok') }}</p>
+          <p v-if="!selectedYears.length" class="mb-5 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700" data-testid="premier-no-year-selected">{{ tt('choose_year_first') }}</p>
+          <div v-for="g in preflightGroups" :key="g.year" class="mb-5" :data-testid="`premier-preflight-${g.year}`">
+            <h3 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ tt('preflight_title', { year: g.year }) }}</h3>
+            <ul v-if="g.messages.length" class="space-y-2">
+              <li v-for="m in g.messages" :key="m.code + m.message" class="rounded-lg border px-3 py-2 text-sm"
+                :class="m.level === 'error' ? 'border-danger-500/30 bg-danger-50 text-danger-600' : m.level === 'warning' ? 'border-warning-500/30 bg-warning-50 text-warning-700' : 'border-primary-500/30 bg-primary-50 text-primary-700'">
+                {{ m.message }}
+              </li>
+            </ul>
+            <p v-else class="rounded-lg border border-success-500/30 bg-success-50 px-3 py-2 text-sm text-success-600">{{ tt('preflight_ok') }}</p>
+          </div>
         </template>
       </template>
 
       <template v-else-if="currentStep === 3">
         <h2 class="mb-1 text-lg font-semibold">{{ tt('dry_run_title') }}</h2>
-        <p class="mb-2 text-sm text-neutral-500">{{ tt('dry_run_hint', { year: year ?? '' }) }}</p>
+        <p class="mb-2 text-sm text-neutral-500">{{ tt('dry_run_hint', { years: yearsLabel }) }}</p>
+        <p v-if="selectedYears.length > 1" class="mb-2 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700" data-testid="premier-dry-run-years-hint">{{ tt('dry_run_years_hint') }}</p>
         <p class="mb-4 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700">{{ tt('dry_run_locks_hint') }}</p>
         <ImportJobProgress v-if="jobRunning" :job="job" :percent="null" :cancelling="false" :show-cancel="false"
           counts-key="premier.job_counts" background-hint-key="premier.background_hint" running-key="premier.dry_run_running" />
-        <MoneyS3Protocol v-if="run && run.mode === 'dry_run'" :run="run" prefix="premier" />
+        <template v-if="jobRuns.length && jobRuns[0].mode === 'dry_run'">
+          <p v-if="yearsNotRun.length" class="mb-3 rounded-lg border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-600" data-testid="premier-years-not-run">{{ tt('years_not_run', { years: yearsNotRun.join(', ') }) }}</p>
+          <MoneyS3Protocol v-if="jobRuns.length === 1" :run="jobRuns[0]" prefix="premier" />
+          <div v-else class="space-y-3" data-testid="premier-job-runs">
+            <details v-for="(r, i) in jobRuns" :key="r.id" :open="r.status === 'failed' || i === jobRuns.length - 1" class="rounded-lg border border-neutral-200" :data-testid="`premier-job-run-${r.agenda_year}`">
+              <summary class="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3">
+                <span class="font-medium">{{ tt('job_run_year', { year: r.agenda_year ?? '', n: i + 1, total: jobRuns.length }) }}<span class="ml-2 text-xs text-neutral-500">#{{ r.id }}</span></span>
+                <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(r.status)">{{ tt(`status.${r.status}`) }}</span>
+              </summary>
+              <div class="border-t border-neutral-200 p-4"><MoneyS3Protocol :run="r" prefix="premier" /></div>
+            </details>
+          </div>
+        </template>
       </template>
 
       <template v-else>
         <h2 class="mb-1 text-lg font-semibold">{{ tt('import_title') }}</h2>
         <label v-if="!importDone && !jobRunning" class="my-4 flex cursor-pointer items-start gap-3 rounded-lg border border-warning-500/30 bg-warning-50 p-4">
           <input v-model="confirmed" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="premier-confirm" />
-          <span class="text-sm text-warning-700">{{ tt('import_confirm', { company: selectedAgenda?.company ?? '', year: year ?? '' }) }}</span>
+          <span class="text-sm text-warning-700">{{ tt('import_confirm', { company: ownAgenda?.company ?? '', years: yearsLabel }) }}</span>
         </label>
         <p v-if="!importDone && !jobRunning && missingRights.length" class="my-4 rounded-lg border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-600" data-testid="premier-rights-missing">
           {{ rightsMessage }}
@@ -425,7 +480,19 @@ onBeforeUnmount(() => {
         <ImportJobProgress v-if="jobRunning" :job="job" :percent="percent" :cancelling="cancelling" :show-cancel="true"
           counts-key="premier.job_counts" background-hint-key="premier.background_hint" running-key="premier.import_running"
           cancel-key="premier.cancel" cancelling-key="premier.cancelling" @cancel="cancel" />
-        <MoneyS3Protocol v-if="run && run.mode === 'import'" :run="run" prefix="premier" />
+        <template v-if="jobRuns.length && jobRuns[0].mode === 'import'">
+          <p v-if="yearsNotRun.length" class="mb-3 rounded-lg border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-600" data-testid="premier-years-not-run">{{ tt('years_not_run', { years: yearsNotRun.join(', ') }) }}</p>
+          <MoneyS3Protocol v-if="jobRuns.length === 1" :run="jobRuns[0]" prefix="premier" />
+          <div v-else class="space-y-3" data-testid="premier-job-runs">
+            <details v-for="(r, i) in jobRuns" :key="r.id" :open="r.status === 'failed' || i === jobRuns.length - 1" class="rounded-lg border border-neutral-200" :data-testid="`premier-job-run-${r.agenda_year}`">
+              <summary class="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3">
+                <span class="font-medium">{{ tt('job_run_year', { year: r.agenda_year ?? '', n: i + 1, total: jobRuns.length }) }}<span class="ml-2 text-xs text-neutral-500">#{{ r.id }}</span></span>
+                <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(r.status)">{{ tt(`status.${r.status}`) }}</span>
+              </summary>
+              <div class="border-t border-neutral-200 p-4"><MoneyS3Protocol :run="r" prefix="premier" /></div>
+            </details>
+          </div>
+        </template>
       </template>
     </section>
 
@@ -443,7 +510,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section v-if="run && currentStep !== 3 && currentStep !== 4" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
+    <section v-if="run && !(currentStep >= 3 && jobRuns.some(r => r.id === run?.id))" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
       <MoneyS3Protocol :run="run" prefix="premier" />
     </section>
   </div>

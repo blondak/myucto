@@ -2,7 +2,7 @@
 
 **Cesta: `Systém → Přechod z PREMIER`**
 
-Průvodce převede účetní rok z programu PREMIER do firmy v MyÚčtu. Vstupem je
+Průvodce převede vybrané účetní roky z programu PREMIER do firmy v MyÚčtu. Vstupem je
 záloha dat, kterou vytvoříte přímo v PREMIERu. Na rozdíl od POHODY tu není
 samostatný exportní nástroj ke stažení.
 
@@ -47,14 +47,16 @@ přepne do podvojného účetnictví od začátku převáděného roku.
 
 ### 109.1.3 Pořadí let
 
-Záloha nese celé účetnictví najednou, ale **převádí se vždy jeden rok**.
-Postupujte **chronologicky od nejstaršího nepřevedeného roku**. PREMIER
+Záloha nese celé účetnictví najednou a převádějí se roky, které zaškrtnete
+v náhledu (jeden i víc najednou). Vybrané roky převod projde **vzestupně od
+nejstaršího**, každý s vlastním protokolem. Nevynechávejte nepřevedený starší
+rok. PREMIER
 počáteční ani uzávěrkové zápisy do deníku neukládá, převod proto počáteční
 stavy roku spočte z deníku všech předchozích let v záloze: zůstatky
 rozvahových účtů a výsledek hospodaření minulých let na účet 431. Doklady
 předchozích let ale převede jen převod těch let, a proto se vyplatí začít
-nejstarším. Průvodce v přehledu let sám nabídne nejstarší rok, který
-v MyÚčtu ještě není. Další rok převedete zopakováním postupu (§ 109.4).
+nejstarším. Průvodce v přehledu předvybere všechny roky zálohy s IČO firmy.
+Další rok převedete i později zopakováním postupu (§ 109.4).
 
 ## 109.2 Co převod přenese
 
@@ -181,26 +183,34 @@ Zkontrolujte po převodu:
    nebo `.icab`. Rozbalení a načtení běží na serveru na pozadí, u velké
    zálohy i několik minut; obnovení stránky mezitím průvodce nepřeruší.
 2. **Náhled a volby.** Tabulka ukáže roky nalezené v záloze s IČO firmy
-   a počtem zápisů deníku. Vyberte převáděný rok, výchozí je nejstarší
-   nepřevedený (§ 109.1.3).
+   a počtem zápisů deníku. Roky k převodu zaškrtněte v prvním sloupci
+   tabulky; předvybrané jsou všechny (§ 109.1.3).
 
-   Kontrola před převodem zvoleného roku zastaví převod, když:
+   Kontrola před převodem se ukáže pro každý vybraný rok zvlášť. Převod
+   zastaví, když u kteréhokoli vybraného roku:
    - záloha patří firmě s jiným IČO,
    - v záloze chybí deník, osnova nebo číselník kódů DPH,
    - účetní období v MyÚčtu už obsahuje zápisy, které nevznikly převodem,
    - období je v MyÚčtu uzavřené.
-3. **Zkouška nanečisto.** Proběhne celý převod zvoleného roku včetně
+3. **Zkouška nanečisto.** Proběhne celý převod vybraných roků včetně
    rekonciliace a kontroly proti podáním, na konci se ale všechno vrátí.
-   Výsledkem je protokol; v MyÚčtu nic nezůstane a nastavení automatiky se
-   nezmění. Zkouška běží v jedné databázové transakci, spouštějte ji proto
-   mimo běžnou práci ve firmě.
-4. **Ostrý převod.** Po potvrzení běží na pozadí, stránku můžete zavřít. Po
-   dokončení průvodce nabídne účetní deník a obratovou předvahu. Převod jedné
-   firmy běží vždy jen jeden, druhý se do jeho konce nespustí.
+   Výsledkem je protokol za každý rok; v MyÚčtu nic nezůstane a nastavení
+   automatiky se nezmění. Každý rok se zkouší samostatně a hned po své
+   zkoušce se vrátí, pozdější rok proto ve zkoušce nevidí data předchozího
+   roku (převzaté doklady, uzávěrku) a jeho výsledek se od ostrého převodu
+   může lišit. Zkouška běží v databázové transakci, spouštějte ji proto mimo
+   běžnou práci ve firmě.
+4. **Ostrý převod.** Potvrzení vyjmenuje převáděné roky. Převod běží na
+   pozadí, stránku můžete zavřít. Roky se převádějí vzestupně jeden po druhém
+   a průběh ukazuje, kolikátý rok z kolika právě běží. Skončí-li rok chybou
+   nebo převod zrušíte, další roky se nespustí a průvodce je vypíše. Po
+   dokončení průvodce ukáže protokoly všech převedených roků a nabídne účetní
+   deník a obratovou předvahu. Převod jedné firmy běží vždy jen jeden, druhý
+   se do jeho konce nespustí.
 
 ## 109.5 Rekonciliace, kontrola a protokol
 
-Každý běh (zkouška i převod) končí protokolem s kroky převodu, počty,
+Každý převáděný rok (ve zkoušce i v převodu) má vlastní běh a protokol s kroky převodu, počty,
 upozorněními a chybami a rekonciliací převáděného roku, obdobně jako
 u přechodu z POHODY, viz [§ 107.5](107_Prechod_z_POHODY.md#1075-rekonciliace-a-protokol).
 Obratová předvaha MyÚčta se porovná s předvahou spočtenou přímo z deníku
@@ -274,13 +284,14 @@ běžný rok), zůstává otevřený.
 Převod si pamatuje, co z které zálohy už vzniklo. Opakovaný převod téže nebo
 novější zálohy založí jen to, co ještě chybí, a nic nezdvojí. Převod
 přerušený chybou tak stačí po opravě spustit znovu. Takhle se převádí i další
-rok: ve stejné záloze zvolte další rok v pořadí.
+rok: ve stejné záloze zaškrtněte další rok v pořadí.
 
 ## 109.8 Omezení
 
 - Převádí se kalendářní účetní rok, období se vždy založí od 1. 1. do 31. 12.
 - Převod čte jen nahranou zálohu, nikdy živou databázi PREMIER.
-- Jeden běh převede jeden rok jedné firmy. Záloha musí mít IČO firmy
+- Jeden běh převede vybrané roky jedné firmy, každý rok s vlastním
+  protokolem. Záloha musí mít IČO firmy
   v MyÚčtu.
 - Záloha ve formátu iCAB musí být jeden soubor s kompresí MSZIP, jak ji
   PREMIER ukládá. Jiný archiv CAB uložte v PREMIERu jako iZIP.

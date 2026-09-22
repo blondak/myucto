@@ -8,7 +8,6 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
-use MyInvoice\Service\Migration\MoneyS3\AccountCode;
 
 /**
  * Bankovní účty a pohyby z PREMIER.
@@ -16,7 +15,9 @@ use MyInvoice\Service\Migration\MoneyS3\AccountCode;
  * PREMIER bankovní výpisy jako samostatnou evidenci nevede: výpis je doklad deníku
  * v řadě typu banka (`DOKL_PU.TOK` = 2), jejíž číselník nese analytiku účtu 221
  * (`MD`+`MDA`), číslo účtu (`CISLO_U`, `KOD_U`, `IBAN`) a měnu (`MENA`). Pohyb v MyÚčtu
- * = řádek deníku na účtu řady, výpis = doklad řady (číslo výpisu = `CISLO`).
+ * = řádek deníku na účtu řady s nenulovou částkou v měně účtu ({@see PremierJournal::bankAmount()}),
+ * výpis = doklad řady (číslo výpisu = `CISLO`). Kurzové přecenění účtu v cizí měně (částka
+ * v měně 0) pohyb nezakládá, zůstává jen v deníku.
  *
  * Částka pohybu je v měně účtu: u účtu v cizí měně z řádku deníku (`ZCASTKA`), jinak
  * v Kč. Počáteční zůstatek účtu se dopočte ze všech předchozích let zálohy ve stejné měně,
@@ -36,7 +37,7 @@ final class BankImporter
     {
         $p = $ctx->protocol;
         $pdo = $this->db->pdo();
-        $series = $this->bankSeries($ctx);
+        $series = $ctx->journal->bankSeries();
         if ($series === []) {
             $p->finish(self::STEP);
             return;
@@ -54,7 +55,20 @@ final class BankImporter
                 (source, source_ref, statement_id, posted_at, amount, currency, variable_symbol, constant_symbol,
                  specific_symbol, counterparty_account, counterparty_bank, counterparty_name, description, bank_ref,
                  import_fingerprint)
-             VALUES ("statement", ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?)'
+             VALUES ("statement", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        // Opakovaný převod doplní jen prázdné údaje (starší převod je nepřebíral), nic nepřepíše.
+        $enrichTx = $pdo->prepare(
+            "UPDATE bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+                SET t.variable_symbol = COALESCE(NULLIF(t.variable_symbol, ''), ?),
+                    t.constant_symbol = COALESCE(NULLIF(t.constant_symbol, ''), ?),
+                    t.specific_symbol = COALESCE(NULLIF(t.specific_symbol, ''), ?),
+                    t.counterparty_account = COALESCE(NULLIF(t.counterparty_account, ''), ?),
+                    t.counterparty_bank = COALESCE(NULLIF(t.counterparty_bank, ''), ?),
+                    t.counterparty_name = COALESCE(NULLIF(t.counterparty_name, ''), ?),
+                    t.description = COALESCE(NULLIF(t.description, ''), ?),
+                    t.bank_ref = CASE WHEN t.bank_ref IS NULL OR t.bank_ref IN ('', ?) THEN ? ELSE t.bank_ref END
+              WHERE t.id = ? AND s.supplier_id = ?"
         );
         $setBalances = $pdo->prepare(
             'UPDATE bank_statements SET transaction_count = ?, prev_balance = ?, curr_balance = ?, credit_total = ?, debit_total = ? WHERE id = ? AND supplier_id = ?'
@@ -63,7 +77,7 @@ final class BankImporter
         foreach ($series as $code => $s) {
             $rows = [];
             foreach ($ctx->journal->year($ctx->year) as $r) {
-                if ($r['series'] === $code && ($r['md'] === $s['account'] || $r['dal'] === $s['account'])) {
+                if ($r['series'] === $code && $ctx->journal->bankAmount($r) !== null) {
                     $rows[] = $r;
                 }
             }
@@ -108,26 +122,32 @@ final class BankImporter
                 $debit = 0.0;
                 $count = 0;
                 foreach ($txRows as $r) {
-                    $amount = self::amount($r, $s['account'], $foreign);
+                    $amount = (float) $ctx->journal->bankAmount($r);
                     $amount >= 0 ? $credit += $amount : $debit -= $amount;
                     $count++;
                     $txKey = 'tx|' . $r['inter'];
+                    $d = self::details($r);
+                    $fallbackRef = mb_substr($code . '-' . $r['inter'], 0, 40);
                     if (isset($existingTx[$txKey])) {
                         $ctx->bankTransactions[$r['inter']] = $existingTx[$txKey];
                         $p->count(self::STEP, 'existing');
+                        $enrichTx->execute([
+                            $d['vs'], $d['ks'], $d['ss'], $d['account'], $d['bank'], $d['name'], $d['description'],
+                            $fallbackRef, $d['ref'] ?? $fallbackRef, $existingTx[$txKey], $ctx->supplierId,
+                        ]);
+                        if ($enrichTx->rowCount() > 0) {
+                            $p->count(self::STEP, 'enriched');
+                        }
                         continue;
                     }
-                    $vs = preg_replace('/\D/', '', $r['variable_symbol']) ?? '';
                     $insertTx->execute([
                         mb_substr($code . ' ' . $number . ' #' . $r['inter'], 0, 190),
                         $statementId,
                         $r['date'],
                         number_format($amount, 2, '.', ''),
                         $s['currency'],
-                        $vs !== '' && ltrim($vs, '0') !== '' && strlen(ltrim($vs, '0')) <= VariableSymbolNormalizer::MAX_LENGTH ? $vs : null,
-                        $r['partner_name'] !== '' ? mb_substr($r['partner_name'], 0, 190) : null,
-                        $r['text'] !== '' ? mb_substr($r['text'], 0, 255) : null,
-                        mb_substr($code . '-' . $r['inter'], 0, 40),
+                        $d['vs'], $d['ks'], $d['ss'], $d['account'], $d['bank'], $d['name'], $d['description'],
+                        $d['ref'] ?? $fallbackRef,
                         hash('sha256', 'premier|' . $ctx->supplierId . '|' . $txKey),
                     ]);
                     $id = (int) $pdo->lastInsertId();
@@ -151,37 +171,74 @@ final class BankImporter
     }
 
     /**
-     * Bankovní řady deníku z číselníku řad PREMIER.
+     * Údaje pohybu z řádku deníku: VS (`VARIABL`, u příjmu `VAR_DAL`, jinak z homebankingu
+     * `HVAR`), protiúčet `HUCET` („předčíslí-číslo/kód banky"), KS `HKS` a SS `HSPEC` (samé
+     * nuly = bez symbolu), zpráva pro příjemce `HZPR_PRIJ` do popisu a ID transakce banky
+     * `PARTRAN`.
      *
-     * @return array<string,array{account:string,number:string,bank:string,iban:string,currency:string,label:string}>
+     * @param array<string,mixed> $r
+     * @return array{vs:?string,ks:?string,ss:?string,account:?string,bank:?string,name:?string,description:?string,ref:?string}
      */
-    private function bankSeries(PremierContext $ctx): array
+    public static function details(array $r): array
     {
-        $out = [];
-        foreach ($ctx->backup->rows('DOKL_PU') as $r) {
-            if ((int) ($r['TOK'] ?? 0) !== 2) {
-                continue;
+        $vs = null;
+        foreach ([$r['variable_symbol'], $r['variable_symbol_credit'] ?? '', $r['bank_variable_symbol'] ?? ''] as $candidate) {
+            $vs = self::symbol((string) $candidate, VariableSymbolNormalizer::MAX_LENGTH);
+            if ($vs !== null) {
+                break;
             }
-            $code = strtoupper(trim((string) ($r['DOKLAD'] ?? '')));
-            $account = trim((string) ($r['MD'] ?? '')) . trim((string) ($r['MDA'] ?? ''));
-            if ($account === '' || !ctype_digit($account)) {
-                $account = trim((string) ($r['DAL'] ?? '')) . trim((string) ($r['DALA'] ?? ''));
-            }
-            if ($code === '' || !ctype_digit($account) || AccountCode::fromMoney($account) === null) {
-                continue;
-            }
-            $currency = strtoupper(trim((string) ($r['MENA'] ?? '')));
-            $out[$code] = [
-                'account' => $account,
-                'number' => str_replace(' ', '', trim((string) ($r['CISLO_U'] ?? ''))),
-                'bank' => trim((string) ($r['KOD_U'] ?? '')),
-                'iban' => str_replace(' ', '', trim((string) ($r['IBAN'] ?? ''))),
-                // Řada bez měny v číselníku (termínovaný vklad v EUR…) - měna z deníku.
-                'currency' => preg_match('/^[A-Z]{3}$/', $currency) === 1 ? $currency : $ctx->journal->accountCurrency($account),
-                'label' => trim((string) ($r['NAZEV_B'] ?? '')) ?: (trim((string) ($r['TEXT'] ?? '')) ?: $code),
-            ];
         }
-        return $out;
+        [$account, $bank] = self::counterparty((string) ($r['bank_account'] ?? ''));
+        $text = (string) $r['text'];
+        $message = (string) ($r['bank_message'] ?? '');
+        if ($message !== '' && mb_stripos($text, $message) === false) {
+            $text = $text !== '' ? $text . ' | ' . $message : $message;
+        }
+        $ref = (string) ($r['bank_ref'] ?? '');
+        return [
+            'vs' => $vs,
+            'ks' => self::symbol((string) ($r['bank_constant_symbol'] ?? ''), 10),
+            'ss' => self::symbol((string) ($r['bank_specific_symbol'] ?? ''), 20),
+            'account' => $account,
+            'bank' => $bank,
+            'name' => $r['partner_name'] !== '' ? mb_substr((string) $r['partner_name'], 0, 190) : null,
+            'description' => $text !== '' ? mb_substr($text, 0, 255) : null,
+            'ref' => $ref !== '' ? mb_substr($ref, 0, 40) : null,
+        ];
+    }
+
+    /** Symbol platby jen číslicemi; prázdný, samé nuly nebo delší než pole = bez symbolu. */
+    private static function symbol(string $value, int $maxLength): ?string
+    {
+        $digits = preg_replace('/\D/', '', $value) ?? '';
+        $significant = ltrim($digits, '0');
+        if ($significant === '' || strlen($significant) > $maxLength) {
+            return null;
+        }
+        return strlen($digits) <= $maxLength ? $digits : $significant;
+    }
+
+    /**
+     * Protiúčet z `HUCET`: tuzemský účet „předčíslí-číslo/kód" bez vodicích nul (nulový
+     * účet = bez protiúčtu), IBAN beze změny.
+     *
+     * @return array{0:?string,1:?string}
+     */
+    private static function counterparty(string $value): array
+    {
+        $value = strtoupper(str_replace(' ', '', $value));
+        if (preg_match('/^(?:(\d{1,6})-)?(\d{1,10})\/(\d{4})$/', $value, $m) === 1) {
+            $number = ltrim($m[2], '0');
+            if ($number === '') {
+                return [null, null];
+            }
+            $prefix = ltrim($m[1], '0');
+            return [($prefix !== '' ? $prefix . '-' : '') . $number, $m[3]];
+        }
+        if (preg_match('/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/', $value) === 1) {
+            return [$value, null];
+        }
+        return [null, null];
     }
 
     /** Zůstatek účtu k začátku roku z deníku předchozích let (v měně účtu). */
@@ -194,34 +251,19 @@ final class BankImporter
         $own = $ctx->journal->openingRows($ctx->year);
         if ($own !== []) {
             foreach ($own as $r) {
-                $sum += self::amount($r, $account, true);
+                $sum += PremierJournal::accountAmount($r, $account, true);
             }
             return round($sum, 2);
         }
         $first = $ctx->journal->firstYear() ?? $ctx->year;
         foreach ($ctx->journal->openingRows($first) as $r) {
-            $sum += self::amount($r, $account, true);
+            $sum += PremierJournal::accountAmount($r, $account, true);
         }
         for ($y = $first; $y < $ctx->year; $y++) {
             foreach ($ctx->journal->year($y) as $r) {
-                $sum += self::amount($r, $account, true);
+                $sum += PremierJournal::accountAmount($r, $account, true);
             }
         }
         return round($sum, 2);
-    }
-
-    /**
-     * Pohyb řádku na účtu v měně účtu (+ příjem, - výdej).
-     *
-     * @param array<string,mixed> $r
-     */
-    private static function amount(array $r, string $account, bool $foreign): float
-    {
-        $movement = PremierJournal::movement($r, $account);
-        if (!$foreign || abs($movement) < 0.005) {
-            return $movement;
-        }
-        $value = abs((float) $r['amount_foreign']);
-        return round($movement < 0 ? -$value : $value, 2);
     }
 }

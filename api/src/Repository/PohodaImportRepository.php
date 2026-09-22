@@ -29,6 +29,13 @@ final class PohodaImportRepository
     public const KIND_BANK_STATEMENT = 'bank_statement';
     public const KIND_BANK_TRANSACTION = 'bank_transaction';
     public const KIND_PAYMENT = 'payment';
+    /**
+     * Úhrada, kterou převod odvodil u pohybu bez zápisu v deníku POHODY
+     * ({@see \MyInvoice\Service\Migration\Pohoda\UnbookedBankPayments}): `tx|id pohybu` => payment_matches.id.
+     */
+    public const KIND_DERIVED_MATCH = 'derived_match';
+    /** Zápis odvozené úhrady a jeho storno: `entry|pohyb|zápis`, `reversal|pohyb|zápis` => journal_entries.id. */
+    public const KIND_DERIVED_ENTRY = 'derived_entry';
     public const KIND_ASSET = 'asset';
     public const KIND_SMALL_ASSET = 'small_asset';
     /** Převedený měsíc mezd: `období|otisk sešitu` => id dávky importu docházky. */

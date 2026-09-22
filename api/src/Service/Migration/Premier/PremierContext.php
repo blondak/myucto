@@ -36,16 +36,16 @@ final class PremierContext
     /** @var array<int,int> FA_IN.INTER => purchase_invoices.id */
     public array $purchaseInvoices = [];
 
-    /** @var array<string,array{table:string,id:int}> klíč dokladu deníku => doklad s DPH mimo faktury */
+    /** @var array<string,array{table:string,id:int}> klíč dokladu deníku ({@see PremierJournal::groups()}) => doklad s DPH mimo faktury */
     public array $vatDocuments = [];
 
-    /** @var array<string,int> klíč dokladu deníku => cash_documents.id */
+    /** @var array<string,int> klíč dokladu deníku ({@see PremierJournal::groups()}) => cash_documents.id */
     public array $cashDocuments = [];
 
     /** @var array<int,int> PUB_UCTO.INTER řádku na bankovním účtu => bank_transactions.id */
     public array $bankTransactions = [];
 
-    /** @var array<string,int> klíč dokladu deníku => journal_entries.id */
+    /** @var array<string,int> klíč zápisu ({@see PremierJournal::documents()}) => journal_entries.id */
     public array $entries = [];
 
     /** @var array<string,true> „typ|id" převedených dokladů minulého období - zápis mají v deníku jiného roku */

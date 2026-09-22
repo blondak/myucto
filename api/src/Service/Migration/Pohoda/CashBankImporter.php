@@ -51,6 +51,9 @@ final class CashBankImporter
         $votes = [];
         foreach ($vouchers as $r) {
             $h = PohodaXml::get($r, 'voucherHeader');
+            if ($ctx->skipsDate(PohodaXml::date($h, 'date') ?? PohodaXml::date($h, 'datePayment'))) {
+                continue;
+            }
             $code = PohodaXml::text($h, 'cashAccount/ids');
             $account = $ctx->cashAccountsByNumber[PohodaXml::text($h, 'number/numberRequested')] ?? null;
             if ($account !== null) {
@@ -103,6 +106,10 @@ final class CashBankImporter
                     $ctx->openingCash[$existing[$key]] = true;
                 }
                 $p->count(self::STEP_CASH, 'existing');
+                continue;
+            }
+            if ($ctx->skipsDate($issue)) {
+                $p->count(self::STEP_CASH, 'later_year_skipped');
                 continue;
             }
             $registerId = $registerIds[PohodaXml::text($h, 'cashAccount/ids')] ?? null;
@@ -224,6 +231,10 @@ final class CashBankImporter
             $date = PohodaXml::date($h, 'datePayment') ?? PohodaXml::date($h, 'dateStatement');
             if ($date === null) {
                 $p->warn(self::STEP_BANK, 'date_missing', 'Bankovní doklad ' . PohodaXml::text($h, 'number') . ' nemá datum, nepřevzat.');
+                continue;
+            }
+            if ($ctx->skipsDate($date)) {
+                $p->count(self::STEP_BANK, 'later_year_skipped');
                 continue;
             }
             if (self::isOpeningBalance($h, $date, $periodStart)) {
@@ -355,6 +366,7 @@ final class CashBankImporter
                     }
                     if (isset($existingTx[$txKey])) {
                         $ctx->bankTransactions[$number][] = ['id' => $existingTx[$txKey], 'date' => $date];
+                        self::rememberReferences($ctx, $r, $existingTx[$txKey]);
                         $p->count(self::STEP_BANK, 'existing');
                         continue;
                     }
@@ -381,6 +393,7 @@ final class CashBankImporter
                     $id = (int) $pdo->lastInsertId();
                     $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_BANK_TRANSACTION, $txKey, $id, $ctx->runId);
                     $ctx->bankTransactions[$number][] = ['id' => $id, 'date' => $date];
+                    self::rememberReferences($ctx, $r, $id);
                     $added++;
                     $p->count(self::STEP_BANK, 'transactions');
                     if (++$done % 500 === 0) {
@@ -406,6 +419,34 @@ final class CashBankImporter
             }
         }
         $p->finish(self::STEP_BANK);
+    }
+
+    /**
+     * Vazby pohybu, kterými POHODA sama říká, co pohyb hradí: id bankovního dokladu (na něj
+     * míří úhrady dokladů) a párovací symboly hlavičky i položek (číslo hrazeného dokladu).
+     * Páruje z nich {@see DocumentLinker::matchPayments()} a {@see UnbookedBankPayments}.
+     */
+    private static function rememberReferences(PohodaContext $ctx, array $r, int $txId): void
+    {
+        $h = PohodaXml::get($r, 'bankHeader');
+        $pohodaId = PohodaXml::text($h, 'id');
+        if ($pohodaId !== '') {
+            $ctx->bankByPohodaId[$pohodaId] = $txId;
+        }
+        $symbols = [PohodaXml::text($h, 'symPar')];
+        foreach (PohodaXml::all($r, 'bankDetail/bankItem') as $item) {
+            $symbols[] = PohodaXml::text($item, 'symPar');
+        }
+        $out = [];
+        foreach ($symbols as $symbol) {
+            $symbol = trim($symbol);
+            if ($symbol !== '' && ltrim($symbol, '0') !== '') {
+                $out[$symbol] = true;
+            }
+        }
+        if ($out !== []) {
+            $ctx->bankSymbols[$txId] = array_map('strval', array_keys($out));
+        }
     }
 
     /**
@@ -576,7 +617,7 @@ final class CashBankImporter
     }
 
     /** Porovnání čísla účtu bez oddělovačů a úvodních nul (`19-123/0100` = `0000190000123`). */
-    private static function accountKey(string $number, string $bank): string
+    public static function accountKey(string $number, string $bank): string
     {
         return ltrim((string) preg_replace('/\D/', '', $number), '0') . '/' . ltrim(trim($bank), '0');
     }

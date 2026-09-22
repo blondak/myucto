@@ -62,11 +62,11 @@ describe('premierApi', () => {
     })).toBe(true)
   })
 
-  it('převod spouští jen s rokem, bez druhu převodu', async () => {
+  it('převod spouští jen s vybranými roky, bez druhu převodu', async () => {
     post.mockResolvedValueOnce({ data: { job_id: 5, status: 'queued', mode: 'dry_run' } })
 
-    await expect(premierApi.start('p1', { mode: 'dry_run', year: 2026 })).resolves.toEqual({ job_id: 5, status: 'queued', mode: 'dry_run' })
-    expect(post).toHaveBeenCalledWith('/admin/imports/premier/uploads/p1/start', { mode: 'dry_run', year: 2026 })
+    await expect(premierApi.start('p1', { mode: 'dry_run', years: [2025, 2026] })).resolves.toEqual({ job_id: 5, status: 'queued', mode: 'dry_run' })
+    expect(post).toHaveBeenCalledWith('/admin/imports/premier/uploads/p1/start', { mode: 'dry_run', years: [2025, 2026] })
   })
 
   it('agendu bez IČO firmy vezme jako hotovou zálohu jen pro informaci', () => {

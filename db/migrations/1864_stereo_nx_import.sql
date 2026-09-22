@@ -17,3 +17,7 @@ CREATE TABLE IF NOT EXISTS stereo_nx_import_map (
     CONSTRAINT fk_stereo_nx_import_map_supplier FOREIGN KEY (supplier_id)
         REFERENCES supplier(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- V integrační větvi tato tabulka krátce vznikla jako 1863; nová 1863 z masteru
+-- patří indexům párování. Schéma je stejné a starý název už není mezi soubory.
+DELETE FROM migrations WHERE filename = '1863_stereo_nx_import.sql';

@@ -9,6 +9,7 @@ use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Stats\StatsRecomputer;
+use MyInvoice\Support\Sql\PayablePredicate;
 
 /**
  * Vydané a přijaté doklady z agend faktur a daňové doklady k platbám z interních dokladů.
@@ -194,7 +195,7 @@ final class InvoiceImporter
     {
         $p = $ctx->protocol;
         $bucket = match ($agenda) { 'receivable' => 'receivable', 'internal' => 'internal_sale', default => 'issued' };
-        $doc = $this->header($r, $prefix);
+        $doc = self::withoutSkippedPayments($ctx, $this->header($r, $prefix), $r);
         if ($doc['number'] === '' || $doc['issue'] === null) {
             $p->warn($step, 'missing_number_or_date', "Doklad {$doc['number']} ({$agenda}) nemá číslo nebo datum, nepřevzat.");
             return;
@@ -202,6 +203,7 @@ final class InvoiceImporter
         $key = $agenda . '|' . $doc['number'] . '|' . $doc['issue'];
         if (isset($existing[$key])) {
             $this->remember($ctx, $bucket, $doc['number'], $existing[$key]);
+            self::rememberRemaining($ctx, 'invoice', $existing[$key], $doc);
             $this->captureLiquidations($ctx, 'invoice', $existing[$key], $doc['number'], $r);
             // Vazby na deník se při opakovaném běhu hodnotí znovu: doklad minulého období
             // zápis v deníku roku nemá a nesmí se napodruhé hlásit jako nezaúčtovaný.
@@ -210,6 +212,11 @@ final class InvoiceImporter
             }
             $p->count($step, 'existing');
             $this->reportChanged($ctx, $step, 'invoices', $existing[$key], $doc['number'], $r, $prefix);
+            $this->refreshSettlement($ctx, $step, 'invoices', $existing[$key], $doc);
+            return;
+        }
+        if ($ctx->skipsDate($doc['accounting'])) {
+            $p->count($step, 'later_year_skipped');
             return;
         }
         $amounts = $this->amounts($ctx, $step, $doc, $r, $prefix);
@@ -298,6 +305,7 @@ final class InvoiceImporter
         }
         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
         $this->remember($ctx, $bucket, $doc['number'], $id);
+        self::rememberRemaining($ctx, 'invoice', $id, $doc);
         $this->captureLiquidations($ctx, 'invoice', $id, $doc['number'], $r);
         if ($previous) {
             $ctx->previousPeriod['invoice|' . $id] = true;
@@ -321,7 +329,7 @@ final class InvoiceImporter
     {
         $p = $ctx->protocol;
         $bucket = match ($agenda) { 'commitment' => 'commitment', 'internal' => 'internal_purchase', default => 'purchase' };
-        $doc = $this->header($r, $prefix);
+        $doc = self::withoutSkippedPayments($ctx, $this->header($r, $prefix), $r);
         if ($doc['number'] === '' || $doc['issue'] === null) {
             $p->warn($step, 'missing_number_or_date', "Doklad {$doc['number']} ({$agenda}) nemá číslo nebo datum, nepřevzat.");
             return;
@@ -329,6 +337,7 @@ final class InvoiceImporter
         $key = $agenda . '|' . $doc['number'] . '|' . $doc['issue'];
         if (isset($existing[$key])) {
             $this->remember($ctx, $bucket, $doc['number'], $existing[$key]);
+            self::rememberRemaining($ctx, 'purchase_invoice', $existing[$key], $doc);
             $this->captureLiquidations($ctx, 'purchase_invoice', $existing[$key], $doc['number'], $r);
             if ($this->isPreviousPeriod($ctx, $doc)) {
                 $ctx->previousPeriod['purchase_invoice|' . $existing[$key]] = true;
@@ -340,6 +349,11 @@ final class InvoiceImporter
             }
             $p->count($step, 'existing');
             $this->reportChanged($ctx, $step, 'purchase_invoices', $existing[$key], $doc['number'], $r, $prefix);
+            $this->refreshSettlement($ctx, $step, 'purchase_invoices', $existing[$key], $doc);
+            return;
+        }
+        if ($ctx->skipsDate($doc['accounting'])) {
+            $p->count($step, 'later_year_skipped');
             return;
         }
         $amounts = $this->amounts($ctx, $step, $doc, $r, $prefix);
@@ -445,6 +459,7 @@ final class InvoiceImporter
         }
         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_PURCHASE_INVOICE, $key, $id, $ctx->runId);
         $this->remember($ctx, $bucket, $doc['number'], $id);
+        self::rememberRemaining($ctx, 'purchase_invoice', $id, $doc);
         $this->captureLiquidations($ctx, 'purchase_invoice', $id, $doc['number'], $r);
         if ($previous) {
             $ctx->previousPeriod['purchase_invoice|' . $id] = true;
@@ -611,6 +626,41 @@ final class InvoiceImporter
             'advance_items' => $advanceItems,
             'source' => $source,
         ];
+    }
+
+    /**
+     * Opakovaný převod doplní úhradu, kterou Pohoda mezitím zaznamenala (likvidace dokladu).
+     * Stav se posouvá jen dopředu: neuhrazený doklad se označí jako uhrazený, u vydaného se
+     * zvýší uhrazená částka. Zpět se nevrací nic - úhradu zapsanou v MyÚčtu (spárovaná platba,
+     * ruční označení) převod nepřepíše, a koncept k ruční kontrole zůstává konceptem.
+     *
+     * @param array<string,mixed> $doc
+     */
+    private function refreshSettlement(PohodaContext $ctx, string $step, string $table, int $id, array $doc): void
+    {
+        $remaining = is_numeric($doc['remaining']) ? round((float) $doc['remaining'], 2) : 0.0;
+        $settled = abs($remaining) < 0.005;
+        if ($table === 'purchase_invoices') {
+            if (!$settled) {
+                return;
+            }
+            $stmt = $this->stmt('settle_purchase',
+                "UPDATE purchase_invoices SET status = 'paid', paid_at = COALESCE(paid_at, ?)
+                  WHERE id = ? AND supplier_id = ? AND status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument(''));
+            $stmt->execute([$doc['paid_date'], $id, $ctx->supplierId]);
+        } else {
+            $stmt = $this->stmt('settle_issued',
+                "UPDATE invoices
+                    SET paid_total = total_with_vat - advance_paid_amount - ?,
+                        paid_at = IF(?, COALESCE(paid_at, ?), paid_at),
+                        status = IF(?, 'paid', status)
+                  WHERE id = ? AND supplier_id = ? AND status IN ('issued', 'sent', 'reminded')
+                    AND ABS(total_with_vat - advance_paid_amount - ?) > ABS(paid_total) + 0.005");
+            $stmt->execute([$remaining, (int) $settled, $doc['paid_date'], (int) $settled, $id, $ctx->supplierId, $remaining]);
+        }
+        if ($stmt->rowCount() > 0) {
+            $ctx->protocol->count($step, $settled ? 'settled_in_pohoda' : 'partially_paid_in_pohoda');
+        }
     }
 
     /**
@@ -893,10 +943,55 @@ final class InvoiceImporter
                 'number' => $number,
                 'agenda' => PohodaXml::text($l, 'sourceAgenda'),
                 'source' => PohodaXml::text($l, 'sourceDocument/number'),
+                'source_id' => PohodaXml::text($l, 'sourceDocument/id'),
                 'date' => PohodaXml::date($l, 'date'),
                 'amount' => PohodaXml::num($l, 'amount'),
                 'liq' => PohodaXml::text($l, 'id') ?: substr(md5((string) json_encode($l)), 0, 12),
             ];
+        }
+    }
+
+    /**
+     * Úhrady s datem v roce, který se nepřevádí, v převodu nejsou - doklad podle nich nesmí
+     * být uhrazený. Zbývá uhradit se o ně zvýší a datum úhrady je poslední převedené úhrady.
+     *
+     * @param array<string,mixed> $doc
+     * @return array<string,mixed>
+     */
+    private static function withoutSkippedPayments(PohodaContext $ctx, array $doc, array $r): array
+    {
+        if ($ctx->skippedYears === []) {
+            return $doc;
+        }
+        $skipped = 0.0;
+        $last = null;
+        foreach (PohodaXml::all($r, 'liquidations/liquidation') as $l) {
+            $date = PohodaXml::date($l, 'date');
+            if ($ctx->skipsDate($date)) {
+                $skipped += PohodaXml::num($l, 'amount');
+            } elseif ($date !== null && ($last === null || $date > $last)) {
+                $last = $date;
+            }
+        }
+        if (abs($skipped) < 0.005) {
+            return $doc;
+        }
+        $remaining = is_numeric($doc['remaining']) ? (float) $doc['remaining'] : 0.0;
+        $doc['remaining'] = number_format($remaining + $skipped, 2, '.', '');
+        $doc['paid_date'] = $last;
+        return $doc;
+    }
+
+    /**
+     * Zbývá uhradit podle Pohody - podle ní páruje úhrady pohybů bez zápisu v deníku
+     * {@see UnbookedBankPayments} (u přijaté faktury MyÚčto částečnou úhradu nevede).
+     *
+     * @param array<string,mixed> $doc
+     */
+    private static function rememberRemaining(PohodaContext $ctx, string $docType, int $id, array $doc): void
+    {
+        if (is_numeric($doc['remaining'])) {
+            $ctx->remaining[$docType . '|' . $id] = round((float) $doc['remaining'], 2);
         }
     }
 

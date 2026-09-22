@@ -57,9 +57,21 @@ final class PohodaReconciler
         }
         $year = $ctx->year();
         $periodId = $ctx->period['id'];
-        $pohoda = PohodaJournal::trialBalance($ctx->export);
+        $periodIds = $ctx->periodIds();
+        $pohoda = PohodaJournal::trialBalance($ctx->export, $ctx->skipsDate(...));
+        // Úhrady, které převod zaúčtoval u pohybů bez zápisu v deníku POHODY, v deníku POHODY
+        // nejsou - předvaha MyÚčta je proti ní má navíc a kontrola je přičítá k POHODĚ.
+        $derived = $this->derivedTurnover($ctx->supplierId);
+        foreach ($derived['accounts'] as $syn => $net) {
+            $pohoda[$syn] ??= [0.0, 0.0, 0.0];
+            $pohoda[$syn][1] = round($pohoda[$syn][1] + $net, 2);
+            $pohoda[$syn][2] = round($pohoda[$syn][2] + $net, 2);
+        }
+        ksort($pohoda, SORT_STRING);
 
-        $tb = $this->trialBalance->build($ctx->supplierId, $periodId, null, null, false, false);
+        // Deník agendy sahá i do období po roce agendy (doklady následujícího roku) - předvaha
+        // se proto bere za celý rozsah, který převod zapsal, ne jen za rok agendy.
+        $tb = $this->trialBalance->build($ctx->supplierId, $periodId, null, $ctx->lastPeriodEnd(), false, false);
         $mine = [];
         foreach ($tb['rows'] as $row) {
             $syn = substr((string) $row['account_code'], 0, 3);
@@ -79,10 +91,10 @@ final class PohodaReconciler
             ['key' => 'no_drafts', 'ok' => (int) $tb['draft_count'] === 0],
             ['key' => 'pohoda_journal', 'ok' => $journalDiffs === [], 'accounts' => count($pohoda)],
         ];
-        $documents = $this->documentsAgainstJournal($ctx->supplierId, $periodId);
+        $documents = $this->documentsAgainstJournal($ctx->supplierId, $periodIds);
         foreach ($documents as $i => $d) {
             if (!$d['ok']) {
-                $documents[$i] = $d = $this->explainBySource($ctx, $periodId, $d);
+                $documents[$i] = $d = $this->explainBySource($ctx, $periodIds, $d);
             }
             if (isset($d['source_differences'])) {
                 $p->info(self::STEP, 'source_difference', self::sourceDifferenceText($d), ['check' => $d['key'], 'documents' => array_column($d['source_differences'], 'document_no')]);
@@ -100,9 +112,14 @@ final class PohodaReconciler
         foreach ($checks as $c) {
             $ok = $ok && $c['ok'];
         }
+        if ($derived['entries'] > 0) {
+            $p->info(self::STEP, 'derived_payments', "Předvaha obsahuje navíc {$derived['entries']} zápisů úhrad, které převod zaúčtoval u pohybů bez zápisu v deníku POHODY (a jejich storna); kontrola proti deníku POHODY s nimi počítá.", ['entries' => $derived['entries']]);
+        }
         $p->set('reconciliation', [[
             'year' => $year,
             'period_id' => $periodId,
+            'period_ids' => $periodIds,
+            'derived_payments' => $derived,
             'ok' => $ok,
             'checks' => $checks,
             'totals' => $tb['totals'],
@@ -123,9 +140,38 @@ final class PohodaReconciler
      *
      * @return list<array{key:string,documents:float,journal:float,ok:bool,other_accounts:int}>
      */
-    private function documentsAgainstJournal(int $supplierId, int $periodId): array
+    /**
+     * Čistý obrat (MD − D) zápisů úhrad, které převod odvodil u pohybů bez zápisu v deníku
+     * POHODY ({@see UnbookedBankPayments}), po syntetických účtech - včetně storen.
+     *
+     * @return array{entries:int,accounts:array<string,float>}
+     */
+    private function derivedTurnover(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT LEFT(a.account_code, 3) AS syn, COUNT(DISTINCT l.entry_id) AS entries,
+                    SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS net
+               FROM pohoda_import_map m
+               JOIN journal_entry_lines l ON l.supplier_id = m.supplier_id AND l.entry_id = m.target_id
+               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+              WHERE m.supplier_id = ? AND m.kind = ?
+              GROUP BY LEFT(a.account_code, 3)"
+        );
+        $stmt->execute([$supplierId, \MyInvoice\Repository\PohodaImportRepository::KIND_DERIVED_ENTRY]);
+        $accounts = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+            $accounts[(string) $r['syn']] = round((float) $r['net'], 2);
+        }
+        $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM pohoda_import_map WHERE supplier_id = ? AND kind = ?');
+        $count->execute([$supplierId, \MyInvoice\Repository\PohodaImportRepository::KIND_DERIVED_ENTRY]);
+        return ['entries' => (int) $count->fetchColumn(), 'accounts' => $accounts];
+    }
+
+    /** @param list<int> $periodIds */
+    private function documentsAgainstJournal(int $supplierId, array $periodIds): array
     {
         $pdo = $this->db->pdo();
+        $in = implode(',', array_map('intval', $periodIds)) ?: '0';
         $scalar = static function (string $sql, array $params) use ($pdo): float {
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
@@ -140,7 +186,7 @@ final class PohodaReconciler
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
                JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND e.period_id = ? AND a.account_code LIKE '{$prefix}%' AND e.source_type <> 'opening'
+              WHERE l.supplier_id = ? AND e.period_id IN ({$in}) AND a.account_code LIKE '{$prefix}%' AND e.source_type <> 'opening'
                 AND " . $oneSided('e.id', $prefix) . "
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k
                              JOIN pohoda_import_map m ON m.supplier_id = k.supplier_id AND m.target_id = k.doc_id AND m.kind = '{$kind}'
@@ -152,7 +198,7 @@ final class PohodaReconciler
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k
                              JOIN journal_entries e ON e.id = k.entry_id AND e.supplier_id = k.supplier_id
                              JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
-                            WHERE k.supplier_id = d.supplier_id AND k.doc_id = d.id AND e.period_id = ? AND k.doc_type = '{$docType}'
+                            WHERE k.supplier_id = d.supplier_id AND k.doc_id = d.id AND e.period_id IN ({$in}) AND k.doc_type = '{$docType}'
                               AND e.source_type <> 'opening'
                               AND " . ($onAccount ? '' : 'NOT ') . $oneSided('k.entry_id', $prefix) . ")
                 AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = '{$kind}' AND m.target_id = d.id)";
@@ -164,31 +210,31 @@ final class PohodaReconciler
         ];
         $out = [];
         foreach ($spec as [$key, $table, $expr, $kind, $docType, $prefix, $sign]) {
-            $documents = $scalar($docs($table, $expr, $kind, $docType, $prefix, true), [$supplierId, $periodId]);
-            $journal = $scalar($ledger($kind, $docType, $prefix, $sign), [$supplierId, $periodId]);
+            $documents = $scalar($docs($table, $expr, $kind, $docType, $prefix, true), [$supplierId]);
+            $journal = $scalar($ledger($kind, $docType, $prefix, $sign), [$supplierId]);
             $out[] = [
                 'key' => $key, 'documents' => $documents, 'journal' => $journal, 'ok' => abs($documents - $journal) < 0.005,
-                'other_accounts' => (int) $scalar($docs($table, $expr, $kind, $docType, $prefix, false), [$supplierId, $periodId]),
+                'other_accounts' => (int) $scalar($docs($table, $expr, $kind, $docType, $prefix, false), [$supplierId]),
             ];
         }
         $bankDocs = $scalar(
             "SELECT COALESCE(SUM(t.amount), 0) FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
               WHERE s.supplier_id = ?
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k JOIN journal_entries e ON e.id = k.entry_id AND e.supplier_id = k.supplier_id
-                             WHERE k.supplier_id = s.supplier_id AND k.doc_type = 'bank' AND k.doc_id = t.id AND e.period_id = ?)
+                             WHERE k.supplier_id = s.supplier_id AND k.doc_type = 'bank' AND k.doc_id = t.id AND e.period_id IN ({$in}))
                 AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = s.supplier_id AND m.kind = 'bank_transaction' AND m.target_id = t.id)",
-            [$supplierId, $periodId]
+            [$supplierId]
         );
         $bankJournal = $scalar(
             "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
                JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND e.period_id = ? AND a.account_code LIKE '221%'
+              WHERE l.supplier_id = ? AND e.period_id IN ({$in}) AND a.account_code LIKE '221%'
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k
                              JOIN pohoda_import_map m ON m.supplier_id = k.supplier_id AND m.target_id = k.doc_id AND m.kind = 'bank_transaction'
                             WHERE k.supplier_id = l.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank')",
-            [$supplierId, $periodId]
+            [$supplierId]
         );
         $out[] = ['key' => 'bank', 'documents' => $bankDocs, 'journal' => $bankJournal, 'ok' => abs($bankDocs - $bankJournal) < 0.005, 'other_accounts' => 0];
         return $out;
@@ -207,13 +253,13 @@ final class PohodaReconciler
      * @param array{key:string,documents:float,journal:float,ok:bool,other_accounts:int} $row
      * @return array<string,mixed>
      */
-    private function explainBySource(PohodaContext $ctx, int $periodId, array $row): array
+    private function explainBySource(PohodaContext $ctx, array $periodIds, array $row): array
     {
         $spec = self::SOURCES[$row['key']] ?? null;
         if ($spec === null) {
             return $row;
         }
-        $mine = $this->entryDifferences($ctx->supplierId, $periodId, $spec['table']);
+        $mine = $this->entryDifferences($ctx->supplierId, $periodIds, $spec['table']);
         if ($mine === []) {
             return $row;
         }
@@ -270,7 +316,7 @@ final class PohodaReconciler
      * @param array{0:string,1:string,2:string,3:string,4:bool} $table
      * @return array<string,float>
      */
-    private function entryDifferences(int $supplierId, int $periodId, array $table): array
+    private function entryDifferences(int $supplierId, array $periodIds, array $table): array
     {
         [$docTable, $kind, $docType, $prefix, $creditPositive] = $table;
         $sign = $creditPositive ? "CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END" : "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END";
@@ -285,12 +331,12 @@ final class PohodaReconciler
                        FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
                       WHERE l.supplier_id = e.supplier_id AND l.entry_id = e.id AND a.account_code LIKE '{$prefix}%') AS journal
                FROM journal_entries e
-              WHERE e.supplier_id = ? AND e.period_id = ? AND e.source_type <> 'opening' AND EXISTS (SELECT 1 {$linked})
+              WHERE e.supplier_id = ? AND e.period_id IN (" . (implode(',', array_map('intval', $periodIds)) ?: '0') . ") AND e.source_type <> 'opening' AND EXISTS (SELECT 1 {$linked})
                 AND (SELECT COUNT(DISTINCT l2.side) FROM journal_entry_lines l2
                        JOIN chart_of_accounts a2 ON a2.id = l2.account_id AND a2.supplier_id = l2.supplier_id
                       WHERE l2.supplier_id = e.supplier_id AND l2.entry_id = e.id AND a2.account_code LIKE '{$prefix}%') = 1"
         );
-        $stmt->execute([$supplierId, $periodId]);
+        $stmt->execute([$supplierId]);
         $out = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
             $docNo = trim((string) $r['document_no']);

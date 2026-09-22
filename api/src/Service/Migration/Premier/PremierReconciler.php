@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Premier;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
+use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use MyInvoice\Service\Migration\MoneyS3\MoneyS3Reconciler;
 
 /**
@@ -17,7 +18,9 @@ use MyInvoice\Service\Migration\MoneyS3\MoneyS3Reconciler;
  *   2. vnitřní kontroly předvahy (obraty MD = D, předvaha = deník, vyrovnané PS);
  *   3. doklady proti deníku: přijaté faktury × 321, vydané × 311, pokladna × 211,
  *      banka × 221 - jen převedené doklady a zápisy, na které jsou navázané;
- *   4. vyrovnaná rozvaha bez účtů, které mapa výkazů nezná.
+ *   4. vyrovnaná rozvaha bez účtů, které mapa výkazů nezná;
+ *   5. každý bankovní pohyb převodu má vlastní zápis deníku (zdroj `bank`) - jinak by ho
+ *      Doúčtování zaúčtovalo podruhé.
  */
 final class PremierReconciler
 {
@@ -74,6 +77,12 @@ final class PremierReconciler
         foreach ($documents as $d) {
             $checks[] = ['key' => 'documents_' . $d['key'], 'ok' => $d['ok']];
         }
+        $bank = $this->bankPosting($ctx->supplierId, $ctx->period['starts_on'], $ctx->period['ends_on']);
+        $checks[] = ['key' => 'bank_transactions_posted', 'ok' => $bank['unposted'] === 0, 'transactions' => $bank['transactions'], 'unposted' => $bank['unposted']];
+        if ($bank['unposted'] > 0) {
+            $p->error(self::STEP, 'bank_transactions_unposted', sprintf('Rok %d: %d z %d bankovních pohybů převodu nemá vlastní zápis v deníku.', $ctx->year, $bank['unposted'], $bank['transactions']),
+                ['year' => $ctx->year, 'transactions' => $bank['transactions'], 'unposted' => $bank['unposted'], 'ids' => $bank['ids']]);
+        }
         $balanceSheet = $this->statements->balanceSheet($ctx->supplierId, $periodId, null, 'full');
         $unmapped = array_map(
             static fn (array $u): array => ['account' => (string) $u['account_code'], 'name' => (string) $u['name'], 'balance' => round((float) $u['balance'], 2)],
@@ -102,6 +111,31 @@ final class PremierReconciler
     }
 
     /**
+     * Bankovní pohyby převodu v období a kolik z nich nemá vlastní zápis deníku.
+     *
+     * @return array{transactions:int,unposted:int,ids:list<int>}
+     */
+    private function bankPosting(int $supplierId, string $from, string $to): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT t.id, " . BankTransactionPostingScope::existsSql('s.supplier_id', 't.id') . " AS posted
+               FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+              WHERE s.supplier_id = ? AND t.posted_at BETWEEN ? AND ?
+                AND EXISTS (SELECT 1 FROM premier_import_map m WHERE m.supplier_id = s.supplier_id AND m.kind = 'bank_transaction' AND m.target_id = t.id)"
+        );
+        $stmt->execute([$supplierId, $from, $to]);
+        $total = 0;
+        $ids = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_NUM) as [$id, $posted]) {
+            $total++;
+            if (!(bool) $posted) {
+                $ids[] = (int) $id;
+            }
+        }
+        return ['transactions' => $total, 'unposted' => count($ids), 'ids' => array_slice($ids, 0, 50)];
+    }
+
+    /**
      * Doklady proti zápisům, na které jsou navázané (stejně jako u převodu z POHODY).
      * Porovnávají se jen zápisy, které mají účet dokladu na JEDNÉ straně (vznik závazku
      * nebo pohledávky); doklad účtovaný jinak se počítá zvlášť (`other_accounts`).
@@ -111,6 +145,7 @@ final class PremierReconciler
     private function documentsAgainstJournal(int $supplierId, int $periodId): array
     {
         $pdo = $this->db->pdo();
+        $notPayment = 'AND (k.note IS NULL OR k.note <> ' . $pdo->quote(DocumentLinker::PAYMENT_NOTE) . ')';
         $scalar = static function (string $sql, array $params) use ($pdo): float {
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
@@ -131,14 +166,14 @@ final class PremierReconciler
                 AND " . $oneSided('e.id', $prefix) . "
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k
                              JOIN premier_import_map m ON m.supplier_id = k.supplier_id AND m.target_id = k.doc_id AND m.kind IN ({$kinds})
-                            WHERE k.supplier_id = l.supplier_id AND k.entry_id = e.id AND k.doc_type = '{$docType}')";
+                            WHERE k.supplier_id = l.supplier_id AND k.entry_id = e.id AND k.doc_type = '{$docType}' {$notPayment})";
         $docs = static fn (string $table, string $expr, string $kinds, string $docType, string $prefix, bool $onAccount): string =>
             'SELECT ' . ($onAccount ? "COALESCE(SUM({$expr}), 0)" : 'COUNT(*)') . "
                FROM {$table} d
               WHERE d.supplier_id = ?
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k
                              JOIN journal_entries e ON e.id = k.entry_id AND e.supplier_id = k.supplier_id
-                            WHERE k.supplier_id = d.supplier_id AND k.doc_id = d.id AND e.period_id = ? AND k.doc_type = '{$docType}'
+                            WHERE k.supplier_id = d.supplier_id AND k.doc_id = d.id AND e.period_id = ? AND k.doc_type = '{$docType}' {$notPayment}
                               AND e.source_type <> 'opening'
                               AND " . ($onAccount ? '' : 'NOT ') . str_replace('l.supplier_id', 'k.supplier_id', $oneSided('k.entry_id', $prefix)) . ')
                 AND ' . $mapped('d', $kinds);

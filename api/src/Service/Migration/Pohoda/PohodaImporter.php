@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\Pohoda;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TableStatistics;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\AccountingUnitSwitch;
@@ -43,6 +44,8 @@ final class PohodaImporter
         private readonly PohodaReconciler $reconciler,
         private readonly AssetImporter $assets,
         private readonly SmallAssetImporter $smallAssets,
+        private readonly TableStatistics $statistics,
+        private readonly UnbookedBankPayments $unbooked,
     ) {}
 
     /** @return list<string> */
@@ -69,10 +72,12 @@ final class PohodaImporter
 
     /**
      * Kontrola před převodem - nic nezapisuje. Chyba převod zastaví, upozornění ne.
+     * `$skipYears` = roky po roce agendy, které se nepřevádějí ({@see PohodaContext::$skippedYears}).
      *
+     * @param list<int> $skipYears
      * @return list<array{level:string,code:string,message:string,context:array<string,mixed>}>
      */
-    public function preflight(int $supplierId, PohodaExport $export): array
+    public function preflight(int $supplierId, PohodaExport $export, array $skipYears = []): array
     {
         $out = [];
         $add = static function (string $level, string $code, string $message, array $context = []) use (&$out): void {
@@ -101,17 +106,37 @@ final class PohodaImporter
                     "Soubor {$f['file']}: Pohoda vrátila stav „{$f['state']}“" . ($f['note'] !== '' ? " ({$f['note']})" : '') . '.', ['file' => $f['file']]);
             }
         }
-        $period = $this->periods->findByYear($supplierId, $export->year);
-        if ($period !== null) {
-            $mapped = $this->map->get($supplierId, PohodaImportRepository::KIND_PERIOD, (string) $export->year) !== null
-                || $this->map->all($supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY) !== [];
+        // Agenda POHODY vede i doklady po konci roku - jejich zápisy jdou do období podle
+        // skutečného data, takže do rozjetého účetnictví se nesmí přimíchat ani tam.
+        $allLaterYears = ChartJournalImporter::laterYears($export);
+        $laterYears = array_values(array_diff($allLaterYears, $skipYears));
+        $skipped = array_values(array_intersect($allLaterYears, $skipYears));
+        $journalMapped = $this->map->all($supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY) !== [];
+        foreach (array_merge([$export->year], $laterYears) as $year) {
+            $period = $this->periods->findByYear($supplierId, $year);
+            if ($period === null) {
+                continue;
+            }
+            $mapped = $this->map->get($supplierId, PohodaImportRepository::KIND_PERIOD, (string) $year) !== null || $journalMapped;
             $foreign = $this->journal->foreignEntryCount($supplierId, (int) $period['id']);
             if ($foreign > 0) {
-                $add('error', 'journal_not_empty', "Účetní období {$export->year} už obsahuje {$foreign} zápisů, které nevznikly převodem z Pohody. Deník z Pohody se do rozjetého účetnictví nepřimíchává.", ['entries' => $foreign]);
+                $add('error', 'journal_not_empty', "Účetní období {$year} už obsahuje {$foreign} zápisů, které nevznikly převodem z Pohody. Deník z Pohody se do rozjetého účetnictví nepřimíchává.", ['entries' => $foreign, 'year' => $year]);
             }
             if ((string) $period['status'] !== 'open' && !$mapped) {
-                $add('error', 'period_not_open', "Účetní období {$export->year} je v MyÚčtu uzavřené.");
+                $add('error', 'period_not_open', "Účetní období {$year} je v MyÚčtu uzavřené.", ['year' => $year]);
             }
+        }
+        if ($laterYears !== []) {
+            $add('info', 'later_periods', sprintf(
+                'Agenda %d obsahuje doklady s datem v roce %s. Jejich zápisy se převedou do účetního období podle skutečného data (chybějící období se založí otevřené); rok %d zůstane neuzavřený, uzávěrku a převod zůstatků provede účetní.',
+                $export->year, implode(', ', $laterYears), $export->year,
+            ), ['years' => $laterYears]);
+        }
+        if ($skipped !== []) {
+            $add('info', 'later_years_skipped', sprintf(
+                'Rok %s se nepřevádí: zápisy deníku, pohyby v bance a pokladně, doklady a úhrady s datem v něm převod přeskočí. Opakovaný převod s vybraným rokem je doplní, nic nezdvojí.',
+                implode(', ', $skipped),
+            ), ['years' => $skipped]);
         }
         if (($supplier['accounting_mode'] ?? '') !== 'double_entry') {
             $add('info', 'switch_to_double_entry', 'Firma se převodem přepne do podvojného účetnictví.');
@@ -125,9 +150,13 @@ final class PohodaImporter
     /**
      * @param (callable(string,int,int):void)|null $progress
      * @param (callable():bool)|null $shouldCancel
+     * @param list<int> $skipYears roky po roce agendy, které se nepřevádějí
      */
-    public function run(int $supplierId, int $userId, PohodaExport $export, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null): ImportProtocol
+    public function run(int $supplierId, int $userId, PohodaExport $export, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, array $skipYears = []): ImportProtocol
     {
+        if ($skipYears !== []) {
+            $skipYears = array_values(array_intersect(ChartJournalImporter::laterYears($export), $skipYears));
+        }
         $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import');
         $protocol->set('agenda', [
             'ico' => $export->ico,
@@ -135,8 +164,9 @@ final class PohodaImporter
             'program' => $export->info['program'],
             'exported_at' => $export->info['timestamp'],
             'dir' => basename($export->dir),
+            'skipped_years' => $skipYears,
         ]);
-        $preflight = $this->preflight($supplierId, $export);
+        $preflight = $this->preflight($supplierId, $export, $skipYears);
         $protocol->set('preflight', $preflight);
         $protocol->begin(self::STEP_PREFLIGHT);
         foreach ($preflight as $m) {
@@ -153,6 +183,7 @@ final class PohodaImporter
         $ctx = new PohodaContext($supplierId, $userId, $export, PohodaVat::fromExport($export), $dryRun, $protocol);
         $ctx->runId = $runId;
         $ctx->progress = $progress;
+        $ctx->skippedYears = array_fill_keys($skipYears, true);
 
         $pdo = $this->db->pdo();
         // Zkouška nanečisto uvnitř cizí transakce (testy, vnořené volání) jede přes savepoint -
@@ -183,6 +214,9 @@ final class PohodaImporter
                 }
                 $ctx->report($key, $index++, $total);
                 $protocol->begin($key);
+                if (!$dryRun && $key === PohodaReconciler::STEP) {
+                    $this->statistics->refreshAfterImport(['pohoda_import_map']);
+                }
                 try {
                     $dryRun ? $fn() : $this->transactional($fn);
                     $protocol->finish($key);
@@ -237,8 +271,14 @@ final class PohodaImporter
             InvoiceImporter::STEP_INTERNAL => fn () => $this->invoices->importInternalTaxDocuments($ctx),
             CashBankImporter::STEP_CASH => fn () => $this->cashBank->importCash($ctx),
             CashBankImporter::STEP_BANK => fn () => $this->cashBank->importBank($ctx),
-            DocumentLinker::STEP_LINK => fn () => $this->linker->link($ctx),
-            DocumentLinker::STEP_PAYMENTS => fn () => $this->linker->matchPayments($ctx),
+            DocumentLinker::STEP_LINK => function () use ($ctx): void {
+                $this->unbooked->supersede($ctx);
+                $this->linker->link($ctx);
+            },
+            DocumentLinker::STEP_PAYMENTS => function () use ($ctx): void {
+                $this->linker->matchPayments($ctx);
+                $this->unbooked->settle($ctx);
+            },
             AssetImporter::STEP => fn () => $this->assets->import($ctx),
             SmallAssetImporter::STEP => fn () => $this->smallAssets->import($ctx),
             PohodaReconciler::STEP => fn () => $this->reconciler->run($ctx),
@@ -250,7 +290,7 @@ final class PohodaImporter
         if ($ctx->period === null) {
             return;
         }
-        $this->unit->switchToDoubleEntry($ctx->supplierId, $ctx->period['starts_on'], !$ctx->dryRun, $ctx->period['ends_on']);
+        $this->unit->switchToDoubleEntry($ctx->supplierId, $ctx->period['starts_on'], !$ctx->dryRun, $ctx->lastPeriodEnd() ?? $ctx->period['ends_on']);
         $ctx->protocol->info(self::STEP_ACCOUNTING_MODE, 'double_entry', 'Podvojné účetnictví od ' . $ctx->period['starts_on'] . '.');
     }
 

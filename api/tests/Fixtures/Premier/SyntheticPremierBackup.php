@@ -133,6 +133,12 @@ final class SyntheticPremierBackup
      *   `payroll`               zaměstnanci a mzdy (`PERSONAL`, `PER_MAIN`, `PERSON2`, `MZDY`, `MZDY_POL`…)
      *                           se zaúčtováním v deníku, viz {@see payroll()}
      *   `payroll_mismatch`      s `payroll`: jeden měsíc deníku nesedí na mzdy
+     *   `bank_split`            výpis BV 8 z 15. 10. 2025 se čtyřmi pohyby a dvěma řádky bez pohybu: výběr hotovosti,
+     *                           úhrada VF 250005 (1 209,60, VS jen ve `VAR_DAL`, údaje homebankingu
+     *                           `H*`/`PARTRAN`) s haléřovým vyrovnáním 548/311 0,40 (vazba na tutéž
+     *                           fakturu), úhrada VF 250006, poplatek a kurzový zisk 311/663 bez vazby;
+     *                           VF 250007 uhrazená zápočtem 321/311 (ID 5); EUR účet (řada BE, 221002)
+     *                           s vkladem 1 000 EUR a kurzovým přeceněním s částkou v měně 0
      *
      * @param array<string,bool> $flags
      * @return array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}>
@@ -182,7 +188,8 @@ final class SyntheticPremierBackup
                     ['CASTKA', 'N', 15, 2], ['MD', 'C', 6], ['DAL', 'C', 6], ['KOD_DPH', 'C', 3], ['SAZBA_DPH', 'N', 5, 2], ['CASTKA_DPH', 'N', 15, 2],
                     ['IKOD', 'C', 1], ['SB_KOD', 'C', 5], ['SBORNIK', 'N', 10], ['MENA', 'C', 3], ['ZCASTKA', 'N', 15, 2], ['KURS', 'N', 10, 4], ['M_KURS', 'N', 5],
                     ['VARIABL', 'C', 12], ['CISLO_ODB', 'C', 10], ['NAZEV_ODB', 'C', 50], ['ICO_ODB', 'C', 12], ['DIC_ODB', 'C', 14], ['STAT_ODB', 'C', 30],
-                    ['ID_PAR', 'C', 10], ['STKOD', 'N', 5]],
+                    ['ID_PAR', 'C', 10], ['STKOD', 'N', 5], ['VAR_DAL', 'C', 12], ['HUCET', 'C', 40], ['HKS', 'C', 4], ['HSPEC', 'C', 10],
+                    ['HVAR', 'C', 10], ['HZPR_PRIJ', 'C', 140], ['PARTRAN', 'C', 20]],
                 self::journal($oss),
             ],
             'PARTNERY' => [
@@ -363,6 +370,9 @@ final class SyntheticPremierBackup
                 ['342', '200', 'Srážková daň'], ['342', '100', 'Záloha na daň ze závislé činnosti'], ['521', '100', 'Mzdové náklady'], ['524', '100', 'Zákonné pojištění']);
             self::payroll($tables, !empty($flags['payroll_mismatch']));
         }
+        if (!empty($flags['bank_split'])) {
+            self::bankSplit($tables, $chart);
+        }
         if (!empty($flags['periody']) || !empty($flags['periody_11'])) {
             $rows = [];
             foreach (range(1, !empty($flags['periody']) ? 12 : 11) as $month) {
@@ -502,6 +512,61 @@ final class SyntheticPremierBackup
                 ['KAL_DNY', 'N', 2], ['KAL_DNYPP', 'N', 5, 1], ['DNY_ODPR', 'N', 5, 2], ['UVA_DOBA', 'N', 7, 4], ['VYL_DND', 'N', 6, 2], ['ZKR_POJ', 'C', 3], ['ID', 'C', 36]],
             $rows,
         ];
+    }
+
+    /**
+     * Výpis s více pohyby v jednom dni, řádky bez pohybu a EUR účet (`bank_split`).
+     *
+     * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
+     * @param list<array{0:string,1:string,2:string}> $chart MĚNÍ SE
+     */
+    private static function bankSplit(array &$tables, array &$chart): void
+    {
+        array_push($chart, ['221', '002', 'Běžný účet EUR'], ['548', '000', 'Ostatní provozní náklady'], ['663', '000', 'Kurzové zisky']);
+        $customer = ['CISLO_ODB' => '1', 'NAZEV_ODB' => 'Odběratel Fiktivní s.r.o.', 'ICO_ODB' => self::CUSTOMER_ICO, 'DIC_ODB' => 'CZ' . self::CUSTOMER_ICO, 'ID_PAR' => 'P1'];
+        $date = '2025-10-15';
+        array_push($tables['PUB_UCTO'][1],
+            self::row(55, '2025-10-01', 'VF', '250005', 'Správa serveru', 1000, '311000', '602100', self::vat(self::CODE_SALE, 'P', 'VF', 6) + $customer),
+            self::row(56, '2025-10-01', 'VF', '250005', 'DPH', 210, '311000', '343021', self::vat(self::CODE_SALE, 'D', 'VF', 6) + $customer),
+            self::row(57, '2025-10-01', 'VF', '250006', 'Školení', 2000, '311000', '602100', self::vat(self::CODE_SALE, 'P', 'VF', 7) + $customer),
+            self::row(58, '2025-10-01', 'VF', '250006', 'DPH', 420, '311000', '343021', self::vat(self::CODE_SALE, 'D', 'VF', 7) + $customer),
+            self::row(90, '2025-10-01', 'VF', '250007', 'Konzultace', 500, '311000', '602100', self::vat(self::CODE_SALE, 'P', 'VF', 8) + $customer),
+            self::row(91, '2025-10-01', 'VF', '250007', 'DPH', 105, '311000', '343021', self::vat(self::CODE_SALE, 'D', 'VF', 8) + $customer),
+            // Výpis BV 8: tři pohyby a dva řádky bez pohybu v jednom dni. Řádek haléřového
+            // vyrovnání je v deníku před úhradou, kterou dorovnává.
+            self::row(47, $date, 'BV', '8', 'Výběr hotovosti', 1000, '211001', '221001'),
+            self::row(49, $date, 'BV', '8', 'Haléřové vyrovnání', 0.40, '548000', '311000', $customer),
+            self::row(50, $date, 'BV', '8', 'Úhrada VF 250005', 1209.60, '221001', '311000', [
+                'VAR_DAL' => '250005', 'HUCET' => '000000-1000000005/0100', 'HKS' => '0308', 'HSPEC' => '0000000000', 'HVAR' => '999',
+                'HZPR_PRIJ' => 'Platba faktury 250005', 'PARTRAN' => 'SYN-TX-0001',
+            ] + $customer),
+            self::row(52, $date, 'BV', '8', 'Úhrada VF 250006', 2420, '221001', '311000', ['VARIABL' => '250006', 'VAR_DAL' => '111', 'HUCET' => '000000-0000000000/0000'] + $customer),
+            self::row(53, $date, 'BV', '8', 'Poplatek za platbu', 25, '568000', '221001', ['HVAR' => '777', 'HSPEC' => '42']),
+            self::row(54, $date, 'BV', '8', 'Kurzový rozdíl', 5, '311000', '663000'),
+            // Úhrada VF 250007 zápočtem proti závazku - bez pohybu peněz.
+            self::row(59, '2025-11-01', 'ID', '5', 'Zápočet VF 250007', 605, '321000', '311000', $customer),
+            // EUR účet: vklad 1 000 EUR a kurzové přecenění (částka v měně 0) na konci roku.
+            self::row(80, '2025-09-01', 'BE', '1', 'Vklad EUR', 25000, '221002', '411000', ['MENA' => 'EUR', 'ZCASTKA' => 1000, 'KURS' => 25, 'M_KURS' => 1]),
+            self::row(81, '2025-12-31', 'BE', '2', 'Kurzové přecenění', 500, '221002', '663000', ['MENA' => 'EUR', 'ZCASTKA' => 0, 'KURS' => 25.5, 'M_KURS' => 1]),
+        );
+        array_push($tables['VAZBY'][1],
+            ['KOD_ZDR' => 'UD', 'INT_ZDR' => 50, 'KOD_TER' => 'VF', 'INT_TER' => 6],
+            ['KOD_ZDR' => 'UD', 'INT_ZDR' => 49, 'KOD_TER' => 'VF', 'INT_TER' => 6],
+            ['KOD_ZDR' => 'UD', 'INT_ZDR' => 52, 'KOD_TER' => 'VF', 'INT_TER' => 7],
+            ['KOD_ZDR' => 'UD', 'INT_ZDR' => 59, 'KOD_TER' => 'VF', 'INT_TER' => 8],
+        );
+        $header = ['FORMA' => 'převodem', 'ULICE_ODB' => 'Zkušební 10', 'MESTO_ODB' => 'Praha', 'PSC_ODB' => '110 00', 'STAT_ODB' => 'Česká republika'] + $customer;
+        array_push($tables['FA_OUT'][1],
+            self::header(6, 'VF', '250005', '2025-10-01', 'Správa serveru', ['VS' => '250005'] + $header),
+            self::header(7, 'VF', '250006', '2025-10-01', 'Školení', ['VS' => '250006'] + $header),
+            self::header(8, 'VF', '250007', '2025-10-01', 'Konzultace', ['VS' => '250007'] + $header),
+        );
+        array_push($tables['POLOZKY'][1],
+            self::item(6, 1, 'Správa serveru', 1, 'měs', 1000, 210, 21, self::CODE_SALE),
+            self::item(7, 1, 'Školení', 1, 'ks', 2000, 420, 21, self::CODE_SALE),
+            self::item(8, 1, 'Konzultace', 1, 'hod', 500, 105, 21, self::CODE_SALE),
+        );
+        $tables['DOKL_PU'][1][] = ['DOKLAD' => 'BE', 'TOK' => 2, 'MD' => '221', 'MDA' => '002', 'MENA' => 'EUR', 'TEXT' => 'Bankovní výpisy EUR', 'NAZEV_B' => 'Fiktivní banka EUR'];
     }
 
     /** @return list<array{0:string,1:string,2?:int,3?:int}> */

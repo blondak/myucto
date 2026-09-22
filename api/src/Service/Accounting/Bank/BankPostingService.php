@@ -958,7 +958,7 @@ final class BankPostingService
         if ($entry === null || ($entry['reversed_by'] ?? null) !== null) {
             throw new PostingException('document_not_posted', 'Vydaná faktura #' . $invoiceId . ' nemá zaúčtovaný předpis.');
         }
-        return $receivable;
+        return $this->predpisSaldoCode($supplierId, (int) $entry['id'], $receivable);
     }
 
     /**
@@ -1006,7 +1006,33 @@ final class BankPostingService
         if ($entry === null || ($entry['reversed_by'] ?? null) !== null) {
             throw new PostingException('document_not_posted', 'Přijatá faktura #' . $pfId . ' nemá zaúčtovaný předpis.');
         }
-        return $payable;
+        return $this->predpisSaldoCode($supplierId, (int) $entry['id'], $payable);
+    }
+
+    /**
+     * Saldokontní účet, na kterém je předpis dokladu. Pravidlo úhrady dává syntetiku (321,
+     * 311); vede-li firma saldokonto na analytice (převzaté účetnictví: předpis na 321.001),
+     * musí úhrada odúčtovat tutéž analytiku - jinak předpis na analytice zůstane otevřený
+     * a úhrada visí na syntetice. Jen když předpis má pod syntetikou právě jednu analytiku;
+     * předpis na syntetice (běžná firma) nebo víc analytik = kód z pravidla beze změny.
+     *
+     * Cizoměnové větve a vratky dobropisů zůstávají u kódu z pravidla - převzaté účetnictví
+     * je vede v Kč a kurzové rozdíly se na analytiky nerozpadají.
+     */
+    private function predpisSaldoCode(int $supplierId, int $entryId, string $code): string
+    {
+        if (preg_match('/^\d{3}$/', $code) !== 1) {
+            return $code;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT DISTINCT a.account_code
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND l.entry_id = ? AND a.account_code LIKE CONCAT(?, '.%')"
+        );
+        $stmt->execute([$supplierId, $entryId, $code]);
+        $codes = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        return count($codes) === 1 ? (string) $codes[0] : $code;
     }
 
     private function incomingPurchaseRefundCounter(int $supplierId, int $pfId): string

@@ -27,7 +27,9 @@ final class AnthropicClient implements LlmGatewayInterface
 {
     private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
-    private const TIMEOUT = 120; // PDF extraction trvá 10-30s typicky
+    private const TIMEOUT = 300; // PDF extraction trvá 10-30s typicky, doklad s desítkami položek i přes 2 minuty
+    // Stejný strop jako OpenAI/Gemini/Azure. S 4096 se faktura s ~40+ položkami usekla uprostřed JSON.
+    private const INVOICE_MAX_TOKENS = 16384;
     private const MAX_PDF_BYTES = 32 * 1024 * 1024; // 32 MiB hard limit (Anthropic limit)
     private const MAX_RETRIES = 3;
     private const MAX_RETRY_SLEEP = 65; // seconds — pokrývá 1-minute token bucket reset
@@ -45,8 +47,9 @@ final class AnthropicClient implements LlmGatewayInterface
         private readonly Connection $db,
         private readonly SecretEncryption $crypto,
         private readonly LoggerInterface $logger,
+        ?Client $http = null,
     ) {
-        $this->http = new Client([
+        $this->http = $http ?? new Client([
             'timeout' => self::TIMEOUT,
             'http_errors' => false,
         ]);
@@ -491,8 +494,10 @@ DŮLEŽITÉ k poli `advance_reference`:
 - Pokud doklad odkazuje na zaplacenou zálohu / proformu (typicky "Odečet zálohy",
   "Zaplaceno zálohou č. ...", "Uhrazeno zálohovou fakturou ...", "k zálohové
   faktuře č. ...", "Hradí se ze zálohy ...", "paid by advance ...", "proforma
-  no. ...") → vrať identifikátor té zálohy/proformy jak je uveden na dokladu
-  (číslo faktury / variabilní symbol), např. `"2026/0042"` nebo `"PF2026001"`.
+  no. ...", "uhrazeno na základě výzvy k úhradě #...", "výzva k platbě č. ...")
+  → vrať identifikátor té zálohy/proformy jak je uveden na dokladu (číslo faktury /
+  variabilní symbol, bez znaku #), např. `"2026/0042"` nebo `"PF2026001"`.
+  Výzva k úhradě / k platbě je proforma.
 - U daňového dokladu k přijaté platbě (`document_kind="tax_document"`) sem VŽDY dej
   číslo zálohové faktury / proformy, ke které se doklad váže (číslo té zálohy / VS).
 - Pokud žádný odkaz na zálohu není → vrať `null`. Nevymýšlej hodnoty.
@@ -608,7 +613,7 @@ EOT . "\n\n" . InvoiceExtractionPrompt::scanFieldRules();
         try {
             ['code' => $code, 'body' => $body] = $this->postWithRetry([
                 'model' => $model,
-                'max_tokens' => 4096,
+                'max_tokens' => self::INVOICE_MAX_TOKENS,
                 'system' => $systemPrompt,
                 'messages' => [[
                     'role' => 'user',
@@ -642,6 +647,10 @@ EOT . "\n\n" . InvoiceExtractionPrompt::scanFieldRules();
             $text = preg_replace('/^```(?:json)?\s*|\s*```\s*$/m', '', $text);
             $data = json_decode((string) $text, true);
             if (!is_array($data)) {
+                if (($body['stop_reason'] ?? null) === 'max_tokens') {
+                    return ['ok' => false, 'error' => 'Claude nestihl vrátit celý doklad (limit ' . self::INVOICE_MAX_TOKENS
+                        . ' výstupních tokenů), doklad má nejspíš příliš mnoho položek.'];
+                }
                 return ['ok' => false, 'error' => 'Claude vrátil invalid JSON: ' . substr($text, 0, 200)];
             }
 
