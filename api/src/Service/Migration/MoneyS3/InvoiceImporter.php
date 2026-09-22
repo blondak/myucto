@@ -6,8 +6,14 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MoneyS3ImportRepository;
+use MyInvoice\Service\Migration\OssMigrationPolicy;
+use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
+use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
+use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
+use MyInvoice\Service\Migration\Shared\MigratedPurchaseDocument;
+use MyInvoice\Service\Migration\Shared\MigrationHomeCurrency;
+use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
 use MyInvoice\Service\Stats\StatsRecomputer;
-use PDO;
 
 /**
  * Přijaté (`PFaktury`) a vydané (`VFaktury`) faktury.
@@ -40,39 +46,25 @@ final class InvoiceImporter
     /** Druhy zálohové faktury v Money (`L`, starší `Z`, u vydaných `F`) — nejsou daňovým dokladem. */
     private const ADVANCE_KINDS = ['L', 'Z', 'F'];
 
-    /** @var array<string,int> */
-    private array $rateCache = [];
+    private readonly MigrationVatRateLookup $rates;
 
     public function __construct(
         private readonly Connection $db,
         private readonly MoneyS3ImportRepository $map,
         private readonly CodebookImporter $codebooks,
         private readonly StatsRecomputer $stats,
-    ) {}
+        private readonly MigratedDocumentWriter $writer,
+        private readonly MigrationHomeCurrency $homeCurrency,
+    ) {
+        $this->rates = new MigrationVatRateLookup($db);
+    }
 
     public function importPurchases(ImportContext $ctx): void
     {
         $p = $ctx->protocol;
         $pdo = $this->db->pdo();
-        $currencyId = $this->currencyId($ctx->supplierId);
+        $currencyId = $this->homeCurrency->id($ctx->supplierId);
         $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_PURCHASE_INVOICE);
-        $insert = $pdo->prepare(
-            'INSERT INTO purchase_invoices
-                (supplier_id, vendor_id, vendor_is_vat_payer, varsymbol, vendor_invoice_number,
-                 document_kind, issue_date, tax_date, due_date, received_at, received_at_source, currency_id,
-                 vendor_snapshot, total_without_vat, total_vat, total_with_vat, rounding,
-                 payment_variable_symbol, payment_method, status, paid_at, booked_at, booked_by,
-                 note_above_items, note_below_items, external_barcode, vat_deduction, vat_classification_code,
-                 prices_include_vat, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
-        );
-        $insertItem = $pdo->prepare(
-            'INSERT INTO purchase_invoice_items
-                (purchase_invoice_id, description, quantity, unit_price_without_vat,
-                 vat_rate_id, vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index,
-                 vat_classification_code)
-             VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)'
-        );
         $claimShifts = $this->claimShifts($ctx);
         $selfAssessed = $this->selfAssessments($ctx);
         $usedSelfAssessments = [];
@@ -150,41 +142,45 @@ final class InvoiceImporter
                 $vendorNumber = mb_substr($vendorNumber . ' (' . $docNo . ')', 0, 50);
             }
             try {
-                $insert->execute([
-                    $ctx->supplierId,
-                    $vendorId,
-                    $snapshot['dic'] !== '' ? 1 : 0,
-                    $number['number'],
-                    $vendorNumber,
-                    $class['kind'],
-                    $issue,
-                    $taxDate,
-                    self::date($r, ['Splatno']) ?? $issue,
-                    $claimDate ?? (self::date($r, ['Doruceno', 'DatUcPr']) ?? $issue),
-                    $claimDate !== null ? 'manual' : 'import',
-                    $currencyId,
-                    json_encode([
-                        'company_name' => $snapshot['name'], 'street' => $snapshot['street'], 'city' => $snapshot['city'],
-                        'zip' => $snapshot['zip'], 'ic' => $snapshot['ico'], 'dic' => $snapshot['dic'],
-                    ], JSON_UNESCAPED_UNICODE),
-                    $amounts['base'],
-                    $amounts['vat'],
-                    $amounts['total'],
-                    $amounts['rounding'],
-                    mb_substr(trim((string) ($r['VarSymbol'] ?? '')), 0, 20) ?: null,
-                    self::paymentMethod((string) ($r['Uhrada'] ?? '')),
-                    $review ? 'draft' : ($paidAt !== null ? 'paid' : ($unbooked ? 'received' : 'booked')),
-                    $paidAt,
-                    $unbooked ? null : (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
-                    $unbooked || $ctx->userId <= 0 ? null : $ctx->userId,
-                    mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
-                    self::note($docNo, $class['reasons']),
+                $id = $this->writer->insertPurchase(new MigratedPurchaseDocument(
+                    supplierId: $ctx->supplierId,
+                    vendorId: $vendorId,
+                    vendorIsVatPayer: $snapshot['dic'] !== '',
+                    varsymbol: $number['number'],
+                    vendorInvoiceNumber: $vendorNumber,
+                    documentKind: $class['kind'],
+                    issueDate: $issue,
+                    taxDate: $taxDate,
+                    dueDate: self::date($r, ['Splatno']) ?? $issue,
+                    receivedAt: $claimDate ?? (self::date($r, ['Doruceno', 'DatUcPr']) ?? $issue),
+                    receivedAtSource: $claimDate !== null ? 'manual' : 'import',
+                    currencyId: $currencyId,
+                    // Money drží základ i daň v Kč i u dokladu v cizí měně (viz classify()).
+                    exchangeRate: null,
+                    // Položky vznikají ze základů po sazbách - ceny jsou vždy bez DPH.
+                    pricesIncludeVat: false,
+                    // Příznak přenesené povinnosti převod z Money nezapisuje: samovyměření nese
+                    // kód zařazení položek, neznámé členění jde do konceptu k ruční kontrole.
+                    reverseCharge: false,
+                    vendorSnapshot: self::snapshotJson($snapshot),
+                    totalWithoutVat: $amounts['base'],
+                    totalVat: $amounts['vat'],
+                    totalWithVat: $amounts['total'],
+                    rounding: $amounts['rounding'],
+                    status: $review ? 'draft' : ($paidAt !== null ? 'paid' : ($unbooked ? 'received' : 'booked')),
+                    vatDeduction: $class['vat_deduction'],
+                    noteAboveItems: mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
+                    noteBelowItems: self::note($docNo, $class['reasons']),
+                    createdBy: $ctx->userId,
+                    paymentVariableSymbol: mb_substr(trim((string) ($r['VarSymbol'] ?? '')), 0, 20) ?: null,
+                    paymentMethod: self::paymentMethod((string) ($r['Uhrada'] ?? '')),
+                    paidAt: $paidAt,
+                    bookedAt: $unbooked ? null : (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
+                    bookedBy: $unbooked || $ctx->userId <= 0 ? null : $ctx->userId,
                     // Čárový kód z Money je jistý klíč pro párování naskenovaných příloh.
-                    mb_substr(trim((string) ($r['BarCode'] ?? '')), 0, 64) ?: null,
-                    $class['vat_deduction'],
-                    $class['code'],
-                    $ctx->userId,
-                ]);
+                    externalBarcode: mb_substr(trim((string) ($r['BarCode'] ?? '')), 0, 64) ?: null,
+                    vatClassificationCode: $class['code'],
+                ));
             } catch (\PDOException $e) {
                 if ((string) $e->getCode() !== '23000') {
                     throw $e;
@@ -192,16 +188,16 @@ final class InvoiceImporter
                 $p->error(self::STEP_PURCHASE, 'insert_conflict', "Faktura {$docNo} ({$year}) koliduje s existujícím dokladem firmy, nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
                 continue;
             }
-            $id = (int) $pdo->lastInsertId();
+            $items = [];
             foreach ($amounts['items'] as $i => $item) {
-                $insertItem->execute([
-                    $id,
+                $items[$i] = MigratedDocumentItem::purchase(
                     trim((string) ($r['Popis'] ?? '')) ?: 'Převzato z Money S3',
-                    $item['base'], $item['rate_id'], $item['rate'],
-                    $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2), $i,
+                    1.0, 'ks', $item['base'], $item['rate_id'], $item['rate'],
+                    $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2),
                     $item['code'] ?? $class['code'],
-                ]);
+                );
             }
+            $this->writer->insertPurchaseItems($id, $items);
             if ($claimDate !== null) {
                 $p->count(self::STEP_PURCHASE, 'claim_shifted');
             }
@@ -228,29 +224,8 @@ final class InvoiceImporter
     public function importIssued(ImportContext $ctx): void
     {
         $p = $ctx->protocol;
-        $pdo = $this->db->pdo();
-        $currencyId = $this->currencyId($ctx->supplierId);
+        $currencyId = $this->homeCurrency->id($ctx->supplierId);
         $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE);
-        $insert = $pdo->prepare(
-            'INSERT INTO invoices
-                (supplier_id, invoice_type, client_id, varsymbol, issue_date, tax_date, due_date,
-                 currency_id, note_above_items, note_below_items, client_snapshot,
-                 total_without_vat, total_vat, total_with_vat, rounding, paid_total,
-                 paid_at, status, booked_at, booked_by, vat_classification_code, prices_include_vat, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
-        );
-        // Převedená faktura není OSS: Money S3 v záloze místo plnění pro OSS nedrží,
-        // a kdyby šlo o OSS, podané přiznání za ten rok už je v Money. Je to ZÁMĚRNÁ
-        // odlišnost od převodu z Pohody, kde členění mimo přiznání prochází
-        // {@see \MyInvoice\Service\Migration\OssMigrationPolicy} - Pohoda na rozdíl od
-        // Money nese na položce sazbu státu spotřeby i měrnou jednotku, takže je z čeho
-        // rozhodovat. Sjednotit to jde teprve tehdy, až půjde z Money zjistit totéž.
-        $insertItem = $pdo->prepare(
-            'INSERT INTO invoice_items
-                (invoice_id, description, quantity, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
-                 total_without_vat, total_vat, total_with_vat, order_index, oss_applicable, vat_classification_code)
-             VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
-        );
 
         $clients = [];
         foreach ($ctx->backup->rowsAcrossYears('VFaktury') as $r) {
@@ -301,33 +276,36 @@ final class InvoiceImporter
             $unbooked = $review || $class['kind'] === 'proforma';
             $paidAt = self::date($r, ['Uhrazeno']);
             try {
-                $insert->execute([
-                    $ctx->supplierId,
-                    $class['kind'],
-                    $clientId,
-                    $number['number'],
-                    $issue,
-                    self::date($r, ['PlnenoDPH']) ?? $issue,
-                    self::date($r, ['Splatno']) ?? $issue,
-                    $currencyId,
-                    mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
-                    self::note($docNo, $class['reasons']),
-                    json_encode([
-                        'company_name' => $snapshot['name'], 'street' => $snapshot['street'], 'city' => $snapshot['city'],
-                        'zip' => $snapshot['zip'], 'ic' => $snapshot['ico'], 'dic' => $snapshot['dic'],
-                    ], JSON_UNESCAPED_UNICODE),
-                    $amounts['base'],
-                    $amounts['vat'],
-                    $amounts['total'],
-                    $amounts['rounding'],
-                    $paidAt !== null ? $amounts['total'] : 0,
-                    $paidAt,
-                    $review ? 'draft' : ($paidAt !== null ? 'paid' : 'sent'),
-                    $unbooked ? null : (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
-                    $unbooked || $ctx->userId <= 0 ? null : $ctx->userId,
-                    $class['code'],
-                    $ctx->userId > 0 ? $ctx->userId : null,
-                ]);
+                $id = $this->writer->insertIssued(new MigratedIssuedDocument(
+                    supplierId: $ctx->supplierId,
+                    invoiceType: $class['kind'],
+                    clientId: $clientId,
+                    varsymbol: $number['number'],
+                    issueDate: $issue,
+                    taxDate: self::date($r, ['PlnenoDPH']) ?? $issue,
+                    dueDate: self::date($r, ['Splatno']) ?? $issue,
+                    currencyId: $currencyId,
+                    // Money drží základ i daň v Kč i u dokladu v cizí měně (viz classify()).
+                    exchangeRate: null,
+                    // Položky vznikají ze základů po sazbách - ceny jsou vždy bez DPH.
+                    pricesIncludeVat: false,
+                    // Členění přenesené povinnosti na výstupu vede doklad do konceptu (classify()).
+                    reverseCharge: false,
+                    noteAboveItems: mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
+                    noteBelowItems: self::note($docNo, $class['reasons']),
+                    clientSnapshot: self::snapshotJson($snapshot),
+                    totalWithoutVat: $amounts['base'],
+                    totalVat: $amounts['vat'],
+                    totalWithVat: $amounts['total'],
+                    rounding: $amounts['rounding'],
+                    status: $review ? 'draft' : ($paidAt !== null ? 'paid' : 'sent'),
+                    createdBy: $ctx->userId > 0 ? $ctx->userId : null,
+                    paidTotal: $paidAt !== null ? $amounts['total'] : 0.0,
+                    paidAt: $paidAt,
+                    bookedAt: $unbooked ? null : (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
+                    bookedBy: $unbooked || $ctx->userId <= 0 ? null : $ctx->userId,
+                    vatClassificationCode: $class['code'],
+                ));
             } catch (\PDOException $e) {
                 if ((string) $e->getCode() !== '23000') {
                     throw $e;
@@ -336,22 +314,17 @@ final class InvoiceImporter
                 continue;
             }
             $clients[$clientId] = $clientId;
-            $id = (int) $pdo->lastInsertId();
+            $items = [];
             foreach ($amounts['items'] as $i => $item) {
-                $insertItem->execute([
-                    $id,
-                    trim((string) ($r['Popis'] ?? '')) ?: 'Převzato z Money S3',
-                    $item['base'], $item['rate_id'], $item['rate'],
-                    $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2), $i,
-                    $class['code'],
-                ]);
+                $items[$i] = self::issuedItem($r, $item['base'], $item['vat'], $item['rate_id'], $item['rate'], $class['code']);
             }
+            $this->writer->insertIssuedItems($id, $items);
             $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
             $ctx->issuedInvoices[$key] = $id;
             $p->count(self::STEP_ISSUED, 'created');
             $this->reportNumberAndReview($ctx, self::STEP_ISSUED, $docNo, $year, $number, $class['reasons']);
         }
-        $this->importOtherReceivables($ctx, $insert, $insertItem, $currencyId, $clients);
+        $this->importOtherReceivables($ctx, $currencyId, $clients);
         $ctx->statsClients = array_values(array_unique(array_merge($ctx->statsClients, array_values($clients))));
         $p->finish(self::STEP_ISSUED);
     }
@@ -365,10 +338,9 @@ final class InvoiceImporter
      *
      * @param array<int,int> $clients
      */
-    private function importOtherReceivables(ImportContext $ctx, \PDOStatement $insert, \PDOStatement $insertItem, int $currencyId, array &$clients): void
+    private function importOtherReceivables(ImportContext $ctx, int $currencyId, array &$clients): void
     {
         $p = $ctx->protocol;
-        $pdo = $this->db->pdo();
         $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE);
         foreach ($ctx->backup->rowsAcrossYears('KnihPohl') as $r) {
             $year = $ctx->yearOf($r);
@@ -423,42 +395,41 @@ final class InvoiceImporter
             ];
             $clientId = $this->codebooks->resolvePartner($ctx, $snapshot);
             $paidAt = self::date($r, ['UhDatum']);
-            $insert->execute([
-                $ctx->supplierId,
-                $total < 0 ? 'credit_note' : 'invoice',
-                $clientId,
-                $number['number'],
-                $issue,
-                $taxDate,
-                self::date($r, ['DatSpl']) ?? $issue,
-                $currencyId,
-                mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
-                'Převzato z Money S3, ostatní pohledávka ' . $docNo,
-                json_encode([
-                    'company_name' => $snapshot['name'], 'street' => $snapshot['street'], 'city' => $snapshot['city'],
-                    'zip' => $snapshot['zip'], 'ic' => $snapshot['ico'], 'dic' => $snapshot['dic'],
-                ], JSON_UNESCAPED_UNICODE),
-                $base,
-                $vat,
-                $total,
-                round($total - $base - $vat, 2),
-                $paidAt !== null ? $total : 0,
-                $paidAt,
-                $paidAt !== null ? 'paid' : 'sent',
-                (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
-                $ctx->userId > 0 ? $ctx->userId : null,
-                $resolved['code'],
-                $ctx->userId > 0 ? $ctx->userId : null,
-            ]);
-            $id = (int) $pdo->lastInsertId();
+            $id = $this->writer->insertIssued(new MigratedIssuedDocument(
+                supplierId: $ctx->supplierId,
+                invoiceType: $total < 0 ? 'credit_note' : 'invoice',
+                clientId: $clientId,
+                varsymbol: $number['number'],
+                issueDate: $issue,
+                taxDate: $taxDate,
+                dueDate: self::date($r, ['DatSpl']) ?? $issue,
+                currencyId: $currencyId,
+                exchangeRate: null,
+                pricesIncludeVat: false,
+                reverseCharge: false,
+                noteAboveItems: mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
+                noteBelowItems: 'Převzato z Money S3, ostatní pohledávka ' . $docNo,
+                clientSnapshot: self::snapshotJson($snapshot),
+                totalWithoutVat: $base,
+                totalVat: $vat,
+                totalWithVat: $total,
+                rounding: round($total - $base - $vat, 2),
+                status: $paidAt !== null ? 'paid' : 'sent',
+                createdBy: $ctx->userId > 0 ? $ctx->userId : null,
+                paidTotal: $paidAt !== null ? $total : 0.0,
+                paidAt: $paidAt,
+                bookedAt: (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
+                bookedBy: $ctx->userId > 0 ? $ctx->userId : null,
+                vatClassificationCode: $resolved['code'],
+            ));
+            // Sazba se páruje až po zápisu hlavičky, položku po položce - chybějící sazba
+            // shodí běh výjimkou ve stejném okamžiku jako dřív.
             foreach ($items as $i => $item) {
-                $insertItem->execute([
+                $this->writer->insertIssuedItem(
                     $id,
-                    trim((string) ($r['Popis'] ?? '')) ?: 'Převzato z Money S3',
-                    $item['base'], $this->rateId($item['rate'], $taxDate), $item['rate'],
-                    $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2), $i,
-                    $resolved['code'],
-                ]);
+                    self::issuedItem($r, $item['base'], $item['vat'], $this->rateId($item['rate'], $taxDate), $item['rate'], $resolved['code']),
+                    $i,
+                );
             }
             $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
             $ctx->otherReceivables[$year . '|' . $docNo] = $id;
@@ -809,30 +780,13 @@ final class InvoiceImporter
     {
         $sumBase = 0.0;
         $sumVat = 0.0;
-        $any = false;
-        $slots = [['Zaklad_0', null, []]];
-        for ($i = 1; $i <= self::RATE_SLOTS; $i++) {
-            $slots[] = ['Zaklad_' . $i, 'SazbaDPH' . $i, ['DPH_' . $i, 'DPH' . $i]];
-        }
-        foreach ($slots as [$baseField, $rateField, $vatFields]) {
-            $base = round((float) ($r[$baseField] ?? 0), 2);
-            if ($base === 0.0) {
-                continue;
-            }
-            $any = true;
-            $rate = $rateField === null ? 0.0 : (float) ($r[$rateField] ?? 0);
-            $vat = null;
-            foreach ($vatFields as $vatField) {
-                if (array_key_exists($vatField, $r)) {
-                    $vat = round((float) $r[$vatField], 2);
-                    break;
-                }
-            }
-            $sumBase += $base;
-            $sumVat += $vat ?? round($base * $rate / 100, 2);
+        $lines = self::rateLines($r);
+        foreach ($lines as $line) {
+            $sumBase += $line['base'];
+            $sumVat += $line['vat'];
         }
         $moneyTotal = array_key_exists('CelkemSDPH', $r) ? round((float) $r['CelkemSDPH'], 2) : null;
-        if (!$any) {
+        if ($lines === []) {
             return $moneyTotal ?? 0.0;
         }
         $total = round(round($sumBase, 2) + round($sumVat, 2), 2);
@@ -860,26 +814,9 @@ final class InvoiceImporter
      */
     private function amounts(ImportContext $ctx, string $step, string $docNo, array $r, string $taxDate): array
     {
-        $slots = [['Zaklad_0', null, []]];
-        for ($i = 1; $i <= self::RATE_SLOTS; $i++) {
-            $slots[] = ['Zaklad_' . $i, 'SazbaDPH' . $i, ['DPH_' . $i, 'DPH' . $i]];
-        }
         $items = [];
-        foreach ($slots as [$baseField, $rateField, $vatFields]) {
-            $base = round((float) ($r[$baseField] ?? 0), 2);
-            if ($base === 0.0) {
-                continue;
-            }
-            $rate = $rateField === null ? 0.0 : (float) ($r[$rateField] ?? 0);
-            $vat = null;
-            foreach ($vatFields as $vatField) {
-                if (array_key_exists($vatField, $r)) {
-                    $vat = round((float) $r[$vatField], 2);
-                    break;
-                }
-            }
-            $vat ??= round($base * $rate / 100, 2);
-            $items[] = ['base' => $base, 'rate' => $rate, 'vat' => $vat, 'rate_id' => $this->rateId($rate, $taxDate)];
+        foreach (self::rateLines($r) as $line) {
+            $items[] = ['base' => $line['base'], 'rate' => $line['rate'], 'vat' => $line['vat'], 'rate_id' => $this->rateId($line['rate'], $taxDate)];
         }
         $sumBase = round(array_sum(array_column($items, 'base')), 2);
         $sumVat = round(array_sum(array_column($items, 'vat')), 2);
@@ -906,40 +843,74 @@ final class InvoiceImporter
         return ['items' => $items, 'base' => $sumBase, 'vat' => $sumVat, 'total' => $total, 'rounding' => $rounding];
     }
 
-    private function rateId(float $rate, string $date): int
+    /**
+     * Nenulové sazby dokladu Money v pořadí `Zaklad_0` (mimo DPH), `Zaklad_1` … `Zaklad_6`.
+     * Daň z Money (`DPH_n`, starší `DPHn`), když ji doklad nese, jinak dopočtená ze základu.
+     *
+     * @param array<string,mixed> $r
+     * @return list<array{base:float,rate:float,vat:float}>
+     */
+    private static function rateLines(array $r): array
     {
-        $cacheKey = number_format($rate, 2, '.', '') . '|' . $date;
-        if (isset($this->rateCache[$cacheKey])) {
-            return $this->rateCache[$cacheKey];
+        $slots = [['Zaklad_0', null, []]];
+        for ($i = 1; $i <= self::RATE_SLOTS; $i++) {
+            $slots[] = ['Zaklad_' . $i, 'SazbaDPH' . $i, ['DPH_' . $i, 'DPH' . $i]];
         }
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT id FROM vat_rates
-              WHERE country = 'CZ' AND rate_percent = ? AND is_reverse_charge = 0
-              ORDER BY ((valid_from IS NULL OR valid_from <= ?) AND (valid_to IS NULL OR valid_to >= ?)) DESC,
-                       is_default DESC, id
-              LIMIT 1"
-        );
-        $stmt->execute([number_format($rate, 2, '.', ''), $date, $date]);
-        $id = $stmt->fetchColumn();
-        if ($id === false) {
-            throw new MoneyS3Exception('unknown_vat_rate', 'Sazba DPH ' . $rate . ' % není v číselníku sazeb.');
+        $lines = [];
+        foreach ($slots as [$baseField, $rateField, $vatFields]) {
+            $base = round((float) ($r[$baseField] ?? 0), 2);
+            if ($base === 0.0) {
+                continue;
+            }
+            $rate = $rateField === null ? 0.0 : (float) ($r[$rateField] ?? 0);
+            $vat = null;
+            foreach ($vatFields as $vatField) {
+                if (array_key_exists($vatField, $r)) {
+                    $vat = round((float) $r[$vatField], 2);
+                    break;
+                }
+            }
+            $lines[] = ['base' => $base, 'rate' => $rate, 'vat' => $vat ?? round($base * $rate / 100, 2)];
         }
-        return $this->rateCache[$cacheKey] = (int) $id;
+        return $lines;
     }
 
-    private function currencyId(int $supplierId): int
+    private function rateId(float $rate, string $date): int
     {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT id FROM currencies WHERE supplier_id = ? AND code = 'CZK' ORDER BY is_default DESC, id LIMIT 1"
+        return $this->rates->find($rate, $date)
+            ?? throw new MoneyS3Exception('unknown_vat_rate', 'Sazba DPH ' . $rate . ' % není v číselníku sazeb.');
+    }
+
+    /**
+     * Položka vydaného dokladu z jedné sazby Money.
+     *
+     * Převedená faktura není OSS: Money S3 v záloze místo plnění pro OSS nedrží,
+     * a kdyby šlo o OSS, podané přiznání za ten rok už je v Money. Je to ZÁMĚRNÁ
+     * odlišnost od převodu z Pohody, kde členění mimo přiznání prochází
+     * {@see OssMigrationPolicy} - Pohoda na rozdíl od Money nese na položce sazbu státu
+     * spotřeby i měrnou jednotku, takže je z čeho rozhodovat. Sjednotit to jde teprve
+     * tehdy, až půjde z Money zjistit totéž.
+     *
+     * @param array<string,mixed> $r
+     */
+    private static function issuedItem(array $r, float $base, float $vat, int $rateId, float $rate, ?string $code): MigratedDocumentItem
+    {
+        return MigratedDocumentItem::issued(
+            trim((string) ($r['Popis'] ?? '')) ?: 'Převzato z Money S3',
+            1.0, 'ks', $base, $rateId, $rate,
+            $base, $vat, round($base + $vat, 2),
+            $code,
+            OssMigrationPolicy::DOMESTIC_COLUMNS,
         );
-        $stmt->execute([$supplierId]);
-        $id = (int) $stmt->fetchColumn();
-        if ($id === 0) {
-            $s = $this->db->pdo()->prepare('SELECT default_currency_id FROM supplier WHERE id = ?');
-            $s->execute([$supplierId]);
-            $id = (int) $s->fetchColumn();
-        }
-        return $id;
+    }
+
+    /** @param array{name:string,ico:string,dic:string,street:string,city:string,zip:string,country:string} $snapshot */
+    private static function snapshotJson(array $snapshot): string
+    {
+        return (string) json_encode([
+            'company_name' => $snapshot['name'], 'street' => $snapshot['street'], 'city' => $snapshot['city'],
+            'zip' => $snapshot['zip'], 'ic' => $snapshot['ico'], 'dic' => $snapshot['dic'],
+        ], JSON_UNESCAPED_UNICODE);
     }
 
     /**

@@ -9,6 +9,12 @@ use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter as PohodaPartners;
+use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
+use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
+use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
+use MyInvoice\Service\Migration\Shared\MigratedPurchaseDocument;
+use MyInvoice\Service\Migration\Shared\MigrationHomeCurrency;
+use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
 use MyInvoice\Service\Stats\StatsRecomputer;
 
 /**
@@ -47,8 +53,7 @@ final class InvoiceImporter
         'dobír' => 'cash_on_delivery', 'dobir' => 'cash_on_delivery', 'inkas' => 'direct_debit', 'záloh' => 'other',
     ];
 
-    /** @var array<string,?int> */
-    private array $rateCache = [];
+    private readonly MigrationVatRateLookup $rates;
 
     /** @var array<string,\PDOStatement> */
     private array $stmts = [];
@@ -59,7 +64,11 @@ final class InvoiceImporter
         private readonly PartnerImporter $partners,
         private readonly StatsRecomputer $stats,
         private readonly OssMigrationPolicy $oss,
-    ) {}
+        private readonly MigratedDocumentWriter $writer,
+        private readonly MigrationHomeCurrency $homeCurrency,
+    ) {
+        $this->rates = new MigrationVatRateLookup($db);
+    }
 
     public function importIssued(PremierContext $ctx, PremierDocuments $documents): void
     {
@@ -222,38 +231,38 @@ final class InvoiceImporter
         $vs = preg_replace('/\D/', '', $doc['variable_symbol']) ?? '';
         $reverse = array_intersect($codes, ['25s', '25s3', '25s5']) !== [];
         try {
-            $this->stmt('issued', 'INSERT INTO invoices
-                (supplier_id, invoice_type, client_id, varsymbol, payment_variable_symbol, issue_date, tax_date, due_date, currency_id,
-                 note_above_items, note_below_items, client_snapshot, total_without_vat, total_vat, total_with_vat,
-                 rounding, advance_paid_amount, paid_total, paid_at, status, booked_at, booked_by,
-                 vat_classification_code, reverse_charge, payment_method, prices_include_vat, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)')->execute([
-                $ctx->supplierId,
-                $type,
-                $clientId,
-                $number['number'],
-                $vs !== '' && strlen(ltrim($vs, '0')) <= VariableSymbolNormalizer::MAX_LENGTH && $vs !== VariableSymbolNormalizer::forPayment((string) $number['number']) ? $vs : null,
-                $doc['issue'],
-                $type === 'proforma' ? null : $taxDate,
-                $doc['due'],
-                $this->currencyId($ctx->supplierId),
-                $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
-                self::note($label, $reasons, $doc, $notes),
-                PohodaPartners::snapshotJson($snapshot),
-                $doc['base'],
-                $doc['vat'],
-                $doc['total'],
-                $doc['rounding'],
-                $doc['paid'],
-                $doc['settled'] ? ($doc['paid_at'] ?? $doc['issue']) : null,
-                $status,
-                $booked ? $doc['accounting'] . ' 00:00:00' : null,
-                $booked ? $ctx->userOrNull() : null,
-                count($codes) === 1 ? $codes[0] : null,
-                $reverse ? 1 : 0,
-                self::paymentMethod($doc['payment_form']),
-                $ctx->userOrNull(),
-            ]);
+            $id = $this->writer->insertIssued(new MigratedIssuedDocument(
+                supplierId: $ctx->supplierId,
+                invoiceType: $type,
+                clientId: $clientId,
+                varsymbol: $number['number'],
+                issueDate: $doc['issue'],
+                taxDate: $type === 'proforma' ? null : $taxDate,
+                dueDate: $doc['due'],
+                currencyId: $this->homeCurrency->id($ctx->supplierId),
+                // Částky jsou v Kč podle zaúčtování - cizí měna jen v poznámce (note()).
+                exchangeRate: null,
+                // Položky jsou základy po kódech DPH - bez DPH.
+                pricesIncludeVat: false,
+                reverseCharge: $reverse,
+                noteAboveItems: $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
+                noteBelowItems: self::note($label, $reasons, $doc, $notes),
+                clientSnapshot: PohodaPartners::snapshotJson($snapshot),
+                totalWithoutVat: $doc['base'],
+                totalVat: $doc['vat'],
+                totalWithVat: $doc['total'],
+                rounding: $doc['rounding'],
+                status: $status,
+                createdBy: $ctx->userOrNull(),
+                paymentVariableSymbol: $vs !== '' && strlen(ltrim($vs, '0')) <= VariableSymbolNormalizer::MAX_LENGTH && $vs !== VariableSymbolNormalizer::forPayment((string) $number['number']) ? $vs : null,
+                advancePaidAmount: 0.0,
+                paidTotal: $doc['paid'],
+                paidAt: $doc['settled'] ? ($doc['paid_at'] ?? $doc['issue']) : null,
+                bookedAt: $booked ? $doc['accounting'] . ' 00:00:00' : null,
+                bookedBy: $booked ? $ctx->userOrNull() : null,
+                vatClassificationCode: count($codes) === 1 ? $codes[0] : null,
+                paymentMethod: self::paymentMethod($doc['payment_form']),
+            ));
         } catch (\PDOException $e) {
             if ((string) $e->getCode() !== '23000') {
                 throw $e;
@@ -261,21 +270,16 @@ final class InvoiceImporter
             $p->error($step, 'insert_conflict', "Doklad {$label} koliduje s existujícím dokladem firmy (stejné číslo nebo variabilní symbol), nepřevzat.", ['document_no' => $label]);
             return null;
         }
-        $id = (int) $this->db->pdo()->lastInsertId();
-        $insertItem = $this->stmt('issued_item', 'INSERT INTO invoice_items
-                (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
-                 total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code,
-                 oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type, oss_needs_manual_review)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $rows = [];
         foreach ($items as $i => $item) {
-            $oss = $item['oss'];
-            $insertItem->execute([
-                $id, $item['description'], $item['quantity'], $item['unit'] ?? 'ks', $item['unit_price'],
-                $item['rate_id'], $item['rate'], $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2), $i,
+            $rows[$i] = MigratedDocumentItem::issued(
+                $item['description'], $item['quantity'], $item['unit'] ?? 'ks', $item['unit_price'],
+                $item['rate_id'], $item['rate'], $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2),
                 $item['target_code'],
-                $oss['oss_applicable'], $oss['oss_consumer_country'], $oss['oss_rate_type'], $oss['oss_supply_type'], $oss['oss_needs_manual_review'],
-            ]);
+                $item['oss'],
+            );
         }
+        $this->writer->insertIssuedItems($id, $rows);
         $this->map->put($ctx->supplierId, isset($doc['map_key']) ? PremierImportRepository::KIND_VAT_DOCUMENT : PremierImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
         if (!isset($doc['map_key'])) {
             $ctx->issuedInvoices[$doc['inter']] = $id;
@@ -403,48 +407,46 @@ final class InvoiceImporter
         [$accountNo, $bankCode] = self::bankAccount($doc['account_no']);
         $vs = preg_replace('/\D/', '', $doc['variable_symbol']) ?? '';
         try {
-            $this->stmt('purchase', 'INSERT INTO purchase_invoices
-                (supplier_id, vendor_id, vendor_is_vat_payer, varsymbol, vendor_invoice_number, document_kind,
-                 issue_date, tax_date, due_date, received_at, received_at_source, currency_id, vendor_snapshot,
-                 total_without_vat, total_vat, total_with_vat, rounding, advance_paid_amount,
-                 payment_variable_symbol, payment_constant_symbol, payment_account_number, payment_bank_code,
-                 payment_method, status, paid_at, booked_at, booked_by, note_above_items, note_below_items,
-                 vat_deduction, vat_classification_code, reverse_charge, is_fixed_asset, prices_include_vat, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)')->execute([
-                $ctx->supplierId,
-                $vendorId,
-                PohodaPartners::vatId($snapshot['dic']) !== '' ? 1 : 0,
-                $number['number'],
-                $vendorNumber,
-                $type,
-                $doc['issue'],
-                $taxDate,
-                $doc['due'],
-                $claim ?? $taxDate,
-                $claim !== null ? 'manual' : 'import',
-                $this->currencyId($ctx->supplierId),
-                PohodaPartners::snapshotJson($snapshot),
-                $doc['base'],
-                $doc['vat'],
-                $doc['total'],
-                $doc['rounding'],
-                $vs !== '' && strlen(ltrim($vs, '0')) <= VariableSymbolNormalizer::MAX_LENGTH && ltrim($vs, '0') !== '' ? $vs : null,
-                preg_match('/^\d{1,4}$/', $doc['constant_symbol']) === 1 ? $doc['constant_symbol'] : null,
-                $accountNo,
-                $bankCode,
-                self::paymentMethod($doc['payment_form']),
-                $status,
-                $doc['settled'] ? ($doc['paid_at'] ?? $doc['issue']) : null,
-                $unbooked ? null : $doc['accounting'] . ' 00:00:00',
-                $unbooked ? null : $ctx->userOrNull(),
-                $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
-                self::note($label, $reasons, $doc),
-                $deduction,
-                count($codes) === 1 ? $codes[0] : null,
-                $reverse ? 1 : 0,
-                $assets > 0 && $assets === count($items) ? 1 : 0,
-                $ctx->userId,
-            ]);
+            $id = $this->writer->insertPurchase(new MigratedPurchaseDocument(
+                supplierId: $ctx->supplierId,
+                vendorId: $vendorId,
+                vendorIsVatPayer: PohodaPartners::vatId($snapshot['dic']) !== '',
+                varsymbol: $number['number'],
+                vendorInvoiceNumber: $vendorNumber,
+                documentKind: $type,
+                issueDate: $doc['issue'],
+                taxDate: $taxDate,
+                dueDate: $doc['due'],
+                receivedAt: $claim ?? $taxDate,
+                receivedAtSource: $claim !== null ? 'manual' : 'import',
+                currencyId: $this->homeCurrency->id($ctx->supplierId),
+                // Částky jsou v Kč podle zaúčtování - cizí měna jen v poznámce (note()).
+                exchangeRate: null,
+                // Položky jsou základy po kódech DPH - bez DPH.
+                pricesIncludeVat: false,
+                reverseCharge: $reverse,
+                vendorSnapshot: PohodaPartners::snapshotJson($snapshot),
+                totalWithoutVat: $doc['base'],
+                totalVat: $doc['vat'],
+                totalWithVat: $doc['total'],
+                rounding: $doc['rounding'],
+                status: $status,
+                vatDeduction: $deduction,
+                noteAboveItems: $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
+                noteBelowItems: self::note($label, $reasons, $doc),
+                createdBy: $ctx->userId,
+                advancePaidAmount: 0.0,
+                paymentVariableSymbol: $vs !== '' && strlen(ltrim($vs, '0')) <= VariableSymbolNormalizer::MAX_LENGTH && ltrim($vs, '0') !== '' ? $vs : null,
+                paymentConstantSymbol: preg_match('/^\d{1,4}$/', $doc['constant_symbol']) === 1 ? $doc['constant_symbol'] : null,
+                paymentAccountNumber: $accountNo,
+                paymentBankCode: $bankCode,
+                paymentMethod: self::paymentMethod($doc['payment_form']),
+                paidAt: $doc['settled'] ? ($doc['paid_at'] ?? $doc['issue']) : null,
+                bookedAt: $unbooked ? null : $doc['accounting'] . ' 00:00:00',
+                bookedBy: $unbooked ? null : $ctx->userOrNull(),
+                vatClassificationCode: count($codes) === 1 ? $codes[0] : null,
+                isFixedAsset: $assets > 0 && $assets === count($items),
+            ));
         } catch (\PDOException $e) {
             if ((string) $e->getCode() !== '23000') {
                 throw $e;
@@ -452,11 +454,7 @@ final class InvoiceImporter
             $p->error($step, 'insert_conflict', "Doklad {$label} koliduje s existujícím dokladem firmy (stejné číslo nebo variabilní symbol), nepřevzat.", ['document_no' => $label]);
             return null;
         }
-        $id = (int) $this->db->pdo()->lastInsertId();
-        $insertItem = $this->stmt('purchase_item', 'INSERT INTO purchase_invoice_items
-                (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
-                 total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code, is_fixed_asset, expense_kind)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $rows = [];
         foreach ($items as $i => $item) {
             // Drobný majetek odvozený z účtu položky, když PREMIER evidenci nevede ({@see PremierSmallAssets}).
             $qty = (float) $item['quantity'];
@@ -464,12 +462,13 @@ final class InvoiceImporter
             if ($expenseKind !== null && $expenseKind !== 'material') {
                 $p->count($step, 'small_asset_items');
             }
-            $insertItem->execute([
-                $id, $item['description'], $item['quantity'], $item['unit'] ?? 'ks', $item['unit_price'],
-                $item['rate_id'], $item['rate'], $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2), $i,
-                $item['target_code'], $item['fixed_asset'] ? 1 : 0, $expenseKind,
-            ]);
+            $rows[$i] = MigratedDocumentItem::purchase(
+                $item['description'], $item['quantity'], $item['unit'] ?? 'ks', $item['unit_price'],
+                $item['rate_id'], $item['rate'], $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2),
+                $item['target_code'], $item['fixed_asset'], $expenseKind,
+            );
         }
+        $this->writer->insertPurchaseItems($id, $rows);
         $this->map->put($ctx->supplierId, isset($doc['map_key']) ? PremierImportRepository::KIND_VAT_DOCUMENT : PremierImportRepository::KIND_PURCHASE_INVOICE, $key, $id, $ctx->runId);
         if (!isset($doc['map_key'])) {
             $ctx->purchaseInvoices[$doc['inter']] = $id;
@@ -634,30 +633,6 @@ final class InvoiceImporter
     /** Tuzemská sazba firmy k datu, `null` = v číselníku není. */
     private function rateId(float $rate, string $date): ?int
     {
-        $cacheKey = number_format($rate, 2, '.', '') . '|' . $date;
-        if (array_key_exists($cacheKey, $this->rateCache)) {
-            return $this->rateCache[$cacheKey];
-        }
-        $stmt = $this->stmt('rate', "SELECT id FROM vat_rates
-              WHERE country = 'CZ' AND rate_percent = ? AND is_reverse_charge = 0
-              ORDER BY ((valid_from IS NULL OR valid_from <= ?) AND (valid_to IS NULL OR valid_to >= ?)) DESC,
-                       is_default DESC, id
-              LIMIT 1");
-        $stmt->execute([number_format($rate, 2, '.', ''), $date, $date]);
-        $id = $stmt->fetchColumn();
-        return $this->rateCache[$cacheKey] = $id === false ? null : (int) $id;
-    }
-
-    private function currencyId(int $supplierId): int
-    {
-        $stmt = $this->stmt('currency', "SELECT id FROM currencies WHERE supplier_id = ? AND code = 'CZK' ORDER BY is_default DESC, id LIMIT 1");
-        $stmt->execute([$supplierId]);
-        $id = (int) $stmt->fetchColumn();
-        if ($id === 0) {
-            $s = $this->stmt('currency_default', 'SELECT default_currency_id FROM supplier WHERE id = ?');
-            $s->execute([$supplierId]);
-            $id = (int) $s->fetchColumn();
-        }
-        return $id;
+        return $this->rates->find($rate, $date);
     }
 }
