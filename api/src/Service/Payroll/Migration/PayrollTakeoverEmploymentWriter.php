@@ -437,7 +437,7 @@ final class PayrollTakeoverEmploymentWriter
      * Změnové položky (`$changeItems`) dostanou poznámku z `$changeNote`, který se zavolá
      * nejvýš jednou a jen tehdy, když taková položka čeká; `null` z něj položku nechá
      * otevřenou. Položku, kterou nejde odškrtnout, předá `$onFailure` a pokračuje dál
-     * (co se toleruje, řídí {@see PayrollTakeoverPolicy::$checklistToleratesRuntime}).
+     * (co se toleruje, říká {@see self::checklistFailure()}).
      *
      * @param array<string,string> $notes položka => poznámka
      * @param list<string> $changeItems
@@ -477,7 +477,7 @@ final class PayrollTakeoverEmploymentWriter
             try {
                 $this->employments->updateChecklist($supplierId, $employmentId, $key, (int) $item['row_version'], 'completed', $notes[$key], $userId, null, null);
             } catch (\Exception $e) {
-                if (!self::checklistFailure($e, $policy)) {
+                if (!self::checklistFailure($e)) {
                     throw $e;
                 }
                 $onFailure($key, $e);
@@ -501,14 +501,15 @@ final class PayrollTakeoverEmploymentWriter
         return $row === false ? null : $row;
     }
 
-    private static function checklistFailure(\Exception $e, PayrollTakeoverPolicy $policy): bool
+    /**
+     * Očekávané odmítnutí položky: konflikt verze, chybějící vztah nebo položka a zamítnutí
+     * kontrolou (datum nástupu). Chyba databáze ani jiná RuntimeException mezi ně nepatří,
+     * projde výš a převod ji ohlásí, místo aby položka tiše zůstala neodškrtnutá.
+     */
+    private static function checklistFailure(\Exception $e): bool
     {
-        if ($e instanceof PayrollEmploymentConflictException || $e instanceof PayrollEmploymentNotFoundException
-            || $e instanceof \DomainException || $e instanceof \InvalidArgumentException
-        ) {
-            return true;
-        }
-        return $policy->checklistToleratesRuntime && $e instanceof \RuntimeException;
+        return $e instanceof PayrollEmploymentConflictException || $e instanceof PayrollEmploymentNotFoundException
+            || $e instanceof \DomainException || $e instanceof \InvalidArgumentException;
     }
 
     /**

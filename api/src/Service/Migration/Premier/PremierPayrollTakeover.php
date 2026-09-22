@@ -41,7 +41,6 @@ final class PremierPayrollTakeover
             countPlannedTermination: false,
             ignoreEndBeforeStart: true,
             rewriteOwnOpenings: true,
-            checklistToleratesRuntime: true,
             // Převod z PREMIER běží po letech a každý rok přináší další nepřítomnosti vztahu.
             absencesPerRecord: true,
         );
