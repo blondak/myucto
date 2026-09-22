@@ -414,6 +414,14 @@ final class PayrollImporter
                 self::personalNumbers(array_keys($this->state->absenceOverlaps)),
             ));
         }
+        if ($this->state->absencesRejected !== []) {
+            $p->warn(self::STEP, 'absences_rejected', sprintf(
+                'Nepřítomností, které evidence odmítla zapsat (datum mimo roky s mzdovými pravidly, uzavřené období '
+                . 'nebo jiná kontrola): %d u osobních čísel %s. Převod je nezapsal; doplňte je v kartě zaměstnance.',
+                array_sum($this->state->absencesRejected),
+                self::personalNumbers(array_keys($this->state->absencesRejected)),
+            ), ['personal_numbers' => array_keys($this->state->absencesRejected)]);
+        }
         if ($this->openSickness !== []) {
             $p->count(self::STEP, 'sickness_open', array_sum($this->openSickness));
             $p->warn(self::STEP, 'sickness_open', sprintf(

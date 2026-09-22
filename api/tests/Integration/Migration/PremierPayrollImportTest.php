@@ -394,6 +394,39 @@ final class PremierPayrollImportTest extends TestCase
     }
 
     /**
+     * Dovolená rozepsaná po měsících se spojí v jednu nepřítomnost, která přejde přes konec
+     * čtvrtletí. Evidence takovou náhradu odmítne (průměr se zjišťuje ke čtvrtletí), takže
+     * se dřív tiše nezapsala vůbec. Rozdělí se na hranici čtvrtletí a obě části se schválí.
+     */
+    public function testAbsenceAcrossQuarterEndIsSplitAtQuarterBoundary(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backupWithQuarterVacation(), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['vacation', '2025-09-29', '2025-09-30', 'approved'], ['vacation', '2025-10-01', '2025-10-03', 'approved']],
+            $this->fetch("SELECT a.absence_type, a.date_from, a.date_to, a.status FROM payroll_absences a JOIN payroll_employments e ON e.id = a.employment_id
+                WHERE e.supplier_id = ? AND e.code = '5' AND a.absence_type = 'vacation' AND a.date_from >= '2025-09-01' ORDER BY a.date_from", $supplierId),
+            $this->explain($protocol));
+        self::assertArrayNotHasKey('absences_rejected', self::stepCounts($protocol, 'payroll'), $this->explain($protocol));
+    }
+
+    /**
+     * Nepřítomnost, kterou evidence odmítne (peněžitá pomoc v mateřství bez dne porodu),
+     * se dřív vynechala bez počtu i hlášky. Protokol ji musí spočítat a říct, u koho.
+     */
+    public function testRejectedAbsenceIsCountedAndReported(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backupWithQuarterVacation([[2, '2025-02-03', '2025-02-07', '603']]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, self::stepCounts($protocol, 'payroll')['absences_rejected'] ?? 0, $this->explain($protocol));
+        $messages = array_values(array_filter(self::step($protocol, 'payroll')['messages'], static fn (array $m): bool => $m['code'] === 'absences_rejected'));
+        self::assertCount(1, $messages, $this->explain($protocol));
+        self::assertSame('warning', $messages[0]['level']);
+        self::assertStringContainsString(': 1 u osobních čísel 5.', $messages[0]['text']);
+    }
+
+    /**
      * Trvalé srážky z PREMIER: exekuce jako nedoložený exekuční případ se zbývající
      * pohledávkou, odbory jako dohoda o srážkách, skončené spoření jen v počtu. Zakládají se
      * až v běhu roku posledních zpracovaných mezd.
@@ -488,6 +521,27 @@ final class PremierPayrollImportTest extends TestCase
             }
         }
         DbfWriter::write($dir . DIRECTORY_SEPARATOR . 'MZDY.DBF', $fields, $rows);
+        return PremierBackup::open($dir);
+    }
+
+    /**
+     * Záloha s podrobnými mzdami, kde vztah INTER 5 čerpá dovolenou 29. 9. - 3. 10. 2025,
+     * v `DNY` rozepsanou po měsících (září a říjen), a volitelně další nepřítomnosti
+     * (měsíc, od, do, kód). Syntetická data jen těchto testů.
+     *
+     * @param list<array{0:int,1:string,2:string,3:string}> $extra
+     */
+    private function backupWithQuarterVacation(array $extra = []): PremierBackup
+    {
+        $flags = ['payroll' => true, 'payroll_detail' => true];
+        $dir = $this->tmp . DIRECTORY_SEPARATOR . 'backup_quarter_vacation_' . md5((string) json_encode($extra));
+        SyntheticPremierBackup::writeDir($dir, false, $flags);
+        [$fields, $rows] = SyntheticPremierBackup::tables(false, $flags)['DNY'];
+        foreach ([[9, '2025-09-29', '2025-09-30', '500'], [10, '2025-10-01', '2025-10-03', '500'], ...$extra] as [$month, $from, $to, $code]) {
+            $rows[] = ['INTER' => 5, 'DATUM_OD' => $from, 'DATUM_DO' => $to, 'KOD' => $code, 'CASTKA' => 2000, 'DNY_ROK' => 2025, 'DNY_MES' => $month,
+                'TYP' => 2, 'ID' => "D5-QV-{$month}-{$code}"];
+        }
+        DbfWriter::write($dir . DIRECTORY_SEPARATOR . 'DNY.DBF', $fields, $rows);
         return PremierBackup::open($dir);
     }
 

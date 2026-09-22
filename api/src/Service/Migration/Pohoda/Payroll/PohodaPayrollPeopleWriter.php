@@ -297,6 +297,14 @@ final class PohodaPayrollPeopleWriter
                 self::personalNumbers($state->absenceOverlaps),
             ));
         }
+        if ($state->absencesRejected !== []) {
+            $protocol->warn($step, 'absences_rejected', sprintf(
+                'Nepřítomností, které evidence odmítla zapsat (datum mimo roky s mzdovými pravidly, uzavřené období '
+                . 'nebo jiná kontrola): %d u osobních čísel %s. Převod je nezapsal; doplňte je v kartě zaměstnance.',
+                array_sum($state->absencesRejected),
+                self::personalNumbers($state->absencesRejected),
+            ));
+        }
         if ($state->hourlyWageRelations > 0) {
             $protocol->warn($step, 'recurring_wage_hourly', sprintf(
                 'Předpis základní měsíční mzdy nedostalo %d vztahů: mzdu mají v převáděných měsících i hodinovou nebo úkolovou '

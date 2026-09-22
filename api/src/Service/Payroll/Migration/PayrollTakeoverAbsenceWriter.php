@@ -93,7 +93,8 @@ final class PayrollTakeoverAbsenceWriter
         $approved = 0;
         $fromImport = 0;
         $already = 0;
-        foreach (self::mergedAbsences($absences, $overlaps) as $absence) {
+        $rejected = 0;
+        foreach (self::splitAtQuarters(self::mergedAbsences($absences, $overlaps)) as $absence) {
             if ($policy->absencesPerRecord && $this->recorded($supplierId, $employmentId, $absence)) {
                 $already++;
                 continue;
@@ -127,7 +128,8 @@ final class PayrollTakeoverAbsenceWriter
                 $overlaps++;
                 continue;
             } catch (\DomainException|\InvalidArgumentException) {
-                // Nepřípustné datum nebo uzavřený rok: nechá se na účetní.
+                // Nepřípustné datum nebo uzavřený rok: nechá se na účetní, protokol ji spočítá.
+                $rejected++;
                 continue;
             }
             $written++;
@@ -148,6 +150,10 @@ final class PayrollTakeoverAbsenceWriter
         if ($overlaps > 0) {
             $state->absenceOverlaps[$number] = $overlaps;
             $counts['absences_overlap'] = $overlaps;
+        }
+        if ($rejected > 0) {
+            $state->absencesRejected[$number] = ($state->absencesRejected[$number] ?? 0) + $rejected;
+            $counts['absences_rejected'] = $rejected;
         }
         if ($approved > 0) {
             $counts['absences_approved'] = $approved;
@@ -270,6 +276,40 @@ final class PayrollTakeoverAbsenceWriter
         }
 
         return true;
+    }
+
+    /**
+     * Nepřítomnost s náhradou z průměru, která přechází přes konec kalendářního čtvrtletí
+     * (typicky dovolená rozepsaná po měsících a spojená {@see self::mergedAbsences()}),
+     * se rozdělí na hranici čtvrtletí. Náhrada se počítá z průměru zjištěného k prvnímu dni
+     * čtvrtletí (§ 354 odst. 1 ZP), evidence proto celou nepřijme
+     * ({@see PayrollAbsenceValidator::TYPES_WITHIN_QUARTER}) a bez rozdělení by se nezapsala.
+     *
+     * @param list<array<string,mixed>> $absences
+     * @return list<array<string,mixed>>
+     */
+    private static function splitAtQuarters(array $absences): array
+    {
+        $out = [];
+        foreach ($absences as $absence) {
+            if (!in_array($absence['type'], PayrollAbsenceValidator::TYPES_WITHIN_QUARTER, true)) {
+                $out[] = $absence;
+                continue;
+            }
+            $from = new \DateTimeImmutable((string) $absence['from']);
+            $to = (string) $absence['to'];
+            while (true) {
+                $month = (int) $from->format('n');
+                $quarterEnd = $from->setDate((int) $from->format('Y'), intdiv($month - 1, 3) * 3 + 3, 1)->modify('last day of this month')->format('Y-m-d');
+                if ($quarterEnd >= $to) {
+                    $out[] = ['from' => $from->format('Y-m-d')] + $absence;
+                    break;
+                }
+                $out[] = ['from' => $from->format('Y-m-d'), 'to' => $quarterEnd] + $absence;
+                $from = (new \DateTimeImmutable($quarterEnd))->modify('+1 day');
+            }
+        }
+        return $out;
     }
 
     /**
