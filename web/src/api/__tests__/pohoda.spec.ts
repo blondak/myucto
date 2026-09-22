@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { post, get, download } = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn(), download: vi.fn() }))
 vi.mock('../client', () => ({ api: { post, get } }))
@@ -55,6 +55,12 @@ describe('pohodaApi.uploadChunked', () => {
 })
 
 describe('pohodaApi', () => {
+  beforeEach(() => {
+    post.mockReset()
+    get.mockReset()
+    download.mockReset()
+  })
+
   it('hotový export pozná podle seznamu agend', () => {
     expect(isPohodaUploadReady({ token: 't', status: 'processing', file_name: 'x.zip', size: 1, received: 1, job_id: 1, error: null })).toBe(false)
     expect(isPohodaUploadReady({

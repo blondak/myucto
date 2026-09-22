@@ -600,3 +600,86 @@ Upload je omezen na 200 souborů, nejvýše 100 MiB na soubor a 300 MiB celkem �
 právě velké dávky jsou důvod, proč import běží na pozadí. Zápis vyžaduje
 oprávnění k importu; všechny výsledky jsou omezené na aktuální firmu. Souběžně
 běží nejvýše jeden import na firmu; pokus o druhý skončí odkazem na ten běžící.
+
+## Převod daňové evidence ze Stereo NX
+
+V **Importy → Stereo NX** lze převést ZIP zálohu firemních dat do aktuálně
+vybrané firmy. Zdrojová i cílová firma musí mít stejné IČO, být plátcem DPH
+a cílová firma musí používat **daňovou evidenci**. Podvojné účetnictví tato
+cesta nepřevádí.
+
+Průvodce používá stejné čtyři kroky jako převody POHODA a PREMIER:
+nahrání zálohy, výběr firmy, zkoušku nanečisto a potvrzení importu.
+
+1. Spusť Stereo NX jako oprávněný uživatel. V nabídce **Ostatní → Zálohování dat**
+   vyber firmu k záloze a vytvoř zálohu. Vznikne soubor ZIP.
+   V MyÚčtu vyber cílovou firmu a nahraj tento ZIP. Výchozí heslo Stereo NX
+   aplikace použije automaticky. Převod zálohu pouze čte, původní data ani
+   instalaci Stereo NX nemění.
+2. Ze seznamu firem v záloze vyber správnou firmu. Pokud prázdná země
+   protistrany ve zdroji znamená ČR, zaškrtni odpovídající volbu. Označení
+   „EU“ bez konkrétního státu touto volbou určeno není.
+3. Spusť **Zkoušku nanečisto**. Projde stejnými databázovými operacemi jako
+   skutečný převod, ale změny vrátí zpět. Zkontroluj rozsah dat, počty
+   dokladů, konceptů a důvody ruční kontroly. Název ZIPu nemusí odpovídat
+   všem rokům obsaženým v záloze.
+4. Po úspěšné zkoušce potvrď převod. Změna vybrané firmy nebo výkladu
+   prázdné země vyžaduje novou zkoušku nanečisto.
+   Volitelně zaškrtni **Smazat nahranou zálohu po úspěšném importu**.
+   Smaže se pouze nahraná kopie ZIPu po potvrzeném zápisu dokladů;
+   zkouška nanečisto ani neúspěšný převod ji nemažou. Pokud odstranění
+   selže, import zůstává dokončený a zálohu lze odstranit ze seznamu.
+
+Převádí se adresář, vydané faktury s položkami, přijaté faktury,
+bankovní výpisy a pohyby, pokladní pohyby, vazby úhrad a zařazení do
+peněžního deníku. Peněžní deník ve zdroji slouží ke kontrole fyzických
+pohybů, nevytváří druhou sadu plateb. Přijaté faktury bez položek dostanou
+položky podle uložené rekapitulace sazeb DPH s původním popisem. Samovyměřená
+daň se nepřičítá k částce splatné dodavateli.
+
+Doklady s neurčenými příznaky DPH nebo cen, neurčenou protistranou či zemí,
+nesouladem kontrolní evidence nebo neověřeným datem se převezmou jako
+**koncepty**. Také vydaný doklad bez položek vyžaduje ruční kontrolu.
+Společný protokol převodu uvádí číslo každého dokladu k ruční kontrole
+a jeho konkrétní důvody. Důvody zůstávají také v poznámce dokladu.
+Koncepty nevstupují do
+přiznání DPH; jejich původní úhrady se uchovají. Před potvrzením konceptu
+ověř částky, režim cen, členění DPH, datum a údaje protistrany.
+
+Převod kontroluje uzavřená a již naplněná cílová období. Již převedené
+záznamy rozpozná podle zdrojových klíčů; opakování stejné zálohy je nezdvojí.
+Změněný nebo chybějící dříve převedený záznam vyžaduje kontrolu, automaticky
+se nepřepisuje. Chyba během převodu vrátí celý aktuální zápis zpět.
+
+Podporovaný rozsah je domácí evidence v CZK. Cizoměnové doklady, odpočty
+záloh, nepodporované druhy dokladů, přijaté faktury s vlastními položkami
+nebo naplněné neověřené agendy převod zastaví s vysvětlením. Majetek, mzdy,
+sklad a podvojné účetnictví vyžadují samostatný převod.
+
+Výchozí heslo je součástí serverového importéru; prohlížeč jej nevyžaduje ani
+neobdrží. Záloha se nerozbaluje do souborů. Nahranou
+zálohu najdeš v seznamu svých nahraných záloh i po obnovení stránky.
+Dokončenou zálohu lze znovu otevřít bez dalšího nahrávání; nepotřebnou nebo
+nedokončenou zálohu lze odstranit a uvolnit místo. Firma může mít nejvýše
+tři nahrané zálohy. Odstranění zálohy nemaže již importované doklady.
+Dočasné uploady podléhají úklidu po sedmi dnech.
+Čtení archivu má limit 20 000 položek, nejvýše 64 MiB na soubor a 1 GiB
+celkového rozbaleného obsahu.
+
+### Technická kontrola zdroje
+
+Bez připojení k aplikační databázi lze zálohu prověřit příkazem:
+
+```text
+php api/bin/stereo-nx-inspect.php --archive=backup.zip --company=0 --password-stdin --purchases
+```
+
+Bez volby `--password-stdin` se použije výchozí heslo Stereo NX. Jiné heslo
+lze předat standardním vstupem, například přesměrováním ze souboru uloženého
+mimo repozitář. Index firmy odpovídá seznamu `ObsahBck.txt`;
+index `0` označuje adresář `Firma_0`.
+
+Výstupem je JSON se schématem, počty řádků, kontrolou domácích úhrad a
+při volbě `--purchases` také souhrnem přijatých rekapitulací. Neobsahuje
+hodnoty jednotlivých firemních řádků. Tento příkaz **neimportuje data a není
+zkouškou převodu nanečisto**; úplnou zkoušku provede průvodce v aplikaci.

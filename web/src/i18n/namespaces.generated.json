@@ -114,6 +114,7 @@
     "shoptet",
     "smtp_logs",
     "stats",
+    "stereo_nx",
     "stock",
     "support_page",
     "tax",
@@ -214,6 +215,7 @@
       "shoptet",
       "smtp_logs",
       "stats",
+      "stereo_nx",
       "stock",
       "support_page",
       "tax",
@@ -431,6 +433,9 @@
     "imports-premier": [
       "imports",
       "premier"
+    ],
+    "imports-stereo-nx": [
+      "stereo_nx"
     ],
     "purchase-invoices-payment-orders": [
       "bank_connection",

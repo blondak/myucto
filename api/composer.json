@@ -22,6 +22,7 @@
         "ext-xmlreader": "*",
         "ext-zip": "*",
         "ext-zlib": "*",
+        "blondak/nx1-reader": "^0.1",
         "chillerlan/php-qrcode": "^6.0",
         "dragonofmercy/phppdf": "^1.0",
         "enshrined/svg-sanitize": "^1.0",
@@ -90,5 +91,10 @@
         ]
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "repositories": [{
+        "name": "nx1-reader",
+        "type": "vcs",
+        "url": "https://github.com/blondak/nx1-reader.git"
+    }]
 }

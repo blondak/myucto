@@ -2579,6 +2579,14 @@ final class Routes
         $app->post   ('/api/admin/imports/premier/uploads/{token:[a-f0-9]{16}}/start', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'start']);
         $app->get    ('/api/admin/imports/premier/runs', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'runs']);
         $app->get    ('/api/admin/imports/premier/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'run']);
+        $app->get    ('/api/admin/imports/stereo-nx/uploads', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'index']);
+        $app->post   ('/api/admin/imports/stereo-nx/uploads/chunked', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'init']);
+        $app->post   ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/chunks', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'chunk']);
+        $app->post   ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/complete', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'complete']);
+        $app->get    ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'show']);
+        $app->post   ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/preview', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'preview']);
+        $app->post   ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/run', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'run']);
+        $app->delete ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'delete']);
 
         // Kompletní export dat firmy (H-14) — DB + PDF doklady + přílohy do jednoho
         // archivu s manifestem a kontrolními součty. Běží na pozadí

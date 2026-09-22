@@ -822,6 +822,9 @@ final class RoutePermissionMap
         // Průvodce „Přechod z PREMIER" (PremierMigrationAction) - stejná pravidla jako POHODA/Money S3.
         ['POST',   '#^/api/admin/imports/premier/uploads(/chunked|/[a-f0-9]+/(start|chunks|complete))$#', 'utilities.import', AccessLevel::WRITE],
         ['GET',    '#^/api/admin/imports/premier/(uploads/[a-f0-9]+|runs(/[0-9]+)?)$#', 'utilities.import', AccessLevel::READ],
+        ['POST',   '#^/api/admin/imports/stereo-nx/uploads(/chunked|/[a-f0-9]{32}/(chunks|complete|preview|run))$#', 'utilities.import', AccessLevel::WRITE],
+        ['GET',    '#^/api/admin/imports/stereo-nx/uploads(/[a-f0-9]{32})?$#', 'utilities.import', AccessLevel::READ],
+        ['DELETE', '#^/api/admin/imports/stereo-nx/uploads/[a-f0-9]{32}$#', 'utilities.import', AccessLevel::WRITE],
         // Credentials importních integrací — {Idoklad,Fakturoid}CredentialsAction hlídají
         // WRITE i u `status` (odpověď prozrazuje, že je integrace nastavená).
         ['*', '#^/api/admin/imports/(idoklad|fakturoid)/credentials$#', 'utilities.import', AccessLevel::WRITE],

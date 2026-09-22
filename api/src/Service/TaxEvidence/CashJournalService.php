@@ -482,7 +482,7 @@ final class CashJournalService
             // níž — DPH z osvobozené faktury je průběžná položka státu, ne příjem poplatníka.
             // Bez toho by „z toho vyloučeno" bylo brutto, kdežto TaxProfileRepository
             // ::annualExemptIncome() vedle toho hlásí netto.
-            $exemptBase = $this->prorateBase($amount, $r['inv_without_vat'] ?? null, $r['inv_with_vat'] ?? null, $isVatPayer);
+            $exemptBase = $this->prorateBase($amount, $r['inv_vat'] ?? null, $r['inv_with_vat'] ?? null, $isVatPayer);
             $exemptVat  = round($amount - $exemptBase, 2);
             $alloc = ['income_exempt' => round($sign * $exemptBase, 2)];
             if ($exemptVat != 0.0) {
@@ -500,7 +500,7 @@ final class CashJournalService
             ];
         }
 
-        $base = $this->prorateBase($amount, $r['inv_without_vat'] ?? null, $r['inv_with_vat'] ?? null, $isVatPayer);
+        $base = $this->prorateBase($amount, $r['inv_vat'] ?? null, $r['inv_with_vat'] ?? null, $isVatPayer);
         $vat  = round($amount - $base, 2);
         $alloc = ['income_taxable' => round($sign * $base, 2)];
         if ($vat != 0.0) {
@@ -681,31 +681,17 @@ final class CashJournalService
         throw new \LogicException('Nedostupná větev pokladní klasifikace.');
     }
 
-    /** R7: základ = amount × (bez_dph / s_dph) u plátce; u neplátce / bez dat celé brutto. */
-    private function prorateBase(float $amount, mixed $without, mixed $with, bool $isVatPayer): float
+    /** R7: z uhrazeného brutto se vyloučí pouze evidovaná DPH; zaokrouhlení patří do základu. */
+    private function prorateBase(float $amount, mixed $vat, mixed $with, bool $isVatPayer): float
     {
-        if (!$isVatPayer || $without === null || $with === null) {
+        if (!$isVatPayer || $vat === null || $with === null) {
             return round($amount, 2);
         }
         $w = (float) $with;
         if ($w <= 0.0) {
             return round($amount, 2);
         }
-        return round($amount * ((float) $without / $w), 2);
-    }
-
-    /** @param array<string,mixed> $row */
-    private function fixedAssetEntryPrice(array $row, bool $isVatPayer): float
-    {
-        $net = (float) ($row['pi_without_vat'] ?? 0);
-        $gross = (float) ($row['pi_with_vat'] ?? $net);
-        if (!$isVatPayer || ($row['pi_vat_deduction'] ?? 'full') === 'none') {
-            return $gross;
-        }
-        $deductionPercent = ($row['pi_vat_deduction'] ?? 'full') === 'full'
-            ? 100.0
-            : max(0.0, min(100.0, (float) ($row['pi_vat_deduction_percent'] ?? 0)));
-        return round($net + max(0.0, $gross - $net) * (1 - $deductionPercent / 100), 2);
+        return round($amount * (1 - min(1.0, max(0.0, (float) $vat / $w))), 2);
     }
 
     /**
@@ -727,11 +713,11 @@ final class CashJournalService
         // R7 proratu. Je to přijatelné pro pohyby BEZ faktury (nezná se DPH rozpad); u pohybu
         // s vazbou by měl uživatel spíš opravit klasifikaci dokladu než override.
         if ($bucket === 'income_taxable' && ($r['invoice_id'] ?? null) !== null) {
-            $base = $this->prorateBase($amount, $r['inv_without_vat'] ?? null, $r['inv_with_vat'] ?? null, $isVatPayer);
+            $base = $this->prorateBase($amount, $r['inv_vat'] ?? null, $r['inv_with_vat'] ?? null, $isVatPayer);
             return $this->single($bucket, $base, $bucket, $base, round($amount - $base, 2));
         }
         if ($bucket === 'expense_taxable' && ($r['purchase_invoice_id'] ?? null) !== null) {
-            $base = $this->prorateBase($amount, $r['pi_without_vat'] ?? null, $r['pi_with_vat'] ?? null, $isVatPayer);
+            $base = $this->prorateBase($amount, $r['pi_vat'] ?? null, $r['pi_with_vat'] ?? null, $isVatPayer);
             return $this->single($bucket, $base, $bucket, $base, round($amount - $base, 2));
         }
         $base = in_array($bucket, ['income_taxable', 'expense_taxable'], true) ? $amount : 0.0;

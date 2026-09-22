@@ -7,6 +7,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/imports\/pohoda(?:\/|$)/, '107_Prechod_z_POHODY'],
   [/^\/imports\/pamica(?:\/|$)/, '108_Prechod_z_PAMICA'],
   [/^\/imports\/premier(?:\/|$)/, '109_Prechod_z_PREMIER'],
+  [/^\/imports\/stereo-nx(?:\/|$)/, '21_Importy'],
   [/^\/accounting\/setup-assistant(?:\/|$)/, '65_Sablony'],
   [/^\/admin\/bank-rule-templates(?:\/|$)/, '65_Sablony'],
   [/^\/templates(?:\/|$)/, '65_Sablony'],

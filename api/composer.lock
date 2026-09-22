@@ -4,8 +4,68 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "c08c85ba2b4837e509946f1603d6050f",
+    "content-hash": "e3110f5bd5d50710ce1b6550f29eb54f",
     "packages": [
+        {
+            "name": "blondak/nx1-reader",
+            "version": "v0.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/blondak/nx1-reader.git",
+                "reference": "72bd2030ef2c105e66e1bd8b44a04bd5b98de965"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/blondak/nx1-reader/zipball/72bd2030ef2c105e66e1bd8b44a04bd5b98de965",
+                "reference": "72bd2030ef2c105e66e1bd8b44a04bd5b98de965",
+                "shasum": ""
+            },
+            "require": {
+                "ext-iconv": "*",
+                "ext-zip": "*",
+                "php": "^8.4"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "bin": [
+                "bin/nx1dump",
+                "bin/nx1scan"
+            ],
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Blondak\\Nx1\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "Blondak\\Nx1\\Tests\\": "tests/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "phpunit"
+                ],
+                "lint": [
+                    "@php tools/lint.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Unofficial read-only PHP reader for NexusDB NX1 table files and ZIP backups.",
+            "keywords": [
+                "database",
+                "legacy",
+                "migration",
+                "nexusdb",
+                "nx1",
+                "reader",
+                "zip"
+            ],
+            "time": "2026-09-22T11:54:31+00:00"
+        },
         {
             "name": "brick/math",
             "version": "1.0.0",

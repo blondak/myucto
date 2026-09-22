@@ -28,6 +28,7 @@ describe('contextual manual for application menu', () => {
   })
 
   it.each([
+    ['/imports/stereo-nx', '21_Importy'],
     ['/reports/cnb-rate-audit', '46_Ucetni_kontroly_a_inventarizace'],
     ['/reports/invoice-series-completeness', '46_Ucetni_kontroly_a_inventarizace'],
     ['/reports/vat-coefficient', '41_Vykazy_DPH'],

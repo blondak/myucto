@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\TaxEvidence;
 
+use MyInvoice\Repository\TaxProfileRepository;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
@@ -22,6 +23,33 @@ use PHPUnit\Framework\Attributes\Group;
 #[Group('integration')]
 final class CashJournalTaxProjectionIncomeTest extends CashJournalTestCase
 {
+    public function testPaidInvoiceRoundingIsIncludedInTaxProfileIncomeAndExpense(): void
+    {
+        $taxable = $this->saleInvoice($this->supplierId, [
+            'without' => 100.0, 'with' => 100.02,
+            'status' => 'paid', 'paid_at' => self::YEAR . '-06-15',
+        ]);
+        $exempt = $this->saleInvoice($this->supplierId, [
+            'without' => 200.0, 'with' => 200.03, 'income_tax_exempt' => 1,
+            'status' => 'paid', 'paid_at' => self::YEAR . '-06-15',
+        ]);
+        $purchase = $this->purchaseInvoice($this->supplierId, [
+            'without' => 50.0, 'with' => 50.01,
+            'status' => 'paid', 'paid_at' => self::YEAR . '-06-15',
+        ]);
+        $this->db->pdo()->prepare('UPDATE invoices SET total_vat = 0 WHERE id IN (?, ?)')
+            ->execute([$taxable, $exempt]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET total_vat = 0, rounding = 0.01 WHERE id = ?')
+            ->execute([$purchase]);
+
+        $profiles = $this->container->get(TaxProfileRepository::class);
+        self::assertEqualsWithDelta(100.02, $profiles->annualIncome($this->supplierId, self::YEAR, true), 0.001);
+        self::assertEqualsWithDelta(200.03, $profiles->annualExemptIncome($this->supplierId, self::YEAR, true), 0.001);
+        self::assertEqualsWithDelta(100.02, $profiles->monthlyIncome($this->supplierId, self::YEAR, true)[6], 0.001);
+        self::assertEqualsWithDelta(100.02, $profiles->monthIncome($this->supplierId, self::YEAR . '-06', true), 0.001);
+        self::assertEqualsWithDelta(50.01, $profiles->monthExpenses($this->supplierId, self::YEAR . '-06', true), 0.001);
+    }
+
     /** Virtuální noha C (úhrada bez importu výpisu) — CashJournalService::incomeAlloc(). */
     public function testProjectionIncomeExcludesExemptInvoiceOnVirtualLeg(): void
     {

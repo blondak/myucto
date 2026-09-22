@@ -847,7 +847,8 @@
         "1860_dimensions.sql",
         "1861_dimension_defaults.sql",
         "1862_bank_posting_rule_mode_set_manually.sql",
-        "1863_payment_matches_supplier_doc_index.sql"
+        "1863_payment_matches_supplier_doc_index.sql",
+        "1864_stereo_nx_import.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -17785,6 +17786,29 @@
                 "uq_sv_type_code": "UNIQUE BTREE (statement_type, version_code)"
             },
             "foreign_keys": [],
+            "checks": []
+        },
+        "stereo_nx_import_map": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "kind": "varchar(32) NOT NULL COLLATE utf8mb4_bin",
+                "source_company_index": "int(10) unsigned NOT NULL",
+                "source_hash": "char(64) NOT NULL COLLATE utf8mb4_bin",
+                "source_ico": "char(8) NOT NULL COLLATE utf8mb4_bin",
+                "source_key": "varchar(190) NOT NULL COLLATE utf8mb4_bin",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "target_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, source_ico, source_company_index, kind, source_key)",
+                "ix_stereo_nx_import_map_target": "BTREE (supplier_id, kind, target_id)"
+            },
+            "foreign_keys": {
+                "fk_stereo_nx_import_map_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
             "checks": []
         },
         "stock_attribute_i18n": {
