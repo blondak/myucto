@@ -10,6 +10,7 @@ use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter as PohodaPartners;
+use MyInvoice\Service\Migration\Shared\MigratedCashNumber;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
@@ -43,6 +44,7 @@ final class StereoNxImporter
     ];
 
     private readonly MigrationVatRateLookup $rates;
+    private readonly MigratedCashNumber $cashNumbers;
 
     public function __construct(
         private readonly Connection $db,
@@ -57,6 +59,7 @@ final class StereoNxImporter
         private readonly PartnerIdentityMatcher $identity,
     ) {
         $this->rates = new MigrationVatRateLookup($db);
+        $this->cashNumbers = new MigratedCashNumber($db);
     }
 
     /**
@@ -144,6 +147,7 @@ final class StereoNxImporter
                     'new_documents' => ['issued' => [], 'purchase' => []], 'new_statements' => [],
                     'touched_documents' => ['issued' => [], 'purchase' => []], 'touched_statements' => [],
                     'zero_cash' => [],
+                    'protocol' => new ImportProtocol($dryRun ? 'dry_run' : 'import'),
                     'actual_review_documents' => [],
                     'written' => ['clients' => 0, 'issued' => 0, 'purchases' => 0, 'bank_statements' => 0,
                         'bank_transactions' => 0, 'cash_transactions' => 0, 'payments' => 0,
@@ -157,6 +161,7 @@ final class StereoNxImporter
                 foreach ($plan['bank_statements'] ?? [] as $record) $this->importBankStatement($context, $record);
                 foreach ($plan['bank_transactions'] ?? [] as $record) $this->importBankTransaction($context, $record);
                 foreach ($plan['cash_transactions'] ?? [] as $record) $this->importCashTransaction($context, $record);
+                self::appendProtocolWarnings($report, $context['protocol']);
                 foreach ($plan['payments'] ?? [] as $record) $this->importPayment($context, $record);
                 foreach ($plan['movement_classifications'] ?? [] as $record) $this->importClassification($context, $record);
                 $this->refreshBalances($context);
@@ -243,14 +248,22 @@ final class StereoNxImporter
         $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import');
         $years = array_map(static fn (string $d): int => (int) substr($d, 0, 4), $sourceDates);
         $this->coefficients->seedConverted($supplierId, [], $years, $userId, $protocol);
+        self::appendProtocolWarnings($report, $protocol);
+        foreach ($protocol->toArray()['steps'] as $step) {
+            if (($step['counts']['settled'] ?? 0) > 0) {
+                $report['counts']['vat_coefficients_settled'] = $step['counts']['settled'];
+            }
+        }
+    }
+
+    /** Upozornění ze sdílených služeb převodu (protokol Money) do zprávy Stereo NX. @param array<string,mixed> $report */
+    private static function appendProtocolWarnings(array &$report, ImportProtocol $protocol): void
+    {
         foreach ($protocol->toArray()['steps'] as $step) {
             foreach ($step['messages'] as $m) {
                 if ($m['level'] === 'warning') {
                     $report['warnings'][] = ['level' => 'warning', 'code' => $m['code'], 'message' => $m['text']] + $m['context'];
                 }
-            }
-            if (($step['counts']['settled'] ?? 0) > 0) {
-                $report['counts']['vat_coefficients_settled'] = $step['counts']['settled'];
             }
         }
     }
@@ -720,11 +733,13 @@ final class StereoNxImporter
         $registerId = $this->cashRegister($ctx['supplier_id']);
         $date = $this->date($record['date'] ?? null);
         $pdo = $this->db->pdo();
+        $number = (string) ($record['document_no'] ?? $key);
+        $number = $this->cashNumbers->allocate($ctx['supplier_id'], [$number], $ctx['protocol'], 'cash', $number);
         $pdo->prepare('INSERT INTO cash_documents
             (supplier_id, register_id, doc_number, doc_type, issue_date, description, purpose,
              total_amount, currency_code, status, created_by)
             VALUES (?, ?, ?, ?, ?, ?, "other", ?, "CZK", "posted", ?)')->execute([
-            $ctx['supplier_id'], $registerId, mb_substr((string) ($record['document_no'] ?? $key), 0, 50),
+            $ctx['supplier_id'], $registerId, $number,
             $amount >= 0 ? 'in' : 'out', $date,
             mb_substr((string) ($record['description'] ?? 'Stereo NX'), 0, 255), abs($amount), $ctx['user_id'],
         ]);

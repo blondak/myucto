@@ -426,6 +426,28 @@ final class MoneyS3ImportTest extends TestCase
         self::assertSame(0, $this->rowCount('journal_entries', $supplierId, "description = 'Účetní závěrka roku 2024'"));
         $journal = array_column($protocol->toArray()['steps'], null, 'key')['journal'];
         self::assertContains('year_end_closing_skipped', array_column($journal['messages'], 'code'));
+        $closing = array_column($protocol->toArray()['steps'], null, 'key')['closing'];
+        self::assertNotContains('closed_without_money_closing', array_column($closing['messages'], 'code'));
+    }
+
+    /**
+     * Money otevře další rok i bez uzávěrky (XZ). Rok, jehož PS navazují, převod uzavře
+     * dál (reálné agendy nemají XZ u většiny podaných let), ale upozorní, že uzávěrka
+     * v Money neproběhla.
+     */
+    public function testYearClosedWithoutMoneyYearEndClosingIsReported(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/noxz.lz', SyntheticAgenda::filesWithoutYearEndClosing());
+        $backup = Ms3Backup::extract($this->tmp . '/noxz.lz', $this->tmp . '/noxz');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertSame('closed', array_column($protocol->get('closing'), null, 'year')[2024]['status']);
+        $closing = array_column($protocol->toArray()['steps'], null, 'key')['closing'];
+        $warning = array_column($closing['messages'], null, 'code')['closed_without_money_closing'] ?? null;
+        self::assertNotNull($warning, $this->explain($protocol));
+        self::assertSame([2024], $warning['context']['years']);
     }
 
     /**
@@ -614,6 +636,11 @@ final class MoneyS3ImportTest extends TestCase
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
 
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'DF-2025-010' AND is_fixed_asset = 1"));
+        // Aplikace drží expense_kind='fixed_asset' ⇔ is_fixed_asset=1 i na položkách.
+        self::assertGreaterThan(0, $this->rowCount('purchase_invoices', $supplierId,
+            'id IN (SELECT purchase_invoice_id FROM purchase_invoice_items WHERE is_fixed_asset = 1)'));
+        self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId,
+            "id IN (SELECT purchase_invoice_id FROM purchase_invoice_items WHERE (is_fixed_asset = 1) <> (expense_kind <=> 'fixed_asset'))"));
         $dph = $this->container(DphPriznaniBuilder::class);
         $march = $dph->build($supplierId, 2025, 3, 'monthly')['summary']['lines'];
         self::assertEqualsWithDelta(1000.0, (float) ($march['47']['base'] ?? 0), 0.005, json_encode($march, JSON_UNESCAPED_UNICODE) ?: '');

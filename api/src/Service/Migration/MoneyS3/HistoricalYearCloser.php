@@ -18,6 +18,10 @@ use MyInvoice\Service\Accounting\Closing\ClosingService;
  * z Money — včetně výsledku hospodaření na 431. Při rozdílu se rok neuzavře a pozdější
  * roky také ne (stojí na něm). Poslední rok zůstává otevřený.
  *
+ * Uzávěrkové zápisy Money (`XZ`) podmínkou NEJSOU: Money otevře další rok s počátečními
+ * stavy i bez uzávěrky a na reálných agendách chybí XZ u většiny let, která byla podaná.
+ * Rok uzavřený bez nich převod jen ohlásí (`closed_without_money_closing`).
+ *
  * Porovnání NEPOČÍTÁ samo: bere ho z průvodce uzávěrkou (`opening_takeover` ve
  * {@see ClosingService::state()}), tedy z téhož výpočtu, podle kterého otevření roku
  * převzaté počáteční stavy přijme nebo odmítne. Vlastní kopie by se s průvodcem
@@ -49,6 +53,7 @@ final class HistoricalYearCloser
         sort($years);
         $results = [];
         $blocked = false;
+        $withoutMoneyClosing = [];
         foreach ($years as $i => $year) {
             $next = $years[$i + 1] ?? null;
             $periodId = $ctx->periods[$year]['id'];
@@ -109,6 +114,9 @@ final class HistoricalYearCloser
                 }
                 $results[] = $row + ['status' => 'closed', 'profit' => $closed['profit'] ?? null];
                 $p->count(self::STEP, 'closed');
+                if (($ctx->yearEndClosingRows[$year] ?? null) === 0) {
+                    $withoutMoneyClosing[] = $year;
+                }
             } catch (\Throwable $e) {
                 if ($savepoint) {
                     $this->db->pdo()->exec('ROLLBACK TO SAVEPOINT money_s3_close_year');
@@ -119,6 +127,13 @@ final class HistoricalYearCloser
                 $p->warn(self::STEP, 'closing_failed', "Rok {$year} se nepodařilo uzavřít: " . $e->getMessage() . ' Uzavřete ho v Uzávěrce ručně.', ['year' => $year]);
                 $blocked = true;
             }
+        }
+        if ($withoutMoneyClosing !== []) {
+            $p->warn(self::STEP, 'closed_without_money_closing', sprintf(
+                'Roky %s se uzavřely podle navazujících počátečních stavů, deník Money v nich ale nemá uzávěrkové zápisy (XZ). '
+                . 'Money dovolí otevřít další rok i bez uzávěrky; ověřte, že jsou roky opravdu uzavřené (podané přiznání), jinak kroky Otevření dalšího roku a Uzavření knih v Uzávěrce vraťte.',
+                implode(', ', $withoutMoneyClosing)
+            ), ['years' => $withoutMoneyClosing]);
         }
         $p->set('closing', $results);
         $p->finish(self::STEP);

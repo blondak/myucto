@@ -399,6 +399,20 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda, ve které Money otevřelo rok 2025 bez uzávěrky roku 2024 (deník 2024 bez XZ).
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithoutYearEndClosing(): array
+    {
+        $files = self::files();
+        $rows = iterator_to_array(Ms3Table::fromString($files['ROK.001/UcDenik.DAT'], 'UCDENIK')->rows(), false);
+        $rows = array_values(array_filter($rows, static fn (array $r): bool => $r['Zdroj'] !== 'XZ'));
+        $files['ROK.001/UcDenik.DAT'] = Ms3FixtureWriter::table(self::JOURNAL_FIELDS, $rows);
+        return $files;
+    }
+
+    /**
      * Agenda, ve které roky v Money nenavazují: počáteční stavy 2025 přesouvají 100 Kč
      * z pokladny na účet (ruční přepis PS v Money), konečné stavy 2024 zůstávají.
      *

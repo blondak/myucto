@@ -46,6 +46,9 @@ final class ImportContext
     /** @var list<int> klienti převedených vydaných faktur (přepočet statistik po převodu) */
     public array $statsClients = [];
 
+    /** @var array<int,int> rok => počet uzávěrkových řádků deníku Money (`XZ`), jen roky, jejichž deník převod četl */
+    public array $yearEndClosingRows = [];
+
     /** @var array<string,true>|null "rok|zdroj|číslo dokladu" dokladů, které má deník Money (líně) */
     public ?array $journalDocuments = null;
 
