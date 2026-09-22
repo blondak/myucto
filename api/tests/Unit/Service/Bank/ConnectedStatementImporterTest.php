@@ -667,6 +667,72 @@ final class ConnectedStatementImporterTest extends TestCase
         self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
     }
 
+    /**
+     * MONETA: pohyb načtený průběžně z MONETA API a později z ručně nahraného
+     * měsíčního výpisu GPC. API nese protiúčet jako „předčíslí mezera číslo/kód“
+     * a vlastní referenci, výpis protiúčet vycpaný nulami a jinou referenci.
+     * Výpis ho musí spárovat, ne založit znovu. Pohyb bez VS a protiúčtu
+     * (poplatek) se tiše nesloučí ani nezdvojí, jde k potvrzení uživateli.
+     */
+    public function testMonetaMonthlyStatementReconcilesMovementsImportedFromApi(): void
+    {
+        $this->pdo->exec("INSERT INTO currencies VALUES (3, 10, '1000000005', 'CZ3106000000001000000005', '0600', 'CZK', 1)");
+        $this->matcher->expects(self::atLeastOnce())->method('matchBatch')->willReturn([]);
+        $api = (new \MyInvoice\Service\Bank\Connector\MonetaTransactionParser())->parse([[
+            'amount' => ['currency' => 'CZK', 'value' => 10000],
+            'bookingDate' => ['date' => '2026-09-18'],
+            'valueDate' => ['date' => '2026-09-18'],
+            'creditDebitIndicator' => 'CRDT',
+            'status' => 'BOOK',
+            'entryReference' => '0001000000005:20260918:00001:0000000000000000001',
+            'entryDetails' => ['transactionDetails' => [
+                'relatedParties' => [
+                    'debtor' => ['name' => 'Synteticka s.r.o.'],
+                    'debtorAccount' => ['identification' => ['other' => ['identification' => '0 0000000019/2250']]],
+                ],
+                'remittanceInformation' => [
+                    'structured' => ['creditorReferenceInformation' => ['reference' => 'VS:1']],
+                    'unstructured' => 'vlastni ucet',
+                ],
+            ]],
+        ]], 'CZ3106000000001000000005', 'CZK', '2026-09-22');
+        $this->importer->importConnectedParsed($api, '{"synthetic":"moneta"}', 'moneta.json', null, 3, 10, 'bank_api');
+
+        $account = str_pad('1000000005', 16, '0', STR_PAD_LEFT);
+        $gpc = '074' . $account . str_pad('SYNTETICKA', 20) . '310826' . str_repeat('0', 14) . '+'
+            . sprintf('%014d', 1000000) . '+' . str_repeat('0', 14) . '0' . sprintf('%014d', 1000000) . '0'
+            . '001' . '300926' . str_repeat(' ', 14) . "\r\n"
+            . '075' . $account . str_pad('19', 16, '0', STR_PAD_LEFT) . sprintf('%013d', 777) . sprintf('%012d', 1000000) . '2'
+            . sprintf('%010d', 1) . '00' . '2250' . '0000' . str_repeat('0', 10) . '180926'
+            . str_pad('SYNTETICKA S.R.O.', 20) . '0' . str_repeat(' ', 4) . '180926' . "\r\n";
+
+        $result = $this->importer->import($gpc, 'moneta-2026-09.gpc', null, 3);
+
+        self::assertSame(0, $result['transactions']);
+        self::assertSame(1, $result['skipped_duplicates']);
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
+
+        $fee = $api;
+        $fee['transactions'] = [[
+            'posted_at' => '2026-09-20', 'amount' => -50.0, 'currency' => 'CZK',
+            'variable_symbol' => null, 'constant_symbol' => null, 'specific_symbol' => null,
+            'counterparty_account' => null, 'counterparty_bank' => null, 'counterparty_name' => null,
+            'description' => 'Poplatek', 'bank_ref' => 'moneta:synthetic-fee',
+        ]];
+        $this->importer->importConnectedParsed($fee, '{"synthetic":"moneta-fee"}', 'moneta-fee.json', null, 3, 10, 'bank_api');
+        $feeGpc = substr($gpc, 0, 130)
+            . '075' . $account . str_repeat('0', 16) . sprintf('%013d', 778) . sprintf('%012d', 5000) . '1'
+            . str_repeat('0', 10) . '00' . '0000' . '0000' . str_repeat('0', 10) . '200926'
+            . str_pad('POPLATEK', 20) . '0' . str_repeat(' ', 4) . '200926' . "\r\n";
+        try {
+            $this->importer->import($feeGpc, 'moneta-2026-09-fee.gpc', null, 3);
+            self::fail('Pohyb bez VS a protiúčtu se nesmí sloučit bez potvrzení.');
+        } catch (\MyInvoice\Service\Bank\StatementReconciliationException $e) {
+            self::assertCount(1, $e->candidates);
+        }
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
+    }
+
     private function gpc(): string
     {
         $account = str_pad('1000000005', 16, '0', STR_PAD_LEFT);

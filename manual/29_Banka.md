@@ -843,6 +843,7 @@ shrnuje, co napojení jako celek umí, jaké má limity a jak je to bezpečnostn
 | **Raiffeisenbank** | 5500 | Premium API — Client ID + certifikát | ano | ano |
 | **Česká spořitelna** | 0800 | Premium Accounts API v3 — OAuth2 Authorization Code | ano | ne (zatím neimplementováno) |
 | **Banka CREDITAS** | 2250 | Bearer token, volitelně mTLS certifikát | ano | ano |
+| **MONETA Money Bank** | 0600 | MONETA API — token z Internet Banky | ano | ano |
 
 Přehled bank se v sekci zobrazuje vždy; v seznamu účtů pod ním se nabízí jen
 účet, jehož kód banky konektor podporuje — ostatní účty tam nejsou vidět.

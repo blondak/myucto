@@ -1005,6 +1005,9 @@ final class Bootstrap
                     $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->create('creditas', new \GuzzleHttp\Handler\CurlHandler([
                         'handle_factory' => new \MyInvoice\Service\Bank\Connector\BankCertificateCurlFactory(allowTokenOnly: true),
                     ])), $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->diagnosticLogger()),
+            \MyInvoice\Service\Bank\Connector\MonetaApiClient::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Bank\Connector\MonetaApiClient(
+                    $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->create('moneta')),
             \MyInvoice\Service\Bank\Connector\KbPlusApiClient::class => fn (ContainerInterface $c)
                 => new \MyInvoice\Service\Bank\Connector\KbPlusApiClient(
                     $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->create('kb_plus'),
@@ -1028,6 +1031,7 @@ final class Bootstrap
                     $c->get(\MyInvoice\Service\Bank\Connector\CsobBankConnector::class),
                     $c->get(\MyInvoice\Service\Bank\Connector\KbPlusConnector::class),
                     $c->get(\MyInvoice\Service\Bank\Connector\CreditasBankConnector::class),
+                    $c->get(\MyInvoice\Service\Bank\Connector\MonetaBankConnector::class),
                 ]),
         ]);
 

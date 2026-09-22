@@ -26,6 +26,7 @@ export function bankReconciliationCandidates(error: unknown): BankReconciliation
 /** Texty, které se u konkrétní banky liší od obecné hlášky (obecná míří na Fio token). */
 const providerKeys: Record<string, Record<string, string>> = {
   kb_plus: { token: 'token_kb_plus', history: 'history_kb_plus' },
+  moneta: { token: 'token_moneta', history: 'history_moneta' },
 }
 
 export function bankConnectionErrorMessage(error: unknown, t: (key: string) => string, fallback: string, provider = ''): string {

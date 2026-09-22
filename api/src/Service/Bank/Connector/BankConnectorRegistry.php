@@ -63,6 +63,13 @@ final class BankConnectorRegistry
                 'bank_codes' => ['2250'],
                 'capabilities' => ['statement_import' => true, 'payment_order_submission' => true],
             ],
+            [
+                'code' => 'moneta',
+                'label' => 'MONETA Money Bank',
+                'implemented' => isset($this->connectors['moneta']),
+                'bank_codes' => ['0600'],
+                'capabilities' => ['statement_import' => true, 'payment_order_submission' => true],
+            ],
         ];
     }
 

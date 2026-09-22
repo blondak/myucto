@@ -287,6 +287,23 @@ vynechání při změně údajů přepne CREDITAS na přístup bez certifikátu.
 Certifikáty pro KB+ a CREDITAS lze vybrat do velikosti 24 KiB. Přístupové
 údaje se ukládají na serveru šifrovaně, nikoli do úložiště prohlížeče.
 
+**MONETA Money Bank (0600)** se připojuje přes MONETA API jen tokenem, který
+si vytvoříš sám v Internet Bance. Registrace u banky ani certifikát nejsou potřeba.
+
+1. V Internet Bance MONETA otevři **Nastavení / Ostatní / Správa API tokenů /
+   Vytvořit token** a token potvrď ve Smart Bance. Při vytváření zapni
+   automatické prodlužování, jinak token po uplynutí platnosti přestane fungovat.
+2. U účtu v MyÚčto otevři **Napojení banky**, zvol **MONETA Money Bank**,
+   vlož token a zvol **Ověřit a uložit**.
+
+Token platí pro všechny tvé účty u MONETY. Aplikace si podle IBANu nastaveného
+účtu najde odpovídající účet a z tokenu nikdy nečte jiný. Pro další účet
+(např. EUR) stačí vložit stejný token. Načítají se jen zaúčtované pohyby, blokace
+karet se objeví až po zaúčtování. MONETA vydá pohyby nejvýše 2 roky zpět
+a starší období může vyžadovat dvoufázové ověření v Internet Bance.
+Odeslaný hromadný příkaz (nejvýše 200 plateb) najdeš v Internet Bance
+v sekci **Zprávy a oznámení**, kde ho podepíšeš. Bez podpisu se neprovede.
+
 **Fio: vytvoření tokenu a první načtení**
 
 1. Založ účet se správným číslem, kódem banky a měnou.
@@ -360,7 +377,7 @@ označení úhrady. Vybrat lze i dříve uložený příkaz z historie.
 
 Pro přímé odeslání musí existovat aktivní ověřené napojení stejného účtu plátce
 v CZK s podporou příkazů: Fio ČR (2010), ČSOB (0300), Raiffeisenbank (5500),
-Banka CREDITAS (2250) nebo KB+ (0100). Přímé odesílání slovenských EUR příkazů
+Banka CREDITAS (2250), MONETA Money Bank (0600) nebo KB+ (0100). Přímé odesílání slovenských EUR příkazů
 zatím není implementované; přímé předání je určené pro tuzemské CZK příkazy.
 Příkaz, který už při vytvoření označil faktury jako
 zaplacené, se tímto způsobem znovu neposílá. Odeslání vyžaduje právo zápisu

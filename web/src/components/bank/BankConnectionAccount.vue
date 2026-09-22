@@ -230,8 +230,8 @@ async function confirmReconciliation() {
       <KbPlusOnboarding v-if="provider === 'kb_plus'" :currency-id="account.id" :can-write="canWrite" @changed="emit('changed')" />
       <CreditasConnectionSetup v-if="provider === 'creditas'" :currency-id="account.id" :connection="connection" :can-write="canWrite" :disabled="busy" @changed="emit('changed')" @busy-change="busy = $event" />
       <div v-if="!['kb_plus', 'creditas', 'csas'].includes(provider)" class="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm space-y-2" data-testid="connection-help">
-        <p class="font-medium">{{ t(provider === 'csob' ? 'bank_connection.csob_help_title' : certificateProvider ? 'bank_connection.rb_help_title' : 'bank_connection.fio_help_title') }}</p>
-        <p>{{ t(provider === 'csob' ? 'bank_connection.csob_hint' : certificateProvider ? 'bank_connection.rb_hint' : 'bank_connection.token_hint') }}</p>
+        <p class="font-medium">{{ t(provider === 'csob' ? 'bank_connection.csob_help_title' : certificateProvider ? 'bank_connection.rb_help_title' : provider === 'moneta' ? 'bank_connection.moneta_help_title' : 'bank_connection.fio_help_title') }}</p>
+        <p>{{ t(provider === 'csob' ? 'bank_connection.csob_hint' : certificateProvider ? 'bank_connection.rb_hint' : provider === 'moneta' ? 'bank_connection.moneta_hint' : 'bank_connection.token_hint') }}</p>
         <p v-if="provider !== 'csob'">{{ t('bank_connection.account_verification_hint') }}</p>
         <p class="text-xs text-neutral-600">{{ t('bank_connection.credentials_storage_hint') }}</p>
         <p class="text-xs text-neutral-600">{{ t('bank_connection.payment_help_hint') }}</p>

@@ -182,7 +182,7 @@ ani při odmítnutém nebo nejasném výsledku. Smazání nemění stav faktur a
 jejich označení k úhradě a nezruší platbu, kterou jsi do banky nahrál ručně.
 
 Pro aktivně propojený účet Fio ČR (2010), ČSOB (0300), Raiffeisenbank (5500),
-Banky CREDITAS (2250) nebo KB+ (0100, jen varianta Plus se souhlasem pro hromadné platby) lze tuzemský příkaz v CZK také
+Banky CREDITAS (2250), MONETA Money Bank (0600) nebo KB+ (0100, jen varianta Plus se souhlasem pro hromadné platby) lze tuzemský příkaz v CZK také
 **odeslat přímo do banky**, pokud napojení má potřebná oprávnění.
 Napojení Fio SR (8330) zatím slouží k načítání pohybů, nikoli k přímému odesílání EUR příkazů.
 Akce **Připravit příkaz pro banku** příkaz uloží bez označení faktur jako
@@ -194,6 +194,8 @@ v bance, opakované odeslání stejného příkazu je blokované. Nastavení a �
 postup jsou v kapitole [Bankovní účty](30_Bankovni_ucty.md#3014-odeslani-prikazu-do-banky).
 
 V internetovém bankovnictví CREDITAS najdeš předanou dávku v **Transakce → Zadané → Hromadné**. Zde zkontroluj její stav a příkazy k autorizaci.
+
+V Internet Bance MONETA najdeš předanou dávku k podpisu v sekci **Zprávy a oznámení**.
 
 Pokud jsi celou dávku v bance zrušil, zvol v historii příkazu **Smazat**.
 U předaného příkazu aplikace nabídne místo trvalého smazání archivaci

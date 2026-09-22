@@ -32,7 +32,7 @@ const canSubmit = computed(() => auth.canWrite('settings.bank_accounts') && auth
 const matchingConnections = computed(() => {
   const current = order.value
   if (!current || current.currency !== 'CZK') return []
-  return connections.value.filter(connection => connection.enabled && connection.has_token && connection.validated_at && ['2010', '5500', '0300', '0100', '2250'].includes(connection.account.bank_code || '') && connection.account.code === 'CZK' && sameBankConnectionAccount(connection.account, {
+  return connections.value.filter(connection => connection.enabled && connection.has_token && connection.validated_at && ['2010', '5500', '0300', '0100', '2250', '0600'].includes(connection.account.bank_code || '') && connection.account.code === 'CZK' && sameBankConnectionAccount(connection.account, {
     account_number: current.payer_account_number, bank_code: current.payer_bank_code, iban: current.payer_iban,
   }))
 })

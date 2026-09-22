@@ -160,7 +160,7 @@ final class BankPaymentSubmissionService
         }
         if (
             !$this->connectors->supportsBankCode((string) $connection['provider'], (string) ($connection['bank_code'] ?? ''))
-            || !in_array((string) ($connection['bank_code'] ?? ''), ['2010', '5500', '0300', '0100', '2250'], true)
+            || !in_array((string) ($connection['bank_code'] ?? ''), ['2010', '5500', '0300', '0100', '2250', '0600'], true)
             || (string) ($connection['verified_bank_code'] ?? '') !== (string) ($connection['bank_code'] ?? '')
             || strtoupper((string) ($connection['account_code'] ?? '')) !== 'CZK'
             || strtoupper((string) ($connection['verified_currency'] ?? '')) !== 'CZK'
