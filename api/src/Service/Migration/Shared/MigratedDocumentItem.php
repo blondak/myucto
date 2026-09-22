@@ -18,7 +18,7 @@ final class MigratedDocumentItem
 {
     private const OSS_KEYS = ['oss_applicable', 'oss_consumer_country', 'oss_rate_type', 'oss_supply_type', 'oss_needs_manual_review'];
 
-    /** @param array{oss_applicable:int,oss_consumer_country:?string,oss_rate_type:?string,oss_supply_type:?string,oss_needs_manual_review:int} $oss */
+    /** @param array{oss_applicable:int,oss_consumer_country:?string,oss_rate_type:?string,oss_supply_type:?string,oss_needs_manual_review:int,oss_taxable_amount_return?:?float,oss_vat_amount_return?:?float} $oss */
     private function __construct(
         public readonly string $description,
         public readonly float $quantity,
@@ -65,6 +65,10 @@ final class MigratedDocumentItem
                 'oss_rate_type' => $oss['oss_rate_type'],
                 'oss_supply_type' => $oss['oss_supply_type'],
                 'oss_needs_manual_review' => $oss['oss_needs_manual_review'],
+                // Nepovinné: částky pro OSS přiznání, když je zdroj zná v měně podání
+                // ({@see OssMigrationPolicy::returnAmounts()}); jinak je dopočte náhled podání.
+                'oss_taxable_amount_return' => $oss['oss_taxable_amount_return'] ?? null,
+                'oss_vat_amount_return' => $oss['oss_vat_amount_return'] ?? null,
             ],
             false,
             null,

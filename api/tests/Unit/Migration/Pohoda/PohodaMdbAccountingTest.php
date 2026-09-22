@@ -76,6 +76,44 @@ final class PohodaMdbAccountingTest extends TestCase
         self::assertSame('21', $invoice['invoiceDetail']['invoiceItem'][0]['rateVAT']['@value']);
     }
 
+    /**
+     * Doklad v režimu OSS z MDB nese stát spotřeby, typ plnění, skutečné procento sazby
+     * a částky položky v cizí měně na týchž místech jako XML POHODY - převod pak z obou
+     * zdrojů rozhoduje stejně (issue #75). Bez MOSS se elementy vynechávají jako v XML.
+     */
+    public function testOssFieldsMapToSameElementsAsOfficialXml(): void
+    {
+        $mapper = $this->mapper([
+            'sCMeny' => [['ID' => '2', 'Kod' => 'EUR']],
+            'FA' => [
+                ['ID' => '1', 'Cislo' => 'TEST-OSS', 'RelTpFak' => '1', 'Datum' => '2026-02-10', 'Kc1' => '1000', 'KcDPH1' => '230',
+                    'RefCM' => '2', 'CmKurs' => '25', 'CmMnoz' => '1', 'CmCelkem' => '49.2', 'MOSS' => 'SK', 'MOSSDukaz' => 'G'],
+                ['ID' => '2', 'Cislo' => 'TEST-CZ', 'RelTpFak' => '1', 'Datum' => '2026-02-11', 'Kc2' => '100', 'KcDPH2' => '21'],
+            ],
+            'FApol' => [
+                ['ID' => '1', 'RefAg' => '1', 'RelSzDPH' => '1', 'ProcentoDPH' => '23', 'Kc' => '1000', 'KcDPH' => '230', 'MJ' => 'ks',
+                    'MOSSDruh' => 'GD', 'CmJedn' => '40', 'Cm' => '40', 'CmDPH' => '9.2'],
+                ['ID' => '2', 'RefAg' => '2', 'RelSzDPH' => '2', 'Kc' => '100', 'KcDPH' => '21'],
+            ],
+        ]);
+        [$oss, $domestic] = iterator_to_array($mapper->records('issued'), false);
+
+        self::assertSame('SK', PohodaXml::text($oss['invoiceHeader'], 'MOSS/ids'));
+        self::assertSame('G', PohodaXml::text($oss['invoiceHeader'], 'evidentiaryResourcesMOSS/ids'));
+        $item = $oss['invoiceDetail']['invoiceItem'][0];
+        self::assertSame('GD', PohodaXml::text($item, 'typeServiceMOSS/ids'));
+        self::assertSame('23', PohodaXml::text($item, 'percentVAT'));
+        self::assertSame('40', PohodaXml::text($item, 'foreignCurrency/price'));
+        self::assertSame('9.2', PohodaXml::text($item, 'foreignCurrency/priceVAT'));
+        self::assertSame('EUR', PohodaXml::text($oss, 'invoiceSummary/foreignCurrency/currency/ids'));
+
+        // Doklad mimo OSS a v Kč: nic z toho nenese, stejně jako XML POHODY.
+        self::assertSame('', PohodaXml::text($domestic['invoiceHeader'], 'MOSS/ids'));
+        self::assertArrayNotHasKey('evidentiaryResourcesMOSS', $domestic['invoiceHeader']);
+        self::assertArrayNotHasKey('typeServiceMOSS', $domestic['invoiceDetail']['invoiceItem'][0]);
+        self::assertArrayNotHasKey('foreignCurrency', $domestic['invoiceDetail']['invoiceItem'][0]);
+    }
+
     public function testBankDirectionAndMovementNumberArePreserved(): void
     {
         $mapper = $this->mapper(['BV' => [

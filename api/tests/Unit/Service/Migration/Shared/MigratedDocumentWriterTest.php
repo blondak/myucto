@@ -42,7 +42,7 @@ final class MigratedDocumentWriterTest extends TestCase
             vat_rate_id INT, vat_rate_snapshot NUMERIC, total_without_vat NUMERIC, total_vat NUMERIC,
             total_with_vat NUMERIC, order_index INT, vat_classification_code TEXT,
             oss_applicable INT, oss_consumer_country TEXT, oss_rate_type TEXT, oss_supply_type TEXT,
-            oss_needs_manual_review INT)');
+            oss_needs_manual_review INT, oss_taxable_amount_return NUMERIC, oss_vat_amount_return NUMERIC)');
         $this->pdo->exec('CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY AUTOINCREMENT,
             supplier_id INT, vendor_id INT, vendor_is_vat_payer INT, varsymbol TEXT, vendor_invoice_number TEXT,
             document_kind TEXT, issue_date TEXT, tax_date TEXT, due_date TEXT, received_at TEXT,
@@ -108,7 +108,8 @@ final class MigratedDocumentWriterTest extends TestCase
     public function testIssuedItemsCarryOrderIndexFromKeysAndOssColumns(): void
     {
         $oss = ['oss_applicable' => 1, 'oss_consumer_country' => 'DE', 'oss_rate_type' => 'standard',
-            'oss_supply_type' => 'goods', 'oss_needs_manual_review' => 0];
+            'oss_supply_type' => 'goods', 'oss_needs_manual_review' => 0,
+            'oss_taxable_amount_return' => 4.0, 'oss_vat_amount_return' => 0.76];
         $this->writer->insertIssuedItems(11, [
             0 => MigratedDocumentItem::issued('Zboží', 2.0, 'ks', 50.0, 4, 19.0, 100.0, 19.0, 119.0, null, $oss),
             1 => MigratedDocumentItem::issued('Doprava', 1.0, 'ks', 10.0, 1, 21.0, 10.0, 2.1, 12.1, '1', OssMigrationPolicy::DOMESTIC_COLUMNS),
@@ -119,8 +120,13 @@ final class MigratedDocumentWriterTest extends TestCase
         self::assertSame([0, 1], array_map(static fn (array $r): int => (int) $r['order_index'], $rows));
         self::assertSame(1, (int) $rows[0]['oss_applicable']);
         self::assertSame('DE', $rows[0]['oss_consumer_country']);
+        // Částky pro OSS přiznání v měně podání, když je zdroj zná; jinak NULL = dopočte náhled.
+        self::assertSame(4.0, (float) $rows[0]['oss_taxable_amount_return']);
+        self::assertSame(0.76, (float) $rows[0]['oss_vat_amount_return']);
         self::assertSame(0, (int) $rows[1]['oss_applicable']);
         self::assertNull($rows[1]['oss_consumer_country']);
+        self::assertNull($rows[1]['oss_taxable_amount_return']);
+        self::assertNull($rows[1]['oss_vat_amount_return']);
         self::assertSame('1', $rows[1]['vat_classification_code']);
     }
 

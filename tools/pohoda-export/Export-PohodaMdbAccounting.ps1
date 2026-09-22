@@ -61,9 +61,12 @@ $PohodaItemColumns = @(
     'ProcentoDPH', 'KcJedn', 'Kc', 'KcDPH', 'RelTpDPH', 'OrderFld'
 )
 
+# Režim OSS vede jen agenda faktur (stát spotřeby, doklady prokazující stát, typ plnění
+# a částky položky v cizí měně). Ostatní tabulky dokladů tyto sloupce nemají; sloupec,
+# který konkrétní verze POHODY nezná, Write-PohodaTable vynechá.
 $PohodaAccountingTables = [ordered]@{
-    FA       = $PohodaDocumentColumns + @('RelTpFak')
-    FApol    = $PohodaItemColumns
+    FA       = $PohodaDocumentColumns + @('RelTpFak', 'MOSS', 'MOSSDukaz', 'DatZdPlnMOSS')
+    FApol    = $PohodaItemColumns + @('MOSSDruh', 'CmJedn', 'Cm', 'CmDPH')
     pUD      = @('ID', 'RelUdAg', 'Cislo', 'Datum', 'DatZdPln', 'SText', 'Kc', 'UMD', 'UD', 'RelAgID', 'ParSym')
     pOS      = @('Ucet', 'Nazev')
     pPK      = @('ID', 'IDS', 'SText', 'UMD', 'UD', 'RelPkAg')

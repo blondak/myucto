@@ -519,6 +519,8 @@ final class InvoiceImporter
             'remaining' => PohodaXml::text($h, 'liquidation/amountHome'),
             'paid_date' => PohodaXml::date($h, 'liquidation/date'),
             'foreign' => PohodaXml::text($r, $prefix . 'Summary/foreignCurrency/currency/ids'),
+            // Stát spotřeby dokladu v režimu OSS; POHODA element vynechává, není-li doklad v OSS.
+            'moss' => strtoupper(PohodaXml::text($h, 'MOSS/ids')),
         ];
     }
 
@@ -568,7 +570,8 @@ final class InvoiceImporter
                 // Skutečné procento sazby, která se do české úrovně nevejde - čte ho jen OSS
                 // větev ({@see rateIssuedItems()}), tuzemské párování zůstává na `rate`.
                 'percent' => is_numeric($percent) && (float) $percent > 0.0 ? (float) $percent : null,
-            ];
+                'supply_type' => self::mossSupplyType(PohodaXml::text($it, 'typeServiceMOSS/ids')),
+            ] + self::foreignAmounts($it);
         }
         $source = 'detail';
         if ($items !== []) {
@@ -628,7 +631,7 @@ final class InvoiceImporter
                 'description' => 'Odpočet zálohy' . ($ref !== '' ? ' ' . $ref : ''),
                 'quantity' => 1.0, 'unit' => null, 'unit_price' => $base,
                 'base' => $base, 'vat' => $vat, 'rate' => $itemRate($a),
-            ];
+            ] + self::foreignAmounts($a);
             $advanceItems++;
         }
         foreach ($items as &$item) {
@@ -745,20 +748,42 @@ final class InvoiceImporter
             }
         }
 
+        // Doklad, který POHODA zahrnuje do svého OSS přiznání, nese stát spotřeby (MOSS);
+        // prázdný element POHODA do exportu nepíše. Členění mimo přiznání s daní BEZ MOSS
+        // tedy v POHODĚ v OSS není a převod ho tam nesmí poslat sám podle země odběratele.
+        // Doklad zůstane konceptem: řádky dostanou návrh plánovače (sazba ve správné zemi,
+        // ať jde doklad otevřít v editoru) s příznakem k ručnímu posouzení - do přiznání
+        // koncept nevstupuje, rozhodne člověk.
+        $outsideOss = $candidate && $doc['moss'] === '';
+        if ($outsideOss) {
+            $class['reasons'][] = "členění DPH „{$code}“ s daní, ale doklad v POHODĚ není v režimu OSS (chybí stát MOSS) - "
+                . 'POHODA ho do OSS přiznání nezahrnula; řádky s daní jsou navržené podle země odběratele, '
+                . 'rozhodněte, zda plnění patří do OSS, nebo do tuzemského přiznání';
+        }
+
         foreach ($amounts['items'] as $i => $item) {
             if ($candidate && abs((float) $item['vat']) >= 0.005) {
-                $client ??= $this->oss->clientContext($clientId, (string) $snapshot['country'], (string) $snapshot['dic']);
+                // Stát spotřeby, který účetní v POHODĚ dokladu zadala (MOSS), je pravdivější
+                // než adresa odběratele - ta může být fakturační, ne místo dodání.
+                $client ??= $this->oss->clientContext($clientId, $doc['moss'] !== '' ? $doc['moss'] : (string) $snapshot['country'], (string) $snapshot['dic']);
                 // Sazbu státu spotřeby píše POHODA jako `historyHigh` bez `@value` a skutečné
                 // procento dává do `percentVAT`. Bez něj měl řádek s daní sazbu 0 %, politika ho
                 // vzala jako plnění bez daně a doklad skončil konceptem (issue #75).
-                $plan = $this->oss->planItem($ctx->supplierId, $client, $item['percent'] ?? (float) $item['rate'], $item['unit'], $taxDate, $code);
+                $plan = $this->oss->planItem($ctx->supplierId, $client, $item['percent'] ?? (float) $item['rate'], $item['unit'], $taxDate, $code, $item['supply_type'] ?? null);
                 if ($plan['reason'] !== null && !in_array($plan['reason'], $class['reasons'], true)) {
                     $class['reasons'][] = $plan['reason'];
                 }
                 if ($plan['rate_id'] !== null) {
                     $amounts['items'][$i]['rate_id'] = $plan['rate_id'];
                     $amounts['items'][$i]['rate'] = $plan['rate_percent'];
-                    $amounts['items'][$i]['oss'] = $plan['columns'];
+                    // Doklad v EUR: do OSS podání jdou eura z dokladu, ne koruny přepočtené
+                    // zpátky kurzem ECB konce čtvrtletí. Tuzemská evidence zůstává v Kč.
+                    $amounts['items'][$i]['oss'] = $plan['columns']
+                        + $this->oss->returnAmounts($ctx->supplierId, $doc['foreign'], $item['foreign_base'] ?? null, $item['foreign_vat'] ?? null);
+                    if ($outsideOss) {
+                        $amounts['items'][$i]['oss']['oss_needs_manual_review'] = 1;
+                        continue;
+                    }
                     $ossItems++;
                     $manualReview += (int) $plan['columns']['oss_needs_manual_review'] === 1 ? 1 : 0;
                     foreach ($plan['warnings'] as $warning) {
@@ -1075,7 +1100,7 @@ final class InvoiceImporter
         }
         if ($reasons !== []) {
             $p->count($step, 'review');
-            $p->warn($step, 'needs_review', "Doklad {$docNo} převzat jako koncept k ruční kontrole: " . implode('; ', $reasons)
+            $p->warn($step, 'needs_review', "Doklad {$docNo} převzat jako koncept k ruční kontrole: " . self::reasonList($reasons)
                 . '. Do DPH ani do účtování nevstoupí, dokud ho neopravíte a nepotvrdíte.', ['document_no' => $docNo, 'reasons' => $reasons]);
         }
     }
@@ -1123,7 +1148,53 @@ final class InvoiceImporter
         foreach ($notes as $n) {
             $note .= '; ' . $n;
         }
-        return $reasons === [] ? $note : $note . '. K ruční kontrole: ' . implode('; ', $reasons) . '.';
+        return $reasons === [] ? $note : $note . '. K ruční kontrole: ' . self::reasonList($reasons) . '.';
+    }
+
+    /**
+     * Základ a daň řádku v cizí měně dokladu (`foreignCurrency`), jak je na dokladu -
+     * čte je jen OSS větev ({@see OssMigrationPolicy::returnAmounts()}). Řádek bez
+     * cizoměnových částek (doklad v Kč, rozpis z rekapitulace) je nenese.
+     *
+     * @return array{foreign_base?:float,foreign_vat?:float}
+     */
+    private static function foreignAmounts(mixed $it): array
+    {
+        if (!is_numeric(PohodaXml::text($it, 'foreignCurrency/price')) || !is_numeric(PohodaXml::text($it, 'foreignCurrency/priceVAT'))) {
+            return [];
+        }
+
+        return [
+            'foreign_base' => round(PohodaXml::num($it, 'foreignCurrency/price'), 2),
+            'foreign_vat' => round(PohodaXml::num($it, 'foreignCurrency/priceVAT'), 2),
+        ];
+    }
+
+    /**
+     * Typ plnění řádku v režimu OSS (`typeServiceMOSS`). POHODA rozlišuje dodání zboží
+     * (`GD`) a druhy služeb (`OS` ostatní, telekomunikační, vysílací, elektronické…);
+     * MyÚčto vede jen zboží a služby, takže vše kromě zboží je služba. Prázdné = zdroj
+     * typ neuvádí a odvodí se jako u ostatních kanálů.
+     */
+    private static function mossSupplyType(string $code): ?string
+    {
+        $code = strtoupper(trim($code));
+        return match (true) {
+            $code === '' => null,
+            $code === 'GD' => 'goods',
+            default => 'services',
+        };
+    }
+
+    /**
+     * Důvody ke konceptu jako jedna věta bez koncové tečky - tu přidává volající. Důvod
+     * převzatý z OSS plánovače je celá věta s tečkou a bez ořezu by hláška končila „..".
+     *
+     * @param list<string> $reasons
+     */
+    private static function reasonList(array $reasons): string
+    {
+        return implode('; ', array_map(static fn (string $r): string => rtrim($r, '. '), $reasons));
     }
 
     private function stmt(string $key, string $sql): \PDOStatement

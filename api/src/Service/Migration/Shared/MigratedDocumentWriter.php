@@ -83,13 +83,15 @@ final class MigratedDocumentWriter
         $this->stmt('issued_item', 'INSERT INTO invoice_items
                 (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code,
-                 oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type, oss_needs_manual_review)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([
+                 oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type, oss_needs_manual_review,
+                 oss_taxable_amount_return, oss_vat_amount_return)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([
             $invoiceId, $item->description, $item->quantity, $item->unit, $item->unitPrice,
             $item->vatRateId, $item->vatRateSnapshot, $item->totalWithoutVat, $item->totalVat, $item->totalWithVat,
             $orderIndex, $item->vatClassificationCode,
             $oss['oss_applicable'], $oss['oss_consumer_country'], $oss['oss_rate_type'],
             $oss['oss_supply_type'], $oss['oss_needs_manual_review'],
+            $oss['oss_taxable_amount_return'], $oss['oss_vat_amount_return'],
         ]);
     }
 

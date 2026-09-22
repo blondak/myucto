@@ -180,7 +180,7 @@ k původnímu MDB. Mzdy se nadále převádějí samostatným průvodcem
 | adresář | klienti, párování podle IČO |
 | předkontace | pravidla zaúčtování se zkratkou z POHODY |
 | přijaté a vydané faktury | doklady se stavem zaúčtováno nebo uhrazeno; doklad nejisté daňové povahy jako koncept k ruční kontrole |
-| vydané doklady s členěním mimo přiznání a s daní | plnění v režimu OSS včetně země spotřeby a typu sazby |
+| vydané doklady v režimu OSS (členění mimo přiznání, daň, stát MOSS) | plnění v režimu OSS včetně země spotřeby, typu sazby a typu plnění |
 | interní daňové doklady | daňové doklady k platbě a samovyměření DPH u přijatých faktur |
 | pokladny a pokladní doklady | pokladny a zaúčtované pokladní doklady |
 | bankovní účty a bankovní doklady | výpisy podle čísla výpisu v POHODĚ, bankovní pohyby |
@@ -231,11 +231,23 @@ to kdykoli zopakovat — viz [§ 52.12.1](52_Ucetni_denik.md#52121-dogenerovani-
 **Doklady v režimu OSS.** Vydaná faktura, jejíž členění DPH stojí mimo přiznání
 a přesto nese daň, je typicky prodej koncovému zákazníkovi do jiného členského
 státu — v POHODĚ se vede vlastní zkratkou členění bez řádku přiznání, sazbou
-státu spotřeby a odběratelem bez DIČ. Převod takový doklad převezme rovnou jako
-[OSS plnění](45_OSS.md): nastaví na řádcích příznak OSS, zemi spotřeby a typ
-sazby a doklad vstoupí do OSS přiznání, ne do českého. Rozhoduje o tom stejné
-pravidlo jako u všech ostatních cest ([§ 45.4](45_OSS.md#454-jak-vznika-oss-radek)),
-tedy číselník sazeb členských států.
+státu spotřeby, odběratelem bez DIČ a vyplněným **státem MOSS**. Převod takový
+doklad převezme rovnou jako [OSS plnění](45_OSS.md): nastaví na řádcích příznak
+OSS, zemi spotřeby a typ sazby a doklad vstoupí do OSS přiznání, ne do českého.
+Zemí spotřeby je stát MOSS z dokladu, adresa odběratele jen tehdy, když stát
+MOSS chybí. Rozhoduje o tom stejné pravidlo jako u všech ostatních cest
+([§ 45.4](45_OSS.md#454-jak-vznika-oss-radek)), tedy číselník sazeb členských států.
+
+Doklad s členěním mimo přiznání a s daní, který stát MOSS nemá, POHODA do svého
+OSS přiznání nezahrnula. Převod ho proto převezme jako koncept k ruční kontrole
+s důvodem *„… není v režimu OSS (chybí stát MOSS)"*; řádky s daní jsou navržené
+podle země odběratele a označené k ručnímu posouzení. Rozhodněte, zda plnění
+patří do OSS, nebo do tuzemského přiznání, a koncept potvrďte.
+
+U dokladu v eurech převezme převod do OSS přiznání **částky v eurech přímo
+z dokladu** (ruční částky pro OSS na řádku). Plnění v eurech se pro OSS
+nepřepočítává, takže podání sedí na eura z POHODY. Tuzemská evidence dokladu
+zůstává v korunách.
 
 Aby to fungovalo, musí být před převodem splněné dvě věci:
 
@@ -248,11 +260,17 @@ Aby to fungovalo, musí být před převodem splněné dvě věci:
 Když některá chybí, řekne to protokol jednou větou hned u prvního takového
 dokladu. Doklady, u kterých sazbu není na co navázat, převod nepřevezme a vypíše
 je jmenovitě; po doplnění nastavení stačí převod zopakovat, doplní se jen ony.
-Typ plnění (zboží/služba) se odvozuje z měrné jednotky, karty odběratele a CZ-NACE
-— u e-shopu se zbožím proto před převodem vyplňte
+Typ plnění (zboží/služba) převod bere z typu plnění MOSS na položce dokladu:
+dodání zboží je zboží, ostatní druhy (elektronické, telekomunikační a ostatní
+služby) jsou služba. Jen když ho položka nemá, odvodí se z měrné jednotky, karty
+odběratele a CZ-NACE — pak u e-shopu se zbožím před převodem vyplňte
 [výchozí typ plnění na kartě odběratele](45_OSS.md#4534-vychozi-nastaveni-na-karte-odberatele)
 nebo převažující činnost firmy, jinak řádky spadnou na výchozí „služba" (protokol
 na to upozorní).
+
+Export z datového souboru (MDB) nese údaje OSS jen z aktuální verze exportního
+nástroje. Se starším exportem skončí doklady v režimu OSS jako koncepty kvůli
+chybějícímu státu MOSS; vytvořte export znovu.
 
 **Doklady k ruční kontrole.** Fakturu, jejíž daňovou povahu export spolehlivě
 neurčuje, převod převezme jako koncept, například doklad s daní bez členění

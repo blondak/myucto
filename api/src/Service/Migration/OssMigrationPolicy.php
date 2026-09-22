@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Migration;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Oss\OssClientContext;
+use MyInvoice\Service\Oss\OssDerivationReason;
+use MyInvoice\Service\Oss\OssItemDecision;
 use MyInvoice\Service\Oss\OssItemPlanner;
 
 /**
@@ -53,6 +55,9 @@ final class OssMigrationPolicy
     private ?bool $ossEnabledCache = null;
 
     private bool $warned = false;
+
+    /** @var array<int,string> */
+    private array $returnCurrencyCache = [];
 
     public function __construct(
         private readonly Connection $db,
@@ -111,8 +116,15 @@ final class OssMigrationPolicy
      * spotřeby, ne v tuzemsku. U všech ostatních zůstává `null` a sazbu si páruje volající
      * po svém (tuzemsky), protože jinou zemi než tuzemsko pro ně nemá čím odůvodnit.
      *
+     * Typ plnění, který převáděný doklad UVÁDÍ (POHODA `typeServiceMOSS`), přebije odvození
+     * z jednotky, karty odběratele a CZ-NACE: ten žebřík existuje pro kanály, které typ
+     * plnění neznají a musí ho odhadnout. Kde ho účetní v původním programu zadala k řádku,
+     * odhad nemá co opravovat - a varování „použita výchozí služba" by bylo nepravdivé.
+     * O místě plnění ani o sazbě typ nerozhoduje, takže rozhodnutí plánovače zůstává celé.
+     *
      * @param  ?string $unit               měrná jednotka řádku; signál zboží vs. služba
      * @param  string  $classificationCode zkratka členění z převáděné agendy - jen do hlášky
+     * @param  ?string $declaredSupplyType typ plnění z dokladu (`goods` / `services`), `null` = zdroj ho neuvádí
      * @return array{rate_id:?int,rate_percent:float,columns:array<string,mixed>,reason:?string,manual_review:bool,warnings:list<string>}
      */
     public function planItem(
@@ -122,6 +134,7 @@ final class OssMigrationPolicy
         ?string $unit,
         string $taxDate,
         string $classificationCode,
+        ?string $declaredSupplyType = null,
     ): array {
         if ($ratePercent <= 0.0) {
             // Osvobozené plnění, vývoz, přenesená povinnost. Číselník nulové sazby nevede,
@@ -154,6 +167,12 @@ final class OssMigrationPolicy
         }
 
         $columns = $plan->itemColumns();
+        $warnings = $plan->warnings();
+        if ($declaredSupplyType !== null && in_array($declaredSupplyType, OssItemDecision::SUPPLY_TYPES, true)) {
+            $columns['oss_supply_type'] = $declaredSupplyType;
+            $guessed = OssDerivationReason::SupplyTypeDefaultServices->message();
+            $warnings = array_values(array_filter($warnings, static fn (string $w): bool => $w !== $guessed));
+        }
 
         return [
             'rate_id' => (int) $columns['vat_rate_id'],
@@ -172,7 +191,7 @@ final class OssMigrationPolicy
             // Typicky „typ plnění se odvodit nedal, doplněna služba" - u e-shopu se zbožím
             // je to špatně a uživatel to musí vidět dřív, než podá OSS přiznání. Rozhodnutí
             // to nemění, proto to není důvod ke konceptu.
-            'warnings' => $plan->warnings(),
+            'warnings' => $warnings,
         ];
     }
 
@@ -189,6 +208,43 @@ final class OssMigrationPolicy
             'manual_review' => $manualReview,
             'warnings' => [],
         ];
+    }
+
+    /**
+     * Částky OSS řádku pro přiznání, je-li převáděný doklad vystavený přímo v MĚNĚ PODÁNÍ.
+     *
+     * Převod zakládá doklad v Kč (tuzemská evidence stojí na korunách ze zdroje). OSS
+     * přiznání se ale podává v eurech a přepočítává se jen plnění v JINÉ měně než euro
+     * (čl. 369h odst. 3 směrnice 2006/112/ES); plnění vyjádřené v eurech jde do podání
+     * tak, jak je na dokladu. Bez těchto částek by {@see \MyInvoice\Service\Oss\OssLedgerService}
+     * přepočítal koruny zpátky kurzem ECB ke konci čtvrtletí a vyšlo by jiné číslo, než
+     * které zdrojový program podal (na reálné agendě o 0,8 % víc).
+     *
+     * Ukládají se jako ruční částky pro OSS (`oss_taxable_amount_return`,
+     * `oss_vat_amount_return`), které má náhled podání přednostně - kurz k nim evidence
+     * neuvádí, protože se nepřepočítávalo. Doklad v jiné cizí měně nechá přepočet na náhledu.
+     *
+     * @return array{oss_taxable_amount_return:?float,oss_vat_amount_return:?float}
+     */
+    public function returnAmounts(int $supplierId, string $documentCurrency, ?float $base, ?float $vat): array
+    {
+        if ($base === null || $vat === null || strtoupper(trim($documentCurrency)) !== $this->returnCurrency($supplierId)) {
+            return ['oss_taxable_amount_return' => null, 'oss_vat_amount_return' => null];
+        }
+
+        return ['oss_taxable_amount_return' => round($base, 2), 'oss_vat_amount_return' => round($vat, 2)];
+    }
+
+    private function returnCurrency(int $supplierId): string
+    {
+        if (!isset($this->returnCurrencyCache[$supplierId])) {
+            $stmt = $this->db->pdo()->prepare('SELECT oss_return_currency FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $currency = strtoupper(trim((string) $stmt->fetchColumn()));
+            $this->returnCurrencyCache[$supplierId] = $currency !== '' ? $currency : 'EUR';
+        }
+
+        return $this->returnCurrencyCache[$supplierId];
     }
 
     private function ossEnabled(int $supplierId): bool
