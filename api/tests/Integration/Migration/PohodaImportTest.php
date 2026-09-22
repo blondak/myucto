@@ -294,6 +294,58 @@ final class PohodaImportTest extends TestCase
     }
 
     /**
+     * Issue #75: POHODA píše sazbu státu spotřeby, která se do české sazbové úrovně nevejde,
+     * jako `historyHigh` BEZ atributu `value` a skutečné procento dává do `percentVAT`.
+     * Převod četl jen atribut a úroveň, takže řádek s daní měl sazbu 0 %, OSS politika ho
+     * jako „bez daně" přeskočila a doklad skončil konceptem s hláškou „členění DPH „UN“
+     * mimo přiznání u dokladu s daní" - u zákazníka 1 160 dokladů, přestože režim OSS
+     * i sazby státu spotřeby měl nastavené správně.
+     */
+    public function testOssDocumentWithPercentVatIsTakenOverAsOssSupply(): void
+    {
+        $supplierId = $this->supplier();
+        $this->enableOss($supplierId);
+        $this->foreignRate(SyntheticPohodaExport::OSS_COUNTRY, SyntheticPohodaExport::OSS_RATE);
+
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, withOss: true, ossRateForm: SyntheticPohodaExport::OSS_RATE_PERCENT));
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertNull($this->reviewMessage($protocol), 'OSS doklad nesmí skončit jako koncept. ' . $this->explain($protocol));
+        $row = $this->ossDocument($supplierId);
+        self::assertNotNull($row, 'Doklad v režimu OSS se nepřevedl. ' . $this->explain($protocol));
+        self::assertNotSame('draft', $row['status'], $this->explain($protocol));
+        self::assertNull($row['vat_classification_code'], 'Do českého přiznání OSS plnění nepatří.');
+        self::assertSame(1, (int) $row['oss_applicable']);
+        self::assertSame(SyntheticPohodaExport::OSS_COUNTRY, $row['oss_consumer_country']);
+        self::assertSame(SyntheticPohodaExport::OSS_COUNTRY, $row['rate_country']);
+        self::assertSame('23.00', (string) $row['vat_rate_snapshot']);
+        self::assertSame(1, self::stepCounts($protocol, 'issued_invoices')['oss_items'] ?? 0, $this->explain($protocol));
+    }
+
+    /**
+     * Když export sazbu řádku s daní opravdu nenese (ani `percentVAT`, ani `@value`), zůstane
+     * doklad konceptem - ale hláška musí říct proč, ne jen zopakovat členění.
+     */
+    public function testOssDocumentWithoutRateInExportIsDraftWithConcreteReason(): void
+    {
+        $supplierId = $this->supplier();
+        $this->enableOss($supplierId);
+        $this->foreignRate(SyntheticPohodaExport::OSS_COUNTRY, SyntheticPohodaExport::OSS_RATE);
+
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, withOss: true, ossRateForm: SyntheticPohodaExport::OSS_RATE_HISTORY));
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+
+        $row = $this->ossDocument($supplierId);
+        self::assertNotNull($row, $this->explain($protocol));
+        self::assertSame('draft', $row['status']);
+        self::assertSame(0, (int) $row['oss_applicable']);
+        $reason = $this->reviewMessage($protocol);
+        self::assertNotNull($reason, $this->explain($protocol));
+        self::assertStringContainsString('sazbu DPH', $reason, 'Hláška musí pojmenovat příčinu, ne jen konstatovat členění.');
+    }
+
+    /**
      * Bez zapnutého režimu OSS se cizí daň do tuzemského přiznání nepustí ani omylem.
      * Doklad se nepřevezme (23 % není tuzemská sazba, takže není na co řádek navázat),
      * ale zbytek agendy doteče a protokol jednou za běh řekne, co zapnout.
