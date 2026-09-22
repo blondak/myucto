@@ -84,13 +84,10 @@ final class PayrollTakeoverAbsenceWriter
         if ($absences === []) {
             return $counts;
         }
-        if (!$policy->absencesPerRecord) {
-            $existing = $this->db->pdo()->prepare('SELECT COUNT(*) FROM payroll_absences WHERE supplier_id = ? AND employment_id = ?');
-            $existing->execute([$supplierId, $employmentId]);
-            if ((int) $existing->fetchColumn() > 0) {
-                return $counts + ['absences_existing' => 1];
-            }
-        }
+        // Doplňuje se po záznamech: převody běží po letech a každý rok přináší další
+        // nepřítomnosti téhož vztahu. Přeskočí se jen ta, která už je zapsaná se stejným
+        // druhem a daty (opakovaný převod nic nezdvojí); jiná nepřítomnost v týchž dnech
+        // (ruční, z jiného kroku) se nezapíše a protokol ji hlásí jako překryv.
         $written = 0;
         $overlaps = 0;
         $approved = 0;
@@ -99,7 +96,7 @@ final class PayrollTakeoverAbsenceWriter
         $rejected = 0;
         $continued = 0;
         foreach (self::splitAtQuarters(self::mergedAbsences($absences, $overlaps)) as $absence) {
-            if ($policy->absencesPerRecord && $this->recorded($supplierId, $employmentId, $absence)) {
+            if ($this->recorded($supplierId, $employmentId, $absence)) {
                 $already++;
                 continue;
             }
@@ -222,7 +219,7 @@ final class PayrollTakeoverAbsenceWriter
 
     /**
      * Je tatáž nepřítomnost (druh a data) u vztahu už zapsaná? Zrušená ani zamítnutá se
-     * nepočítá. Jen pro doplňování po záznamech ({@see PayrollTakeoverPolicy::$absencesPerRecord}).
+     * nepočítá.
      *
      * @param array<string,mixed> $absence
      */
