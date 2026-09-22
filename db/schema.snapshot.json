@@ -848,7 +848,8 @@
         "1861_dimension_defaults.sql",
         "1862_bank_posting_rule_mode_set_manually.sql",
         "1863_payment_matches_supplier_doc_index.sql",
-        "1864_stereo_nx_import.sql"
+        "1864_stereo_nx_import.sql",
+        "1865_import_jobs_stereo_nx.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -4995,7 +4996,7 @@
                 "result_path": "varchar(255) NULL DEFAULT NULL",
                 "result_size": "bigint(20) unsigned NULL DEFAULT NULL",
                 "skipped_count": "int(10) unsigned NOT NULL DEFAULT 0",
-                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import') NOT NULL",
+                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import','stereo_nx_import') NOT NULL",
                 "started_at": "timestamp NULL DEFAULT NULL",
                 "status": "enum('queued','running','completed','failed','cancelled','completed_with_warnings') NOT NULL DEFAULT 'queued'",
                 "supplier_id": "int(10) unsigned NOT NULL",
