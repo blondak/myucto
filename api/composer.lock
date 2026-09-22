@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "db8e6f69c95062eea2bd0508949cb6d2",
+    "content-hash": "e3110f5bd5d50710ce1b6550f29eb54f",
     "packages": [
         {
             "name": "blondak/nx1-reader",
-            "version": "dev-main",
+            "version": "v0.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/blondak/nx1-reader.git",
-                "reference": "f2b51f1e1d024f9030e3eea5076110223074f27e"
+                "reference": "72bd2030ef2c105e66e1bd8b44a04bd5b98de965"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/blondak/nx1-reader/zipball/f2b51f1e1d024f9030e3eea5076110223074f27e",
-                "reference": "f2b51f1e1d024f9030e3eea5076110223074f27e",
+                "url": "https://api.github.com/repos/blondak/nx1-reader/zipball/72bd2030ef2c105e66e1bd8b44a04bd5b98de965",
+                "reference": "72bd2030ef2c105e66e1bd8b44a04bd5b98de965",
                 "shasum": ""
             },
             "require": {
@@ -28,7 +28,6 @@
             "require-dev": {
                 "phpunit/phpunit": "^12.0"
             },
-            "default-branch": true,
             "bin": [
                 "bin/nx1dump",
                 "bin/nx1scan"
@@ -65,7 +64,7 @@
                 "reader",
                 "zip"
             ],
-            "time": "2026-09-22T08:39:17+00:00"
+            "time": "2026-09-22T11:54:31+00:00"
         },
         {
             "name": "brick/math",
@@ -10984,9 +10983,7 @@
     ],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {
-        "blondak/nx1-reader": 20
-    },
+    "stability-flags": {},
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {

@@ -22,7 +22,7 @@
         "ext-xmlreader": "*",
         "ext-zip": "*",
         "ext-zlib": "*",
-        "blondak/nx1-reader": "dev-main#f2b51f1e1d024f9030e3eea5076110223074f27e",
+        "blondak/nx1-reader": "^0.1",
         "chillerlan/php-qrcode": "^6.0",
         "dragonofmercy/phppdf": "^1.0",
         "enshrined/svg-sanitize": "^1.0",
