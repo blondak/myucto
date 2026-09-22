@@ -140,6 +140,13 @@ Praktické důsledky:
   read-only, takže je lze pustit i proti produkci; `-SkipData` je vynechá.
 - **Ne každá odlišnost je drift.** `formatAmount` v EPO výkazech a § 46 vs § 74b jsou
   záměr — guard je má chránit před „sjednocením", ne je slučovat.
+- **Oprava sdílené daňové/účetní vrstvy nepatří do PR jiné funkce.** Když při práci na
+  importu, integraci nebo jiné feature narazíš na chybu ve sdíleném výpočtu (DPH, peněžní
+  deník, daňový profil, DPFO/DPPO, účetní deník, výkazy), pošli ji jako **samostatný PR**
+  `fix(dane|ucetnictvi): …`, ideálně dřív než feature. Popis musí říct, které doklady se
+  mění (nativní vs. převzaté), s číslem dopadu na reálně vypadajících datech, a doložit
+  test, který bez opravy padá. Feature PR na takové opravě může stavět, ale nesmí ji nést
+  v sobě: maintainer ji musí posoudit a případně vrátit nezávisle na feature.
 
 ## Manuál
 
