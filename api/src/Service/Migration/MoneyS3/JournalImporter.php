@@ -10,6 +10,8 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Migration\Shared\MigrationPeriods;
+use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
 
 /**
  * Účetní období a účetní deník z Money.
@@ -132,31 +134,15 @@ final class JournalImporter
     private function ensurePeriod(ImportContext $ctx, array $item): array
     {
         $year = $item['year'];
-        $existing = $this->periods->findByYear($ctx->supplierId, $year);
-        if ($existing === null) {
-            $id = $this->periods->create($ctx->supplierId, $year, $item['starts_on'], $item['ends_on'], 'import');
-            $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_PERIOD, (string) $year, $id, $ctx->runId);
-            $ctx->protocol->count(self::STEP, 'periods_created');
-            return ['id' => $id, 'starts_on' => $item['starts_on'], 'ends_on' => $item['ends_on'], 'status' => 'open', 'locked' => false];
-        }
-        $id = (int) $existing['id'];
-        if ($this->map->get($ctx->supplierId, MoneyS3ImportRepository::KIND_PERIOD, (string) $year) === null) {
-            $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_PERIOD, (string) $year, $id, $ctx->runId);
-        }
-        if ((string) $existing['starts_on'] !== $item['starts_on'] || (string) $existing['ends_on'] !== $item['ends_on']) {
-            $ctx->protocol->warn(self::STEP, 'period_bounds_differ', sprintf(
-                'Období %d už v MyÚčtu existuje (%s – %s), převod ho použije beze změny hranic.',
-                $year, $existing['starts_on'], $existing['ends_on']
-            ), ['year' => $year]);
-        }
-        $status = (string) $existing['status'];
-        return [
-            'id' => $id,
-            'starts_on' => (string) $existing['starts_on'],
-            'ends_on' => (string) $existing['ends_on'],
-            'status' => $status,
-            'locked' => $status !== 'open',
-        ];
+        $remember = fn (int $id) => $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_PERIOD, (string) $year, $id, $ctx->runId);
+        // Období založené dřív (ručně nebo jiným převodem) se zapíše do mapy, pokud v ní chybí.
+        $adopt = function (int $id) use ($ctx, $year, $remember): void {
+            if ($this->map->get($ctx->supplierId, MoneyS3ImportRepository::KIND_PERIOD, (string) $year) === null) {
+                $remember($id);
+            }
+        };
+        return (new MigrationPeriods($this->periods))
+            ->ensure($ctx->supplierId, $year, $item['starts_on'], $item['ends_on'], $ctx->protocol, self::STEP, $remember, $adopt, true);
     }
 
     /**
@@ -299,7 +285,7 @@ final class JournalImporter
                 $year, count($moved), $year, implode(', ', array_slice($moved, 0, 10)) . (count($moved) > 10 ? ', …' : '')
             ), ['year' => $year, 'documents' => $moved]);
         }
-        if (abs($stats['debit'] - $stats['credit']) >= 0.005) {
+        if (!ReconciliationTolerance::sameCent($stats['debit'], $stats['credit'])) {
             $p->error(self::STEP, 'journal_unbalanced', "Rok {$year}: Σ MD ≠ Σ D.", ['year' => $year]);
         }
         return $stats;
@@ -406,7 +392,7 @@ final class JournalImporter
             $diffs = [];
             foreach (array_unique(array_merge(array_keys($cur['closing']), array_keys($next['opening']))) as $code) {
                 $diff = round(($cur['closing'][$code] ?? 0.0) - ($next['opening'][$code] ?? 0.0), 2);
-                if (abs($diff) >= 0.005) {
+                if (!ReconciliationTolerance::isZeroCent($diff)) {
                     $diffs[(string) $code] = $diff;
                 }
             }

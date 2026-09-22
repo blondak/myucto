@@ -13,6 +13,9 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Migration\MoneyS3\AccountCode;
+use MyInvoice\Service\Migration\Shared\ChartAccountCreator;
+use MyInvoice\Service\Migration\Shared\MigrationPeriods;
+use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
 
 /**
  * Účtová osnova, účetní období, počáteční stavy a účetní deník roku z PREMIER.
@@ -90,15 +93,9 @@ final class ChartJournalImporter
             if ($parent === null) {
                 continue;
             }
-            $id = $this->accounts->insert($ctx->supplierId, [
-                'account_code' => $target,
-                'name' => mb_substr(($info['name'] ?? '') !== '' ? $info['name'] : ('Analytika ' . $premierCode), 0, 190),
-                'account_type' => (string) $parent['account_type'],
-                'normal_side' => $parent['normal_side'] ?? null,
-                'is_synthetic' => false,
-                'parent_id' => (int) $parent['id'],
-                'is_active' => true,
-            ]);
+            $id = (new ChartAccountCreator($this->accounts))->createAnalytic(
+                $ctx->supplierId, $target, ($info['name'] ?? '') !== '' ? $info['name'] : ('Analytika ' . $premierCode), $parent,
+            );
             $this->setDeductibility($ctx->supplierId, $id, $deductibility);
             $ctx->accountIds[$target] = $id;
             $this->map->put($ctx->supplierId, PremierImportRepository::KIND_ACCOUNT, $target, $id, $ctx->runId);
@@ -220,7 +217,7 @@ final class ChartJournalImporter
         if ($stats['swapped_rows'] > 0) {
             $p->info(self::STEP_JOURNAL, 'negative_amounts', "{$stats['swapped_rows']} řádků se zápornou částkou přeneseno s prohozenými stranami (účetně totéž).");
         }
-        if (abs($stats['debit'] - $stats['credit']) >= 0.005) {
+        if (!ReconciliationTolerance::sameCent($stats['debit'], $stats['credit'])) {
             $p->error(self::STEP_JOURNAL, 'journal_unbalanced', "Rok {$year}: Σ MD ≠ Σ D.");
         }
         $p->set('journal', [$stats]);
@@ -429,23 +426,11 @@ final class ChartJournalImporter
     private function ensurePeriod(PremierContext $ctx): array
     {
         $year = $ctx->year;
-        $existing = $this->periods->findByYear($ctx->supplierId, $year);
-        if ($existing === null) {
-            $starts = sprintf('%04d-01-01', $year);
-            $ends = sprintf('%04d-12-31', $year);
-            $id = $this->periods->create($ctx->supplierId, $year, $starts, $ends, 'import');
-            $this->map->put($ctx->supplierId, PremierImportRepository::KIND_PERIOD, (string) $year, $id, $ctx->runId);
-            $ctx->protocol->count(self::STEP_JOURNAL, 'periods_created');
-            return ['id' => $id, 'starts_on' => $starts, 'ends_on' => $ends, 'status' => 'open', 'locked' => false];
-        }
-        $status = (string) $existing['status'];
-        return [
-            'id' => (int) $existing['id'],
-            'starts_on' => (string) $existing['starts_on'],
-            'ends_on' => (string) $existing['ends_on'],
-            'status' => $status,
-            'locked' => $status !== 'open',
-        ];
+        [$starts, $ends] = MigrationPeriods::calendarYear($year);
+        return (new MigrationPeriods($this->periods))->ensure(
+            $ctx->supplierId, $year, $starts, $ends, $ctx->protocol, self::STEP_JOURNAL,
+            fn (int $id) => $this->map->put($ctx->supplierId, PremierImportRepository::KIND_PERIOD, (string) $year, $id, $ctx->runId),
+        );
     }
 
     /**
@@ -462,32 +447,15 @@ final class ChartJournalImporter
             $ctx->accountIds[$synthetic] ??= (int) $found['id'];
             return $found;
         }
-        $sibling = null;
-        foreach ([2, 1] as $prefix) {
-            foreach ($this->accounts->listForTenant($ctx->supplierId, true) as $row) {
-                if (!empty($row['is_synthetic']) && str_starts_with((string) $row['account_code'], substr($synthetic, 0, $prefix))) {
-                    $sibling = $row;
-                    break 2;
-                }
-            }
-        }
-        if ($sibling === null) {
-            $ctx->protocol->error(self::STEP_CHART, 'unknown_synthetic', "Syntetický účet {$synthetic} v osnově chybí a nelze odvodit jeho typ. Založte ho v Účetní osnově a spusťte převod znovu.", ['account' => $synthetic]);
+        $created = (new ChartAccountCreator($this->accounts))->createSynthetic(
+            $ctx->supplierId, $synthetic, ($chart[$synthetic]['name'] ?? '') !== '' ? $chart[$synthetic]['name'] : ('Účet ' . $synthetic), $ctx->protocol, self::STEP_CHART,
+        );
+        if ($created === null) {
             return null;
         }
-        $id = $this->accounts->insert($ctx->supplierId, [
-            'account_code' => $synthetic,
-            'name' => mb_substr(($chart[$synthetic]['name'] ?? '') !== '' ? $chart[$synthetic]['name'] : ('Účet ' . $synthetic), 0, 190),
-            'account_type' => (string) $sibling['account_type'],
-            'normal_side' => $sibling['normal_side'] ?? null,
-            'is_synthetic' => true,
-            'parent_id' => null,
-            'is_active' => true,
-        ]);
-        $ctx->accountIds[$synthetic] = $id;
-        $this->map->put($ctx->supplierId, PremierImportRepository::KIND_ACCOUNT, $synthetic, $id, $ctx->runId);
-        $ctx->protocol->warn(self::STEP_CHART, 'synthetic_created', "Syntetický účet {$synthetic} v osnově chyběl, založen s typem podle účtu {$sibling['account_code']}. Zkontrolujte jeho zařazení do výkazů.", ['account' => $synthetic]);
-        return $this->accounts->findById($ctx->supplierId, $id);
+        $ctx->accountIds[$synthetic] = $created['id'];
+        $this->map->put($ctx->supplierId, PremierImportRepository::KIND_ACCOUNT, $synthetic, $created['id'], $ctx->runId);
+        return $this->accounts->findById($ctx->supplierId, $created['id']);
     }
 
     /**
