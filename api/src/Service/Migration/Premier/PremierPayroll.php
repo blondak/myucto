@@ -81,6 +81,7 @@ final class PremierPayroll
         }
         $wages = [];
         $hourly = [];
+        $weeklyHours = [];
         foreach ($backup->rows('PERS_HYS') as $row) {
             $from = self::date($row['PLATNY_OD'] ?? null)
                 ?? (((int) ($row['ROK'] ?? 0)) > 0 ? sprintf('%04d-%02d-01', (int) $row['ROK'], max(1, (int) ($row['MESIC'] ?? 1))) : null);
@@ -93,7 +94,13 @@ final class PremierPayroll
             } elseif ($kind === 'hourly') {
                 $hourly[(int) ($row['INTER'] ?? 0)][$from] = $amount;
             }
+            // Týdenní pracovní doba verze (`UVA_HOD`, hodin týdně; `UVA_DOBA` je hodin denně).
+            $weekly = round((float) ($row['UVA_HOD'] ?? 0), 2);
+            if ($weekly > 0 && $weekly <= 168) {
+                $weeklyHours[(int) ($row['INTER'] ?? 0)][$from] = ['weekly' => $weekly, 'daily' => round((float) ($row['UVA_DOBA'] ?? 0), 4)];
+            }
         }
+        $registry = PremierPayrollRegistry::read($backup);
         $insurers = [];
         /** @var array<int,list<array{date:string,code:string,kind:string}>> $insurerEvents */
         $insurerEvents = [];
@@ -165,7 +172,10 @@ final class PremierPayroll
             $account = self::digits(str_replace('-', '', self::text($row['BANKA_UCET'] ?? '')), 22) !== null
                 ? self::text($row['BANKA_UCET'] ?? '') : null;
             $bankCode = self::digits(self::text($row['BANKA_KOD'] ?? ''), 4);
-            [$relationType, $typeDerived] = self::relationType($row);
+            $evidence = $registry[$inter] ?? [];
+            [$relationType, $typeDerived] = self::relationType($row, $evidence['jmhz']['activity'] ?? null);
+            $relationWeekly = $weeklyHours[$inter] ?? [];
+            ksort($relationWeekly);
             $relations[] = [
                 'key' => (string) $inter,
                 'person_key' => $person !== null ? 'PER_MAIN|' . self::text($person['ID'] ?? '') : 'CISLO|' . ($number > 0 ? $number : 'I' . $inter),
@@ -200,7 +210,11 @@ final class PremierPayroll
                 'account' => $account !== null && $bankCode !== null ? ['account' => $account, 'bank_code' => $bankCode] : null,
                 'wages' => $relationWages,
                 'hourly_wages' => $relationHourly,
+                // Úvazek po verzích: `od` => týdně a denně (hodiny).
+                'working_time' => $relationWeekly,
                 'months' => $relationMonths,
+                'registry' => $evidence,
+                'oic' => self::oic(self::text($person['IK_MPSV'] ?? '')),
             ];
         }
         usort($relations, static fn (array $a, array $b): int => ((int) $a['key']) <=> ((int) $b['key']));
@@ -358,12 +372,29 @@ final class PremierPayroll
      * - společník, jednatel, komanditista), dohody podle kódu činnosti ČSSZ nebo textu
      * kategorie, jinak pracovní poměr. Druhá hodnota říká, že druh vyšel z výchozí volby.
      *
+     * `KODPP_SO` je v zálohách prázdný; druh činnosti pak nese poslední formulář JMHZ
+     * vztahu (`X10239`, číselník JMHZ: 1-9 pracovní poměr, A-J DPČ, T-Z a ZA-ZC DPP,
+     * S člen orgánu). Na reálné záloze sedí na kategorii ve všech formulářích.
+     *
      * @param array<string,mixed> $row
      * @return array{0:string,1:bool}
      */
-    private static function relationType(array $row): array
+    private static function relationType(array $row, ?string $jmhzActivity = null): array
     {
         $activity = strtoupper(self::text($row['KODPP_SO'] ?? ''));
+        if ($activity === '' && is_string($jmhzActivity)) {
+            $jmhz = strtoupper($jmhzActivity);
+            $type = match (true) {
+                $jmhz === 'S' => 'statutory_body',
+                preg_match('/^[1-9]$/D', $jmhz) === 1 => 'employment',
+                preg_match('/^[A-J]$/D', $jmhz) === 1 => 'dpc',
+                preg_match('/^(?:[T-Z]|Z[A-C])$/D', $jmhz) === 1 => 'dpp',
+                default => null,
+            };
+            if ($type !== null) {
+                return [$type, false];
+            }
+        }
         $category = mb_strtoupper(self::text($row['UVA_KATE'] ?? '') . ' ' . self::text($row['KATEGO'] ?? ''));
         if (($row['JEDNATEL'] ?? false) === true || $activity === 'S' || preg_match('/\bSJK\b|JEDNATEL|STATUT/u', $category) === 1) {
             return ['statutory_body', false];
@@ -610,6 +641,13 @@ final class PremierPayroll
             }
         }
         return false;
+    }
+
+    /** OIČ osoby z `PER_MAIN.IK_MPSV` (text), jen deset číslic; kontrolní číslici ověří zápis. */
+    private static function oic(string $value): ?string
+    {
+        $digits = (string) preg_replace('/\s+/', '', $value);
+        return preg_match('/^[0-9]{10}$/D', $digits) === 1 ? $digits : null;
     }
 
     private static function email(string $value): ?string

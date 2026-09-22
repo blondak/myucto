@@ -528,9 +528,13 @@ final class SyntheticPremierBackup
      *            v `SAZBA_MZ` podle `TYP_MZDY` (30 000, od 7/2025 32 000; `MZDA_MES` prázdné
      *            nebo jiné), stát adresy názvem „Česká republika"; mzdy 1/2025-1/2026; přihláška
      *            k ZP 111, od 7/2025 změna na 201; korespondenční adresa v `PER_ADR`; exekuce
-     *            1 000 Kč měsíčně od 10/2025, v 11/2025 záloha na mzdu 2 000 Kč (jen v `DNY`)
+     *            1 000 Kč měsíčně od 10/2025, v 11/2025 záloha na mzdu 2 000 Kč (jen v `DNY`);
+     *            úvazek 38,75 h týdně; formulář JMHZ za 1/2026 přijatý ČSSZ (OIČ, ID PPV,
+     *            pracoviště Brno, druh činnosti 1), CZ-ISCO v `MZ_ISPV`, přijaté oznámení
+     *            o nástupu ČSSZ (`MZ_PRISO`)
      *   INTER 6  DPP 4-6/2025 (kategorie `DPP`), osoba s bydlištěm na Slovensku (stát názvem
-     *            „Slovenská republika")
+     *            „Slovenská republika"); OIČ jen na kartě osoby (bez formuláře JMHZ), přijatá
+     *            oznámení ČSSZ o nástupu i skončení
      *
      * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
      * @param list<array{0:int,1:int,2:int,3:array<string,mixed>}> $months MĚNÍ SE
@@ -551,10 +555,11 @@ final class SyntheticPremierBackup
                 'ULICE' => 'Školní', 'CISLOP' => '3', 'PSC' => '60200', 'MESTO' => 'Brno', 'STAT' => 'CZ', 'STAT_N' => 'CZ'],
             ['ID' => 'OS-E', 'SUP_INTER' => 105, 'RC_1' => '880312', 'RC_2' => '0106', 'PRIJMENI' => 'Syntetický', 'JMENO' => 'Tomáš', 'NAROZENI' => '1988-03-12',
                 'ULICE' => 'Vymyšlená', 'CISLOP' => '12', 'PSC' => '60200', 'MESTO' => 'Brno', 'STAT' => 'Česká republika', 'STAT_N' => 'CZ'],
-            ['ID' => 'OS-F', 'RC_1' => '870202', 'RC_2' => '0107', 'PRIJMENI' => 'Pokusný', 'JMENO' => 'Marek', 'NAROZENI' => '1987-02-02',
+            ['ID' => 'OS-F', 'IK_MPSV' => '9876543204', 'RC_1' => '870202', 'RC_2' => '0107', 'PRIJMENI' => 'Pokusný', 'JMENO' => 'Marek', 'NAROZENI' => '1987-02-02',
                 'ULICE' => 'Hlavná', 'CISLOP' => '5', 'PSC' => '81101', 'MESTO' => 'Bratislava', 'STAT' => 'Slovenská republika', 'STAT_N' => 'SK'],
         );
         $tables['PER_MAIN'][0][] = ['SUP_INTER', 'N', 10];
+        $tables['PER_MAIN'][0][] = ['IK_MPSV', 'C', 36];
         // Další adresy osoby: vazba přes PER_MAIN.SUP_INTER; druh 1 je kopie trvalé, druh 2 korespondenční.
         $tables['PER_ADR'] = [
             [['INTER', 'N', 10], ['XULICE', 'C', 28], ['XCISLO', 'C', 12], ['XPSC', 'C', 10], ['XMESTO', 'C', 40], ['XOBEC', 'C', 50], ['XSTAT', 'C', 10],
@@ -570,12 +575,33 @@ final class SyntheticPremierBackup
             $months[] = [6, 2025, $m, ['MZ_HRUBA' => 5000, 'MZ_SDANI' => 5000, 'MZ_SDAN' => 750, 'SRAZ_DAN' => true, 'MZ_CISTA' => 4250, 'MZ_VYPLATA' => 4250,
                 'DNY_ODPR' => 5, 'UVA_DOBA' => 8]];
         }
-        $tables['PERS_HYS'][0] = [...$tables['PERS_HYS'][0], ['TYP_MZDY', 'N', 1], ['SAZBA_MZ', 'N', 15, 4]];
+        $tables['PERS_HYS'][0] = [...$tables['PERS_HYS'][0], ['TYP_MZDY', 'N', 1], ['SAZBA_MZ', 'N', 15, 4], ['UVA_HOD', 'N', 8, 4], ['UVA_DOBA', 'N', 7, 4]];
+        $time = ['UVA_HOD' => 38.75, 'UVA_DOBA' => 7.75];
         array_push($tables['PERS_HYS'][1],
-            ['INTER' => 5, 'ROK' => 2025, 'MESIC' => 1, 'TYP_MZDY' => 1, 'SAZBA_MZ' => 30000, 'PLATNY_OD' => '2025-01-01', 'ID' => 'H5-1'],
+            ['INTER' => 5, 'ROK' => 2025, 'MESIC' => 1, 'TYP_MZDY' => 1, 'SAZBA_MZ' => 30000, 'PLATNY_OD' => '2025-01-01', 'ID' => 'H5-1'] + $time,
             // `MZDA_MES` se od sazby liší a sjednanou mzdou není.
-            ['INTER' => 5, 'ROK' => 2025, 'MESIC' => 7, 'TYP_MZDY' => 1, 'SAZBA_MZ' => 32000, 'MZDA_MES' => 30400, 'PLATNY_OD' => '2025-07-01', 'ID' => 'H5-2'],
+            ['INTER' => 5, 'ROK' => 2025, 'MESIC' => 7, 'TYP_MZDY' => 1, 'SAZBA_MZ' => 32000, 'MZDA_MES' => 30400, 'PLATNY_OD' => '2025-07-01', 'ID' => 'H5-2'] + $time,
         );
+        // Formulář JMHZ za 1/2026 přijatý ČSSZ; OIČ má platnou kontrolní číslici.
+        $tables['MZ_JMHZ'] = [
+            [['ID', 'C', 36], ['X10010', 'N', 12], ['X10011', 'N', 12], ['X10007', 'C', 10], ['TS', 'C', 40]],
+            [['ID' => 'J2601', 'X10010' => 1, 'X10011' => 2026, 'X10007' => 'R', 'TS' => '2026021010:00:00#INSE#']],
+        ];
+        $tables['MZ_JMHZ2'] = [
+            [['ID', 'C', 36], ['ID_JMHZ', 'C', 36], ['INT_ZAM', 'N', 10], ['XPRIJATO_Z', 'N', 2], ['X10051', 'N', 12], ['X10228', 'C', 100],
+                ['X10229', 'C', 100], ['X10230', 'C', 10], ['X10231', 'C', 10], ['X10239', 'C', 10], ['X10261', 'N', 12, 2], ['TS', 'C', 40]],
+            [['ID' => 'F5', 'ID_JMHZ' => 'J2601', 'INT_ZAM' => 5, 'XPRIJATO_Z' => 3, 'X10051' => 1234567895, 'X10228' => '1234567890123',
+                'X10229' => 'Brno', 'X10230' => '582786', 'X10231' => 'CZ', 'X10239' => '1', 'X10261' => 38.75, 'TS' => '2026021010:00:00#INSE#']],
+        ];
+        $tables['MZ_ISPV'] = [[['INTER', 'N', 10], ['KZAM', 'C', 8], ['CZICSE', 'C', 4], ['ID', 'C', 36]], [['INTER' => 5, 'KZAM' => '25120', 'CZICSE' => '1111', 'ID' => 'I5']]];
+        $tables['MZ_PRISO'] = [
+            [['INTER', 'N', 8], ['KOD', 'C', 2], ['PRIJATO', 'L'], ['PRIJ_DAT', 'D'], ['ID', 'C', 36]],
+            [
+                ['INTER' => 5, 'KOD' => '1', 'PRIJATO' => true, 'PRIJ_DAT' => '2025-01-20', 'ID' => 'S5-1'],
+                ['INTER' => 6, 'KOD' => '1', 'PRIJATO' => true, 'PRIJ_DAT' => '2025-04-05', 'ID' => 'S6-1'],
+                ['INTER' => 6, 'KOD' => '2', 'PRIJATO' => true, 'PRIJ_DAT' => '2025-07-03', 'ID' => 'S6-2'],
+            ],
+        ];
         // Přihláška k VZP s nástupem, od 7/2025 změna pojišťovny (oznámení Q).
         array_push($tables['MZ_PRIZP'][1],
             ['INTER' => 5, 'HLAS_OD' => '2025-01-15', 'ZKRATKA_P' => '111', 'KOD' => 'P', 'PRIJATO' => true, 'ID' => 'ZP5-1'],

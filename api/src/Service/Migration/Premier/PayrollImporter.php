@@ -58,6 +58,10 @@ final class PayrollImporter
 
     private int $messages = 0;
     private ?CountryNameMatcher $countries = null;
+    /** Souhrny zápisu přes všechny vztahy běhu (neplatné OIČ, splněné termíny…). */
+    private PayrollTakeoverRunState $state;
+    /** @var list<string> osobní čísla s OIČ nebo ID PPV bez přijatého formuláře JMHZ */
+    private array $unconfirmedIdentifiers = [];
 
     public function __construct(
         private readonly Connection $db,
@@ -77,6 +81,8 @@ final class PayrollImporter
     {
         $p = $ctx->protocol;
         $this->messages = 0;
+        $this->state = new PayrollTakeoverRunState();
+        $this->unconfirmedIdentifiers = [];
         $payroll = $ctx->payroll ?? PremierPayroll::fromBackup($ctx->backup);
         if (!$payroll->hasData()) {
             return;
@@ -165,6 +171,7 @@ final class PayrollImporter
             $p->count(self::STEP, 'months_after_start', $afterStart);
             $this->info($p, 'months_after_start', "Mzdové měsíce od začátku vedení mezd v MyÚčtu ({$start}) se nepřevzaly (celkem {$afterStart}), počítá je MyÚčto.");
         }
+        $this->identifierSummary($p);
         $this->notConverted($p, $deductions, $excluded);
         if ($totals !== []) {
             $this->referenceTotals->store($ctx->supplierId, self::SOURCE, $totals, self::REFERENCE . ' ' . $ctx->backup->ico);
@@ -216,6 +223,32 @@ final class PayrollImporter
                     array_values($excluded),
                 )),
             ), ['personal_numbers' => array_keys($excluded)]);
+        }
+    }
+
+    /**
+     * OIČ a ID PPV, které převod nepřevzal: bez přijatého formuláře JMHZ nejsou doložené
+     * ({@see PremierPayrollTakeover::identifiers()}), nebo OIČ nesedí na kontrolní číslici.
+     * Souhrnné upozornění mimo limit hlášek kroku, s osobními čísly.
+     */
+    private function identifierSummary(ImportProtocol $p): void
+    {
+        if ($this->unconfirmedIdentifiers !== []) {
+            $p->count(self::STEP, 'identifiers_unconfirmed', count($this->unconfirmedIdentifiers));
+            $p->warn(self::STEP, 'identifiers_unconfirmed', sprintf(
+                'OIČ nebo ID pracovněprávního vztahu z PREMIER nemá doložené %d vztahů (osobní čísla %s): PREMIER u nich nevede '
+                . 'formulář JMHZ, který by ČSSZ přijala, takže převod čísla nepřevzal. K ověření: porovnejte je s protokolem ČSSZ '
+                . 'a doplňte na kartě vztahu.',
+                count($this->unconfirmedIdentifiers),
+                self::personalNumbers($this->unconfirmedIdentifiers),
+            ), ['personal_numbers' => $this->unconfirmedIdentifiers]);
+        }
+        if ($this->state->invalidOic !== []) {
+            $p->warn(self::STEP, 'oic_invalid', sprintf(
+                'OIČ z PREMIER nesedí na kontrolní číslici u %d vztahů (osobní čísla %s). Porovnejte je s protokolem ČSSZ a doplňte ručně.',
+                count($this->state->invalidOic),
+                self::personalNumbers($this->state->invalidOic),
+            ), ['personal_numbers' => $this->state->invalidOic]);
         }
     }
 
@@ -331,8 +364,7 @@ final class PayrollImporter
         $this->countries ??= CountryNameMatcher::fromDatabase($this->db);
         $takeover = PremierPayrollTakeover::record($relation, $ctx->endsOn(), $this->countries);
         $person = $takeover->person;
-        // Souhrny běhu převod z PREMIER zatím do protokolu neskládá (výplatní účty neověřuje).
-        $state = new PayrollTakeoverRunState();
+        $state = $this->state;
         $this->detail($ctx, $number, 'Sjednaná mzda', fn (): array => $this->wages($ctx, $employmentId, $relation));
         $this->detail($ctx, $number, 'Údaje o narození a občanství', fn (): array => $this->people->identity($supplierId, $employeeId, $person, $policy));
         $this->detail($ctx, $number, 'Adresa a kontakt', fn (): array => $this->people->personCard($supplierId, $employeeId, $person, $takeover->employment->start, $userId, $policy));
@@ -347,11 +379,22 @@ final class PayrollImporter
             },
         ));
         $this->detail($ctx, $number, 'Výplatní účet', fn (): array => $this->people->payoutAccounts($supplierId, $employeeId, $person, $takeover->employment->start, $userId, $policy, $state));
+        $employment = $takeover->employment;
+        $this->detail($ctx, $number, 'Pracoviště JMHZ', fn (): array => $this->employmentWriter->workplace($supplierId, $employmentId, $employment, $userId, $policy));
+        $this->detail($ctx, $number, 'Kód CZ-ISCO', fn (): array => $this->employmentWriter->czIsco($supplierId, $employmentId, $employment, $userId, $policy));
+        if ($employment->oic !== null || $employment->idPpv !== null) {
+            $this->detail($ctx, $number, 'OIČ a ID PPV', fn (): array => $this->employmentWriter->identifiers($supplierId, $employeeId, $employmentId, $employment, $userId, $policy, $this->state));
+        } else {
+            $identifiers = PremierPayrollTakeover::identifiers($relation);
+            if ($identifiers['oic'] !== null || $identifiers['id_ppv'] !== null) {
+                $this->unconfirmedIdentifiers[] = $number;
+            }
+        }
         $this->detail($ctx, $number, 'Skončení vztahu', fn (): array => $this->employmentWriter->termination(
-            $supplierId, $employmentId, $takeover->employment, date('Y-m-d'), $ctx->endsOn(), $userId, $policy,
+            $supplierId, $employmentId, $employment, date('Y-m-d'), $ctx->endsOn(), $userId, $policy,
         ));
         $this->detail($ctx, $number, 'Zákonné termíny', fn (): array => $this->employmentWriter->completeChecklist(
-            $supplierId, $employmentId, $this->checklistNotes($ctx, $employmentId, $relation), [], null, $userId, $policy, $state,
+            $supplierId, $employmentId, $this->checklistNotes($ctx, $employmentId, $relation, $employment->checklistNotes), [], null, $userId, $policy, $this->state,
             static function (): void {},
         ));
         return [$employeeId, $employmentId];
@@ -413,6 +456,7 @@ final class PayrollImporter
             'relation_type' => $relation['relation_type'],
             'planned_start_on' => $relation['start'],
             'monthly_gross' => self::firstWage($relation, $ctx->endsOn()),
+            'weekly_hours' => self::weeklyHours($relation, $ctx->endsOn()),
             'employment_code' => $this->codeAvailable($ctx->supplierId, $number) ? $number : null,
         ];
         $attempts = [$input];
@@ -462,6 +506,7 @@ final class PayrollImporter
             'relation_type' => $relation['relation_type'],
             'planned_start_on' => $relation['start'],
             'monthly_gross' => self::firstWage($relation, $ctx->endsOn()),
+            'weekly_hours' => self::weeklyHours($relation, $ctx->endsOn()),
             'employment_code' => $this->codeAvailable($ctx->supplierId, $number) ? $number : null,
         ]);
         $employment = $validated['employment'];
@@ -519,18 +564,15 @@ final class PayrollImporter
     }
 
     /**
-     * Doklady k položkám Zákonných termínů, které proběhly v PREMIER: smlouva vztahu,
-     * přihláška zdravotní pojišťovně (přijaté oznámení) a doklad o skončení.
+     * Doklady k položkám Zákonných termínů, které proběhly v PREMIER
+     * ({@see PremierPayrollTakeover}), a doklad o skončení, pokud je vztah v MyÚčtu skončený.
      *
      * @param array<string,mixed> $relation
+     * @param array<string,string> $notes
      * @return array<string,string>
      */
-    private function checklistNotes(PremierContext $ctx, int $employmentId, array $relation): array
+    private function checklistNotes(PremierContext $ctx, int $employmentId, array $relation, array $notes): array
     {
-        $notes = ['employment_contract' => self::NOTE . 'vztah vedený v předchozím mzdovém systému, nástup ' . self::czechDate((string) $relation['start']) . '.'];
-        if ($relation['insurer_registered'] === true) {
-            $notes['health_insurance_registration'] = self::NOTE . 'přihláška zdravotní pojišťovně přijatá v PREMIER.';
-        }
         $row = $this->employmentById($ctx->supplierId, $employmentId);
         if ($row !== null && $row['status'] === 'ended' && is_string($relation['end'])) {
             $notes['termination_document'] = self::NOTE . 'vztah skončil ' . self::czechDate($relation['end']) . '.';
@@ -673,6 +715,23 @@ final class PayrollImporter
         );
     }
 
+
+    /**
+     * Stanovená týdenní pracovní doba vztahu: úvazek z první verze `PERS_HYS`, jinak
+     * z formuláře JMHZ (`X10261`). Bez údaje zůstane výchozí doba založení.
+     *
+     * @param array<string,mixed> $relation
+     */
+    private static function weeklyHours(array $relation, string $until): ?string
+    {
+        foreach ((array) ($relation['working_time'] ?? []) as $from => $time) {
+            if ($from <= $until) {
+                return sprintf('%.2f', $time['weekly']);
+            }
+        }
+        $jmhz = $relation['registry']['jmhz']['weekly_hours'] ?? null;
+        return is_float($jmhz) || is_int($jmhz) ? sprintf('%.2f', $jmhz) : null;
+    }
 
     /** @param array<string,mixed> $relation */
     private static function firstWage(array $relation, string $until): ?int

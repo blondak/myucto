@@ -95,13 +95,121 @@ final class PremierPayrollTakeover
                 (array) ($relation['insurer_history'] ?? []),
             ),
         );
+        $jmhz = $relation['registry']['jmhz'] ?? null;
+        $identifiers = self::identifiers($relation);
         $employment = new PayrollTakeoverEmployment(
             personalNumber: (string) $relation['personal_number'],
             relationKey: (string) $relation['key'],
             start: $start,
             end: is_string($relation['end']) ? $relation['end'] : null,
+            workplace: is_array($jmhz) && is_string($jmhz['municipality_code']) && is_string($jmhz['municipality']) && is_string($jmhz['country'])
+                ? ['work_place' => mb_substr($jmhz['municipality'], 0, 255), 'municipality_code' => $jmhz['municipality_code'],
+                    'country_code' => $jmhz['country'], 'regular_workplace' => null]
+                : null,
+            czIsco: is_string($relation['registry']['cz_isco'] ?? null) ? $relation['registry']['cz_isco'] : null,
+            oic: $identifiers['confirmed'] ? $identifiers['oic'] : null,
+            idPpv: $identifiers['confirmed'] ? $identifiers['id_ppv'] : null,
+            checklistNotes: self::checklistNotes($relation, $until),
         );
         return new PayrollTakeoverRecord($person, $employment);
+    }
+
+    /**
+     * OIČ a ID pracovněprávního vztahu. PREMIER je nese ve formuláři JMHZ za vztah
+     * (`X10051`, `X10228`) a OIČ i na kartě osoby (`PER_MAIN.IK_MPSV`; na reálné záloze
+     * se obě hodnoty shodují ve všech formulářích).
+     *
+     * Převzít je smí převod jen doložené: převod z PAMICA na to má potvrzení uživatele
+     * v průvodci, převod z PREMIER takové potvrzení nemá. Doklad je tu přijetí formuláře
+     * ČSSZ ({@see PremierPayrollRegistry}): ČSSZ ho s těmi čísly zpracovala. Čísla bez
+     * přijatého formuláře (jen z karty osoby nebo z neodeslaného hlášení) zůstávají
+     * k ověření a protokol je spočítá.
+     *
+     * @param array<string,mixed> $relation
+     * @return array{oic:?string,id_ppv:?string,confirmed:bool}
+     */
+    public static function identifiers(array $relation): array
+    {
+        $jmhz = $relation['registry']['jmhz'] ?? null;
+        $accepted = is_array($jmhz) && $jmhz['accepted'] === true;
+        return [
+            'oic' => (is_array($jmhz) ? $jmhz['oic'] : null) ?? (is_string($relation['oic'] ?? null) ? $relation['oic'] : null),
+            'id_ppv' => is_array($jmhz) ? $jmhz['id_ppv'] : null,
+            'confirmed' => $accepted,
+        ];
+    }
+
+    /**
+     * Doklady k položkám Zákonných termínů, které proběhly v PREMIER. Doklad o skončení
+     * přidává orchestrátor až podle stavu vztahu v MyÚčtu.
+     *
+     * @param array<string,mixed> $relation
+     * @return array<string,string>
+     */
+    private static function checklistNotes(array $relation, string $until): array
+    {
+        $notes = ['employment_contract' => self::NOTE . 'vztah vedený v předchozím mzdovém systému, nástup ' . self::czechDate((string) $relation['start']) . '.'];
+        foreach ($relation['months'] as $period => $m) {
+            if ($period . '-01' > $until) {
+                break;
+            }
+            if ($m['signed'] === true) {
+                $notes['tax_declaration'] = self::NOTE . 'podepsané prohlášení poplatníka, mzda za ' . $period . '.';
+                break;
+            }
+        }
+        $registry = (array) ($relation['registry'] ?? []);
+        $health = (array) ($registry['health_notices'] ?? []);
+        if ($relation['insurer_registered'] === true || self::accepted($health, 'P') !== null) {
+            $notes['health_insurance_registration'] = self::NOTE . 'přihláška zdravotní pojišťovně přijatá v PREMIER.';
+        }
+        $deregistration = self::accepted($health, 'O');
+        if ($deregistration !== null) {
+            $notes['health_insurance_deregistration'] = self::NOTE . 'odhláška zdravotní pojišťovně'
+                . (is_string($deregistration['date']) ? ' k ' . self::czechDate($deregistration['date']) : '') . ' přijatá v PREMIER.';
+        }
+        $social = (array) ($registry['social_notices'] ?? []);
+        $start = self::accepted($social, '1');
+        $jmhz = $registry['jmhz'] ?? null;
+        if ($start !== null) {
+            $notes['social_jmhz_registration'] = self::NOTE . 'oznámení o nástupu ČSSZ přijaté'
+                . (is_string($start['accepted_on']) ? ' ' . self::czechDate($start['accepted_on']) : '') . '.';
+        } elseif (is_array($jmhz) && $jmhz['accepted'] === true) {
+            $notes['social_jmhz_registration'] = self::NOTE . 'měsíční hlášení JMHZ za vztah za ' . $jmhz['period'] . ' přijaté ČSSZ.';
+        }
+        $end = self::accepted($social, '2');
+        if ($end !== null) {
+            $notes['social_jmhz_deregistration'] = self::NOTE . 'oznámení o skončení ČSSZ přijaté'
+                . (is_string($end['accepted_on']) ? ' ' . self::czechDate($end['accepted_on']) : '') . '.';
+        }
+        $eldp = $registry['eldp'] ?? null;
+        if (is_array($eldp)) {
+            $notes['eldp_submission'] = self::NOTE . 'evidenční list důchodového pojištění za rok ' . $eldp['year'] . ' přijatý ČSSZ.';
+        }
+        return $notes;
+    }
+
+    /**
+     * Poslední přijaté oznámení daného druhu.
+     *
+     * @param list<array<string,mixed>> $notices
+     * @return array<string,mixed>|null
+     */
+    private static function accepted(array $notices, string $kind): ?array
+    {
+        $found = null;
+        foreach ($notices as $notice) {
+            if ($notice['kind'] === $kind && $notice['accepted'] === true
+                && ($found === null || (string) ($notice['date'] ?? $notice['accepted_on'] ?? '') >= (string) ($found['date'] ?? $found['accepted_on'] ?? ''))) {
+                $found = $notice;
+            }
+        }
+        return $found;
+    }
+
+    private static function czechDate(string $iso): string
+    {
+        return (new \DateTimeImmutable($iso))->format('j. n. Y');
     }
 
     /**

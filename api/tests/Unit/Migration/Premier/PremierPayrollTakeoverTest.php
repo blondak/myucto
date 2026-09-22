@@ -77,6 +77,30 @@ final class PremierPayrollTakeoverTest extends TestCase
             'country_text' => 'Atlantida'], $countries));
     }
 
+    /**
+     * Evidence JMHZ vztahu z posledního formuláře: identifikátory se převezmou jen
+     * z formuláře, který přijala ČSSZ; pracoviště, CZ-ISCO a doklady Zákonných termínů.
+     */
+    public function testJmhzEvidenceAndIdentifiers(): void
+    {
+        $this->tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'premier_takeover_' . bin2hex(random_bytes(5));
+        SyntheticPremierBackup::writeDir($this->tmp, false, ['payroll' => true, 'payroll_detail' => true]);
+        $relations = PremierPayroll::fromBackup(PremierBackup::open($this->tmp))->relations;
+        [$employee, $dpp] = array_values(array_filter($relations, static fn (array $r): bool => in_array($r['key'], ['5', '6'], true)));
+
+        $employment = PremierPayrollTakeover::record($employee, '2025-12-31')->employment;
+        self::assertSame(['1234567895', '1234567890123', '25120'], [$employment->oic, $employment->idPpv, $employment->czIsco]);
+        self::assertSame(['work_place' => 'Brno', 'municipality_code' => '582786', 'country_code' => 'CZ', 'regular_workplace' => null], $employment->workplace);
+        self::assertSame('Převzato z PREMIER: oznámení o nástupu ČSSZ přijaté 20. 1. 2025.', $employment->checklistNotes['social_jmhz_registration']);
+        self::assertSame('Převzato z PREMIER: podepsané prohlášení poplatníka, mzda za 2025-01.', $employment->checklistNotes['tax_declaration']);
+        self::assertSame(['2025-01-01' => ['weekly' => 38.75, 'daily' => 7.75], '2025-07-01' => ['weekly' => 38.75, 'daily' => 7.75]], $employee['working_time']);
+
+        self::assertSame(['oic' => '9876543204', 'id_ppv' => null, 'confirmed' => false], PremierPayrollTakeover::identifiers($dpp));
+        $ended = PremierPayrollTakeover::record($dpp, '2025-12-31')->employment;
+        self::assertNull($ended->oic, 'OIČ bez přijatého formuláře JMHZ se nepřevezme.');
+        self::assertArrayHasKey('social_jmhz_deregistration', $ended->checklistNotes);
+    }
+
     public function testPolicyKeepsPremierBehaviour(): void
     {
         $policy = PremierPayrollTakeover::policy();

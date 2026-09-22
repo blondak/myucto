@@ -296,6 +296,36 @@ final class PremierPayrollImportTest extends TestCase
             WHERE r.supplier_id = ? AND e.code = '5' AND r.deductions_minor > 0 ORDER BY r.period_start", $supplierId), $this->explain($protocol));
     }
 
+    /**
+     * Evidence JMHZ z PREMIER: OIČ a ID PPV z formuláře, který přijala ČSSZ, pracoviště,
+     * CZ-ISCO, týdenní doba a doklady k Zákonným termínům. OIČ bez přijatého formuláře
+     * zůstává k ověření.
+     */
+    public function testJmhzEvidenceIdentifiersAndChecklist(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $counts = self::stepCounts($protocol, 'payroll');
+        self::assertSame([1, 1, 1, 1, 1], [$counts['workplace'] ?? 0, $counts['cz_isco'] ?? 0, $counts['oic'] ?? 0, $counts['id_ppv'] ?? 0,
+            $counts['identifiers_unconfirmed'] ?? 0], $this->explain($protocol));
+        self::assertSame([['582786', 'CZ', 'Brno', '25120', '38.75']], $this->fetch("SELECT t.jmhz_workplace_municipality_code, t.jmhz_workplace_country_code, t.work_place,
+            t.cz_isco_code, t.weekly_hours FROM payroll_employment_terms t JOIN payroll_employments e ON e.id = t.employment_id
+            WHERE e.supplier_id = ? AND e.code = '5' ORDER BY t.effective_from DESC LIMIT 1", $supplierId));
+        self::assertSame([['ik_mpsv', 'verified_manual_import']], $this->fetch("SELECT x.identifier_type, x.source_kind FROM payroll_person_external_ids x
+            JOIN payroll_employments e ON e.employee_id = x.employee_id AND e.supplier_id = x.supplier_id WHERE e.supplier_id = ? AND e.code = '5'", $supplierId));
+        self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_person_external_ids x
+            JOIN payroll_employments e ON e.employee_id = x.employee_id AND e.supplier_id = x.supplier_id WHERE e.supplier_id = ? AND e.code = '6'", $supplierId),
+            'OIČ jen z karty osoby bez přijatého formuláře se nepřevezme.');
+        $done = array_column($this->fetch("SELECT c.item_key FROM payroll_employment_checklist_items c JOIN payroll_employments e ON e.id = c.employment_id
+            WHERE e.supplier_id = ? AND e.code = '5' AND c.status = 'completed' ORDER BY c.item_key", $supplierId), 0);
+        foreach (['employment_contract', 'health_insurance_registration', 'social_jmhz_registration', 'tax_declaration'] as $item) {
+            self::assertContains($item, $done, $this->explain($protocol));
+        }
+        self::assertContains('social_jmhz_deregistration', array_column($this->fetch("SELECT c.item_key FROM payroll_employment_checklist_items c
+            JOIN payroll_employments e ON e.id = c.employment_id WHERE e.supplier_id = ? AND e.code = '6' AND c.status = 'completed'", $supplierId), 0));
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);
