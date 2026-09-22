@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Premier;
 
+use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier;
+
 /**
  * Kódy DPH z PREMIER (`KODY_DPH`) převedené na zařazení dokladu v MyÚčtu.
  *
@@ -32,21 +34,13 @@ namespace MyInvoice\Service\Migration\Premier;
  * Kódy jiných řádků (dovoz celním úřadem ř. 42, opravy § 44 a § 74, vypořádání
  * koeficientu, korekce odpočtu…) převod nezařazuje a doklad nechá jako koncept
  * k ruční kontrole.
+ *
+ * Význam řádků drží {@see VatReturnLineClassifier}; tady je jen čtení číselníku PREMIER.
  */
 final class PremierVat
 {
-    public const RATE_BASE = 'base';
-    public const RATE_REDUCED = 'reduced';
-
-    /** Výstupní řádky samovyměření (sudý = snížená sazba) → kód zařazení přijatého dokladu. */
-    private const SELF_ASSESSMENT = [3 => '23', 4 => '23', 5 => '24e', 6 => '24e', 7 => '25', 8 => '25', 10 => '5', 11 => '5', 12 => '24', 13 => '24'];
-
-    /** Řádky přiznání v základní a ve snížené sazbě (výstup, samovyměření, odpočet). */
-    private const BASE_LINES = [1, 3, 5, 7, 10, 12, 40, 43];
-    private const REDUCED_LINES = [2, 4, 6, 8, 11, 13, 41, 44];
-
-    /** Řádky přiznání, které převod u vydaného dokladu zná (bez tuzemských 1, 2, 51). */
-    private const SALE_CODES = [20 => '20', 21 => '22', 22 => '26', 23 => '23n', 24 => '24z', 25 => '25s', 26 => '26s', 31 => '31', 50 => '3'];
+    public const RATE_BASE = VatReturnLineClassifier::RATE_BASE;
+    public const RATE_REDUCED = VatReturnLineClassifier::RATE_REDUCED;
 
     /** @param array<string,array{lines:list<int>,name:string,purchase:bool,sale:bool,reverse:bool,reduced:bool,rate_class:?string,other_rate:float,kh:string,kh_small:string}> $codes */
     private function __construct(private readonly array $codes) {}
@@ -141,15 +135,7 @@ final class PremierVat
         if ($c['rate_class'] !== null) {
             return $c['rate_class'];
         }
-        foreach ($c['lines'] as $line) {
-            if (in_array($line, self::BASE_LINES, true)) {
-                return self::RATE_BASE;
-            }
-            if (in_array($line, self::REDUCED_LINES, true)) {
-                return self::RATE_REDUCED;
-            }
-        }
-        return null;
+        return VatReturnLineClassifier::rateClass($c['lines']);
     }
 
     /** Jiná (historická) sazba kódu v %, 0 = kód ji neurčuje. */
@@ -167,24 +153,7 @@ final class PremierVat
     public function sale(string $code): ?array
     {
         $lines = $this->codes[$code]['lines'] ?? null;
-        if ($lines === null) {
-            return null;
-        }
-        if ($lines === []) {
-            return ['in_return' => false, 'code' => null, 'domestic' => false, 'asset_sale' => false];
-        }
-        $domestic = array_values(array_intersect($lines, [1, 2]));
-        $rest = array_values(array_diff($lines, [1, 2, 51]));
-        if ($domestic !== [] && $rest === []) {
-            return ['in_return' => true, 'code' => null, 'domestic' => true, 'asset_sale' => in_array(51, $lines, true)];
-        }
-        if ($lines === [50, 51]) {
-            return ['in_return' => true, 'code' => '3m', 'domestic' => false, 'asset_sale' => false];
-        }
-        if (count($lines) === 1 && isset(self::SALE_CODES[$lines[0]])) {
-            return ['in_return' => true, 'code' => self::SALE_CODES[$lines[0]], 'domestic' => false, 'asset_sale' => false];
-        }
-        return null;
+        return $lines === null ? null : VatReturnLineClassifier::saleFromLineSet($lines);
     }
 
     /**
@@ -196,45 +165,7 @@ final class PremierVat
     public function purchase(string $code): ?array
     {
         $c = $this->codes[$code] ?? null;
-        if ($c === null) {
-            return null;
-        }
-        $lines = $c['lines'];
-        if ($lines === []) {
-            return ['in_return' => false, 'deduction' => 'none', 'reverse' => false, 'code' => null, 'fixed_asset' => false];
-        }
-        $asset = in_array(47, $lines, true);
-        $deduction = $c['reduced'] ? 'reduced' : 'full';
-        $rest = array_values(array_diff($lines, [47]));
-        $output = array_values(array_filter($rest, static fn (int $l): bool => isset(self::SELF_ASSESSMENT[$l])));
-        $claim = array_values(array_intersect($rest, [43, 44]));
-        $domestic = array_values(array_intersect($rest, [40, 41]));
-        $unknown = array_values(array_diff($rest, $output, $claim, $domestic));
-        if ($unknown !== []) {
-            return null;
-        }
-        if ($output !== []) {
-            $codes = array_unique(array_map(static fn (int $l): string => self::SELF_ASSESSMENT[$l], $output));
-            if (count($codes) !== 1 || $domestic !== []) {
-                return null;
-            }
-            return [
-                'in_return' => true,
-                'deduction' => $claim !== [] ? $deduction : 'none',
-                'reverse' => true,
-                'code' => $codes[0],
-                'fixed_asset' => $asset,
-            ];
-        }
-        if ($claim !== []) {
-            // Odpočet ze samovyměření bez výstupního řádku - PREMIER to umí jen u kódu,
-            // který daň na výstupu vede jinde. Převod to neodhaduje.
-            return null;
-        }
-        if ($domestic !== []) {
-            return ['in_return' => true, 'deduction' => $deduction, 'reverse' => false, 'code' => null, 'fixed_asset' => $asset];
-        }
-        return null;
+        return $c === null ? null : VatReturnLineClassifier::purchaseFromLineSet($c['lines'], $c['reduced']);
     }
 
     /**
@@ -252,21 +183,7 @@ final class PremierVat
      */
     public static function rateFor(string $class, string $date): float
     {
-        if ($class === self::RATE_BASE) {
-            return match (true) {
-                $date >= '2013-01-01' => 21.0,
-                $date >= '2010-01-01' => 20.0,
-                default => 19.0,
-            };
-        }
-        return match (true) {
-            $date >= '2024-01-01' => 12.0,
-            $date >= '2013-01-01' => 15.0,
-            $date >= '2012-01-01' => 14.0,
-            $date >= '2010-01-01' => 10.0,
-            $date >= '2008-01-01' => 9.0,
-            default => 5.0,
-        };
+        return VatReturnLineClassifier::domesticRate($class, $date);
     }
 
     /**

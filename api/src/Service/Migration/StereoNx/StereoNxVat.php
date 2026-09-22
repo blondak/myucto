@@ -4,14 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\StereoNx;
 
-use MyInvoice\Service\Migration\Premier\PremierVat;
+use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier;
 
 /**
- * Adaptér Lsdph na existující klasifikátor řádků přiznání.
+ * Adaptér Lsdph na sdílený klasifikátor řádků přiznání.
  *
- * PremierVat je čistá veřejná služba (žádná DB ani přepnutí účetního režimu).
- * Převádíme pouze její vstupní formát; vlastní tabulku řádek → kód MyÚčta
- * nekopírujeme. Zkratky TypDPH ani názvy nejsou autoritou daňového významu.
+ * {@see VatReturnLineClassifier} je čistá služba (žádná DB ani přepnutí účetního režimu).
+ * Tady se jen čtou řádky z Lsdph; vlastní tabulku řádek → kód MyÚčta nekopírujeme.
+ * Řádky Stereo NX jsou množina jako u PREMIER, proto platí tatáž gramatika sad řádků.
+ * Zkratky TypDPH ani názvy nejsou autoritou daňového významu.
  */
 final class StereoNxVat
 {
@@ -46,12 +47,7 @@ final class StereoNxVat
             throw new StereoNxException('vat_code_unsupported', 'Neověřené krácení nebo režim OSS v členění Stereo NX.');
         }
         $lines = $this->lines($row, $slot);
-        $input = ['KOD_DPH' => 'source', 'FA_IN' => true, 'FA_OUT' => false,
-            'IS_KRACENY' => $row['Kraceni'], 'R19' => 0];
-        foreach ($lines as $i => $line) {
-            $input[$i === 0 ? 'R19' : 'R19' . chr(64 + $i)] = $line;
-        }
-        $result = PremierVat::fromRows([$input])->purchase('source');
+        $result = VatReturnLineClassifier::purchaseFromLineSet($lines, $row['Kraceni']);
         if ($result === null || $result['fixed_asset']) {
             throw new StereoNxException('vat_classification_unsupported', 'Členění DPH vyžaduje samostatné mapování před převodem.');
         }
@@ -78,11 +74,7 @@ final class StereoNxVat
             throw new StereoNxException('vat_code_unknown', 'Členění není známým uskutečněným plněním Stereo NX.');
         }
         $lines = $this->lines($row, $slot);
-        $input = ['KOD_DPH' => 'source', 'FA_IN' => false, 'FA_OUT' => true, 'R19' => 0];
-        foreach ($lines as $i => $line) {
-            $input[$i === 0 ? 'R19' : 'R19' . chr(64 + $i)] = $line;
-        }
-        $result = PremierVat::fromRows([$input])->sale('source');
+        $result = VatReturnLineClassifier::saleFromLineSet($lines);
         if ($result === null || $result['asset_sale']) {
             throw new StereoNxException('vat_classification_unsupported', 'Členění vydaného plnění vyžaduje samostatné mapování.');
         }

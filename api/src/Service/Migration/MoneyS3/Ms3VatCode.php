@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\MoneyS3;
 
+use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier as Lines;
+
 /**
  * Členění DPH z Money S3 (`KodDPH` u faktur, `Cleneni` v pokladně) převedené na zařazení
  * dokladu v MyÚčtu.
@@ -23,20 +25,29 @@ namespace MyInvoice\Service\Migration\MoneyS3;
  *   - `19Ř00P`/`19Ř00U` doklad mimo přiznání.
  * Ostatní členění (přenesená povinnost na vstupu, pořízení z EU, dovoz…) převod
  * nezařazuje a doklad nechá k ruční kontrole.
+ *
+ * Význam řádků drží {@see Lines}; tady je jen gramatika kódu Money a význam přípon.
  */
 final class Ms3VatCode
 {
-    /** Uskutečněná plnění mimo tuzemský řádek 1/2: řádky + přípona → kód zařazení MyÚčta. */
-    private const SALE_CODES = [
-        '20|' => '20',
-        '21|' => '22',
-        '22|' => '26',
-        '25|' => '25s5',
-        '25|_S' => '25s',
-        '26|' => '26s',
-        '50|' => '3',
-        '51|BN' => '3m',
+    /**
+     * Uskutečněná plnění mimo tuzemský řádek 1/2, která převod zná: řádek + přípona → kód
+     * předmětu plnění (jen ř. 25). Výchozí číselník Money vede `19Ř25` u odpadu (předmět
+     * plnění 5) a `19Ř25_S` u stavebních prací (4). Řádky 23, 24 a 31 Money členění
+     * převod nezařazuje.
+     */
+    private const SALE_ROWS = [
+        '20|' => null,
+        '21|' => null,
+        '22|' => null,
+        '25|' => '5',
+        '25|_S' => '4',
+        '26|' => null,
+        '50|' => null,
     ];
+
+    /** `19Ř51BN` - osvobozené plnění mimo koeficient (Money ho vede jen ř. 51, bez ř. 50). */
+    private const EXEMPT_OUTSIDE_COEFFICIENT = '51|BN';
 
     /**
      * @return array{in_return:bool, code:?string, deduction:'full'|'reduced'|'none'}|null
@@ -66,14 +77,14 @@ final class Ms3VatCode
         if ($rows === [1, 2]) {
             return in_array($suffix, ['', '_S'], true) ? ['in_return' => true, 'code' => null, 'deduction' => 'full'] : null;
         }
-        $saleCode = count($rows) === 1 ? (self::SALE_CODES[$rows[0] . '|' . $suffix] ?? null) : null;
+        $saleCode = count($rows) === 1 ? self::saleCode($rows[0], $suffix) : null;
         return $saleCode === null ? null : ['in_return' => true, 'code' => $saleCode, 'deduction' => 'full'];
     }
 
     /** Řádek samovyměření na výstupu (ř. 3–13) na interním dokladu Money. */
     public static function isReverseChargeOutput(string $code): bool
     {
-        return preg_match('/^\d{2}Ř\s*(03,04|05,06|07,08|10,11|12,13)/u', trim($code)) === 1;
+        return preg_match('/^\d{2}Ř\s*(' . self::outputPairsPattern() . ')/u', trim($code)) === 1;
     }
 
     /**
@@ -86,21 +97,10 @@ final class Ms3VatCode
      */
     public static function reverseCharge(string $output, ?string $mirror, string $subject = ''): ?array
     {
-        if (preg_match('/^\d{2}Ř\s*(03,04|05,06|07,08|10,11|12,13)(_S)?\s*$/u', trim($output), $m) !== 1) {
+        if (preg_match('/^\d{2}Ř\s*(' . self::outputPairsPattern() . ')(_S)?\s*$/u', trim($output), $m) !== 1) {
             return null;
         }
-        $code = match ($m[1]) {
-            '03,04' => '23',
-            '05,06' => '24e',
-            '07,08' => '25',
-            '12,13' => '24',
-            default => match (trim($subject)) {
-                '', '4' => '5',
-                '5' => '5c',
-                '3' => '5d',
-                default => null,
-            },
-        };
+        $code = Lines::selfAssessmentCode((int) substr($m[1], 0, 2), trim($subject));
         if ($code === null) {
             return null;
         }
@@ -116,5 +116,20 @@ final class Ms3VatCode
             default => null,
         };
         return $deduction === null ? null : ['code' => $code, 'deduction' => $deduction];
+    }
+
+    private static function saleCode(int $row, string $suffix): ?string
+    {
+        $key = $row . '|' . $suffix;
+        if ($key === self::EXEMPT_OUTSIDE_COEFFICIENT) {
+            return Lines::EXEMPT_OUTSIDE_COEFFICIENT_CODE;
+        }
+        return array_key_exists($key, self::SALE_ROWS) ? Lines::saleCode($row, self::SALE_ROWS[$key]) : null;
+    }
+
+    /** Výstupní dvojice samovyměření tak, jak je Money píše v kódu (`03,04|05,06|…`). */
+    private static function outputPairsPattern(): string
+    {
+        return implode('|', array_map(static fn (array $p): string => sprintf('%02d,%02d', $p[0], $p[1]), Lines::SELF_ASSESSMENT_PAIRS));
     }
 }
