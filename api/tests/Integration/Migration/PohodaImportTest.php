@@ -160,6 +160,29 @@ final class PohodaImportTest extends TestCase
         return [];
     }
 
+    /**
+     * Krácený odpočet (§ 76): převod nastaví koeficient stejně jako u Money S3, jinak by
+     * přiznání s ř. 52 nešlo sestavit (vat_coefficient_missing).
+     */
+    public function testReducedDeductionGetsCoefficientSoTheReturnCanBeBuilt(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withReducedDeduction($dir);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, "vat_deduction = 'reduced'"));
+        self::assertContains('provisional_from_own_year', $this->messageCodes($protocol));
+
+        $coefficient = $this->db->pdo()->prepare('SELECT provisional_percent, settled_at FROM vat_coefficients WHERE supplier_id = ? AND year = ?');
+        $coefficient->execute([$supplierId, SyntheticPohodaExport::YEAR]);
+        self::assertSame(['100', null], array_values(array_map(static fn ($v) => $v === null ? null : (string) $v, $coefficient->fetch(\PDO::FETCH_ASSOC) ?: [])));
+
+        $return = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 1, 'monthly');
+        self::assertEqualsWithDelta(105.0, (float) ($return['summary']['lines']['40k']['vat'] ?? 0), 0.005, 'Krácený odpočet ř. 40 (sloupec krácený).');
+    }
+
     public function testDryRunLeavesNothingBehind(): void
     {
         $supplierId = $this->supplier();

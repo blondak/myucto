@@ -10,6 +10,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\AccountingUnitSwitch;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
+use MyInvoice\Service\Migration\Shared\VatCoefficientSeeder;
 use PDO;
 
 /**
@@ -17,7 +18,7 @@ use PDO;
  *
  * Pořadí: osnova → období a deník → režim účetní jednotky → adresář a předkontace →
  * přijaté a vydané doklady → pokladna a banka → vazby dokladů na deník a úhrady →
- * rekonciliace. Automatika účtování je po celou dobu vypnutá ({@see AccountingUnitSwitch}).
+ * majetek → koeficient krácení odpočtu (§ 76) → rekonciliace. Automatika účtování je po celou dobu vypnutá ({@see AccountingUnitSwitch}).
  *
  * **Zkouška nanečisto** běží stejným kódem v jedné transakci, která se na konci vrátí.
  * **Ostrý převod** zapisuje po krocích, každý krok je idempotentní ({@see PohodaImportRepository}):
@@ -46,6 +47,7 @@ final class PohodaImporter
         private readonly SmallAssetImporter $smallAssets,
         private readonly TableStatistics $statistics,
         private readonly UnbookedBankPayments $unbooked,
+        private readonly VatCoefficientSeeder $coefficients,
     ) {}
 
     /** @return list<string> */
@@ -66,6 +68,7 @@ final class PohodaImporter
             DocumentLinker::STEP_PAYMENTS,
             AssetImporter::STEP,
             SmallAssetImporter::STEP,
+            VatCoefficientSeeder::STEP,
             PohodaReconciler::STEP,
         ];
     }
@@ -281,6 +284,13 @@ final class PohodaImporter
             },
             AssetImporter::STEP => fn () => $this->assets->import($ctx),
             SmallAssetImporter::STEP => fn () => $this->smallAssets->import($ctx),
+            VatCoefficientSeeder::STEP => fn () => $this->coefficients->seedConverted(
+                $ctx->supplierId,
+                array_keys($this->map->all($ctx->supplierId, PohodaImportRepository::KIND_PERIOD)),
+                [$ctx->year(), ...array_keys(array_filter($ctx->periods))],
+                $ctx->userId,
+                $ctx->protocol,
+            ),
             PohodaReconciler::STEP => fn () => $this->reconciler->run($ctx),
         ];
     }

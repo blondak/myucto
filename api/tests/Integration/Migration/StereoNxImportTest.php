@@ -403,6 +403,19 @@ final class StereoNxImportTest extends TestCase
         self::assertEqualsWithDelta(21.0, array_sum(array_column($ledger, 'vat_czk')), 0.005);
     }
 
+    /** Krácený odpočet (§ 76): převod nastaví koeficient, jinak by přiznání s ř. 52 nešlo sestavit. */
+    public function testReducedDeductionGetsCoefficientSoTheReturnCanBeBuilt(): void
+    {
+        $tables = SyntheticStereoNxTables::tables();
+        $tables['Lsdph'][1]['Kraceni'] = true;
+        $report = $this->importer->run($this->backup($tables), $this->supplierId, $this->userId, false);
+        self::assertTrue($report['ok'], json_encode($report, JSON_UNESCAPED_UNICODE));
+        self::assertSame('reduced', $this->scalar("SELECT vat_deduction FROM purchase_invoices WHERE supplier_id = ? AND varsymbol = 'PF-1'", [$this->supplierId]));
+        self::assertContains('provisional_from_own_year', array_column($report['warnings'], 'code'));
+        $return = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($this->supplierId, 2025, 3, 'monthly');
+        self::assertEqualsWithDelta(21.0, (float) ($return['summary']['lines']['40k']['vat'] ?? 0), 0.005);
+    }
+
     public function testFailureAfterDocumentWritesRollsBackAllObjects(): void
     {
         $tables = SyntheticStereoNxTables::tables();

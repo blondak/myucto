@@ -139,6 +139,7 @@ final class SyntheticPremierBackup
      *                           fakturu), úhrada VF 250006, poplatek a kurzový zisk 311/663 bez vazby;
      *                           VF 250007 uhrazená zápočtem 321/311 (ID 5); EUR účet (řada BE, 221002)
      *                           s vkladem 1 000 EUR a kurzovým přeceněním s částkou v měně 0
+     *   `reduced_deduction`     tuzemský kód odpočtu je krácený (§ 76, `IS_KRACENY`)
      *   `cash_duplicate`        další dva pokladní doklady PP 1 z 2. 1. 2025 (jiný sborník), tedy tři
      *                           doklady se stejnou řadou i číslem a dva i se stejným datem
      *
@@ -374,6 +375,14 @@ final class SyntheticPremierBackup
         }
         if (!empty($flags['bank_split'])) {
             self::bankSplit($tables, $chart);
+        }
+        if (!empty($flags['reduced_deduction'])) {
+            foreach ($tables['KODY_DPH'][1] as &$code) {
+                if ($code['KOD_DPH'] === self::CODE_PURCHASE) {
+                    $code['IS_KRACENY'] = true;
+                }
+            }
+            unset($code);
         }
         if (!empty($flags['cash_duplicate'])) {
             array_push($tables['PUB_UCTO'][1],
