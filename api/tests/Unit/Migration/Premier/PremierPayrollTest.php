@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Migration\Premier;
 use MyInvoice\Service\Migration\Premier\PremierBackup;
 use MyInvoice\Service\Migration\Premier\PremierJournal;
 use MyInvoice\Service\Migration\Premier\PremierPayroll;
+use MyInvoice\Tests\Fixtures\Premier\DbfWriter;
 use MyInvoice\Tests\Fixtures\Premier\SyntheticPremierBackup;
 use PHPUnit\Framework\TestCase;
 
@@ -46,7 +47,7 @@ final class PremierPayrollTest extends TestCase
         self::assertFalse($statutory['relation_type_derived']);
         self::assertSame('PER_MAIN|OS-A', $statutory['person_key']);
         self::assertSame('CISLO|2', $dpp['person_key'], 'Osoba bez karty PER_MAIN se páruje osobním číslem.');
-        self::assertSame(['street_line' => 'Nová 5', 'city' => 'Praha', 'postal_code' => '11000', 'country_code' => 'CZ'], $dpp['residence'],
+        self::assertSame(['street_line' => 'Nová 5', 'city' => 'Praha', 'postal_code' => '11000', 'country_code' => 'CZ', 'country_text' => 'CZ'], $dpp['residence'],
             'Platí poslední snímek PERSON2.');
         self::assertSame(['account' => SyntheticPremierBackup::BANK_ACCOUNT, 'bank_code' => SyntheticPremierBackup::BANK_CODE], $statutory['account']);
         self::assertSame(['2025-01-01' => 6000.0, '2026-01-01' => 6500.0], $statutory['wages']);
@@ -61,6 +62,85 @@ final class PremierPayrollTest extends TestCase
             (int) round($dpp['months']['2025-03']['worked_days'] * 100)]);
         self::assertTrue($employee['months']['2026-02']['signed']);
         self::assertSame(2570.0, $employee['months']['2026-02']['non_refundable']);
+    }
+
+    /**
+     * `KODPP_SO` je v zálohách prázdný a druh vztahu vychází z kategorie. Učeň (`UCN`)
+     * dřív padal do výchozího pracovního poměru s příznakem odvození.
+     */
+    public function testApprenticeIsNotAnEmploymentRelation(): void
+    {
+        $relations = PremierPayroll::fromBackup($this->backup(['payroll' => true, 'payroll_detail' => true]))->relations;
+        $apprentice = array_values(array_filter($relations, static fn (array $r): bool => $r['key'] === '4'))[0];
+        self::assertSame([PremierPayroll::APPRENTICE, false], [$apprentice['relation_type'], $apprentice['relation_type_derived']]);
+    }
+
+    /**
+     * Sjednaná mzda je v `SAZBA_MZ` podle `TYP_MZDY`; `MZDA_MES` je vyplněné jen někdy
+     * a od sazby se může lišit. Hodinová sazba sjednanou měsíční mzdou není.
+     */
+    public function testAgreedWageComesFromRateByWageType(): void
+    {
+        $relations = PremierPayroll::fromBackup($this->backup(['payroll' => true, 'payroll_detail' => true]))->relations;
+        $employee = array_values(array_filter($relations, static fn (array $r): bool => $r['key'] === '5'))[0];
+        self::assertSame(['2025-01-01' => 30000.0, '2025-07-01' => 32000.0], $employee['wages']);
+        self::assertSame([], $employee['hourly_wages']);
+        $statutory = array_values(array_filter($relations, static fn (array $r): bool => $r['key'] === '1'))[0];
+        self::assertSame(['2025-01-01' => 6000.0, '2026-01-01' => 6500.0], $statutory['wages'], 'Starší verze bez typu mzdy nesou MZDA_MES.');
+    }
+
+    /** Historie zdravotní pojišťovny z oznámení pojišťovnám, po celých navazujících měsících. */
+    public function testInsurerHistoryFromNotifications(): void
+    {
+        self::assertSame([
+            ['code' => '111', 'from' => '2024-03-01', 'to' => '2025-06-30', 'reference' => 'premier:mz_prizp:P:2024-03-18'],
+            ['code' => '201', 'from' => '2025-07-01', 'to' => null, 'reference' => 'premier:mz_prizp:Q:2025-07-01'],
+        ], PremierPayroll::insurerHistory([
+            ['date' => '2025-07-01', 'code' => '201', 'kind' => 'Q'],
+            ['date' => '2024-03-18', 'code' => '111', 'kind' => 'P'],
+            // Odhláška úsek nekončí, opakovaná přihláška téže pojišťovny nic nemění.
+            ['date' => '2024-10-31', 'code' => '111', 'kind' => 'O'],
+            ['date' => '2024-11-04', 'code' => '111', 'kind' => 'P'],
+        ], '2024-03-18'));
+        self::assertSame([['code' => '205', 'from' => '2024-01-01', 'to' => null, 'reference' => 'premier:mz_prizp:M:2024-05-20']],
+            PremierPayroll::insurerHistory([
+                ['date' => '2024-05-02', 'code' => '211', 'kind' => 'P'],
+                ['date' => '2024-05-20', 'code' => '205', 'kind' => 'M'],
+            ], '2024-01-10'), 'Dvě oznámení v jednom měsíci rozhoduje pozdější; první úsek začíná měsícem nástupu.');
+        self::assertSame([], PremierPayroll::insurerHistory([['date' => '2024-05-02', 'code' => '211', 'kind' => 'O']], null));
+
+        $relations = PremierPayroll::fromBackup($this->backup(['payroll' => true, 'payroll_detail' => true]))->relations;
+        $employee = array_values(array_filter($relations, static fn (array $r): bool => $r['key'] === '5'))[0];
+        self::assertSame([['111', '2025-01-01', '2025-06-30'], ['201', '2025-07-01', null]],
+            array_map(static fn (array $run): array => [$run['code'], $run['from'], $run['to']], $employee['insurer_history']));
+    }
+
+    /** Srážky měsíce ze složek mezd v `DNY`, včetně zálohy na mzdu, kterou `SR_*` nenese. */
+    public function testDeductionsFromPayrollItems(): void
+    {
+        $relations = PremierPayroll::fromBackup($this->backup(['payroll' => true, 'payroll_detail' => true]))->relations;
+        $employee = array_values(array_filter($relations, static fn (array $r): bool => $r['key'] === '5'))[0];
+        self::assertSame([0.0, 1000.0, 3000.0, 1000.0], [$employee['months']['2025-09']['deductions'], $employee['months']['2025-10']['deductions'],
+            $employee['months']['2025-11']['deductions'], $employee['months']['2025-12']['deductions']]);
+    }
+
+    /**
+     * Druh vztahu z druhu činnosti posledního hlášení JMHZ, když `KODPP_SO` chybí; hlášení
+     * má přednost i před příznakem jednatele (ten zůstává v `statutory_flag` k ověření).
+     */
+    public function testRelationTypeFromJmhzActivity(): void
+    {
+        $backup = $this->backup(['payroll' => true, 'payroll_detail' => true]);
+        [$fields, $rows] = SyntheticPremierBackup::tables(false, ['payroll' => true, 'payroll_detail' => true])['MZ_JMHZ2'];
+        $rows[] = ['ID' => 'F1', 'ID_JMHZ' => 'J2601', 'INT_ZAM' => 1, 'XPRIJATO_Z' => 3, 'X10239' => '1', 'TS' => '2026021010:00:00#INSE#'];
+        $rows[] = ['ID' => 'F2', 'ID_JMHZ' => 'J2601', 'INT_ZAM' => 2, 'XPRIJATO_Z' => 3, 'X10239' => 'A', 'TS' => '2026021010:00:00#INSE#'];
+        DbfWriter::write($this->tmp . DIRECTORY_SEPARATOR . 'MZ_JMHZ2.DBF', $fields, $rows);
+        $relations = PremierPayroll::fromBackup(PremierBackup::open($this->tmp))->relations;
+        $byKey = array_column($relations, null, 'key');
+        self::assertSame(['employment', true], [$byKey['1']['relation_type'], $byKey['1']['statutory_flag']]);
+        self::assertSame('dpp', $byKey['2']['relation_type'], 'Vyplněný KODPP_SO (T) má přednost před hlášením JMHZ.');
+        self::assertSame('employment', $byKey['5']['relation_type']);
+        self::assertTrue($backup->hasTable('MZ_JMHZ2'));
     }
 
     public function testMonthTotalsMatchJournalPostings(): void

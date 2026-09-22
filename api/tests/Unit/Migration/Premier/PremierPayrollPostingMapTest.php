@@ -63,6 +63,36 @@ final class PremierPayrollPostingMapTest extends TestCase
         self::assertNull($rows['premier:PUB_UCTO:331100/342900']->concept);
     }
 
+    /**
+     * Srážky účtované mimo 379: význam dá číselník složek (`MZDY_POL.UCET`) - účet jen
+     * s exekucemi, jen s dobrovolnými srážkami, nebo smíšený (rozhodne text zápisu).
+     */
+    public function testDeductionAccountsFromComponentCatalog(): void
+    {
+        $map = PremierPayrollPostingMap::fromJournal(PremierJournal::fromRows([
+            self::row(1, 'Exekuce', 1000, '331100', '325333'),
+            self::row(2, 'Stravenky', 400, '331100', '213001'),
+            self::row(3, 'Srážka', 300, '331100', '325900'),
+            self::row(4, 'Exekuce Novák', 700, '331100', '325900'),
+            self::row(5, 'Záloha', 200, '331100', '335100'),
+        ]), 2025, self::NAMES, [
+            '325333' => ['702', '706', '709'],
+            '213001' => ['710'],
+            '325900' => ['700', '702'],
+            // Účet, na který jde i jiná než srážková složka, se nepřebírá.
+            '335100' => ['750', '860'],
+        ]);
+        $rows = self::byReference($map);
+
+        self::assertSame('enforcement_deductions', $rows['premier:PUB_UCTO:331100/325333']->concept);
+        self::assertSame('other_deductions', $rows['premier:PUB_UCTO:331100/213001']->concept);
+        $mixed = array_map(static fn (PayrollLegacyPostingRow $r): ?string => $r->concept,
+            array_values(array_filter($map->postingRows(), static fn (PayrollLegacyPostingRow $r): bool => $r->sourceReference === 'premier:PUB_UCTO:331100/325900')));
+        sort($mixed);
+        self::assertSame([null, 'enforcement_deductions'], $mixed, 'Smíšený účet: význam z textu zápisu, bez vodítka neurčený.');
+        self::assertArrayNotHasKey('premier:PUB_UCTO:331100/335100', $rows);
+    }
+
     public function testOtherYearIsIgnored(): void
     {
         $map = PremierPayrollPostingMap::fromJournal(PremierJournal::fromRows([self::row(1, 'Hrubá mzda', 1000, '521100', '331100', 0, '2024-12-31')]), 2025);

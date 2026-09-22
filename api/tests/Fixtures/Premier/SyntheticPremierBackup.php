@@ -133,6 +133,7 @@ final class SyntheticPremierBackup
      *   `payroll`               zaměstnanci a mzdy (`PERSONAL`, `PER_MAIN`, `PERSON2`, `MZDY`, `MZDY_POL`…)
      *                           se zaúčtováním v deníku, viz {@see payroll()}
      *   `payroll_mismatch`      s `payroll`: jeden měsíc deníku nesedí na mzdy
+     *   `payroll_detail`        s `payroll`: další vztahy a evidence mzdového modulu, viz {@see payrollDetail()}
      *   `bank_split`            výpis BV 8 z 15. 10. 2025 se čtyřmi pohyby a dvěma řádky bez pohybu: výběr hotovosti,
      *                           úhrada VF 250005 (1 209,60, VS jen ve `VAR_DAL`, údaje homebankingu
      *                           `H*`/`PARTRAN`) s haléřovým vyrovnáním 548/311 0,40 (vazba na tutéž
@@ -368,7 +369,7 @@ final class SyntheticPremierBackup
         if (!empty($flags['payroll'])) {
             array_push($chart, ['331', '100', 'Zaměstnanci'], ['336', '100', 'Zúčtování sociálního pojištění'], ['336', '200', 'Zúčtování zdravotního pojištění'],
                 ['342', '200', 'Srážková daň'], ['342', '100', 'Záloha na daň ze závislé činnosti'], ['521', '100', 'Mzdové náklady'], ['524', '100', 'Zákonné pojištění']);
-            self::payroll($tables, !empty($flags['payroll_mismatch']));
+            self::payroll($tables, !empty($flags['payroll_mismatch']), !empty($flags['payroll_detail']));
         }
         if (!empty($flags['bank_split'])) {
             self::bankSplit($tables, $chart);
@@ -406,7 +407,7 @@ final class SyntheticPremierBackup
      *
      * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
      */
-    private static function payroll(array &$tables, bool $mismatch): void
+    private static function payroll(array &$tables, bool $mismatch, bool $detail = false): void
     {
         $tables['PERSONAL'] = [
             [['INTER', 'N', 8], ['CISLO', 'N', 10], ['VSTUP', 'D'], ['VYSTUP', 'D'], ['BANKA_UCET', 'C', 30], ['BANKA_KOD', 'C', 20], ['UVA_KATE', 'C', 3],
@@ -477,6 +478,10 @@ final class SyntheticPremierBackup
         $months[] = [3, 2026, 2, ['MZ_HRUBA' => 40000, 'VYM_SOC' => 40000, 'VYM_ZDR' => 40000, 'MZ_SOC' => 2840, 'MZ_ZDR' => 1800, 'MZ_SOCF' => 9920, 'MZ_ZDRF' => 3600,
             'MZ_ZDANI' => 40000, 'MZ_DAN' => 3430, 'NEZD_VLAS' => 2570, 'POD_DAN' => true, 'NEZD_A' => true, 'MZ_CISTA' => 31930, 'MZ_VYPLATA' => 31930,
             'POJIS_SO' => true, 'ZKR_POJ' => '201', 'DNY_ODPR' => 19, 'UVA_DOBA' => 8]];
+        $mzdyFields = [];
+        if ($detail) {
+            $mzdyFields = self::payrollDetail($tables, $months);
+        }
 
         $rows = [];
         $inter = 300;
@@ -509,9 +514,253 @@ final class SyntheticPremierBackup
                 ['MZ_SOC', 'N', 12, 2], ['MZ_ZDR', 'N', 12, 2], ['MZ_SOCF', 'N', 15, 2], ['MZ_ZDRF', 'N', 15, 2], ['MZ_ZDANI', 'N', 15, 2], ['MZ_DAN', 'N', 15, 2],
                 ['MZ_SDANI', 'N', 15, 2], ['MZ_SDAN', 'N', 15, 2], ['MZ_BONUS', 'N', 15, 2], ['NEZD_VLAS', 'N', 12, 2], ['NEZD_DETI', 'N', 12, 2],
                 ['MZ_CISTA', 'N', 15, 2], ['MZ_VYPLATA', 'N', 15, 2], ['SRAZ_DAN', 'L'], ['POD_DAN', 'L'], ['NEZD_A', 'L'], ['POJIS_SO', 'L'],
-                ['KAL_DNY', 'N', 2], ['KAL_DNYPP', 'N', 5, 1], ['DNY_ODPR', 'N', 5, 2], ['UVA_DOBA', 'N', 7, 4], ['VYL_DND', 'N', 6, 2], ['ZKR_POJ', 'C', 3], ['ID', 'C', 36]],
+                ['KAL_DNY', 'N', 2], ['KAL_DNYPP', 'N', 5, 1], ['DNY_ODPR', 'N', 5, 2], ['UVA_DOBA', 'N', 7, 4], ['VYL_DND', 'N', 6, 2], ['ZKR_POJ', 'C', 3], ['ID', 'C', 36],
+                ...$mzdyFields],
             $rows,
         ];
+    }
+
+    /**
+     * Další vztahy a evidence mzdového modulu (`payroll_detail`), syntetické osoby:
+     *
+     *   INTER 4  učeň (kategorie `UCN`, `KODPP_SO` prázdné jako v reálných zálohách), bez mezd
+     *   INTER 5  pracovní poměr od 15. 1. 2025 (kategorie `HPP`, `KODPP_SO` prázdné); sjednaná mzda
+     *            v `SAZBA_MZ` podle `TYP_MZDY` (30 000, od 7/2025 32 000; `MZDA_MES` prázdné
+     *            nebo jiné), stát adresy názvem „Česká republika"; mzdy 1/2025-1/2026; přihláška
+     *            k ZP 111, od 7/2025 změna na 201; korespondenční adresa v `PER_ADR`; exekuce
+     *            1 000 Kč měsíčně od 10/2025, v 11/2025 záloha na mzdu 2 000 Kč (jen v `DNY`);
+     *            úvazek 38,75 h týdně; formulář JMHZ za 1/2026 přijatý ČSSZ (OIČ, ID PPV,
+     *            pracoviště Brno, druh činnosti 1), CZ-ISCO v `MZ_ISPV`, přijaté oznámení
+     *            o nástupu ČSSZ (`MZ_PRISO`); výplatní účet se změnou 9/2025 (`MZ_PERH`), dítě
+     *            se zvýhodněním (`PER_DETI`, `MZ_DETI`) a dítě bez něj; dovolená 8/2025 a pracovní
+     *            neschopnost od 10. 11. 2025 do 20. 1. 2026 (`DNY`, `MZ_HDPN`), stav dovolené
+     *            v hodinách (`DOV_DNY`), průměry čtvrtletí (`PER_PRU`); trvalé složky `MZ_SRAZ`
+     *            (osobní ohodnocení, exekuce, skončené spoření, odbory)
+     *   INTER 6  DPP 4-6/2025 (kategorie `DPP`), osoba s bydlištěm na Slovensku (stát názvem
+     *            „Slovenská republika"); OIČ jen na kartě osoby (bez formuláře JMHZ), přijatá
+     *            oznámení ČSSZ o nástupu i skončení; pobírá důchod (`MZ_DUCHOD`), výplata v hotovosti
+     *
+     * Registr pojišťoven `POJIST` a účty odvodů v nastavení mezd (`SET_GLOB` `amz_ucet1..3`).
+     *
+     * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
+     * @param list<array{0:int,1:int,2:int,3:array<string,mixed>}> $months MĚNÍ SE
+     * @return list<array{0:string,1:string,2?:int,3?:int}> další sloupce `MZDY`
+     */
+    private static function payrollDetail(array &$tables, array &$months): array
+    {
+        array_push($tables['PERSONAL'][1],
+            ['INTER' => 4, 'CISLO' => 4, 'VSTUP' => '2025-09-01', 'UVA_KATE' => 'UCN', 'UVA_PROF' => 'učeň', 'KODPP_SO' => '',
+                'OSS_ZEME' => 'CZ', 'SUP_ID' => 'OS-D', 'ID' => 'PP-4'],
+            ['INTER' => 5, 'CISLO' => 5, 'VSTUP' => '2025-01-15', 'UVA_KATE' => 'HPP', 'UVA_PROF' => 'programátor', 'KODPP_SO' => '',
+                'OSS_ZEME' => 'CZ', 'SUP_ID' => 'OS-E', 'ID' => 'PP-5'],
+            ['INTER' => 6, 'CISLO' => 6, 'VSTUP' => '2025-04-01', 'VYSTUP' => '2025-06-30', 'UVA_KATE' => 'DPP', 'UVA_PROF' => 'lektor', 'KODPP_SO' => '',
+                'OSS_ZEME' => 'CZ', 'SUP_ID' => 'OS-F', 'ID' => 'PP-6'],
+        );
+        array_push($tables['PER_MAIN'][1],
+            ['ID' => 'OS-D', 'RC_1' => '080312', 'RC_2' => '0000', 'PRIJMENI' => 'Učňovský', 'JMENO' => 'Adam', 'NAROZENI' => '2008-03-12',
+                'ULICE' => 'Školní', 'CISLOP' => '3', 'PSC' => '60200', 'MESTO' => 'Brno', 'STAT' => 'CZ', 'STAT_N' => 'CZ'],
+            ['ID' => 'OS-E', 'SUP_INTER' => 105, 'RC_1' => '880312', 'RC_2' => '0106', 'PRIJMENI' => 'Syntetický', 'JMENO' => 'Tomáš', 'NAROZENI' => '1988-03-12',
+                'ULICE' => 'Vymyšlená', 'CISLOP' => '12', 'PSC' => '60200', 'MESTO' => 'Brno', 'STAT' => 'Česká republika', 'STAT_N' => 'CZ'],
+            ['ID' => 'OS-F', 'IK_MPSV' => '9876543204', 'RC_1' => '870202', 'RC_2' => '0107', 'PRIJMENI' => 'Pokusný', 'JMENO' => 'Marek', 'NAROZENI' => '1987-02-02',
+                'ULICE' => 'Hlavná', 'CISLOP' => '5', 'PSC' => '81101', 'MESTO' => 'Bratislava', 'STAT' => 'Slovenská republika', 'STAT_N' => 'SK'],
+        );
+        $tables['PER_MAIN'][0][] = ['SUP_INTER', 'N', 10];
+        $tables['PER_MAIN'][0][] = ['IK_MPSV', 'C', 36];
+        // Výplata na účet (KONTO_L): INTER 5 na účet s historií změn, INTER 6 v hotovosti.
+        $tables['PERSONAL'][0][] = ['KONTO_L', 'L'];
+        foreach ($tables['PERSONAL'][1] as $i => $row) {
+            if ($row['INTER'] === 5) {
+                $tables['PERSONAL'][1][$i] += ['BANKA_UCET' => self::BANK_ACCOUNT, 'BANKA_KOD' => self::BANK_CODE, 'KONTO_L' => true];
+            } else {
+                $tables['PERSONAL'][1][$i]['KONTO_L'] = $row['INTER'] !== 6;
+            }
+        }
+        $history = static fn (string $key, string $value, int $month): array => ['UDAJ' => $key, 'TYP' => 'C', 'HODNOTAC' => $value, 'PLATN_OD_M' => $month,
+            'PLATN_OD_R' => 2025, 'MZ_HINTER' => 5, 'ID' => "PH5-{$key}-{$month}"];
+        $tables['MZ_PERH'] = [
+            [['UDAJ', 'C', 20], ['TYP', 'C', 1], ['HODNOTAC', 'C', 80], ['PLATN_OD_M', 'N', 2], ['PLATN_OD_R', 'N', 4], ['MZ_HINTER', 'N', 12], ['ID', 'C', 36]],
+            [$history('banka_ucet', '19-2000145399', 1), $history('banka_kod', '0800', 1),
+                $history('banka_ucet', self::BANK_ACCOUNT, 9), $history('banka_kod', self::BANK_CODE, 9)],
+        ];
+        // Děti osoby OS-E (vazba přes SUP_INTER): se zvýhodněním 1. pořadí (uplatněné 1/2025-1/2026,
+        // příznak BVYZI) a bez zvýhodnění.
+        $tables['PER_DETI'] = [
+            [['ID', 'C', 36], ['INTER', 'N', 8], ['BJMENO', 'C', 30], ['BPRIJMENI', 'C', 30], ['BRC_1', 'C', 6], ['BRC_2', 'C', 4], ['BDNAR', 'D'],
+                ['BABY_POR', 'C', 1], ['BABY_SLE', 'L'], ['BVYZI', 'L'], ['BABYV', 'L']],
+            [
+                ['ID' => 'D1', 'INTER' => 105, 'BJMENO' => 'Eliška', 'BPRIJMENI' => 'Syntetická', 'BRC_1' => '180420', 'BRC_2' => '0101', 'BDNAR' => '2018-04-20',
+                    'BABY_POR' => '1', 'BABY_SLE' => true, 'BVYZI' => true, 'BABYV' => true],
+                ['ID' => 'D2', 'INTER' => 105, 'BJMENO' => 'Ondřej', 'BPRIJMENI' => 'Syntetický', 'BRC_1' => '150505', 'BRC_2' => '0107', 'BDNAR' => '2015-05-05',
+                    'BABY_POR' => 'N', 'BABY_SLE' => false, 'BVYZI' => false, 'BABYV' => true],
+            ],
+        ];
+        $applied = [];
+        foreach ([[2025, range(1, 12)], [2026, [1]]] as [$year, $monthList]) {
+            foreach ($monthList as $m) {
+                $applied[] = ['DITE_ID' => 'D1', 'DITE_POR' => '1', 'DI_SLE' => 1267, 'ZAM_SUPID' => 'OS-E', 'DITE_MES' => $m, 'DITE_ROK' => $year, 'ID' => "MD-{$year}-{$m}"];
+            }
+        }
+        $tables['MZ_DETI'] = [
+            [['DITE_ID', 'C', 36], ['DITE_POR', 'C', 1], ['DI_SLE', 'N', 12, 2], ['ZAM_SUPID', 'C', 36], ['DITE_MES', 'N', 2], ['DITE_ROK', 'N', 4], ['ID', 'C', 36]],
+            $applied,
+        ];
+        // DPP vztahu INTER 6 pobírá starobní důchod, sleva na pojistném se neuplatňuje.
+        $tables['MZ_DUCHOD'] = [[['INTER', 'N', 12], ['DAT_PR_OD', 'D'], ['D_KATE2', 'N', 2], ['ID', 'C', 36]],
+            [['INTER' => 6, 'DAT_PR_OD' => '2020-01-01', 'D_KATE2' => 8, 'ID' => 'DU6']]];
+        // Registr pojišťoven a účty odvodů v nastavení mezd (pozice 1 záloha na daň, 2 srážková daň, 3 ČSSZ).
+        $tables['POJIST'] = [
+            [['ZKRATKA_PO', 'C', 3], ['NAZEV_PO', 'C', 40], ['UCET_PO', 'C', 36], ['KOD_PO', 'C', 12], ['VAR1', 'C', 10], ['CO_POJIS', 'N', 2], ['ADR_DS', 'C', 10]],
+            [
+                ['ZKRATKA_PO' => '111', 'NAZEV_PO' => 'Fiktivní zdravotní pojišťovna', 'UCET_PO' => self::BANK_ACCOUNT, 'KOD_PO' => '0710', 'VAR1' => self::ICO, 'CO_POJIS' => 1, 'ADR_DS' => 'abc1234'],
+                ['ZKRATKA_PO' => '201', 'NAZEV_PO' => 'Vzorová pojišťovna', 'UCET_PO' => '2000145399', 'KOD_PO' => '0100', 'VAR1' => self::ICO, 'CO_POJIS' => 1],
+                ['ZKRATKA_PO' => 'PF', 'NAZEV_PO' => 'Penzijní fond', 'UCET_PO' => self::BANK_ACCOUNT, 'KOD_PO' => '2700', 'CO_POJIS' => 2],
+            ],
+        ];
+        array_push($tables['SET_GLOB'][1],
+            ['PROMEN' => 'amz_ucet1', 'C_SET' => '713-' . self::BANK_ACCOUNT], ['PROMEN' => 'amz_kod1', 'C_SET' => '0710'], ['PROMEN' => 'amz_var1', 'C_SET' => self::ICO],
+            ['PROMEN' => 'amz_ucet2', 'C_SET' => '7720-' . self::BANK_ACCOUNT], ['PROMEN' => 'amz_kod2', 'C_SET' => '0710'], ['PROMEN' => 'amz_var2', 'C_SET' => self::ICO],
+            ['PROMEN' => 'amz_ucet3', 'C_SET' => '21012-' . self::BANK_ACCOUNT], ['PROMEN' => 'amz_kod3', 'C_SET' => '0710'], ['PROMEN' => 'amz_var3', 'C_SET' => '1234567890'],
+        );
+        // Další adresy osoby: vazba přes PER_MAIN.SUP_INTER; druh 1 je kopie trvalé, druh 2 korespondenční.
+        $tables['PER_ADR'] = [
+            [['INTER', 'N', 10], ['XULICE', 'C', 28], ['XCISLO', 'C', 12], ['XPSC', 'C', 10], ['XMESTO', 'C', 40], ['XOBEC', 'C', 50], ['XSTAT', 'C', 10],
+                ['XZEME', 'C', 2], ['DRUH_ADR', 'N', 1], ['XKORES', 'L'], ['XIS_IMP', 'L'], ['ID', 'C', 36], ['TS', 'C', 40]],
+            [
+                ['INTER' => 105, 'XULICE' => 'Vymyšlená', 'XCISLO' => '12', 'XPSC' => '60200', 'XMESTO' => 'Brno', 'XSTAT' => 'CZ', 'XZEME' => 'CZ',
+                    'DRUH_ADR' => 1, 'XKORES' => false, 'XIS_IMP' => true, 'ID' => 'A5-1', 'TS' => '2025011510:00:00#INSE#'],
+                ['INTER' => 105, 'XULICE' => 'Poštovní', 'XCISLO' => '1', 'XPSC' => '77900', 'XMESTO' => 'Olomouc', 'XSTAT' => 'CZ', 'XZEME' => 'CZ',
+                    'DRUH_ADR' => 2, 'XKORES' => true, 'XIS_IMP' => false, 'ID' => 'A5-2', 'TS' => '2025011510:00:00#INSE#'],
+            ],
+        ];
+        foreach (range(4, 6) as $m) {
+            $months[] = [6, 2025, $m, ['MZ_HRUBA' => 5000, 'MZ_SDANI' => 5000, 'MZ_SDAN' => 750, 'SRAZ_DAN' => true, 'MZ_CISTA' => 4250, 'MZ_VYPLATA' => 4250,
+                'DNY_ODPR' => 5, 'UVA_DOBA' => 8]];
+        }
+        $tables['PERS_HYS'][0] = [...$tables['PERS_HYS'][0], ['TYP_MZDY', 'N', 1], ['SAZBA_MZ', 'N', 15, 4], ['UVA_HOD', 'N', 8, 4], ['UVA_DOBA', 'N', 7, 4]];
+        $time = ['UVA_HOD' => 38.75, 'UVA_DOBA' => 7.75];
+        array_push($tables['PERS_HYS'][1],
+            ['INTER' => 5, 'ROK' => 2025, 'MESIC' => 1, 'TYP_MZDY' => 1, 'SAZBA_MZ' => 30000, 'PLATNY_OD' => '2025-01-01', 'ID' => 'H5-1'] + $time,
+            // `MZDA_MES` se od sazby liší a sjednanou mzdou není.
+            ['INTER' => 5, 'ROK' => 2025, 'MESIC' => 7, 'TYP_MZDY' => 1, 'SAZBA_MZ' => 32000, 'MZDA_MES' => 30400, 'PLATNY_OD' => '2025-07-01', 'ID' => 'H5-2'] + $time,
+        );
+        // Formulář JMHZ za 1/2026 přijatý ČSSZ; OIČ má platnou kontrolní číslici.
+        $tables['MZ_JMHZ'] = [
+            [['ID', 'C', 36], ['X10010', 'N', 12], ['X10011', 'N', 12], ['X10007', 'C', 10], ['TS', 'C', 40]],
+            [['ID' => 'J2601', 'X10010' => 1, 'X10011' => 2026, 'X10007' => 'R', 'TS' => '2026021010:00:00#INSE#']],
+        ];
+        $tables['MZ_JMHZ2'] = [
+            [['ID', 'C', 36], ['ID_JMHZ', 'C', 36], ['INT_ZAM', 'N', 10], ['XPRIJATO_Z', 'N', 2], ['X10051', 'N', 12], ['X10228', 'C', 100],
+                ['X10229', 'C', 100], ['X10230', 'C', 10], ['X10231', 'C', 10], ['X10239', 'C', 10], ['X10261', 'N', 12, 2], ['TS', 'C', 40]],
+            [['ID' => 'F5', 'ID_JMHZ' => 'J2601', 'INT_ZAM' => 5, 'XPRIJATO_Z' => 3, 'X10051' => 1234567895, 'X10228' => '1234567890123',
+                'X10229' => 'Brno', 'X10230' => '582786', 'X10231' => 'CZ', 'X10239' => '1', 'X10261' => 38.75, 'TS' => '2026021010:00:00#INSE#']],
+        ];
+        $tables['MZ_ISPV'] = [[['INTER', 'N', 10], ['KZAM', 'C', 8], ['CZICSE', 'C', 4], ['ID', 'C', 36]], [['INTER' => 5, 'KZAM' => '25120', 'CZICSE' => '1111', 'ID' => 'I5']]];
+        $tables['MZ_PRISO'] = [
+            [['INTER', 'N', 8], ['KOD', 'C', 2], ['PRIJATO', 'L'], ['PRIJ_DAT', 'D'], ['ID', 'C', 36]],
+            [
+                ['INTER' => 5, 'KOD' => '1', 'PRIJATO' => true, 'PRIJ_DAT' => '2025-01-20', 'ID' => 'S5-1'],
+                ['INTER' => 6, 'KOD' => '1', 'PRIJATO' => true, 'PRIJ_DAT' => '2025-04-05', 'ID' => 'S6-1'],
+                ['INTER' => 6, 'KOD' => '2', 'PRIJATO' => true, 'PRIJ_DAT' => '2025-07-03', 'ID' => 'S6-2'],
+            ],
+        ];
+        // Přihláška k VZP s nástupem, od 7/2025 změna pojišťovny (oznámení Q).
+        array_push($tables['MZ_PRIZP'][1],
+            ['INTER' => 5, 'HLAS_OD' => '2025-01-15', 'ZKRATKA_P' => '111', 'KOD' => 'P', 'PRIJATO' => true, 'ID' => 'ZP5-1'],
+            ['INTER' => 5, 'HLAS_OD' => '2025-07-01', 'ZKRATKA_P' => '201', 'KOD' => 'Q', 'PRIJATO' => true, 'ID' => 'ZP5-2'],
+        );
+        $employee = static fn (int $gross, int $soc, int $zdr, int $socF, int $zdrF, int $tax, string $insurer): array => [
+            'MZ_HRUBA' => $gross, 'VYM_SOC' => $gross, 'VYM_ZDR' => $gross, 'MZ_SOC' => $soc, 'MZ_ZDR' => $zdr, 'MZ_SOCF' => $socF, 'MZ_ZDRF' => $zdrF,
+            'MZ_ZDANI' => $gross, 'MZ_DAN' => $tax, 'NEZD_VLAS' => 2570, 'POD_DAN' => true, 'NEZD_A' => true, 'MZ_CISTA' => $gross - $soc - $zdr - $tax,
+            'MZ_VYPLATA' => $gross - $soc - $zdr - $tax, 'POJIS_SO' => true, 'ZKR_POJ' => $insurer, 'DNY_ODPR' => 20, 'UVA_DOBA' => 8,
+        ];
+        // Exekuce 1 000 Kč měsíčně od 10/2025 (v `SR_OST1` i v `DNY`), v 11/2025 navíc záloha
+        // na mzdu 2 000 Kč, kterou `SR_*` nenese.
+        $items = [];
+        foreach (range(1, 12) as $m) {
+            $values = $m < 7 ? $employee(30000, 2130, 1350, 7440, 2700, 1930, '111') : $employee(32000, 2272, 1440, 7936, 2880, 2230, '201');
+            if ($m >= 10) {
+                $values['SR_OST1'] = 1000;
+                $values['MZ_VYPLATA'] -= 1000;
+                $items[] = self::item5(2025, $m, '702', 1000, ['SRA_INT' => 2]);
+            }
+            if ($m === 11) {
+                $values['MZ_VYPLATA'] -= 2000;
+                $items[] = self::item5(2025, $m, '750', 2000);
+            }
+            $months[] = [5, 2025, $m, $values];
+        }
+        $months[] = [5, 2026, 1, $employee(32000, 2272, 1440, 7936, 2880, 2230, '201')];
+        // Dovolená 4.-8. 8. 2025 (38,75 h) a pracovní neschopnost od 10. 11. 2025: náhrada (610),
+        // pak nemocenská (600) do konce roku; případ eNeschopenky končí 20. 1. 2026.
+        array_push($items,
+            self::item5(2025, 8, '500', 5400, ['DATUM_OD' => '2025-08-04', 'DATUM_DO' => '2025-08-08', 'HODINY' => 38.75, 'N_DNY' => 5, 'TYP' => 2]),
+            self::item5(2025, 11, '610', 4200, ['DATUM_OD' => '2025-11-10', 'DATUM_DO' => '2025-11-23', 'HODINY' => 69.75, 'N_DNY' => 14, 'TYP' => 3]),
+            self::item5(2025, 11, '600', 0, ['DATUM_OD' => '2025-11-24', 'DATUM_DO' => '2025-11-30', 'N_DNY' => 7, 'TYP' => 3]),
+            self::item5(2025, 12, '600', 0, ['DATUM_OD' => '2025-12-01', 'DATUM_DO' => '2025-12-31', 'N_DNY' => 31, 'TYP' => 3]),
+        );
+        // Trvalé složky vztahu: osobní ohodnocení (příjem, ne srážka), exekuce od 10/2025,
+        // spoření skončené v 6/2025 a odborové příspěvky.
+        $card = static fn (int $sra, string $code, string $text, array $values): array => $values + ['S_INTER' => 5, 'S_SRAINT' => $sra, 'S_KOD' => $code,
+            'S_POPIS' => $text, 'ID' => "SR5-{$sra}"];
+        $tables['MZ_SRAZ'] = [
+            [['S_INTER', 'N', 10], ['S_KOD', 'C', 3], ['S_SRAINT', 'N', 10], ['S_POPIS', 'C', 64], ['S_CASTKA', 'N', 12, 3], ['S_CAST_SR', 'N', 12, 2],
+                ['S_EXEKUCE', 'L'], ['S_DOCDAT', 'D'], ['S_PORADI', 'N', 2], ['S_MES_OD', 'N', 2], ['S_ROK_OD', 'N', 4], ['S_MES_DO', 'N', 2], ['S_ROK_DO', 'N', 4],
+                ['S_DORUCIT', 'C', 64], ['S_UCET', 'C', 35], ['S_BANKOD', 'C', 11], ['S_VAR', 'C', 10], ['S_KONS', 'C', 4], ['ID', 'C', 36]],
+            [
+                $card(1, '303', 'Osobní ohodnocení', ['S_CASTKA' => 2000, 'S_MES_OD' => 1, 'S_ROK_OD' => 2025]),
+                $card(2, '702', 'Exekuce - syntetická', ['S_CASTKA' => 50000, 'S_CAST_SR' => 1000, 'S_EXEKUCE' => true, 'S_DOCDAT' => '2025-09-15', 'S_PORADI' => 1,
+                    'S_MES_OD' => 10, 'S_ROK_OD' => 2025, 'S_DORUCIT' => 'Exekutorský úřad Fiktivní', 'S_UCET' => '2000145399', 'S_BANKOD' => '0100',
+                    'S_VAR' => '1234', 'S_KONS' => '558']),
+                $card(3, '700', 'Spoření', ['S_CASTKA' => 500, 'S_MES_OD' => 1, 'S_ROK_OD' => 2025, 'S_MES_DO' => 6, 'S_ROK_DO' => 2025]),
+                $card(4, '720', 'Odbory', ['S_CASTKA' => 150, 'S_MES_OD' => 1, 'S_ROK_OD' => 2025]),
+            ],
+        ];
+        $tables['MZ_HDPN'] = [[['INTER', 'N', 10], ['HDPN_OD', 'D'], ['HDPN_DO', 'D'], ['TYP_NP', 'C', 3], ['C_LISTKU', 'C', 20], ['ID', 'C', 36]],
+            [['INTER' => 5, 'HDPN_OD' => '2025-11-10', 'HDPN_DO' => '2026-01-20', 'TYP_NP' => 'DPN', 'C_LISTKU' => 'SYN-1', 'ID' => 'HD5']]];
+        // Stav dovolené v hodinách: nárok 193,75 h, do 12/2025 vyčerpáno 38,75 h.
+        $tables['DOV_DNY'] = [
+            [['INTER', 'N', 8], ['MESIC', 'N', 2], ['ROK', 'N', 4], ['ZUS_MINR', 'N', 9, 4], ['CERPANI', 'N', 9, 4], ['NAROK', 'N', 9, 4], ['CERPANO_R', 'N', 9, 4],
+                ['ZUST_MES', 'N', 11, 4], ['ID', 'C', 36]],
+            [
+                ['INTER' => 5, 'MESIC' => 8, 'ROK' => 2025, 'ZUS_MINR' => 0, 'CERPANI' => 38.75, 'NAROK' => 193.75, 'CERPANO_R' => 38.75, 'ZUST_MES' => 155, 'ID' => 'DD5-8'],
+                ['INTER' => 5, 'MESIC' => 12, 'ROK' => 2025, 'ZUS_MINR' => 0, 'CERPANI' => 0, 'NAROK' => 193.75, 'CERPANO_R' => 38.75, 'ZUST_MES' => 155, 'ID' => 'DD5-12'],
+            ],
+        ];
+        // Průměrný výdělek pro náhrady po měsících; ve čtvrtletí stejný.
+        $averages = [];
+        foreach (range(1, 12) as $m) {
+            $quarter = (int) ceil($m / 3);
+            $from = $quarter === 1 ? '2024-10-01' : sprintf('2025-%02d-01', ($quarter - 2) * 3 + 1);
+            $to = $quarter === 1 ? '2024-12-31' : date('Y-m-t', (int) strtotime(sprintf('2025-%02d-01', ($quarter - 1) * 3)));
+            $averages[] = ['XNINTER' => 5, 'XN_MES' => $m, 'XN_ROK' => 2025, 'XN_PRDO' => $quarter === 1 ? 180.5 : 190.25, 'XN_DRUH' => $quarter === 1 ? 'P' : 'R',
+                'XROZOBDOD' => $from, 'XROZOBDDO' => $to, 'XVYM_DOV' => $quarter === 1 ? 0 : 90000, 'XHOD_SPL' => $quarter === 1 ? 0 : 480, 'ID' => "PR5-{$m}"];
+        }
+        $tables['PER_PRU'] = [
+            [['XNINTER', 'N', 8], ['XN_MES', 'N', 2], ['XN_ROK', 'N', 4], ['XN_PRDO', 'N', 10, 4], ['XN_DRUH', 'C', 1], ['XROZOBDOD', 'D'], ['XROZOBDDO', 'D'],
+                ['XVYM_DOV', 'N', 12, 2], ['XHOD_SPL', 'N', 7, 2], ['ID', 'C', 36]],
+            $averages,
+        ];
+        $tables['DNY'] = [
+            [['INTER', 'N', 8], ['DATUM_OD', 'D'], ['DATUM_DO', 'D'], ['KOD', 'C', 3], ['HODINY', 'N', 8, 4], ['N_DNY', 'N', 5, 2], ['CASTKA', 'N', 14, 2],
+                ['SAZBA', 'N', 15, 4], ['SRA_INT', 'N', 10], ['DNY_ROK', 'N', 4], ['DNY_MES', 'N', 2], ['TYP', 'N', 2], ['KOD_BAZE', 'C', 3],
+                ['C_LISTKU', 'C', 20], ['ZAC_NEM', 'D'], ['UKONCENO', 'L'], ['ID', 'C', 36]],
+            $items,
+        ];
+        return [['SR_OST1', 'N', 12, 2]];
+    }
+
+    /**
+     * Položka mzdy vztahu INTER 5 (`DNY`) za měsíc; interval je celý měsíc, pokud ho
+     * `$extra` neurčí jinak.
+     *
+     * @param array<string,mixed> $extra
+     * @return array<string,mixed>
+     */
+    private static function item5(int $year, int $month, string $code, float $amount, array $extra = []): array
+    {
+        $from = sprintf('%04d-%02d-01', $year, $month);
+        return $extra + ['INTER' => 5, 'DATUM_OD' => $from, 'DATUM_DO' => date('Y-m-t', (int) strtotime($from)), 'KOD' => $code, 'CASTKA' => $amount,
+            'DNY_ROK' => $year, 'DNY_MES' => $month, 'TYP' => 6, 'ID' => "D5-{$year}-{$month}-{$code}"];
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Migration\Premier;
 
+use MyInvoice\Service\Geo\CountryNameMatcher;
 use MyInvoice\Service\Migration\Premier\PremierBackup;
 use MyInvoice\Service\Migration\Premier\PremierPayroll;
 use MyInvoice\Service\Migration\Premier\PremierPayrollTakeover;
@@ -57,13 +58,56 @@ final class PremierPayrollTakeoverTest extends TestCase
         self::assertNull($ended->person->healthCoverage);
     }
 
+    /** Stát adresy je v PREMIER volný text; na kód ho převede číselník zemí. */
+    public function testResidenceCountryFromNameViaCountryCodebook(): void
+    {
+        $this->tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'premier_takeover_' . bin2hex(random_bytes(5));
+        SyntheticPremierBackup::writeDir($this->tmp, false, ['payroll' => true, 'payroll_detail' => true]);
+        $relations = PremierPayroll::fromBackup(PremierBackup::open($this->tmp))->relations;
+        $slovak = array_values(array_filter($relations, static fn (array $r): bool => $r['key'] === '6'))[0];
+        $countries = new CountryNameMatcher([
+            ['iso2' => 'CZ', 'iso3' => 'CZE', 'name_cs' => 'Česko', 'name_en' => 'Czechia'],
+            ['iso2' => 'SK', 'iso3' => 'SVK', 'name_cs' => 'Slovensko', 'name_en' => 'Slovakia'],
+        ]);
+
+        self::assertSame(['street_line' => 'Hlavná 5', 'city' => 'Bratislava', 'postal_code' => '81101', 'country_code' => 'SK'],
+            PremierPayrollTakeover::record($slovak, '2025-12-31', $countries)->person->residence);
+        self::assertNull(PremierPayrollTakeover::record($slovak, '2025-12-31')->person->residence, 'Bez číselníku se stát neurčí a adresa se nezapíše.');
+        self::assertNull(PremierPayrollTakeover::address(['street_line' => 'X 1', 'city' => 'Y', 'postal_code' => '1', 'country_code' => null,
+            'country_text' => 'Atlantida'], $countries));
+    }
+
+    /**
+     * Evidence JMHZ vztahu z posledního formuláře: identifikátory se převezmou jen
+     * z formuláře, který přijala ČSSZ; pracoviště, CZ-ISCO a doklady Zákonných termínů.
+     */
+    public function testJmhzEvidenceAndIdentifiers(): void
+    {
+        $this->tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'premier_takeover_' . bin2hex(random_bytes(5));
+        SyntheticPremierBackup::writeDir($this->tmp, false, ['payroll' => true, 'payroll_detail' => true]);
+        $relations = PremierPayroll::fromBackup(PremierBackup::open($this->tmp))->relations;
+        [$employee, $dpp] = array_values(array_filter($relations, static fn (array $r): bool => in_array($r['key'], ['5', '6'], true)));
+
+        $employment = PremierPayrollTakeover::record($employee, '2025-12-31')->employment;
+        self::assertSame(['1234567895', '1234567890123', '25120'], [$employment->oic, $employment->idPpv, $employment->czIsco]);
+        self::assertSame(['work_place' => 'Brno', 'municipality_code' => '582786', 'country_code' => 'CZ', 'regular_workplace' => null], $employment->workplace);
+        self::assertSame('Převzato z PREMIER: oznámení o nástupu ČSSZ přijaté 20. 1. 2025.', $employment->checklistNotes['social_jmhz_registration']);
+        self::assertSame('Převzato z PREMIER: podepsané prohlášení poplatníka, mzda za 2025-01.', $employment->checklistNotes['tax_declaration']);
+        self::assertSame(['2025-01-01' => ['weekly' => 38.75, 'daily' => 7.75], '2025-07-01' => ['weekly' => 38.75, 'daily' => 7.75]], $employee['working_time']);
+
+        self::assertSame(['oic' => '9876543204', 'id_ppv' => null, 'confirmed' => false], PremierPayrollTakeover::identifiers($dpp));
+        $ended = PremierPayrollTakeover::record($dpp, '2025-12-31')->employment;
+        self::assertNull($ended->oic, 'OIČ bez přijatého formuláře JMHZ se nepřevezme.');
+        self::assertArrayHasKey('social_jmhz_deregistration', $ended->checklistNotes);
+    }
+
     public function testPolicyKeepsPremierBehaviour(): void
     {
         $policy = PremierPayrollTakeover::policy();
 
         self::assertSame(['premier', 'PREMIER'], [$policy->sourceKey, $policy->label]);
         self::assertFalse($policy->strict);
-        self::assertFalse($policy->addressesPerType);
+        self::assertTrue($policy->addressesPerType);
         self::assertFalse($policy->verifyPayoutAccounts);
         self::assertTrue($policy->ignoreEndBeforeStart);
         self::assertTrue($policy->rewriteOwnOpenings);

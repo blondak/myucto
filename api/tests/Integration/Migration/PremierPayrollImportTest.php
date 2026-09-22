@@ -215,6 +215,211 @@ final class PremierPayrollImportTest extends TestCase
         self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_absences a JOIN payroll_employments e ON e.id = a.employment_id WHERE e.supplier_id = ?', $supplierId));
     }
 
+    /** Učeň nesmí vzniknout jako pracovní poměr; převod ho nezaloží a řekne to. */
+    public function testApprenticeIsReportedInsteadOfCreatedAsEmployment(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_employments WHERE supplier_id = ? AND code = '4'", $supplierId), $this->explain($protocol));
+        self::assertContains('relation_apprentice', $this->messageCodes($protocol));
+        self::assertSame(1, self::stepCounts($protocol, 'payroll')['apprentices'] ?? 0);
+    }
+
+    /** Sjednaná mzda vztahu ze sazby podle typu mzdy, ne z `MZDA_MES`. */
+    public function testAgreedWageFromRateByWageType(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['2025-01-15', '3000000'], ['2025-07-01', '3200000']], $this->fetch("SELECT t.effective_from, t.monthly_gross_minor FROM payroll_employment_terms t
+            JOIN payroll_employments e ON e.id = t.employment_id WHERE e.supplier_id = ? AND e.code = '5' ORDER BY t.effective_from", $supplierId), $this->explain($protocol));
+    }
+
+    /**
+     * Zákonná evidence má účinnost po celých měsících. Vztah s nástupem uprostřed měsíce
+     * ji dřív nedostal vůbec: uložení celé evidence odmítlo den nástupu jako začátek řady.
+     */
+    public function testStatutoryEvidenceStartsAtMonthOfMidMonthStart(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        foreach (['payroll_person_tax_residences', 'payroll_person_social_jurisdictions', 'payroll_person_tax_declarations'] as $table) {
+            self::assertSame([['2025-01-01']], $this->fetch("SELECT MIN(x.effective_from) FROM {$table} x
+                JOIN payroll_employments e ON e.employee_id = x.employee_id AND e.supplier_id = x.supplier_id WHERE e.supplier_id = ? AND e.code = '5'", $supplierId),
+                $table . ' ' . $this->explain($protocol));
+        }
+    }
+
+    /** Změna zdravotní pojišťovny v PREMIER se převede jako historie, ne jen poslední stav. */
+    public function testHealthInsurerHistory(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['111', '2025-01-01', '2025-06-30'], ['201', '2025-07-01', null]], $this->fetch("SELECT h.insurer_code, h.effective_from, h.effective_to
+            FROM payroll_person_health_coverage_history h JOIN payroll_employments e ON e.employee_id = h.employee_id AND e.supplier_id = h.supplier_id
+            WHERE e.supplier_id = ? AND e.code = '5' ORDER BY h.effective_from", $supplierId), $this->explain($protocol));
+    }
+
+    /** Adresa se státem zapsaným názvem (mimo české varianty) se dřív nezapsala vůbec. */
+    public function testForeignResidenceCountryFromName(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['residence', 'SK']], $this->fetch("SELECT a.address_type, a.country_code FROM payroll_person_addresses a
+            JOIN payroll_employments e ON e.employee_id = a.employee_id AND e.supplier_id = a.supplier_id WHERE e.supplier_id = ? AND e.code = '6'", $supplierId),
+            $this->explain($protocol));
+    }
+
+    /** Korespondenční adresa z `PER_ADR` se doplní vedle trvalé. */
+    public function testMailingAddressFromAdditionalAddresses(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['residence', '60200', 'CZ'], ['mailing', '77900', 'CZ']], $this->fetch("SELECT a.address_type, a.postal_code, a.country_code FROM payroll_person_addresses a
+            JOIN payroll_employments e ON e.employee_id = a.employee_id AND e.supplier_id = a.supplier_id WHERE e.supplier_id = ? AND e.code = '5' ORDER BY a.address_type", $supplierId),
+            $this->explain($protocol));
+    }
+
+    /** Převzaté měsíce nesou srážky ze složek mezd, ne jen ze sloupců `SR_*`. */
+    public function testReferenceTotalsDeductionsIncludeWageAdvance(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['2025-10-01', '100000'], ['2025-11-01', '300000'], ['2025-12-01', '100000']], $this->fetch("SELECT r.period_start, r.deductions_minor
+            FROM payroll_migration_reference_totals r JOIN payroll_employments e ON e.id = r.employment_id
+            WHERE r.supplier_id = ? AND e.code = '5' AND r.deductions_minor > 0 ORDER BY r.period_start", $supplierId), $this->explain($protocol));
+    }
+
+    /**
+     * Evidence JMHZ z PREMIER: OIČ a ID PPV z formuláře, který přijala ČSSZ, pracoviště,
+     * CZ-ISCO, týdenní doba a doklady k Zákonným termínům. OIČ bez přijatého formuláře
+     * zůstává k ověření.
+     */
+    public function testJmhzEvidenceIdentifiersAndChecklist(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $counts = self::stepCounts($protocol, 'payroll');
+        self::assertSame([1, 1, 1, 1, 1], [$counts['workplace'] ?? 0, $counts['cz_isco'] ?? 0, $counts['oic'] ?? 0, $counts['id_ppv'] ?? 0,
+            $counts['identifiers_unconfirmed'] ?? 0], $this->explain($protocol));
+        self::assertSame([['582786', 'CZ', 'Brno', '25120', '38.75']], $this->fetch("SELECT t.jmhz_workplace_municipality_code, t.jmhz_workplace_country_code, t.work_place,
+            t.cz_isco_code, t.weekly_hours FROM payroll_employment_terms t JOIN payroll_employments e ON e.id = t.employment_id
+            WHERE e.supplier_id = ? AND e.code = '5' ORDER BY t.effective_from DESC LIMIT 1", $supplierId));
+        self::assertSame([['ik_mpsv', 'verified_manual_import']], $this->fetch("SELECT x.identifier_type, x.source_kind FROM payroll_person_external_ids x
+            JOIN payroll_employments e ON e.employee_id = x.employee_id AND e.supplier_id = x.supplier_id WHERE e.supplier_id = ? AND e.code = '5'", $supplierId));
+        self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_person_external_ids x
+            JOIN payroll_employments e ON e.employee_id = x.employee_id AND e.supplier_id = x.supplier_id WHERE e.supplier_id = ? AND e.code = '6'", $supplierId),
+            'OIČ jen z karty osoby bez přijatého formuláře se nepřevezme.');
+        $done = array_column($this->fetch("SELECT c.item_key FROM payroll_employment_checklist_items c JOIN payroll_employments e ON e.id = c.employment_id
+            WHERE e.supplier_id = ? AND e.code = '5' AND c.status = 'completed' ORDER BY c.item_key", $supplierId), 0);
+        foreach (['employment_contract', 'health_insurance_registration', 'social_jmhz_registration', 'tax_declaration'] as $item) {
+            self::assertContains($item, $done, $this->explain($protocol));
+        }
+        self::assertContains('social_jmhz_deregistration', array_column($this->fetch("SELECT c.item_key FROM payroll_employment_checklist_items c
+            JOIN payroll_employments e ON e.id = c.employment_id WHERE e.supplier_id = ? AND e.code = '6' AND c.status = 'completed'", $supplierId), 0));
+    }
+
+    /**
+     * Karta osoby z PREMIER: dítě s uplatněným zvýhodněním, sleva důchodce, výplatní účty
+     * s historií a účty institucí z registru pojišťoven a nastavení mezd.
+     */
+    public function testPersonCardChildrenAccountsAndInstitutions(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $counts = self::stepCounts($protocol, 'payroll');
+        self::assertArrayNotHasKey('details_failed', $counts, $this->explain($protocol));
+
+        self::assertSame([['1', '2025-01-01', null]], $this->fetch("SELECT c.child_order, c.effective_from, c.effective_to FROM payroll_person_tax_child_claims c
+            JOIN payroll_employments e ON e.employee_id = c.employee_id AND e.supplier_id = c.supplier_id WHERE e.supplier_id = ? AND e.code = '5'", $supplierId),
+            $this->explain($protocol));
+        self::assertSame(1, $counts['children_without_credit'] ?? 0);
+        self::assertSame(1, $counts['children_other_caregiver'] ?? 0);
+
+        self::assertSame([['1', '1'], ['0', '0']], $this->fetch("SELECT a.is_active, a.allocation_basis_points > 0 FROM payroll_person_accounts a
+            JOIN payroll_employments e ON e.employee_id = a.employee_id AND e.supplier_id = a.supplier_id WHERE e.supplier_id = ? AND e.code = '5' ORDER BY a.id", $supplierId),
+            'Aktuální účet je výplatní, dřívější z historie zůstává bez výplat.');
+        self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_person_accounts a JOIN payroll_employments e ON e.employee_id = a.employee_id
+            AND e.supplier_id = a.supplier_id WHERE e.supplier_id = ? AND e.code = '6'", $supplierId), 'Výplata v hotovosti účet nezakládá.');
+
+        self::assertSame([['not_claimed']], $this->fetch("SELECT d.status FROM payroll_person_social_discount_claims d
+            JOIN payroll_employments e ON e.employee_id = d.employee_id AND e.supplier_id = d.supplier_id WHERE e.supplier_id = ? AND e.code = '6'", $supplierId));
+        self::assertSame(1, $counts['pensioners_without_discount'] ?? 0);
+
+        self::assertSame([['health_insurer', '111', 'institution_notice'], ['health_insurer', '201', 'institution_notice'], ['social_security', 'P', 'imported'],
+            ['tax_office', 'ADVANCE_TAX', 'imported'], ['tax_office', 'WITHHOLDING_TAX', 'imported']],
+            $this->fetch('SELECT i.institution_type, i.institution_code, a.source_kind FROM payroll_institution_accounts a
+                JOIN payroll_institutions i ON i.id = a.institution_id WHERE a.supplier_id = ? ORDER BY i.institution_type, i.institution_code', $supplierId),
+            $this->explain($protocol));
+        self::assertContains('institution_accounts_unconfirmed', $this->messageCodes($protocol));
+    }
+
+    /**
+     * Časové evidence z PREMIER: nepřítomnosti s daty (neschopnost prodloužená do konce
+     * případu eNeschopenky), průměry čtvrtletí a zůstatek dovolené v hodinách. Opakovaný
+     * převod nic nezdvojí.
+     */
+    public function testAbsencesAveragesAndLeave(): void
+    {
+        $supplierId = $this->supplier(true);
+        $backup = $this->backup(['payroll' => true, 'payroll_detail' => true]);
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $absences = "SELECT a.absence_type, a.date_from, a.date_to, a.status FROM payroll_absences a JOIN payroll_employments e ON e.id = a.employment_id
+            WHERE e.supplier_id = ? AND e.code = '5' ORDER BY a.date_from";
+        self::assertSame([['vacation', '2025-08-04', '2025-08-08', 'approved'], ['dpn', '2025-11-10', '2026-01-20', 'approved']],
+            $this->fetch($absences, $supplierId), $this->explain($protocol));
+        self::assertSame([['2025', '1', '18050'], ['2025', '2', '19025'], ['2025', '3', '19025'], ['2025', '4', '19025']],
+            $this->fetch("SELECT s.applicable_year, s.applicable_quarter, s.average_hourly_minor FROM payroll_average_earning_snapshots s
+                JOIN payroll_employments e ON e.id = s.employment_id WHERE e.supplier_id = ? AND e.code = '5' AND s.status = 'approved'
+                ORDER BY s.applicable_year, s.applicable_quarter", $supplierId), $this->explain($protocol));
+        self::assertSame([['2025', 'carryover', '9300']], $this->fetch("SELECT l.leave_year, l.entry_type, l.minutes_delta FROM payroll_leave_ledger l
+            JOIN payroll_employments e ON e.id = l.employment_id WHERE e.supplier_id = ? AND e.code = '5' AND l.entry_type = 'carryover'", $supplierId));
+        self::assertContains('leave_carryover', $this->messageCodes($protocol));
+
+        $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertCount(2, $this->fetch($absences, $supplierId), 'Opakovaný převod nepřítomnosti nezdvojí.');
+    }
+
+    /**
+     * Trvalé srážky z PREMIER: exekuce jako nedoložený exekuční případ se zbývající
+     * pohledávkou, odbory jako dohoda o srážkách, skončené spoření jen v počtu. Zakládají se
+     * až v běhu roku posledních zpracovaných mezd.
+     */
+    public function testDeductionsFromStandingDeductionCards(): void
+    {
+        $supplierId = $this->supplier(true);
+        $backup = $this->backup(['payroll' => true, 'payroll_detail' => true]);
+        $first = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        self::assertArrayNotHasKey('deductions_not_converted', self::stepCounts($first, 'payroll'), 'Trvalé srážky ze zálohy převod zakládá, nehlásí je jako nepřevedené.');
+        self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_enforcement_cases WHERE supplier_id = ?', $supplierId), 'Rok 2025 ještě není konec zpracovaných mezd.');
+
+        $next = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR2, false);
+        self::assertFalse($next->hasErrors(), $this->explain($next));
+        $counts = self::stepCounts($next, 'payroll');
+        self::assertSame([1, 1, 1, 1], [$counts['enforcement_cases'] ?? 0, $counts['deduction_agreements'] ?? 0, $counts['deductions_ended'] ?? 0,
+            $counts['recipient_accounts'] ?? 0], $this->explain($next));
+        self::assertSame([['non_priority', '4700000']], $this->fetch('SELECT c.category, c.outstanding_minor_units FROM payroll_enforcement_claims c
+            JOIN payroll_enforcement_cases k ON k.id = c.case_id WHERE k.supplier_id = ?', $supplierId));
+        self::assertSame([['contribution', '15000', 'active']], $this->fetch('SELECT deduction_kind, requested_minor, status FROM payroll_deduction_agreements
+            WHERE supplier_id = ?', $supplierId));
+        self::assertContains('deductions_evidence_pending', $this->messageCodes($next));
+
+        $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR2, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame(2, self::stepCounts($again, 'payroll')['deductions_existing'] ?? 0, 'Opakovaný převod srážky nezdvojí.');
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);

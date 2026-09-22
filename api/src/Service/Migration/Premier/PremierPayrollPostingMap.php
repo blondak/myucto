@@ -61,16 +61,56 @@ final class PremierPayrollPostingMap implements PayrollLegacyPostingSource
         return $this->rows;
     }
 
+    /** Srážky exekucí a insolvencí (kódy složek `MZDY_POL`), ostatní srážky jsou dobrovolné. */
+    private const ENFORCEMENT_CODES = ['702', '703', '704', '705', '706', '707', '708', '709', '751'];
+
     public static function fromBackup(PremierBackup $backup, PremierJournal $journal, int $year): self
     {
-        return self::fromJournal($journal, $year, self::accountNames($backup, $year));
+        return self::fromJournal($journal, $year, self::accountNames($backup, $year), self::componentAccounts($backup, $year));
+    }
+
+    /**
+     * Účty složek mezd z číselníku `MZDY_POL` (`UCET`, `UCET2`) platného v roce (`PLATNOST`;
+     * bez verze roku platí nejbližší starší): účet => kódy složek, které na něj účtují.
+     * PREMIER tak u srážky říká, kam ji účtuje: exekuce a insolvence (702-709) na 325333,
+     * poplatky a náklady na 379100, stravenky na 213001, záloha a odbory na 335100 (reálná
+     * záloha). Deník tu dvojici nese taky, ale bez významu.
+     *
+     * @return array<string,list<string>>
+     */
+    public static function componentAccounts(PremierBackup $backup, int $year): array
+    {
+        $best = [];
+        foreach ($backup->rows('MZDY_POL') as $row) {
+            $code = trim((string) ($row['KOD'] ?? ''));
+            $validity = (int) ($row['PLATNOST'] ?? 0);
+            if ($code === '' || ($validity > $year && $validity !== 0)) {
+                continue;
+            }
+            if (!isset($best[$code]) || $validity >= $best[$code][0]) {
+                $best[$code] = [$validity, $row];
+            }
+        }
+        $out = [];
+        foreach ($best as $code => [, $row]) {
+            foreach (['UCET', 'UCET2'] as $column) {
+                $account = trim((string) ($row[$column] ?? ''));
+                if (preg_match('/^[0-9]{3,6}$/D', $account) === 1 && !in_array((string) $code, $out[$account] ?? [], true)) {
+                    $out[$account][] = (string) $code;
+                }
+            }
+        }
+        ksort($out);
+        return $out;
     }
 
     /**
      * @param array<string,string> $accountNames účet PREMIER (`336100`) => název z osnovy
+     * @param array<string,list<string>> $componentAccounts účet => kódy složek ({@see self::componentAccounts()})
      */
-    public static function fromJournal(PremierJournal $journal, int $year, array $accountNames = []): self
+    public static function fromJournal(PremierJournal $journal, int $year, array $accountNames = [], array $componentAccounts = []): self
     {
+        $deductions = self::deductionAccounts($componentAccounts);
         /** @var array<string,array<string,mixed>> $buckets */
         $buckets = [];
         foreach ($journal->year($year) as $r) {
@@ -80,12 +120,12 @@ final class PremierPayrollPostingMap implements PayrollLegacyPostingSource
                 continue;
             }
             $text = (string) $r['text'];
-            $pair = self::pair($debit, $credit) ?? self::pair($credit, $debit);
+            $pair = self::pair($debit, $credit, $deductions) ?? self::pair($credit, $debit, $deductions);
             if ($pair === null) {
                 continue;
             }
             [$from, $to] = $pair;
-            $concept = self::concept($from, $to, $text, $accountNames);
+            $concept = self::concept($from, $to, $text, $accountNames, $deductions);
             $key = ($concept ?? '') . '|' . $from . '|' . $to;
             $bucket = $buckets[$key] ?? [
                 'concept' => $concept,
@@ -153,17 +193,44 @@ final class PremierPayrollPostingMap implements PayrollLegacyPostingSource
     }
 
     /**
+     * Účty, na které PREMIER účtuje jen srážky: účet => `enforcement`, `voluntary` nebo
+     * `mixed` (obojí na jednom účtu, význam rozhodne text).
+     *
+     * @param array<string,list<string>> $componentAccounts
+     * @return array<string,string>
+     */
+    private static function deductionAccounts(array $componentAccounts): array
+    {
+        $out = [];
+        foreach ($componentAccounts as $account => $codes) {
+            $deductions = array_intersect($codes, PremierPayroll::DEDUCTION_CODES);
+            if ($deductions === [] || count($deductions) !== count($codes)) {
+                continue;
+            }
+            $enforcement = array_intersect($deductions, self::ENFORCEMENT_CODES);
+            $out[(string) $account] = match (count($enforcement)) {
+                0 => 'voluntary',
+                count($deductions) => 'enforcement',
+                default => 'mixed',
+            };
+        }
+        return $out;
+    }
+
+    /**
      * Je dvojice MD/D v této orientaci mzdový zápis? Vrací ji zpět, jinak `null`.
      *
+     * @param array<string,string> $deductions {@see self::deductionAccounts()}
      * @return array{0:string,1:string}|null
      */
-    private static function pair(string $debit, string $credit): ?array
+    private static function pair(string $debit, string $credit, array $deductions = []): ?array
     {
         $employeeDebit = self::employee($debit);
         $employeeCredit = self::employee($credit);
         $cost = str_starts_with($debit, '52');
         $known = ($cost && ($employeeCredit || str_starts_with($credit, '336')))
-            || ($employeeDebit && (str_starts_with($credit, '336') || str_starts_with($credit, '342') || str_starts_with($credit, '379')));
+            || ($employeeDebit && (str_starts_with($credit, '336') || str_starts_with($credit, '342') || str_starts_with($credit, '379')
+                || isset($deductions[$credit])));
         return $known ? [$debit, $credit] : null;
     }
 
@@ -172,11 +239,25 @@ final class PremierPayrollPostingMap implements PayrollLegacyPostingSource
      * neplyne jednoznačně.
      *
      * @param array<string,string> $accountNames
+     * @param array<string,string> $deductions {@see self::deductionAccounts()}
      */
-    private static function concept(string $debit, string $credit, string $text, array $accountNames): ?string
+    private static function concept(string $debit, string $credit, string $text, array $accountNames, array $deductions = []): ?string
     {
         $partner = str_starts_with($debit, '366') || str_starts_with($credit, '366');
         $hint = AttendanceText::normalize(($accountNames[$credit] ?? '') . ' ' . $text);
+        // Účet, na který číselník složek účtuje jen srážky: druh srážky z kódů složek,
+        // u účtu se srážkami obou druhů z textu zápisu.
+        $kind = self::employee($debit) ? ($deductions[$credit] ?? null) : null;
+        if ($kind !== null) {
+            $enforcement = $kind === 'enforcement' || ($kind === 'mixed' && preg_match('/exekuc|insolven/', $hint) === 1);
+            if ($enforcement) {
+                return $partner ? null : 'enforcement_deductions';
+            }
+            if ($kind === 'voluntary') {
+                return $partner ? 'partner_other_deductions' : 'other_deductions';
+            }
+            // Smíšený účet bez vodítka v textu: rozhodne obecné pravidlo níž (379 = ostatní).
+        }
         if (str_starts_with($debit, '52') && self::employee($credit)) {
             if ($partner) {
                 return 'partner_gross';

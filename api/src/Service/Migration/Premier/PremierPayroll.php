@@ -16,7 +16,8 @@ namespace MyInvoice\Service\Migration\Premier;
  *    kontakt, daňový nerezident `NREZIDEN`. Starší verze PREMIER ji nemají; osobu pak nese
  *    `PERSON2`, historické snímky osoby po osobním čísle (poslední snímek platí).
  *  - `MZDY` - zpracovaná mzda vztahu za měsíc (`INTER`, `ROK`, `MESIC`).
- *  - `PERS_HYS` - historie sjednané mzdy (`MZDA_MES` od `PLATNY_OD`).
+ *  - `PERS_HYS` - historie sjednané mzdy od `PLATNY_OD` (`SAZBA_MZ` podle `TYP_MZDY`,
+ *    u starších verzí `MZDA_MES`, viz {@see self::agreedWage()}).
  *  - `MZ_PRIZP` - oznámení zdravotní pojišťovně (`ZKRATKA_P` = kód pojišťovny).
  *
  * Význam polí `MZDY` ověřený proti zaúčtování téhož měsíce v deníku (`PUB_UCTO`):
@@ -33,6 +34,16 @@ final class PremierPayroll
 
     /** Kódy druhu činnosti ČSSZ pro dohodu o provedení práce (viz `PayrollEmploymentJmhzActivityFamily`). */
     private const DPP_CODES = ['T', 'D'];
+
+    /**
+     * Druh vztahu učně (kategorie `UCN`). MyÚčto pro žáka nebo učně druh vztahu nemá
+     * a pracovní poměr to není: odměna za produktivní činnost nezakládá účast na
+     * pojištění jako mzda zaměstnance. Převod takový vztah nezakládá a ohlásí ho.
+     */
+    public const APPRENTICE = 'apprentice';
+
+    /** Složky mezd (`DNY.KOD`), které snižují čistou mzdu ({@see self::monthItems()}). */
+    public const DEDUCTION_CODES = ['700', '701', '702', '703', '704', '705', '706', '707', '708', '709', '710', '711', '714', '720', '750', '751', '770'];
 
     /**
      * @param list<array<string,mixed>> $relations
@@ -59,6 +70,7 @@ final class PremierPayroll
                 $people[$id] = $row;
             }
         }
+        $mailing = self::mailingAddresses($backup);
         $snapshots = [];
         foreach ($backup->rows('PERSON2') as $row) {
             $number = (int) ($row['CISLO'] ?? 0);
@@ -68,15 +80,32 @@ final class PremierPayroll
             }
         }
         $wages = [];
+        $hourly = [];
+        $weeklyHours = [];
         foreach ($backup->rows('PERS_HYS') as $row) {
-            $amount = round((float) ($row['MZDA_MES'] ?? 0), 2);
             $from = self::date($row['PLATNY_OD'] ?? null)
                 ?? (((int) ($row['ROK'] ?? 0)) > 0 ? sprintf('%04d-%02d-01', (int) $row['ROK'], max(1, (int) ($row['MESIC'] ?? 1))) : null);
-            if ($amount > 0 && $from !== null) {
+            if ($from === null) {
+                continue;
+            }
+            [$kind, $amount] = self::agreedWage($row);
+            if ($kind === 'monthly') {
                 $wages[(int) ($row['INTER'] ?? 0)][$from] = $amount;
+            } elseif ($kind === 'hourly') {
+                $hourly[(int) ($row['INTER'] ?? 0)][$from] = $amount;
+            }
+            // Týdenní pracovní doba verze (`UVA_HOD`, hodin týdně; `UVA_DOBA` je hodin denně).
+            $weekly = round((float) ($row['UVA_HOD'] ?? 0), 2);
+            if ($weekly > 0 && $weekly <= 168) {
+                $weeklyHours[(int) ($row['INTER'] ?? 0)][$from] = ['weekly' => $weekly, 'daily' => round((float) ($row['UVA_DOBA'] ?? 0), 4)];
             }
         }
+        $registry = PremierPayrollRegistry::read($backup);
+        $card = PremierPayrollPersonCard::read($backup);
+        $time = PremierPayrollTime::read($backup);
         $insurers = [];
+        /** @var array<int,list<array{date:string,code:string,kind:string}>> $insurerEvents */
+        $insurerEvents = [];
         foreach ($backup->rows('MZ_PRIZP') as $row) {
             $code = self::text($row['ZKRATKA_P'] ?? '');
             if (preg_match('/^[0-9]{3}$/D', $code) === 1) {
@@ -84,8 +113,13 @@ final class PremierPayroll
                     'code' => $code,
                     'registered' => self::text($row['KOD'] ?? '') === 'P' && ($row['PRIJATO'] ?? false) === true,
                 ];
+                $date = self::date($row['HLAS_OD'] ?? null);
+                if ($date !== null) {
+                    $insurerEvents[(int) ($row['INTER'] ?? 0)][] = ['date' => $date, 'code' => $code, 'kind' => strtoupper(self::text($row['KOD'] ?? ''))];
+                }
             }
         }
+        $items = self::monthItems($backup);
         $months = [];
         $monthRows = 0;
         foreach ($backup->rows('MZDY') as $row) {
@@ -95,7 +129,14 @@ final class PremierPayroll
                 continue;
             }
             $monthRows++;
-            $months[(int) ($row['INTER'] ?? 0)][sprintf('%04d-%02d', $year, $month)] = self::month($row);
+            $inter = (int) ($row['INTER'] ?? 0);
+            $period = sprintf('%04d-%02d', $year, $month);
+            $months[$inter][$period] = self::month($row);
+            // Srážky nese `DNY` po složkách; sloupce `SR_*` v `MZDY` nemají zálohu na mzdu
+            // ani stravenky a u některých záloh ani exekuce.
+            if (isset($items[$inter][$period])) {
+                $months[$inter][$period]['deductions'] = round($items[$inter][$period], 2);
+            }
         }
 
         $relations = [];
@@ -128,10 +169,15 @@ final class PremierPayroll
             }
             $relationWages = $wages[$inter] ?? [];
             ksort($relationWages);
+            $relationHourly = $hourly[$inter] ?? [];
+            ksort($relationHourly);
             $account = self::digits(str_replace('-', '', self::text($row['BANKA_UCET'] ?? '')), 22) !== null
                 ? self::text($row['BANKA_UCET'] ?? '') : null;
             $bankCode = self::digits(self::text($row['BANKA_KOD'] ?? ''), 4);
-            [$relationType, $typeDerived] = self::relationType($row);
+            $evidence = $registry[$inter] ?? [];
+            [$relationType, $typeDerived] = self::relationType($row, $evidence['jmhz']['activity'] ?? null);
+            $relationWeekly = $weeklyHours[$inter] ?? [];
+            ksort($relationWeekly);
             $relations[] = [
                 'key' => (string) $inter,
                 'person_key' => $person !== null ? 'PER_MAIN|' . self::text($person['ID'] ?? '') : 'CISLO|' . ($number > 0 ? $number : 'I' . $inter),
@@ -149,6 +195,7 @@ final class PremierPayroll
                 ],
                 'birth_surname' => self::limited($person['RODNE_P'] ?? '', 128),
                 'residence' => self::address($source),
+                'mailing' => $person !== null ? ($mailing[(int) ($person['SUP_INTER'] ?? 0)] ?? null) : null,
                 'email' => self::email(self::text($person['E_MAIL'] ?? '')),
                 'phone' => self::phone(self::text($person['MOBIL'] ?? '') ?: self::text($person['TEL'] ?? '')),
                 'non_resident' => ($person['NREZIDEN'] ?? false) === true,
@@ -156,6 +203,8 @@ final class PremierPayroll
                     || (self::country($row['OSS_ZEME'] ?? '') ?? 'CZ') !== 'CZ',
                 'relation_type' => $relationType,
                 'relation_type_derived' => $typeDerived,
+                // Příznak jednatele na vztahu; druh činnosti z hlášení JMHZ má před ním přednost.
+                'statutory_flag' => ($row['JEDNATEL'] ?? false) === true,
                 'category' => self::text($row['UVA_KATE'] ?? ''),
                 'profession' => self::limited($row['UVA_PROF'] ?? '', 80),
                 'start' => $start,
@@ -164,10 +213,60 @@ final class PremierPayroll
                 'insurer_registered' => (bool) ($insurer['registered'] ?? false),
                 'account' => $account !== null && $bankCode !== null ? ['account' => $account, 'bank_code' => $bankCode] : null,
                 'wages' => $relationWages,
+                'hourly_wages' => $relationHourly,
+                // Úvazek po verzích: `od` => týdně a denně (hodiny).
+                'working_time' => $relationWeekly,
                 'months' => $relationMonths,
+                'registry' => $evidence,
+                'oic' => self::oic(self::text($person['IK_MPSV'] ?? '')),
+                'children' => $person !== null ? ($card['children'][self::text($person['ID'] ?? '')] ?? []) : [],
+                'pension' => $card['pensions'][$inter] ?? null,
+                // Mzda na účet (`KONTO_L`); F = výplata v hotovosti.
+                'paid_to_account' => ($row['KONTO_L'] ?? true) !== false,
+                'account_history' => $card['accounts'][$inter] ?? [],
+                'absences' => $time['absences'][$inter] ?? [],
+                'leave_months' => $time['leave'][$inter] ?? [],
+                'average_months' => $time['averages'][$inter] ?? [],
+                'sickness' => $time['sickness'][$inter] ?? [],
             ];
         }
         usort($relations, static fn (array $a, array $b): int => ((int) $a['key']) <=> ((int) $b['key']));
+
+        // Zdravotní pojištění je údaj osoby: historie se skládá z oznámení všech jejích vztahů.
+        $personEvents = [];
+        $personStart = [];
+        foreach ($relations as $relation) {
+            $personKey = (string) $relation['person_key'];
+            $personEvents[$personKey] = [...($personEvents[$personKey] ?? []), ...($insurerEvents[(int) $relation['key']] ?? [])];
+            if (is_string($relation['start']) && (!isset($personStart[$personKey]) || $relation['start'] < $personStart[$personKey])) {
+                $personStart[$personKey] = $relation['start'];
+            }
+        }
+        $personLast = [];
+        /** @var array<string,list<string>> $personSigned měsíce s podepsaným prohlášením osoby (přes všechny vztahy) */
+        $personSigned = [];
+        foreach ($relations as $relation) {
+            $last = array_key_last($relation['months']);
+            $personKey = (string) $relation['person_key'];
+            if ($last !== null && (!isset($personLast[$personKey]) || (string) $last > $personLast[$personKey])) {
+                $personLast[$personKey] = (string) $last;
+            }
+            foreach ($relation['months'] as $period => $m) {
+                if ($m['signed'] === true) {
+                    $personSigned[$personKey][] = (string) $period;
+                }
+            }
+        }
+        $accounts = self::payoutAccounts($relations);
+        foreach ($relations as $i => $relation) {
+            $personKey = (string) $relation['person_key'];
+            $relations[$i]['insurer_history'] = self::insurerHistory($personEvents[$personKey] ?? [], $personStart[$personKey] ?? null);
+            $relations[$i]['person_last_period'] = $personLast[$personKey] ?? null;
+            $signed = array_values(array_unique($personSigned[$personKey] ?? []));
+            sort($signed);
+            $relations[$i]['person_signed_periods'] = $signed;
+            $relations[$i]['payout_accounts'] = $accounts[$personKey] ?? [];
+        }
         return new self($relations, $missing, $monthRows);
     }
 
@@ -293,6 +392,8 @@ final class PremierPayroll
             'non_refundable' => round($num('NEZD_VLAS') + $num('NEZD_INVA') + $num('NEZD_ZTP') + $num('NEZD_ZACI'), 2),
             'child' => $num('NEZD_DETI'),
             'signed' => ($row['POD_DAN'] ?? false) === true || ($row['NEZD_A'] ?? false) === true,
+            // Uplatněná sleva na pojistném pracujícího důchodce (Kč za měsíc).
+            'pensioner_discount' => $num('SLEVA_SOC') > 0,
             'pension_participation' => $participates,
             'insurance_days' => $participates ? max(0, min($calendarDays, 31)) : 0,
             'excluded_days' => max(0, min((int) round($num('VYL_DND')), 31)),
@@ -307,15 +408,37 @@ final class PremierPayroll
      * - společník, jednatel, komanditista), dohody podle kódu činnosti ČSSZ nebo textu
      * kategorie, jinak pracovní poměr. Druhá hodnota říká, že druh vyšel z výchozí volby.
      *
+     * `KODPP_SO` je v zálohách prázdný; druh činnosti pak nese poslední formulář JMHZ
+     * vztahu (`X10239`, číselník JMHZ: 1-9 pracovní poměr, A-J DPČ, T-Z a ZA-ZC DPP,
+     * S člen orgánu). Na reálné záloze sedí na kategorii ve všech formulářích.
+     *
      * @param array<string,mixed> $row
      * @return array{0:string,1:bool}
      */
-    private static function relationType(array $row): array
+    private static function relationType(array $row, ?string $jmhzActivity = null): array
     {
         $activity = strtoupper(self::text($row['KODPP_SO'] ?? ''));
+        if ($activity === '' && is_string($jmhzActivity)) {
+            $jmhz = strtoupper($jmhzActivity);
+            $type = match (true) {
+                $jmhz === 'S' => 'statutory_body',
+                preg_match('/^[1-9]$/D', $jmhz) === 1 => 'employment',
+                preg_match('/^[A-J]$/D', $jmhz) === 1 => 'dpc',
+                preg_match('/^(?:[T-Z]|Z[A-C])$/D', $jmhz) === 1 => 'dpp',
+                default => null,
+            };
+            if ($type !== null) {
+                return [$type, false];
+            }
+        }
         $category = mb_strtoupper(self::text($row['UVA_KATE'] ?? '') . ' ' . self::text($row['KATEGO'] ?? ''));
         if (($row['JEDNATEL'] ?? false) === true || $activity === 'S' || preg_match('/\bSJK\b|JEDNATEL|STATUT/u', $category) === 1) {
             return ['statutory_body', false];
+        }
+        // `KODPP_SO` je v zálohách prázdný, učeň se pozná jen podle kategorie. Bez tohohle
+        // pravidla padal do výchozího pracovního poměru.
+        if (preg_match('/\bUCN\b|UČE[NŇ]/u', $category) === 1) {
+            return [self::APPRENTICE, false];
         }
         if (in_array($activity, self::DPP_CODES, true) || preg_match('/\bDPP\b|PROVEDEN/u', $category) === 1) {
             return ['dpp', false];
@@ -329,6 +452,173 @@ final class PremierPayroll
         return ['employment', true];
     }
 
+    /**
+     * Srážky z čisté mzdy po měsících z položek mezd (`DNY`): složky 7xx, které čistou mzdu
+     * snižují (číselník `MZDY_POL` je vede s příznakem `IS_NETTO`): spoření a půjčky,
+     * exekuce a insolvence včetně nákladů, stravenky, odbory, záloha na mzdu, provozní
+     * srážky. Stravenkový paušál (712) je příjem, zúčtování cestovního příkazu (721)
+     * náhrada, ne srážka.
+     *
+     * Na reálné záloze (agregovaně) se součet `SR_*` v `MZDY` rovná součtu těchto složek
+     * bez stravenek (710) a zálohy na mzdu (750) ve 145 ze 157 měsíců se srážkou; ve
+     * zbylých chybí právě záloha na mzdu. Obojí přitom čistou mzdu k výplatě snižuje.
+     *
+     * Vrací jen vztahy a měsíce, pro které `DNY` nějaké položky má; ostatní zůstávají
+     * na `SR_*` z `MZDY` (starší zálohy bez položek).
+     *
+     * @return array<int,array<string,float>> INTER => `YYYY-MM` => sraženo (Kč)
+     */
+    private static function monthItems(PremierBackup $backup): array
+    {
+        $out = [];
+        foreach ($backup->rows('DNY') as $row) {
+            $inter = (int) ($row['INTER'] ?? 0);
+            $period = self::itemPeriod($row);
+            if ($inter <= 0 || $period === null) {
+                continue;
+            }
+            $code = self::text($row['KOD'] ?? '');
+            $out[$inter][$period] = ($out[$inter][$period] ?? 0.0)
+                + (in_array($code, self::DEDUCTION_CODES, true) ? (float) ($row['CASTKA'] ?? 0) : 0.0);
+        }
+        return $out;
+    }
+
+    /**
+     * Měsíc mzdy, do kterého položka `DNY` patří (`DNY_ROK`/`DNY_MES`, jinak `DATUM_OD`).
+     *
+     * @param array<string,mixed> $row
+     */
+    private static function itemPeriod(array $row): ?string
+    {
+        $year = (int) ($row['DNY_ROK'] ?? 0);
+        $month = (int) ($row['DNY_MES'] ?? 0);
+        if ($year >= 1990 && $month >= 1 && $month <= 12) {
+            return sprintf('%04d-%02d', $year, $month);
+        }
+        $from = self::date($row['DATUM_OD'] ?? null);
+        return $from === null ? null : substr($from, 0, 7);
+    }
+
+    /**
+     * Sjednaná mzda jedné verze `PERS_HYS`: `SAZBA_MZ` podle `TYP_MZDY` (1 = měsíční mzda
+     * v Kč za měsíc, 2 = hodinová sazba, 0 = bez mzdy). `MZDA_MES` je jen u starších
+     * verzí bez typu mzdy.
+     *
+     * Ověřeno na reálné záloze (agregovaně): u verzí s typem 1 se `SAZBA_MZ` rovná částce
+     * měsíční mzdy (složka 101) za celý měsíc v `DNY` v 47 z 56 porovnatelných verzí,
+     * `MZDA_MES` ani jednou tam, kde se od sazby liší (a vyplněné je jen u 29 % verzí).
+     * U typu 2 je `SAZBA_MZ` vždy pod 1 000 Kč, tedy hodinová sazba.
+     *
+     * @param array<string,mixed> $row
+     * @return array{0:?string,1:float} [`monthly` | `hourly` | null, částka]
+     */
+    private static function agreedWage(array $row): array
+    {
+        $rate = round((float) ($row['SAZBA_MZ'] ?? 0), 2);
+        $monthly = round((float) ($row['MZDA_MES'] ?? 0), 2);
+        return match ((int) ($row['TYP_MZDY'] ?? 0)) {
+            1 => $rate > 0 ? ['monthly', $rate] : ($monthly > 0 ? ['monthly', $monthly] : [null, 0.0]),
+            2 => $rate > 0 ? ['hourly', $rate] : [null, 0.0],
+            default => $monthly > 0 ? ['monthly', $monthly] : [null, 0.0],
+        };
+    }
+
+    /**
+     * Výplatní účty osoby: aktivní je účet posledního vztahu (podle nástupu), na který
+     * PREMIER mzdu vyplácí (`KONTO_L`); dřívější účty z historie změn (`MZ_PERH`) a účty
+     * jiných vztahů osoby se zapíšou jako účty bez výplat, aby historie nezmizela. Osoba,
+     * které PREMIER vyplácí v hotovosti, účet nedostane.
+     *
+     * @param list<array<string,mixed>> $relations
+     * @return array<string,list<array{account:string,bank_code:string,active:bool}>> klíč osoby => účty
+     */
+    private static function payoutAccounts(array $relations): array
+    {
+        $byPerson = [];
+        foreach ($relations as $relation) {
+            $byPerson[(string) $relation['person_key']][] = $relation;
+        }
+        $out = [];
+        foreach ($byPerson as $personKey => $list) {
+            usort($list, static fn (array $a, array $b): int => [(string) $b['start'], (int) $b['key']] <=> [(string) $a['start'], (int) $a['key']]);
+            $latest = $list[0];
+            if (!is_array($latest['account']) || $latest['paid_to_account'] !== true) {
+                continue;
+            }
+            $accounts = [['account' => $latest['account']['account'], 'bank_code' => $latest['account']['bank_code'], 'active' => true]];
+            $seen = [self::accountKey($latest['account']['account'], $latest['account']['bank_code']) => true];
+            foreach ($list as $relation) {
+                $candidates = array_reverse((array) $relation['account_history']);
+                if (is_array($relation['account'])) {
+                    array_unshift($candidates, $relation['account']);
+                }
+                foreach ($candidates as $candidate) {
+                    $key = self::accountKey((string) $candidate['account'], (string) $candidate['bank_code']);
+                    if (isset($seen[$key])) {
+                        continue;
+                    }
+                    $seen[$key] = true;
+                    $accounts[] = ['account' => (string) $candidate['account'], 'bank_code' => (string) $candidate['bank_code'], 'active' => false];
+                }
+            }
+            $out[$personKey] = $accounts;
+        }
+        return $out;
+    }
+
+    private static function accountKey(string $account, string $bankCode): string
+    {
+        [$prefix, $number] = str_contains($account, '-') ? explode('-', $account, 2) : ['', $account];
+        return ltrim(trim($prefix), '0') . '-' . ltrim(trim($number), '0') . '/' . $bankCode;
+    }
+
+    /**
+     * Historie zdravotní pojišťovny osoby z oznámení pojišťovnám (`MZ_PRIZP`): přihláška
+     * (`KOD` P) a změna pojišťovny (Q, M) začínají úsek s kódem `ZKRATKA_P`. Odhláška (O)
+     * úsek neukončuje: zákonná evidence musí navazovat bez děr a o pojištění mimo vztahy
+     * osoby převod nic neví. Úseky jsou po celých měsících, jak je evidence vyžaduje;
+     * dvě oznámení v jednom měsíci rozhoduje to pozdější. První úsek začíná nejpozději
+     * měsícem prvního nástupu osoby.
+     *
+     * @param list<array{date:string,code:string,kind:string}> $events
+     * @return list<array{code:string,from:string,to:?string,reference:string}>
+     */
+    public static function insurerHistory(array $events, ?string $start): array
+    {
+        $events = array_values(array_filter($events, static fn (array $e): bool => in_array($e['kind'], ['P', 'Q', 'M'], true)));
+        if ($events === []) {
+            return [];
+        }
+        usort($events, static fn (array $a, array $b): int => [$a['date'], $a['kind'] === 'P' ? 0 : 1] <=> [$b['date'], $b['kind'] === 'P' ? 0 : 1]);
+        $runs = [];
+        foreach ($events as $event) {
+            $month = substr($event['date'], 0, 7) . '-01';
+            $last = array_key_last($runs);
+            if ($last !== null && $runs[$last]['from'] === $month) {
+                $runs[$last]['code'] = $event['code'];
+                $runs[$last]['reference'] = 'premier:mz_prizp:' . $event['kind'] . ':' . $event['date'];
+                if ($last > 0 && $runs[$last - 1]['code'] === $event['code']) {
+                    array_pop($runs);
+                }
+                continue;
+            }
+            if ($last !== null && $runs[$last]['code'] === $event['code']) {
+                continue;
+            }
+            $runs[] = ['code' => $event['code'], 'from' => $month, 'to' => null, 'reference' => 'premier:mz_prizp:' . $event['kind'] . ':' . $event['date']];
+        }
+        if (is_string($start) && substr($start, 0, 7) . '-01' < $runs[0]['from']) {
+            $runs[0]['from'] = substr($start, 0, 7) . '-01';
+        }
+        foreach ($runs as $i => $run) {
+            if (isset($runs[$i + 1])) {
+                $runs[$i]['to'] = (new \DateTimeImmutable($runs[$i + 1]['from']))->modify('-1 day')->format('Y-m-d');
+            }
+        }
+        return $runs;
+    }
+
     /** @param array<string,mixed> $row */
     private static function birthNumber(array $row): ?string
     {
@@ -338,24 +628,64 @@ final class PremierPayroll
     }
 
     /**
+     * Adresa; stát je v PREMIER volný text (`STAT` C(28), v `PERSON2` jen tři znaky).
+     * Kód státu vyplní rovnou jen u dvoupísmenného kódu a českých variant; jinak nese
+     * text (`country_text`) a na kód ho převede až {@see PremierPayrollTakeover::address()}
+     * číselníkem zemí.
+     *
      * @param array<string,mixed> $row
-     * @return array{street_line:string,city:string,postal_code:string,country_code:string}|null
+     * @param array{0:string,1:string,2:string,3:string,4:string,5:string} $columns ulice, číslo, město, obec, PSČ, stát
+     * @return array{street_line:string,city:string,postal_code:string,country_code:?string,country_text:string}|null
      */
-    private static function address(array $row): ?array
+    private static function address(array $row, array $columns = ['ULICE', 'CISLOP', 'MESTO', 'OBEC', 'PSC', 'STAT']): ?array
     {
-        $city = self::text($row['MESTO'] ?? '') ?: self::text($row['OBEC'] ?? '');
-        $postal = self::text($row['PSC'] ?? '');
-        $country = self::country($row['STAT'] ?? '') ?? (self::text($row['STAT'] ?? '') === '' ? 'CZ' : null);
-        if ($city === '' || $postal === '' || $country === null) {
+        [$streetColumn, $numberColumn, $cityColumn, $municipalityColumn, $postalColumn, $countryColumn] = $columns;
+        $city = self::text($row[$cityColumn] ?? '') ?: self::text($row[$municipalityColumn] ?? '');
+        $postal = self::text($row[$postalColumn] ?? '');
+        if ($city === '' || $postal === '') {
             return null;
         }
-        $street = trim(self::text($row['ULICE'] ?? '') . ' ' . self::text($row['CISLOP'] ?? ''));
+        $countryText = self::text($row[$countryColumn] ?? '');
+        $street = trim(self::text($row[$streetColumn] ?? '') . ' ' . self::text($row[$numberColumn] ?? ''));
         return [
             'street_line' => mb_substr($street !== '' ? $street : $city, 0, 191),
             'city' => mb_substr($city, 0, 128),
             'postal_code' => mb_substr($postal, 0, 24),
-            'country_code' => $country,
+            'country_code' => self::country($countryText) ?? ($countryText === '' ? 'CZ' : null),
+            'country_text' => $countryText,
         ];
+    }
+
+    /**
+     * Kontaktní adresy osob z `PER_ADR` podle `INTER` = `PER_MAIN.SUP_INTER` (ověřeno na
+     * reálné záloze: všechny řádky `PER_ADR` se tak spárují s osobou, s `PERSONAL.INTER`
+     * jen polovina). `DRUH_ADR` 1 je kopie trvalé adresy, 2 další adresa; z nich má
+     * přednost ta s příznakem korespondenční (`XKORES`), pak poslední podle `TS`.
+     *
+     * @return array<int,array{street_line:string,city:string,postal_code:string,country_code:?string,country_text:string}>
+     */
+    private static function mailingAddresses(PremierBackup $backup): array
+    {
+        $best = [];
+        foreach ($backup->rows('PER_ADR') as $row) {
+            if ((int) ($row['DRUH_ADR'] ?? 0) !== 2) {
+                continue;
+            }
+            $inter = (int) ($row['INTER'] ?? 0);
+            $rank = [($row['XKORES'] ?? false) === true ? 1 : 0, self::text($row['TS'] ?? '')];
+            if (!isset($best[$inter]) || $rank >= $best[$inter][0]) {
+                $best[$inter] = [$rank, $row];
+            }
+        }
+        $out = [];
+        foreach ($best as $inter => [, $row]) {
+            $row['XSTAT_KOD'] = self::text($row['XZEME'] ?? '') !== '' ? self::text($row['XZEME'] ?? '') : self::text($row['XSTAT'] ?? '');
+            $address = self::address($row, ['XULICE', 'XCISLO', 'XMESTO', 'XOBEC', 'XPSC', 'XSTAT_KOD']);
+            if ($address !== null) {
+                $out[$inter] = $address;
+            }
+        }
+        return $out;
     }
 
     private static function country(mixed $value): ?string
@@ -364,7 +694,8 @@ final class PremierPayroll
         if (preg_match('/^[A-Z]{2}$/D', $value) === 1) {
             return $value;
         }
-        return in_array($value, ['CZE', 'ČR', 'ČESKÁ REPUBLIKA', 'ČESKO'], true) ? 'CZ' : null;
+        // „ČES" je název státu uříznutý na šířku pole `PERSON2.STAT` C(3).
+        return in_array($value, ['CZE', 'ČR', 'ČES', 'ČESKÁ REPUBLIKA', 'ČESKO'], true) ? 'CZ' : null;
     }
 
     /**
@@ -395,6 +726,13 @@ final class PremierPayroll
             }
         }
         return false;
+    }
+
+    /** OIČ osoby z `PER_MAIN.IK_MPSV` (text), jen deset číslic; kontrolní číslici ověří zápis. */
+    private static function oic(string $value): ?string
+    {
+        $digits = (string) preg_replace('/\s+/', '', $value);
+        return preg_match('/^[0-9]{10}$/D', $digits) === 1 ? $digits : null;
     }
 
     private static function email(string $value): ?string
