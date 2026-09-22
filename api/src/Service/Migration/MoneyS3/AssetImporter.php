@@ -752,14 +752,16 @@ final class AssetImporter
      */
     private function upsertMigrated(ImportContext $ctx, int $assetId, string $kind, int $year, float $amount, float $full, float $residual, ?int $months, bool $half, string $status): void
     {
-        // Pozor: „vlastní" je jen účetní řádek; daňový řádek roku se přepíše, i když ho
-        // potvrdilo MyÚčto (stejně jako u PREMIER, viz zpráva k refaktoru).
-        $result = (new MigratedDepreciation($this->entries))->confirm(
+        $result = (new MigratedDepreciation($this->entries, $this->db))->confirm(
             $ctx->supplierId, $assetId, $kind, $year, $amount, $full, $residual, $full < 0.005, $half, $months,
             'Money S3', $status, MigratedDepreciation::OVERWRITE_OWN, true, true,
         );
         if ($result['written']) {
             $ctx->protocol->count(self::STEP, $kind === 'accounting' ? 'accounting_depreciation_booked' : 'tax_depreciation_confirmed');
+        } elseif ($result['kept'] !== null) {
+            $number = $this->db->pdo()->prepare('SELECT inventory_number FROM assets WHERE id = ? AND supplier_id = ?');
+            $number->execute([$assetId, $ctx->supplierId]);
+            MigratedDepreciation::reportKept($ctx->protocol, self::STEP, (string) $number->fetchColumn(), $kind, $year, $amount, $result['kept'], 'Money S3');
         }
     }
 

@@ -14,7 +14,7 @@ final class MigratedDepreciationTest extends SharedMigrationDbTestCase
     public function testOwnPolicyKeepsAccountingRowBookedInMyUcto(): void
     {
         [$supplier, $asset, $entries] = $this->asset();
-        $migrated = new MigratedDepreciation($entries);
+        $migrated = new MigratedDepreciation($entries, $this->db);
 
         $first = $migrated->confirm($supplier, $asset, 'accounting', 2024, 1000.0, 1000.0, 9000.0, false, false, 12, 'Money S3', 'posted', MigratedDepreciation::OVERWRITE_OWN, true);
         self::assertTrue($first['written']);
@@ -31,24 +31,59 @@ final class MigratedDepreciationTest extends SharedMigrationDbTestCase
         self::assertFalse($migrated->confirm($supplier, $asset, 'accounting', 2024, 1200.0, 1200.0, 8800.0, false, false, 12, 'Money S3', 'posted', MigratedDepreciation::OVERWRITE_OWN, true)['written'], 'řádek zaúčtovaný v MyÚčtu se nepřepíše');
     }
 
-    public function testTaxRowIsOverwrittenRegardlessOfOrigin(): void
+    public function testTaxRowConfirmedInMyUctoIsKept(): void
     {
         [$supplier, $asset, $entries] = $this->asset();
-        $migrated = new MigratedDepreciation($entries);
+        $migrated = new MigratedDepreciation($entries, $this->db);
         // Potvrzené přerušení odpisu v MyÚčtu (řádek bez původu převodu).
         $entries->upsert(['supplier_id' => $supplier, 'asset_id' => $asset, 'kind' => 'tax', 'fiscal_year' => 2024, 'amount' => 0.0, 'full_amount' => 0.0,
             'residual_value_end' => 10000.0, 'is_paused' => true, 'is_half' => false, 'months_count' => null, 'detail' => null, 'status' => 'confirmed']);
 
-        $result = $migrated->confirm($supplier, $asset, 'tax', 2024, 2000.0, 2000.0, 8000.0, false, false, null, 'PREMIER', 'confirmed', MigratedDepreciation::OVERWRITE_OWN, false);
-        self::assertTrue($result['written']);
-        self::assertTrue((bool) $result['previous']['is_paused']);
+        $result = $migrated->confirm($supplier, $asset, 'tax', 2024, 2000.0, 2000.0, 8000.0, false, false, null, 'PREMIER', 'confirmed', MigratedDepreciation::OVERWRITE_ALWAYS, false);
+        self::assertFalse($result['written']);
+        self::assertSame(MigratedDepreciation::KEPT_NOT_MIGRATED, $result['kept']);
+        $row = $entries->findYear($asset, 'tax', 2024);
+        self::assertTrue((bool) $row['is_paused']);
+        self::assertSame(0.0, (float) $row['amount']);
+    }
+
+    public function testMigratedTaxRowIsMarkedAndRealigned(): void
+    {
+        [$supplier, $asset, $entries] = $this->asset();
+        $migrated = new MigratedDepreciation($entries, $this->db);
+        self::assertTrue($migrated->confirm($supplier, $asset, 'tax', 2024, 2000.0, 2000.0, 8000.0, false, false, null, 'PREMIER', 'confirmed', MigratedDepreciation::OVERWRITE_ALWAYS, false)['written']);
+        $row = $entries->findYear($asset, 'tax', 2024);
+        self::assertTrue(MigratedDepreciation::isMigratedRow($row));
+        self::assertFalse(DepreciationEntryRepository::isBookedByMigratedJournal($row), 'daňový řádek není zaúčtovaný deníkem');
+
+        $again = $migrated->confirm($supplier, $asset, 'tax', 2024, 2500.0, 2500.0, 7500.0, false, false, null, 'PREMIER', 'confirmed', MigratedDepreciation::OVERWRITE_ALWAYS, false);
+        self::assertTrue($again['written'], 'vlastní řádek převodu se srovná se zdrojem');
+        self::assertSame(2000.0, (float) $again['previous']['amount']);
+    }
+
+    public function testClosedPeriodIsNeverRewritten(): void
+    {
+        [$supplier, $asset, $entries] = $this->asset();
+        $migrated = new MigratedDepreciation($entries, $this->db);
+        $migrated->confirm($supplier, $asset, 'tax', 2024, 2000.0, 2000.0, 8000.0, false, false, null, 'Money S3', 'confirmed', MigratedDepreciation::OVERWRITE_OWN, false);
+        $migrated->confirm($supplier, $asset, 'accounting', 2024, 1000.0, 1000.0, 9000.0, false, false, 12, 'Money S3', 'posted', MigratedDepreciation::OVERWRITE_OWN, false);
+        $period = $this->period($supplier, 2024);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ?")->execute([$period]);
+
+        foreach (['tax' => 2100.0, 'accounting' => 1100.0] as $kind => $amount) {
+            $result = $migrated->confirm($supplier, $asset, $kind, 2024, $amount, $amount, 7000.0, false, false, 12, 'Money S3', 'confirmed', MigratedDepreciation::OVERWRITE_OWN, false);
+            self::assertSame([false, MigratedDepreciation::KEPT_CLOSED], [$result['written'], $result['kept']], $kind);
+        }
         self::assertSame(2000.0, (float) $entries->findYear($asset, 'tax', 2024)['amount']);
+        self::assertSame(1000.0, (float) $entries->findYear($asset, 'accounting', 2024)['amount']);
+        $same = $migrated->confirm($supplier, $asset, 'tax', 2024, 2000.0, 2000.0, 8000.0, false, false, null, 'Money S3', 'confirmed', MigratedDepreciation::OVERWRITE_OWN, false);
+        self::assertSame([false, null], [$same['written'], $same['kept']], 'shodný řádek se nehlásí');
     }
 
     public function testClampWritesZeroButComparesRawResidual(): void
     {
         [$supplier, $asset, $entries] = $this->asset();
-        $migrated = new MigratedDepreciation($entries);
+        $migrated = new MigratedDepreciation($entries, $this->db);
         $migrated->confirm($supplier, $asset, 'tax', 2024, 500.0, 500.0, -3.0, false, false, null, 'Money S3', 'confirmed', MigratedDepreciation::OVERWRITE_OWN, true, true);
         self::assertSame(0.0, (float) $entries->findYear($asset, 'tax', 2024)['residual_value_end']);
         self::assertTrue($migrated->confirm($supplier, $asset, 'tax', 2024, 500.0, 500.0, -3.0, false, false, null, 'Money S3', 'confirmed', MigratedDepreciation::OVERWRITE_OWN, true, true)['written'],
