@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Service\Mail\LogAnalysis;
 
 use MyInvoice\Service\Mail\LogAnalysis\HMailServerLogConnector;
 use MyInvoice\Service\Mail\LogAnalysis\MailEnableLogConnector;
+use MyInvoice\Service\Mail\LogAnalysis\PostfixLogConnector;
 use MyInvoice\Service\Mail\LogAnalysis\SmtpLogEvent;
 use PHPUnit\Framework\TestCase;
 
@@ -169,8 +170,101 @@ final class SmtpLogConnectorTest extends TestCase
         self::assertSame('Newsletter', $events[0]->subject);
     }
 
+    public function testPostfixJoinsSubmissionAndDeliveriesByQueueId(): void
+    {
+        // maillog_file (postlogd): BSD čas bez roku s mikrosekundami.
+        $log = implode("\n", [
+            'Jan  2 10:00:00.123456 mail.example.com postfix/smtpd[100]: connect from unknown[172.18.0.2]',
+            'Jan  2 10:00:00.200000 mail.example.com postfix/smtpd[100]: 1A2B3C4D5E: client=unknown[172.18.0.2]',
+            'Jan  2 10:00:00.210000 mail.example.com postfix/cleanup[101]: 1A2B3C4D5E: info: header Subject: =?UTF-8?B?RmFrdHVyYSAyNjAxMDAx?= from unknown[172.18.0.2]; from=<sender@example.com> to=<a@example.org> proto=ESMTP helo=<app>',
+            'Jan  2 10:00:00.220000 mail.example.com postfix/cleanup[101]: 1A2B3C4D5E: message-id=<abc@example.com>',
+            'Jan  2 10:00:00.230000 mail.example.com postfix/qmgr[50]: 1A2B3C4D5E: from=<sender@example.com>, size=2048, nrcpt=2 (queue active)',
+            'Jan  2 10:00:01.500000 mail.example.com postfix/smtp[102]: 1A2B3C4D5E: to=<a@example.org>, relay=mx.example.org[203.0.113.10]:25, delay=1.3, delays=0.03/0/0.5/0.8, dsn=2.0.0, status=sent (250 2.0.0 Ok: queued as XYZ)',
+            'Jan  2 10:00:02.000000 mail.example.com postfix/smtp[103]: 1A2B3C4D5E: to=<b@example.net>, relay=mx.example.net[203.0.113.20]:25, delay=1.8, delays=0.03/0/1/0.8, dsn=4.3.2, status=deferred (host mx.example.net[203.0.113.20] said: 450 4.3.2 Service currently unavailable (in reply to RCPT TO command))',
+            'Jan  2 11:00:02.000000 mail.example.com postfix/smtp[104]: 1A2B3C4D5E: to=<b@example.net>, relay=mx.example.net[203.0.113.20]:25, delay=3600, delays=3599/0/0.5/0.5, dsn=5.1.1, status=bounced (host mx.example.net[203.0.113.20] said: 550 5.1.1 User unknown (in reply to RCPT TO command))',
+            'Jan  2 11:00:02.100000 mail.example.com postfix/bounce[105]: 1A2B3C4D5E: sender non-delivery notification: 9F8E7D6C5B',
+            'Jan  2 11:00:02.200000 mail.example.com postfix/qmgr[50]: 1A2B3C4D5E: removed',
+        ]);
+
+        $events = (new PostfixLogConnector())->parse($log, 'mail.log-2026-01-02');
+
+        $submission = $this->firstOfKind($events, SmtpLogEvent::KIND_SUBMISSION);
+        self::assertNotNull($submission);
+        self::assertSame('2026-01-02 10:00:00.200', $submission->ts);
+        self::assertSame('sender@example.com', $submission->mailFrom);
+        self::assertSame(['a@example.org', 'b@example.net'], $submission->recipients);
+        self::assertSame('172.18.0.2', $submission->remoteIp);
+        self::assertSame('Faktura 2601001', $submission->subject);
+        self::assertSame('1A2B3C4D5E', $submission->messageId);
+
+        $deliveries = array_values(array_filter($events, static fn (SmtpLogEvent $e) => $e->kind === SmtpLogEvent::KIND_DELIVERY));
+        self::assertCount(3, $deliveries);
+        self::assertSame(SmtpLogEvent::STATUS_DELIVERED, $deliveries[0]->status);
+        self::assertSame(250, $deliveries[0]->code);
+        self::assertSame('mx.example.org', $deliveries[0]->remoteHost);
+        self::assertSame('203.0.113.10', $deliveries[0]->remoteIp);
+        self::assertSame(SmtpLogEvent::STATUS_DEFERRED, $deliveries[1]->status);
+        self::assertSame(450, $deliveries[1]->code);
+        self::assertSame(SmtpLogEvent::STATUS_REJECTED, $deliveries[2]->status);
+        self::assertSame(550, $deliveries[2]->code);
+        self::assertSame(['b@example.net'], $deliveries[2]->recipients);
+        foreach ($events as $e) {
+            self::assertSame('Faktura 2601001', $e->subject, 'Předmět se propíše ke všem událostem zprávy');
+        }
+
+        $notice = $this->firstOfKind($events, SmtpLogEvent::KIND_NOTICE);
+        self::assertNotNull($notice);
+        self::assertSame(SmtpLogEvent::STATUS_INFO, $notice->status);
+    }
+
+    public function testPostfixReadsIsoTimestampsAndNoQueueReject(): void
+    {
+        // journalctl -o short-iso / rsyslog RFC 3339.
+        $log = implode("\n", [
+            '2026-01-02T10:00:00+01:00 mail.example.com postfix/smtpd[100]: NOQUEUE: reject: RCPT from unknown[198.51.100.7]: 554 5.7.1 <x@example.org>: Relay access denied; from=<spam@example.net> to=<x@example.org> proto=ESMTP helo=<bad>',
+            '2026-01-02T10:05:00.5+01:00 mail.example.com postfix/pickup[110]: 0A1B2C3D4E: uid=33 from=<www-data>',
+            '2026-01-02T10:05:01+01:00 mail.example.com postfix/smtp[111]: 0A1B2C3D4E: to=<a@example.org>, relay=none, delay=30, delays=0/0/30/0, dsn=4.4.1, status=deferred (connect to mx.example.org[203.0.113.10]:25: Connection timed out)',
+        ]);
+
+        $events = (new PostfixLogConnector())->parse($log, 'mail.log');
+
+        $reject = array_values(array_filter($events, static fn (SmtpLogEvent $e) => $e->kind === SmtpLogEvent::KIND_NOTICE));
+        self::assertCount(1, $reject);
+        self::assertSame(SmtpLogEvent::STATUS_REJECTED, $reject[0]->status);
+        self::assertSame(554, $reject[0]->code);
+        self::assertSame(['x@example.org'], $reject[0]->recipients);
+        self::assertSame('198.51.100.7', $reject[0]->remoteIp);
+        self::assertSame('2026-01-02 10:00:00.000', $reject[0]->ts);
+
+        $submission = $this->firstOfKind($events, SmtpLogEvent::KIND_SUBMISSION);
+        self::assertNotNull($submission);
+        self::assertSame('2026-01-02 10:05:00.500', $submission->ts);
+        self::assertSame('www-data', $submission->mailFrom);
+
+        $delivery = $this->firstOfKind($events, SmtpLogEvent::KIND_DELIVERY);
+        self::assertNotNull($delivery);
+        self::assertSame(SmtpLogEvent::STATUS_DEFERRED, $delivery->status);
+        self::assertNull($delivery->remoteHost);
+        self::assertNull($delivery->code);
+    }
+
+    public function testPostfixYearRollsBackForDecemberLinesInJanuaryFile(): void
+    {
+        $log = 'Dec 31 23:59:59 mail.example.com postfix/smtp[1]: 1A2B3C4D5E: to=<a@example.org>, relay=mx.example.org[203.0.113.10]:25, delay=1, delays=0/0/0.5/0.5, dsn=2.0.0, status=sent (250 Ok)';
+
+        $events = (new PostfixLogConnector())->parse($log, 'mail.log-2027-01-01');
+
+        self::assertCount(1, $events);
+        self::assertSame('2026-12-31 23:59:59.000', $events[0]->ts);
+    }
+
     public function testConnectorMatchesFileGuards(): void
     {
+        $pf = new PostfixLogConnector();
+        self::assertTrue($pf->matchesFile('/data/log/mail/mail.log', 'Jan  2 10:00:00.123456 mail.example.com postfix/qmgr[50]: 1A2B3C4D5E: removed'));
+        self::assertTrue($pf->matchesFile('/data/log/mail/mail.log', ''), 'Čerstvě rotovaný prázdný soubor');
+        self::assertFalse($pf->matchesFile('/data/log/app-2026-01-02.log', '[2026-01-02 10:00:00] app.INFO: x'));
+
         $hm = new HMailServerLogConnector();
         self::assertTrue($hm->matchesFile('C:/logs/hmailserver_2026-01-02.log', ''));
 

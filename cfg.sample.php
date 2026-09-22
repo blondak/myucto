@@ -327,6 +327,9 @@ return [
         //   'hmailserver' — hMailServer (Windows MTA), soubory hmailserver_*.log
         //   'mailenable'  — MailEnable (Windows MTA), sada SMTP-Activity-*.log
         //                   (NE SMTP-Debug ani W3C ex* — ty se ignorují)
+        //   'postfix'     — Postfix (Linux MTA), syslog řádky postfix/* z mail.log;
+        //                   v Dockeru Postfix hostitele zapisuje do datového svazku
+        //                   ('path' => '/data/log/mail/mail.log*', postup v manuálu 96.8.3)
         // Vyber jeden dle serveru, kterým aplikace odesílá poštu. Architektura je
         // pluggable — další server = nová třída SmtpLogConnectorInterface zapsaná
         // do SmtpLogAnalyzer::CONNECTORS; tento klíč pak jen přepneš.

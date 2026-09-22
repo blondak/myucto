@@ -553,7 +553,7 @@ Konfigurace je v `cfg.php` (vzor v `cfg.sample.php`) v sekci `smtp_log`:
 | Klíč | Význam |
 |---|---|
 | `enabled` | `true` = záložka je aktivní. |
-| `connector` | Parser pro konkrétní server: `hmailserver` nebo `mailenable`. |
+| `connector` | Parser pro konkrétní server: `hmailserver`, `mailenable` nebo `postfix`. |
 | `path` | Glob vzor k log souborům (absolutní cesta). Hvězdička pokryje denní rotaci. |
 | `max_files` | Strop počtu souborů (nejnovější dle data). |
 | `max_bytes` | Strop velikosti čteného souboru; větší se čtou od konce. |
@@ -563,8 +563,43 @@ Příklady cest:
 - **hMailServer** — `C:\Program Files (x86)\hMailServer\Logs\hmailserver_*.log`
 - **MailEnable** — `C:\Program Files\Mail Enable\Logging\SMTP\SMTP-Activity-*.log`
   (čte se sada *SMTP-Activity*; *SMTP-Debug* a W3C `ex*` se ignorují)
+- **Postfix v Dockeru** — `/data/log/mail/mail.log*` (log z hostitele, viz níže)
 
-> 🛈 Uživatelské rozhraní podporuje konektory `hmailserver` a `mailenable`.
+**Postfix na hostiteli Docker instalace.** Aplikace v kontejneru posílá poštu přes
+Postfix na hostiteli, který ve výchozím stavu loguje jen do systémového journalu.
+Ten na čerstvém Debianu přežije jen do restartu a kontejner do něj nevidí. Postfix
+proto nech zapisovat přímo do datového svazku aplikace, vedle jejích vlastních logů
+(`/data/log`). Log tak přečká restart i aktualizaci a je v zálohách svazku:
+
+```bash
+VOL=$(docker volume inspect myucto_app-data --format '{{.Mountpoint}}')
+install -d -m 755 "$VOL/log/mail"
+postconf -e "maillog_file = $VOL/log/mail/mail.log" maillog_file_permissions=0644
+postfix reload
+```
+
+Denní rotaci zajistí `logrotate` (`/etc/logrotate.d/postfix-myucto`):
+
+```
+/var/lib/docker/volumes/myucto_app-data/_data/log/mail/mail.log {
+    daily
+    rotate 90
+    dateext
+    dateyesterday
+    dateformat -%Y-%m-%d
+    nocompress
+    missingok
+    notifempty
+    copytruncate
+}
+```
+
+V `cfg.php` pak `connector` = `postfix` a `path` = `/data/log/mail/mail.log*`.
+Rotované soubory nesou v názvu den, za který log je, takže filtr data načte jen
+potřebné soubory. Chceš-li v přehledu i předmět zprávy, přidej do Postfixu
+`header_checks = regexp:/etc/postfix/header_checks` se řádkem `/^Subject:/ INFO`.
+
+> 🛈 Uživatelské rozhraní podporuje konektory `hmailserver`, `mailenable` a `postfix`.
 > Pro jiný poštovní server analýzu nezapínej: jeho logy se bez odpovídajícího
 > parseru nenačtou správně.
 

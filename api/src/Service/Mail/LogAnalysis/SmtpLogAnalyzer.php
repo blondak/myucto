@@ -28,6 +28,7 @@ final class SmtpLogAnalyzer
     private const CONNECTORS = [
         'hmailserver' => HMailServerLogConnector::class,
         'mailenable'  => MailEnableLogConnector::class,
+        'postfix'     => PostfixLogConnector::class,
     ];
 
     private const DEFAULT_MAX_FILES = 60;
