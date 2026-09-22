@@ -96,7 +96,9 @@ final class PohodaVat
      * `reverse` = odpočet ze samovyměření (ř. 43, 44): daň na výstupu nese interní doklad
      * a převod ji k faktuře dohledá ({@see InvoiceImporter}).
      *
-     * @return array{in_return:bool,deduction:'full'|'reduced'|'none',reverse:bool}|null
+     * `fixed_asset` = odpočet u pořízení majetku (ř. 47 v sadě řádků členění).
+     *
+     * @return array{in_return:bool,deduction:'full'|'reduced'|'none',reverse:bool,fixed_asset:bool}|null
      */
     public function purchase(string $code): ?array
     {
@@ -105,12 +107,13 @@ final class PohodaVat
             return null;
         }
         if ($lines === []) {
-            return ['in_return' => false, 'deduction' => 'none', 'reverse' => false];
+            return ['in_return' => false, 'deduction' => 'none', 'reverse' => false, 'fixed_asset' => false];
         }
         $deduction = str_starts_with($code, 'PK') ? 'reduced' : 'full';
+        $asset = in_array(Lines::FIXED_ASSET, $lines, true);
         return match ($lines) {
-            Lines::DOMESTIC_DEDUCTION, [...Lines::DOMESTIC_DEDUCTION, Lines::FIXED_ASSET] => ['in_return' => true, 'deduction' => $deduction, 'reverse' => false],
-            Lines::SELF_ASSESSMENT_DEDUCTION, [...Lines::SELF_ASSESSMENT_DEDUCTION, Lines::FIXED_ASSET] => ['in_return' => true, 'deduction' => $deduction, 'reverse' => true],
+            Lines::DOMESTIC_DEDUCTION, [...Lines::DOMESTIC_DEDUCTION, Lines::FIXED_ASSET] => ['in_return' => true, 'deduction' => $deduction, 'reverse' => false, 'fixed_asset' => $asset],
+            Lines::SELF_ASSESSMENT_DEDUCTION, [...Lines::SELF_ASSESSMENT_DEDUCTION, Lines::FIXED_ASSET] => ['in_return' => true, 'deduction' => $deduction, 'reverse' => true, 'fixed_asset' => $asset],
             default => null,
         };
     }

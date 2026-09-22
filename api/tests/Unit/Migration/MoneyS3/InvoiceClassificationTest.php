@@ -65,20 +65,31 @@ final class InvoiceClassificationTest extends TestCase
         self::assertSame($kind, $class['kind'], $info);
     }
 
+    /** Přípona M/P/MK/PK = odpočet u pořízení majetku: doklad nese příznak pro ř. 47. */
+    public function testFixedAssetSuffixesAreFlagged(): void
+    {
+        foreach (['19Ř40,41M' => true, '19Ř40,41P' => true, '19Ř40,41MK' => true, '19Ř40,41PK' => true, '19Ř40,41' => false, '19Ř40,41 K' => false, '19Ř40,41_S' => false] as $code => $asset) {
+            self::assertSame($asset, InvoiceImporter::classify(['Druh' => 'N', 'KodDPH' => $code], false, 210.0)['fixed_asset'], $code);
+        }
+        self::assertFalse(InvoiceImporter::classify(['Druh' => 'N', 'KodDPH' => '19Ř01,02'], true, 210.0)['fixed_asset']);
+    }
+
     public function testCashCodesUseTheSameResolver(): void
     {
-        self::assertSame(['in_return' => true, 'code' => null, 'deduction' => 'reduced'], Ms3VatCode::resolve('19Ř40,41 K', false));
-        self::assertSame(['in_return' => false, 'code' => null, 'deduction' => 'none'], Ms3VatCode::resolve('19Ř00P', false));
+        self::assertSame(['in_return' => true, 'code' => null, 'deduction' => 'reduced', 'fixed_asset' => false], Ms3VatCode::resolve('19Ř40,41 K', false));
+        self::assertSame(['in_return' => true, 'code' => null, 'deduction' => 'full', 'fixed_asset' => true], Ms3VatCode::resolve('19Ř40,41M', false));
+        self::assertSame(['in_return' => true, 'code' => null, 'deduction' => 'reduced', 'fixed_asset' => true], Ms3VatCode::resolve('19Ř40,41PK', false));
+        self::assertSame(['in_return' => false, 'code' => null, 'deduction' => 'none', 'fixed_asset' => false], Ms3VatCode::resolve('19Ř00P', false));
         self::assertNull(Ms3VatCode::resolve('19Ř43,44', false));
         self::assertNull(Ms3VatCode::resolve('19Ř40,41', true), 'Řádek odpočtu na výstupní straně je chyba členění.');
     }
 
     public function testReverseChargeFromInternalDocumentLines(): void
     {
-        self::assertSame(['code' => '24e', 'deduction' => 'reduced'], Ms3VatCode::reverseCharge('19Ř05,06', '19Ř43,44 K'));
-        self::assertSame(['code' => '23', 'deduction' => 'full'], Ms3VatCode::reverseCharge('19Ř03,04', '19Ř43,44'));
-        self::assertSame(['code' => '5', 'deduction' => 'full'], Ms3VatCode::reverseCharge('19Ř10,11_S', '19Ř43,44P', '4'));
-        self::assertSame(['code' => '24', 'deduction' => 'none'], Ms3VatCode::reverseCharge('19Ř12,13', null));
+        self::assertSame(['code' => '24e', 'deduction' => 'reduced', 'fixed_asset' => false], Ms3VatCode::reverseCharge('19Ř05,06', '19Ř43,44 K'));
+        self::assertSame(['code' => '23', 'deduction' => 'full', 'fixed_asset' => false], Ms3VatCode::reverseCharge('19Ř03,04', '19Ř43,44'));
+        self::assertSame(['code' => '5', 'deduction' => 'full', 'fixed_asset' => true], Ms3VatCode::reverseCharge('19Ř10,11_S', '19Ř43,44P', '4'));
+        self::assertSame(['code' => '24', 'deduction' => 'none', 'fixed_asset' => false], Ms3VatCode::reverseCharge('19Ř12,13', null));
         self::assertNull(Ms3VatCode::reverseCharge('19Ř10,11_S', '19Ř42   P', '4'), 'Odpočet z dovozu k tuzemskému přenosu převod neodhaduje.');
         self::assertNull(Ms3VatCode::reverseCharge('19Ř40,41', '19Ř43,44'));
         self::assertTrue(Ms3VatCode::isReverseChargeOutput('19Ř10,11_S'));

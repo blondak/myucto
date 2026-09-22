@@ -694,6 +694,29 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda, ve které je FP25002 pořízením majetku (`19Ř40,41M`) a pokladní PV25002
+     * pořízením majetku s kráceným odpočtem (`19Ř40,41 MK`): v přiznání patří i do ř. 47.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithFixedAssetCodes(): array
+    {
+        $files = self::files();
+        foreach (['ROK.002/PFaktury.DAT' => [self::PURCHASE_FIELDS, 'FP25002', 'KodDPH', self::KOD_DPH_PURCHASE . 'M'],
+            'ROK.002/PoklKnih.DAT' => [self::CASH_FIELDS, 'PV25002', 'Cleneni', self::KOD_DPH_PURCHASE . ' MK']] as $path => [$fields, $doc, $column, $code]) {
+            $rows = iterator_to_array(Ms3Table::fromString($files[$path], strtoupper(pathinfo($path, PATHINFO_FILENAME)))->rows(), false);
+            foreach ($rows as &$row) {
+                if (trim((string) ($row['Doklad'] ?? '')) === $doc) {
+                    $row[$column] = $code;
+                }
+            }
+            unset($row);
+            $files[$path] = Ms3FixtureWriter::table($fields, $rows);
+        }
+        return $files;
+    }
+
+    /**
      * Záloha agendy z daných souborů (varianty agendy pro jednotlivé testy).
      *
      * @param array<string,string> $files

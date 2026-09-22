@@ -71,6 +71,28 @@ final class MigratedDocumentItem
         );
     }
 
+    /**
+     * Příznak pořízení majetku (ř. 47) položky, když zdroj zařazuje DPH celým dokladem
+     * (Money S3 `KodDPH`, POHODA členění): nesou ho jen položky s odpočtem, tedy se sazbou,
+     * daní nebo kódem zařazení. Položka mimo DPH (základ 0 %, rozdíl kurzu u samovyměření)
+     * pořízením majetku v přiznání není. Zdroj s kódem na položce (PREMIER) bere příznak
+     * přímo z klasifikace kódu ({@see VatReturnLineClassifier::purchaseFromLineSet()}).
+     */
+    public static function fixedAssetLine(bool $documentFixedAsset, float $rate, float $vat, ?string $code): bool
+    {
+        return $documentFixedAsset && ($rate > 0.0 || abs($vat) >= 0.005 || $code !== null);
+    }
+
+    /**
+     * Příznak na hlavičce přijatého dokladu: jen když je pořízením majetku každá položka.
+     *
+     * @param list<bool>|array<int,bool> $itemFlags
+     */
+    public static function wholeDocumentFixedAsset(array $itemFlags): bool
+    {
+        return $itemFlags !== [] && !in_array(false, $itemFlags, true);
+    }
+
     public static function purchase(
         string $description,
         float $quantity,

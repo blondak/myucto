@@ -50,9 +50,18 @@ final class Ms3VatCode
     private const EXEMPT_OUTSIDE_COEFFICIENT = '51|BN';
 
     /**
-     * @return array{in_return:bool, code:?string, deduction:'full'|'reduced'|'none'}|null
+     * Přípony odpočtu (ř. 40,41 i zrcadlový ř. 43,44) → [pořízení majetku (ř. 47), krácený
+     * odpočet § 76]. `M` a `P` jsou v číselníku Money pořízení majetku, `K` krácení.
+     */
+    private const DEDUCTION_SUFFIXES = [
+        '' => [false, false], '_S' => [false, false], 'M' => [true, false], 'P' => [true, false],
+        'K' => [false, true], 'MK' => [true, true], 'PK' => [true, true],
+    ];
+
+    /**
+     * @return array{in_return:bool, code:?string, deduction:'full'|'reduced'|'none', fixed_asset:bool}|null
      *   `code` null = tuzemské plnění, kód se odvodí ze sazby; null celé = členění převod
-     *   nezná
+     *   nezná; `fixed_asset` = odpočet u pořízení majetku (ř. 47)
      */
     public static function resolve(string $code, bool $issued): ?array
     {
@@ -62,23 +71,21 @@ final class Ms3VatCode
         $rows = array_map('intval', preg_split('/[\s,]+/', trim($m[1]), -1, PREG_SPLIT_NO_EMPTY) ?: []);
         $suffix = $m[2];
         if ($rows === [0]) {
-            return ['in_return' => false, 'code' => null, 'deduction' => 'none'];
+            return ['in_return' => false, 'code' => null, 'deduction' => 'none', 'fixed_asset' => false];
         }
         if (!$issued) {
-            if ($rows !== [40, 41]) {
+            if ($rows !== [40, 41] || !isset(self::DEDUCTION_SUFFIXES[$suffix])) {
                 return null;
             }
-            return match ($suffix) {
-                '', 'M', 'P', '_S' => ['in_return' => true, 'code' => null, 'deduction' => 'full'],
-                'K', 'MK', 'PK' => ['in_return' => true, 'code' => null, 'deduction' => 'reduced'],
-                default => null,
-            };
+            [$asset, $reduced] = self::DEDUCTION_SUFFIXES[$suffix];
+            $class = Lines::purchaseFromLineSet($asset ? [...Lines::DOMESTIC_DEDUCTION, Lines::FIXED_ASSET] : Lines::DOMESTIC_DEDUCTION, $reduced);
+            return $class === null ? null : ['in_return' => true, 'code' => null, 'deduction' => $class['deduction'], 'fixed_asset' => $class['fixed_asset']];
         }
         if ($rows === [1, 2]) {
-            return in_array($suffix, ['', '_S'], true) ? ['in_return' => true, 'code' => null, 'deduction' => 'full'] : null;
+            return in_array($suffix, ['', '_S'], true) ? ['in_return' => true, 'code' => null, 'deduction' => 'full', 'fixed_asset' => false] : null;
         }
         $saleCode = count($rows) === 1 ? self::saleCode($rows[0], $suffix) : null;
-        return $saleCode === null ? null : ['in_return' => true, 'code' => $saleCode, 'deduction' => 'full'];
+        return $saleCode === null ? null : ['in_return' => true, 'code' => $saleCode, 'deduction' => 'full', 'fixed_asset' => false];
     }
 
     /** Řádek samovyměření na výstupu (ř. 3–13) na interním dokladu Money. */
@@ -93,7 +100,7 @@ final class Ms3VatCode
      * Tuzemský přenos (ř. 10) rozliší předmět plnění z řádku dokladu (4 stavební práce,
      * 5 odpad, 3 nemovitost). Bez zrcadlového řádku odpočet nebyl ('none').
      *
-     * @return array{code:string, deduction:'full'|'reduced'|'none'}|null null = převod nezařadí
+     * @return array{code:string, deduction:'full'|'reduced'|'none', fixed_asset:bool}|null null = převod nezařadí
      */
     public static function reverseCharge(string $output, ?string $mirror, string $subject = ''): ?array
     {
@@ -105,17 +112,13 @@ final class Ms3VatCode
             return null;
         }
         if ($mirror === null || trim($mirror) === '') {
-            return ['code' => $code, 'deduction' => 'none'];
+            return ['code' => $code, 'deduction' => 'none', 'fixed_asset' => false];
         }
-        if (preg_match('/^\d{2}Ř\s*43,44\s*([A-Z]*)$/u', trim($mirror), $mm) !== 1) {
+        if (preg_match('/^\d{2}Ř\s*43,44\s*([A-Z]*)$/u', trim($mirror), $mm) !== 1 || !isset(self::DEDUCTION_SUFFIXES[$mm[1]])) {
             return null;
         }
-        $deduction = match ($mm[1]) {
-            '', 'M', 'P' => 'full',
-            'K', 'MK', 'PK' => 'reduced',
-            default => null,
-        };
-        return $deduction === null ? null : ['code' => $code, 'deduction' => $deduction];
+        [$asset, $reduced] = self::DEDUCTION_SUFFIXES[$mm[1]];
+        return ['code' => $code, 'deduction' => $reduced ? 'reduced' : 'full', 'fixed_asset' => $asset];
     }
 
     private static function saleCode(int $row, string $suffix): ?string

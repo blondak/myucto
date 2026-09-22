@@ -12,6 +12,7 @@ use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
 use MyInvoice\Service\Migration\Shared\BankStatementImportWriter;
 use MyInvoice\Service\Migration\Shared\BankSymbols;
 use MyInvoice\Service\Migration\Shared\MigratedCashNumber;
+use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use PDO;
 
 /**
@@ -60,7 +61,7 @@ final class CashBankImporter
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "CZK", ?, ?, "posted", ?)'
         );
         $insertVat = $pdo->prepare(
-            'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount, vat_deduction) VALUES (?, ?, ?, ?, ?)'
+            'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount, vat_deduction, is_fixed_asset) VALUES (?, ?, ?, ?, ?, ?)'
         );
         // Každá pokladna má vlastní číselnou řadu — stejné číslo v další pokladně téhož
         // roku dostane klíč s kódem pokladny (první si ponechá „rok|číslo").
@@ -114,6 +115,7 @@ final class CashBankImporter
                 $vatLines = [];
             }
             $vatDeduction = $vatClass['deduction'] ?? 'full';
+            $vatAsset = $isOut && ($vatClass['fixed_asset'] ?? false);
             $rule = mb_substr(trim((string) ($r['PrKont'] ?? '')), 0, 64);
             $ruleKey = null;
             if ($rule !== '') {
@@ -140,7 +142,8 @@ final class CashBankImporter
             ]);
             $id = (int) $pdo->lastInsertId();
             foreach ($vatLines as $line) {
-                $insertVat->execute([$id, $line['rate'], $line['base'], $line['vat'], $vatDeduction]);
+                $insertVat->execute([$id, $line['rate'], $line['base'], $line['vat'], $vatDeduction,
+                    MigratedDocumentItem::fixedAssetLine($vatAsset, (float) $line['rate'], (float) $line['vat'], null) ? 1 : 0]);
             }
             if ($vatLines !== []) {
                 $p->count(self::STEP_CASH, 'with_vat');

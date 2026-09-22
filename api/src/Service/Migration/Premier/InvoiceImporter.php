@@ -320,7 +320,6 @@ final class InvoiceImporter
         $items = $doc['items'];
         $deductions = [];
         $reverse = false;
-        $assets = 0;
         foreach ($items as $i => $item) {
             $items[$i]['target_code'] = null;
             $items[$i]['fixed_asset'] = false;
@@ -360,7 +359,6 @@ final class InvoiceImporter
             }
             if ($class['fixed_asset']) {
                 $items[$i]['fixed_asset'] = true;
-                $assets++;
             }
         }
         if (count($deductions) > 1) {
@@ -445,7 +443,7 @@ final class InvoiceImporter
                 bookedAt: $unbooked ? null : $doc['accounting'] . ' 00:00:00',
                 bookedBy: $unbooked ? null : $ctx->userOrNull(),
                 vatClassificationCode: count($codes) === 1 ? $codes[0] : null,
-                isFixedAsset: $assets > 0 && $assets === count($items),
+                isFixedAsset: MigratedDocumentItem::wholeDocumentFixedAsset(array_column($items, 'fixed_asset')),
             ));
         } catch (\PDOException $e) {
             if ((string) $e->getCode() !== '23000') {

@@ -189,6 +189,20 @@ final class SyntheticPohodaExport
         file_put_contents($received, str_replace('<typ:ids>PD</typ:ids>', '<typ:ids>PK</typ:ids>', (string) file_get_contents($received)));
     }
 
+    /**
+     * Agenda z {@see write()} s pořízením majetku: členění `PDM` (ř. 40, 41, 47) a přijatá
+     * faktura 26PF0001 zařazená do něj místo `PD`.
+     */
+    public static function withFixedAssetPurchase(string $agendaDir): void
+    {
+        $class = '<lst:classificationVAT version="2.0"><vat:classificationVATHeader><vat:code>PDM</vat:code><vat:name>Tuzemsky odpocet porizeni majetku</vat:name>'
+            . '<vat:lineInVATReturn>40, 41, 47</vat:lineInVATReturn><vat:sectionInVATLedgerStatement>B.2., B.3.</vat:sectionInVATLedgerStatement></vat:classificationVATHeader></lst:classificationVAT>';
+        $classes = $agendaDir . '/06_cleneni_dph.xml';
+        file_put_contents($classes, str_replace('</lst:listClassificationVAT>', $class . '</lst:listClassificationVAT>', (string) file_get_contents($classes)));
+        $received = $agendaDir . '/20_faktury_receivedInvoice.xml';
+        file_put_contents($received, str_replace('<typ:ids>PD</typ:ids>', '<typ:ids>PDM</typ:ids>', (string) file_get_contents($received)));
+    }
+
     /** ZIP exportu tak, jak ho zabalí nástroj (kořen s přehledem jednotek a složka agendy). */
     public static function writeZip(string $zipPath, string $workDir): void
     {

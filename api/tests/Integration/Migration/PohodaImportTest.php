@@ -183,6 +183,22 @@ final class PohodaImportTest extends TestCase
         self::assertEqualsWithDelta(105.0, (float) ($return['summary']['lines']['40k']['vat'] ?? 0), 0.005, 'Krácený odpočet ř. 40 (sloupec krácený).');
     }
 
+    /** Členění s ř. 47 (pořízení majetku): položky nesou příznak a přiznání má ř. 47. */
+    public function testFixedAssetClassificationFillsLine47(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withFixedAssetPurchase($dir);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, "vendor_invoice_number = 'D-2026-7' AND is_fixed_asset = 1"));
+
+        $return = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 1, 'monthly');
+        self::assertEqualsWithDelta(500.0, (float) ($return['summary']['lines']['47']['base'] ?? 0), 0.005, json_encode($return['summary']['lines']));
+        self::assertEqualsWithDelta(105.0, (float) ($return['summary']['lines']['40']['vat'] ?? 0), 0.005);
+    }
+
     public function testDryRunLeavesNothingBehind(): void
     {
         $supplierId = $this->supplier();

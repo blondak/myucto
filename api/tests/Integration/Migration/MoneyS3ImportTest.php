@@ -25,6 +25,7 @@ use MyInvoice\Service\Migration\MoneyS3\MoneyS3Exception;
 use MyInvoice\Service\Migration\MoneyS3\MoneyS3Importer;
 use MyInvoice\Service\Migration\MoneyS3\MoneyS3ImportJobService;
 use MyInvoice\Service\Migration\MoneyS3\Ms3Backup;
+use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
 use PDO;
@@ -597,6 +598,29 @@ final class MoneyS3ImportTest extends TestCase
      * knihou zálohy pohybem není. Počáteční stav proto kotví deník — korunový počáteční
      * stav účtu přepočtený kurzem počátečního stavu z Money (`PSKurz`) — a výpisy navazují.
      */
+    /**
+     * Členění s příponou M/P/MK/PK je v Money pořízení majetku: převzatý doklad ho nese
+     * na položkách i řádcích DPH pokladny, takže přiznání má ř. 47 jako v Money.
+     */
+    public function testFixedAssetCodesFillLine47(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/asset.lz', SyntheticAgenda::filesWithFixedAssetCodes());
+        $backup = Ms3Backup::extract($this->tmp . '/asset.lz', $this->tmp . '/asset');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'DF-2025-010' AND is_fixed_asset = 1"));
+        $dph = $this->container(DphPriznaniBuilder::class);
+        $march = $dph->build($supplierId, 2025, 3, 'monthly')['summary']['lines'];
+        self::assertEqualsWithDelta(1000.0, (float) ($march['47']['base'] ?? 0), 0.005, json_encode($march, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertEqualsWithDelta(210.0, (float) ($march['47']['vat'] ?? 0), 0.005);
+        $june = $dph->build($supplierId, 2025, 6, 'monthly')['summary']['lines'];
+        self::assertEqualsWithDelta(100.0, (float) ($june['47']['base'] ?? 0), 0.005, json_encode($june, JSON_UNESCAPED_UNICODE) ?: '');
+        // Daň a odpočet se nemění: ř. 47 je jen doplňující údaj k ř. 40.
+        self::assertEqualsWithDelta(315.0, (float) ($march['40']['vat'] ?? 0), 0.005, 'FP25002 210 + DZ25001 210 - DP25001 105 jako bez příznaku.');
+    }
+
     public function testForeignAccountOpeningIsAnchoredToLedger(): void
     {
         $supplierId = $this->supplier();

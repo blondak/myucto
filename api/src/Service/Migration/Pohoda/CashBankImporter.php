@@ -13,6 +13,7 @@ use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
 use MyInvoice\Service\Migration\Shared\BankStatementImportWriter;
 use MyInvoice\Service\Migration\Shared\BankSymbols;
 use MyInvoice\Service\Migration\Shared\MigratedCashNumber;
+use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use PDO;
 
 /**
@@ -87,7 +88,7 @@ final class CashBankImporter
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "CZK", ?, "posted", ?)'
         );
         $insertVat = $pdo->prepare(
-            'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount, vat_deduction) VALUES (?, ?, ?, ?, ?)'
+            'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount, vat_deduction, is_fixed_asset) VALUES (?, ?, ?, ?, ?, ?)'
         );
 
         $periodStart = (string) ($ctx->period['starts_on'] ?? sprintf('%04d-01-01', $ctx->year()));
@@ -134,6 +135,7 @@ final class CashBankImporter
             $classCode = PohodaXml::text($h, 'classificationVAT/ids');
             $vatLines = [];
             $deduction = 'full';
+            $asset = false;
             $withVat = array_values(array_filter($lines, static fn (array $l): bool => abs($l['vat']) >= 0.005));
             if ($withVat !== []) {
                 if ($isOut) {
@@ -141,6 +143,7 @@ final class CashBankImporter
                     if ($res !== null && $res['in_return'] && !$res['reverse']) {
                         $vatLines = $withVat;
                         $deduction = $res['deduction'];
+                        $asset = $res['fixed_asset'];
                     } elseif ($res === null || $res['in_return']) {
                         $p->warn(self::STEP_CASH, 'cash_vat_review', "Pokladní doklad {$number}: členění DPH „{$classCode}“ převod nepřebírá, DPH doplňte ručně.", ['document_no' => $number]);
                     }
@@ -186,7 +189,8 @@ final class CashBankImporter
             ]);
             $id = (int) $pdo->lastInsertId();
             foreach ($vatLines as $line) {
-                $insertVat->execute([$id, $line['rate'], round($sign * $line['base'], 2), round($sign * $line['vat'], 2), $deduction]);
+                $insertVat->execute([$id, $line['rate'], round($sign * $line['base'], 2), round($sign * $line['vat'], 2), $deduction,
+                    MigratedDocumentItem::fixedAssetLine($asset, (float) $line['rate'], (float) $line['vat'], null) ? 1 : 0]);
             }
             if ($vatLines !== []) {
                 $p->count(self::STEP_CASH, 'with_vat');
