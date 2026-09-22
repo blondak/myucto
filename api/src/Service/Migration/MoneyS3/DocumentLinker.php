@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Migration\Shared\JournalEntryLinker;
+use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
 use PDO;
 
 /**
@@ -336,7 +337,7 @@ final class DocumentLinker
         $bestScore = -1;
         $tie = false;
         foreach ($near as $c) {
-            $score = (abs(abs($c['amount']) - abs($docTotal)) < 0.005 ? 8 : 0)
+            $score = (ReconciliationTolerance::sameCent(abs($c['amount']), abs($docTotal)) ? 8 : 0)
                 + ($paidAt !== null && $c['date'] === $paidAt ? 4 : 0)
                 + ($c['year'] === $year ? 2 : 1);
             if ($score > $bestScore) {

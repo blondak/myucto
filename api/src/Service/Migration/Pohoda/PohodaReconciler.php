@@ -7,7 +7,8 @@ namespace MyInvoice\Service\Migration\Pohoda;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
-use MyInvoice\Service\Migration\MoneyS3\MoneyS3Reconciler;
+use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
+use MyInvoice\Service\Migration\Shared\TrialBalanceReconciliation;
 
 /**
  * Rekonciliace převodu - důkaz, že MyÚčto po převodu ukazuje totéž co Pohoda:
@@ -72,25 +73,9 @@ final class PohodaReconciler
         // Deník agendy sahá i do období po roce agendy (doklady následujícího roku) - předvaha
         // se proto bere za celý rozsah, který převod zapsal, ne jen za rok agendy.
         $tb = $this->trialBalance->build($ctx->supplierId, $periodId, null, $ctx->lastPeriodEnd(), false, false);
-        $mine = [];
-        foreach ($tb['rows'] as $row) {
-            $syn = substr((string) $row['account_code'], 0, 3);
-            $mine[$syn] ??= [0.0, 0.0, 0.0];
-            $mine[$syn][0] += (float) $row['ps_md'] - (float) $row['ps_d'];
-            $mine[$syn][1] += (float) $row['turnover_md'] - (float) $row['turnover_d'];
-            $mine[$syn][2] += (float) $row['ks_md'] - (float) $row['ks_d'];
-        }
-        foreach ($mine as $syn => $v) {
-            $mine[$syn] = [round($v[0], 2), round($v[1], 2), round($v[2], 2)];
-        }
-        $journalDiffs = MoneyS3Reconciler::compare($mine, $pohoda);
-        $checks = [
-            ['key' => 'turnover_balanced', 'ok' => (bool) $tb['checks']['turnover_balanced']],
-            ['key' => 'matches_journal', 'ok' => (bool) $tb['checks']['matches_journal']],
-            ['key' => 'opening_balanced', 'ok' => (bool) $tb['checks']['opening_balanced']],
-            ['key' => 'no_drafts', 'ok' => (int) $tb['draft_count'] === 0],
-            ['key' => 'pohoda_journal', 'ok' => $journalDiffs === [], 'accounts' => count($pohoda)],
-        ];
+        $mine = TrialBalanceReconciliation::synthetic($tb['rows']);
+        $journalDiffs = TrialBalanceReconciliation::compare($mine, $pohoda);
+        $checks = TrialBalanceReconciliation::checks($tb, 'pohoda_journal', $journalDiffs, count($pohoda));
         $documents = $this->documentsAgainstJournal($ctx->supplierId, $periodIds);
         foreach ($documents as $i => $d) {
             if (!$d['ok']) {
@@ -101,17 +86,11 @@ final class PohodaReconciler
             }
             $checks[] = ['key' => 'documents_' . $d['key'], 'ok' => $d['ok']];
         }
-        $balanceSheet = $this->statements->balanceSheet($ctx->supplierId, $periodId, null, 'full');
-        $unmapped = array_map(
-            static fn (array $u): array => ['account' => (string) $u['account_code'], 'name' => (string) $u['name'], 'balance' => round((float) $u['balance'], 2)],
-            (array) ($balanceSheet['checks']['unmapped_accounts'] ?? [])
-        );
-        $checks[] = ['key' => 'balance_sheet_balanced', 'ok' => (bool) ($balanceSheet['checks']['balanced'] ?? false) && $unmapped === []];
+        $balanceSheet = TrialBalanceReconciliation::balanceSheet($this->statements->balanceSheet($ctx->supplierId, $periodId, null, 'full'));
+        $unmapped = $balanceSheet['unmapped'];
+        $checks[] = $balanceSheet['check'];
 
-        $ok = true;
-        foreach ($checks as $c) {
-            $ok = $ok && $c['ok'];
-        }
+        $ok = TrialBalanceReconciliation::allOk($checks);
         if ($derived['entries'] > 0) {
             $p->info(self::STEP, 'derived_payments', "Předvaha obsahuje navíc {$derived['entries']} zápisů úhrad, které převod zaúčtoval u pohybů bez zápisu v deníku POHODY (a jejich storna); kontrola proti deníku POHODY s nimi počítá.", ['entries' => $derived['entries']]);
         }
@@ -212,10 +191,7 @@ final class PohodaReconciler
         foreach ($spec as [$key, $table, $expr, $kind, $docType, $prefix, $sign]) {
             $documents = $scalar($docs($table, $expr, $kind, $docType, $prefix, true), [$supplierId]);
             $journal = $scalar($ledger($kind, $docType, $prefix, $sign), [$supplierId]);
-            $out[] = [
-                'key' => $key, 'documents' => $documents, 'journal' => $journal, 'ok' => abs($documents - $journal) < 0.005,
-                'other_accounts' => (int) $scalar($docs($table, $expr, $kind, $docType, $prefix, false), [$supplierId]),
-            ];
+            $out[] = TrialBalanceReconciliation::documentRow($key, $documents, $journal, (int) $scalar($docs($table, $expr, $kind, $docType, $prefix, false), [$supplierId]));
         }
         $bankDocs = $scalar(
             "SELECT COALESCE(SUM(t.amount), 0) FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
@@ -236,7 +212,7 @@ final class PohodaReconciler
                             WHERE k.supplier_id = l.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank')",
             [$supplierId]
         );
-        $out[] = ['key' => 'bank', 'documents' => $bankDocs, 'journal' => $bankJournal, 'ok' => abs($bankDocs - $bankJournal) < 0.005, 'other_accounts' => 0];
+        $out[] = TrialBalanceReconciliation::documentRow('bank', $bankDocs, $bankJournal, 0);
         return $out;
     }
 
@@ -264,22 +240,19 @@ final class PohodaReconciler
             return $row;
         }
         $pohoda = self::pohodaDifferences($ctx->export, $spec, array_keys($mine));
-        $explained = [];
-        $total = 0.0;
+        $entries = [];
         foreach ($mine as $docNo => $difference) {
-            $source = $pohoda[$docNo] ?? null;
-            if ($source === null || abs($source['difference']) < 0.005 || abs($source['difference'] - $difference) >= 0.005) {
-                return $row;
-            }
-            $explained[] = [
-                'document_no' => (string) $docNo,
-                'difference' => $difference,
-                'reason' => abs($source['advance']) >= 0.005 && abs($source['advance'] - $difference) < 0.005 ? 'advance_deduction' : 'amount',
-            ];
-            $total += $difference;
+            $entries[] = ['document_no' => (string) $docNo, 'difference' => $difference];
         }
-        if (abs(round($row['documents'] - $row['journal'], 2) - round($total, 2)) >= 0.005) {
+        if (!TrialBalanceReconciliation::explainedBySource($entries, array_map(static fn (array $s): float => $s['difference'], $pohoda), $row['documents'], $row['journal'])) {
             return $row;
+        }
+        $explained = [];
+        foreach ($entries as $e) {
+            $advance = $pohoda[$e['document_no']]['advance'];
+            $explained[] = $e + [
+                'reason' => !ReconciliationTolerance::isZeroCent($advance) && ReconciliationTolerance::sameCent($advance, $e['difference']) ? 'advance_deduction' : 'amount',
+            ];
         }
         $row['ok'] = true;
         $row['source_differences'] = $explained;
@@ -342,7 +315,7 @@ final class PohodaReconciler
             $docNo = trim((string) $r['document_no']);
             $out[$docNo] = round(($out[$docNo] ?? 0.0) + (float) $r['docs'] - (float) $r['journal'], 2);
         }
-        return array_filter($out, static fn (float $d): bool => abs($d) >= 0.005);
+        return array_filter($out, static fn (float $d): bool => !ReconciliationTolerance::isZeroCent($d));
     }
 
     /**
@@ -405,7 +378,7 @@ final class PohodaReconciler
         }
         $advance = 0.0;
         foreach (PohodaXml::all($r, $tag . 'Detail/invoiceAdvancePaymentItem') as $a) {
-            if (abs(round(PohodaXml::num($a, 'homeCurrency/priceVAT'), 2)) >= 0.005) {
+            if (!ReconciliationTolerance::isZeroCent(round(PohodaXml::num($a, 'homeCurrency/priceVAT'), 2))) {
                 $total += PohodaXml::num($a, 'homeCurrency/priceSum');
             } else {
                 $advance += PohodaXml::num($a, 'homeCurrency/priceSum');

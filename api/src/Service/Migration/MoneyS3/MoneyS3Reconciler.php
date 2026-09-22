@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
+use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
+use MyInvoice\Service\Migration\Shared\TrialBalanceReconciliation;
 
 /**
  * Rekonciliace převodu — důkaz, že MyÚčto po převodu ukazuje totéž co Money.
@@ -94,26 +96,10 @@ final class MoneyS3Reconciler
     private function reconcileYear(ImportContext $ctx, int $year, int $periodId, array $money): array
     {
         $tb = $this->trialBalance->build($ctx->supplierId, $periodId, null, null, false, false);
-        $mine = [];
-        foreach ($tb['rows'] as $row) {
-            $syn = substr((string) $row['account_code'], 0, 3);
-            $mine[$syn] ??= [0.0, 0.0, 0.0];
-            $mine[$syn][0] += (float) $row['ps_md'] - (float) $row['ps_d'];
-            $mine[$syn][1] += (float) $row['turnover_md'] - (float) $row['turnover_d'];
-            $mine[$syn][2] += (float) $row['ks_md'] - (float) $row['ks_d'];
-        }
-        foreach ($mine as $syn => $v) {
-            $mine[$syn] = [round($v[0], 2), round($v[1], 2), round($v[2], 2)];
-        }
+        $mine = TrialBalanceReconciliation::synthetic($tb['rows']);
 
         $journalDiffs = self::compare($mine, $money);
-        $checks = [
-            ['key' => 'turnover_balanced', 'ok' => (bool) $tb['checks']['turnover_balanced']],
-            ['key' => 'matches_journal', 'ok' => (bool) $tb['checks']['matches_journal']],
-            ['key' => 'opening_balanced', 'ok' => (bool) $tb['checks']['opening_balanced']],
-            ['key' => 'no_drafts', 'ok' => (int) $tb['draft_count'] === 0],
-            ['key' => 'money_journal', 'ok' => $journalDiffs === [], 'accounts' => count($money)],
-        ];
+        $checks = TrialBalanceReconciliation::checks($tb, 'money_journal', $journalDiffs, count($money));
 
         $report = null;
         $reportPath = $ctx->options->moneyReports[$year] ?? null;
@@ -133,19 +119,11 @@ final class MoneyS3Reconciler
             $checks[] = ['key' => 'documents_' . $d['key'], 'ok' => $d['ok']];
         }
 
-        // Rozvaha musí vyjít: účet, který mapa výkazů nezná (syntetika z osnovy Money mimo
-        // šablonu), by ve výkazech chyběl, i když předvaha sedí na haléř.
-        $balanceSheet = $this->statements->balanceSheet($ctx->supplierId, $periodId, null, 'full');
-        $unmapped = array_map(
-            static fn (array $u): array => ['account' => (string) $u['account_code'], 'name' => (string) $u['name'], 'balance' => round((float) $u['balance'], 2)],
-            (array) ($balanceSheet['checks']['unmapped_accounts'] ?? [])
-        );
-        $checks[] = ['key' => 'balance_sheet_balanced', 'ok' => (bool) ($balanceSheet['checks']['balanced'] ?? false) && $unmapped === []];
+        $balanceSheet = TrialBalanceReconciliation::balanceSheet($this->statements->balanceSheet($ctx->supplierId, $periodId, null, 'full'));
+        $unmapped = $balanceSheet['unmapped'];
+        $checks[] = $balanceSheet['check'];
 
-        $ok = true;
-        foreach ($checks as $c) {
-            $ok = $ok && $c['ok'];
-        }
+        $ok = TrialBalanceReconciliation::allOk($checks);
         return [
             'year' => $year,
             'period_id' => $periodId,
@@ -245,8 +223,7 @@ final class MoneyS3Reconciler
 
         $out = [];
         foreach ($rows as [$key, $documents, $journal]) {
-            $row = ['key' => $key, 'documents' => $documents, 'journal' => $journal, 'ok' => abs($documents - $journal) < 0.005,
-                'other_accounts' => $other[$key] ?? 0];
+            $row = TrialBalanceReconciliation::documentRow($key, $documents, $journal, $other[$key] ?? 0);
             $out[] = $row['ok'] ? $row : $this->explainBySource($ctx, $year, $periodId, $row);
         }
         return $out;
@@ -279,21 +256,11 @@ final class MoneyS3Reconciler
             return $row;
         }
         $money = $this->moneyDifferences($ctx, $year, $row['key'], array_column($entries, 'document_no'));
-        $explained = [];
-        $total = 0.0;
-        foreach ($entries as $e) {
-            $m = $money[$e['document_no']] ?? null;
-            if ($m === null || abs($m) < 0.005 || abs($m - $e['difference']) >= 0.005) {
-                return $row;
-            }
-            $explained[] = ['document_no' => $e['document_no'], 'difference' => round($e['difference'], 2)];
-            $total += $e['difference'];
-        }
-        if (abs(round($row['documents'] - $row['journal'], 2) - round($total, 2)) >= 0.005) {
+        if (!TrialBalanceReconciliation::explainedBySource($entries, $money, $row['documents'], $row['journal'])) {
             return $row;
         }
         $row['ok'] = true;
-        $row['source_differences'] = $explained;
+        $row['source_differences'] = array_map(static fn (array $e): array => ['document_no' => $e['document_no'], 'difference' => round($e['difference'], 2)], $entries);
         return $row;
     }
 
@@ -344,7 +311,7 @@ final class MoneyS3Reconciler
         $out = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
             $diff = round((float) $r['docs'] - (float) $r['journal'], 2);
-            if (abs($diff) >= 0.005) {
+            if (!ReconciliationTolerance::isZeroCent($diff)) {
                 $out[] = ['document_no' => trim((string) $r['document_no']), 'difference' => $diff];
             }
         }
@@ -418,8 +385,7 @@ final class MoneyS3Reconciler
     }
 
     /**
-     * Rozdíly MyÚčto × Money po účtech (PS, obrat, KS). Účet bez pohybu na obou stranách
-     * se nevypisuje.
+     * Rozdíly MyÚčto × Money po účtech ({@see TrialBalanceReconciliation::compare()}).
      *
      * @param array<string,array{0:float,1:float,2:float}> $mine
      * @param array<string,array{0:float,1:float,2:float}> $theirs
@@ -427,19 +393,6 @@ final class MoneyS3Reconciler
      */
     public static function compare(array $mine, array $theirs): array
     {
-        $diffs = [];
-        $codes = array_unique(array_merge(array_map('strval', array_keys($mine)), array_map('strval', array_keys($theirs))));
-        sort($codes, SORT_STRING);
-        foreach ($codes as $code) {
-            $a = $mine[$code] ?? [0.0, 0.0, 0.0];
-            $b = $theirs[$code] ?? [0.0, 0.0, 0.0];
-            foreach ([0, 1, 2] as $i) {
-                if (abs((float) $a[$i] - (float) $b[$i]) >= 0.005) {
-                    $diffs[] = ['account' => (string) $code, 'myucto' => $a, 'money' => $b];
-                    break;
-                }
-            }
-        }
-        return $diffs;
+        return TrialBalanceReconciliation::compare($mine, $theirs);
     }
 }
