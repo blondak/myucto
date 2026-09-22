@@ -12,6 +12,7 @@ use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Bank\Match\MatchScorer;
+use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
 use MyInvoice\Support\Sql\PayablePredicate;
 use PDO;
 
@@ -550,7 +551,7 @@ final class UnbookedBankPayments
                             $symbols[] = $digits;
                         }
                     }
-                    $account = self::digits((string) $r['account_no']) !== '' ? CashBankImporter::accountKey((string) $r['account_no'], (string) $r['bank_code']) : null;
+                    $account = self::digits((string) $r['account_no']) !== '' ? BankAccountRegistrar::accountKey((string) $r['account_no'], (string) $r['bank_code']) : null;
                     $out[$type . '|' . $id] = [
                         'key' => $type . '|' . $id,
                         'type' => $type,
@@ -607,7 +608,7 @@ final class UnbookedBankPayments
                     'bank_ref' => $r['bank_ref'] !== null ? (string) $r['bank_ref'] : null,
                     // Platba kartou nemá účet protistrany (POHODA ho vede jako 0/0000).
                     'card' => $accountDigits === '',
-                    'account' => $accountDigits !== '' ? CashBankImporter::accountKey((string) $r['counterparty_account'], (string) $r['counterparty_bank']) : null,
+                    'account' => $accountDigits !== '' ? BankAccountRegistrar::accountKey((string) $r['counterparty_account'], (string) $r['counterparty_bank']) : null,
                     'match_status' => (string) $r['match_status'],
                     'matched' => (bool) $r['has_match'],
                     'live_entry' => (bool) $r['live_entry'],

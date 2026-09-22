@@ -6,9 +6,9 @@ namespace MyInvoice\Service\Migration\Premier;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PremierImportRepository;
-use MyInvoice\Service\Accounting\Activation\OpeningBalanceDocuments;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
+use MyInvoice\Service\Migration\Shared\JournalEntryLinker;
 use PDO;
 
 /**
@@ -32,10 +32,16 @@ final class DocumentLinker
     /** Vazba zápisu úhrady na fakturu - není to zaúčtování faktury (rekonciliace a sirotci ji vynechávají). */
     public const PAYMENT_NOTE = 'Úhrada převzatá z PREMIER';
 
+    private readonly JournalEntryLinker $entries;
+
     public function __construct(
         private readonly Connection $db,
         private readonly PremierImportRepository $map,
-    ) {}
+    ) {
+        // Deník PREMIER převod zapisuje jako ruční zápisy (`manual`); nová vazba jen podle
+        // skutečně přeznačeného zápisu ({@see JournalEntryLinker::__construct()}).
+        $this->entries = new JournalEntryLinker($db, 'PREMIER', true);
+    }
 
     public function link(PremierContext $ctx, PremierDocuments $documents): void
     {
@@ -93,7 +99,7 @@ final class DocumentLinker
             $p->warn(self::STEP_LINK, 'orphan_documents', count($orphans) . ' převedených faktur nemá v deníku PREMIER zápis. '
                 . 'Nejsou zaúčtované; zaúčtujte je ručně nebo v Účetnictví → Doúčtovat doklady.', ['documents' => array_slice($orphans, 0, 50)]);
         }
-        $this->refreshDescriptions($ctx->supplierId, $p);
+        $this->entries->refreshDescriptions($ctx->supplierId, $p, self::STEP_LINK, false);
         $p->finish(self::STEP_LINK);
     }
 
@@ -206,18 +212,10 @@ final class DocumentLinker
      */
     private function markBookedWithoutDocument(PremierContext $ctx): void
     {
-        $marked = 0;
-        foreach (array_chunk(array_values(array_unique($ctx->bankTransactions)), 500) as $chunk) {
-            $stmt = $this->db->pdo()->prepare(
-                "UPDATE bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
-                    SET t.match_status = 'ignored', t.match_reason = 'premier_booked', t.matched_at = NOW(), t.matched_by = ?,
-                        t.ignore_note = 'Zaúčtováno v PREMIER bez faktury (převod z PREMIER).'
-                  WHERE s.supplier_id = ? AND t.match_status = 'unmatched' AND " . BankTransactionPostingScope::existsSql('s.supplier_id', 't.id') . '
-                    AND t.id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')'
-            );
-            $stmt->execute(array_merge([$ctx->userOrNull(), $ctx->supplierId], $chunk));
-            $marked += $stmt->rowCount();
-        }
+        $marked = $this->entries->markBankBookedWithoutDocument(
+            $ctx->supplierId, $ctx->userOrNull(), array_values($ctx->bankTransactions), 'premier_booked',
+            'Zaúčtováno v PREMIER bez faktury (převod z PREMIER).', BankTransactionPostingScope::existsSql('s.supplier_id', 't.id'),
+        );
         if ($marked > 0) {
             $ctx->protocol->count(self::STEP_PAYMENTS, 'booked_without_document', $marked);
         }
@@ -268,57 +266,19 @@ final class DocumentLinker
      */
     private function linkOpening(PremierContext $ctx, string $docType, int $docId): bool
     {
-        if ($ctx->period === null) {
-            return false;
-        }
-        $pdo = $this->db->pdo();
-        $opening = $pdo->prepare(
-            "SELECT id FROM journal_entries WHERE supplier_id = ? AND period_id = ? AND source_type = 'opening' AND reversed_by IS NULL ORDER BY id LIMIT 1"
-        );
-        $opening->execute([$ctx->supplierId, (int) $ctx->period['id']]);
-        $entryId = $opening->fetchColumn();
-        if ($entryId === false) {
-            return false;
-        }
-        $link = $pdo->prepare(
-            'INSERT IGNORE INTO journal_entry_document_links (supplier_id, entry_id, doc_type, doc_id, note, created_by) VALUES (?, ?, ?, ?, ?, ?)'
-        );
-        $link->execute([$ctx->supplierId, (int) $entryId, $docType, $docId, OpeningBalanceDocuments::NOTE . ' (převzato z PREMIER)', $ctx->userOrNull()]);
-        return $link->rowCount() > 0;
+        return $this->entries->linkOpening($ctx->supplierId, $ctx->userOrNull(), $ctx->period !== null ? (int) $ctx->period['id'] : null, $docType, $docId);
     }
 
     /**
      * Zápis dostane `source_type`/`source_id` dokladu (jen první navázaný doklad a jen
-     * zápis převodu bez zdroje) a vazbu v `journal_entry_document_links`.
+     * zápis převodu bez zdroje, převod ho zapsal jako `manual`) a vazbu
+     * v `journal_entry_document_links`.
      *
      * @return bool true = nová vazba
      */
-    private function attach(PremierContext $ctx, string $sourceType, string $docType, int $docId, int $entryId, bool $setSource = true): bool
+    private function attach(PremierContext $ctx, string $sourceType, string $docType, int $docId, int $entryId): bool
     {
-        $pdo = $this->db->pdo();
-        $isNew = false;
-        if ($setSource) {
-            $owner = $pdo->prepare('SELECT id FROM journal_entries WHERE supplier_id = ? AND source_type = ? AND source_id = ? AND reversed_by IS NULL LIMIT 1');
-            $owner->execute([$ctx->supplierId, $sourceType, $docId]);
-            if ($owner->fetchColumn() === false) {
-                $stmt = $pdo->prepare(
-                    "UPDATE journal_entries SET source_type = ?, source_id = ?
-                      WHERE id = ? AND supplier_id = ? AND source_type = 'manual' AND source_id IS NULL"
-                );
-                $stmt->execute([$sourceType, $docId, $entryId, $ctx->supplierId]);
-                $isNew = $stmt->rowCount() > 0;
-            }
-        }
-        $link = $pdo->prepare(
-            'INSERT IGNORE INTO journal_entry_document_links (supplier_id, entry_id, doc_type, doc_id, note, created_by) VALUES (?, ?, ?, ?, ?, ?)'
-        );
-        $link->execute([$ctx->supplierId, $entryId, $docType, $docId, 'Převzato z PREMIER', $ctx->userOrNull()]);
-        $isNew = $isNew || $link->rowCount() > 0;
-        if ($docType === 'cash') {
-            $pdo->prepare('UPDATE cash_documents SET journal_entry_id = ? WHERE id = ? AND supplier_id = ? AND journal_entry_id IS NULL')
-                ->execute([$entryId, $docId, $ctx->supplierId]);
-        }
-        return $isNew;
+        return $this->entries->attach($ctx->supplierId, $ctx->userOrNull(), $sourceType, 'manual', $docType, $docId, [$entryId]);
     }
 
     private function linkPayment(PremierContext $ctx, string $docType, int $docId, int $entryId): void
@@ -337,22 +297,5 @@ final class DocumentLinker
             }
         }
         return false;
-    }
-
-    /** Popisy zápisů doplní rebuilder o číslo dokladu a protistranu (stejně jako u POHODY). */
-    private function refreshDescriptions(int $supplierId, ImportProtocol $p): void
-    {
-        try {
-            $rebuilder = new \MyInvoice\Service\Accounting\JournalDescriptionRebuilder(
-                $this->db,
-                new \MyInvoice\Service\Accounting\JournalDescriptionBuilder($this->db),
-            );
-            $changed = $rebuilder->rebuild(['supplier_id' => $supplierId]);
-            if ($changed > 0) {
-                $p->info(self::STEP_LINK, 'descriptions_rebuilt', "U {$changed} převedených zápisů se popis doplnil o číslo dokladu a protistranu.");
-            }
-        } catch (\Throwable $e) {
-            $p->warn(self::STEP_LINK, 'descriptions_rebuild_failed', 'Popisy převedených zápisů se nepodařilo doplnit: ' . $e->getMessage());
-        }
     }
 }

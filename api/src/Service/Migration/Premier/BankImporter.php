@@ -8,6 +8,9 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
+use MyInvoice\Service\Migration\Shared\BankStatementImportWriter;
+use MyInvoice\Service\Migration\Shared\BankSymbols;
 
 /**
  * Bankovní účty a pohyby z PREMIER.
@@ -44,19 +47,8 @@ final class BankImporter
         }
         $existingStatements = $this->map->all($ctx->supplierId, PremierImportRepository::KIND_BANK_STATEMENT);
         $existingTx = $this->map->all($ctx->supplierId, PremierImportRepository::KIND_BANK_TRANSACTION);
-        $insertStatement = $pdo->prepare(
-            'INSERT INTO bank_statements
-                (supplier_id, source, file_name, file_hash, account_number, bank_code, currency, statement_number,
-                 statement_date, transaction_count, imported_by)
-             VALUES (?, "import", ?, ?, ?, ?, ?, ?, ?, 0, ?)'
-        );
-        $insertTx = $pdo->prepare(
-            'INSERT INTO bank_transactions
-                (source, source_ref, statement_id, posted_at, amount, currency, variable_symbol, constant_symbol,
-                 specific_symbol, counterparty_account, counterparty_bank, counterparty_name, description, bank_ref,
-                 import_fingerprint)
-             VALUES ("statement", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        );
+        $writer = new BankStatementImportWriter($this->db, 'premier');
+        $registrar = new BankAccountRegistrar($this->db, $this->bankAccounts);
         // Opakovaný převod doplní jen prázdné údaje (starší převod je nepřebíral), nic nepřepíše.
         $enrichTx = $pdo->prepare(
             "UPDATE bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
@@ -70,10 +62,9 @@ final class BankImporter
                     t.bank_ref = CASE WHEN t.bank_ref IS NULL OR t.bank_ref IN ('', ?) THEN ? ELSE t.bank_ref END
               WHERE t.id = ? AND s.supplier_id = ?"
         );
-        $setBalances = $pdo->prepare(
-            'UPDATE bank_statements SET transaction_count = ?, prev_balance = ?, curr_balance = ?, credit_total = ?, debit_total = ? WHERE id = ? AND supplier_id = ?'
-        );
 
+        $company = [];
+        $registered = [];
         foreach ($series as $code => $s) {
             $rows = [];
             foreach ($ctx->journal->year($ctx->year) as $r) {
@@ -85,10 +76,11 @@ final class BankImporter
                 continue;
             }
             if (!$ctx->dryRun && $s['number'] !== '') {
-                $this->bankAccounts->registerImported(
-                    $ctx->supplierId, $s['number'], $s['bank'] !== '' ? $s['bank'] : null, $s['iban'] !== '' ? $s['iban'] : null,
-                    $s['currency'], $s['label'], strlen($s['account']) > 3 ? substr($s['account'], 3) : null,
-                );
+                $company[$code] = [
+                    'number' => $s['number'], 'bank' => $s['bank'], 'iban' => $s['iban'], 'currency' => $s['currency'],
+                    'label' => $s['label'], 'suffix' => strlen($s['account']) > 3 ? substr($s['account'], 3) : null,
+                ];
+                $registered += $registrar->register($ctx->supplierId, [$code => $company[$code]]);
             }
             $foreign = $s['currency'] !== 'CZK';
             $running = $this->opening($ctx, $s['account'], $foreign);
@@ -102,19 +94,10 @@ final class BankImporter
                 $statementId = $existingStatements[$mapKey] ?? null;
                 $lastDate = max(array_column($txRows, 'date'));
                 if ($statementId === null) {
-                    $label = sprintf('%s %s/%d', $code, $number, $ctx->year);
-                    $insertStatement->execute([
-                        $ctx->supplierId,
-                        sprintf('premier-%s.import', preg_replace('/[^A-Za-z0-9_-]/', '_', $label)),
-                        hash('sha256', 'premier|' . $ctx->supplierId . '|' . $mapKey),
-                        mb_substr($s['number'] !== '' ? $s['number'] : $code, 0, 40),
-                        $s['bank'] !== '' ? mb_substr($s['bank'], 0, 4) : null,
-                        $s['currency'],
-                        mb_substr($label, 0, 20),
-                        $lastDate,
-                        $ctx->userOrNull(),
-                    ]);
-                    $statementId = (int) $pdo->lastInsertId();
+                    $statementId = $writer->createStatement(
+                        $ctx->supplierId, $mapKey, sprintf('%s %s/%d', $code, $number, $ctx->year), $s['number'] !== '' ? $s['number'] : (string) $code,
+                        $s['bank'], $s['currency'], $lastDate, $ctx->userOrNull(),
+                    );
                     $this->map->put($ctx->supplierId, PremierImportRepository::KIND_BANK_STATEMENT, $mapKey, $statementId, $ctx->runId);
                     $p->count(self::STEP, 'statements');
                 }
@@ -140,34 +123,64 @@ final class BankImporter
                         }
                         continue;
                     }
-                    $insertTx->execute([
-                        mb_substr($code . ' ' . $number . ' #' . $r['inter'], 0, 190),
-                        $statementId,
-                        $r['date'],
-                        number_format($amount, 2, '.', ''),
-                        $s['currency'],
-                        $d['vs'], $d['ks'], $d['ss'], $d['account'], $d['bank'], $d['name'], $d['description'],
-                        $d['ref'] ?? $fallbackRef,
-                        hash('sha256', 'premier|' . $ctx->supplierId . '|' . $txKey),
+                    $id = $writer->insertTransaction($ctx->supplierId, $statementId, $txKey, [
+                        'source_ref' => mb_substr($code . ' ' . $number . ' #' . $r['inter'], 0, 190),
+                        'posted_at' => $r['date'],
+                        'amount' => number_format($amount, 2, '.', ''),
+                        'currency' => $s['currency'],
+                        'variable_symbol' => $d['vs'],
+                        'constant_symbol' => $d['ks'],
+                        'specific_symbol' => $d['ss'],
+                        'counterparty_account' => $d['account'],
+                        'counterparty_bank' => $d['bank'],
+                        'counterparty_name' => $d['name'],
+                        'description' => $d['description'],
+                        'bank_ref' => $d['ref'] ?? $fallbackRef,
                     ]);
-                    $id = (int) $pdo->lastInsertId();
                     $this->map->put($ctx->supplierId, PremierImportRepository::KIND_BANK_TRANSACTION, $txKey, $id, $ctx->runId);
                     $ctx->bankTransactions[$r['inter']] = $id;
                     $p->count(self::STEP, 'transactions');
                 }
                 $closing = round($running + $credit - $debit, 2);
-                $setBalances->execute([
-                    $count,
-                    number_format($running, 2, '.', ''),
-                    number_format($closing, 2, '.', ''),
-                    number_format($credit, 2, '.', ''),
-                    number_format($debit, 2, '.', ''),
-                    $statementId, $ctx->supplierId,
-                ]);
+                $writer->setBalances(
+                    $ctx->supplierId, $statementId, number_format($running, 2, '.', ''), number_format($closing, 2, '.', ''),
+                    number_format($credit, 2, '.', ''), number_format($debit, 2, '.', ''), $count,
+                );
                 $running = $closing;
             }
         }
+        $this->linkCompanyAccounts($ctx, $registrar, $company, $registered);
         $p->finish(self::STEP);
+    }
+
+    /**
+     * Účty řad s pohyby patří mezi účty firmy v měnách (zůstatky banky, platební údaje
+     * dokladů) stejně jako po převodu z Money S3 a POHODY: prázdnou měnu firmy doplní
+     * první účet řady v té měně (vyplněný účet se nepřepisuje), každý další účet dostane
+     * vlastní řádek měny a evidence účtů se na něj naváže ({@see BankAccountRegistrar}).
+     *
+     * @param array<string,array{number:string,bank:string,iban:string,currency:string,label:string,suffix:?string}> $company
+     * @param array<string,int> $registered
+     */
+    private function linkCompanyAccounts(PremierContext $ctx, BankAccountRegistrar $registrar, array $company, array $registered): void
+    {
+        if ($company === []) {
+            return;
+        }
+        $filled = [];
+        foreach ($company as $a) {
+            if (!isset($filled[$a['currency']])) {
+                $filled[$a['currency']] = true;
+                $registrar->fillCurrencyAccount(
+                    $ctx->supplierId,
+                    $a['currency'],
+                    mb_substr($a['number'], 0, 30),
+                    $a['bank'] !== '' ? mb_substr($a['bank'], 0, 4) : null,
+                    $a['iban'] !== '' ? mb_substr($a['iban'], 0, 34) : null,
+                );
+            }
+        }
+        $registrar->linkCompanyAccounts($ctx->supplierId, $company, array_map('strval', array_keys($company)), $registered, $ctx->protocol, self::STEP, true);
     }
 
     /**
@@ -207,15 +220,10 @@ final class BankImporter
         ];
     }
 
-    /** Symbol platby jen číslicemi; prázdný, samé nuly nebo delší než pole = bez symbolu. */
+    /** Symbol platby jen číslicemi ({@see BankSymbols::digitsSymbol()}). */
     private static function symbol(string $value, int $maxLength): ?string
     {
-        $digits = preg_replace('/\D/', '', $value) ?? '';
-        $significant = ltrim($digits, '0');
-        if ($significant === '' || strlen($significant) > $maxLength) {
-            return null;
-        }
-        return strlen($digits) <= $maxLength ? $digits : $significant;
+        return BankSymbols::digitsSymbol($value, $maxLength);
     }
 
     /**

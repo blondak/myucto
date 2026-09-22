@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Premier;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
+use MyInvoice\Service\Migration\Shared\SmallAssetCard;
 use PDO;
 
 /**
@@ -104,23 +105,22 @@ final class SmallAssetImporter
                 $ctx->protocol->count(self::STEP, 'later_years');
                 continue;
             }
-            $disposed = $card['disposed'] !== null && $card['disposed'] <= $end ? max($card['disposed'], $card['acquired']) : null;
-            $id = $this->cards->create($ctx->supplierId, [
-                'asset_kind' => $card['kind'],
-                'name' => mb_substr($card['name'] !== '' ? $card['name'] : 'Drobný majetek', 0, 255),
-                'inventory_number' => $card['number'] !== '' && $card['number'] !== '0' ? mb_substr($card['number'], 0, 40) : null,
-                'acquisition_date' => $card['acquired'],
-                'put_into_use_date' => $card['in_use'],
-                'quantity' => $card['quantity'],
-                'unit_price' => round($card['price'] / $card['quantity'], 2),
-                'price' => $card['price'],
-                'location' => $card['location'] !== '' ? mb_substr($card['location'], 0, 160) : null,
-                'responsible_person' => $card['person'] !== '' ? mb_substr($card['person'], 0, 160) : null,
-                'status' => $disposed !== null ? 'disposed' : 'in_use',
-                'disposed_at' => $disposed,
-                'disposal_reason' => $disposed !== null ? 'Vyřazeno v PREMIER' : null,
-                'notes' => 'Převzato z evidence drobného majetku PREMIER' . ($card['note'] !== '' ? ': ' . $card['note'] : '.'),
-            ], $ctx->userOrNull());
+            $disposed = SmallAssetCard::disposedWithin($card['disposed'], $card['acquired'], $end);
+            $id = $this->cards->create($ctx->supplierId, SmallAssetCard::payload(
+                $card['kind'],
+                $card['name'] !== '' ? $card['name'] : SmallAssetCard::DEFAULT_NAME,
+                SmallAssetCard::inventoryNumber($card['number'], true),
+                $card['acquired'],
+                $card['in_use'],
+                $card['quantity'],
+                round($card['price'] / $card['quantity'], 2),
+                $card['price'],
+                $card['location'],
+                $disposed,
+                'Vyřazeno v PREMIER',
+                'Převzato z evidence drobného majetku PREMIER' . ($card['note'] !== '' ? ': ' . $card['note'] : '.'),
+                ['responsible_person' => $card['person'] !== '' ? mb_substr($card['person'], 0, 160) : null],
+            ), $ctx->userOrNull());
             $this->map->put($ctx->supplierId, PremierImportRepository::KIND_SMALL_ASSET, $card['key'], $id, $ctx->runId);
             $ctx->protocol->count(self::STEP, $disposed !== null ? 'created_disposed' : 'created');
         }

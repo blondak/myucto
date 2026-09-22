@@ -13,6 +13,9 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Migration\MoneyS3\AccountCode;
+use MyInvoice\Service\Migration\Shared\ChartAccountCreator;
+use MyInvoice\Service\Migration\Shared\MigrationPeriods;
+use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
 
 /**
  * Účtová osnova, účetní období a účetní deník z Pohody.
@@ -91,15 +94,7 @@ final class ChartJournalImporter
             if ($parent === null) {
                 continue;
             }
-            $id = $this->accounts->insert($ctx->supplierId, [
-                'account_code' => $target,
-                'name' => mb_substr($names[$pohodaCode] ?? ('Analytika ' . $pohodaCode), 0, 190),
-                'account_type' => (string) $parent['account_type'],
-                'normal_side' => $parent['normal_side'] ?? null,
-                'is_synthetic' => false,
-                'parent_id' => (int) $parent['id'],
-                'is_active' => true,
-            ]);
+            $id = (new ChartAccountCreator($this->accounts))->createAnalytic($ctx->supplierId, $target, $names[$pohodaCode] ?? ('Analytika ' . $pohodaCode), $parent);
             $ctx->accountIds[$target] = $id;
             $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_ACCOUNT, $target, $id, $ctx->runId);
             $p->count(self::STEP_CHART, 'created');
@@ -298,7 +293,7 @@ final class ChartJournalImporter
                 count($moved), $year, implode(', ', array_slice($moved, 0, 10)) . (count($moved) > 10 ? ', …' : '')
             ), ['documents' => array_slice($moved, 0, 200)]);
         }
-        if (abs($stats['debit'] - $stats['credit']) >= 0.005) {
+        if (!ReconciliationTolerance::sameCent($stats['debit'], $stats['credit'])) {
             $p->error(self::STEP_JOURNAL, 'journal_unbalanced', "Rok {$year}: Σ MD ≠ Σ D.");
         }
         $p->set('journal', [$stats]);
@@ -350,9 +345,8 @@ final class ChartJournalImporter
      * v období agendy k jeho poslednímu dni (období je uzavřené nebo ho nejde založit
      * bez překryvu s řadou období firmy).
      *
-     * Období se zakládá stejně jako období agendy ({@see ensurePeriod()}): převod běží
-     * dřív, než firma podvojné účetnictví vede, takže {@see \MyInvoice\Service\Accounting\AccountingPeriodProvisioner}
-     * (ten zakládá jen firmě v podvojném účetnictví) tu použít nejde.
+     * Období se zakládá stejně jako období agendy ({@see ensurePeriod()}, proč ne
+     * AccountingPeriodProvisioner vysvětluje {@see MigrationPeriods}).
      *
      * @return array{id:int,starts_on:string,ends_on:string,status:string,locked:bool,year:int}|null
      */
@@ -405,23 +399,11 @@ final class ChartJournalImporter
     /** @return array{id:int,starts_on:string,ends_on:string,status:string,locked:bool} */
     private function ensurePeriod(PohodaContext $ctx, int $year): array
     {
-        $existing = $this->periods->findByYear($ctx->supplierId, $year);
-        if ($existing === null) {
-            $starts = sprintf('%04d-01-01', $year);
-            $ends = sprintf('%04d-12-31', $year);
-            $id = $this->periods->create($ctx->supplierId, $year, $starts, $ends, 'import');
-            $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_PERIOD, (string) $year, $id, $ctx->runId);
-            $ctx->protocol->count(self::STEP_JOURNAL, 'periods_created');
-            return ['id' => $id, 'starts_on' => $starts, 'ends_on' => $ends, 'status' => 'open', 'locked' => false];
-        }
-        $status = (string) $existing['status'];
-        return [
-            'id' => (int) $existing['id'],
-            'starts_on' => (string) $existing['starts_on'],
-            'ends_on' => (string) $existing['ends_on'],
-            'status' => $status,
-            'locked' => $status !== 'open',
-        ];
+        [$starts, $ends] = MigrationPeriods::calendarYear($year);
+        return (new MigrationPeriods($this->periods))->ensure(
+            $ctx->supplierId, $year, $starts, $ends, $ctx->protocol, self::STEP_JOURNAL,
+            fn (int $id) => $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_PERIOD, (string) $year, $id, $ctx->runId),
+        );
     }
 
     /**
@@ -430,31 +412,13 @@ final class ChartJournalImporter
      */
     private function createSynthetic(PohodaContext $ctx, string $synthetic, array $names): ?array
     {
-        $sibling = null;
-        foreach ([2, 1] as $prefix) {
-            foreach ($this->accounts->listForTenant($ctx->supplierId, true) as $row) {
-                if (!empty($row['is_synthetic']) && str_starts_with((string) $row['account_code'], substr($synthetic, 0, $prefix))) {
-                    $sibling = $row;
-                    break 2;
-                }
-            }
-        }
-        if ($sibling === null) {
-            $ctx->protocol->error(self::STEP_CHART, 'unknown_synthetic', "Syntetický účet {$synthetic} v osnově chybí a nelze odvodit jeho typ. Založte ho v Účetní osnově a spusťte převod znovu.", ['account' => $synthetic]);
+        $created = (new ChartAccountCreator($this->accounts))
+            ->createSynthetic($ctx->supplierId, $synthetic, $names[$synthetic . '000'] ?? ('Účet ' . $synthetic), $ctx->protocol, self::STEP_CHART);
+        if ($created === null) {
             return null;
         }
-        $id = $this->accounts->insert($ctx->supplierId, [
-            'account_code' => $synthetic,
-            'name' => mb_substr($names[$synthetic . '000'] ?? ('Účet ' . $synthetic), 0, 190),
-            'account_type' => (string) $sibling['account_type'],
-            'normal_side' => $sibling['normal_side'] ?? null,
-            'is_synthetic' => true,
-            'parent_id' => null,
-            'is_active' => true,
-        ]);
-        $ctx->accountIds[$synthetic] = $id;
-        $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_ACCOUNT, $synthetic, $id, $ctx->runId);
-        $ctx->protocol->warn(self::STEP_CHART, 'synthetic_created', "Syntetický účet {$synthetic} v osnově chyběl, založen s typem podle účtu {$sibling['account_code']}. Zkontrolujte jeho zařazení do výkazů.", ['account' => $synthetic]);
-        return $this->accounts->findById($ctx->supplierId, $id);
+        $ctx->accountIds[$synthetic] = $created['id'];
+        $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_ACCOUNT, $synthetic, $created['id'], $ctx->runId);
+        return $this->accounts->findById($ctx->supplierId, $created['id']);
     }
 }

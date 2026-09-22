@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
+use MyInvoice\Service\Migration\Shared\SmallAssetCard;
 
 /**
  * Drobný majetek z operativní evidence POHODY (tabulka `DM` v `90_majetek.xml`) do evidence
@@ -62,23 +63,24 @@ final class SmallAssetImporter
             $price = round(PohodaXml::num($row, 'Kc'), 2);
             $unitPrice = round(PohodaXml::num($row, 'KcJedn'), 2);
             $disposed = PohodaXml::date($row, 'DatLikv');
-            $data = [
-                'name' => mb_substr($name, 0, 255),
-                'inventory_number' => $number !== '' ? mb_substr($number, 0, 40) : null,
-                'vendor_name' => ($vendor = PohodaXml::text($row, 'Firma')) !== '' ? mb_substr($vendor, 0, 255) : null,
-                'acquisition_date' => $date,
-                'put_into_use_date' => $date,
-                'quantity' => $quantity,
-                'unit_price' => $unitPrice > 0 ? $unitPrice : round($price / $quantity, 2),
-                'price' => $price,
-                'location' => ($place = $places[PohodaXml::text($row, 'RefIMmist')] ?? '') !== '' ? mb_substr($place, 0, 160) : null,
-                'status' => $disposed !== null ? 'disposed' : 'in_use',
-                'disposed_at' => $disposed,
-                'disposal_reason' => $disposed !== null ? 'Vyřazeno v POHODĚ' : null,
-                'notes' => ($note = PohodaXml::text($row, 'Pozn')) !== '' ? $note : null,
+            $vendor = PohodaXml::text($row, 'Firma');
+            $note = PohodaXml::text($row, 'Pozn');
+            $data = SmallAssetCard::payload(
                 // Typ drobného majetku (`DM.RelTpDM`) převod nerozlišuje - kódy nejsou ověřené.
-                'asset_kind' => 'tangible',
-            ] + $this->source($ctx, $row);
+                'tangible',
+                $name,
+                SmallAssetCard::inventoryNumber($number, false),
+                $date,
+                $date,
+                $quantity,
+                $unitPrice > 0 ? $unitPrice : round($price / $quantity, 2),
+                $price,
+                $places[PohodaXml::text($row, 'RefIMmist')] ?? '',
+                $disposed,
+                'Vyřazeno v POHODĚ',
+                $note !== '' ? $note : null,
+                ['vendor_name' => $vendor !== '' ? mb_substr($vendor, 0, 255) : null],
+            ) + $this->source($ctx, $row);
             if (!isset($data['purchase_invoice_id']) && !isset($data['cash_document_id']) && PohodaXml::text($row, 'SrcAgenda') === '') {
                 // POHODA vazbu karty na doklad často nedrží - náhradou jediná volná položka
                 // přijaté faktury se stejným datem a částkou bez DPH.

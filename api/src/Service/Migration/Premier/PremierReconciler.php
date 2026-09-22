@@ -8,7 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
-use MyInvoice\Service\Migration\MoneyS3\MoneyS3Reconciler;
+use MyInvoice\Service\Migration\Shared\TrialBalanceReconciliation;
 
 /**
  * Rekonciliace převodu roku - důkaz, že MyÚčto po převodu ukazuje totéž co PREMIER:
@@ -51,28 +51,10 @@ final class PremierReconciler
         $premier = $ctx->journal->trialBalance($ctx->year, $opening);
 
         $tb = $this->trialBalance->build($ctx->supplierId, $periodId, null, null, false, false);
-        $mine = [];
-        foreach ($tb['rows'] as $row) {
-            $syn = substr((string) $row['account_code'], 0, 3);
-            if (str_starts_with($syn, '7')) {
-                continue; // 701 otevíracího zápisu PREMIER v deníku nevede
-            }
-            $mine[$syn] ??= [0.0, 0.0, 0.0];
-            $mine[$syn][0] += (float) $row['ps_md'] - (float) $row['ps_d'];
-            $mine[$syn][1] += (float) $row['turnover_md'] - (float) $row['turnover_d'];
-            $mine[$syn][2] += (float) $row['ks_md'] - (float) $row['ks_d'];
-        }
-        foreach ($mine as $syn => $v) {
-            $mine[$syn] = [round($v[0], 2), round($v[1], 2), round($v[2], 2)];
-        }
-        $journalDiffs = MoneyS3Reconciler::compare($mine, $premier);
-        $checks = [
-            ['key' => 'turnover_balanced', 'ok' => (bool) $tb['checks']['turnover_balanced']],
-            ['key' => 'matches_journal', 'ok' => (bool) $tb['checks']['matches_journal']],
-            ['key' => 'opening_balanced', 'ok' => (bool) $tb['checks']['opening_balanced']],
-            ['key' => 'no_drafts', 'ok' => (int) $tb['draft_count'] === 0],
-            ['key' => 'premier_journal', 'ok' => $journalDiffs === [], 'accounts' => count($premier)],
-        ];
+        // 701 otevíracího zápisu PREMIER v deníku nevede.
+        $mine = TrialBalanceReconciliation::synthetic($tb['rows'], static fn (string $syn): bool => str_starts_with($syn, '7'));
+        $journalDiffs = TrialBalanceReconciliation::compare($mine, $premier);
+        $checks = TrialBalanceReconciliation::checks($tb, 'premier_journal', $journalDiffs, count($premier));
         $documents = $this->documentsAgainstJournal($ctx->supplierId, $periodId);
         foreach ($documents as $d) {
             $checks[] = ['key' => 'documents_' . $d['key'], 'ok' => $d['ok']];
@@ -83,17 +65,11 @@ final class PremierReconciler
             $p->error(self::STEP, 'bank_transactions_unposted', sprintf('Rok %d: %d z %d bankovních pohybů převodu nemá vlastní zápis v deníku.', $ctx->year, $bank['unposted'], $bank['transactions']),
                 ['year' => $ctx->year, 'transactions' => $bank['transactions'], 'unposted' => $bank['unposted'], 'ids' => $bank['ids']]);
         }
-        $balanceSheet = $this->statements->balanceSheet($ctx->supplierId, $periodId, null, 'full');
-        $unmapped = array_map(
-            static fn (array $u): array => ['account' => (string) $u['account_code'], 'name' => (string) $u['name'], 'balance' => round((float) $u['balance'], 2)],
-            (array) ($balanceSheet['checks']['unmapped_accounts'] ?? [])
-        );
-        $checks[] = ['key' => 'balance_sheet_balanced', 'ok' => (bool) ($balanceSheet['checks']['balanced'] ?? false) && $unmapped === []];
+        $balanceSheet = TrialBalanceReconciliation::balanceSheet($this->statements->balanceSheet($ctx->supplierId, $periodId, null, 'full'));
+        $unmapped = $balanceSheet['unmapped'];
+        $checks[] = $balanceSheet['check'];
 
-        $ok = true;
-        foreach ($checks as $c) {
-            $ok = $ok && $c['ok'];
-        }
+        $ok = TrialBalanceReconciliation::allOk($checks);
         $p->set('reconciliation', [[
             'year' => $ctx->year,
             'period_id' => $periodId,
@@ -187,10 +163,7 @@ final class PremierReconciler
         foreach ($spec as [$key, $table, $expr, $kinds, $docType, $prefix, $sign]) {
             $documents = $scalar($docs($table, $expr, $kinds, $docType, $prefix, true), [$supplierId, $periodId]);
             $journal = $scalar($ledger($kinds, $docType, $prefix, $sign), [$supplierId, $periodId]);
-            $out[] = [
-                'key' => $key, 'documents' => $documents, 'journal' => $journal, 'ok' => abs($documents - $journal) < 0.005,
-                'other_accounts' => (int) $scalar($docs($table, $expr, $kinds, $docType, $prefix, false), [$supplierId, $periodId]),
-            ];
+            $out[] = TrialBalanceReconciliation::documentRow($key, $documents, $journal, (int) $scalar($docs($table, $expr, $kinds, $docType, $prefix, false), [$supplierId, $periodId]));
         }
         // Banka jen u účtů v Kč - pohyb účtu v cizí měně je v měně účtu, deník v Kč.
         $bankDocs = $scalar(
@@ -213,7 +186,7 @@ final class PremierReconciler
                             WHERE k.supplier_id = l.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank' AND t.currency = 'CZK')",
             [$supplierId, $periodId]
         );
-        $out[] = ['key' => 'bank', 'documents' => $bankDocs, 'journal' => $bankJournal, 'ok' => abs($bankDocs - $bankJournal) < 0.005, 'other_accounts' => 0];
+        $out[] = TrialBalanceReconciliation::documentRow('bank', $bankDocs, $bankJournal, 0);
         return $out;
     }
 }

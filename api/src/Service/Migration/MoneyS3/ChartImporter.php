@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Migration\Shared\ChartAccountCreator;
 
 /**
  * Účtová osnova: z Money se přenáší jen to, na co se v deníku účtovalo.
@@ -81,15 +82,9 @@ final class ChartImporter
                     continue;
                 }
             }
-            $id = $this->accounts->insert($ctx->supplierId, [
-                'account_code' => $target,
-                'name' => mb_substr($names[$moneyCode] ?? ($names[str_replace('.', '', $target)] ?? ('Analytika ' . $moneyCode)), 0, 190),
-                'account_type' => (string) $parent['account_type'],
-                'normal_side' => $parent['normal_side'] ?? null,
-                'is_synthetic' => false,
-                'parent_id' => (int) $parent['id'],
-                'is_active' => true,
-            ]);
+            $id = (new ChartAccountCreator($this->accounts))->createAnalytic(
+                $ctx->supplierId, $target, $names[$moneyCode] ?? ($names[str_replace('.', '', $target)] ?? ('Analytika ' . $moneyCode)), $parent,
+            );
             $ctx->accountIds[$target] = $id;
             $p->count(self::STEP, 'created');
         }
@@ -102,43 +97,12 @@ final class ChartImporter
      */
     private function createSynthetic(ImportContext $ctx, string $synthetic, array $names): ?array
     {
-        // Sourozenec ze skupiny, jinak ze třídy: skupiny zrušené osnovou od roku 2016
-        // (61x změna stavu zásob) ve starých letech agendy zůstávají a šablona je nemá,
-        // přitom třída 5/6 typ účtu určuje jednoznačně.
-        $sibling = null;
-        foreach ([2, 1] as $prefix) {
-            foreach ($this->accounts->listForTenant($ctx->supplierId, true) as $row) {
-                if (!empty($row['is_synthetic']) && str_starts_with((string) $row['account_code'], substr($synthetic, 0, $prefix))) {
-                    $sibling = $row;
-                    break 2;
-                }
-            }
-        }
-        if ($sibling === null) {
-            $ctx->protocol->error(
-                self::STEP,
-                'unknown_synthetic',
-                "Syntetický účet {$synthetic} v osnově chybí a nelze odvodit jeho typ. Založte ho v Účetní osnově a spusťte převod znovu.",
-                ['account' => $synthetic],
-            );
+        $created = (new ChartAccountCreator($this->accounts))
+            ->createSynthetic($ctx->supplierId, $synthetic, $names[$synthetic . '000'] ?? ('Účet ' . $synthetic), $ctx->protocol, self::STEP, true);
+        if ($created === null) {
             return null;
         }
-        $id = $this->accounts->insert($ctx->supplierId, [
-            'account_code' => $synthetic,
-            'name' => mb_substr($names[$synthetic . '000'] ?? ('Účet ' . $synthetic), 0, 190),
-            'account_type' => (string) $sibling['account_type'],
-            'normal_side' => $sibling['normal_side'] ?? null,
-            'is_synthetic' => true,
-            'parent_id' => null,
-            'is_active' => true,
-        ]);
-        $ctx->accountIds[$synthetic] = $id;
-        $ctx->protocol->warn(
-            self::STEP,
-            'synthetic_created',
-            "Syntetický účet {$synthetic} v osnově chyběl, založen s typem podle účtu {$sibling['account_code']}. Zkontrolujte jeho zařazení do výkazů.",
-            ['account' => $synthetic, 'type_from' => $sibling['account_code']],
-        );
-        return $this->accounts->findById($ctx->supplierId, $id);
+        $ctx->accountIds[$synthetic] = $created['id'];
+        return $this->accounts->findById($ctx->supplierId, $created['id']);
     }
 }

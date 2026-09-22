@@ -10,6 +10,7 @@ use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Accounting\Assets\AssetException;
 use MyInvoice\Service\Accounting\Assets\AssetService;
 use MyInvoice\Service\Migration\MoneyS3\AccountCode;
+use MyInvoice\Service\Migration\Shared\MigratedDepreciation;
 
 /**
  * Karty dlouhodobého majetku PREMIER s daňovými odpisy po letech, účetním plánem po měsících
@@ -234,55 +235,40 @@ final class AssetImporter
             }
         }
         $booked = round($booked, 2);
+        $depreciation = new MigratedDepreciation($this->entries);
+        // Účetní řádek roku, který už existuje (i převzatý dřívějším převodem), se nemění.
         if ($booked > 0.0 && $this->entries->findYear($assetId, 'accounting', $ctx->year) === null) {
             $residual = $this->db->pdo()->prepare('SELECT input_price - opening_acc_amount - COALESCE((SELECT SUM(amount) FROM depreciation_entries
                 WHERE asset_id = a.id AND kind = \'accounting\'), 0) FROM assets a WHERE a.id = ? AND a.supplier_id = ?');
             $residual->execute([$assetId, $ctx->supplierId]);
-            $this->entries->upsert([
-                'supplier_id' => $ctx->supplierId,
-                'asset_id' => $assetId,
-                'kind' => 'accounting',
-                'fiscal_year' => $ctx->year,
-                'amount' => $booked,
-                'full_amount' => $booked,
-                'residual_value_end' => round((float) $residual->fetchColumn() - $booked, 2),
-                'is_paused' => false,
-                'is_half' => false,
-                'months_count' => count($months),
-                'detail' => json_encode(['journal' => DepreciationEntryRepository::MIGRATED_JOURNAL, 'program' => 'PREMIER']),
-                'status' => 'posted',
-            ]);
+            $depreciation->confirm(
+                $ctx->supplierId, $assetId, 'accounting', $ctx->year, $booked, $booked, round((float) $residual->fetchColumn() - $booked, 2),
+                false, false, count($months), 'PREMIER', 'posted', MigratedDepreciation::OVERWRITE_ALWAYS, false,
+            );
             $ctx->protocol->count(self::STEP, 'accounting_depreciation_booked');
         }
-        $this->confirmTax($ctx, $assetId, $taxRows, $number);
+        $this->confirmTax($ctx, $assetId, $taxRows, $number, $depreciation);
     }
 
-    /** Daňový odpis roku převodu přesně podle PREMIER (potvrzený). */
-    private function confirmTax(PremierContext $ctx, int $assetId, array $taxRows, string $number): void
+    /**
+     * Daňový odpis roku převodu přesně podle PREMIER (potvrzený). Liší-li se od existujícího
+     * řádku roku, přepíše ho bez ohledu na původ (viz zpráva k refaktoru, bod 8).
+     */
+    private function confirmTax(PremierContext $ctx, int $assetId, array $taxRows, string $number, MigratedDepreciation $depreciation): void
     {
         foreach ($taxRows as $t) {
             if ((int) substr((string) ($t['O_DATUM'] ?? ''), 0, 4) !== $ctx->year) {
                 continue;
             }
-            $existing = $this->entries->findYear($assetId, 'tax', $ctx->year);
             $amount = round((float) ($t['O_ODPIS'] ?? 0), 2);
-            if ($existing !== null && abs((float) $existing['amount'] - $amount) < 0.005) {
+            $result = $depreciation->confirm(
+                $ctx->supplierId, $assetId, 'tax', $ctx->year, $amount, $amount, round((float) ($t['O_ZUST2'] ?? 0), 2),
+                abs($amount) < 0.005, false, null, 'PREMIER', 'confirmed', MigratedDepreciation::OVERWRITE_ALWAYS, false,
+            );
+            if (!$result['written']) {
                 return;
             }
-            $this->entries->upsert([
-                'supplier_id' => $ctx->supplierId,
-                'asset_id' => $assetId,
-                'kind' => 'tax',
-                'fiscal_year' => $ctx->year,
-                'amount' => $amount,
-                'full_amount' => $amount,
-                'residual_value_end' => round((float) ($t['O_ZUST2'] ?? 0), 2),
-                'is_paused' => abs($amount) < 0.005,
-                'is_half' => false,
-                'months_count' => null,
-                'detail' => null,
-                'status' => 'confirmed',
-            ]);
+            $existing = $result['previous'];
             $ctx->protocol->count(self::STEP, 'tax_depreciation_confirmed');
             if ($existing !== null) {
                 $ctx->protocol->info(self::STEP, 'tax_depreciation_replaced', sprintf('Majetek %s: daňový odpis %d nastaven podle PREMIER (%s Kč místo %s Kč).',
@@ -302,25 +288,7 @@ final class AssetImporter
      */
     private static function accountingOpening(string $inUse, array $monthPlan, ?string $booked): array
     {
-        if ($monthPlan === []) {
-            return [0, 0.0, null];
-        }
-        $start = substr($inUse, 0, 7);
-        $last = (string) array_key_last($monthPlan);
-        $cutoff = $booked !== null ? min($booked, $last) : null;
-        $amount = 0.0;
-        if ($cutoff !== null) {
-            foreach ($monthPlan as $month => $value) {
-                if ($month <= $cutoff) {
-                    $amount += $value;
-                }
-            }
-        }
-        return [
-            $cutoff !== null ? max(0, self::monthsBetween($start, $cutoff)) : 0,
-            round($amount, 2),
-            max(1, self::monthsBetween($start, $last)),
-        ];
+        return MigratedDepreciation::accountingOpening($inUse, $monthPlan, $booked);
     }
 
     /**
@@ -357,11 +325,6 @@ final class AssetImporter
         return $plan;
     }
 
-    /** Počet měsíců od `$from` (bez něj) do `$to` včetně, oba `Y-m`. */
-    private static function monthsBetween(string $from, string $to): int
-    {
-        return ((int) substr($to, 0, 4) - (int) substr($from, 0, 4)) * 12 + (int) substr($to, 5, 2) - (int) substr($from, 5, 2);
-    }
 
     /**
      * @param iterable<array<string,mixed>> $rows

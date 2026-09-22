@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Accounting\Activation\OpeningBalanceDocuments;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
+use MyInvoice\Service\Migration\Shared\JournalEntryLinker;
 use PDO;
 
 /**
@@ -25,10 +26,14 @@ final class DocumentLinker
     public const STEP_LINK = 'link';
     public const STEP_PAYMENTS = 'payments';
 
+    private readonly JournalEntryLinker $entries;
+
     public function __construct(
         private readonly Connection $db,
         private readonly PohodaImportRepository $map,
-    ) {}
+    ) {
+        $this->entries = new JournalEntryLinker($db, 'Pohody');
+    }
 
     public function link(PohodaContext $ctx): void
     {
@@ -82,7 +87,7 @@ final class DocumentLinker
                     }
                     continue;
                 }
-                $new = $this->attach($ctx, $sourceType, $docType, $docId, $entryIds, $retype);
+                $new = $this->entries->attach($ctx->supplierId, $ctx->userOrNull(), $retype ?? $sourceType, $sourceType, $docType, $docId, $entryIds);
                 $p->count(self::STEP_LINK, $new ? 'linked' : 'existing');
             }
         }
@@ -96,37 +101,8 @@ final class DocumentLinker
             $p->warn(self::STEP_LINK, 'orphan_documents', count($orphans) . ' dokladů nemá v deníku Pohody zápis se stejným číslem. '
                 . 'Nejsou zaúčtované; zaúčtujte je ručně nebo v Účetnictví → Doúčtovat doklady.', ['documents' => array_slice($orphans, 0, 50)]);
         }
-        $this->refreshDescriptions($ctx->supplierId, $p);
+        $this->entries->refreshDescriptions($ctx->supplierId, $p, self::STEP_LINK);
         $p->finish(self::STEP_LINK);
-    }
-
-    /**
-     * Popisy zápisů se dogenerují AŽ TADY: deník z Pohody nese jen `act:text`, který je
-     * u celé řady dokladů shodný („Fakturujeme Vám za …"), a teprve navázáním `source_id`
-     * výš je z čeho doplnit číslo dokladu a protistranu
-     * ({@see \MyInvoice\Service\Accounting\JournalDescriptionRebuilder}).
-     *
-     * Ručních zápisů, zápisů bez dokladu ani popisů změněných uživatelem se to netýká —
-     * rozhoduje o tom rebuilder, ne tenhle krok. Selhání se jen ohlásí: popis je
-     * komfort, kvůli kterému nesmí spadnout celý převod.
-     */
-    private function refreshDescriptions(int $supplierId, ImportProtocol $p): void
-    {
-        try {
-            $rebuilder = new \MyInvoice\Service\Accounting\JournalDescriptionRebuilder(
-                $this->db,
-                new \MyInvoice\Service\Accounting\JournalDescriptionBuilder($this->db),
-            );
-            $changed = $rebuilder->rebuild(['supplier_id' => $supplierId]);
-            if ($changed > 0) {
-                $p->info(self::STEP_LINK, 'descriptions_rebuilt',
-                    "U {$changed} převedených zápisů se popis doplnil o číslo dokladu a protistranu.");
-            }
-        } catch (\Throwable $e) {
-            $p->warn(self::STEP_LINK, 'descriptions_rebuild_failed',
-                'Popisy převedených zápisů se nepodařilo doplnit: ' . $e->getMessage()
-                . ' Doplníš je kdykoli později skriptem api/bin/rebuild-journal-descriptions.php.');
-        }
     }
 
     public function matchPayments(PohodaContext $ctx): void
@@ -260,23 +236,7 @@ final class DocumentLinker
      */
     private function linkOpening(PohodaContext $ctx, string $docType, int $docId): bool
     {
-        if ($ctx->period === null) {
-            return false;
-        }
-        $pdo = $this->db->pdo();
-        $opening = $pdo->prepare(
-            "SELECT id FROM journal_entries WHERE supplier_id = ? AND period_id = ? AND source_type = 'opening' AND reversed_by IS NULL ORDER BY id LIMIT 1"
-        );
-        $opening->execute([$ctx->supplierId, (int) $ctx->period['id']]);
-        $entryId = $opening->fetchColumn();
-        if ($entryId === false) {
-            return false;
-        }
-        $link = $pdo->prepare(
-            'INSERT IGNORE INTO journal_entry_document_links (supplier_id, entry_id, doc_type, doc_id, note, created_by) VALUES (?, ?, ?, ?, ?, ?)'
-        );
-        $link->execute([$ctx->supplierId, (int) $entryId, $docType, $docId, OpeningBalanceDocuments::NOTE . ' (převzato z Pohody)', $ctx->userOrNull()]);
-        return $link->rowCount() > 0;
+        return $this->entries->linkOpening($ctx->supplierId, $ctx->userOrNull(), $ctx->period !== null ? (int) $ctx->period['id'] : null, $docType, $docId);
     }
 
     /**
@@ -294,17 +254,9 @@ final class DocumentLinker
     {
         $ids = $this->bankBooking($ctx);
         $pdo = $this->db->pdo();
-        $marked = 0;
-        foreach (array_chunk(array_values(array_unique($ids['booked'])), 500) as $chunk) {
-            $stmt = $pdo->prepare(
-                "UPDATE bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
-                    SET t.match_status = 'ignored', t.match_reason = 'pohoda_booked', t.matched_at = NOW(), t.matched_by = ?,
-                        t.ignore_note = 'Zaúčtováno v Pohodě bez dokladu (převod z POHODY).'
-                  WHERE s.supplier_id = ? AND t.match_status = 'unmatched' AND t.id IN (" . implode(',', array_fill(0, count($chunk), '?')) . ')'
-            );
-            $stmt->execute(array_merge([$ctx->userOrNull(), $ctx->supplierId], $chunk));
-            $marked += $stmt->rowCount();
-        }
+        $marked = $this->entries->markBankBookedWithoutDocument(
+            $ctx->supplierId, $ctx->userOrNull(), $ids['booked'], 'pohoda_booked', 'Zaúčtováno v Pohodě bez dokladu (převod z POHODY).',
+        );
         $released = 0;
         foreach (array_chunk(array_values(array_unique($ids['unbooked'])), 500) as $chunk) {
             $stmt = $pdo->prepare(
@@ -382,37 +334,6 @@ final class DocumentLinker
             }
         }
         return $index;
-    }
-
-    /**
-     * @param list<int> $entryIds
-     * @return bool true = nová vazba
-     */
-    private function attach(PohodaContext $ctx, string $sourceType, string $docType, int $docId, array $entryIds, ?string $retype): bool
-    {
-        $pdo = $this->db->pdo();
-        $owner = $pdo->prepare('SELECT id FROM journal_entries WHERE supplier_id = ? AND source_type = ? AND source_id = ? AND reversed_by IS NULL LIMIT 1');
-        $owner->execute([$ctx->supplierId, $retype ?? $sourceType, $docId]);
-        $isNew = false;
-        if ($owner->fetchColumn() === false) {
-            $pdo->prepare(
-                'UPDATE journal_entries SET source_type = ?, source_id = ?
-                  WHERE id = ? AND supplier_id = ? AND source_type = ? AND source_id IS NULL'
-            )->execute([$retype ?? $sourceType, $docId, $entryIds[0], $ctx->supplierId, $sourceType]);
-            $isNew = true;
-        }
-        $link = $pdo->prepare(
-            'INSERT IGNORE INTO journal_entry_document_links (supplier_id, entry_id, doc_type, doc_id, note, created_by) VALUES (?, ?, ?, ?, ?, ?)'
-        );
-        foreach ($entryIds as $entryId) {
-            $link->execute([$ctx->supplierId, $entryId, $docType, $docId, 'Převzato z Pohody', $ctx->userOrNull()]);
-            $isNew = $isNew || $link->rowCount() > 0;
-        }
-        if ($docType === 'cash') {
-            $pdo->prepare('UPDATE cash_documents SET journal_entry_id = ? WHERE id = ? AND supplier_id = ? AND journal_entry_id IS NULL')
-                ->execute([$entryIds[0], $docId, $ctx->supplierId]);
-        }
-        return $isNew;
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Premier;
 
+use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Tax\Return\TaxReturnService;
 
@@ -122,7 +123,7 @@ final class PremierVerifier
                 foreach (['zakl_dane1', 'dan1', 'zakl_dane2', 'dan2'] as $field) {
                     $a = round($mine[$section][$field] ?? 0.0, 2);
                     $b = round($theirs[$section][$field] ?? 0.0, 2);
-                    if (abs($a - $b) >= 1.0) {
+                    if (abs($a - $b) >= ReconciliationTolerance::FILING_ROUNDING) {
                         $diffs[] = ['section' => $section, 'field' => $field, 'myucto' => $a, 'premier' => $b];
                     }
                 }
@@ -169,9 +170,11 @@ final class PremierVerifier
             // PREMIER zaokrouhluje částky přiznání na koruny nahoru, MyÚčto matematicky -
             // rozdíl do 1 Kč je zaokrouhlení, ne neshoda (daň se zaokrouhluje ze základu
             // na tisíce a vychází stejně).
-            if (abs($premier - $myucto) > 1.0) {
+            // Pozor: DPPO bere rozdíl právě 1 Kč ještě jako zaokrouhlení (>), KH už jako
+            // neshodu (>=). Rozdíl je převzatý beze změny.
+            if (abs($premier - $myucto) > ReconciliationTolerance::FILING_ROUNDING) {
                 $diffs[] = ['line' => $l['line'], 'myucto' => $myucto, 'premier' => $premier];
-            } elseif (abs($premier - $myucto) >= 0.005) {
+            } elseif (!ReconciliationTolerance::sameCent($premier, $myucto)) {
                 $rounding = true;
             }
         }
