@@ -203,6 +203,8 @@ final class PremierPayroll
                     || (self::country($row['OSS_ZEME'] ?? '') ?? 'CZ') !== 'CZ',
                 'relation_type' => $relationType,
                 'relation_type_derived' => $typeDerived,
+                // Příznak jednatele na vztahu; druh činnosti z hlášení JMHZ má před ním přednost.
+                'statutory_flag' => ($row['JEDNATEL'] ?? false) === true,
                 'category' => self::text($row['UVA_KATE'] ?? ''),
                 'profession' => self::limited($row['UVA_PROF'] ?? '', 80),
                 'start' => $start,

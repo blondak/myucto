@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Migration\Premier;
 use MyInvoice\Service\Migration\Premier\PremierBackup;
 use MyInvoice\Service\Migration\Premier\PremierJournal;
 use MyInvoice\Service\Migration\Premier\PremierPayroll;
+use MyInvoice\Tests\Fixtures\Premier\DbfWriter;
 use MyInvoice\Tests\Fixtures\Premier\SyntheticPremierBackup;
 use PHPUnit\Framework\TestCase;
 
@@ -121,6 +122,25 @@ final class PremierPayrollTest extends TestCase
         $employee = array_values(array_filter($relations, static fn (array $r): bool => $r['key'] === '5'))[0];
         self::assertSame([0.0, 1000.0, 3000.0, 1000.0], [$employee['months']['2025-09']['deductions'], $employee['months']['2025-10']['deductions'],
             $employee['months']['2025-11']['deductions'], $employee['months']['2025-12']['deductions']]);
+    }
+
+    /**
+     * Druh vztahu z druhu činnosti posledního hlášení JMHZ, když `KODPP_SO` chybí; hlášení
+     * má přednost i před příznakem jednatele (ten zůstává v `statutory_flag` k ověření).
+     */
+    public function testRelationTypeFromJmhzActivity(): void
+    {
+        $backup = $this->backup(['payroll' => true, 'payroll_detail' => true]);
+        [$fields, $rows] = SyntheticPremierBackup::tables(false, ['payroll' => true, 'payroll_detail' => true])['MZ_JMHZ2'];
+        $rows[] = ['ID' => 'F1', 'ID_JMHZ' => 'J2601', 'INT_ZAM' => 1, 'XPRIJATO_Z' => 3, 'X10239' => '1', 'TS' => '2026021010:00:00#INSE#'];
+        $rows[] = ['ID' => 'F2', 'ID_JMHZ' => 'J2601', 'INT_ZAM' => 2, 'XPRIJATO_Z' => 3, 'X10239' => 'A', 'TS' => '2026021010:00:00#INSE#'];
+        DbfWriter::write($this->tmp . DIRECTORY_SEPARATOR . 'MZ_JMHZ2.DBF', $fields, $rows);
+        $relations = PremierPayroll::fromBackup(PremierBackup::open($this->tmp))->relations;
+        $byKey = array_column($relations, null, 'key');
+        self::assertSame(['employment', true], [$byKey['1']['relation_type'], $byKey['1']['statutory_flag']]);
+        self::assertSame('dpp', $byKey['2']['relation_type'], 'Vyplněný KODPP_SO (T) má přednost před hlášením JMHZ.');
+        self::assertSame('employment', $byKey['5']['relation_type']);
+        self::assertTrue($backup->hasTable('MZ_JMHZ2'));
     }
 
     public function testMonthTotalsMatchJournalPostings(): void

@@ -531,6 +531,11 @@ final class PayrollImporter
                 $this->info($p, 'relation_type_default', "Osobní číslo {$number}: druh vztahu z kategorie „{$relation['category']}\" nejde určit, "
                     . 'vztah je založený jako pracovní poměr. Zkontrolujte ho na kartě zaměstnance.');
             }
+            if (($relation['statutory_flag'] ?? false) === true && $relation['relation_type'] !== 'statutory_body') {
+                $this->warn($p, 'relation_type_statutory_flag', "Osobní číslo {$number}: PREMIER vede vztah s příznakem jednatele, hlášení JMHZ přijaté ČSSZ "
+                    . 'ho ale vykazuje jiným druhem činnosti; vztah je založený podle hlášení. K ověření: zkontrolujte druh vztahu na kartě zaměstnance.',
+                    ['personal_number' => $number]);
+            }
         }
 
         $this->activate($ctx, $employmentId, $relation);
