@@ -184,7 +184,7 @@ final class PohodaPayrollConverter
              *
              * Vypouští se jen druh, u kterého má data KAŽDÝ jeho řádek v měsíci. Kdyby se
              * vypustila jen datovaná část, zbytek by v souhrnu druh podržel, převod by kvůli
-             * tomu nezapsal ani datovanou část ({@see PohodaPayrollPeopleWriter::absences()})
+             * tomu nezapsal ani datovanou část ({@see \MyInvoice\Service\Payroll\Migration\PayrollTakeoverAbsenceWriter::absences()})
              * a ta doba by zmizela z obou stran.
              */
             $year = (int) substr($period, 0, 4);

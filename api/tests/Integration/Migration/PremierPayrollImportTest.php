@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Premier\PremierBackup;
 use MyInvoice\Service\Migration\Premier\PremierImporter;
+use MyInvoice\Tests\Fixtures\Premier\DbfWriter;
 use MyInvoice\Tests\Fixtures\Premier\SyntheticPremierBackup;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -92,6 +93,8 @@ final class PremierPayrollImportTest extends TestCase
         self::assertSame([2, 2, 16, 1], [$counts['employees_created'] ?? 0, $counts['employments_created'] ?? 0, $counts['months'] ?? 0, $counts['employees_later'] ?? 0],
             $this->explain($first));
         self::assertArrayNotHasKey('details_failed', $counts, $this->explain($first));
+        self::assertArrayNotHasKey('deductions_not_converted', $counts, 'Bez srážek ve zdroji žádné upozornění.');
+        self::assertArrayNotHasKey('absences_not_converted', $counts);
         self::assertArrayNotHasKey('failed', $counts, $this->explain($first));
         self::assertSame([2, 2, 2, 1], [$counts['tax_residence'] ?? 0, $counts['tax_declarations'] ?? 0, $counts['social_jurisdiction'] ?? 0, $counts['ended'] ?? 0]);
 
@@ -151,6 +154,67 @@ final class PremierPayrollImportTest extends TestCase
             $this->explain($repeat));
     }
 
+    /**
+     * Mzdové zápisy deníku dávají návrh kontací mezd stejnou cestou jako převod z PAMICA:
+     * uloží se jen návrh, nastavení zaměstnavatele se nemění.
+     */
+    public function testPostingMapProposalFromPayrollJournal(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $stmt = $this->db->pdo()->prepare('SELECT source, status, source_year, proposal_json FROM payroll_posting_map_proposals WHERE supplier_id = ?');
+        $stmt->execute([$supplierId]);
+        $stored = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        self::assertCount(1, $stored, $this->explain($protocol));
+        self::assertSame(['other', 'draft', 2025], [$stored[0]['source'], $stored[0]['status'], (int) $stored[0]['source_year']]);
+        $keys = [];
+        foreach (json_decode((string) $stored[0]['proposal_json'], true)['keys'] as $key) {
+            $keys[$key['key']] = [$key['status'], $key['suggested_code']];
+        }
+        $expected = [
+            'employment_gross_debit' => ['unambiguous', '521.100'],
+            'employment_gross_credit' => ['unambiguous', '331.100'],
+            'social_insurance_credit' => ['unambiguous', '336.100'],
+            'health_insurance_credit' => ['unambiguous', '336.200'],
+            'employer_insurance_debit' => ['unambiguous', '524.100'],
+            'withholding_tax_credit' => ['unambiguous', '342.200'],
+            // Záloha na daň v roce 2025 nikdo neměl, v deníku pro ni nic není.
+            'income_tax_credit' => ['missing', null],
+        ];
+        $actual = array_intersect_key($keys, $expected);
+        ksort($expected);
+        ksort($actual);
+        self::assertSame($expected, $actual, $this->explain($protocol));
+        self::assertSame([], json_decode((string) $stored[0]['proposal_json'], true)['unmapped']);
+        self::assertContains('posting_map', $this->messageCodes($protocol));
+        self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_posting_map_proposals WHERE supplier_id = ? AND status = 'confirmed'", $supplierId));
+    }
+
+    /**
+     * Srážky a vyloučené doby PREMIER nese jen jako částky a počty dnů za měsíc; převod
+     * je nezakládá, ale musí to říct s osobními čísly, jinak by o nich mlčel.
+     */
+    public function testDeductionsAndExcludedDaysAreReportedAsNotConverted(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backupWithDeductions(), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $messages = [];
+        foreach (self::step($protocol, 'payroll')['messages'] as $m) {
+            $messages[$m['code']] = $m;
+        }
+        self::assertArrayHasKey('deductions_not_converted', $messages, $this->explain($protocol));
+        self::assertSame('warning', $messages['deductions_not_converted']['level'] ?? null);
+        self::assertStringContainsString('osobní čísla 1 (celkem 4 500,00 Kč)', $messages['deductions_not_converted']['text']);
+        self::assertArrayHasKey('absences_not_converted', $messages, $this->explain($protocol));
+        self::assertStringContainsString('1 (naposledy 2025-11)', $messages['absences_not_converted']['text']);
+        $counts = self::stepCounts($protocol, 'payroll');
+        self::assertSame([1, 1], [$counts['deductions_not_converted'] ?? 0, $counts['absences_not_converted'] ?? 0]);
+        self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_absences a JOIN payroll_employments e ON e.id = a.employment_id WHERE e.supplier_id = ?', $supplierId));
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);
@@ -194,6 +258,28 @@ final class PremierPayrollImportTest extends TestCase
         if (!is_dir($dir)) {
             PremierBackup::extractArchive(SyntheticPremierBackup::writeCab($this->tmp . DIRECTORY_SEPARATOR . 'zaloha.icab', $this->tmp, false, $flags), $dir);
         }
+        return PremierBackup::open($dir);
+    }
+
+    /**
+     * Záloha s mzdami, kde jednatelka má v 9-11/2025 srážku 1 500 Kč (`SR_VYZI`) a v 11/2025
+     * vyloučenou dobu 5 dnů (`VYL_DND`). Syntetická data jen tohoto testu.
+     */
+    private function backupWithDeductions(): PremierBackup
+    {
+        $dir = $this->tmp . DIRECTORY_SEPARATOR . 'backup_deductions';
+        SyntheticPremierBackup::writeDir($dir, false, ['payroll' => true]);
+        [$fields, $rows] = SyntheticPremierBackup::tables(false, ['payroll' => true])['MZDY'];
+        $fields[] = ['SR_VYZI', 'N', 12, 2];
+        foreach ($rows as $i => $row) {
+            if ($row['INTER'] === 1 && $row['ROK'] === 2025 && $row['MESIC'] >= 9 && $row['MESIC'] <= 11) {
+                $rows[$i]['SR_VYZI'] = 1500;
+            }
+            if ($row['INTER'] === 1 && $row['ROK'] === 2025 && $row['MESIC'] === 11) {
+                $rows[$i]['VYL_DND'] = 5;
+            }
+        }
+        DbfWriter::write($dir . DIRECTORY_SEPARATOR . 'MZDY.DBF', $fields, $rows);
         return PremierBackup::open($dir);
     }
 

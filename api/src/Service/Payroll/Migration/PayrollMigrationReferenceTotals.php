@@ -128,6 +128,51 @@ final readonly class PayrollMigrationReferenceTotals
         );
     }
 
+    /**
+     * Úhrny měsíce z částek v korunách, klíčovaných metrikami sestavy
+     * ({@see self::metrics()}: `gross`, `net`, `social_base`, …). Pro převody, které
+     * zdrojová pole samy přeloží na metriky (PREMIER); převod na haléře dělá jediné
+     * zaokrouhlení {@see self::minor()}.
+     *
+     * @param array<string,float|int> $amounts metrika => Kč; každá metrika je povinná
+     */
+    public static function fromAmounts(
+        string $period,
+        string $externalPersonRef,
+        string $externalRelationshipRef,
+        ?int $employeeId,
+        ?int $employmentId,
+        array $amounts,
+        PayrollMigrationTakeoverFacts $facts = new PayrollMigrationTakeoverFacts(),
+    ): self {
+        $minor = static function (string $key) use ($amounts): int {
+            if (!array_key_exists($key, $amounts)) {
+                throw new \InvalidArgumentException("Převzatá mzda nemá úhrn {$key}.");
+            }
+            return self::minor((float) $amounts[$key]);
+        };
+
+        return new self(
+            $period,
+            $externalPersonRef,
+            $externalRelationshipRef,
+            $employeeId,
+            $employmentId,
+            $minor('gross'),
+            $minor('net'),
+            $minor('social_base'),
+            $minor('health_base'),
+            $minor('employee_social'),
+            $minor('employee_health'),
+            $minor('employer_social'),
+            $minor('employer_health'),
+            $minor('advance_tax'),
+            $minor('withholding_tax'),
+            $minor('tax_bonus'),
+            $facts,
+        );
+    }
+
     /** @return array<string,int> metrika => haléře, v pořadí sloupců sestavy */
     public function metrics(): array
     {

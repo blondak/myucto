@@ -412,7 +412,7 @@ final class PohodaPayrollPeople
      * ji zapsat nejde: nulové datum Accessu, obrácené pořadí, nebo doba mimo převáděný rok.
      *
      * **Jediné místo, které o datovatelnosti rozhoduje.** Podle něj převod nepřítomnost
-     * zapisuje s daty ({@see PohodaPayrollPeopleWriter::absences()}) a měsíční sešit tytéž
+     * zapisuje s daty ({@see \MyInvoice\Service\Payroll\Migration\PayrollTakeoverAbsenceWriter::absences()}) a měsíční sešit tytéž
      * hodiny vypouští ({@see PohodaPayrollConverter::month()}). Kdyby to každá strana
      * posuzovala po svém, vedla by se doba dvakrát, nebo nikde.
      *

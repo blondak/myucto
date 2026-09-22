@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Migration\Pohoda;
 
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollPeople;
-use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollPeopleWriter;
+use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollTakeover;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInstitutionWriter;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -139,9 +140,9 @@ final class PohodaPayrollInstitutionsAndLeaveTest extends TestCase
      */
     private static function gap(array $institution, string $code): string
     {
-        $method = new \ReflectionMethod(PohodaPayrollPeopleWriter::class, 'institutionGap');
+        $method = new \ReflectionMethod(PayrollTakeoverInstitutionWriter::class, 'institutionGap');
 
-        return (string) $method->invoke(null, $institution, $code);
+        return (string) $method->invoke(null, $institution, $code, PohodaPayrollTakeover::LABEL, '');
     }
 
     /**

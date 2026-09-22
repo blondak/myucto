@@ -156,7 +156,7 @@ final class PohodaPayrollCatalog
      * s `absence_hours_without_dates` ({@see \MyInvoice\Service\Payroll\Time\PayrollTimeImportApprovalService}).
      * Do měsíčního sešitu ({@see PohodaPayrollConverter::month()}) proto takové hodiny
      * nejdou a tatáž doba se zapíše datovaně z `MZneprit`
-     * ({@see PohodaPayrollPeopleWriter::absences()}). Dovolená a překážky zůstávají
+     * ({@see \MyInvoice\Service\Payroll\Migration\PayrollTakeoverAbsenceWriter::absences()}). Dovolená a překážky zůstávají
      * v souhrnu: ty schválení s daty nevyžaduje.
      */
     public static function absenceNeedsDates(string $number, string $name): bool

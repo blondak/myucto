@@ -156,6 +156,37 @@ final readonly class PayrollMigrationTakeoverFacts
         );
     }
 
+    /**
+     * Doby a platba z měsíce, který zdrojová čtečka už přeložila do obecných veličin
+     * (PREMIER). Odpracované dny a peníze jdou v přirozených jednotkách (dny, Kč) a na
+     * celá čísla je převádí tahle metoda; ostatní jsou už celá čísla.
+     *
+     * @param array{pension_participation:bool,insurance_days:int,excluded_days:int,worked_days:float|int,
+     *     worked_minutes:int,deductions:float|int,net_payable:float|int,payout_date?:?string} $month
+     */
+    public static function fromMonth(
+        array $month,
+        ?string $relationshipStartDate = null,
+        ?string $relationshipEndDate = null,
+        ?string $relationType = null,
+        ?string $activityCode = null,
+    ): self {
+        return new self(
+            relationshipStartDate: $relationshipStartDate,
+            relationshipEndDate: $relationshipEndDate,
+            relationType: $relationType,
+            activityCode: $activityCode,
+            pensionParticipation: $month['pension_participation'],
+            insuranceDays: $month['insurance_days'],
+            excludedDays: $month['excluded_days'],
+            workedDaysHundredths: (int) round($month['worked_days'] * 100),
+            workedMinutes: $month['worked_minutes'],
+            deductionsMinor: (int) round($month['deductions'] * 100),
+            netPayableMinor: (int) round($month['net_payable'] * 100),
+            payoutDate: $month['payout_date'] ?? null,
+        );
+    }
+
     /** @return array<string,mixed> tvar sloupců `payroll_migration_reference_totals` */
     public function toColumns(): array
     {

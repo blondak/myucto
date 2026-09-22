@@ -6,22 +6,21 @@ namespace MyInvoice\Service\Migration\Premier;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
-use MyInvoice\Repository\Payroll\PayrollPersonProfileRepository;
-use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
-use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationTakeoverFacts;
+use MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalService;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverOpeningMonth;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPersonWriter;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRunState;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
-use MyInvoice\Service\Payroll\PayrollOpeningBalanceService;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
 use MyInvoice\Service\Payroll\PayrollPersonCreateValidator;
-use MyInvoice\Service\Payroll\PayrollPersonProfileValidator;
-use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use PDO;
 
 /**
@@ -37,7 +36,9 @@ use PDO;
  *
  * Osoba a vztah jdou toutéž cestou jako ruční založení ({@see PayrollPersonCreateService})
  * a údaje karty (identita, adresa, zákonná evidence, výplatní účet, sjednaná mzda,
- * skončení vztahu) doplňují jen to, co v MyÚčtu chybí. Opakovaný převod nic nezdvojí:
+ * skončení vztahu) doplňují jen to, co v MyÚčtu chybí. Karta se zapisuje společným
+ * zápisem převzatých mezd ({@see PayrollTakeoverPersonWriter}, {@see PayrollTakeoverEmploymentWriter})
+ * z kanonické podoby vztahu ({@see PremierPayrollTakeover}). Opakovaný převod nic nezdvojí:
  * osoby, vztahy i měsíce nese mapa převodu.
  *
  * Mzdy se nakonec porovnají s deníkem ({@see PremierPayroll::reconcile()}): hrubé
@@ -53,8 +54,6 @@ final class PayrollImporter
     private const NOTE = 'Převzato z PREMIER: ';
     private const SAVEPOINT = 'premier_payroll';
     private const MESSAGE_LIMIT = 20;
-    /** Začátek popisu zdroje počátečních stavů, které zapsal tento převod. */
-    private const OPENING_REFERENCE = 'PREMIER:';
 
     private int $messages = 0;
 
@@ -65,14 +64,11 @@ final class PayrollImporter
         private readonly PayrollPersonCreateValidator $personValidator,
         private readonly PayrollEmploymentRepository $employments,
         private readonly PayrollEmploymentValidator $employmentValidator,
-        private readonly PayrollPersonProfileRepository $profiles,
-        private readonly PayrollPersonProfileValidator $profileValidator,
-        private readonly PayrollPersonStatutoryEvidenceRepository $statutory,
-        private readonly PayrollRegistrationIdentityRepository $registrations,
-        private readonly PayrollRegistrationIdentityService $identities,
-        private readonly PayrollOpeningBalanceService $openings,
+        private readonly PayrollTakeoverPersonWriter $people,
+        private readonly PayrollTakeoverEmploymentWriter $employmentWriter,
         private readonly PayrollMigrationReferenceTotalsWriter $referenceTotals,
         private readonly PayrollHistoricalPeriodService $historical,
+        private readonly PayrollPostingMapProposalService $postingMap,
     ) {}
 
     public function import(PremierContext $ctx): void
@@ -117,6 +113,10 @@ final class PayrollImporter
         $afterStart = 0;
         $totals = [];
         $byEmployee = [];
+        /** @var array<string,float> osobní číslo => srážky v převáděných měsících (Kč) */
+        $deductions = [];
+        /** @var array<string,string> osobní číslo => poslední měsíc s vyloučenou dobou */
+        $excluded = [];
         foreach ($relations as $relation) {
             $pair = $this->inSavepoint($ctx, $relation, fn (): ?array => $this->relation($ctx, $relation));
             if ($pair === null) {
@@ -124,9 +124,16 @@ final class PayrollImporter
             }
             [$employeeId, $employmentId] = $pair;
             $activity = $this->activityCode($ctx->supplierId, $employmentId);
+            $number = (string) $relation['personal_number'];
             foreach ($relation['months'] as $period => $m) {
                 if ($period > $lastPeriod) {
                     continue;
+                }
+                if ($m['deductions'] > 0) {
+                    $deductions[$number] = ($deductions[$number] ?? 0.0) + $m['deductions'];
+                }
+                if ($m['excluded_days'] > 0) {
+                    $excluded[$number] = (string) $period;
                 }
                 if ($start !== null && $period >= $start) {
                     $afterStart++;
@@ -147,11 +154,94 @@ final class PayrollImporter
             $p->count(self::STEP, 'months_after_start', $afterStart);
             $this->info($p, 'months_after_start', "Mzdové měsíce od začátku vedení mezd v MyÚčtu ({$start}) se nepřevzaly (celkem {$afterStart}), počítá je MyÚčto.");
         }
+        $this->notConverted($p, $deductions, $excluded);
         if ($totals !== []) {
             $this->referenceTotals->store($ctx->supplierId, self::SOURCE, $totals, self::REFERENCE . ' ' . $ctx->backup->ico);
         }
         $this->openingBalances($ctx, $byEmployee, $payroll);
+        $this->postingMap($ctx);
         $this->reconcile($ctx, $payroll);
+    }
+
+    /**
+     * Srážky a nepřítomnosti, které převod z PREMIER nezakládá, a u koho je zdroj má.
+     *
+     * Srážky: `MZDY` nese jen částky sražené v jednotlivých měsících, ne případ (věřitel,
+     * pořadí, zbývající dluh, dohoda). Exekuci, insolvenci ani dohodu o srážkách z toho
+     * založit nejde, a bez nich je MyÚčto od prvního vlastního měsíce nesrazí.
+     *
+     * Nepřítomnosti: `MZDY` nese jen počet vyloučených dnů měsíce (nemoc, ošetřovné,
+     * mateřská…), ne druh a data. Pracovní neschopnost, která trvá přes začátek vedení
+     * mezd, proto MyÚčto nezná a čtrnáctidenní období náhrady mzdy by počítalo znovu.
+     *
+     * Upozornění je souhrnné a nepodléhá limitu hlášek kroku: bez něj by převod o obojím
+     * mlčel.
+     *
+     * @param array<string,float> $deductions osobní číslo => sražené Kč
+     * @param array<string,string> $excluded osobní číslo => poslední měsíc s vyloučenou dobou
+     */
+    private function notConverted(ImportProtocol $p, array $deductions, array $excluded): void
+    {
+        if ($deductions !== []) {
+            $p->count(self::STEP, 'deductions_not_converted', count($deductions));
+            $p->warn(self::STEP, 'deductions_not_converted', sprintf(
+                'Srážky ze mzdy z PREMIER se nepřevedly: záloha nese jen částky sražené v jednotlivých měsících, ne exekuce, '
+                . 'insolvence ani dohody o srážkách (věřitel, pořadí, zbývající dluh). Srážky mají osobní čísla %s (celkem %s Kč). '
+                . 'Trvající srážky založte ručně v Mzdy → Exekuce a insolvence, jinak je MyÚčto od prvního měsíce vedení mezd nesrazí.',
+                self::personalNumbers(array_keys($deductions)),
+                self::money(array_sum($deductions)),
+            ), ['personal_numbers' => array_keys($deductions)]);
+        }
+        if ($excluded !== []) {
+            $p->count(self::STEP, 'absences_not_converted', count($excluded));
+            $p->warn(self::STEP, 'absences_not_converted', sprintf(
+                'Nepřítomnosti a nemocenská z PREMIER se nepřevedly: záloha nese jen počet vyloučených dnů měsíce (nemoc, '
+                . 'ošetřovné, mateřská a další), ne druh ani data. Vyloučené doby mají osobní čísla %s. Trvá-li nepřítomnost '
+                . 'i v prvním měsíci vedení mezd v MyÚčtu (rozpracovaná pracovní neschopnost), založte ji ručně na kartě '
+                . 'zaměstnance, jinak MyÚčto začne období náhrady mzdy počítat znovu.',
+                self::personalNumbers(array_map(
+                    static fn (string $number, string $period): string => "{$number} (naposledy {$period})",
+                    array_keys($excluded),
+                    array_values($excluded),
+                )),
+            ), ['personal_numbers' => array_keys($excluded)]);
+        }
+    }
+
+    /** @param list<int|string> $numbers */
+    private static function personalNumbers(array $numbers): string
+    {
+        return implode(', ', array_slice(array_map('strval', $numbers), 0, 30)) . (count($numbers) > 30 ? ', …' : '');
+    }
+
+    /**
+     * Návrh mzdových předkontací z mzdových zápisů deníku roku, stejnou cestou jako
+     * u převodu z PAMICA ({@see PremierPayrollPostingMap}). Ukládá se jen návrh; do
+     * nastavení mezd sáhne teprve potvrzení účetní. Kontrola mezd proti deníku
+     * ({@see self::reconcile()}) je jiná otázka a běží dál vedle něj.
+     */
+    private function postingMap(PremierContext $ctx): void
+    {
+        $stored = $this->postingMap->refresh(
+            $ctx->supplierId,
+            PremierPayrollPostingMap::fromBackup($ctx->backup, $ctx->journal, $ctx->year),
+            $ctx->year,
+            self::REFERENCE . ' ' . $ctx->backup->ico,
+        );
+        if ($stored === null) {
+            return;
+        }
+        $ctx->protocol->set('posting_map', $stored['proposal']);
+        $conflicts = (int) ($stored['proposal']['summary']['conflict'] ?? 0);
+        if ($conflicts > 0) {
+            $ctx->protocol->count(self::STEP, 'posting_map_conflicts', $conflicts);
+        }
+        $this->info($ctx->protocol, 'posting_map', sprintf(
+            'Ze mzdových zápisů deníku %d vznikl návrh kontací mezd (Kontace mezd z původního programu). '
+            . 'Nastavení se nemění, dokud návrh nepotvrdíte%s.',
+            $ctx->year,
+            $conflicts > 0 ? "; u {$conflicts} kontací jsou v deníku různé účty a vybrat musíte sami" : '',
+        ));
     }
 
     /**
@@ -226,13 +316,32 @@ final class PayrollImporter
         }
 
         $this->activate($ctx, $employmentId, $relation);
+        $policy = PremierPayrollTakeover::policy();
+        $takeover = PremierPayrollTakeover::record($relation, $ctx->endsOn());
+        $person = $takeover->person;
+        // Souhrny běhu převod z PREMIER zatím do protokolu neskládá (výplatní účty neověřuje).
+        $state = new PayrollTakeoverRunState();
         $this->detail($ctx, $number, 'Sjednaná mzda', fn (): array => $this->wages($ctx, $employmentId, $relation));
-        $this->detail($ctx, $number, 'Údaje o narození a občanství', fn (): array => $this->identity($supplierId, $employeeId, $relation));
-        $this->detail($ctx, $number, 'Adresa a kontakt', fn (): array => $this->personCard($supplierId, $employeeId, $relation, $userId));
-        $this->detail($ctx, $number, 'Zákonná evidence', fn (): array => $this->statutoryEvidence($ctx, $employeeId, $relation));
-        $this->detail($ctx, $number, 'Výplatní účet', fn (): array => $this->payoutAccount($supplierId, $employeeId, $relation, $userId));
-        $this->detail($ctx, $number, 'Skončení vztahu', fn (): array => $this->termination($ctx, $employmentId, $relation));
-        $this->detail($ctx, $number, 'Zákonné termíny', fn (): array => $this->checklist($ctx, $employmentId, $relation));
+        $this->detail($ctx, $number, 'Údaje o narození a občanství', fn (): array => $this->people->identity($supplierId, $employeeId, $person, $policy));
+        $this->detail($ctx, $number, 'Adresa a kontakt', fn (): array => $this->people->personCard($supplierId, $employeeId, $person, $takeover->employment->start, $userId, $policy));
+        $this->detail($ctx, $number, 'Zákonná evidence', fn (): array => $this->people->statutoryEvidence(
+            $supplierId, $employeeId, $person, date('Y-m-d'), $userId, $policy,
+            function (string $manual) use ($ctx, $number): void {
+                if ($manual === 'tax_residence') {
+                    $this->warn($ctx->protocol, 'tax_residence_manual', "Osobní číslo {$number}: PREMIER vede osobu jako daňového nerezidenta. Daňovou rezidenci doplňte ručně.");
+                    return;
+                }
+                $this->warn($ctx->protocol, 'social_jurisdiction_manual', "Osobní číslo {$number}: PREMIER vede osobu jako vyslanou nebo pojištěnou v cizině. Příslušnost k sociálnímu pojištění doplňte ručně.");
+            },
+        ));
+        $this->detail($ctx, $number, 'Výplatní účet', fn (): array => $this->people->payoutAccounts($supplierId, $employeeId, $person, $takeover->employment->start, $userId, $policy, $state));
+        $this->detail($ctx, $number, 'Skončení vztahu', fn (): array => $this->employmentWriter->termination(
+            $supplierId, $employmentId, $takeover->employment, date('Y-m-d'), $ctx->endsOn(), $userId, $policy,
+        ));
+        $this->detail($ctx, $number, 'Zákonné termíny', fn (): array => $this->employmentWriter->completeChecklist(
+            $supplierId, $employmentId, $this->checklistNotes($ctx, $employmentId, $relation), [], null, $userId, $policy, $state,
+            static function (): void {},
+        ));
         return [$employeeId, $employmentId];
     }
 
@@ -396,254 +505,13 @@ final class PayrollImporter
     }
 
     /**
-     * @param array<string,mixed> $relation
-     * @return array<string,int>
-     */
-    private function identity(int $supplierId, int $employeeId, array $relation): array
-    {
-        $identity = $this->registrations->identityAt($supplierId, $employeeId, date('Y-m-d'));
-        if ($identity === null) {
-            return [];
-        }
-        $merged = [];
-        $changed = false;
-        foreach (['title_prefix', 'title_suffix', 'birth_date', 'birth_place', 'birth_country_code', 'citizenship_country_code', 'sex'] as $field) {
-            $current = $identity[$field] ?? null;
-            $current = $current === null || $current === '' ? null : (string) $current;
-            $incoming = $field === 'birth_date' ? $relation['birth_date'] : ($relation['identity'][$field] ?? null);
-            if ($current === null && is_string($incoming) && $incoming !== '') {
-                $current = $incoming;
-                $changed = true;
-            }
-            $merged[$field] = $current;
-        }
-        if (!$changed) {
-            return [];
-        }
-        $this->identities->saveIdentityFacts($supplierId, $employeeId, (int) $identity['id'], (int) $identity['row_version'], $merged);
-        return ['identity' => 1];
-    }
-
-    /**
-     * Adresa trvalého pobytu, kontakt a rodné příjmení - jen do prázdné karty.
+     * Doklady k položkám Zákonných termínů, které proběhly v PREMIER: smlouva vztahu,
+     * přihláška zdravotní pojišťovně (přijaté oznámení) a doklad o skončení.
      *
      * @param array<string,mixed> $relation
-     * @return array<string,int>
+     * @return array<string,string>
      */
-    private function personCard(int $supplierId, int $employeeId, array $relation, ?int $userId): array
-    {
-        $current = $this->profiles->get($supplierId, $employeeId);
-        if ($current === null) {
-            return [];
-        }
-        $today = date('Y-m-d');
-        $from = min((string) $relation['start'], $today);
-        $addresses = [];
-        if (is_array($relation['residence']) && $current['addresses'] === []) {
-            $addresses[] = $relation['residence'] + ['id' => null, 'address_type' => 'residence', 'effective_from' => $from, 'effective_to' => null];
-        }
-        $contacts = [];
-        $hasContact = false;
-        foreach ($current['contacts'] as $row) {
-            $hasContact = $hasContact || (!empty($row['is_active']) && !empty($row['is_primary']));
-        }
-        if (!$hasContact) {
-            foreach (['email' => $relation['email'], 'phone' => $relation['phone']] as $type => $value) {
-                if (is_string($value)) {
-                    $contacts[] = ['id' => null, 'contact_type' => $type, 'value' => $value, 'is_primary' => true, 'is_active' => true];
-                }
-            }
-        }
-        $identity = [];
-        if (is_string($relation['birth_surname']) && mb_strtolower($relation['birth_surname']) !== mb_strtolower((string) $relation['last_name'])) {
-            $version = $current['identity_history'][0] ?? null;
-            if ($version !== null && ($version['birth_surname_masked'] ?? null) === null) {
-                $identity[] = [
-                    'id' => $version['id'],
-                    'full_name' => $version['full_name'],
-                    'first_name' => $version['first_name'],
-                    'last_name' => $version['last_name'],
-                    'birth_surname' => $relation['birth_surname'],
-                    'effective_from' => $version['effective_from'],
-                    'effective_to' => $version['effective_to'],
-                ];
-            }
-        }
-        if ($addresses === [] && $contacts === [] && $identity === []) {
-            return [];
-        }
-        $this->profiles->save($supplierId, $employeeId, $this->profileValidator->validate([
-            'row_version' => $current['row_version'],
-            'profile_status' => $current['profile_status'] === 'missing' ? 'setup' : $current['profile_status'],
-            'payout_method' => $current['payout_method'],
-            'partner_settlement_account_code' => $current['partner_settlement_account_code'],
-            'cash_allocation_basis_points' => $current['cash_allocation_basis_points'],
-            'payout_effective_on' => $current['payout_effective_on'] ?? $today,
-            'secure_delivery_channel' => $current['secure_delivery_channel'],
-            'identity_history' => $identity,
-            'addresses' => $addresses,
-            'contacts' => $contacts,
-            'identifiers' => [],
-            'accounts' => [],
-        ]), $current['row_version'], $userId, null, null);
-        return ['person_card' => 1];
-    }
-
-    /**
-     * Daňová rezidence, prohlášení poplatníka po měsících mezd, zdravotní pojištění
-     * a příslušnost k sociálnímu pojištění - jen do prázdných řad zákonné evidence.
-     *
-     * @param array<string,mixed> $relation
-     * @return array<string,int>
-     */
-    private function statutoryEvidence(PremierContext $ctx, int $employeeId, array $relation): array
-    {
-        $today = date('Y-m-d');
-        $view = $this->statutory->editorView($ctx->supplierId, $employeeId, $today);
-        if ($view === null) {
-            return [];
-        }
-        /** @var array<string,list<array<string,mixed>>> $sections */
-        $sections = $view['sections'];
-        $from = (string) $relation['start'];
-        $counts = [];
-        if (($sections['tax_residences'] ?? []) === []) {
-            if ($relation['non_resident'] === true) {
-                $this->warn($ctx->protocol, 'tax_residence_manual', "Osobní číslo {$relation['personal_number']}: PREMIER vede osobu jako daňového nerezidenta. Daňovou rezidenci doplňte ručně.");
-            } else {
-                $sections['tax_residences'] = [[
-                    'residence' => 'czech-resident',
-                    'country_code' => 'CZ',
-                    'evidence_reference' => 'premier:per_main:rezident',
-                    'effective_from' => $from,
-                    'effective_to' => null,
-                    'evidence_note' => self::NOTE . 'osoba není v PREMIER vedená jako daňový nerezident.',
-                ]];
-                $counts['tax_residence'] = 1;
-            }
-        }
-        $declarations = self::declarations($relation, $ctx->endsOn());
-        if (($sections['tax_declarations'] ?? []) === [] && $declarations !== []) {
-            $sections['tax_declarations'] = array_map(static fn (array $run): array => [
-                'status' => $run['status'],
-                'evidence_reference' => 'premier:mzdy:' . $run['period'],
-                'effective_from' => $run['from'],
-                'effective_to' => $run['to'],
-                'evidence_note' => self::NOTE . ($run['status'] === 'signed' ? 'podepsané' : 'nepodepsané') . ' prohlášení poplatníka od mzdy za ' . $run['period'] . '.',
-            ], $declarations);
-            $counts['tax_declarations'] = 1;
-        }
-        if (($sections['health_coverages'] ?? []) === [] && is_string($relation['insurer_code'])) {
-            $sections['health_coverages'] = [[
-                'jurisdiction' => 'czech_regime_verified',
-                'foreign_country_code' => null,
-                'jurisdiction_evidence_reference' => null,
-                'insurer_status' => 'verified',
-                'insurer_code' => $relation['insurer_code'],
-                'insurer_evidence_reference' => null,
-                'health_evidence_document_id' => null,
-                'health_evidence_document_sha256' => null,
-                'effective_from' => $from,
-                'effective_to' => null,
-                'evidence_note' => self::NOTE . 'zdravotní pojišťovna ' . $relation['insurer_code'] . '.',
-            ]];
-            $counts['health_coverage'] = 1;
-        }
-        if (($sections['social_jurisdictions'] ?? []) === []) {
-            if ($relation['foreign_legislation'] === true) {
-                $this->warn($ctx->protocol, 'social_jurisdiction_manual', "Osobní číslo {$relation['personal_number']}: PREMIER vede osobu jako vyslanou nebo pojištěnou v cizině. Příslušnost k sociálnímu pojištění doplňte ručně.");
-            } else {
-                $sections['social_jurisdictions'] = [[
-                    'jurisdiction' => 'czech_regime_verified',
-                    'foreign_country_code' => null,
-                    'jurisdiction_evidence_reference' => null,
-                    'a1_status' => 'not_applicable',
-                    'a1_certificate_reference' => null,
-                    'a1_valid_until' => null,
-                    'effective_from' => $from,
-                    'effective_to' => null,
-                    'evidence_note' => self::NOTE . 'osoba nepodléhá v PREMIER cizím právním předpisům.',
-                ]];
-                $counts['social_jurisdiction'] = 1;
-            }
-        }
-        if ($counts === []) {
-            return [];
-        }
-        $this->statutory->save($ctx->supplierId, $employeeId, ['sections' => $sections], $today, $ctx->userOrNull(), null, null);
-        return $counts;
-    }
-
-    /**
-     * Výplatní účet z karty vztahu. Neověřený: PREMIER nevede datum výplaty, kterým by šlo
-     * doložit, že na účet mzda opravdu chodila.
-     *
-     * @param array<string,mixed> $relation
-     * @return array<string,int>
-     */
-    private function payoutAccount(int $supplierId, int $employeeId, array $relation, ?int $userId): array
-    {
-        $account = $relation['account'];
-        if (!is_array($account)) {
-            return [];
-        }
-        $current = $this->profiles->get($supplierId, $employeeId);
-        if ($current === null || $current['accounts'] !== []) {
-            return [];
-        }
-        $today = date('Y-m-d');
-        $this->profiles->save($supplierId, $employeeId, $this->profileValidator->validate([
-            'row_version' => $current['row_version'],
-            'profile_status' => $current['profile_status'] === 'missing' ? 'setup' : $current['profile_status'],
-            'payout_method' => $current['payout_method'] === 'cash' ? 'bank' : $current['payout_method'],
-            'partner_settlement_account_code' => $current['partner_settlement_account_code'],
-            'cash_allocation_basis_points' => $current['cash_allocation_basis_points'],
-            'payout_effective_on' => $current['payout_effective_on'] ?? $today,
-            'secure_delivery_channel' => $current['secure_delivery_channel'],
-            'identity_history' => [],
-            'addresses' => [],
-            'contacts' => [],
-            'identifiers' => [],
-            'accounts' => [[
-                'id' => null,
-                'label' => 'Výplatní účet z PREMIER',
-                'bank_account' => $account['account'] . '/' . $account['bank_code'],
-                'allocation_basis_points' => 10000,
-                'effective_from' => min((string) $relation['start'], $today),
-                'effective_to' => null,
-                'is_active' => true,
-            ]],
-        ]), $current['row_version'], $userId, null, null);
-        return ['payout_accounts_to_verify' => 1];
-    }
-
-    /**
-     * @param array<string,mixed> $relation
-     * @return array<string,int>
-     */
-    private function termination(PremierContext $ctx, int $employmentId, array $relation): array
-    {
-        $end = $relation['end'];
-        if (!is_string($end) || $end > $ctx->endsOn() || $end > date('Y-m-d') || $end < (string) $relation['start']) {
-            return [];
-        }
-        $row = $this->employmentById($ctx->supplierId, $employmentId);
-        if ($row === null || !in_array($row['status'], ['active', 'suspended'], true)) {
-            return [];
-        }
-        $this->employments->transition($ctx->supplierId, $employmentId, 'ended', (int) $row['row_version'], $end,
-            self::NOTE . 'vztah skončil ' . self::czechDate($end) . '.', $ctx->userOrNull(), null, null);
-        return ['ended' => 1];
-    }
-
-    /**
-     * Položky zákonných termínů, které proběhly v PREMIER: smlouva vztahu, přihláška
-     * zdravotní pojišťovně (přijaté oznámení) a doklad o skončení.
-     *
-     * @param array<string,mixed> $relation
-     * @return array<string,int>
-     */
-    private function checklist(PremierContext $ctx, int $employmentId, array $relation): array
+    private function checklistNotes(PremierContext $ctx, int $employmentId, array $relation): array
     {
         $notes = ['employment_contract' => self::NOTE . 'vztah vedený v předchozím mzdovém systému, nástup ' . self::czechDate((string) $relation['start']) . '.'];
         if ($relation['insurer_registered'] === true) {
@@ -653,25 +521,7 @@ final class PayrollImporter
         if ($row !== null && $row['status'] === 'ended' && is_string($relation['end'])) {
             $notes['termination_document'] = self::NOTE . 'vztah skončil ' . self::czechDate($relation['end']) . '.';
         }
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT item_key, row_version FROM payroll_employment_checklist_items
-              WHERE supplier_id = ? AND employment_id = ? AND status = 'pending' ORDER BY id"
-        );
-        $stmt->execute([$ctx->supplierId, $employmentId]);
-        $done = 0;
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
-            $key = (string) $item['item_key'];
-            if (!isset($notes[$key])) {
-                continue;
-            }
-            try {
-                $this->employments->updateChecklist($ctx->supplierId, $employmentId, $key, (int) $item['row_version'], 'completed', $notes[$key], $ctx->userOrNull(), null, null);
-                $done++;
-            } catch (\DomainException|\InvalidArgumentException|\RuntimeException) {
-                continue;
-            }
-        }
-        return $done > 0 ? ['checklist_completed' => $done] : [];
+        return $notes;
     }
 
     /**
@@ -725,49 +575,38 @@ final class PayrollImporter
                     $sums['child'] += $m['child'];
                     $sums['bonus'] += $m['tax_bonus'];
                 }
-                $months[(int) substr($period, 5, 2)] = $sums;
+                $month = (int) substr($period, 5, 2);
+                $months[$month] = new PayrollTakeoverOpeningMonth(
+                    month: $month,
+                    socialBase: self::minor($sums['social']),
+                    advanceBase: self::minor($sums['advance_base']),
+                    advanceTax: self::minor($sums['advance_tax']),
+                    withholdingBase: self::minor($sums['withholding_base']),
+                    withholdingTax: self::minor($sums['withholding_tax']),
+                    nonRefundableCredits: self::minor($sums['non_refundable']),
+                    childCredit: self::minor($sums['child']),
+                    taxBonus: self::minor($sums['bonus']),
+                    healthBase: self::minor($sums['health']),
+                    healthEmployee: self::minor($sums['health_employee']),
+                    healthEmployer: self::minor($sums['health_employer']),
+                    healthTopUp: self::minor($sums['health_top_up']),
+                );
             }
             if ($months === []) {
                 continue;
             }
             ksort($months);
-            $this->inSavepoint($ctx, ['personal_number' => (string) $employeeId], function () use ($ctx, $employeeId, $months, $startYear): void {
+            $this->inSavepoint($ctx, ['personal_number' => (string) $employeeId], function () use ($ctx, $employeeId, $months, $startYear, $startMonth): void {
                 // Stavy zadané jinak než tímto převodem (ručně, z hlášení) převod nepřepisuje.
                 // Vlastní stavy uloží znovu: shodná čísla nic nezapíšou, změněná záloha je
                 // opraví novou verzí.
-                $current = $this->openings->current($ctx->supplierId, $employeeId, $startYear);
-                $existing = array_filter($current['openings'], static fn (?int $id): bool => $id !== null);
-                if ($existing !== [] && !str_starts_with($current['source_reference'], self::OPENING_REFERENCE)) {
-                    $ctx->protocol->count(self::STEP, 'openings_existing');
-                    return;
-                }
-                $numbers = array_keys($months);
-                if (count($numbers) !== max($numbers) - min($numbers) + 1) {
-                    $this->warn($ctx->protocol, 'openings_gap', "Zaměstnanec {$employeeId}: mzdy v PREMIER před začátkem vedení mezd nejsou za souvislou řadu měsíců, počáteční stavy kumulací zadejte ručně.");
-                    return;
-                }
-                $rows = [];
-                foreach ($months as $month => $sums) {
-                    $rows[] = [
-                        'month' => $month,
-                        'social_assessment_base_minor_units' => self::minor($sums['social']),
-                        'health_assessment_base_minor_units' => self::minor($sums['health']),
-                        'health_employee_contribution_minor_units' => self::minor($sums['health_employee']),
-                        'health_employer_contribution_minor_units' => self::minor($sums['health_employer']),
-                        'health_minimum_top_up_minor_units' => self::minor($sums['health_top_up']),
-                        'advance_base_minor_units' => self::minor($sums['advance_base']),
-                        'advance_tax_minor_units' => self::minor($sums['advance_tax']),
-                        'withholding_base_minor_units' => self::minor($sums['withholding_base']),
-                        'withholding_tax_minor_units' => self::minor($sums['withholding_tax']),
-                        'applied_non_refundable_credits_minor_units' => self::minor($sums['non_refundable']),
-                        'applied_child_credit_minor_units' => self::minor($sums['child']),
-                        'tax_bonus_minor_units' => self::minor($sums['bonus']),
-                        'bonus_qualifying_income_minor_units' => self::minor($sums['advance_base']),
-                    ];
-                }
-                $saved = $this->openings->save($ctx->supplierId, $employeeId, $startYear, $rows,
-                    sprintf('%s zpracované mzdy %d. až %d. měsíc %d', self::OPENING_REFERENCE, min($numbers), max($numbers), $startYear), $ctx->userOrNull());
-                $ctx->protocol->count(self::STEP, $saved['openings'] == $current['openings'] ? 'openings_existing' : 'openings');
+                $status = $this->people->openingBalances($ctx->supplierId, $employeeId, $startYear, $startMonth, $months, $ctx->userOrNull(), PremierPayrollTakeover::policy());
+                match ($status) {
+                    PayrollTakeoverPersonWriter::OPENINGS_GAP => $this->warn($ctx->protocol, 'openings_gap', "Zaměstnanec {$employeeId}: mzdy v PREMIER před začátkem vedení mezd nejsou za souvislou řadu měsíců, počáteční stavy kumulací zadejte ručně."),
+                    PayrollTakeoverPersonWriter::OPENINGS_WRITTEN => $ctx->protocol->count(self::STEP, 'openings'),
+                    PayrollTakeoverPersonWriter::OPENINGS_EXISTING, PayrollTakeoverPersonWriter::OPENINGS_UNCHANGED => $ctx->protocol->count(self::STEP, 'openings_existing'),
+                    default => null,
+                };
             });
         }
     }
@@ -809,65 +648,17 @@ final class PayrollImporter
     private static function referenceTotals(array $relation, string $period, array $m, int $employeeId, int $employmentId, ?string $activity): PayrollMigrationReferenceTotals
     {
         $end = is_string($relation['end']) && $relation['end'] >= (string) $relation['start'] ? $relation['end'] : null;
-        return new PayrollMigrationReferenceTotals(
+        return PayrollMigrationReferenceTotals::fromAmounts(
             $period,
             'premier:' . $relation['person_key'],
             'premier:' . $relation['key'],
             $employeeId,
             $employmentId,
-            self::minor($m['gross']),
-            self::minor($m['net']),
-            self::minor($m['social_base']),
-            self::minor($m['health_base']),
-            self::minor($m['employee_social']),
-            self::minor($m['employee_health']),
-            self::minor($m['employer_social']),
-            self::minor($m['employer_health']),
-            self::minor($m['advance_tax']),
-            self::minor($m['withholding_tax']),
-            self::minor($m['tax_bonus']),
-            new PayrollMigrationTakeoverFacts(
-                relationshipStartDate: $relation['start'],
-                relationshipEndDate: $end,
-                relationType: $relation['relation_type'],
-                activityCode: $activity,
-                pensionParticipation: $m['pension_participation'],
-                insuranceDays: $m['insurance_days'],
-                excludedDays: $m['excluded_days'],
-                workedDaysHundredths: (int) round($m['worked_days'] * 100),
-                workedMinutes: $m['worked_minutes'],
-                deductionsMinor: self::minor($m['deductions']),
-                netPayableMinor: self::minor($m['net_payable']),
-            ),
+            $m,
+            PayrollMigrationTakeoverFacts::fromMonth($m, $relation['start'], $end, $relation['relation_type'], $activity),
         );
     }
 
-    /**
-     * Prohlášení poplatníka jako souvislé úseky stejného stavu po měsících mezd.
-     *
-     * @param array<string,mixed> $relation
-     * @return list<array{from:string,to:?string,status:string,period:string}>
-     */
-    private static function declarations(array $relation, string $until): array
-    {
-        $runs = [];
-        foreach ($relation['months'] as $period => $m) {
-            if ($period . '-01' > $until) {
-                break;
-            }
-            $status = $m['signed'] === true ? 'signed' : 'not-signed';
-            $last = array_key_last($runs);
-            if ($last !== null && $runs[$last]['status'] === $status) {
-                continue;
-            }
-            $from = max($period . '-01', (string) $relation['start']);
-            if ($last !== null) {
-                $runs[$last]['to'] = (new \DateTimeImmutable($from))->modify('-1 day')->format('Y-m-d');
-            }
-            $runs[] = ['from' => $from, 'to' => null, 'status' => $status, 'period' => (string) $period];
-        }
-        return $runs;
-    }
 
     /** @param array<string,mixed> $relation */
     private static function firstWage(array $relation, string $until): ?int
