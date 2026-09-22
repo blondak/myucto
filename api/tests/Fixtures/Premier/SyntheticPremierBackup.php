@@ -528,6 +528,8 @@ final class SyntheticPremierBackup
      *            v `SAZBA_MZ` podle `TYP_MZDY` (30 000, od 7/2025 32 000; `MZDA_MES` prázdné
      *            nebo jiné), stát adresy názvem „Česká republika"; mzdy 1/2025-1/2026; přihláška
      *            k ZP 111, od 7/2025 změna na 201
+     *   INTER 6  DPP 4-6/2025 (kategorie `DPP`), osoba s bydlištěm na Slovensku (stát názvem
+     *            „Slovenská republika")
      *
      * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
      * @param list<array{0:int,1:int,2:int,3:array<string,mixed>}> $months MĚNÍ SE
@@ -540,13 +542,21 @@ final class SyntheticPremierBackup
                 'OSS_ZEME' => 'CZ', 'SUP_ID' => 'OS-D', 'ID' => 'PP-4'],
             ['INTER' => 5, 'CISLO' => 5, 'VSTUP' => '2025-01-15', 'UVA_KATE' => 'HPP', 'UVA_PROF' => 'programátor', 'KODPP_SO' => '',
                 'OSS_ZEME' => 'CZ', 'SUP_ID' => 'OS-E', 'ID' => 'PP-5'],
+            ['INTER' => 6, 'CISLO' => 6, 'VSTUP' => '2025-04-01', 'VYSTUP' => '2025-06-30', 'UVA_KATE' => 'DPP', 'UVA_PROF' => 'lektor', 'KODPP_SO' => '',
+                'OSS_ZEME' => 'CZ', 'SUP_ID' => 'OS-F', 'ID' => 'PP-6'],
         );
         array_push($tables['PER_MAIN'][1],
             ['ID' => 'OS-D', 'RC_1' => '080312', 'RC_2' => '0000', 'PRIJMENI' => 'Učňovský', 'JMENO' => 'Adam', 'NAROZENI' => '2008-03-12',
                 'ULICE' => 'Školní', 'CISLOP' => '3', 'PSC' => '60200', 'MESTO' => 'Brno', 'STAT' => 'CZ', 'STAT_N' => 'CZ'],
             ['ID' => 'OS-E', 'RC_1' => '880312', 'RC_2' => '0106', 'PRIJMENI' => 'Syntetický', 'JMENO' => 'Tomáš', 'NAROZENI' => '1988-03-12',
                 'ULICE' => 'Vymyšlená', 'CISLOP' => '12', 'PSC' => '60200', 'MESTO' => 'Brno', 'STAT' => 'Česká republika', 'STAT_N' => 'CZ'],
+            ['ID' => 'OS-F', 'RC_1' => '870202', 'RC_2' => '0107', 'PRIJMENI' => 'Pokusný', 'JMENO' => 'Marek', 'NAROZENI' => '1987-02-02',
+                'ULICE' => 'Hlavná', 'CISLOP' => '5', 'PSC' => '81101', 'MESTO' => 'Bratislava', 'STAT' => 'Slovenská republika', 'STAT_N' => 'SK'],
         );
+        foreach (range(4, 6) as $m) {
+            $months[] = [6, 2025, $m, ['MZ_HRUBA' => 5000, 'MZ_SDANI' => 5000, 'MZ_SDAN' => 750, 'SRAZ_DAN' => true, 'MZ_CISTA' => 4250, 'MZ_VYPLATA' => 4250,
+                'DNY_ODPR' => 5, 'UVA_DOBA' => 8]];
+        }
         $tables['PERS_HYS'][0] = [...$tables['PERS_HYS'][0], ['TYP_MZDY', 'N', 1], ['SAZBA_MZ', 'N', 15, 4]];
         array_push($tables['PERS_HYS'][1],
             ['INTER' => 5, 'ROK' => 2025, 'MESIC' => 1, 'TYP_MZDY' => 1, 'SAZBA_MZ' => 30000, 'PLATNY_OD' => '2025-01-01', 'ID' => 'H5-1'],

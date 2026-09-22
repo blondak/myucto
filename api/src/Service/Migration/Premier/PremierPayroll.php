@@ -451,23 +451,31 @@ final class PremierPayroll
     }
 
     /**
+     * Adresa; stát je v PREMIER volný text (`STAT` C(28), v `PERSON2` jen tři znaky).
+     * Kód státu vyplní rovnou jen u dvoupísmenného kódu a českých variant; jinak nese
+     * text (`country_text`) a na kód ho převede až {@see PremierPayrollTakeover::address()}
+     * číselníkem zemí.
+     *
      * @param array<string,mixed> $row
-     * @return array{street_line:string,city:string,postal_code:string,country_code:string}|null
+     * @param array{0:string,1:string,2:string,3:string,4:string,5:string} $columns ulice, číslo, město, obec, PSČ, stát
+     * @return array{street_line:string,city:string,postal_code:string,country_code:?string,country_text:string}|null
      */
-    private static function address(array $row): ?array
+    private static function address(array $row, array $columns = ['ULICE', 'CISLOP', 'MESTO', 'OBEC', 'PSC', 'STAT']): ?array
     {
-        $city = self::text($row['MESTO'] ?? '') ?: self::text($row['OBEC'] ?? '');
-        $postal = self::text($row['PSC'] ?? '');
-        $country = self::country($row['STAT'] ?? '') ?? (self::text($row['STAT'] ?? '') === '' ? 'CZ' : null);
-        if ($city === '' || $postal === '' || $country === null) {
+        [$streetColumn, $numberColumn, $cityColumn, $municipalityColumn, $postalColumn, $countryColumn] = $columns;
+        $city = self::text($row[$cityColumn] ?? '') ?: self::text($row[$municipalityColumn] ?? '');
+        $postal = self::text($row[$postalColumn] ?? '');
+        if ($city === '' || $postal === '') {
             return null;
         }
-        $street = trim(self::text($row['ULICE'] ?? '') . ' ' . self::text($row['CISLOP'] ?? ''));
+        $countryText = self::text($row[$countryColumn] ?? '');
+        $street = trim(self::text($row[$streetColumn] ?? '') . ' ' . self::text($row[$numberColumn] ?? ''));
         return [
             'street_line' => mb_substr($street !== '' ? $street : $city, 0, 191),
             'city' => mb_substr($city, 0, 128),
             'postal_code' => mb_substr($postal, 0, 24),
-            'country_code' => $country,
+            'country_code' => self::country($countryText) ?? ($countryText === '' ? 'CZ' : null),
+            'country_text' => $countryText,
         ];
     }
 
@@ -477,7 +485,8 @@ final class PremierPayroll
         if (preg_match('/^[A-Z]{2}$/D', $value) === 1) {
             return $value;
         }
-        return in_array($value, ['CZE', 'ČR', 'ČESKÁ REPUBLIKA', 'ČESKO'], true) ? 'CZ' : null;
+        // „ČES" je název státu uříznutý na šířku pole `PERSON2.STAT` C(3).
+        return in_array($value, ['CZE', 'ČR', 'ČES', 'ČESKÁ REPUBLIKA', 'ČESKO'], true) ? 'CZ' : null;
     }
 
     /**

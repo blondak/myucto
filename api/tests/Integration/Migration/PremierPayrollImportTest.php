@@ -263,6 +263,17 @@ final class PremierPayrollImportTest extends TestCase
             WHERE e.supplier_id = ? AND e.code = '5' ORDER BY h.effective_from", $supplierId), $this->explain($protocol));
     }
 
+    /** Adresa se státem zapsaným názvem (mimo české varianty) se dřív nezapsala vůbec. */
+    public function testForeignResidenceCountryFromName(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['residence', 'SK']], $this->fetch("SELECT a.address_type, a.country_code FROM payroll_person_addresses a
+            JOIN payroll_employments e ON e.employee_id = a.employee_id AND e.supplier_id = a.supplier_id WHERE e.supplier_id = ? AND e.code = '6'", $supplierId),
+            $this->explain($protocol));
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);

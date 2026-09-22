@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Premier;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Repository\PremierImportRepository;
+use MyInvoice\Service\Geo\CountryNameMatcher;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
@@ -56,6 +57,7 @@ final class PayrollImporter
     private const MESSAGE_LIMIT = 20;
 
     private int $messages = 0;
+    private ?CountryNameMatcher $countries = null;
 
     public function __construct(
         private readonly Connection $db,
@@ -326,7 +328,8 @@ final class PayrollImporter
 
         $this->activate($ctx, $employmentId, $relation);
         $policy = PremierPayrollTakeover::policy();
-        $takeover = PremierPayrollTakeover::record($relation, $ctx->endsOn());
+        $this->countries ??= CountryNameMatcher::fromDatabase($this->db);
+        $takeover = PremierPayrollTakeover::record($relation, $ctx->endsOn(), $this->countries);
         $person = $takeover->person;
         // Souhrny běhu převod z PREMIER zatím do protokolu neskládá (výplatní účty neověřuje).
         $state = new PayrollTakeoverRunState();

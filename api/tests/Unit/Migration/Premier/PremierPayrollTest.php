@@ -46,7 +46,7 @@ final class PremierPayrollTest extends TestCase
         self::assertFalse($statutory['relation_type_derived']);
         self::assertSame('PER_MAIN|OS-A', $statutory['person_key']);
         self::assertSame('CISLO|2', $dpp['person_key'], 'Osoba bez karty PER_MAIN se páruje osobním číslem.');
-        self::assertSame(['street_line' => 'Nová 5', 'city' => 'Praha', 'postal_code' => '11000', 'country_code' => 'CZ'], $dpp['residence'],
+        self::assertSame(['street_line' => 'Nová 5', 'city' => 'Praha', 'postal_code' => '11000', 'country_code' => 'CZ', 'country_text' => 'CZ'], $dpp['residence'],
             'Platí poslední snímek PERSON2.');
         self::assertSame(['account' => SyntheticPremierBackup::BANK_ACCOUNT, 'bank_code' => SyntheticPremierBackup::BANK_CODE], $statutory['account']);
         self::assertSame(['2025-01-01' => 6000.0, '2026-01-01' => 6500.0], $statutory['wages']);

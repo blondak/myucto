@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Premier;
 
+use MyInvoice\Service\Geo\CountryNameMatcher;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmployment;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEvidencePeriod;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPayoutAccount;
@@ -47,7 +48,7 @@ final class PremierPayrollTakeover
      * @param array<string,mixed> $relation vztah z {@see PremierPayroll::$relations}
      * @param string $until poslední den převáděného období (prohlášení po měsících mezd do něj)
      */
-    public static function record(array $relation, string $until): PayrollTakeoverRecord
+    public static function record(array $relation, string $until, ?CountryNameMatcher $countries = null): PayrollTakeoverRecord
     {
         $start = (string) $relation['start'];
         // Zákonná evidence má účinnost po celých měsících (čte se k prvnímu dni měsíce);
@@ -70,7 +71,7 @@ final class PremierPayrollTakeover
             identity: ['birth_date' => $relation['birth_date']] + (array) $relation['identity'],
             // Rodné příjmení shodné s příjmením PREMIER vyplňuje i u osob bez změny jména.
             birthSurname: is_string($surname) && mb_strtolower($surname) !== mb_strtolower((string) $relation['last_name']) ? $surname : null,
-            residence: is_array($relation['residence']) ? $relation['residence'] : null,
+            residence: self::address(is_array($relation['residence']) ? $relation['residence'] : null, $countries),
             email: is_string($relation['email']) ? $relation['email'] : null,
             phone: is_string($relation['phone']) ? $relation['phone'] : null,
             payoutAccounts: is_array($account) ? [new PayrollTakeoverPayoutAccount($account['account'], $account['bank_code'])] : [],
@@ -99,6 +100,35 @@ final class PremierPayrollTakeover
             end: is_string($relation['end']) ? $relation['end'] : null,
         );
         return new PayrollTakeoverRecord($person, $employment);
+    }
+
+    /**
+     * Adresa v podobě karty osoby. Stát zapsaný v PREMIER volným textem („Slovenská
+     * republika", „Německo") se převede na kód číselníkem zemí ({@see CountryNameMatcher});
+     * adresa, jejíž stát nejde určit, se nezapíše (špatně přiřazená země je horší než
+     * chybějící adresa).
+     *
+     * @param array<string,mixed>|null $address {@see PremierPayroll} (`country_code`, `country_text`)
+     * @return array{street_line:string,city:string,postal_code:string,country_code:string}|null
+     */
+    public static function address(?array $address, ?CountryNameMatcher $countries): ?array
+    {
+        if ($address === null) {
+            return null;
+        }
+        $code = $address['country_code'] ?? null;
+        if (!is_string($code) && $countries !== null) {
+            $code = $countries->match((string) ($address['country_text'] ?? ''));
+        }
+        if (!is_string($code)) {
+            return null;
+        }
+        return [
+            'street_line' => (string) $address['street_line'],
+            'city' => (string) $address['city'],
+            'postal_code' => (string) $address['postal_code'],
+            'country_code' => $code,
+        ];
     }
 
     /**
