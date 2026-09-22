@@ -139,6 +139,8 @@ final class SyntheticPremierBackup
      *                           fakturu), úhrada VF 250006, poplatek a kurzový zisk 311/663 bez vazby;
      *                           VF 250007 uhrazená zápočtem 321/311 (ID 5); EUR účet (řada BE, 221002)
      *                           s vkladem 1 000 EUR a kurzovým přeceněním s částkou v měně 0
+     *   `cash_duplicate`        další dva pokladní doklady PP 1 z 2. 1. 2025 (jiný sborník), tedy tři
+     *                           doklady se stejnou řadou i číslem a dva i se stejným datem
      *
      * @param array<string,bool> $flags
      * @return array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}>
@@ -372,6 +374,12 @@ final class SyntheticPremierBackup
         }
         if (!empty($flags['bank_split'])) {
             self::bankSplit($tables, $chart);
+        }
+        if (!empty($flags['cash_duplicate'])) {
+            array_push($tables['PUB_UCTO'][1],
+                self::row(80, '2025-01-02', 'PP', '1', 'Další vklad', 100, '211001', '411000', ['SB_KOD' => 'PP', 'SBORNIK' => 901]),
+                self::row(81, '2025-01-02', 'PP', '1', 'Třetí vklad', 200, '211001', '411000', ['SB_KOD' => 'PP', 'SBORNIK' => 902]),
+            );
         }
         if (!empty($flags['periody']) || !empty($flags['periody_11'])) {
             $rows = [];

@@ -12,6 +12,7 @@ use MyInvoice\Service\Migration\MoneyS3\AccountCode;
 use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
 use MyInvoice\Service\Migration\Shared\BankStatementImportWriter;
 use MyInvoice\Service\Migration\Shared\BankSymbols;
+use MyInvoice\Service\Migration\Shared\MigratedCashNumber;
 use PDO;
 
 /**
@@ -33,6 +34,7 @@ final class CashBankImporter
         private readonly Connection $db,
         private readonly PohodaImportRepository $map,
         private readonly SupplierBankAccountRepository $bankAccounts,
+        private readonly MigratedCashNumber $cashNumbers,
     ) {}
 
     public function importCash(PohodaContext $ctx): void
@@ -77,7 +79,6 @@ final class CashBankImporter
 
         $existing = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_CASH_DOCUMENT);
         $ruleExists = $pdo->prepare('SELECT 1 FROM posting_rules WHERE supplier_id = ? AND rule_key = ? LIMIT 1');
-        $numberTaken = $pdo->prepare('SELECT 1 FROM cash_documents WHERE supplier_id = ? AND doc_number = ? LIMIT 1');
         $insert = $pdo->prepare(
             'INSERT INTO cash_documents
                 (supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date,
@@ -152,11 +153,7 @@ final class CashBankImporter
                     }
                 }
             }
-            $numberText = mb_substr($number, 0, 30);
-            $numberTaken->execute([$ctx->supplierId, $numberText]);
-            if ($numberTaken->fetchColumn() !== false) {
-                $numberText = mb_substr($number . '/' . substr($issue, 0, 4), 0, 30);
-            }
+            $numberText = $this->cashNumbers->allocate($ctx->supplierId, [$number, $number . '/' . substr($issue, 0, 4)], $p, self::STEP_CASH, $number . ' z ' . $issue);
             $rule = mb_substr(PohodaXml::text($h, 'accounting/ids'), 0, 64);
             $ruleKey = null;
             if ($rule !== '') {

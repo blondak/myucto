@@ -11,6 +11,7 @@ use MyInvoice\Service\Bank\StatementBalanceService;
 use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
 use MyInvoice\Service\Migration\Shared\BankStatementImportWriter;
 use MyInvoice\Service\Migration\Shared\BankSymbols;
+use MyInvoice\Service\Migration\Shared\MigratedCashNumber;
 use PDO;
 
 /**
@@ -33,6 +34,7 @@ final class CashBankImporter
         private readonly Connection $db,
         private readonly MoneyS3ImportRepository $map,
         private readonly SupplierBankAccountRepository $bankAccounts,
+        private readonly MigratedCashNumber $cashNumbers,
     ) {}
 
     public function importCash(ImportContext $ctx): void
@@ -50,7 +52,6 @@ final class CashBankImporter
 
         $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_CASH_DOCUMENT);
         $ruleExists = $pdo->prepare('SELECT 1 FROM posting_rules WHERE supplier_id = ? AND rule_key = ? LIMIT 1');
-        $numberTaken = $pdo->prepare('SELECT 1 FROM cash_documents WHERE supplier_id = ? AND doc_number = ? LIMIT 1');
         $insert = $pdo->prepare(
             'INSERT INTO cash_documents
                 (supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date,
@@ -89,17 +90,13 @@ final class CashBankImporter
                 $p->warn(self::STEP_CASH, 'register_or_date_missing', "Pokladní doklad {$docNo} nemá pokladnu nebo datum, nepřevzat.");
                 continue;
             }
-            $number = mb_substr($docNo, 0, 30);
-            $numberTaken->execute([$ctx->supplierId, $number]);
-            if ($numberTaken->fetchColumn() !== false) {
-                $number = mb_substr($docNo . '/' . $year, 0, 30);
-            }
             $amount = round((float) ($r['Celkem'] ?? 0), 2);
             if ($amount === 0.0) {
                 // Nulový doklad nemá v pokladně účinek a MyÚčto ho nepřijme (částka > 0).
                 $p->count(self::STEP_CASH, 'zero_amount');
                 continue;
             }
+            $number = $this->cashNumbers->allocate($ctx->supplierId, [$docNo, $docNo . '/' . $year], $p, self::STEP_CASH, $docNo . ' (' . $year . ')');
             // Záporný příjem je výdej a naopak (vratka v pokladně) — jen tak sedí 211 na deník.
             $isOut = (((int) ($r['Vydej'] ?? 0)) === 1) !== ($amount < 0);
             $vatLines = self::vatLines($r, $amount < 0);

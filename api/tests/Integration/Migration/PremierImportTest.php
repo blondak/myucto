@@ -428,6 +428,24 @@ final class PremierImportTest extends TestCase
         self::assertSame(4, $this->rows('purchase_invoices', $supplierId), $this->explain($protocol));
     }
 
+    /**
+     * Tři pokladní doklady PP 1 v jednom roce, dva i ze stejného dne: poslední kandidát čísla
+     * (řada, číslo a datum) je obsazený, doklad dostane příponu a rok se převede celý.
+     */
+    public function testDuplicateCashNumberOnTheSameDayGetsSuffix(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(false, ['cash_duplicate' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertSame(
+            [['PP1/2025', '5000.00'], ['PP1/2025-01-02', '100.00'], ['PP1/2025-01-02-2', '200.00']],
+            $this->fetch("SELECT doc_number, total_amount FROM cash_documents WHERE supplier_id = ? AND doc_number LIKE 'PP1/%' ORDER BY id", $supplierId)
+        );
+        self::assertContains('cash_number_duplicate', $this->messageCodes($protocol));
+        $this->assertReconciled($protocol, SyntheticPremierBackup::YEAR1);
+    }
+
     private function assertReconciled(ImportProtocol $protocol, int $year): void
     {
         $reconciliation = $protocol->get('reconciliation');
