@@ -10,6 +10,7 @@ use MyInvoice\Service\Migration\MoneyS3\ImportOptions;
 use MyInvoice\Service\Migration\MoneyS3\MoneyS3Importer;
 use MyInvoice\Service\Migration\MoneyS3\Ms3Backup;
 use MyInvoice\Service\Migration\MoneyS3\Ms3Table;
+use MyInvoice\Service\Tax\Return\DppoReturnCalculator;
 use MyInvoice\Service\Tax\Return\DppoReturnDataProvider;
 use MyInvoice\Tests\Fixtures\MoneyS3\Ms3FixtureWriter;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
@@ -115,6 +116,11 @@ final class DppoMigratedDisposalTest extends TestCase
         foreach ($data['warnings'] as $w) {
             self::assertStringNotContainsString('DM-005', $w, 'Karta sedí na převzatý deník.');
         }
+
+        $calc = (new DppoReturnCalculator())->compute($data, [], ['corporate_tax_rate' => 0.21]);
+        $lines = array_column($calc['lines'], 'value', 'line');
+        self::assertSame(9750.0, $lines[160] ?? null, 'Daňová ZC vyšší než účetní → ř. 160 (pokyny k DPPO).');
+        self::assertSame([['group' => '54', 'amount' => 9750.0]], $calc['line160_appendix']);
     }
 
     /**

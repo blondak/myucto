@@ -170,6 +170,43 @@ final class DppoXmlBuilderXsdTest extends TestCase
         }
     }
 
+    /**
+     * EP-1: můstek ZC vyřazeného majetku podle pokynů k DPPO — účetní ZC vyšší na ř. 40
+     * (a tabulce A), daňová ZC vyšší na ř. 160 se zvláštní přílohou podle účtových skupin.
+     * Ř. 62/162 zůstanou prázdné a ř. 70/170 nesou součty.
+     */
+    public function testDisposalResidualBridgeGoesToLines40And160WithAppendix(): void
+    {
+        $calc = (new DppoReturnCalculator())->compute(
+            [
+                'vh' => 500000,
+                'non_deductible_costs' => 20000,
+                'depreciation' => ['tax' => 0, 'accounting' => 0],
+                'disposal_tax_increase' => 7703,
+                'disposal_tax_decrease' => 17005.86,
+                'disposal_decrease_groups' => ['54' => 17005.86],
+            ],
+            ['tax_paid_advances' => 0],
+            TaxConstants::forYear(2025)
+        );
+        $xml = (new DppoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc)['xml'];
+
+        self::assertStringContainsString('kc_ii50_40="27703"', $xml);
+        self::assertStringContainsString('kc_dpp_a12="27703"', $xml, 'Tabulka A = ř. 40.');
+        self::assertStringContainsString('kc_ii180_160="17006"', $xml);
+        self::assertStringContainsString('kc_ii190_170="17006"', $xml);
+        self::assertStringNotContainsString('kc_ii72_62=', $xml);
+        self::assertStringNotContainsString('kc_ii182_162=', $xml);
+        self::assertMatchesRegularExpression('/<VetaR[^>]*c_radku="160"[^>]*t_prilohy="Úč. skupina 54: [^"]*17 006 Kč\)"/u', $xml);
+        self::assertStringContainsString('zvl_pr="1"', $xml);
+
+        $validator = new XmlSchemaValidator();
+        if ($validator->hasSchema('dppdp9')) {
+            $validation = $validator->validate($xml, 'dppdp9');
+            self::assertSame('passed', $validation['status'], 'XSD chyby: ' . implode(' | ', $validation['errors']));
+        }
+    }
+
     /** Bez nároku podle § 35/4 zůstává ř. 3 tabulky H prázdný — žádná nula naslepo. */
     public function testStoppedExecutionCreditOmittedWhenZero(): void
     {

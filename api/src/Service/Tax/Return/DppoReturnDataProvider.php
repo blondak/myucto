@@ -67,6 +67,7 @@ final class DppoReturnDataProvider
      *   bank_accounts: list<array{id:int,account_number:?string,bank_code:?string,bank_name:?string,iban:?string,is_default:int}>,
      *   disposal_nondeductible_residual: float,
      *   disposal_tax_increase: float, disposal_tax_decrease: float,
+     *   disposal_decrease_groups: array<string,float>,
      *   disposals: list<array<string,mixed>>,
      *   closing_projection: array<string,mixed>,
      *   legal_provisions: array<string,mixed>,
@@ -94,6 +95,7 @@ final class DppoReturnDataProvider
                 'disposal_nondeductible_residual' => 0.0,
                 'disposal_tax_increase' => 0.0,
                 'disposal_tax_decrease' => 0.0,
+                'disposal_decrease_groups' => [],
                 'disposals' => [],
                 'closing_projection' => (new ClosingProjectionCalculator())->project(0.0, []),
                 'legal_provisions' => LegalProvisionLedgerService::empty(),
@@ -113,7 +115,7 @@ final class DppoReturnDataProvider
         $depByGroup = $this->depreciationByGroup($supplierId, $year);
         $relatedPartyFlag = $this->relatedPartyCountryFlag($supplierId, $startsOn, $endsOn);
         $relatedPartyAppendix = $this->relatedPartyAppendix($supplierId, $startsOn, $endsOn);
-        [$disposalIncrease, $disposalDecrease, $disposals, $disposalWarnings] = $this->disposalResiduals($supplierId, $startsOn, $endsOn);
+        [$disposalIncrease, $disposalDecrease, $disposals, $disposalWarnings, $disposalDecreaseGroups] = $this->disposalResiduals($supplierId, $startsOn, $endsOn);
         $projection = $this->closingProjection($supplierId, (int) $period['id'], $endsOn, $vh);
         // Tabulka C přílohy č. 1 II. oddílu (VetaG) — zákonné OP k pohledávkám (§8/§8a/§8b/§8c)
         // a zákonné rezervy (§7). Bez služby (unit testy nad SQLite) zůstane prázdný podklad
@@ -159,6 +161,7 @@ final class DppoReturnDataProvider
             'disposal_nondeductible_residual' => 0.0,
             'disposal_tax_increase' => $disposalIncrease,
             'disposal_tax_decrease' => $disposalDecrease,
+            'disposal_decrease_groups' => $disposalDecreaseGroups,
             'disposals' => $disposals,
             'closing_projection' => $projection,
             'legal_provisions' => $legalProvisions,
@@ -663,7 +666,10 @@ final class DppoReturnDataProvider
      * jako vstupní cenu odpisovaného majetku bez daňové historie — ta je neznámá
      * a můstek se u ní nedopočítá (varování, ne fiktivní odpočet).
      *
-     * @return array{0:float,1:float,2:list<array<string,mixed>>,3:list<string>}
+     * Pátý prvek rozděluje snížení (ř. 160) podle účtové skupiny nákladu vyřazení —
+     * zvláštní příloha k ř. 160 ho podle pokynů vyžaduje.
+     *
+     * @return array{0:float,1:float,2:list<array<string,mixed>>,3:list<string>,4:array<string,float>}
      */
     private function disposalResiduals(int $supplierId, string $startsOn, string $endsOn): array
     {
@@ -671,6 +677,7 @@ final class DppoReturnDataProvider
 
         $increase = 0.0;
         $decrease = 0.0;
+        $decreaseGroups = [];
         $disposals = [];
         $warnings = $residuals['warnings'];
         $hasLimited = false;
@@ -686,6 +693,9 @@ final class DppoReturnDataProvider
                 $taxDecrease = max(0.0, round($taxResidual - $bookResidual, 2));
                 $increase += $taxIncrease;
                 $decrease += $taxDecrease;
+                if ($taxDecrease > 0.0) {
+                    $decreaseGroups[$row['expense_group']] = round(($decreaseGroups[$row['expense_group']] ?? 0.0) + $taxDecrease, 2);
+                }
             } elseif ($deductibility === 'limited') {
                 $hasLimited = true;
             }
@@ -714,7 +724,7 @@ final class DppoReturnDataProvider
                 . '(nebo při živelní pohromě dle §24/2/l ZDP) uplatněte ruční snižující položkou §23.';
         }
 
-        return [round($increase, 2), round($decrease, 2), $disposals, $warnings];
+        return [round($increase, 2), round($decrease, 2), $disposals, $warnings, $decreaseGroups];
     }
 
     private function classifyDisposal(string $type): string
