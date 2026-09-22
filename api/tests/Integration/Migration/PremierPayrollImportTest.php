@@ -226,6 +226,16 @@ final class PremierPayrollImportTest extends TestCase
         self::assertSame(1, self::stepCounts($protocol, 'payroll')['apprentices'] ?? 0);
     }
 
+    /** Sjednaná mzda vztahu ze sazby podle typu mzdy, ne z `MZDA_MES`. */
+    public function testAgreedWageFromRateByWageType(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['2025-01-01', '3000000'], ['2025-07-01', '3200000']], $this->fetch("SELECT t.effective_from, t.monthly_gross_minor FROM payroll_employment_terms t
+            JOIN payroll_employments e ON e.id = t.employment_id WHERE e.supplier_id = ? AND e.code = '5' ORDER BY t.effective_from", $supplierId), $this->explain($protocol));
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);

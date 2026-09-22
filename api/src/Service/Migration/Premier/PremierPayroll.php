@@ -16,7 +16,8 @@ namespace MyInvoice\Service\Migration\Premier;
  *    kontakt, daňový nerezident `NREZIDEN`. Starší verze PREMIER ji nemají; osobu pak nese
  *    `PERSON2`, historické snímky osoby po osobním čísle (poslední snímek platí).
  *  - `MZDY` - zpracovaná mzda vztahu za měsíc (`INTER`, `ROK`, `MESIC`).
- *  - `PERS_HYS` - historie sjednané mzdy (`MZDA_MES` od `PLATNY_OD`).
+ *  - `PERS_HYS` - historie sjednané mzdy od `PLATNY_OD` (`SAZBA_MZ` podle `TYP_MZDY`,
+ *    u starších verzí `MZDA_MES`, viz {@see self::agreedWage()}).
  *  - `MZ_PRIZP` - oznámení zdravotní pojišťovně (`ZKRATKA_P` = kód pojišťovny).
  *
  * Význam polí `MZDY` ověřený proti zaúčtování téhož měsíce v deníku (`PUB_UCTO`):
@@ -75,12 +76,18 @@ final class PremierPayroll
             }
         }
         $wages = [];
+        $hourly = [];
         foreach ($backup->rows('PERS_HYS') as $row) {
-            $amount = round((float) ($row['MZDA_MES'] ?? 0), 2);
             $from = self::date($row['PLATNY_OD'] ?? null)
                 ?? (((int) ($row['ROK'] ?? 0)) > 0 ? sprintf('%04d-%02d-01', (int) $row['ROK'], max(1, (int) ($row['MESIC'] ?? 1))) : null);
-            if ($amount > 0 && $from !== null) {
+            if ($from === null) {
+                continue;
+            }
+            [$kind, $amount] = self::agreedWage($row);
+            if ($kind === 'monthly') {
                 $wages[(int) ($row['INTER'] ?? 0)][$from] = $amount;
+            } elseif ($kind === 'hourly') {
+                $hourly[(int) ($row['INTER'] ?? 0)][$from] = $amount;
             }
         }
         $insurers = [];
@@ -135,6 +142,8 @@ final class PremierPayroll
             }
             $relationWages = $wages[$inter] ?? [];
             ksort($relationWages);
+            $relationHourly = $hourly[$inter] ?? [];
+            ksort($relationHourly);
             $account = self::digits(str_replace('-', '', self::text($row['BANKA_UCET'] ?? '')), 22) !== null
                 ? self::text($row['BANKA_UCET'] ?? '') : null;
             $bankCode = self::digits(self::text($row['BANKA_KOD'] ?? ''), 4);
@@ -171,6 +180,7 @@ final class PremierPayroll
                 'insurer_registered' => (bool) ($insurer['registered'] ?? false),
                 'account' => $account !== null && $bankCode !== null ? ['account' => $account, 'bank_code' => $bankCode] : null,
                 'wages' => $relationWages,
+                'hourly_wages' => $relationHourly,
                 'months' => $relationMonths,
             ];
         }
@@ -339,6 +349,30 @@ final class PremierPayroll
             return ['employment', false];
         }
         return ['employment', true];
+    }
+
+    /**
+     * Sjednaná mzda jedné verze `PERS_HYS`: `SAZBA_MZ` podle `TYP_MZDY` (1 = měsíční mzda
+     * v Kč za měsíc, 2 = hodinová sazba, 0 = bez mzdy). `MZDA_MES` je jen u starších
+     * verzí bez typu mzdy.
+     *
+     * Ověřeno na reálné záloze (agregovaně): u verzí s typem 1 se `SAZBA_MZ` rovná částce
+     * měsíční mzdy (složka 101) za celý měsíc v `DNY` v 47 z 56 porovnatelných verzí,
+     * `MZDA_MES` ani jednou tam, kde se od sazby liší (a vyplněné je jen u 29 % verzí).
+     * U typu 2 je `SAZBA_MZ` vždy pod 1 000 Kč, tedy hodinová sazba.
+     *
+     * @param array<string,mixed> $row
+     * @return array{0:?string,1:float} [`monthly` | `hourly` | null, částka]
+     */
+    private static function agreedWage(array $row): array
+    {
+        $rate = round((float) ($row['SAZBA_MZ'] ?? 0), 2);
+        $monthly = round((float) ($row['MZDA_MES'] ?? 0), 2);
+        return match ((int) ($row['TYP_MZDY'] ?? 0)) {
+            1 => $rate > 0 ? ['monthly', $rate] : ($monthly > 0 ? ['monthly', $monthly] : [null, 0.0]),
+            2 => $rate > 0 ? ['hourly', $rate] : [null, 0.0],
+            default => $monthly > 0 ? ['monthly', $monthly] : [null, 0.0],
+        };
     }
 
     /** @param array<string,mixed> $row */

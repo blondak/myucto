@@ -74,6 +74,20 @@ final class PremierPayrollTest extends TestCase
         self::assertSame([PremierPayroll::APPRENTICE, false], [$apprentice['relation_type'], $apprentice['relation_type_derived']]);
     }
 
+    /**
+     * Sjednaná mzda je v `SAZBA_MZ` podle `TYP_MZDY`; `MZDA_MES` je vyplněné jen někdy
+     * a od sazby se může lišit. Hodinová sazba sjednanou měsíční mzdou není.
+     */
+    public function testAgreedWageComesFromRateByWageType(): void
+    {
+        $relations = PremierPayroll::fromBackup($this->backup(['payroll' => true, 'payroll_detail' => true]))->relations;
+        $employee = array_values(array_filter($relations, static fn (array $r): bool => $r['key'] === '5'))[0];
+        self::assertSame(['2025-01-01' => 30000.0, '2025-07-01' => 32000.0], $employee['wages']);
+        self::assertSame([], $employee['hourly_wages']);
+        $statutory = array_values(array_filter($relations, static fn (array $r): bool => $r['key'] === '1'))[0];
+        self::assertSame(['2025-01-01' => 6000.0, '2026-01-01' => 6500.0], $statutory['wages'], 'Starší verze bez typu mzdy nesou MZDA_MES.');
+    }
+
     public function testMonthTotalsMatchJournalPostings(): void
     {
         $backup = $this->backup(['payroll' => true]);

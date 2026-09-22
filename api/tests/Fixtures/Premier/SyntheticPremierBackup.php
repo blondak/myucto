@@ -524,6 +524,9 @@ final class SyntheticPremierBackup
      * Další vztahy a evidence mzdového modulu (`payroll_detail`), syntetické osoby:
      *
      *   INTER 4  učeň (kategorie `UCN`, `KODPP_SO` prázdné jako v reálných zálohách), bez mezd
+     *   INTER 5  pracovní poměr od 1. 1. 2025 (kategorie `HPP`, `KODPP_SO` prázdné); sjednaná mzda
+     *            v `SAZBA_MZ` podle `TYP_MZDY` (30 000, od 7/2025 32 000; `MZDA_MES` prázdné
+     *            nebo jiné), stát adresy názvem „Česká republika"; mzdy 1/2025-1/2026
      *
      * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
      * @param list<array{0:int,1:int,2:int,3:array<string,mixed>}> $months MĚNÍ SE
@@ -531,10 +534,33 @@ final class SyntheticPremierBackup
      */
     private static function payrollDetail(array &$tables, array &$months): array
     {
-        $tables['PERSONAL'][1][] = ['INTER' => 4, 'CISLO' => 4, 'VSTUP' => '2025-09-01', 'UVA_KATE' => 'UCN', 'UVA_PROF' => 'učeň', 'KODPP_SO' => '',
-            'OSS_ZEME' => 'CZ', 'SUP_ID' => 'OS-D', 'ID' => 'PP-4'];
-        $tables['PER_MAIN'][1][] = ['ID' => 'OS-D', 'RC_1' => '080312', 'RC_2' => '0000', 'PRIJMENI' => 'Učňovský', 'JMENO' => 'Adam', 'NAROZENI' => '2008-03-12',
-            'ULICE' => 'Školní', 'CISLOP' => '3', 'PSC' => '60200', 'MESTO' => 'Brno', 'STAT' => 'CZ', 'STAT_N' => 'CZ'];
+        array_push($tables['PERSONAL'][1],
+            ['INTER' => 4, 'CISLO' => 4, 'VSTUP' => '2025-09-01', 'UVA_KATE' => 'UCN', 'UVA_PROF' => 'učeň', 'KODPP_SO' => '',
+                'OSS_ZEME' => 'CZ', 'SUP_ID' => 'OS-D', 'ID' => 'PP-4'],
+            ['INTER' => 5, 'CISLO' => 5, 'VSTUP' => '2025-01-01', 'UVA_KATE' => 'HPP', 'UVA_PROF' => 'programátor', 'KODPP_SO' => '',
+                'OSS_ZEME' => 'CZ', 'SUP_ID' => 'OS-E', 'ID' => 'PP-5'],
+        );
+        array_push($tables['PER_MAIN'][1],
+            ['ID' => 'OS-D', 'RC_1' => '080312', 'RC_2' => '0000', 'PRIJMENI' => 'Učňovský', 'JMENO' => 'Adam', 'NAROZENI' => '2008-03-12',
+                'ULICE' => 'Školní', 'CISLOP' => '3', 'PSC' => '60200', 'MESTO' => 'Brno', 'STAT' => 'CZ', 'STAT_N' => 'CZ'],
+            ['ID' => 'OS-E', 'RC_1' => '880312', 'RC_2' => '0106', 'PRIJMENI' => 'Syntetický', 'JMENO' => 'Tomáš', 'NAROZENI' => '1988-03-12',
+                'ULICE' => 'Vymyšlená', 'CISLOP' => '12', 'PSC' => '60200', 'MESTO' => 'Brno', 'STAT' => 'Česká republika', 'STAT_N' => 'CZ'],
+        );
+        $tables['PERS_HYS'][0] = [...$tables['PERS_HYS'][0], ['TYP_MZDY', 'N', 1], ['SAZBA_MZ', 'N', 15, 4]];
+        array_push($tables['PERS_HYS'][1],
+            ['INTER' => 5, 'ROK' => 2025, 'MESIC' => 1, 'TYP_MZDY' => 1, 'SAZBA_MZ' => 30000, 'PLATNY_OD' => '2025-01-01', 'ID' => 'H5-1'],
+            // `MZDA_MES` se od sazby liší a sjednanou mzdou není.
+            ['INTER' => 5, 'ROK' => 2025, 'MESIC' => 7, 'TYP_MZDY' => 1, 'SAZBA_MZ' => 32000, 'MZDA_MES' => 30400, 'PLATNY_OD' => '2025-07-01', 'ID' => 'H5-2'],
+        );
+        $employee = static fn (int $gross, int $soc, int $zdr, int $socF, int $zdrF, int $tax): array => [
+            'MZ_HRUBA' => $gross, 'VYM_SOC' => $gross, 'VYM_ZDR' => $gross, 'MZ_SOC' => $soc, 'MZ_ZDR' => $zdr, 'MZ_SOCF' => $socF, 'MZ_ZDRF' => $zdrF,
+            'MZ_ZDANI' => $gross, 'MZ_DAN' => $tax, 'NEZD_VLAS' => 2570, 'POD_DAN' => true, 'NEZD_A' => true, 'MZ_CISTA' => $gross - $soc - $zdr - $tax,
+            'MZ_VYPLATA' => $gross - $soc - $zdr - $tax, 'POJIS_SO' => true, 'ZKR_POJ' => '111', 'DNY_ODPR' => 20, 'UVA_DOBA' => 8,
+        ];
+        foreach (range(1, 12) as $m) {
+            $months[] = [5, 2025, $m, $m < 7 ? $employee(30000, 2130, 1350, 7440, 2700, 1930) : $employee(32000, 2272, 1440, 7936, 2880, 2230)];
+        }
+        $months[] = [5, 2026, 1, $employee(32000, 2272, 1440, 7936, 2880, 2230)];
         return [];
     }
 
