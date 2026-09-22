@@ -6,7 +6,7 @@ namespace MyInvoice\Service\Migration\Premier;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PremierImportRepository;
-use MyInvoice\Service\Migration\Pohoda\PartnerImporter as PohodaPartners;
+use MyInvoice\Service\Migration\Shared\PartnerIdentityMatcher;
 use PDO;
 
 /**
@@ -16,6 +16,9 @@ use PDO;
  * a u existující karty jen doplní chybějící údaje. Vlastní firma se přeskakuje. Doklad
  * s partnerem mimo adresář (PREMIER drží na dokladu kopii adresy) partnera založí
  * z údajů dokladu ({@see resolvePartner()}).
+ *
+ * Normalizace IČO/DIČ a párování na existující kontakt jsou společné všem převodům
+ * ({@see PartnerIdentityMatcher}).
  *
  * Stát: ISO kód z karty (`KOD_ZEME`), jinak předpona DIČ, jinak název státu (PREMIER
  * ho na dokladu drží textem - „Česká republika", „United States").
@@ -39,6 +42,7 @@ final class PartnerImporter
     public function __construct(
         private readonly Connection $db,
         private readonly PremierImportRepository $map,
+        private readonly PartnerIdentityMatcher $identity,
     ) {}
 
     public function import(PremierContext $ctx): void
@@ -66,7 +70,7 @@ final class PartnerImporter
             }
             if ($s['ico'] !== '' && isset($ctx->clientsByIco[$s['ico']])) {
                 $clientId = $ctx->clientsByIco[$s['ico']];
-                $this->fillMissing($ctx->supplierId, $clientId, $s);
+                $this->identity->fillMissing($ctx->supplierId, $clientId, $s);
                 $this->map->put($ctx->supplierId, PremierImportRepository::KIND_CLIENT_MATCH, $key, $clientId, $ctx->runId);
                 $p->count(self::STEP, 'matched');
             } else {
@@ -97,19 +101,17 @@ final class PartnerImporter
             return $ctx->clientsByIco[$s['ico']];
         }
         $name = $s['name'] !== '' ? $s['name'] : 'Neznámý partner z PREMIER';
-        $key = $s['ico'] !== '' ? 'ico:' . $s['ico'] : 'name:' . mb_strtolower($name);
+        $key = PartnerIdentityMatcher::documentKey($s['ico'], $name);
         $mapped = $this->map->get($ctx->supplierId, PremierImportRepository::KIND_CLIENT, $key)
             ?? $this->map->get($ctx->supplierId, PremierImportRepository::KIND_CLIENT_MATCH, $key);
         if ($mapped !== null) {
             return $mapped;
         }
         if ($s['ico'] === '') {
-            $stmt = $this->db->pdo()->prepare('SELECT id FROM clients WHERE supplier_id = ? AND company_name = ? AND archived_at IS NULL ORDER BY id LIMIT 1');
-            $stmt->execute([$ctx->supplierId, mb_substr($name, 0, 190)]);
-            $found = $stmt->fetchColumn();
-            if ($found !== false) {
-                $this->map->put($ctx->supplierId, PremierImportRepository::KIND_CLIENT_MATCH, $key, (int) $found, $ctx->runId);
-                return (int) $found;
+            $found = $this->identity->clientByName($ctx->supplierId, mb_substr($name, 0, 190));
+            if ($found !== null) {
+                $this->map->put($ctx->supplierId, PremierImportRepository::KIND_CLIENT_MATCH, $key, $found, $ctx->runId);
+                return $found;
             }
         }
         $clientId = $this->insertClient($ctx, $s + ['name' => $name, 'email' => '', 'phone' => '', 'note' => 'Převzato z PREMIER (podle dokladu)']);
@@ -138,7 +140,7 @@ final class PartnerImporter
             'premier_id' => trim((string) ($h['ID_PAR'] ?? '')),
             'premier_no' => $number,
             'name' => $name !== '' ? $name : ($card['name'] ?? ''),
-            'ico' => PohodaPartners::ico((string) ($h['ICO_ODB'] ?? '')),
+            'ico' => PartnerIdentityMatcher::ico((string) ($h['ICO_ODB'] ?? '')),
             'dic' => $dic !== '' ? $dic : ($euDic !== '' ? $euDic : ''),
             'street' => trim((string) ($h['ULICE_ODB'] ?? '')),
             'city' => trim((string) ($h['MESTO_ODB'] ?? '')),
@@ -165,7 +167,7 @@ final class PartnerImporter
         if (preg_match('/^[A-Z]{2}$/', $cardIso) === 1) {
             return $cardIso;
         }
-        $vat = PohodaPartners::vatId($dic);
+        $vat = PartnerIdentityMatcher::vatId($dic);
         if ($vat !== '') {
             $prefix = substr($vat, 0, 2);
             return $prefix === 'EL' ? 'GR' : $prefix;
@@ -200,7 +202,7 @@ final class PartnerImporter
             'premier_id' => trim((string) ($r['ID'] ?? '')),
             'premier_no' => $number,
             'name' => trim((string) ($r['NAZEV'] ?? '')),
-            'ico' => PohodaPartners::ico((string) ($r['ICO'] ?? '')),
+            'ico' => PartnerIdentityMatcher::ico((string) ($r['ICO'] ?? '')),
             'dic' => $dic,
             'street' => trim((string) ($r['ULICE'] ?? '')),
             'city' => trim((string) ($r['MESTO'] ?? '')),
@@ -228,13 +230,8 @@ final class PartnerImporter
 
     private function loadClientIndex(PremierContext $ctx): void
     {
-        $stmt = $this->db->pdo()->prepare("SELECT id, ic FROM clients WHERE supplier_id = ? AND ic IS NOT NULL AND ic <> '' AND archived_at IS NULL ORDER BY id");
-        $stmt->execute([$ctx->supplierId]);
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $ico = PohodaPartners::ico((string) $row['ic']);
-            if ($ico !== '') {
-                $ctx->clientsByIco[$ico] ??= (int) $row['id'];
-            }
+        foreach ($this->identity->clientsByIco($ctx->supplierId) as $ico => $clientId) {
+            $ctx->clientsByIco[$ico] ??= $clientId;
         }
     }
 
@@ -242,7 +239,7 @@ final class PartnerImporter
     private function insertClient(PremierContext $ctx, array $s): int
     {
         $defaults = $this->defaults($ctx->supplierId);
-        $dic = PohodaPartners::vatId($s['dic']);
+        $dic = PartnerIdentityMatcher::vatId($s['dic']);
         $countryId = $this->countryId($s['country']) ?? $defaults['country_id'];
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -266,33 +263,6 @@ final class PartnerImporter
             (string) ($s['note'] ?? 'Převzato z PREMIER'),
         ]);
         return (int) $pdo->lastInsertId();
-    }
-
-    /** @param array{dic:string,street:string,city:string,zip:string,email:string,phone:string} $s */
-    private function fillMissing(int $supplierId, int $clientId, array $s): void
-    {
-        $dic = PohodaPartners::vatId($s['dic']);
-        $this->db->pdo()->prepare(
-            "UPDATE clients SET
-                dic = COALESCE(NULLIF(dic, ''), ?),
-                is_vat_payer = IF(? IS NOT NULL, 1, is_vat_payer),
-                street = IF(street IS NULL OR street IN ('', '-'), COALESCE(?, street), street),
-                city = IF(city IS NULL OR city IN ('', '-'), COALESCE(?, city), city),
-                zip = IF(zip IS NULL OR zip IN ('', '-'), COALESCE(?, zip), zip),
-                main_email = COALESCE(NULLIF(main_email, ''), ?),
-                phone = COALESCE(NULLIF(phone, ''), ?)
-              WHERE id = ? AND supplier_id = ?"
-        )->execute([
-            $dic !== '' ? $dic : null,
-            $dic !== '' ? $dic : null,
-            $s['street'] !== '' ? mb_substr($s['street'], 0, 190) : null,
-            $s['city'] !== '' ? mb_substr($s['city'], 0, 120) : null,
-            $s['zip'] !== '' ? mb_substr($s['zip'], 0, 10) : null,
-            $s['email'] !== '' ? mb_substr($s['email'], 0, 190) : null,
-            $s['phone'] !== '' ? mb_substr($s['phone'], 0, 40) : null,
-            $clientId,
-            $supplierId,
-        ]);
     }
 
     private function countryId(string $iso2): ?int
