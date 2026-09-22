@@ -747,7 +747,8 @@ final class SyntheticPremierBackup
         $averages = [];
         foreach (range(1, 12) as $m) {
             $quarter = (int) ceil($m / 3);
-            $from = $quarter === 1 ? '2024-10-01' : sprintf('2025-%02d-01', ($quarter - 2) * 3 + 1);
+            // Pravděpodobný výdělek nástupce (Q1) PREMIER vede bez rozhodného období: od > do.
+            $from = $quarter === 1 ? '2025-01-01' : sprintf('2025-%02d-01', ($quarter - 2) * 3 + 1);
             $to = $quarter === 1 ? '2024-12-31' : date('Y-m-t', (int) strtotime(sprintf('2025-%02d-01', ($quarter - 1) * 3)));
             $averages[] = ['XNINTER' => 5, 'XN_MES' => $m, 'XN_ROK' => 2025, 'XN_PRDO' => $quarter === 1 ? 180.5 : 190.25, 'XN_DRUH' => $quarter === 1 ? 'P' : 'R',
                 'XROZOBDOD' => $from, 'XROZOBDDO' => $to, 'XVYM_DOV' => $quarter === 1 ? 0 : 90000, 'XHOD_SPL' => $quarter === 1 ? 0 : 480, 'ID' => "PR5-{$m}"];

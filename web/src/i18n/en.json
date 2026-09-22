@@ -27013,6 +27013,7 @@
       "pensioners_without_discount": "pensioners without a claimed discount",
       "institution_accounts": "institution accounts",
       "averages": "average earnings",
+      "averages_default_period": "averages with a completed decisive period",
       "absences": "absences",
       "absences_approved": "approved absences",
       "absences_existing": "absences already recorded",

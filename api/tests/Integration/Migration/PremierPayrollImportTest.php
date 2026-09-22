@@ -381,6 +381,9 @@ final class PremierPayrollImportTest extends TestCase
             $this->fetch("SELECT s.applicable_year, s.applicable_quarter, s.average_hourly_minor FROM payroll_average_earning_snapshots s
                 JOIN payroll_employments e ON e.id = s.employment_id WHERE e.supplier_id = ? AND e.code = '5' AND s.status = 'approved'
                 ORDER BY s.applicable_year, s.applicable_quarter", $supplierId), $this->explain($protocol));
+        self::assertSame([['2024-10-01', '2024-12-31']], $this->fetch("SELECT s.decisive_from, s.decisive_to FROM payroll_average_earning_snapshots s
+            JOIN payroll_employments e ON e.id = s.employment_id WHERE e.supplier_id = ? AND e.code = '5' AND s.applicable_quarter = 1", $supplierId),
+            'Pravděpodobný výdělek bez rozhodného období ve zdroji dostane předchozí čtvrtletí.');
         self::assertSame([['2025', 'carryover', '9300']], $this->fetch("SELECT l.leave_year, l.entry_type, l.minutes_delta FROM payroll_leave_ledger l
             JOIN payroll_employments e ON e.id = l.employment_id WHERE e.supplier_id = ? AND e.code = '5' AND l.entry_type = 'carryover'", $supplierId));
         self::assertContains('leave_carryover', $this->messageCodes($protocol));

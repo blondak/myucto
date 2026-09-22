@@ -229,6 +229,7 @@ final class PayrollTakeoverEmploymentWriter
             return [];
         }
         $written = 0;
+        $defaultPeriod = 0;
         foreach ($averages as $average) {
             $hourlyMinor = (int) round(((float) $average['hourly']) * 100);
             if ($hourlyMinor <= 0) {
@@ -237,6 +238,17 @@ final class PayrollTakeoverEmploymentWriter
             $quarterStart = sprintf('%04d-%02d-01', (int) $average['year'], ((int) $average['quarter'] - 1) * 3 + 1);
             if ($this->averages->findApproved($supplierId, $employmentId, (int) $average['year'], (int) $average['quarter']) !== null) {
                 continue;
+            }
+            // Pravděpodobný výdělek nástupce zdroj vede bez rozhodného období (od > do).
+            // Snímek ho vyžaduje, proto se doplní předchozí kalendářní čtvrtletí (§ 354 ZP),
+            // jak ho u pravděpodobného výdělku bere i výpočet v aplikaci.
+            $from = (string) $average['from'];
+            $to = (string) $average['to'];
+            if ($from === '' || $to === '' || $to < $from) {
+                $previous = (new \DateTimeImmutable($quarterStart))->modify('-3 months');
+                $from = $previous->format('Y-m-d');
+                $to = $previous->modify('+2 months')->format('Y-m-t');
+                $defaultPeriod++;
             }
             // `probable`, ne `actual`: rozhodné období leží před převodem a jeho odpracované
             // hodiny a dny zdroj nenese. Hodnota je ta, se kterou zdroj počítal náhrady.
@@ -249,8 +261,8 @@ final class PayrollTakeoverEmploymentWriter
                 $employmentId,
                 (int) $average['year'],
                 (int) $average['quarter'],
-                (string) $average['from'],
-                (string) $average['to'],
+                $from,
+                $to,
                 (int) round(((float) $average['gross']) * 100),
                 0,
                 (int) round(((float) $average['worked']) * 60),
@@ -263,7 +275,8 @@ final class PayrollTakeoverEmploymentWriter
             $this->averages->approve($supplierId, (int) $snapshot['id'], (int) $snapshot['row_version'], $userId);
             $written++;
         }
-        return $written > 0 ? ['averages' => $written] : [];
+        $counts = $written > 0 ? ['averages' => $written] : [];
+        return $defaultPeriod > 0 ? $counts + ['averages_default_period' => $defaultPeriod] : $counts;
     }
 
     /**
