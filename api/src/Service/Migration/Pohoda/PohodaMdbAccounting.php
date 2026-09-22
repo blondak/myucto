@@ -221,6 +221,15 @@ final class PohodaMdbAccounting
             'liquidation' => ['amountHome' => $r['KcLikv'] ?? '0', 'date' => $this->date($r, 'DatLikv')],
             'note' => $r['Pozn'] ?? '',
         ];
+        // Režim OSS dokladu (FA.MOSS = stát spotřeby, FA.MOSSDukaz = doklady prokazující
+        // stát) ve stejných elementech jako XML POHODY. Prázdné se vynechává stejně jako
+        // v XML - převod podle toho pozná doklad, který POHODA v OSS nevede.
+        if ($prefix === 'invoice' && trim($r['MOSS'] ?? '') !== '') {
+            $h['MOSS'] = ['ids' => trim($r['MOSS'])];
+            if (trim($r['MOSSDukaz'] ?? '') !== '') {
+                $h['evidentiaryResourcesMOSS'] = ['ids' => trim($r['MOSSDukaz'])];
+            }
+        }
         $d = [$prefix . 'Header' => $h, $prefix . 'Summary' => ['homeCurrency' => $this->summary($r)]];
         if ($prefix !== 'invoice') {
             unset($d[$prefix . 'Header']['liquidation']);
@@ -335,7 +344,7 @@ final class PohodaMdbAccounting
         if ($rate === null) {
             throw new PohodaException('mdb_item_vat', 'Sazbu položky z MDB nelze bezpečně určit. Použijte standardní XML export.');
         }
-        return [
+        $item = [
             'id' => $r['ID'],
             'text' => $r['SText'] ?? '',
             'quantity' => $r['Mnozstvi'] ?? '1',
@@ -344,6 +353,23 @@ final class PohodaMdbAccounting
             'homeCurrency' => ['unitPrice' => $r['KcJedn'] ?? '0', 'price' => $r['Kc'] ?? '0', 'priceVAT' => $r['KcDPH'] ?? '0', 'priceSum' => (string) ((float) ($r['Kc'] ?? 0) + (float) ($r['KcDPH'] ?? 0))],
             'classificationVAT' => $this->reference('sDPH', $r['RelTpDPH'] ?? ''),
         ];
+        // Stejné elementy jako XML POHODY, ať převod z obou zdrojů skončí v téže logice:
+        // skutečné procento sazby, typ plnění OSS a částky položky v cizí měně dokladu.
+        if (($r['ProcentoDPH'] ?? '') !== '') {
+            $item['percentVAT'] = $r['ProcentoDPH'];
+        }
+        if (trim($r['MOSSDruh'] ?? '') !== '') {
+            $item['typeServiceMOSS'] = ['ids' => trim($r['MOSSDruh'])];
+        }
+        if ($this->lookup('sCMeny', $header['RefCM'] ?? '') !== [] && is_numeric($r['Cm'] ?? '') && is_numeric($r['CmDPH'] ?? '')) {
+            $item['foreignCurrency'] = [
+                'unitPrice' => $r['CmJedn'] ?? '0',
+                'price' => $r['Cm'],
+                'priceVAT' => $r['CmDPH'],
+                'priceSum' => (string) ((float) $r['Cm'] + (float) $r['CmDPH']),
+            ];
+        }
+        return $item;
     }
 
     private function identity(array $r): array
