@@ -22388,6 +22388,17 @@
     "inv": "Inv. no.",
     "name": "Name",
     "tax_residual": "Tax residual",
+    "book_residual": "Book residual",
+    "residual_unknown": "unknown",
+    "residual_source": {
+      "disposal_entry": "disposal entry",
+      "card": "from card",
+      "tax_entries": "tax depreciation",
+      "by_accounting": "= book",
+      "non_depreciable": "input price",
+      "opening": "opening balance",
+      "unknown": "enter manually"
+    },
     "deductibility": "Deductibility",
     "fo_s7_income": "§7 income",
     "fo_s7_expenses": "§7 expenses",

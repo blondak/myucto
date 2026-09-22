@@ -22388,6 +22388,17 @@
     "inv": "Inv. č.",
     "name": "Název",
     "tax_residual": "Daňová ZC",
+    "book_residual": "Účetní ZC",
+    "residual_unknown": "neznámá",
+    "residual_source": {
+      "disposal_entry": "zápis vyřazení",
+      "card": "z karty",
+      "tax_entries": "daňové odpisy",
+      "by_accounting": "= účetní",
+      "non_depreciable": "vstupní cena",
+      "opening": "počáteční stav",
+      "unknown": "doplňte ručně"
+    },
     "deductibility": "Uznatelnost",
     "fo_s7_income": "Příjmy §7",
     "fo_s7_expenses": "Výdaje §7",
