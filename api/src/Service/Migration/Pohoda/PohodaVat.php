@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Pohoda;
 
+use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier as Lines;
+
 /**
  * Členění DPH z Pohody převedené na zařazení dokladu v MyÚčtu.
  *
@@ -23,6 +25,9 @@ namespace MyInvoice\Service\Migration\Pohoda;
  *
  * Členění jiných řádků (dovoz ř. 42, insolvence, nedobytné pohledávky, vrácená daň…)
  * převod nezařazuje a doklad nechá jako koncept k ruční kontrole.
+ *
+ * Význam řádků drží {@see Lines}. Pohoda ale řádky vede jako celé dvojice (`1,2`,
+ * `40,41`, `3,4`), takže se tu páruje přesná sada řádků, ne množina jako u PREMIER.
  */
 final class PohodaVat
 {
@@ -71,26 +76,18 @@ final class PohodaVat
         if ($lines === []) {
             return ['in_return' => false, 'code' => null];
         }
-        $mapped = match ($lines) {
-            [1, 2] => ['in_return' => true, 'code' => null],
-            [1, 2, 51] => match (true) {
-                abs($rate - 21.0) < 0.01 => ['in_return' => true, 'code' => '1m'],
-                abs($rate - 12.0) < 0.01 => ['in_return' => true, 'code' => '2m'],
-                default => null,
-            },
-            [20] => ['in_return' => true, 'code' => '20'],
-            [21] => ['in_return' => true, 'code' => '22'],
-            [22] => ['in_return' => true, 'code' => '26'],
-            [23] => ['in_return' => true, 'code' => '23n'],
-            [24] => ['in_return' => true, 'code' => '24z'],
-            [25] => ['in_return' => true, 'code' => '25s'],
-            [26] => ['in_return' => true, 'code' => '26s'],
-            [31] => ['in_return' => true, 'code' => '31'],
-            [50] => ['in_return' => true, 'code' => '3'],
-            [50, 51] => ['in_return' => true, 'code' => '3m'],
+        if ($lines === Lines::DOMESTIC_OUTPUT) {
+            return ['in_return' => true, 'code' => null];
+        }
+        $target = match (true) {
+            // Pohoda prodej majetku nevede sazbou číselníku: kód jen u aktuální sazby.
+            $lines === [...Lines::DOMESTIC_OUTPUT, Lines::OUTSIDE_COEFFICIENT] => Lines::assetSaleCode($rate),
+            $lines === [Lines::EXEMPT, Lines::OUTSIDE_COEFFICIENT] => Lines::EXEMPT_OUTSIDE_COEFFICIENT_CODE,
+            // Členění Pohody předmět plnění ř. 25 nenese - platí výchozí 4 (stavební práce).
+            count($lines) === 1 => Lines::saleCode($lines[0]),
             default => null,
         };
-        return $mapped;
+        return $target === null ? null : ['in_return' => true, 'code' => $target];
     }
 
     /**
@@ -112,8 +109,8 @@ final class PohodaVat
         }
         $deduction = str_starts_with($code, 'PK') ? 'reduced' : 'full';
         return match ($lines) {
-            [40, 41], [40, 41, 47] => ['in_return' => true, 'deduction' => $deduction, 'reverse' => false],
-            [43, 44], [43, 44, 47] => ['in_return' => true, 'deduction' => $deduction, 'reverse' => true],
+            Lines::DOMESTIC_DEDUCTION, [...Lines::DOMESTIC_DEDUCTION, Lines::FIXED_ASSET] => ['in_return' => true, 'deduction' => $deduction, 'reverse' => false],
+            Lines::SELF_ASSESSMENT_DEDUCTION, [...Lines::SELF_ASSESSMENT_DEDUCTION, Lines::FIXED_ASSET] => ['in_return' => true, 'deduction' => $deduction, 'reverse' => true],
             default => null,
         };
     }
@@ -135,14 +132,7 @@ final class PohodaVat
      */
     public function selfAssessmentCode(string $code): ?string
     {
-        return match ($this->classes[$code]['lines'] ?? null) {
-            [3, 4] => '23',
-            [5, 6] => '24e',
-            [7, 8] => '25',
-            [10, 11] => '5',
-            [12, 13] => '24',
-            default => null,
-        };
+        return Lines::selfAssessmentCodeForPair($this->classes[$code]['lines'] ?? null);
     }
 
     /** @return list<int> */

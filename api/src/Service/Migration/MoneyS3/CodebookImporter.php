@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Geo\CountryNameMatcher;
+use MyInvoice\Service\Migration\Shared\PartnerIdentityMatcher;
 use PDO;
 
 /**
@@ -15,7 +16,9 @@ use PDO;
  * (`UcPrKont`).
  *
  * Partner se stejným IČO, který už ve firmě je, se použije — převod nezakládá druhého.
- * Vlastní firma (Money ji má v adresáři jako záznam č. 1) se přeskakuje.
+ * Vlastní firma (Money ji má v adresáři jako záznam č. 1) se přeskakuje. Normalizace
+ * IČO/DIČ a párování na existující kontakt jsou společné všem převodům
+ * ({@see PartnerIdentityMatcher}).
  *
  * Předkontace se přenáší jako `posting_rules` s klíčem = zkratka z Money. Pokladní
  * doklad si ji nese v `rule_key`, takže je na čem stavět automatické účtování dalších
@@ -30,6 +33,7 @@ final class CodebookImporter
         private readonly Connection $db,
         private readonly ClientBankAccountRepository $bankAccounts,
         private readonly MoneyS3ImportRepository $map,
+        private readonly PartnerIdentityMatcher $identity,
     ) {}
 
     public function importPartners(ImportContext $ctx): void
@@ -70,7 +74,7 @@ final class CodebookImporter
                 ];
                 if ($ico !== '' && isset($ctx->clientsByIco[$ico])) {
                     $clientId = $ctx->clientsByIco[$ico];
-                    $this->fillMissing($ctx->supplierId, $clientId, $data);
+                    $this->identity->fillMissing($ctx->supplierId, $clientId, $data);
                     $p->count(self::STEP_PARTNERS, 'matched');
                 } else {
                     $clientId = $this->insertClient($ctx, $data, $defaults);
@@ -122,20 +126,17 @@ final class CodebookImporter
             return $ctx->clientsByIco[$ico];
         }
         $name = trim($snapshot['name']) !== '' ? trim($snapshot['name']) : 'Neznámý partner z Money S3';
-        $key = $ico !== '' ? 'ico:' . $ico : 'name:' . mb_strtolower($name);
+        $key = PartnerIdentityMatcher::documentKey($ico, $name);
         $mapped = $this->map->get($ctx->supplierId, MoneyS3ImportRepository::KIND_CLIENT, $key);
         if ($mapped !== null) {
             return $mapped;
         }
         if ($ico === '') {
-            $stmt = $this->db->pdo()->prepare(
-                'SELECT id FROM clients WHERE supplier_id = ? AND company_name = ? AND archived_at IS NULL ORDER BY id LIMIT 1'
-            );
-            $stmt->execute([$ctx->supplierId, $name]);
-            $found = $stmt->fetchColumn();
-            if ($found !== false) {
-                $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_CLIENT, $key, (int) $found, $ctx->runId);
-                return (int) $found;
+            // Název se na rozdíl od Pohody a PREMIER nezkracuje na délku sloupce (190).
+            $found = $this->identity->clientByName($ctx->supplierId, $name);
+            if ($found !== null) {
+                $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_CLIENT, $key, $found, $ctx->runId);
+                return $found;
             }
         }
         $clientId = $this->insertClient($ctx, $snapshot + ['email' => '', 'phone' => '', 'note' => 'Převzato z Money S3 (podle dokladu)'], $this->defaults($ctx->supplierId));
@@ -242,13 +243,8 @@ final class CodebookImporter
 
     private function loadClientIndex(ImportContext $ctx): void
     {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT id, ic FROM clients WHERE supplier_id = ? AND ic IS NOT NULL AND ic <> '' AND archived_at IS NULL ORDER BY id"
-        );
-        $stmt->execute([$ctx->supplierId]);
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $ico = self::ico((string) $row['ic']);
-            $ctx->clientsByIco[$ico] ??= (int) $row['id'];
+        foreach ($this->identity->clientsByIco($ctx->supplierId) as $ico => $clientId) {
+            $ctx->clientsByIco[$ico] ??= $clientId;
         }
     }
 
@@ -357,7 +353,7 @@ final class CodebookImporter
     /** IČO v kanonickém tvaru (8 číslic): Money vede tentýž subjekt jednou s vodicí nulou a jednou bez ní. */
     public static function ico(string $ico): string
     {
-        return \MyInvoice\Support\CompanyIdNormalizer::ic($ico) ?? '';
+        return PartnerIdentityMatcher::ico($ico);
     }
 
     /**
@@ -366,40 +362,6 @@ final class CodebookImporter
      */
     private static function vatId(string $dic): string
     {
-        $clean = \MyInvoice\Support\CompanyIdNormalizer::dic($dic) ?? '';
-        return preg_match('/^[A-Z]{2}(?=[0-9A-Z]*\d)[0-9A-Z]{2,13}$/', $clean) === 1 ? $clean : '';
-    }
-
-    /**
-     * Druhý záznam adresáře Money se stejným IČO: karta už existuje, doplní se jen
-     * údaje, které na ní chybějí (DIČ, adresa, e-mail, telefon). Nic se nepřepisuje.
-     *
-     * @param array{dic:string,street:string,city:string,zip:string,email:string,phone:string} $data
-     */
-    private function fillMissing(int $supplierId, int $clientId, array $data): void
-    {
-        $dic = self::vatId($data['dic']);
-        $zip = str_replace(' ', '', $data['zip']);
-        $this->db->pdo()->prepare(
-            "UPDATE clients SET
-                dic = COALESCE(NULLIF(dic, ''), ?),
-                is_vat_payer = IF(? IS NOT NULL, 1, is_vat_payer),
-                street = IF(street IS NULL OR street IN ('', '-'), COALESCE(?, street), street),
-                city = IF(city IS NULL OR city IN ('', '-'), COALESCE(?, city), city),
-                zip = IF(zip IS NULL OR zip IN ('', '-'), COALESCE(?, zip), zip),
-                main_email = COALESCE(NULLIF(main_email, ''), ?),
-                phone = COALESCE(NULLIF(phone, ''), ?)
-              WHERE id = ? AND supplier_id = ?"
-        )->execute([
-            $dic !== '' ? mb_substr($dic, 0, 20) : null,
-            $dic !== '' ? $dic : null,
-            $data['street'] !== '' ? mb_substr($data['street'], 0, 190) : null,
-            $data['city'] !== '' ? mb_substr($data['city'], 0, 120) : null,
-            $zip !== '' ? mb_substr($zip, 0, 10) : null,
-            $data['email'] !== '' ? mb_substr($data['email'], 0, 190) : null,
-            $data['phone'] !== '' ? mb_substr($data['phone'], 0, 40) : null,
-            $clientId,
-            $supplierId,
-        ]);
+        return PartnerIdentityMatcher::vatId($dic);
     }
 }

@@ -7,7 +7,7 @@ namespace MyInvoice\Service\Migration\Pohoda;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\AccountCode;
-use MyInvoice\Support\CompanyIdNormalizer;
+use MyInvoice\Service\Migration\Shared\PartnerIdentityMatcher;
 use PDO;
 
 /**
@@ -17,6 +17,9 @@ use PDO;
  * a u existující karty jen doplní chybějící údaje. Vlastní firma se přeskakuje.
  * Doklad s partnerem mimo adresář (Pohoda drží na dokladu kopii adresy) partnera založí
  * z údajů dokladu ({@see resolvePartner()}).
+ *
+ * Normalizace IČO/DIČ a párování na existující kontakt jsou společné všem převodům
+ * ({@see PartnerIdentityMatcher}).
  *
  * Předkontace jdou do `posting_rules` s klíčem = zkratka z Pohody. Na rozdíl od deníku
  * mají v seznamu předkontací strany pojmenované normálně (`debit` = MD, `credit` = Dal).
@@ -35,6 +38,7 @@ final class PartnerImporter
     public function __construct(
         private readonly Connection $db,
         private readonly PohodaImportRepository $map,
+        private readonly PartnerIdentityMatcher $identity,
     ) {}
 
     public function importPartners(PohodaContext $ctx): void
@@ -67,7 +71,7 @@ final class PartnerImporter
             $s['note'] = 'Převzato z Pohody (adresář č. ' . $id . ')';
             if ($s['ico'] !== '' && isset($ctx->clientsByIco[$s['ico']])) {
                 $clientId = $ctx->clientsByIco[$s['ico']];
-                $this->fillMissing($ctx->supplierId, $clientId, $s);
+                $this->identity->fillMissing($ctx->supplierId, $clientId, $s);
                 $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_CLIENT_MATCH, $key, $clientId, $ctx->runId);
                 $p->count(self::STEP_PARTNERS, 'matched');
             } else {
@@ -98,19 +102,17 @@ final class PartnerImporter
             return $ctx->clientsByIco[$s['ico']];
         }
         $name = $s['name'] !== '' ? $s['name'] : 'Neznámý partner z Pohody';
-        $key = $s['ico'] !== '' ? 'ico:' . $s['ico'] : 'name:' . mb_strtolower($name);
+        $key = PartnerIdentityMatcher::documentKey($s['ico'], $name);
         $mapped = $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CLIENT, $key)
             ?? $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CLIENT_MATCH, $key);
         if ($mapped !== null) {
             return $mapped;
         }
         if ($s['ico'] === '') {
-            $stmt = $this->db->pdo()->prepare('SELECT id FROM clients WHERE supplier_id = ? AND company_name = ? AND archived_at IS NULL ORDER BY id LIMIT 1');
-            $stmt->execute([$ctx->supplierId, mb_substr($name, 0, 190)]);
-            $found = $stmt->fetchColumn();
-            if ($found !== false) {
-                $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_CLIENT_MATCH, $key, (int) $found, $ctx->runId);
-                return (int) $found;
+            $found = $this->identity->clientByName($ctx->supplierId, mb_substr($name, 0, 190));
+            if ($found !== null) {
+                $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_CLIENT_MATCH, $key, $found, $ctx->runId);
+                return $found;
             }
         }
         $clientId = $this->insertClient($ctx, $s + ['name' => $name, 'email' => '', 'phone' => '', 'note' => 'Převzato z Pohody (podle dokladu)']);
@@ -202,14 +204,13 @@ final class PartnerImporter
     /** IČO v kanonickém tvaru (8 číslic) - Pohoda vede tentýž subjekt i bez vodicí nuly. */
     public static function ico(string $ico): string
     {
-        return CompanyIdNormalizer::ic($ico) ?? '';
+        return PartnerIdentityMatcher::ico($ico);
     }
 
     /** DIČ, jen když má tvar DIČ (kód státu a aspoň jedna číslice). */
     public static function vatId(string $dic): string
     {
-        $clean = CompanyIdNormalizer::dic($dic) ?? '';
-        return preg_match('/^[A-Z]{2}(?=[0-9A-Z]*\d)[0-9A-Z]{2,13}$/', $clean) === 1 ? $clean : '';
+        return PartnerIdentityMatcher::vatId($dic);
     }
 
     private function knownAccount(PohodaContext $ctx, string $code): ?string
@@ -220,13 +221,8 @@ final class PartnerImporter
 
     private function loadClientIndex(PohodaContext $ctx): void
     {
-        $stmt = $this->db->pdo()->prepare("SELECT id, ic FROM clients WHERE supplier_id = ? AND ic IS NOT NULL AND ic <> '' AND archived_at IS NULL ORDER BY id");
-        $stmt->execute([$ctx->supplierId]);
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $ico = self::ico((string) $row['ic']);
-            if ($ico !== '') {
-                $ctx->clientsByIco[$ico] ??= (int) $row['id'];
-            }
+        foreach ($this->identity->clientsByIco($ctx->supplierId) as $ico => $clientId) {
+            $ctx->clientsByIco[$ico] ??= $clientId;
         }
     }
 
@@ -261,33 +257,6 @@ final class PartnerImporter
             $s['note'],
         ]);
         return (int) $pdo->lastInsertId();
-    }
-
-    /** @param array{dic:string,street:string,city:string,zip:string,email:string,phone:string} $s */
-    private function fillMissing(int $supplierId, int $clientId, array $s): void
-    {
-        $dic = self::vatId($s['dic']);
-        $this->db->pdo()->prepare(
-            "UPDATE clients SET
-                dic = COALESCE(NULLIF(dic, ''), ?),
-                is_vat_payer = IF(? IS NOT NULL, 1, is_vat_payer),
-                street = IF(street IS NULL OR street IN ('', '-'), COALESCE(?, street), street),
-                city = IF(city IS NULL OR city IN ('', '-'), COALESCE(?, city), city),
-                zip = IF(zip IS NULL OR zip IN ('', '-'), COALESCE(?, zip), zip),
-                main_email = COALESCE(NULLIF(main_email, ''), ?),
-                phone = COALESCE(NULLIF(phone, ''), ?)
-              WHERE id = ? AND supplier_id = ?"
-        )->execute([
-            $dic !== '' ? $dic : null,
-            $dic !== '' ? $dic : null,
-            $s['street'] !== '' ? mb_substr($s['street'], 0, 190) : null,
-            $s['city'] !== '' ? mb_substr($s['city'], 0, 120) : null,
-            $s['zip'] !== '' ? mb_substr($s['zip'], 0, 10) : null,
-            $s['email'] !== '' ? mb_substr($s['email'], 0, 190) : null,
-            $s['phone'] !== '' ? mb_substr($s['phone'], 0, 40) : null,
-            $clientId,
-            $supplierId,
-        ]);
     }
 
     private function countryId(string $iso2): ?int
