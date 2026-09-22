@@ -50,6 +50,32 @@ final class CashJournalTaxProjectionIncomeTest extends CashJournalTestCase
         self::assertEqualsWithDelta(50.01, $profiles->monthExpenses($this->supplierId, self::YEAR . '-06', true), 0.001);
     }
 
+    public function testPaidCreditNoteExcludesItsVatFromTaxProfileIncomeAndExpense(): void
+    {
+        $this->saleInvoice($this->supplierId, [
+            'without' => 1000.0, 'with' => 1210.0,
+            'status' => 'paid', 'paid_at' => self::YEAR . '-06-15',
+        ]);
+        $this->saleInvoice($this->supplierId, [
+            'type' => 'credit_note', 'without' => -100.0, 'with' => -121.0,
+            'status' => 'paid', 'paid_at' => self::YEAR . '-06-20',
+        ]);
+        $this->purchaseInvoice($this->supplierId, [
+            'without' => 500.0, 'with' => 605.0,
+            'status' => 'paid', 'paid_at' => self::YEAR . '-06-15',
+        ]);
+        $this->purchaseInvoice($this->supplierId, [
+            'without' => -50.0, 'with' => -60.5,
+            'status' => 'paid', 'paid_at' => self::YEAR . '-06-20',
+        ]);
+
+        $profiles = $this->container->get(TaxProfileRepository::class);
+        self::assertEqualsWithDelta(900.0, $profiles->annualIncome($this->supplierId, self::YEAR, true), 0.001);
+        self::assertEqualsWithDelta(900.0, $profiles->monthlyIncome($this->supplierId, self::YEAR, true)[6], 0.001);
+        self::assertEqualsWithDelta(900.0, $profiles->monthIncome($this->supplierId, self::YEAR . '-06', true), 0.001);
+        self::assertEqualsWithDelta(450.0, $profiles->monthExpenses($this->supplierId, self::YEAR . '-06', true), 0.001);
+    }
+
     /** Virtuální noha C (úhrada bez importu výpisu) — CashJournalService::incomeAlloc(). */
     public function testProjectionIncomeExcludesExemptInvoiceOnVirtualLeg(): void
     {

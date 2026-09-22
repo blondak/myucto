@@ -130,12 +130,14 @@ final class TaxProfileRepository
 
     /**
      * Stejný rozpad jako peněžní deník: z uhrazeného brutto je průběžnou položkou
-     * jen uložená DPH. Zaokrouhlení zůstává v příjmu či výdaji.
+     * jen uložená DPH. Zaokrouhlení zůstává v příjmu či výdaji. Dobropis má záporné
+     * brutto i DPH, proto se DPH omezuje podle absolutní hodnoty a stejného znaménka.
      */
     private static function paidInvoiceBaseSql(string $alias, bool $isVatPayer): string
     {
         return $isVatPayer
-            ? "({$alias}.total_with_vat - GREATEST(0, LEAST({$alias}.total_vat, {$alias}.total_with_vat)))"
+            ? "({$alias}.total_with_vat - IF(SIGN({$alias}.total_vat) = SIGN({$alias}.total_with_vat),"
+                . " SIGN({$alias}.total_with_vat) * LEAST(ABS({$alias}.total_vat), ABS({$alias}.total_with_vat)), 0))"
             : "{$alias}.total_with_vat";
     }
 
