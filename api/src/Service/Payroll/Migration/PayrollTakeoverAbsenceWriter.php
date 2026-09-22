@@ -81,16 +81,23 @@ final class PayrollTakeoverAbsenceWriter
         if ($absences === []) {
             return $counts;
         }
-        $existing = $this->db->pdo()->prepare('SELECT COUNT(*) FROM payroll_absences WHERE supplier_id = ? AND employment_id = ?');
-        $existing->execute([$supplierId, $employmentId]);
-        if ((int) $existing->fetchColumn() > 0) {
-            return $counts + ['absences_existing' => 1];
+        if (!$policy->absencesPerRecord) {
+            $existing = $this->db->pdo()->prepare('SELECT COUNT(*) FROM payroll_absences WHERE supplier_id = ? AND employment_id = ?');
+            $existing->execute([$supplierId, $employmentId]);
+            if ((int) $existing->fetchColumn() > 0) {
+                return $counts + ['absences_existing' => 1];
+            }
         }
         $written = 0;
         $overlaps = 0;
         $approved = 0;
         $fromImport = 0;
+        $already = 0;
         foreach (self::mergedAbsences($absences, $overlaps) as $absence) {
+            if ($policy->absencesPerRecord && $this->recorded($supplierId, $employmentId, $absence)) {
+                $already++;
+                continue;
+            }
             // Měsíc, jehož docházku nese souhrn z importu, má tytéž hodiny i náhradu už z něj.
             // Zapsat k němu ještě nepřítomnost s daty znamená vést jeden údaj dvakrát a krácení
             // měsíční mzdy se pak neprovede vůbec: `PayrollWageProrationService` takový měsíc
@@ -148,7 +155,27 @@ final class PayrollTakeoverAbsenceWriter
         if ($fromImport > 0) {
             $counts['absences_from_import'] = $fromImport;
         }
+        if ($already > 0) {
+            $counts['absences_existing'] = $already;
+        }
         return $written > 0 ? $counts + ['absences' => $written] : $counts;
+    }
+
+    /**
+     * Je tatáž nepřítomnost (druh a data) u vztahu už zapsaná? Zrušená ani zamítnutá se
+     * nepočítá. Jen pro doplňování po záznamech ({@see PayrollTakeoverPolicy::$absencesPerRecord}).
+     *
+     * @param array<string,mixed> $absence
+     */
+    private function recorded(int $supplierId, int $employmentId, array $absence): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM payroll_absences
+              WHERE supplier_id = ? AND employment_id = ? AND absence_type = ? AND date_from = ? AND date_to = ?
+                AND status NOT IN ('cancelled', 'rejected') LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $employmentId, (string) $absence['type'], (string) $absence['from'], (string) $absence['to']]);
+        return $stmt->fetchColumn() !== false;
     }
 
     /**

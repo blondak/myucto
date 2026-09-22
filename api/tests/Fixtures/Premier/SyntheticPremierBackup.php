@@ -532,7 +532,9 @@ final class SyntheticPremierBackup
      *            úvazek 38,75 h týdně; formulář JMHZ za 1/2026 přijatý ČSSZ (OIČ, ID PPV,
      *            pracoviště Brno, druh činnosti 1), CZ-ISCO v `MZ_ISPV`, přijaté oznámení
      *            o nástupu ČSSZ (`MZ_PRISO`); výplatní účet se změnou 9/2025 (`MZ_PERH`), dítě
-     *            se zvýhodněním (`PER_DETI`, `MZ_DETI`) a dítě bez něj
+     *            se zvýhodněním (`PER_DETI`, `MZ_DETI`) a dítě bez něj; dovolená 8/2025 a pracovní
+     *            neschopnost od 10. 11. 2025 do 20. 1. 2026 (`DNY`, `MZ_HDPN`), stav dovolené
+     *            v hodinách (`DOV_DNY`), průměry čtvrtletí (`PER_PRU`)
      *   INTER 6  DPP 4-6/2025 (kategorie `DPP`), osoba s bydlištěm na Slovensku (stát názvem
      *            „Slovenská republika"); OIČ jen na kartě osoby (bez formuláře JMHZ), přijatá
      *            oznámení ČSSZ o nástupu i skončení; pobírá důchod (`MZ_DUCHOD`), výplata v hotovosti
@@ -687,6 +689,39 @@ final class SyntheticPremierBackup
             $months[] = [5, 2025, $m, $values];
         }
         $months[] = [5, 2026, 1, $employee(32000, 2272, 1440, 7936, 2880, 2230, '201')];
+        // Dovolená 4.-8. 8. 2025 (38,75 h) a pracovní neschopnost od 10. 11. 2025: náhrada (610),
+        // pak nemocenská (600) do konce roku; případ eNeschopenky končí 20. 1. 2026.
+        array_push($items,
+            self::item5(2025, 8, '500', 5400, ['DATUM_OD' => '2025-08-04', 'DATUM_DO' => '2025-08-08', 'HODINY' => 38.75, 'N_DNY' => 5, 'TYP' => 2]),
+            self::item5(2025, 11, '610', 4200, ['DATUM_OD' => '2025-11-10', 'DATUM_DO' => '2025-11-23', 'HODINY' => 69.75, 'N_DNY' => 14, 'TYP' => 3]),
+            self::item5(2025, 11, '600', 0, ['DATUM_OD' => '2025-11-24', 'DATUM_DO' => '2025-11-30', 'N_DNY' => 7, 'TYP' => 3]),
+            self::item5(2025, 12, '600', 0, ['DATUM_OD' => '2025-12-01', 'DATUM_DO' => '2025-12-31', 'N_DNY' => 31, 'TYP' => 3]),
+        );
+        $tables['MZ_HDPN'] = [[['INTER', 'N', 10], ['HDPN_OD', 'D'], ['HDPN_DO', 'D'], ['TYP_NP', 'C', 3], ['C_LISTKU', 'C', 20], ['ID', 'C', 36]],
+            [['INTER' => 5, 'HDPN_OD' => '2025-11-10', 'HDPN_DO' => '2026-01-20', 'TYP_NP' => 'DPN', 'C_LISTKU' => 'SYN-1', 'ID' => 'HD5']]];
+        // Stav dovolené v hodinách: nárok 193,75 h, do 12/2025 vyčerpáno 38,75 h.
+        $tables['DOV_DNY'] = [
+            [['INTER', 'N', 8], ['MESIC', 'N', 2], ['ROK', 'N', 4], ['ZUS_MINR', 'N', 9, 4], ['CERPANI', 'N', 9, 4], ['NAROK', 'N', 9, 4], ['CERPANO_R', 'N', 9, 4],
+                ['ZUST_MES', 'N', 11, 4], ['ID', 'C', 36]],
+            [
+                ['INTER' => 5, 'MESIC' => 8, 'ROK' => 2025, 'ZUS_MINR' => 0, 'CERPANI' => 38.75, 'NAROK' => 193.75, 'CERPANO_R' => 38.75, 'ZUST_MES' => 155, 'ID' => 'DD5-8'],
+                ['INTER' => 5, 'MESIC' => 12, 'ROK' => 2025, 'ZUS_MINR' => 0, 'CERPANI' => 0, 'NAROK' => 193.75, 'CERPANO_R' => 38.75, 'ZUST_MES' => 155, 'ID' => 'DD5-12'],
+            ],
+        ];
+        // Průměrný výdělek pro náhrady po měsících; ve čtvrtletí stejný.
+        $averages = [];
+        foreach (range(1, 12) as $m) {
+            $quarter = (int) ceil($m / 3);
+            $from = $quarter === 1 ? '2024-10-01' : sprintf('2025-%02d-01', ($quarter - 2) * 3 + 1);
+            $to = $quarter === 1 ? '2024-12-31' : date('Y-m-t', (int) strtotime(sprintf('2025-%02d-01', ($quarter - 1) * 3)));
+            $averages[] = ['XNINTER' => 5, 'XN_MES' => $m, 'XN_ROK' => 2025, 'XN_PRDO' => $quarter === 1 ? 180.5 : 190.25, 'XN_DRUH' => $quarter === 1 ? 'P' : 'R',
+                'XROZOBDOD' => $from, 'XROZOBDDO' => $to, 'XVYM_DOV' => $quarter === 1 ? 0 : 90000, 'XHOD_SPL' => $quarter === 1 ? 0 : 480, 'ID' => "PR5-{$m}"];
+        }
+        $tables['PER_PRU'] = [
+            [['XNINTER', 'N', 8], ['XN_MES', 'N', 2], ['XN_ROK', 'N', 4], ['XN_PRDO', 'N', 10, 4], ['XN_DRUH', 'C', 1], ['XROZOBDOD', 'D'], ['XROZOBDDO', 'D'],
+                ['XVYM_DOV', 'N', 12, 2], ['XHOD_SPL', 'N', 7, 2], ['ID', 'C', 36]],
+            $averages,
+        ];
         $tables['DNY'] = [
             [['INTER', 'N', 8], ['DATUM_OD', 'D'], ['DATUM_DO', 'D'], ['KOD', 'C', 3], ['HODINY', 'N', 8, 4], ['N_DNY', 'N', 5, 2], ['CASTKA', 'N', 14, 2],
                 ['SAZBA', 'N', 15, 4], ['SRA_INT', 'N', 10], ['DNY_ROK', 'N', 4], ['DNY_MES', 'N', 2], ['TYP', 'N', 2], ['KOD_BAZE', 'C', 3],

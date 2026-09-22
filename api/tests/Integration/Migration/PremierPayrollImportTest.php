@@ -362,6 +362,34 @@ final class PremierPayrollImportTest extends TestCase
         self::assertContains('institution_accounts_unconfirmed', $this->messageCodes($protocol));
     }
 
+    /**
+     * Časové evidence z PREMIER: nepřítomnosti s daty (neschopnost prodloužená do konce
+     * případu eNeschopenky), průměry čtvrtletí a zůstatek dovolené v hodinách. Opakovaný
+     * převod nic nezdvojí.
+     */
+    public function testAbsencesAveragesAndLeave(): void
+    {
+        $supplierId = $this->supplier(true);
+        $backup = $this->backup(['payroll' => true, 'payroll_detail' => true]);
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $absences = "SELECT a.absence_type, a.date_from, a.date_to, a.status FROM payroll_absences a JOIN payroll_employments e ON e.id = a.employment_id
+            WHERE e.supplier_id = ? AND e.code = '5' ORDER BY a.date_from";
+        self::assertSame([['vacation', '2025-08-04', '2025-08-08', 'approved'], ['dpn', '2025-11-10', '2026-01-20', 'approved']],
+            $this->fetch($absences, $supplierId), $this->explain($protocol));
+        self::assertSame([['2025', '1', '18050'], ['2025', '2', '19025'], ['2025', '3', '19025'], ['2025', '4', '19025']],
+            $this->fetch("SELECT s.applicable_year, s.applicable_quarter, s.average_hourly_minor FROM payroll_average_earning_snapshots s
+                JOIN payroll_employments e ON e.id = s.employment_id WHERE e.supplier_id = ? AND e.code = '5' AND s.status = 'approved'
+                ORDER BY s.applicable_year, s.applicable_quarter", $supplierId), $this->explain($protocol));
+        self::assertSame([['2025', 'carryover', '9300']], $this->fetch("SELECT l.leave_year, l.entry_type, l.minutes_delta FROM payroll_leave_ledger l
+            JOIN payroll_employments e ON e.id = l.employment_id WHERE e.supplier_id = ? AND e.code = '5' AND l.entry_type = 'carryover'", $supplierId));
+        self::assertContains('leave_carryover', $this->messageCodes($protocol));
+
+        $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertCount(2, $this->fetch($absences, $supplierId), 'Opakovaný převod nepřítomnosti nezdvojí.');
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);

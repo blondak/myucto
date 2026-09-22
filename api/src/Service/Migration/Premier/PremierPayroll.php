@@ -102,6 +102,7 @@ final class PremierPayroll
         }
         $registry = PremierPayrollRegistry::read($backup);
         $card = PremierPayrollPersonCard::read($backup);
+        $time = PremierPayrollTime::read($backup);
         $insurers = [];
         /** @var array<int,list<array{date:string,code:string,kind:string}>> $insurerEvents */
         $insurerEvents = [];
@@ -221,6 +222,10 @@ final class PremierPayroll
                 // Mzda na účet (`KONTO_L`); F = výplata v hotovosti.
                 'paid_to_account' => ($row['KONTO_L'] ?? true) !== false,
                 'account_history' => $card['accounts'][$inter] ?? [],
+                'absences' => $time['absences'][$inter] ?? [],
+                'leave_months' => $time['leave'][$inter] ?? [],
+                'average_months' => $time['averages'][$inter] ?? [],
+                'sickness' => $time['sickness'][$inter] ?? [],
             ];
         }
         usort($relations, static fn (array $a, array $b): int => ((int) $a['key']) <=> ((int) $b['key']));

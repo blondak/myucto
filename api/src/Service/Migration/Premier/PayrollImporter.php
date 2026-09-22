@@ -14,6 +14,7 @@ use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationTakeoverFacts;
 use MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalService;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverAbsenceWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInstitutionWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverOpeningMonth;
@@ -69,6 +70,10 @@ final class PayrollImporter
     private array $childrenOtherCaregiver = [];
     /** @var array<string,int> osobní číslo => pobírá důchod bez uplatněné slevy */
     private array $pensionersWithoutDiscount = [];
+    /** @var array<string,int> osobní číslo => trvající neschopnosti bez známého konce */
+    private array $openSickness = [];
+    /** První měsíc vedení mezd v MyÚčtu (`YYYY-MM`), nebo null. */
+    private ?string $moduleStart = null;
 
     public function __construct(
         private readonly Connection $db,
@@ -83,6 +88,7 @@ final class PayrollImporter
         private readonly PayrollHistoricalPeriodService $historical,
         private readonly PayrollPostingMapProposalService $postingMap,
         private readonly PayrollTakeoverInstitutionWriter $institutions,
+        private readonly PayrollTakeoverAbsenceWriter $absences,
     ) {}
 
     public function import(PremierContext $ctx): void
@@ -94,6 +100,7 @@ final class PayrollImporter
         $this->childrenWithoutBirthNumber = [];
         $this->childrenOtherCaregiver = [];
         $this->pensionersWithoutDiscount = [];
+        $this->openSickness = [];
         $payroll = $ctx->payroll ?? PremierPayroll::fromBackup($ctx->backup);
         if (!$payroll->hasData()) {
             return;
@@ -138,6 +145,7 @@ final class PayrollImporter
         // Měsíce od začátku vedení mezd v MyÚčtu počítá MyÚčto; převzatý údaj by vedle
         // spočítaného stál jako druhé, neověřené číslo za týž měsíc.
         $start = $this->historical->startPeriod($ctx->supplierId);
+        $this->moduleStart = $start;
         $afterStart = 0;
         $totals = [];
         $byEmployee = [];
@@ -160,7 +168,8 @@ final class PayrollImporter
                 if ($m['deductions'] > 0) {
                     $deductions[$number] = ($deductions[$number] ?? 0.0) + $m['deductions'];
                 }
-                if ($m['excluded_days'] > 0) {
+                // Vyloučenou dobu bez nepřítomností s daty (starší zálohy bez `DNY`) převod nezná.
+                if ($m['excluded_days'] > 0 && ($relation['absences'] ?? []) === []) {
                     $excluded[$number] = (string) $period;
                 }
                 if ($start !== null && $period >= $start) {
@@ -188,6 +197,7 @@ final class PayrollImporter
         ));
         $this->identifierSummary($p);
         $this->cardSummary($p);
+        $this->timeSummary($p);
         $this->notConverted($p, $deductions, $excluded);
         if ($totals !== []) {
             $this->referenceTotals->store($ctx->supplierId, self::SOURCE, $totals, self::REFERENCE . ' ' . $ctx->backup->ico);
@@ -319,6 +329,37 @@ final class PayrollImporter
         }
     }
 
+    /** Nepřítomnosti a dovolená převzaté z PREMIER: co se převzalo a co je k ověření. */
+    private function timeSummary(ImportProtocol $p): void
+    {
+        if ($this->state->leaveTransferred > 0) {
+            $p->info(self::STEP, 'leave_carryover', sprintf(
+                'Zůstatek dovolené z PREMIER (DOV_DNY, v hodinách) převzalo %d vztahů jako převod do knihy dovolené. Čerpání '
+                . 'se nepřenáší, v zůstatku je už odečtené; v převáděném roce bylo v PREMIER vyčerpáno %d hodin.',
+                $this->state->leaveTransferred,
+                $this->state->leaveTakenHours,
+            ));
+        }
+        if ($this->state->absenceOverlaps !== []) {
+            $p->warn(self::STEP, 'absences_overlap', sprintf(
+                'Nepřítomností vynechaných pro překryv s jinou: %d u osobních čísel %s. Evidence dva druhy v týchž dnech nepovolí, '
+                . 'zapsala se jen ta první. Zkontrolujte je v kartě zaměstnance.',
+                array_sum($this->state->absenceOverlaps),
+                self::personalNumbers(array_keys($this->state->absenceOverlaps)),
+            ));
+        }
+        if ($this->openSickness !== []) {
+            $p->count(self::STEP, 'sickness_open', array_sum($this->openSickness));
+            $p->warn(self::STEP, 'sickness_open', sprintf(
+                'K ověření: pracovní neschopnost trvá přes poslední převáděný měsíc a PREMIER nezná její konec (%d případů, osobní '
+                . 'čísla %s). Nepřítomnost je zapsaná do konce převáděného období; až neschopnost skončí, prodlužte ji v kartě '
+                . 'zaměstnance (ne novou nepřítomností), jinak MyÚčto začne období náhrady mzdy počítat znovu.',
+                array_sum($this->openSickness),
+                self::personalNumbers(array_keys($this->openSickness)),
+            ), ['personal_numbers' => array_keys($this->openSickness)]);
+        }
+    }
+
     /** @param list<int|string> $numbers */
     private static function personalNumbers(array $numbers): string
     {
@@ -429,7 +470,7 @@ final class PayrollImporter
         $this->activate($ctx, $employmentId, $relation);
         $policy = PremierPayrollTakeover::policy();
         $this->countries ??= CountryNameMatcher::fromDatabase($this->db);
-        $takeover = PremierPayrollTakeover::record($relation, $ctx->endsOn(), $this->countries);
+        $takeover = PremierPayrollTakeover::record($relation, $ctx->endsOn(), $this->countries, $this->moduleStart);
         $person = $takeover->person;
         $state = $this->state;
         $this->detail($ctx, $number, 'Sjednaná mzda', fn (): array => $this->wages($ctx, $employmentId, $relation));
@@ -458,6 +499,13 @@ final class PayrollImporter
         }
         $this->detail($ctx, $number, 'Výplatní účet', fn (): array => $this->people->payoutAccounts($supplierId, $employeeId, $person, $takeover->employment->start, $userId, $policy, $state));
         $employment = $takeover->employment;
+        $this->detail($ctx, $number, 'Průměrný výdělek', fn (): array => $this->employmentWriter->averageEarnings($supplierId, $employmentId, $employment, $userId, $policy));
+        $this->detail($ctx, $number, 'Nepřítomnosti', fn (): array => $this->absences->absences($supplierId, $employmentId, $employment, $userId, $policy, $state));
+        $this->detail($ctx, $number, 'Zůstatek dovolené', fn (): array => $this->absences->leaveCarryover($supplierId, $employmentId, $employment, $userId, $policy, $state));
+        $open = PremierPayrollTakeover::absences($relation, $ctx->endsOn(), $this->moduleStart)['open_sickness'];
+        if ($open > 0) {
+            $this->openSickness[$number] = $open;
+        }
         $this->detail($ctx, $number, 'Pracoviště JMHZ', fn (): array => $this->employmentWriter->workplace($supplierId, $employmentId, $employment, $userId, $policy));
         $this->detail($ctx, $number, 'Kód CZ-ISCO', fn (): array => $this->employmentWriter->czIsco($supplierId, $employmentId, $employment, $userId, $policy));
         if ($employment->oic !== null || $employment->idPpv !== null) {

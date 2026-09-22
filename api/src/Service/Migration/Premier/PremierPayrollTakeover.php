@@ -42,14 +42,18 @@ final class PremierPayrollTakeover
             ignoreEndBeforeStart: true,
             rewriteOwnOpenings: true,
             checklistToleratesRuntime: true,
+            // Převod z PREMIER běží po letech a každý rok přináší další nepřítomnosti vztahu.
+            absencesPerRecord: true,
         );
     }
 
     /**
      * @param array<string,mixed> $relation vztah z {@see PremierPayroll::$relations}
      * @param string $until poslední den převáděného období (prohlášení po měsících mezd do něj)
+     * @param ?string $moduleStart první měsíc vedení mezd v MyÚčtu (`YYYY-MM`); časové evidence
+     *        (nepřítomnosti, dovolená, průměry) se berou jen z měsíců před ním
      */
-    public static function record(array $relation, string $until, ?CountryNameMatcher $countries = null): PayrollTakeoverRecord
+    public static function record(array $relation, string $until, ?CountryNameMatcher $countries = null, ?string $moduleStart = null): PayrollTakeoverRecord
     {
         $start = (string) $relation['start'];
         // Zákonná evidence má účinnost po celých měsících (čte se k prvnímu dni měsíce);
@@ -118,8 +122,169 @@ final class PremierPayrollTakeover
             oic: $identifiers['confirmed'] ? $identifiers['oic'] : null,
             idPpv: $identifiers['confirmed'] ? $identifiers['id_ppv'] : null,
             checklistNotes: self::checklistNotes($relation, $until),
+            averages: self::averages($relation, $until, $moduleStart),
+            absences: self::absences($relation, $until, $moduleStart)['absences'],
+            leave: self::leave($relation, $until, $moduleStart),
+            transferStart: self::transferStart($relation, $until),
         );
         return new PayrollTakeoverRecord($person, $employment);
+    }
+
+    /**
+     * Poslední měsíc (`YYYY-MM`), za který převod přebírá časové evidence roku: konec
+     * převáděného období, ale nejpozději měsíc před začátkem vedení mezd v MyÚčtu
+     * (od něj eviduje nepřítomnosti a dovolenou MyÚčto samo).
+     */
+    private static function lastPeriod(string $until, ?string $moduleStart): string
+    {
+        $last = substr($until, 0, 7);
+        if (is_string($moduleStart) && preg_match('/^\d{4}-\d{2}/', $moduleStart) === 1) {
+            $before = (new \DateTimeImmutable(substr($moduleStart, 0, 7) . '-01'))->modify('-1 month')->format('Y-m');
+            $last = min($last, $before);
+        }
+        return $last;
+    }
+
+    /**
+     * Nepřítomnosti převáděného roku (`$until`) s daty z `DNY`. Pracovní neschopnost, která
+     * trvá přes poslední převáděný měsíc (`MZ_HDPN` s pozdějším koncem), se prodlouží až do
+     * konce případu, aby MyÚčto navázalo tentýž případ a nepočítalo období náhrady mzdy
+     * znovu. Případ bez známého konce se jen spočítá (`open_sickness`).
+     *
+     * @param array<string,mixed> $relation
+     * @return array{absences:list<array{type:string,from:string,to:string,childbirth:?string}>,open_sickness:int}
+     */
+    public static function absences(array $relation, string $until, ?string $moduleStart = null): array
+    {
+        $year = substr($until, 0, 4);
+        $last = self::lastPeriod($until, $moduleStart);
+        $out = [];
+        $lastSick = null;
+        foreach ((array) ($relation['absences'] ?? []) as $absence) {
+            if (substr($absence['period'], 0, 4) !== $year || $absence['period'] > $last) {
+                continue;
+            }
+            $out[] = ['type' => $absence['type'], 'from' => $absence['from'], 'to' => $absence['to'], 'childbirth' => $absence['childbirth']];
+            if ($absence['type'] === 'dpn' && ($lastSick === null || $absence['to'] > $lastSick)) {
+                $lastSick = $absence['to'];
+            }
+        }
+        $open = 0;
+        $monthEnd = (new \DateTimeImmutable($last . '-01'))->format('Y-m-t');
+        foreach ((array) ($relation['sickness'] ?? []) as $case) {
+            if ($case['kind'] !== 'DPN' || $lastSick === null || $case['from'] > $lastSick || $lastSick < $monthEnd) {
+                continue;
+            }
+            if ($case['to'] === null) {
+                $open++;
+                continue;
+            }
+            if ($case['to'] > $lastSick) {
+                $out[] = ['type' => 'dpn', 'from' => (new \DateTimeImmutable($lastSick))->modify('+1 day')->format('Y-m-d'), 'to' => $case['to'], 'childbirth' => null];
+            }
+        }
+        return ['absences' => $out, 'open_sickness' => $open];
+    }
+
+    /**
+     * Zůstatek dovolené roku ke konci posledního převáděného měsíce (`DOV_DNY`, hodiny;
+     * viz {@see PremierPayrollTime}). Dny se dopočtou denním úvazkem vztahu.
+     *
+     * @param array<string,mixed> $relation
+     * @return array{year:int,balance_hours:float,balance_days:?float,taken_hours:float,daily_hours:?float,from_days:bool}|null
+     */
+    private static function leave(array $relation, string $until, ?string $moduleStart): ?array
+    {
+        $year = substr($until, 0, 4);
+        $last = self::lastPeriod($until, $moduleStart);
+        $found = null;
+        foreach ((array) ($relation['leave_months'] ?? []) as $period => $state) {
+            if (substr((string) $period, 0, 4) === $year && (string) $period <= $last && ($found === null || (string) $period > $found)) {
+                $found = (string) $period;
+            }
+        }
+        if ($found === null) {
+            return null;
+        }
+        $state = $relation['leave_months'][$found];
+        $daily = null;
+        foreach ((array) ($relation['working_time'] ?? []) as $from => $time) {
+            if ($from <= $found . '-31') {
+                $daily = $time['daily'] > 0 ? (float) $time['daily'] : ($time['weekly'] > 0 ? round($time['weekly'] / 5, 4) : null);
+            }
+        }
+        return [
+            'year' => (int) $year,
+            'balance_hours' => (float) $state['balance'],
+            'balance_days' => $daily === null ? null : round($state['balance'] / $daily, 2),
+            'taken_hours' => (float) $state['taken'],
+            'daily_hours' => $daily,
+            'from_days' => false,
+        ];
+    }
+
+    /**
+     * Průměrné výdělky čtvrtletí převáděného roku (`PER_PRU`): hodnota z prvního měsíce
+     * čtvrtletí, pro které PREMIER průměr vede, s rozhodným obdobím a výdělkem v něm.
+     * Odpracované dny rozhodného období se sečtou ze zpracovaných mezd vztahu.
+     *
+     * @param array<string,mixed> $relation
+     * @return list<array{year:int,quarter:int,hourly:float,from:string,to:string,gross:float,worked:float,days:float}>
+     */
+    private static function averages(array $relation, string $until, ?string $moduleStart): array
+    {
+        $year = (int) substr($until, 0, 4);
+        $last = self::lastPeriod($until, $moduleStart);
+        $byQuarter = [];
+        foreach ((array) ($relation['average_months'] ?? []) as $period => $average) {
+            $period = (string) $period;
+            if ((int) substr($period, 0, 4) !== $year || !is_string($average['from']) || !is_string($average['to'])) {
+                continue;
+            }
+            $quarter = (int) ceil(((int) substr($period, 5, 2)) / 3);
+            $quarterStart = sprintf('%04d-%02d', $year, ($quarter - 1) * 3 + 1);
+            if ($quarterStart > $last || (isset($byQuarter[$quarter]) && $byQuarter[$quarter]['period'] < $period)) {
+                continue;
+            }
+            $byQuarter[$quarter] = ['period' => $period] + $average;
+        }
+        ksort($byQuarter);
+        $out = [];
+        foreach ($byQuarter as $quarter => $average) {
+            $days = 0.0;
+            foreach ($relation['months'] as $period => $m) {
+                if ($period . '-01' >= substr($average['from'], 0, 7) . '-01' && $period . '-01' <= $average['to']) {
+                    $days += (float) $m['worked_days'];
+                }
+            }
+            $out[] = [
+                'year' => $year,
+                'quarter' => $quarter,
+                'hourly' => (float) $average['hourly'],
+                'from' => $average['from'],
+                'to' => $average['to'],
+                'gross' => (float) $average['gross'],
+                'worked' => (float) $average['worked'],
+                'days' => $days,
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * První měsíc (`YYYY-MM`) převáděného roku se zpracovanou mzdou vztahu.
+     *
+     * @param array<string,mixed> $relation
+     */
+    private static function transferStart(array $relation, string $until): string
+    {
+        $year = substr($until, 0, 4);
+        foreach (array_keys($relation['months']) as $period) {
+            if (substr((string) $period, 0, 4) === $year) {
+                return (string) $period;
+            }
+        }
+        return $year . '-01';
     }
 
     /**
