@@ -9,9 +9,11 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Migration\StereoNx\StereoNxBackup;
 use MyInvoice\Service\Migration\StereoNx\StereoNxImporter;
+use MyInvoice\Service\Migration\StereoNx\StereoNxImportJobService;
 use MyInvoice\Service\Migration\StereoNx\StereoNxImportMap;
 use MyInvoice\Service\Migration\StereoNx\StereoNxSourcePlan;
 use MyInvoice\Service\Migration\StereoNx\StereoNxUploads;
@@ -447,12 +449,12 @@ final class StereoNxImportTest extends TestCase
         $body = ['company' => 0, 'password' => self::PASSWORD, 'mode' => 'import'];
         self::assertSame(409, $this->call('run', $body, $token)->getStatusCode());
         $before = $this->snapshot();
-        $dry = $this->json($this->call('run', ['mode' => 'dry_run'] + $body, $token));
+        $dry = $this->runJob(['mode' => 'dry_run'] + $body, $token);
         self::assertTrue($dry['report']['ok'], json_encode($dry));
         self::assertSame($before, $this->snapshot());
         self::assertSame(409, $this->call('run', ['blank_country_is_cz' => true] + $body, $token)->getStatusCode(), 'Changing the country interpretation requires a fresh dry run.');
         self::assertSame($before, $this->snapshot());
-        $import = $this->json($this->call('run', $body, $token));
+        $import = $this->runJob($body, $token);
         self::assertTrue($import['report']['ok'], json_encode($import));
         self::assertStringNotContainsString(self::PASSWORD, file_get_contents(StereoNxUploads::dir($this->supplierId, $token) . '/state.json'));
         self::assertSame(409, $this->call('run', $body, $token)->getStatusCode(), 'Completed import consumes the dry-run gate.');
@@ -507,6 +509,25 @@ final class StereoNxImportTest extends TestCase
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
         return $stmt->fetchColumn();
+    }
+
+    /**
+     * Zkouška i převod běží jako job na pozadí: akce ho založí, test ho pustí synchronně
+     * a výsledek přečte stejně jako průvodce. Heslo zálohy v řádku jobu nezůstane.
+     */
+    private function runJob(array $body, string $token): array
+    {
+        $started = $this->call('run', $body, $token);
+        self::assertSame(202, $started->getStatusCode(), (string) $started->getBody());
+        $jobId = (int) $this->json($started)['job_id'];
+        $container = Bootstrap::buildApp()->getContainer();
+        $jobs = $container->get(ImportJobRepository::class);
+        self::assertStringNotContainsString(self::PASSWORD, json_encode($jobs->find($jobId, $this->supplierId)['params']));
+        $container->get(StereoNxImportJobService::class)->run($jobId);
+        self::assertArrayNotHasKey('password_enc', $jobs->find($jobId, $this->supplierId)['params']);
+        $result = $this->action->result($this->request([]), (new ResponseFactory())->createResponse(), ['token' => $token, 'id' => (string) $jobId]);
+        self::assertSame(200, $result->getStatusCode(), (string) $result->getBody());
+        return $this->json($result);
     }
 
     private function call(string $method, array $body, ?string $token = null): ResponseInterface

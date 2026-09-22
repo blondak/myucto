@@ -7,6 +7,8 @@ import type { MoneyS3Step } from '@/api/moneyS3'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
+import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
+import type { FileImportJob } from '@/api/imports'
 import { useSupplierStore } from '@/stores/supplier'
 
 const { t, te, tm, rt, locale } = useI18n()
@@ -30,6 +32,8 @@ const deleteAfterImport = ref(false)
 const cleanupWarning = ref('')
 const reportCompany = ref<{ name: string; ico: string } | null>(null)
 const blankCountryIsCz = ref(false)
+// Zkouška i převod běží na serveru jako job; stav jobu pro ukazatel průběhu.
+const job = ref<FileImportJob | null>(null)
 const error = ref('')
 
 const selectedCompany = computed(() => companies.value.find(item => item.index === selected.value))
@@ -235,10 +239,13 @@ async function run(mode: 'dry_run' | 'import'): Promise<void> {
   const uploadToken = token.value
   const company = selected.value
   busy.value = true
+  job.value = null
   error.value = ''
   cleanupWarning.value = ''
   try {
-    const report = await stereoNxApi.run(uploadToken, company, mode, blankCountryIsCz.value)
+    const report = await stereoNxApi.run(uploadToken, company, mode, blankCountryIsCz.value, current => {
+      if (supplier.currentSupplierId === supplierId && token.value === uploadToken) job.value = current
+    })
     if (supplier.currentSupplierId !== supplierId || token.value !== uploadToken) return
     reportCompany.value = selectedCompany.value ? { name: selectedCompany.value.identity.name, ico: selectedCompany.value.identity.ico } : null
     if (mode === 'dry_run') {
@@ -439,7 +446,9 @@ const importProtocol = computed(() => importReport.value ? asProtocol(importRepo
     <section v-else-if="currentStep === 3" data-testid="stereo-dry-report" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
       <h2 class="mb-1 text-lg font-semibold">{{ t('stereo_nx.dry_result') }}</h2>
       <p class="mb-4 text-sm text-neutral-500">{{ t('stereo_nx.dry_hint') }}</p>
-      <p v-if="busy" class="text-sm text-primary-700" role="status">{{ t('stereo_nx.working') }}</p>
+      <ImportJobProgress v-if="busy && job" :job="job" :percent="null" :cancelling="false" :show-cancel="false"
+        counts-key="stereo_nx.job_counts" background-hint-key="stereo_nx.background_hint" running-key="stereo_nx.dry_run_running" />
+      <p v-else-if="busy" class="text-sm text-primary-700" role="status">{{ t('stereo_nx.working') }}</p>
       <template v-if="dryReport">
         <p v-if="dryReport.date_bounds" class="mb-4 text-sm text-neutral-600">{{ t('stereo_nx.date_bounds', dryReport.date_bounds) }}</p>
         <MoneyS3Protocol v-if="dryProtocol" :run="dryProtocol" prefix="stereo_nx" />
@@ -448,6 +457,8 @@ const importProtocol = computed(() => importReport.value ? asProtocol(importRepo
 
     <section v-else data-testid="stereo-import-report" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
       <h2 class="mb-1 text-lg font-semibold">{{ t('stereo_nx.import_result') }}</h2>
+      <ImportJobProgress v-if="busy && job" class="mb-4" :job="job" :percent="null" :cancelling="false" :show-cancel="false"
+        counts-key="stereo_nx.job_counts" background-hint-key="stereo_nx.background_hint" running-key="stereo_nx.import_running" />
       <template v-if="importReport">
         <p v-if="importReport.date_bounds" class="mb-4 text-sm text-neutral-600">{{ t('stereo_nx.date_bounds', importReport.date_bounds) }}</p>
         <MoneyS3Protocol v-if="importProtocol" :run="importProtocol" prefix="stereo_nx" />

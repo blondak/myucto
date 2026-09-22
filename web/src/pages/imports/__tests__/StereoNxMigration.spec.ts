@@ -83,7 +83,7 @@ describe('Stereo NX migration wizard', () => {
     expect(wrapper.find('[data-testid="stereo-dry-report"]').exists()).toBe(true)
     await primaryButton(wrapper, 'dry_run').trigger('click')
     await flushPromises()
-    expect(m.run).toHaveBeenCalledWith(upload.token, 0, 'dry_run', false)
+    expect(m.run).toHaveBeenCalledWith(upload.token, 0, 'dry_run', false, expect.any(Function))
     expect(wrapper.find('[data-testid="stereo-dry-report"]').exists()).toBe(true)
     await primaryButton(wrapper, 'continue').trigger('click')
     expect(wrapper.find('[data-testid="stereo-import-report"]').exists()).toBe(true)
@@ -94,7 +94,7 @@ describe('Stereo NX migration wizard', () => {
     expect(primaryButton(wrapper, 'import').attributes('disabled')).toBeUndefined()
     await primaryButton(wrapper, 'import').trigger('click')
     await flushPromises()
-    expect(m.run).toHaveBeenLastCalledWith(upload.token, 0, 'import', false)
+    expect(m.run).toHaveBeenLastCalledWith(upload.token, 0, 'import', false, expect.any(Function))
     expect(wrapper.find('[data-testid="stereo-import-report"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('stereo_nx.protocol.title')
     expect(wrapper.text()).not.toContain('#null')
@@ -125,6 +125,21 @@ describe('Stereo NX migration wizard', () => {
     expect(m.remove).toHaveBeenCalledWith(upload.token)
     expect(wrapper.get('[data-testid="stereo-import-report"]').text()).toContain('stereo_nx.protocol.title')
     expect(wrapper.find('[data-testid="stereo-step-4"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('shows the background job progress while the dry run is running', async () => {
+    let finish!: (report: typeof dryReport) => void
+    m.run.mockImplementationOnce((_token: string, _company: number, _mode: string, _blank: boolean, onJob: (job: object) => void) => {
+      onJob({ id: 5, status: 'running', total_items: 1, processed: 0, created_count: 0, skipped_count: 0, failed_count: 0, current_step: 'Synthetic dry run step' })
+      return new Promise(resolve => { finish = resolve })
+    })
+    const wrapper = await mountPage()
+    await reachDryRun(wrapper)
+    expect(wrapper.get('[data-testid="stereo-dry-report"]').text()).toContain('Synthetic dry run step')
+    finish(dryReport)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="stereo-dry-report"]').text()).not.toContain('Synthetic dry run step')
     wrapper.unmount()
   })
 

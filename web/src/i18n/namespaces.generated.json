@@ -435,6 +435,7 @@
       "premier"
     ],
     "imports-stereo-nx": [
+      "imports",
       "stereo_nx"
     ],
     "purchase-invoices-payment-orders": [

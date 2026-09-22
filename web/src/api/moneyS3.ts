@@ -1,5 +1,5 @@
 import { api } from './client'
-import { uploadChunked as uploadChunkedTo, type ChunkedUploadProgress } from './chunkedUpload'
+import { createMigrationApi } from './migrationApi'
 
 export { retryDelay } from './chunkedUpload'
 
@@ -150,38 +150,17 @@ export interface MoneyS3StartParams {
 
 const BASE = '/admin/imports/money-s3'
 
-/**
- * Záloha agendy má stovky megabajtů až gigabajty, posílá se proto po částech
- * (sdílený helper v chunkedUpload.ts). Po poslední části server zálohu zpracuje
- * na pozadí (stav přes `show`).
- */
-function uploadChunked(
-  file: File,
-  onProgress?: ChunkedUploadProgress,
-  onStarted?: (token: string) => void,
-): Promise<{ token: string; job_id: number | null }> {
-  return uploadChunkedTo(BASE, file, onProgress, onStarted)
-}
-
 export const moneyS3Api = {
+  ...createMigrationApi<MoneyS3Upload, MoneyS3UploadPending, MoneyS3Run, MoneyS3StartParams>(BASE),
   upload: (file: File): Promise<MoneyS3Upload> => {
     const fd = new FormData()
     fd.append('backup', file, file.name)
     return api.post<MoneyS3Upload>(`${BASE}/uploads`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
   },
-  uploadChunked,
-  show: (token: string): Promise<MoneyS3Upload | MoneyS3UploadPending> =>
-    api.get<MoneyS3Upload | MoneyS3UploadPending>(`${BASE}/uploads/${token}`).then(r => r.data),
   attachReport: (token: string, year: number, file: File): Promise<{ year: number; accounts: number; skipped_lines: number }> => {
     const fd = new FormData()
     fd.append('year', String(year))
     fd.append('report', file, file.name)
     return api.post(`${BASE}/uploads/${token}/reports`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
   },
-  start: (token: string, params: MoneyS3StartParams): Promise<{ job_id: number; status: string; mode: string }> =>
-    api.post(`${BASE}/uploads/${token}/start`, params).then(r => r.data),
-  runs: (): Promise<{ items: MoneyS3Run[] }> =>
-    api.get<{ items: MoneyS3Run[] }>(`${BASE}/runs`).then(r => r.data),
-  run: (id: number): Promise<MoneyS3Run> =>
-    api.get<MoneyS3Run>(`${BASE}/runs/${id}`).then(r => r.data),
 }

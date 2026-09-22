@@ -24977,6 +24977,9 @@
     "open_trial_balance": "Trial balance",
     "history_title": "Transfer protocols",
     "history_empty": "No transfer yet.",
+    "run_delete": "Delete the dry run log",
+    "run_delete_confirm": "Delete the log of dry run #{id}? The dry run changed nothing in MyÚčto, only the record is deleted.",
+    "run_deleted": "Dry run log deleted.",
     "mode": {
       "dry_run": "Dry run",
       "import": "Transfer"
@@ -26842,6 +26845,9 @@
     "open_trial_balance": "Trial balance",
     "history_title": "Migration protocols",
     "history_empty": "No migration yet.",
+    "run_delete": "Delete the dry run log",
+    "run_delete_confirm": "Delete the log of dry run #{id}? The dry run changed nothing in MyÚčto, only the record is deleted.",
+    "run_deleted": "Dry run log deleted.",
     "mode": {
       "dry_run": "Dry run",
       "import": "Migration"
@@ -27240,6 +27246,10 @@
       "mixed_vat_deduction": "Document combines items with different VAT deduction eligibility"
     },
     "working": "Processing backup…",
+    "dry_run_running": "Dry run in progress…",
+    "import_running": "Migration in progress…",
+    "job_counts": "documents written {created}, errors {failed}",
+    "background_hint": "The migration runs on the server and finishes even if you close the page. The result is shown while the page stays open.",
     "blank_country_is_cz": "I confirm that a blank counterparty country in this backup means the Czech Republic. Other ambiguous countries will remain for review.",
     "written_title": "New records saved",
     "counts": {

@@ -1,8 +1,10 @@
 import { api } from './client'
 import { uploadChunked, type ChunkedUploadProgress } from './chunkedUpload'
+import { fetchImportJob, type FileImportJob } from './imports'
 import type { MoneyS3ProtocolData, MoneyS3RunStatus } from './moneyS3'
 
 const BASE = '/admin/imports/stereo-nx'
+const POLL_MS = 2000
 
 export interface StereoCompany {
   index: number
@@ -63,7 +65,20 @@ export const stereoNxApi = {
     uploadChunked(BASE, file, onProgress, onStarted),
   preview: async (token: string): Promise<StereoPreview> =>
     (await api.post<StereoPreview>(`${BASE}/uploads/${token}/preview`, {})).data,
-  run: async (token: string, company: number, mode: 'dry_run' | 'import', blankCountryIsCz: boolean): Promise<StereoReport> =>
-    (await api.post<{ report: StereoReport }>(`${BASE}/uploads/${token}/run`, { company, mode, blank_country_is_cz: blankCountryIsCz })).data.report,
+  /**
+   * Zkouška nanečisto i převod běží na serveru jako job: po založení se polluje jeho stav
+   * (společné `/admin/imports/{id}`, `onJob` dostává každý stav) a po doběhnutí se stáhne
+   * výsledek. Job, který skončil bez výsledku, vrátí chybu s textem jobu.
+   */
+  run: async (token: string, company: number, mode: 'dry_run' | 'import', blankCountryIsCz: boolean, onJob?: (job: FileImportJob) => void): Promise<StereoReport> => {
+    const { job_id: jobId } = (await api.post<{ job_id: number }>(`${BASE}/uploads/${token}/run`, { company, mode, blank_country_is_cz: blankCountryIsCz })).data
+    for (;;) {
+      const job = await fetchImportJob(jobId)
+      onJob?.(job)
+      if (job.status !== 'queued' && job.status !== 'running') break
+      await new Promise<void>(resolve => { setTimeout(resolve, POLL_MS) })
+    }
+    return (await api.get<{ report: StereoReport }>(`${BASE}/uploads/${token}/runs/${jobId}`)).data.report
+  },
   remove: async (token: string): Promise<void> => { await api.delete(`${BASE}/uploads/${token}`) },
 }

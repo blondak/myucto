@@ -7,15 +7,11 @@ namespace MyInvoice\Action\Admin\Import;
 use MyInvoice\Bootstrap;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
-use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Security\AccessLevel;
-use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
-use MyInvoice\Service\BackgroundProcess;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Migration\ImportYears;
 use MyInvoice\Service\Migration\Pohoda\ChartJournalImporter;
@@ -26,9 +22,10 @@ use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaImporter;
 use MyInvoice\Service\Migration\Pohoda\PohodaImportJobService;
 use MyInvoice\Service\Migration\Pohoda\PohodaUploads;
+use MyInvoice\Service\Migration\Shared\ChunkedUploadStore;
+use MyInvoice\Service\Migration\Shared\MigrationUploadLimits;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
-use Psr\Http\Message\UploadedFileInterface;
 
 /**
  * Průvodce „Přechod z POHODA" - nahrání XML exportu agendy (ZIP), náhled, zkouška
@@ -47,16 +44,30 @@ use Psr\Http\Message\UploadedFileInterface;
  *
  * Export se vytváří nástrojem `tools/pohoda-export` přímo u POHODY (oficiální XML
  * rozhraní, jen čte). ZIP se nahrává po částech jako záloha Money S3 a rozbalí ho job na
- * pozadí ({@see PohodaImportJobService::MODE_PREPARE}). Stav běžícího převodu jde přes
- * společné GET /api/admin/imports/{id}.
+ * pozadí ({@see AbstractMigrationAction}). Stav běžícího převodu jde přes společné
+ * GET /api/admin/imports/{id}.
  */
-final class PohodaMigrationAction
+final class PohodaMigrationAction extends AbstractMigrationAction
 {
-    private const MAX_EXPORT_BYTES = 2 * 1024 * 1024 * 1024;
-    /** Nahraných exportů firmy najednou (nové nahrání smaže nejstarší nečinný). */
-    private const MAX_ACTIVE_UPLOADS = 3;
-    /** Část exportu: pod `upload_max_filesize`, IIS `maxAllowedContentLength` i nginx `client_max_body_size`, včetně výchozího 1 MB u nginx bez nastavení (cizí reverzní proxy). */
-    public const CHUNK_BYTES = 768 * 1024;
+    protected const JOB_SERVICE = PohodaImportJobService::class;
+    protected const EXCEPTION_CLASS = PohodaException::class;
+    protected const ALLOWED_EXTENSIONS = ['zip'];
+    protected const MAX_BYTES = MigrationUploadLimits::POHODA_MAX_BYTES;
+
+    protected const TEXT_DENIED = 'Převod z POHODY smí spustit jen admin nebo účetní.';
+    protected const TEXT_INVALID_FILE_TYPE = 'Nahrajte ZIP s XML exportem z POHODY.';
+    protected const TEXT_INVALID_SIZE = 'Chybí velikost exportu.';
+    protected const TEXT_TOO_LARGE = 'Export je příliš velký (nejvýš 2 GB).';
+    protected const TEXT_TOO_MANY_UPLOADS = 'Firma má rozpracovaných příliš mnoho exportů, počkejte na dokončení běžícího zpracování.';
+    protected const TEXT_CHUNK_MISSING = 'Chybí část exportu.';
+    protected const TEXT_OFFSET_MISSING = 'Chybí pozice části exportu.';
+    protected const TEXT_ALREADY_PROCESSING = 'Jiný export z POHODY se právě zpracovává, počkejte na jeho dokončení.';
+    protected const TEXT_UPLOAD_FAILED = 'Export z POHODY se nepodařilo načíst.';
+    protected const TEXT_UPLOAD_INCOMPLETE = 'Export ještě není nahraný celý.';
+    protected const TEXT_MIGRATION_REQUIRED = 'Chybí databázová migrace pro převod z POHODY - spusťte `php api/bin/migrate.php`.';
+    protected const RUN_ENTITY = 'pohoda_import';
+    protected const DRY_RUN_DELETED_EVENT = 'import.pohoda_dry_run_deleted';
+
     /**
      * Exportní nástroje po programech. POHODA se exportuje přes XML rozhraní, PAMICA nemá
      * XML rozhraní a čte se přímo z mzdového datového souboru, takže má vlastní skript.
@@ -68,154 +79,20 @@ final class PohodaMigrationAction
     private const TOOL_FILE_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.(ps1|cmd)$/';
 
     public function __construct(
-        private readonly ImportJobRepository $jobs,
-        private readonly PohodaImportRepository $runs,
+        ImportJobRepository $jobs,
+        PohodaImportRepository $runs,
         private readonly PohodaImporter $importer,
-        private readonly ActivityLogger $logger,
-        private readonly IpMatcher $ipMatcher,
+        ActivityLogger $logger,
+        IpMatcher $ipMatcher,
         private readonly Connection $db,
         private readonly PohodaPayrollImporter $payroll,
-    ) {}
-
-    /** Založí nahrávání exportu po částech: `{file_name, size}` → `{token, chunk_size}`. */
-    public function initChunked(Request $request, Response $response): Response
-    {
-        $denied = $this->deny($request, $response, AccessLevel::WRITE);
-        if ($denied !== null) {
-            return $denied;
-        }
-        $supplierId = SupplierGuard::currentId($request);
-        $body = (array) ($request->getParsedBody() ?? []);
-        $fileName = mb_substr(basename(str_replace('\\', '/', trim((string) ($body['file_name'] ?? '')))), 0, 200);
-        $size = filter_var($body['size'] ?? null, FILTER_VALIDATE_INT);
-        if ($fileName === '' || strtolower(pathinfo($fileName, PATHINFO_EXTENSION)) !== 'zip') {
-            return Json::error($response, 'invalid_file_type', 'Nahrajte ZIP s XML exportem z POHODY.', 422);
-        }
-        if (!is_int($size) || $size <= 0) {
-            return Json::error($response, 'invalid_size', 'Chybí velikost exportu.', 422);
-        }
-        if ($size > self::MAX_EXPORT_BYTES) {
-            return Json::error($response, 'upload_too_large', 'Export je příliš velký (nejvýš 2 GB).', 413);
-        }
-
-        PohodaUploads::purgeStale($supplierId);
-        if (!PohodaUploads::makeRoom($supplierId, self::MAX_ACTIVE_UPLOADS)) {
-            return Json::error($response, 'too_many_uploads', 'Firma má rozpracovaných příliš mnoho exportů, počkejte na dokončení běžícího zpracování.', 429);
-        }
-        $token = PohodaUploads::newToken();
-        $dir = PohodaUploads::dir($supplierId, $token);
-        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
-            return Json::error($response, 'storage_not_writable', 'Úložiště pro exporty není zapisovatelné.', 500);
-        }
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        PohodaUploads::writeState($supplierId, $token, [
-            'file_name' => $fileName,
-            'size' => $size,
-            'received' => 0,
-            'status' => PohodaUploads::STATUS_UPLOADING,
-            'uploaded_by' => (int) ($user['id'] ?? 0),
-            'created_at' => date('c'),
-            'job_id' => null,
-            'error' => null,
-        ]);
-        touch(PohodaUploads::partPath($supplierId, $token));
-
-        return Json::ok($response, ['token' => $token, 'chunk_size' => self::CHUNK_BYTES], 201);
+    ) {
+        parent::__construct($jobs, $runs, $logger, $ipMatcher);
     }
 
-    /** @param array<string,string> $args */
-    public function chunk(Request $request, Response $response, array $args): Response
+    protected function uploads(): ChunkedUploadStore
     {
-        $denied = $this->deny($request, $response, AccessLevel::WRITE);
-        if ($denied !== null) {
-            return $denied;
-        }
-        $supplierId = SupplierGuard::currentId($request);
-        $token = (string) ($args['token'] ?? '');
-        $body = (array) ($request->getParsedBody() ?? []);
-        $offset = filter_var($body['offset'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
-        $file = $request->getUploadedFiles()['chunk'] ?? null;
-        if ($file instanceof UploadedFileInterface && in_array($file->getError(), [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) {
-            return Json::error($response, 'chunk_too_large', 'Část exportu je větší, než server přijme.', 413);
-        }
-        if (!$file instanceof UploadedFileInterface || $file->getError() !== UPLOAD_ERR_OK) {
-            return Json::error($response, 'no_file', 'Chybí část exportu.', 400);
-        }
-        if (!is_int($offset)) {
-            return Json::error($response, 'invalid_offset', 'Chybí pozice části exportu.', 422);
-        }
-        try {
-            $received = PohodaUploads::appendChunk($supplierId, $token, $offset, $file->getStream(), self::CHUNK_BYTES);
-        } catch (PohodaException $e) {
-            return Json::error($response, $e->errorCode, $e->getMessage(), $e->getCode() >= 400 ? $e->getCode() : 422, $e->context);
-        }
-        return Json::ok($response, ['received' => $received]);
-    }
-
-    /**
-     * Nahrávání je u konce: export se rozbalí a přečte jobem na pozadí.
-     *
-     * @param array<string,string> $args
-     */
-    public function complete(Request $request, Response $response, array $args): Response
-    {
-        $denied = $this->deny($request, $response, AccessLevel::WRITE);
-        if ($denied !== null) {
-            return $denied;
-        }
-        $supplierId = SupplierGuard::currentId($request);
-        $token = (string) ($args['token'] ?? '');
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $userId = (int) ($user['id'] ?? 0);
-        // Rozbalení je drahé (až 2 GB na disk) - u firmy běží nejvýš jedno najednou.
-        $this->jobs->reapStale($supplierId, PohodaImportJobService::SOURCE);
-        foreach ($this->jobs->listForTenant($supplierId, PohodaImportJobService::SOURCE, limit: 20) as $existing) {
-            if (in_array($existing['status'], ['queued', 'running'], true) && PohodaImportJobService::isPrepareJob($existing)
-                && (string) ($existing['params']['token'] ?? '') !== $token) {
-                return Json::error($response, 'already_processing', 'Jiný export z POHODY se právě zpracovává, počkejte na jeho dokončení.', 409,
-                    ['existing_job_id' => $existing['id']]);
-            }
-        }
-        try {
-            $result = PohodaUploads::withUploadLock($supplierId, $token, function () use ($request, $supplierId, $token, $userId): array {
-                $state = PohodaUploads::state($supplierId, $token);
-                if ($state === null) {
-                    throw new PohodaException('upload_not_found', 'Nahrávaný export nebyl nalezen.', [], 404);
-                }
-                $status = (string) ($state['status'] ?? '');
-                if (in_array($status, [PohodaUploads::STATUS_PROCESSING, PohodaUploads::STATUS_READY], true)) {
-                    return ['job_id' => isset($state['job_id']) ? (int) $state['job_id'] : null, 'spawn' => false];
-                }
-                if ($status !== PohodaUploads::STATUS_UPLOADING) {
-                    throw new PohodaException('upload_failed', (string) ($state['error'] ?? 'Export z POHODY se nepodařilo načíst.'), [], 409);
-                }
-                $size = (int) ($state['size'] ?? 0);
-                $received = PohodaUploads::partSize($supplierId, $token);
-                if ($received !== $size) {
-                    throw new PohodaException('upload_incomplete', 'Export ještě není nahraný celý.', ['received' => $received, 'size' => $size], 422);
-                }
-                $jobId = $this->jobs->create($supplierId, PohodaImportJobService::SOURCE, [
-                    'token' => $token,
-                    'mode' => PohodaImportJobService::MODE_PREPARE,
-                    'ip' => $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
-                    'user_agent' => mb_substr($request->getHeaderLine('User-Agent'), 0, 255),
-                ], $userId);
-                PohodaUploads::updateState($supplierId, $token, [
-                    'status' => PohodaUploads::STATUS_PROCESSING,
-                    'received' => $received,
-                    'job_id' => $jobId,
-                    'error' => null,
-                ]);
-                return ['job_id' => $jobId, 'spawn' => true];
-            });
-        } catch (PohodaException $e) {
-            return Json::error($response, $e->errorCode, $e->getMessage(), $e->getCode() >= 400 ? $e->getCode() : 422, $e->context);
-        }
-
-        if ($result['spawn']) {
-            $this->spawnWorker((int) $result['job_id']);
-        }
-        return Json::ok($response, ['token' => $token, 'job_id' => $result['job_id']], 202);
+        return PohodaUploads::store();
     }
 
     /** @param array<string,string> $args */
@@ -228,11 +105,9 @@ final class PohodaMigrationAction
         $supplierId = SupplierGuard::currentId($request);
         $token = (string) ($args['token'] ?? '');
         try {
-            if (!PohodaUploads::hasMeta($supplierId, $token)) {
-                $state = PohodaUploads::state($supplierId, $token);
-                if ($state !== null) {
-                    return Json::ok($response, $this->pendingView($supplierId, $token, $state));
-                }
+            $pending = $this->pendingUpload($supplierId, $token);
+            if ($pending !== null) {
+                return Json::ok($response, $pending);
             }
             $meta = PohodaUploads::meta($supplierId, $token);
         } catch (PohodaException $e) {
@@ -284,35 +159,6 @@ final class PohodaMigrationAction
         ]);
     }
 
-    /**
-     * @param array<string,mixed> $state
-     * @return array<string,mixed>
-     */
-    private function pendingView(int $supplierId, string $token, array $state): array
-    {
-        $status = (string) ($state['status'] ?? PohodaUploads::STATUS_UPLOADING);
-        $jobId = isset($state['job_id']) ? (int) $state['job_id'] : null;
-        $error = isset($state['error']) ? (string) $state['error'] : null;
-        if ($status === PohodaUploads::STATUS_PROCESSING || $status === PohodaUploads::STATUS_READY) {
-            $job = $jobId !== null ? $this->jobs->find($jobId, $supplierId) : null;
-            if ($job === null || in_array($job['status'], ['failed', 'cancelled', 'completed', 'completed_with_warnings'], true)) {
-                $status = PohodaUploads::STATUS_FAILED;
-                $error ??= trim((string) ($job['last_error'] ?? '')) ?: 'Export z POHODY se nepodařilo načíst.';
-            } else {
-                $status = PohodaUploads::STATUS_PROCESSING;
-            }
-        }
-        return [
-            'token' => $token,
-            'status' => $status,
-            'file_name' => (string) ($state['file_name'] ?? ''),
-            'size' => (int) ($state['size'] ?? 0),
-            'received' => $status === PohodaUploads::STATUS_UPLOADING ? PohodaUploads::partSize($supplierId, $token) : (int) ($state['received'] ?? 0),
-            'job_id' => $jobId,
-            'error' => $status === PohodaUploads::STATUS_FAILED ? $error : null,
-        ];
-    }
-
     /** @param array<string,string> $args */
     public function start(Request $request, Response $response, array $args): Response
     {
@@ -362,20 +208,13 @@ final class PohodaMigrationAction
             return Json::error($response, $e->errorCode, $e->getMessage(), 422, $e->context);
         }
         PohodaUploads::touch($supplierId, $token);
-        if (!$this->runs->isLockFree($supplierId)) {
-            return Json::error($response, 'already_running', 'Převod této firmy právě běží.', 409);
-        }
-        $this->jobs->reapStale($supplierId, PohodaImportJobService::SOURCE);
-        foreach ($this->jobs->listForTenant($supplierId, PohodaImportJobService::SOURCE, limit: 20) as $existing) {
-            if (in_array($existing['status'], ['queued', 'running'], true) && !PohodaImportJobService::isPrepareJob($existing)) {
-                return Json::error($response, 'already_running', "Převod už běží (job #{$existing['id']}).", 409,
-                    ['existing_job_id' => $existing['id']]);
-            }
+        $running = $this->alreadyRunning($response, $supplierId);
+        if ($running !== null) {
+            return $running;
         }
 
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $userId = (int) ($user['id'] ?? 0);
-        $jobId = $this->jobs->create($supplierId, PohodaImportJobService::SOURCE, [
+        $userId = self::userId($request);
+        $jobId = $this->createRunJob($response, $supplierId, [
             'token' => $token,
             'mode' => $mode,
             // Vybrané roky vzestupně; `year` = první z nich pro starší čtení parametrů jobu.
@@ -390,69 +229,14 @@ final class PohodaMigrationAction
             // `time_month_not_approved` a `draft_inputs_present`, které nejdou přebít výjimkou.
             'approve_taken_over' => $kind === 'payroll' && filter_var($body['approve_taken_over'] ?? false, FILTER_VALIDATE_BOOLEAN),
         ], $userId);
-        $stored = $this->jobs->find($jobId, $supplierId);
-        if ($stored === null || ($stored['source'] ?? '') !== PohodaImportJobService::SOURCE) {
-            $this->jobs->delete($jobId, $supplierId);
-            return Json::error($response, 'migration_required',
-                'Chybí databázová migrace pro převod z POHODY - spusťte `php api/bin/migrate.php`.', 500);
+        if ($jobId instanceof Response) {
+            return $jobId;
         }
         $this->spawnWorker($jobId);
         $this->logger->log('import.pohoda_started', $userId, 'import_job', $jobId, ['mode' => $mode, 'years' => $years, 'kind' => $kind],
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, ['job_id' => $jobId, 'status' => 'queued', 'mode' => $mode], 201);
-    }
-
-    public function runs(Request $request, Response $response): Response
-    {
-        $denied = $this->deny($request, $response, AccessLevel::READ);
-        if ($denied !== null) {
-            return $denied;
-        }
-        return Json::ok($response, ['items' => $this->runs->listRuns(SupplierGuard::currentId($request))]);
-    }
-
-    /** @param array<string,string> $args */
-    public function run(Request $request, Response $response, array $args): Response
-    {
-        $denied = $this->deny($request, $response, AccessLevel::READ);
-        if ($denied !== null) {
-            return $denied;
-        }
-        $run = $this->runs->findRun((int) ($args['id'] ?? 0), SupplierGuard::currentId($request));
-        if ($run === null) {
-            return Json::error($response, 'not_found', 'Protokol převodu nenalezen.', 404);
-        }
-        return Json::ok($response, $run);
-    }
-
-    /**
-     * Smaže protokol zkoušky nanečisto. Protokol ostrého převodu a běžící zkouška zůstávají
-     * ({@see PohodaImportRepository::deleteDryRun()}).
-     *
-     * @param array<string,string> $args
-     */
-    public function deleteRun(Request $request, Response $response, array $args): Response
-    {
-        $denied = $this->deny($request, $response, AccessLevel::WRITE);
-        if ($denied !== null) {
-            return $denied;
-        }
-        $supplierId = SupplierGuard::currentId($request);
-        $id = (int) ($args['id'] ?? 0);
-        $run = $this->runs->findRun($id, $supplierId);
-        if ($run === null) {
-            return Json::error($response, 'not_found', 'Protokol převodu nenalezen.', 404);
-        }
-        if (!$this->runs->deleteDryRun($id, $supplierId)) {
-            return Json::error($response, 'run_not_deletable',
-                'Smazat jde jen doběhlou zkoušku nanečisto. Protokol ostrého převodu zůstává jako záznam převzatých dat.', 409);
-        }
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $this->logger->log('import.pohoda_dry_run_deleted', (int) ($user['id'] ?? 0), 'pohoda_import', $id,
-            ['year' => $run['agenda_year'] ?? null, 'ico' => $run['agenda_ico'] ?? null],
-            $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
-        return Json::ok($response, ['ok' => true]);
     }
 
     /** Soubory exportního nástroje, které si uživatel stáhne k POHODĚ. */
@@ -521,8 +305,7 @@ final class PohodaMigrationAction
      */
     public static function missingLiveImportRights(Request $request): array
     {
-        return array_values(array_filter(['accounting.journal.write', 'settings.company.write'],
-            static fn (string $key): bool => !RequestAuthorization::allows($request, $key, AccessLevel::WRITE)));
+        return self::missingRights($request, self::LIVE_IMPORT_RIGHTS);
     }
 
     /**
@@ -533,8 +316,7 @@ final class PohodaMigrationAction
      */
     public static function missingPayrollRights(Request $request): array
     {
-        return array_values(array_filter(['payroll.inputs.write', 'payroll.person.write', 'payroll.settings'],
-            static fn (string $key): bool => !RequestAuthorization::allows($request, $key, AccessLevel::WRITE)));
+        return self::missingRights($request, ['payroll.inputs.write', 'payroll.person.write', 'payroll.settings']);
     }
 
     /** Program, jehož nástroj se servíruje; neznámá hodnota spadne na POHODU. */
@@ -564,26 +346,5 @@ final class PohodaMigrationAction
         $stmt = $this->db->pdo()->prepare('SELECT ic FROM supplier WHERE id = ?');
         $stmt->execute([$supplierId]);
         return PartnerImporter::ico((string) $stmt->fetchColumn());
-    }
-
-    private function spawnWorker(int $jobId): void
-    {
-        BackgroundProcess::spawnPhp(
-            Bootstrap::rootDir() . '/api/bin/import-worker.php',
-            ['--job-id=' . $jobId],
-            RuntimePaths::log('import-worker.log'),
-            Bootstrap::rootDir(),
-        );
-    }
-
-    private function deny(Request $request, Response $response, AccessLevel $level): ?Response
-    {
-        if (!RequestAuthorization::allows($request, 'utilities.import', $level)) {
-            return Json::error($response, 'forbidden', 'Převod z POHODY smí spustit jen admin nebo účetní.', 403);
-        }
-        if (SupplierGuard::currentId($request) === 0) {
-            return Json::error($response, 'no_supplier', 'Chybí supplier kontext.', 400);
-        }
-        return null;
     }
 }

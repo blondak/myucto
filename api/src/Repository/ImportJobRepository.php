@@ -129,6 +129,23 @@ final class ImportJobRepository
     }
 
     /**
+     * Odebere klíče z parametrů jobu — worker tak po přečtení zahodí citlivý parametr
+     * (heslo zálohy), aby nezůstal v řádku jobu, který čte stav pro UI.
+     *
+     * @param list<string> $keys
+     */
+    public function removeParams(int $id, array $keys): void
+    {
+        if ($keys === []) {
+            return;
+        }
+        $paths = implode(', ', array_fill(0, count($keys), '?'));
+        $this->db->pdo()->prepare(
+            "UPDATE import_jobs SET params = JSON_REMOVE(params, {$paths}) WHERE id = ? AND params IS NOT NULL"
+        )->execute([...array_map(static fn (string $key): string => '$.' . $key, $keys), $id]);
+    }
+
+    /**
      * Najdi nejstarší queued job — volá worker.
      */
     public function findNextQueued(?string $source = null): ?array

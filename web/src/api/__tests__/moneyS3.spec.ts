@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const { post } = vi.hoisted(() => ({ post: vi.fn() }))
-vi.mock('../client', () => ({ api: { post } }))
+const { post, del } = vi.hoisted(() => ({ post: vi.fn(), del: vi.fn() }))
+vi.mock('../client', () => ({ api: { post, delete: del } }))
 
 import { moneyS3Api, retryDelay } from '../moneyS3'
 
@@ -44,5 +44,13 @@ describe('uploadChunked', () => {
     await expect(done).resolves.toEqual({ token: 't', job_id: 5 })
     expect(post).toHaveBeenCalledTimes(6)
     expect(post.mock.calls.at(-1)?.[0]).toBe('/admin/imports/money-s3/uploads/t/complete')
+  })
+})
+
+describe('deleteRun', () => {
+  it('protokol zkoušky nanečisto maže na adrese Money S3', async () => {
+    del.mockResolvedValueOnce({ data: { ok: true } })
+    await expect(moneyS3Api.deleteRun(4)).resolves.toEqual({ ok: true })
+    expect(del).toHaveBeenCalledWith('/admin/imports/money-s3/runs/4')
   })
 })

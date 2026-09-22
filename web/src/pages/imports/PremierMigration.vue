@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { isPremierUploadReady, premierApi, type PremierRun, type PremierUpload } from '@/api/premier'
-import { cancelImportJob, fetchImportJob, type FileImportJob } from '@/api/imports'
-import { useToast } from '@/composables/useToast'
+import { isPremierUploadReady, premierApi, type PremierRun, type PremierStartParams, type PremierUpload, type PremierUploadPending } from '@/api/premier'
+import { useMigrationWizard } from '@/composables/useMigrationWizard'
 import { useAuthStore } from '@/stores/auth'
 import type { PermissionKey } from '@/security/permissions'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import { ICONS } from '@/components/ui/buttonStyles'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
 
@@ -15,7 +15,7 @@ import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
  * a výběr roků → zkouška nanečisto → ostrý převod (vybrané roky vzestupně v jednom jobu,
  * každý rok vlastní protokol). Nahraná záloha zůstává na serveru
  * pod tokenem, takže obnovení stránky průvodce nevrátí na začátek (token drží
- * sessionStorage).
+ * sessionStorage). Společný průběh průvodců je v useMigrationWizard.
  *
  * Na rozdíl od průvodce POHODA/PAMICA (PohodaMigration.vue) tu není exportní nástroj
  * ke stažení (záloha se dělá přímo v PREMIERu) ani volba druhu převodu (mzdy PREMIER
@@ -25,7 +25,6 @@ import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
 const TOKEN_KEY = 'myucto.premier.token'
 
 const { t, tm, rt } = useI18n()
-const toast = useToast()
 const auth = useAuthStore()
 
 function tt(key: string, params?: Record<string, unknown>): string {
@@ -38,39 +37,22 @@ function list(key: string): string[] {
 const backupHelpItems = computed(() => list('backup_help_items'))
 const fileHelpItems = computed(() => list('file_help_items'))
 
-const currentStep = ref(1)
-const upload = ref<PremierUpload | null>(null)
-const file = ref<File | null>(null)
 const selectedYears = ref<number[]>([])
-const job = ref<FileImportJob | null>(null)
-const jobMode = ref<'dry_run' | 'import' | null>(null)
-const run = ref<PremierRun | null>(null)
-// Běhy (protokoly) aktuálního jobu vzestupně: job víc roků má běh za každý rok.
-const jobRuns = ref<PremierRun[]>([])
-const runs = ref<PremierRun[]>([])
-const busy = ref(false)
-const cancelling = ref(false)
-const confirmed = ref(false)
-const dryRunPassed = ref(false)
-const uploadPercent = ref<number | null>(null)
-const processing = ref(false)
-let pollTimer: ReturnType<typeof setTimeout> | null = null
-let disposed = false
 
-function readToken(): string | null {
-  try { return sessionStorage.getItem(TOKEN_KEY) } catch { return null }
-}
-function writeToken(token: string | null): void {
-  try {
-    if (token) sessionStorage.setItem(TOKEN_KEY, token)
-    else sessionStorage.removeItem(TOKEN_KEY)
-  } catch { /* prohlížeč bez úložiště: průvodce jen nepřežije obnovení stránky */ }
-}
-
-function errorMessage(error: any, fallback: string): string {
-  const message = String(error?.response?.data?.error?.message ?? '').trim()
-  return message || fallback
-}
+const {
+  currentStep, upload, file, job, jobMode, run, jobRuns, runs, busy, cancelling, confirmed, dryRunPassed,
+  uploadPercent, processing, deletingRun, jobRunning, jobSucceeded, percent,
+  canGoTo, goTo, onFile, doUpload, resetUpload, start: startJob, cancel, showRun, deleteRun,
+} = useMigrationWizard<PremierUpload, PremierUploadPending, PremierRun, PremierStartParams>({
+  api: premierApi,
+  tokenKey: () => TOKEN_KEY,
+  isReady: isPremierUploadReady,
+  text: tt,
+  multiYear: true,
+  // Předvybrané všechny roky zálohy s IČO firmy.
+  onReady: () => { selectedYears.value = [...years.value] },
+  onReset: () => { selectedYears.value = [] },
+})
 
 const steps = computed(() => [1, 2, 3, 4].map(number => ({ number, label: tt(`step${number}`) })))
 const agendas = computed(() => (upload.value?.agendas ?? []).filter(a => a.has_accounting))
@@ -94,16 +76,12 @@ const preflightGroups = computed(() => selectedYears.value.map(y => ({ year: y, 
 const preflightErrors = computed(() => preflightGroups.value.flatMap(g => g.messages).filter(m => m.level === 'error'))
 const missingRights = computed<PermissionKey[]>(() => (['accounting.journal.write', 'settings.company.write'] as PermissionKey[]).filter(key => !auth.canWrite(key)))
 const rightsMessage = computed(() => tt('rights_missing', { rights: missingRights.value.join(', ') }))
+// Smazat jde jen doběhlou zkoušku nanečisto, protokol ostrého převodu zůstává (stejně jako u POHODY).
+const canWrite = computed(() => missingRights.value.length === 0)
 const blocked = computed(() => selectedYears.value.length === 0 || preflightErrors.value.length > 0)
-const jobRunning = computed(() => job.value?.status === 'queued' || job.value?.status === 'running')
 const blockedReason = computed(() => jobRunning.value && !blocked.value
   ? tt(jobMode.value === 'import' ? 'import_running' : 'dry_run_running')
   : selectedYears.value.length === 0 ? tt('choose_year_first') : tt('preflight_blocked'))
-const percent = computed(() => {
-  if (jobMode.value !== 'import' || !job.value?.total_items) return null
-  return Math.min(100, Math.round(job.value.processed / job.value.total_items * 100))
-})
-const jobSucceeded = computed(() => job.value?.status === 'completed' || job.value?.status === 'completed_with_warnings')
 const importDone = computed(() => jobMode.value === 'import' && !jobRunning.value && jobSucceeded.value
   && jobRuns.value.length > 0 && jobRuns.value.every(r => r.mode === 'import'))
 // Roky jobu, které se po chybě nebo zrušení předchozího roku nespustily.
@@ -122,173 +100,9 @@ watch(selectedYears, () => {
   confirmed.value = false
 })
 
-function canGoTo(step: number): boolean {
-  if (busy.value || jobRunning.value || step === currentStep.value) return false
-  if (step === 1) return true
-  if (step === 2 || step === 3) return upload.value !== null
-  return dryRunPassed.value && upload.value !== null
-}
-
-function goTo(step: number): void {
-  if (canGoTo(step)) currentStep.value = step
-}
-
-function onFile(event: Event): void {
-  const input = event.target as HTMLInputElement
-  file.value = input.files?.[0] ?? null
-}
-
-async function doUpload(): Promise<void> {
-  if (!file.value) return
-  busy.value = true
-  uploadPercent.value = 0
-  try {
-    const { token } = await premierApi.uploadChunked(
-      file.value,
-      (sent, total) => { uploadPercent.value = total > 0 ? Math.floor(sent / total * 100) : 100 },
-      started => writeToken(started),
-    )
-    uploadPercent.value = null
-    await waitForUpload(token)
-  } catch (error: any) {
-    writeToken(null)
-    toast.error(errorMessage(error, tt('upload_failed')))
-  } finally {
-    uploadPercent.value = null
-    busy.value = false
-  }
-}
-
-/** Polluje stav nahrané zálohy, dokud ho server nerozbalí a nenačte (nebo nenahlásí chybu). */
-async function waitForUpload(token: string): Promise<void> {
-  processing.value = true
-  try {
-    while (!disposed) {
-      const result = await premierApi.show(token)
-      if (isPremierUploadReady(result)) {
-        upload.value = result
-        // Předvybrané všechny roky zálohy s IČO firmy.
-        selectedYears.value = [...years.value]
-        dryRunPassed.value = false
-        confirmed.value = false
-        run.value = null
-        currentStep.value = 2
-        return
-      }
-      if (result.status !== 'processing') {
-        // 'uploading' po obnovení stránky: soubor v prohlížeči už není, nahrávání nejde dokončit.
-        writeToken(null)
-        toast.error(result.status === 'failed' ? (result.error || tt('upload_failed')) : tt('upload_interrupted'))
-        return
-      }
-      await new Promise<void>(resolve => { pollTimer = setTimeout(resolve, 2000) })
-    }
-  } finally {
-    processing.value = false
-  }
-}
-
-function resetUpload(): void {
-  upload.value = null
-  file.value = null
-  selectedYears.value = []
-  run.value = null
-  jobRuns.value = []
-  dryRunPassed.value = false
-  confirmed.value = false
-  writeToken(null)
-  currentStep.value = 1
-}
-
 async function start(mode: 'dry_run' | 'import'): Promise<void> {
   if (!upload.value || selectedYears.value.length === 0) return
-  busy.value = true
-  try {
-    const started = await premierApi.start(upload.value.token, { mode, years: [...selectedYears.value] })
-    jobMode.value = mode
-    run.value = null
-    jobRuns.value = []
-    currentStep.value = mode === 'dry_run' ? 3 : 4
-    await pollJob(started.job_id)
-  } catch (error: any) {
-    toast.error(errorMessage(error, tt('start_failed')))
-  } finally {
-    busy.value = false
-  }
-}
-
-async function pollJob(id: number): Promise<void> {
-  job.value = await fetchImportJob(id)
-  if (jobRunning.value) {
-    schedulePoll(id)
-    return
-  }
-  await loadRuns()
-  // Job víc roků má běh a protokol za každý rok - průvodce ukazuje všechny, vzestupně.
-  const ids = runs.value.filter(r => r.job_id === id).map(r => r.id).sort((a, b) => a - b)
-  jobRuns.value = await Promise.all(ids.map(runId => premierApi.run(runId)))
-  run.value = jobRuns.value[jobRuns.value.length - 1] ?? null
-  const ok = jobRuns.value.length > 0 && jobSucceeded.value
-  if (jobMode.value === 'dry_run') {
-    dryRunPassed.value = ok
-  } else if (jobMode.value === 'import' && ok) {
-    // Server nahranou zálohu po úspěšném převodu smazal.
-    writeToken(null)
-  }
-}
-
-function schedulePoll(id: number): void {
-  if (pollTimer) clearTimeout(pollTimer)
-  pollTimer = setTimeout(() => { void pollJob(id) }, 2000)
-}
-
-async function cancel(): Promise<void> {
-  if (!job.value) return
-  cancelling.value = true
-  try {
-    await cancelImportJob(job.value.id)
-  } catch (error: any) {
-    toast.error(errorMessage(error, t('common.error')))
-  } finally {
-    cancelling.value = false
-  }
-}
-
-async function loadRuns(): Promise<void> {
-  runs.value = (await premierApi.runs()).items
-}
-
-async function showRun(item: PremierRun): Promise<void> {
-  try {
-    run.value = await premierApi.run(item.id)
-  } catch (error: any) {
-    toast.error(errorMessage(error, t('common.error')))
-  }
-}
-
-async function load(): Promise<void> {
-  busy.value = true
-  try {
-    await loadRuns()
-    const token = readToken()
-    if (token) {
-      try {
-        await waitForUpload(token)
-      } catch {
-        writeToken(null)
-      }
-    }
-    const active = runs.value.find(r => r.status === 'running' && r.job_id !== null)
-    if (active?.job_id) {
-      jobMode.value = active.mode
-      currentStep.value = active.mode === 'dry_run' ? 3 : 4
-      await pollJob(active.job_id)
-    }
-  } catch (error: any) {
-    toast.error(errorMessage(error, t('common.error')))
-  } finally {
-    busy.value = false
-  }
+  await startJob(mode, { mode, years: [...selectedYears.value] })
 }
 
 const actions = computed<ActionItem[]>(() => {
@@ -317,12 +131,6 @@ const actions = computed<ActionItem[]>(() => {
   return [
     { key: 'import', label: tt('import_start'), icon: 'play', tier: 'primary', variant: 'warning', disabled: !confirmed.value || jobRunning.value || blocked.value || missingRights.value.length > 0, disabledReason: importReason, loading: busy.value, run: () => { void start('import') } },
   ]
-})
-
-onMounted(load)
-onBeforeUnmount(() => {
-  disposed = true
-  if (pollTimer) clearTimeout(pollTimer)
 })
 </script>
 
@@ -502,11 +310,19 @@ onBeforeUnmount(() => {
       <h2 class="border-b border-neutral-200 px-4 py-3 text-lg font-semibold">{{ tt('history_title') }}</h2>
       <p v-if="!runs.length" class="px-4 py-3 text-sm text-neutral-500">{{ tt('history_empty') }}</p>
       <div class="divide-y divide-neutral-100">
-        <button v-for="item in runs" :key="item.id" type="button" class="flex w-full cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3 text-left hover:bg-neutral-50" @click="showRun(item)">
-          <span><strong>#{{ item.id }} · {{ tt(`mode.${item.mode}`) }}</strong><span class="ml-2 text-xs text-neutral-500">{{ [item.agenda_ico, item.agenda_year].filter(Boolean).join(' · ') }} · {{ item.created_at }}</span></span>
-          <span class="rounded-full px-2.5 py-1 text-xs font-medium"
-            :class="item.status === 'completed' ? 'bg-success-50 text-success-600' : item.status === 'failed' ? 'bg-danger-50 text-danger-600' : item.status === 'completed_with_warnings' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600'">{{ tt(`status.${item.status}`) }}</span>
-        </button>
+        <div v-for="item in runs" :key="item.id" class="flex items-center gap-2 pr-3 hover:bg-neutral-50">
+          <button type="button" class="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3 text-left" @click="showRun(item)">
+            <span><strong>#{{ item.id }} · {{ tt(`mode.${item.mode}`) }}</strong><span class="ml-2 text-xs text-neutral-500">{{ [item.agenda_ico, item.agenda_year].filter(Boolean).join(' · ') }} · {{ item.created_at }}</span></span>
+            <span class="rounded-full px-2.5 py-1 text-xs font-medium"
+              :class="item.status === 'completed' ? 'bg-success-50 text-success-600' : item.status === 'failed' ? 'bg-danger-50 text-danger-600' : item.status === 'completed_with_warnings' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600'">{{ tt(`status.${item.status}`) }}</span>
+          </button>
+          <button v-if="item.mode === 'dry_run' && item.status !== 'running' && canWrite" type="button"
+            class="shrink-0 rounded p-1.5 text-neutral-400 hover:bg-danger-50 hover:text-danger-600 disabled:opacity-40"
+            :title="tt('run_delete')" :aria-label="tt('run_delete')" :disabled="deletingRun === item.id"
+            :data-testid="`premier-run-delete-${item.id}`" @click="deleteRun(item)">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+          </button>
+        </div>
       </div>
     </section>
 

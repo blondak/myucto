@@ -2560,6 +2560,7 @@ final class Routes
         $app->post   ('/api/admin/imports/money-s3/uploads/{token:[a-f0-9]{16}}/start', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'start']);
         $app->get    ('/api/admin/imports/money-s3/runs', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'runs']);
         $app->get    ('/api/admin/imports/money-s3/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'run']);
+        $app->delete ('/api/admin/imports/money-s3/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'deleteRun']);
         // Průvodce „Přechod z POHODA" - XML export (ZIP), náhled, zkouška nanečisto, převod, protokoly, exportní nástroj.
         $app->post   ('/api/admin/imports/pohoda/uploads/chunked', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'initChunked']);
         $app->post   ('/api/admin/imports/pohoda/uploads/{token:[a-f0-9]{16}}/chunks', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'chunk']);
@@ -2579,6 +2580,7 @@ final class Routes
         $app->post   ('/api/admin/imports/premier/uploads/{token:[a-f0-9]{16}}/start', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'start']);
         $app->get    ('/api/admin/imports/premier/runs', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'runs']);
         $app->get    ('/api/admin/imports/premier/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'run']);
+        $app->delete ('/api/admin/imports/premier/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\PremierMigrationAction::class, 'deleteRun']);
         $app->get    ('/api/admin/imports/stereo-nx/uploads', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'index']);
         $app->post   ('/api/admin/imports/stereo-nx/uploads/chunked', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'init']);
         $app->post   ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/chunks', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'chunk']);
@@ -2586,6 +2588,7 @@ final class Routes
         $app->get    ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'show']);
         $app->post   ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/preview', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'preview']);
         $app->post   ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/run', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'run']);
+        $app->get    ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'result']);
         $app->delete ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'delete']);
 
         // Kompletní export dat firmy (H-14) — DB + PDF doklady + přílohy do jednoho

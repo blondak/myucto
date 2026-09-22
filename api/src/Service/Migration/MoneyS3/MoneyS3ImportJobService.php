@@ -7,34 +7,33 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Migration\Shared\AbstractImportJobService;
+use MyInvoice\Service\Migration\Shared\ChunkedUploadStore;
 
 /**
  * Převod z Money S3 na pozadí (`import_jobs.source = money_s3_import`, migrace 1807).
  *
  * Tahle třída řeší jen to, co přidává job: najít nahranou zálohu, hlásit průběh, uložit
- * protokol k běhu a uklidit. Převod sám dělá {@see MoneyS3Importer}.
- *
- * Zkouška nanečisto běží v jedné transakci, která se vrací. Průběh do řádku jobu během
- * ní nezapisuje: zápis by držel zámek řádku až do konce a požadavek na zrušení z UI by
- * na něm visel. UI proto u zkoušky ukazuje jen „běží".
- *
- * Běh drží po celou dobu zámek firmy ({@see MoneyS3ImportRepository::acquireLock()}).
- * Job bez hlášení průběhu (zkouška nanečisto) by jinak po čtvrthodině vypadal jako
- * mrtvý, úklid by ho ukončil a mohl by se spustit druhý převod nad toutéž mapou.
+ * protokol k běhu a uklidit. Převod sám dělá {@see MoneyS3Importer}. Kostra jobu
+ * (zpracování nahrané zálohy, zámek firmy, chyby) je společná s ostatními převody
+ * ({@see AbstractImportJobService}).
  */
-final class MoneyS3ImportJobService
+final class MoneyS3ImportJobService extends AbstractImportJobService
 {
     public const SOURCE = 'money_s3_import';
 
-    /**
-     * Zpracování zálohy nahrané po částech (kontrolní součet, rozbalení, údaje agendy)
-     * běží jako job téhož zdroje s `params.mode = prepare`. Nic nepřevádí: nebere zámek
-     * firmy, nezakládá protokol převodu a do „Převod už běží" se nepočítá.
-     */
-    public const MODE_PREPARE = 'prepare';
-    private const PREPARE_FAILED = 'Zálohu agendy se nepodařilo přečíst.';
+    protected const LOG_PREFIX = 'Money S3';
+    protected const UPLOAD_NOUN = 'zálohy';
+    protected const EXCEPTION_CLASS = MoneyS3Exception::class;
+    protected const PREPARE_FAILED = 'Zálohu agendy se nepodařilo přečíst.';
+    protected const RUN_FAILED = 'Převod z Money S3 selhal na neočekávané chybě, podrobnosti jsou v logu serveru.';
+    protected const PREPARE_BUSY = 'Zálohu už zpracovává jiný proces.';
+    protected const UPLOAD_INCOMPLETE = 'Záloha agendy není nahraná celá, nahrajte ji znovu.';
+    protected const DEFAULT_FILE_NAME = 'agenda.lz';
+    protected const UPLOADED_EVENT = 'import.money_s3_uploaded';
+    protected const PREPARE_STEPS = ['Kontrolní součet zálohy', 'Rozbaluji zálohu agendy', 'Čtu údaje agendy'];
 
-    private const STEP_LABELS = [
+    protected const STEP_LABELS = [
         'chart' => 'Účtová osnova',
         'journal' => 'Účetní období a deník',
         'accounting_mode' => 'Režim účetní jednotky',
@@ -52,42 +51,36 @@ final class MoneyS3ImportJobService
     ];
 
     public function __construct(
-        private readonly ImportJobRepository $jobs,
-        private readonly MoneyS3ImportRepository $runs,
+        ImportJobRepository $jobs,
+        MoneyS3ImportRepository $runs,
         private readonly MoneyS3Importer $importer,
-        private readonly ActivityLogger $logger,
-    ) {}
-
-    /** @param array<string,mixed> $job řádek import_jobs */
-    public static function isPrepareJob(array $job): bool
-    {
-        return is_array($job['params'] ?? null) && ($job['params']['mode'] ?? null) === self::MODE_PREPARE;
+        ActivityLogger $logger,
+    ) {
+        parent::__construct($jobs, $runs, $logger);
     }
 
-    public function run(int $jobId): void
+    protected function uploads(): ChunkedUploadStore
     {
-        $job = $this->jobs->findById($jobId);
-        if ($job === null || !$this->jobs->markRunning($jobId)) {
-            return;
-        }
-        $supplierId = (int) $job['supplier_id'];
-        if (self::isPrepareJob($job)) {
-            $this->prepare($jobId, $job, $supplierId);
-            return;
-        }
-        if (!$this->runs->acquireLock($supplierId)) {
-            $this->jobs->markFailed($jobId, 'Převod této firmy už běží v jiném procesu, druhý se nespouští.');
-            return;
-        }
-        try {
-            $this->runLocked($jobId, $job, $supplierId);
-        } finally {
-            $this->runs->releaseLock($supplierId);
-        }
+        return MoneyS3Uploads::store();
+    }
+
+    protected function extractUpload(string $part, int $supplierId, string $token): mixed
+    {
+        return Ms3Backup::extract($part, MoneyS3Uploads::agendaDir($supplierId, $token));
+    }
+
+    protected function describeUpload(mixed $extracted, int $supplierId, string $token): array
+    {
+        $agenda = AgendaInfo::fromBackup($extracted);
+        return [
+            'meta' => ['agenda' => $agenda->toArray()],
+            'activity' => ['agenda_ico' => $agenda->ico, 'version' => $agenda->version, 'years' => $agenda->fiscalYears()],
+            'log' => 'Záloha agendy ' . $agenda->name . ' načtena.',
+        ];
     }
 
     /** @param array<string,mixed> $job */
-    private function runLocked(int $jobId, array $job, int $supplierId): void
+    protected function runLocked(int $jobId, array $job, int $supplierId): void
     {
         $userId = (int) ($job['created_by'] ?? 0);
         $params = is_array($job['params'] ?? null) ? $job['params'] : [];
@@ -96,10 +89,7 @@ final class MoneyS3ImportJobService
         $runId = null;
 
         try {
-            $interrupted = $this->runs->closeInterruptedRuns($supplierId);
-            if ($interrupted > 0) {
-                $this->jobs->appendLog($jobId, "Uzavřeno {$interrupted} přerušených běhů převodu.");
-            }
+            $this->closeInterruptedRuns($jobId, $supplierId);
             $meta = MoneyS3Uploads::meta($supplierId, $token);
             $backup = Ms3Backup::open(MoneyS3Uploads::agendaDir($supplierId, $token));
             $options = new ImportOptions(
@@ -128,14 +118,8 @@ final class MoneyS3ImportJobService
             ]);
             $this->jobs->appendLog($jobId, ($options->isDryRun() ? 'Zkouška nanečisto' : 'Ostrý převod') . ' agendy ' . ($agenda['name'] ?? '') . '.');
 
-            $progress = $options->isDryRun() ? null : function (string $step, int $done, int $total) use ($jobId, $steps): void {
-                $index = array_search($step, $steps, true);
-                $this->jobs->updateProgress($jobId, [
-                    'processed' => $index === false ? count($steps) : (int) $index,
-                    'current_step' => mb_substr(self::STEP_LABELS[$step] ?? $step, 0, 120),
-                ]);
-            };
-            $cancel = $options->isDryRun() ? null : fn (): bool => $this->jobs->isCancelRequested($jobId);
+            $progress = $options->isDryRun() ? null : $this->progressCallback($jobId, $steps, 0, null);
+            $cancel = $options->isDryRun() ? null : $this->cancelCallback($jobId);
 
             $protocol = $this->importer->run($supplierId, $userId, $backup, $options, $runId, $progress, $cancel);
             $result = $protocol->toArray();
@@ -144,14 +128,7 @@ final class MoneyS3ImportJobService
             $this->runs->finishRun($runId, $supplierId, $status, $result);
 
             $journal = array_column($result['steps'], null, 'key')['journal']['counts'] ?? [];
-            $errors = 0;
-            $warnings = 0;
-            foreach ($result['steps'] as $s) {
-                foreach ($s['messages'] as $m) {
-                    $errors += $m['level'] === 'error' ? 1 : 0;
-                    $warnings += $m['level'] === 'warning' ? 1 : 0;
-                }
-            }
+            [$errors, $warnings] = self::messageCounts($result);
             $this->jobs->updateProgress($jobId, [
                 'processed' => count($steps),
                 'created_count' => (int) ($journal['entries'] ?? 0),
@@ -161,107 +138,16 @@ final class MoneyS3ImportJobService
             ]);
             $this->jobs->appendLog($jobId, sprintf('Protokol #%d: %d chyb, %d upozornění.', $runId, $errors, $warnings));
 
-            if ($cancelled) {
-                $this->jobs->markCancelled($jobId);
-            } elseif ($status === 'failed') {
-                $this->jobs->markFailed($jobId, 'Převod nedoběhl nebo nesedí rekonciliace — podrobnosti v protokolu #' . $runId . '.');
-            } elseif ($status === 'completed_with_warnings') {
-                $this->jobs->markCompletedWithWarnings($jobId);
-            } else {
-                $this->jobs->markCompleted($jobId);
-            }
+            $this->finishJob($jobId, $status, 'Převod nedoběhl nebo nesedí rekonciliace — podrobnosti v protokolu #' . $runId . '.');
             if (!$options->isDryRun() && $status !== 'failed' && !$cancelled) {
                 MoneyS3Uploads::purge($supplierId, $token);
             }
         } catch (\Throwable $e) {
-            if ($e instanceof MoneyS3Exception) {
-                $message = $e->getMessage();
-            } else {
-                error_log(sprintf('Money S3: převod zálohy %s firmy %d selhal: %s', $token, $supplierId, (string) $e));
-                $message = 'Převod z Money S3 selhal na neočekávané chybě, podrobnosti jsou v logu serveru.';
-            }
+            $message = $this->failureMessage($e, sprintf('převod zálohy %s firmy %d selhal', $token, $supplierId), static::RUN_FAILED);
             if ($runId !== null) {
                 $this->runs->finishRun($runId, $supplierId, 'failed', ['mode' => $mode, 'status' => 'failed', 'failure' => 'unexpected', 'error' => $message, 'steps' => []]);
             }
             $this->jobs->markFailed($jobId, $message);
-        }
-    }
-
-    /**
-     * Záloha nahraná po částech → kontrolní součet, rozbalení agendy, údaje agendy
-     * a `meta.json` stejného tvaru jako u nahrání jedním požadavkem. Chyba se uloží
-     * do stavu nahrávání, odkud ji průvodce ukáže.
-     *
-     * @param array<string,mixed> $job
-     */
-    private function prepare(int $jobId, array $job, int $supplierId): void
-    {
-        $params = (array) $job['params'];
-        $token = (string) ($params['token'] ?? '');
-        try {
-            $lock = MoneyS3Uploads::acquireJobLock($supplierId, $token);
-        } catch (MoneyS3Exception $e) {
-            $this->jobs->markFailed($jobId, $e->getMessage());
-            return;
-        }
-        if ($lock === null) {
-            $this->jobs->markFailed($jobId, 'Zálohu už zpracovává jiný proces.');
-            return;
-        }
-        try {
-            $state = MoneyS3Uploads::state($supplierId, $token);
-            if ($state === null) {
-                throw new MoneyS3Exception('upload_not_found', 'Nahraná záloha nebyla nalezena (mohla být už uklizena).', [], 404);
-            }
-            $size = (int) ($state['size'] ?? 0);
-            if (MoneyS3Uploads::partSize($supplierId, $token) !== $size || $size <= 0) {
-                throw new MoneyS3Exception('upload_incomplete', 'Záloha agendy není nahraná celá, nahrajte ji znovu.');
-            }
-            MoneyS3Uploads::updateState($supplierId, $token, ['status' => MoneyS3Uploads::STATUS_PROCESSING, 'job_id' => $jobId, 'error' => null]);
-            $this->jobs->updateProgress($jobId, ['total_items' => 3, 'processed' => 0, 'current_step' => 'Kontrolní součet zálohy']);
-            $part = MoneyS3Uploads::partPath($supplierId, $token);
-            $sha = (string) hash_file('sha256', $part);
-
-            $this->jobs->updateProgress($jobId, ['processed' => 1, 'current_step' => 'Rozbaluji zálohu agendy']);
-            $backup = Ms3Backup::extract($part, MoneyS3Uploads::agendaDir($supplierId, $token));
-            @unlink($part);
-
-            $this->jobs->updateProgress($jobId, ['processed' => 2, 'current_step' => 'Čtu údaje agendy']);
-            $agenda = AgendaInfo::fromBackup($backup);
-            $userId = (int) ($state['uploaded_by'] ?? 0);
-            MoneyS3Uploads::writeMeta($supplierId, $token, [
-                'token' => $token,
-                'file_name' => (string) ($state['file_name'] ?? 'agenda.lz'),
-                'sha256' => $sha,
-                'uploaded_at' => date('c'),
-                'uploaded_by' => $userId,
-                'agenda' => $agenda->toArray(),
-            ]);
-            MoneyS3Uploads::updateState($supplierId, $token, ['status' => MoneyS3Uploads::STATUS_READY, 'error' => null]);
-            $this->logger->log('import.money_s3_uploaded', $userId > 0 ? $userId : null, 'supplier', $supplierId,
-                ['agenda_ico' => $agenda->ico, 'version' => $agenda->version, 'years' => $agenda->fiscalYears()],
-                isset($params['ip']) ? (string) $params['ip'] : null,
-                isset($params['user_agent']) ? (string) $params['user_agent'] : null);
-
-            $this->jobs->updateProgress($jobId, ['processed' => 3, 'current_step' => 'Hotovo']);
-            $this->jobs->appendLog($jobId, 'Záloha agendy ' . $agenda->name . ' načtena.');
-            $this->jobs->markCompleted($jobId);
-        } catch (\Throwable $e) {
-            if ($e instanceof MoneyS3Exception) {
-                $message = $e->getMessage();
-            } else {
-                error_log(sprintf('Money S3: zpracování zálohy %s firmy %d selhalo: %s', $token, $supplierId, (string) $e));
-                $message = self::PREPARE_FAILED;
-            }
-            MoneyS3Uploads::discardData($supplierId, $token);
-            try {
-                MoneyS3Uploads::updateState($supplierId, $token, ['status' => MoneyS3Uploads::STATUS_FAILED, 'error' => $message]);
-            } catch (\Throwable) {
-                // adresář zálohy mezitím zmizel — chyba zůstane aspoň u jobu
-            }
-            $this->jobs->markFailed($jobId, $message);
-        } finally {
-            MoneyS3Uploads::releaseJobLock($lock);
         }
     }
 }
