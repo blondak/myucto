@@ -15,6 +15,7 @@ use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
 use MyInvoice\Service\Migration\Shared\MigratedPurchaseDocument;
 use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
+use MyInvoice\Service\Migration\Shared\PartnerIdentityMatcher;
 use MyInvoice\Service\Migration\Shared\VatCoefficientSeeder;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use PDO;
@@ -53,6 +54,7 @@ final class StereoNxImporter
         private readonly LoggerInterface $log,
         private readonly MigratedDocumentWriter $writer,
         private readonly VatCoefficientSeeder $coefficients,
+        private readonly PartnerIdentityMatcher $identity,
     ) {
         $this->rates = new MigrationVatRateLookup($db);
     }
@@ -374,10 +376,8 @@ final class StereoNxImporter
         if ($existing !== null) { $ctx['ids']['client'][$key] = $existing; return; }
         $ico = PohodaPartners::ico((string) ($record['ico'] ?? ''));
         if ($ico !== '') {
-            $stmt = $this->db->pdo()->prepare('SELECT id, dic FROM clients WHERE supplier_id = ? AND ic = ? AND archived_at IS NULL ORDER BY id LIMIT 1');
-            $stmt->execute([$ctx['supplier_id'], $ico]);
-            $matched = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($matched !== false) {
+            $matched = $this->identity->clientByIco($ctx['supplier_id'], $ico);
+            if ($matched !== null) {
                 $sourceDic = PohodaPartners::vatId((string) ($record['dic'] ?? ''));
                 $targetDic = PohodaPartners::vatId((string) ($matched['dic'] ?? ''));
                 if ($sourceDic !== '' && $targetDic !== '' && $sourceDic !== $targetDic) {

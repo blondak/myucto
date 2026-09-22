@@ -67,6 +67,33 @@ final class PartnerIdentityMatcher
         return $out;
     }
 
+    /**
+     * Nejstarší nearchivovaný kontakt firmy s tímto IČO v kanonickém tvaru - i když je
+     * u kontaktu uložené s mezerami nebo bez vodicí nuly.
+     *
+     * @return array{id:int,dic:string}|null
+     */
+    public function clientByIco(int $supplierId, string $ico): ?array
+    {
+        $ico = self::ico($ico);
+        if ($ico === '') {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, ic, dic FROM clients
+              WHERE supplier_id = ? AND ic IS NOT NULL AND archived_at IS NULL
+                AND TRIM(LEADING '0' FROM REGEXP_REPLACE(ic, '[^0-9]', '')) = ?
+           ORDER BY id"
+        );
+        $stmt->execute([$supplierId, ltrim($ico, '0')]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (self::ico((string) $row['ic']) === $ico) {
+                return ['id' => (int) $row['id'], 'dic' => (string) ($row['dic'] ?? '')];
+            }
+        }
+        return null;
+    }
+
     /** Nejstarší nearchivovaný kontakt firmy s přesně tímto názvem. */
     public function clientByName(int $supplierId, string $name): ?int
     {
