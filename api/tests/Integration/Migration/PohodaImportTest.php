@@ -434,6 +434,34 @@ final class PohodaImportTest extends TestCase
     }
 
     /**
+     * Členění mimo přiznání s daní, ale BEZ státu MOSS: POHODA takový doklad do svého OSS
+     * přiznání nezahrnula. Převod ho dřív do OSS zařadil sám podle adresy odběratele - OSS
+     * podání v MyÚčtu by pak neodpovídalo tomu, co firma z POHODY podala. Zůstane konceptem
+     * s konkrétním důvodem a řádek je označený k ručnímu posouzení.
+     */
+    public function testUnDocumentWithTaxButWithoutMossStaysDraft(): void
+    {
+        $supplierId = $this->supplier();
+        $this->enableOss($supplierId);
+        $this->foreignRate(SyntheticPohodaExport::OSS_COUNTRY, SyntheticPohodaExport::OSS_RATE);
+
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, withOss: true, ossRateForm: SyntheticPohodaExport::OSS_RATE_PERCENT,
+            oss: new OssVariant(moss: null)));
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $row = $this->ossDocument($supplierId);
+        self::assertNotNull($row, 'Doklad se musí převzít, jinak nesedí saldo. ' . $this->explain($protocol));
+        self::assertSame('draft', $row['status'], $this->explain($protocol));
+        self::assertSame(1, (int) $row['oss_needs_manual_review']);
+        self::assertNull($row['vat_classification_code'], 'Do tuzemského přiznání koncept nepatří.');
+        $reason = $this->reviewMessage($protocol);
+        self::assertNotNull($reason, $this->explain($protocol));
+        self::assertStringContainsString('chybí stát MOSS', $reason);
+        self::assertSame(0, self::stepCounts($protocol, 'issued_invoices')['oss_items'] ?? 0, $this->explain($protocol));
+    }
+
+    /**
      * Když export sazbu řádku s daní opravdu nenese (ani `percentVAT`, ani `@value`), zůstane
      * doklad konceptem - ale hláška musí říct proč, ne jen zopakovat členění.
      */

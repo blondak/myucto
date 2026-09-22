@@ -748,6 +748,19 @@ final class InvoiceImporter
             }
         }
 
+        // Doklad, který POHODA zahrnuje do svého OSS přiznání, nese stát spotřeby (MOSS);
+        // prázdný element POHODA do exportu nepíše. Členění mimo přiznání s daní BEZ MOSS
+        // tedy v POHODĚ v OSS není a převod ho tam nesmí poslat sám podle země odběratele.
+        // Doklad zůstane konceptem: řádky dostanou návrh plánovače (sazba ve správné zemi,
+        // ať jde doklad otevřít v editoru) s příznakem k ručnímu posouzení - do přiznání
+        // koncept nevstupuje, rozhodne člověk.
+        $outsideOss = $candidate && $doc['moss'] === '';
+        if ($outsideOss) {
+            $class['reasons'][] = "členění DPH „{$code}“ s daní, ale doklad v POHODĚ není v režimu OSS (chybí stát MOSS) - "
+                . 'POHODA ho do OSS přiznání nezahrnula; řádky s daní jsou navržené podle země odběratele, '
+                . 'rozhodněte, zda plnění patří do OSS, nebo do tuzemského přiznání';
+        }
+
         foreach ($amounts['items'] as $i => $item) {
             if ($candidate && abs((float) $item['vat']) >= 0.005) {
                 // Stát spotřeby, který účetní v POHODĚ dokladu zadala (MOSS), je pravdivější
@@ -764,6 +777,10 @@ final class InvoiceImporter
                     $amounts['items'][$i]['rate_id'] = $plan['rate_id'];
                     $amounts['items'][$i]['rate'] = $plan['rate_percent'];
                     $amounts['items'][$i]['oss'] = $plan['columns'];
+                    if ($outsideOss) {
+                        $amounts['items'][$i]['oss']['oss_needs_manual_review'] = 1;
+                        continue;
+                    }
                     $ossItems++;
                     $manualReview += (int) $plan['columns']['oss_needs_manual_review'] === 1 ? 1 : 0;
                     foreach ($plan['warnings'] as $warning) {
