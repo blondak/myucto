@@ -47,7 +47,7 @@ abstract class SharedMigrationDbTestCase extends TestCase
         }
     }
 
-    protected function supplier(): int
+    protected function supplier(string $ico = '00000019', string $name = 'Sdílená vrstva s.r.o.'): int
     {
         $pdo = $this->db->pdo();
         $cz = (int) ($pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn() ?: 0);
@@ -58,8 +58,8 @@ abstract class SharedMigrationDbTestCase extends TestCase
         }
         $pdo->prepare(
             'INSERT INTO supplier (company_name, street, city, zip, country_id, email, ic, dic, is_vat_payer, vat_period, default_currency_id, default_vat_rate_id, accounting_mode)
-             VALUES ("Sdílená vrstva s.r.o.", "Účetní 1", "Brno", "60200", ?, "shared@example.invalid", "00000019", "CZ00000019", 1, "monthly", ?, ?, "tax_evidence")'
-        )->execute([$cz, $currency, $vatRate]);
+             VALUES (?, "Účetní 1", "Brno", "60200", ?, "shared@example.invalid", ?, ?, 1, "monthly", ?, ?, "tax_evidence")'
+        )->execute([$name, $cz, $ico, 'CZ' . $ico, $currency, $vatRate]);
         $id = (int) $pdo->lastInsertId();
         $pdo->prepare(
             "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)

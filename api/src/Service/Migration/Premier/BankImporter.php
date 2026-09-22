@@ -63,6 +63,8 @@ final class BankImporter
               WHERE t.id = ? AND s.supplier_id = ?"
         );
 
+        $company = [];
+        $registered = [];
         foreach ($series as $code => $s) {
             $rows = [];
             foreach ($ctx->journal->year($ctx->year) as $r) {
@@ -74,10 +76,11 @@ final class BankImporter
                 continue;
             }
             if (!$ctx->dryRun && $s['number'] !== '') {
-                $registrar->register($ctx->supplierId, [$code => [
+                $company[$code] = [
                     'number' => $s['number'], 'bank' => $s['bank'], 'iban' => $s['iban'], 'currency' => $s['currency'],
                     'label' => $s['label'], 'suffix' => strlen($s['account']) > 3 ? substr($s['account'], 3) : null,
-                ]]);
+                ];
+                $registered += $registrar->register($ctx->supplierId, [$code => $company[$code]]);
             }
             $foreign = $s['currency'] !== 'CZK';
             $running = $this->opening($ctx, $s['account'], $foreign);
@@ -146,7 +149,38 @@ final class BankImporter
                 $running = $closing;
             }
         }
+        $this->linkCompanyAccounts($ctx, $registrar, $company, $registered);
         $p->finish(self::STEP);
+    }
+
+    /**
+     * Účty řad s pohyby patří mezi účty firmy v měnách (zůstatky banky, platební údaje
+     * dokladů) stejně jako po převodu z Money S3 a POHODY: prázdnou měnu firmy doplní
+     * první účet řady v té měně (vyplněný účet se nepřepisuje), každý další účet dostane
+     * vlastní řádek měny a evidence účtů se na něj naváže ({@see BankAccountRegistrar}).
+     *
+     * @param array<string,array{number:string,bank:string,iban:string,currency:string,label:string,suffix:?string}> $company
+     * @param array<string,int> $registered
+     */
+    private function linkCompanyAccounts(PremierContext $ctx, BankAccountRegistrar $registrar, array $company, array $registered): void
+    {
+        if ($company === []) {
+            return;
+        }
+        $filled = [];
+        foreach ($company as $a) {
+            if (!isset($filled[$a['currency']])) {
+                $filled[$a['currency']] = true;
+                $registrar->fillCurrencyAccount(
+                    $ctx->supplierId,
+                    $a['currency'],
+                    mb_substr($a['number'], 0, 30),
+                    $a['bank'] !== '' ? mb_substr($a['bank'], 0, 4) : null,
+                    $a['iban'] !== '' ? mb_substr($a['iban'], 0, 34) : null,
+                );
+            }
+        }
+        $registrar->linkCompanyAccounts($ctx->supplierId, $company, array_map('strval', array_keys($company)), $registered, $ctx->protocol, self::STEP, true);
     }
 
     /**
