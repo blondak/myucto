@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { isPohodaUploadReady, pohodaApi, type PohodaKind, type PohodaMessage, type PohodaRun, type PohodaSystem, type PohodaToolFile, type PohodaUpload } from '@/api/pohoda'
-import { cancelImportJob, fetchImportJob, type FileImportJob } from '@/api/imports'
+import { isPohodaUploadReady, pohodaApi, type PohodaKind, type PohodaMessage, type PohodaRun, type PohodaStartParams, type PohodaSystem, type PohodaToolFile, type PohodaUpload, type PohodaUploadPending } from '@/api/pohoda'
 import { useToast } from '@/composables/useToast'
+import { useMigrationWizard } from '@/composables/useMigrationWizard'
 import { useAuthStore } from '@/stores/auth'
 import type { PermissionKey } from '@/security/permissions'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
@@ -16,7 +16,7 @@ import { formatBytes } from '@/components/documents/docFormat'
  * Průvodce převodem ze STORMWARE: export agendy → náhled a výběr roků → zkouška nanečisto
  * → ostrý převod (vybrané roky vzestupně v jednom jobu, každý rok vlastní protokol).
  * Nahraný export zůstává na serveru pod tokenem, takže obnovení stránky průvodce nevrátí
- * na začátek (token drží sessionStorage).
+ * na začátek (token drží sessionStorage). Společný průběh průvodců je v useMigrationWizard.
  *
  * Jedna komponenta obsluhuje dva průvodce, protože server i protokol jsou stejné; liší se
  * jen to, co se převádí a jakým nástrojem se to z programu dostane ven:
@@ -61,29 +61,14 @@ const exportHelpItems = computed(() => list('export_help_items'))
 const mdbHelpItems = computed(() => list('mdb_help_items'))
 const fileHelpItems = computed(() => list('file_help_items'))
 
-const currentStep = ref(1)
-const upload = ref<PohodaUpload | null>(null)
-const file = ref<File | null>(null)
 const selectedYears = ref<number[]>([])
 // Druh převodu plyne ze systému průvodce; volba v UI už není.
 const kind = ref<PohodaKind>(FORCED_KIND[props.system])
-const job = ref<FileImportJob | null>(null)
-const jobMode = ref<'dry_run' | 'import' | null>(null)
-const run = ref<PohodaRun | null>(null)
-// Běhy (protokoly) aktuálního jobu vzestupně: job víc roků má běh za každý rok.
-const jobRuns = ref<PohodaRun[]>([])
-const runs = ref<PohodaRun[]>([])
-const busy = ref(false)
-const cancelling = ref(false)
-const confirmed = ref(false)
 // Mzdy: potvrzení, že OIČ a ID PPV v PAMICA pocházejí z protokolů ČSSZ. Bez něj je převod nepřevezme.
 const confirmIdentifiers = ref(false)
 // Mzdy: převzatá docházka a vstupy se rovnou schválí. Zapnuté proto, že měsíce z PAMICA
 // už reálně proběhly a byly podané; jako koncepty by mzdový běh nad nimi vůbec nešel spustit.
 const approveTakenOver = ref(true)
-const dryRunPassed = ref(false)
-const uploadPercent = ref<number | null>(null)
-const processing = ref(false)
 const toolOpen = ref(false)
 const toolFiles = ref<PohodaToolFile[] | null>(null)
 const toolGroups = computed(() => [
@@ -93,23 +78,24 @@ const toolGroups = computed(() => [
 ].map(group => ({ ...group, files: (toolFiles.value ?? []).filter(file => group.names.includes(file.name)) })))
 const toolLoading = ref(false)
 const toolDownloading = ref<string | null>(null)
-let pollTimer: ReturnType<typeof setTimeout> | null = null
-let disposed = false
 
-function readToken(): string | null {
-  try { return sessionStorage.getItem(TOKEN_KEY.value) } catch { return null }
-}
-function writeToken(token: string | null): void {
-  try {
-    if (token) sessionStorage.setItem(TOKEN_KEY.value, token)
-    else sessionStorage.removeItem(TOKEN_KEY.value)
-  } catch { /* prohlížeč bez úložiště: průvodce jen nepřežije obnovení stránky */ }
-}
-
-function errorMessage(error: any, fallback: string): string {
-  const message = String(error?.response?.data?.error?.message ?? '').trim()
-  return message || fallback
-}
+const {
+  currentStep, upload, file, job, jobMode, run, jobRuns, runs, busy, cancelling, confirmed, dryRunPassed,
+  uploadPercent, processing, deletingRun, jobRunning, jobSucceeded, percent,
+  canGoTo, goTo, onFile, doUpload, resetUpload, start: startJob, cancel, showRun, deleteRun, errorMessage,
+} = useMigrationWizard<PohodaUpload, PohodaUploadPending, PohodaRun, PohodaStartParams>({
+  api: pohodaApi,
+  tokenKey: () => TOKEN_KEY.value,
+  isReady: isPohodaUploadReady,
+  text: tt,
+  multiYear: true,
+  // Předvybrané všechny roky agend s IČO firmy (a jejich pozdější roky).
+  onReady: () => { selectedYears.value = [...years.value] },
+  onReset: () => { selectedYears.value = [] },
+  // Historie je společná pro oba průvodce, ale ukazuje se jen ta jeho. Běh bez druhu
+  // je z doby před podporou mezd, tedy vždycky účetnictví.
+  filterRuns: items => items.filter(r => (r.kind ?? 'accounting') === kind.value),
+})
 
 const steps = computed(() => [1, 2, 3, 4].map(number => ({ number, label: tt(`step${number}`) })))
 const payrollWizard = computed(() => kind.value === 'payroll')
@@ -196,17 +182,11 @@ const missingRights = computed(() => {
 const rightsMessage = computed(() => tt(kind.value === 'payroll' ? 'payroll_rights_missing' : 'rights_missing', { rights: missingRights.value.join(', ') }))
 const payrollRightsBlocked = computed(() => kind.value === 'payroll' && missingRights.value.length > 0)
 const blocked = computed(() => selectedYears.value.length === 0 || preflightErrors.value.length > 0 || payrollRightsBlocked.value)
-const jobRunning = computed(() => job.value?.status === 'queued' || job.value?.status === 'running')
 // Tlačítko je zakázané i během běžící úlohy; důvodem pak není kontrola před převodem.
 const blockedReason = computed(() => jobRunning.value && !blocked.value
   ? tt(jobMode.value === 'import' ? 'import_running' : 'dry_run_running')
   : selectedYears.value.length === 0 ? tt('choose_year_first')
     : payrollRightsBlocked.value ? rightsMessage.value : tt('preflight_blocked'))
-const percent = computed(() => {
-  if (jobMode.value !== 'import' || !job.value?.total_items) return null
-  return Math.min(100, Math.round(job.value.processed / job.value.total_items * 100))
-})
-const jobSucceeded = computed(() => job.value?.status === 'completed' || job.value?.status === 'completed_with_warnings')
 const importDone = computed(() => jobMode.value === 'import' && !jobRunning.value && jobSucceeded.value
   && jobRuns.value.length > 0 && jobRuns.value.every(r => r.mode === 'import'))
 // Roky jobu, které se po chybě nebo zrušení předchozího roku nespustily.
@@ -232,22 +212,6 @@ watch(kind, () => {
 function fileState(state: string): string {
   const key = `file_state.${state}`
   return te(`pohoda.${key}`) ? tt(key) : state
-}
-
-function canGoTo(step: number): boolean {
-  if (busy.value || jobRunning.value || step === currentStep.value) return false
-  if (step === 1) return true
-  if (step === 2 || step === 3) return upload.value !== null
-  return dryRunPassed.value && upload.value !== null
-}
-
-function goTo(step: number): void {
-  if (canGoTo(step)) currentStep.value = step
-}
-
-function onFile(event: Event): void {
-  const input = event.target as HTMLInputElement
-  file.value = input.files?.[0] ?? null
 }
 
 async function toggleTool(): Promise<void> {
@@ -276,184 +240,18 @@ async function downloadTool(name: string | null): Promise<void> {
   }
 }
 
-async function doUpload(): Promise<void> {
-  if (!file.value) return
-  busy.value = true
-  uploadPercent.value = 0
-  try {
-    const { token } = await pohodaApi.uploadChunked(
-      file.value,
-      (sent, total) => { uploadPercent.value = total > 0 ? Math.floor(sent / total * 100) : 100 },
-      started => writeToken(started),
-    )
-    uploadPercent.value = null
-    await waitForUpload(token)
-  } catch (error: any) {
-    writeToken(null)
-    toast.error(errorMessage(error, tt('upload_failed')))
-  } finally {
-    uploadPercent.value = null
-    busy.value = false
-  }
-}
-
-/** Polluje stav nahraného exportu, dokud ho server nerozbalí a nenačte (nebo nenahlásí chybu). */
-async function waitForUpload(token: string): Promise<void> {
-  processing.value = true
-  try {
-    while (!disposed) {
-      const result = await pohodaApi.show(token)
-      if (isPohodaUploadReady(result)) {
-        upload.value = result
-        // Předvybrané všechny roky agend s IČO firmy (a jejich pozdější roky).
-        selectedYears.value = [...years.value]
-        dryRunPassed.value = false
-        confirmed.value = false
-        run.value = null
-        currentStep.value = 2
-        return
-      }
-      if (result.status !== 'processing') {
-        // 'uploading' po obnovení stránky: soubor v prohlížeči už není, nahrávání nejde dokončit.
-        writeToken(null)
-        toast.error(result.status === 'failed' ? (result.error || tt('upload_failed')) : tt('upload_interrupted'))
-        return
-      }
-      await new Promise<void>(resolve => { pollTimer = setTimeout(resolve, 2000) })
-    }
-  } finally {
-    processing.value = false
-  }
-}
-
-function resetUpload(): void {
-  upload.value = null
-  file.value = null
-  selectedYears.value = []
-  run.value = null
-  jobRuns.value = []
-  dryRunPassed.value = false
-  confirmed.value = false
-  writeToken(null)
-  currentStep.value = 1
-}
-
 async function start(mode: 'dry_run' | 'import'): Promise<void> {
   if (!upload.value || selectedYears.value.length === 0) return
-  busy.value = true
-  try {
-    const started = await pohodaApi.start(upload.value.token, {
-      mode,
-      years: [...selectedYears.value],
-      kind: kind.value,
-      ...(kind.value === 'payroll' ? { confirm_identifiers: confirmIdentifiers.value, approve_taken_over: approveTakenOver.value } : {}),
-    })
-    jobMode.value = mode
-    run.value = null
-    jobRuns.value = []
-    currentStep.value = mode === 'dry_run' ? 3 : 4
-    await pollJob(started.job_id)
-  } catch (error: any) {
-    toast.error(errorMessage(error, tt('start_failed')))
-  } finally {
-    busy.value = false
-  }
-}
-
-async function pollJob(id: number): Promise<void> {
-  job.value = await fetchImportJob(id)
-  if (jobRunning.value) {
-    schedulePoll(id)
-    return
-  }
-  await loadRuns()
-  // Job víc roků má běh a protokol za každý rok - průvodce ukazuje všechny, vzestupně.
-  const ids = runs.value.filter(r => r.job_id === id).map(r => r.id).sort((a, b) => a - b)
-  jobRuns.value = await Promise.all(ids.map(runId => pohodaApi.run(runId)))
-  run.value = jobRuns.value[jobRuns.value.length - 1] ?? null
-  const ok = jobRuns.value.length > 0 && jobSucceeded.value
-  if (jobMode.value === 'dry_run') {
-    dryRunPassed.value = ok
-  } else if (jobMode.value === 'import' && ok) {
-    // Server nahraný export po úspěšném převodu smazal.
-    writeToken(null)
-  }
-}
-
-function schedulePoll(id: number): void {
-  if (pollTimer) clearTimeout(pollTimer)
-  pollTimer = setTimeout(() => { void pollJob(id) }, 2000)
-}
-
-async function cancel(): Promise<void> {
-  if (!job.value) return
-  cancelling.value = true
-  try {
-    await cancelImportJob(job.value.id)
-  } catch (error: any) {
-    toast.error(errorMessage(error, t('common.error')))
-  } finally {
-    cancelling.value = false
-  }
-}
-
-// Historie je společná pro oba průvodce, ale ukazuje se jen ta jeho. Běh bez druhu
-// je z doby před podporou mezd, tedy vždycky účetnictví.
-async function loadRuns(): Promise<void> {
-  const items = (await pohodaApi.runs()).items
-  runs.value = items.filter(r => (r.kind ?? 'accounting') === kind.value)
-}
-
-async function showRun(item: PohodaRun): Promise<void> {
-  try {
-    run.value = await pohodaApi.run(item.id)
-  } catch (error: any) {
-    toast.error(errorMessage(error, t('common.error')))
-  }
+  await startJob(mode, {
+    mode,
+    years: [...selectedYears.value],
+    kind: kind.value,
+    ...(kind.value === 'payroll' ? { confirm_identifiers: confirmIdentifiers.value, approve_taken_over: approveTakenOver.value } : {}),
+  })
 }
 
 // Smazat jde jen doběhlou zkoušku nanečisto, protokol ostrého převodu zůstává.
 const canWrite = computed(() => missingRights.value.length === 0)
-const deletingRun = ref<number | null>(null)
-async function deleteRun(item: PohodaRun): Promise<void> {
-  if (!confirm(tt('run_delete_confirm', { id: item.id }))) return
-  deletingRun.value = item.id
-  try {
-    await pohodaApi.deleteRun(item.id)
-    if (run.value?.id === item.id) run.value = null
-    await loadRuns()
-    toast.success(tt('run_deleted'))
-  } catch (error: any) {
-    toast.error(errorMessage(error, t('common.error')))
-  } finally {
-    deletingRun.value = null
-  }
-}
-
-async function load(): Promise<void> {
-  busy.value = true
-  try {
-    await loadRuns()
-    const token = readToken()
-    if (token) {
-      try {
-        await waitForUpload(token)
-      } catch {
-        writeToken(null)
-      }
-    }
-    const active = runs.value.find(r => r.status === 'running' && r.job_id !== null)
-    if (active?.job_id) {
-      jobMode.value = active.mode
-      currentStep.value = active.mode === 'dry_run' ? 3 : 4
-      await pollJob(active.job_id)
-    }
-  } catch (error: any) {
-    toast.error(errorMessage(error, t('common.error')))
-  } finally {
-    busy.value = false
-  }
-}
 
 const actions = computed<ActionItem[]>(() => {
   if (currentStep.value === 1) return [
@@ -483,12 +281,6 @@ const actions = computed<ActionItem[]>(() => {
   return [
     { key: 'import', label: tt('import_start'), icon: 'play', tier: 'primary', variant: 'warning', disabled: !confirmed.value || jobRunning.value || blocked.value || missingRights.value.length > 0, disabledReason: importReason, loading: busy.value, run: () => { void start('import') } },
   ]
-})
-
-onMounted(load)
-onBeforeUnmount(() => {
-  disposed = true
-  if (pollTimer) clearTimeout(pollTimer)
 })
 </script>
 

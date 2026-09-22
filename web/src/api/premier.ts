@@ -1,5 +1,4 @@
-import { api } from './client'
-import { uploadChunked, type ChunkedUploadProgress } from './chunkedUpload'
+import { createMigrationApi } from './migrationApi'
 import type { MoneyS3RunStatus, MoneyS3Step } from './moneyS3'
 
 /**
@@ -107,14 +106,5 @@ export interface PremierStartParams {
 export const PREMIER_BASE = '/admin/imports/premier'
 
 export const premierApi = {
-  uploadChunked: (file: File, onProgress?: ChunkedUploadProgress, onStarted?: (token: string) => void) =>
-    uploadChunked(PREMIER_BASE, file, onProgress, onStarted),
-  show: (token: string): Promise<PremierUpload | PremierUploadPending> =>
-    api.get<PremierUpload | PremierUploadPending>(`${PREMIER_BASE}/uploads/${token}`).then(r => r.data),
-  start: (token: string, params: PremierStartParams): Promise<{ job_id: number; status: string; mode: string }> =>
-    api.post(`${PREMIER_BASE}/uploads/${token}/start`, params).then(r => r.data),
-  runs: (): Promise<{ items: PremierRun[] }> =>
-    api.get<{ items: PremierRun[] }>(`${PREMIER_BASE}/runs`).then(r => r.data),
-  run: (id: number): Promise<PremierRun> =>
-    api.get<PremierRun>(`${PREMIER_BASE}/runs/${id}`).then(r => r.data),
+  ...createMigrationApi<PremierUpload, PremierUploadPending, PremierRun, PremierStartParams>(PREMIER_BASE),
 }

@@ -1,5 +1,5 @@
 import { api } from './client'
-import { uploadChunked, type ChunkedUploadProgress } from './chunkedUpload'
+import { createMigrationApi } from './migrationApi'
 import { downloadApiFile } from '@/utils/downloadFile'
 import type { MoneyS3Diff, MoneyS3RunStatus, MoneyS3Step, SourceDifference } from './moneyS3'
 
@@ -156,16 +156,7 @@ export interface PohodaToolFile {
 export const POHODA_BASE = '/admin/imports/pohoda'
 
 export const pohodaApi = {
-  uploadChunked: (file: File, onProgress?: ChunkedUploadProgress, onStarted?: (token: string) => void) =>
-    uploadChunked(POHODA_BASE, file, onProgress, onStarted),
-  show: (token: string): Promise<PohodaUpload | PohodaUploadPending> =>
-    api.get<PohodaUpload | PohodaUploadPending>(`${POHODA_BASE}/uploads/${token}`).then(r => r.data),
-  start: (token: string, params: PohodaStartParams): Promise<{ job_id: number; status: string; mode: string }> =>
-    api.post(`${POHODA_BASE}/uploads/${token}/start`, params).then(r => r.data),
-  runs: (): Promise<{ items: PohodaRun[] }> =>
-    api.get<{ items: PohodaRun[] }>(`${POHODA_BASE}/runs`).then(r => r.data),
-  run: (id: number): Promise<PohodaRun> =>
-    api.get<PohodaRun>(`${POHODA_BASE}/runs/${id}`).then(r => r.data),
+  ...createMigrationApi<PohodaUpload, PohodaUploadPending, PohodaRun, PohodaStartParams>(POHODA_BASE),
   /** Jen doběhlá zkouška nanečisto; protokol ostrého převodu API smazat nedovolí. */
   deleteRun: (id: number): Promise<{ ok: boolean }> =>
     api.delete<{ ok: boolean }>(`${POHODA_BASE}/runs/${id}`).then(r => r.data),
