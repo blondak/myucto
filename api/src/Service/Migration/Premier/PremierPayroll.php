@@ -101,6 +101,7 @@ final class PremierPayroll
             }
         }
         $registry = PremierPayrollRegistry::read($backup);
+        $card = PremierPayrollPersonCard::read($backup);
         $insurers = [];
         /** @var array<int,list<array{date:string,code:string,kind:string}>> $insurerEvents */
         $insurerEvents = [];
@@ -215,6 +216,11 @@ final class PremierPayroll
                 'months' => $relationMonths,
                 'registry' => $evidence,
                 'oic' => self::oic(self::text($person['IK_MPSV'] ?? '')),
+                'children' => $person !== null ? ($card['children'][self::text($person['ID'] ?? '')] ?? []) : [],
+                'pension' => $card['pensions'][$inter] ?? null,
+                // Mzda na účet (`KONTO_L`); F = výplata v hotovosti.
+                'paid_to_account' => ($row['KONTO_L'] ?? true) !== false,
+                'account_history' => $card['accounts'][$inter] ?? [],
             ];
         }
         usort($relations, static fn (array $a, array $b): int => ((int) $a['key']) <=> ((int) $b['key']));
@@ -229,9 +235,20 @@ final class PremierPayroll
                 $personStart[$personKey] = $relation['start'];
             }
         }
+        $personLast = [];
+        foreach ($relations as $relation) {
+            $last = array_key_last($relation['months']);
+            $personKey = (string) $relation['person_key'];
+            if ($last !== null && (!isset($personLast[$personKey]) || (string) $last > $personLast[$personKey])) {
+                $personLast[$personKey] = (string) $last;
+            }
+        }
+        $accounts = self::payoutAccounts($relations);
         foreach ($relations as $i => $relation) {
             $personKey = (string) $relation['person_key'];
             $relations[$i]['insurer_history'] = self::insurerHistory($personEvents[$personKey] ?? [], $personStart[$personKey] ?? null);
+            $relations[$i]['person_last_period'] = $personLast[$personKey] ?? null;
+            $relations[$i]['payout_accounts'] = $accounts[$personKey] ?? [];
         }
         return new self($relations, $missing, $monthRows);
     }
@@ -358,6 +375,8 @@ final class PremierPayroll
             'non_refundable' => round($num('NEZD_VLAS') + $num('NEZD_INVA') + $num('NEZD_ZTP') + $num('NEZD_ZACI'), 2),
             'child' => $num('NEZD_DETI'),
             'signed' => ($row['POD_DAN'] ?? false) === true || ($row['NEZD_A'] ?? false) === true,
+            // Uplatněná sleva na pojistném pracujícího důchodce (Kč za měsíc).
+            'pensioner_discount' => $num('SLEVA_SOC') > 0,
             'pension_participation' => $participates,
             'insurance_days' => $participates ? max(0, min($calendarDays, 31)) : 0,
             'excluded_days' => max(0, min((int) round($num('VYL_DND')), 31)),
@@ -486,6 +505,55 @@ final class PremierPayroll
             2 => $rate > 0 ? ['hourly', $rate] : [null, 0.0],
             default => $monthly > 0 ? ['monthly', $monthly] : [null, 0.0],
         };
+    }
+
+    /**
+     * Výplatní účty osoby: aktivní je účet posledního vztahu (podle nástupu), na který
+     * PREMIER mzdu vyplácí (`KONTO_L`); dřívější účty z historie změn (`MZ_PERH`) a účty
+     * jiných vztahů osoby se zapíšou jako účty bez výplat, aby historie nezmizela. Osoba,
+     * které PREMIER vyplácí v hotovosti, účet nedostane.
+     *
+     * @param list<array<string,mixed>> $relations
+     * @return array<string,list<array{account:string,bank_code:string,active:bool}>> klíč osoby => účty
+     */
+    private static function payoutAccounts(array $relations): array
+    {
+        $byPerson = [];
+        foreach ($relations as $relation) {
+            $byPerson[(string) $relation['person_key']][] = $relation;
+        }
+        $out = [];
+        foreach ($byPerson as $personKey => $list) {
+            usort($list, static fn (array $a, array $b): int => [(string) $b['start'], (int) $b['key']] <=> [(string) $a['start'], (int) $a['key']]);
+            $latest = $list[0];
+            if (!is_array($latest['account']) || $latest['paid_to_account'] !== true) {
+                continue;
+            }
+            $accounts = [['account' => $latest['account']['account'], 'bank_code' => $latest['account']['bank_code'], 'active' => true]];
+            $seen = [self::accountKey($latest['account']['account'], $latest['account']['bank_code']) => true];
+            foreach ($list as $relation) {
+                $candidates = array_reverse((array) $relation['account_history']);
+                if (is_array($relation['account'])) {
+                    array_unshift($candidates, $relation['account']);
+                }
+                foreach ($candidates as $candidate) {
+                    $key = self::accountKey((string) $candidate['account'], (string) $candidate['bank_code']);
+                    if (isset($seen[$key])) {
+                        continue;
+                    }
+                    $seen[$key] = true;
+                    $accounts[] = ['account' => (string) $candidate['account'], 'bank_code' => (string) $candidate['bank_code'], 'active' => false];
+                }
+            }
+            $out[$personKey] = $accounts;
+        }
+        return $out;
+    }
+
+    private static function accountKey(string $account, string $bankCode): string
+    {
+        [$prefix, $number] = str_contains($account, '-') ? explode('-', $account, 2) : ['', $account];
+        return ltrim(trim($prefix), '0') . '-' . ltrim(trim($number), '0') . '/' . $bankCode;
     }
 
     /**

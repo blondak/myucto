@@ -531,10 +531,13 @@ final class SyntheticPremierBackup
      *            1 000 Kč měsíčně od 10/2025, v 11/2025 záloha na mzdu 2 000 Kč (jen v `DNY`);
      *            úvazek 38,75 h týdně; formulář JMHZ za 1/2026 přijatý ČSSZ (OIČ, ID PPV,
      *            pracoviště Brno, druh činnosti 1), CZ-ISCO v `MZ_ISPV`, přijaté oznámení
-     *            o nástupu ČSSZ (`MZ_PRISO`)
+     *            o nástupu ČSSZ (`MZ_PRISO`); výplatní účet se změnou 9/2025 (`MZ_PERH`), dítě
+     *            se zvýhodněním (`PER_DETI`, `MZ_DETI`) a dítě bez něj
      *   INTER 6  DPP 4-6/2025 (kategorie `DPP`), osoba s bydlištěm na Slovensku (stát názvem
      *            „Slovenská republika"); OIČ jen na kartě osoby (bez formuláře JMHZ), přijatá
-     *            oznámení ČSSZ o nástupu i skončení
+     *            oznámení ČSSZ o nástupu i skončení; pobírá důchod (`MZ_DUCHOD`), výplata v hotovosti
+     *
+     * Registr pojišťoven `POJIST` a účty odvodů v nastavení mezd (`SET_GLOB` `amz_ucet1..3`).
      *
      * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
      * @param list<array{0:int,1:int,2:int,3:array<string,mixed>}> $months MĚNÍ SE
@@ -560,6 +563,61 @@ final class SyntheticPremierBackup
         );
         $tables['PER_MAIN'][0][] = ['SUP_INTER', 'N', 10];
         $tables['PER_MAIN'][0][] = ['IK_MPSV', 'C', 36];
+        // Výplata na účet (KONTO_L): INTER 5 na účet s historií změn, INTER 6 v hotovosti.
+        $tables['PERSONAL'][0][] = ['KONTO_L', 'L'];
+        foreach ($tables['PERSONAL'][1] as $i => $row) {
+            if ($row['INTER'] === 5) {
+                $tables['PERSONAL'][1][$i] += ['BANKA_UCET' => self::BANK_ACCOUNT, 'BANKA_KOD' => self::BANK_CODE, 'KONTO_L' => true];
+            } else {
+                $tables['PERSONAL'][1][$i]['KONTO_L'] = $row['INTER'] !== 6;
+            }
+        }
+        $history = static fn (string $key, string $value, int $month): array => ['UDAJ' => $key, 'TYP' => 'C', 'HODNOTAC' => $value, 'PLATN_OD_M' => $month,
+            'PLATN_OD_R' => 2025, 'MZ_HINTER' => 5, 'ID' => "PH5-{$key}-{$month}"];
+        $tables['MZ_PERH'] = [
+            [['UDAJ', 'C', 20], ['TYP', 'C', 1], ['HODNOTAC', 'C', 80], ['PLATN_OD_M', 'N', 2], ['PLATN_OD_R', 'N', 4], ['MZ_HINTER', 'N', 12], ['ID', 'C', 36]],
+            [$history('banka_ucet', '19-2000145399', 1), $history('banka_kod', '0800', 1),
+                $history('banka_ucet', self::BANK_ACCOUNT, 9), $history('banka_kod', self::BANK_CODE, 9)],
+        ];
+        // Děti osoby OS-E (vazba přes SUP_INTER): se zvýhodněním 1. pořadí (uplatněné 1/2025-1/2026,
+        // příznak BVYZI) a bez zvýhodnění.
+        $tables['PER_DETI'] = [
+            [['ID', 'C', 36], ['INTER', 'N', 8], ['BJMENO', 'C', 30], ['BPRIJMENI', 'C', 30], ['BRC_1', 'C', 6], ['BRC_2', 'C', 4], ['BDNAR', 'D'],
+                ['BABY_POR', 'C', 1], ['BABY_SLE', 'L'], ['BVYZI', 'L'], ['BABYV', 'L']],
+            [
+                ['ID' => 'D1', 'INTER' => 105, 'BJMENO' => 'Eliška', 'BPRIJMENI' => 'Syntetická', 'BRC_1' => '180420', 'BRC_2' => '0101', 'BDNAR' => '2018-04-20',
+                    'BABY_POR' => '1', 'BABY_SLE' => true, 'BVYZI' => true, 'BABYV' => true],
+                ['ID' => 'D2', 'INTER' => 105, 'BJMENO' => 'Ondřej', 'BPRIJMENI' => 'Syntetický', 'BRC_1' => '150505', 'BRC_2' => '0107', 'BDNAR' => '2015-05-05',
+                    'BABY_POR' => 'N', 'BABY_SLE' => false, 'BVYZI' => false, 'BABYV' => true],
+            ],
+        ];
+        $applied = [];
+        foreach ([[2025, range(1, 12)], [2026, [1]]] as [$year, $monthList]) {
+            foreach ($monthList as $m) {
+                $applied[] = ['DITE_ID' => 'D1', 'DITE_POR' => '1', 'DI_SLE' => 1267, 'ZAM_SUPID' => 'OS-E', 'DITE_MES' => $m, 'DITE_ROK' => $year, 'ID' => "MD-{$year}-{$m}"];
+            }
+        }
+        $tables['MZ_DETI'] = [
+            [['DITE_ID', 'C', 36], ['DITE_POR', 'C', 1], ['DI_SLE', 'N', 12, 2], ['ZAM_SUPID', 'C', 36], ['DITE_MES', 'N', 2], ['DITE_ROK', 'N', 4], ['ID', 'C', 36]],
+            $applied,
+        ];
+        // DPP vztahu INTER 6 pobírá starobní důchod, sleva na pojistném se neuplatňuje.
+        $tables['MZ_DUCHOD'] = [[['INTER', 'N', 12], ['DAT_PR_OD', 'D'], ['D_KATE2', 'N', 2], ['ID', 'C', 36]],
+            [['INTER' => 6, 'DAT_PR_OD' => '2020-01-01', 'D_KATE2' => 8, 'ID' => 'DU6']]];
+        // Registr pojišťoven a účty odvodů v nastavení mezd (pozice 1 záloha na daň, 2 srážková daň, 3 ČSSZ).
+        $tables['POJIST'] = [
+            [['ZKRATKA_PO', 'C', 3], ['NAZEV_PO', 'C', 40], ['UCET_PO', 'C', 36], ['KOD_PO', 'C', 12], ['VAR1', 'C', 10], ['CO_POJIS', 'N', 2], ['ADR_DS', 'C', 10]],
+            [
+                ['ZKRATKA_PO' => '111', 'NAZEV_PO' => 'Fiktivní zdravotní pojišťovna', 'UCET_PO' => self::BANK_ACCOUNT, 'KOD_PO' => '0710', 'VAR1' => self::ICO, 'CO_POJIS' => 1, 'ADR_DS' => 'abc1234'],
+                ['ZKRATKA_PO' => '201', 'NAZEV_PO' => 'Vzorová pojišťovna', 'UCET_PO' => '2000145399', 'KOD_PO' => '0100', 'VAR1' => self::ICO, 'CO_POJIS' => 1],
+                ['ZKRATKA_PO' => 'PF', 'NAZEV_PO' => 'Penzijní fond', 'UCET_PO' => self::BANK_ACCOUNT, 'KOD_PO' => '2700', 'CO_POJIS' => 2],
+            ],
+        ];
+        array_push($tables['SET_GLOB'][1],
+            ['PROMEN' => 'amz_ucet1', 'C_SET' => '713-' . self::BANK_ACCOUNT], ['PROMEN' => 'amz_kod1', 'C_SET' => '0710'], ['PROMEN' => 'amz_var1', 'C_SET' => self::ICO],
+            ['PROMEN' => 'amz_ucet2', 'C_SET' => '7720-' . self::BANK_ACCOUNT], ['PROMEN' => 'amz_kod2', 'C_SET' => '0710'], ['PROMEN' => 'amz_var2', 'C_SET' => self::ICO],
+            ['PROMEN' => 'amz_ucet3', 'C_SET' => '21012-' . self::BANK_ACCOUNT], ['PROMEN' => 'amz_kod3', 'C_SET' => '0710'], ['PROMEN' => 'amz_var3', 'C_SET' => '1234567890'],
+        );
         // Další adresy osoby: vazba přes PER_MAIN.SUP_INTER; druh 1 je kopie trvalé, druh 2 korespondenční.
         $tables['PER_ADR'] = [
             [['INTER', 'N', 10], ['XULICE', 'C', 28], ['XCISLO', 'C', 12], ['XPSC', 'C', 10], ['XMESTO', 'C', 40], ['XOBEC', 'C', 50], ['XSTAT', 'C', 10],

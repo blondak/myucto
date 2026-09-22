@@ -67,6 +67,7 @@ final class PremierPayrollTakeover
             );
         }
         $account = $relation['account'];
+        $children = self::children($relation, $until);
         $person = new PayrollTakeoverPerson(
             key: (string) $relation['person_key'],
             identity: ['birth_date' => $relation['birth_date']] + (array) $relation['identity'],
@@ -76,7 +77,10 @@ final class PremierPayrollTakeover
             mailing: self::address(is_array($relation['mailing'] ?? null) ? $relation['mailing'] : null, $countries),
             email: is_string($relation['email']) ? $relation['email'] : null,
             phone: is_string($relation['phone']) ? $relation['phone'] : null,
-            payoutAccounts: is_array($account) ? [new PayrollTakeoverPayoutAccount($account['account'], $account['bank_code'])] : [],
+            payoutAccounts: array_key_exists('payout_accounts', $relation)
+                ? array_map(static fn (array $a): PayrollTakeoverPayoutAccount => new PayrollTakeoverPayoutAccount($a['account'], $a['bank_code'], $a['active']),
+                    (array) $relation['payout_accounts'])
+                : (is_array($account) ? [new PayrollTakeoverPayoutAccount($account['account'], $account['bank_code'])] : []),
             taxResidence: $relation['non_resident'] === true
                 ? new PayrollTakeoverEvidencePeriod('non-resident', $from)
                 : new PayrollTakeoverEvidencePeriod('czech-resident', $from, null, 'premier:per_main:rezident',
@@ -89,6 +93,10 @@ final class PremierPayrollTakeover
                 ? new PayrollTakeoverEvidencePeriod('foreign', $from)
                 : new PayrollTakeoverEvidencePeriod('czech', $from, null, null, self::NOTE . 'osoba nepodléhá v PREMIER cizím právním předpisům.'),
             taxDeclarations: $declarations,
+            socialDiscountClaims: self::socialDiscounts($relation, $until),
+            children: $children['children'],
+            childrenWithoutCredit: $children['without_credit'],
+            firstSignedPeriod: self::firstSignedPeriod($relation, $until),
             healthCoverageHistory: array_map(
                 static fn (array $run): PayrollTakeoverEvidencePeriod => new PayrollTakeoverEvidencePeriod($run['code'], $run['from'], $run['to'], $run['reference'],
                     self::NOTE . 'zdravotní pojišťovna ' . $run['code'] . ' podle oznámení pojišťovně.'),
@@ -242,6 +250,94 @@ final class PremierPayrollTakeover
     }
 
     /**
+     * Děti s uplatněným daňovým zvýhodněním ({@see PremierPayrollPersonCard}): pořadí
+     * z posledního uplatněného měsíce, nárok od prvního do posledního uplatněného měsíce;
+     * uplatňuje-li se dosud (poslední měsíc mezd osoby), je nárok otevřený. Dítě bez
+     * uplatnění do `$until` je jen v počtu dětí bez zvýhodnění. Dítě bez rodného čísla
+     * se nezapisuje (zápis ho bez něj založit nesmí), vrací se zvlášť.
+     *
+     * @param array<string,mixed> $relation
+     * @return array{children:list<array<string,mixed>>,without_credit:int,without_birth_number:int,other_caregiver:int}
+     */
+    public static function children(array $relation, string $until): array
+    {
+        $untilPeriod = substr($until, 0, 7);
+        $lastPayroll = is_string($relation['person_last_period'] ?? null) ? min($relation['person_last_period'], $untilPeriod) : $untilPeriod;
+        $out = ['children' => [], 'without_credit' => 0, 'without_birth_number' => 0, 'other_caregiver' => 0];
+        foreach ((array) ($relation['children'] ?? []) as $child) {
+            $periods = array_filter((array) $child['periods'], static fn (string $p): bool => $p <= $untilPeriod, ARRAY_FILTER_USE_KEY);
+            if ($periods === []) {
+                $out['without_credit']++;
+                continue;
+            }
+            if (!is_string($child['birth_number'])) {
+                $out['without_birth_number']++;
+                continue;
+            }
+            if ($child['other_caregiver'] === true) {
+                $out['other_caregiver']++;
+            }
+            $first = (string) array_key_first($periods);
+            $last = (string) array_key_last($periods);
+            $out['children'][] = [
+                'order' => (int) $periods[$last],
+                'code' => (string) $child['id'],
+                'reference' => 'premier:mz_deti:' . $child['id'],
+                'given_name' => $child['given_name'],
+                'family_name' => $child['family_name'],
+                'birth_number' => $child['birth_number'],
+                'from' => $first . '-01',
+                'to' => $last < $lastPayroll ? (new \DateTimeImmutable($last . '-01'))->format('Y-m-t') : null,
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Sleva na pojistném pracujícího důchodce po úsecích měsíců mezd (`MZDY.SLEVA_SOC`).
+     * U osoby, která podle PREMIER pobírá důchod (`MZ_DUCHOD`), poznámka řekne i to.
+     *
+     * @param array<string,mixed> $relation
+     * @return list<PayrollTakeoverEvidencePeriod>
+     */
+    private static function socialDiscounts(array $relation, string $until): array
+    {
+        $pension = is_array($relation['pension'] ?? null) ? $relation['pension'] : null;
+        $out = [];
+        foreach (self::runs($relation, $until, static fn (array $m): string => ($m['pensioner_discount'] ?? false) === true ? 'verified' : 'not_claimed') as $run) {
+            $claimed = $run['status'] === 'verified';
+            $out[] = new PayrollTakeoverEvidencePeriod(
+                $run['status'],
+                $run['from'],
+                $run['to'],
+                $claimed ? 'premier:mzdy:sleva_soc:' . $run['period'] : null,
+                self::NOTE . ($claimed ? 'sleva pracujícího důchodce uplatněná' : 'sleva pracujícího důchodce se neuplatňuje')
+                    . ' od mzdy za ' . $run['period']
+                    . ($pension !== null ? '; PREMIER vede pobírání důchodu' . (is_string($pension['from']) ? ' od ' . self::czechDate($pension['from']) : '') : '') . '.',
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * První měsíc (`YYYY-MM`) s podepsaným prohlášením poplatníka do `$until`.
+     *
+     * @param array<string,mixed> $relation
+     */
+    private static function firstSignedPeriod(array $relation, string $until): ?string
+    {
+        foreach ($relation['months'] as $period => $m) {
+            if ($period . '-01' > $until) {
+                break;
+            }
+            if ($m['signed'] === true) {
+                return (string) $period;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Prohlášení poplatníka jako souvislé úseky stejného stavu po měsících mezd.
      *
      * @param array<string,mixed> $relation
@@ -249,12 +345,24 @@ final class PremierPayrollTakeover
      */
     private static function declarations(array $relation, string $until): array
     {
+        return self::runs($relation, $until, static fn (array $m): string => $m['signed'] === true ? 'signed' : 'not-signed');
+    }
+
+    /**
+     * Souvislé úseky stejného stavu po měsících mezd (do `$until`), po celých měsících.
+     *
+     * @param array<string,mixed> $relation
+     * @param callable(array<string,mixed>):string $statusOf
+     * @return list<array{from:string,to:?string,status:string,period:string}>
+     */
+    private static function runs(array $relation, string $until, callable $statusOf): array
+    {
         $runs = [];
         foreach ($relation['months'] as $period => $m) {
             if ($period . '-01' > $until) {
                 break;
             }
-            $status = $m['signed'] === true ? 'signed' : 'not-signed';
+            $status = $statusOf($m);
             $last = array_key_last($runs);
             if ($last !== null && $runs[$last]['status'] === $status) {
                 continue;

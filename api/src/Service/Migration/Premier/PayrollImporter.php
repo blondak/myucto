@@ -15,6 +15,7 @@ use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationTakeoverFacts;
 use MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalService;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInstitutionWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverOpeningMonth;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPersonWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRunState;
@@ -62,6 +63,12 @@ final class PayrollImporter
     private PayrollTakeoverRunState $state;
     /** @var list<string> osobní čísla s OIČ nebo ID PPV bez přijatého formuláře JMHZ */
     private array $unconfirmedIdentifiers = [];
+    /** @var array<string,int> osobní číslo => děti se zvýhodněním bez rodného čísla */
+    private array $childrenWithoutBirthNumber = [];
+    /** @var array<string,int> osobní číslo => děti s příznakem BVYZI */
+    private array $childrenOtherCaregiver = [];
+    /** @var array<string,int> osobní číslo => pobírá důchod bez uplatněné slevy */
+    private array $pensionersWithoutDiscount = [];
 
     public function __construct(
         private readonly Connection $db,
@@ -75,6 +82,7 @@ final class PayrollImporter
         private readonly PayrollMigrationReferenceTotalsWriter $referenceTotals,
         private readonly PayrollHistoricalPeriodService $historical,
         private readonly PayrollPostingMapProposalService $postingMap,
+        private readonly PayrollTakeoverInstitutionWriter $institutions,
     ) {}
 
     public function import(PremierContext $ctx): void
@@ -83,6 +91,9 @@ final class PayrollImporter
         $this->messages = 0;
         $this->state = new PayrollTakeoverRunState();
         $this->unconfirmedIdentifiers = [];
+        $this->childrenWithoutBirthNumber = [];
+        $this->childrenOtherCaregiver = [];
+        $this->pensionersWithoutDiscount = [];
         $payroll = $ctx->payroll ?? PremierPayroll::fromBackup($ctx->backup);
         if (!$payroll->hasData()) {
             return;
@@ -171,7 +182,12 @@ final class PayrollImporter
             $p->count(self::STEP, 'months_after_start', $afterStart);
             $this->info($p, 'months_after_start', "Mzdové měsíce od začátku vedení mezd v MyÚčtu ({$start}) se nepřevzaly (celkem {$afterStart}), počítá je MyÚčto.");
         }
+        $this->detail($ctx, '-', 'Účty institucí', fn (): array => $this->institutions->institutionAccounts(
+            $ctx->supplierId, PremierPayrollInstitutions::read($ctx->backup), $ctx->year, $ctx->userOrNull(), PremierPayrollTakeover::policy(), $this->state,
+            ' (není v číselníku pojišťoven ani v nastavení mezd)',
+        ));
         $this->identifierSummary($p);
+        $this->cardSummary($p);
         $this->notConverted($p, $deductions, $excluded);
         if ($totals !== []) {
             $this->referenceTotals->store($ctx->supplierId, self::SOURCE, $totals, self::REFERENCE . ' ' . $ctx->backup->ico);
@@ -249,6 +265,57 @@ final class PayrollImporter
                 count($this->state->invalidOic),
                 self::personalNumbers($this->state->invalidOic),
             ), ['personal_numbers' => $this->state->invalidOic]);
+        }
+    }
+
+    /**
+     * Údaje karty osoby, které převod nezapsal nebo které je třeba ověřit, souhrnně
+     * s osobními čísly (mimo limit hlášek kroku).
+     */
+    private function cardSummary(ImportProtocol $p): void
+    {
+        if ($this->state->institutionsToConfirm > 0) {
+            $p->warn(self::STEP, 'institution_accounts_unconfirmed', sprintf(
+                'Účtů ČSSZ a finančního úřadu převzatých z nastavení mezd PREMIER: %d. Nejsou to sdělení úřadu, převod je proto '
+                . 'založil s původem „převzato z jiného systému" a platební dávka je ODMÍTNE: než se z mezd zaplatí, otevřete '
+                . 'Nastavení mezd → Účty institucí, porovnejte číslo účtu a symboly s rozhodnutím úřadu a uložte je jako ověřené.',
+                $this->state->institutionsToConfirm,
+            ));
+        }
+        if ($this->state->institutionGaps !== []) {
+            $p->warn(self::STEP, 'institution_accounts_missing', sprintf(
+                'Účty, které převod z PREMIER nedoložil a je nutné je zadat ručně v Nastavení mezd → Účty institucí: %s.',
+                implode('; ', array_slice($this->state->institutionGaps, 0, 10)) . (count($this->state->institutionGaps) > 10 ? '; …' : ''),
+            ));
+        }
+        if ($this->childrenWithoutBirthNumber !== []) {
+            $p->count(self::STEP, 'children_birth_number_missing', array_sum($this->childrenWithoutBirthNumber));
+            $p->warn(self::STEP, 'children_birth_number_missing', sprintf(
+                'Dětí s uplatněným daňovým zvýhodněním bez rodného čísla v PREMIER: %d (osobní čísla %s). Vyživovanou osobu bez '
+                . 'rodného čísla převod nezakládá; doplňte dítě a nárok ručně na kartě zaměstnance.',
+                array_sum($this->childrenWithoutBirthNumber),
+                self::personalNumbers(array_keys($this->childrenWithoutBirthNumber)),
+            ), ['personal_numbers' => array_keys($this->childrenWithoutBirthNumber)]);
+        }
+        if ($this->childrenOtherCaregiver !== []) {
+            $p->count(self::STEP, 'children_other_caregiver', array_sum($this->childrenOtherCaregiver));
+            $p->warn(self::STEP, 'children_other_caregiver', sprintf(
+                'K ověření: u %d dětí se zvýhodněním vede PREMIER příznak „vyživuje i jiná osoba" (BVYZI), jehož význam se ze zálohy '
+                . 'nedá spolehlivě určit; zvýhodnění se přitom uplatňovalo dál. Nárok se převzal jako uplatněný tímto zaměstnancem; '
+                . 'ověřte v prohlášení, zda dítě v domácnosti nevyživuje i druhý z rodičů (osobní čísla %s).',
+                array_sum($this->childrenOtherCaregiver),
+                self::personalNumbers(array_keys($this->childrenOtherCaregiver)),
+            ), ['personal_numbers' => array_keys($this->childrenOtherCaregiver)]);
+        }
+        if ($this->pensionersWithoutDiscount !== []) {
+            $p->count(self::STEP, 'pensioners_without_discount', count($this->pensionersWithoutDiscount));
+            $p->warn(self::STEP, 'pensioners_without_discount', sprintf(
+                'K ověření: PREMIER vede u %d vztahů pobírání důchodu, sleva na pojistném pracujícího důchodce se ale v mzdách '
+                . 'neuplatňovala; převod ji zapsal jako neuplatněnou. Zkontrolujte, zda o ni zaměstnanec nepožádal '
+                . '(osobní čísla %s).',
+                count($this->pensionersWithoutDiscount),
+                self::personalNumbers(array_keys($this->pensionersWithoutDiscount)),
+            ), ['personal_numbers' => array_keys($this->pensionersWithoutDiscount)]);
         }
     }
 
@@ -378,6 +445,17 @@ final class PayrollImporter
                 $this->warn($ctx->protocol, 'social_jurisdiction_manual', "Osobní číslo {$number}: PREMIER vede osobu jako vyslanou nebo pojištěnou v cizině. Příslušnost k sociálnímu pojištění doplňte ručně.");
             },
         ));
+        $this->detail($ctx, $number, 'Děti a daňové zvýhodnění', fn (): array => $this->people->children($supplierId, $employeeId, $person, $userId, $policy));
+        $children = PremierPayrollTakeover::children($relation, $ctx->endsOn());
+        if ($children['without_birth_number'] > 0) {
+            $this->childrenWithoutBirthNumber[$number] = $children['without_birth_number'];
+        }
+        if ($children['other_caregiver'] > 0) {
+            $this->childrenOtherCaregiver[$number] = $children['other_caregiver'];
+        }
+        if (is_array($relation['pension'] ?? null) && !in_array(true, array_column($relation['months'], 'pensioner_discount'), true)) {
+            $this->pensionersWithoutDiscount[$number] = 1;
+        }
         $this->detail($ctx, $number, 'Výplatní účet', fn (): array => $this->people->payoutAccounts($supplierId, $employeeId, $person, $takeover->employment->start, $userId, $policy, $state));
         $employment = $takeover->employment;
         $this->detail($ctx, $number, 'Pracoviště JMHZ', fn (): array => $this->employmentWriter->workplace($supplierId, $employmentId, $employment, $userId, $policy));

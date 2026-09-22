@@ -326,6 +326,42 @@ final class PremierPayrollImportTest extends TestCase
             JOIN payroll_employments e ON e.id = c.employment_id WHERE e.supplier_id = ? AND e.code = '6' AND c.status = 'completed'", $supplierId), 0));
     }
 
+    /**
+     * Karta osoby z PREMIER: dítě s uplatněným zvýhodněním, sleva důchodce, výplatní účty
+     * s historií a účty institucí z registru pojišťoven a nastavení mezd.
+     */
+    public function testPersonCardChildrenAccountsAndInstitutions(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $counts = self::stepCounts($protocol, 'payroll');
+        self::assertArrayNotHasKey('details_failed', $counts, $this->explain($protocol));
+
+        self::assertSame([['1', '2025-01-01', null]], $this->fetch("SELECT c.child_order, c.effective_from, c.effective_to FROM payroll_person_tax_child_claims c
+            JOIN payroll_employments e ON e.employee_id = c.employee_id AND e.supplier_id = c.supplier_id WHERE e.supplier_id = ? AND e.code = '5'", $supplierId),
+            $this->explain($protocol));
+        self::assertSame(1, $counts['children_without_credit'] ?? 0);
+        self::assertSame(1, $counts['children_other_caregiver'] ?? 0);
+
+        self::assertSame([['1', '1'], ['0', '0']], $this->fetch("SELECT a.is_active, a.allocation_basis_points > 0 FROM payroll_person_accounts a
+            JOIN payroll_employments e ON e.employee_id = a.employee_id AND e.supplier_id = a.supplier_id WHERE e.supplier_id = ? AND e.code = '5' ORDER BY a.id", $supplierId),
+            'Aktuální účet je výplatní, dřívější z historie zůstává bez výplat.');
+        self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_person_accounts a JOIN payroll_employments e ON e.employee_id = a.employee_id
+            AND e.supplier_id = a.supplier_id WHERE e.supplier_id = ? AND e.code = '6'", $supplierId), 'Výplata v hotovosti účet nezakládá.');
+
+        self::assertSame([['not_claimed']], $this->fetch("SELECT d.status FROM payroll_person_social_discount_claims d
+            JOIN payroll_employments e ON e.employee_id = d.employee_id AND e.supplier_id = d.supplier_id WHERE e.supplier_id = ? AND e.code = '6'", $supplierId));
+        self::assertSame(1, $counts['pensioners_without_discount'] ?? 0);
+
+        self::assertSame([['health_insurer', '111', 'institution_notice'], ['health_insurer', '201', 'institution_notice'], ['social_security', 'P', 'imported'],
+            ['tax_office', 'ADVANCE_TAX', 'imported'], ['tax_office', 'WITHHOLDING_TAX', 'imported']],
+            $this->fetch('SELECT i.institution_type, i.institution_code, a.source_kind FROM payroll_institution_accounts a
+                JOIN payroll_institutions i ON i.id = a.institution_id WHERE a.supplier_id = ? ORDER BY i.institution_type, i.institution_code', $supplierId),
+            $this->explain($protocol));
+        self::assertContains('institution_accounts_unconfirmed', $this->messageCodes($protocol));
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);
