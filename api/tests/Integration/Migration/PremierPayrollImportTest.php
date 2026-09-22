@@ -394,6 +394,34 @@ final class PremierPayrollImportTest extends TestCase
     }
 
     /**
+     * Příznak jednatele proti druhu činnosti z hlášení JMHZ přijatého ČSSZ: vztah vznikne
+     * podle hlášení a protokol řekne, jaký druh zvolil, podle čeho a proč.
+     */
+    public function testStatutoryFlagAgainstAcceptedJmhzExplainsChosenType(): void
+    {
+        $flags = ['payroll' => true, 'payroll_detail' => true];
+        $dir = $this->tmp . DIRECTORY_SEPARATOR . 'backup_statutory_flag';
+        SyntheticPremierBackup::writeDir($dir, false, $flags);
+        [$fields, $rows] = SyntheticPremierBackup::tables(false, $flags)['PERSONAL'];
+        foreach ($rows as $i => $row) {
+            if ($row['INTER'] === 5) {
+                $rows[$i]['JEDNATEL'] = true;
+            }
+        }
+        DbfWriter::write($dir . DIRECTORY_SEPARATOR . 'PERSONAL.DBF', $fields, $rows);
+
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, PremierBackup::open($dir), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['employment']], $this->fetch("SELECT relation_type FROM payroll_employments WHERE supplier_id = ? AND code = '5'", $supplierId));
+        $messages = array_values(array_filter(self::step($protocol, 'payroll')['messages'], static fn (array $m): bool => $m['code'] === 'relation_type_statutory_flag'));
+        self::assertCount(1, $messages, $this->explain($protocol));
+        self::assertStringContainsString('vykazuje druh činnosti 1 (pracovní poměr). Vztah je založený jako pracovní poměr', $messages[0]['text']);
+        self::assertStringContainsString('podle něj vztah eviduje ČSSZ', $messages[0]['text']);
+        self::assertSame(['employment', '1'], [$messages[0]['context']['relation_type'] ?? null, $messages[0]['context']['jmhz_activity'] ?? null]);
+    }
+
+    /**
      * Osoba bez evidované identity je nekonzistence, ne důvod údaj mlčky přeskočit: převod
      * z PREMIER ji ohlásí stejně jako převod z PAMICA a zbytek osoby převede.
      */
