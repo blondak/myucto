@@ -218,21 +218,28 @@ final class PayrollTakeoverPersonWriter
         }
         // Zdravotní pojištění: osoba založená druhým souběžným vztahem ho od importu mezd
         // nedostane, kód pojišťovny ale zdroj má.
-        $health = $person->healthCoverage;
-        if (($sections['health_coverages'] ?? []) === [] && $health !== null) {
-            $sections['health_coverages'] = [[
-                'jurisdiction' => 'czech_regime_verified',
-                'foreign_country_code' => null,
-                'jurisdiction_evidence_reference' => null,
-                'insurer_status' => 'verified',
-                'insurer_code' => $health->status,
-                'insurer_evidence_reference' => null,
-                'health_evidence_document_id' => null,
-                'health_evidence_document_sha256' => null,
-                'effective_from' => $health->from,
-                'effective_to' => null,
-                'evidence_note' => $health->note,
-            ]];
+        $healthRuns = $person->healthCoverageHistory !== []
+            ? $person->healthCoverageHistory
+            : ($person->healthCoverage !== null ? [$person->healthCoverage] : []);
+        if (($sections['health_coverages'] ?? []) === [] && $healthRuns !== []) {
+            $rows = [];
+            foreach ($healthRuns as $health) {
+                $rows[] = [
+                    'jurisdiction' => 'czech_regime_verified',
+                    'foreign_country_code' => null,
+                    'jurisdiction_evidence_reference' => null,
+                    'insurer_status' => 'verified',
+                    'insurer_code' => $health->status,
+                    'insurer_evidence_reference' => null,
+                    'health_evidence_document_id' => null,
+                    'health_evidence_document_sha256' => null,
+                    'effective_from' => $health->from,
+                    // Jediný úsek bez historie je otevřený, jak ho převod vždy zapisoval.
+                    'effective_to' => $person->healthCoverageHistory !== [] ? $health->to : null,
+                    'evidence_note' => $health->note,
+                ];
+            }
+            $sections['health_coverages'] = $rows;
             $counts['health_coverage'] = 1;
         }
         // Příslušnost k sociálnímu pojištění: český režim bez A1, ledaže zdroj vede

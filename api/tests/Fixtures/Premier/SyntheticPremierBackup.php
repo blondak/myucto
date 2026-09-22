@@ -526,7 +526,8 @@ final class SyntheticPremierBackup
      *   INTER 4  učeň (kategorie `UCN`, `KODPP_SO` prázdné jako v reálných zálohách), bez mezd
      *   INTER 5  pracovní poměr od 15. 1. 2025 (kategorie `HPP`, `KODPP_SO` prázdné); sjednaná mzda
      *            v `SAZBA_MZ` podle `TYP_MZDY` (30 000, od 7/2025 32 000; `MZDA_MES` prázdné
-     *            nebo jiné), stát adresy názvem „Česká republika"; mzdy 1/2025-1/2026
+     *            nebo jiné), stát adresy názvem „Česká republika"; mzdy 1/2025-1/2026; přihláška
+     *            k ZP 111, od 7/2025 změna na 201
      *
      * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
      * @param list<array{0:int,1:int,2:int,3:array<string,mixed>}> $months MĚNÍ SE
@@ -552,15 +553,20 @@ final class SyntheticPremierBackup
             // `MZDA_MES` se od sazby liší a sjednanou mzdou není.
             ['INTER' => 5, 'ROK' => 2025, 'MESIC' => 7, 'TYP_MZDY' => 1, 'SAZBA_MZ' => 32000, 'MZDA_MES' => 30400, 'PLATNY_OD' => '2025-07-01', 'ID' => 'H5-2'],
         );
-        $employee = static fn (int $gross, int $soc, int $zdr, int $socF, int $zdrF, int $tax): array => [
+        // Přihláška k VZP s nástupem, od 7/2025 změna pojišťovny (oznámení Q).
+        array_push($tables['MZ_PRIZP'][1],
+            ['INTER' => 5, 'HLAS_OD' => '2025-01-15', 'ZKRATKA_P' => '111', 'KOD' => 'P', 'PRIJATO' => true, 'ID' => 'ZP5-1'],
+            ['INTER' => 5, 'HLAS_OD' => '2025-07-01', 'ZKRATKA_P' => '201', 'KOD' => 'Q', 'PRIJATO' => true, 'ID' => 'ZP5-2'],
+        );
+        $employee = static fn (int $gross, int $soc, int $zdr, int $socF, int $zdrF, int $tax, string $insurer): array => [
             'MZ_HRUBA' => $gross, 'VYM_SOC' => $gross, 'VYM_ZDR' => $gross, 'MZ_SOC' => $soc, 'MZ_ZDR' => $zdr, 'MZ_SOCF' => $socF, 'MZ_ZDRF' => $zdrF,
             'MZ_ZDANI' => $gross, 'MZ_DAN' => $tax, 'NEZD_VLAS' => 2570, 'POD_DAN' => true, 'NEZD_A' => true, 'MZ_CISTA' => $gross - $soc - $zdr - $tax,
-            'MZ_VYPLATA' => $gross - $soc - $zdr - $tax, 'POJIS_SO' => true, 'ZKR_POJ' => '111', 'DNY_ODPR' => 20, 'UVA_DOBA' => 8,
+            'MZ_VYPLATA' => $gross - $soc - $zdr - $tax, 'POJIS_SO' => true, 'ZKR_POJ' => $insurer, 'DNY_ODPR' => 20, 'UVA_DOBA' => 8,
         ];
         foreach (range(1, 12) as $m) {
-            $months[] = [5, 2025, $m, $m < 7 ? $employee(30000, 2130, 1350, 7440, 2700, 1930) : $employee(32000, 2272, 1440, 7936, 2880, 2230)];
+            $months[] = [5, 2025, $m, $m < 7 ? $employee(30000, 2130, 1350, 7440, 2700, 1930, '111') : $employee(32000, 2272, 1440, 7936, 2880, 2230, '201')];
         }
-        $months[] = [5, 2026, 1, $employee(32000, 2272, 1440, 7936, 2880, 2230)];
+        $months[] = [5, 2026, 1, $employee(32000, 2272, 1440, 7936, 2880, 2230, '201')];
         return [];
     }
 

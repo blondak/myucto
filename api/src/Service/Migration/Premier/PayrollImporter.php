@@ -404,7 +404,9 @@ final class PayrollImporter
             'last_name' => $relation['last_name'],
             'birth_date' => $relation['birth_date'],
             'birth_number' => $relation['birth_number'],
-            'health_insurer_code' => $relation['insurer_code'],
+            // Historii pojišťoven z oznámení zapíše zákonná evidence celou; založení osoby
+            // by jinak zapsalo jen poslední pojišťovnu od nástupu a historie by se nevešla.
+            'health_insurer_code' => ($relation['insurer_history'] ?? []) === [] ? $relation['insurer_code'] : null,
             'relation_type' => $relation['relation_type'],
             'planned_start_on' => $relation['start'],
             'monthly_gross' => self::firstWage($relation, $ctx->endsOn()),

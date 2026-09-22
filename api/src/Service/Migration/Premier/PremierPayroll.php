@@ -91,6 +91,8 @@ final class PremierPayroll
             }
         }
         $insurers = [];
+        /** @var array<int,list<array{date:string,code:string,kind:string}>> $insurerEvents */
+        $insurerEvents = [];
         foreach ($backup->rows('MZ_PRIZP') as $row) {
             $code = self::text($row['ZKRATKA_P'] ?? '');
             if (preg_match('/^[0-9]{3}$/D', $code) === 1) {
@@ -98,6 +100,10 @@ final class PremierPayroll
                     'code' => $code,
                     'registered' => self::text($row['KOD'] ?? '') === 'P' && ($row['PRIJATO'] ?? false) === true,
                 ];
+                $date = self::date($row['HLAS_OD'] ?? null);
+                if ($date !== null) {
+                    $insurerEvents[(int) ($row['INTER'] ?? 0)][] = ['date' => $date, 'code' => $code, 'kind' => strtoupper(self::text($row['KOD'] ?? ''))];
+                }
             }
         }
         $months = [];
@@ -185,6 +191,21 @@ final class PremierPayroll
             ];
         }
         usort($relations, static fn (array $a, array $b): int => ((int) $a['key']) <=> ((int) $b['key']));
+
+        // Zdravotní pojištění je údaj osoby: historie se skládá z oznámení všech jejích vztahů.
+        $personEvents = [];
+        $personStart = [];
+        foreach ($relations as $relation) {
+            $personKey = (string) $relation['person_key'];
+            $personEvents[$personKey] = [...($personEvents[$personKey] ?? []), ...($insurerEvents[(int) $relation['key']] ?? [])];
+            if (is_string($relation['start']) && (!isset($personStart[$personKey]) || $relation['start'] < $personStart[$personKey])) {
+                $personStart[$personKey] = $relation['start'];
+            }
+        }
+        foreach ($relations as $i => $relation) {
+            $personKey = (string) $relation['person_key'];
+            $relations[$i]['insurer_history'] = self::insurerHistory($personEvents[$personKey] ?? [], $personStart[$personKey] ?? null);
+        }
         return new self($relations, $missing, $monthRows);
     }
 
@@ -373,6 +394,52 @@ final class PremierPayroll
             2 => $rate > 0 ? ['hourly', $rate] : [null, 0.0],
             default => $monthly > 0 ? ['monthly', $monthly] : [null, 0.0],
         };
+    }
+
+    /**
+     * Historie zdravotní pojišťovny osoby z oznámení pojišťovnám (`MZ_PRIZP`): přihláška
+     * (`KOD` P) a změna pojišťovny (Q, M) začínají úsek s kódem `ZKRATKA_P`. Odhláška (O)
+     * úsek neukončuje: zákonná evidence musí navazovat bez děr a o pojištění mimo vztahy
+     * osoby převod nic neví. Úseky jsou po celých měsících, jak je evidence vyžaduje;
+     * dvě oznámení v jednom měsíci rozhoduje to pozdější. První úsek začíná nejpozději
+     * měsícem prvního nástupu osoby.
+     *
+     * @param list<array{date:string,code:string,kind:string}> $events
+     * @return list<array{code:string,from:string,to:?string,reference:string}>
+     */
+    public static function insurerHistory(array $events, ?string $start): array
+    {
+        $events = array_values(array_filter($events, static fn (array $e): bool => in_array($e['kind'], ['P', 'Q', 'M'], true)));
+        if ($events === []) {
+            return [];
+        }
+        usort($events, static fn (array $a, array $b): int => [$a['date'], $a['kind'] === 'P' ? 0 : 1] <=> [$b['date'], $b['kind'] === 'P' ? 0 : 1]);
+        $runs = [];
+        foreach ($events as $event) {
+            $month = substr($event['date'], 0, 7) . '-01';
+            $last = array_key_last($runs);
+            if ($last !== null && $runs[$last]['from'] === $month) {
+                $runs[$last]['code'] = $event['code'];
+                $runs[$last]['reference'] = 'premier:mz_prizp:' . $event['kind'] . ':' . $event['date'];
+                if ($last > 0 && $runs[$last - 1]['code'] === $event['code']) {
+                    array_pop($runs);
+                }
+                continue;
+            }
+            if ($last !== null && $runs[$last]['code'] === $event['code']) {
+                continue;
+            }
+            $runs[] = ['code' => $event['code'], 'from' => $month, 'to' => null, 'reference' => 'premier:mz_prizp:' . $event['kind'] . ':' . $event['date']];
+        }
+        if (is_string($start) && substr($start, 0, 7) . '-01' < $runs[0]['from']) {
+            $runs[0]['from'] = substr($start, 0, 7) . '-01';
+        }
+        foreach ($runs as $i => $run) {
+            if (isset($runs[$i + 1])) {
+                $runs[$i]['to'] = (new \DateTimeImmutable($runs[$i + 1]['from']))->modify('-1 day')->format('Y-m-d');
+            }
+        }
+        return $runs;
     }
 
     /** @param array<string,mixed> $row */

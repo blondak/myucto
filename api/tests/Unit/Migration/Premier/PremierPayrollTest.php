@@ -88,6 +88,32 @@ final class PremierPayrollTest extends TestCase
         self::assertSame(['2025-01-01' => 6000.0, '2026-01-01' => 6500.0], $statutory['wages'], 'Starší verze bez typu mzdy nesou MZDA_MES.');
     }
 
+    /** Historie zdravotní pojišťovny z oznámení pojišťovnám, po celých navazujících měsících. */
+    public function testInsurerHistoryFromNotifications(): void
+    {
+        self::assertSame([
+            ['code' => '111', 'from' => '2024-03-01', 'to' => '2025-06-30', 'reference' => 'premier:mz_prizp:P:2024-03-18'],
+            ['code' => '201', 'from' => '2025-07-01', 'to' => null, 'reference' => 'premier:mz_prizp:Q:2025-07-01'],
+        ], PremierPayroll::insurerHistory([
+            ['date' => '2025-07-01', 'code' => '201', 'kind' => 'Q'],
+            ['date' => '2024-03-18', 'code' => '111', 'kind' => 'P'],
+            // Odhláška úsek nekončí, opakovaná přihláška téže pojišťovny nic nemění.
+            ['date' => '2024-10-31', 'code' => '111', 'kind' => 'O'],
+            ['date' => '2024-11-04', 'code' => '111', 'kind' => 'P'],
+        ], '2024-03-18'));
+        self::assertSame([['code' => '205', 'from' => '2024-01-01', 'to' => null, 'reference' => 'premier:mz_prizp:M:2024-05-20']],
+            PremierPayroll::insurerHistory([
+                ['date' => '2024-05-02', 'code' => '211', 'kind' => 'P'],
+                ['date' => '2024-05-20', 'code' => '205', 'kind' => 'M'],
+            ], '2024-01-10'), 'Dvě oznámení v jednom měsíci rozhoduje pozdější; první úsek začíná měsícem nástupu.');
+        self::assertSame([], PremierPayroll::insurerHistory([['date' => '2024-05-02', 'code' => '211', 'kind' => 'O']], null));
+
+        $relations = PremierPayroll::fromBackup($this->backup(['payroll' => true, 'payroll_detail' => true]))->relations;
+        $employee = array_values(array_filter($relations, static fn (array $r): bool => $r['key'] === '5'))[0];
+        self::assertSame([['111', '2025-01-01', '2025-06-30'], ['201', '2025-07-01', null]],
+            array_map(static fn (array $run): array => [$run['code'], $run['from'], $run['to']], $employee['insurer_history']));
+    }
+
     public function testMonthTotalsMatchJournalPostings(): void
     {
         $backup = $this->backup(['payroll' => true]);

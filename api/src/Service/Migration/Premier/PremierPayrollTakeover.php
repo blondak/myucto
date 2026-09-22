@@ -86,6 +86,11 @@ final class PremierPayrollTakeover
                 ? new PayrollTakeoverEvidencePeriod('foreign', $from)
                 : new PayrollTakeoverEvidencePeriod('czech', $from, null, null, self::NOTE . 'osoba nepodléhá v PREMIER cizím právním předpisům.'),
             taxDeclarations: $declarations,
+            healthCoverageHistory: array_map(
+                static fn (array $run): PayrollTakeoverEvidencePeriod => new PayrollTakeoverEvidencePeriod($run['code'], $run['from'], $run['to'], $run['reference'],
+                    self::NOTE . 'zdravotní pojišťovna ' . $run['code'] . ' podle oznámení pojišťovně.'),
+                (array) ($relation['insurer_history'] ?? []),
+            ),
         );
         $employment = new PayrollTakeoverEmployment(
             personalNumber: (string) $relation['personal_number'],

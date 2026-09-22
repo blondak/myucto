@@ -252,6 +252,17 @@ final class PremierPayrollImportTest extends TestCase
         }
     }
 
+    /** Změna zdravotní pojišťovny v PREMIER se převede jako historie, ne jen poslední stav. */
+    public function testHealthInsurerHistory(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['111', '2025-01-01', '2025-06-30'], ['201', '2025-07-01', null]], $this->fetch("SELECT h.insurer_code, h.effective_from, h.effective_to
+            FROM payroll_person_health_coverage_history h JOIN payroll_employments e ON e.employee_id = h.employee_id AND e.supplier_id = h.supplier_id
+            WHERE e.supplier_id = ? AND e.code = '5' ORDER BY h.effective_from", $supplierId), $this->explain($protocol));
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);

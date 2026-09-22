@@ -29,6 +29,8 @@ final readonly class PayrollTakeoverPerson
      * @param ?string $payoutAccountsPaidOn den poslední výplaty na účet (doklad pro ověření)
      * @param ?PayrollTakeoverEvidencePeriod $taxResidence stav `czech-resident` nebo `non-resident`
      * @param ?PayrollTakeoverEvidencePeriod $healthCoverage stav = kód zdravotní pojišťovny
+     * @param list<PayrollTakeoverEvidencePeriod> $healthCoverageHistory zdravotní pojišťovny po úsecích
+     *        (celé měsíce, navazující); zdroj, který historii zná, ji nese místo `$healthCoverage`
      * @param ?PayrollTakeoverEvidencePeriod $socialJurisdiction stav `czech` nebo `foreign`
      * @param list<PayrollTakeoverEvidencePeriod> $taxDeclarations prohlášení poplatníka po úsecích
      * @param list<PayrollTakeoverEvidencePeriod> $socialDiscountClaims sleva pracujícího důchodce po úsecích
@@ -57,5 +59,6 @@ final readonly class PayrollTakeoverPerson
         public int $childrenWithoutCredit = 0,
         public ?string $firstSignedPeriod = null,
         public array $openingMonths = [],
+        public array $healthCoverageHistory = [],
     ) {}
 }
