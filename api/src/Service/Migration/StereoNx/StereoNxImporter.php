@@ -7,7 +7,13 @@ namespace MyInvoice\Service\Migration\StereoNx;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MovementClassificationRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
+use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter as PohodaPartners;
+use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
+use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
+use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
+use MyInvoice\Service\Migration\Shared\MigratedPurchaseDocument;
+use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use PDO;
 use PDOException;
@@ -33,6 +39,8 @@ final class StereoNxImporter
         'mixed_vat_deduction' => 'doklad kombinuje položky s různým nárokem na odpočet DPH',
     ];
 
+    private readonly MigrationVatRateLookup $rates;
+
     public function __construct(
         private readonly Connection $db,
         private readonly StereoNxSourcePlan $sourcePlan,
@@ -41,7 +49,10 @@ final class StereoNxImporter
         private readonly MovementClassificationRepository $classifications,
         private readonly StatsRecomputer $stats,
         private readonly LoggerInterface $log,
-    ) {}
+        private readonly MigratedDocumentWriter $writer,
+    ) {
+        $this->rates = new MigrationVatRateLookup($db);
+    }
 
     /**
      * Stejná cesta pro ostrý převod i zkoušku nanečisto. Suchý běh provede veškeré
@@ -444,20 +455,34 @@ final class StereoNxImporter
         $snapshotJson = PohodaPartners::snapshotJson($snapshot);
         $vs = preg_replace('/\D/', '', (string) ($record['variable_symbol'] ?? '')) ?? '';
         $vs = strlen($vs) <= 10 ? ($vs !== '' ? $vs : null) : null;
-        $pdo = $this->db->pdo();
+        // Zdrojový plán převádí jen doklady v Kč s kurzem 1 (StereoNxIssuedDocuments,
+        // StereoNxPurchaseRecap), režim cen a přenesenou povinnost nese záznam plánu.
+        $pricesIncludeVat = (bool) ($record['prices_include_vat'] ?? false);
+        $reverseCharge = (bool) ($record['reverse_charge'] ?? false);
         if ($kind === 'issued') {
-            $pdo->prepare('INSERT INTO invoices
-                (supplier_id, invoice_type, client_id, varsymbol, payment_variable_symbol, issue_date, tax_date,
-                 due_date, currency_id, note_above_items, note_below_items, client_snapshot,
-                 total_without_vat, total_vat, total_with_vat, rounding, status, prices_include_vat,
-                 reverse_charge, created_by)
-                VALUES (?, "invoice", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([
-                $ctx['supplier_id'], $partnerId, $number, $vs, $issue, $tax, $due, $ctx['currency_id'],
-                $sourceNote !== '' ? mb_substr($sourceNote, 0, 1000) : null, $note, $snapshotJson,
-                $base, $vat, $total, $rounding, $review ? 'draft' : 'sent',
-                ($record['prices_include_vat'] ?? false) ? 1 : 0,
-                ($record['reverse_charge'] ?? false) ? 1 : 0, $ctx['user_id'],
-            ]);
+            $id = $this->writer->insertIssued(new MigratedIssuedDocument(
+                supplierId: $ctx['supplier_id'],
+                invoiceType: 'invoice',
+                clientId: $partnerId,
+                varsymbol: $number,
+                issueDate: $issue,
+                taxDate: $tax,
+                dueDate: $due,
+                currencyId: $ctx['currency_id'],
+                exchangeRate: null,
+                pricesIncludeVat: $pricesIncludeVat,
+                reverseCharge: $reverseCharge,
+                noteAboveItems: $sourceNote !== '' ? mb_substr($sourceNote, 0, 1000) : null,
+                noteBelowItems: $note,
+                clientSnapshot: $snapshotJson,
+                totalWithoutVat: $base,
+                totalVat: $vat,
+                totalWithVat: $total,
+                rounding: $rounding,
+                status: $review ? 'draft' : 'sent',
+                createdBy: $ctx['user_id'],
+                paymentVariableSymbol: $vs,
+            ));
         } else {
             $vendorNumber = trim((string) ($record['vendor_number'] ?? ''));
             if ($vendorNumber === '') $vendorNumber = $number;
@@ -465,21 +490,34 @@ final class StereoNxImporter
             if ($mixedDeduction) {
                 throw new StereoNxException('mixed_deduction_unsupported', 'Zdaněné položky s různým nárokem na odpočet vyžadují samostatné mapování.');
             }
-            $pdo->prepare('INSERT INTO purchase_invoices
-                (supplier_id, vendor_id, vendor_is_vat_payer, varsymbol, vendor_invoice_number, document_kind,
-                 issue_date, tax_date, due_date, received_at, received_at_source, currency_id, vendor_snapshot,
-                 total_without_vat, total_vat, total_with_vat, rounding, status, prices_include_vat,
-                 reverse_charge, vat_deduction, note_above_items, note_below_items, created_by)
-                VALUES (?, ?, ?, ?, ?, "invoice", ?, ?, ?, ?, "import", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([
-                $ctx['supplier_id'], $partnerId, $liveSnapshot['is_vat_payer'] ? 1 : 0, $number,
-                mb_substr($vendorNumber, 0, 50), $issue, $tax, $due, max($issue, $tax), $ctx['currency_id'],
-                $snapshotJson, $base, $vat, $total, $rounding, $review ? 'draft' : 'received',
-                ($record['prices_include_vat'] ?? false) ? 1 : 0,
-                ($record['reverse_charge'] ?? false) ? 1 : 0, $deduction,
-                $sourceNote !== '' ? mb_substr($sourceNote, 0, 1000) : null, $note, $ctx['user_id'],
-            ]);
+            $id = $this->writer->insertPurchase(new MigratedPurchaseDocument(
+                supplierId: $ctx['supplier_id'],
+                vendorId: $partnerId,
+                vendorIsVatPayer: $liveSnapshot['is_vat_payer'],
+                varsymbol: $number,
+                vendorInvoiceNumber: mb_substr($vendorNumber, 0, 50),
+                documentKind: 'invoice',
+                issueDate: $issue,
+                taxDate: $tax,
+                dueDate: $due,
+                receivedAt: max($issue, $tax),
+                receivedAtSource: 'import',
+                currencyId: $ctx['currency_id'],
+                exchangeRate: null,
+                pricesIncludeVat: $pricesIncludeVat,
+                reverseCharge: $reverseCharge,
+                vendorSnapshot: $snapshotJson,
+                totalWithoutVat: $base,
+                totalVat: $vat,
+                totalWithVat: $total,
+                rounding: $rounding,
+                status: $review ? 'draft' : 'received',
+                vatDeduction: $deduction,
+                noteAboveItems: $sourceNote !== '' ? mb_substr($sourceNote, 0, 1000) : null,
+                noteBelowItems: $note,
+                createdBy: $ctx['user_id'],
+            ));
         }
-        $id = (int) $pdo->lastInsertId();
         $this->insertItems($kind, $id, $items, $tax);
         $this->put($ctx, $kind, $key, $hash, $id);
         $ctx['ids'][$kind][$key] = $id;
@@ -488,27 +526,38 @@ final class StereoNxImporter
     }
 
     /** @param list<array<string,mixed>> $items */
+    /**
+     * Sazba se páruje až po zápisu hlavičky a položku po položce; neplatná nebo chybějící
+     * sazba shodí celý běh výjimkou (převod je jedna transakce).
+     *
+     * @param list<array<string,mixed>> $items
+     */
     private function insertItems(string $kind, int $documentId, array $items, string $taxDate): void
     {
-        $table = $kind === 'issued' ? 'invoice_items' : 'purchase_invoice_items';
-        $foreign = $kind === 'issued' ? 'invoice_id' : 'purchase_invoice_id';
-        $stmt = $this->db->pdo()->prepare("INSERT INTO {$table}
-            ({$foreign}, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
-             total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         foreach ($items as $i => $item) {
             $rate = (float) ($item['vat_rate_snapshot'] ?? -1);
             if ($rate < 0 || $rate > 100) throw new StereoNxException('vat_rate_invalid', 'Neplatná sazba DPH položky.');
             $rateId = $this->rateId($rate, $taxDate);
             if ($rateId === null) throw new StereoNxException('vat_rate_missing', 'Sazba DPH položky není v cílovém číselníku.');
-            $stmt->execute([
-                $documentId, (string) ($item['description'] ?? ''), (float) ($item['quantity'] ?? 1),
-                (string) ($item['unit'] ?? 'ks'), (float) ($item['unit_price_without_vat'] ?? $item['unit_price'] ?? 0),
-                $rateId, $rate,
-                $this->money($item['total_without_vat'] ?? null), $this->money($item['total_vat'] ?? null),
-                $this->money($item['total_with_vat'] ?? null), $i,
-                $item['vat_classification_code'] ?? null,
-            ]);
+            $description = (string) ($item['description'] ?? '');
+            $quantity = (float) ($item['quantity'] ?? 1);
+            $unit = (string) ($item['unit'] ?? 'ks');
+            $unitPrice = (float) ($item['unit_price_without_vat'] ?? $item['unit_price'] ?? 0);
+            $base = $this->money($item['total_without_vat'] ?? null);
+            $vat = $this->money($item['total_vat'] ?? null);
+            $gross = $this->money($item['total_with_vat'] ?? null);
+            $code = $item['vat_classification_code'] ?? null;
+            if ($kind === 'issued') {
+                // Stereo NX převádí jen tuzemská plnění; režim OSS zdroj nezná.
+                $this->writer->insertIssuedItem($documentId, MigratedDocumentItem::issued(
+                    $description, $quantity, $unit, $unitPrice, $rateId, $rate, $base, $vat, $gross, $code,
+                    OssMigrationPolicy::DOMESTIC_COLUMNS,
+                ), $i);
+            } else {
+                $this->writer->insertPurchaseItem($documentId, MigratedDocumentItem::purchase(
+                    $description, $quantity, $unit, $unitPrice, $rateId, $rate, $base, $vat, $gross, $code,
+                ), $i);
+            }
         }
     }
 
@@ -950,13 +999,7 @@ final class StereoNxImporter
         // Stejně jako Premier/Pohoda hledáme nejprve časově platnou sazbu a potom
         // stejnou nominální sazbu; rozhodující historické procento drží položka
         // ve vat_rate_snapshot, nikoli dnešní validita číselníku.
-        $stmt = $this->db->pdo()->prepare('SELECT id FROM vat_rates WHERE country = "CZ" AND rate_percent = ?
-            AND is_reverse_charge = 0
-            ORDER BY ((valid_from IS NULL OR valid_from <= ?) AND (valid_to IS NULL OR valid_to >= ?)) DESC,
-                     is_default DESC, id LIMIT 1');
-        $stmt->execute([number_format($rate, 2, '.', ''), $date, $date]);
-        $id = $stmt->fetchColumn();
-        return $id === false ? null : (int) $id;
+        return $this->rates->find($rate, $date);
     }
 
     /** @return array{name:string,ico:string,dic:string,street:string,city:string,zip:string,country_code:string,is_vat_payer:bool} */

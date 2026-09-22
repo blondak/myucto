@@ -57,6 +57,13 @@ final class InvoiceCreationStatsRecomputeCoverageTest extends TestCase
     private const NEEDLE_RAW_INSERT = 'INSERT INTO invoices';
     private const NEEDLE_CREATE_DRAFT = '$this->invoices->createDraft(';
 
+    /**
+     * Převody z cizích účetních programů zapisují vydané doklady přes sdílený
+     * {@see \MyInvoice\Service\Migration\Shared\MigratedDocumentWriter}. Ten je vyjmutý
+     * (přepočet patří importéru, který ví, kdy běh končí), takže hlídat se musí volání.
+     */
+    private const NEEDLE_MIGRATION_WRITER = '$this->writer->insertIssued(';
+
     /** Důkaz, že metoda (nebo aspoň soubor) skutečně VOLÁ přepočet cache, ne jen zná typ. */
     private const EVIDENCE = [
         '->recomputeMany(',
@@ -86,6 +93,12 @@ final class InvoiceCreationStatsRecomputeCoverageTest extends TestCase
         'Repository/InvoiceRepository.php' => [
             'createDraft' => 'vždy status=draft (mimo agregaci cache) — přepočet patří volajícímu',
         ],
+        // Nízkoúrovňový zapisovač převodů (Money S3, POHODA, PREMIER, Stereo NX). Přepočet
+        // dělá importér dávkově po celém běhu mimo transakci; jeho volání hlídá
+        // NEEDLE_MIGRATION_WRITER.
+        'Service/Migration/Shared/MigratedDocumentWriter.php' => [
+            'insertIssued' => 'zapisovač převodů — přepočet patří volajícímu importéru, hlídá ho NEEDLE_MIGRATION_WRITER',
+        ],
     ];
 
     public function testEveryInvoiceCreationAllowsStatsRecompute(): void
@@ -95,7 +108,7 @@ final class InvoiceCreationStatsRecomputeCoverageTest extends TestCase
 
         foreach (self::phpFiles($srcDir) as $path) {
             $raw = (string) file_get_contents($path);
-            if (!str_contains($raw, self::NEEDLE_RAW_INSERT) && !str_contains($raw, self::NEEDLE_CREATE_DRAFT)) {
+            if (!self::containsNeedle($raw)) {
                 continue;
             }
             $rel = str_replace('\\', '/', substr($path, strlen($srcDir) + 1));
@@ -169,7 +182,7 @@ final class InvoiceCreationStatsRecomputeCoverageTest extends TestCase
         $out = [];
 
         foreach ($lines as $index => $line) {
-            if (!str_contains($line, self::NEEDLE_RAW_INSERT) && !str_contains($line, self::NEEDLE_CREATE_DRAFT)) {
+            if (!self::containsNeedle($line)) {
                 continue;
             }
             $symbol = PhpSourceRegions::symbolAtLine($code, $index + 1) ?? '(mimo metodu)';
@@ -193,6 +206,13 @@ final class InvoiceCreationStatsRecomputeCoverageTest extends TestCase
         }
 
         return null;
+    }
+
+    private static function containsNeedle(string $code): bool
+    {
+        return str_contains($code, self::NEEDLE_RAW_INSERT)
+            || str_contains($code, self::NEEDLE_CREATE_DRAFT)
+            || str_contains($code, self::NEEDLE_MIGRATION_WRITER);
     }
 
     private static function hasEvidence(string $region): bool
