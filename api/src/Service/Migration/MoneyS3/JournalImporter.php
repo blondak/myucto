@@ -158,6 +158,7 @@ final class JournalImporter
         $rows = $table !== null ? iterator_to_array($table->rows(), false) : [];
 
         [$groups, $closingRows] = self::groupRows($rows);
+        $ctx->yearEndClosingRows[$year] = $closingRows;
         if ($closingRows > 0) {
             $p->info(self::STEP, 'year_end_closing_skipped', "Rok {$year}: uzávěrkové zápisy z Money ({$closingRows} řádků) se nepřebírají, rok uzavře průvodce uzávěrkou MyÚčta.", ['year' => $year]);
         }

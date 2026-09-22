@@ -426,6 +426,28 @@ final class MoneyS3ImportTest extends TestCase
         self::assertSame(0, $this->rowCount('journal_entries', $supplierId, "description = 'Účetní závěrka roku 2024'"));
         $journal = array_column($protocol->toArray()['steps'], null, 'key')['journal'];
         self::assertContains('year_end_closing_skipped', array_column($journal['messages'], 'code'));
+        $closing = array_column($protocol->toArray()['steps'], null, 'key')['closing'];
+        self::assertNotContains('closed_without_money_closing', array_column($closing['messages'], 'code'));
+    }
+
+    /**
+     * Money otevře další rok i bez uzávěrky (XZ). Rok, jehož PS navazují, převod uzavře
+     * dál (reálné agendy nemají XZ u většiny podaných let), ale upozorní, že uzávěrka
+     * v Money neproběhla.
+     */
+    public function testYearClosedWithoutMoneyYearEndClosingIsReported(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/noxz.lz', SyntheticAgenda::filesWithoutYearEndClosing());
+        $backup = Ms3Backup::extract($this->tmp . '/noxz.lz', $this->tmp . '/noxz');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertSame('closed', array_column($protocol->get('closing'), null, 'year')[2024]['status']);
+        $closing = array_column($protocol->toArray()['steps'], null, 'key')['closing'];
+        $warning = array_column($closing['messages'], null, 'code')['closed_without_money_closing'] ?? null;
+        self::assertNotNull($warning, $this->explain($protocol));
+        self::assertSame([2024], $warning['context']['years']);
     }
 
     /**
