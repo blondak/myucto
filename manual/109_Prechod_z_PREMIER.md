@@ -137,12 +137,33 @@ a mzdy se doplní.
 
 - **Zaměstnanci.** Každý pracovní vztah z PREMIERu se založí jako osoba
   a pracovní vztah s osobním číslem z PREMIERu: jméno, rodné číslo, datum
-  narození, adresa, zdravotní pojišťovna, výplatní účet, druh vztahu
-  (pracovní poměr, DPP, DPČ, jednatel), nástup, skončení a sjednaná mzda
-  včetně jejích změn. V zákonné evidenci osoby doplní daňovou rezidenci,
-  prohlášení poplatníka po měsících a příslušnost k sociálnímu pojištění.
-  Doplňuje se jen to, co v MyÚčtu chybí. Vztah se stejným osobním číslem
-  a jménem, který ve firmě už je, převod převezme místo založení nového.
+  narození, trvalá a kontaktní adresa, kontakty, druh vztahu (pracovní
+  poměr, DPP, DPČ, jednatel), nástup, skončení, týdenní pracovní doba
+  a sjednaná mzda včetně jejích změn. V zákonné evidenci osoby doplní daňovou
+  rezidenci, prohlášení poplatníka po měsících, historii zdravotních
+  pojišťoven podle oznámení pojišťovnám, příslušnost k sociálnímu pojištění
+  a slevu pracujícího důchodce. Doplňuje se jen to, co v MyÚčtu chybí. Vztah
+  se stejným osobním číslem a jménem, který ve firmě už je, převod převezme
+  místo založení nového. Učně (kategorie UCN) převod nezakládá, MyÚčto pro
+  něj druh vztahu nemá; protokol ho vypíše.
+- **Evidence JMHZ.** OIČ a ID pracovněprávního vztahu z posledního hlášení
+  JMHZ, které ČSSZ přijala, pracoviště (obec a stát), kód CZ-ISCO a doklady
+  k Zákonným termínům (přihlášky a odhlášky ČSSZ a zdravotní pojišťovně,
+  ELDP, prohlášení poplatníka). Čísla bez přijatého hlášení protokol vypíše
+  k ověření.
+- **Karta osoby.** Děti s daňovým zvýhodněním podle skutečného uplatnění
+  v mzdách, výplatní účty (aktuální s výplatou, dřívější bez ní) a účty
+  zdravotních pojišťoven, ČSSZ a finančního úřadu. Účty ČSSZ a finančního
+  úřadu z nastavení mezd PREMIERu se zakládají jako převzaté a před první
+  platbou je porovnejte s rozhodnutím úřadu.
+- **Nepřítomnosti, dovolená a průměry.** Nepřítomnosti s daty, zůstatek
+  dovolené a průměrné výdělky čtvrtletí převáděného roku, jen z měsíců před
+  začátkem vedení mezd v MyÚčtu. Pracovní neschopnost, která trvá přes
+  převáděné období, navazuje až do konce případu eNeschopenky.
+- **Srážky.** Exekuce a insolvence, které na konci zpracovaných mezd trvají,
+  se založí jako nedoložené exekuční případy se zbývající pohledávkou
+  a příjemcem, ostatní trvalé srážky jako dohody o srážkách. Exekuční případ
+  před aktivací ověřte proti spisu.
 - **Zpracované mzdy.** Každý měsíc do konce převáděného roku se uloží jako
   převzatá mzda předchozího systému: hrubý příjem, vyměřovací základy,
   pojistné zaměstnance i zaměstnavatele, záloha a srážková daň, daňový bonus,
@@ -161,15 +182,18 @@ Zkontrolujte po převodu:
 
 - druh vztahu u zaměstnanců, u kterých ho protokol označil jako odvozený,
 - výplatní účty: převod je založí jako neověřené, ověřte je na kartě osoby,
-- mzdové složky, pravidelné předpisy a průměrný výdělek pro první měsíc
-  vedený v MyÚčtu,
+- položky, které protokol označil k ověření (OIČ bez přijatého hlášení,
+  děti s příznakem jiné vyživující osoby, důchodci bez slevy, neschopnost
+  bez známého konce),
+- exekuční případy a dohody o srážkách,
+- mzdové složky a pravidelné předpisy pro první měsíc vedený v MyÚčtu,
 - upozornění rekonciliace mezd proti deníku (§ 109.5).
 
 ## 109.3 Co převod nepřenese
 
-- **Docházka a podrobnosti mezd.** Mzdové složky jednotlivých měsíců,
-  nepřítomnosti, dovolená, průměrné výdělky, srážky ze mzdy, exekuce a děti
-  pro daňové zvýhodnění se nepřevádějí, zadejte je v modulu Mzdy.
+- **Docházka a složky mezd.** Mzdové složky jednotlivých měsíců a pravidelné
+  předpisy (osobní ohodnocení, příspěvky) se nepřevádějí, zadejte je
+  v modulu Mzdy.
 - **Sklad, zakázky a CRM.** Zápisy jsou v převedeném deníku, evidence se
   zakládá v MyÚčtu.
 - **Objednávky, nabídky a přílohy dokladů.** Skeny dokladů připojíte zvlášť
