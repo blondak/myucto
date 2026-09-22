@@ -614,6 +614,11 @@ final class MoneyS3ImportTest extends TestCase
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
 
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'DF-2025-010' AND is_fixed_asset = 1"));
+        // Aplikace drží expense_kind='fixed_asset' ⇔ is_fixed_asset=1 i na položkách.
+        self::assertGreaterThan(0, $this->rowCount('purchase_invoices', $supplierId,
+            'id IN (SELECT purchase_invoice_id FROM purchase_invoice_items WHERE is_fixed_asset = 1)'));
+        self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId,
+            "id IN (SELECT purchase_invoice_id FROM purchase_invoice_items WHERE (is_fixed_asset = 1) <> (expense_kind <=> 'fixed_asset'))"));
         $dph = $this->container(DphPriznaniBuilder::class);
         $march = $dph->build($supplierId, 2025, 3, 'monthly')['summary']['lines'];
         self::assertEqualsWithDelta(1000.0, (float) ($march['47']['base'] ?? 0), 0.005, json_encode($march, JSON_UNESCAPED_UNICODE) ?: '');

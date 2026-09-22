@@ -116,7 +116,10 @@ final class MigratedDocumentItem
             $totalWithoutVat, $totalVat, $totalWithVat, $vatClassificationCode,
             OssMigrationPolicy::DOMESTIC_COLUMNS,
             $isFixedAsset,
-            $expenseKind,
+            // Aplikace drží expense_kind='fixed_asset' ⇔ is_fixed_asset=1 (PurchaseInvoiceRepository);
+            // bez druhu by první uložení nebo auto-klasifikace příznak ř. 47 shodily. Druh daný
+            // zdrojem (PREMIER podle účtu položky) má přednost.
+            $expenseKind ?? ($isFixedAsset ? 'fixed_asset' : null),
         );
     }
 }
