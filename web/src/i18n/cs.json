@@ -15283,6 +15283,7 @@
     "force_delete": "Smazat (force)",
     "force_edit_hint": "Admin only — úprava received/booked/paid faktury. U zaplacené pozor: po změně částky může přestat sedět s bankovní transakcí. Po uložení se přepočítají sumy.",
     "force_edit_confirm": "Opravdu upravit fakturu ve stavu '{status}'? U zaplacené faktury: změna částky může rozbít párování s bankovní transakcí. Pokračovat?",
+    "opened_detail_not_draft": "Doklad je ve stavu '{status}', takže se neupravuje v editoru. Otevřel se jeho detail, kde ho můžete třeba spárovat se zálohou.",
     "bulk": {
       "mark_received": "Označit jako přijaté ({n})",
       "mark_booked": "Označit zaúčtováno ({n})",

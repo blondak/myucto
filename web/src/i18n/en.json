@@ -15283,6 +15283,7 @@
     "force_delete": "Delete (force)",
     "force_edit_hint": "Admin only — edit received/booked/paid invoice. For paid invoices, beware: changing the amount may break matching with the bank transaction. Totals will be recomputed.",
     "force_edit_confirm": "Really edit invoice with status '{status}'? For paid invoices: changing the amount may break the bank-transaction match. Continue?",
+    "opened_detail_not_draft": "The document has status '{status}', so it is not edited in the editor. Its detail opened instead, where you can e.g. pair it with an advance.",
     "bulk": {
       "mark_received": "Mark as received ({n})",
       "mark_booked": "Mark booked ({n})",

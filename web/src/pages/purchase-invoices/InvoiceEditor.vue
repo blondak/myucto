@@ -663,6 +663,13 @@ async function loadInvoice(id: number) {
       router.replace(`/purchase-invoices/${inv.id}`)
       return
     }
+    // Mimo koncept ukládá editor jen admin přes ?force=1, jinak by PUT skončil 409.
+    // Typicky sem vede vytěžení dokladu „Uhrazeno, k úhradě 0", který vznikne rovnou jako paid.
+    if (inv.status !== 'draft' && String(route.query.force ?? '') !== '1') {
+      toast.info(t('purchase_invoice.opened_detail_not_draft', { status: t('purchase_invoice.status.' + inv.status) }))
+      router.replace(`/purchase-invoices/${inv.id}`)
+      return
+    }
     aiPostingSuggestion.value = inv.ai_posting_suggestion ?? null
     populate(inv)
     void docDims.load(id, form.value.items)

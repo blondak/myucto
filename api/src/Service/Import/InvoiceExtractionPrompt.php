@@ -281,8 +281,9 @@ DŮLEŽITÉ k poli `payment.method` (FORMA ÚHRADY):
 - `payment.method_confidence` = 0..1, jak jistě jsi formu vyčetl (0 když vracíš null).
 
 DŮLEŽITÉ k poli `advance_reference`:
-- Odkaz na zaplacenou zálohu/proformu ("Odečet zálohy", "k zálohové faktuře č. …") →
-  vrať identifikátor té zálohy; jinak null.
+- Odkaz na zaplacenou zálohu/proformu ("Odečet zálohy", "k zálohové faktuře č. …",
+  "uhrazeno na základě výzvy k úhradě #…", "výzva k platbě č. …") → vrať identifikátor
+  té zálohy; jinak null. Výzva k úhradě / k platbě je proforma.
 - U daňového dokladu k přijaté platbě (`document_kind="tax_document"`) sem VŽDY dej číslo
   zálohové faktury / proformy, ke které se doklad váže (VS nebo číslo té zálohy).
 

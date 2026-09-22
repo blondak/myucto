@@ -554,7 +554,68 @@ final class AiProviderContractTest extends TestCase
         self::assertTrue($payload['response_format']['json_schema']['strict']);
     }
 
+    /**
+     * Faktura se 40+ položkami potřebuje přes 8k výstupních tokenů. Se starým
+     * stropem 4096 se JSON usekl a uživatel viděl jen „Claude vrátil invalid JSON".
+     */
+    public function testAnthropicInvoiceRequest_hasSameOutputLimitAsOtherProviders(): void
+    {
+        [$client, $history] = $this->anthropicClient([
+            'content'     => [['type' => 'text', 'text' => (string) json_encode($this->goldenData())]],
+            'model'       => 'claude-haiku-4-5',
+            'stop_reason' => 'end_turn',
+        ]);
+
+        $result = $client->extractInvoice(1, "%PDF-1.4\nfake");
+
+        self::assertTrue($result['ok']);
+        $payload = json_decode((string) $history[0]['request']->getBody(), true);
+        self::assertSame(16384, $payload['max_tokens']);
+    }
+
+    public function testAnthropicInvoice_truncatedOutputReportsLimitInsteadOfInvalidJson(): void
+    {
+        [$client] = $this->anthropicClient([
+            'content'     => [['type' => 'text', 'text' => "{\n  \"vendor\": {\n    \"company_name\": \"ACME s.r.o.\",\n"]],
+            'model'       => 'claude-haiku-4-5',
+            'stop_reason' => 'max_tokens',
+        ]);
+
+        $result = $client->extractInvoice(1, "%PDF-1.4\nfake");
+
+        self::assertFalse($result['ok']);
+        self::assertStringContainsString('nestihl vrátit celý doklad', $result['error']);
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────────
+
+    /** @return array{0: AnthropicClient, 1: \ArrayObject<int, array<string, mixed>>} */
+    private function anthropicClient(array $responseBody): array
+    {
+        $history = new \ArrayObject();
+        $stack = HandlerStack::create(new MockHandler([new Response(200, [], (string) json_encode($responseBody))]));
+        $stack->push(Middleware::history($history));
+        $http = new Client(['handler' => $stack, 'http_errors' => false]);
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturnCallback(function (string $sql) {
+            $stmt = $this->createMock(PDOStatement::class);
+            $stmt->method('execute')->willReturn(true);
+            if (str_contains($sql, 'anthropic_api_key_enc')) {
+                $stmt->method('fetch')->willReturn(['anthropic_api_key_enc' => 'ENC', 'anthropic_default_model' => 'claude-haiku-4-5']);
+            } else {
+                $stmt->method('fetch')->willReturn(false);
+            }
+            return $stmt;
+        });
+        $conn = $this->createMock(Connection::class);
+        $conn->method('pdo')->willReturn($pdo);
+
+        $crypto = $this->createMock(SecretEncryption::class);
+        $crypto->method('decrypt')->willReturn('sk-ant-' . str_repeat('a', 40));
+
+        return [new AnthropicClient($conn, $crypto, new NullLogger(), $http), $history];
+    }
 
     private function makeRouter(string $provider, bool $euRequired, string $declaredRegion): LlmGatewayRouter
     {
