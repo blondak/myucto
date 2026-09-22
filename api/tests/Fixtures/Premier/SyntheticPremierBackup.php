@@ -527,7 +527,7 @@ final class SyntheticPremierBackup
      *   INTER 5  pracovní poměr od 15. 1. 2025 (kategorie `HPP`, `KODPP_SO` prázdné); sjednaná mzda
      *            v `SAZBA_MZ` podle `TYP_MZDY` (30 000, od 7/2025 32 000; `MZDA_MES` prázdné
      *            nebo jiné), stát adresy názvem „Česká republika"; mzdy 1/2025-1/2026; přihláška
-     *            k ZP 111, od 7/2025 změna na 201
+     *            k ZP 111, od 7/2025 změna na 201; korespondenční adresa v `PER_ADR`
      *   INTER 6  DPP 4-6/2025 (kategorie `DPP`), osoba s bydlištěm na Slovensku (stát názvem
      *            „Slovenská republika")
      *
@@ -548,11 +548,23 @@ final class SyntheticPremierBackup
         array_push($tables['PER_MAIN'][1],
             ['ID' => 'OS-D', 'RC_1' => '080312', 'RC_2' => '0000', 'PRIJMENI' => 'Učňovský', 'JMENO' => 'Adam', 'NAROZENI' => '2008-03-12',
                 'ULICE' => 'Školní', 'CISLOP' => '3', 'PSC' => '60200', 'MESTO' => 'Brno', 'STAT' => 'CZ', 'STAT_N' => 'CZ'],
-            ['ID' => 'OS-E', 'RC_1' => '880312', 'RC_2' => '0106', 'PRIJMENI' => 'Syntetický', 'JMENO' => 'Tomáš', 'NAROZENI' => '1988-03-12',
+            ['ID' => 'OS-E', 'SUP_INTER' => 105, 'RC_1' => '880312', 'RC_2' => '0106', 'PRIJMENI' => 'Syntetický', 'JMENO' => 'Tomáš', 'NAROZENI' => '1988-03-12',
                 'ULICE' => 'Vymyšlená', 'CISLOP' => '12', 'PSC' => '60200', 'MESTO' => 'Brno', 'STAT' => 'Česká republika', 'STAT_N' => 'CZ'],
             ['ID' => 'OS-F', 'RC_1' => '870202', 'RC_2' => '0107', 'PRIJMENI' => 'Pokusný', 'JMENO' => 'Marek', 'NAROZENI' => '1987-02-02',
                 'ULICE' => 'Hlavná', 'CISLOP' => '5', 'PSC' => '81101', 'MESTO' => 'Bratislava', 'STAT' => 'Slovenská republika', 'STAT_N' => 'SK'],
         );
+        $tables['PER_MAIN'][0][] = ['SUP_INTER', 'N', 10];
+        // Další adresy osoby: vazba přes PER_MAIN.SUP_INTER; druh 1 je kopie trvalé, druh 2 korespondenční.
+        $tables['PER_ADR'] = [
+            [['INTER', 'N', 10], ['XULICE', 'C', 28], ['XCISLO', 'C', 12], ['XPSC', 'C', 10], ['XMESTO', 'C', 40], ['XOBEC', 'C', 50], ['XSTAT', 'C', 10],
+                ['XZEME', 'C', 2], ['DRUH_ADR', 'N', 1], ['XKORES', 'L'], ['XIS_IMP', 'L'], ['ID', 'C', 36], ['TS', 'C', 40]],
+            [
+                ['INTER' => 105, 'XULICE' => 'Vymyšlená', 'XCISLO' => '12', 'XPSC' => '60200', 'XMESTO' => 'Brno', 'XSTAT' => 'CZ', 'XZEME' => 'CZ',
+                    'DRUH_ADR' => 1, 'XKORES' => false, 'XIS_IMP' => true, 'ID' => 'A5-1', 'TS' => '2025011510:00:00#INSE#'],
+                ['INTER' => 105, 'XULICE' => 'Poštovní', 'XCISLO' => '1', 'XPSC' => '77900', 'XMESTO' => 'Olomouc', 'XSTAT' => 'CZ', 'XZEME' => 'CZ',
+                    'DRUH_ADR' => 2, 'XKORES' => true, 'XIS_IMP' => false, 'ID' => 'A5-2', 'TS' => '2025011510:00:00#INSE#'],
+            ],
+        ];
         foreach (range(4, 6) as $m) {
             $months[] = [6, 2025, $m, ['MZ_HRUBA' => 5000, 'MZ_SDANI' => 5000, 'MZ_SDAN' => 750, 'SRAZ_DAN' => true, 'MZ_CISTA' => 4250, 'MZ_VYPLATA' => 4250,
                 'DNY_ODPR' => 5, 'UVA_DOBA' => 8]];

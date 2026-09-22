@@ -274,6 +274,17 @@ final class PremierPayrollImportTest extends TestCase
             $this->explain($protocol));
     }
 
+    /** Korespondenční adresa z `PER_ADR` se doplní vedle trvalé. */
+    public function testMailingAddressFromAdditionalAddresses(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['residence', '60200', 'CZ'], ['mailing', '77900', 'CZ']], $this->fetch("SELECT a.address_type, a.postal_code, a.country_code FROM payroll_person_addresses a
+            JOIN payroll_employments e ON e.employee_id = a.employee_id AND e.supplier_id = a.supplier_id WHERE e.supplier_id = ? AND e.code = '5' ORDER BY a.address_type", $supplierId),
+            $this->explain($protocol));
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);

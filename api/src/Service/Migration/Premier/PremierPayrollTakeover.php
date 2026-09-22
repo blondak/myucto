@@ -34,7 +34,8 @@ final class PremierPayrollTakeover
             sourceKey: 'premier',
             label: self::LABEL,
             strict: false,
-            addressesPerType: false,
+            // Kontaktní adresa (`PER_ADR`) se doplňuje vedle trvalé stejně jako u PAMICA.
+            addressesPerType: true,
             birthSurnameOnCurrentVersion: false,
             verifyPayoutAccounts: false,
             countPlannedTermination: false,
@@ -72,6 +73,7 @@ final class PremierPayrollTakeover
             // Rodné příjmení shodné s příjmením PREMIER vyplňuje i u osob bez změny jména.
             birthSurname: is_string($surname) && mb_strtolower($surname) !== mb_strtolower((string) $relation['last_name']) ? $surname : null,
             residence: self::address(is_array($relation['residence']) ? $relation['residence'] : null, $countries),
+            mailing: self::address(is_array($relation['mailing'] ?? null) ? $relation['mailing'] : null, $countries),
             email: is_string($relation['email']) ? $relation['email'] : null,
             phone: is_string($relation['phone']) ? $relation['phone'] : null,
             payoutAccounts: is_array($account) ? [new PayrollTakeoverPayoutAccount($account['account'], $account['bank_code'])] : [],

@@ -67,6 +67,7 @@ final class PremierPayroll
                 $people[$id] = $row;
             }
         }
+        $mailing = self::mailingAddresses($backup);
         $snapshots = [];
         foreach ($backup->rows('PERSON2') as $row) {
             $number = (int) ($row['CISLO'] ?? 0);
@@ -171,6 +172,7 @@ final class PremierPayroll
                 ],
                 'birth_surname' => self::limited($person['RODNE_P'] ?? '', 128),
                 'residence' => self::address($source),
+                'mailing' => $person !== null ? ($mailing[(int) ($person['SUP_INTER'] ?? 0)] ?? null) : null,
                 'email' => self::email(self::text($person['E_MAIL'] ?? '')),
                 'phone' => self::phone(self::text($person['MOBIL'] ?? '') ?: self::text($person['TEL'] ?? '')),
                 'non_resident' => ($person['NREZIDEN'] ?? false) === true,
@@ -477,6 +479,38 @@ final class PremierPayroll
             'country_code' => self::country($countryText) ?? ($countryText === '' ? 'CZ' : null),
             'country_text' => $countryText,
         ];
+    }
+
+    /**
+     * Kontaktní adresy osob z `PER_ADR` podle `INTER` = `PER_MAIN.SUP_INTER` (ověřeno na
+     * reálné záloze: všechny řádky `PER_ADR` se tak spárují s osobou, s `PERSONAL.INTER`
+     * jen polovina). `DRUH_ADR` 1 je kopie trvalé adresy, 2 další adresa; z nich má
+     * přednost ta s příznakem korespondenční (`XKORES`), pak poslední podle `TS`.
+     *
+     * @return array<int,array{street_line:string,city:string,postal_code:string,country_code:?string,country_text:string}>
+     */
+    private static function mailingAddresses(PremierBackup $backup): array
+    {
+        $best = [];
+        foreach ($backup->rows('PER_ADR') as $row) {
+            if ((int) ($row['DRUH_ADR'] ?? 0) !== 2) {
+                continue;
+            }
+            $inter = (int) ($row['INTER'] ?? 0);
+            $rank = [($row['XKORES'] ?? false) === true ? 1 : 0, self::text($row['TS'] ?? '')];
+            if (!isset($best[$inter]) || $rank >= $best[$inter][0]) {
+                $best[$inter] = [$rank, $row];
+            }
+        }
+        $out = [];
+        foreach ($best as $inter => [, $row]) {
+            $row['XSTAT_KOD'] = self::text($row['XZEME'] ?? '') !== '' ? self::text($row['XZEME'] ?? '') : self::text($row['XSTAT'] ?? '');
+            $address = self::address($row, ['XULICE', 'XCISLO', 'XMESTO', 'XOBEC', 'XPSC', 'XSTAT_KOD']);
+            if ($address !== null) {
+                $out[$inter] = $address;
+            }
+        }
+        return $out;
     }
 
     private static function country(mixed $value): ?string
