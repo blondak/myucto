@@ -14,6 +14,7 @@ final class StereoNxUploads
     public const CHUNK_BYTES = MigrationUploadLimits::CHUNK_BYTES;
     public const MAX_BYTES = MigrationUploadLimits::STEREO_NX_MAX_BYTES;
     private const MAX_ACTIVE = MigrationUploadLimits::MAX_ACTIVE_UPLOADS;
+    private const RESULT_PATTERN = '/^result-[1-9]\d*\.json(\.tmp)?$/D';
 
     public static function token(): string
     {
@@ -102,11 +103,41 @@ final class StereoNxUploads
     {
         $dir = self::dir($supplierId, $token);
         if (!is_dir($dir)) return;
-        foreach (['backup.zip', 'state.json', 'state.json.tmp', 'lock'] as $name) {
+        $names = ['backup.zip', 'state.json', 'state.json.tmp', 'lock'];
+        foreach (scandir($dir) ?: [] as $name) {
+            if (preg_match(self::RESULT_PATTERN, $name) === 1) $names[] = $name;
+        }
+        foreach ($names as $name) {
             $path = $dir . '/' . $name;
             if (is_file($path)) @unlink($path);
         }
         @rmdir($dir);
+    }
+
+    /**
+     * Výsledek (report) převodu, který běžel jako job na pozadí. Leží u zálohy, dokud
+     * ji uživatel nebo úklid nesmaže; průvodce si ho po doběhnutí jobu stáhne.
+     *
+     * @param array<string,mixed> $report
+     */
+    public static function saveResult(int $supplierId, string $token, int $jobId, array $report): void
+    {
+        $path = self::dir($supplierId, $token) . '/result-' . $jobId . '.json';
+        $temp = $path . '.tmp';
+        $json = json_encode($report, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
+        if ($json === false || file_put_contents($temp, $json, LOCK_EX) === false || !rename($temp, $path)) {
+            @unlink($temp);
+            throw new StereoNxException('storage_error', 'Výsledek převodu nelze uložit.');
+        }
+    }
+
+    /** @return array<string,mixed>|null null = job ještě nedoběhl nebo výsledek neuložil */
+    public static function result(int $supplierId, string $token, int $jobId): ?array
+    {
+        $path = self::dir($supplierId, $token) . '/result-' . $jobId . '.json';
+        if ($jobId < 1 || !is_file($path) || is_link($path)) return null;
+        $report = json_decode((string) file_get_contents($path), true);
+        return is_array($report) ? $report : null;
     }
 
     /** @return array<string,mixed> */

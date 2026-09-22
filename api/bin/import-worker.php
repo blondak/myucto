@@ -104,6 +104,8 @@ try {
         $container->get(\MyInvoice\Service\Migration\Pohoda\PohodaImportJobService::class)->run($jobId);
     } elseif ($source === 'premier_import') {
         $container->get(\MyInvoice\Service\Migration\Premier\PremierImportJobService::class)->run($jobId);
+    } elseif ($source === 'stereo_nx_import') {
+        $container->get(\MyInvoice\Service\Migration\StereoNx\StereoNxImportJobService::class)->run($jobId);
     } elseif ($source === 'scan_attach') {
         $container->get(\MyInvoice\Service\Document\ScanAttach\ScanAttachJobService::class)->run($jobId);
     } else {

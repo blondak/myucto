@@ -4,27 +4,46 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Admin\Import;
 
+use MyInvoice\Bootstrap;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\BackgroundProcess;
 use MyInvoice\Service\Migration\StereoNx\StereoNxBackup;
 use MyInvoice\Service\Migration\StereoNx\StereoNxException;
-use MyInvoice\Service\Migration\StereoNx\StereoNxImporter;
+use MyInvoice\Service\Migration\StereoNx\StereoNxImportJobService;
 use MyInvoice\Service\Migration\StereoNx\StereoNxUploads;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\UploadedFileInterface;
 use Psr\Log\LoggerInterface;
 
-/** Nahrání šifrované zálohy, výběr firmy, kontrolní běh a následný převod. */
+/**
+ * Nahrání šifrované zálohy, výběr firmy, kontrolní běh a následný převod. Zkouška
+ * nanečisto i převod běží na pozadí jako job ({@see StereoNxImportJobService}).
+ *
+ *   GET    /api/admin/imports/stereo-nx/uploads
+ *   POST   /api/admin/imports/stereo-nx/uploads/chunked                    {file_name, size}
+ *   POST   /api/admin/imports/stereo-nx/uploads/{token}/chunks             multipart `chunk` + `offset`
+ *   POST   /api/admin/imports/stereo-nx/uploads/{token}/complete
+ *   GET    /api/admin/imports/stereo-nx/uploads/{token}
+ *   POST   /api/admin/imports/stereo-nx/uploads/{token}/preview            {password?}
+ *   POST   /api/admin/imports/stereo-nx/uploads/{token}/run                {company, mode, blank_country_is_cz, password?} → {job_id}
+ *   GET    /api/admin/imports/stereo-nx/uploads/{token}/runs/{jobId}       výsledek doběhlého jobu
+ *   DELETE /api/admin/imports/stereo-nx/uploads/{token}
+ */
 final class StereoNxMigrationAction
 {
     public function __construct(
         private readonly Connection $db,
-        private readonly StereoNxImporter $importer,
+        private readonly ImportJobRepository $jobs,
+        private readonly SecretEncryption $secrets,
         private readonly LoggerInterface $log,
     ) {}
 
@@ -180,7 +199,13 @@ final class StereoNxMigrationAction
         }
     }
 
-    /** @param array<string,string> $args */
+    /**
+     * Ověří zálohu, firmu v ní a cílovou firmu a spustí zkoušku nanečisto nebo převod jako
+     * job na pozadí ({@see StereoNxImportJobService}). Stav jde přes společné
+     * GET /api/admin/imports/{id}, výsledek po doběhnutí přes {@see result()}.
+     *
+     * @param array<string,string> $args
+     */
     public function run(Request $request, Response $response, array $args): Response
     {
         if ($denied = $this->deny($request, $response)) return $denied;
@@ -194,9 +219,10 @@ final class StereoNxMigrationAction
         try {
             $sid = SupplierGuard::currentId($request);
             $uid = $this->userId($request);
-            $state = $this->ready($sid, $args['token'], $uid);
+            $token = $args['token'];
+            $state = $this->ready($sid, $token, $uid);
             $password = $this->password($request);
-            $backup = StereoNxBackup::open(StereoNxUploads::archive($sid, $args['token']), $company, $password);
+            $backup = StereoNxBackup::open(StereoNxUploads::archive($sid, $token), $company, $password);
             $identity = $backup->companyIdentity();
             $target = $this->target($sid);
             if ($identity['ico'] !== $target['ico'] || $target['accounting_mode'] !== 'tax_evidence' || !$identity['vat_payer'] || !$target['vat_payer']) {
@@ -206,7 +232,7 @@ final class StereoNxMigrationAction
                 return Json::error($response, 'migration_required',
                     'Chybí databázová migrace pro převod ze Stereo NX. Spusťte php api/bin/migrate.php.', 503);
             }
-            $hash = hash_file('sha256', StereoNxUploads::archive($sid, $args['token']));
+            $hash = hash_file('sha256', StereoNxUploads::archive($sid, $token));
             if (!hash_equals((string) $state['sha256'], $hash)) {
                 return Json::error($response, 'archive_changed', 'Nahraná záloha se změnila; nahrajte ji znovu.', 409);
             }
@@ -214,42 +240,67 @@ final class StereoNxMigrationAction
                 || ($state['dry_run_blank_country_is_cz'] ?? null) !== $blankCountryIsCz)) {
                 return Json::error($response, 'dry_run_required', 'Před převodem spusťte úspěšnou zkoušku nanečisto pro zvolenou firmu.', 409);
             }
-            $token = $args['token'];
-            $report = StereoNxUploads::locked($sid, $token, function (array $locked) use ($sid, $uid, $company, $mode, $backup, $hash, $token, $blankCountryIsCz): array {
-                if (($locked['status'] ?? '') !== 'ready' || !hash_equals((string) ($locked['sha256'] ?? ''), $hash)) {
-                    throw new StereoNxException('upload_changed', 'Nahraná záloha se změnila.');
-                }
-                if ($mode === 'import' && (($locked['dry_run_company'] ?? null) !== $company
-                    || ($locked['dry_run_blank_country_is_cz'] ?? null) !== $blankCountryIsCz)) {
-                    throw new StereoNxException('dry_run_required', 'Před převodem spusťte úspěšnou zkoušku nanečisto.');
-                }
-                $report = $this->importer->run($backup, $sid, $uid, $mode === 'dry_run', $blankCountryIsCz);
-                if ($mode === 'dry_run') {
-                    $locked['dry_run_company'] = ($report['ok'] ?? false) === true ? $company : null;
-                    $locked['dry_run_blank_country_is_cz'] = ($report['ok'] ?? false) === true ? $blankCountryIsCz : null;
-                } else {
-                    $locked['dry_run_company'] = null;
-                    $locked['dry_run_blank_country_is_cz'] = null;
-                    $locked['imported_at'] = time();
-                }
-                StereoNxUploads::save($sid, $token, $locked);
-                return $report;
-            });
-            return Json::ok($response, ['mode' => $mode, 'report' => $report]);
         } catch (StereoNxException $e) {
             return $this->error($response, $e);
         } catch (\Throwable $e) {
-            $diagnostic = ['exception_class' => $e::class];
-            if ($e instanceof \PDOException) {
-                $sqlState = (string) $e->getCode();
-                if (preg_match('/^[A-Z0-9]{5}$/D', $sqlState)) $diagnostic['sqlstate'] = $sqlState;
-                $driverCode = $e->errorInfo[1] ?? null;
-                if (is_int($driverCode) || (is_string($driverCode) && ctype_digit($driverCode))) {
-                    $diagnostic['driver_code'] = (int) $driverCode;
-                }
+            $this->log->error('Stereo NX import failed', ['exception_class' => $e::class]);
+            return Json::error($response, 'backup_read_failed', StereoNxImportJobService::FAILED, 500);
+        }
+
+        // Převod firmy běží nejvýš jeden naráz (importer drží řádek firmy po celou transakci).
+        $this->jobs->reapStale($sid, StereoNxImportJobService::SOURCE);
+        foreach ($this->jobs->listForTenant($sid, StereoNxImportJobService::SOURCE, limit: 20) as $existing) {
+            if (in_array($existing['status'], ['queued', 'running'], true)) {
+                return Json::error($response, 'already_running', "Převod už běží (job #{$existing['id']}).", 409,
+                    ['existing_job_id' => $existing['id']]);
             }
-            $this->log->error('Stereo NX import failed', $diagnostic);
-            return Json::error($response, 'backup_read_failed', 'Převod se nepodařilo dokončit; zkontrolujte stav dat.', 500);
+        }
+        $params = ['token' => $token, 'company' => $company, 'mode' => $mode, 'blank_country_is_cz' => $blankCountryIsCz, 'sha256' => $hash];
+        if ($password !== null) {
+            $params['password_enc'] = $this->secrets->encryptFor($password, StereoNxImportJobService::passwordContext($sid, $token));
+        }
+        $jobId = $this->jobs->create($sid, StereoNxImportJobService::SOURCE, $params, $uid);
+        $stored = $this->jobs->find($jobId, $sid);
+        if ($stored === null || ($stored['source'] ?? '') !== StereoNxImportJobService::SOURCE) {
+            $this->jobs->delete($jobId, $sid);
+            return Json::error($response, 'migration_required',
+                'Chybí databázová migrace pro převod ze Stereo NX. Spusťte php api/bin/migrate.php.', 503);
+        }
+        BackgroundProcess::spawnPhp(
+            Bootstrap::rootDir() . '/api/bin/import-worker.php',
+            ['--job-id=' . $jobId],
+            RuntimePaths::log('import-worker.log'),
+            Bootstrap::rootDir(),
+        );
+        return Json::ok($response, ['mode' => $mode, 'job_id' => $jobId, 'status' => 'queued'], 202);
+    }
+
+    /**
+     * Výsledek (report) doběhlého jobu převodu nad touto zálohou.
+     *
+     * @param array<string,string> $args
+     */
+    public function result(Request $request, Response $response, array $args): Response
+    {
+        if ($denied = $this->deny($request, $response, AccessLevel::READ)) return $denied;
+        try {
+            $sid = SupplierGuard::currentId($request);
+            $token = $args['token'];
+            $this->owner($sid, $token, $this->userId($request));
+            $job = $this->jobs->find((int) ($args['id'] ?? 0), $sid);
+            if ($job === null || ($job['source'] ?? '') !== StereoNxImportJobService::SOURCE
+                || (string) ($job['params']['token'] ?? '') !== $token) {
+                return Json::error($response, 'not_found', 'Převod nebyl nalezen.', 404);
+            }
+            $report = StereoNxUploads::result($sid, $token, (int) $job['id']);
+            if ($report === null) {
+                return Json::error($response, 'result_missing', in_array($job['status'], ['queued', 'running'], true)
+                    ? 'Převod ještě běží.'
+                    : (trim((string) ($job['last_error'] ?? '')) ?: 'Výsledek převodu není k dispozici.'), 409);
+            }
+            return Json::ok($response, ['mode' => ($job['params']['mode'] ?? '') === 'import' ? 'import' : 'dry_run', 'report' => $report]);
+        } catch (StereoNxException $e) {
+            return $this->error($response, $e);
         }
     }
 

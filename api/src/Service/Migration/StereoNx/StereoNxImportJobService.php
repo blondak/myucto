@@ -1,0 +1,137 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Migration\StereoNx;
+
+use MyInvoice\Repository\ImportJobRepository;
+use MyInvoice\Service\Auth\SecretEncryption;
+use Psr\Log\LoggerInterface;
+
+/**
+ * Převod ze Stereo NX na pozadí (`import_jobs.source = stereo_nx_import`) — zkouška
+ * nanečisto i ostrý převod, stejně jako u ostatních převodů z cizích programů.
+ *
+ * Průvodce ověří zálohu, firmu a cílovou firmu v požadavku a založí job s tím, co
+ * ověřil (firma v záloze, režim, otisk zálohy). Job pod zámkem zálohy
+ * ({@see StereoNxUploads::locked()}) zopakuje kontrolu, že se záloha nezměnila a že
+ * ostrému převodu předchází úspěšná zkouška téže firmy, spustí {@see StereoNxImporter}
+ * a výsledek (report) uloží k záloze, odkud si ho průvodce po doběhnutí jobu stáhne.
+ *
+ * Importer průběh ani zrušení nehlásí (jeden běh = jedna transakce): job hlásí jen
+ * začátek a konec a zrušit jde, dokud čeká ve frontě.
+ *
+ * Heslo zálohy (když ho uživatel zadal) jde do parametrů jobu zašifrované a vázané
+ * na firmu a zálohu; job ho po přečtení z řádku odebere.
+ */
+final class StereoNxImportJobService
+{
+    public const SOURCE = 'stereo_nx_import';
+    public const FAILED = 'Převod se nepodařilo dokončit; zkontrolujte stav dat.';
+
+    public function __construct(
+        private readonly ImportJobRepository $jobs,
+        private readonly StereoNxImporter $importer,
+        private readonly SecretEncryption $secrets,
+        private readonly LoggerInterface $log,
+    ) {}
+
+    /** Kontext šifrování hesla v parametrech jobu: heslo nejde použít s jinou zálohou ani firmou. */
+    public static function passwordContext(int $supplierId, string $token): string
+    {
+        return 'stereo-nx-backup:' . $supplierId . ':' . $token;
+    }
+
+    public function run(int $jobId): void
+    {
+        $job = $this->jobs->findById($jobId);
+        if ($job === null || !$this->jobs->markRunning($jobId)) {
+            return;
+        }
+        $supplierId = (int) $job['supplier_id'];
+        $userId = (int) ($job['created_by'] ?? 0);
+        $params = is_array($job['params'] ?? null) ? $job['params'] : [];
+        $token = (string) ($params['token'] ?? '');
+        $company = (int) ($params['company'] ?? -1);
+        $mode = ($params['mode'] ?? '') === 'import' ? 'import' : 'dry_run';
+        $dryRun = $mode === 'dry_run';
+        $blankCountryIsCz = ($params['blank_country_is_cz'] ?? false) === true;
+        $hash = (string) ($params['sha256'] ?? '');
+
+        try {
+            $password = isset($params['password_enc'])
+                ? $this->secrets->decryptFor((string) $params['password_enc'], self::passwordContext($supplierId, $token))
+                : null;
+        } catch (\Throwable) {
+            $this->jobs->removeParams($jobId, ['password_enc']);
+            $this->jobs->markFailed($jobId, 'Heslo zálohy nelze přečíst, spusťte převod znovu.');
+            return;
+        }
+        $this->jobs->removeParams($jobId, ['password_enc']);
+
+        $this->jobs->updateProgress($jobId, [
+            'total_items' => 1,
+            'processed' => 0,
+            'current_step' => $dryRun ? 'Zkouška nanečisto běží' : 'Převod běží',
+        ]);
+        $this->jobs->appendLog($jobId, ($dryRun ? 'Zkouška nanečisto' : 'Ostrý převod') . " firmy č. {$company} ze zálohy Stereo NX.");
+
+        try {
+            $backup = StereoNxBackup::open(StereoNxUploads::archive($supplierId, $token), $company, $password);
+            $report = StereoNxUploads::locked($supplierId, $token, function (array $locked) use ($jobId, $supplierId, $userId, $token, $company, $mode, $dryRun, $backup, $hash, $blankCountryIsCz): array {
+                if (($locked['status'] ?? '') !== 'ready' || $hash === '' || !hash_equals((string) ($locked['sha256'] ?? ''), $hash)) {
+                    throw new StereoNxException('upload_changed', 'Nahraná záloha se změnila.');
+                }
+                if ($mode === 'import' && (($locked['dry_run_company'] ?? null) !== $company
+                    || ($locked['dry_run_blank_country_is_cz'] ?? null) !== $blankCountryIsCz)) {
+                    throw new StereoNxException('dry_run_required', 'Před převodem spusťte úspěšnou zkoušku nanečisto.');
+                }
+                $report = $this->importer->run($backup, $supplierId, $userId, $dryRun, $blankCountryIsCz);
+                if ($dryRun) {
+                    $locked['dry_run_company'] = ($report['ok'] ?? false) === true ? $company : null;
+                    $locked['dry_run_blank_country_is_cz'] = ($report['ok'] ?? false) === true ? $blankCountryIsCz : null;
+                } else {
+                    $locked['dry_run_company'] = null;
+                    $locked['dry_run_blank_country_is_cz'] = null;
+                    $locked['imported_at'] = time();
+                }
+                StereoNxUploads::save($supplierId, $token, $locked);
+                StereoNxUploads::saveResult($supplierId, $token, $jobId, $report);
+                return $report;
+            });
+        } catch (StereoNxException $e) {
+            $this->jobs->appendLog($jobId, $e->getMessage());
+            $this->jobs->markFailed($jobId, $e->getMessage());
+            return;
+        } catch (\Throwable $e) {
+            $diagnostic = ['exception_class' => $e::class, 'job_id' => $jobId];
+            if ($e instanceof \PDOException) {
+                $sqlState = (string) $e->getCode();
+                if (preg_match('/^[A-Z0-9]{5}$/D', $sqlState)) $diagnostic['sqlstate'] = $sqlState;
+                $driverCode = $e->errorInfo[1] ?? null;
+                if (is_int($driverCode) || (is_string($driverCode) && ctype_digit($driverCode))) {
+                    $diagnostic['driver_code'] = (int) $driverCode;
+                }
+            }
+            $this->log->error('Stereo NX import failed', $diagnostic);
+            $this->jobs->markFailed($jobId, self::FAILED);
+            return;
+        }
+
+        $ok = ($report['ok'] ?? false) === true;
+        $written = is_array($report['written'] ?? null) ? $report['written'] : [];
+        $this->jobs->updateProgress($jobId, [
+            'processed' => 1,
+            'created_count' => (int) (($written['issued'] ?? 0) + ($written['purchases'] ?? 0)),
+            'failed_count' => is_array($report['errors'] ?? null) ? count($report['errors']) : 0,
+            'current_step' => 'Hotovo',
+        ]);
+        if ($ok) {
+            $this->jobs->markCompleted($jobId);
+        } else {
+            $this->jobs->markFailed($jobId, $dryRun
+                ? 'Zkouška nanečisto našla chyby, podrobnosti jsou ve výsledku.'
+                : 'Převod neproběhl, podrobnosti jsou ve výsledku.');
+        }
+    }
+}

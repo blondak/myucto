@@ -27246,6 +27246,10 @@
       "mixed_vat_deduction": "Doklad kombinuje položky s různým nárokem na odpočet DPH"
     },
     "working": "Zpracovávám zálohu…",
+    "dry_run_running": "Zkouška nanečisto běží…",
+    "import_running": "Převod běží…",
+    "job_counts": "zapsáno dokladů {created}, chyb {failed}",
+    "background_hint": "Převod běží na serveru a doběhne i po zavření stránky. Výsledek se ukáže, když stránku necháte otevřenou.",
     "blank_country_is_cz": "Potvrzuji, že prázdná země u protistrany v této záloze znamená Českou republiku. Ostatní nejasné země zůstanou ke kontrole.",
     "written_title": "Nově uložené záznamy",
     "counts": {

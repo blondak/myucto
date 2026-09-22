@@ -27246,6 +27246,10 @@
       "mixed_vat_deduction": "Document combines items with different VAT deduction eligibility"
     },
     "working": "Processing backup…",
+    "dry_run_running": "Dry run in progress…",
+    "import_running": "Migration in progress…",
+    "job_counts": "documents written {created}, errors {failed}",
+    "background_hint": "The migration runs on the server and finishes even if you close the page. The result is shown while the page stays open.",
     "blank_country_is_cz": "I confirm that a blank counterparty country in this backup means the Czech Republic. Other ambiguous countries will remain for review.",
     "written_title": "New records saved",
     "counts": {
