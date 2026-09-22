@@ -571,7 +571,7 @@ final class InvoiceImporter
                 // větev ({@see rateIssuedItems()}), tuzemské párování zůstává na `rate`.
                 'percent' => is_numeric($percent) && (float) $percent > 0.0 ? (float) $percent : null,
                 'supply_type' => self::mossSupplyType(PohodaXml::text($it, 'typeServiceMOSS/ids')),
-            ];
+            ] + self::foreignAmounts($it);
         }
         $source = 'detail';
         if ($items !== []) {
@@ -631,7 +631,7 @@ final class InvoiceImporter
                 'description' => 'Odpočet zálohy' . ($ref !== '' ? ' ' . $ref : ''),
                 'quantity' => 1.0, 'unit' => null, 'unit_price' => $base,
                 'base' => $base, 'vat' => $vat, 'rate' => $itemRate($a),
-            ];
+            ] + self::foreignAmounts($a);
             $advanceItems++;
         }
         foreach ($items as &$item) {
@@ -776,7 +776,10 @@ final class InvoiceImporter
                 if ($plan['rate_id'] !== null) {
                     $amounts['items'][$i]['rate_id'] = $plan['rate_id'];
                     $amounts['items'][$i]['rate'] = $plan['rate_percent'];
-                    $amounts['items'][$i]['oss'] = $plan['columns'];
+                    // Doklad v EUR: do OSS podání jdou eura z dokladu, ne koruny přepočtené
+                    // zpátky kurzem ECB konce čtvrtletí. Tuzemská evidence zůstává v Kč.
+                    $amounts['items'][$i]['oss'] = $plan['columns']
+                        + $this->oss->returnAmounts($ctx->supplierId, $doc['foreign'], $item['foreign_base'] ?? null, $item['foreign_vat'] ?? null);
                     if ($outsideOss) {
                         $amounts['items'][$i]['oss']['oss_needs_manual_review'] = 1;
                         continue;
@@ -1146,6 +1149,25 @@ final class InvoiceImporter
             $note .= '; ' . $n;
         }
         return $reasons === [] ? $note : $note . '. K ruční kontrole: ' . self::reasonList($reasons) . '.';
+    }
+
+    /**
+     * Základ a daň řádku v cizí měně dokladu (`foreignCurrency`), jak je na dokladu -
+     * čte je jen OSS větev ({@see OssMigrationPolicy::returnAmounts()}). Řádek bez
+     * cizoměnových částek (doklad v Kč, rozpis z rekapitulace) je nenese.
+     *
+     * @return array{foreign_base?:float,foreign_vat?:float}
+     */
+    private static function foreignAmounts(mixed $it): array
+    {
+        if (!is_numeric(PohodaXml::text($it, 'foreignCurrency/price')) || !is_numeric(PohodaXml::text($it, 'foreignCurrency/priceVAT'))) {
+            return [];
+        }
+
+        return [
+            'foreign_base' => round(PohodaXml::num($it, 'foreignCurrency/price'), 2),
+            'foreign_vat' => round(PohodaXml::num($it, 'foreignCurrency/priceVAT'), 2),
+        ];
     }
 
     /**

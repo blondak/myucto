@@ -56,6 +56,9 @@ final class OssMigrationPolicy
 
     private bool $warned = false;
 
+    /** @var array<int,string> */
+    private array $returnCurrencyCache = [];
+
     public function __construct(
         private readonly Connection $db,
         private readonly OssItemPlanner $planner,
@@ -205,6 +208,43 @@ final class OssMigrationPolicy
             'manual_review' => $manualReview,
             'warnings' => [],
         ];
+    }
+
+    /**
+     * Částky OSS řádku pro přiznání, je-li převáděný doklad vystavený přímo v MĚNĚ PODÁNÍ.
+     *
+     * Převod zakládá doklad v Kč (tuzemská evidence stojí na korunách ze zdroje). OSS
+     * přiznání se ale podává v eurech a přepočítává se jen plnění v JINÉ měně než euro
+     * (čl. 369h odst. 3 směrnice 2006/112/ES); plnění vyjádřené v eurech jde do podání
+     * tak, jak je na dokladu. Bez těchto částek by {@see \MyInvoice\Service\Oss\OssLedgerService}
+     * přepočítal koruny zpátky kurzem ECB ke konci čtvrtletí a vyšlo by jiné číslo, než
+     * které zdrojový program podal (na reálné agendě o 0,8 % víc).
+     *
+     * Ukládají se jako ruční částky pro OSS (`oss_taxable_amount_return`,
+     * `oss_vat_amount_return`), které má náhled podání přednostně - kurz k nim evidence
+     * neuvádí, protože se nepřepočítávalo. Doklad v jiné cizí měně nechá přepočet na náhledu.
+     *
+     * @return array{oss_taxable_amount_return:?float,oss_vat_amount_return:?float}
+     */
+    public function returnAmounts(int $supplierId, string $documentCurrency, ?float $base, ?float $vat): array
+    {
+        if ($base === null || $vat === null || strtoupper(trim($documentCurrency)) !== $this->returnCurrency($supplierId)) {
+            return ['oss_taxable_amount_return' => null, 'oss_vat_amount_return' => null];
+        }
+
+        return ['oss_taxable_amount_return' => round($base, 2), 'oss_vat_amount_return' => round($vat, 2)];
+    }
+
+    private function returnCurrency(int $supplierId): string
+    {
+        if (!isset($this->returnCurrencyCache[$supplierId])) {
+            $stmt = $this->db->pdo()->prepare('SELECT oss_return_currency FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $currency = strtoupper(trim((string) $stmt->fetchColumn()));
+            $this->returnCurrencyCache[$supplierId] = $currency !== '' ? $currency : 'EUR';
+        }
+
+        return $this->returnCurrencyCache[$supplierId];
     }
 
     private function ossEnabled(int $supplierId): bool

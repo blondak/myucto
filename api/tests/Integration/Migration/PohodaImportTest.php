@@ -12,6 +12,7 @@ use MyInvoice\Service\Accounting\Assets\AssetService;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaImporter;
+use MyInvoice\Service\Oss\OssLedgerService;
 use MyInvoice\Tests\Fixtures\Pohoda\OssVariant;
 use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaExport;
 use PHPUnit\Framework\Attributes\Group;
@@ -27,6 +28,7 @@ final class PohodaImportTest extends TestCase
 {
     private Connection $db;
     private PohodaImporter $importer;
+    private OssLedgerService $ossLedger;
     private string $tmp = '';
     private int $userId = 0;
     private int $anyCurrencyId = 0;
@@ -43,6 +45,7 @@ final class PohodaImportTest extends TestCase
             $container = Bootstrap::buildApp()->getContainer();
             $this->db = $container->get(Connection::class);
             $this->importer = $container->get(PohodaImporter::class);
+            $this->ossLedger = $container->get(OssLedgerService::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -434,6 +437,39 @@ final class PohodaImportTest extends TestCase
     }
 
     /**
+     * Doklad v EUR: převod ho zakládá v Kč, a OSS náhled pak koruny přepočítal zpátky kurzem
+     * ECB ke konci čtvrtletí - OSS podání neodpovídalo eurům z dokladu (na reálné agendě
+     * o 0,8 % víc). Plnění vyjádřené v eurech se pro OSS nepřepočítává, takže řádek nese
+     * částky pro přiznání v EUR z dokladu. Tuzemská evidence zůstává v Kč beze změny.
+     */
+    public function testEurOssDocumentGoesToReturnInEurosFromTheDocument(): void
+    {
+        $supplierId = $this->supplier();
+        $this->enableOss($supplierId);
+        $this->foreignRate(SyntheticPohodaExport::OSS_COUNTRY, SyntheticPohodaExport::OSS_RATE);
+
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, withOss: true, ossRateForm: SyntheticPohodaExport::OSS_RATE_PERCENT));
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $row = $this->ossDocument($supplierId);
+        self::assertNotNull($row, $this->explain($protocol));
+        self::assertSame(1, (int) $row['oss_applicable'], $this->explain($protocol));
+        self::assertEqualsWithDelta(1000.0, (float) $row['total_without_vat'], 0.001, 'Tuzemská evidence zůstává v Kč.');
+        self::assertEqualsWithDelta(230.0, (float) $row['total_vat'], 0.001);
+        self::assertNotNull($row['oss_taxable_amount_return']);
+        self::assertEqualsWithDelta(40.0, (float) $row['oss_taxable_amount_return'], 0.001);
+        self::assertEqualsWithDelta(9.2, (float) $row['oss_vat_amount_return'], 0.001);
+
+        // Náhled OSS podání bere eura z dokladu - bez kurzu ECB, který by v testu ani nebyl.
+        $preview = $this->ossLedger->preview($supplierId, SyntheticPohodaExport::YEAR, 1);
+        $sk = array_column($preview['countries'], null, 'country')[SyntheticPohodaExport::OSS_COUNTRY] ?? null;
+        self::assertNotNull($sk, json_encode($preview, JSON_UNESCAPED_UNICODE));
+        self::assertEqualsWithDelta(40.0, (float) $sk['base'], 0.001);
+        self::assertEqualsWithDelta(9.2, (float) $sk['vat'], 0.001);
+    }
+
+    /**
      * Členění mimo přiznání s daní, ale BEZ státu MOSS: POHODA takový doklad do svého OSS
      * přiznání nezahrnula. Převod ho dřív do OSS zařadil sám podle adresy odběratele - OSS
      * podání v MyÚčtu by pak neodpovídalo tomu, co firma z POHODY podala. Zůstane konceptem
@@ -596,7 +632,8 @@ final class PohodaImportTest extends TestCase
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT i.status, i.vat_classification_code, it.oss_applicable, it.oss_consumer_country, it.oss_rate_type,
-                    it.oss_supply_type, it.oss_needs_manual_review, it.vat_rate_snapshot, r.country AS rate_country
+                    it.oss_supply_type, it.oss_needs_manual_review, it.vat_rate_snapshot, r.country AS rate_country,
+                    it.total_without_vat, it.total_vat, it.oss_taxable_amount_return, it.oss_vat_amount_return
                FROM invoices i
                JOIN invoice_items it ON it.invoice_id = i.id
                JOIN vat_rates r ON r.id = it.vat_rate_id
