@@ -33,7 +33,9 @@ final class PremierPayrollTakeover
         return new PayrollTakeoverPolicy(
             sourceKey: 'premier',
             label: self::LABEL,
-            strict: false,
+            // Chybějící identita, karta, zákonná evidence nebo vztah je nekonzistence, kterou
+            // protokol ohlásí u osoby (stejně jako u PAMICA), ne důvod údaj mlčky přeskočit.
+            strict: true,
             // Kontaktní adresa (`PER_ADR`) se doplňuje vedle trvalé stejně jako u PAMICA.
             addressesPerType: true,
             birthSurnameOnCurrentVersion: false,

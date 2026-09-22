@@ -394,6 +394,27 @@ final class PremierPayrollImportTest extends TestCase
     }
 
     /**
+     * Osoba bez evidované identity je nekonzistence, ne důvod údaj mlčky přeskočit: převod
+     * z PREMIER ji ohlásí stejně jako převod z PAMICA a zbytek osoby převede.
+     */
+    public function testMissingIdentityIsReportedNotSkippedSilently(): void
+    {
+        $supplierId = $this->supplier(true);
+        $backup = $this->backup(['payroll' => true, 'payroll_detail' => true]);
+        $first = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        $this->db->pdo()->prepare("DELETE h FROM payroll_person_identity_history h JOIN payroll_employments e ON e.employee_id = h.employee_id AND e.supplier_id = h.supplier_id
+            WHERE e.supplier_id = ? AND e.code = '5'")->execute([$supplierId]);
+
+        $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        $failed = array_values(array_filter(self::step($again, 'payroll')['messages'],
+            static fn (array $m): bool => $m['code'] === 'detail_failed' && str_contains($m['text'], 'nemá evidovanou identitu')));
+        self::assertCount(1, $failed, $this->explain($again));
+        self::assertStringStartsWith('Osobní číslo 5: Údaje o narození a občanství se nepřevzal', $failed[0]['text']);
+    }
+
+    /**
      * Dovolená rozepsaná po měsících se spojí v jednu nepřítomnost, která přejde přes konec
      * čtvrtletí. Evidence takovou náhradu odmítne (průměr se zjišťuje ke čtvrtletí), takže
      * se dřív tiše nezapsala vůbec. Rozdělí se na hranici čtvrtletí a obě části se schválí.
