@@ -429,6 +429,27 @@ final class PremierImportTest extends TestCase
     }
 
     /**
+     * Firma se zahraniční sazbou omylem založenou jako tuzemská a vypnutým OSS: doklad je
+     * koncept s důvodem z OSS plánovače. Důvod plánovače je celá věta s tečkou - hláška
+     * protokolu ani poznámka dokladu z ní nesmí udělat „..".
+     */
+    public function testOssPlannerReasonDoesNotEndWithDoubleDot(): void
+    {
+        $supplierId = $this->supplier();
+        $this->foreignRate('CZ', SyntheticPremierBackup::OSS_RATE);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(true), SyntheticPremierBackup::YEAR1, false);
+
+        $note = $this->fetch("SELECT status, note_below_items FROM invoices WHERE supplier_id = ? AND varsymbol = ?", $supplierId, false, [SyntheticPremierBackup::OSS_DOCUMENT]);
+        self::assertSame('draft', $note[0][0] ?? null, $this->explain($protocol));
+        self::assertStringContainsString('OSS', (string) $note[0][1]);
+        self::assertStringNotContainsString('..', (string) $note[0][1]);
+        $review = array_values(array_filter(array_merge(...array_map(static fn (array $s): array => $s['messages'] ?? [], $protocol->toArray()['steps'])),
+            static fn (array $m): bool => $m['code'] === 'needs_review'));
+        self::assertNotSame([], $review, $this->explain($protocol));
+        self::assertStringNotContainsString('..', (string) $review[0]['text']);
+    }
+
+    /**
      * Tři pokladní doklady PP 1 v jednom roce, dva i ze stejného dne: poslední kandidát čísla
      * (řada, číslo a datum) je obsazený, doklad dostane příponu a rok se převede celý.
      */
