@@ -552,6 +552,7 @@ final class InvoiceImporter
         foreach (PohodaXml::all($r, $prefix . 'Detail/' . $prefix . 'Item') as $it) {
             $base = round(PohodaXml::num($it, 'homeCurrency/price'), 2);
             $qty = PohodaXml::num($it, 'quantity');
+            $percent = PohodaXml::text($it, 'percentVAT');
             $items[] = [
                 'description' => PohodaXml::text($it, 'text') ?: ($doc['text'] ?: 'Převzato z Pohody'),
                 'quantity' => $qty !== 0.0 ? round($qty, 3) : 1.0,
@@ -560,6 +561,9 @@ final class InvoiceImporter
                 'base' => $base,
                 'vat' => round(PohodaXml::num($it, 'homeCurrency/priceVAT'), 2),
                 'rate' => $itemRate($it),
+                // Skutečné procento sazby, která se do české úrovně nevejde - čte ho jen OSS
+                // větev ({@see rateIssuedItems()}), tuzemské párování zůstává na `rate`.
+                'percent' => is_numeric($percent) && (float) $percent > 0.0 ? (float) $percent : null,
             ];
         }
         $source = 'detail';
@@ -740,7 +744,10 @@ final class InvoiceImporter
         foreach ($amounts['items'] as $i => $item) {
             if ($candidate && abs((float) $item['vat']) >= 0.005) {
                 $client ??= $this->oss->clientContext($clientId, (string) $snapshot['country'], (string) $snapshot['dic']);
-                $plan = $this->oss->planItem($ctx->supplierId, $client, (float) $item['rate'], $item['unit'], $taxDate, $code);
+                // Sazbu státu spotřeby píše POHODA jako `historyHigh` bez `@value` a skutečné
+                // procento dává do `percentVAT`. Bez něj měl řádek s daní sazbu 0 %, politika ho
+                // vzala jako plnění bez daně a doklad skončil konceptem (issue #75).
+                $plan = $this->oss->planItem($ctx->supplierId, $client, $item['percent'] ?? (float) $item['rate'], $item['unit'], $taxDate, $code);
                 if ($plan['reason'] !== null && !in_array($plan['reason'], $class['reasons'], true)) {
                     $class['reasons'][] = $plan['reason'];
                 }
@@ -772,9 +779,10 @@ final class InvoiceImporter
 
         if ($candidate && $ossItems === 0 && $class['reasons'] === []) {
             // Pojistka pro doklad, u kterého se daň nedá přiřadit k žádnému řádku se sazbou
-            // (rozpis z Pohody nesedí na rekapitulaci). OSS se nerozhodlo, ale doklad daň
-            // nese a do přiznání nepatří - to člověk vidět musí.
-            $class['reasons'][] = "členění DPH „{$code}“ mimo přiznání u dokladu s daní";
+            // (rozpis z Pohody nesedí na rekapitulaci, sazba řádku s daní v exportu chybí).
+            // OSS se nerozhodlo, ale doklad daň nese a do přiznání nepatří - to člověk vidět musí.
+            $class['reasons'][] = "členění DPH „{$code}“ mimo přiznání u dokladu s daní: sazbu DPH "
+                . 'řádků s daní se z exportu Pohody nepodařilo určit, režim OSS proto nešlo posoudit';
         }
         if ($ossItems > 0) {
             $p->count($step, 'oss_items', $ossItems);

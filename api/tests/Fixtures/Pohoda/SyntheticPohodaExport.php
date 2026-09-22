@@ -38,6 +38,17 @@ final class SyntheticPohodaExport
     public const OSS_COUNTRY = 'SK';
     public const OSS_RATE = 23.0;
 
+    /**
+     * Tvar sazby na položce OSS dokladu (`$ossRateForm`). `value`: procento v exportním
+     * atributu `rateVAT/@value`. `percent`: tvar, jakým POHODA píše sazbu, která se do
+     * české úrovně nevejde - `historyHigh` bez atributu a skutečné procento v `percentVAT`,
+     * k tomu hlavička `MOSS` se státem spotřeby a částky i v EUR (issue #75). `history`:
+     * totéž bez `percentVAT` - sazba řádku s daní se z exportu určit nedá.
+     */
+    public const OSS_RATE_VALUE = 'value';
+    public const OSS_RATE_PERCENT = 'percent';
+    public const OSS_RATE_HISTORY = 'history';
+
     /** Konečná faktura s odpočtem nedaňové zálohy (`$withAdvanceDeduction`). */
     public const ADVANCE_DOCUMENT = '26FV0003';
 
@@ -98,7 +109,7 @@ final class SyntheticPohodaExport
      * jako úhradu faktury: faktura zlikvidovaná tímto pohybem, v deníku 321/221. Minulá
      * faktura 25FV0099 je v tomtéž exportu doplacená bez pohybu v bance.
      */
-    public static function write(string $root, bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false): string
+    public static function write(string $root, bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE): string
     {
         $dir = rtrim($root, '/\\') . '/' . self::ICO . '_' . self::YEAR;
         if (!is_dir($dir)) {
@@ -107,7 +118,7 @@ final class SyntheticPohodaExport
         self::file($root . '/00_ucetni_jednotky.xml', '<acu:listAccountingUnit version="1.1"><acu:itemAccountingUnit><acu:unitType>doubleEntry</acu:unitType>'
             . '<acu:year>' . self::YEAR . '</acu:year><acu:unitIdentity><typ:address><typ:company>' . self::NAME . '</typ:company><typ:ico>' . self::ICO . '</typ:ico></typ:address></acu:unitIdentity>'
             . '<acu:dataFile>StwPh_' . self::ICO . '_' . self::YEAR . '.mdb</acu:dataFile></acu:itemAccountingUnit></acu:listAccountingUnit>');
-        foreach (self::files($withAssets, $withOss, $withAdvanceDeduction, $laterPayment, $unbooked) as $name => $body) {
+        foreach (self::files($withAssets, $withOss, $withAdvanceDeduction, $laterPayment, $unbooked, $ossRateForm) as $name => $body) {
             self::file($dir . '/' . $name, $body);
         }
         if ($withAssets) {
@@ -190,7 +201,7 @@ final class SyntheticPohodaExport
     }
 
     /** @return array<string,string> soubor => obsah listu */
-    private static function files(bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false): array
+    private static function files(bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE): array
     {
         $journal = self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 100000, '221001', '701000', '2026-01-01')
             . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 100000, '701000', '411000', '2026-01-01')
@@ -294,14 +305,21 @@ final class SyntheticPohodaExport
         // české přiznání, sazba státu spotřeby, odběratel bez IČ a DIČ, doklad v EUR.
         // Přesně takhle se OSS v POHODĚ vede.
         if ($withOss) {
+            $percent = $ossRateForm !== self::OSS_RATE_VALUE;
             $issued .= '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>issuedInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . self::OSS_DOCUMENT . '</typ:numberRequested></inv:number>'
                 . '<inv:symVar>260002</inv:symVar><inv:date>2026-02-10</inv:date><inv:dateTax>2026-02-10</inv:dateTax><inv:dateAccounting>2026-02-10</inv:dateAccounting><inv:dateDue>2026-02-24</inv:dateDue>'
                 . '<inv:classificationVAT><typ:ids>UN</typ:ids></inv:classificationVAT><inv:text>Prodej zboží na dálku - SK</inv:text>'
+                . ($percent ? '<inv:MOSS><typ:ids>' . self::OSS_COUNTRY . '</typ:ids></inv:MOSS>' : '')
                 . '<inv:partnerIdentity><typ:address><typ:name>Jana</typ:name><typ:surname>Testovacia</typ:surname><typ:city>Bratislava</typ:city>'
                 . '<typ:street>Testovacia 1</typ:street><typ:zip>81101</typ:zip><typ:country><typ:ids>SK</typ:ids></typ:country></typ:address></inv:partnerIdentity>'
                 . '<inv:liquidation><typ:amountHome>1230</typ:amountHome></inv:liquidation></inv:invoiceHeader>'
-                . '<inv:invoiceDetail><inv:invoiceItem><inv:text>Zboží</inv:text><inv:quantity>1.0</inv:quantity><inv:unit>ks</inv:unit><inv:rateVAT value="23">high</inv:rateVAT>'
-                . '<inv:homeCurrency><typ:unitPrice>1000</typ:unitPrice><typ:price>1000</typ:price><typ:priceVAT>230</typ:priceVAT><typ:priceSum>1230</typ:priceSum></inv:homeCurrency></inv:invoiceItem></inv:invoiceDetail>'
+                . '<inv:invoiceDetail><inv:invoiceItem><inv:text>Zboží</inv:text><inv:quantity>1.0</inv:quantity><inv:unit>ks</inv:unit>'
+                . ($percent
+                    ? '<inv:rateVAT>historyHigh</inv:rateVAT>' . ($ossRateForm === self::OSS_RATE_PERCENT ? '<inv:percentVAT>' . self::OSS_RATE . '</inv:percentVAT>' : '')
+                    : '<inv:rateVAT value="23">high</inv:rateVAT>')
+                . '<inv:homeCurrency><typ:unitPrice>1000</typ:unitPrice><typ:price>1000</typ:price><typ:priceVAT>230</typ:priceVAT><typ:priceSum>1230</typ:priceSum></inv:homeCurrency>'
+                . ($percent ? '<inv:foreignCurrency><typ:unitPrice>40</typ:unitPrice><typ:price>40</typ:price><typ:priceVAT>9.20</typ:priceVAT><typ:priceSum>49.20</typ:priceSum></inv:foreignCurrency>' : '')
+                . '</inv:invoiceItem></inv:invoiceDetail>'
                 . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>0</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT rate="12">0</typ:priceLowVAT>'
                 . '<typ:priceLowSum>0</typ:priceLowSum><typ:priceHigh>1000</typ:priceHigh><typ:priceHighVAT rate="23">230</typ:priceHighVAT>'
                 . '<typ:priceHighSum>1230</typ:priceHighSum><typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency>'
