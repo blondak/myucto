@@ -12,6 +12,7 @@ use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationTakeoverFacts;
+use MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalService;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverOpeningMonth;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPersonWriter;
@@ -53,6 +54,7 @@ final class PayrollImporter
     private const NOTE = 'Převzato z PREMIER: ';
     private const SAVEPOINT = 'premier_payroll';
     private const MESSAGE_LIMIT = 20;
+
     private int $messages = 0;
 
     public function __construct(
@@ -66,6 +68,7 @@ final class PayrollImporter
         private readonly PayrollTakeoverEmploymentWriter $employmentWriter,
         private readonly PayrollMigrationReferenceTotalsWriter $referenceTotals,
         private readonly PayrollHistoricalPeriodService $historical,
+        private readonly PayrollPostingMapProposalService $postingMap,
     ) {}
 
     public function import(PremierContext $ctx): void
@@ -144,7 +147,38 @@ final class PayrollImporter
             $this->referenceTotals->store($ctx->supplierId, self::SOURCE, $totals, self::REFERENCE . ' ' . $ctx->backup->ico);
         }
         $this->openingBalances($ctx, $byEmployee, $payroll);
+        $this->postingMap($ctx);
         $this->reconcile($ctx, $payroll);
+    }
+
+    /**
+     * Návrh mzdových předkontací z mzdových zápisů deníku roku, stejnou cestou jako
+     * u převodu z PAMICA ({@see PremierPayrollPostingMap}). Ukládá se jen návrh; do
+     * nastavení mezd sáhne teprve potvrzení účetní. Kontrola mezd proti deníku
+     * ({@see self::reconcile()}) je jiná otázka a běží dál vedle něj.
+     */
+    private function postingMap(PremierContext $ctx): void
+    {
+        $stored = $this->postingMap->refresh(
+            $ctx->supplierId,
+            PremierPayrollPostingMap::fromBackup($ctx->backup, $ctx->journal, $ctx->year),
+            $ctx->year,
+            self::REFERENCE . ' ' . $ctx->backup->ico,
+        );
+        if ($stored === null) {
+            return;
+        }
+        $ctx->protocol->set('posting_map', $stored['proposal']);
+        $conflicts = (int) ($stored['proposal']['summary']['conflict'] ?? 0);
+        if ($conflicts > 0) {
+            $ctx->protocol->count(self::STEP, 'posting_map_conflicts', $conflicts);
+        }
+        $this->info($ctx->protocol, 'posting_map', sprintf(
+            'Ze mzdových zápisů deníku %d vznikl návrh kontací mezd (Kontace mezd z původního programu). '
+            . 'Nastavení se nemění, dokud návrh nepotvrdíte%s.',
+            $ctx->year,
+            $conflicts > 0 ? "; u {$conflicts} kontací jsou v deníku různé účty a vybrat musíte sami" : '',
+        ));
     }
 
     /**

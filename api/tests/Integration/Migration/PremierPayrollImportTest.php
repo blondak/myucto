@@ -151,6 +151,44 @@ final class PremierPayrollImportTest extends TestCase
             $this->explain($repeat));
     }
 
+    /**
+     * Mzdové zápisy deníku dávají návrh kontací mezd stejnou cestou jako převod z PAMICA:
+     * uloží se jen návrh, nastavení zaměstnavatele se nemění.
+     */
+    public function testPostingMapProposalFromPayrollJournal(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $stmt = $this->db->pdo()->prepare('SELECT source, status, source_year, proposal_json FROM payroll_posting_map_proposals WHERE supplier_id = ?');
+        $stmt->execute([$supplierId]);
+        $stored = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        self::assertCount(1, $stored, $this->explain($protocol));
+        self::assertSame(['other', 'draft', 2025], [$stored[0]['source'], $stored[0]['status'], (int) $stored[0]['source_year']]);
+        $keys = [];
+        foreach (json_decode((string) $stored[0]['proposal_json'], true)['keys'] as $key) {
+            $keys[$key['key']] = [$key['status'], $key['suggested_code']];
+        }
+        $expected = [
+            'employment_gross_debit' => ['unambiguous', '521.100'],
+            'employment_gross_credit' => ['unambiguous', '331.100'],
+            'social_insurance_credit' => ['unambiguous', '336.100'],
+            'health_insurance_credit' => ['unambiguous', '336.200'],
+            'employer_insurance_debit' => ['unambiguous', '524.100'],
+            'withholding_tax_credit' => ['unambiguous', '342.200'],
+            // Záloha na daň v roce 2025 nikdo neměl, v deníku pro ni nic není.
+            'income_tax_credit' => ['missing', null],
+        ];
+        $actual = array_intersect_key($keys, $expected);
+        ksort($expected);
+        ksort($actual);
+        self::assertSame($expected, $actual, $this->explain($protocol));
+        self::assertSame([], json_decode((string) $stored[0]['proposal_json'], true)['unmapped']);
+        self::assertContains('posting_map', $this->messageCodes($protocol));
+        self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_posting_map_proposals WHERE supplier_id = ? AND status = 'confirmed'", $supplierId));
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);
