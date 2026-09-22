@@ -160,7 +160,7 @@ final class PohodaPayrollSicknessWriter
         // Rozhodnout ji musí někdo, jinak nerozhodnutá nepřítomnost zablokuje schválení
         // celého pracovního měsíce. U převzatého případu rozhodl předchozí program: proběhl
         // a je podaný. Schvaluje se stejným pravidlem jako u ostatních převzatých
-        // nepřítomností ({@see PohodaPayrollPeopleWriter::absences()}): druh, který potřebuje
+        // nepřítomností ({@see \MyInvoice\Service\Payroll\Migration\PayrollTakeoverAbsenceWriter::absences()}): druh, který potřebuje
         // průměrný výdělek, až když čtvrtletí schválený průměr má.
         //
         // Dorovnává se i u nepřítomnosti z dřívějšího běhu převodu, ale JEN u té, kterou
