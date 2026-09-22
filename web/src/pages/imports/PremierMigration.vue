@@ -6,6 +6,7 @@ import { useMigrationWizard } from '@/composables/useMigrationWizard'
 import { useAuthStore } from '@/stores/auth'
 import type { PermissionKey } from '@/security/permissions'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import { ICONS } from '@/components/ui/buttonStyles'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
 
@@ -40,8 +41,8 @@ const selectedYears = ref<number[]>([])
 
 const {
   currentStep, upload, file, job, jobMode, run, jobRuns, runs, busy, cancelling, confirmed, dryRunPassed,
-  uploadPercent, processing, jobRunning, jobSucceeded, percent,
-  canGoTo, goTo, onFile, doUpload, resetUpload, start: startJob, cancel, showRun,
+  uploadPercent, processing, deletingRun, jobRunning, jobSucceeded, percent,
+  canGoTo, goTo, onFile, doUpload, resetUpload, start: startJob, cancel, showRun, deleteRun,
 } = useMigrationWizard<PremierUpload, PremierUploadPending, PremierRun, PremierStartParams>({
   api: premierApi,
   tokenKey: () => TOKEN_KEY,
@@ -75,6 +76,8 @@ const preflightGroups = computed(() => selectedYears.value.map(y => ({ year: y, 
 const preflightErrors = computed(() => preflightGroups.value.flatMap(g => g.messages).filter(m => m.level === 'error'))
 const missingRights = computed<PermissionKey[]>(() => (['accounting.journal.write', 'settings.company.write'] as PermissionKey[]).filter(key => !auth.canWrite(key)))
 const rightsMessage = computed(() => tt('rights_missing', { rights: missingRights.value.join(', ') }))
+// Smazat jde jen doběhlou zkoušku nanečisto, protokol ostrého převodu zůstává (stejně jako u POHODY).
+const canWrite = computed(() => missingRights.value.length === 0)
 const blocked = computed(() => selectedYears.value.length === 0 || preflightErrors.value.length > 0)
 const blockedReason = computed(() => jobRunning.value && !blocked.value
   ? tt(jobMode.value === 'import' ? 'import_running' : 'dry_run_running')
@@ -307,11 +310,19 @@ const actions = computed<ActionItem[]>(() => {
       <h2 class="border-b border-neutral-200 px-4 py-3 text-lg font-semibold">{{ tt('history_title') }}</h2>
       <p v-if="!runs.length" class="px-4 py-3 text-sm text-neutral-500">{{ tt('history_empty') }}</p>
       <div class="divide-y divide-neutral-100">
-        <button v-for="item in runs" :key="item.id" type="button" class="flex w-full cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3 text-left hover:bg-neutral-50" @click="showRun(item)">
-          <span><strong>#{{ item.id }} · {{ tt(`mode.${item.mode}`) }}</strong><span class="ml-2 text-xs text-neutral-500">{{ [item.agenda_ico, item.agenda_year].filter(Boolean).join(' · ') }} · {{ item.created_at }}</span></span>
-          <span class="rounded-full px-2.5 py-1 text-xs font-medium"
-            :class="item.status === 'completed' ? 'bg-success-50 text-success-600' : item.status === 'failed' ? 'bg-danger-50 text-danger-600' : item.status === 'completed_with_warnings' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600'">{{ tt(`status.${item.status}`) }}</span>
-        </button>
+        <div v-for="item in runs" :key="item.id" class="flex items-center gap-2 pr-3 hover:bg-neutral-50">
+          <button type="button" class="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3 text-left" @click="showRun(item)">
+            <span><strong>#{{ item.id }} · {{ tt(`mode.${item.mode}`) }}</strong><span class="ml-2 text-xs text-neutral-500">{{ [item.agenda_ico, item.agenda_year].filter(Boolean).join(' · ') }} · {{ item.created_at }}</span></span>
+            <span class="rounded-full px-2.5 py-1 text-xs font-medium"
+              :class="item.status === 'completed' ? 'bg-success-50 text-success-600' : item.status === 'failed' ? 'bg-danger-50 text-danger-600' : item.status === 'completed_with_warnings' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600'">{{ tt(`status.${item.status}`) }}</span>
+          </button>
+          <button v-if="item.mode === 'dry_run' && item.status !== 'running' && canWrite" type="button"
+            class="shrink-0 rounded p-1.5 text-neutral-400 hover:bg-danger-50 hover:text-danger-600 disabled:opacity-40"
+            :title="tt('run_delete')" :aria-label="tt('run_delete')" :disabled="deletingRun === item.id"
+            :data-testid="`premier-run-delete-${item.id}`" @click="deleteRun(item)">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+          </button>
+        </div>
       </div>
     </section>
 

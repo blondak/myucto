@@ -35,6 +35,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   POST /api/admin/imports/premier/uploads/{token}/start          {mode, years: int[] (nebo year)}
  *   GET  /api/admin/imports/premier/runs
  *   GET  /api/admin/imports/premier/runs/{id}
+ *   DELETE /api/admin/imports/premier/runs/{id}                    jen zkouška nanečisto
  *
  * Záloha se pořizuje v PREMIER („Správce → Záloha dat") a nahrává po částech jako export
  * POHODY/Money S3 ({@see AbstractMigrationAction}). Na rozdíl od POHODY nese jedna záloha
@@ -59,6 +60,8 @@ final class PremierMigrationAction extends AbstractMigrationAction
     protected const TEXT_UPLOAD_FAILED = 'Zálohu PREMIER se nepodařilo načíst.';
     protected const TEXT_UPLOAD_INCOMPLETE = 'Záloha ještě není nahraná celá.';
     protected const TEXT_MIGRATION_REQUIRED = 'Chybí databázová migrace pro převod z PREMIER - spusťte `php api/bin/migrate.php`.';
+    protected const RUN_ENTITY = 'premier_import';
+    protected const DRY_RUN_DELETED_EVENT = 'import.premier_dry_run_deleted';
 
     public function __construct(
         ImportJobRepository $jobs,

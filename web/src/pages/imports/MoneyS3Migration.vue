@@ -7,6 +7,7 @@ import { useMigrationWizard } from '@/composables/useMigrationWizard'
 import { useAuthStore } from '@/stores/auth'
 import type { PermissionKey } from '@/security/permissions'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import { ICONS } from '@/components/ui/buttonStyles'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
@@ -32,8 +33,8 @@ const reportBusy = ref<number | null>(null)
 
 const {
   currentStep, upload, file, job, jobMode, run, runs, busy, cancelling, confirmed, dryRunPassed,
-  uploadPercent, processing, jobRunning, percent,
-  canGoTo, goTo, onFile, doUpload, resetUpload, start: startJob, cancel, showRun, errorMessage,
+  uploadPercent, processing, deletingRun, jobRunning, percent,
+  canGoTo, goTo, onFile, doUpload, resetUpload, start: startJob, cancel, showRun, deleteRun, errorMessage,
 } = useMigrationWizard<MoneyS3Upload, MoneyS3UploadPending, MoneyS3Run, MoneyS3StartParams>({
   api: moneyS3Api,
   tokenKey: () => TOKEN_KEY,
@@ -56,6 +57,8 @@ const missingRights = computed(() => {
 })
 const importDone = computed(() => jobMode.value === 'import' && !jobRunning.value && run.value?.mode === 'import'
   && (run.value.status === 'completed' || run.value.status === 'completed_with_warnings'))
+// Smazat jde jen doběhlou zkoušku nanečisto, protokol ostrého převodu zůstává (stejně jako u POHODY).
+const canWrite = computed(() => (['accounting.journal.write', 'settings.company.write'] as PermissionKey[]).every(key => auth.canWrite(key)))
 
 async function attachReport(year: number, event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
@@ -286,11 +289,19 @@ const actions = computed<ActionItem[]>(() => {
       <h2 class="border-b border-neutral-200 px-4 py-3 text-lg font-semibold">{{ t('money_s3.history_title') }}</h2>
       <p v-if="!runs.length" class="px-4 py-3 text-sm text-neutral-500">{{ t('money_s3.history_empty') }}</p>
       <div class="divide-y divide-neutral-100">
-        <button v-for="item in runs" :key="item.id" type="button" class="flex w-full cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3 text-left hover:bg-neutral-50" @click="showRun(item)">
-          <span><strong>#{{ item.id }} · {{ t(`money_s3.mode.${item.mode}`) }}</strong><span class="ml-2 text-xs text-neutral-500">{{ item.agenda_name }} · {{ item.created_at }}</span></span>
-          <span class="rounded-full px-2.5 py-1 text-xs font-medium"
-            :class="item.status === 'completed' ? 'bg-success-50 text-success-600' : item.status === 'failed' ? 'bg-danger-50 text-danger-600' : item.status === 'completed_with_warnings' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600'">{{ t(`money_s3.status.${item.status}`) }}</span>
-        </button>
+        <div v-for="item in runs" :key="item.id" class="flex items-center gap-2 pr-3 hover:bg-neutral-50">
+          <button type="button" class="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3 text-left" @click="showRun(item)">
+            <span><strong>#{{ item.id }} · {{ t(`money_s3.mode.${item.mode}`) }}</strong><span class="ml-2 text-xs text-neutral-500">{{ item.agenda_name }} · {{ item.created_at }}</span></span>
+            <span class="rounded-full px-2.5 py-1 text-xs font-medium"
+              :class="item.status === 'completed' ? 'bg-success-50 text-success-600' : item.status === 'failed' ? 'bg-danger-50 text-danger-600' : item.status === 'completed_with_warnings' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600'">{{ t(`money_s3.status.${item.status}`) }}</span>
+          </button>
+          <button v-if="item.mode === 'dry_run' && item.status !== 'running' && canWrite" type="button"
+            class="shrink-0 rounded p-1.5 text-neutral-400 hover:bg-danger-50 hover:text-danger-600 disabled:opacity-40"
+            :title="t('money_s3.run_delete')" :aria-label="t('money_s3.run_delete')" :disabled="deletingRun === item.id"
+            :data-testid="`money-s3-run-delete-${item.id}`" @click="deleteRun(item)">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+          </button>
+        </div>
       </div>
     </section>
 

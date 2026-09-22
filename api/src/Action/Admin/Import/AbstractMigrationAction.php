@@ -33,6 +33,7 @@ use Psr\Http\Message\UploadedFileInterface;
  *   POST {base}/uploads/{token}/complete
  *   GET  {base}/runs
  *   GET  {base}/runs/{id}
+ *   DELETE {base}/runs/{id}                    jen doběhlá zkouška nanečisto
  *
  * Reálný soubor má stovky megabajtů až jednotky gigabajtů, víc než limity PHP
  * i webserverů na jeden požadavek. Průvodce ho proto nahrává po částech pod všemi
@@ -69,6 +70,9 @@ abstract class AbstractMigrationAction
     protected const TEXT_UPLOAD_FAILED = '';
     protected const TEXT_UPLOAD_INCOMPLETE = '';
     protected const TEXT_MIGRATION_REQUIRED = '';
+    /** Typ entity běhu a událost activity logu po smazání protokolu zkoušky nanečisto. */
+    protected const RUN_ENTITY = '';
+    protected const DRY_RUN_DELETED_EVENT = '';
 
     /** Práva, která ostrý převod navíc potřebuje: zapisuje účetní deník a přepíná režim účetnictví a automatiku. */
     protected const LIVE_IMPORT_RIGHTS = ['accounting.journal.write', 'settings.company.write'];
@@ -253,6 +257,34 @@ abstract class AbstractMigrationAction
             return Json::error($response, 'not_found', 'Protokol převodu nenalezen.', 404);
         }
         return Json::ok($response, $run);
+    }
+
+    /**
+     * Smaže protokol zkoušky nanečisto. Protokol ostrého převodu a běžící zkouška zůstávají
+     * ({@see AbstractMigrationImportRepository::deleteDryRun()}).
+     *
+     * @param array<string,string> $args
+     */
+    public function deleteRun(Request $request, Response $response, array $args): Response
+    {
+        $denied = $this->deny($request, $response, AccessLevel::WRITE);
+        if ($denied !== null) {
+            return $denied;
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $run = $this->runs->findRun($id, $supplierId);
+        if ($run === null) {
+            return Json::error($response, 'not_found', 'Protokol převodu nenalezen.', 404);
+        }
+        if (!$this->runs->deleteDryRun($id, $supplierId)) {
+            return Json::error($response, 'run_not_deletable',
+                'Smazat jde jen doběhlou zkoušku nanečisto. Protokol ostrého převodu zůstává jako záznam převzatých dat.', 409);
+        }
+        $this->logger->log(static::DRY_RUN_DELETED_EVENT, self::userId($request), static::RUN_ENTITY, $id,
+            ['year' => $run['agenda_year'] ?? null, 'ico' => $run['agenda_ico'] ?? null],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
+        return Json::ok($response, ['ok' => true]);
     }
 
     /**

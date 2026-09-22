@@ -19,5 +19,8 @@ export function createMigrationApi<TUpload, TPending, TRun, TStart>(base: string
       api.get<{ items: TRun[] }>(`${base}/runs`).then(r => r.data),
     run: (id: number): Promise<TRun> =>
       api.get<TRun>(`${base}/runs/${id}`).then(r => r.data),
+    /** Jen doběhlá zkouška nanečisto; protokol ostrého převodu API smazat nedovolí. */
+    deleteRun: (id: number): Promise<{ ok: boolean }> =>
+      api.delete<{ ok: boolean }>(`${base}/runs/${id}`).then(r => r.data),
   }
 }

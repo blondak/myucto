@@ -24977,6 +24977,9 @@
     "open_trial_balance": "Trial balance",
     "history_title": "Transfer protocols",
     "history_empty": "No transfer yet.",
+    "run_delete": "Delete the dry run log",
+    "run_delete_confirm": "Delete the log of dry run #{id}? The dry run changed nothing in MyÚčto, only the record is deleted.",
+    "run_deleted": "Dry run log deleted.",
     "mode": {
       "dry_run": "Dry run",
       "import": "Transfer"
@@ -26842,6 +26845,9 @@
     "open_trial_balance": "Trial balance",
     "history_title": "Migration protocols",
     "history_empty": "No migration yet.",
+    "run_delete": "Delete the dry run log",
+    "run_delete_confirm": "Delete the log of dry run #{id}? The dry run changed nothing in MyÚčto, only the record is deleted.",
+    "run_deleted": "Dry run log deleted.",
     "mode": {
       "dry_run": "Dry run",
       "import": "Migration"

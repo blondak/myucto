@@ -40,6 +40,7 @@ use Psr\Http\Message\UploadedFileInterface;
  *   POST /api/admin/imports/money-s3/uploads/{token}/start          {mode, close_history, first_period_start, from_year, disposal_year_tax}
  *   GET  /api/admin/imports/money-s3/runs
  *   GET  /api/admin/imports/money-s3/runs/{id}
+ *   DELETE /api/admin/imports/money-s3/runs/{id}                    jen zkouška nanečisto
  *
  * Nahrávání po částech, stav, protokoly a práva jsou společné s ostatními převody
  * ({@see AbstractMigrationAction}). Stav běžícího převodu jde přes společné
@@ -63,6 +64,8 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
     protected const TEXT_UPLOAD_FAILED = 'Zálohu agendy se nepodařilo načíst.';
     protected const TEXT_UPLOAD_INCOMPLETE = 'Záloha ještě není nahraná celá.';
     protected const TEXT_MIGRATION_REQUIRED = 'Chybí databázová migrace pro převod z Money S3 — spusťte `php api/bin/migrate.php`.';
+    protected const RUN_ENTITY = 'money_s3_import';
+    protected const DRY_RUN_DELETED_EVENT = 'import.money_s3_dry_run_deleted';
 
     public function __construct(
         ImportJobRepository $jobs,

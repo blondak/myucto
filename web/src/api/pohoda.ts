@@ -157,9 +157,6 @@ export const POHODA_BASE = '/admin/imports/pohoda'
 
 export const pohodaApi = {
   ...createMigrationApi<PohodaUpload, PohodaUploadPending, PohodaRun, PohodaStartParams>(POHODA_BASE),
-  /** Jen doběhlá zkouška nanečisto; protokol ostrého převodu API smazat nedovolí. */
-  deleteRun: (id: number): Promise<{ ok: boolean }> =>
-    api.delete<{ ok: boolean }>(`${POHODA_BASE}/runs/${id}`).then(r => r.data),
   // Nástroj se liší podle programu: POHODA exportuje účetní agendu přes XML rozhraní,
   // PAMICA se čte přímo z mzdového datového souboru.
   toolFiles: (system: PohodaSystem = 'pohoda'): Promise<{ files: PohodaToolFile[] }> =>

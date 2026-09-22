@@ -65,6 +65,8 @@ final class PohodaMigrationAction extends AbstractMigrationAction
     protected const TEXT_UPLOAD_FAILED = 'Export z POHODY se nepodařilo načíst.';
     protected const TEXT_UPLOAD_INCOMPLETE = 'Export ještě není nahraný celý.';
     protected const TEXT_MIGRATION_REQUIRED = 'Chybí databázová migrace pro převod z POHODY - spusťte `php api/bin/migrate.php`.';
+    protected const RUN_ENTITY = 'pohoda_import';
+    protected const DRY_RUN_DELETED_EVENT = 'import.pohoda_dry_run_deleted';
 
     /**
      * Exportní nástroje po programech. POHODA se exportuje přes XML rozhraní, PAMICA nemá
@@ -235,34 +237,6 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, ['job_id' => $jobId, 'status' => 'queued', 'mode' => $mode], 201);
-    }
-
-    /**
-     * Smaže protokol zkoušky nanečisto. Protokol ostrého převodu a běžící zkouška zůstávají
-     * ({@see PohodaImportRepository::deleteDryRun()}).
-     *
-     * @param array<string,string> $args
-     */
-    public function deleteRun(Request $request, Response $response, array $args): Response
-    {
-        $denied = $this->deny($request, $response, AccessLevel::WRITE);
-        if ($denied !== null) {
-            return $denied;
-        }
-        $supplierId = SupplierGuard::currentId($request);
-        $id = (int) ($args['id'] ?? 0);
-        $run = $this->runs->findRun($id, $supplierId);
-        if ($run === null) {
-            return Json::error($response, 'not_found', 'Protokol převodu nenalezen.', 404);
-        }
-        if (!$this->runs->deleteDryRun($id, $supplierId)) {
-            return Json::error($response, 'run_not_deletable',
-                'Smazat jde jen doběhlou zkoušku nanečisto. Protokol ostrého převodu zůstává jako záznam převzatých dat.', 409);
-        }
-        $this->logger->log('import.pohoda_dry_run_deleted', self::userId($request), 'pohoda_import', $id,
-            ['year' => $run['agenda_year'] ?? null, 'ico' => $run['agenda_ico'] ?? null],
-            $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
-        return Json::ok($response, ['ok' => true]);
     }
 
     /** Soubory exportního nástroje, které si uživatel stáhne k POHODĚ. */

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const { post, get } = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn() }))
-vi.mock('../client', () => ({ api: { post, get } }))
+const { post, get, del } = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn(), del: vi.fn() }))
+vi.mock('../client', () => ({ api: { post, get, delete: del } }))
 
 import { isPremierUploadReady, premierApi } from '../premier'
 
@@ -88,5 +88,11 @@ describe('premierApi', () => {
     get.mockResolvedValueOnce({ data: { id: 1 } })
     await expect(premierApi.run(1)).resolves.toEqual({ id: 1 })
     expect(get).toHaveBeenCalledWith('/admin/imports/premier/runs/1')
+  })
+
+  it('protokol zkoušky nanečisto maže na adrese PREMIER', async () => {
+    del.mockResolvedValueOnce({ data: { ok: true } })
+    await expect(premierApi.deleteRun(3)).resolves.toEqual({ ok: true })
+    expect(del).toHaveBeenCalledWith('/admin/imports/premier/runs/3')
   })
 })
