@@ -21,6 +21,9 @@ use MyInvoice\Service\Payroll\Migration\PayrollTakeoverOpeningMonth;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPersonWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRunState;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
 use MyInvoice\Service\Payroll\PayrollPersonCreateValidator;
@@ -74,6 +77,10 @@ final class PayrollImporter
     private array $openSickness = [];
     /** První měsíc vedení mezd v MyÚčtu (`YYYY-MM`), nebo null. */
     private ?string $moduleStart = null;
+    /** Vztahy s časovou evidencí roku, pro který MyÚčto nemá mzdová pravidla. */
+    private int $timeEvidenceSkipped = 0;
+    /** @var array<int,bool> rok => má pravidla pro průměry a náhrady */
+    private array $timeYears = [];
 
     public function __construct(
         private readonly Connection $db,
@@ -89,6 +96,7 @@ final class PayrollImporter
         private readonly PayrollPostingMapProposalService $postingMap,
         private readonly PayrollTakeoverInstitutionWriter $institutions,
         private readonly PayrollTakeoverAbsenceWriter $absences,
+        private readonly PayrollRulesetProvider $rulesets,
     ) {}
 
     public function import(PremierContext $ctx): void
@@ -101,6 +109,7 @@ final class PayrollImporter
         $this->childrenOtherCaregiver = [];
         $this->pensionersWithoutDiscount = [];
         $this->openSickness = [];
+        $this->timeEvidenceSkipped = 0;
         $payroll = $ctx->payroll ?? PremierPayroll::fromBackup($ctx->backup);
         if (!$payroll->hasData()) {
             return;
@@ -197,7 +206,7 @@ final class PayrollImporter
         ));
         $this->identifierSummary($p);
         $this->cardSummary($p);
-        $this->timeSummary($p);
+        $this->timeSummary($p, $ctx->year);
         $this->notConverted($p, $deductions, $excluded);
         if ($totals !== []) {
             $this->referenceTotals->store($ctx->supplierId, self::SOURCE, $totals, self::REFERENCE . ' ' . $ctx->backup->ico);
@@ -329,9 +338,23 @@ final class PayrollImporter
         }
     }
 
-    /** Nepřítomnosti a dovolená převzaté z PREMIER: co se převzalo a co je k ověření. */
-    private function timeSummary(ImportProtocol $p): void
+    private function timeEvidenceYear(int $year): bool
     {
+        return $this->timeYears[$year] ??= PayrollRulesetYearCoverage::coversYear($this->rulesets, PayrollRulesetDomain::CompensationAverages, $year);
+    }
+
+    /** Nepřítomnosti a dovolená převzaté z PREMIER: co se převzalo a co je k ověření. */
+    private function timeSummary(ImportProtocol $p, int $year): void
+    {
+        if ($this->timeEvidenceSkipped > 0) {
+            $p->count(self::STEP, 'time_evidence_unsupported_year', $this->timeEvidenceSkipped);
+            $p->info(self::STEP, 'time_evidence_unsupported_year', sprintf(
+                'Nepřítomnosti, zůstatek dovolené a průměrné výdělky roku %d se nepřevzaly (%d vztahů): MyÚčto pro tento rok nemá '
+                . 'mzdová pravidla a mzdy za něj nepočítá. Převezmou se z roku, od kterého MyÚčto mzdy vede.',
+                $year,
+                $this->timeEvidenceSkipped,
+            ));
+        }
         if ($this->state->leaveTransferred > 0) {
             $p->info(self::STEP, 'leave_carryover', sprintf(
                 'Zůstatek dovolené z PREMIER (DOV_DNY, v hodinách) převzalo %d vztahů jako převod do knihy dovolené. Čerpání '
@@ -499,12 +522,19 @@ final class PayrollImporter
         }
         $this->detail($ctx, $number, 'Výplatní účet', fn (): array => $this->people->payoutAccounts($supplierId, $employeeId, $person, $takeover->employment->start, $userId, $policy, $state));
         $employment = $takeover->employment;
-        $this->detail($ctx, $number, 'Průměrný výdělek', fn (): array => $this->employmentWriter->averageEarnings($supplierId, $employmentId, $employment, $userId, $policy));
-        $this->detail($ctx, $number, 'Nepřítomnosti', fn (): array => $this->absences->absences($supplierId, $employmentId, $employment, $userId, $policy, $state));
-        $this->detail($ctx, $number, 'Zůstatek dovolené', fn (): array => $this->absences->leaveCarryover($supplierId, $employmentId, $employment, $userId, $policy, $state));
-        $open = PremierPayrollTakeover::absences($relation, $ctx->endsOn(), $this->moduleStart)['open_sickness'];
-        if ($open > 0) {
-            $this->openSickness[$number] = $open;
+        // Rok, pro který MyÚčto nemá mzdová pravidla, nepočítá: nepřítomnost ani průměr
+        // se k němu zapsat nedají (validátor je odmítne) a zůstatek dovolené by visel v roce,
+        // který kniha dovolené nevede.
+        if ($this->timeEvidenceYear($ctx->year)) {
+            $this->detail($ctx, $number, 'Průměrný výdělek', fn (): array => $this->employmentWriter->averageEarnings($supplierId, $employmentId, $employment, $userId, $policy));
+            $this->detail($ctx, $number, 'Nepřítomnosti', fn (): array => $this->absences->absences($supplierId, $employmentId, $employment, $userId, $policy, $state));
+            $this->detail($ctx, $number, 'Zůstatek dovolené', fn (): array => $this->absences->leaveCarryover($supplierId, $employmentId, $employment, $userId, $policy, $state));
+            $open = PremierPayrollTakeover::absences($relation, $ctx->endsOn(), $this->moduleStart)['open_sickness'];
+            if ($open > 0) {
+                $this->openSickness[$number] = $open;
+            }
+        } elseif ($employment->absences !== [] || $employment->averages !== [] || $employment->leave !== null) {
+            $this->timeEvidenceSkipped++;
         }
         $this->detail($ctx, $number, 'Pracoviště JMHZ', fn (): array => $this->employmentWriter->workplace($supplierId, $employmentId, $employment, $userId, $policy));
         $this->detail($ctx, $number, 'Kód CZ-ISCO', fn (): array => $this->employmentWriter->czIsco($supplierId, $employmentId, $employment, $userId, $policy));
