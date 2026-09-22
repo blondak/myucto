@@ -285,6 +285,17 @@ final class PremierPayrollImportTest extends TestCase
             $this->explain($protocol));
     }
 
+    /** Převzaté měsíce nesou srážky ze složek mezd, ne jen ze sloupců `SR_*`. */
+    public function testReferenceTotalsDeductionsIncludeWageAdvance(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['2025-10-01', '100000'], ['2025-11-01', '300000'], ['2025-12-01', '100000']], $this->fetch("SELECT r.period_start, r.deductions_minor
+            FROM payroll_migration_reference_totals r JOIN payroll_employments e ON e.id = r.employment_id
+            WHERE r.supplier_id = ? AND e.code = '5' AND r.deductions_minor > 0 ORDER BY r.period_start", $supplierId), $this->explain($protocol));
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);

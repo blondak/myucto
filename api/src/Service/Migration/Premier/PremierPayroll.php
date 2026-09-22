@@ -42,6 +42,9 @@ final class PremierPayroll
      */
     public const APPRENTICE = 'apprentice';
 
+    /** Složky mezd (`DNY.KOD`), které snižují čistou mzdu ({@see self::monthItems()}). */
+    public const DEDUCTION_CODES = ['700', '701', '702', '703', '704', '705', '706', '707', '708', '709', '710', '711', '714', '720', '750', '751', '770'];
+
     /**
      * @param list<array<string,mixed>> $relations
      * @param list<string> $missingTables
@@ -107,6 +110,7 @@ final class PremierPayroll
                 }
             }
         }
+        $items = self::monthItems($backup);
         $months = [];
         $monthRows = 0;
         foreach ($backup->rows('MZDY') as $row) {
@@ -116,7 +120,14 @@ final class PremierPayroll
                 continue;
             }
             $monthRows++;
-            $months[(int) ($row['INTER'] ?? 0)][sprintf('%04d-%02d', $year, $month)] = self::month($row);
+            $inter = (int) ($row['INTER'] ?? 0);
+            $period = sprintf('%04d-%02d', $year, $month);
+            $months[$inter][$period] = self::month($row);
+            // Srážky nese `DNY` po složkách; sloupce `SR_*` v `MZDY` nemají zálohu na mzdu
+            // ani stravenky a u některých záloh ani exekuce.
+            if (isset($items[$inter][$period])) {
+                $months[$inter][$period]['deductions'] = round($items[$inter][$period], 2);
+            }
         }
 
         $relations = [];
@@ -372,6 +383,54 @@ final class PremierPayroll
             return ['employment', false];
         }
         return ['employment', true];
+    }
+
+    /**
+     * Srážky z čisté mzdy po měsících z položek mezd (`DNY`): složky 7xx, které čistou mzdu
+     * snižují (číselník `MZDY_POL` je vede s příznakem `IS_NETTO`): spoření a půjčky,
+     * exekuce a insolvence včetně nákladů, stravenky, odbory, záloha na mzdu, provozní
+     * srážky. Stravenkový paušál (712) je příjem, zúčtování cestovního příkazu (721)
+     * náhrada, ne srážka.
+     *
+     * Na reálné záloze (agregovaně) se součet `SR_*` v `MZDY` rovná součtu těchto složek
+     * bez stravenek (710) a zálohy na mzdu (750) ve 145 ze 157 měsíců se srážkou; ve
+     * zbylých chybí právě záloha na mzdu. Obojí přitom čistou mzdu k výplatě snižuje.
+     *
+     * Vrací jen vztahy a měsíce, pro které `DNY` nějaké položky má; ostatní zůstávají
+     * na `SR_*` z `MZDY` (starší zálohy bez položek).
+     *
+     * @return array<int,array<string,float>> INTER => `YYYY-MM` => sraženo (Kč)
+     */
+    private static function monthItems(PremierBackup $backup): array
+    {
+        $out = [];
+        foreach ($backup->rows('DNY') as $row) {
+            $inter = (int) ($row['INTER'] ?? 0);
+            $period = self::itemPeriod($row);
+            if ($inter <= 0 || $period === null) {
+                continue;
+            }
+            $code = self::text($row['KOD'] ?? '');
+            $out[$inter][$period] = ($out[$inter][$period] ?? 0.0)
+                + (in_array($code, self::DEDUCTION_CODES, true) ? (float) ($row['CASTKA'] ?? 0) : 0.0);
+        }
+        return $out;
+    }
+
+    /**
+     * Měsíc mzdy, do kterého položka `DNY` patří (`DNY_ROK`/`DNY_MES`, jinak `DATUM_OD`).
+     *
+     * @param array<string,mixed> $row
+     */
+    private static function itemPeriod(array $row): ?string
+    {
+        $year = (int) ($row['DNY_ROK'] ?? 0);
+        $month = (int) ($row['DNY_MES'] ?? 0);
+        if ($year >= 1990 && $month >= 1 && $month <= 12) {
+            return sprintf('%04d-%02d', $year, $month);
+        }
+        $from = self::date($row['DATUM_OD'] ?? null);
+        return $from === null ? null : substr($from, 0, 7);
     }
 
     /**

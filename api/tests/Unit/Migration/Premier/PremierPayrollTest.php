@@ -114,6 +114,15 @@ final class PremierPayrollTest extends TestCase
             array_map(static fn (array $run): array => [$run['code'], $run['from'], $run['to']], $employee['insurer_history']));
     }
 
+    /** Srážky měsíce ze složek mezd v `DNY`, včetně zálohy na mzdu, kterou `SR_*` nenese. */
+    public function testDeductionsFromPayrollItems(): void
+    {
+        $relations = PremierPayroll::fromBackup($this->backup(['payroll' => true, 'payroll_detail' => true]))->relations;
+        $employee = array_values(array_filter($relations, static fn (array $r): bool => $r['key'] === '5'))[0];
+        self::assertSame([0.0, 1000.0, 3000.0, 1000.0], [$employee['months']['2025-09']['deductions'], $employee['months']['2025-10']['deductions'],
+            $employee['months']['2025-11']['deductions'], $employee['months']['2025-12']['deductions']]);
+    }
+
     public function testMonthTotalsMatchJournalPostings(): void
     {
         $backup = $this->backup(['payroll' => true]);

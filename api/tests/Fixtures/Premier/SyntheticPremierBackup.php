@@ -527,7 +527,8 @@ final class SyntheticPremierBackup
      *   INTER 5  pracovní poměr od 15. 1. 2025 (kategorie `HPP`, `KODPP_SO` prázdné); sjednaná mzda
      *            v `SAZBA_MZ` podle `TYP_MZDY` (30 000, od 7/2025 32 000; `MZDA_MES` prázdné
      *            nebo jiné), stát adresy názvem „Česká republika"; mzdy 1/2025-1/2026; přihláška
-     *            k ZP 111, od 7/2025 změna na 201; korespondenční adresa v `PER_ADR`
+     *            k ZP 111, od 7/2025 změna na 201; korespondenční adresa v `PER_ADR`; exekuce
+     *            1 000 Kč měsíčně od 10/2025, v 11/2025 záloha na mzdu 2 000 Kč (jen v `DNY`)
      *   INTER 6  DPP 4-6/2025 (kategorie `DPP`), osoba s bydlištěm na Slovensku (stát názvem
      *            „Slovenská republika")
      *
@@ -585,11 +586,44 @@ final class SyntheticPremierBackup
             'MZ_ZDANI' => $gross, 'MZ_DAN' => $tax, 'NEZD_VLAS' => 2570, 'POD_DAN' => true, 'NEZD_A' => true, 'MZ_CISTA' => $gross - $soc - $zdr - $tax,
             'MZ_VYPLATA' => $gross - $soc - $zdr - $tax, 'POJIS_SO' => true, 'ZKR_POJ' => $insurer, 'DNY_ODPR' => 20, 'UVA_DOBA' => 8,
         ];
+        // Exekuce 1 000 Kč měsíčně od 10/2025 (v `SR_OST1` i v `DNY`), v 11/2025 navíc záloha
+        // na mzdu 2 000 Kč, kterou `SR_*` nenese.
+        $items = [];
         foreach (range(1, 12) as $m) {
-            $months[] = [5, 2025, $m, $m < 7 ? $employee(30000, 2130, 1350, 7440, 2700, 1930, '111') : $employee(32000, 2272, 1440, 7936, 2880, 2230, '201')];
+            $values = $m < 7 ? $employee(30000, 2130, 1350, 7440, 2700, 1930, '111') : $employee(32000, 2272, 1440, 7936, 2880, 2230, '201');
+            if ($m >= 10) {
+                $values['SR_OST1'] = 1000;
+                $values['MZ_VYPLATA'] -= 1000;
+                $items[] = self::item5(2025, $m, '702', 1000, ['SRA_INT' => 2]);
+            }
+            if ($m === 11) {
+                $values['MZ_VYPLATA'] -= 2000;
+                $items[] = self::item5(2025, $m, '750', 2000);
+            }
+            $months[] = [5, 2025, $m, $values];
         }
         $months[] = [5, 2026, 1, $employee(32000, 2272, 1440, 7936, 2880, 2230, '201')];
-        return [];
+        $tables['DNY'] = [
+            [['INTER', 'N', 8], ['DATUM_OD', 'D'], ['DATUM_DO', 'D'], ['KOD', 'C', 3], ['HODINY', 'N', 8, 4], ['N_DNY', 'N', 5, 2], ['CASTKA', 'N', 14, 2],
+                ['SAZBA', 'N', 15, 4], ['SRA_INT', 'N', 10], ['DNY_ROK', 'N', 4], ['DNY_MES', 'N', 2], ['TYP', 'N', 2], ['KOD_BAZE', 'C', 3],
+                ['C_LISTKU', 'C', 20], ['ZAC_NEM', 'D'], ['UKONCENO', 'L'], ['ID', 'C', 36]],
+            $items,
+        ];
+        return [['SR_OST1', 'N', 12, 2]];
+    }
+
+    /**
+     * Položka mzdy vztahu INTER 5 (`DNY`) za měsíc; interval je celý měsíc, pokud ho
+     * `$extra` neurčí jinak.
+     *
+     * @param array<string,mixed> $extra
+     * @return array<string,mixed>
+     */
+    private static function item5(int $year, int $month, string $code, float $amount, array $extra = []): array
+    {
+        $from = sprintf('%04d-%02d-01', $year, $month);
+        return $extra + ['INTER' => 5, 'DATUM_OD' => $from, 'DATUM_DO' => date('Y-m-t', (int) strtotime($from)), 'KOD' => $code, 'CASTKA' => $amount,
+            'DNY_ROK' => $year, 'DNY_MES' => $month, 'TYP' => 6, 'ID' => "D5-{$year}-{$month}-{$code}"];
     }
 
     /**
