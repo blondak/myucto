@@ -285,8 +285,8 @@ final class CodebookImporter
             'INSERT INTO clients
                 (supplier_id, company_name, ic, dic, street, city, zip, country_id,
                  main_email, phone, currency_default_id, is_customer, is_vendor,
-                 is_vat_payer, related_party, related_party_type, note)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?)'
+                 is_vat_payer, related_party, related_party_type, note, auto_send_reminders)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?, 0)'
         )->execute([
             $ctx->supplierId,
             mb_substr($data['name'], 0, 190),

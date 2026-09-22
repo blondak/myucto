@@ -248,8 +248,8 @@ final class PartnerImporter
         $pdo->prepare(
             'INSERT INTO clients
                 (supplier_id, company_name, ic, dic, street, city, zip, country_id, main_email, phone,
-                 currency_default_id, is_customer, is_vendor, is_vat_payer, note)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)'
+                 currency_default_id, is_customer, is_vendor, is_vat_payer, note, auto_send_reminders)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, 0)'
         )->execute([
             $ctx->supplierId,
             mb_substr($s['name'], 0, 190),
