@@ -281,6 +281,20 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertSame(2, self::stepCounts($fourth, PohodaPayrollImporter::STEP_PEOPLE)['openings_existing'] ?? 0, $this->explain($fourth));
         // Dvě osoby krát tři druhy kumulace (sociální, zdravotní, daň z příjmů).
         self::assertSame(6, $this->rows('payroll_statutory_accumulator_openings', $supplierId));
+
+        // Oprava lednové mzdy v PAMICA: opakovaný převod srovná vlastní počáteční stavy
+        // převodu (Jana), nezměněné nechá (Petr).
+        $changedDir = $this->tmp . '/changed/' . basename(dirname($file));
+        mkdir($changedDir, 0755, true);
+        $changed = $changedDir . '/' . basename($file);
+        file_put_contents($changed, preg_replace('~<KcSocZak>43000</KcSocZak>~', '<KcSocZak>44000</KcSocZak>', (string) file_get_contents($file), 1));
+        $fifth = $this->importer->run($supplierId, $this->userId, $changed, SyntheticPohodaPayroll::YEAR, false, null, null, null, true);
+        self::assertFalse($fifth->hasErrors(), $this->explain($fifth));
+        $counts = self::stepCounts($fifth, PohodaPayrollImporter::STEP_PEOPLE);
+        self::assertSame([1, 1], [$counts['openings'] ?? 0, $counts['openings_existing'] ?? 0], $this->explain($fifth));
+        $latest = $pdo->prepare("SELECT values_json FROM payroll_statutory_accumulator_openings WHERE supplier_id = ? AND employee_id = ? AND calculation_kind = 'social_insurance' ORDER BY id DESC LIMIT 1");
+        $latest->execute([$supplierId, $jana['employee_id']]);
+        self::assertSame(4400000, json_decode((string) $latest->fetchColumn(), true)['assessment_base_minor_units'] ?? null);
     }
 
     /**

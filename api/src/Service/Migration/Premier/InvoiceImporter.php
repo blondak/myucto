@@ -15,6 +15,7 @@ use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
 use MyInvoice\Service\Migration\Shared\MigratedPurchaseDocument;
 use MyInvoice\Service\Migration\Shared\MigrationHomeCurrency;
 use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
+use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier;
 use MyInvoice\Service\Stats\StatsRecomputer;
 
 /**
@@ -229,7 +230,7 @@ final class InvoiceImporter
         $booked = !$review && $type !== 'proforma' && $doc['booked'];
         $codes = array_values(array_unique(array_filter(array_column($items, 'target_code'))));
         $vs = preg_replace('/\D/', '', $doc['variable_symbol']) ?? '';
-        $reverse = array_intersect($codes, ['25s', '25s3', '25s5']) !== [];
+        $reverse = VatReturnLineClassifier::isDomesticReverseSale($codes);
         try {
             $id = $this->writer->insertIssued(new MigratedIssuedDocument(
                 supplierId: $ctx->supplierId,
@@ -320,7 +321,6 @@ final class InvoiceImporter
         $items = $doc['items'];
         $deductions = [];
         $reverse = false;
-        $assets = 0;
         foreach ($items as $i => $item) {
             $items[$i]['target_code'] = null;
             $items[$i]['fixed_asset'] = false;
@@ -360,7 +360,6 @@ final class InvoiceImporter
             }
             if ($class['fixed_asset']) {
                 $items[$i]['fixed_asset'] = true;
-                $assets++;
             }
         }
         if (count($deductions) > 1) {
@@ -445,7 +444,7 @@ final class InvoiceImporter
                 bookedAt: $unbooked ? null : $doc['accounting'] . ' 00:00:00',
                 bookedBy: $unbooked ? null : $ctx->userOrNull(),
                 vatClassificationCode: count($codes) === 1 ? $codes[0] : null,
-                isFixedAsset: $assets > 0 && $assets === count($items),
+                isFixedAsset: MigratedDocumentItem::wholeDocumentFixedAsset(array_column($items, 'fixed_asset')),
             ));
         } catch (\PDOException $e) {
             if ((string) $e->getCode() !== '23000') {

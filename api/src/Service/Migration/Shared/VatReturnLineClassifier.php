@@ -105,6 +105,23 @@ final class VatReturnLineClassifier
         };
     }
 
+    /**
+     * Vydaný doklad v tuzemském přenesení daňové povinnosti (ř. 25, § 92a): některý z kódů
+     * zařazení dokladu nebo položek je kódem ř. 25. Takový doklad nese i příznak
+     * `reverse_charge` na hlavičce (text o přenesení na dokladu, účtování bez daně).
+     *
+     * @param list<?string> $codes
+     */
+    public static function isDomesticReverseSale(array $codes): bool
+    {
+        foreach ($codes as $code) {
+            if ($code !== null && in_array($code, self::DOMESTIC_REVERSE_SALE, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static function isSelfAssessmentOutput(int $line): bool
     {
         return isset(self::SELF_ASSESSMENT[$line]);

@@ -12,6 +12,8 @@ use MyInvoice\Service\Migration\MoneyS3\AccountCode;
 use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
 use MyInvoice\Service\Migration\Shared\BankStatementImportWriter;
 use MyInvoice\Service\Migration\Shared\BankSymbols;
+use MyInvoice\Service\Migration\Shared\MigratedCashNumber;
+use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use PDO;
 
 /**
@@ -33,6 +35,7 @@ final class CashBankImporter
         private readonly Connection $db,
         private readonly PohodaImportRepository $map,
         private readonly SupplierBankAccountRepository $bankAccounts,
+        private readonly MigratedCashNumber $cashNumbers,
     ) {}
 
     public function importCash(PohodaContext $ctx): void
@@ -77,7 +80,6 @@ final class CashBankImporter
 
         $existing = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_CASH_DOCUMENT);
         $ruleExists = $pdo->prepare('SELECT 1 FROM posting_rules WHERE supplier_id = ? AND rule_key = ? LIMIT 1');
-        $numberTaken = $pdo->prepare('SELECT 1 FROM cash_documents WHERE supplier_id = ? AND doc_number = ? LIMIT 1');
         $insert = $pdo->prepare(
             'INSERT INTO cash_documents
                 (supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date,
@@ -86,7 +88,7 @@ final class CashBankImporter
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "CZK", ?, "posted", ?)'
         );
         $insertVat = $pdo->prepare(
-            'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount, vat_deduction) VALUES (?, ?, ?, ?, ?)'
+            'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount, vat_deduction, is_fixed_asset) VALUES (?, ?, ?, ?, ?, ?)'
         );
 
         $periodStart = (string) ($ctx->period['starts_on'] ?? sprintf('%04d-01-01', $ctx->year()));
@@ -133,6 +135,7 @@ final class CashBankImporter
             $classCode = PohodaXml::text($h, 'classificationVAT/ids');
             $vatLines = [];
             $deduction = 'full';
+            $asset = false;
             $withVat = array_values(array_filter($lines, static fn (array $l): bool => abs($l['vat']) >= 0.005));
             if ($withVat !== []) {
                 if ($isOut) {
@@ -140,6 +143,7 @@ final class CashBankImporter
                     if ($res !== null && $res['in_return'] && !$res['reverse']) {
                         $vatLines = $withVat;
                         $deduction = $res['deduction'];
+                        $asset = $res['fixed_asset'];
                     } elseif ($res === null || $res['in_return']) {
                         $p->warn(self::STEP_CASH, 'cash_vat_review', "Pokladní doklad {$number}: členění DPH „{$classCode}“ převod nepřebírá, DPH doplňte ručně.", ['document_no' => $number]);
                     }
@@ -152,11 +156,7 @@ final class CashBankImporter
                     }
                 }
             }
-            $numberText = mb_substr($number, 0, 30);
-            $numberTaken->execute([$ctx->supplierId, $numberText]);
-            if ($numberTaken->fetchColumn() !== false) {
-                $numberText = mb_substr($number . '/' . substr($issue, 0, 4), 0, 30);
-            }
+            $numberText = $this->cashNumbers->allocate($ctx->supplierId, [$number, $number . '/' . substr($issue, 0, 4)], $p, self::STEP_CASH, $number . ' z ' . $issue);
             $rule = mb_substr(PohodaXml::text($h, 'accounting/ids'), 0, 64);
             $ruleKey = null;
             if ($rule !== '') {
@@ -189,7 +189,8 @@ final class CashBankImporter
             ]);
             $id = (int) $pdo->lastInsertId();
             foreach ($vatLines as $line) {
-                $insertVat->execute([$id, $line['rate'], round($sign * $line['base'], 2), round($sign * $line['vat'], 2), $deduction]);
+                $insertVat->execute([$id, $line['rate'], round($sign * $line['base'], 2), round($sign * $line['vat'], 2), $deduction,
+                    MigratedDocumentItem::fixedAssetLine($asset, (float) $line['rate'], (float) $line['vat'], null) ? 1 : 0]);
             }
             if ($vatLines !== []) {
                 $p->count(self::STEP_CASH, 'with_vat');

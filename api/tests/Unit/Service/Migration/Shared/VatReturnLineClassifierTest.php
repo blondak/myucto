@@ -13,6 +13,15 @@ use PHPUnit\Framework\TestCase;
  */
 final class VatReturnLineClassifierTest extends TestCase
 {
+    public function testDomesticReverseSaleCodes(): void
+    {
+        self::assertTrue(Lines::isDomesticReverseSale(['25s']));
+        self::assertTrue(Lines::isDomesticReverseSale([null, '1', '25s5']));
+        self::assertTrue(Lines::isDomesticReverseSale(['25s3']));
+        self::assertFalse(Lines::isDomesticReverseSale([null, '1', '26s', '22', '5']));
+        self::assertFalse(Lines::isDomesticReverseSale([]));
+    }
+
     /** @return iterable<string,array{int,?string,?string}> */
     public static function saleLines(): iterable
     {

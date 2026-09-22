@@ -235,24 +235,29 @@ final class AssetImporter
             }
         }
         $booked = round($booked, 2);
-        $depreciation = new MigratedDepreciation($this->entries);
+        $depreciation = new MigratedDepreciation($this->entries, $this->db);
         // Účetní řádek roku, který už existuje (i převzatý dřívějším převodem), se nemění.
         if ($booked > 0.0 && $this->entries->findYear($assetId, 'accounting', $ctx->year) === null) {
             $residual = $this->db->pdo()->prepare('SELECT input_price - opening_acc_amount - COALESCE((SELECT SUM(amount) FROM depreciation_entries
                 WHERE asset_id = a.id AND kind = \'accounting\'), 0) FROM assets a WHERE a.id = ? AND a.supplier_id = ?');
             $residual->execute([$assetId, $ctx->supplierId]);
-            $depreciation->confirm(
+            $result = $depreciation->confirm(
                 $ctx->supplierId, $assetId, 'accounting', $ctx->year, $booked, $booked, round((float) $residual->fetchColumn() - $booked, 2),
                 false, false, count($months), 'PREMIER', 'posted', MigratedDepreciation::OVERWRITE_ALWAYS, false,
             );
-            $ctx->protocol->count(self::STEP, 'accounting_depreciation_booked');
+            if ($result['kept'] !== null) {
+                MigratedDepreciation::reportKept($ctx->protocol, self::STEP, $number, 'accounting', $ctx->year, $booked, $result['kept'], 'PREMIER');
+            } else {
+                $ctx->protocol->count(self::STEP, 'accounting_depreciation_booked');
+            }
         }
         $this->confirmTax($ctx, $assetId, $taxRows, $number, $depreciation);
     }
 
     /**
      * Daňový odpis roku převodu přesně podle PREMIER (potvrzený). Liší-li se od existujícího
-     * řádku roku, přepíše ho bez ohledu na původ (viz zpráva k refaktoru, bod 8).
+     * řádku roku, přepíše ho, jen když řádek zapsal převod a rok není uzavřený
+     * ({@see MigratedDepreciation::confirm()}); jinak ohlásí, že zůstal.
      */
     private function confirmTax(PremierContext $ctx, int $assetId, array $taxRows, string $number, MigratedDepreciation $depreciation): void
     {
@@ -266,6 +271,9 @@ final class AssetImporter
                 abs($amount) < 0.005, false, null, 'PREMIER', 'confirmed', MigratedDepreciation::OVERWRITE_ALWAYS, false,
             );
             if (!$result['written']) {
+                if ($result['kept'] !== null) {
+                    MigratedDepreciation::reportKept($ctx->protocol, self::STEP, $number, 'tax', $ctx->year, $amount, $result['kept'], 'PREMIER');
+                }
                 return;
             }
             $existing = $result['previous'];

@@ -65,7 +65,7 @@ final class PohodaPayrollTakeoverTest extends TestCase
         self::assertSame(['pamica', 'PAMICA'], [$policy->sourceKey, $policy->label]);
         self::assertTrue($policy->strict);
         self::assertTrue($policy->verifyPayoutAccounts);
-        self::assertFalse($policy->rewriteOwnOpenings);
+        self::assertTrue($policy->rewriteOwnOpenings);
         self::assertFalse($policy->checklistToleratesRuntime);
     }
 

@@ -25324,6 +25324,7 @@
       "payments": "Úhrady faktur",
       "assets": "Dlouhodobý majetek",
       "small_assets": "Drobný majetek",
+      "vat_coefficients": "Koeficient krácení DPH",
       "reconciliation": "Rekonciliace",
       "payroll_preflight": "Kontrola před převodem mezd",
       "payroll_profile": "Profil importu mezd",
@@ -25336,6 +25337,7 @@
       "payroll_posting_map": "Kontace z původního programu"
     },
     "counts": {
+      "settled": "vypořádaných let",
       "months": "měsíců",
       "payslips": "mezd",
       "enforcement_cases": "exekučních případů",
@@ -26885,6 +26887,7 @@
       "assets": "Dlouhodobý majetek",
       "reconciliation": "Rekonciliace",
       "small_assets": "Drobný majetek",
+      "vat_coefficients": "Koeficient krácení DPH",
       "payroll": "Zaměstnanci a mzdy",
       "tax_return": "Úpravy základu daně z přiznání PREMIER",
       "verification": "Kontrola proti podáním z PREMIER",
@@ -26893,6 +26896,7 @@
       "unexpected": "Neočekávaná chyba"
     },
     "counts": {
+      "settled": "vypořádaných let",
       "created": "založeno",
       "existing": "už převedeno",
       "entries": "zápisů",

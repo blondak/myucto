@@ -77,6 +77,18 @@ final class SharedPartnerIdentityMatcherTest extends TestCase
         self::assertCount(1, $index);
     }
 
+    public function testSingleIcoLookupNormalizesStoredValue(): void
+    {
+        $this->client('Archivovaný', '012 34 567', archived: true);
+        $first = $this->client('Syntetický partner D', '123 45 67');
+        $this->client('Syntetický partner D duplicitní', '01234567');
+
+        self::assertSame(['id' => $first, 'dic' => ''], $this->matcher->clientByIco($this->supplierId, '01234567'));
+        self::assertSame($first, $this->matcher->clientByIco($this->supplierId, '1234567')['id'] ?? null);
+        self::assertNull($this->matcher->clientByIco($this->supplierId, '45274649'));
+        self::assertNull($this->matcher->clientByIco($this->supplierId, ''));
+    }
+
     public function testNameMatchIsExactAndSkipsArchived(): void
     {
         $this->client('Syntetický partner B', null, archived: true);

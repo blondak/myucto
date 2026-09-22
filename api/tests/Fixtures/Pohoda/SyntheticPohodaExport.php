@@ -186,6 +186,56 @@ final class SyntheticPohodaExport
         return $dir;
     }
 
+    /**
+     * Agenda z {@see write()} s kráceným odpočtem (§ 76): členění `PK` (ř. 40, 41) a přijatá
+     * faktura 26PF0001 zařazená do něj místo `PD`.
+     */
+    public static function withReducedDeduction(string $agendaDir): void
+    {
+        $class = '<lst:classificationVAT version="2.0"><vat:classificationVATHeader><vat:code>PK</vat:code><vat:name>Tuzemsky odpocet kraceny</vat:name>'
+            . '<vat:lineInVATReturn>40, 41</vat:lineInVATReturn><vat:sectionInVATLedgerStatement>B.2., B.3.</vat:sectionInVATLedgerStatement></vat:classificationVATHeader></lst:classificationVAT>';
+        $classes = $agendaDir . '/06_cleneni_dph.xml';
+        file_put_contents($classes, str_replace('</lst:listClassificationVAT>', $class . '</lst:listClassificationVAT>', (string) file_get_contents($classes)));
+        $received = $agendaDir . '/20_faktury_receivedInvoice.xml';
+        file_put_contents($received, str_replace('<typ:ids>PD</typ:ids>', '<typ:ids>PK</typ:ids>', (string) file_get_contents($received)));
+    }
+
+    /**
+     * Agenda z {@see write()} s pořízením majetku: členění `PDM` (ř. 40, 41, 47) a přijatá
+     * faktura 26PF0001 zařazená do něj místo `PD`.
+     */
+    public static function withFixedAssetPurchase(string $agendaDir): void
+    {
+        $class = '<lst:classificationVAT version="2.0"><vat:classificationVATHeader><vat:code>PDM</vat:code><vat:name>Tuzemsky odpocet porizeni majetku</vat:name>'
+            . '<vat:lineInVATReturn>40, 41, 47</vat:lineInVATReturn><vat:sectionInVATLedgerStatement>B.2., B.3.</vat:sectionInVATLedgerStatement></vat:classificationVATHeader></lst:classificationVAT>';
+        $classes = $agendaDir . '/06_cleneni_dph.xml';
+        file_put_contents($classes, str_replace('</lst:listClassificationVAT>', $class . '</lst:listClassificationVAT>', (string) file_get_contents($classes)));
+        $received = $agendaDir . '/20_faktury_receivedInvoice.xml';
+        file_put_contents($received, str_replace('<typ:ids>PD</typ:ids>', '<typ:ids>PDM</typ:ids>', (string) file_get_contents($received)));
+    }
+
+    /** Číslo vydané faktury v tuzemském přenesení daňové povinnosti ({@see withDomesticReverseSale()}). */
+    public const REVERSE_SALE = '26FV0009';
+
+    /**
+     * Agenda z {@see write()} s vydanou fakturou 26FV0009 na 1 000 Kč bez daně v členění
+     * `UDpdp` (ř. 25, tuzemské přenesení daňové povinnosti) a jejím zápisem v deníku.
+     */
+    public static function withDomesticReverseSale(string $agendaDir): void
+    {
+        $append = static function (string $file, string $closing, string $xml): void {
+            $content = (string) file_get_contents($file);
+            file_put_contents($file, str_replace($closing, (string) iconv('UTF-8', 'Windows-1250', $xml) . $closing, $content));
+        };
+        $append($agendaDir . '/06_cleneni_dph.xml', '</lst:listClassificationVAT>',
+            '<lst:classificationVAT version="2.0"><vat:classificationVATHeader><vat:code>UDpdp</vat:code><vat:name>Přenesení daňové povinnosti</vat:name>'
+            . '<vat:lineInVATReturn>25</vat:lineInVATReturn><vat:sectionInVATLedgerStatement>A.1.</vat:sectionInVATLedgerStatement></vat:classificationVATHeader></lst:classificationVAT>');
+        $append($agendaDir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>',
+            str_replace('<typ:ids>UD</typ:ids>', '<typ:ids>UDpdp</typ:ids>', self::invoice('issuedInvoice', self::REVERSE_SALE, '260009', '2026-01-18', 1000, 0)));
+        $append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Vydané faktury', self::REVERSE_SALE, 'Stavební práce', 1000, '311001', '602000', '2026-01-18'));
+    }
+
     /** ZIP exportu tak, jak ho zabalí nástroj (kořen s přehledem jednotek a složka agendy). */
     public static function writeZip(string $zipPath, string $workDir): void
     {

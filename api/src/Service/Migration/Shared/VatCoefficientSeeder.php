@@ -60,6 +60,20 @@ final class VatCoefficientSeeder
         }
     }
 
+    /**
+     * Převod po jednotlivých letech (POHODA, PREMIER, Stereo NX): roky, které firma už má
+     * z převodu (klíče mapy období), a roky tohoto běhu. Vypořádá se každý z nich kromě
+     * nejnovějšího, takže rok převedený dřív se vypořádá, až převod dojde k roku po něm.
+     *
+     * @param list<int|string> $convertedYears roky z mapy převodu (klíče období)
+     * @param list<int> $runYears roky, které zapsal tento běh
+     */
+    public function seedConverted(int $supplierId, array $convertedYears, array $runYears, int $userId, ImportProtocol $p): void
+    {
+        $years = array_values(array_unique(array_map('intval', array_merge($convertedYears, $runYears))));
+        $this->seed($supplierId, array_values(array_filter($years, static fn (int $y): bool => $y > 0)), $userId, $p);
+    }
+
     private function hasReducedDeduction(int $supplierId): bool
     {
         $stmt = $this->db->pdo()->prepare(

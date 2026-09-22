@@ -14,6 +14,7 @@ use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
 use MyInvoice\Service\Migration\Shared\MigratedPurchaseDocument;
 use MyInvoice\Service\Migration\Shared\MigrationHomeCurrency;
 use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
+use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Support\Sql\PayablePredicate;
 
@@ -276,8 +277,8 @@ final class InvoiceImporter
                 exchangeRate: null,
                 // Položky i rekapitulace Pohody jsou bez DPH.
                 pricesIncludeVat: false,
-                // Vydaný doklad v přenesené povinnosti nese kód zařazení položek, ne příznak hlavičky.
-                reverseCharge: false,
+                // Tuzemské přenesení daňové povinnosti (ř. 25) nese kód zařazení i příznak hlavičky.
+                reverseCharge: VatReturnLineClassifier::isDomesticReverseSale([$class['code'], ...array_column($amounts['items'], 'code')]),
                 noteAboveItems: $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
                 noteBelowItems: self::note($doc['number'], $class['reasons'], $previous, $doc['foreign'], $notes),
                 clientSnapshot: PartnerImporter::snapshotJson($snapshot),
@@ -418,6 +419,7 @@ final class InvoiceImporter
         // Datum pro KH je v Pohodě den, ke kterému účetní odpočet uplatnila - MyÚčto
         // ho respektuje jen jako ručně zadané datum přijetí (§ 73).
         $claim = $doc['claim'];
+        $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], (float) $item['rate'], (float) $item['vat'], $item['code'] ?? null), $amounts['items']);
         try {
             $id = $this->writer->insertPurchase(new MigratedPurchaseDocument(
                 supplierId: $ctx->supplierId,
@@ -458,6 +460,7 @@ final class InvoiceImporter
                 bookedAt: $unbooked ? null : $doc['accounting'] . ' 00:00:00',
                 bookedBy: $unbooked ? null : $ctx->userOrNull(),
                 vatClassificationCode: null,
+                isFixedAsset: MigratedDocumentItem::wholeDocumentFixedAsset($assets),
             ));
         } catch (\PDOException $e) {
             if ((string) $e->getCode() !== '23000') {
@@ -472,6 +475,7 @@ final class InvoiceImporter
                 $item['description'], $item['quantity'], $item['unit'] ?? 'ks', $item['unit_price'],
                 $item['rate_id'], $item['rate'], $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2),
                 $item['code'] ?? null,
+                $assets[$i],
             );
         }
         $this->writer->insertPurchaseItems($id, $items);
@@ -845,29 +849,29 @@ final class InvoiceImporter
 
     /**
      * @param array{items:list<array<string,mixed>>,vat:float} $amounts
-     * @return array{reasons:list<string>,deduction:string,in_return:bool,reverse:bool}
+     * @return array{reasons:list<string>,deduction:string,in_return:bool,reverse:bool,fixed_asset:bool}
      */
     private function classifyPurchase(PohodaContext $ctx, string $kind, string $code, array $amounts): array
     {
         if ($kind === 'advance') {
-            return ['reasons' => [], 'deduction' => 'full', 'in_return' => true, 'reverse' => false];
+            return ['reasons' => [], 'deduction' => 'full', 'in_return' => true, 'reverse' => false, 'fixed_asset' => false];
         }
         $hasVat = abs($amounts['vat']) >= 0.005;
         if ($code === '') {
-            return ['reasons' => $hasVat ? ['doklad s daní bez členění DPH'] : [], 'deduction' => 'full', 'in_return' => true, 'reverse' => false];
+            return ['reasons' => $hasVat ? ['doklad s daní bez členění DPH'] : [], 'deduction' => 'full', 'in_return' => true, 'reverse' => false, 'fixed_asset' => false];
         }
         $res = $ctx->vat->purchase($code);
         if ($res === null) {
-            return ['reasons' => ["členění DPH „{$code}“ ({$ctx->vat->name($code)}) převod nezařazuje"], 'deduction' => 'full', 'in_return' => true, 'reverse' => false];
+            return ['reasons' => ["členění DPH „{$code}“ ({$ctx->vat->name($code)}) převod nezařazuje"], 'deduction' => 'full', 'in_return' => true, 'reverse' => false, 'fixed_asset' => false];
         }
         if (!$res['in_return']) {
             // Přijatý doklad mimo přiznání: daň je součástí nákladu, odpočet se neuplatnil.
-            return ['reasons' => [], 'deduction' => $hasVat ? 'none' : 'full', 'in_return' => false, 'reverse' => false];
+            return ['reasons' => [], 'deduction' => $hasVat ? 'none' : 'full', 'in_return' => false, 'reverse' => false, 'fixed_asset' => false];
         }
         if ($res['reverse'] && $hasVat) {
-            return ['reasons' => ["členění DPH „{$code}“ (samovyměření) u dokladu s daní od dodavatele"], 'deduction' => $res['deduction'], 'in_return' => true, 'reverse' => false];
+            return ['reasons' => ["členění DPH „{$code}“ (samovyměření) u dokladu s daní od dodavatele"], 'deduction' => $res['deduction'], 'in_return' => true, 'reverse' => false, 'fixed_asset' => false];
         }
-        return ['reasons' => [], 'deduction' => $res['deduction'], 'in_return' => true, 'reverse' => $res['reverse']];
+        return ['reasons' => [], 'deduction' => $res['deduction'], 'in_return' => true, 'reverse' => $res['reverse'], 'fixed_asset' => $res['fixed_asset']];
     }
 
     /**

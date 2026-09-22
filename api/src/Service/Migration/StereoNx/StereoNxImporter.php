@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\StereoNx;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MovementClassificationRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
+use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter as PohodaPartners;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
@@ -14,6 +15,8 @@ use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
 use MyInvoice\Service\Migration\Shared\MigratedPurchaseDocument;
 use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
+use MyInvoice\Service\Migration\Shared\PartnerIdentityMatcher;
+use MyInvoice\Service\Migration\Shared\VatCoefficientSeeder;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use PDO;
 use PDOException;
@@ -50,6 +53,8 @@ final class StereoNxImporter
         private readonly StatsRecomputer $stats,
         private readonly LoggerInterface $log,
         private readonly MigratedDocumentWriter $writer,
+        private readonly VatCoefficientSeeder $coefficients,
+        private readonly PartnerIdentityMatcher $identity,
     ) {
         $this->rates = new MigrationVatRateLookup($db);
     }
@@ -155,6 +160,7 @@ final class StereoNxImporter
                 foreach ($plan['payments'] ?? [] as $record) $this->importPayment($context, $record);
                 foreach ($plan['movement_classifications'] ?? [] as $record) $this->importClassification($context, $record);
                 $this->refreshBalances($context);
+                $this->seedVatCoefficients($report, $supplierId, $userId, $dryRun, $sourceDates);
                 $reviewDocuments = [];
                 foreach ($report['review_documents'] as $document) {
                     $reviewDocuments[$document['kind'] . "\0" . $document['source_key']] = $document;
@@ -223,6 +229,30 @@ final class StereoNxImporter
             }
         }
         return $report;
+    }
+
+    /**
+     * Koeficient § 76 převedených let stejnou cestou jako ostatní převody: bez něj přiznání
+     * s kráceným odpočtem (ř. 52) nejde sestavit.
+     *
+     * @param array<string,mixed> $report
+     * @param list<string> $sourceDates
+     */
+    private function seedVatCoefficients(array &$report, int $supplierId, int $userId, bool $dryRun, array $sourceDates): void
+    {
+        $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import');
+        $years = array_map(static fn (string $d): int => (int) substr($d, 0, 4), $sourceDates);
+        $this->coefficients->seedConverted($supplierId, [], $years, $userId, $protocol);
+        foreach ($protocol->toArray()['steps'] as $step) {
+            foreach ($step['messages'] as $m) {
+                if ($m['level'] === 'warning') {
+                    $report['warnings'][] = ['level' => 'warning', 'code' => $m['code'], 'message' => $m['text']] + $m['context'];
+                }
+            }
+            if (($step['counts']['settled'] ?? 0) > 0) {
+                $report['counts']['vat_coefficients_settled'] = $step['counts']['settled'];
+            }
+        }
     }
 
     /** @param array<string,mixed> $ctx @return list<int> */
@@ -346,10 +376,8 @@ final class StereoNxImporter
         if ($existing !== null) { $ctx['ids']['client'][$key] = $existing; return; }
         $ico = PohodaPartners::ico((string) ($record['ico'] ?? ''));
         if ($ico !== '') {
-            $stmt = $this->db->pdo()->prepare('SELECT id, dic FROM clients WHERE supplier_id = ? AND ic = ? AND archived_at IS NULL ORDER BY id LIMIT 1');
-            $stmt->execute([$ctx['supplier_id'], $ico]);
-            $matched = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($matched !== false) {
+            $matched = $this->identity->clientByIco($ctx['supplier_id'], $ico);
+            if ($matched !== null) {
                 $sourceDic = PohodaPartners::vatId((string) ($record['dic'] ?? ''));
                 $targetDic = PohodaPartners::vatId((string) ($matched['dic'] ?? ''));
                 if ($sourceDic !== '' && $targetDic !== '' && $sourceDic !== $targetDic) {

@@ -25324,6 +25324,7 @@
       "payments": "Invoice payments",
       "assets": "Fixed assets",
       "small_assets": "Small assets",
+      "vat_coefficients": "VAT deduction coefficient",
       "reconciliation": "Reconciliation",
       "payroll_preflight": "Payroll pre-transfer check",
       "payroll_profile": "Payroll import profile",
@@ -25336,6 +25337,7 @@
       "payroll_posting_map": "Posting rules from the previous program"
     },
     "counts": {
+      "settled": "years settled",
       "months": "months",
       "payslips": "payslips",
       "enforcement_cases": "garnishment cases",
@@ -26885,6 +26887,7 @@
       "assets": "Fixed assets",
       "reconciliation": "Reconciliation",
       "small_assets": "Small assets",
+      "vat_coefficients": "VAT deduction coefficient",
       "payroll": "Employees and payroll",
       "tax_return": "Tax base adjustments from the PREMIER return",
       "verification": "Check against PREMIER filings",
@@ -26893,6 +26896,7 @@
       "unexpected": "Unexpected error"
     },
     "counts": {
+      "settled": "years settled",
       "created": "created",
       "existing": "already migrated",
       "entries": "entries",

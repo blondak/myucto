@@ -29,8 +29,13 @@ final class PartnerImporter
     public const STEP_PARTNERS = 'partners';
     public const STEP_POSTING_RULES = 'posting_rules';
 
-    /** @var array{currency_id:int,country_id:int}|null */
-    private ?array $defaults = null;
+    /**
+     * Výchozí měna a země nových kontaktů po firmách: jeden proces (job, testy) převádí
+     * i víc firem a měna je řádek číselníku konkrétní firmy.
+     *
+     * @var array<int,array{currency_id:int,country_id:int}>
+     */
+    private array $defaults = [];
 
     /** @var array<string,int|null> */
     private array $countryIds = [];
@@ -277,8 +282,8 @@ final class PartnerImporter
     /** @return array{currency_id:int,country_id:int} */
     private function defaults(int $supplierId): array
     {
-        if ($this->defaults !== null) {
-            return $this->defaults;
+        if (isset($this->defaults[$supplierId])) {
+            return $this->defaults[$supplierId];
         }
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare('SELECT default_currency_id, country_id FROM supplier WHERE id = ?');
@@ -290,6 +295,6 @@ final class PartnerImporter
             $c->execute([$supplierId]);
             $currencyId = (int) $c->fetchColumn();
         }
-        return $this->defaults = ['currency_id' => $currencyId, 'country_id' => $this->countryId('CZ') ?? (int) ($row['country_id'] ?? 0)];
+        return $this->defaults[$supplierId] = ['currency_id' => $currencyId, 'country_id' => $this->countryId('CZ') ?? (int) ($row['country_id'] ?? 0)];
     }
 }

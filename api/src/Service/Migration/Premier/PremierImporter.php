@@ -11,6 +11,7 @@ use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\AccountingUnitSwitch;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter as PohodaPartners;
+use MyInvoice\Service\Migration\Shared\VatCoefficientSeeder;
 use PDO;
 
 /**
@@ -20,7 +21,7 @@ use PDO;
  * Pořadí kroků: osnova → období, počáteční stavy a deník → režim účetní jednotky →
  * adresář → přijaté a vydané faktury → doklady s DPH mimo faktury a pokladna → banka →
  * vazby dokladů na deník a úhrady → majetek → zaměstnanci a mzdy (bez účetních zápisů,
- * ty jsou v deníku) → rekonciliace → kontrola proti podáním KH a DPPO uloženým v PREMIER
+ * ty jsou v deníku) → koeficient krácení odpočtu (§ 76) → rekonciliace → kontrola proti podáním KH a DPPO uloženým v PREMIER
  * → uzávěrka. Automatika účtování je po celou dobu vypnutá ({@see AccountingUnitSwitch}).
  *
  * **Zkouška nanečisto** běží stejným kódem v jedné transakci, která se na konci vrátí.
@@ -54,6 +55,7 @@ final class PremierImporter
         private readonly PremierVerifier $verifier,
         private readonly ClosingImporter $closing,
         private readonly TableStatistics $statistics,
+        private readonly VatCoefficientSeeder $coefficients,
     ) {}
 
     /** @return list<string> */
@@ -73,6 +75,7 @@ final class PremierImporter
             AssetImporter::STEP,
             SmallAssetImporter::STEP,
             PayrollImporter::STEP,
+            VatCoefficientSeeder::STEP,
             PremierReconciler::STEP,
             TaxReturnImporter::STEP,
             PremierVerifier::STEP,
@@ -274,6 +277,13 @@ final class PremierImporter
             AssetImporter::STEP => fn () => $this->assets->import($ctx),
             SmallAssetImporter::STEP => fn () => $this->smallAssets->import($ctx),
             PayrollImporter::STEP => fn () => $this->payroll->import($ctx),
+            VatCoefficientSeeder::STEP => fn () => $this->coefficients->seedConverted(
+                $ctx->supplierId,
+                array_keys($this->map->all($ctx->supplierId, PremierImportRepository::KIND_PERIOD)),
+                [$ctx->year],
+                $ctx->userId,
+                $ctx->protocol,
+            ),
             PremierReconciler::STEP => fn () => $this->reconciler->run($ctx),
             TaxReturnImporter::STEP => fn () => $this->taxReturn->import($ctx),
             PremierVerifier::STEP => fn () => $this->verifier->run($ctx),

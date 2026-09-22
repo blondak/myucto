@@ -428,6 +428,47 @@ final class PremierImportTest extends TestCase
         self::assertSame(4, $this->rows('purchase_invoices', $supplierId), $this->explain($protocol));
     }
 
+    /**
+     * Tři pokladní doklady PP 1 v jednom roce, dva i ze stejného dne: poslední kandidát čísla
+     * (řada, číslo a datum) je obsazený, doklad dostane příponu a rok se převede celý.
+     */
+    public function testDuplicateCashNumberOnTheSameDayGetsSuffix(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(false, ['cash_duplicate' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertSame(
+            [['PP1/2025', '5000.00'], ['PP1/2025-01-02', '100.00'], ['PP1/2025-01-02-2', '200.00']],
+            $this->fetch("SELECT doc_number, total_amount FROM cash_documents WHERE supplier_id = ? AND doc_number LIKE 'PP1/%' ORDER BY id", $supplierId)
+        );
+        self::assertContains('cash_number_duplicate', $this->messageCodes($protocol));
+        $this->assertReconciled($protocol, SyntheticPremierBackup::YEAR1);
+    }
+
+    /**
+     * Krácený odpočet (§ 76): první převedený rok dostane zálohový koeficient ze svých
+     * dokladů, převod dalšího roku ho vypořádá a nový rok ho převezme - jako u Money S3.
+     */
+    public function testReducedDeductionGetsCoefficientSoTheReturnCanBeBuilt(): void
+    {
+        $supplierId = $this->supplier();
+        $backup = $this->backup(false, ['reduced_deduction' => true]);
+        $first = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        self::assertGreaterThan(0, $this->rows('purchase_invoices', $supplierId, "vat_deduction = 'reduced'"));
+        self::assertContains('provisional_from_own_year', $this->messageCodes($first));
+        $this->dph->build($supplierId, SyntheticPremierBackup::YEAR1, 3, 'monthly');
+
+        $second = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR2, false);
+        self::assertFalse($second->hasErrors(), $this->explain($second));
+        self::assertSame(
+            [[(string) SyntheticPremierBackup::YEAR1, '1']],
+            $this->fetch('SELECT year, settled_at IS NOT NULL FROM vat_coefficients WHERE supplier_id = ? ORDER BY year', $supplierId)
+        );
+        $this->dph->build($supplierId, SyntheticPremierBackup::YEAR2, 3, 'monthly');
+    }
+
     private function assertReconciled(ImportProtocol $protocol, int $year): void
     {
         $reconciliation = $protocol->get('reconciliation');

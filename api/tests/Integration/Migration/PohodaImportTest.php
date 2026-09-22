@@ -160,6 +160,70 @@ final class PohodaImportTest extends TestCase
         return [];
     }
 
+    /**
+     * Krácený odpočet (§ 76): převod nastaví koeficient stejně jako u Money S3, jinak by
+     * přiznání s ř. 52 nešlo sestavit (vat_coefficient_missing).
+     */
+    public function testReducedDeductionGetsCoefficientSoTheReturnCanBeBuilt(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withReducedDeduction($dir);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, "vat_deduction = 'reduced'"));
+        self::assertContains('provisional_from_own_year', $this->messageCodes($protocol));
+
+        $coefficient = $this->db->pdo()->prepare('SELECT provisional_percent, settled_at FROM vat_coefficients WHERE supplier_id = ? AND year = ?');
+        $coefficient->execute([$supplierId, SyntheticPohodaExport::YEAR]);
+        self::assertSame(['100', null], array_values(array_map(static fn ($v) => $v === null ? null : (string) $v, $coefficient->fetch(\PDO::FETCH_ASSOC) ?: [])));
+
+        $return = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 1, 'monthly');
+        self::assertEqualsWithDelta(105.0, (float) ($return['summary']['lines']['40k']['vat'] ?? 0), 0.005, 'Krácený odpočet ř. 40 (sloupec krácený).');
+    }
+
+    /** Členění s ř. 47 (pořízení majetku): položky nesou příznak a přiznání má ř. 47. */
+    public function testFixedAssetClassificationFillsLine47(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withFixedAssetPurchase($dir);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, "vendor_invoice_number = 'D-2026-7' AND is_fixed_asset = 1"));
+
+        $return = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 1, 'monthly');
+        self::assertEqualsWithDelta(500.0, (float) ($return['summary']['lines']['47']['base'] ?? 0), 0.005, json_encode($return['summary']['lines']));
+        self::assertEqualsWithDelta(105.0, (float) ($return['summary']['lines']['40']['vat'] ?? 0), 0.005);
+    }
+
+    /** Vydaný doklad v tuzemském přenesení daňové povinnosti (ř. 25) nese příznak na hlavičce. */
+    public function testDomesticReverseSaleIsFlagged(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withDomesticReverseSale($dir);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, $this->rows('invoices', $supplierId, sprintf("varsymbol = '%s' AND vat_classification_code = '25s' AND reverse_charge = 1 AND status <> 'draft'", SyntheticPohodaExport::REVERSE_SALE)), $this->explain($protocol));
+        self::assertSame(0, $this->rows('invoices', $supplierId, sprintf("varsymbol <> '%s' AND reverse_charge = 1", SyntheticPohodaExport::REVERSE_SALE)));
+    }
+
+    /** Dvě firmy v jednom procesu: kontakty každé dostanou měnu z číselníku své firmy. */
+    public function testPartnerCurrencyBelongsToItsOwnSupplier(): void
+    {
+        foreach ([$this->supplier(), $this->supplier()] as $supplierId) {
+            $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open(SyntheticPohodaExport::write($this->tmp . '/' . $supplierId)), false);
+            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+            self::assertGreaterThan(0, $this->rows('clients', $supplierId));
+            self::assertSame(0, $this->rows('clients', $supplierId,
+                'NOT EXISTS (SELECT 1 FROM currencies cu WHERE cu.id = clients.currency_default_id AND cu.supplier_id = clients.supplier_id)'));
+        }
+    }
+
     public function testDryRunLeavesNothingBehind(): void
     {
         $supplierId = $this->supplier();

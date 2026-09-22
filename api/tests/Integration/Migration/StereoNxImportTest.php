@@ -403,6 +403,34 @@ final class StereoNxImportTest extends TestCase
         self::assertEqualsWithDelta(21.0, array_sum(array_column($ledger, 'vat_czk')), 0.005);
     }
 
+    /** Existující kontakt s IČO uloženým v jiném tvaru (mezery) se spáruje, druhý nevznikne. */
+    public function testExistingClientWithDifferentlyFormattedIcoIsReused(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO clients (supplier_id, company_name, ic, dic, street, city, zip, country_id, currency_default_id, is_customer, is_vendor, is_vat_payer, auto_send_reminders)
+            VALUES (?, 'Odběratel už v MyÚčtu', '111 11 111', 'CZ11111111', 'Testovací 1', 'Vzorov', '10000',
+                    (SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1), (SELECT default_currency_id FROM supplier WHERE id = ?), 1, 0, 1, 0)")->execute([$this->supplierId, $this->supplierId]);
+        $existing = (int) $pdo->lastInsertId();
+
+        $report = $this->importer->run($this->backup(), $this->supplierId, $this->userId, false);
+        self::assertTrue($report['ok'], json_encode($report, JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, (int) $this->scalar("SELECT COUNT(*) FROM clients WHERE supplier_id = ? AND company_name = 'Syntetický odběratel'", [$this->supplierId]));
+        self::assertSame($existing, (int) $this->scalar("SELECT client_id FROM invoices WHERE supplier_id = ? AND varsymbol LIKE 'VF%' LIMIT 1", [$this->supplierId]));
+    }
+
+    /** Krácený odpočet (§ 76): převod nastaví koeficient, jinak by přiznání s ř. 52 nešlo sestavit. */
+    public function testReducedDeductionGetsCoefficientSoTheReturnCanBeBuilt(): void
+    {
+        $tables = SyntheticStereoNxTables::tables();
+        $tables['Lsdph'][1]['Kraceni'] = true;
+        $report = $this->importer->run($this->backup($tables), $this->supplierId, $this->userId, false);
+        self::assertTrue($report['ok'], json_encode($report, JSON_UNESCAPED_UNICODE));
+        self::assertSame('reduced', $this->scalar("SELECT vat_deduction FROM purchase_invoices WHERE supplier_id = ? AND varsymbol = 'PF-1'", [$this->supplierId]));
+        self::assertContains('provisional_from_own_year', array_column($report['warnings'], 'code'));
+        $return = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($this->supplierId, 2025, 3, 'monthly');
+        self::assertEqualsWithDelta(21.0, (float) ($return['summary']['lines']['40k']['vat'] ?? 0), 0.005);
+    }
+
     public function testFailureAfterDocumentWritesRollsBackAllObjects(): void
     {
         $tables = SyntheticStereoNxTables::tables();

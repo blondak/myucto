@@ -13,6 +13,7 @@ use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
 use MyInvoice\Service\Migration\Shared\MigratedPurchaseDocument;
 use MyInvoice\Service\Migration\Shared\MigrationHomeCurrency;
 use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
+use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier;
 use MyInvoice\Service\Stats\StatsRecomputer;
 
 /**
@@ -26,11 +27,16 @@ use MyInvoice\Service\Stats\StatsRecomputer;
  *
  * Doklad zaúčtovaný deníkem z Money ({@see DocumentLinker}) má stav „zaúčtováno" nebo
  * „uhrazeno". **Doklad, jehož daňovou povahu z Money spolehlivě neznáme, se převezme
- * jako koncept k ruční kontrole** ({@see classify()}): zálohové a jiné než běžné
- * faktury, dobropisy, stornované a neúčtované doklady, cizí měna a členění DPH mimo
- * tuzemské řádky přiznání. Koncept do DPH evidence ani do účtování nevstoupí, dokud ho
- * účetní neopraví a nepotvrdí — hádat by znamenalo zálohu vedle konečné faktury
- * započíst do DPH dvakrát nebo přenesenou daňovou povinnost vykázat jako tuzemské plnění.
+ * jako koncept k ruční kontrole** ({@see classify()}): neznámý druh dokladu, dobropis
+ * zálohy, stornované a neúčtované doklady a členění DPH, které převod nezná. Koncept do
+ * DPH evidence ani do účtování nevstoupí, dokud ho účetní neopraví a nepotvrdí — hádat
+ * by znamenalo zálohu vedle konečné faktury započíst do DPH dvakrát nebo přenesenou
+ * daňovou povinnost vykázat jako tuzemské plnění.
+ *
+ * **Doklad v cizí měně koncept není**: Money drží základ i daň po sazbách v Kč (kurzem,
+ * kterým doklad zaúčtovalo a vykázalo v přiznání), převezme se tedy jako daňový doklad
+ * v Kč bez kurzu. Částky DPH jsou tak přesně ty, které Money vykázalo; přepočet
+ * z cizí měny by je jen rozházel o zaokrouhlení kurzu.
  */
 final class InvoiceImporter
 {
@@ -141,6 +147,7 @@ final class InvoiceImporter
             if ($duplicate->fetchColumn() !== false) {
                 $vendorNumber = mb_substr($vendorNumber . ' (' . $docNo . ')', 0, 50);
             }
+            $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], $item['rate'], $item['vat'], $item['code'] ?? null), $amounts['items']);
             try {
                 $id = $this->writer->insertPurchase(new MigratedPurchaseDocument(
                     supplierId: $ctx->supplierId,
@@ -180,6 +187,7 @@ final class InvoiceImporter
                     // Čárový kód z Money je jistý klíč pro párování naskenovaných příloh.
                     externalBarcode: mb_substr(trim((string) ($r['BarCode'] ?? '')), 0, 64) ?: null,
                     vatClassificationCode: $class['code'],
+                    isFixedAsset: MigratedDocumentItem::wholeDocumentFixedAsset($assets),
                 ));
             } catch (\PDOException $e) {
                 if ((string) $e->getCode() !== '23000') {
@@ -195,6 +203,7 @@ final class InvoiceImporter
                     1.0, 'ks', $item['base'], $item['rate_id'], $item['rate'],
                     $item['base'], $item['vat'], round($item['base'] + $item['vat'], 2),
                     $item['code'] ?? $class['code'],
+                    $assets[$i],
                 );
             }
             $this->writer->insertPurchaseItems($id, $items);
@@ -289,8 +298,9 @@ final class InvoiceImporter
                     exchangeRate: null,
                     // Položky vznikají ze základů po sazbách - ceny jsou vždy bez DPH.
                     pricesIncludeVat: false,
-                    // Členění přenesené povinnosti na výstupu vede doklad do konceptu (classify()).
-                    reverseCharge: false,
+                    // Tuzemské přenesení daňové povinnosti (19Ř25, 19Ř25_S) nese kód zařazení
+                    // i příznak hlavičky; jiné členění přenesené povinnosti jde do konceptu (classify()).
+                    reverseCharge: VatReturnLineClassifier::isDomesticReverseSale([$class['code']]),
                     noteAboveItems: mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
                     noteBelowItems: self::note($docNo, $class['reasons']),
                     clientSnapshot: self::snapshotJson($snapshot),
@@ -406,7 +416,7 @@ final class InvoiceImporter
                 currencyId: $currencyId,
                 exchangeRate: null,
                 pricesIncludeVat: false,
-                reverseCharge: false,
+                reverseCharge: VatReturnLineClassifier::isDomesticReverseSale([$resolved['code']]),
                 noteAboveItems: mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
                 noteBelowItems: 'Převzato z Money S3, ostatní pohledávka ' . $docNo,
                 clientSnapshot: self::snapshotJson($snapshot),
@@ -468,13 +478,16 @@ final class InvoiceImporter
      * Doklad v cizí měně má v Money základ i daň v Kč, převezme se tak.
      *
      * @param array<string,mixed> $r
-     * @return array{reasons:list<string>,vat_deduction:string,code:?string,kind:string}
+     * `fixed_asset` = odpočet u pořízení majetku (ř. 47, členění Money s příponou M/P/MK/PK).
+     *
+     * @return array{reasons:list<string>,vat_deduction:string,code:?string,kind:string,fixed_asset:bool}
      */
     public static function classify(array $r, bool $issued, float $vat): array
     {
         $reasons = [];
         $deduction = 'full';
         $vatCode = null;
+        $asset = false;
         $kind = 'invoice';
         $druh = strtoupper(trim((string) ($r['Druh'] ?? '')));
         $advance = in_array($druh, self::ADVANCE_KINDS, true);
@@ -499,7 +512,7 @@ final class InvoiceImporter
             $reasons[] = 'v Money označený „neúčtovat“';
         }
         if ($advance) {
-            return ['reasons' => $reasons, 'vat_deduction' => $deduction, 'code' => null, 'kind' => $kind];
+            return ['reasons' => $reasons, 'vat_deduction' => $deduction, 'code' => null, 'kind' => $kind, 'fixed_asset' => false];
         }
 
         $code = trim((string) ($r['KodDPH'] ?? ''));
@@ -525,8 +538,9 @@ final class InvoiceImporter
         } else {
             $deduction = $resolved['deduction'];
             $vatCode = $resolved['code'];
+            $asset = !$issued && $resolved['fixed_asset'];
         }
-        return ['reasons' => $reasons, 'vat_deduction' => $deduction, 'code' => $vatCode, 'kind' => $kind];
+        return ['reasons' => $reasons, 'vat_deduction' => $deduction, 'code' => $vatCode, 'kind' => $kind, 'fixed_asset' => $asset];
     }
 
     /**
@@ -582,7 +596,7 @@ final class InvoiceImporter
      * tuzemský přenos. Faktura sama má členění mimo přiznání; výstup (ř. 3–13) a zrcadlový
      * odpočet (ř. 43/44) nese interní doklad. Faktura se pozná z popisu („RCH k PFZ…").
      *
-     * @return array<string,array<int,array{key:string,doc:string,date:?string,lines:list<array{base:float,rate:float,code:string}>,deduction:string,error:?string}>>
+     * @return array<string,array<int,array{key:string,doc:string,date:?string,lines:list<array{base:float,rate:float,code:string}>,deduction:string,fixed_asset:bool,error:?string}>>
      *   číslo faktury (''= nepoznaná) => rok interního dokladu => samovyměření
      */
     private function selfAssessments(ImportContext $ctx): array
@@ -616,7 +630,7 @@ final class InvoiceImporter
                 continue;
             }
             $entry = ['key' => $year . '|' . $docNo, 'doc' => $docNo, 'date' => self::date($h, ['DatUplDPH', 'DatPln', 'DatUcPr']),
-                'lines' => [], 'deduction' => 'full', 'error' => null];
+                'lines' => [], 'deduction' => 'full', 'fixed_asset' => false, 'error' => null];
             foreach ($output as $l) {
                 $resolved = Ms3VatCode::reverseCharge((string) $l['Cleneni'], $mirror, (string) ($l['PredmPln'] ?? ''));
                 if ($resolved === null) {
@@ -629,6 +643,7 @@ final class InvoiceImporter
                     'code' => $resolved['code'],
                 ];
                 $entry['deduction'] = $resolved['deduction'];
+                $entry['fixed_asset'] = $resolved['fixed_asset'];
             }
             // „RCH k PFZ190001" — první číslo dokladu v popisu (písmena + číslice).
             $ref = preg_match('/\b([A-Z]{1,5}\d{4,})\b/u', (string) ($h['Popis'] ?? ''), $m) === 1 ? $m[1] : '';
@@ -663,7 +678,7 @@ final class InvoiceImporter
      *
      * @param array<string,mixed> $sa
      * @param array{items:list<array<string,mixed>>,base:float,vat:float,total:float,rounding:float} $amounts
-     * @param array{reasons:list<string>,vat_deduction:string,code:?string,kind:string} $class
+     * @param array{reasons:list<string>,vat_deduction:string,code:?string,kind:string,fixed_asset:bool} $class
      * @return array{0:array<string,mixed>,1:array<string,mixed>}
      */
     private function applySelfAssessment(array $sa, array $amounts, array $class, string $taxDate): array
@@ -685,6 +700,7 @@ final class InvoiceImporter
         $amounts['rounding'] = 0.0;
         $class['vat_deduction'] = $sa['deduction'];
         $class['code'] = null;
+        $class['fixed_asset'] = $sa['fixed_asset'];
         return [$amounts, $class];
     }
 

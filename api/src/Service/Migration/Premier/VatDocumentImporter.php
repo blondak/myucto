@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Premier;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\AccountCode;
+use MyInvoice\Service\Migration\Shared\MigratedCashNumber;
 
 /**
  * Doklady deníku PREMIER, které nejsou fakturou: pokladna a doklady s DPH mimo faktury.
@@ -33,6 +34,7 @@ final class VatDocumentImporter
         private readonly Connection $db,
         private readonly PremierImportRepository $map,
         private readonly InvoiceImporter $invoices,
+        private readonly MigratedCashNumber $cashNumbers,
     ) {}
 
     public function import(PremierContext $ctx, PremierDocuments $documents): void
@@ -178,12 +180,10 @@ final class VatDocumentImporter
         $first = $rows[0];
         $isOut = $movement < 0;
         $pdo = $this->db->pdo();
-        $number = mb_substr($first['series'] . $first['number'] . '/' . $ctx->year, 0, 30);
-        $taken = $pdo->prepare('SELECT 1 FROM cash_documents WHERE supplier_id = ? AND doc_number = ? LIMIT 1');
-        $taken->execute([$ctx->supplierId, $number]);
-        if ($taken->fetchColumn() !== false) {
-            $number = mb_substr($first['series'] . $first['number'] . '/' . $first['date'], 0, 30);
-        }
+        $number = $this->cashNumbers->allocate($ctx->supplierId, [
+            $first['series'] . $first['number'] . '/' . $ctx->year,
+            $first['series'] . $first['number'] . '/' . $first['date'],
+        ], $p, self::STEP, $first['series'] . ' ' . $first['number'] . ' z ' . $first['date']);
         $partnerDic = $first['partner_dic'] !== '' ? mb_substr($first['partner_dic'], 0, 20) : null;
         $pdo->prepare(
             'INSERT INTO cash_documents

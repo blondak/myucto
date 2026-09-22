@@ -74,8 +74,8 @@ final class PohodaExportTest extends TestCase
         $vat = PohodaVat::fromExport(PohodaExport::open(SyntheticPohodaExport::write($this->tmp)));
         self::assertSame(['in_return' => true, 'code' => null], $vat->sale('UD', 21.0));
         self::assertSame(['in_return' => false, 'code' => null], $vat->sale('UN', 0.0));
-        self::assertSame(['in_return' => true, 'deduction' => 'full', 'reverse' => false], $vat->purchase('PD'));
-        self::assertSame(['in_return' => true, 'deduction' => 'full', 'reverse' => true], $vat->purchase('PDslRegEU'));
+        self::assertSame(['in_return' => true, 'deduction' => 'full', 'reverse' => false, 'fixed_asset' => false], $vat->purchase('PD'));
+        self::assertSame(['in_return' => true, 'deduction' => 'full', 'reverse' => true, 'fixed_asset' => false], $vat->purchase('PDslRegEU'));
         self::assertSame('24e', $vat->selfAssessmentCode('DDslRegEU'));
         self::assertTrue($vat->forcesA5('UDA5'));
         self::assertFalse($vat->forcesA5('UD'));
