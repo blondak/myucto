@@ -49,5 +49,9 @@ final class PremierPayrollDeductionsTest extends TestCase
             array_intersect_key($result['deductions'][0]['recipient'], array_flip(['name', 'account', 'bank_code', 'constant_symbol'])));
 
         self::assertSame([], PremierPayrollDeductions::read($backup, [], '2026-01', 2026)['deductions'], 'Srážky vztahů, které převod nezakládá, se nečtou.');
+
+        $ended = array_map(static fn (array $r): array => $r['key'] === '5' ? ['end' => '2025-12-31'] + $r : $r, $relations);
+        $afterEnd = PremierPayrollDeductions::read($backup, $ended, '2026-01', 2026);
+        self::assertSame([[], 3], [$afterEnd['deductions'], $afterEnd['ended']], 'Po skončení vztahu se nesráží, i když karta srážky konec nemá.');
     }
 }

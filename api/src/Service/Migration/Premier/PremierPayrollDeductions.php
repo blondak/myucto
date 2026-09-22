@@ -105,7 +105,10 @@ final class PremierPayrollDeductions
             }
             $from = self::month($row['S_ROK_OD'] ?? null, $row['S_MES_OD'] ?? null);
             $to = self::month($row['S_ROK_DO'] ?? null, $row['S_MES_DO'] ?? null);
-            if (($from !== null && $from > $lastPeriod) || ($to !== null && $to < $lastPeriod)) {
+            // Srážka skončená dřív, nebo vztah skončený dřív (u skončeného vztahu se už nesráží,
+            // i když karta srážky konec nemá).
+            $relationEnd = is_string($relation['end'] ?? null) ? substr($relation['end'], 0, 7) : null;
+            if (($from !== null && $from > $lastPeriod) || ($to !== null && $to < $lastPeriod) || ($relationEnd !== null && $relationEnd < $lastPeriod)) {
                 $ended++;
                 continue;
             }
