@@ -551,36 +551,14 @@ final class PayrollImporter
     private static function referenceTotals(array $relation, string $period, array $m, int $employeeId, int $employmentId, ?string $activity): PayrollMigrationReferenceTotals
     {
         $end = is_string($relation['end']) && $relation['end'] >= (string) $relation['start'] ? $relation['end'] : null;
-        return new PayrollMigrationReferenceTotals(
+        return PayrollMigrationReferenceTotals::fromAmounts(
             $period,
             'premier:' . $relation['person_key'],
             'premier:' . $relation['key'],
             $employeeId,
             $employmentId,
-            self::minor($m['gross']),
-            self::minor($m['net']),
-            self::minor($m['social_base']),
-            self::minor($m['health_base']),
-            self::minor($m['employee_social']),
-            self::minor($m['employee_health']),
-            self::minor($m['employer_social']),
-            self::minor($m['employer_health']),
-            self::minor($m['advance_tax']),
-            self::minor($m['withholding_tax']),
-            self::minor($m['tax_bonus']),
-            new PayrollMigrationTakeoverFacts(
-                relationshipStartDate: $relation['start'],
-                relationshipEndDate: $end,
-                relationType: $relation['relation_type'],
-                activityCode: $activity,
-                pensionParticipation: $m['pension_participation'],
-                insuranceDays: $m['insurance_days'],
-                excludedDays: $m['excluded_days'],
-                workedDaysHundredths: (int) round($m['worked_days'] * 100),
-                workedMinutes: $m['worked_minutes'],
-                deductionsMinor: self::minor($m['deductions']),
-                netPayableMinor: self::minor($m['net_payable']),
-            ),
+            $m,
+            PayrollMigrationTakeoverFacts::fromMonth($m, $relation['start'], $end, $relation['relation_type'], $activity),
         );
     }
 
