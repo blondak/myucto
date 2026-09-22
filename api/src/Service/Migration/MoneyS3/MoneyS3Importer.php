@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\MoneyS3;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TableStatistics;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use PDO;
@@ -48,6 +49,7 @@ final class MoneyS3Importer
         private readonly VatCoefficientSeeder $coefficients,
         private readonly HistoricalYearCloser $closer,
         private readonly MoneyS3Reconciler $reconciler,
+        private readonly TableStatistics $statistics,
     ) {}
 
     /** @return list<string> klíče kroků v pořadí, v jakém běží */
@@ -231,6 +233,9 @@ final class MoneyS3Importer
                 }
                 $ctx->report($key, $index++, $total);
                 $protocol->begin($key);
+                if (!$dryRun && $key === MoneyS3Reconciler::STEP) {
+                    $this->statistics->refreshAfterImport(['money_s3_import_map']);
+                }
                 try {
                     // Uzávěrka si transakce řídí sama (každý krok průvodce je atomický);
                     // obalit ji by znamenalo, že se chyba uprostřed kroku nevrátí.

@@ -846,7 +846,8 @@
         "1859_premier_migration.sql",
         "1860_dimensions.sql",
         "1861_dimension_defaults.sql",
-        "1862_bank_posting_rule_mode_set_manually.sql"
+        "1862_bank_posting_rule_mode_set_manually.sql",
+        "1863_payment_matches_supplier_doc_index.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -6681,7 +6682,8 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "idx_pm_invoice": "BTREE (invoice_id)",
                 "idx_pm_purchase": "BTREE (purchase_invoice_id)",
-                "idx_pm_supplier": "BTREE (supplier_id)",
+                "idx_pm_supplier_invoice": "BTREE (supplier_id, invoice_id)",
+                "idx_pm_supplier_purchase": "BTREE (supplier_id, purchase_invoice_id)",
                 "idx_pm_tx": "BTREE (bank_transaction_id)",
                 "idx_pm_user": "BTREE (matched_by_user_id)"
             },

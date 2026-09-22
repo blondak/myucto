@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Export\Instance;
 
 use MyInvoice\Infrastructure\Database\SchemaMetadataProvider;
+use MyInvoice\Infrastructure\Database\TableStatistics;
 use PDO;
 use ZipArchive;
 
@@ -100,6 +101,7 @@ final class CompleteInstanceRestoreService
                         throw new InstanceExportException('restore_fk_invalid', 'Obnova vytvořila neplatné vazby: ' . implode('; ', $violations));
                     }
                     $this->pdo->commit();
+                    TableStatistics::analyze($this->pdo, array_map('strval', array_keys($tables)));
                     return [
                         'manifest' => $manifest,
                         'counts' => $counts,
