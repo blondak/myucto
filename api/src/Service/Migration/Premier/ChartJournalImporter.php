@@ -114,6 +114,15 @@ final class ChartJournalImporter
     {
         $p = $ctx->protocol;
         $year = $ctx->year;
+        $existing = $this->map->all($ctx->supplierId, PremierImportRepository::KIND_JOURNAL_ENTRY);
+        $legacy = self::legacyBankDocuments($ctx, $existing);
+        if ($legacy > 0) {
+            // Starší verze skládala bankovní výpis do jednoho zápisu za den. Nové zápisy po
+            // pohybech by se k nim přidaly a banka by byla v deníku dvakrát.
+            $p->error(self::STEP_JOURNAL, 'legacy_bank_entries', 'Firma byla převedena starší verzí převodu; pro rozdělení bankovních zápisů převeďte znovu do čisté firmy.',
+                ['year' => $year, 'documents' => $legacy]);
+            return;
+        }
         $period = $this->ensurePeriod($ctx);
         $ctx->period = $period;
         if ($period['locked']) {
@@ -127,7 +136,6 @@ final class ChartJournalImporter
             $p->info(self::STEP_JOURNAL, 'year_end_closing_skipped', "Uzávěrkové zápisy z PREMIER ({$closing} řádků na 702/710) se nepřebírají, rok uzavře průvodce uzávěrkou MyÚčta.");
         }
 
-        $existing = $this->map->all($ctx->supplierId, PremierImportRepository::KIND_JOURNAL_ENTRY);
         $moneyCurrencies = self::moneyAccountCurrencies($ctx);
         $stats = ['year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0, 'skipped_rows' => 0, 'swapped_rows' => 0];
         $now = date('Y-m-d H:i:s');
@@ -301,6 +309,24 @@ final class ChartJournalImporter
         ], $lines);
         $this->map->put($ctx->supplierId, PremierImportRepository::KIND_JOURNAL_ENTRY, $key, $entryId, $ctx->runId);
         $p->setCount(self::STEP_JOURNAL, 'opening_accounts', count($balances));
+    }
+
+    /**
+     * Bankovní doklady roku, které má firma v mapě převodu jako jeden zápis za doklad
+     * (převod starší verzí) - nové zápisy po pohybech by je zdvojily.
+     *
+     * @param array<string,int> $existing
+     */
+    private static function legacyBankDocuments(PremierContext $ctx, array $existing): int
+    {
+        $legacy = [];
+        foreach (array_keys($ctx->journal->documents($ctx->year)) as $docKey) {
+            $group = PremierJournal::groupKey((string) $docKey);
+            if ($group !== $docKey && isset($existing[$ctx->year . '|' . $group])) {
+                $legacy[$group] = true;
+            }
+        }
+        return count($legacy);
     }
 
     /** Při uzavřeném roce se aspoň naplní mapa zápisů z dřívějšího převodu (vazby dokladů). */

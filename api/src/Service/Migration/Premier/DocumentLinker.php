@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Premier;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Accounting\Activation\OpeningBalanceDocuments;
+use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use PDO;
 
@@ -20,12 +21,16 @@ use PDO;
  *
  * Úhrady vede PREMIER vazbou řádku deníku na fakturu (`VAZBY`), párování je proto přesné:
  * bankovní pohyb z navázaného řádku = úhrada faktury, pokladní doklad s navázaným řádkem
- * hradí fakturu.
+ * hradí fakturu. Zápis úhrady bez pohybu peněz (zápočet, haléřový a kurzový rozdíl,
+ * odpočet zálohy) dostane vazbu na fakturu s poznámkou {@see PAYMENT_NOTE}.
  */
 final class DocumentLinker
 {
     public const STEP_LINK = 'link';
     public const STEP_PAYMENTS = 'payments';
+
+    /** Vazba zápisu úhrady na fakturu - není to zaúčtování faktury (rekonciliace a sirotci ji vynechávají). */
+    public const PAYMENT_NOTE = 'Úhrada převzatá z PREMIER';
 
     public function __construct(
         private readonly Connection $db,
@@ -57,22 +62,22 @@ final class DocumentLinker
                 $p->count(self::STEP_LINK, $this->attach($ctx, $type, $type, $docId, $entryId) ? 'linked' : 'existing');
                 continue;
             }
-            if (isset($ctx->vatDocuments[$docKey])) {
-                $d = $ctx->vatDocuments[$docKey];
+            // Zdroj zápisu dostane první navázaný doklad v pořadí doklad s DPH → bankovní
+            // pohyb → pokladní doklad ({@see attach()} přepíše jen zápis bez zdroje). Doklad
+            // s DPH i pokladna vznikly z celého dokladu deníku, bankovní zápis je jeho část.
+            $group = PremierJournal::groupKey((string) $docKey);
+            if (isset($ctx->vatDocuments[$group])) {
+                $d = $ctx->vatDocuments[$group];
                 $p->count(self::STEP_LINK, $this->attach($ctx, $d['table'], $d['table'], $d['id'], $entryId) ? 'linked' : 'existing');
             }
-            if (isset($ctx->cashDocuments[$docKey])) {
-                $p->count(self::STEP_LINK, $this->attach($ctx, 'cash', 'cash', $ctx->cashDocuments[$docKey], $entryId, !isset($ctx->vatDocuments[$docKey])) ? 'linked' : 'existing');
-                continue;
-            }
-            $first = true;
             foreach ($rows as $r) {
                 $txId = $ctx->bankTransactions[$r['inter']] ?? null;
                 if ($txId !== null) {
-                    $new = $this->attach($ctx, 'bank', 'bank', $txId, $entryId, $first && !isset($ctx->vatDocuments[$docKey]));
-                    $first = false;
-                    $p->count(self::STEP_LINK, $new ? 'bank_linked' : 'existing');
+                    $p->count(self::STEP_LINK, $this->attach($ctx, 'bank', 'bank', $txId, $entryId) ? 'bank_linked' : 'existing');
                 }
+            }
+            if (isset($ctx->cashDocuments[$group]) && self::touchesCash($rows)) {
+                $p->count(self::STEP_LINK, $this->attach($ctx, 'cash', 'cash', $ctx->cashDocuments[$group], $entryId) ? 'linked' : 'existing');
             }
         }
         foreach (['invoice' => $ctx->issuedInvoices, 'purchase_invoice' => $ctx->purchaseInvoices] as $type => $ids) {
@@ -111,10 +116,22 @@ final class DocumentLinker
         );
         $cashLink = $pdo->prepare('SELECT invoice_id, purchase_invoice_id FROM cash_documents WHERE id = ? AND supplier_id = ?');
         $cashByRow = [];
-        foreach ($ctx->journal->documents($ctx->year) as $docKey => $rows) {
+        foreach ($ctx->journal->groups($ctx->year) as $docKey => $rows) {
             if (isset($ctx->cashDocuments[$docKey])) {
+                // Úhradou v hotovosti je jen řádek na pokladně; haléřové vyrovnání nebo řádek
+                // bankovního výpisu s výběrem hotovosti pokladní doklad k faktuře nepřiřadí.
                 foreach ($rows as $r) {
-                    $cashByRow[$r['inter']] = $ctx->cashDocuments[$docKey];
+                    if (self::touchesCash([$r])) {
+                        $cashByRow[$r['inter']] = $ctx->cashDocuments[$docKey];
+                    }
+                }
+            }
+        }
+        $entryByRow = [];
+        foreach ($ctx->journal->documents($ctx->year) as $docKey => $rows) {
+            foreach ($rows as $r) {
+                if (isset($ctx->entries[$docKey])) {
+                    $entryByRow[$r['inter']] = $ctx->entries[$docKey];
                 }
             }
         }
@@ -167,6 +184,12 @@ final class DocumentLinker
                     continue;
                 }
                 // Zápočet, haléřový nebo kurzový rozdíl, odpočet zálohy - úhrada bez pohybu peněz.
+                // Uhrazenost faktury nese už převod faktury (PremierDocuments), zápis úhrady
+                // dostane vazbu na fakturu, ať je vidět, čím byla vyrovnaná.
+                $entryId = $entryByRow[$rowInter] ?? null;
+                if ($entryId !== null) {
+                    $this->linkPayment($ctx, $isIssued ? 'invoice' : 'purchase_invoice', $docId, $entryId);
+                }
                 $this->map->put($ctx->supplierId, PremierImportRepository::KIND_PAYMENT, $mapKey, $docId, $ctx->runId);
                 $p->count(self::STEP_PAYMENTS, 'without_money');
             }
@@ -177,7 +200,9 @@ final class DocumentLinker
 
     /**
      * Pohyby, které PREMIER zaúčtoval bez faktury (poplatky, převody mezi vlastními účty,
-     * mzdy, odvody), jsou vyřízené - označí se jako ignorované s poznámkou.
+     * mzdy, odvody), jsou vyřízené - označí se jako ignorované s poznámkou. Jen pohyb
+     * s vlastním zápisem ({@see BankTransactionPostingScope}): ignorovaný pohyb Doúčtování
+     * nevidí, bez zápisu by tak zůstal nezaúčtovaný.
      */
     private function markBookedWithoutDocument(PremierContext $ctx): void
     {
@@ -187,7 +212,8 @@ final class DocumentLinker
                 "UPDATE bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
                     SET t.match_status = 'ignored', t.match_reason = 'premier_booked', t.matched_at = NOW(), t.matched_by = ?,
                         t.ignore_note = 'Zaúčtováno v PREMIER bez faktury (převod z PREMIER).'
-                  WHERE s.supplier_id = ? AND t.match_status = 'unmatched' AND t.id IN (" . implode(',', array_fill(0, count($chunk), '?')) . ')'
+                  WHERE s.supplier_id = ? AND t.match_status = 'unmatched' AND " . BankTransactionPostingScope::existsSql('s.supplier_id', 't.id') . '
+                    AND t.id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')'
             );
             $stmt->execute(array_merge([$ctx->userOrNull(), $ctx->supplierId], $chunk));
             $marked += $stmt->rowCount();
@@ -231,8 +257,8 @@ final class DocumentLinker
 
     private function hasLink(int $supplierId, string $type, int $id): bool
     {
-        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM journal_entry_document_links WHERE supplier_id = ? AND doc_type = ? AND doc_id = ? LIMIT 1');
-        $stmt->execute([$supplierId, $type, $id]);
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM journal_entry_document_links WHERE supplier_id = ? AND doc_type = ? AND doc_id = ? AND (note IS NULL OR note <> ?) LIMIT 1');
+        $stmt->execute([$supplierId, $type, $id, self::PAYMENT_NOTE]);
         return $stmt->fetchColumn() !== false;
     }
 
@@ -293,6 +319,24 @@ final class DocumentLinker
                 ->execute([$entryId, $docId, $ctx->supplierId]);
         }
         return $isNew;
+    }
+
+    private function linkPayment(PremierContext $ctx, string $docType, int $docId, int $entryId): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT IGNORE INTO journal_entry_document_links (supplier_id, entry_id, doc_type, doc_id, note, created_by) VALUES (?, ?, ?, ?, ?, ?)'
+        )->execute([$ctx->supplierId, $entryId, $docType, $docId, self::PAYMENT_NOTE, $ctx->userOrNull()]);
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private static function touchesCash(array $rows): bool
+    {
+        foreach ($rows as $r) {
+            if (str_starts_with($r['md'], '211') || str_starts_with($r['dal'], '211')) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Popisy zápisů doplní rebuilder o číslo dokladu a protistranu (stejně jako u POHODY). */

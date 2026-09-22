@@ -8,8 +8,14 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
+use MyInvoice\Service\Migration\Premier\DocumentLinker;
 use MyInvoice\Service\Migration\Premier\PremierBackup;
+use MyInvoice\Service\Migration\Premier\PremierContext;
+use MyInvoice\Service\Migration\Premier\PremierDocuments;
 use MyInvoice\Service\Migration\Premier\PremierImporter;
+use MyInvoice\Service\Migration\Premier\PremierJournal;
+use MyInvoice\Service\Migration\Premier\PremierReconciler;
+use MyInvoice\Service\Migration\Premier\PremierVat;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Tests\Fixtures\Premier\SyntheticPremierBackup;
 use PHPUnit\Framework\Attributes\Group;
@@ -26,6 +32,8 @@ final class PremierImportTest extends TestCase
 {
     private Connection $db;
     private PremierImporter $importer;
+    private PremierReconciler $reconciler;
+    private DocumentLinker $linker;
     private DphPriznaniBuilder $dph;
     private string $tmp = '';
     private int $userId = 0;
@@ -43,6 +51,8 @@ final class PremierImportTest extends TestCase
             $container = Bootstrap::buildApp()->getContainer();
             $this->db = $container->get(Connection::class);
             $this->importer = $container->get(PremierImporter::class);
+            $this->reconciler = $container->get(PremierReconciler::class);
+            $this->linker = $container->get(DocumentLinker::class);
             $this->dph = $container->get(DphPriznaniBuilder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -212,6 +222,145 @@ final class PremierImportTest extends TestCase
         self::assertSame($before, $this->snapshot($supplierId));
     }
 
+    /**
+     * Každý bankovní pohyb má vlastní zápis se zdrojem `bank` (MyÚčto jinak pohyb bere jako
+     * nezaúčtovaný a Doúčtování by ho zaúčtovalo podruhé), řádky výpisu bez pohybu jdou
+     * k pohybu hradícímu stejnou fakturu, kurzové přecenění EUR účtu pohyb nezakládá.
+     */
+    public function testEveryBankMovementHasOwnJournalEntry(): void
+    {
+        $supplierId = $this->supplier();
+        $backup = $this->backup(false, ['bank_split' => true]);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $this->assertReconciled($protocol, SyntheticPremierBackup::YEAR1);
+        $bankCheck = array_values(array_filter($protocol->get('reconciliation')[0]['checks'], static fn (array $c): bool => $c['key'] === 'bank_transactions_posted'));
+        self::assertSame([true, 12, 0], [$bankCheck[0]['ok'] ?? null, $bankCheck[0]['transactions'] ?? null, $bankCheck[0]['unposted'] ?? null]);
+        // 15 základních + 3 faktury, výpis BV 8 po pohybech (4 + zbytek), zápočet, dva EUR doklady.
+        self::assertSame(26, $protocol->get('journal')[0]['entries'], $this->explain($protocol));
+
+        $pdo = $this->db->pdo();
+        $count = static function (string $sql) use ($pdo, $supplierId): int {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$supplierId]);
+            return (int) $stmt->fetchColumn();
+        };
+        self::assertSame(12, $count('SELECT COUNT(*) FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id WHERE s.supplier_id = ?'));
+        self::assertSame(0, $count('SELECT COUNT(*) FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id WHERE s.supplier_id = ? AND t.amount = 0'),
+            'Kurzové přecenění EUR účtu (částka v měně 0) není pohyb.');
+        self::assertSame(0, $count("SELECT COUNT(*) FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+                                     WHERE s.supplier_id = ? AND NOT EXISTS (SELECT 1 FROM journal_entries e WHERE e.supplier_id = s.supplier_id
+                                       AND e.source_type = 'bank' AND e.source_id = t.id AND e.reversed_by IS NULL)"), 'Každý pohyb má vlastní zápis.');
+        self::assertSame(1, $this->rows('journal_entries', $supplierId, "document_no = 'BV 8' AND source_type = 'manual'"), 'Kurzový rozdíl bez vazby je samostatný zápis dokladu.');
+
+        // Úhrada VF 250005 i s haléřovým vyrovnáním (548) v jednom zápisu pohybu.
+        self::assertSame([['221.001', 'debit', '1209.60'], ['311.000', 'credit', '0.40'], ['311.000', 'credit', '1209.60'], ['548.000', 'debit', '0.40']], $this->fetch(
+            "SELECT a.account_code, l.side, l.amount FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+               JOIN journal_entries e ON e.id = l.entry_id JOIN bank_transactions t ON e.source_type = 'bank' AND t.id = e.source_id
+              WHERE e.supplier_id = ? AND t.source_ref = 'BV 8 #50' ORDER BY a.account_code, l.amount", $supplierId));
+
+        // Údaje pohybu z deníku: VS z VAR_DAL / VARIABL / HVAR, protiúčet z HUCET, KS a SS bez samých nul, zpráva, ID transakce banky.
+        self::assertSame([
+            ['BV 8 #47', '-1000.00', null, null, null, null, null, 'Výběr hotovosti', 'BV-47'],
+            ['BV 8 #50', '1209.60', '250005', '0308', null, '1000000005', '0100', 'Úhrada VF 250005 | Platba faktury 250005', 'SYN-TX-0001'],
+            ['BV 8 #52', '2420.00', '250006', null, null, null, null, 'Úhrada VF 250006', 'BV-52'],
+            ['BV 8 #53', '-25.00', '777', null, '42', null, null, 'Poplatek za platbu', 'BV-53'],
+            ['BE 1 #80', '1000.00', null, null, null, null, null, 'Vklad EUR', 'BE-80'],
+        ], $this->fetch("SELECT t.source_ref, t.amount, t.variable_symbol, t.constant_symbol, t.specific_symbol, t.counterparty_account, t.counterparty_bank, t.description, t.bank_ref
+                           FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+                          WHERE s.supplier_id = ? AND (t.source_ref LIKE 'BV 8 %' OR t.source_ref LIKE 'BE %') ORDER BY t.id", $supplierId));
+
+        // Faktury uhrazené bankou (i s haléřem) a zápočtem; zápis úhrady bez pohybu peněz je na fakturu navázaný.
+        self::assertSame([['250005', 'paid'], ['250006', 'paid'], ['250007', 'paid']],
+            $this->fetch("SELECT varsymbol, status FROM invoices WHERE supplier_id = ? AND varsymbol IN ('250005', '250006', '250007') ORDER BY varsymbol", $supplierId));
+        self::assertSame([['250005', 'BV 8'], ['250007', 'ID 5']], $this->fetch(
+            'SELECT i.varsymbol, e.document_no FROM journal_entry_document_links k JOIN invoices i ON i.id = k.doc_id JOIN journal_entries e ON e.id = k.entry_id
+              WHERE k.supplier_id = ? AND k.doc_type = \'invoice\' AND k.note = ? ORDER BY i.varsymbol', $supplierId, false, [DocumentLinker::PAYMENT_NOTE]));
+        // Ignorované jen pohyby s vlastním zápisem: vklad ZK, poplatky, výběr hotovosti a vklad na EUR účet.
+        self::assertSame([['manual', null, 7], ['ignored', 'premier_booked', 5]], $this->txStatuses($supplierId));
+        // Výběr hotovosti: pokladní doklad patří k zápisu svého pohybu, zdroj zápisu zůstává bance.
+        self::assertSame([['in', 'transfer', '1000.00', 'BV 8 #47']], $this->fetch(
+            "SELECT d.doc_type, d.purpose, d.total_amount, t.source_ref FROM cash_documents d JOIN journal_entries e ON e.id = d.journal_entry_id
+               JOIN bank_transactions t ON e.source_type = 'bank' AND t.id = e.source_id WHERE d.supplier_id = ? AND d.doc_number LIKE 'BV%'", $supplierId));
+        self::assertSame(1, $this->rows('journal_entry_document_links', $supplierId, "doc_type = 'cash' AND doc_id = (SELECT id FROM cash_documents WHERE supplier_id = journal_entry_document_links.supplier_id AND doc_number LIKE 'BV%')"));
+
+        // Opakovaný převod téže zálohy do nově převedené firmy nic nezdvojí; u existujícího
+        // pohybu doplní jen prázdné údaje (vlastní popis zůstane).
+        $pdo->prepare("UPDATE bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+                          SET t.variable_symbol = NULL, t.counterparty_account = NULL, t.counterparty_bank = NULL, t.bank_ref = 'BV-50', t.description = 'Vlastní popis'
+                        WHERE s.supplier_id = ? AND t.source_ref = 'BV 8 #50'")->execute([$supplierId]);
+        $before = $this->snapshot($supplierId);
+        $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame([0, 26], [$again->get('journal')[0]['entries'], $again->get('journal')[0]['existing']]);
+        self::assertArrayNotHasKey('transactions', self::stepCounts($again, 'bank'), $this->explain($again));
+        self::assertSame(1, self::stepCounts($again, 'bank')['enriched'] ?? null, $this->explain($again));
+        self::assertSame($before, $this->snapshot($supplierId));
+        self::assertSame([['250005', '1000000005', '0100', 'SYN-TX-0001', 'Vlastní popis']], $this->fetch(
+            "SELECT t.variable_symbol, t.counterparty_account, t.counterparty_bank, t.bank_ref, t.description FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+              WHERE s.supplier_id = ? AND t.source_ref = 'BV 8 #50'", $supplierId));
+    }
+
+    /**
+     * Firma převedená starší verzí má bankovní výpis jako jeden zápis za den. Nový převod
+     * by k němu přidal zápisy po pohybech a banku zdvojil - krok deníku skončí chybou
+     * a nic nezapíše.
+     */
+    public function testFirmConvertedByOlderVersionIsRefused(): void
+    {
+        $supplierId = $this->supplier();
+        $backup = $this->backup(false, ['bank_split' => true]);
+        $first = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        // Mapa převodu staré verze: klíč bankovního dokladu bez pohybu.
+        $this->db->pdo()->prepare("UPDATE premier_import_map SET premier_key = '2025|BV|8|2025-10-15||0' WHERE supplier_id = ? AND kind = ? AND premier_key = '2025|BV|8|2025-10-15||0|#50'")
+            ->execute([$supplierId, PremierImportRepository::KIND_JOURNAL_ENTRY]);
+
+        $before = $this->snapshot($supplierId);
+        $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertTrue($again->hasErrors());
+        self::assertContains('legacy_bank_entries', $this->messageCodes($again), $this->explain($again));
+        self::assertStringContainsString('převeďte znovu do čisté firmy', $this->explain($again));
+        self::assertSame($before, $this->snapshot($supplierId));
+    }
+
+    /** Rekonciliace ohlásí pohyb převodu bez vlastního zápisu deníku jako chybu. */
+    public function testReconciliationFlagsBankMovementWithoutOwnEntry(): void
+    {
+        $supplierId = $this->supplier();
+        $backup = $this->backup();
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE journal_entries SET source_type = 'manual', source_id = NULL WHERE supplier_id = ? AND source_type = 'bank' ORDER BY id LIMIT 1")->execute([$supplierId]);
+        $journal = new PremierJournal($backup);
+        $ctx = new PremierContext($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, $journal, PremierVat::fromBackup($backup), false, new ImportProtocol('import'));
+        $period = $pdo->prepare('SELECT id, starts_on, ends_on FROM accounting_periods WHERE supplier_id = ? AND YEAR(starts_on) = ?');
+        $period->execute([$supplierId, SyntheticPremierBackup::YEAR1]);
+        $p = $period->fetch(\PDO::FETCH_ASSOC);
+        $ctx->period = ['id' => (int) $p['id'], 'starts_on' => (string) $p['starts_on'], 'ends_on' => (string) $p['ends_on'], 'status' => 'open', 'locked' => false];
+
+        $this->reconciler->run($ctx);
+        self::assertContains('bank_transactions_unposted', $this->messageCodes($ctx->protocol), $this->explain($ctx->protocol));
+        $check = array_values(array_filter($ctx->protocol->get('reconciliation')[0]['checks'], static fn (array $c): bool => $c['key'] === 'bank_transactions_posted'));
+        self::assertSame([false, 7, 1], [$check[0]['ok'], $check[0]['transactions'], $check[0]['unposted']]);
+
+        // Pohyb bez vlastního zápisu se neoznačí jako vyřízený - Doúčtování ho musí vidět.
+        $tx = $this->fetch("SELECT t.id, t.source_ref FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+                             WHERE s.supplier_id = ? AND t.match_status = 'ignored'
+                               AND NOT EXISTS (SELECT 1 FROM journal_entries e WHERE e.supplier_id = s.supplier_id AND e.source_type = 'bank' AND e.source_id = t.id)", $supplierId);
+        self::assertCount(1, $tx);
+        $pdo->prepare("UPDATE bank_transactions SET match_status = 'unmatched', match_reason = NULL WHERE id = ?")->execute([(int) $tx[0][0]]);
+        $ctx->bankTransactions = [(int) substr((string) strrchr((string) $tx[0][1], '#'), 1) => (int) $tx[0][0]];
+        $this->linker->matchPayments($ctx, PremierDocuments::fromBackup($backup, $journal, $ctx->vat));
+        self::assertSame(1, $this->rows('journal_entries', $supplierId, "source_type = 'manual' AND source_id IS NULL AND document_no LIKE 'BV %'"));
+        $status = $pdo->prepare('SELECT match_status FROM bank_transactions WHERE id = ?');
+        $status->execute([(int) $tx[0][0]]);
+        self::assertSame('unmatched', $status->fetchColumn());
+    }
+
     public function testDryRunLeavesNothingBehind(): void
     {
         $supplierId = $this->supplier();
@@ -288,11 +437,12 @@ final class PremierImportTest extends TestCase
         self::assertSame([], $reconciliation[0]['journal_diffs']);
     }
 
-    private function backup(bool $oss = false): PremierBackup
+    /** @param array<string,bool> $flags */
+    private function backup(bool $oss = false, array $flags = []): PremierBackup
     {
-        $dir = $this->tmp . DIRECTORY_SEPARATOR . 'backup_' . ($oss ? 'oss' : 'base');
+        $dir = $this->tmp . DIRECTORY_SEPARATOR . 'backup_' . ($oss ? 'oss' : 'base') . implode('_', array_keys(array_filter($flags)));
         if (!is_dir($dir)) {
-            PremierBackup::extractArchive(SyntheticPremierBackup::writeCab($this->tmp . DIRECTORY_SEPARATOR . 'zaloha.icab', $this->tmp, $oss), $dir);
+            PremierBackup::extractArchive(SyntheticPremierBackup::writeCab($this->tmp . DIRECTORY_SEPARATOR . 'zaloha.icab', $this->tmp, $oss, $flags), $dir);
         }
         return PremierBackup::open($dir);
     }

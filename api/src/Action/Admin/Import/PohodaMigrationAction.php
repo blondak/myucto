@@ -17,6 +17,8 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\BackgroundProcess;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Migration\ImportYears;
+use MyInvoice\Service\Migration\Pohoda\ChartJournalImporter;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollImporter;
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
@@ -30,13 +32,13 @@ use Psr\Http\Message\UploadedFileInterface;
 
 /**
  * Průvodce „Přechod z POHODA" - nahrání XML exportu agendy (ZIP), náhled, zkouška
- * nanečisto a ostrý převod zvoleného roku na pozadí, protokoly a exportní nástroj.
+ * nanečisto a ostrý převod vybraných roků na pozadí, protokoly a exportní nástroj.
  *
  *   POST /api/admin/imports/pohoda/uploads/chunked                {file_name, size}
  *   POST /api/admin/imports/pohoda/uploads/{token}/chunks         multipart `chunk` + `offset`
  *   POST /api/admin/imports/pohoda/uploads/{token}/complete
  *   GET  /api/admin/imports/pohoda/uploads/{token}
- *   POST /api/admin/imports/pohoda/uploads/{token}/start          {mode, year, kind: accounting|payroll}
+ *   POST /api/admin/imports/pohoda/uploads/{token}/start          {mode, years: int[] (nebo year), kind: accounting|payroll}
  *   GET  /api/admin/imports/pohoda/runs
  *   GET  /api/admin/imports/pohoda/runs/{id}
  *   DELETE /api/admin/imports/pohoda/runs/{id}                    jen zkouška nanečisto
@@ -240,7 +242,7 @@ final class PohodaMigrationAction
         $preflight = [];
         $payrollPreflight = [];
         $defaultYear = null;
-        foreach ((array) ($meta['agendas'] ?? []) as $agenda) {
+        foreach ((array) ($meta['agendas'] ?? []) as $i => $agenda) {
             if ($supplierIco === '' || (string) $agenda['ico'] !== $supplierIco) {
                 continue;
             }
@@ -260,6 +262,10 @@ final class PohodaMigrationAction
             }
             try {
                 $export = PohodaExport::open(PohodaUploads::exportDir($supplierId, $token) . DIRECTORY_SEPARATOR . $agenda['dir']);
+                // Přehled nahraný před výběrem roků pozdější roky agendy nemá.
+                if (!is_array($agenda['counts']['later_years'] ?? null)) {
+                    $meta['agendas'][$i]['counts']['later_years'] = ChartJournalImporter::laterYears($export);
+                }
                 $preflight[(string) $year] = $this->importer->preflight($supplierId, $export);
             } catch (\Throwable $e) {
                 if (!$e instanceof PohodaException) {
@@ -321,7 +327,10 @@ final class PohodaMigrationAction
         if (!in_array($mode, ['dry_run', 'import'], true)) {
             return Json::error($response, 'invalid_mode', 'Neznámý režim převodu.', 422);
         }
-        $year = (int) ($body['year'] ?? 0);
+        if (!ImportYears::validBody($body)) {
+            return Json::error($response, 'invalid_year', 'Roky převodu musí být seznam roků.', 422);
+        }
+        $years = ImportYears::fromParams($body);
         $kind = (string) ($body['kind'] ?? 'accounting');
         if (!in_array($kind, ['accounting', 'payroll'], true)) {
             return Json::error($response, 'invalid_kind', 'Neznámý druh převodu.', 422);
@@ -346,14 +355,11 @@ final class PohodaMigrationAction
             return Json::error($response, $e->errorCode, $e->getMessage(), 404);
         }
         $supplierIco = $this->supplierIco($supplierId);
-        $agenda = PohodaImportJobService::agenda($meta, $supplierIco, $year);
-        if ($agenda === null) {
-            return Json::error($response, 'invalid_year', 'Export neobsahuje agendu zvoleného roku s IČO této firmy.', 422);
-        }
-        if ($kind === 'payroll' ? !$agenda['has_payroll'] : !$agenda['has_accounting']) {
-            return Json::error($response, 'invalid_kind', $kind === 'payroll'
-                ? 'Export zvoleného roku neobsahuje mzdy (91_mzdy.xml).'
-                : 'Export zvoleného roku obsahuje jen mzdy, účetnictví v něm není.', 422);
+        try {
+            // Stejný plán jako job: rok s agendou IČO firmy, nebo pozdější rok vybrané agendy.
+            PohodaImportJobService::plan($meta, $supplierIco, $years, $kind === 'payroll', $supplierId, $token);
+        } catch (PohodaException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), 422, $e->context);
         }
         PohodaUploads::touch($supplierId, $token);
         if (!$this->runs->isLockFree($supplierId)) {
@@ -372,7 +378,9 @@ final class PohodaMigrationAction
         $jobId = $this->jobs->create($supplierId, PohodaImportJobService::SOURCE, [
             'token' => $token,
             'mode' => $mode,
-            'year' => $year,
+            // Vybrané roky vzestupně; `year` = první z nich pro starší čtení parametrů jobu.
+            'years' => $years,
+            'year' => $years[0],
             'ico' => $supplierIco,
             'kind' => $kind,
             // OIČ a ID PPV z PAMICA se převezmou jen s potvrzením, že pocházejí z protokolů ČSSZ.
@@ -389,7 +397,7 @@ final class PohodaMigrationAction
                 'Chybí databázová migrace pro převod z POHODY - spusťte `php api/bin/migrate.php`.', 500);
         }
         $this->spawnWorker($jobId);
-        $this->logger->log('import.pohoda_started', $userId, 'import_job', $jobId, ['mode' => $mode, 'year' => $year, 'kind' => $kind],
+        $this->logger->log('import.pohoda_started', $userId, 'import_job', $jobId, ['mode' => $mode, 'years' => $years, 'kind' => $kind],
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, ['job_id' => $jobId, 'status' => 'queued', 'mode' => $mode], 201);

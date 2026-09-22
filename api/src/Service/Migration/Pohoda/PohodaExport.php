@@ -411,9 +411,10 @@ final class PohodaExport
 
     /**
      * Počty záznamů agendy pro náhled: řádky deníku (z toho počáteční stavy), rozsah dat,
-     * vydané a přijaté doklady, interní doklady, pokladna, banka a adresář.
+     * vydané a přijaté doklady, interní doklady, pokladna, banka a adresář. `later_years` =
+     * roky po roce agendy, do kterých padají zápisy deníku ({@see PohodaJournal::laterYear()}).
      *
-     * @return array{journal:int,opening:int,first_date:?string,last_date:?string,issued:int,purchase:int,internal:int,cash:int,bank:int,partners:int}
+     * @return array{journal:int,opening:int,first_date:?string,last_date:?string,later_years:list<int>,issued:int,purchase:int,internal:int,cash:int,bank:int,partners:int}
      */
     public function counts(): array
     {
@@ -421,11 +422,16 @@ final class PohodaExport
         $opening = 0;
         $first = null;
         $last = null;
+        $later = [];
         foreach ($this->records('journal', 'accountingItem') as $item) {
             $journal++;
             if (PohodaJournal::isOpening($item)) {
                 $opening++;
                 continue;
+            }
+            $laterYear = PohodaJournal::laterYear($item, $this->year);
+            if ($laterYear !== null) {
+                $later[$laterYear] = true;
             }
             $date = PohodaXml::date($item, 'date');
             if ($date !== null) {
@@ -447,11 +453,13 @@ final class PohodaExport
             }
             return $n;
         };
+        ksort($later);
         return [
             'journal' => $journal,
             'opening' => $opening,
             'first_date' => $first,
             'last_date' => $last,
+            'later_years' => array_keys($later),
             'issued' => $sum(['issued', 'issued_credit', 'issued_debit', 'issued_advance', 'issued_proforma', 'issued_corrective', 'receivable'], 'invoice'),
             'purchase' => $sum(['received', 'received_credit', 'received_debit', 'received_advance', 'received_proforma', 'received_corrective', 'commitment'], 'invoice'),
             'internal' => $sum(['internal'], 'intDoc'),

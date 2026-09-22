@@ -41,6 +41,41 @@ final class SyntheticPohodaExport
     /** Konečná faktura s odpočtem nedaňové zálohy (`$withAdvanceDeduction`). */
     public const ADVANCE_DOCUMENT = '26FV0003';
 
+    /** Přijatá faktura, kterou POHODA zlikviduje až v pozdějším exportu. */
+    public const LATER_PAID_DOCUMENT = '26PF0003';
+    public const LATER_PAID_VS = '2026009';
+    public const LATER_PAID_BANK = 'BAN0010004';
+    public const LATER_OPEN = 'open';
+    public const LATER_SETTLED = 'settled';
+
+    /** Účet protistrany (dodavatele i odběratele) - ověřený placeholder, projde mod 11. */
+    public const PARTNER_ACCOUNT = '1000000005';
+    public const PARTNER_BANK = '0100';
+    /** Jiný účet protistrany (mod 11), na přijaté faktuře neuvedený. */
+    public const OTHER_ACCOUNT = '2000000050';
+
+    /**
+     * Rok po roce agendy (`$unbooked`): agenda vede i doklady následujícího roku.
+     */
+    public const NEXT_YEAR = self::YEAR + 1;
+    /** Vydaná faktura, kterou uhradí nezaúčtovaný příjem v následujícím roce (shoda VS + částka). */
+    public const UNBOOKED_ISSUED = '26FV0004';
+    public const UNBOOKED_ISSUED_VS = '260004';
+    /** Dvě přijaté faktury se stejnou částkou i účtem dodavatele - platba bez VS je nejednoznačná. */
+    public const AMBIGUOUS_PURCHASES = ['26PF0005', '26PF0006'];
+    /** Přijatá faktura, kterou jednoznačně určí účet dodavatele, částka a datum. */
+    public const ACCOUNT_PURCHASE = '26PF0007';
+    /** Přijatá faktura, kterou určí párovací symbol pohybu (číslo dokladu). */
+    public const PARSYM_PURCHASE = '26PF0008';
+    /** Přijatá faktura, jejíž VS i částku má platba kartou - karta se automaticky nepáruje. */
+    public const CARD_PURCHASE = '26PF0009';
+    public const CARD_VS = '2026019';
+    /**
+     * Vydaná faktura s datem v následujícím roce, zaúčtovaná i uhrazená v POHODĚ. Úhrada nese
+     * id bankovního dokladu a opis čísla jiného pohybu - rozhodovat musí id.
+     */
+    public const NEXT_YEAR_ISSUED = '26FV0005';
+
     /**
      * Zapíše export do `$root` (kořen jako rozbalený ZIP) a vrátí složku agendy.
      *
@@ -56,8 +91,14 @@ final class SyntheticPohodaExport
      * zálohy 1 210 Kč (k úhradě 0). Deník ji má tak, jak ji zaúčtovala POHODA u reálné
      * agendy: odpočet zálohy KLADNĚ 311/602 1 210, takže 311 z dokladu drží 2 420 Kč
      * a rozdíl dokladů proti deníku je už v POHODĚ.
+     *
+     * `$laterPayment`: navíc přijatá faktura 26PF0003 na 726 Kč a odchozí platba s jejím VS.
+     * `open` = stav před likvidací: faktura neuhrazená, platba v bance bez zaúčtování
+     * (předkontace „Nevím"), v deníku tedy chybí. `settled` = účetní platbu mezitím zaúčtovala
+     * jako úhradu faktury: faktura zlikvidovaná tímto pohybem, v deníku 321/221. Minulá
+     * faktura 25FV0099 je v tomtéž exportu doplacená bez pohybu v bance.
      */
-    public static function write(string $root, bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false): string
+    public static function write(string $root, bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false): string
     {
         $dir = rtrim($root, '/\\') . '/' . self::ICO . '_' . self::YEAR;
         if (!is_dir($dir)) {
@@ -66,7 +107,7 @@ final class SyntheticPohodaExport
         self::file($root . '/00_ucetni_jednotky.xml', '<acu:listAccountingUnit version="1.1"><acu:itemAccountingUnit><acu:unitType>doubleEntry</acu:unitType>'
             . '<acu:year>' . self::YEAR . '</acu:year><acu:unitIdentity><typ:address><typ:company>' . self::NAME . '</typ:company><typ:ico>' . self::ICO . '</typ:ico></typ:address></acu:unitIdentity>'
             . '<acu:dataFile>StwPh_' . self::ICO . '_' . self::YEAR . '.mdb</acu:dataFile></acu:itemAccountingUnit></acu:listAccountingUnit>');
-        foreach (self::files($withAssets, $withOss, $withAdvanceDeduction) as $name => $body) {
+        foreach (self::files($withAssets, $withOss, $withAdvanceDeduction, $laterPayment, $unbooked) as $name => $body) {
             self::file($dir . '/' . $name, $body);
         }
         if ($withAssets) {
@@ -96,6 +137,44 @@ final class SyntheticPohodaExport
         return $dir;
     }
 
+    /**
+     * Agenda následujícího roku po agendě `write(..., unbooked: true)`: POHODA do ní převzala
+     * doklady, které vedla už agenda minulého roku (vydaná faktura s úhradou a nezaúčtovaný
+     * příjem), a přibyl nezaúčtovaný pohyb se stejným číslem jako zaúčtovaný poplatek minulého
+     * roku (číselná řada banky se po letech opakuje).
+     */
+    public static function writeNextYear(string $root): string
+    {
+        $year = self::NEXT_YEAR;
+        $dir = rtrim($root, '/\\') . '/' . self::ICO . '_' . $year;
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        self::file($root . '/00_ucetni_jednotky.xml', '<acu:listAccountingUnit version="1.1"><acu:itemAccountingUnit><acu:unitType>doubleEntry</acu:unitType>'
+            . '<acu:year>' . $year . '</acu:year><acu:unitIdentity><typ:address><typ:company>' . self::NAME . '</typ:company><typ:ico>' . self::ICO . '</typ:ico></typ:address></acu:unitIdentity>'
+            . '<acu:dataFile>StwPh_' . self::ICO . '_' . $year . '.mdb</acu:dataFile></acu:itemAccountingUnit></acu:listAccountingUnit>');
+        $all = self::files(unbooked: true);
+        $journal = self::entry('Vydané faktury', self::NEXT_YEAR_ISSUED, 'Služby', 1000, '311001', '602000', $year . '-01-10')
+            . self::entry('Vydané faktury', self::NEXT_YEAR_ISSUED, 'DPH', 210, '311001', '343021', $year . '-01-10')
+            . self::entry('Banka', 'BAN0010016', 'Úhrada ' . self::NEXT_YEAR_ISSUED, 1210, '221001', '311001', $year . '-01-20');
+        $files = [
+            '01_ucetni_denik.xml' => '<lst:listAccountancy version="2.0" dateTimeStamp="' . $year . '-03-01T10:00:00" state="ok"><lst:accountancy version="2.0">' . $journal . '</lst:accountancy></lst:listAccountancy>',
+            '12_faktury_issuedInvoice.xml' => '<lst:listInvoice version="2.0" state="ok">'
+                . self::invoice('issuedInvoice', self::NEXT_YEAR_ISSUED, '260005', $year . '-01-10', 1000, 210, '', 'BAN0010016', 'BAN0010003') . '</lst:listInvoice>',
+            '29_banka.xml' => '<lst:listBank version="2.0" state="ok">'
+                . self::bank('BAN0010011', 'receipt', $year . '-01-15', 1815, self::UNBOOKED_ISSUED_VS, 'Odběratel Test s.r.o.', self::PARTNER_ACCOUNT)
+                . self::bank('BAN0010016', 'receipt', $year . '-01-20', 1210, '260005', 'Odběratel Test s.r.o.', self::PARTNER_ACCOUNT)
+                . self::bank('BAN0010003', 'expense', $year . '-02-01', 80, '', 'Testovací banka', self::OTHER_ACCOUNT) . '</lst:listBank>',
+        ];
+        foreach (['02_uctova_osnova.xml', '03_predkontace_pu.xml', '06_cleneni_dph.xml', '30_adresar.xml', '31_bankovni_ucty.xml'] as $name) {
+            $files[$name] = $all[$name];
+        }
+        foreach ($files as $name => $body) {
+            self::file($dir . '/' . $name, $body);
+        }
+        return $dir;
+    }
+
     /** ZIP exportu tak, jak ho zabalí nástroj (kořen s přehledem jednotek a složka agendy). */
     public static function writeZip(string $zipPath, string $workDir): void
     {
@@ -111,7 +190,7 @@ final class SyntheticPohodaExport
     }
 
     /** @return array<string,string> soubor => obsah listu */
-    private static function files(bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false): array
+    private static function files(bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false): array
     {
         $journal = self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 100000, '221001', '701000', '2026-01-01')
             . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 100000, '701000', '411000', '2026-01-01')
@@ -135,6 +214,28 @@ final class SyntheticPohodaExport
         if ($withOss) {
             $journal .= self::entry('Vydané faktury', '26FV0002', 'Zboží na dálku SK', 1000, '311001', '604000', '2026-02-10')
                 . self::entry('Vydané faktury', '26FV0002', 'DPH OSS', 230, '311001', '343090', '2026-02-10');
+        }
+        $settled = $laterPayment === self::LATER_SETTLED;
+        if ($laterPayment !== null) {
+            $journal .= self::entry('Přijaté faktury', self::LATER_PAID_DOCUMENT, 'Servis', 600, '518000', '321001', '2026-01-25')
+                . self::entry('Přijaté faktury', self::LATER_PAID_DOCUMENT, 'DPH', 126, '343011', '321001', '2026-01-25');
+            if ($settled) {
+                $journal .= self::entry('Banka', self::LATER_PAID_BANK, 'Úhrada ' . self::LATER_PAID_DOCUMENT, 726, '321001', '221001', '2026-01-28');
+            }
+        }
+        if ($unbooked) {
+            $next = self::NEXT_YEAR;
+            $journal .= self::entry('Vydané faktury', self::UNBOOKED_ISSUED, 'Služby', 1500, '311001', '602000', '2026-11-20')
+                . self::entry('Vydané faktury', self::UNBOOKED_ISSUED, 'DPH', 315, '311001', '343021', '2026-11-20');
+            foreach ([[self::AMBIGUOUS_PURCHASES[0], 300, '2026-03-01'], [self::AMBIGUOUS_PURCHASES[1], 300, '2026-03-02'],
+                [self::ACCOUNT_PURCHASE, 200, '2026-04-01'], [self::PARSYM_PURCHASE, 400, '2026-05-01'], [self::CARD_PURCHASE, 100, '2026-05-20']] as [$number, $base, $date]) {
+                $journal .= self::entry('Přijaté faktury', $number, 'Služby', $base, '518000', '321001', $date)
+                    . self::entry('Přijaté faktury', $number, 'DPH', $base * 0.21, '343011', '321001', $date);
+            }
+            // Doklady následujícího roku, které agenda vede a POHODA je i zaúčtovala.
+            $journal .= self::entry('Vydané faktury', self::NEXT_YEAR_ISSUED, 'Služby', 1000, '311001', '602000', $next . '-01-10')
+                . self::entry('Vydané faktury', self::NEXT_YEAR_ISSUED, 'DPH', 210, '311001', '343021', $next . '-01-10')
+                . self::entry('Banka', 'BAN0010016', 'Úhrada ' . self::NEXT_YEAR_ISSUED, 1210, '221001', '311001', $next . '-01-20');
         }
         if ($withAdvanceDeduction) {
             $journal .= self::entry('Vydané faktury', self::ADVANCE_DOCUMENT, 'Služby', 1000, '311001', '602000', '2026-03-02')
@@ -183,7 +284,9 @@ final class SyntheticPohodaExport
             . '<inv:symVar>250099</inv:symVar><inv:date>2025-12-20</inv:date><inv:dateTax>2025-12-20</inv:dateTax><inv:dateAccounting>2025-12-20</inv:dateAccounting><inv:dateDue>2026-01-03</inv:dateDue>'
             . '<inv:classificationVAT><typ:ids>UN</typ:ids></inv:classificationVAT><inv:text>Služby z minulého roku</inv:text>'
             . self::partner('inv', 'Odběratel Test s.r.o.', self::CUSTOMER_ICO, 'CZ' . self::CUSTOMER_ICO)
-            . '<inv:liquidation><typ:amountHome>500</typ:amountHome></inv:liquidation></inv:invoiceHeader>'
+            . ($settled
+                ? '<inv:liquidation><typ:amountHome>0</typ:amountHome><typ:date>2026-01-05</typ:date></inv:liquidation></inv:invoiceHeader>'
+                : '<inv:liquidation><typ:amountHome>500</typ:amountHome></inv:liquidation></inv:invoiceHeader>')
             . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>500</typ:priceNone><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT rate="21">0</typ:priceHighVAT>'
             . '<typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency></inv:invoiceSummary></lst:invoice>';
 
@@ -239,6 +342,33 @@ final class SyntheticPohodaExport
                 . self::summary('inv', 1200, 252) . '</lst:invoice>';
         }
 
+        if ($unbooked) {
+            $issued .= self::invoice('issuedInvoice', self::UNBOOKED_ISSUED, self::UNBOOKED_ISSUED_VS, '2026-11-20', 1500, 315)
+                . self::invoice('issuedInvoice', self::NEXT_YEAR_ISSUED, '260005', self::NEXT_YEAR . '-01-10', 1000, 210, '', 'BAN0010016', 'BAN0010003');
+            $received .= self::invoice('receivedInvoice', self::AMBIGUOUS_PURCHASES[0], '2026015', '2026-03-01', 300, 63, self::PARTNER_ACCOUNT)
+                . self::invoice('receivedInvoice', self::AMBIGUOUS_PURCHASES[1], '2026016', '2026-03-02', 300, 63, self::PARTNER_ACCOUNT)
+                . self::invoice('receivedInvoice', self::ACCOUNT_PURCHASE, '2026017', '2026-04-01', 200, 42, self::PARTNER_ACCOUNT)
+                . self::invoice('receivedInvoice', self::PARSYM_PURCHASE, '2026018', '2026-05-01', 400, 84)
+                . self::invoice('receivedInvoice', self::CARD_PURCHASE, self::CARD_VS, '2026-05-20', 100, 21);
+        }
+        if ($laterPayment !== null) {
+            $received .= '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>receivedInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . self::LATER_PAID_DOCUMENT . '</typ:numberRequested></inv:number>'
+                . '<inv:symVar>' . self::LATER_PAID_VS . '</inv:symVar><inv:originalDocument>D-2026-9</inv:originalDocument><inv:date>2026-01-25</inv:date><inv:dateTax>2026-01-25</inv:dateTax>'
+                . '<inv:dateAccounting>2026-01-25</inv:dateAccounting><inv:dateDue>2026-02-08</inv:dateDue><inv:dateKHDPH>2026-01-25</inv:dateKHDPH>'
+                . '<inv:classificationVAT><typ:ids>PD</typ:ids></inv:classificationVAT><inv:text>Servis</inv:text>'
+                . self::partner('inv', 'Dodavatel Test s.r.o.', self::VENDOR_ICO, 'CZ' . self::VENDOR_ICO)
+                . '<inv:paymentType><typ:paymentType>draft</typ:paymentType></inv:paymentType>'
+                . ($settled
+                    ? '<inv:liquidation><typ:amountHome>0</typ:amountHome><typ:date>2026-01-28</typ:date></inv:liquidation></inv:invoiceHeader>'
+                    : '<inv:liquidation><typ:amountHome>726</typ:amountHome></inv:liquidation></inv:invoiceHeader>')
+                . self::summary('inv', 600, 126)
+                . ($settled
+                    ? '<inv:liquidations><typ:liquidation><typ:id>3</typ:id><typ:date>2026-01-28</typ:date><typ:sourceAgenda>bank</typ:sourceAgenda><typ:sourceDocument><typ:number>'
+                        . self::LATER_PAID_BANK . '</typ:number></typ:sourceDocument><typ:amount>726</typ:amount></typ:liquidation></inv:liquidations>'
+                    : '')
+                . '</lst:invoice>';
+        }
+
         // POHODA zakládá na začátku roku doklad počátečního stavu účtu: bez čísla, bez výpisu
         // a bez zaúčtování. Není to pohyb, stav už nese deník.
         $bank = '<lst:bank version="2.0"><bnk:bankHeader><bnk:bankType>receipt</bnk:bankType><bnk:account><typ:ids>BAN</typ:ids></bnk:account>'
@@ -251,6 +381,20 @@ final class SyntheticPohodaExport
             . self::bank('BAN0010002', 'expense', '2026-01-20', 605, '2026007', 'Dodavatel Test s.r.o.')
             // Poplatek bez dokladu: v Pohodě zaúčtovaný, fakturu nemá.
             . self::bank('BAN0010003', 'expense', '2026-01-31', 50, '', 'Testovací banka');
+        if ($laterPayment !== null) {
+            $bank .= self::bank(self::LATER_PAID_BANK, 'expense', '2026-01-28', 726, self::LATER_PAID_VS, 'Dodavatel Test s.r.o.', self::PARTNER_ACCOUNT);
+        }
+        if ($unbooked) {
+            // Pohyby bez zaúčtování (předkontace „Nevím"): úhrada vydané faktury v následujícím
+            // roce podle VS, platba bez VS dvou stejných faktur, platba podle účtu dodavatele,
+            // platba s párovacím symbolem a platba kartou bez účtu protistrany.
+            $bank .= self::bank('BAN0010011', 'receipt', self::NEXT_YEAR . '-01-15', 1815, self::UNBOOKED_ISSUED_VS, 'Odběratel Test s.r.o.', self::PARTNER_ACCOUNT)
+                . self::bank('BAN0010012', 'expense', '2026-03-10', 363, '', 'Dodavatel Test s.r.o.', self::PARTNER_ACCOUNT)
+                . self::bank('BAN0010013', 'expense', '2026-04-10', 242, '', 'Dodavatel Test s.r.o.', self::PARTNER_ACCOUNT)
+                . self::bank('BAN0010014', 'expense', '2026-05-05', 484, '', 'Dodavatel Test s.r.o.', self::OTHER_ACCOUNT, self::PARSYM_PURCHASE)
+                . self::bank('BAN0010015', 'expense', '2026-06-01', 121, self::CARD_VS, 'Obchod kartou')
+                . self::bank('BAN0010016', 'receipt', self::NEXT_YEAR . '-01-20', 1210, '260005', 'Odběratel Test s.r.o.', self::PARTNER_ACCOUNT);
+        }
 
         $addressbook = '';
         foreach ([[1, 'Odběratel Test s.r.o.', self::CUSTOMER_ICO], [2, 'Dodavatel Test s.r.o.', self::VENDOR_ICO]] as [$id, $name, $ico]) {
@@ -294,12 +438,40 @@ final class SyntheticPohodaExport
             . '<typ:priceHighSum>' . ($base + $vat) . '</typ:priceHighSum><typ:round><typ:priceRound>0</typ:priceRound></typ:round></' . $ns . ':homeCurrency></' . $ns . ':invoiceSummary>';
     }
 
-    private static function bank(string $number, string $type, string $date, float $amount, string $vs, string $partner): string
+    /**
+     * Faktura bez úhrady, nebo zlikvidovaná bankovním dokladem `$paidBy` (úhrada nese jeho id;
+     * `$paidByNumber` = opis čísla v úhradě, který se může lišit).
+     */
+    private static function invoice(string $type, string $number, string $vs, string $date, float $base, float $vat, string $account = '', string $paidBy = '', ?string $paidByNumber = null): string
     {
-        return '<lst:bank version="2.0"><bnk:bankHeader><bnk:bankType>' . $type . '</bnk:bankType><bnk:account><typ:ids>BAN</typ:ids></bnk:account>'
+        $issued = $type === 'issuedInvoice';
+        $due = date('Y-m-d', (int) strtotime($date . ' +14 days'));
+        $total = $base + $vat;
+        return '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>' . $type . '</inv:invoiceType><inv:number><typ:numberRequested>' . $number . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>' . $vs . '</inv:symVar>' . ($issued ? '' : '<inv:originalDocument>D-' . $number . '</inv:originalDocument>')
+            . '<inv:date>' . $date . '</inv:date><inv:dateTax>' . $date . '</inv:dateTax><inv:dateAccounting>' . $date . '</inv:dateAccounting><inv:dateDue>' . $due . '</inv:dateDue>'
+            . ($issued ? '' : '<inv:dateKHDPH>' . $date . '</inv:dateKHDPH>')
+            . '<inv:classificationVAT><typ:ids>' . ($issued ? 'UD' : 'PD') . '</typ:ids></inv:classificationVAT><inv:text>Služby</inv:text>'
+            . ($issued ? self::partner('inv', 'Odběratel Test s.r.o.', self::CUSTOMER_ICO, 'CZ' . self::CUSTOMER_ICO) : self::partner('inv', 'Dodavatel Test s.r.o.', self::VENDOR_ICO, 'CZ' . self::VENDOR_ICO))
+            . '<inv:paymentType><typ:paymentType>draft</typ:paymentType></inv:paymentType>'
+            . ($account !== '' ? '<inv:paymentAccount><typ:accountNo>' . $account . '</typ:accountNo><typ:bankCode>' . self::PARTNER_BANK . '</typ:bankCode></inv:paymentAccount>' : '')
+            . ($paidBy !== '' ? '<inv:liquidation><typ:amountHome>0</typ:amountHome></inv:liquidation>' : '<inv:liquidation><typ:amountHome>' . $total . '</typ:amountHome></inv:liquidation>')
+            . '</inv:invoiceHeader>' . self::summary('inv', $base, $vat)
+            . ($paidBy !== '' ? '<inv:liquidations><typ:liquidation><typ:id>' . abs(crc32($number)) . '</typ:id><typ:sourceAgenda>bank</typ:sourceAgenda><typ:sourceDocument>'
+                . '<typ:id>' . abs(crc32($paidBy)) . '</typ:id><typ:number>' . ($paidByNumber ?? $paidBy) . '</typ:number></typ:sourceDocument><typ:amount>' . $total . '</typ:amount></typ:liquidation></inv:liquidations>' : '')
+            . '</lst:invoice>';
+    }
+
+    /** `$account` prázdný = platba kartou (POHODA ji vede bez účtu protistrany). */
+    private static function bank(string $number, string $type, string $date, float $amount, string $vs, string $partner, string $account = '', string $symPar = ''): string
+    {
+        return '<lst:bank version="2.0"><bnk:bankHeader><bnk:id>' . abs(crc32($number)) . '</bnk:id><bnk:bankType>' . $type . '</bnk:bankType><bnk:account><typ:ids>BAN</typ:ids></bnk:account>'
             . '<bnk:number>' . $number . '</bnk:number><bnk:statementNumber><bnk:statementNumber>001</bnk:statementNumber></bnk:statementNumber>'
-            . '<bnk:symVar>' . $vs . '</bnk:symVar><bnk:dateStatement>2026-01-31</bnk:dateStatement><bnk:datePayment>' . $date . '</bnk:datePayment>'
-            . '<bnk:text>Platba</bnk:text><bnk:partnerIdentity><typ:address><typ:company>' . $partner . '</typ:company></typ:address></bnk:partnerIdentity></bnk:bankHeader>'
+            . '<bnk:symVar>' . $vs . '</bnk:symVar>' . ($symPar !== '' ? '<bnk:symPar>' . $symPar . '</bnk:symPar>' : '')
+            . '<bnk:dateStatement>2026-01-31</bnk:dateStatement><bnk:datePayment>' . $date . '</bnk:datePayment>'
+            . '<bnk:text>Platba</bnk:text><bnk:partnerIdentity><typ:address><typ:company>' . $partner . '</typ:company></typ:address></bnk:partnerIdentity>'
+            . ($account !== '' ? '<bnk:paymentAccount><typ:accountNo>' . $account . '</typ:accountNo><typ:bankCode>' . self::PARTNER_BANK . '</typ:bankCode></bnk:paymentAccount>' : '')
+            . '</bnk:bankHeader>'
             . '<bnk:bankSummary><bnk:homeCurrency><typ:priceNone>' . $amount . '</typ:priceNone><typ:priceLowSum>0</typ:priceLowSum><typ:priceHighSum>0</typ:priceHighSum>'
             . '<typ:round><typ:priceRound>0</typ:priceRound></typ:round></bnk:homeCurrency></bnk:bankSummary></lst:bank>';
     }

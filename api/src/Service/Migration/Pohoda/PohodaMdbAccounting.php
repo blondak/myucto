@@ -182,6 +182,7 @@ final class PohodaMdbAccounting
                 $d = $this->document($r, 'bank', 'BVpol');
                 $d['bankHeader']['bankType'] = $this->direction($r['RelTpBV'] ?? '');
                 $d['bankHeader']['number'] = $r['Cislo'] ?? '';
+                $d['bankHeader']['symPar'] = $r['ParSym'] ?? '';
                 $d['bankHeader']['account'] = $this->reference('sUcet', $r['RefUcet'] ?? '');
                 $d['bankHeader']['dateStatement'] = $this->date($r, 'Datum');
                 $d['bankHeader']['datePayment'] = $this->date($r, 'DatPlat');
@@ -239,6 +240,9 @@ final class PohodaMdbAccounting
                 continue;
             }
             $item = $this->item($it, $r);
+            if ($prefix === 'bank' && ($it['ParSym'] ?? '') !== '') {
+                $item['symPar'] = $it['ParSym'];
+            }
             if ($advance) {
                 $linked = $this->lookup('FA', $it['RefPol'] ?? '');
                 $item['note'] = $linked['Cislo'] ?? ($it['SText'] ?? '');
@@ -270,7 +274,7 @@ final class PohodaMdbAccounting
                     'id' => $u['ID'],
                     'date' => $this->date($u, 'DatumU'),
                     'sourceAgenda' => self::LINKS[$agenda] ?? '',
-                    'sourceDocument' => ['id' => $u['RelIDU'] ?? '', 'number' => $u['CisloU'] ?? ''],
+                    'sourceDocument' => $this->paymentSource($u, $agenda),
                     'amount' => $u['KcU'] ?? '0',
                 ];
             }
@@ -283,6 +287,34 @@ final class PohodaMdbAccounting
             $d['linkedDocuments']['link'] = array_values($unique);
         }
         return $d;
+    }
+
+    /**
+     * Doklad, kterým byla úhrada zaplacena. Bankovní úhradu váže POHODA oběma směry
+     * (`Uhrady.RelIDU` na bankovní doklad a `BVpol.RelIDUhrady` z položky pohybu na úhradu);
+     * číslo dokladu v úhradě (`CisloU`) je jen opis a číselná řada banky se po letech opakuje.
+     * Rozhoduje proto vazba na id, číslo se bere z nalezeného bankovního dokladu. Export bez
+     * sloupce `RelIDUhrady` (starší převodník) se čte jako dřív.
+     *
+     * @return array{id:string,number:string}
+     */
+    private function paymentSource(array $u, int $agenda): array
+    {
+        $id = (string) ($u['RelIDU'] ?? '');
+        $number = (string) ($u['CisloU'] ?? '');
+        if ($agenda !== 28) {
+            return ['id' => $id, 'number' => $number];
+        }
+        $bank = $this->lookup('BV', $id);
+        if ($bank === []) {
+            foreach ($this->group('BVpol', 'RelIDUhrady')[(string) ($u['ID'] ?? '')] ?? [] as $item) {
+                $bank = $this->lookup('BV', (string) ($item['RefAg'] ?? ''));
+                if ($bank !== []) {
+                    break;
+                }
+            }
+        }
+        return $bank === [] ? ['id' => $id, 'number' => $number] : ['id' => (string) $bank['ID'], 'number' => (string) ($bank['Cislo'] ?? $number)];
     }
 
     private function summary(array $r): array

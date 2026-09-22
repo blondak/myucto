@@ -454,6 +454,338 @@ final class PohodaImportTest extends TestCase
         return null;
     }
 
+    /**
+     * Platba, kterou POHODA nezaúčtovala (předkontace „Nevím") a kterou převod neumí
+     * jednoznačně přiřadit (platba kartou), není vyřízená - zůstane nespárovaná. Dřívější
+     * převod ji chybně označil jako vyřízenou; opakovaný převod ji vrátí k párování.
+     */
+    public function testUnbookedBankPaymentStaysOpenForMatching(): void
+    {
+        $supplierId = $this->supplier();
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, unbooked: true));
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(['unmatched', null, 0], $this->txState($supplierId, 'BAN0010015'));
+        self::assertContains('unbooked_bank', $this->messageCodes($protocol));
+
+        $this->db->pdo()->prepare(
+            "UPDATE bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+                SET t.match_status = 'ignored', t.match_reason = 'pohoda_booked', t.ignore_note = 'Zaúčtováno v Pohodě bez dokladu (převod z POHODY).'
+              WHERE s.supplier_id = ? AND t.bank_ref = 'BAN0010015'"
+        )->execute([$supplierId]);
+        $before = $this->snapshot($supplierId);
+
+        $again = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame(['unmatched', null, 0], $this->txState($supplierId, 'BAN0010015'));
+        self::assertSame(1, self::stepCounts($again, 'payments')['unbooked_released'] ?? 0, $this->explain($again));
+        self::assertSame($before, $this->snapshot($supplierId));
+    }
+
+    /**
+     * Pohyby bez zápisu v deníku POHODY: jednoznačná úhrada (párovací symbol, VS + částka,
+     * účet dodavatele + částka) se spáruje s fakturou a rovnou zaúčtuje jako bankovní zápis
+     * 321/221 resp. 221/311 v období podle data pohybu. Nejednoznačná shoda je jen návrh
+     * párování, platba kartou zůstává na Doúčtování. Opakovaný převod nic nezdvojí a zápisy
+     * převodu nejsou pro kontrolu před převodem „cizí".
+     */
+    public function testUnbookedPaymentsArePairedAndPostedOnlyWhenUnambiguous(): void
+    {
+        $supplierId = $this->supplier();
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, laterPayment: SyntheticPohodaExport::LATER_OPEN, unbooked: true));
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $payments = self::stepCounts($protocol, 'payments');
+        self::assertSame([2, 1, 1, 1, 4], [$payments['unbooked_matched_vs'] ?? 0, $payments['unbooked_matched_account'] ?? 0,
+            $payments['unbooked_matched_parsym'] ?? 0, $payments['unbooked_suggested'] ?? 0, $payments['unbooked_posted'] ?? 0], $this->explain($protocol));
+
+        // VS + částka: přijatá faktura uhrazená a úhrada zaúčtovaná 321/221 k datu pohybu.
+        self::assertSame(['auto_exact', null, 1], $this->txState($supplierId, SyntheticPohodaExport::LATER_PAID_BANK));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, "vendor_invoice_number = 'D-2026-9' AND status = 'paid' AND paid_at = '2026-01-28'"));
+        self::assertSame([['debit', '321.001', '726.00'], ['credit', '221.001', '726.00']], $this->bankEntryLines($supplierId, SyntheticPohodaExport::LATER_PAID_BANK));
+        // Účet dodavatele + částka a párovací symbol pohybu.
+        self::assertSame(['auto_exact', null, 1], $this->txState($supplierId, 'BAN0010013'));
+        self::assertSame(['auto_exact', null, 1], $this->txState($supplierId, 'BAN0010014'));
+        foreach ([SyntheticPohodaExport::ACCOUNT_PURCHASE, SyntheticPohodaExport::PARSYM_PURCHASE] as $number) {
+            self::assertSame(1, $this->rows('purchase_invoices', $supplierId, "varsymbol = '{$number}' AND status = 'paid'"), $number);
+        }
+        // Vydaná faktura uhrazená příjmem v následujícím roce: evidovaná platba, 221/311 v jeho období.
+        self::assertSame(['auto_exact', null, 1], $this->txState($supplierId, 'BAN0010011'));
+        self::assertSame(1, $this->rows('invoices', $supplierId, sprintf("varsymbol = '%s' AND status = 'paid' AND paid_total = 1815.00", SyntheticPohodaExport::UNBOOKED_ISSUED)));
+        self::assertSame(1, $this->rows('invoice_payments', $supplierId, "amount = 1815.00 AND source = 'bank' AND bank_transaction_id IS NOT NULL"));
+        self::assertSame([['debit', '221.001', '1815.00'], ['credit', '311.001', '1815.00']], $this->bankEntryLines($supplierId, 'BAN0010011'));
+        self::assertSame(SyntheticPohodaExport::NEXT_YEAR, $this->bankEntryYear($supplierId, 'BAN0010011'));
+
+        // Dvě stejné faktury téhož dodavatele: jen návrh s oběma kandidáty, nic uhrazeno.
+        self::assertSame(['unmatched', null, 0], $this->txState($supplierId, 'BAN0010012'));
+        $suggestion = $this->db->pdo()->prepare(
+            "SELECT b.status, b.reason, JSON_LENGTH(b.candidates_json) FROM bank_match_suggestions b
+               JOIN bank_transactions t ON t.id = b.bank_transaction_id JOIN bank_statements s ON s.id = t.statement_id
+              WHERE s.supplier_id = ? AND t.bank_ref = 'BAN0010012'"
+        );
+        $suggestion->execute([$supplierId]);
+        self::assertSame([['pending', 'ambiguous_amount_date_match', 2]], array_map(
+            static fn (array $r): array => [$r[0], $r[1], (int) $r[2]], $suggestion->fetchAll(\PDO::FETCH_NUM)));
+        self::assertSame(2, $this->rows('purchase_invoices', $supplierId, sprintf("varsymbol IN ('%s') AND status = 'booked'", implode("','", SyntheticPohodaExport::AMBIGUOUS_PURCHASES))));
+        // Platba kartou: bez párování, bez návrhu, bez zápisu - ani když VS a částka sedí na fakturu.
+        self::assertSame(['unmatched', null, 0], $this->txState($supplierId, 'BAN0010015'));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, sprintf("varsymbol = '%s' AND status = 'booked'", SyntheticPohodaExport::CARD_PURCHASE)));
+        self::assertSame(0, $this->rows('bank_match_suggestions', $supplierId, "bank_transaction_id = (SELECT t.id FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id WHERE s.supplier_id = bank_match_suggestions.supplier_id AND t.bank_ref = 'BAN0010015')"));
+
+        $reconciliation = $protocol->get('reconciliation')[0];
+        self::assertTrue($reconciliation['ok'], json_encode($reconciliation, JSON_UNESCAPED_UNICODE));
+        self::assertSame(4, $reconciliation['derived_payments']['entries']);
+        $map = (new PohodaImportRepository($this->db))->counts($supplierId);
+        self::assertSame([4, 4], [$map[PohodaImportRepository::KIND_DERIVED_MATCH] ?? 0, $map[PohodaImportRepository::KIND_DERIVED_ENTRY] ?? 0]);
+
+        // Opakovaný převod: kontrola před převodem zápisy převodu nepočítá jako cizí a nic se nezdvojí.
+        $before = $this->snapshot($supplierId) + ['suggestions' => $this->rows('bank_match_suggestions', $supplierId), 'invoice_payments' => $this->rows('invoice_payments', $supplierId)];
+        $again = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertNotContains('journal_not_empty', array_column((array) $again->get('preflight'), 'code'));
+        self::assertSame($before, $this->snapshot($supplierId) + ['suggestions' => $this->rows('bank_match_suggestions', $supplierId), 'invoice_payments' => $this->rows('invoice_payments', $supplierId)]);
+
+        // Pohyb, který uživatel spároval sám (bez zaúčtování), převod nezaúčtuje - to je jeho krok.
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO payment_matches (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, matched_by_user_id)
+             SELECT s.supplier_id, t.id, pi.id, 363.00, 'manual', ?
+               FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+               JOIN purchase_invoices pi ON pi.supplier_id = s.supplier_id AND pi.varsymbol = ?
+              WHERE s.supplier_id = ? AND t.bank_ref = 'BAN0010012'"
+        )->execute([$this->userId, SyntheticPohodaExport::AMBIGUOUS_PURCHASES[0], $supplierId]);
+        $pdo->prepare(
+            "UPDATE bank_transactions t JOIN bank_statements s ON s.id = t.statement_id SET t.match_status = 'manual'
+              WHERE s.supplier_id = ? AND t.bank_ref = 'BAN0010012'"
+        )->execute([$supplierId]);
+        $third = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($third->hasErrors(), $this->explain($third));
+        self::assertSame(['manual', null, 0], $this->txState($supplierId, 'BAN0010012'));
+    }
+
+    /**
+     * Opakovaný převod novějšího exportu, ve kterém účetní platbu v POHODĚ mezitím zaúčtovala
+     * a zlikvidovala: odvozený zápis úhrady se stornuje a pohyb nese zápis z deníku POHODY,
+     * párování s fakturou zůstává jedno. Vydaná faktura doplacená bez pohybu v bance je uhrazená
+     * podle likvidace. Další běh už nic nemění.
+     */
+    public function testReimportReplacesDerivedPaymentWhenPohodaBooksIt(): void
+    {
+        $supplierId = $this->supplier();
+        $open = $this->importer->run($supplierId, $this->userId,
+            PohodaExport::open(SyntheticPohodaExport::write($this->tmp . '/open', laterPayment: SyntheticPohodaExport::LATER_OPEN)), false);
+        self::assertFalse($open->hasErrors(), $this->explain($open));
+        self::assertSame(['auto_exact', null, 1], $this->txState($supplierId, SyntheticPohodaExport::LATER_PAID_BANK));
+        $derived = $this->bankEntryId($supplierId, SyntheticPohodaExport::LATER_PAID_BANK);
+        $before = $this->snapshot($supplierId);
+        $settledExport = PohodaExport::open(SyntheticPohodaExport::write($this->tmp . '/settled', laterPayment: SyntheticPohodaExport::LATER_SETTLED));
+
+        $settled = $this->importer->run($supplierId, $this->userId, $settledExport, false);
+        self::assertFalse($settled->hasErrors(), $this->explain($settled));
+        $after = $this->snapshot($supplierId);
+        foreach (['purchase_invoices', 'invoices', 'clients', 'bank_statements', 'chart_of_accounts', 'payment_matches'] as $t) {
+            self::assertSame($before[$t], $after[$t], $t);
+        }
+        // Zápis z deníku POHODY + storno odvozeného zápisu.
+        self::assertSame($before['journal_entries'] + 2, $after['journal_entries']);
+        self::assertSame(1, self::stepCounts($settled, 'link')['superseded'] ?? 0, $this->explain($settled));
+        self::assertSame(1, self::stepCounts($settled, 'payments')['already_matched'] ?? 0, $this->explain($settled));
+        $state = $this->db->pdo()->prepare('SELECT source_id IS NULL, reversed_by IS NOT NULL FROM journal_entries WHERE id = ?');
+        $state->execute([$derived]);
+        self::assertSame([1, 1], array_map('intval', $state->fetch(\PDO::FETCH_NUM)));
+        $pohoda = $this->bankEntryId($supplierId, SyntheticPohodaExport::LATER_PAID_BANK);
+        self::assertNotSame($derived, $pohoda);
+        self::assertSame(1, $this->rows('journal_entry_document_links', $supplierId, "entry_id = {$pohoda} AND doc_type = 'bank'"));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, "vendor_invoice_number = 'D-2026-9' AND status = 'paid' AND paid_at = '2026-01-28'"));
+        self::assertSame(1, $this->rows('invoices', $supplierId, "issue_date = '2025-12-20' AND status = 'paid' AND paid_total = 500.00 AND paid_at = '2026-01-05'"));
+        self::assertTrue($settled->get('reconciliation')[0]['ok'], json_encode($settled->get('reconciliation')[0], JSON_UNESCAPED_UNICODE));
+
+        $repeat = $this->importer->run($supplierId, $this->userId, $settledExport, false);
+        self::assertFalse($repeat->hasErrors(), $this->explain($repeat));
+        self::assertSame($after, $this->snapshot($supplierId));
+    }
+
+    /** Zkouška nanečisto s odvozenými úhradami a obdobím následujícího roku po sobě nic nenechá. */
+    public function testDryRunWithUnbookedPaymentsLeavesNothingBehind(): void
+    {
+        $supplierId = $this->supplier();
+        $before = $this->snapshot($supplierId) + ['suggestions' => $this->rows('bank_match_suggestions', $supplierId)];
+        $protocol = $this->importer->run($supplierId, $this->userId,
+            PohodaExport::open(SyntheticPohodaExport::write($this->tmp, laterPayment: SyntheticPohodaExport::LATER_OPEN, unbooked: true)), true);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(4, self::stepCounts($protocol, 'payments')['unbooked_posted'] ?? 0, $this->explain($protocol));
+        self::assertSame($before, $this->snapshot($supplierId) + ['suggestions' => $this->rows('bank_match_suggestions', $supplierId)]);
+    }
+
+    /**
+     * Agenda vede i doklady následujícího roku. Jejich zápisy jdou do účetního období podle
+     * skutečného data (období se založí otevřené), rok agendy zůstává neuzavřený. Zápis, který
+     * dřívější převod posunul k 31. 12., opakovaný převod přesune do jeho období. Cizí zápis
+     * v období následujícího roku převod zastaví stejně jako v roce agendy.
+     */
+    public function testNextYearDocumentsGoToTheirOwnPeriod(): void
+    {
+        $supplierId = $this->supplier();
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, unbooked: true));
+        $next = SyntheticPohodaExport::NEXT_YEAR;
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertContains('later_periods', array_column((array) $protocol->get('preflight'), 'code'));
+        self::assertContains('later_period', $this->messageCodes($protocol));
+        $periods = $this->db->pdo()->prepare('SELECT fiscal_year, status FROM accounting_periods WHERE supplier_id = ? ORDER BY fiscal_year');
+        $periods->execute([$supplierId]);
+        self::assertSame([[SyntheticPohodaExport::YEAR, 'open'], [$next, 'open']],
+            array_map(static fn (array $r): array => [(int) $r[0], (string) $r[1]], $periods->fetchAll(\PDO::FETCH_NUM)));
+        $entries = $this->db->pdo()->prepare(
+            'SELECT e.entry_date, p.fiscal_year FROM journal_entries e JOIN accounting_periods p ON p.id = e.period_id
+              WHERE e.supplier_id = ? AND e.document_no IN (?, ?) ORDER BY e.entry_date'
+        );
+        $entries->execute([$supplierId, SyntheticPohodaExport::NEXT_YEAR_ISSUED, 'BAN0010016']);
+        self::assertSame([[$next . '-01-10', $next], [$next . '-01-20', $next]],
+            array_map(static fn (array $r): array => [(string) $r[0], (int) $r[1]], $entries->fetchAll(\PDO::FETCH_NUM)));
+        self::assertSame(0, $this->rows('journal_entries', $supplierId, sprintf("entry_date = '%d-12-31'", SyntheticPohodaExport::YEAR)));
+        // Úhrada nese id bankovního dokladu a opis čísla jiného pohybu: páruje se podle id.
+        $paidBy = $this->db->pdo()->prepare(
+            'SELECT t.bank_ref FROM payment_matches pm JOIN invoices i ON i.id = pm.invoice_id JOIN bank_transactions t ON t.id = pm.bank_transaction_id
+              WHERE pm.supplier_id = ? AND i.varsymbol = ?'
+        );
+        $paidBy->execute([$supplierId, SyntheticPohodaExport::NEXT_YEAR_ISSUED]);
+        self::assertSame(['BAN0010016'], $paidBy->fetchAll(\PDO::FETCH_COLUMN));
+        self::assertTrue($protocol->get('reconciliation')[0]['ok'], json_encode($protocol->get('reconciliation')[0], JSON_UNESCAPED_UNICODE));
+
+        // Stav po dřívějším převodu: zápisy následujícího roku posunuté k 31. 12. roku agendy.
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "UPDATE journal_entries e JOIN accounting_periods p ON p.supplier_id = e.supplier_id AND p.fiscal_year = ?
+                SET e.period_id = p.id, e.entry_date = ?
+              WHERE e.supplier_id = ? AND e.document_no IN (?, ?)"
+        )->execute([SyntheticPohodaExport::YEAR, SyntheticPohodaExport::YEAR . '-12-31', $supplierId, SyntheticPohodaExport::NEXT_YEAR_ISSUED, 'BAN0010016']);
+        $again = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame(2, self::stepCounts($again, 'journal')['relocated'] ?? 0, $this->explain($again));
+        $entries->execute([$supplierId, SyntheticPohodaExport::NEXT_YEAR_ISSUED, 'BAN0010016']);
+        self::assertSame([[$next . '-01-10', $next], [$next . '-01-20', $next]],
+            array_map(static fn (array $r): array => [(string) $r[0], (int) $r[1]], $entries->fetchAll(\PDO::FETCH_NUM)));
+        self::assertTrue($again->get('reconciliation')[0]['ok'], json_encode($again->get('reconciliation')[0], JSON_UNESCAPED_UNICODE));
+
+        // Cizí zápis v období následujícího roku: deník se do rozjetého účetnictví nepřimíchá.
+        $pdo->prepare(
+            "INSERT INTO journal_entries (supplier_id, period_id, entry_date, description, source_type, posted_at)
+             SELECT supplier_id, id, ?, 'Ruční zápis', 'manual', NOW() FROM accounting_periods WHERE supplier_id = ? AND fiscal_year = ?"
+        )->execute([$next . '-02-01', $supplierId, $next]);
+        $refused = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertTrue($refused->hasErrors());
+        $errors = array_values(array_filter((array) $refused->get('preflight'), static fn (array $m): bool => $m['code'] === 'journal_not_empty'));
+        self::assertSame([$next], array_column(array_column($errors, 'context'), 'year'));
+    }
+
+    /**
+     * Převod agendy následujícího roku po agendě, která už vedla jeho doklady: zápisy, které
+     * přinesla minulá agenda, podruhé nevzniknou, a pohyb se stejným číslem jako zaúčtovaný
+     * pohyb minulého roku (číselná řada banky se opakuje) se nebere jako zaúčtovaný.
+     */
+    public function testNextYearAgendaDoesNotDuplicateEntriesCarriedByPreviousAgenda(): void
+    {
+        $supplierId = $this->supplier();
+        $first = $this->importer->run($supplierId, $this->userId, PohodaExport::open(SyntheticPohodaExport::write($this->tmp . '/y1', unbooked: true)), false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        $before = $this->rows('journal_entries', $supplierId);
+
+        $next = $this->importer->run($supplierId, $this->userId, PohodaExport::open(SyntheticPohodaExport::writeNextYear($this->tmp . '/y2')), false);
+        self::assertSame(['reconciliation'], array_values(array_unique(array_map(
+            static fn (array $s): string => $s['key'],
+            array_filter($next->toArray()['steps'], static fn (array $s): bool => $s['status'] === 'error'),
+        ))), 'Bez počátečních stavů v agendě následujícího roku nesedí jen rekonciliace. ' . $this->explain($next));
+        self::assertSame(2, self::stepCounts($next, 'journal')['existing'] ?? 0, $this->explain($next));
+        self::assertSame(0, self::stepCounts($next, 'journal')['entries'] ?? 0, $this->explain($next));
+        self::assertSame($before, $this->rows('journal_entries', $supplierId));
+        $fee = $this->db->pdo()->prepare(
+            "SELECT t.match_status FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+              WHERE s.supplier_id = ? AND t.bank_ref = 'BAN0010003' AND t.posted_at >= ?"
+        );
+        $fee->execute([$supplierId, SyntheticPohodaExport::NEXT_YEAR . '-01-01']);
+        self::assertSame(['unmatched'], $fee->fetchAll(\PDO::FETCH_COLUMN));
+    }
+
+    /** Úhradu, kterou uživatel mezi převody spároval v MyÚčtu, převod nezdvojí. */
+    public function testReimportKeepsPaymentMatchedByUserMeanwhile(): void
+    {
+        $supplierId = $this->supplier();
+        $open = $this->importer->run($supplierId, $this->userId,
+            PohodaExport::open(SyntheticPohodaExport::write($this->tmp . '/open', laterPayment: SyntheticPohodaExport::LATER_OPEN)), false);
+        self::assertFalse($open->hasErrors(), $this->explain($open));
+        $pdo = $this->db->pdo();
+        $ids = $pdo->prepare(
+            "SELECT t.id, (SELECT pi.id FROM purchase_invoices pi WHERE pi.supplier_id = s.supplier_id AND pi.vendor_invoice_number = 'D-2026-9')
+               FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id WHERE s.supplier_id = ? AND t.variable_symbol = ?"
+        );
+        $ids->execute([$supplierId, SyntheticPohodaExport::LATER_PAID_VS]);
+        [$txId, $invoiceId] = array_map('intval', $ids->fetch(\PDO::FETCH_NUM));
+        // Uživatel převodem odvozené párování zrušil a platbu spároval znovu sám.
+        $pdo->prepare('DELETE FROM payment_matches WHERE supplier_id = ? AND bank_transaction_id = ?')->execute([$supplierId, $txId]);
+        $pdo->prepare("INSERT INTO payment_matches (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type) VALUES (?, ?, ?, 726.00, 'auto')")
+            ->execute([$supplierId, $txId, $invoiceId]);
+        $pdo->prepare("UPDATE bank_transactions SET match_status = 'auto_exact' WHERE id = ?")->execute([$txId]);
+        $pdo->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = '2026-01-29' WHERE id = ?")->execute([$invoiceId]);
+        $before = $this->snapshot($supplierId);
+
+        $settled = $this->importer->run($supplierId, $this->userId,
+            PohodaExport::open(SyntheticPohodaExport::write($this->tmp . '/settled', laterPayment: SyntheticPohodaExport::LATER_SETTLED)), false);
+        self::assertFalse($settled->hasErrors(), $this->explain($settled));
+        self::assertSame($before['payment_matches'], $this->rows('payment_matches', $supplierId));
+        self::assertSame(1, self::stepCounts($settled, 'payments')['already_matched'] ?? 0, $this->explain($settled));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, "id = {$invoiceId} AND status = 'paid' AND paid_at = '2026-01-29'"));
+    }
+
+    /** @return array{0:string,1:?string,2:int} stav a důvod párování pohybu a počet jeho živých bankovních zápisů */
+    private function txState(int $supplierId, string $bankRef): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT t.match_status, t.match_reason,
+                    (SELECT COUNT(*) FROM journal_entries e WHERE e.supplier_id = s.supplier_id AND e.source_type = 'bank' AND e.source_id = t.id AND e.reversed_by IS NULL)
+               FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+              WHERE s.supplier_id = ? AND t.bank_ref = ?"
+        );
+        $stmt->execute([$supplierId, $bankRef]);
+        $rows = $stmt->fetchAll(\PDO::FETCH_NUM);
+        self::assertCount(1, $rows);
+        return [(string) $rows[0][0], $rows[0][1] === null ? null : (string) $rows[0][1], (int) $rows[0][2]];
+    }
+
+    private function bankEntryId(int $supplierId, string $bankRef): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT e.id FROM journal_entries e
+               JOIN bank_transactions t ON t.id = e.source_id JOIN bank_statements s ON s.id = t.statement_id AND s.supplier_id = e.supplier_id
+              WHERE e.supplier_id = ? AND e.source_type = 'bank' AND e.reversed_by IS NULL AND t.bank_ref = ?"
+        );
+        $stmt->execute([$supplierId, $bankRef]);
+        $ids = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+        self::assertCount(1, $ids);
+        return $ids[0];
+    }
+
+    /** @return list<array{0:string,1:string,2:string}> strana, účet, částka živého bankovního zápisu pohybu */
+    private function bankEntryLines(int $supplierId, string $bankRef): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT l.side, a.account_code, l.amount FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.entry_id = ? ORDER BY l.side = 'credit', l.id"
+        );
+        $stmt->execute([$this->bankEntryId($supplierId, $bankRef)]);
+        return array_map(static fn (array $r): array => [(string) $r[0], (string) $r[1], (string) $r[2]], $stmt->fetchAll(\PDO::FETCH_NUM));
+    }
+
+    private function bankEntryYear(int $supplierId, string $bankRef): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT p.fiscal_year FROM journal_entries e JOIN accounting_periods p ON p.id = e.period_id WHERE e.id = ?');
+        $stmt->execute([$this->bankEntryId($supplierId, $bankRef)]);
+        return (int) $stmt->fetchColumn();
+    }
+
     /** Export cizí firmy se do téhle nevmíchá. */
     public function testExportOfAnotherCompanyIsRefused(): void
     {

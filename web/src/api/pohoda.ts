@@ -5,7 +5,7 @@ import type { MoneyS3Diff, MoneyS3RunStatus, MoneyS3Step, SourceDifference } fro
 
 /**
  * Průvodce „Přechod z POHODA": XML export agendy vytvořený exportním nástrojem,
- * náhled agend a volba roku, zkouška nanečisto a ostrý převod na pozadí. Stav běžícího
+ * náhled agend a výběr roků, zkouška nanečisto a ostrý převod na pozadí. Stav běžícího
  * převodu se čte přes společné `/admin/imports/{id}` (fetchImportJob v api/imports.ts).
  */
 
@@ -14,6 +14,8 @@ export interface PohodaAgendaCounts {
   opening: number
   first_date: string | null
   last_date: string | null
+  /** Roky po roce agendy, do kterých padají zápisy deníku (chybí u přehledu nahraného dřív). */
+  later_years?: number[]
   issued: number
   purchase: number
   internal: number
@@ -112,7 +114,9 @@ export interface PohodaProtocolData {
   failure: string | null
   error?: string
   steps: MoneyS3Step[]
-  agenda?: { ico: string; year: number; program: string; exported_at: string | null; dir: string }
+  agenda?: { ico: string; year: number; program: string; exported_at: string | null; dir: string; skipped_years?: number[] }
+  /** Job víc roků: roky jobu vzestupně a pořadí tohoto roku. */
+  job_years?: { years: number[]; index: number; dry_run_isolated: boolean }
   preflight?: PohodaMessage[]
   reconciliation?: PohodaReconciliationYear[]
   orphans?: { type: 'purchase_invoice' | 'invoice' | 'cash' | 'bank'; document_no: string; id: number }[]
@@ -136,7 +140,8 @@ export interface PohodaRun {
 
 export interface PohodaStartParams {
   mode: 'dry_run' | 'import'
-  year: number
+  /** Vybrané roky; převádějí se vzestupně, každý s vlastním během a protokolem. */
+  years: number[]
   kind?: PohodaKind
   /** Mzdy: OIČ a ID PPV z PAMICA pocházejí z protokolů ČSSZ, převod je smí uložit. */
   confirm_identifiers?: boolean

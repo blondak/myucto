@@ -57,6 +57,19 @@ final class PohodaJournal
         return str_contains($source, 'konečné stavy') || str_contains($source, 'uzávěr') || str_contains($source, 'závěrk');
     }
 
+    /**
+     * Rok po roce agendy, do kterého řádek deníku padá (agenda POHODY vede doklady i po
+     * 31. 12.). `null` = řádek roku agendy, počáteční stavy nebo uzávěrka.
+     */
+    public static function laterYear(array $item, int $agendaYear): ?int
+    {
+        if (self::isOpening($item) || self::isYearEndClosing($item)) {
+            return null;
+        }
+        $year = (int) substr(PohodaXml::date($item, 'date') ?? '', 0, 4);
+        return $year > $agendaYear ? $year : null;
+    }
+
     /** Doklad v deníku: řádky se stejným zdrojem, číslem a datem. */
     public static function groupKey(array $item): string
     {
@@ -118,15 +131,20 @@ final class PohodaJournal
 
     /**
      * Předvaha přímo z deníku Pohody po syntetických účtech: netto PS (počáteční stavy),
-     * obrat (ostatní řádky bez uzávěrky) a KS.
+     * obrat (ostatní řádky bez uzávěrky) a KS. `$skipsDate` vynechá řádky s datem v roce,
+     * který se nepřevádí ({@see PohodaContext::skipsDate()}).
      *
+     * @param (callable(?string):bool)|null $skipsDate
      * @return array<string,array{0:float,1:float,2:float}>
      */
-    public static function trialBalance(PohodaExport $export): array
+    public static function trialBalance(PohodaExport $export, ?callable $skipsDate = null): array
     {
         $out = [];
         foreach ($export->records('journal', 'accountingItem') as $item) {
             if (self::isYearEndClosing($item)) {
+                continue;
+            }
+            if ($skipsDate !== null && !self::isOpening($item) && $skipsDate(PohodaXml::date($item, 'date'))) {
                 continue;
             }
             $effect = self::effect($item);

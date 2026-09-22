@@ -42,7 +42,7 @@ final class VatDocumentImporter
         $existingCash = $this->map->all($ctx->supplierId, PremierImportRepository::KIND_CASH_DOCUMENT);
         $registers = [];
 
-        foreach ($ctx->journal->documents($ctx->year) as $docKey => $rows) {
+        foreach ($ctx->journal->groups($ctx->year) as $docKey => $rows) {
             $first = $rows[0];
             if ($first['sb_kod'] !== '' && isset($invoiceSeries[$first['sb_kod']])) {
                 continue; // řádky faktury - převádí je InvoiceImporter

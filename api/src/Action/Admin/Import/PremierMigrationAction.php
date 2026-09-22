@@ -17,6 +17,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\BackgroundProcess;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Migration\ImportYears;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter;
 use MyInvoice\Service\Migration\Premier\PremierBackup;
 use MyInvoice\Service\Migration\Premier\PremierException;
@@ -29,13 +30,13 @@ use Psr\Http\Message\UploadedFileInterface;
 
 /**
  * Průvodce „Přechod z PREMIER" - nahrání zálohy dat (`.izip`/`.icab`), náhled, zkouška
- * nanečisto a ostrý převod zvoleného roku na pozadí, protokoly.
+ * nanečisto a ostrý převod vybraných roků na pozadí, protokoly.
  *
  *   POST /api/admin/imports/premier/uploads/chunked                {file_name, size}
  *   POST /api/admin/imports/premier/uploads/{token}/chunks         multipart `chunk` + `offset`
  *   POST /api/admin/imports/premier/uploads/{token}/complete
  *   GET  /api/admin/imports/premier/uploads/{token}
- *   POST /api/admin/imports/premier/uploads/{token}/start          {mode, year}
+ *   POST /api/admin/imports/premier/uploads/{token}/start          {mode, years: int[] (nebo year)}
  *   GET  /api/admin/imports/premier/runs
  *   GET  /api/admin/imports/premier/runs/{id}
  *
@@ -296,7 +297,13 @@ final class PremierMigrationAction
         if (!in_array($mode, ['dry_run', 'import'], true)) {
             return Json::error($response, 'invalid_mode', 'Neznámý režim převodu.', 422);
         }
-        $year = (int) ($body['year'] ?? 0);
+        if (!ImportYears::validBody($body)) {
+            return Json::error($response, 'invalid_year', 'Roky převodu musí být seznam roků.', 422);
+        }
+        $years = ImportYears::fromParams($body);
+        if ($years === []) {
+            return Json::error($response, 'invalid_year', 'Vyberte aspoň jeden rok převodu.', 422);
+        }
         if ($mode === 'import') {
             $missing = self::missingLiveImportRights($request);
             if ($missing !== []) {
@@ -310,9 +317,10 @@ final class PremierMigrationAction
             return Json::error($response, $e->errorCode, $e->getMessage(), 404);
         }
         $supplierIco = $this->supplierIco($supplierId);
-        $agenda = PremierImportJobService::agenda($meta, $supplierIco, $year);
-        if ($agenda === null) {
-            return Json::error($response, 'invalid_year', 'Záloha neobsahuje účetní rok zvoleného roku s IČO této firmy.', 422);
+        foreach ($years as $year) {
+            if (PremierImportJobService::agenda($meta, $supplierIco, $year) === null) {
+                return Json::error($response, 'invalid_year', "Záloha neobsahuje účetní rok {$year} s IČO této firmy.", 422, ['year' => $year]);
+            }
         }
         PremierUploads::touch($supplierId, $token);
         if (!$this->runs->isLockFree($supplierId)) {
@@ -331,7 +339,9 @@ final class PremierMigrationAction
         $jobId = $this->jobs->create($supplierId, PremierImportJobService::SOURCE, [
             'token' => $token,
             'mode' => $mode,
-            'year' => $year,
+            // Vybrané roky vzestupně; `year` = první z nich pro starší čtení parametrů jobu.
+            'years' => $years,
+            'year' => $years[0],
             'ico' => $supplierIco,
         ], $userId);
         $stored = $this->jobs->find($jobId, $supplierId);
@@ -341,7 +351,7 @@ final class PremierMigrationAction
                 'Chybí databázová migrace pro převod z PREMIER - spusťte `php api/bin/migrate.php`.', 500);
         }
         $this->spawnWorker($jobId);
-        $this->logger->log('import.premier_started', $userId, 'import_job', $jobId, ['mode' => $mode, 'year' => $year],
+        $this->logger->log('import.premier_started', $userId, 'import_job', $jobId, ['mode' => $mode, 'years' => $years],
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, ['job_id' => $jobId, 'status' => 'queued', 'mode' => $mode], 201);

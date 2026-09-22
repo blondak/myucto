@@ -63,11 +63,11 @@ describe('pohodaApi', () => {
     })).toBe(true)
   })
 
-  it('převod spouští s druhem převodu (účetnictví nebo mzdy)', async () => {
+  it('převod spouští s vybranými roky a druhem převodu (účetnictví nebo mzdy)', async () => {
     post.mockResolvedValueOnce({ data: { job_id: 5, status: 'queued', mode: 'dry_run' } })
 
-    await expect(pohodaApi.start('p1', { mode: 'dry_run', year: 2026, kind: 'payroll' })).resolves.toEqual({ job_id: 5, status: 'queued', mode: 'dry_run' })
-    expect(post).toHaveBeenCalledWith('/admin/imports/pohoda/uploads/p1/start', { mode: 'dry_run', year: 2026, kind: 'payroll' })
+    await expect(pohodaApi.start('p1', { mode: 'dry_run', years: [2025, 2026], kind: 'payroll' })).resolves.toEqual({ job_id: 5, status: 'queued', mode: 'dry_run' })
+    expect(post).toHaveBeenCalledWith('/admin/imports/pohoda/uploads/p1/start', { mode: 'dry_run', years: [2025, 2026], kind: 'payroll' })
   })
 
   it('agendu jen se mzdami vezme jako hotový export', () => {

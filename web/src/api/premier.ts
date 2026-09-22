@@ -4,9 +4,9 @@ import type { MoneyS3RunStatus, MoneyS3Step } from './moneyS3'
 
 /**
  * Průvodce „Přechod z PREMIER": záloha dat (iZIP/iCAB) vytvořená přímo v programu
- * (Správce → Záloha dat, F11), náhled agend a volba roku, zkouška nanečisto a ostrý
- * převod na pozadí. Záloha obsahuje všechny roky, převádí se ale vždy jeden — od
- * nejstaršího, protože počáteční stavy roku vycházejí z let předchozích. Stav
+ * (Správce → Záloha dat, F11), náhled agend a výběr roků, zkouška nanečisto a ostrý
+ * převod na pozadí. Záloha obsahuje všechny roky; vybrané se převádějí v jednom jobu
+ * vzestupně, protože počáteční stavy roku vycházejí z let předchozích. Stav
  * běžícího převodu se čte přes společné `/admin/imports/{id}` (fetchImportJob
  * v api/imports.ts). Na rozdíl od POHODY tu není exportní nástroj (záloha se dělá
  * přímo v PREMIERu) ani druh převodu (mzdy PREMIER nevede v téže záloze).
@@ -77,6 +77,8 @@ export interface PremierProtocolData {
   error?: string
   steps: MoneyS3Step[]
   agenda?: { ico: string; dic: string; company: string; year: number; dir: string }
+  /** Job víc roků: roky jobu vzestupně a pořadí tohoto roku. */
+  job_years?: { years: number[]; index: number; dry_run_isolated: boolean }
   preflight?: PremierMessage[]
   reconciliation?: PremierReconciliationYear[]
   orphans?: { type: 'purchase_invoice' | 'invoice' | 'cash' | 'bank'; document_no: string; id: number }[]
@@ -98,7 +100,8 @@ export interface PremierRun {
 
 export interface PremierStartParams {
   mode: 'dry_run' | 'import'
-  year: number
+  /** Vybrané roky; převádějí se vzestupně, každý s vlastním během a protokolem. */
+  years: number[]
 }
 
 export const PREMIER_BASE = '/admin/imports/premier'

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\Premier;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TableStatistics;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\AccountingUnitSwitch;
@@ -52,6 +53,7 @@ final class PremierImporter
         private readonly TaxReturnImporter $taxReturn,
         private readonly PremierVerifier $verifier,
         private readonly ClosingImporter $closing,
+        private readonly TableStatistics $statistics,
     ) {}
 
     /** @return list<string> */
@@ -178,6 +180,7 @@ final class PremierImporter
         $journal = new PremierJournal($backup);
         $vat = PremierVat::fromBackup($backup);
         $documents = PremierDocuments::fromBackup($backup, $journal, $vat);
+        $journal->usePaymentLinks($documents->paymentLinks());
         $ctx = new PremierContext($supplierId, $userId, $backup, $year, $journal, $vat, $dryRun, $protocol);
         $ctx->runId = $runId;
         $ctx->progress = $progress;
@@ -212,6 +215,9 @@ final class PremierImporter
                 }
                 $ctx->report($key, $index++, $total);
                 $protocol->begin($key);
+                if (!$dryRun && $key === PremierReconciler::STEP) {
+                    $this->statistics->refreshAfterImport(['premier_import_map']);
+                }
                 try {
                     $dryRun ? $fn() : $this->transactional($fn);
                     $protocol->finish($key);
