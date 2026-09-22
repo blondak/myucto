@@ -633,7 +633,7 @@ final class AssetService
                         $accumulatedDep += (float) $e['amount'];
                     }
                 }
-                $accZc = round($increasedPc - $accumulatedDep, 2);
+                $accZc = DisposalResiduals::bookResidual($increasedPc, $accumulatedDep, true);
                 if ($accZc > 0) {
                     $lines[] = ['account_code' => $expense, 'side' => 'debit', 'amount' => $accZc];
                     $lines[] = ['account_code' => (string) $asset['accumulated_account_code'], 'side' => 'credit', 'amount' => $accZc];
