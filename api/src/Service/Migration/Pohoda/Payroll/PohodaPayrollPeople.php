@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\Pohoda\Payroll;
 
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInstitutionWriter;
 
 /**
  * Údaje osob a pracovních vztahů z `91_mzdy.xml` (POHODA Mzdy / PAMICA), které
@@ -73,21 +74,15 @@ final class PohodaPayrollPeople
     private const REGULAR_SHARE = 0.8;
 
     /** Kód banky ČNB; odvody státu chodí jen na její účty. */
-    private const CNB_BANK_CODE = '0710';
+    private const CNB_BANK_CODE = PayrollTakeoverInstitutionWriter::CNB_BANK_CODE;
 
     /**
-     * Předčíslí účtu u ČNB => instituce MyÚčta, kód účtu a název. Registr institucí
-     * PAMICA nese jen zdravotní pojišťovny; účet ČSSZ a finančního úřadu je pouze na
-     * vystavených závazcích a předčíslí je tam jediné, co příjemce spolehlivě rozliší
-     * (`Doklady.Firma` je volný text účetní, číselník úřadů v exportu není).
-     * Kód účtu finančního úřadu je DRUH DANĚ, ne značka úřadu - každý druh má vlastní
-     * předčíslí a platební cesta pod ním účet hledá.
+     * Předčíslí účtu u ČNB => instituce MyÚčta ({@see PayrollTakeoverInstitutionWriter::LEVY_ACCOUNTS}).
+     * Registr institucí PAMICA nese jen zdravotní pojišťovny; účet ČSSZ a finančního
+     * úřadu je pouze na vystavených závazcích a předčíslí je tam jediné, co příjemce
+     * spolehlivě rozliší (`Doklady.Firma` je volný text účetní, číselník úřadů v exportu není).
      */
-    private const LEVY_ACCOUNTS = [
-        '21012' => ['social_security', null, 'Správa sociálního zabezpečení'],
-        '713' => ['tax_office', 'ADVANCE_TAX', 'Finanční úřad - záloha na daň ze závislé činnosti'],
-        '7720' => ['tax_office', 'WITHHOLDING_TAX', 'Finanční úřad - daň vybíraná srážkou'],
-    ];
+    private const LEVY_ACCOUNTS = PayrollTakeoverInstitutionWriter::LEVY_ACCOUNTS;
 
     /**
      * Daňové zvýhodnění na dítě v `ZAMpDet.RelOdpoc` => pořadí dítěte. Ověřené na mzdách:

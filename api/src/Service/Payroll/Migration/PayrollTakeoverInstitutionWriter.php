@@ -31,6 +31,21 @@ use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
  */
 final class PayrollTakeoverInstitutionWriter
 {
+    /** Kód banky ČNB; odvody státu chodí jen na její účty. */
+    public const CNB_BANK_CODE = '0710';
+
+    /**
+     * Předčíslí účtu u ČNB => instituce MyÚčta, kód účtu a název. Zdroje, které účet ČSSZ
+     * a finančního úřadu nenesou v registru institucí, ho poznají podle předčíslí.
+     * Kód účtu finančního úřadu je DRUH DANĚ, ne značka úřadu - každý druh má vlastní
+     * předčíslí a platební cesta pod ním účet hledá.
+     */
+    public const LEVY_ACCOUNTS = [
+        '21012' => ['social_security', null, 'Správa sociálního zabezpečení'],
+        '713' => ['tax_office', 'ADVANCE_TAX', 'Finanční úřad - záloha na daň ze závislé činnosti'],
+        '7720' => ['tax_office', 'WITHHOLDING_TAX', 'Finanční úřad - daň vybíraná srážkou'],
+    ];
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollInstitutionAccountRepository $institutions,
