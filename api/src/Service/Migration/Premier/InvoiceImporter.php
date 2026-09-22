@@ -321,6 +321,7 @@ final class InvoiceImporter
         $items = $doc['items'];
         $deductions = [];
         $reverse = false;
+        $outside = [];
         foreach ($items as $i => $item) {
             $items[$i]['target_code'] = null;
             $items[$i]['fixed_asset'] = false;
@@ -332,6 +333,8 @@ final class InvoiceImporter
             if ($code === '') {
                 if ($hasVat) {
                     $reasons[] = 'položka s daní bez kódu DPH';
+                } else {
+                    $outside[] = $i;
                 }
                 continue;
             }
@@ -343,6 +346,8 @@ final class InvoiceImporter
             if (!$class['in_return']) {
                 if ($hasVat) {
                     $deductions['none'] = true; // daň je součástí nákladu, odpočet se neuplatnil
+                } else {
+                    $outside[] = $i;
                 }
                 continue;
             }
@@ -360,6 +365,14 @@ final class InvoiceImporter
             }
             if ($class['fixed_asset']) {
                 $items[$i]['fixed_asset'] = true;
+            }
+        }
+        if ($reverse) {
+            // Položka bez daně, kterou PREMIER do přiznání nezahrnul (bez kódu, kód bez řádků),
+            // potřebuje na dokladu se samovyměřením kód mimo předmět daně - bez kódu by ji
+            // evidence DPH podle příznaku `reverse_charge` zdanila jako samovyměření.
+            foreach ($outside as $i) {
+                $items[$i]['target_code'] = VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE;
             }
         }
         if (count($deductions) > 1) {
@@ -402,7 +415,9 @@ final class InvoiceImporter
         $review = $reasons !== [];
         $unbooked = $review || $type === 'advance' || !$doc['booked'];
         $status = $review ? 'draft' : ($doc['settled'] ? 'paid' : ($unbooked ? 'received' : 'booked'));
-        $codes = array_values(array_unique(array_filter(array_column($items, 'target_code'))));
+        // Kód hlavičky jen ze zařazení do přiznání - položka mimo předmět daně ho neurčuje.
+        $codes = array_values(array_unique(array_filter(array_column($items, 'target_code'),
+            static fn (?string $c): bool => $c !== null && $c !== VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE)));
         [$accountNo, $bankCode] = self::bankAccount($doc['account_no']);
         $vs = preg_replace('/\D/', '', $doc['variable_symbol']) ?? '';
         try {

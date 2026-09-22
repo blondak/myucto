@@ -203,6 +203,41 @@ final class PohodaImportTest extends TestCase
         self::assertEqualsWithDelta(105.0, (float) ($return['summary']['lines']['40']['vat'] ?? 0), 0.005);
     }
 
+    /**
+     * Služba z EU se samovyměřením v cizí měně: POHODA vyměří daň ze základu 2 500 Kč (kurz ke
+     * dni plnění), faktura zní na 2 530 Kč (kurz faktury). Rozdíl 30 Kč je položka dokladu, ale
+     * předmětem daně není - v přiznání ani v KH A.2 nesmí být. Dřív ho evidence DPH kvůli
+     * příznaku samovyměření na hlavičce zařadila jako službu z EU (24e) a dopočítala z něj
+     * daň 6,30 Kč na ř. 5 i ř. 43 a do KH A.2.
+     */
+    public function testSelfAssessedForeignPurchaseDoesNotTaxTheRateDifference(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withSelfAssessedForeignPurchase($dir);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertSame(1, self::stepCounts($protocol, 'purchase_invoices')['self_assessed'] ?? 0, $this->explain($protocol));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, sprintf(
+            "varsymbol = '%s' AND reverse_charge = 1 AND total_with_vat = 2530.00 AND status <> 'draft'", SyntheticPohodaExport::SELF_ASSESSED_PURCHASE)), $this->explain($protocol));
+
+        $container = Bootstrap::buildApp()->getContainer();
+        $lines = $container->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 2, 'monthly')['summary']['lines'];
+        self::assertEqualsWithDelta(2500.0, (float) ($lines['5']['base'] ?? 0), 0.005, json_encode($lines));
+        self::assertEqualsWithDelta(525.0, (float) ($lines['5']['vat'] ?? 0), 0.005, json_encode($lines));
+        self::assertEqualsWithDelta(525.0, (float) ($lines['43']['vat'] ?? 0), 0.005, json_encode($lines));
+
+        $a2 = ['base' => 0.0, 'vat' => 0.0];
+        foreach ($container->get(\MyInvoice\Service\Report\VatLedgerService::class)->rows($supplierId, '2026-02-01', '2026-02-28') as $row) {
+            if ($row['kh_section'] === 'A.2') {
+                $a2['base'] += $row['base_czk'];
+                $a2['vat'] += $row['vat_czk'];
+            }
+        }
+        self::assertEqualsWithDelta(2500.0, $a2['base'], 0.005, 'KH A.2 jen ze základu samovyměření.');
+        self::assertEqualsWithDelta(525.0, $a2['vat'], 0.005);
+    }
+
     /** Vydaný doklad v tuzemském přenesení daňové povinnosti (ř. 25) nese příznak na hlavičce. */
     public function testDomesticReverseSaleIsFlagged(): void
     {

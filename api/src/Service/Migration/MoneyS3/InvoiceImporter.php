@@ -147,7 +147,8 @@ final class InvoiceImporter
             if ($duplicate->fetchColumn() !== false) {
                 $vendorNumber = mb_substr($vendorNumber . ' (' . $docNo . ')', 0, 50);
             }
-            $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], $item['rate'], $item['vat'], $item['code'] ?? null), $amounts['items']);
+            $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], $item['rate'], $item['vat'],
+                ($item['code'] ?? null) === VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE ? null : ($item['code'] ?? null)), $amounts['items']);
             try {
                 $id = $this->writer->insertPurchase(new MigratedPurchaseDocument(
                     supplierId: $ctx->supplierId,
@@ -673,8 +674,10 @@ final class InvoiceImporter
      * Položky faktury se samovyměřením = řádky interního dokladu (základ, sazba a kód
      * zařazení podle výstupního řádku), nárok na odpočet podle zrcadlového řádku. Money
      * samovyměřuje kurzem ke dni plnění, takže základ se od částky faktury může lišit —
-     * rozdíl zůstane jako položka bez DPH a bez kódu, aby doklad seděl na závazek.
-     * Hlavička kód nenese: položka rozdílu by jinak zdědila kód přenesené povinnosti.
+     * rozdíl zůstane jako položka bez DPH s kódem mimo předmět daně, aby doklad seděl na
+     * závazek. Bez kódu by ji evidence DPH podle příznaku samovyměření na hlavičce
+     * zdanila ({@see VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE}). Hlavička kód
+     * nenese: položka rozdílu by jinak zdědila kód přenesené povinnosti.
      *
      * @param array<string,mixed> $sa
      * @param array{items:list<array<string,mixed>>,base:float,vat:float,total:float,rounding:float} $amounts
@@ -692,7 +695,8 @@ final class InvoiceImporter
         }
         $diff = round($amounts['total'] - $base, 2);
         if (abs($diff) >= 0.01) {
-            $items[] = ['base' => $diff, 'rate' => 0.0, 'vat' => 0.0, 'rate_id' => $this->rateId(0.0, $taxDate), 'code' => null];
+            $items[] = ['base' => $diff, 'rate' => 0.0, 'vat' => 0.0, 'rate_id' => $this->rateId(0.0, $taxDate),
+                'code' => VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE];
         }
         $amounts['items'] = $items;
         $amounts['base'] = $amounts['total'];

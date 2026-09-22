@@ -28,7 +28,7 @@ final class SyntheticPohodaExport
         . 'xmlns:inv="http://www.stormware.cz/schema/version_2/invoice.xsd" xmlns:bnk="http://www.stormware.cz/schema/version_2/bank.xsd" '
         . 'xmlns:vat="http://www.stormware.cz/schema/version_2/classificationVAT.xsd" xmlns:bka="http://www.stormware.cz/schema/version_2/bankAccount.xsd" '
         . 'xmlns:adb="http://www.stormware.cz/schema/version_2/addressbook.xsd" xmlns:lAdb="http://www.stormware.cz/schema/version_2/list_addBook.xsd" '
-        . 'xmlns:acu="http://www.stormware.cz/schema/version_2/accountingunit.xsd"';
+        . 'xmlns:acu="http://www.stormware.cz/schema/version_2/accountingunit.xsd" xmlns:int="http://www.stormware.cz/schema/version_2/intDoc.xsd"';
 
     /** Karta majetku v tabulkách POHODY (`90_majetek.xml`) a její odpisy v deníku. */
     public const ASSET_NUMBER = '25IM0001';
@@ -235,6 +235,47 @@ final class SyntheticPohodaExport
             str_replace('<typ:ids>UD</typ:ids>', '<typ:ids>UDpdp</typ:ids>', self::invoice('issuedInvoice', self::REVERSE_SALE, '260009', '2026-01-18', 1000, 0)));
         $append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
             self::entry('Vydané faktury', self::REVERSE_SALE, 'Stavební práce', 1000, '311001', '602000', '2026-01-18'));
+    }
+
+    /** Přijatá faktura za službu z EU se samovyměřením ({@see withSelfAssessedForeignPurchase()}). */
+    public const SELF_ASSESSED_PURCHASE = '26PF0010';
+    public const SELF_ASSESSMENT_DOCUMENT = '26DD0001';
+
+    /**
+     * Agenda z {@see write()} s přijatou fakturou 26PF0010 od německého dodavatele za službu
+     * (100 EUR, v Kč kurzem faktury 25,30 = 2 530 Kč, členění `PDslRegEU` ř. 43, 44) a interním
+     * dokladem 26DD0001 s vyměřením daně (`DDslRegEU` ř. 5, 6) ze základu 2 500 Kč - kurz ke
+     * dni plnění 25,00. Rozdíl 30 Kč je jen kurzový, daň z něj nevzniká.
+     */
+    public static function withSelfAssessedForeignPurchase(string $agendaDir): void
+    {
+        $append = static function (string $file, string $closing, string $xml): void {
+            $content = (string) file_get_contents($file);
+            file_put_contents($file, str_replace($closing, (string) iconv('UTF-8', 'Windows-1250', $xml) . $closing, $content));
+        };
+        $append($agendaDir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>receivedInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . self::SELF_ASSESSED_PURCHASE . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>2026010</inv:symVar><inv:originalDocument>RE-2026-10</inv:originalDocument><inv:date>2026-02-15</inv:date><inv:dateTax>2026-02-15</inv:dateTax>'
+            . '<inv:dateAccounting>2026-02-15</inv:dateAccounting><inv:dateDue>2026-03-01</inv:dateDue>'
+            . '<inv:classificationVAT><typ:ids>PDslRegEU</typ:ids></inv:classificationVAT><inv:text>Licence software</inv:text>'
+            . '<inv:partnerIdentity><typ:address><typ:company>Lieferant Test GmbH</typ:company><typ:city>Berlin</typ:city><typ:street>Teststraße 1</typ:street>'
+            . '<typ:zip>10115</typ:zip><typ:country><typ:ids>DE</typ:ids></typ:country><typ:dic>DE999999999</typ:dic></typ:address></inv:partnerIdentity>'
+            . '<inv:liquidation><typ:amountHome>2530</typ:amountHome></inv:liquidation></inv:invoiceHeader>'
+            . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>2530</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT rate="12">0</typ:priceLowVAT>'
+            . '<typ:priceLowSum>0</typ:priceLowSum><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT rate="21">0</typ:priceHighVAT><typ:priceHighSum>0</typ:priceHighSum>'
+            . '<typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency>'
+            . '<inv:foreignCurrency><typ:currency><typ:ids>EUR</typ:ids></typ:currency><typ:rate>25.3</typ:rate><typ:priceSum>100</typ:priceSum></inv:foreignCurrency></inv:invoiceSummary></lst:invoice>');
+        self::file($agendaDir . '/27_interni_doklady.xml', '<lst:listIntDoc version="2.0" state="ok"><lst:intDoc version="2.0"><int:intDocHeader>'
+            . '<int:number><typ:numberRequested>' . self::SELF_ASSESSMENT_DOCUMENT . '</typ:numberRequested></int:number>'
+            . '<int:date>2026-02-15</int:date><int:dateTax>2026-02-15</int:dateTax><int:dateAccounting>2026-02-15</int:dateAccounting>'
+            . '<int:classificationVAT><typ:ids>DDslRegEU</typ:ids></int:classificationVAT><int:text>Vyměření DPH - služba z EU</int:text></int:intDocHeader>'
+            . '<int:intDocDetail><int:intDocItem><int:text>Licence software</int:text><int:rateVAT value="21">high</int:rateVAT>'
+            . '<int:homeCurrency><typ:price>2500</typ:price><typ:priceVAT>525</typ:priceVAT></int:homeCurrency></int:intDocItem></int:intDocDetail>'
+            . '<int:linkedDocuments><typ:link><typ:sourceAgenda>receivedInvoice</typ:sourceAgenda><typ:sourceDocument><typ:number>' . self::SELF_ASSESSED_PURCHASE . '</typ:number></typ:sourceDocument></typ:link></int:linkedDocuments>'
+            . '</lst:intDoc></lst:listIntDoc>');
+        $append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Přijaté faktury', self::SELF_ASSESSED_PURCHASE, 'Licence software', 2530, '518000', '321001', '2026-02-15')
+            . self::entry('Interní doklady', self::SELF_ASSESSMENT_DOCUMENT, 'DPH samovyměření', 525, '343011', '343021', '2026-02-15'));
     }
 
     /** ZIP exportu tak, jak ho zabalí nástroj (kořen s přehledem jednotek a složka agendy). */

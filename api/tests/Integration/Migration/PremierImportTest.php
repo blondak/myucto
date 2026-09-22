@@ -469,6 +469,25 @@ final class PremierImportTest extends TestCase
         $this->dph->build($supplierId, SyntheticPremierBackup::YEAR2, 3, 'monthly');
     }
 
+    /**
+     * Služba z EU s další položkou bez kódu DPH (poplatek, který PREMIER do přiznání
+     * nezahrnul): doklad je samovyměření, ale položka mimo přiznání v přiznání být nesmí.
+     * Bez kódu by ji evidence DPH podle příznaku samovyměření zařadila jako službu z EU
+     * a dopočítala z ní daň na ř. 5 i 43.
+     */
+    public function testUncodedLineOnSelfAssessedPurchaseStaysOutsideTheReturn(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(false, ['rc_uncoded_line' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['5200.00', '1', '24e']], $this->fetch("SELECT total_with_vat, reverse_charge, vat_classification_code FROM purchase_invoices WHERE supplier_id = ? AND varsymbol = 'PF250002/2025'", $supplierId));
+        $lines = $this->dph->build($supplierId, SyntheticPremierBackup::YEAR1, SyntheticPremierBackup::RC_MONTH, 'monthly')['summary']['lines'];
+        self::assertSame([5000.0, 1050.0, 5000.0, 1050.0], [round((float) ($lines['5']['base'] ?? 0), 2), round((float) ($lines['5']['vat'] ?? 0), 2),
+            round((float) ($lines['43']['base'] ?? 0), 2), round((float) ($lines['43']['vat'] ?? 0), 2)], json_encode($lines, JSON_UNESCAPED_UNICODE));
+        self::assertSame([['5000.00', '24e'], ['200.00', 'mimo']], $this->fetch("SELECT it.total_without_vat, it.vat_classification_code FROM purchase_invoice_items it
+            JOIN purchase_invoices p ON p.id = it.purchase_invoice_id WHERE p.supplier_id = ? AND p.varsymbol = 'PF250002/2025' ORDER BY it.order_index", $supplierId));
+    }
+
     private function assertReconciled(ImportProtocol $protocol, int $year): void
     {
         $reconciliation = $protocol->get('reconciliation');

@@ -60,6 +60,15 @@ final class VatReturnLineClassifier
     /** Osvobozené plnění mimo koeficient (ř. 50 + 51). */
     public const EXEMPT_OUTSIDE_COEFFICIENT_CODE = '3m';
 
+    /**
+     * Položka přijatého dokladu mimo předmět DPH (bez řádku přiznání a oddílu KH, sazba 0 %).
+     * Na dokladu se samovyměřením ji musí nést každá položka, která součástí přenesené
+     * povinnosti není (kurzový rozdíl proti základu samovyměření, plnění mimo přiznání):
+     * položku BEZ kódu evidence DPH u dokladu s příznakem `reverse_charge` zařadí jako
+     * samovyměření podle země dodavatele a dopočte z ní daň.
+     */
+    public const PURCHASE_OUTSIDE_SCOPE_CODE = 'mimo';
+
     /** Výchozí kód předmětu plnění tuzemského přenosu: stavební a montážní práce (§ 92e). */
     public const DEFAULT_REVERSE_SUBJECT = '4';
 

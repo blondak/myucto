@@ -419,7 +419,8 @@ final class InvoiceImporter
         // Datum pro KH je v Pohodě den, ke kterému účetní odpočet uplatnila - MyÚčto
         // ho respektuje jen jako ručně zadané datum přijetí (§ 73).
         $claim = $doc['claim'];
-        $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], (float) $item['rate'], (float) $item['vat'], $item['code'] ?? null), $amounts['items']);
+        $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], (float) $item['rate'], (float) $item['vat'],
+            ($item['code'] ?? null) === VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE ? null : ($item['code'] ?? null)), $amounts['items']);
         try {
             $id = $this->writer->insertPurchase(new MigratedPurchaseDocument(
                 supplierId: $ctx->supplierId,
@@ -956,7 +957,9 @@ final class InvoiceImporter
     /**
      * Položky faktury se samovyměřením = řádky interního dokladu (základ, sazba, kód
      * zařazení), daň je nulová - výstup i odpočet dopočte evidence DPH z kódu. Rozdíl
-     * proti celku faktury (jiný kurz vyměření) zůstane jako položka bez DPH a bez kódu.
+     * proti celku faktury (jiný kurz vyměření) zůstane jako položka bez DPH s kódem mimo
+     * předmět daně - bez kódu by ji evidence DPH u dokladu s příznakem samovyměření
+     * zdanila jako službu z EU ({@see VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE}).
      *
      * @param array{lines:list<array{base:float,rate:float,code:string}>} $sa
      * @param array<string,mixed> $amounts
@@ -979,7 +982,8 @@ final class InvoiceImporter
         if (abs($diff) >= 0.01) {
             $items[] = [
                 'description' => 'Rozdíl proti základu samovyměření (kurz)', 'quantity' => 1.0, 'unit' => null, 'unit_price' => $diff,
-                'base' => $diff, 'vat' => 0.0, 'rate' => 0.0, 'rate_id' => $this->rateId(0.0, $taxDate), 'code' => null,
+                'base' => $diff, 'vat' => 0.0, 'rate' => 0.0, 'rate_id' => $this->rateId(0.0, $taxDate),
+                'code' => VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE,
             ];
         }
         $amounts['items'] = $items;
