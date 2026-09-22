@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Migration\Shared;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use PHPUnit\Framework\TestCase;
+use Psr\Container\ContainerInterface;
 
 /**
  * Základ testů sdílené vrstvy převodů nad skutečnou DB: izolovaná syntetická firma
@@ -15,6 +16,7 @@ use PHPUnit\Framework\TestCase;
 abstract class SharedMigrationDbTestCase extends TestCase
 {
     protected Connection $db;
+    protected ContainerInterface $container;
     protected int $userId = 0;
     private bool $inTx = false;
 
@@ -24,7 +26,8 @@ abstract class SharedMigrationDbTestCase extends TestCase
             $this->markTestSkipped('cfg.php neexistuje - test vyžaduje DB connection.');
         }
         try {
-            $this->db = Bootstrap::buildApp()->getContainer()->get(Connection::class);
+            $this->container = Bootstrap::buildApp()->getContainer();
+            $this->db = $this->container->get(Connection::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }

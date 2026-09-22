@@ -8,7 +8,9 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Bank\StatementBalanceService;
-use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
+use MyInvoice\Service\Migration\Shared\BankStatementImportWriter;
+use MyInvoice\Service\Migration\Shared\BankSymbols;
 use PDO;
 
 /**
@@ -156,7 +158,6 @@ final class CashBankImporter
     public function importBank(ImportContext $ctx): void
     {
         $p = $ctx->protocol;
-        $pdo = $this->db->pdo();
         $accounts = [];
         foreach ($ctx->backup->rowsAcrossYears('SzUcPokl') as $r) {
             $code = trim((string) ($r['Zkrat'] ?? ''));
@@ -198,48 +199,26 @@ final class CashBankImporter
         // Zkouška nanečisto účet firmy nedoplňuje: zámek řádku měny by v její transakci
         // blokoval vystavování dokladů firmy (cizí klíč na měnu) až do konce zkoušky.
         if (!$ctx->options->isDryRun()) {
-            $this->fillOwnAccount($ctx->supplierId, $accounts);
-            $registered = $this->registerBankAccounts($ctx, $accounts);
+            $registrar = new BankAccountRegistrar($this->db, $this->bankAccounts);
+            $this->fillOwnAccount($ctx->supplierId, $accounts, $registrar);
+            $companyAccounts = self::companyAccounts($accounts);
+            $registered = $registrar->register($ctx->supplierId, $companyAccounts);
             $used = [];
             foreach (array_keys($byStatement) as $statementKey) {
                 $used[explode('|', (string) $statementKey, 2)[1]] = true;
             }
-            $this->linkCompanyAccounts($ctx, $accounts, array_keys($used), $registered);
+            $registrar->linkCompanyAccounts($ctx->supplierId, $companyAccounts, array_keys($used), $registered, $p, self::STEP_BANK, true);
         }
 
         $existingStatements = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_STATEMENT);
         $existingTx = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_TRANSACTION);
         // Výpis převzatý z Money je měsíční výpis se stavem účtu (zdroj `import`): záložka
         // Stavy na účtech ho bere jako kotvu zůstatku a jde z něj vytvořit GPC.
-        $insertStatement = $pdo->prepare(
-            'INSERT INTO bank_statements
-                (supplier_id, source, file_name, file_hash, account_number, bank_code,
-                 currency, statement_number, statement_date, transaction_count, imported_by)
-             VALUES (?, "import", ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-        $insertTx = $pdo->prepare(
-            'INSERT INTO bank_transactions
-                (source, source_ref, statement_id, posted_at, amount, currency, variable_symbol,
-                 counterparty_name, description, bank_ref, import_fingerprint)
-             VALUES ("statement", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-        $touchStatement = $pdo->prepare(
-            'UPDATE bank_statements SET transaction_count = transaction_count + ?, statement_date = GREATEST(statement_date, ?)
-              WHERE id = ? AND supplier_id = ?'
-        );
         // Stav korunového účtu na začátku roku = otevírací zápis účtu banky v deníku; dál
         // se počítá po pohybech výpisů. Účet v cizí měně deník v té měně nevede — počáteční
         // stav je součet pohybů účtu ze všech předchozích let zálohy ({@see foreignOpenings()}).
-        $ledgerOpening = $pdo->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
-               FROM journal_entry_lines l
-               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND e.period_id = ? AND l.account_id = ? AND e.source_type = 'opening'"
-        );
-        $setBalances = $pdo->prepare(
-            'UPDATE bank_statements SET prev_balance = ?, curr_balance = ?, credit_total = ?, debit_total = ? WHERE id = ? AND supplier_id = ?'
-        );
-        $foreignOpenings = $this->anchorForeignOpenings($ctx, $accounts, self::foreignOpenings($ctx, $accounts), $ledgerOpening);
+        $writer = new BankStatementImportWriter($this->db, 'money-s3');
+        $foreignOpenings = $this->anchorForeignOpenings($ctx, $accounts, self::foreignOpenings($ctx, $accounts), $writer);
 
         foreach ($byStatement as $statementKey => $rows) {
             [$yearText, $code] = explode('|', $statementKey, 2);
@@ -262,8 +241,7 @@ final class CashBankImporter
                 $accountId = $primary !== null ? ($ctx->accountIds[$primary] ?? null) : null;
                 $periodId = $ctx->periods[$year]['id'] ?? null;
                 if ($accountId !== null && $periodId !== null) {
-                    $ledgerOpening->execute([$ctx->supplierId, $periodId, $accountId]);
-                    $running = StatementBalanceService::cents(number_format((float) $ledgerOpening->fetchColumn(), 2, '.', ''));
+                    $running = StatementBalanceService::cents(number_format($writer->ledgerOpening($ctx->supplierId, $periodId, $accountId), 2, '.', ''));
                 }
             } elseif (isset($foreignOpenings[$code][$year])) {
                 $running = $foreignOpenings[$code][$year];
@@ -295,20 +273,10 @@ final class CashBankImporter
                 $mapKey = $statementKey . '|m' . $month;
                 $statementId = $legacyStatementId ?? ($existingStatements[$mapKey] ?? null);
                 if ($statementId === null) {
-                    $label = sprintf('%s/%d/%02d', $code, $year, $month);
-                    $insertStatement->execute([
-                        $ctx->supplierId,
-                        sprintf('money-s3-%s.import', preg_replace('/[^A-Za-z0-9_-]/', '_', $label)),
-                        hash('sha256', 'money-s3|' . $ctx->supplierId . '|' . $mapKey),
-                        mb_substr($meta['number'] !== '' ? $meta['number'] : $code, 0, 40),
-                        $meta['bank'] !== '' ? mb_substr($meta['bank'], 0, 4) : null,
-                        $currency,
-                        mb_substr($label, 0, 20),
-                        $lastDate,
-                        0,
-                        $ctx->userId > 0 ? $ctx->userId : null,
-                    ]);
-                    $statementId = (int) $pdo->lastInsertId();
+                    $statementId = $writer->createStatement(
+                        $ctx->supplierId, $mapKey, sprintf('%s/%d/%02d', $code, $year, $month), $meta['number'] !== '' ? $meta['number'] : $code,
+                        $meta['bank'], $currency, $lastDate, $ctx->userId > 0 ? $ctx->userId : null,
+                    );
                     $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_STATEMENT, $mapKey, $statementId, $ctx->runId);
                     $p->count(self::STEP_BANK, 'statements');
                 }
@@ -335,19 +303,17 @@ final class CashBankImporter
                         $p->count(self::STEP_BANK, 'existing');
                         continue;
                     }
-                    $insertTx->execute([
-                        mb_substr($docNo, 0, 190),
-                        $statementId,
-                        InvoiceImporter::date($r, ['DatPlat', 'DatUcPr']) ?? $lastDate,
-                        number_format($amount, 2, '.', ''),
-                        $currency,
-                        self::symbolAndDescription($r)[0],
-                        mb_substr(trim((string) ($r['AdNazev'] ?? '')), 0, 190) ?: null,
-                        self::symbolAndDescription($r)[1],
-                        mb_substr($docNo, 0, 40),
-                        hash('sha256', 'money-s3|' . $ctx->supplierId . '|' . $txKey),
+                    [$vs, $description] = self::symbolAndDescription($r);
+                    $id = $writer->insertTransaction($ctx->supplierId, $statementId, $txKey, [
+                        'source_ref' => mb_substr($docNo, 0, 190),
+                        'posted_at' => InvoiceImporter::date($r, ['DatPlat', 'DatUcPr']) ?? $lastDate,
+                        'amount' => number_format($amount, 2, '.', ''),
+                        'currency' => $currency,
+                        'variable_symbol' => $vs,
+                        'counterparty_name' => mb_substr(trim((string) ($r['AdNazev'] ?? '')), 0, 190) ?: null,
+                        'description' => $description,
+                        'bank_ref' => mb_substr($docNo, 0, 40),
                     ]);
-                    $id = (int) $pdo->lastInsertId();
                     $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_TRANSACTION, $txKey, $id, $ctx->runId);
                     $ctx->bankTransactions[$txKey] = $id;
                     if ($currency !== 'CZK') {
@@ -357,17 +323,11 @@ final class CashBankImporter
                     $p->count(self::STEP_BANK, 'transactions');
                 }
                 if ($added > 0) {
-                    $touchStatement->execute([$added, $lastDate, $statementId, $ctx->supplierId]);
+                    $writer->touchStatement($ctx->supplierId, $statementId, $added, $lastDate);
                 }
                 if ($running !== null && $legacyStatementId === null) {
                     $closing = $running + $credit - $debit;
-                    $setBalances->execute([
-                        number_format($running / 100, 2, '.', ''),
-                        number_format($closing / 100, 2, '.', ''),
-                        number_format($credit / 100, 2, '.', ''),
-                        number_format($debit / 100, 2, '.', ''),
-                        $statementId, $ctx->supplierId,
-                    ]);
+                    $writer->setBalancesInCents($ctx->supplierId, $statementId, $running, $closing, $credit, $debit);
                     $running = $closing;
                     $p->count(self::STEP_BANK, 'balances');
                 }
@@ -446,7 +406,7 @@ final class CashBankImporter
      * @param array<string,array<int,int>> $openings kód účtu => rok => počáteční stav v haléřích měny
      * @return array<string,array<int,int>>
      */
-    private function anchorForeignOpenings(ImportContext $ctx, array $accounts, array $openings, \PDOStatement $ledgerOpening): array
+    private function anchorForeignOpenings(ImportContext $ctx, array $accounts, array $openings, BankStatementImportWriter $writer): array
     {
         foreach ($openings as $code => $years) {
             $meta = $accounts[$code] ?? null;
@@ -462,8 +422,7 @@ final class CashBankImporter
                 if ($rate === null || $periodId === null) {
                     continue;
                 }
-                $ledgerOpening->execute([$ctx->supplierId, $periodId, $accountId]);
-                $czk = (float) $ledgerOpening->fetchColumn();
+                $czk = $writer->ledgerOpening($ctx->supplierId, $periodId, $accountId);
                 $offsets[$year] = (int) round($czk / $rate * 100) - $movementOpening;
             }
             if ($offsets === []) {
@@ -593,7 +552,7 @@ final class CashBankImporter
      *
      * @param array<string,array{number:string,bank:string,iban:string,currency:string,year:int}> $accounts
      */
-    private function fillOwnAccount(int $supplierId, array $accounts): void
+    private function fillOwnAccount(int $supplierId, array $accounts, BankAccountRegistrar $registrar): void
     {
         $best = [];
         foreach ($accounts as $a) {
@@ -605,137 +564,53 @@ final class CashBankImporter
                 $best[$a['currency']] = $a;
             }
         }
-        $update = $this->db->pdo()->prepare(
-            "UPDATE currencies SET account_number = ?, bank_code = ?, iban = COALESCE(iban, ?)
-              WHERE supplier_id = ? AND code = ? AND (account_number IS NULL OR account_number = '')"
-        );
         foreach ($best as $currency => $a) {
-            $update->execute([
+            $registrar->fillCurrencyAccount(
+                $supplierId,
+                $currency,
                 mb_substr($a['number'], 0, 30),
                 $a['bank'] !== '' ? mb_substr($a['bank'], 0, 4) : null,
                 $a['iban'] !== '' ? mb_substr($a['iban'], 0, 34) : null,
-                $supplierId,
-                $currency,
-            ]);
+            );
         }
     }
 
     /**
-     * Vlastní bankovní účty z Money do evidence účtů firmy (záložka Kontace): bez nich
-     * se pohyby banky po převodu nemají kam zaúčtovat. Analytika 221.xxx se bere z
-     * primárního účtu Money (`PrimUcet`), název z popisu účtu.
+     * Vlastní bankovní účty z Money pro evidenci účtů firmy ({@see BankAccountRegistrar}):
+     * analytika 221.xxx z primárního účtu Money (`PrimUcet`), název z popisu účtu, jinak
+     * „Účet {kód}". Mezi účty firmy v měnách se dostane každý účet s pohyby; jen první
+     * doplní prázdnou výchozí měnu ({@see fillOwnAccount()}).
      *
      * @param array<string,array{number:string,bank:string,iban:string,primary:string,currency:string,label:string}> $accounts
-     * @return array<string,int> kód účtu v Money => supplier_bank_accounts.id (účet cizí firmy chybí)
+     * @return array<string,array{number:string,bank:string,iban:string,currency:string,label:string,suffix:?string}>
      */
-    private function registerBankAccounts(ImportContext $ctx, array $accounts): array
+    private static function companyAccounts(array $accounts): array
     {
-        $registered = [];
+        $out = [];
         foreach ($accounts as $code => $a) {
-            $number = $a['number'] !== '' ? $a['number'] : $a['iban'];
-            if ($number === '') {
-                continue;
-            }
             $primary = AccountCode::fromMoney($a['primary']);
-            $id = $this->bankAccounts->registerImported(
-                $ctx->supplierId,
-                $number,
-                $a['bank'] !== '' ? $a['bank'] : null,
-                $a['iban'] !== '' ? $a['iban'] : null,
-                $a['currency'],
-                $a['label'] !== '' ? $a['label'] : 'Účet ' . $code,
-                $primary !== null && str_starts_with($primary, '221.') ? substr($primary, 4) : null,
-            );
-            if ($id !== null) {
-                $registered[(string) $code] = $id;
-            }
+            $out[$code] = [
+                'number' => $a['number'],
+                'bank' => $a['bank'],
+                'iban' => $a['iban'],
+                'currency' => $a['currency'],
+                'label' => $a['label'] !== '' ? $a['label'] : 'Účet ' . $code,
+                'suffix' => $primary !== null && str_starts_with($primary, '221.') ? substr($primary, 4) : null,
+            ];
         }
-        return $registered;
+        return $out;
     }
 
     /**
-     * Každý vlastní účet s pohyby patří mezi účty firmy (tab Účty, zůstatky banky). Účet,
-     * který na měně firmy ještě není, dostane vlastní řádek měny (jen první doplní prázdnou
-     * výchozí měnu, {@see fillOwnAccount()}), a evidence účtů firmy se na něj naváže.
-     * Účet se porovnává bez oddělovačů a úvodních nul spolu s kódem banky, takže opakovaný
-     * převod řádky nezdvojí.
-     *
-     * @param array<string,array{number:string,bank:string,iban:string,currency:string,label:string}> $accounts
-     * @param list<string> $used kódy účtů Money s pohyby v převáděných letech
-     * @param array<string,int> $registered kód účtu v Money => supplier_bank_accounts.id
-     */
-    private function linkCompanyAccounts(ImportContext $ctx, array $accounts, array $used, array $registered): void
-    {
-        $pdo = $this->db->pdo();
-        $known = [];
-        $byCode = [];
-        $existing = $pdo->prepare('SELECT id, code, account_number, bank_code, symbol, name_cs, name_en FROM currencies WHERE supplier_id = ?');
-        $existing->execute([$ctx->supplierId]);
-        foreach ($existing->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            $byCode[(string) $row['code']] ??= $row;
-            if ((string) ($row['account_number'] ?? '') !== '') {
-                $known[self::accountKey((string) $row['account_number'], (string) $row['bank_code'])] = (int) $row['id'];
-            }
-        }
-        $insert = $pdo->prepare(
-            'INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default, account_number, bank_code, iban)
-             VALUES (?, ?, ?, ?, ?, ?, 2, 1, 0, ?, ?, ?)'
-        );
-        $link = $pdo->prepare('UPDATE supplier_bank_accounts SET currency_id = ? WHERE id = ? AND supplier_id = ? AND currency_id IS NULL');
-        foreach ($used as $code) {
-            $a = $accounts[$code] ?? null;
-            if ($a === null || $a['number'] === '' || !isset($registered[$code])) {
-                continue;
-            }
-            $key = self::accountKey($a['number'], $a['bank']);
-            if (!isset($known[$key])) {
-                $base = $byCode[$a['currency']] ?? null;
-                $czk = $a['currency'] === 'CZK';
-                $insert->execute([
-                    $ctx->supplierId,
-                    $a['currency'],
-                    mb_substr($a['label'] !== '' ? $a['label'] : 'Účet ' . $code, 0, 60),
-                    $base['symbol'] ?? ($czk ? 'Kč' : $a['currency']),
-                    $base['name_cs'] ?? ($czk ? 'Česká koruna' : $a['currency']),
-                    $base['name_en'] ?? ($czk ? 'Czech Koruna' : $a['currency']),
-                    mb_substr($a['number'], 0, 30),
-                    $a['bank'] !== '' ? mb_substr($a['bank'], 0, 4) : null,
-                    $a['iban'] !== '' ? mb_substr($a['iban'], 0, 34) : null,
-                ]);
-                $known[$key] = (int) $pdo->lastInsertId();
-                $ctx->protocol->count(self::STEP_BANK, 'accounts_added');
-            }
-            $link->execute([$known[$key], $registered[$code], $ctx->supplierId]);
-        }
-    }
-
-    /** Porovnání čísla účtu bez oddělovačů a úvodních nul (`19-123/0100` = `0000190000123`). */
-    public static function accountKey(string $number, string $bank): string
-    {
-        return ltrim((string) preg_replace('/\D/', '', $number), '0') . '/' . ltrim(trim($bank), '0');
-    }
-
-    /**
-     * Variabilní symbol a popis bankovního pohybu z Money. Platný VS má nejvýš 10 číslic
-     * (vodicí nuly se nepočítají, stejně jako v GPC). Money do pole ukládá i reference
-     * plateb kartou (13 až 15 číslic) nebo text; ty VS nejsou, a proto zůstanou v popisu
-     * pohybu. Jinak by výpis nešel vyexportovat do GPC a párování by dostalo nesmyslný symbol.
+     * Variabilní symbol a popis bankovního pohybu z Money ({@see BankSymbols::variableSymbolAndDescription()}).
+     * Money do pole ukládá i reference plateb kartou (13 až 15 číslic) nebo text; ty VS nejsou.
      *
      * @param array<string,mixed> $r
      * @return array{0:?string,1:?string} [variabilní symbol, popis]
      */
     private static function symbolAndDescription(array $r): array
     {
-        $raw = trim((string) ($r['VarSym'] ?? ''));
-        $description = trim((string) ($r['Popis'] ?? ''));
-        $valid = $raw === '' || (ctype_digit($raw) && strlen(ltrim($raw, '0')) <= VariableSymbolNormalizer::MAX_LENGTH);
-        if (!$valid) {
-            $description = trim($description . ' (ref. ' . $raw . ')');
-        }
-        return [
-            $valid && $raw !== '' ? $raw : null,
-            $description !== '' ? mb_substr($description, 0, 255) : null,
-        ];
+        return BankSymbols::variableSymbolAndDescription(trim((string) ($r['VarSym'] ?? '')), trim((string) ($r['Popis'] ?? '')), false);
     }
 
     /** Měna pokladny/účtu z Money (prázdná = domácí). */

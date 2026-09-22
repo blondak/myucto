@@ -8,8 +8,10 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Bank\StatementBalanceService;
-use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Migration\MoneyS3\AccountCode;
+use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
+use MyInvoice\Service\Migration\Shared\BankStatementImportWriter;
+use MyInvoice\Service\Migration\Shared\BankSymbols;
 use PDO;
 
 /**
@@ -205,7 +207,6 @@ final class CashBankImporter
     public function importBank(PohodaContext $ctx): void
     {
         $p = $ctx->protocol;
-        $pdo = $this->db->pdo();
 
         $accounts = [];
         foreach ($ctx->export->records('bank_accounts', 'bankAccount') as $r) {
@@ -252,31 +253,7 @@ final class CashBankImporter
 
         $existingStatements = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_BANK_STATEMENT);
         $existingTx = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_BANK_TRANSACTION);
-        $insertStatement = $pdo->prepare(
-            'INSERT INTO bank_statements
-                (supplier_id, source, file_name, file_hash, account_number, bank_code, currency, statement_number,
-                 statement_date, transaction_count, imported_by)
-             VALUES (?, "import", ?, ?, ?, ?, "CZK", ?, ?, 0, ?)'
-        );
-        $insertTx = $pdo->prepare(
-            'INSERT INTO bank_transactions
-                (source, source_ref, statement_id, posted_at, amount, currency, variable_symbol, constant_symbol,
-                 specific_symbol, counterparty_account, counterparty_bank, counterparty_name, description, bank_ref,
-                 import_fingerprint)
-             VALUES ("statement", ?, ?, ?, ?, "CZK", ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-        $touchStatement = $pdo->prepare(
-            'UPDATE bank_statements SET transaction_count = transaction_count + ?, statement_date = GREATEST(statement_date, ?) WHERE id = ? AND supplier_id = ?'
-        );
-        $setBalances = $pdo->prepare(
-            'UPDATE bank_statements SET prev_balance = ?, curr_balance = ?, credit_total = ?, debit_total = ? WHERE id = ? AND supplier_id = ?'
-        );
-        $ledgerOpening = $pdo->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
-               FROM journal_entry_lines l
-               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND e.period_id = ? AND l.account_id = ? AND e.source_type = 'opening'"
-        );
+        $writer = new BankStatementImportWriter($this->db, 'pohoda');
 
         $done = 0;
         $seenKeys = [];
@@ -299,8 +276,7 @@ final class CashBankImporter
             $running = null;
             $accountId = $meta['analytic'] !== null ? ($ctx->accountIds[$meta['analytic']] ?? null) : null;
             if ($accountId !== null && $ctx->period !== null) {
-                $ledgerOpening->execute([$ctx->supplierId, $ctx->period['id'], $accountId]);
-                $running = StatementBalanceService::cents(number_format((float) $ledgerOpening->fetchColumn(), 2, '.', ''));
+                $running = StatementBalanceService::cents(number_format($writer->ledgerOpening($ctx->supplierId, (int) $ctx->period['id'], $accountId), 2, '.', ''));
                 if (isset($openingDocs[$code]) && $openingDocs[$code] !== $running) {
                     $p->warn(self::STEP_BANK, 'opening_mismatch', sprintf(
                         'Počáteční stav bankovního účtu %s v Pohodě (%s Kč) nesedí s počátečním stavem jeho analytiky v deníku (%s Kč), výpisy navazují na deník.',
@@ -326,18 +302,10 @@ final class CashBankImporter
                 $statementId = $existingStatements[$mapKey] ?? null;
                 $isNewStatement = $statementId === null;
                 if ($isNewStatement) {
-                    $label = sprintf('%s %s/%d', $code, $statementNo, $ctx->year());
-                    $insertStatement->execute([
-                        $ctx->supplierId,
-                        sprintf('pohoda-%s.import', preg_replace('/[^A-Za-z0-9_-]/', '_', $label)),
-                        hash('sha256', 'pohoda|' . $ctx->supplierId . '|' . $mapKey),
-                        mb_substr($meta['number'] !== '' ? $meta['number'] : $code, 0, 40),
-                        $meta['bank'] !== '' ? mb_substr($meta['bank'], 0, 4) : null,
-                        mb_substr($label, 0, 20),
-                        $lastDate,
-                        $ctx->userOrNull(),
-                    ]);
-                    $statementId = (int) $pdo->lastInsertId();
+                    $statementId = $writer->createStatement(
+                        $ctx->supplierId, $mapKey, sprintf('%s %s/%d', $code, $statementNo, $ctx->year()), $meta['number'] !== '' ? $meta['number'] : (string) $code,
+                        $meta['bank'], 'CZK', $lastDate, $ctx->userOrNull(),
+                    );
                     $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_BANK_STATEMENT, $mapKey, $statementId, $ctx->runId);
                     $p->count(self::STEP_BANK, 'statements');
                 }
@@ -375,22 +343,20 @@ final class CashBankImporter
                     $counterName = $partner['name'] !== '' ? $partner['name'] : PohodaXml::text($h, 'note');
                     $constant = PohodaXml::text($h, 'symConst');
                     $specific = PohodaXml::text($h, 'symSpec');
-                    $insertTx->execute([
-                        mb_substr($number, 0, 190),
-                        $statementId,
-                        $date,
-                        number_format($amount, 2, '.', ''),
-                        $vs,
-                        preg_match('/^\d{1,10}$/', $constant) === 1 && ltrim($constant, '0') !== '' ? $constant : null,
-                        preg_match('/^\d{1,20}$/', $specific) === 1 && ltrim($specific, '0') !== '' ? $specific : null,
-                        mb_substr(PohodaXml::text($h, 'paymentAccount/accountNo'), 0, 40) ?: null,
-                        mb_substr(PohodaXml::text($h, 'paymentAccount/bankCode'), 0, 4) ?: null,
-                        $counterName !== '' ? mb_substr($counterName, 0, 190) : null,
-                        $description,
-                        mb_substr($number, 0, 40),
-                        hash('sha256', 'pohoda|' . $ctx->supplierId . '|' . $txKey),
+                    $id = $writer->insertTransaction($ctx->supplierId, $statementId, $txKey, [
+                        'source_ref' => mb_substr($number, 0, 190),
+                        'posted_at' => $date,
+                        'amount' => number_format($amount, 2, '.', ''),
+                        'currency' => 'CZK',
+                        'variable_symbol' => $vs,
+                        'constant_symbol' => preg_match('/^\d{1,10}$/', $constant) === 1 && ltrim($constant, '0') !== '' ? $constant : null,
+                        'specific_symbol' => preg_match('/^\d{1,20}$/', $specific) === 1 && ltrim($specific, '0') !== '' ? $specific : null,
+                        'counterparty_account' => mb_substr(PohodaXml::text($h, 'paymentAccount/accountNo'), 0, 40) ?: null,
+                        'counterparty_bank' => mb_substr(PohodaXml::text($h, 'paymentAccount/bankCode'), 0, 4) ?: null,
+                        'counterparty_name' => $counterName !== '' ? mb_substr($counterName, 0, 190) : null,
+                        'description' => $description,
+                        'bank_ref' => mb_substr($number, 0, 40),
                     ]);
-                    $id = (int) $pdo->lastInsertId();
                     $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_BANK_TRANSACTION, $txKey, $id, $ctx->runId);
                     $ctx->bankTransactions[$number][] = ['id' => $id, 'date' => $date];
                     self::rememberReferences($ctx, $r, $id);
@@ -401,17 +367,11 @@ final class CashBankImporter
                     }
                 }
                 if ($added > 0) {
-                    $touchStatement->execute([$added, $lastDate, $statementId, $ctx->supplierId]);
+                    $writer->touchStatement($ctx->supplierId, $statementId, $added, $lastDate);
                 }
                 if ($running !== null && $isNewStatement) {
                     $closing = $running + $credit - $debit;
-                    $setBalances->execute([
-                        number_format($running / 100, 2, '.', ''),
-                        number_format($closing / 100, 2, '.', ''),
-                        number_format($credit / 100, 2, '.', ''),
-                        number_format($debit / 100, 2, '.', ''),
-                        $statementId, $ctx->supplierId,
-                    ]);
+                    $writer->setBalancesInCents($ctx->supplierId, $statementId, $running, $closing, $credit, $debit);
                     $running = $closing;
                 } elseif ($running !== null) {
                     $running += $credit - $debit;
@@ -463,23 +423,14 @@ final class CashBankImporter
     }
 
     /**
-     * Variabilní symbol pohybu: platný má nejvýš 10 číslic (vodicí nuly se nepočítají).
-     * Jiný obsah pole zůstane v popisu pohybu.
+     * Variabilní symbol pohybu ({@see BankSymbols::variableSymbolAndDescription()}); VS ze
+     * samých nul je bez symbolu. Jiný obsah pole zůstane v popisu pohybu.
      *
      * @return array{0:?string,1:?string}
      */
     private static function symbolAndDescription(mixed $h): array
     {
-        $raw = PohodaXml::text($h, 'symVar');
-        $description = PohodaXml::text($h, 'text');
-        $valid = $raw === '' || (ctype_digit($raw) && strlen(ltrim($raw, '0')) <= VariableSymbolNormalizer::MAX_LENGTH);
-        if (!$valid) {
-            $description = trim($description . ' (ref. ' . $raw . ')');
-        }
-        return [
-            $valid && $raw !== '' && ltrim($raw, '0') !== '' ? $raw : null,
-            $description !== '' ? mb_substr($description, 0, 255) : null,
-        ];
+        return BankSymbols::variableSymbolAndDescription(PohodaXml::text($h, 'symVar'), PohodaXml::text($h, 'text'), true);
     }
 
     /** @return list<array{rate:float,base:float,vat:float}> */
@@ -550,26 +501,19 @@ final class CashBankImporter
      */
     private function registerAccounts(PohodaContext $ctx, array $accounts, array $used): void
     {
-        $pdo = $this->db->pdo();
-        $registered = [];
+        $registrar = new BankAccountRegistrar($this->db, $this->bankAccounts);
+        $company = [];
         foreach ($accounts as $code => $a) {
-            if ($a['number'] === '' && $a['iban'] === '') {
-                continue;
-            }
-            $id = $this->bankAccounts->registerImported(
-                $ctx->supplierId,
-                $a['number'] !== '' ? $a['number'] : $a['iban'],
-                $a['bank'] !== '' ? $a['bank'] : null,
-                $a['iban'] !== '' ? $a['iban'] : null,
-                'CZK',
-                $a['label'],
-                $a['analytic'] !== null && str_starts_with($a['analytic'], '221.') ? substr($a['analytic'], 4) : null,
-            );
-            if ($id !== null) {
-                $registered[$code] = $id;
-            }
-            $ctx->protocol->count(self::STEP_BANK, $id !== null ? 'accounts_registered' : 'accounts_rejected');
+            $company[$code] = [
+                'number' => $a['number'],
+                'bank' => $a['bank'],
+                'iban' => $a['iban'],
+                'currency' => 'CZK',
+                'label' => $a['label'],
+                'suffix' => $a['analytic'] !== null && str_starts_with($a['analytic'], '221.') ? substr($a['analytic'], 4) : null,
+            ];
         }
+        $registered = $registrar->register($ctx->supplierId, $company, $ctx->protocol, self::STEP_BANK);
         $primary = null;
         foreach ($used as $code) {
             if (($accounts[$code]['number'] ?? '') !== '') {
@@ -578,47 +522,9 @@ final class CashBankImporter
             }
         }
         if ($primary !== null) {
-            $pdo->prepare(
-                "UPDATE currencies SET account_number = ?, bank_code = ?, iban = COALESCE(iban, ?)
-                  WHERE supplier_id = ? AND code = 'CZK' AND (account_number IS NULL OR account_number = '')"
-            )->execute([$primary['number'], $primary['bank'] ?: null, $primary['iban'] ?: null, $ctx->supplierId]);
+            // Na rozdíl od Money S3 bez zkrácení na délku sloupců a '0' jako kód banky = NULL.
+            $registrar->fillCurrencyAccount($ctx->supplierId, 'CZK', $primary['number'], $primary['bank'] ?: null, $primary['iban'] ?: null);
         }
-
-        $known = [];
-        $existing = $pdo->prepare("SELECT id, account_number, bank_code FROM currencies WHERE supplier_id = ? AND COALESCE(account_number, '') <> ''");
-        $existing->execute([$ctx->supplierId]);
-        foreach ($existing->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            $known[self::accountKey((string) $row['account_number'], (string) $row['bank_code'])] = (int) $row['id'];
-        }
-        $insert = $pdo->prepare(
-            "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default, account_number, bank_code, iban)
-             VALUES (?, 'CZK', ?, 'Kč', 'Česká koruna', 'Czech Koruna', 2, 1, 0, ?, ?, ?)"
-        );
-        $link = $pdo->prepare('UPDATE supplier_bank_accounts SET currency_id = ? WHERE id = ? AND supplier_id = ? AND currency_id IS NULL');
-        foreach ($used as $code) {
-            $a = $accounts[$code] ?? null;
-            if ($a === null || $a['number'] === '' || !isset($registered[$code])) {
-                continue;
-            }
-            $key = self::accountKey($a['number'], $a['bank']);
-            if (!isset($known[$key])) {
-                $insert->execute([
-                    $ctx->supplierId,
-                    mb_substr($a['label'], 0, 60),
-                    mb_substr($a['number'], 0, 30),
-                    $a['bank'] !== '' ? mb_substr($a['bank'], 0, 4) : null,
-                    $a['iban'] !== '' ? mb_substr($a['iban'], 0, 34) : null,
-                ]);
-                $known[$key] = (int) $pdo->lastInsertId();
-                $ctx->protocol->count(self::STEP_BANK, 'accounts_added');
-            }
-            $link->execute([$known[$key], $registered[$code], $ctx->supplierId]);
-        }
-    }
-
-    /** Porovnání čísla účtu bez oddělovačů a úvodních nul (`19-123/0100` = `0000190000123`). */
-    public static function accountKey(string $number, string $bank): string
-    {
-        return ltrim((string) preg_replace('/\D/', '', $number), '0') . '/' . ltrim(trim($bank), '0');
+        $registrar->linkCompanyAccounts($ctx->supplierId, $company, $used, $registered, $ctx->protocol, self::STEP_BANK, false);
     }
 }
