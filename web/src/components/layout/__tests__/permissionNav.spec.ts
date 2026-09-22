@@ -22,8 +22,8 @@ describe('navigace podle RBAC oprávnění', () => {
     expect(appLayout).not.toContain("...(isAdmin ? [{ to: '/invoices/import'")
     expect(appLayout).not.toContain("...(isAdmin ? [{ to: '/purchase-invoices/import'")
     // Import vydaných, import přijatých a průvodci „Přechod z Money S3", „Přechod z POHODA",
-    // „Přechod z PREMIER" a „Přechod z PAMICA".
-    expect(appLayout.match(/permission: 'utilities\.import' as PermissionKey, access: 'write'/g)).toHaveLength(6)
+    // „Přechod z PREMIER", „Přechod z PAMICA" a „Přechod ze Stereo NX".
+    expect(appLayout.match(/permission: 'utilities\.import' as PermissionKey, access: 'write'/g)).toHaveLength(7)
   })
 
   it('nabízí firemní sekci i staff roli a její položky pak filtruje podle práv', () => {
