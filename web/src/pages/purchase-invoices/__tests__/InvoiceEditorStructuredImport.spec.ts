@@ -89,6 +89,7 @@ function importedInvoice() {
     vendor_invoice_number: 'SYNTHETIC-42',
     varsymbol: '42',
     document_kind: 'invoice',
+    status: 'draft',
     issue_date: '2026-08-01',
     tax_date: '2026-08-01',
     due_date: '2026-08-15',
@@ -150,6 +151,7 @@ async function createEditorRouter(path = '/purchase-invoices/new') {
     routes: [
       { path: '/purchase-invoices/new', component: InvoiceEditor },
       { path: '/purchase-invoices/:id/edit', component: InvoiceEditor },
+      { path: '/purchase-invoices/:id', component: { render: () => null } },
       { path: '/portal/purchase-invoice-submissions', component: { render: () => null } },
     ],
   })
@@ -205,6 +207,24 @@ describe('InvoiceEditor — strukturovaný import', () => {
     expect(router.currentRoute.value.path).toBe('/purchase-invoices/42/edit')
     expect(m.get).toHaveBeenCalledWith(42)
     expect(wrapper.find('input[maxlength="50"]').element).toHaveProperty('value', 'SYNTHETIC-42')
+  })
+
+  it('doklad mimo koncept otevře na detailu, protože by ho editor neuložil', async () => {
+    m.get.mockResolvedValueOnce({ ...importedInvoice(), status: 'paid' })
+    const router = await createEditorRouter('/purchase-invoices/42/edit')
+    shallowMount(InvoiceEditor, { global: { plugins: [router], directives: { math: {} } } })
+    await flushPromises()
+
+    expect(router.currentRoute.value.path).toBe('/purchase-invoices/42')
+  })
+
+  it('doklad mimo koncept s ?force=1 nechá v editoru', async () => {
+    m.get.mockResolvedValueOnce({ ...importedInvoice(), status: 'paid' })
+    const router = await createEditorRouter('/purchase-invoices/42/edit?force=1')
+    shallowMount(InvoiceEditor, { global: { plugins: [router], directives: { math: {} } } })
+    await flushPromises()
+
+    expect(router.currentRoute.value.path).toBe('/purchase-invoices/42/edit')
   })
 
   it('předá běžné PDF účetní jedním klikem bez založení neúplné faktury', async () => {
