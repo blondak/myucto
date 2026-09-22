@@ -129,12 +129,23 @@ final class TaxProfileRepository
     }
 
     /**
+     * Stejný rozpad jako peněžní deník: z uhrazeného brutto je průběžnou položkou
+     * jen uložená DPH. Zaokrouhlení zůstává v příjmu či výdaji.
+     */
+    private static function paidInvoiceBaseSql(string $alias, bool $isVatPayer): string
+    {
+        return $isVatPayer
+            ? "({$alias}.total_with_vat - GREATEST(0, LEAST({$alias}.total_vat, {$alias}.total_with_vat)))"
+            : "{$alias}.total_with_vat";
+    }
+
+    /**
      * Roční příjem (zaplacené faktury daného roku, přepočet na CZK).
      * Pro plátce DPH se bere bez DPH, pro neplátce s DPH (= fakturovaná částka).
      */
     public function annualIncome(int $supplierId, int $year, bool $isVatPayer): float
     {
-        $col = $isVatPayer ? 'i.total_without_vat' : 'i.total_with_vat';
+        $col = self::paidInvoiceBaseSql('i', $isVatPayer);
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(SUM({$col} * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)), 0)
                FROM invoices i
@@ -158,7 +169,7 @@ final class TaxProfileRepository
      */
     public function annualExemptIncome(int $supplierId, int $year, bool $isVatPayer): float
     {
-        $col = $isVatPayer ? 'i.total_without_vat' : 'i.total_with_vat';
+        $col = self::paidInvoiceBaseSql('i', $isVatPayer);
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(SUM({$col} * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)), 0)
                FROM invoices i
@@ -180,7 +191,7 @@ final class TaxProfileRepository
      */
     public function monthlyIncome(int $supplierId, int $year, bool $isVatPayer): array
     {
-        $col = $isVatPayer ? 'i.total_without_vat' : 'i.total_with_vat';
+        $col = self::paidInvoiceBaseSql('i', $isVatPayer);
         $stmt = $this->db->pdo()->prepare(
             "SELECT MONTH(i.paid_at) AS m,
                     COALESCE(SUM({$col} * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)), 0) AS total
@@ -208,7 +219,7 @@ final class TaxProfileRepository
      */
     public function monthIncome(int $supplierId, string $ym, bool $isVatPayer): float
     {
-        $col = $isVatPayer ? 'i.total_without_vat' : 'i.total_with_vat';
+        $col = self::paidInvoiceBaseSql('i', $isVatPayer);
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(SUM({$col} * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)), 0)
                FROM invoices i
@@ -231,7 +242,7 @@ final class TaxProfileRepository
      */
     public function monthExpenses(int $supplierId, string $ym, bool $isVatPayer): float
     {
-        $col = $isVatPayer ? 'pi.total_without_vat' : 'pi.total_with_vat';
+        $col = self::paidInvoiceBaseSql('pi', $isVatPayer);
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(SUM({$col} * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1)), 0)
                FROM purchase_invoices pi

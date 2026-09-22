@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { MoneyS3Diff, MoneyS3Run } from '@/api/moneyS3'
 import type { PohodaRun } from '@/api/pohoda'
 import type { PremierRun } from '@/api/premier'
+import type { StereoProtocolRun } from '@/api/stereoNx'
 
 /**
  * Protokol převodu agendy (Money S3, POHODA, PREMIER) — důkaz pro účetní: kroky s počty,
@@ -11,7 +12,7 @@ import type { PremierRun } from '@/api/premier'
  * sestavě, doklady proti deníku), uzávěrka historických let, doklady bez zápisu a stav
  * automatiky. Texty se berou z jmenného prostoru `prefix` (`money_s3`, `pohoda`, `premier`).
  */
-const props = withDefaults(defineProps<{ run: MoneyS3Run | PohodaRun | PremierRun; prefix?: string }>(), { prefix: 'money_s3' })
+const props = withDefaults(defineProps<{ run: MoneyS3Run | PohodaRun | PremierRun | StereoProtocolRun; prefix?: string }>(), { prefix: 'money_s3' })
 const { t, te, locale } = useI18n()
 
 interface ReconciliationView {
@@ -95,9 +96,9 @@ function levelClass(level: string): string {
 <template>
   <div v-if="protocol" class="space-y-5">
     <div class="flex flex-wrap items-center gap-3">
-      <h3 class="text-lg font-semibold">{{ t(k('protocol.title'), { id: run.id }) }}</h3>
+      <h3 class="text-lg font-semibold">{{ run.id === null ? t(k('protocol.title')) : t(k('protocol.title'), { id: run.id }) }}</h3>
       <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(run.status)">{{ label('status', run.status) }}</span>
-      <span class="text-sm text-neutral-500">{{ label('mode', run.mode) }} · {{ agendaLabel }} · {{ run.created_at }}</span>
+      <span class="text-sm text-neutral-500">{{ [label('mode', run.mode), agendaLabel, run.created_at].filter(Boolean).join(' · ') }}</span>
     </div>
 
     <div v-if="protocol.failure" class="rounded-lg border border-danger-500/30 bg-danger-50 px-4 py-3 text-sm text-danger-600">

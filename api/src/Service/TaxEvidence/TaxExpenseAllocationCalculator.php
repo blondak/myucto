@@ -49,7 +49,7 @@ final class TaxExpenseAllocationCalculator
     ): float {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, status, document_kind, tax_deductible, is_fixed_asset,
-                    total_without_vat, total_with_vat, vat_deduction, vat_deduction_percent
+                    total_without_vat, total_vat, total_with_vat, vat_deduction, vat_deduction_percent
                FROM purchase_invoices WHERE id = ? AND supplier_id = ?'
         );
         $stmt->execute([$purchaseInvoiceId, $supplierId]);
@@ -178,14 +178,15 @@ final class TaxExpenseAllocationCalculator
             if (!$isVatPayer) {
                 return $paidAmount;
             }
-            $net = max(0.0, (float) $invoice['total_without_vat']);
-            $vat = max(0.0, $gross - $net);
-            $deductible = $net + $vat * (1 - $this->deductionRatio(
+            // The paid gross can include document rounding. Only the stored VAT
+            // is deductible; gross - net would wrongly treat rounding as VAT.
+            $vat = min($gross, max(0.0, (float) $invoice['total_vat']));
+            $deductible = $gross - $vat * $this->deductionRatio(
                 $supplierId,
                 (string) $invoice['vat_deduction'],
                 (float) $invoice['vat_deduction_percent'],
                 $year,
-            ));
+            );
             return $paidAmount * ($deductible / $gross);
         }
 

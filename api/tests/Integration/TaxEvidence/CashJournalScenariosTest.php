@@ -127,6 +127,58 @@ final class CashJournalScenariosTest extends CashJournalTestCase
         self::assertEqualsWithDelta(3315.0, $cashBase, 0.01, 'Pokladna musí použít stejný výpočet nároku na odpočet.');
     }
 
+    public function testPurchaseRoundingWithoutVatRemainsTaxExpenseForBankPayment(): void
+    {
+        $this->setVatPayer($this->supplierId, true);
+        $invoice = $this->purchaseInvoice($this->supplierId, [
+            'without' => 100.0, 'with' => 100.02, 'vat_deduction' => 'full', 'status' => 'paid',
+        ]);
+        $this->db->pdo()->prepare(
+            'UPDATE purchase_invoices SET total_vat = 0, rounding = 0.02, reverse_charge = 1 WHERE id = ?'
+        )->execute([$invoice]);
+        $statement = $this->statement($this->supplierId, $this->accountA);
+        $transaction = $this->bankTx($statement, -100.02, ['match_status' => 'auto_exact']);
+        $this->paymentMatch($this->supplierId, $transaction, $invoice, 100.02);
+
+        $result = $this->fullYear($this->supplierId, true);
+        $row = array_values(array_filter(
+            $result['rows'],
+            static fn (array $r): bool => $r['source_type'] === 'bank' && $r['source_id'] === $transaction,
+        ))[0];
+        self::assertEqualsWithDelta(100.02, $row['base'], 0.001);
+    }
+
+    public function testInvoiceRoundingWithoutVatRemainsTaxableIncomeForBankAndVirtualPayments(): void
+    {
+        $this->setVatPayer($this->supplierId, true);
+        $bankInvoice = $this->saleInvoice($this->supplierId, [
+            'without' => 100.0, 'with' => 100.02, 'status' => 'paid',
+        ]);
+        $virtualInvoice = $this->saleInvoice($this->supplierId, [
+            'without' => 100.0, 'with' => 100.02, 'status' => 'paid',
+        ]);
+        $this->db->pdo()->prepare(
+            'UPDATE invoices SET total_vat = 0, rounding = 0.02 WHERE id IN (?, ?)'
+        )->execute([$bankInvoice, $virtualInvoice]);
+
+        $statement = $this->statement($this->supplierId, $this->accountA);
+        $transaction = $this->bankTx($statement, 100.02, ['match_status' => 'auto_exact']);
+        $this->invoicePayment($this->supplierId, $bankInvoice, 100.02, 'bank', $transaction);
+        $this->invoicePayment($this->supplierId, $virtualInvoice, 100.02, 'manual');
+
+        $result = $this->fullYear($this->supplierId, true);
+        foreach ([['bank', $transaction], ['invoice_payment', $virtualInvoice]] as [$type, $sourceId]) {
+            $rows = array_values(array_filter(
+                $result['rows'],
+                static fn (array $r): bool => $r['source_type'] === $type
+                    && ($type === 'bank' ? $r['source_id'] === $sourceId : $r['invoice_id'] === $sourceId),
+            ));
+            self::assertCount(1, $rows);
+            self::assertEqualsWithDelta(100.02, $rows[0]['base'], 0.001);
+            self::assertEqualsWithDelta(0.0, $rows[0]['vat'], 0.001);
+        }
+    }
+
     public function testVatPayerStatusIsResolvedAtMovementDate(): void
     {
         $this->setVatPayer($this->supplierId, true);

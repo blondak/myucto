@@ -1,0 +1,146 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import StereoNxMigration from '../StereoNxMigration.vue'
+
+const m = vi.hoisted(() => ({
+  uploads: vi.fn(), upload: vi.fn(), preview: vi.fn(), run: vi.fn(), remove: vi.fn(),
+  toastError: vi.fn(), supplierStore: undefined as any,
+}))
+
+vi.mock('@/api/stereoNx', () => ({ stereoNxApi: {
+  uploads: m.uploads, upload: m.upload, preview: m.preview, run: m.run, remove: m.remove,
+} }))
+vi.mock('@/stores/supplier', async () => {
+  const { reactive } = await import('vue')
+  m.supplierStore = reactive({ currentSupplierId: 1 })
+  return { useSupplierStore: () => m.supplierStore }
+})
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: m.toastError }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({
+  t: (key: string) => key, te: () => true, tm: () => ['Synthetic backup instruction'],
+  rt: (value: string) => value, locale: { value: 'cs' },
+}) }))
+
+const upload = { token: 'synthetic-token', filename: 'synthetic.zip', size: 1024,
+  received: 1024, complete: true, created_at: 1700000000 }
+const company = { index: 0, label: 'Syntetická firma',
+  identity: { ico: '12345678', dic: 'CZ12345678', name: 'Syntetická firma', vat_payer: true },
+  matches_target: true }
+const preview = { companies: [company], target: { ico: '12345678', accounting_mode: 'tax_evidence', vat_payer: true } }
+const dryReport = { ok: true, counts: { issued: 1, purchases: 1, requires_draft: 1 },
+  review_reasons: { vat_participation_unassigned: 1 }, errors: [], warnings: [],
+  written: { issued: 1, purchases: 1 } }
+const importReport = { ...dryReport, database_writes: true, written: { issued: 1, purchases: 1 } }
+
+function primaryButton(wrapper: Awaited<ReturnType<typeof mountPage>>, key: string) {
+  const button = wrapper.get('[data-testid="stereo-actions"]').findAll('button').find(item => item.text().includes(`stereo_nx.${key}`))
+  expect(button, `missing button ${key}`).toBeDefined()
+  return button!
+}
+
+async function mountPage() {
+  const wrapper = mount(StereoNxMigration)
+  await flushPromises()
+  return wrapper
+}
+
+async function openExisting(wrapper: Awaited<ReturnType<typeof mountPage>>) {
+  const button = wrapper.findAll('button').find(item => item.text().includes('stereo_nx.open_upload'))
+  expect(button).toBeDefined()
+  await button!.trigger('click')
+  await flushPromises()
+}
+
+async function reachDryRun(wrapper: Awaited<ReturnType<typeof mountPage>>) {
+  await openExisting(wrapper)
+  expect(wrapper.get('[data-testid="stereo-company-select"]').element).toBeTruthy()
+  await primaryButton(wrapper, 'continue').trigger('click')
+  await flushPromises()
+  await primaryButton(wrapper, 'dry_run').trigger('click')
+  await flushPromises()
+}
+
+beforeEach(() => {
+  vi.resetAllMocks()
+  m.supplierStore.currentSupplierId = 1
+  m.uploads.mockResolvedValue([upload])
+  m.upload.mockResolvedValue({ token: upload.token })
+  m.preview.mockResolvedValue(preview)
+  m.run.mockImplementation(async (_token: string, _company: number, mode: string) => mode === 'dry_run' ? dryReport : importReport)
+  m.remove.mockResolvedValue(undefined)
+})
+
+afterEach(() => vi.clearAllMocks())
+
+describe('Stereo NX migration wizard', () => {
+  it('opens an existing ZIP and gates import behind company selection, dry run and confirmation', async () => {
+    const wrapper = await mountPage()
+    expect(wrapper.find('[data-testid="stereo-upload-input"]').exists()).toBe(true)
+    await openExisting(wrapper)
+    expect(m.preview).toHaveBeenCalledWith(upload.token)
+    expect(wrapper.find('[data-testid="stereo-company-select"]').exists()).toBe(true)
+    await primaryButton(wrapper, 'continue').trigger('click')
+    expect(wrapper.find('[data-testid="stereo-dry-report"]').exists()).toBe(true)
+    await primaryButton(wrapper, 'dry_run').trigger('click')
+    await flushPromises()
+    expect(m.run).toHaveBeenCalledWith(upload.token, 0, 'dry_run', false)
+    expect(wrapper.find('[data-testid="stereo-dry-report"]').exists()).toBe(true)
+    await primaryButton(wrapper, 'continue').trigger('click')
+    expect(wrapper.find('[data-testid="stereo-import-report"]').exists()).toBe(true)
+    expect(primaryButton(wrapper, 'import').attributes('disabled')).toBeDefined()
+    expect(m.run).toHaveBeenCalledTimes(1)
+    const confirm = wrapper.get('input[type="checkbox"][data-testid="stereo-import-confirm"]')
+    await confirm.setValue(true)
+    expect(primaryButton(wrapper, 'import').attributes('disabled')).toBeUndefined()
+    await primaryButton(wrapper, 'import').trigger('click')
+    await flushPromises()
+    expect(m.run).toHaveBeenLastCalledWith(upload.token, 0, 'import', false)
+    expect(wrapper.find('[data-testid="stereo-import-report"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('stereo_nx.protocol.title')
+    expect(wrapper.text()).not.toContain('#null')
+    wrapper.unmount()
+  })
+
+  it('keeps an unsuccessful dry run from enabling the import', async () => {
+    m.run.mockResolvedValueOnce({ ...dryReport, ok: false,
+      errors: [{ level: 'error', code: 'period_closed', message: 'Synthetic closed period' }] })
+    const wrapper = await mountPage()
+    await reachDryRun(wrapper)
+    expect(wrapper.get('[data-testid="stereo-dry-report"]').text()).toContain('Synthetic closed period')
+    expect(wrapper.find('[data-testid="stereo-import-report"]').exists()).toBe(false)
+    expect(wrapper.findAll('button').some(item => item.text().includes('stereo_nx.import') && !item.attributes('disabled'))).toBe(false)
+    expect(m.run).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('deletes the source only after a successful import and preserves its protocol', async () => {
+    const wrapper = await mountPage()
+    await reachDryRun(wrapper)
+    await primaryButton(wrapper, 'continue').trigger('click')
+    await wrapper.get('[data-testid="stereo-import-confirm"]').setValue(true)
+    await wrapper.get('[data-testid="stereo-delete-after-import"]').setValue(true)
+    await primaryButton(wrapper, 'import').trigger('click')
+    await flushPromises()
+    expect(m.remove).toHaveBeenCalledOnce()
+    expect(m.remove).toHaveBeenCalledWith(upload.token)
+    expect(wrapper.get('[data-testid="stereo-import-report"]').text()).toContain('stereo_nx.protocol.title')
+    expect(wrapper.find('[data-testid="stereo-step-4"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('retains a failed import and its ZIP even when deletion was selected', async () => {
+    m.run.mockImplementation(async (_token: string, _company: number, mode: string) => mode === 'dry_run' ? dryReport
+      : { ...importReport, ok: false, database_writes: false,
+        errors: [{ level: 'error', code: 'source_changed', message: 'Synthetic changed source' }] })
+    const wrapper = await mountPage()
+    await reachDryRun(wrapper)
+    await primaryButton(wrapper, 'continue').trigger('click')
+    await wrapper.get('[data-testid="stereo-import-confirm"]').setValue(true)
+    await wrapper.get('[data-testid="stereo-delete-after-import"]').setValue(true)
+    await primaryButton(wrapper, 'import').trigger('click')
+    await flushPromises()
+    expect(m.remove).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="stereo-import-report"]').text()).toContain('Synthetic changed source')
+    wrapper.unmount()
+  })
+})
