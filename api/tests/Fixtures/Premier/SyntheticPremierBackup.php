@@ -524,7 +524,7 @@ final class SyntheticPremierBackup
      * Další vztahy a evidence mzdového modulu (`payroll_detail`), syntetické osoby:
      *
      *   INTER 4  učeň (kategorie `UCN`, `KODPP_SO` prázdné jako v reálných zálohách), bez mezd
-     *   INTER 5  pracovní poměr od 1. 1. 2025 (kategorie `HPP`, `KODPP_SO` prázdné); sjednaná mzda
+     *   INTER 5  pracovní poměr od 15. 1. 2025 (kategorie `HPP`, `KODPP_SO` prázdné); sjednaná mzda
      *            v `SAZBA_MZ` podle `TYP_MZDY` (30 000, od 7/2025 32 000; `MZDA_MES` prázdné
      *            nebo jiné), stát adresy názvem „Česká republika"; mzdy 1/2025-1/2026
      *
@@ -537,7 +537,7 @@ final class SyntheticPremierBackup
         array_push($tables['PERSONAL'][1],
             ['INTER' => 4, 'CISLO' => 4, 'VSTUP' => '2025-09-01', 'UVA_KATE' => 'UCN', 'UVA_PROF' => 'učeň', 'KODPP_SO' => '',
                 'OSS_ZEME' => 'CZ', 'SUP_ID' => 'OS-D', 'ID' => 'PP-4'],
-            ['INTER' => 5, 'CISLO' => 5, 'VSTUP' => '2025-01-01', 'UVA_KATE' => 'HPP', 'UVA_PROF' => 'programátor', 'KODPP_SO' => '',
+            ['INTER' => 5, 'CISLO' => 5, 'VSTUP' => '2025-01-15', 'UVA_KATE' => 'HPP', 'UVA_PROF' => 'programátor', 'KODPP_SO' => '',
                 'OSS_ZEME' => 'CZ', 'SUP_ID' => 'OS-E', 'ID' => 'PP-5'],
         );
         array_push($tables['PER_MAIN'][1],

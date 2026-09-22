@@ -50,6 +50,9 @@ final class PremierPayrollTakeover
     public static function record(array $relation, string $until): PayrollTakeoverRecord
     {
         $start = (string) $relation['start'];
+        // Zákonná evidence má účinnost po celých měsících (čte se k prvnímu dni měsíce);
+        // nástup uprostřed měsíce by uložení celé evidence odmítl.
+        $from = substr($start, 0, 7) . '-01';
         $surname = $relation['birth_surname'];
         $declarations = [];
         foreach (self::declarations($relation, $until) as $run) {
@@ -72,16 +75,16 @@ final class PremierPayrollTakeover
             phone: is_string($relation['phone']) ? $relation['phone'] : null,
             payoutAccounts: is_array($account) ? [new PayrollTakeoverPayoutAccount($account['account'], $account['bank_code'])] : [],
             taxResidence: $relation['non_resident'] === true
-                ? new PayrollTakeoverEvidencePeriod('non-resident', $start)
-                : new PayrollTakeoverEvidencePeriod('czech-resident', $start, null, 'premier:per_main:rezident',
+                ? new PayrollTakeoverEvidencePeriod('non-resident', $from)
+                : new PayrollTakeoverEvidencePeriod('czech-resident', $from, null, 'premier:per_main:rezident',
                     self::NOTE . 'osoba není v PREMIER vedená jako daňový nerezident.'),
             healthCoverage: is_string($relation['insurer_code'])
-                ? new PayrollTakeoverEvidencePeriod($relation['insurer_code'], $start, null, null,
+                ? new PayrollTakeoverEvidencePeriod($relation['insurer_code'], $from, null, null,
                     self::NOTE . 'zdravotní pojišťovna ' . $relation['insurer_code'] . '.')
                 : null,
             socialJurisdiction: $relation['foreign_legislation'] === true
-                ? new PayrollTakeoverEvidencePeriod('foreign', $start)
-                : new PayrollTakeoverEvidencePeriod('czech', $start, null, null, self::NOTE . 'osoba nepodléhá v PREMIER cizím právním předpisům.'),
+                ? new PayrollTakeoverEvidencePeriod('foreign', $from)
+                : new PayrollTakeoverEvidencePeriod('czech', $from, null, null, self::NOTE . 'osoba nepodléhá v PREMIER cizím právním předpisům.'),
             taxDeclarations: $declarations,
         );
         $employment = new PayrollTakeoverEmployment(
@@ -111,7 +114,7 @@ final class PremierPayrollTakeover
             if ($last !== null && $runs[$last]['status'] === $status) {
                 continue;
             }
-            $from = max($period . '-01', (string) $relation['start']);
+            $from = max($period . '-01', substr((string) $relation['start'], 0, 7) . '-01');
             if ($last !== null) {
                 $runs[$last]['to'] = (new \DateTimeImmutable($from))->modify('-1 day')->format('Y-m-d');
             }

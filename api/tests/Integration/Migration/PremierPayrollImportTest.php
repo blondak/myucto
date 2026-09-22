@@ -232,8 +232,24 @@ final class PremierPayrollImportTest extends TestCase
         $supplierId = $this->supplier(true);
         $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
-        self::assertSame([['2025-01-01', '3000000'], ['2025-07-01', '3200000']], $this->fetch("SELECT t.effective_from, t.monthly_gross_minor FROM payroll_employment_terms t
+        self::assertSame([['2025-01-15', '3000000'], ['2025-07-01', '3200000']], $this->fetch("SELECT t.effective_from, t.monthly_gross_minor FROM payroll_employment_terms t
             JOIN payroll_employments e ON e.id = t.employment_id WHERE e.supplier_id = ? AND e.code = '5' ORDER BY t.effective_from", $supplierId), $this->explain($protocol));
+    }
+
+    /**
+     * Zákonná evidence má účinnost po celých měsících. Vztah s nástupem uprostřed měsíce
+     * ji dřív nedostal vůbec: uložení celé evidence odmítlo den nástupu jako začátek řady.
+     */
+    public function testStatutoryEvidenceStartsAtMonthOfMidMonthStart(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true, 'payroll_detail' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        foreach (['payroll_person_tax_residences', 'payroll_person_social_jurisdictions', 'payroll_person_tax_declarations'] as $table) {
+            self::assertSame([['2025-01-01']], $this->fetch("SELECT MIN(x.effective_from) FROM {$table} x
+                JOIN payroll_employments e ON e.employee_id = x.employee_id AND e.supplier_id = x.supplier_id WHERE e.supplier_id = ? AND e.code = '5'", $supplierId),
+                $table . ' ' . $this->explain($protocol));
+        }
     }
 
     public function testLedgerMismatchIsAWarningNotAnError(): void
