@@ -238,7 +238,8 @@ Každý převáděný rok (ve zkoušce i v převodu) má vlastní běh a protoko
 upozorněními a chybami a rekonciliací převáděného roku, obdobně jako
 u přechodu z POHODY, viz [§ 107.5](107_Prechod_z_POHODY.md#1075-rekonciliace-a-protokol).
 Obratová předvaha MyÚčta se porovná s předvahou spočtenou přímo z deníku
-PREMIER na haléř, včetně počátečních stavů.
+PREMIER na haléř, včetně počátečních stavů. Protokol zkoušky nanečisto
+z přehledu pod průvodcem smažete, protokol ostrého převodu zůstává.
 
 **Úpravy základu daně.** Výsledek hospodaření, odpisy a nedaňové účty spočte
 MyÚčto z převedených dat samo. Ruční úpravy, které účetní zadala do přiznání

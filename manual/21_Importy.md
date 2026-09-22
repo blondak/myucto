@@ -624,7 +624,9 @@ nahrání zálohy, výběr firmy, zkoušku nanečisto a potvrzení importu.
    dokladů, konceptů a důvody ruční kontroly. Název ZIPu nemusí odpovídat
    všem rokům obsaženým v záloze.
 4. Po úspěšné zkoušce potvrď převod. Změna vybrané firmy nebo výkladu
-   prázdné země vyžaduje novou zkoušku nanečisto.
+   prázdné země vyžaduje novou zkoušku nanečisto. Zkouška i převod běží
+   na pozadí, průvodce průběžně ukazuje stav a druhý převod téže firmy
+   se nespustí, dokud první neskončí.
    Volitelně zaškrtni **Smazat nahranou zálohu po úspěšném importu**.
    Smaže se pouze nahraná kopie ZIPu po potvrzeném zápisu dokladů;
    zkouška nanečisto ani neúspěšný převod ji nemažou. Pokud odstranění

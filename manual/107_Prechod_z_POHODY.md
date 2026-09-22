@@ -407,7 +407,8 @@ exportu odvozený zápis stornuje a pohyb nese zápis z deníku POHODY; úhrada
 v deníku není dvakrát. Rekonciliace se zápisy odvozených úhrad počítá
 a protokol uvede jejich počet.
 
-Protokoly všech běhů zůstávají v přehledu pod průvodcem.
+Protokoly všech běhů zůstávají v přehledu pod průvodcem. Protokol zkoušky
+nanečisto z přehledu smažete, protokol ostrého převodu zůstává.
 
 ## 107.6 Režim účetnictví a automatika
 

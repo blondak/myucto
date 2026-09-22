@@ -228,7 +228,8 @@ stejným číslem rozhoduje shoda částky, pak datum úhrady a nakonec rok. Dva
 stejně dobré kandidáty převod nespáruje a protokol je vypíše k ručnímu
 spárování. Spárovaná faktura dostane stav uhrazeno.
 
-Protokoly všech běhů zůstávají v přehledu pod průvodcem.
+Protokoly všech běhů zůstávají v přehledu pod průvodcem. Protokol zkoušky
+nanečisto z přehledu smažete, protokol ostrého převodu zůstává.
 
 ## 103.6 Uzávěrka historických let
 
