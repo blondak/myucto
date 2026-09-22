@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Migration;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Oss\OssClientContext;
+use MyInvoice\Service\Oss\OssDerivationReason;
+use MyInvoice\Service\Oss\OssItemDecision;
 use MyInvoice\Service\Oss\OssItemPlanner;
 
 /**
@@ -111,8 +113,15 @@ final class OssMigrationPolicy
      * spotřeby, ne v tuzemsku. U všech ostatních zůstává `null` a sazbu si páruje volající
      * po svém (tuzemsky), protože jinou zemi než tuzemsko pro ně nemá čím odůvodnit.
      *
+     * Typ plnění, který převáděný doklad UVÁDÍ (POHODA `typeServiceMOSS`), přebije odvození
+     * z jednotky, karty odběratele a CZ-NACE: ten žebřík existuje pro kanály, které typ
+     * plnění neznají a musí ho odhadnout. Kde ho účetní v původním programu zadala k řádku,
+     * odhad nemá co opravovat - a varování „použita výchozí služba" by bylo nepravdivé.
+     * O místě plnění ani o sazbě typ nerozhoduje, takže rozhodnutí plánovače zůstává celé.
+     *
      * @param  ?string $unit               měrná jednotka řádku; signál zboží vs. služba
      * @param  string  $classificationCode zkratka členění z převáděné agendy - jen do hlášky
+     * @param  ?string $declaredSupplyType typ plnění z dokladu (`goods` / `services`), `null` = zdroj ho neuvádí
      * @return array{rate_id:?int,rate_percent:float,columns:array<string,mixed>,reason:?string,manual_review:bool,warnings:list<string>}
      */
     public function planItem(
@@ -122,6 +131,7 @@ final class OssMigrationPolicy
         ?string $unit,
         string $taxDate,
         string $classificationCode,
+        ?string $declaredSupplyType = null,
     ): array {
         if ($ratePercent <= 0.0) {
             // Osvobozené plnění, vývoz, přenesená povinnost. Číselník nulové sazby nevede,
@@ -154,6 +164,12 @@ final class OssMigrationPolicy
         }
 
         $columns = $plan->itemColumns();
+        $warnings = $plan->warnings();
+        if ($declaredSupplyType !== null && in_array($declaredSupplyType, OssItemDecision::SUPPLY_TYPES, true)) {
+            $columns['oss_supply_type'] = $declaredSupplyType;
+            $guessed = OssDerivationReason::SupplyTypeDefaultServices->message();
+            $warnings = array_values(array_filter($warnings, static fn (string $w): bool => $w !== $guessed));
+        }
 
         return [
             'rate_id' => (int) $columns['vat_rate_id'],
@@ -172,7 +188,7 @@ final class OssMigrationPolicy
             // Typicky „typ plnění se odvodit nedal, doplněna služba" - u e-shopu se zbožím
             // je to špatně a uživatel to musí vidět dřív, než podá OSS přiznání. Rozhodnutí
             // to nemění, proto to není důvod ke konceptu.
-            'warnings' => $plan->warnings(),
+            'warnings' => $warnings,
         ];
     }
 

@@ -12,6 +12,7 @@ use MyInvoice\Service\Accounting\Assets\AssetService;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaImporter;
+use MyInvoice\Tests\Fixtures\Pohoda\OssVariant;
 use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaExport;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -385,6 +386,51 @@ final class PohodaImportTest extends TestCase
         self::assertSame(SyntheticPohodaExport::OSS_COUNTRY, $row['rate_country']);
         self::assertSame('23.00', (string) $row['vat_rate_snapshot']);
         self::assertSame(1, self::stepCounts($protocol, 'issued_invoices')['oss_items'] ?? 0, $this->explain($protocol));
+    }
+
+    /**
+     * Issue #75: POHODA nese OSS údaje přímo v dokladu - stát spotřeby v hlavičce (`MOSS`)
+     * a typ plnění na položce (`typeServiceMOSS`). Převod je nečetl, takže typ plnění byl
+     * u každého řádku odhad „služba" s varováním a stát spotřeby jen z adresy odběratele.
+     * Adresa tady zemi nenese vůbec: bez MOSS by stát spotřeby nebyl z čeho určit.
+     */
+    public function testOssSupplyTypeAndConsumerCountryComeFromMossFields(): void
+    {
+        $supplierId = $this->supplier();
+        $this->enableOss($supplierId);
+        $this->foreignRate(SyntheticPohodaExport::OSS_COUNTRY, SyntheticPohodaExport::OSS_RATE);
+
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, withOss: true, ossRateForm: SyntheticPohodaExport::OSS_RATE_PERCENT,
+            oss: new OssVariant(supplyType: 'GD', partnerCountry: null)));
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertNull($this->reviewMessage($protocol), $this->explain($protocol));
+        $row = $this->ossDocument($supplierId);
+        self::assertNotNull($row, $this->explain($protocol));
+        self::assertSame(1, (int) $row['oss_applicable'], $this->explain($protocol));
+        self::assertSame(SyntheticPohodaExport::OSS_COUNTRY, $row['oss_consumer_country']);
+        self::assertSame('goods', $row['oss_supply_type']);
+        // Typ plnění uvádí doklad - varování o dosazené „službě" by bylo nepravdivé.
+        self::assertNotContains('oss_item_warning', $this->messageCodes($protocol), $this->explain($protocol));
+    }
+
+    /** Ostatní druhy plnění POHODY (OS, ES, TS…) jsou v MyÚčtu služby - bez varování o odhadu. */
+    public function testOssServiceTypeFromMossIsServicesWithoutGuessWarning(): void
+    {
+        $supplierId = $this->supplier();
+        $this->enableOss($supplierId);
+        $this->foreignRate(SyntheticPohodaExport::OSS_COUNTRY, SyntheticPohodaExport::OSS_RATE);
+
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp, withOss: true, ossRateForm: SyntheticPohodaExport::OSS_RATE_PERCENT,
+            oss: new OssVariant(supplyType: 'OS')));
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+
+        $row = $this->ossDocument($supplierId);
+        self::assertNotNull($row, $this->explain($protocol));
+        self::assertSame(1, (int) $row['oss_applicable'], $this->explain($protocol));
+        self::assertSame('services', $row['oss_supply_type']);
+        self::assertNotContains('oss_item_warning', $this->messageCodes($protocol), $this->explain($protocol));
     }
 
     /**

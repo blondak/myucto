@@ -519,6 +519,8 @@ final class InvoiceImporter
             'remaining' => PohodaXml::text($h, 'liquidation/amountHome'),
             'paid_date' => PohodaXml::date($h, 'liquidation/date'),
             'foreign' => PohodaXml::text($r, $prefix . 'Summary/foreignCurrency/currency/ids'),
+            // Stát spotřeby dokladu v režimu OSS; POHODA element vynechává, není-li doklad v OSS.
+            'moss' => strtoupper(PohodaXml::text($h, 'MOSS/ids')),
         ];
     }
 
@@ -568,6 +570,7 @@ final class InvoiceImporter
                 // Skutečné procento sazby, která se do české úrovně nevejde - čte ho jen OSS
                 // větev ({@see rateIssuedItems()}), tuzemské párování zůstává na `rate`.
                 'percent' => is_numeric($percent) && (float) $percent > 0.0 ? (float) $percent : null,
+                'supply_type' => self::mossSupplyType(PohodaXml::text($it, 'typeServiceMOSS/ids')),
             ];
         }
         $source = 'detail';
@@ -747,11 +750,13 @@ final class InvoiceImporter
 
         foreach ($amounts['items'] as $i => $item) {
             if ($candidate && abs((float) $item['vat']) >= 0.005) {
-                $client ??= $this->oss->clientContext($clientId, (string) $snapshot['country'], (string) $snapshot['dic']);
+                // Stát spotřeby, který účetní v POHODĚ dokladu zadala (MOSS), je pravdivější
+                // než adresa odběratele - ta může být fakturační, ne místo dodání.
+                $client ??= $this->oss->clientContext($clientId, $doc['moss'] !== '' ? $doc['moss'] : (string) $snapshot['country'], (string) $snapshot['dic']);
                 // Sazbu státu spotřeby píše POHODA jako `historyHigh` bez `@value` a skutečné
                 // procento dává do `percentVAT`. Bez něj měl řádek s daní sazbu 0 %, politika ho
                 // vzala jako plnění bez daně a doklad skončil konceptem (issue #75).
-                $plan = $this->oss->planItem($ctx->supplierId, $client, $item['percent'] ?? (float) $item['rate'], $item['unit'], $taxDate, $code);
+                $plan = $this->oss->planItem($ctx->supplierId, $client, $item['percent'] ?? (float) $item['rate'], $item['unit'], $taxDate, $code, $item['supply_type'] ?? null);
                 if ($plan['reason'] !== null && !in_array($plan['reason'], $class['reasons'], true)) {
                     $class['reasons'][] = $plan['reason'];
                 }
@@ -1124,6 +1129,22 @@ final class InvoiceImporter
             $note .= '; ' . $n;
         }
         return $reasons === [] ? $note : $note . '. K ruční kontrole: ' . self::reasonList($reasons) . '.';
+    }
+
+    /**
+     * Typ plnění řádku v režimu OSS (`typeServiceMOSS`). POHODA rozlišuje dodání zboží
+     * (`GD`) a druhy služeb (`OS` ostatní, telekomunikační, vysílací, elektronické…);
+     * MyÚčto vede jen zboží a služby, takže vše kromě zboží je služba. Prázdné = zdroj
+     * typ neuvádí a odvodí se jako u ostatních kanálů.
+     */
+    private static function mossSupplyType(string $code): ?string
+    {
+        $code = strtoupper(trim($code));
+        return match (true) {
+            $code === '' => null,
+            $code === 'GD' => 'goods',
+            default => 'services',
+        };
     }
 
     /**

@@ -42,8 +42,9 @@ final class SyntheticPohodaExport
      * Tvar sazby na položce OSS dokladu (`$ossRateForm`). `value`: procento v exportním
      * atributu `rateVAT/@value`. `percent`: tvar, jakým POHODA píše sazbu, která se do
      * české úrovně nevejde - `historyHigh` bez atributu a skutečné procento v `percentVAT`,
-     * k tomu hlavička `MOSS` se státem spotřeby a částky i v EUR (issue #75). `history`:
-     * totéž bez `percentVAT` - sazba řádku s daní se z exportu určit nedá.
+     * k tomu částky položky i v EUR (issue #75). `history`: totéž bez `percentVAT` - sazba
+     * řádku s daní se z exportu určit nedá. Stát `MOSS`, typ plnění a zemi odběratele
+     * určuje {@see OssVariant}.
      */
     public const OSS_RATE_VALUE = 'value';
     public const OSS_RATE_PERCENT = 'percent';
@@ -109,7 +110,7 @@ final class SyntheticPohodaExport
      * jako úhradu faktury: faktura zlikvidovaná tímto pohybem, v deníku 321/221. Minulá
      * faktura 25FV0099 je v tomtéž exportu doplacená bez pohybu v bance.
      */
-    public static function write(string $root, bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE): string
+    public static function write(string $root, bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE, ?OssVariant $oss = null): string
     {
         $dir = rtrim($root, '/\\') . '/' . self::ICO . '_' . self::YEAR;
         if (!is_dir($dir)) {
@@ -118,7 +119,7 @@ final class SyntheticPohodaExport
         self::file($root . '/00_ucetni_jednotky.xml', '<acu:listAccountingUnit version="1.1"><acu:itemAccountingUnit><acu:unitType>doubleEntry</acu:unitType>'
             . '<acu:year>' . self::YEAR . '</acu:year><acu:unitIdentity><typ:address><typ:company>' . self::NAME . '</typ:company><typ:ico>' . self::ICO . '</typ:ico></typ:address></acu:unitIdentity>'
             . '<acu:dataFile>StwPh_' . self::ICO . '_' . self::YEAR . '.mdb</acu:dataFile></acu:itemAccountingUnit></acu:listAccountingUnit>');
-        foreach (self::files($withAssets, $withOss, $withAdvanceDeduction, $laterPayment, $unbooked, $ossRateForm) as $name => $body) {
+        foreach (self::files($withAssets, $withOss, $withAdvanceDeduction, $laterPayment, $unbooked, $ossRateForm, $oss) as $name => $body) {
             self::file($dir . '/' . $name, $body);
         }
         if ($withAssets) {
@@ -251,8 +252,9 @@ final class SyntheticPohodaExport
     }
 
     /** @return array<string,string> soubor => obsah listu */
-    private static function files(bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE): array
+    private static function files(bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE, ?OssVariant $oss = null): array
     {
+        $oss ??= new OssVariant();
         $journal = self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 100000, '221001', '701000', '2026-01-01')
             . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 100000, '701000', '411000', '2026-01-01')
             . self::entry('Vydané faktury', '26FV0001', 'Služby', 1000, '311001', '602000', '2026-01-10')
@@ -359,11 +361,14 @@ final class SyntheticPohodaExport
             $issued .= '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>issuedInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . self::OSS_DOCUMENT . '</typ:numberRequested></inv:number>'
                 . '<inv:symVar>260002</inv:symVar><inv:date>2026-02-10</inv:date><inv:dateTax>2026-02-10</inv:dateTax><inv:dateAccounting>2026-02-10</inv:dateAccounting><inv:dateDue>2026-02-24</inv:dateDue>'
                 . '<inv:classificationVAT><typ:ids>UN</typ:ids></inv:classificationVAT><inv:text>Prodej zboží na dálku - SK</inv:text>'
-                . ($percent ? '<inv:MOSS><typ:ids>' . self::OSS_COUNTRY . '</typ:ids></inv:MOSS>' : '')
+                . ($oss->moss !== null ? '<inv:MOSS><typ:ids>' . $oss->moss . '</typ:ids></inv:MOSS><inv:evidentiaryResourcesMOSS><typ:ids>G</typ:ids></inv:evidentiaryResourcesMOSS>' : '')
                 . '<inv:partnerIdentity><typ:address><typ:name>Jana</typ:name><typ:surname>Testovacia</typ:surname><typ:city>Bratislava</typ:city>'
-                . '<typ:street>Testovacia 1</typ:street><typ:zip>81101</typ:zip><typ:country><typ:ids>SK</typ:ids></typ:country></typ:address></inv:partnerIdentity>'
+                . '<typ:street>Testovacia 1</typ:street><typ:zip>81101</typ:zip>'
+                . ($oss->partnerCountry !== null ? '<typ:country><typ:ids>' . $oss->partnerCountry . '</typ:ids></typ:country>' : '')
+                . '</typ:address></inv:partnerIdentity>'
                 . '<inv:liquidation><typ:amountHome>1230</typ:amountHome></inv:liquidation></inv:invoiceHeader>'
                 . '<inv:invoiceDetail><inv:invoiceItem><inv:text>Zboží</inv:text><inv:quantity>1.0</inv:quantity><inv:unit>ks</inv:unit>'
+                . ($oss->supplyType !== '' ? '<inv:typeServiceMOSS><typ:ids>' . $oss->supplyType . '</typ:ids></inv:typeServiceMOSS>' : '')
                 . ($percent
                     ? '<inv:rateVAT>historyHigh</inv:rateVAT>' . ($ossRateForm === self::OSS_RATE_PERCENT ? '<inv:percentVAT>' . self::OSS_RATE . '</inv:percentVAT>' : '')
                     : '<inv:rateVAT value="23">high</inv:rateVAT>')
