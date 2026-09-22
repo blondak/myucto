@@ -12,6 +12,8 @@ use MyInvoice\Service\Accounting\Assets\AssetService;
 use MyInvoice\Service\Accounting\Assets\DepreciationCalculator;
 use MyInvoice\Service\Accounting\Assets\DepreciationContext;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
+use MyInvoice\Service\Migration\Shared\MigratedDepreciation;
+use MyInvoice\Service\Migration\Shared\SmallAssetCard;
 
 /**
  * Evidence majetku Money (`MajInv` karty, `MjInvPoh` pohyby): dlouhodobý majetek
@@ -198,30 +200,28 @@ final class AssetImporter
             if ($price < 0.005) {
                 $price = round((float) ($card['UcOdpPorC'] ?? 0), 2);
             }
-            $disposed = self::date($card['DatVyrazen'] ?? null) ?? self::firstDate($list, 'Y');
-            $disposed = $disposed !== null && $disposed <= $end ? max($disposed, $acquired) : null;
+            $disposed = SmallAssetCard::disposedWithin(self::date($card['DatVyrazen'] ?? null) ?? self::firstDate($list, 'Y'), $acquired, $end);
             $inUse = self::date($card['DatZarazen'] ?? null);
             $vendorNo = (int) ($card['CDodavatel'] ?? 0);
-            $number = trim((string) ($card['InventCisl'] ?? ''));
-            $id = $this->smallAssets->create($ctx->supplierId, [
-                'asset_kind' => strtoupper(trim((string) ($card['Druh'] ?? ''))) === 'N' ? 'intangible' : 'tangible',
-                'name' => mb_substr(trim((string) ($card['Nazev'] ?? '')) ?: 'Drobný majetek', 0, 255),
-                'inventory_number' => $number !== '' && $number !== '0' ? mb_substr($number, 0, 40) : null,
-                'acquisition_date' => $acquired,
-                'put_into_use_date' => $inUse !== null && $inUse >= $acquired ? $inUse : $acquired,
-                'quantity' => 1,
-                'unit_price' => max(0.0, $price),
-                'price' => max(0.0, $price),
-                'location' => self::text($card['Umisteno'] ?? null, 160),
-                'vendor_client_id' => $vendorNo > 0 ? ($ctx->clientsByMoneyNo[$vendorNo] ?? null) : null,
-                'vendor_name' => self::text($card['SDodavatel'] ?? null, 190),
-                'status' => $disposed !== null ? 'disposed' : 'in_use',
-                'disposed_at' => $disposed,
-                'disposal_reason' => $disposed !== null
-                    ? mb_substr('Vyřazeno v Money S3' . (($reason = trim((string) ($card['ZpVyrazeni'] ?? ''))) !== '' ? ': ' . $reason : ''), 0, 255)
-                    : null,
-                'notes' => 'Převzato z evidence majetku Money S3 (karta č. ' . $no . ').',
-            ], $ctx->userId > 0 ? $ctx->userId : null);
+            $reason = trim((string) ($card['ZpVyrazeni'] ?? ''));
+            $id = $this->smallAssets->create($ctx->supplierId, SmallAssetCard::payload(
+                strtoupper(trim((string) ($card['Druh'] ?? ''))) === 'N' ? 'intangible' : 'tangible',
+                trim((string) ($card['Nazev'] ?? '')) ?: SmallAssetCard::DEFAULT_NAME,
+                SmallAssetCard::inventoryNumber(trim((string) ($card['InventCisl'] ?? '')), true),
+                $acquired,
+                $inUse !== null && $inUse >= $acquired ? $inUse : $acquired,
+                1,
+                max(0.0, $price),
+                max(0.0, $price),
+                self::text($card['Umisteno'] ?? null, 160),
+                $disposed,
+                mb_substr('Vyřazeno v Money S3' . ($reason !== '' ? ': ' . $reason : ''), 0, 255),
+                'Převzato z evidence majetku Money S3 (karta č. ' . $no . ').',
+                [
+                    'vendor_client_id' => $vendorNo > 0 ? ($ctx->clientsByMoneyNo[$vendorNo] ?? null) : null,
+                    'vendor_name' => self::text($card['SDodavatel'] ?? null, 190),
+                ],
+            ), $ctx->userId > 0 ? $ctx->userId : null);
             $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_SMALL_ASSET, $key, $id, $ctx->runId);
             $p->count(self::STEP_SMALL, $disposed !== null ? 'created_disposed' : 'created');
         }
@@ -752,28 +752,15 @@ final class AssetImporter
      */
     private function upsertMigrated(ImportContext $ctx, int $assetId, string $kind, int $year, float $amount, float $full, float $residual, ?int $months, bool $half, string $status): void
     {
-        $existing = $this->entries->findYear($assetId, $kind, $year);
-        if ($existing !== null) {
-            $own = $kind === 'accounting' ? DepreciationEntryRepository::isBookedByMigratedJournal($existing) : true;
-            if (!$own || (abs((float) $existing['amount'] - $amount) < 0.005 && abs((float) $existing['residual_value_end'] - $residual) < 0.005)) {
-                return;
-            }
+        // Pozor: „vlastní" je jen účetní řádek; daňový řádek roku se přepíše, i když ho
+        // potvrdilo MyÚčto (stejně jako u PREMIER, viz zpráva k refaktoru).
+        $result = (new MigratedDepreciation($this->entries))->confirm(
+            $ctx->supplierId, $assetId, $kind, $year, $amount, $full, $residual, $full < 0.005, $half, $months,
+            'Money S3', $status, MigratedDepreciation::OVERWRITE_OWN, true, true,
+        );
+        if ($result['written']) {
+            $ctx->protocol->count(self::STEP, $kind === 'accounting' ? 'accounting_depreciation_booked' : 'tax_depreciation_confirmed');
         }
-        $this->entries->upsert([
-            'supplier_id' => $ctx->supplierId,
-            'asset_id' => $assetId,
-            'kind' => $kind,
-            'fiscal_year' => $year,
-            'amount' => $amount,
-            'full_amount' => $full,
-            'residual_value_end' => max(0.0, $residual),
-            'is_paused' => $full < 0.005,
-            'is_half' => $half,
-            'months_count' => $months,
-            'detail' => $kind === 'accounting' ? json_encode(['journal' => DepreciationEntryRepository::MIGRATED_JOURNAL, 'program' => 'Money S3']) : null,
-            'status' => $status,
-        ]);
-        $ctx->protocol->count(self::STEP, $kind === 'accounting' ? 'accounting_depreciation_booked' : 'tax_depreciation_confirmed');
     }
 
     /**
@@ -951,7 +938,7 @@ final class AssetImporter
 
     private static function monthsBetween(string $from, string $to): int
     {
-        return ((int) substr($to, 0, 4) - (int) substr($from, 0, 4)) * 12 + (int) substr($to, 5, 2) - (int) substr($from, 5, 2);
+        return MigratedDepreciation::monthsBetween($from, $to);
     }
 
     private static function date(mixed $value): ?string

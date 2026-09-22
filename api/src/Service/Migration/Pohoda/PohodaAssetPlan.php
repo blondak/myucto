@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Pohoda;
 
+use MyInvoice\Service\Migration\Shared\MigratedDepreciation;
+
 /**
  * Karta dlouhodobého majetku z tabulek POHODY (`90_majetek.xml`, vytváří ho exportní
  * nástroj z datového souboru POHODY) jako vstup pro {@see \MyInvoice\Service\Accounting\Assets\AssetService::create()}.
@@ -125,16 +127,7 @@ final class PohodaAssetPlan
         if ($plan === [] || $inUse === null) {
             $review[] = 'účetní odpisový plán chybí';
         } else {
-            $start = substr($inUse, 0, 7);
-            $last = (string) array_key_last($plan);
-            $cutoff = min($lastBooked, $last);
-            foreach ($plan as $month => $amount) {
-                if ($month <= $cutoff) {
-                    $openingAcc += $amount;
-                }
-            }
-            $openingMonths = max(0, self::monthsBetween($start, $cutoff));
-            $usefulLife = max(1, self::monthsBetween($start, $last));
+            [$openingMonths, $openingAcc, $usefulLife] = MigratedDepreciation::accountingOpening($inUse, $plan, $lastBooked);
         }
         $openingAcc = min(round($openingAcc, 2), $inputPrice);
 
@@ -161,11 +154,6 @@ final class PohodaAssetPlan
         ];
     }
 
-    /** Počet měsíců od `$from` (bez něj) do `$to` včetně, oba `Y-m`. */
-    private static function monthsBetween(string $from, string $to): int
-    {
-        return ((int) substr($to, 0, 4) - (int) substr($from, 0, 4)) * 12 + (int) substr($to, 5, 2) - (int) substr($from, 5, 2);
-    }
 
     private static function money(float $amount): string
     {
