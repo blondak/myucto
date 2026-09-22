@@ -365,8 +365,8 @@ final class PohodaPayrollPeopleWriter
 
     /**
      * Počáteční stavy ročních kumulací za měsíce roku před prvním obdobím, které zpracovává
-     * MyÚčto (začátek vedení mezd). Jen souvislá řada měsíců a jen tam, kde stavy nejsou;
-     * stavy, které už existují, převod z PAMICA nikdy nepřepíše.
+     * MyÚčto (začátek vedení mezd). Jen souvislá řada měsíců; stavy, které zapsal dřívější
+     * převod z PAMICA, se srovnají se zdrojem, zadané jinak převod nikdy nepřepíše.
      *
      * @return array<string,int>
      */
@@ -376,7 +376,7 @@ final class PohodaPayrollPeopleWriter
             return [];
         }
         return match ($this->people->openingBalances($supplierId, $employeeId, $year, (int) substr($moduleStart, 5, 2), $person->openingMonths, $userId, $policy)) {
-            PayrollTakeoverPersonWriter::OPENINGS_EXISTING => ['openings_existing' => 1],
+            PayrollTakeoverPersonWriter::OPENINGS_EXISTING, PayrollTakeoverPersonWriter::OPENINGS_UNCHANGED => ['openings_existing' => 1],
             PayrollTakeoverPersonWriter::OPENINGS_GAP => throw new \DomainException('mzdy v PAMICA před prvním obdobím MyÚčta nejsou za souvislou řadu měsíců, počáteční stavy zadejte ručně.'),
             PayrollTakeoverPersonWriter::OPENINGS_WRITTEN => ['openings' => 1],
             default => [],

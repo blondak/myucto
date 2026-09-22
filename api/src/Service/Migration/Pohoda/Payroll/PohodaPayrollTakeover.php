@@ -27,7 +27,8 @@ final class PohodaPayrollTakeover
     /**
      * Pravidla zápisu převodu z PAMICA (viz {@see PayrollTakeoverPolicy}): chybějící
      * karta je chyba údaje, adresy po druzích, ověření výplatních účtů dnem poslední
-     * výplaty, počáteční stavy se nepřepisují.
+     * výplaty, počáteční stavy zapsané dřívějším převodem z PAMICA se srovnají se
+     * zdrojem, zadané jinak (ručně, z hlášení) zůstávají.
      */
     public static function policy(): PayrollTakeoverPolicy
     {
@@ -40,7 +41,7 @@ final class PohodaPayrollTakeover
             verifyPayoutAccounts: true,
             countPlannedTermination: true,
             ignoreEndBeforeStart: false,
-            rewriteOwnOpenings: false,
+            rewriteOwnOpenings: true,
             checklistToleratesRuntime: false,
         );
     }
