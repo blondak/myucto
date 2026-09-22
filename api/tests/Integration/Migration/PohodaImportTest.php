@@ -453,6 +453,18 @@ final class PohodaImportTest extends TestCase
         $reason = $this->reviewMessage($protocol);
         self::assertNotNull($reason, $this->explain($protocol));
         self::assertStringContainsString('OSS', $reason, 'Hláška musí pojmenovat příčinu, ne jen konstatovat členění.');
+        // Důvod z OSS plánovače je celá věta s tečkou - hláška ani poznámka dokladu z ní
+        // nesmí udělat „..".
+        self::assertStringNotContainsString('..', $reason);
+        self::assertStringNotContainsString('..', $this->ossNote($supplierId));
+    }
+
+    private function ossNote(int $supplierId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT note_below_items FROM invoices WHERE supplier_id = ? AND varsymbol = ?');
+        $stmt->execute([$supplierId, SyntheticPohodaExport::OSS_DOCUMENT]);
+
+        return (string) $stmt->fetchColumn();
     }
 
     /**

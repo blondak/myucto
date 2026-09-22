@@ -1075,7 +1075,7 @@ final class InvoiceImporter
         }
         if ($reasons !== []) {
             $p->count($step, 'review');
-            $p->warn($step, 'needs_review', "Doklad {$docNo} převzat jako koncept k ruční kontrole: " . implode('; ', $reasons)
+            $p->warn($step, 'needs_review', "Doklad {$docNo} převzat jako koncept k ruční kontrole: " . self::reasonList($reasons)
                 . '. Do DPH ani do účtování nevstoupí, dokud ho neopravíte a nepotvrdíte.', ['document_no' => $docNo, 'reasons' => $reasons]);
         }
     }
@@ -1123,7 +1123,18 @@ final class InvoiceImporter
         foreach ($notes as $n) {
             $note .= '; ' . $n;
         }
-        return $reasons === [] ? $note : $note . '. K ruční kontrole: ' . implode('; ', $reasons) . '.';
+        return $reasons === [] ? $note : $note . '. K ruční kontrole: ' . self::reasonList($reasons) . '.';
+    }
+
+    /**
+     * Důvody ke konceptu jako jedna věta bez koncové tečky - tu přidává volající. Důvod
+     * převzatý z OSS plánovače je celá věta s tečkou a bez ořezu by hláška končila „..".
+     *
+     * @param list<string> $reasons
+     */
+    private static function reasonList(array $reasons): string
+    {
+        return implode('; ', array_map(static fn (string $r): string => rtrim($r, '. '), $reasons));
     }
 
     private function stmt(string $key, string $sql): \PDOStatement
