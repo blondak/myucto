@@ -125,6 +125,7 @@ final class InvoiceImporter
             }
             $taxDate = self::date($r, ['PlnenoDPH']) ?? $issue;
             $selfAssessment = $review ? null : self::pickSelfAssessment($selfAssessed, $docNo, $year);
+            $reverseCharge = false;
             if ($selfAssessment !== null) {
                 $usedSelfAssessments[$selfAssessment['key']] = true;
                 if ($selfAssessment['error'] !== null) {
@@ -133,6 +134,7 @@ final class InvoiceImporter
                     // Samovyměření se vykazuje ke dni z interního dokladu (datum uplatnění DPH).
                     $taxDate = $selfAssessment['date'] ?? $taxDate;
                     [$amounts, $class] = $this->applySelfAssessment($selfAssessment, $amounts, $class, $taxDate);
+                    $reverseCharge = true;
                     $p->count(self::STEP_PURCHASE, 'self_assessed');
                 }
             }
@@ -167,9 +169,9 @@ final class InvoiceImporter
                     exchangeRate: null,
                     // Položky vznikají ze základů po sazbách - ceny jsou vždy bez DPH.
                     pricesIncludeVat: false,
-                    // Příznak přenesené povinnosti převod z Money nezapisuje: samovyměření nese
-                    // kód zařazení položek, neznámé členění jde do konceptu k ruční kontrole.
-                    reverseCharge: false,
+                    // Samovyměření z interního dokladu (applySelfAssessment()) - jako u POHODY
+                    // a PREMIER. Neznámé členění přenesené povinnosti jde do konceptu.
+                    reverseCharge: $reverseCharge,
                     vendorSnapshot: self::snapshotJson($snapshot),
                     totalWithoutVat: $amounts['base'],
                     totalVat: $amounts['vat'],

@@ -624,6 +624,35 @@ final class MoneyS3ImportTest extends TestCase
         self::assertEqualsWithDelta(315.0, (float) ($march['40']['vat'] ?? 0), 0.005, 'FP25002 210 + DZ25001 210 - DP25001 105 jako bez příznaku.');
     }
 
+    /**
+     * Faktura se samovyměřením z interního dokladu nese příznak přenesené povinnosti na
+     * hlavičce (účtování 343 na obě strany, zobrazení dokladu). Rozdíl proti základu
+     * samovyměření (jiný kurz) je položka mimo předmět daně - přiznání i KH A.2 zůstávají
+     * přesně ze základu interního dokladu, jako je vykázalo Money.
+     */
+    public function testSelfAssessedPurchaseIsFlaggedAndRateDifferenceStaysOutsideTheReturn(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/rc.lz', SyntheticAgenda::filesWithSelfAssessmentRateDifference());
+        $backup = Ms3Backup::extract($this->tmp . '/rc.lz', $this->tmp . '/rc');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $july = $this->container(DphPriznaniBuilder::class)->build($supplierId, 2025, 7, 'monthly')['summary']['lines'];
+        self::assertEqualsWithDelta(1000.0, (float) ($july['5']['base'] ?? 0), 0.005, json_encode($july, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertEqualsWithDelta(210.0, (float) ($july['5']['vat'] ?? 0), 0.005, json_encode($july, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertEqualsWithDelta(210.0, (float) ($july['43k']['vat'] ?? 0), 0.005, json_encode($july, JSON_UNESCAPED_UNICODE) ?: '');
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT p.reverse_charge, p.total_with_vat, it.total_without_vat, it.vat_classification_code
+               FROM purchase_invoices p JOIN purchase_invoice_items it ON it.purchase_invoice_id = p.id
+              WHERE p.supplier_id = ? AND p.varsymbol = 'FP25005' ORDER BY it.order_index"
+        );
+        $stmt->execute([$supplierId]);
+        self::assertSame([[1, '1030.00', '1000.00', '24e'], [1, '1030.00', '30.00', 'mimo']],
+            array_map(static fn (array $r): array => [(int) $r[0], (string) $r[1], (string) $r[2], $r[3]], $stmt->fetchAll(PDO::FETCH_NUM)));
+    }
+
     /** Vydaná faktura v tuzemském přenesení (19Ř25_S) nese příznak na hlavičce; daň se nemění. */
     public function testDomesticReverseSaleIsFlagged(): void
     {
