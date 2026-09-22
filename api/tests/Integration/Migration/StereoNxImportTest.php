@@ -350,6 +350,31 @@ final class StereoNxImportTest extends TestCase
         self::assertSame($before, $this->snapshot());
     }
 
+    /** Pokladní číslo delší než sloupec (30) a dvojí číslo ve zdroji neshodí převod. */
+    public function testLongAndDuplicateCashNumbersGetUniqueNumbersWithinColumnLimit(): void
+    {
+        $tables = SyntheticStereoNxTables::tables();
+        $long = 'P-' . str_repeat('7', 38);
+        $tables['CPokl'][0]['Doklad'] = $long;
+        $second = $tables['CPokl'][0];
+        $second['DoklCislo'] = 2;
+        $second['Castka'] = 5.0;
+        $tables['CPokl'][] = $second;
+        $journal = array_values(array_filter($tables['Cdenik'], static fn (array $row): bool => $row['Agenda'] === 'P'))[0];
+        $journal['DoklCislo'] = 2;
+        $journal['Celkem'] = 5.0;
+        $tables['Cdenik'][] = $journal;
+
+        $report = $this->importer->run($this->backup($tables), $this->supplierId, $this->userId, false);
+        self::assertTrue($report['ok'], json_encode($report, JSON_UNESCAPED_UNICODE));
+        $stmt = $this->db->pdo()->prepare('SELECT doc_number FROM cash_documents WHERE supplier_id = ? ORDER BY id');
+        $stmt->execute([$this->supplierId]);
+        $numbers = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+        $truncated = mb_substr($long, 0, 30);
+        self::assertSame([$truncated, mb_substr($truncated, 0, 28) . '-2'], $numbers);
+        self::assertContains('cash_number_duplicate', array_column($report['warnings'], 'code'));
+    }
+
     public function testRepeatPreservesUserClassificationAndDisabledBankAccount(): void
     {
         $backup = $this->backup();
