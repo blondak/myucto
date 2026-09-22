@@ -62,6 +62,14 @@ final class PremierPayrollPersonCardTest extends TestCase
 
         $record = PremierPayrollTakeover::record($employee, '2025-12-31');
         self::assertSame(['2025-01', 'premier:mz_deti:D1'], [$record->person->firstSignedPeriod, $record->person->children[0]['reference']]);
+
+        // Osoba zapsaná přes souběžný vztah bez podepsaného prohlášení: rozhoduje prohlášení osoby.
+        $unsigned = $employee;
+        foreach ($unsigned['months'] as $period => $m) {
+            $unsigned['months'][$period]['signed'] = false;
+        }
+        self::assertSame('2025-01', PremierPayrollTakeover::record($unsigned, '2025-12-31')->person->firstSignedPeriod);
+        self::assertNull(PremierPayrollTakeover::record(['person_signed_periods' => ['2026-01']] + $unsigned, '2025-12-31')->person->firstSignedPeriod);
         self::assertSame([true, false], array_map(static fn ($a): bool => $a->active, $record->person->payoutAccounts),
             'Aktuální účet je výplatní, dřívější z historie bez výplat.');
     }

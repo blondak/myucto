@@ -320,12 +320,20 @@ final class PremierPayrollTakeover
     }
 
     /**
-     * První měsíc (`YYYY-MM`) s podepsaným prohlášením poplatníka do `$until`.
+     * První měsíc (`YYYY-MM`) s podepsaným prohlášením poplatníka do `$until`. Prohlášení
+     * i nárok na dítě jsou údaje osoby: rozhodují všechny její vztahy, ne jen ten, přes
+     * který se osoba zapisuje (souběžná dohoda prohlášení podepsané nemívá).
      *
      * @param array<string,mixed> $relation
      */
     private static function firstSignedPeriod(array $relation, string $until): ?string
     {
+        if (array_key_exists('person_signed_periods', $relation)) {
+            foreach ((array) $relation['person_signed_periods'] as $period) {
+                return $period . '-01' <= $until ? (string) $period : null;
+            }
+            return null;
+        }
         foreach ($relation['months'] as $period => $m) {
             if ($period . '-01' > $until) {
                 break;

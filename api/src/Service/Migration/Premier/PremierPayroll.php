@@ -236,11 +236,18 @@ final class PremierPayroll
             }
         }
         $personLast = [];
+        /** @var array<string,list<string>> $personSigned měsíce s podepsaným prohlášením osoby (přes všechny vztahy) */
+        $personSigned = [];
         foreach ($relations as $relation) {
             $last = array_key_last($relation['months']);
             $personKey = (string) $relation['person_key'];
             if ($last !== null && (!isset($personLast[$personKey]) || (string) $last > $personLast[$personKey])) {
                 $personLast[$personKey] = (string) $last;
+            }
+            foreach ($relation['months'] as $period => $m) {
+                if ($m['signed'] === true) {
+                    $personSigned[$personKey][] = (string) $period;
+                }
             }
         }
         $accounts = self::payoutAccounts($relations);
@@ -248,6 +255,9 @@ final class PremierPayroll
             $personKey = (string) $relation['person_key'];
             $relations[$i]['insurer_history'] = self::insurerHistory($personEvents[$personKey] ?? [], $personStart[$personKey] ?? null);
             $relations[$i]['person_last_period'] = $personLast[$personKey] ?? null;
+            $signed = array_values(array_unique($personSigned[$personKey] ?? []));
+            sort($signed);
+            $relations[$i]['person_signed_periods'] = $signed;
             $relations[$i]['payout_accounts'] = $accounts[$personKey] ?? [];
         }
         return new self($relations, $missing, $monthRows);
