@@ -113,6 +113,10 @@ final class PayrollImporter
         $afterStart = 0;
         $totals = [];
         $byEmployee = [];
+        /** @var array<string,float> osobní číslo => srážky v převáděných měsících (Kč) */
+        $deductions = [];
+        /** @var array<string,string> osobní číslo => poslední měsíc s vyloučenou dobou */
+        $excluded = [];
         foreach ($relations as $relation) {
             $pair = $this->inSavepoint($ctx, $relation, fn (): ?array => $this->relation($ctx, $relation));
             if ($pair === null) {
@@ -120,9 +124,16 @@ final class PayrollImporter
             }
             [$employeeId, $employmentId] = $pair;
             $activity = $this->activityCode($ctx->supplierId, $employmentId);
+            $number = (string) $relation['personal_number'];
             foreach ($relation['months'] as $period => $m) {
                 if ($period > $lastPeriod) {
                     continue;
+                }
+                if ($m['deductions'] > 0) {
+                    $deductions[$number] = ($deductions[$number] ?? 0.0) + $m['deductions'];
+                }
+                if ($m['excluded_days'] > 0) {
+                    $excluded[$number] = (string) $period;
                 }
                 if ($start !== null && $period >= $start) {
                     $afterStart++;
@@ -143,12 +154,64 @@ final class PayrollImporter
             $p->count(self::STEP, 'months_after_start', $afterStart);
             $this->info($p, 'months_after_start', "Mzdové měsíce od začátku vedení mezd v MyÚčtu ({$start}) se nepřevzaly (celkem {$afterStart}), počítá je MyÚčto.");
         }
+        $this->notConverted($p, $deductions, $excluded);
         if ($totals !== []) {
             $this->referenceTotals->store($ctx->supplierId, self::SOURCE, $totals, self::REFERENCE . ' ' . $ctx->backup->ico);
         }
         $this->openingBalances($ctx, $byEmployee, $payroll);
         $this->postingMap($ctx);
         $this->reconcile($ctx, $payroll);
+    }
+
+    /**
+     * Srážky a nepřítomnosti, které převod z PREMIER nezakládá, a u koho je zdroj má.
+     *
+     * Srážky: `MZDY` nese jen částky sražené v jednotlivých měsících, ne případ (věřitel,
+     * pořadí, zbývající dluh, dohoda). Exekuci, insolvenci ani dohodu o srážkách z toho
+     * založit nejde, a bez nich je MyÚčto od prvního vlastního měsíce nesrazí.
+     *
+     * Nepřítomnosti: `MZDY` nese jen počet vyloučených dnů měsíce (nemoc, ošetřovné,
+     * mateřská…), ne druh a data. Pracovní neschopnost, která trvá přes začátek vedení
+     * mezd, proto MyÚčto nezná a čtrnáctidenní období náhrady mzdy by počítalo znovu.
+     *
+     * Upozornění je souhrnné a nepodléhá limitu hlášek kroku: bez něj by převod o obojím
+     * mlčel.
+     *
+     * @param array<string,float> $deductions osobní číslo => sražené Kč
+     * @param array<string,string> $excluded osobní číslo => poslední měsíc s vyloučenou dobou
+     */
+    private function notConverted(ImportProtocol $p, array $deductions, array $excluded): void
+    {
+        if ($deductions !== []) {
+            $p->count(self::STEP, 'deductions_not_converted', count($deductions));
+            $p->warn(self::STEP, 'deductions_not_converted', sprintf(
+                'Srážky ze mzdy z PREMIER se nepřevedly: záloha nese jen částky sražené v jednotlivých měsících, ne exekuce, '
+                . 'insolvence ani dohody o srážkách (věřitel, pořadí, zbývající dluh). Srážky mají osobní čísla %s (celkem %s Kč). '
+                . 'Trvající srážky založte ručně v Mzdy → Exekuce a insolvence, jinak je MyÚčto od prvního měsíce vedení mezd nesrazí.',
+                self::personalNumbers(array_keys($deductions)),
+                self::money(array_sum($deductions)),
+            ), ['personal_numbers' => array_keys($deductions)]);
+        }
+        if ($excluded !== []) {
+            $p->count(self::STEP, 'absences_not_converted', count($excluded));
+            $p->warn(self::STEP, 'absences_not_converted', sprintf(
+                'Nepřítomnosti a nemocenská z PREMIER se nepřevedly: záloha nese jen počet vyloučených dnů měsíce (nemoc, '
+                . 'ošetřovné, mateřská a další), ne druh ani data. Vyloučené doby mají osobní čísla %s. Trvá-li nepřítomnost '
+                . 'i v prvním měsíci vedení mezd v MyÚčtu (rozpracovaná pracovní neschopnost), založte ji ručně na kartě '
+                . 'zaměstnance, jinak MyÚčto začne období náhrady mzdy počítat znovu.',
+                self::personalNumbers(array_map(
+                    static fn (string $number, string $period): string => "{$number} (naposledy {$period})",
+                    array_keys($excluded),
+                    array_values($excluded),
+                )),
+            ), ['personal_numbers' => array_keys($excluded)]);
+        }
+    }
+
+    /** @param list<int|string> $numbers */
+    private static function personalNumbers(array $numbers): string
+    {
+        return implode(', ', array_slice(array_map('strval', $numbers), 0, 30)) . (count($numbers) > 30 ? ', …' : '');
     }
 
     /**
