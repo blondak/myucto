@@ -5,14 +5,15 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\StereoNx;
 
 use MyInvoice\Infrastructure\Config\RuntimePaths;
+use MyInvoice\Service\Migration\Shared\MigrationUploadLimits;
 use Psr\Http\Message\StreamInterface;
 
 /** Přechodné šifrované archivy jsou oddělené podle cílové firmy a náhodného tokenu. */
 final class StereoNxUploads
 {
-    public const CHUNK_BYTES = 768 * 1024;
-    public const MAX_BYTES = 2 * 1024 * 1024 * 1024;
-    private const MAX_ACTIVE = 3;
+    public const CHUNK_BYTES = MigrationUploadLimits::CHUNK_BYTES;
+    public const MAX_BYTES = MigrationUploadLimits::STEREO_NX_MAX_BYTES;
+    private const MAX_ACTIVE = MigrationUploadLimits::MAX_ACTIVE_UPLOADS;
 
     public static function token(): string
     {
