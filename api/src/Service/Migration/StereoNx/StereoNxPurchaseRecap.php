@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\StereoNx;
 
+use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier;
+
 /**
  * Náhradní položky přijatého dokladu z rekapitulace SPFH (jen CZK).
  * Hodnoty řádků jsou zdrojové: samovyměřená daň není daní placenou dodavateli.
@@ -83,6 +85,15 @@ final class StereoNxPurchaseRecap
         }
         if ($items === []) {
             throw new StereoNxException('purchase_empty_recap', 'Rekapitulace neobsahuje žádnou nenulovou položku.');
+        }
+        if ($reverse === true) {
+            // Přihrádka mimo přiznání (bez daně) na dokladu se samovyměřením: bez kódu by ji
+            // evidence DPH podle příznaku `reverse_charge` zdanila jako samovyměření.
+            foreach ($items as $i => $item) {
+                if ($item['vat_classification_code'] === null && $item['total_vat'] === 0.0 && $item['source_self_assessed_vat'] === 0.0) {
+                    $items[$i]['vat_classification_code'] = VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE;
+                }
+            }
         }
         $base = round(array_sum(array_column($items, 'total_without_vat')), 2);
         $vat = round(array_sum(array_column($items, 'total_vat')), 2);

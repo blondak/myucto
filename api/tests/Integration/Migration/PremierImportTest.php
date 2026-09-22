@@ -415,6 +415,31 @@ final class PremierImportTest extends TestCase
         self::assertEqualsWithDelta(0.0, (float) ($september['1']['base'] ?? 0), 0.005, 'OSS plnění do tuzemského ř. 1 nepatří.');
     }
 
+    /**
+     * OSS doklad v EUR: tuzemská evidence zůstává v Kč z deníku, ale do OSS podání jdou eura
+     * z dokladu - ne koruny přepočtené zpátky kurzem ECB konce čtvrtletí (stejně jako POHODA).
+     */
+    public function testEurOssDocumentGoesToReturnInEurosFromTheDocument(): void
+    {
+        $supplierId = $this->supplier();
+        $this->db->pdo()->prepare(
+            "UPDATE supplier SET oss_enabled = 1, oss_identification_country = 'CZ', oss_return_currency = 'EUR', oss_valid_from = '2025-01-01', oss_valid_to = NULL WHERE id = ?"
+        )->execute([$supplierId]);
+        $this->foreignRate(SyntheticPremierBackup::OSS_COUNTRY, SyntheticPremierBackup::OSS_RATE);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(true, ['oss_eur' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['1', '1000.00', '230.00', '40.00', '9.20']], $this->fetch(
+            'SELECT it.oss_applicable, it.total_without_vat, it.total_vat, it.oss_taxable_amount_return, it.oss_vat_amount_return
+               FROM invoices i JOIN invoice_items it ON it.invoice_id = i.id WHERE i.supplier_id = ? AND i.varsymbol = ?', $supplierId, false, [SyntheticPremierBackup::OSS_DOCUMENT]));
+
+        $preview = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Oss\OssLedgerService::class)->preview($supplierId, SyntheticPremierBackup::YEAR1, 3);
+        $sk = array_column($preview['countries'], null, 'country')[SyntheticPremierBackup::OSS_COUNTRY] ?? null;
+        self::assertNotNull($sk, json_encode($preview, JSON_UNESCAPED_UNICODE));
+        self::assertEqualsWithDelta(40.0, (float) $sk['base'], 0.001);
+        self::assertEqualsWithDelta(9.2, (float) $sk['vat'], 0.001);
+    }
+
     /** Bez zapnutého OSS se cizí daň do tuzemského přiznání nepustí - doklad se nepřevezme, zbytek ano. */
     public function testIssuedDocumentOutsideReturnWithVatIsNotDomesticWhenOssIsOff(): void
     {
@@ -426,6 +451,27 @@ final class PremierImportTest extends TestCase
         self::assertContains('oss_setup', $this->messageCodes($protocol), $this->explain($protocol));
         self::assertSame(1, $this->rows('invoices', $supplierId, "varsymbol = '250001' AND status = 'paid'"), $this->explain($protocol));
         self::assertSame(4, $this->rows('purchase_invoices', $supplierId), $this->explain($protocol));
+    }
+
+    /**
+     * Firma se zahraniční sazbou omylem založenou jako tuzemská a vypnutým OSS: doklad je
+     * koncept s důvodem z OSS plánovače. Důvod plánovače je celá věta s tečkou - hláška
+     * protokolu ani poznámka dokladu z ní nesmí udělat „..".
+     */
+    public function testOssPlannerReasonDoesNotEndWithDoubleDot(): void
+    {
+        $supplierId = $this->supplier();
+        $this->foreignRate('CZ', SyntheticPremierBackup::OSS_RATE);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(true), SyntheticPremierBackup::YEAR1, false);
+
+        $note = $this->fetch("SELECT status, note_below_items FROM invoices WHERE supplier_id = ? AND varsymbol = ?", $supplierId, false, [SyntheticPremierBackup::OSS_DOCUMENT]);
+        self::assertSame('draft', $note[0][0] ?? null, $this->explain($protocol));
+        self::assertStringContainsString('OSS', (string) $note[0][1]);
+        self::assertStringNotContainsString('..', (string) $note[0][1]);
+        $review = array_values(array_filter(array_merge(...array_map(static fn (array $s): array => $s['messages'] ?? [], $protocol->toArray()['steps'])),
+            static fn (array $m): bool => $m['code'] === 'needs_review'));
+        self::assertNotSame([], $review, $this->explain($protocol));
+        self::assertStringNotContainsString('..', (string) $review[0]['text']);
     }
 
     /**
@@ -467,6 +513,25 @@ final class PremierImportTest extends TestCase
             $this->fetch('SELECT year, settled_at IS NOT NULL FROM vat_coefficients WHERE supplier_id = ? ORDER BY year', $supplierId)
         );
         $this->dph->build($supplierId, SyntheticPremierBackup::YEAR2, 3, 'monthly');
+    }
+
+    /**
+     * Služba z EU s další položkou bez kódu DPH (poplatek, který PREMIER do přiznání
+     * nezahrnul): doklad je samovyměření, ale položka mimo přiznání v přiznání být nesmí.
+     * Bez kódu by ji evidence DPH podle příznaku samovyměření zařadila jako službu z EU
+     * a dopočítala z ní daň na ř. 5 i 43.
+     */
+    public function testUncodedLineOnSelfAssessedPurchaseStaysOutsideTheReturn(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(false, ['rc_uncoded_line' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['5200.00', '1', '24e']], $this->fetch("SELECT total_with_vat, reverse_charge, vat_classification_code FROM purchase_invoices WHERE supplier_id = ? AND varsymbol = 'PF250002/2025'", $supplierId));
+        $lines = $this->dph->build($supplierId, SyntheticPremierBackup::YEAR1, SyntheticPremierBackup::RC_MONTH, 'monthly')['summary']['lines'];
+        self::assertSame([5000.0, 1050.0, 5000.0, 1050.0], [round((float) ($lines['5']['base'] ?? 0), 2), round((float) ($lines['5']['vat'] ?? 0), 2),
+            round((float) ($lines['43']['base'] ?? 0), 2), round((float) ($lines['43']['vat'] ?? 0), 2)], json_encode($lines, JSON_UNESCAPED_UNICODE));
+        self::assertSame([['5000.00', '24e'], ['200.00', 'mimo']], $this->fetch("SELECT it.total_without_vat, it.vat_classification_code FROM purchase_invoice_items it
+            JOIN purchase_invoices p ON p.id = it.purchase_invoice_id WHERE p.supplier_id = ? AND p.varsymbol = 'PF250002/2025' ORDER BY it.order_index", $supplierId));
     }
 
     private function assertReconciled(ImportProtocol $protocol, int $year): void

@@ -759,6 +759,27 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda, ve které licence z EU FP25005 zní na 1 030 Kč (kurz faktury), ale samovyměření
+     * ICH25001 má základ 1 000 Kč (kurz ke dni plnění). Rozdíl 30 Kč je jen kurzový.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithSelfAssessmentRateDifference(): array
+    {
+        $files = self::files();
+        $patch = static function (string $path, array $fields, callable $change) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $rows = array_map($change, iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false));
+            $files[$path] = Ms3FixtureWriter::table($fields, $rows);
+        };
+        $patch('ROK.002/PFaktury.DAT', self::PURCHASE_FIELDS, static fn (array $r): array => trim((string) $r['Doklad']) === 'FP25005'
+            ? ['Zaklad_0' => 1030.0, 'CelkemSDPH' => 1030.0] + $r : $r);
+        $patch('ROK.002/UcDenik.DAT', self::JOURNAL_FIELDS, static fn (array $r): array => trim((string) $r['Doklad']) === 'FP25005'
+            ? ['Castka' => 1030.0] + $r : $r);
+        return $files;
+    }
+
+    /**
      * Záloha agendy z daných souborů (varianty agendy pro jednotlivé testy).
      *
      * @param array<string,string> $files

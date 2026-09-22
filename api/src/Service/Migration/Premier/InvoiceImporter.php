@@ -185,7 +185,10 @@ final class InvoiceImporter
                 if ($plan['rate_id'] !== null) {
                     $items[$i]['rate_id'] = $plan['rate_id'];
                     $items[$i]['rate'] = $plan['rate_percent'];
-                    $items[$i]['oss'] = $plan['columns'];
+                    // Doklad v EUR: do OSS podání jdou eura z položky, ne koruny přepočtené
+                    // zpátky kurzem ECB konce čtvrtletí (jako POHODA). Tuzemská evidence zůstává v Kč.
+                    $items[$i]['oss'] = $plan['columns']
+                        + $this->oss->returnAmounts($ctx->supplierId, $doc['currency'], $item['foreign_base'] ?? null, $item['foreign_vat'] ?? null);
                     $ossItems++;
                     foreach ($plan['warnings'] as $w) {
                         $p->warn($step, 'oss_item_warning', "Doklad {$label} (režim OSS): {$w}", ['document_no' => $label]);
@@ -321,6 +324,7 @@ final class InvoiceImporter
         $items = $doc['items'];
         $deductions = [];
         $reverse = false;
+        $outside = [];
         foreach ($items as $i => $item) {
             $items[$i]['target_code'] = null;
             $items[$i]['fixed_asset'] = false;
@@ -332,6 +336,8 @@ final class InvoiceImporter
             if ($code === '') {
                 if ($hasVat) {
                     $reasons[] = 'položka s daní bez kódu DPH';
+                } else {
+                    $outside[] = $i;
                 }
                 continue;
             }
@@ -343,6 +349,8 @@ final class InvoiceImporter
             if (!$class['in_return']) {
                 if ($hasVat) {
                     $deductions['none'] = true; // daň je součástí nákladu, odpočet se neuplatnil
+                } else {
+                    $outside[] = $i;
                 }
                 continue;
             }
@@ -360,6 +368,14 @@ final class InvoiceImporter
             }
             if ($class['fixed_asset']) {
                 $items[$i]['fixed_asset'] = true;
+            }
+        }
+        if ($reverse) {
+            // Položka bez daně, kterou PREMIER do přiznání nezahrnul (bez kódu, kód bez řádků),
+            // potřebuje na dokladu se samovyměřením kód mimo předmět daně - bez kódu by ji
+            // evidence DPH podle příznaku `reverse_charge` zdanila jako samovyměření.
+            foreach ($outside as $i) {
+                $items[$i]['target_code'] = VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE;
             }
         }
         if (count($deductions) > 1) {
@@ -402,7 +418,9 @@ final class InvoiceImporter
         $review = $reasons !== [];
         $unbooked = $review || $type === 'advance' || !$doc['booked'];
         $status = $review ? 'draft' : ($doc['settled'] ? 'paid' : ($unbooked ? 'received' : 'booked'));
-        $codes = array_values(array_unique(array_filter(array_column($items, 'target_code'))));
+        // Kód hlavičky jen ze zařazení do přiznání - položka mimo předmět daně ho neurčuje.
+        $codes = array_values(array_unique(array_filter(array_column($items, 'target_code'),
+            static fn (?string $c): bool => $c !== null && $c !== VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE)));
         [$accountNo, $bankCode] = self::bankAccount($doc['account_no']);
         $vs = preg_replace('/\D/', '', $doc['variable_symbol']) ?? '';
         try {
@@ -560,7 +578,7 @@ final class InvoiceImporter
         }
         if ($reasons !== []) {
             $p->count($step, 'review');
-            $p->warn($step, 'needs_review', "Doklad {$label} převzat jako koncept k ruční kontrole: " . implode('; ', $reasons)
+            $p->warn($step, 'needs_review', "Doklad {$label} převzat jako koncept k ruční kontrole: " . self::reasonList($reasons)
                 . '. Do DPH ani do účtování nevstoupí, dokud ho neopravíte a nepotvrdíte.', ['document_no' => $label, 'reasons' => $reasons]);
         }
     }
@@ -601,7 +619,18 @@ final class InvoiceImporter
         foreach ($notes as $n) {
             $note .= '; ' . $n;
         }
-        return $reasons === [] ? $note : $note . '. K ruční kontrole: ' . implode('; ', $reasons) . '.';
+        return $reasons === [] ? $note : $note . '. K ruční kontrole: ' . self::reasonList($reasons) . '.';
+    }
+
+    /**
+     * Důvody ke konceptu jako jedna věta bez koncové tečky - tu přidává volající. Důvod
+     * převzatý z OSS plánovače je celá věta s tečkou a bez ořezu by hláška končila „..".
+     *
+     * @param list<string> $reasons
+     */
+    private static function reasonList(array $reasons): string
+    {
+        return implode('; ', array_map(static fn (string $r): string => rtrim($r, '. '), $reasons));
     }
 
     private static function paymentMethod(string $form): string

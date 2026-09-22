@@ -77,6 +77,20 @@ final class StereoNxPurchaseRecapTest extends TestCase
         self::assertSame(21.0, $computed['items'][0]['rate']);
     }
 
+    /**
+     * Přihrádka bez daně mimo přiznání na dokladu se samovyměřením: bez kódu by ji evidence
+     * DPH podle příznaku `reverse_charge` na hlavičce zdanila jako samovyměření.
+     */
+    public function testZeroRateSlotOnSelfAssessedDocumentIsOutsideScope(): void
+    {
+        $plan = $this->mapper(true)->plan($this->header(['BezDane' => 50.0, 'Celkem' => 150.0]));
+        self::assertTrue($plan['reverse_charge']);
+        self::assertSame(['24', 'mimo'], array_column($plan['items'], 'vat_classification_code'));
+
+        $domestic = $this->mapper()->plan($this->header(['BezDane' => 50.0, 'Celkem' => 171.0]));
+        self::assertSame(['40', null], array_column($domestic['items'], 'vat_classification_code'), 'Tuzemský doklad bez samovyměření zůstává beze změny.');
+    }
+
     public function testUnassignedFlagsRemainExplicitAndRequireReview(): void
     {
         $plan = $this->mapper(true)->plan($this->header(['CenySDPH' => null, 'ZpracovatDPH' => null, 'Celkem' => 100.0]));
