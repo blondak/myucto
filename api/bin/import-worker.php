@@ -100,6 +100,8 @@ try {
         $container->get(AccountingHistoryReclassificationService::class)->run($jobId);
     } elseif ($source === 'money_s3_import') {
         $container->get(\MyInvoice\Service\Migration\MoneyS3\MoneyS3ImportJobService::class)->run($jobId);
+    } elseif ($source === 'money_s3_batch') {
+        $container->get(\MyInvoice\Service\Migration\MoneyS3\MoneyS3BatchJobService::class)->run($jobId);
     } elseif ($source === 'pohoda_import') {
         $container->get(\MyInvoice\Service\Migration\Pohoda\PohodaImportJobService::class)->run($jobId);
     } elseif ($source === 'premier_import') {

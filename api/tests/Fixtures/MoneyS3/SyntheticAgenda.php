@@ -399,6 +399,28 @@ final class SyntheticAgenda
     }
 
     /**
+     * Tatáž agenda jako agenda jiné firmy (dávkový převod více firem): jiné IČO, název
+     * a sídlo v `AgendaInfo.ini` i v „Údajích o firmě".
+     *
+     * @param array<string,string> $files
+     * @return array<string,string>
+     */
+    public static function forCompany(array $files, string $ico, string $name, string $street = 'Účetní 12', string $city = 'Brno', string $zip = '602 00'): array
+    {
+        $files['AgendaInfo.ini'] = (string) iconv('UTF-8', 'CP1250', "[Agenda]\r\nNázev=" . $name . "\r\nIČO=" . $ico
+            . "\r\nVersion=" . self::VERSION . "\r\nDatum=10.01.2026 08:15\r\n");
+        $files['Agenda.DAT'] = Ms3FixtureWriter::table([['Section1', 'C', 30], ['Variable', 'C', 20], ['Value', 'C', 60]], [
+            ['Section1' => 'Údaje o firmě', 'Variable' => 'Název', 'Value' => $name],
+            ['Section1' => 'Údaje o firmě', 'Variable' => 'Ulice', 'Value' => $street],
+            ['Section1' => 'Údaje o firmě', 'Variable' => 'Místo', 'Value' => $city],
+            ['Section1' => 'Údaje o firmě', 'Variable' => 'PSČ', 'Value' => $zip],
+            ['Section1' => 'Údaje o firmě', 'Variable' => 'IČO', 'Value' => $ico],
+            ['Section1' => 'Údaje o firmě', 'Variable' => 'DIČ', 'Value' => 'CZ' . $ico],
+        ], 7);
+        return $files;
+    }
+
+    /**
      * Agenda, ve které Money otevřelo rok 2025 bez uzávěrky roku 2024 (deník 2024 bez XZ).
      *
      * @return array<string,string>
