@@ -1638,6 +1638,12 @@ final class BankStatementAction
             }
         }
 
+        $sort = \MyInvoice\Service\Bank\BankTransactionSort::fromQuery(
+            $qp,
+            ['posted_at', 'amount', 'variable_symbol', 'counterparty', 'invoice', 'status', 'posting'],
+        );
+        $orderBy = \MyInvoice\Service\Bank\BankTransactionSort::orderBySql($sort['key'], $sort['dir'], $sid);
+
         $txCountStmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM bank_transactions bt WHERE $txWhere");
         $txCountStmt->execute($txParams);
         $txTotal = (int) $txCountStmt->fetchColumn();
@@ -1660,7 +1666,7 @@ final class BankStatementAction
           LEFT JOIN purchase_invoices p ON p.id = pm.purchase_invoice_id
           LEFT JOIN clients vc ON vc.id = p.vendor_id
               WHERE ' . $txWhere . '
-           ORDER BY bt.posted_at, bt.id
+           ORDER BY ' . $orderBy . '
               LIMIT ' . $p['per_page'] . ' OFFSET ' . $p['offset']
         );
         $txStmt->execute($txParams);

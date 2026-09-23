@@ -7,6 +7,7 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
+use MyInvoice\Service\Bank\BankTransactionSort;
 use MyInvoice\Service\Bank\PurchasePaymentMatchReader;
 use PDO;
 use PDOException;
@@ -682,11 +683,13 @@ final class BankPostingSuggestionRepository
      * @return array{items:list<array<string,mixed>>, total:int}
      */
     /**
-     * @param array{year?:?int, q?:?string, scope?:string, account?:?string} $filters
-     *   year    — kalendářní rok pohybu (NULL = všechny),
-     *   q       — fulltext přes protistranu, VS, popis a číslo účtu,
-     *   scope   — 'unposted' (výchozí, jen nezaúčtované) | 'all' (všechny pohyby na všech účtech).
-     *   account — náš zdrojový účet (bs.account_number, normalizováno stejně jako u BankStatementAction::list).
+     * @param array{year?:?int, q?:?string, scope?:string, account?:?string, sort?:?string, direction?:?string} $filters
+     *   year      — kalendářní rok pohybu (NULL = všechny),
+     *   q         — fulltext přes protistranu, VS, popis a číslo účtu,
+     *   scope     — 'unposted' (výchozí, jen nezaúčtované) | 'all' (všechny pohyby na všech účtech).
+     *   account   — náš zdrojový účet (bs.account_number, normalizováno stejně jako u BankStatementAction::list).
+     *   sort      — sloupec řazení z whitelistu {@see BankTransactionSort::KEYS} (jinak datum),
+     *   direction — asc | desc (výchozí desc, nejnovější nahoře).
      */
     public function paginateUnposted(int $supplierId, int $limit, int $offset, array $filters = []): array
     {
@@ -733,6 +736,13 @@ final class BankPostingSuggestionRepository
                 $scopeParams[] = $digits;
             }
         }
+        $sort = BankTransactionSort::fromQuery(
+            ['sort' => $filters['sort'] ?? null, 'direction' => $filters['direction'] ?? null],
+            BankTransactionSort::KEYS,
+            'posted_at',
+            'desc',
+        );
+        $orderBy = BankTransactionSort::orderBySql($sort['key'], $sort['dir'], $supplierId);
         $pdo = $this->db->pdo();
 
         $countStmt = $pdo->prepare(
@@ -804,7 +814,7 @@ final class BankPostingSuggestionRepository
           LEFT JOIN purchase_invoices p ON p.id = pm.purchase_invoice_id
           LEFT JOIN clients vc ON vc.id = p.vendor_id
               WHERE {$scopeSql}
-              ORDER BY bt.posted_at DESC, bt.id DESC
+              ORDER BY {$orderBy}
               LIMIT {$limit} OFFSET {$offset}"
         );
         $stmt->execute(array_merge(

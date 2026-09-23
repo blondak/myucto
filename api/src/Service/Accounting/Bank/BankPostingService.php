@@ -4518,6 +4518,22 @@ final class BankPostingService
             $out[$txId]['suggestion_source'] = 'transfer';
         }
 
+        // Poznámky žijí u zápisu deníku (jediná pravda) — pohyb je jen zobrazuje
+        // a edituje přes /accounting/journal/{id}/notes.
+        $entryIds = [];
+        foreach ($out as $txId => $posting) {
+            if (isset($posting['journal_entry_id'])) {
+                $entryIds[$txId] = (int) $posting['journal_entry_id'];
+            }
+        }
+        if ($entryIds !== []) {
+            $notes = (new \MyInvoice\Repository\JournalEntryNoteRepository($this->db))
+                ->briefForEntries(array_values($entryIds), $supplierId);
+            foreach ($entryIds as $txId => $entryId) {
+                $out[$txId]['journal_notes'] = $notes[$entryId] ?? [];
+            }
+        }
+
         return $out;
     }
 

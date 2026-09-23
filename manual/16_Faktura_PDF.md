@@ -147,6 +147,10 @@ viz [§ 96.11 Automatické zaúčtování](96_Nastaveni.md#9611-automaticke-zauc
 - **Přeúčtovat** (admin/účetní) — opraví kontaci, která v deníku už je. V otevřeném
   období se zápis přepíše, v zamčeném nebo uzavřeném vznikne storno a nový zápis;
   viz [§ 48.8.2](52_Ucetni_denik.md#5282-preuctovani-z-dokladu-sekce-zauctovani).
+- **Souvisí** — protějšky zápisu (úhrady, bankovní pohyby, ručně navázané doklady)
+  s odkazem do deníku i na zdrojový doklad.
+- **Poznámky** — poznámky zápisu, tytéž jako v deníku a u bankovního pohybu
+  ([§ 52.6.3](52_Ucetni_denik.md#5263-poznamky-k-zapisu)).
 
 ## 16.2 PDF struktura
 
