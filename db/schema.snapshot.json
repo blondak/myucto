@@ -863,7 +863,8 @@
         "1876_dimension_account_rules.sql",
         "1877_payroll_enforcement_claim_key_unique_restore.sql",
         "1878_vat_classification_24z_selected_supplies.sql",
-        "1879_users_default_supplier.sql"
+        "1879_users_default_supplier.sql",
+        "1880_invoice_price_level.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -5766,6 +5767,7 @@
                 "pdf_generated_at": "timestamp NULL DEFAULT NULL",
                 "pdf_path": "varchar(255) NULL DEFAULT NULL",
                 "penalty_covered_through": "date NULL DEFAULT NULL",
+                "price_level_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "prices_include_vat": "tinyint(1) NOT NULL DEFAULT 0",
                 "project_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "public_token": "char(48) NULL DEFAULT NULL",

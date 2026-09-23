@@ -89,8 +89,9 @@ final class EffectivePriceResolver
         string $qty = '1',
         ?string $onDate = null,
         ?int $clientId = null,
+        ?int $priceLevelId = null,
     ): array {
-        $all = $this->resolveMany($supplierId, [$stockItemId], $currency, $qty, $onDate, $clientId);
+        $all = $this->resolveMany($supplierId, [$stockItemId], $currency, $qty, $onDate, $clientId, $priceLevelId);
         return $all[$stockItemId] ?? $this->emptyResult($stockItemId, $currency, null);
     }
 
@@ -151,7 +152,11 @@ final class EffectivePriceResolver
      *   customer_price       … {id,price_type,fixed_price,discount_pct,valid_from,valid_to}
      * a `base_price` je pak zákaznická cena (základ, se kterým se akce porovnává).
      *
-     * Jen když se použila cenová hladina odběratele, přibudou:
+     * `$priceLevelId` = hladina zvolená na dokladu: nahradí hladinu odběratele a platí
+     * i bez odběratele. Individuální cena zákazníka má dál přednost. Neaktivní nebo
+     * cizí hladina se nepoužije (validaci s chybou dělá volající, např. nacenění dokladu).
+     *
+     * Jen když se použila cenová hladina (odběratele nebo dokladu), přibudou:
      *   standard_price       … standardní cena z cenotvorby (string|null),
      *   price_source         … price_level_fixed|price_level_discount|promo,
      *   price_level          … {id,code,name},
@@ -168,6 +173,7 @@ final class EffectivePriceResolver
         string|array $qty = '1',
         ?string $onDate = null,
         ?int $clientId = null,
+        ?int $priceLevelId = null,
     ): array {
         $ids = array_values(array_unique(array_filter(
             array_map('intval', $stockItemIds),
@@ -194,14 +200,19 @@ final class EffectivePriceResolver
                 $base[$itemId] = $baseline;
                 $customer[$itemId] = $row;
             }
-            // Hladina odběratele až po zákaznické ceně — jen pro karty bez ní.
+        }
+        // Hladina až po zákaznické ceně, jen pro karty bez ní. Hladina dokladu má
+        // přednost před hladinou odběratele a platí i bez odběratele.
+        if ($priceLevelId !== null && $priceLevelId > 0) {
+            $level = $this->priceLevels->activeLevel($supplierId, $priceLevelId);
+        } elseif ($clientId !== null && $clientId > 0) {
             $level = $this->priceLevels->levelForClient($supplierId, $clientId);
-            if ($level !== null) {
-                $rest = array_values(array_filter($ids, static fn (int $i): bool => !isset($customer[$i])));
-                foreach ($this->priceLevels->baselines($supplierId, $level, $rest, $currency, $standard) as $itemId => $applied) {
-                    $base[$itemId] = $applied['price'];
-                    $levelApplied[$itemId] = $applied;
-                }
+        }
+        if ($level !== null) {
+            $rest = array_values(array_filter($ids, static fn (int $i): bool => !isset($customer[$i])));
+            foreach ($this->priceLevels->baselines($supplierId, $level, $rest, $currency, $standard) as $itemId => $applied) {
+                $base[$itemId] = $applied['price'];
+                $levelApplied[$itemId] = $applied;
             }
         }
         $candidates = $this->promos->activeForItems($supplierId, $ids, $currency, $onDate);

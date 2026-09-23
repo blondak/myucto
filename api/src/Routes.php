@@ -3513,6 +3513,7 @@ final class Routes
             $g->post('/assemblies/{id:[0-9]+}/reverse', [\MyInvoice\Action\Stock\ProductAssemblyAction::class, 'reverse']);
             $g->get   ('/reports/status',                [\MyInvoice\Action\Stock\StockReportAction::class, 'status']);
             $g->get   ('/reports/valuation',              [\MyInvoice\Action\Stock\StockReportAction::class, 'valuation']);
+            $g->get   ('/reports/sales',                  [\MyInvoice\Action\Stock\StockReportAction::class, 'sales']);
             $g->post  ('/reports/valuation-jobs',         [\MyInvoice\Action\Stock\StockReportAction::class, 'createValuationJob']);
             $g->get   ('/reports/valuation-jobs/{id:[0-9]+}', [\MyInvoice\Action\Stock\StockReportAction::class, 'valuationJobResult']);
             $g->get   ('/reports/valuation-jobs/{id:[0-9]+}/status', [\MyInvoice\Action\Stock\StockReportAction::class, 'valuationJobStatus']);

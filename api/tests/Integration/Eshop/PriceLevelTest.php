@@ -247,6 +247,159 @@ final class PriceLevelTest extends StockTestCase
         self::assertSame(['1000.00', 'standard', null, null], [$plain['unit_price'], $plain['price_source'], $plain['price_level'], $plain['discount_pct']]);
     }
 
+    // ── hladina zvolená na dokladu (migrace 1880) ──────────────────────────
+
+    public function testDocumentLevelReplacesClientLevelAndWorksWithoutClient(): void
+    {
+        $sid = $this->createSupplier();
+        $item = $this->pricedItem($sid, 'PL-DOC');
+        $standard = $this->priceLevel($sid, 'DEALER', 'Dealer', '30');
+        $urgent = $this->priceLevel($sid, 'DEALER-URG', 'Dealer urgentní', '25');
+        $client = $this->assignedClient($sid, $standard);
+
+        self::assertSame('700.00', $this->unitPrice($sid, $item, $client));
+        $r = $this->resolver->resolve($sid, $item, 'CZK', '1', self::TODAY, $client, $urgent);
+        self::assertSame('750.00', $r['unit_price']);
+        self::assertSame(['id' => $urgent, 'code' => 'DEALER-URG', 'name' => 'Dealer urgentní'], $r['price_level']);
+
+        $walkIn = $this->resolver->resolve($sid, $item, 'CZK', '1', self::TODAY, null, $urgent);
+        self::assertSame('750.00', $walkIn['unit_price'], 'Hladina dokladu platí i bez odběratele.');
+    }
+
+    public function testCustomerPriceBeatsDocumentLevel(): void
+    {
+        $sid = $this->createSupplier();
+        $item = $this->pricedItem($sid, 'PL-DOC-CUST');
+        $client = $this->client($sid);
+        $this->customerPrice($sid, $item, $client, '850.00');
+        $level = $this->priceLevel($sid, 'DOC', 'Doklad', '40');
+
+        $r = $this->resolver->resolve($sid, $item, 'CZK', '1', self::TODAY, $client, $level);
+        self::assertSame('850.00', $r['unit_price']);
+        self::assertSame('customer_fixed', $r['price_source']);
+    }
+
+    public function testInactiveOrForeignDocumentLevelIsIgnoredAndQuoteRejectsIt(): void
+    {
+        $sid = $this->createSupplier();
+        $item = $this->pricedItem($sid, 'PL-DOC-BAD');
+        $gold = $this->priceLevel($sid, 'GOLD', 'Gold', '10');
+        $client = $this->assignedClient($sid, $gold);
+        $inactive = $this->priceLevel($sid, 'OLD', 'Stará', '50', false);
+        $foreign = $this->priceLevel($this->createSupplier(), 'X', 'Cizí', '50');
+
+        // Resolver neplatnou hladinu dokladu nepoužije a nespadne zpátky na hladinu odběratele.
+        self::assertSame('1000.00', $this->resolver->resolve($sid, $item, 'CZK', '1', self::TODAY, $client, $inactive)['unit_price']);
+        self::assertSame('1000.00', $this->resolver->resolve($sid, $item, 'CZK', '1', self::TODAY, $client, $foreign)['unit_price']);
+
+        $quotes = $this->container->get(StockItemQuoteService::class);
+        $lines = [['key' => 'a', 'stock_item_id' => $item, 'unit' => null, 'quantity' => '1']];
+        foreach ([$inactive, $foreign, -1, 'abc'] as $bad) {
+            try {
+                $quotes->quote($sid, ['client_id' => $client, 'price_level_id' => $bad, 'currency' => 'CZK', 'date' => self::TODAY, 'lines' => $lines]);
+                self::fail('Neplatná hladina dokladu musí vrátit chybu: ' . $bad);
+            } catch (StockException $e) {
+                self::assertSame('invalid_price_level', $e->errorCode);
+            }
+        }
+    }
+
+    public function testQuoteUsesDocumentLevel(): void
+    {
+        $sid = $this->createSupplier();
+        $item = $this->pricedItem($sid, 'PL-DOC-QUOTE');
+        $client = $this->assignedClient($sid, $this->priceLevel($sid, 'GOLD', 'Gold', '10'));
+        $urgent = $this->priceLevel($sid, 'URG', 'Urgentní', '5');
+        $quotes = $this->container->get(StockItemQuoteService::class);
+        $lines = [['key' => 'a', 'stock_item_id' => $item, 'unit' => null, 'quantity' => '1']];
+
+        $line = $quotes->quote($sid, ['client_id' => $client, 'price_level_id' => $urgent, 'currency' => 'CZK', 'date' => self::TODAY, 'lines' => $lines])['lines'][0];
+        self::assertSame(['950.00', 'price_level_discount'], [$line['unit_price'], $line['price_source']]);
+        self::assertSame($urgent, $line['price_level']['id']);
+
+        $default = $quotes->quote($sid, ['client_id' => $client, 'price_level_id' => null, 'currency' => 'CZK', 'date' => self::TODAY, 'lines' => $lines])['lines'][0];
+        self::assertSame('900.00', $default['unit_price'], 'null = hladina odběratele.');
+    }
+
+    public function testInvoiceStoresDocumentLevelOnlyWhenKeyIsPresent(): void
+    {
+        $sid = $this->createSupplier();
+        $level = $this->priceLevel($sid, 'URG', 'Urgentní', '5');
+        $repo = $this->container->get(\MyInvoice\Repository\InvoiceRepository::class);
+        $data = [
+            'invoice_type' => 'invoice', 'client_id' => $this->client($sid), 'issue_date' => self::TODAY,
+            'tax_date' => self::TODAY, 'due_date' => self::TODAY, 'currency_id' => $this->currencyIdFor($sid),
+            'reverse_charge' => false, 'language' => 'cs',
+        ];
+        $id = $repo->createDraft($data + ['price_level_id' => $level], $this->userId);
+        self::assertSame($level, $repo->find($id)['price_level_id']);
+
+        $repo->updateDraft($id, $data);
+        self::assertSame($level, $repo->find($id)['price_level_id'], 'Cesta bez klíče (import, opakovaná fakturace) hladinu nesmaže.');
+
+        $repo->updateDraft($id, $data + ['price_level_id' => null]);
+        self::assertNull($repo->find($id)['price_level_id']);
+
+        $plain = $repo->createDraft($data, $this->userId);
+        self::assertNull($repo->find($plain)['price_level_id']);
+    }
+
+    public function testCopiedInvoiceKeepsDocumentLevel(): void
+    {
+        $sid = $this->createSupplier();
+        $level = $this->priceLevel($sid, 'URG', 'Urgentní', '5');
+        $repo = $this->container->get(\MyInvoice\Repository\InvoiceRepository::class);
+        $source = $repo->createDraft([
+            'invoice_type' => 'invoice', 'client_id' => $this->client($sid), 'issue_date' => self::TODAY,
+            'tax_date' => self::TODAY, 'due_date' => self::TODAY, 'currency_id' => $this->currencyIdFor($sid),
+            'reverse_charge' => false, 'language' => 'cs', 'price_level_id' => $level,
+        ], $this->userId);
+
+        $copy = $this->container->get(\MyInvoice\Action\Invoice\BulkReissueAction::class)->cloneOne($source, self::TODAY, false, $this->userId);
+        self::assertSame($level, $repo->find($copy)['price_level_id']);
+
+        $proforma = $repo->createDraft([
+            'invoice_type' => 'proforma', 'client_id' => $this->client($sid), 'issue_date' => self::TODAY,
+            'tax_date' => self::TODAY, 'due_date' => self::TODAY, 'currency_id' => $this->currencyIdFor($sid),
+            'reverse_charge' => false, 'language' => 'cs', 'price_level_id' => $level,
+        ], $this->userId);
+        $final = $this->container->get(\MyInvoice\Service\Invoice\FinalFromProformaCreator::class)
+            ->create($proforma, $this->userId, self::TODAY, self::TODAY, 0.0);
+        self::assertSame($level, $repo->find($final)['price_level_id'], 'Finální faktura z proformy převezme hladinu.');
+    }
+
+    public function testInvoiceActionsRejectForeignOrInactiveDocumentLevel(): void
+    {
+        $sid = $this->createSupplier();
+        $inactive = $this->priceLevel($sid, 'OLD', 'Stará', '10', false);
+        $foreign = $this->priceLevel($this->createSupplier(), 'X', 'Cizí', '10');
+        $create = $this->container->get(\MyInvoice\Action\Invoice\CreateInvoiceAction::class);
+        foreach ([$inactive, $foreign] as $bad) {
+            $res = $create($this->request('POST', $sid, ['client_id' => $this->client($sid), 'price_level_id' => $bad]), new Psr7Response());
+            self::assertSame(422, $res->getStatusCode());
+            self::assertSame('invalid_price_level', $this->body($res)['error']['code']);
+        }
+
+        $repo = $this->container->get(\MyInvoice\Repository\InvoiceRepository::class);
+        $invoiceId = $repo->createDraft([
+            'invoice_type' => 'invoice', 'client_id' => $this->client($sid), 'issue_date' => self::TODAY,
+            'tax_date' => self::TODAY, 'due_date' => self::TODAY, 'currency_id' => $this->currencyIdFor($sid),
+            'reverse_charge' => false, 'language' => 'cs',
+        ], $this->userId);
+        $update = $this->container->get(\MyInvoice\Action\Invoice\UpdateInvoiceAction::class);
+        $res = $update($this->request('PUT', $sid, ['price_level_id' => $foreign]), new Psr7Response(), ['id' => (string) $invoiceId]);
+        self::assertSame(422, $res->getStatusCode());
+        self::assertSame('invalid_price_level', $this->body($res)['error']['code']);
+
+        // Hladina, kterou koncept už má a kterou někdo mezitím smazal, uložení neblokuje.
+        $gone = $this->priceLevel($sid, 'GONE', 'Smazaná', '10');
+        $this->db->pdo()->prepare('UPDATE invoices SET price_level_id = ? WHERE id = ?')->execute([$gone, $invoiceId]);
+        $this->db->pdo()->prepare('DELETE FROM stock_price_levels WHERE id = ?')->execute([$gone]);
+        $res = $update($this->request('PUT', $sid, ['price_level_id' => $gone]), new Psr7Response(), ['id' => (string) $invoiceId]);
+        self::assertNotSame('invalid_price_level', $this->body($res)['error']['code'] ?? null);
+        self::assertSame($gone, $repo->find($invoiceId)['price_level_id'], 'Hladina na konceptu zůstala.');
+    }
+
     // ── číselník hladin a pravidla ─────────────────────────────────────────
 
     public function testCodebookCrudAndDeleteInUseIsRejected(): void

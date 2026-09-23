@@ -100,6 +100,93 @@ final class StockReportXlsxExporter
     }
 
     /**
+     * Prodeje skladových karet: list Řádky (1 řádek faktury = 1 řádek) a při
+     * seskupení i list Souhrn. Částky v měně dokladu, součty po měnách.
+     *
+     * @param array<string,mixed> $data výstup StockSalesReportService::export()
+     * @return array{bytes:string, filename:string, mime:string}
+     */
+    public function sales(array $data): array
+    {
+        $f = $data['filters'] ?? [];
+        $period = $this->czDate((string) ($f['date_from'] ?? '')) . ' – ' . $this->czDate((string) ($f['date_to'] ?? ''));
+        $ss = new Spreadsheet();
+        $sheet = $ss->getActiveSheet();
+        $sheet->setTitle('Řádky');
+        $sheet->setCellValue('A1', 'Prodeje skladových karet ' . $period);
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+
+        $headers = ['DUZP', 'Doklad', 'Typ', 'Odběratel', 'SKU', 'Název', 'Sériová čísla / šarže', 'Množství', 'MJ', 'Cena/MJ', 'Celkem bez DPH', 'Měna'];
+        $cols = count($headers);
+        $head = 3;
+        $this->headerRow($sheet, $head, $headers);
+
+        $r = $head + 1;
+        foreach ($data['items'] ?? [] as $row) {
+            $sheet->setCellValue([1, $r], $this->czDate((string) $row['tax_date']));
+            $sheet->setCellValueExplicit([2, $r], (string) ($row['invoice_number'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([3, $r], $row['invoice_type'] === 'credit_note' ? 'Dobropis' : 'Faktura', DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([4, $r], (string) $row['client_name'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([5, $r], (string) $row['sku'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([6, $r], (string) $row['name'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([7, $r], implode(', ', $row['identifiers'] ?? []), DataType::TYPE_STRING);
+            $sheet->setCellValue([8, $r], (float) $row['qty']);
+            $sheet->setCellValueExplicit([9, $r], (string) $row['unit'], DataType::TYPE_STRING);
+            $sheet->setCellValue([10, $r], (float) $row['unit_price']);
+            $sheet->setCellValue([11, $r], (float) $row['total_without_vat']);
+            $sheet->setCellValueExplicit([12, $r], (string) $row['currency'], DataType::TYPE_STRING);
+            $r++;
+        }
+        $t = $data['totals'] ?? [];
+        foreach ($t['amounts'] ?? [] as $amount) {
+            $sheet->setCellValue([1, $r], 'CELKEM (' . (int) ($t['lines'] ?? 0) . ' řádků)');
+            if (count($t['units'] ?? []) === 1) {
+                $sheet->setCellValue([8, $r], (float) ($t['qty'] ?? 0));
+            }
+            $sheet->setCellValue([11, $r], (float) $amount['total_without_vat']);
+            $sheet->setCellValueExplicit([12, $r], (string) $amount['currency'], DataType::TYPE_STRING);
+            $this->boldRow($sheet, $r, $cols);
+            $r++;
+        }
+        $this->finishTable($sheet, $head, $r - 1, $cols, 8);
+
+        if (($data['groups'] ?? []) !== []) {
+            $byClient = ($f['group_by'] ?? '') === 'client';
+            $summary = $ss->createSheet();
+            $summary->setTitle('Souhrn');
+            $summary->setCellValue('A1', ($byClient ? 'Prodeje podle odběratelů ' : 'Prodeje podle karet ') . $period);
+            $summary->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+            $groupHeaders = $byClient
+                ? ['Odběratel', 'Dokladů', 'Řádků', 'Množství', 'Celkem bez DPH', 'Měna']
+                : ['SKU', 'Název', 'Dokladů', 'Řádků', 'Množství', 'Celkem bez DPH', 'Měna'];
+            $this->headerRow($summary, 3, $groupHeaders);
+            $r = 4;
+            foreach ($data['groups'] as $group) {
+                foreach ($group['amounts'] as $i => $amount) {
+                    $values = $byClient ? [(string) $group['label']] : [(string) $group['code'], (string) $group['label']];
+                    foreach ($values as $c => $value) {
+                        $summary->setCellValueExplicit([$c + 1, $r], $value, DataType::TYPE_STRING);
+                    }
+                    $c = count($values) + 1;
+                    if ($i === 0) {
+                        $summary->setCellValue([$c, $r], (int) $group['documents']);
+                        $summary->setCellValue([$c + 1, $r], (int) $group['lines']);
+                        $summary->setCellValue([$c + 2, $r], (float) $group['qty']);
+                    }
+                    $summary->setCellValue([$c + 3, $r], (float) $amount['total_without_vat']);
+                    $summary->setCellValueExplicit([$c + 4, $r], (string) $amount['currency'], DataType::TYPE_STRING);
+                    $r++;
+                }
+            }
+            $this->finishTable($summary, 3, $r - 1, count($groupHeaders), count($groupHeaders) - 4);
+            // Seskupení si uživatel vybral kvůli souhrnu, proto se sešit otevře na něm.
+            $ss->setActiveSheetIndexByName('Souhrn');
+        }
+
+        return $this->out($ss, 'prodeje-skladovych-karet-' . (string) ($f['date_from'] ?? '') . '-' . (string) ($f['date_to'] ?? '') . '.xlsx');
+    }
+
+    /**
      * @param array<string,mixed> $item skladová karta {sku,name,unit}
      * @param array<string,mixed> $data výstup StockItemAction::movements() (items, opening_balance)
      * @return array{bytes:string, filename:string, mime:string}
@@ -113,7 +200,7 @@ final class StockReportXlsxExporter
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
         $sheet->setCellValue('A2', 'Počáteční stav: ' . (string) ($data['opening_balance'] ?? '0'));
 
-        $headers = ['Datum', 'Doklad', 'Typ', 'Sklad', 'Množství', 'Cena/MJ', 'Hodnota', 'Stav po pohybu'];
+        $headers = ['Datum', 'Doklad', 'Typ', 'Faktura', 'Partner', 'Sklad', 'Množství', 'Cena/MJ', 'Hodnota', 'Stav po pohybu'];
         $cols = count($headers);
         $head = 4;
         $this->headerRow($sheet, $head, $headers);
@@ -123,15 +210,17 @@ final class StockReportXlsxExporter
             $sheet->setCellValue([1, $r], $this->czDate((string) $row['doc_date']));
             $sheet->setCellValueExplicit([2, $r], (string) ($row['doc_number'] ?? ''), DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([3, $r], (string) $row['doc_type'], DataType::TYPE_STRING);
-            $sheet->setCellValueExplicit([4, $r], (string) $row['warehouse_code'], DataType::TYPE_STRING);
-            $sheet->setCellValue([5, $r], (float) $row['qty_signed']);
-            $sheet->setCellValue([6, $r], (float) $row['unit_cost']);
-            $sheet->setCellValue([7, $r], (float) $row['value_total']);
-            $sheet->setCellValue([8, $r], (float) $row['balance_after']);
+            $sheet->setCellValueExplicit([4, $r], (string) ($row['invoice_number'] ?? $row['purchase_invoice_number'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([5, $r], (string) ($row['partner']['name'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([6, $r], (string) $row['warehouse_code'], DataType::TYPE_STRING);
+            $sheet->setCellValue([7, $r], (float) $row['qty_signed']);
+            $sheet->setCellValue([8, $r], (float) $row['unit_cost']);
+            $sheet->setCellValue([9, $r], (float) $row['value_total']);
+            $sheet->setCellValue([10, $r], (float) $row['balance_after']);
             $r++;
         }
 
-        $this->finishTable($sheet, $head, $r - 1, $cols, 5);
+        $this->finishTable($sheet, $head, $r - 1, $cols, 7);
 
         return $this->out($ss, 'skladova-karta-' . (string) ($item['sku'] ?? '') . '.xlsx');
     }

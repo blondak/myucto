@@ -30,6 +30,14 @@ export interface StockItemEffectivePrice {
   promo_qty_available?: string | null
 }
 
+/** Kde karta vyhověla hledání, když ne v kódu, názvu ani EAN (od 3 znaků). */
+export interface StockSearchMatch {
+  kind: 'serial' | 'lot' | 'attribute'
+  value: string
+  /** Název parametru u `kind = attribute`. */
+  attribute: string | null
+}
+
 export interface StockItem extends StockItemEffectivePrice {
   id: number
   supplier_id: number
@@ -63,6 +71,8 @@ export interface StockItem extends StockItemEffectivePrice {
   note: string | null
   created_at: string
   updated_at: string
+  /** Jen ve výsledku hledání (`q`). */
+  search_match?: StockSearchMatch | null
 }
 
 export interface StockItemPayload {
@@ -205,6 +215,7 @@ export interface StockItemSearchResult extends StockItemEffectivePrice {
   matched_unit?: string | null
   /** Karta má individuální ceny zákazníků (zapíná nacenění v editoru faktury). */
   has_customer_prices?: boolean
+  search_match?: StockSearchMatch | null
 }
 
 /**
@@ -323,6 +334,8 @@ export interface StockQuoteRequestLine {
 
 export interface StockQuoteRequest {
   client_id: number | null
+  /** Cenová hladina zvolená na dokladu; null = hladina odběratele. */
+  price_level_id?: number | null
   currency: string
   date: string | null
   lines: StockQuoteRequestLine[]
@@ -574,8 +587,26 @@ export interface StockLedgerRow {
   unit_cost: string
   value_total: string
   note: string | null
+  /** Faktura/dobropis, který výdej či vratku vyvolal (null bez práva k fakturám). */
+  invoice_id: number | null
+  invoice_number: string | null
+  invoice_type: string | null
+  purchase_invoice_id: number | null
+  purchase_invoice_number: string | null
+  /** Odběratel (FV), dodavatel (PF) nebo volný text ručního dokladu. */
+  partner: StockLedgerPartner | null
+  /** Prodejní cena řádku faktury bez DPH za `sale_unit` v měně `sale_currency`. */
+  sale_unit_price: string | null
+  sale_unit: string | null
+  sale_currency: string | null
   /** Doplněno FE (running balance dopočtená BE stránku po stránce). */
   balance_after?: string
+}
+
+export interface StockLedgerPartner {
+  kind: 'client' | 'vendor' | 'text'
+  id: number | null
+  name: string
 }
 
 export interface StockItemMovementsResponse {
@@ -740,6 +771,64 @@ export interface StockTake {
 export interface StockStatusReport {
   items: StockLevelRow[]
   totals: { value_total: string; count: number }
+}
+
+export interface StockSalesFilters {
+  date_from?: string
+  date_to?: string
+  client_id?: number
+  category_id?: number
+  warehouse_id?: number
+  stock_item_id?: number
+  q?: string
+  group_by?: 'none' | 'client' | 'item'
+  page?: number
+  per_page?: number
+}
+
+export interface StockSalesAmount { currency: string; total_without_vat: string }
+
+export interface StockSalesRow {
+  invoice_item_id: number
+  invoice_id: number
+  invoice_number: string | null
+  invoice_type: 'invoice' | 'credit_note'
+  issue_date: string
+  tax_date: string
+  client_id: number | null
+  client_name: string
+  stock_item_id: number
+  sku: string
+  name: string
+  description: string
+  warehouse_id: number | null
+  qty: string
+  unit: string
+  unit_price: string
+  total_without_vat: string
+  currency: string
+  /** Sériová čísla a šarže vydané k řádku faktury. */
+  identifiers: string[]
+}
+
+export interface StockSalesGroup {
+  /** client_id nebo stock_item_id; null = doklady bez odběratele. */
+  id: number | null
+  label: string
+  /** SKU u seskupení podle karet. */
+  code: string
+  lines: number
+  documents: number
+  qty: string
+  amounts: StockSalesAmount[]
+}
+
+export interface StockSalesReport {
+  filters: Required<Pick<StockSalesFilters, 'date_from' | 'date_to' | 'group_by'>> & StockSalesFilters
+  items: StockSalesRow[]
+  groups: StockSalesGroup[]
+  totals: { lines: number; qty: string; units: string[]; amounts: StockSalesAmount[] }
+  pagination: { page: number; per_page: number; total: number; pages: number }
 }
 
 export interface StockValuationRow {
@@ -1086,7 +1175,9 @@ export const stockApi = {
     api.get<StockStatusReport>('/stock/reports/status', { params: toParams(filters) }).then(r => r.data),
   reportValuation: (filters: { date?: string; warehouse_id?: number } = {}) =>
     api.get<StockValuationReport>('/stock/reports/valuation', { params: toParams(filters) }).then(r => r.data),
-  reportExportUrl: (name: 'status' | 'valuation', format: 'pdf' | 'xlsx', filters: Record<string, unknown> = {}) => {
+  reportSales: (filters: StockSalesFilters = {}) =>
+    api.get<StockSalesReport>('/stock/reports/sales', { params: toParams(filters) }).then(r => r.data),
+  reportExportUrl: (name: 'status' | 'valuation' | 'sales', format: 'pdf' | 'xlsx', filters: Record<string, unknown> = {}) => {
     const params = new URLSearchParams(toParams({ ...filters, format }) as Record<string, string>)
     return downloadUrl(`/stock/reports/${name}/export?${params.toString()}`)
   },
