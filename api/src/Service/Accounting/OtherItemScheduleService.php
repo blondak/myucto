@@ -69,18 +69,22 @@ final class OtherItemScheduleService
 
     public function list(int $supplierId): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT id, source_item_id, frequency, anchor_on, due_days,
-            ends_on, next_index, status, template_json, created_at FROM other_item_schedules
-            WHERE supplier_id = ? ORDER BY id DESC');
+        $stmt = $this->db->pdo()->prepare('SELECT s.id, s.source_item_id, s.frequency, s.anchor_on, s.due_days,
+            s.ends_on, s.next_index, s.status, s.template_json, s.created_at, oi.status AS source_status
+            FROM other_item_schedules s
+            JOIN other_items oi ON oi.id = s.source_item_id AND oi.supplier_id = s.supplier_id
+            WHERE s.supplier_id = ? ORDER BY s.id DESC');
         $stmt->execute([$supplierId]);
         return array_map(self::decode(...), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     public function get(int $supplierId, int $id): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT id, source_item_id, frequency, anchor_on, due_days,
-            ends_on, next_index, status, template_json, created_at FROM other_item_schedules
-            WHERE supplier_id = ? AND id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT s.id, s.source_item_id, s.frequency, s.anchor_on, s.due_days,
+            s.ends_on, s.next_index, s.status, s.template_json, s.created_at, oi.status AS source_status
+            FROM other_item_schedules s
+            JOIN other_items oi ON oi.id = s.source_item_id AND oi.supplier_id = s.supplier_id
+            WHERE s.supplier_id = ? AND s.id = ?');
         $stmt->execute([$supplierId, $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) throw new OtherItemException('schedule_not_found', 'Rozvrh nebyl nalezen.', 404);
@@ -99,9 +103,21 @@ final class OtherItemScheduleService
         if (!in_array($status, ['active', 'paused'], true)) {
             throw new OtherItemException('invalid_status', 'Neplatný stav rozvrhu.');
         }
-        $stmt = $this->db->pdo()->prepare('UPDATE other_item_schedules SET status = ? WHERE supplier_id = ? AND id = ?');
-        $stmt->execute([$status, $supplierId, $id]);
-        if ($stmt->rowCount() === 0) $this->get($supplierId, $id);
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            $sourceId = $this->sourceId($supplierId, $id);
+            $source = $this->items->find($supplierId, $sourceId, true)
+                ?? throw new OtherItemException('not_found', 'Zdrojový doklad nebyl nalezen.', 404);
+            if ($status === 'active') self::assertActiveSource($source);
+            $stmt = $pdo->prepare('UPDATE other_item_schedules SET status = ? WHERE supplier_id = ? AND id = ?');
+            $stmt->execute([$status, $supplierId, $id]);
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
         return $this->get($supplierId, $id);
     }
 
@@ -112,6 +128,10 @@ final class OtherItemScheduleService
         $ownTx = !$pdo->inTransaction();
         if ($ownTx) $pdo->beginTransaction();
         try {
+            $sourceId = $this->sourceId($supplierId, $id);
+            $source = $this->items->find($supplierId, $sourceId, true)
+                ?? throw new OtherItemException('not_found', 'Zdrojový doklad nebyl nalezen.', 404);
+            self::assertActiveSource($source);
             $stmt = $pdo->prepare('SELECT * FROM other_item_schedules WHERE supplier_id = ? AND id = ? FOR UPDATE');
             $stmt->execute([$supplierId, $id]);
             $schedule = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -214,6 +234,22 @@ final class OtherItemScheduleService
         $stmt->execute([$supplierId, $scheduleId, $index, $itemId]);
     }
 
+    private function sourceId(int $supplierId, int $id): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT source_item_id FROM other_item_schedules WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$supplierId, $id]);
+        $sourceId = $stmt->fetchColumn();
+        if ($sourceId === false) throw new OtherItemException('schedule_not_found', 'Rozvrh nebyl nalezen.', 404);
+        return (int) $sourceId;
+    }
+
+    private static function assertActiveSource(array $source): void
+    {
+        if (!in_array($source['status'], ['draft', 'confirmed', 'posted'], true)) {
+            throw new OtherItemException('schedule_source_inactive', 'Stornovaný zdrojový doklad nelze opakovat.', 409);
+        }
+    }
+
     private static function occurrenceDate(\DateTimeImmutable $anchor, int $months): string
     {
         $first = $anchor->modify('first day of this month')->modify('+' . $months . ' months');
@@ -231,8 +267,9 @@ final class OtherItemScheduleService
 
     private static function decode(array $row): array
     {
+        if (!in_array($row['source_status'], ['draft', 'confirmed', 'posted'], true)) $row['status'] = 'paused';
         $row['template'] = json_decode($row['template_json'], true, 512, JSON_THROW_ON_ERROR);
-        unset($row['template_json']);
+        unset($row['template_json'], $row['source_status']);
         return $row;
     }
 }
