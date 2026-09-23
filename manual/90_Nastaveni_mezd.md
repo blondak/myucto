@@ -231,7 +231,8 @@ na serveru neukládají, při použití se náhled spočítá znovu ze stejných
 ### 90.9.1 JMHZ: registrace a měsíční hlášení
 
 Záložka načte XML registrací zaměstnanců pro ČSSZ, tedy přihlášky a oznámení
-REGZEC a přihlášky před nástupem PREZEC, i měsíční hlášení JMHZ. Soubory může
+REGZEC a přihlášky před nástupem PREZEC, export zaměstnanců z ePortálu ČSSZ
+i měsíční hlášení JMHZ. Soubory může
 vytvořit i jiný mzdový program. Najednou lze nahrát víc souborů. Vyžaduje
 oprávnění `payroll.person.write`.
 
@@ -254,9 +255,39 @@ Před použitím potvrďte, že jste údaje porovnali s podáním, které ČSSZ 
 identifikátory se ukládají jako ověřený ruční opis. Opakovaný import téhož
 souboru nic nezaloží podruhé.
 
+**Export zaměstnanců z ePortálu ČSSZ.** Záložka přijme i soubor, který
+stáhnete na ePortálu ČSSZ jako přehled zaměstnanců (kořen `ExportZamestnancu`).
+V náhledu se zobrazí jako **Export zaměstnanců ČSSZ**. Každá věta nese jméno,
+rodné číslo, OIČ, ID zaměstnání, druh činnosti, příznak zaměstnání malého
+rozsahu a variabilní symbol zaměstnavatele. Datum nástupu v exportu není.
+
+- U osoby, kterou už evidujete, import doplní chybějící OIČ a ID zaměstnání.
+  Druh činnosti a druh vztahu jen porovná; nesoulad ohlásí varováním
+  a podmínky vztahu nemění. Vztah, který je zatím jen naplánovaný, import
+  aktivuje, protože ID zaměstnání v exportu dokládá přihlášení u ČSSZ.
+  Nástupem je plánovaný nástup vztahu, a když chybí, datum z měsíčního
+  hlášení v dávce. Vztah s nástupem v budoucnu zůstane naplánovaný.
+- Osobu, kterou v evidenci nemáte, založí i s pracovním vztahem jen tehdy,
+  když v téže dávce nahrajete měsíční hlášení JMHZ s formulářem stejného ID
+  zaměstnání. Nástupem je nejdřívější datum nástupu z formulářů, a když ho
+  formuláře nenesou, nejdřívější začátek pojištění v hlášeném měsíci. Vyjde-li
+  nástup na první den nejstaršího nahraného měsíce, náhled upozorní, že
+  pojištění mohlo začít dřív. Skutečný nástup pak ověřte podle smlouvy
+  a případně ho opravte na kartě vztahu.
+- Bez měsíčního hlášení je věta nové osoby zablokovaná. Nahrajte k exportu
+  hlášení nebo přihlášku REGZEC.
+- Variabilní symbol ve větě se porovná s variabilními symboly vašich mzdových
+  účtáren. Když nesouhlasí, věta je zablokovaná jako export jiného
+  zaměstnavatele. Pokud žádná účtárna variabilní symbol vyplněný nemá,
+  kontrola se přeskočí.
+
+Při použití se věty exportu zapíšou dřív než formuláře hlášení, takže se
+formuláře k nově založeným vztahům spárují podle ID zaměstnání samy. Vyberte
+proto v náhledu obojí najednou.
+
 **Měsíční hlášení z předchozího mzdového programu.** Hlášení samo osobu
-nezakládá, proto nejdřív naimportujte registrace, případně zaměstnance
-založte ručně. Náhled u každé věty ukáže období a spárovaný pracovní vztah.
+nezakládá, proto nejdřív naimportujte registrace nebo export zaměstnanců ČSSZ,
+případně zaměstnance založte ručně. Náhled u každé věty ukáže období a spárovaný pracovní vztah.
 Větu bez jednoznačné shody přiřadíte ručně výběrem vztahu. Náhled se pak
 přepočítá. Z hlášení se převezme zdravotní pojišťovna, prohlášení
 poplatníka, uplatňované slevy a vyživované děti podle období, ve kterém

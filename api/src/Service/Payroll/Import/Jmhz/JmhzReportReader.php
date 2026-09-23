@@ -411,7 +411,22 @@ final class JmhzReportReader
             irregularBonuses: $i('f:mzda/f:mzdaRozpad/f:odmenyNepravidelne'),
             standbyPay: $i('f:mzda/f:odmeny/f:pohotovost'),
             averageHourlyMilli: $this->scaled($t('f:mzda/f:vydelek/f:vydelekPrumernyHod'), 3, 'vydelekPrumernyHod'),
+            insuranceFrom: $this->lenientDate($t('f:pojisteni/f:trvani/f:pojisteniOd')),
         );
+    }
+
+    /**
+     * Začátek pojištění (10354) leží v bloku `trvani`, který měkký režim smí
+     * přejít. Slouží jen jako náznak nástupu u exportu zaměstnanců, proto
+     * nečitelná hodnota soubor neodmítne — prostě se nepoužije.
+     */
+    private function lenientDate(?string $value): ?string
+    {
+        try {
+            return $this->date($value, 'pojisteniOd');
+        } catch (RegistrationImportFileException) {
+            return null;
+        }
     }
 
     /** @return array<string,mixed>|null */

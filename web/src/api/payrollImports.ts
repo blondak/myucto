@@ -10,7 +10,8 @@ export interface ImportFilePayload {
 // ─── Registrace JMHZ ──────────────────────────────────────────────────────────
 
 export type RegistrationEnvironment = 'production' | 'test'
-export type RegistrationDocumentType = 'REGZEC25' | 'PREZEC26' | 'JMHZ'
+/** `CSSZ_EXPORT` = export zaměstnanců z ePortálu ČSSZ (bez data nástupu). */
+export type RegistrationDocumentType = 'REGZEC25' | 'PREZEC26' | 'CSSZ_EXPORT' | 'JMHZ'
 export type RegistrationRelationType =
   | 'employment'
   | 'small_scale_employment'
