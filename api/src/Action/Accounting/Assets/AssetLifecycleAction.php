@@ -166,7 +166,7 @@ final class AssetLifecycleAction
             }
         }
 
-        // book_entry=false: vyřazení už zaúčtoval deník (převod, ruční zápis) — karta se
+        // book_entry=false: vyřazení už zaúčtoval deník (převod, ruční zápis): karta se
         // vyřadí bez zaúčtování a naváže na zápis (entry_id, jinak jediný zápis ke dni).
         $bookEntry = array_key_exists('book_entry', $body) ? (bool) $body['book_entry'] : true;
         $entryId = null;

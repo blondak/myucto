@@ -111,7 +111,7 @@ final class AccountSummaryCardService
         if ($cards !== []) {
             throw new AssetException(
                 'account_has_cards',
-                'Na účtu ' . $accountCode . ' jsou karty majetku (' . implode(', ', array_slice($cards, 0, 5)) . ') — pohyby deníku '
+                'Na účtu ' . $accountCode . ' jsou karty majetku (' . implode(', ', array_slice($cards, 0, 5)) . '): pohyby deníku '
                     . 'nejde rozdělit mezi karty, souhrnná karta by majetek započetla podruhé.',
                 409,
             );
@@ -120,13 +120,13 @@ final class AccountSummaryCardService
         $existing->execute([$supplierId, $accountCode]);
         $summary = $existing->fetch(\PDO::FETCH_ASSOC) ?: null;
         if ($summary !== null && $summary['status'] !== 'in_use') {
-            throw new AssetException('invalid_status', 'Souhrnná karta účtu ' . $accountCode . ' není v užívání — srovnat s deníkem ji nejde.');
+            throw new AssetException('invalid_status', 'Souhrnná karta účtu ' . $accountCode . ' není v užívání, srovnat s deníkem ji nejde.');
         }
 
         $ledger = $this->ledger($supplierId, $accountCode, $summary !== null ? (int) $summary['id'] : null);
         [$input, $startDate, $moves] = self::split($ledger);
         if ($input === null) {
-            throw new AssetException('account_empty', 'Účet ' . $accountCode . ' nemá v deníku kladný stav — souhrnnou kartu není z čeho založit.', 422);
+            throw new AssetException('account_empty', 'Účet ' . $accountCode . ' nemá v deníku kladný stav, souhrnnou kartu není z čeho založit.', 422);
         }
         $warnings = [];
         if ($ledger['gap'] !== null) {
@@ -146,7 +146,7 @@ final class AccountSummaryCardService
             if ($summary === null) {
                 $created = $this->service->create($supplierId, [
                     'inventory_number' => $this->inventoryNumber($supplierId, $accountCode),
-                    'name' => mb_substr('Souhrnná karta účtu ' . $accountCode . ' – ' . (string) $accountName, 0, 255),
+                    'name' => mb_substr('Souhrnná karta účtu ' . $accountCode . ' - ' . (string) $accountName, 0, 255),
                     'description' => 'Souhrnná karta majetku vedeného jen v deníku: vstupní cena je stav účtu ' . $accountCode
                         . ' k ' . $startDate . ', pohyby deníku na účtu jsou zvýšení a snížení ceny.',
                     'kind' => 'tangible',

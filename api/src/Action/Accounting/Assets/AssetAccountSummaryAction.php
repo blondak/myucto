@@ -19,8 +19,8 @@ use Psr\Log\LoggerInterface;
 /**
  * Souhrnná karta majetku z účtu bez karet (portfolio pozemků vedené jen v deníku).
  *
- *   GET  /api/accounting/assets/account-summary   — účty neodpisovaného majetku se zůstatkem a stav jejich souhrnné karty
- *   POST /api/accounting/assets/account-summary   — založení / srovnání souhrnné karty s deníkem {account_code}
+ *   GET  /api/accounting/assets/account-summary   - účty neodpisovaného majetku se zůstatkem a stav jejich souhrnné karty
+ *   POST /api/accounting/assets/account-summary   - založení / srovnání souhrnné karty s deníkem {account_code}
  */
 final class AssetAccountSummaryAction
 {

@@ -28,8 +28,8 @@ use Psr\Log\LoggerInterface;
  *   POST   /api/accounting/assets/depreciations/book                — hromadné potvrzení + zaúčtování roku — účetní|admin
  *   POST   /api/accounting/assets/{id}/depreciation/pause           — přerušení daňového odpisu roku — účetní|admin
  *   DELETE /api/accounting/assets/{id}/depreciation/pause/{year}    — zrušení přerušení — účetní|admin
- *   POST   /api/accounting/assets/{id}/depreciation/tax-override    — ruční přepis daňového odpisu roku (R8)
- *   DELETE /api/accounting/assets/{id}/depreciation/tax-override/{year} — zrušení ručního přepisu
+ *   POST   /api/accounting/assets/{id}/depreciation/tax-override    - ruční přepis daňového odpisu roku (R8)
+ *   DELETE /api/accounting/assets/{id}/depreciation/tax-override/{year} - zrušení ručního přepisu
  */
 final class DepreciationAction
 {

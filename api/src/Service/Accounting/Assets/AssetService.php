@@ -689,7 +689,7 @@ final class AssetService
         if ($period === null || $period['status'] !== 'open') {
             throw new AssetException(
                 'period_not_open',
-                'Účetní období data vyřazení ' . $date . ' není otevřené — vyřazení nelze zaznamenat.',
+                'Účetní období data vyřazení ' . $date . ' není otevřené, vyřazení nelze zaznamenat.',
             );
         }
 
@@ -1075,12 +1075,12 @@ final class AssetService
             if ($row === null || (int) $row['supplier_id'] !== $supplierId) {
                 throw new AssetException(
                     'not_found',
-                    'Rok ' . $fiscalYear . ' nemá potvrzený daňový odpis — ručně přepsat jde jen potvrzený rok.',
+                    'Rok ' . $fiscalYear . ' nemá potvrzený daňový odpis, ručně přepsat jde jen potvrzený rok.',
                     404,
                 );
             }
             if ($row['is_paused']) {
-                throw new AssetException('validation_failed', 'Rok ' . $fiscalYear . ' je přerušený (§26/8) — nejdřív zrušte přerušení.');
+                throw new AssetException('validation_failed', 'Rok ' . $fiscalYear . ' je přerušený (§26/8), nejdřív zrušte přerušení.');
             }
             $residualStart = round((float) $row['residual_value_end'] + (float) $row['full_amount'], 2);
             if ($amount > $residualStart + 0.005) {
@@ -1094,7 +1094,7 @@ final class AssetService
             if ($later !== null && $later - $delta < -0.005) {
                 throw new AssetException(
                     'validation_failed',
-                    'Přepis by u pozdějšího potvrzeného roku snížil daňovou zůstatkovou cenu pod nulu — nejdřív upravte pozdější roky.',
+                    'Přepis by u pozdějšího potvrzeného roku snížil daňovou zůstatkovou cenu pod nulu, nejdřív upravte pozdější roky.',
                 );
             }
             $this->entries->applyOverride($supplierId, (int) $row['id'], $amount, round($residualStart - $amount, 2), $reason, $meta['user_id'] ?? null);
@@ -1164,7 +1164,7 @@ final class AssetService
         if ($period !== null && (string) $period['status'] === 'approved') {
             throw new AssetException(
                 'period_approved',
-                'Účetní závěrka roku ' . $fiscalYear . ' je schválená — daňový odpis roku už nelze měnit.',
+                'Účetní závěrka roku ' . $fiscalYear . ' je schválená, daňový odpis roku už nelze měnit.',
             );
         }
     }
