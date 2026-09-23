@@ -662,8 +662,9 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
 
     /**
      * Rodičovská ve formě celého měsíce bez příjmu je týž případ § 11
-     * odst. 2. Rozpad § 18 se pro ni z podkladů odvodit nedá, takže zůstává
-     * neuvedený (viz EldpExcludedPeriodDeriver::deriveSection18()).
+     * odst. 2. Její dny jsou vyloučenými dny § 18 odst. 7 v 10473 (Pokyny
+     * MPSV k vyplnění MH 1.4.13 ji tam jmenují výslovně), stejně jako celý
+     * měsíc neplaceného volna výš.
      */
     public function testWholeMonthOfParentalLeaveIsReportedAsZeroInsuranceDays(): void
     {
@@ -685,7 +686,8 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         self::assertSame(0, $section['insurance_days']);
         self::assertSame('1++', $section['code']);
         self::assertSame(0, $section['assessment_base_czk']);
-        self::assertNull($section['section18_days_total']);
+        self::assertSame(31, $section['section18_days_total']);
+        self::assertSame(31, $section['section18_days']['omluvenaNepritomnost']);
     }
 
     /**
