@@ -113,7 +113,8 @@ tři věci:
   Chybí-li nastavení zaměstnavatele, založí ho s mzdovou účtárnou `MZDY`
   a výchozími předkontacemi. Variabilní symbol ČSSZ, kód OSSZ a číslo plátce
   zdravotního pojištění, které firma vede v Nastavení firmy, převezme do Mezd
-  (viz [§ 90.8](90_Nastaveni_mezd.md#908-podrobny-pracovni-postup-a-kontroly)).
+  a k variabilnímu symbolu založí registraci účtárny s účinností od začátku
+  vedení mezd (viz [§ 90.8](90_Nastaveni_mezd.md#908-podrobny-pracovni-postup-a-kontroly)).
   Co v Nastavení firmy není, ani účty institucí převod nevymýšlí; protokol
   vypíše k doplnění v Mzdy → Nastavení jen to, co opravdu chybí. Zapnutý
   modul, jeho začátek ani existující nastavení převod nemění. Firmě, jejíž mzdy

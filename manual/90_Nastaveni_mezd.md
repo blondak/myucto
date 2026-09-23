@@ -71,9 +71,12 @@ založeného později). Přenáší se jen do prázdného pole, vyplněnou hodno
 nepřepíše. Variabilní symbol a číslo plátce se přenesou jen jako 1 až 10 číslic,
 kód OSSZ jen jako trojmístné číslo. Z Nastavení firmy se údaj odstraní teprve
 tehdy, když ho Mzdy opravdu drží; dokud nastavení zaměstnavatele nebo účet
-pojišťovny chybí, zůstává tam. Datum, od kdy převzatý variabilní symbol ČSSZ
-platí, se nevymýšlí: doplňte ho v historii registrace účtárny, jinak mzdový běh
-za dané období neprojde.
+pojišťovny chybí, zůstává tam. Převod mezd z jiného programu založí k desetimístnému
+variabilnímu symbolu ČSSZ i záznam v historii registrace účtárny s účinností od
+začátku vedení mezd v MyÚčtu (dřívější měsíce MyÚčto nepočítá). Skutečné datum
+registrace u ČSSZ můžete opravit: nejnovější záznam smažte a zadejte znovu. Při
+ručním zapnutí mezd se datum nevymýšlí: doplňte ho v historii registrace účtárny,
+jinak mzdový běh za dané období neprojde.
 
 U každé účtárny lze vyplnit **Testovací VS ČSSZ**. Testovací prostředí ČSSZ má
 vlastní přidělený variabilní symbol, jiný než ostrý, a podání poslané pod cizím

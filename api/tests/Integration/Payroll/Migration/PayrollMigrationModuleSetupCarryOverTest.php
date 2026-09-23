@@ -102,8 +102,16 @@ final class PayrollMigrationModuleSetupCarryOverTest extends TestCase
 
         self::assertNotContains(PayrollMigrationModuleSetup::TODO_SOCIAL_SECURITY_SYMBOL, $result['todo']);
         self::assertNotContains(PayrollMigrationModuleSetup::TODO_SOCIAL_SECURITY_OFFICE, $result['todo']);
-        self::assertContains(PayrollMigrationModuleSetup::TODO_SOCIAL_SECURITY_REGISTRATION, $result['todo']);
         self::assertContains(PayrollMigrationModuleSetup::TODO_INSTITUTION_ACCOUNTS, $result['todo']);
+        if ($result['start_period'] === null) {
+            $this->markTestSkipped('Začátek vedení mezd pro rok 2026 testovací instalace nepodporuje.');
+        }
+        self::assertSame('2026-09-01', $result['registration_from']);
+        self::assertNotContains(PayrollMigrationModuleSetup::TODO_SOCIAL_SECURITY_REGISTRATION, $result['todo']);
+        self::assertSame(
+            [['2026-09-01', '0012345678', PayrollMigrationModuleSetup::REGISTRATION_SOURCE]],
+            $this->registrations(),
+        );
 
         $legacy = $this->db->pdo()->prepare('SELECT cssz_vsdp, cssz_ossz_code, health_insurance_number FROM supplier WHERE id = ?');
         $legacy->execute([$this->supplierId]);
@@ -117,7 +125,60 @@ final class PayrollMigrationModuleSetupCarryOverTest extends TestCase
         PayrollMigrationModuleSetup::report($protocol, 'payroll', $result, 'Money S3');
         $texts = implode("\n", array_column($protocol->toArray()['steps'][0]['messages'], 'text'));
         self::assertStringContainsString('převzal z Nastavení firmy variabilní symbol ČSSZ 0012345678', $texts);
+        self::assertStringContainsString('založil registraci mzdové účtárny u ČSSZ s účinností od 1. 9. 2026', $texts);
         self::assertStringNotContainsString('variabilní symbol plátce pojistného ČSSZ u mzdové účtárny', $texts);
+        self::assertStringNotContainsString('datum, od kdy variabilní symbol ČSSZ platí', $texts);
+    }
+
+    public function testShortSymbolGetsNoRegistrationAndStaysOnTodo(): void
+    {
+        $this->db->pdo()->prepare("UPDATE supplier SET cssz_vsdp = '123456789' WHERE id = ?")->execute([$this->supplierId]);
+
+        $result = $this->setup->ensure($this->supplierId, $this->userId, '2026-08');
+        if ($result['outcome'] !== PayrollMigrationModuleSetup::OUTCOME_READY) {
+            $this->markTestSkipped('Mzdy nejde v testovací instalaci zapnout: ' . $result['outcome']);
+        }
+
+        self::assertNull($result['registration_from']);
+        self::assertSame([], $this->registrations());
+        self::assertContains(PayrollMigrationModuleSetup::TODO_SOCIAL_SECURITY_REGISTRATION, $result['todo']);
+    }
+
+    public function testExistingRegistrationIsKept(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_offices (supplier_id, code, name, social_security_variable_symbol, is_active)
+             VALUES (?, "MZDY", "Syntetická účtárna", "9990001234", 1)'
+        )->execute([$this->supplierId]);
+        $officeId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO payroll_employer_settings (supplier_id, default_office_id) VALUES (?, ?)')
+            ->execute([$this->supplierId, $officeId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_office_registration_versions
+                (supplier_id, office_id, effective_from, social_security_variable_symbol, source_reference)
+             VALUES (?, ?, "2019-03-01", "9990001234", "synthetic-registration")'
+        )->execute([$this->supplierId, $officeId]);
+
+        $result = $this->setup->ensure($this->supplierId, $this->userId, '2026-08');
+        if ($result['outcome'] !== PayrollMigrationModuleSetup::OUTCOME_READY) {
+            $this->markTestSkipped('Mzdy nejde v testovací instalaci zapnout: ' . $result['outcome']);
+        }
+
+        self::assertNull($result['registration_from']);
+        self::assertSame([['2019-03-01', '9990001234', 'synthetic-registration']], $this->registrations());
+    }
+
+    /** @return list<array{0:string,1:string,2:string}> */
+    private function registrations(): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT effective_from, social_security_variable_symbol, source_reference
+               FROM payroll_office_registration_versions WHERE supplier_id = ? ORDER BY effective_from'
+        );
+        $stmt->execute([$this->supplierId]);
+
+        return array_map(static fn (array $row): array => array_map('strval', $row), $stmt->fetchAll(\PDO::FETCH_NUM));
     }
 
     public function testFilledEmployerSettingsAreNotOverwritten(): void

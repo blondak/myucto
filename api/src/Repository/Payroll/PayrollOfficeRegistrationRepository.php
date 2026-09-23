@@ -39,7 +39,7 @@ final class PayrollOfficeRegistrationRepository
         string $effectiveFrom,
         string $symbol,
         string $sourceReference,
-        int $actorUserId,
+        ?int $actorUserId,
     ): array {
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();

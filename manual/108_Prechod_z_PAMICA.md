@@ -164,7 +164,8 @@ nemá, převod zapne modul Mzdy a začátek vedení mezd v MyÚčtu nastaví na 
 po posledním měsíci v exportu. Chybí-li nastavení zaměstnavatele, založí ho
 s mzdovou účtárnou `MZDY` a výchozími předkontacemi. Variabilní symbol ČSSZ,
 kód OSSZ a číslo plátce zdravotního pojištění, které firma vede v Nastavení
-firmy, převezme do Mezd
+firmy, převezme do Mezd a k variabilnímu symbolu založí registraci účtárny
+s účinností od začátku vedení mezd
 (viz [§ 90.8](90_Nastaveni_mezd.md#908-podrobny-pracovni-postup-a-kontroly));
 co chybí, včetně účtů institucí, vypíše protokol k doplnění v Mzdy → Nastavení.
 Zapnutý modul, jeho začátek ani existující nastavení převod nemění. Počáteční
