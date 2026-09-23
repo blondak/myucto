@@ -83,6 +83,7 @@
     "monthly_report",
     "oss_rates",
     "pamica",
+    "parallelRun",
     "payment_method",
     "payment_order",
     "payroll",
@@ -185,6 +186,7 @@
       "monthly_report",
       "oss_rates",
       "pamica",
+      "parallelRun",
       "payment_method",
       "payment_order",
       "payroll",
@@ -649,6 +651,9 @@
     ],
     "accounting-section18-statements": [
       "activation"
+    ],
+    "accounting-parallel-run": [
+      "parallelRun"
     ],
     "accounting-monthly-check": [
       "checks"

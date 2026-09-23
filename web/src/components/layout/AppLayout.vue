@@ -576,6 +576,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/accounting/document-completeness', label: t('nav.accounting_document_completeness'), icon: ICONS.approvals, permission: 'accounting' },
         { to: '/accounting/monthly-check',    label: t('nav.accounting_monthly_check'),    icon: ICONS.approvals },
         { to: '/accounting/monthly-report',   label: t('nav.accounting_monthly_report'),   icon: ICONS.reports },
+        { to: '/accounting/parallel-run',     label: t('nav.accounting_parallel_run'),     icon: ICONS.approvals, permission: 'accounting' },
         // Mzdová rekapitulace zůstává ZDE záměrně: položky nejdou přetáhnout mezi
         // sekcemi (useNavOrder), takže přesun do Nástrojů by byl nevratný.
         { to: '/accounting/payroll', label: t('nav.accounting_payroll'), icon: ICONS.users },

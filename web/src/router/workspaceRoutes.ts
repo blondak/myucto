@@ -221,6 +221,8 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'accounting/balance-inventory', name: 'accounting-balance-inventory', component: () => import('@/pages/accounting/BalanceInventory.vue'), meta: { requiresDoubleEntry: true } },
       // § 18 odst. 2 ZoÚ — přehled o peněžních tocích a o změnách vlastního kapitálu.
       { path: 'accounting/section18-statements', name: 'accounting-section18-statements', component: () => import('@/pages/accounting/Section18Statements.vue'), meta: { requiresDoubleEntry: true } },
+      // Kontrola souběhu se starým účetním programem (měsíční rekonciliace K1, K5–K13).
+      { path: 'accounting/parallel-run', name: 'accounting-parallel-run', component: () => import('@/pages/accounting/ParallelRun.vue'), meta: { requiresDoubleEntry: true } },
       { path: 'accounting/monthly-check',    name: 'accounting-monthly-check',    component: () => import('@/pages/accounting/MonthlyCheck.vue'),    meta: { requiresDoubleEntry: true } },
       // Evidenční podklad DPPO (Epic F4, R19) — odkaz z kroku uzávěrky „Daň z příjmů".
       { path: 'accounting/reports/tax-base-adjustments', name: 'accounting-tax-base-adjustments', component: () => import('@/pages/accounting/TaxBaseAdjustments.vue'), meta: { requiresDoubleEntry: true } },

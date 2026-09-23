@@ -2318,6 +2318,17 @@ final class Routes
             $g->get('/reports/dimension-profit',                  \MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class);
             $g->get('/reports/saldo',                             [SaldoAction::class, 'get']);
             $g->get('/reports/saldo/export',                      [SaldoAction::class, 'export']);
+            // Kontrola souběhu se starým účetním programem (měsíční rekonciliace K1, K5–K13).
+            $g->get   ('/parallel-run/sources',                            [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'sources']);
+            $g->get   ('/parallel-run/backups',                            [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'backups']);
+            $g->get   ('/parallel-run/checks',                             [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'list']);
+            $g->post  ('/parallel-run/checks',                             [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'create']);
+            $g->get   ('/parallel-run/checks/{id:[0-9]+}',                 [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'get']);
+            $g->get   ('/parallel-run/checks/{id:[0-9]+}/export',          [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'export']);
+            $g->put   ('/parallel-run/checks/{id:[0-9]+}/classification',  [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'classify']);
+            $g->post  ('/parallel-run/checks/{id:[0-9]+}/close',           [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'close']);
+            $g->post  ('/parallel-run/checks/{id:[0-9]+}/reopen',          [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'reopen']);
+            $g->delete('/parallel-run/checks/{id:[0-9]+}',                 [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'delete']);
             // Kontrola úplnosti dokladů proti bance (REAL_data_followup_UX.md E) — read-only
             // report: bankovní pohyby bez dokladu po prahu X dní (§24/1) + doklady po splatnosti.
             $g->get('/reports/document-completeness',             [\MyInvoice\Action\Accounting\Reports\DocumentCompletenessAction::class, 'get']);
