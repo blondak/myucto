@@ -18,11 +18,11 @@ declare(strict_types=1);
  * Soubor CSV: account_prefix;row_code;balance_condition;note[;statement_type[;valid_from_year[;valid_to_year]]]
  *   oddělovač středník nebo čárka, hlavička volitelná, prázdné řádky a řádky začínající # se
  *   přeskočí. `account_prefix` smí končit hvězdičkou (351.* = všechny analytiky 351).
- * Soubor JSON: pole objektů se stejnými klíči, navíc 	arget (gross | correction) a u korekce
- * ollows_prefix (účet pohledávky, jejíž řádek korekce přebírá).
+ * Soubor JSON: pole objektů se stejnými klíči, navíc `target` (gross | correction) a u korekce
+ * `follows_prefix` (účet pohledávky, jejíž řádek korekce přebírá).
  * `statement_type` (balance_sheet | income_statement | income_statement_purpose) je povinný
  * jen u kódu řádku, který existuje v rozvaze i ve výsledovce (A., C. …); jinak se odvodí.
- * alid_from_year / alid_to_year omezí platnost výjimky na účetní období (prázdné = bez omezení).
+ * `valid_from_year` / `valid_to_year` omezí platnost výjimky na účetní období (prázdné = bez omezení).
  * `--replace` nahradí celou sadu výjimek dotčených výkazů obsahem souboru.
  * Firmu lze místo IČO určit přes --supplier-id=<id>.
  *
