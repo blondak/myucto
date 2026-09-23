@@ -630,6 +630,7 @@
     ],
     "accounting-balance-sheet": [
       "activation",
+      "dimensions",
       "reports"
     ],
     "accounting-income-statement": [

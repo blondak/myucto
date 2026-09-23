@@ -13,7 +13,7 @@ nebo změnit i u zaúčtovaného dokladu a v uzavřeném období.
 Dimenze se zapínají pro každou firmu zvlášť v `Firma → Nastavení`, v boxu
 **Dimenze**. Dokud jsou vypnuté, nikde se nic nezobrazí a doklady ani deník se
 nemění. Po zapnutí přibude v menu `Firma → Dimenze` a v Účetnictví sestava
-**Výsledovka po dimenzi**.
+**Výkazy po dimenzi**.
 
 Na stránce Dimenze jde založit výchozí typy jedním tlačítkem: Středisko, Projekt,
 Vozidlo, Lokalita a Obchodní případ.
@@ -221,23 +221,75 @@ s částkou. Součet musí dát 100 %, resp. částku řádku. Typ s rozpadem pa
 jedinou hodnotu. Když typu později vyberete jedinou hodnotu, rozpad se zruší.
 
 Řádek zápisu se rozpadem nedělí, zůstává jeden se svou částkou. Rozpad se ukládá
-jako podíly. **Výsledovka po dimenzi** ho počítá poměrem po haléřích, součet
-sestavy tak dál sedí na výsledek firmy. Filtr na dimenzi ve Výsledovce, Obratové
-předvaze a Hlavní knize bere jen řádky s jedinou hodnotou. Rozpad dokladu se při
+jako podíly a všechny sestavy ho počítají poměrem po haléřích: každý díl se
+zaokrouhlí na haléře a zbytek dostane největší podíl (při shodě hodnota založená
+dřív). Výkazy po dimenzi i výkazy s filtrem na dimenzi tak dávají pro hodnotu
+stejné číslo a součet po hodnotách sedí na výsledek firmy. Rozpad dokladu se při
 zaúčtování přenese na řádky zápisu. Storno zápisu přenese stejný rozpad, takže
 odečte přesně to, co původní zápis přičetl. Rozpad splní i povinnou dimenzi
 pravidla.
 
 ## Sestavy
 
-- **Výsledovka**, **Obratová předvaha** a **Hlavní kniha** mají filtr na dimenzi:
-  vybere se typ a hodnota, volitelně včetně podřízených hodnot. Sestava pak
-  obsahuje jen řádky deníku s touto hodnotou, ne protistranu zápisu. Kontrolní
-  vazby předvahy na celý deník proto s filtrem nemusí sedět.
-- **Výsledovka po dimenzi** ukáže pro hodnoty jednoho typu výnosy, náklady
-  a výsledek. Nadřízená hodnota sčítá celou větev, řádek **Bez hodnoty** doplní
-  součet do výsledku firmy za období. U globálního typu lze zaškrtnout **Sečíst
-  všechny firmy skupiny**: sečtou se firmy skupiny, ke kterým máte účetní přístup.
+### Filtr na dimenzi ve výkazech
+
+**Výsledovka**, **Rozvaha**, **Obratová předvaha** a **Hlavní kniha** mají filtr
+na dimenzi: vybere se typ a hodnota, volitelně včetně podřízených hodnot. Sestava
+pak obsahuje jen řádky deníku s touto hodnotou, ne protistranu zápisu. Řádek
+s rozpadem mezi víc hodnot se započte jen dílem vybrané hodnoty (náklad 60 %
+středisko A a 40 % B se do výsledovky střediska A započte šedesáti procenty).
+Kontrolní vazby předvahy na celý deník proto s filtrem nemusí sedět. Export do
+PDF i XLSX nese v hlavičce řádek **Dimenze** s vybranou hodnotou.
+
+Rozvaha po dimenzi dává smysl u projektu nebo zakázky, jejíž doklady nesou
+hodnotu na všech řádcích (dimenze z hlavičky dokladu). Vyrovnaná je jen tehdy,
+když hodnotu nesou obě strany zápisů. Úhrada faktury projektu v bance bez
+projektu nechá pohledávku projektu v rozvaze otevřenou.
+
+### Výkazy po dimenzi
+
+Menu **Účetnictví → Výkazy po dimenzi** má dvě záložky. Tlačítko **Export XLSX**
+stáhne aktivní záložku.
+
+**Výsledovka** ukáže pro hodnoty jednoho typu výnosy, náklady a výsledek.
+Nadřízená hodnota sčítá celou větev, řádek **Bez hodnoty** doplní součet do
+výsledku firmy za období. Sestavu lze omezit:
+
+- **Větev**: jen vybraná hodnota a její podřízené (účelová výsledovka projektu
+  a jeho etap),
+- **Odpovědná osoba**: jen hodnoty, u kterých je osoba uvedená jako odpovědná,
+  včetně jejich větví.
+
+S omezením se řádek Bez hodnoty nevykazuje a součet není výsledek celé firmy.
+Volba **Rozpad po účtech** přepne tabulku na syntetické účty: řádky jsou účty
+výnosů a nákladů, sloupce hodnoty nejvyšší úrovně (nebo vybraná větev či hodnoty
+odpovědné osoby) a Bez hodnoty, poslední řádek je výsledek sloupce. XLSX obsahuje
+strom hodnot i list s rozpadem po účtech.
+
+**Peněžní tok** počítá tok nepřímou metodou za celou firmu nebo za vybranou
+hodnotu:
+
+| Řádek | Obsah |
+|---|---|
+| Výsledek hospodaření | výnosy mínus náklady |
+| Úpravy o nepeněžní operace | změna oprávek a opravných položek (07x až 09x, 19x, 29x, 39x) a rezerv (45x) |
+| Změna pracovního kapitálu | změna pohledávek, závazků, zásob a ostatních účtů tříd 1 až 3 |
+| B. Investiční činnost | dlouhodobý majetek (0xx) a krátkodobý finanční majetek (25x) |
+| C. Finanční činnost | třída 4 kromě rezerv, úvěry 231 a 232, vlastní podíly 252 |
+
+Každá změna rozvahového účtu se počítá z řádků, které hodnotu nesou (u rozpadu
+jejich díl). Pod výkazem je pohyb na peněžních účtech (211, 213, 221, 261)
+ve stejném výběru řádků. Za celou firmu musí vyjít stejně jako čistý tok.
+U hodnoty dimenze **Rozdíl** ukazuje peníze, které hodnotu nenesou, typicky
+úhradu faktury projektu v bance bez projektu. Oficiální přehled o peněžních
+tocích do závěrky je v sekci **Peněžní toky a kapitál**.
+
+### Součet za skupinu firem
+
+U globálního typu (projekt sdílený skupinou firem, viz [Firemní a globální
+dimenze](#firemni-a-globalni-dimenze)) lze v obou záložkách zaškrtnout **Sečíst
+všechny firmy skupiny**. Sečtou se firmy skupiny, ke kterým máte účetní přístup.
+Firmy, ke kterým přístup nemáte, se nesečtou a sestava uvede jen jejich počet.
 
 ## Oprávnění
 
