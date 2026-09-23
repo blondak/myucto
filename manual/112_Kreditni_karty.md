@@ -103,8 +103,11 @@ Detail kreditní karty slouží jako rozcestník:
   otevře výpis rovnou na něm,
 - souhrn **Co zbývá dořešit** sečte počty a částky nezaúčtovaných pohybů, návrhů
   a nákupů bez dokladu a otevře výpis na nejstarším z nich; u nákupů bez dokladu
-  vede i na Platby bez dokladu v [Platebních kartách](31_Platebni_karty.md), kde
-  nahrajete účtenku nebo nákup uzavřete bez dokladu,
+  vede na sekci **Nákupy bez dokladu** níže na stránce,
+- sekce **Nákupy bez dokladu** ukazuje nákupy tohoto úvěrového účtu, ke kterým
+  zatím není doklad: nahrajete k nim účtenku, spárujete je, nebo nákup uzavřete
+  bez dokladu (akce stejné jako u platebních karet). Nákupy kreditkou se
+  v Platebních kartách neukazují,
 - tabulka výpisů ukazuje ke každému výpisu zůstatek analytiky 231 ke dni výpisu
   (zeleně, když sedí na konečný zůstatek výpisu), počet nevyřešených pohybů
   a tlačítko **Zpracovat ve výpisu**.
@@ -153,7 +156,7 @@ nákup vypořádá z mezičlenu:
 
 - spárováním pohybu s přijatým dokladem (MD 321 / D 378.x, kurzový rozdíl
   563/663, haléřový rozdíl 548/648),
-- nahráním účtenky u platby v Platbách bez dokladu (účtenka se vytěží do
+- nahráním účtenky v sekci Nákupy bez dokladu v detailu kreditky (účtenka se vytěží do
   přijatého dokladu, po jeho kontrole ho spárujete),
 - bez dokladu jedním z uzavření: **nedaňově** (nedaňový náklad), **daňově**
   (daňový náklad bez DPH, jen s jiným průkazným dokladem) nebo **k tíži

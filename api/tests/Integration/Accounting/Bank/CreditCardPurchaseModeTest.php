@@ -355,13 +355,41 @@ final class CreditCardPurchaseModeTest extends BankPostingTestCase
         self::assertSame('clearing', $detail['clearing']['mode']);
     }
 
-    public function testCreditCardPurchaseWithoutSuffixIsListedAmongCardPaymentsWithoutDocument(): void
+    /** Měsíční kontrola plateb kartou bez dokladu hlídá platební karty; nákupy kreditkou řeší detail kreditky. */
+    public function testMonthlyCardCheckDoesNotReportCreditCardPurchases(): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO card_clearing_settings (supplier_id, enabled, effective_from, clearing_synthetic, unmatched_alert_days)
+             VALUES (?, 1, '2099-01-01', '378', 10)"
+        )->execute([$this->supplierId]);
+        $this->container->get(CardClearingRegime::class)->forget($this->supplierId);
+        $tx = $this->ccTx(-75.00, 'Platba kartou | d.tran. 01.06.2099', ['posted_at' => '2099-06-01']);
+        $this->db->pdo()->prepare("UPDATE bank_transactions SET card_last4 = '3532' WHERE id = ?")->execute([$tx]);
+
+        $late = $this->container->get(\MyInvoice\Service\Accounting\Card\CardClearingOverview::class)
+            ->unmatchedOlderThan($this->supplierId, '2099-06-30');
+        self::assertNotContains($tx, array_column($late['items'], 'tx_id'));
+    }
+
+    public function testCreditCardPurchaseIsListedOnlyForItsCreditCardNotAmongPaymentCards(): void
     {
         $tx = $this->ccTx(-410.00, 'Nákup na internetu');
+        $withSuffix = $this->ccTx(-90.00, 'Platba kartou | d.tran. 11.06.2099');
+        $this->db->pdo()->prepare("UPDATE bank_transactions SET card_last4 = '3532' WHERE id = ?")->execute([$withSuffix]);
         $interest = $this->ccTx(-12.00, 'ÚROK Z ÚVĚRU');
         $this->service->handleTransaction($tx, $this->userId);
 
-        $list = $this->container->get(CardPaymentOverview::class)->unmatched($this->supplierId, '2099-01-01', '2099-12-31');
+        // Platební karty: pohyb z výpisu kreditní karty sem nepatří, ani s koncovkou karty.
+        $payment = $this->container->get(CardPaymentOverview::class)->unmatched($this->supplierId, '2099-01-01', '2099-12-31');
+        $paymentIds = [];
+        foreach ($payment['groups'] as $g) {
+            self::assertNull($g['credit_card'], 'Platby bez dokladu platebních karet kreditku nemíchají.');
+            array_push($paymentIds, ...array_column($g['transactions'], 'id'));
+        }
+        self::assertNotContains($tx, $paymentIds);
+        self::assertNotContains($withSuffix, $paymentIds, 'Koncovka karty z výpisu kreditky z pohybu platbu platební kartou nedělá.');
+
+        $list = $this->container->get(CardPaymentOverview::class)->unmatched($this->supplierId, '2099-01-01', '2099-12-31', $this->ccId);
 
         $group = null;
         foreach ($list['groups'] as $g) {
@@ -372,8 +400,10 @@ final class CreditCardPurchaseModeTest extends BankPostingTestCase
         self::assertNotNull($group, 'Nákup kreditkou čeká na doklad jako každá platba kartou.');
         $ids = array_column($group['transactions'], 'id');
         self::assertContains($tx, $ids);
+        self::assertContains($withSuffix, $ids, 'Nákup s koncovkou karty patří ke kreditce, ne k platebním kartám.');
         self::assertNotContains($interest, $ids, 'Úrok doklad nečeká.');
-        self::assertSame($this->clearingCode(), $group['transactions'][0]['clearing_account']);
+        $row = array_values(array_filter($group['transactions'], static fn (array $t): bool => $t['id'] === $tx))[0];
+        self::assertSame($this->clearingCode(), $row['clearing_account']);
     }
 
     // ── izolace a oprávnění ────────────────────────────────────────────────────

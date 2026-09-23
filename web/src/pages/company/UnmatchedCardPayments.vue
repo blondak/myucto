@@ -16,6 +16,9 @@ import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 
+/** Detail kreditní karty: jen nákupy tohoto úvěrového účtu. Bez něj jen platební karty. */
+const props = defineProps<{ creditCardAccountId?: number | null }>()
+
 const { t } = useI18n()
 const router = useRouter()
 const auth = useAuthStore()
@@ -83,7 +86,10 @@ async function confirmWriteOff() {
 async function load() {
   loading.value = true
   try {
-    data.value = await paymentCardsApi.unmatchedPayments({ from: from.value, to: to.value })
+    data.value = await paymentCardsApi.unmatchedPayments({
+      from: from.value, to: to.value,
+      ...(props.creditCardAccountId ? { credit_card_account_id: props.creditCardAccountId } : {}),
+    })
   } catch (e) {
     toast.error(apiErrorMessage(e, t('payment_cards.load_failed')))
   } finally {
@@ -91,18 +97,6 @@ async function load() {
   }
 }
 onMounted(load)
-
-/**
- * Platební a kreditní karty se v přehledu nemíchají: kreditní karta je úvěrový účet
- * s vlastním výpisem, platby jejích nákupů jdou do samostatné sekce pod platebními kartami.
- */
-const sections = computed(() => {
-  const groups = data.value?.groups ?? []
-  return [
-    { key: 'payment', groups: groups.filter(g => !g.credit_card) },
-    { key: 'credit', groups: groups.filter(g => !!g.credit_card) },
-  ].filter(sec => sec.groups.length > 0)
-})
 
 function groupTitle(g: CardPaymentGroup): string {
   if (g.credit_card) return t('payment_cards.unmatched.credit_card_group', { label: g.credit_card.label })
@@ -197,10 +191,7 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
     <template v-else-if="data">
       <p v-if="data.truncated" class="mb-3 text-xs text-warning-700">{{ t('payment_cards.unmatched.truncated', { n: data.count }) }}</p>
 
-      <template v-for="sec in sections" :key="sec.key">
-      <h3 v-if="sections.length > 1" class="mt-2 mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500"
-        :data-testid="`unmatched-section-${sec.key}`">{{ t(`payment_cards.unmatched.section_${sec.key}`) }}</h3>
-      <section v-for="g in sec.groups" :key="g.key"
+      <section v-for="g in data.groups" :key="g.key"
         class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-4">
         <header class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-neutral-100 bg-neutral-50">
           <div class="min-w-0">
@@ -354,7 +345,6 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
           </div>
         </div>
       </section>
-      </template>
     </template>
 
     <Modal v-if="writeOffDialog" :title="t(`payment_cards.unmatched.write_off_${writeOffDialog.target}`)" width-class="max-w-lg"

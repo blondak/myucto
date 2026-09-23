@@ -53,7 +53,8 @@ final class CardPaymentOverviewAction
         if ($from > $to) {
             return Json::error($response, 'validation_failed', 'Datum od nesmí být po datu do.', 422);
         }
-        return Json::ok($response, $this->vehicleHints->annotate($supplierId, $this->overview->unmatched($supplierId, $from, $to)));
+        $creditCardId = isset($qp['credit_card_account_id']) && (int) $qp['credit_card_account_id'] > 0 ? (int) $qp['credit_card_account_id'] : null;
+        return Json::ok($response, $this->vehicleHints->annotate($supplierId, $this->overview->unmatched($supplierId, $from, $to, $creditCardId)));
     }
 
     public function uploadReceipt(Request $request, Response $response, array $args): Response

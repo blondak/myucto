@@ -204,7 +204,8 @@ export const paymentCardsApi = {
   archive: (id: number) => api.post<{ card: PaymentCard }>(`/payment-cards/${id}/archive`).then(r => r.data.card),
   restore: (id: number) => api.post<{ card: PaymentCard }>(`/payment-cards/${id}/restore`).then(r => r.data.card),
 
-  unmatchedPayments: (params: { from?: string; to?: string } = {}) =>
+  /** Bez `credit_card_account_id` jen platby platebními kartami (běžné účty), s ním jen nákupy té kreditky. */
+  unmatchedPayments: (params: { from?: string; to?: string; credit_card_account_id?: number } = {}) =>
     api.get<UnmatchedCardPayments>('/payment-cards/unmatched-payments', { params }).then(r => r.data),
   uploadReceipt: (transactionId: number, file: File) => {
     const fd = new FormData()

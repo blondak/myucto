@@ -164,6 +164,9 @@ final class CardClearingOverview
                JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.card_last4 IS NOT NULL AND bt.amount < 0 AND bt.source = 'statement'
                 AND bt.match_status = 'unmatched'
+                -- Nákupy kreditkou hlídá detail kreditní karty, ne kontrola platebních karet.
+                AND NOT EXISTS (SELECT 1 FROM supplier_bank_accounts cc
+                                 WHERE " . \MyInvoice\Service\Bank\Card\CardPaymentOverview::creditCardAccountJoin('cc', 'bs') . ")
                 AND bt.posted_at >= ? AND bt.posted_at <= ?
                 AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.bank_transaction_id = bt.id)
                 AND NOT EXISTS (SELECT 1 FROM journal_entries w
@@ -173,7 +176,7 @@ final class CardClearingOverview
               ORDER BY bt.posted_at, bt.id'
         );
         $stmt->execute(array_merge(
-            [(string) $s['effective_from'], $cutoff, $supplierId],
+            [$supplierId, (string) $s['effective_from'], $cutoff, $supplierId],
             BankStatementOwnershipResolver::params($supplierId),
         ));
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];

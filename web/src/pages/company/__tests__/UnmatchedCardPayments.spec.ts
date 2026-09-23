@@ -80,29 +80,13 @@ describe('Platby kartou bez dokladu', () => {
     expect(m.unmatchedPayments).toHaveBeenCalledOnce()
   })
 
-  it('platební a kreditní karty jsou v oddělených sekcích, kreditní až pod platebními', async () => {
-    m.unmatchedPayments.mockResolvedValue({
-      ...overview,
-      groups: [
-        {
-          key: 'credit:3', card: null, credit_card: { id: 3, label: 'Kreditka Test' }, last4: '3532', holder: null, count: 1, totals: { CZK: 50 },
-          transactions: [{ id: 51, statement_id: 9, posted_at: '2026-06-14', amount: -50, currency: 'CZK', counterparty_name: 'OBCHOD', description: null, card_last4: '3532', clearing_account: '378.201' }],
-        },
-        ...overview.groups,
-      ],
-    } as Overview)
-    const wrapper = await render()
-    const html = wrapper.html()
-    expect(wrapper.find('[data-testid="unmatched-section-payment"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="unmatched-section-credit"]').exists()).toBe(true)
-    expect(html.indexOf('unmatched-section-payment')).toBeLessThan(html.indexOf('unmatched-section-credit'))
-    expect(html.indexOf('Jana Testovací')).toBeLessThan(html.indexOf('unmatched-section-credit'))
-    expect(html.indexOf('payment_cards.unmatched.credit_card_group')).toBeGreaterThan(html.indexOf('unmatched-section-credit'))
-  })
+  it('v Platebních kartách se ptá jen na platební karty, v detailu kreditky jen na její nákupy', async () => {
+    await render()
+    expect(m.unmatchedPayments).toHaveBeenLastCalledWith(expect.not.objectContaining({ credit_card_account_id: expect.anything() }))
 
-  it('bez kreditních karet se nadpisy sekcí neukazují', async () => {
-    const wrapper = await render()
-    expect(wrapper.find('[data-testid="unmatched-section-payment"]').exists()).toBe(false)
+    mount(UnmatchedCardPayments, { props: { creditCardAccountId: 7 }, global: { stubs: { EmptyState: true } } })
+    await flushPromises()
+    expect(m.unmatchedPayments).toHaveBeenLastCalledWith(expect.objectContaining({ credit_card_account_id: 7 }))
   })
 
   it('u platby na čerpací stanici ukáže vozidlo držitele karty', async () => {

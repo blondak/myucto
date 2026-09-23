@@ -25960,6 +25960,7 @@
     "todo_none": "All transactions are resolved.",
     "todo_open": "Open in statement",
     "todo_documents": "Purchase documents",
+    "without_document_title": "Purchases without a document",
     "todo": {
       "unposted": "Unposted transactions: {n}",
       "suggested": "Suggestions to approve: {n}",
@@ -26228,8 +26229,6 @@
       "write_off_confirm_holder": "Re-post the payment to the card holder? If the document arrives later, the closure is cancelled automatically.",
       "write_off_account": "Account",
       "write_off_account_default": "Default from posting settings",
-      "section_payment": "Payment cards",
-      "section_credit": "Credit cards",
       "written_off": "Payment closed to account {account}.",
       "write_off_failed": "The payment could not be closed."
     }

@@ -29,9 +29,24 @@ final class CardPaymentOverview
     /**
      * @return array{from:string, to:string, count:int, truncated:bool, groups:list<array<string,mixed>>}
      */
-    public function unmatched(int $supplierId, string $from, string $to): array
+    /**
+     * Podmínka „výpis `$bs` je výpisem úvěrového účtu kreditní karty firmy" pro JOIN na
+     * `supplier_bank_accounts $sba`. Jeden `?` = supplier_id. Platební karty ji používají,
+     * aby pohyby kreditky nemíchaly s platbami platebními kartami (výpis kreditky nese
+     * koncovku karty taky, účtuje se ale přes kreditku).
+     */
+    public static function creditCardAccountJoin(string $sba, string $bs): string
     {
-        // Nákup kreditní kartou je platba kartou i bez koncovky: kreditní účet je karta sám.
+        return "{$sba}.supplier_id = ? AND {$sba}.kind = 'credit_card'
+                AND {$sba}.account_canonical = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL({$bs}.account_number, ''), '[^0-9]', ''))
+                AND {$sba}.bank_code_norm = COALESCE({$bs}.bank_code, '')";
+    }
+
+    public function unmatched(int $supplierId, string $from, string $to, ?int $creditCardAccountId = null): array
+    {
+        // Platební a kreditní karty se nemíchají. Bez $creditCardAccountId jen platby z běžných
+        // účtů (koncovka karty); pohyb z výpisu kreditní karty sem nepatří, i když koncovku nese
+        // (účtuje se přes kreditku). S ním jen nákupy toho úvěrového účtu (detail kreditky).
         $stmt = $this->db->pdo()->prepare(
             "SELECT bt.id, bt.statement_id, bt.posted_at, bt.amount,
                     COALESCE(NULLIF(bt.currency, ''), bs.currency) AS currency,
@@ -40,11 +55,9 @@ final class CardPaymentOverview
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
           LEFT JOIN supplier_bank_accounts sba
-                 ON sba.supplier_id = ? AND sba.kind = 'credit_card'
-                AND sba.account_canonical = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''), '[^0-9]', ''))
-                AND sba.bank_code_norm = COALESCE(bs.bank_code, '')
+                 ON " . self::creditCardAccountJoin('sba', 'bs') . "
           LEFT JOIN credit_card_accounts cca ON cca.bank_account_id = sba.id AND cca.supplier_id = sba.supplier_id
-              WHERE (bt.card_last4 IS NOT NULL OR cca.id IS NOT NULL)
+              WHERE " . ($creditCardAccountId === null ? 'cca.id IS NULL AND bt.card_last4 IS NOT NULL' : 'cca.id = ?') . "
                 AND bt.amount < 0
                 AND bt.match_status = 'unmatched'
                 AND bt.posted_at BETWEEN ? AND ?
@@ -62,7 +75,12 @@ final class CardPaymentOverview
               ORDER BY bt.posted_at DESC, bt.id DESC
               LIMIT " . (self::MAX_ROWS + 1)
         );
-        $stmt->execute(array_merge([$supplierId, $from, $to, $supplierId, $supplierId], BankStatementOwnershipResolver::params($supplierId)));
+        $stmt->execute(array_merge(
+            [$supplierId],
+            $creditCardAccountId === null ? [] : [$creditCardAccountId],
+            [$from, $to, $supplierId, $supplierId],
+            BankStatementOwnershipResolver::params($supplierId),
+        ));
         // Z kreditky jen nákupy: úrok, poplatek a výběr doklad nečekají.
         $rows = array_values(array_filter(
             $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [],

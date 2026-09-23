@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import UnmatchedCardPayments from './UnmatchedCardPayments.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { importCreditCardStatement } from './creditCardImport'
 import { openingLines, STATE_CLASS, statementLink, todoRows } from './creditCardWork'
@@ -453,13 +454,13 @@ const INPUT = 'h-9 w-full px-3 border border-neutral-300 rounded-md text-sm bg-s
                   </svg>
                   {{ t('credit_cards.todo_open') }}
                 </RouterLink>
-                <RouterLink v-if="row.state === 'clearing_open'" :to="{ name: 'payment-cards', query: { tab: 'unmatched' } }"
+                <a v-if="row.state === 'clearing_open'" href="#credit-card-without-document"
                   :class="btnOutline('warning')" class="whitespace-nowrap">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" />
                   </svg>
                   {{ t('credit_cards.todo_documents') }}
-                </RouterLink>
+                </a>
               </div>
             </li>
           </ul>
@@ -513,6 +514,14 @@ const INPUT = 'h-9 w-full px-3 border border-neutral-300 rounded-md text-sm bg-s
           </div>
         </section>
       </div>
+
+      <!-- Nákupy bez dokladu: tatáž komponenta jako Platby bez dokladu u platebních karet,
+           jen omezená na tento úvěrový účet (kreditka se s platebními kartami nemíchá). -->
+      <section v-if="isDoubleEntry" id="credit-card-without-document" data-testid="credit-card-without-document"
+        class="mt-4 bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 md:p-5">
+        <h2 class="mb-2 text-sm font-semibold text-neutral-700">{{ t('credit_cards.without_document_title') }}</h2>
+        <UnmatchedCardPayments :credit-card-account-id="accountId" />
+      </section>
 
       <section class="mt-4 bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <h2 class="px-4 pt-4 pb-2 text-sm font-semibold text-neutral-700">{{ t('credit_cards.section_statements') }}</h2>
