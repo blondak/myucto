@@ -811,11 +811,14 @@ final class DimensionService
     {
         $value = $this->requireValue($supplierId, $valueId);
         $ids = $withDescendants ? $this->repo->descendantIds($supplierId, $valueId) : [$valueId];
+        $type = $this->repo->findType($supplierId, (int) $value['type_id']);
         return new DimensionFilter(
             $value['type_id'],
             $valueId,
             $ids,
             array_values($this->repo->costCenterCodes($supplierId, $ids)),
+            trim(($type !== null ? $type['name'] . ': ' : '') . $value['code'] . ' ' . $value['name'])
+                . ($withDescendants && count($ids) > 1 ? ' (vč. podřízených)' : ''),
         );
     }
 
