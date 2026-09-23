@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\Shared;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\CzkRecap;
+use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 
 /**
  * Převzetí dokladu v cizí měně (EUR…) z cizího účetního programu v jeho měně a kurzu.
@@ -100,10 +101,62 @@ final class ForeignCurrencyTakeover
         }
         $foreignTotal = round($foreignTotal, 2);
         if (!self::convertsTo($foreignTotal, $rate, $homeTotal)) {
-            return sprintf('celkem %s × kurz %s nedává celkem %s Kč ze zdroje (zaokrouhlení dokladu v Kč)',
+            return sprintf('celkem %s × kurz %s nedává celkem %s Kč ze zdroje',
                 self::amount($foreignTotal), self::amount($rate, 6), self::amount($homeTotal));
         }
         return null;
+    }
+
+    /**
+     * Přijatý doklad, který převzít v měně nejde bez ohledu na částky: samovyměření vyměřil
+     * zdroj kurzem ke dni plnění (POHODA, Money S3 interním dokladem), ne kurzem faktury,
+     * a evidence DPH by daň dopočetla z přepočteného základu jinak; poměrný nárok krátí
+     * evidence až v měně dokladu, takže by haléře vyšly jinak než ve zdroji.
+     */
+    public static function purchaseBlock(bool $reverseCharge, string $vatDeduction): ?string
+    {
+        return match (true) {
+            $reverseCharge => 'samovyměření DPH - zdroj daň vyměřil kurzem ke dni plnění, ne kurzem faktury',
+            $vatDeduction === 'proportional' => 'poměrný nárok na odpočet',
+            default => null,
+        };
+    }
+
+    /**
+     * Úhrada, kterou v měně dokladu vyjádřit nejde: odpočet nedaňové zálohy (zdroj ho vede
+     * v Kč kurzem zálohy) a částečná úhrada (zdroj ji nese jen v Kč). Doklad bez úhrady
+     * a doklad uhrazený celý projdou.
+     */
+    public static function paymentBlock(float $homeAdvance, float $homePaid, float $homeToPay): ?string
+    {
+        if (abs($homeAdvance) >= 0.005) {
+            return 'odpočet nedaňové zálohy - zdroj ho vede v Kč';
+        }
+        if (abs($homePaid) >= 0.005 && abs($homePaid - $homeToPay) >= 0.005) {
+            return 'doklad je uhrazený jen částečně - úhradu v měně dokladu zdroj nenese';
+        }
+        return null;
+    }
+
+    /** Uhrazená částka v měně dokladu pro doklad, který {@see paymentBlock()} pustil. */
+    public static function paidInForeignCurrency(float $homePaid, float $foreignToPay): float
+    {
+        return abs($homePaid) < 0.005 ? 0.0 : $foreignToPay;
+    }
+
+    /** Protokol: počet dokladů v měně převzatých v ní / v Kč a u těch v Kč důvod. */
+    public static function report(ImportProtocol $protocol, string $step, string $label, ForeignCurrencyDecision $decision): void
+    {
+        if (!$decision->isForeignDocument()) {
+            return;
+        }
+        if ($decision->inForeignCurrency()) {
+            $protocol->count($step, 'foreign_currency');
+            return;
+        }
+        $protocol->count($step, 'foreign_currency_in_home');
+        $protocol->info($step, 'foreign_currency_in_home', sprintf('Doklad %s je v %s, převzat v Kč: %s.', $label, $decision->currency, $decision->reason),
+            ['document_no' => $label, 'currency' => $decision->currency]);
     }
 
     /** Kurz za 1 jednotku měny s přesností sloupce `exchange_rate`; `null` = kurz chybí. */

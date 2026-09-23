@@ -82,7 +82,7 @@ final class ForeignCurrencyTakeoverTest extends TestCase
         // Položky sedí, ale zdroj zaokrouhlil celkem v Kč na celé koruny.
         $items = [['base' => 2512.50, 'vat' => 527.63, 'foreign_base' => 100.0, 'foreign_vat' => 21.0]];
         $reason = ForeignCurrencyTakeover::check(25.125, $items, 3040.0);
-        self::assertSame('celkem 121,00 × kurz 25,125 nedává celkem 3 040,00 Kč ze zdroje (zaokrouhlení dokladu v Kč)', $reason);
+        self::assertSame('celkem 121,00 × kurz 25,125 nedává celkem 3 040,00 Kč ze zdroje', $reason);
     }
 
     public function testItemsWithoutForeignAmountsKeepCrowns(): void
@@ -108,6 +108,19 @@ final class ForeignCurrencyTakeoverTest extends TestCase
         $d = $this->takeover->decide(5, 'EUR', 25.125, 1.0, $items, 2512.50, 'samovyměření DPH');
         self::assertFalse($d->inForeignCurrency());
         self::assertSame('doklad v EUR, převzat v Kč podle zaúčtování (samovyměření DPH)', $d->note('převzat v Kč podle zaúčtování'));
+    }
+
+    public function testSourceBlocksAndPayment(): void
+    {
+        self::assertStringStartsWith('samovyměření DPH', (string) ForeignCurrencyTakeover::purchaseBlock(true, 'full'));
+        self::assertSame('poměrný nárok na odpočet', ForeignCurrencyTakeover::purchaseBlock(false, 'proportional'));
+        self::assertNull(ForeignCurrencyTakeover::purchaseBlock(false, 'reduced'));
+        self::assertStringStartsWith('odpočet nedaňové zálohy', (string) ForeignCurrencyTakeover::paymentBlock(-1210.0, 0.0, 0.0));
+        self::assertStringStartsWith('doklad je uhrazený jen částečně', (string) ForeignCurrencyTakeover::paymentBlock(0.0, 1000.0, 3040.13));
+        self::assertNull(ForeignCurrencyTakeover::paymentBlock(0.0, 3040.13, 3040.13));
+        self::assertNull(ForeignCurrencyTakeover::paymentBlock(0.0, 0.0, 3040.13));
+        self::assertSame(121.0, ForeignCurrencyTakeover::paidInForeignCurrency(3040.13, 121.0));
+        self::assertSame(0.0, ForeignCurrencyTakeover::paidInForeignCurrency(0.0, 121.0));
     }
 
     public function testForeignItemsAndTotals(): void
