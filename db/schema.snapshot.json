@@ -859,7 +859,8 @@
         "1872_depreciation_tax_override.sql",
         "1873_asset_account_summary.sql",
         "1874_migration_batches.sql",
-        "1875_migration_parallel_checks.sql"
+        "1875_migration_parallel_checks.sql",
+        "1876_dimension_account_rules.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -3722,6 +3723,43 @@
                 "detail": "json_valid(`detail`)"
             }
         },
+        "dimension_account_rules": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_mask": "varchar(190) NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "default_from_card": "tinyint(1) NOT NULL DEFAULT 0",
+                "default_value_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "dimension_type_id": "bigint(20) unsigned NOT NULL",
+                "enforcement": "enum('error','warning','none') NOT NULL DEFAULT 'error'",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "is_active": "tinyint(1) NOT NULL DEFAULT 1",
+                "note": "varchar(500) NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "valid_from": "date NULL DEFAULT NULL",
+                "valid_to": "date NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_dar_user": "BTREE (created_by)",
+                "idx_dar_supplier": "BTREE (supplier_id, is_active)",
+                "idx_dar_type_value": "BTREE (dimension_type_id, default_value_id)"
+            },
+            "foreign_keys": {
+                "fk_dar_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dar_type": "(dimension_type_id) -> dimension_types (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dar_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_dar_value": "(dimension_type_id, default_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_dar_flags": "`is_active` in (0,1) and `default_from_card` in (0,1)",
+                "chk_dar_validity": "`valid_from` is null or `valid_to` is null or `valid_to` >= `valid_from`"
+            }
+        },
         "dimension_defaults": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -3830,6 +3868,32 @@
             "checks": {
                 "chk_dimension_value_active": "`is_active` in (0,1)",
                 "chk_dimension_value_owner": "`supplier_id` is null <> (`supplier_group_id` is null)"
+            }
+        },
+        "document_dimension_splits": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "dimension_type_id": "bigint(20) unsigned NOT NULL",
+                "dimension_value_id": "bigint(20) unsigned NOT NULL",
+                "doc_id": "bigint(20) unsigned NOT NULL",
+                "doc_type": "enum('purchase_invoice','invoice','cash_document','bank_transaction','journal_template') NOT NULL",
+                "item_no": "smallint(5) unsigned NOT NULL DEFAULT 0",
+                "share": "decimal(12,10) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id)",
+                "idx_docdims_type_value": "BTREE (dimension_type_id, dimension_value_id)",
+                "idx_docdims_value": "BTREE (supplier_id, dimension_value_id)"
+            },
+            "foreign_keys": {
+                "fk_docdims_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_docdims_value": "(dimension_type_id, dimension_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_docdims_share": "`share` > 0 and `share` <= 1"
             }
         },
         "document_dimensions": {
@@ -5966,6 +6030,31 @@
                 "fk_jedl_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": []
+        },
+        "journal_entry_line_dimension_splits": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "dimension_type_id": "bigint(20) unsigned NOT NULL",
+                "dimension_value_id": "bigint(20) unsigned NOT NULL",
+                "line_id": "bigint(20) unsigned NOT NULL",
+                "share": "decimal(12,10) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (line_id, dimension_type_id, dimension_value_id)",
+                "idx_jelds_supplier_value": "BTREE (supplier_id, dimension_value_id)",
+                "idx_jelds_type_value": "BTREE (dimension_type_id, dimension_value_id)"
+            },
+            "foreign_keys": {
+                "fk_jelds_line": "(line_id) -> journal_entry_lines (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_jelds_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_jelds_value": "(dimension_type_id, dimension_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_jelds_share": "`share` > 0 and `share` <= 1"
+            }
         },
         "journal_entry_line_dimensions": {
             "type": "BASE TABLE",
