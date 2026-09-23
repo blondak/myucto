@@ -502,7 +502,7 @@ final class CashBookAction
     {
         $stmt = $this->db->pdo()->prepare(
             "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(MIN(t.running_delta), 0) FROM (
-                SELECT SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END)
+                SELECT SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END)
                          OVER (ORDER BY e.entry_date, e.id, l.line_no
                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_delta
                   FROM journal_entry_lines l

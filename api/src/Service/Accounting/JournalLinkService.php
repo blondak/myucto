@@ -846,7 +846,7 @@ final class JournalLinkService
             // ne doklad — popisná data proto jdou z deníku a částka je Σ MD.
             foreach ($this->rows(
                 "SELECT e.id, e.document_no, e.description, e.entry_date,
-                        COALESCE((SELECT SUM(l.amount) FROM journal_entry_lines l
+                        COALESCE((SELECT SUM(l.signed_amount) FROM journal_entry_lines l
                                    WHERE l.entry_id = e.id AND l.supplier_id = e.supplier_id
                                      AND l.side = 'debit'), 0) AS amount
                    FROM journal_entries e

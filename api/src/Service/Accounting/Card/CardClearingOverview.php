@@ -77,7 +77,7 @@ final class CardClearingOverview
         $ph = implode(',', array_fill(0, count($codes), '?'));
         $stmt = $this->db->pdo()->prepare(
             "SELECT bt.id AS tx_id, je.id AS entry_id, bt.posted_at, c.account_code,
-                    CASE WHEN jel.side = 'debit' THEN jel.amount ELSE -jel.amount END AS amount,
+                    CASE WHEN jel.side = 'debit' THEN jel.signed_amount ELSE -jel.signed_amount END AS amount,
                     bt.counterparty_name, bt.card_last4
                FROM journal_entries je
                JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.supplier_id = je.supplier_id

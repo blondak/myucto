@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { journalAmount } from '@/utils/journalAmount'
 /**
  * Auditní historie účetního zápisu (audit 2026-07, nález „Historie účetního zápisu
  * v UI — SYSTEM VERSIONING timeline"). Lazy-load na první rozbalení — panel je
@@ -107,19 +108,19 @@ function lineSideLabel(side: string): string {
                   <template v-if="c.type === 'added' && c.line">
                     <span class="text-success-600 font-medium">+ </span>
                     <span class="font-mono">{{ c.line.account_code }}</span> {{ c.line.account_name }}
-                    — {{ lineSideLabel(c.line.side) }} {{ formatMoney(c.line.amount) }}
+                    — {{ lineSideLabel(c.line.side) }} {{ formatMoney(journalAmount(c.line)) }}
                   </template>
                   <template v-else-if="c.type === 'removed' && c.line">
                     <span class="text-danger-500 font-medium">− </span>
                     <span class="font-mono line-through">{{ c.line.account_code }}</span> {{ c.line.account_name }}
-                    — {{ lineSideLabel(c.line.side) }} {{ formatMoney(c.line.amount) }}
+                    — {{ lineSideLabel(c.line.side) }} {{ formatMoney(journalAmount(c.line)) }}
                   </template>
                   <template v-else-if="c.type === 'changed' && c.before && c.after">
                     <span class="text-warning-600 font-medium">~ </span>
                     <span class="font-mono">{{ c.after.account_code }}</span> {{ c.after.account_name }}:
-                    <span class="text-neutral-400 line-through">{{ lineSideLabel(c.before.side) }} {{ formatMoney(c.before.amount) }}</span>
+                    <span class="text-neutral-400 line-through">{{ lineSideLabel(c.before.side) }} {{ formatMoney(journalAmount(c.before)) }}</span>
                     <span class="mx-1">→</span>
-                    <span>{{ lineSideLabel(c.after.side) }} {{ formatMoney(c.after.amount) }}</span>
+                    <span>{{ lineSideLabel(c.after.side) }} {{ formatMoney(journalAmount(c.after)) }}</span>
                   </template>
                 </li>
               </ul>

@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Repository\PostingRuleRepository;
+use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 
 /**
@@ -319,10 +320,7 @@ final class FxRevaluationService
      */
     public function buildReversal(array $saldoLines): array
     {
-        return array_map(static function (array $line): array {
-            $line['side'] = $line['side'] === 'debit' ? 'credit' : 'debit';
-            return $line;
-        }, $saldoLines);
+        return array_map(JournalLineAmount::reversal(...), $saldoLines);
     }
 
     /**

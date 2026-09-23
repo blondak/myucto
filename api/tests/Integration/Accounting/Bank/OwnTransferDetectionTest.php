@@ -219,6 +219,29 @@ final class OwnTransferDetectionTest extends BankPostingTestCase
         self::assertSame('duplicate_suspect:#' . $manualEntry, $this->suggestionRow((int) $result['suggestion_id'])['note']);
     }
 
+    public function testRedStornoManual261EntryDoesNotCreateDuplicateWarning(): void
+    {
+        $this->registerAccount(self::SECOND_ACCOUNT, self::SECOND_BANK, 'CZK');
+        $amount = 54321.09;
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '261', 'side' => 'debit', 'amount' => $amount, 'is_red_storno' => true],
+            ['account_code' => '221', 'side' => 'credit', 'amount' => $amount, 'is_red_storno' => true],
+        ], [
+            'entry_date' => self::YEAR . '-06-08',
+            'posted' => true,
+            'posted_by' => $this->userId,
+        ]);
+        $tx = $this->transaction($this->statement(), -$amount, [
+            'counterparty_account' => self::SECOND_ACCOUNT,
+            'counterparty_bank' => self::SECOND_BANK,
+        ]);
+
+        $result = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('suggested', $result['action']);
+        self::assertSame('own_transfer', $result['reason']);
+        self::assertNull($this->suggestionRow((int) $result['suggestion_id'])['note']);
+    }
+
     public function testPeriodBoundaryTreatsPairedTransitBalanceAsDocumented(): void
     {
         $this->registerAccount(self::SECOND_ACCOUNT, self::SECOND_BANK, 'CZK');

@@ -1,3 +1,4 @@
+import { journalForeignAmount } from '@/utils/journalAmount'
 import type { JournalLine } from '@/api/accounting'
 
 /**
@@ -62,6 +63,8 @@ function hasUniqueAmountMatching(debits: JournalLine[], credits: JournalLine[]):
  * vztahy vymýšlelo — tam se vrací rozpad po stranách.
  */
 export function canPair(lines: JournalLine[]): boolean {
+  // Smíšená znaménka nelze spolehlivě rozdělit stávajícím párováním kladných částek.
+  if (lines.some(l => !!l.is_red_storno !== !!lines[0]?.is_red_storno)) return false
   const debits = lines.filter(l => l.side === 'debit')
   const credits = lines.filter(l => l.side === 'credit')
   if (debits.length === 0 || credits.length === 0) return false
@@ -114,7 +117,7 @@ export function pairLines(lines: JournalLine[]): JournalPair[] {
       key: `${d.id}-${c.id}-${pairs.length}`,
       debit: d,
       credit: c,
-      amount: take / 100,
+      amount: (take / 100) * (d.is_red_storno ? -1 : 1),
       ...foreignOf(d, c, debitWhole, creditWhole),
       costCenter: d.cost_center || c.cost_center || null,
     })
@@ -143,6 +146,6 @@ function foreignOf(
     : creditWhole && credit.amount_foreign != null ? credit
       : null
   return source
-    ? { amountForeign: source.amount_foreign, currencyCode: source.currency_code }
+    ? { amountForeign: journalForeignAmount(source), currencyCode: source.currency_code }
     : { amountForeign: null, currencyCode: null }
 }

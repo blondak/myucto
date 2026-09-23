@@ -26,7 +26,7 @@ final class LedgerSyntheticBalancesWindowTest extends TestCase
         $this->pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
         $this->pdo->exec("CREATE TABLE accounting_periods (id INTEGER PRIMARY KEY, supplier_id INTEGER, starts_on TEXT);
             CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, period_id INTEGER, source_type TEXT, source_id INTEGER, reversed_by INTEGER, entry_date TEXT, posted_at TEXT);
-            CREATE TABLE journal_entry_lines (entry_id INTEGER, supplier_id INTEGER, account_id INTEGER, side TEXT, amount REAL);
+            CREATE TABLE journal_entry_lines (entry_id INTEGER, supplier_id INTEGER, account_id INTEGER, side TEXT, amount REAL, is_red_storno INTEGER GENERATED ALWAYS AS (0) VIRTUAL, signed_amount REAL GENERATED ALWAYS AS (amount) VIRTUAL);
             CREATE TABLE chart_of_accounts (id INTEGER PRIMARY KEY, account_code TEXT, account_type TEXT, parent_id INTEGER, name TEXT);
             INSERT INTO chart_of_accounts VALUES (1,'221','asset',NULL,'Banka'),(2,'518','expense',NULL,'Služby'),
                 (3,'602','revenue',NULL,'Tržby'),(4,'702','closing',NULL,'Počáteční účet rozvažný'),(5,'999','offbalance',NULL,'Podrozvaha');

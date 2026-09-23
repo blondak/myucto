@@ -160,7 +160,7 @@ final class TaxBaseReportAction
     private function accountingResidualFromJournal(int $supplierId, int $assetId): ?float
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT SUM(l.amount) AS zc
+            'SELECT SUM(l.signed_amount) AS zc
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id
                JOIN chart_of_accounts ca ON ca.id = l.account_id
@@ -214,7 +214,7 @@ final class TaxBaseReportAction
     private function accountBalance(int $supplierId, string $codePrefix, string $asOf): float
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT COALESCE(SUM(CASE WHEN l.side = \'debit\' THEN l.amount ELSE -l.amount END), 0)
+            'SELECT COALESCE(SUM(CASE WHEN l.side = \'debit\' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id
                JOIN chart_of_accounts ca ON ca.id = l.account_id
@@ -230,7 +230,7 @@ final class TaxBaseReportAction
     private function fxTotal(int $supplierId, int $periodId, string $codePrefix, string $side): float
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT COALESCE(SUM(l.amount), 0)
+            'SELECT COALESCE(SUM(l.signed_amount), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id
                JOIN chart_of_accounts ca ON ca.id = l.account_id

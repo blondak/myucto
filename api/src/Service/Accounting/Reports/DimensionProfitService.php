@@ -122,9 +122,9 @@ final class DimensionProfitService
             'WITH RECURSIVE ' . JournalTaxOrigin::cte($supplierId) . "
             SELECT COALESCE(jd.dimension_value_id, ccv.id) AS value_id,
                    SUM(CASE WHEN a.account_type = 'revenue'
-                            THEN CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END ELSE 0 END) AS revenue,
+                            THEN CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END ELSE 0 END) AS revenue,
                    SUM(CASE WHEN a.account_type = 'expense'
-                            THEN CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END ELSE 0 END) AS cost
+                            THEN CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END ELSE 0 END) AS cost
               FROM journal_entry_lines l
               JOIN journal_entries e ON e.id = l.entry_id
               " . JournalTaxOrigin::join() . "

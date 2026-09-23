@@ -129,7 +129,7 @@ final class PohodaReconciler
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT LEFT(a.account_code, 3) AS syn, COUNT(DISTINCT l.entry_id) AS entries,
-                    SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS net
+                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net
                FROM pohoda_import_map m
                JOIN journal_entry_lines l ON l.supplier_id = m.supplier_id AND l.entry_id = m.target_id
                JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
@@ -183,9 +183,9 @@ final class PohodaReconciler
                 AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = '{$kind}' AND m.target_id = d.id)";
 
         $spec = [
-            ['purchase_invoices', 'purchase_invoices', 'd.total_with_vat', 'purchase_invoice', 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END"],
-            ['issued_invoices', 'invoices', 'd.total_with_vat', 'invoice', 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END"],
-            ['cash', 'cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", 'cash_document', 'cash', '211', "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END"],
+            ['purchase_invoices', 'purchase_invoices', 'd.total_with_vat', 'purchase_invoice', 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END"],
+            ['issued_invoices', 'invoices', 'd.total_with_vat', 'invoice', 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
+            ['cash', 'cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", 'cash_document', 'cash', '211', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
         ];
         $out = [];
         foreach ($spec as [$key, $table, $expr, $kind, $docType, $prefix, $sign]) {
@@ -202,7 +202,7 @@ final class PohodaReconciler
             [$supplierId]
         );
         $bankJournal = $scalar(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
                JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
@@ -292,7 +292,7 @@ final class PohodaReconciler
     private function entryDifferences(int $supplierId, array $periodIds, array $table): array
     {
         [$docTable, $kind, $docType, $prefix, $creditPositive] = $table;
-        $sign = $creditPositive ? "CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END" : "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END";
+        $sign = $creditPositive ? "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END" : "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END";
         $linked = "FROM journal_entry_document_links k
                      JOIN {$docTable} d ON d.id = k.doc_id AND d.supplier_id = k.supplier_id
                     WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = '{$docType}'

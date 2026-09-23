@@ -30,7 +30,7 @@ final class NonDeductibleCostsService
     public function sum(int $supplierId, string $startsOn, string $endsOn): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0) AS c
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS c
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "

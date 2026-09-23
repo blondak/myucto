@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Reports;
 
+use MyInvoice\Service\Accounting\JournalLineAmount;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -984,10 +985,11 @@ final class ReportXlsxExporter
             foreach ($entry['lines'] ?? [] as $line) {
                 $sheet->setCellValueExplicit([5, $r], (string) ($line['account_code'] ?? ''), DataType::TYPE_STRING);
                 $sheet->setCellValueExplicit([6, $r], (string) ($line['account_name'] ?? ''), DataType::TYPE_STRING);
+                $lineAmount = JournalLineAmount::signed($line);
                 if (($line['side'] ?? '') === 'debit') {
-                    $sheet->setCellValue([7, $r], (float) $line['amount']);
+                    $sheet->setCellValue([7, $r], $lineAmount);
                 } else {
-                    $sheet->setCellValue([8, $r], (float) $line['amount']);
+                    $sheet->setCellValue([8, $r], $lineAmount);
                 }
                 $r++;
             }

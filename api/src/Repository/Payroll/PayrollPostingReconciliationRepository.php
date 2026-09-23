@@ -149,7 +149,7 @@ final class PayrollPostingReconciliationRepository
                       ELSE 'none'
                     END AS dimension,
                     line.side AS side,
-                    CAST(ROUND(SUM(line.amount) * 100) AS SIGNED) AS amount_minor
+                    CAST(ROUND(SUM(line.signed_amount) * 100) AS SIGNED) AS amount_minor
                FROM journal_entry_lines line
                JOIN journal_entries entry
                  ON entry.supplier_id = line.supplier_id

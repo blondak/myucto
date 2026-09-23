@@ -547,7 +547,8 @@ final class PostingService
             throw new PostingException('period_not_open', 'Období storna je "' . $period['status'] . '" — storno nelze zaúčtovat.');
         }
 
-        // Zrcadlo: stejný účet, opačná strana, stejná částka (vč. cizoměnové stopy).
+        // Běžný protizápis obrací stranu. Červené storno už nese záporný obrat,
+        // proto se ruší kladným řádkem na stejné straně.
         // Dimenze se přenáší ze stejného důvodu jako zakázka — storno musí odečíst
         // tam, kam původní řádek přičetl.
         $origDims = (new DimensionAssignmentRepository($this->db))->lineDimensions(
@@ -556,10 +557,12 @@ final class PostingService
         );
         $mirror = [];
         foreach ($origLines as $line) {
+            $reversalLine = JournalLineAmount::reversal($line);
             $mirror[] = [
                 'account_id'     => (int) $line['account_id'],
-                'side'           => $line['side'] === 'debit' ? 'credit' : 'debit',
+                'side'           => $reversalLine['side'],
                 'amount'         => $line['amount'],
+                'is_red_storno'  => $reversalLine['is_red_storno'],
                 'currency_code'  => $line['currency_code'] ?? null,
                 'fx_rate'        => $line['fx_rate'] ?? null,
                 'amount_foreign' => $line['amount_foreign'] ?? null,
@@ -2202,7 +2205,7 @@ final class PostingService
     /**
      * Součty stran v haléřích (int) — peníze se NIKDY neporovnávají přes float.
      *
-     * @param list<array{side:'debit'|'credit', amount:float|int|string}> $lines
+     * @param list<array{side:'debit'|'credit', amount:float|int|string, is_red_storno?:bool}> $lines
      * @return array{debit:int, credit:int}
      */
     public static function balanceCents(array $lines): array
@@ -2210,7 +2213,7 @@ final class PostingService
         $debit = 0;
         $credit = 0;
         foreach ($lines as $line) {
-            $cents = self::cents($line['amount']);
+            $cents = JournalLineAmount::signedCents($line);
             if ($line['side'] === 'debit') {
                 $debit += $cents;
             } else {
@@ -2223,7 +2226,7 @@ final class PostingService
     /**
      * Ověří Σ MD == Σ D v haléřích. Nevyváženost → UnbalancedEntryException.
      *
-     * @param list<array{side:'debit'|'credit', amount:float|int|string}> $lines
+     * @param list<array{side:'debit'|'credit', amount:float|int|string, is_red_storno?:bool}> $lines
      */
     public static function assertBalanced(array $lines): void
     {
@@ -2426,6 +2429,7 @@ final class PostingService
                 'account_id'  => $account['id'],
                 'side'        => $side,
                 'amount'      => $amount,
+                'is_red_storno' => (bool) ($line['is_red_storno'] ?? false),
                 'cost_center' => $line['cost_center'] ?? null,
                 // Zakázka (issue #29): builder ji smí určit per řádek (rozúčtování jednoho
                 // dokladu na víc akcí); co nechá NULL, dorazítkuje stampProjectDimension()

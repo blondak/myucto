@@ -150,7 +150,7 @@ final class EquityChangesStatementService
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT a.account_code, MIN(a.name) AS name,
-                    ROUND(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 2) AS amount
+                    ROUND(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END), 2) AS amount
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id
@@ -197,8 +197,8 @@ final class EquityChangesStatementService
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT a.account_code, MIN(a.name) AS name,
-                    ROUND(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 2) AS increase,
-                    ROUND(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 2) AS decrease
+                    ROUND(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END), 2) AS increase,
+                    ROUND(SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END), 2) AS decrease
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id

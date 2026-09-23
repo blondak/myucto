@@ -48,8 +48,8 @@ final class TaxNeutralReclassification
     ];
 
     /**
-     * @param list<array{account_id:int, side:string, amount:float|int|string}> $before řádky v deníku
-     * @param list<array{account_id:int, side:string, amount:float|int|string}> $after  opravené řádky
+     * @param list<array{account_id:int, side:string, amount:float|int|string, is_red_storno?:bool}> $before řádky v deníku
+     * @param list<array{account_id:int, side:string, amount:float|int|string, is_red_storno?:bool}> $after  opravené řádky
      * @param array<int, array{code:string, account_type?:string, tax_deductibility?:string}> $accounts
      * @param bool $incomeTaxFiled přiznání k dani z příjmů za rok zápisu už je podané
      *
@@ -61,7 +61,7 @@ final class TaxNeutralReclassification
         foreach ([[$before, -1], [$after, 1]] as [$lines, $sign]) {
             foreach ($lines as $line) {
                 $key = (int) $line['account_id'] . '|' . (string) $line['side'];
-                $diff[$key] = ($diff[$key] ?? 0) + $sign * (int) round(((float) $line['amount']) * 100.0);
+                $diff[$key] = ($diff[$key] ?? 0) + $sign * JournalLineAmount::signedCents($line);
             }
         }
         $changed = array_filter($diff, static fn (int $cents): bool => $cents !== 0);

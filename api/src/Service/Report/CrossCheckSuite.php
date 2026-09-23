@@ -411,10 +411,10 @@ final class CrossCheckSuite
         $stmt = $this->db->pdo()->prepare(
             "SELECT ROUND(
                       SUM(CASE WHEN a.account_code LIKE '6%'
-                               THEN (CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END)
+                               THEN (CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END)
                                ELSE 0 END)
                     - SUM(CASE WHEN a.account_code LIKE '5%'
-                               THEN (CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END)
+                               THEN (CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END)
                                ELSE 0 END), 2)
                FROM journal_entries e
                JOIN journal_entry_lines l ON l.entry_id = e.id

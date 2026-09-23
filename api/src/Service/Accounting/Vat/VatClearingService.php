@@ -722,8 +722,8 @@ final class VatClearingService
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT a.account_code,
-                    COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 0) AS d,
-                    COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 0) AS c
+                    COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END), 0) AS d,
+                    COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END), 0) AS c
                FROM journal_entry_lines l
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.entry_id = ? AND l.supplier_id = ? AND a.account_code IN (?, ?)
@@ -835,8 +835,8 @@ final class VatClearingService
         $placeholders = implode(', ', array_fill(0, count($codes), '?'));
         $stmt = $this->db->pdo()->prepare(
             "SELECT a.account_code,
-                    COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 0) AS d,
-                    COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 0) AS c
+                    COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END), 0) AS d,
+                    COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END), 0) AS c
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
                JOIN chart_of_accounts a  ON a.id = l.account_id

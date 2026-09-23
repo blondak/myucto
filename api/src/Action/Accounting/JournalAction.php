@@ -357,10 +357,14 @@ final class JournalAction
             if ($side !== 'debit' && $side !== 'credit') {
                 return Json::error($response, 'validation_failed', "Řádek #{$i}: side musí být 'debit' nebo 'credit'.", 422);
             }
+            if (array_key_exists('is_red_storno', $l) && !is_bool($l['is_red_storno'])) {
+                return Json::error($response, 'validation_failed', "Řádek #{$i}: is_red_storno musí být boolean.", 422);
+            }
             $line = [
                 'account_code' => (string) ($l['account_code'] ?? ''),
                 'side'         => $side,
                 'amount'       => (float) ($l['amount'] ?? 0),
+                'is_red_storno' => (bool) ($l['is_red_storno'] ?? false),
             ];
             if (isset($l['cost_center']) && trim((string) $l['cost_center']) !== '') {
                 $line['cost_center'] = (string) $l['cost_center'];
@@ -1361,6 +1365,7 @@ final class JournalAction
                         'account_id' => (int) $line['account_id'],
                         'side' => (string) $line['side'],
                         'amount' => (float) $line['amount'],
+                        'is_red_storno' => (bool) $line['is_red_storno'],
                         'currency_code' => $line['currency_code'],
                         'amount_foreign' => $line['amount_foreign'],
                         'cost_center' => $line['cost_center'],
@@ -1590,6 +1595,7 @@ final class JournalAction
                             'account_id' => (int) $line['account_id'],
                             'side' => (string) $line['side'],
                             'amount' => (float) $line['amount'],
+                            'is_red_storno' => (bool) $line['is_red_storno'],
                             'currency_code' => $line['currency_code'],
                             'amount_foreign' => $line['amount_foreign'],
                             'cost_center' => $line['cost_center'],

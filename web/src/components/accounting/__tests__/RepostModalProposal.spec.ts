@@ -52,6 +52,17 @@ describe('RepostModal — kontace z nového pravidla', () => {
     ])
   })
 
+  it('při opravě kontace zachová příznak červeného storna', async () => {
+    m.plan.lines = [
+      { account_code: '518', side: 'debit', amount: 100, is_red_storno: true },
+      { account_code: '321', side: 'credit', amount: 100, is_red_storno: true },
+    ]
+    const wrapper = await mountModal({})
+    const rows = wrapper.findComponent({ name: 'JournalLinesEditor' }).props('modelValue')
+    expect(rows.map((row: { is_red_storno?: boolean }) => row.is_red_storno)).toEqual([true, true])
+    wrapper.unmount()
+  })
+
   it('přepíše jen protiúčet a bankovní analytiku ponechá', async () => {
     const wrapper = await mountModal({ proposedAccounts: { debit: '548', credit: '221' } })
     expect(editorCodes(wrapper)).toEqual(['548', '221.001'])

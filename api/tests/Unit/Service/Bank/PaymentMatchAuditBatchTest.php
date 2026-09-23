@@ -31,7 +31,7 @@ final class PaymentMatchAuditBatchTest extends TestCase
             'invoice_payments (invoice_id INTEGER, bank_transaction_id INTEGER, amount NUMERIC)',
             'payment_matches (purchase_invoice_id INTEGER, bank_transaction_id INTEGER, amount NUMERIC, supplier_id INTEGER)',
             'journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, source_type TEXT, source_id INTEGER, posted_at TEXT, reversed_by INTEGER)',
-            'journal_entry_lines (entry_id INTEGER, supplier_id INTEGER, account_id INTEGER, amount NUMERIC)',
+            'journal_entry_lines (entry_id INTEGER, supplier_id INTEGER, account_id INTEGER, amount NUMERIC, signed_amount NUMERIC GENERATED ALWAYS AS (amount) VIRTUAL)',
             'chart_of_accounts (id INTEGER PRIMARY KEY, account_code TEXT, parent_id INTEGER)',
         ] as $schema) {
             $this->pdo->exec('CREATE TABLE ' . $schema);
@@ -128,7 +128,7 @@ final class PaymentAuditCountingPdo extends \Pdo\Sqlite
 
     public function prepare(string $query, array $options = []): PDOStatement|false
     {
-        if (str_contains($query, 'SUM(l.amount) AS total')) {
+        if (str_contains($query, 'SUM(l.signed_amount) AS total')) {
             $this->fxQueries[] = $query;
         }
         return parent::prepare($query, $options);

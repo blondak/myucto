@@ -140,7 +140,7 @@ final class JournalHistoryService
 
     /**
      * @param array<string,mixed> $line
-     * @return array{account_code:?string, account_name:?string, side:string, amount:float, cost_center:?string, line_no:int}
+     * @return array{account_code:?string, account_name:?string, side:string, amount:float, is_red_storno:bool, cost_center:?string, line_no:int}
      */
     private function exportLine(array $line): array
     {
@@ -149,6 +149,7 @@ final class JournalHistoryService
             'account_name' => $line['account_name'] ?? null,
             'side'         => $line['side'],
             'amount'       => (float) $line['amount'],
+            'is_red_storno' => (bool) ($line['is_red_storno'] ?? false),
             'cost_center'  => $line['cost_center'] ?? null,
             'line_no'      => (int) $line['line_no'],
         ];
@@ -202,6 +203,7 @@ final class JournalHistoryService
             $changed = (int) $pl['account_id'] !== (int) $cl['account_id']
                 || $pl['side'] !== $cl['side']
                 || abs((float) $pl['amount'] - (float) $cl['amount']) > 0.001
+                || (bool) ($pl['is_red_storno'] ?? false) !== (bool) ($cl['is_red_storno'] ?? false)
                 || ($pl['cost_center'] ?? null) !== ($cl['cost_center'] ?? null);
             if ($changed) {
                 $changes[] = [

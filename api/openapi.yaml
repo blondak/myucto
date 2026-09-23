@@ -9725,6 +9725,7 @@ paths:
                       account_code: { type: string }
                       side: { type: string, enum: [debit, credit] }
                       amount: { type: number, format: float, exclusiveMinimum: 0 }
+                      is_red_storno: { type: boolean, default: false, description: "Červené storno snižující původní stranu MD/Dal." }
                 description: { type: [string, "null"] }
                 confirm_date_shift:
                   type: boolean
@@ -24688,7 +24689,8 @@ components:
         id: { type: integer }
         account_id: { type: integer }
         side: { type: string, enum: [debit, credit] }
-        amount: { type: number, format: float }
+        amount: { type: number, format: float, description: "Kladná velikost částky; červené storno snižuje obrat původní strany." }
+        is_red_storno: { type: boolean, default: false, description: "Červené storno: pro součty a zobrazení použijte zápornou částku na zachované straně MD/Dal." }
         currency_code: { type: [string, "null"] }
         fx_rate: { type: [number, "null"], format: float }
         amount_foreign: { type: [number, "null"], format: float }
@@ -24720,7 +24722,8 @@ components:
             properties:
               account_code: { type: string, example: "518" }
               side: { type: string, enum: [debit, credit] }
-              amount: { type: number, format: float, example: 1000.00 }
+              amount: { type: number, format: float, example: 1000.00, description: "Kladná velikost částky i při červeném stornu." }
+              is_red_storno: { type: boolean, default: false, description: "Snižuje obrat původní strany, neprohazuje MD/Dal." }
               cost_center: { type: [string, "null"] }
               dimensions: { type: object, additionalProperties: { type: integer }, description: "Dimenze (Firma → Dimenze): id typu → id hodnoty." }
 
@@ -27674,6 +27677,7 @@ components:
               account_name: { type: [string, "null"] }
               side: { type: string, enum: [debit, credit] }
               amount: { type: number, format: float }
+              is_red_storno: { type: boolean, default: false, description: "Červené storno snižující původní stranu MD/Dal." }
 
     JournalRepostResult:
       type: object

@@ -100,6 +100,9 @@ final class JournalTemplateAction
             if (!is_array($l)) {
                 return Json::error($response, 'validation_failed', "Řádek #{$i} má neplatný formát.", 422);
             }
+            if (!empty($l['is_red_storno'])) {
+                return Json::error($response, 'red_storno_template_unsupported', 'Červené storno nelze uložit do šablony.', 422);
+            }
             $accountCode = trim((string) ($l['account_code'] ?? ''));
             if ($accountCode === '' || mb_strlen($accountCode) > 20) {
                 return Json::error($response, 'validation_failed', "Řádek #{$i}: chybí kód účtu.", 422);
@@ -176,6 +179,9 @@ final class JournalTemplateAction
         foreach ($rawLines as $i => $l) {
             if (!is_array($l)) {
                 return Json::error($response, 'validation_failed', "Řádek #{$i} má neplatný formát.", 422);
+            }
+            if (!empty($l['is_red_storno'])) {
+                return Json::error($response, 'red_storno_template_unsupported', 'Červené storno nelze uložit do šablony.', 422);
             }
             $accountCode = trim((string) ($l['account_code'] ?? ''));
             if ($accountCode === '' || mb_strlen($accountCode) > 20) {

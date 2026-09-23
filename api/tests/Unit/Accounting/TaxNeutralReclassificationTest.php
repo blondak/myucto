@@ -99,6 +99,17 @@ final class TaxNeutralReclassificationTest extends TestCase
         self::assertSame(R::AMOUNTS_CHANGED, R::violation(self::purchase(1), $after, self::ACCOUNTS));
     }
 
+    public function testChangingRedStornoToOrdinaryLineIsRejected(): void
+    {
+        $after = [
+            ['account_id' => 1, 'side' => 'debit', 'amount' => 100.00],
+            ['account_id' => 5, 'side' => 'credit', 'amount' => 100.00],
+        ];
+        $before = array_map(static fn (array $line): array => $line + ['is_red_storno' => true], $after);
+
+        self::assertSame(R::AMOUNTS_CHANGED, R::violation($before, $after, self::ACCOUNTS));
+    }
+
     /** Přesun uvnitř třídy 3 bez daňového účtu projde (321 → 325). */
     public function testBalanceSheetMoveWithinClassIsTaxNeutral(): void
     {

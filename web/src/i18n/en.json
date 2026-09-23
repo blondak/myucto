@@ -12411,6 +12411,8 @@
       }
     },
     "journal": {
+      "red_storno": "Red storno",
+      "red_storno_template_unsupported": "An entry with red storno cannot be saved as a template yet.",
       "notes": {
         "title": "Notes",
         "empty": "No notes yet.",

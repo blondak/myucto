@@ -333,8 +333,8 @@ final class BackfillService
     private function journalBalance(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT CAST(ROUND(COALESCE(SUM(CASE WHEN side = 'debit' THEN amount END), 0) * 100) AS SIGNED),
-                    CAST(ROUND(COALESCE(SUM(CASE WHEN side = 'credit' THEN amount END), 0) * 100) AS SIGNED)
+            "SELECT CAST(ROUND(COALESCE(SUM(CASE WHEN side = 'debit' THEN signed_amount END), 0) * 100) AS SIGNED),
+                    CAST(ROUND(COALESCE(SUM(CASE WHEN side = 'credit' THEN signed_amount END), 0) * 100) AS SIGNED)
                FROM journal_entry_lines WHERE supplier_id = ?"
         );
         $stmt->execute([$supplierId]);

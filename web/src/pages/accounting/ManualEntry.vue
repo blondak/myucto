@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { journalAmount } from '@/utils/journalAmount'
 import { ref, onMounted, reactive, computed, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
@@ -35,6 +36,7 @@ const saving = ref(false)
 const error = ref('')
 
 interface LineRow {
+  is_red_storno?: boolean
   account_code: string
   side: JournalSide
   amount: number | null
@@ -104,6 +106,7 @@ onMounted(async () => {
         account_code: l.account_code ?? '',
         side: l.side,
         amount: l.amount,
+        is_red_storno: 'is_red_storno' in l ? !!l.is_red_storno : false,
         cost_center: l.cost_center ?? '',
         dimensions: { ...(l.dimensions ?? {}) },
       }))
@@ -138,14 +141,14 @@ const linesHaveAccounts = computed(() =>
   lines.value.length > 0 && lines.value.every(l => l.account_code.trim() !== ''))
 
 const totalDebit = computed(() =>
-  lines.value.filter(l => l.side === 'debit').reduce((s, l) => s + (Number(l.amount) || 0), 0),
+  lines.value.filter(l => l.side === 'debit').reduce((s, l) => s + journalAmount(l), 0),
 )
 const totalCredit = computed(() =>
-  lines.value.filter(l => l.side === 'credit').reduce((s, l) => s + (Number(l.amount) || 0), 0),
+  lines.value.filter(l => l.side === 'credit').reduce((s, l) => s + journalAmount(l), 0),
 )
 // Zaokrouhlení na haléře kvůli plovoucí čárce.
 const diff = computed(() => Math.round((totalDebit.value - totalCredit.value) * 100) / 100)
-const balanced = computed(() => diff.value === 0 && totalDebit.value > 0)
+const balanced = computed(() => diff.value === 0 && lines.value.some(l => Number(l.amount) > 0))
 
 const hasEmptyLine = computed(() =>
   lines.value.some(l => !l.account_code.trim() || !(Number(l.amount) > 0)),
@@ -168,6 +171,7 @@ async function save(andNew = false) {
       account_code: l.account_code.trim(),
       side: l.side,
       amount: Number(l.amount),
+      is_red_storno: !!l.is_red_storno,
     }
     if (l.cost_center.trim()) line.cost_center = l.cost_center.trim()
     const lineDims = compactDimensions(l.dimensions)
@@ -227,6 +231,7 @@ function openSaveTemplate() {
 
 async function submitSaveTemplate() {
   templateError.value = ''
+  if (lines.value.some(l => l.is_red_storno)) { templateError.value = t('accounting.journal.red_storno_template_unsupported'); return }
   const name = templateForm.name.trim()
   if (!name) { templateError.value = t('accounting.manual.template.name_required'); return }
 
@@ -319,6 +324,7 @@ async function importTemplateCsv() {
       account_code: l.account_code,
       side: l.side,
       amount: l.amount,
+        is_red_storno: 'is_red_storno' in l ? !!l.is_red_storno : false,
       cost_center: l.cost_center ?? '',
       dimensions: {},
     }))
@@ -534,6 +540,10 @@ async function submitTransfer(force = false) {
             <div class="col-span-5 sm:col-span-2">
               <input v-model.number="l.amount" type="number" step="0.01" min="0" :placeholder="t('accounting.manual.amount')"
                 class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm text-right" />
+              <label class="mt-1 flex items-center gap-1 text-xs text-neutral-600">
+                <input v-model="l.is_red_storno" type="checkbox" />
+                {{ t('accounting.journal.red_storno') }}
+              </label>
             </div>
             <div class="col-span-2 sm:col-span-2">
               <input v-model="l.cost_center" :list="`${pageId}-cost-center-options`" type="text" maxlength="50" :placeholder="t('accounting.manual.cost_center')"

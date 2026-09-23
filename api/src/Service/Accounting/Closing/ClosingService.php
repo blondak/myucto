@@ -21,6 +21,7 @@ use MyInvoice\Repository\SaldoRepository;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Tax\Return\LegalProvisionLedgerService;
 use MyInvoice\Service\Accounting\Reports\BalanceInventoryService;
 use MyInvoice\Service\Accounting\Reports\EntityCategoryService;
@@ -1912,7 +1913,7 @@ final class ClosingService
         $amount = 0.0;
         foreach ($defer['lines'] as $l) {
             if ((string) $l['side'] === 'debit' && str_starts_with((string) $l['account_code'], '381')) {
-                $amount += (float) $l['amount'];
+                $amount += JournalLineAmount::signed($l);
             }
         }
         return round($amount, 2);
@@ -1935,7 +1936,9 @@ final class ClosingService
                 AND l.side = 'debit' AND ca.account_code LIKE '5%'
                 AND e.entry_date <= ?
               GROUP BY ca.account_code
-              ORDER BY COUNT(*) DESC, SUM(l.amount) DESC
+              HAVING SUM(CASE WHEN l.is_red_storno = 1 THEN -1 ELSE 1 END) > 0
+              ORDER BY SUM(CASE WHEN l.is_red_storno = 1 THEN -1 ELSE 1 END) DESC,
+                       SUM(l.signed_amount) DESC
               LIMIT 1"
         );
         $stmt->execute([$supplierId, $vendorId, $asOf]);
@@ -3459,6 +3462,7 @@ final class ClosingService
                             'account_code' => (string) $l['account_code'],
                             'side' => (string) $l['side'],
                             'amount' => (float) $l['amount'],
+                            'is_red_storno' => (bool) ($l['is_red_storno'] ?? false),
                         ];
                         if (($l['currency_code'] ?? null) !== null) {
                             $line['currency_code'] = $l['currency_code'];
@@ -4526,7 +4530,7 @@ final class ClosingService
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT bt.id AS tx_id, je.id AS entry_id, bt.posted_at,
-                    CASE WHEN jl.side = "debit" THEN jl.amount ELSE -jl.amount END AS signed_amount,
+                    CASE WHEN jl.side = "debit" THEN jl.signed_amount ELSE -jl.signed_amount END AS signed_amount,
                     CASE WHEN m.out_transaction_id = bt.id THEN m.in_transaction_id
                          ELSE m.out_transaction_id END AS pair_tx_id,
                     pair_bt.posted_at AS pair_posted_at
@@ -4947,7 +4951,7 @@ final class ClosingService
         ];
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT COALESCE(SUM(CASE WHEN l.side = \'debit\' THEN l.amount ELSE -l.amount END), 0)
+            'SELECT COALESCE(SUM(CASE WHEN l.side = \'debit\' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id
               WHERE l.supplier_id = ? AND e.period_id = ? AND e.posted_at IS NOT NULL'
@@ -5373,7 +5377,8 @@ final class ClosingService
             return null;
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT l.id, l.account_id, l.side, l.amount, l.currency_code, l.fx_rate, l.amount_foreign,
+            'SELECT l.id, l.account_id, l.side, l.amount, l.is_red_storno,
+                    l.currency_code, l.fx_rate, l.amount_foreign,
                     l.cost_center, l.line_no, a.account_code, a.name AS account_name, a.account_type
                FROM journal_entry_lines l
                JOIN chart_of_accounts a ON a.id = l.account_id
@@ -5385,6 +5390,7 @@ final class ClosingService
             $r['id'] = (int) $r['id'];
             $r['account_id'] = (int) $r['account_id'];
             $r['amount'] = (float) $r['amount'];
+            $r['is_red_storno'] = (bool) $r['is_red_storno'];
             $r['fx_rate'] = $r['fx_rate'] === null ? null : (float) $r['fx_rate'];
             $r['amount_foreign'] = $r['amount_foreign'] === null ? null : (float) $r['amount_foreign'];
             return $r;

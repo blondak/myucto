@@ -156,10 +156,10 @@ final class ProjectProfitService
         }
         $sql = 'SELECT jel.project_id,
                        SUM(CASE WHEN a.account_type = \'revenue\'
-                                THEN (CASE WHEN jel.side = \'credit\' THEN jel.amount ELSE -jel.amount END)
+                                THEN (CASE WHEN jel.side = \'credit\' THEN jel.signed_amount ELSE -jel.signed_amount END)
                                 ELSE 0 END) AS revenue,
                        SUM(CASE WHEN a.account_type = \'expense\'
-                                THEN (CASE WHEN jel.side = \'debit\' THEN jel.amount ELSE -jel.amount END)
+                                THEN (CASE WHEN jel.side = \'debit\' THEN jel.signed_amount ELSE -jel.signed_amount END)
                                 ELSE 0 END) AS cost
                   FROM journal_entry_lines jel
                   JOIN journal_entries je   ON je.id = jel.entry_id

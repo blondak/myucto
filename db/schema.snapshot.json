@@ -849,7 +849,8 @@
         "1862_bank_posting_rule_mode_set_manually.sql",
         "1863_payment_matches_supplier_doc_index.sql",
         "1864_stereo_nx_import.sql",
-        "1865_import_jobs_stereo_nx.sql"
+        "1865_import_jobs_stereo_nx.sql",
+        "1866_journal_red_storno.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -5978,9 +5979,12 @@
                 "entry_id": "bigint(20) unsigned NOT NULL",
                 "fx_rate": "decimal(18,6) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "is_red_storno": "tinyint(1) NOT NULL DEFAULT 0",
                 "line_no": "int(10) unsigned NOT NULL DEFAULT 0",
                 "project_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "side": "enum('debit','credit') NOT NULL",
+                "signed_amount": "decimal(15,2) NULL DEFAULT NULL STORED GENERATED AS (if(`is_red_storno` = 1,-`amount`,`amount`))",
+                "signed_amount_foreign": "decimal(15,2) NULL DEFAULT NULL STORED GENERATED AS (case when `amount_foreign` is null then NULL when `is_red_storno` = 1 then -`amount_foreign` else `amount_foreign` end)",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
             "indexes": {
@@ -6000,7 +6004,8 @@
                 "fk_jel_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
-                "chk_jel_amount_positive": "`amount` > 0"
+                "chk_jel_amount_positive": "`amount` > 0",
+                "chk_jel_red_storno_boolean": "`is_red_storno` in (0,1)"
             }
         },
         "journal_entry_notes": {

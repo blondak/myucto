@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { journalAmount } from '@/utils/journalAmount'
 /**
  * Přeúčtování už zaúčtovaného dokladu — oprava kontace, která v deníku je.
  *
@@ -160,6 +161,7 @@ async function load(): Promise<void> {
       account_code: l.account_code ?? '',
       side: l.side,
       amount: l.amount,
+    is_red_storno: l.is_red_storno,
     }))
     applyProposal()
   } catch (e: any) {
@@ -211,6 +213,7 @@ async function submit(): Promise<void> {
         account_code: l.account_code,
         side: l.side,
         amount: l.amount ?? 0,
+        is_red_storno: l.is_red_storno,
       })),
       description: description.value.trim() || null,
       confirm_date_shift: confirmShift.value,
@@ -315,7 +318,7 @@ async function submit(): Promise<void> {
               <li v-for="line in dimPreview.lines" :key="line.id" class="flex flex-wrap items-center gap-x-2 gap-y-1 py-1">
                 <span class="font-mono font-medium">{{ line.account_code }}</span>
                 <span class="text-xs text-neutral-500">{{ line.side === 'debit' ? t('accounting.journal.side.debit') : t('accounting.journal.side.credit') }}</span>
-                <span class="font-mono">{{ formatMoney(line.amount) }}</span>
+                <span class="font-mono">{{ formatMoney(journalAmount(line)) }}</span>
                 <DimensionChips :dimensions="line.dimensions" class="ml-auto" />
               </li>
             </ul>

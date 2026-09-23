@@ -453,7 +453,7 @@ final class SaldoRepository
                    )
                  GROUP BY ip.invoice_id
             ), settled AS (
-                SELECT child.parent_invoice_id AS invoice_id, SUM(l.amount) AS settled_czk
+                SELECT child.parent_invoice_id AS invoice_id, SUM(l.signed_amount) AS settled_czk
                   FROM invoices child
                   CROSS JOIN params x
                   JOIN journal_entries e
@@ -596,7 +596,7 @@ final class SaldoRepository
                 -- obecné parent_invoice_id IS NOT NULL, které chytí DDKP i finál.
                 -- Podmínka advance_purchase_invoice_id IS NULL v druhé větvi brání dvojímu
                 -- započtení, kdyby jeden doklad nesl obě vazby.
-                SELECT link.advance_id, SUM(l.amount) AS settled_czk
+                SELECT link.advance_id, SUM(l.signed_amount) AS settled_czk
                   FROM (
                       SELECT id AS child_id, supplier_id, advance_purchase_invoice_id AS advance_id
                         FROM purchase_invoices
@@ -724,9 +724,9 @@ final class SaldoRepository
         $paidExpr    = 'COALESCE(paid.paid_sum, 0)';
         $advanceExpr = 'ROUND(COALESCE(adv.advance_sum, 0), 2)';
         $toPayExpr   = 'COALESCE(d.amount_to_pay, 0)';
-        $bookedExpr  = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2)";
+        $bookedExpr  = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 2)";
         $foreignExpr = "ROUND(SUM(CASE WHEN l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
-                                       THEN (CASE WHEN l.side = 'debit' THEN l.amount_foreign ELSE -l.amount_foreign END)
+                                       THEN (CASE WHEN l.side = 'debit' THEN l.signed_amount_foreign ELSE -l.signed_amount_foreign END)
                                        ELSE 0 END), 2)";
         // Proplacený dobropis se v `invoice_payments` neobjeví (PAYABLE_TYPES ho tam
         // nepustí) — zkratka „vrácené peníze ⇒ poměr 1" je proto jediný způsob, jak
@@ -934,9 +934,9 @@ final class SaldoRepository
         $afterExpr      = 'COALESCE(m.matched_after, 0)';
         $advanceExpr    = 'ROUND(COALESCE(adv.advance_sum, 0), 2)';
         $toPayExpr      = 'COALESCE(d.amount_to_pay, 0)';
-        $bookedExpr     = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2)";
+        $bookedExpr     = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 2)";
         $foreignExpr    = "ROUND(SUM(CASE WHEN l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
-                                          THEN (CASE WHEN l.side = 'debit' THEN l.amount_foreign ELSE -l.amount_foreign END)
+                                          THEN (CASE WHEN l.side = 'debit' THEN l.signed_amount_foreign ELSE -l.signed_amount_foreign END)
                                           ELSE 0 END), 2)";
 
         // Zkratka „doklad je k asOf plně uhrazený podle svého stavu" — SQL protějšek

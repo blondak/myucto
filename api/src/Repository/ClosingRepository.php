@@ -57,8 +57,8 @@ final class ClosingRepository
         $stmt = $this->db->pdo()->prepare(
             "WITH RECURSIVE {$origin}
              SELECT COALESCE(pr.invoice_id, tax_origin.source_id) AS invoice_id,
-                    SUM(CASE WHEN a.account_code LIKE '558%' OR parent.account_code LIKE '558%' THEN IF(l.side = 'debit', l.amount, -l.amount) ELSE 0 END) AS legal_amount,
-                    SUM(CASE WHEN a.account_code LIKE '559%' OR parent.account_code LIKE '559%' THEN IF(l.side = 'debit', l.amount, -l.amount) ELSE 0 END) AS acct_amount
+                    SUM(CASE WHEN a.account_code LIKE '558%' OR parent.account_code LIKE '558%' THEN IF(l.side = 'debit', l.signed_amount, -l.signed_amount) ELSE 0 END) AS legal_amount,
+                    SUM(CASE WHEN a.account_code LIKE '559%' OR parent.account_code LIKE '559%' THEN IF(l.side = 'debit', l.signed_amount, -l.signed_amount) ELSE 0 END) AS acct_amount
                FROM journal_entries e
                JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
                JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
@@ -113,7 +113,7 @@ final class ClosingRepository
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT l.account_id, a.account_code, a.name,
-                    SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS bal
+                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS bal
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id
@@ -141,7 +141,7 @@ final class ClosingRepository
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT l.account_id, a.account_code, a.name,
-                    SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS bal
+                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS bal
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id
@@ -164,7 +164,7 @@ final class ClosingRepository
     public function plBalanceBefore(int $supplierId, string $startsOn): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id
@@ -241,7 +241,7 @@ final class ClosingRepository
     private function accountMovement(int $supplierId, string $accountCode, string $from, string $to, string $side): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(l.amount), 0)
+            "SELECT COALESCE(SUM(l.signed_amount), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id
@@ -272,7 +272,7 @@ final class ClosingRepository
             ? 'AND NOT (e.source_type = ? AND e.source_id = ?)'
             : '';
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id
@@ -307,7 +307,7 @@ final class ClosingRepository
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT a.id AS account_id, a.account_code, a.name, a.normal_side,
-                    SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS bal
+                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS bal
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id
@@ -352,7 +352,7 @@ final class ClosingRepository
             "SELECT COALESCE(p.id, a.id) AS account_id,
                     COALESCE(p.account_code, a.account_code) AS account_code,
                     COALESCE(p.name, a.name) AS name,
-                    SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS bal
+                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS bal
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id
@@ -394,8 +394,8 @@ final class ClosingRepository
                 AND e.entry_date <= ?
                 AND (
                      (l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
-                        AND (l.amount_foreign IS NULL OR l.amount_foreign = 0))
-                  OR (l.amount_foreign IS NOT NULL AND l.amount_foreign <> 0
+                        AND (l.signed_amount_foreign IS NULL OR l.signed_amount_foreign = 0))
+                  OR (l.signed_amount_foreign IS NOT NULL AND l.signed_amount_foreign <> 0
                         AND (l.currency_code IS NULL OR l.currency_code = 'CZK'))
                 )
               GROUP BY a.id, a.account_code, a.name
@@ -436,7 +436,8 @@ final class ClosingRepository
         $stmt = $this->db->pdo()->prepare(
             "SELECT 'invoice' AS doc_type, i.id AS doc_id, i.varsymbol,
                     i.issue_date AS doc_date, cl.company_name AS partner_name,
-                    l.account_id, ca.account_code, l.currency_code, l.fx_rate, l.amount_foreign,
+                    l.account_id, ca.account_code, l.currency_code, l.fx_rate,
+                    l.signed_amount_foreign AS amount_foreign,
                     i.total_with_vat, i.paid_at, i.status
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id AND e.source_type = 'invoice'
@@ -451,7 +452,8 @@ final class ClosingRepository
              UNION ALL
              SELECT 'purchase_invoice' AS doc_type, pi.id AS doc_id, pi.varsymbol,
                     pi.issue_date AS doc_date, vn.company_name AS partner_name,
-                    l.account_id, ca.account_code, l.currency_code, l.fx_rate, l.amount_foreign,
+                    l.account_id, ca.account_code, l.currency_code, l.fx_rate,
+                    l.signed_amount_foreign AS amount_foreign,
                     pi.total_with_vat, pi.paid_at, pi.status
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id AND e.source_type = 'purchase_invoice'
@@ -483,7 +485,7 @@ final class ClosingRepository
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT l.account_id, a.account_code, l.currency_code,
-                    SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS amount
+                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS amount
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
                JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
@@ -562,8 +564,8 @@ final class ClosingRepository
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT a.account_code, a.name AS label, l.currency_code,
-                    SUM(CASE WHEN l.side = 'debit' THEN l.amount_foreign ELSE -l.amount_foreign END) AS foreign_balance,
-                    SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS czk_balance
+                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount_foreign ELSE -l.signed_amount_foreign END) AS foreign_balance,
+                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS czk_balance
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                -- a.supplier_id plyne už z FK řádku na osnovu (supplier_id, account_id);
@@ -576,7 +578,7 @@ final class ClosingRepository
               GROUP BY a.account_code, a.name, l.currency_code
              HAVING (ABS(foreign_balance) >= 0.005 OR ABS(czk_balance) >= 0.005)
                 AND ABS(czk_balance - (
-                    SELECT COALESCE(SUM(CASE WHEN lt.side = 'debit' THEN lt.amount ELSE -lt.amount END), 0)
+                    SELECT COALESCE(SUM(CASE WHEN lt.side = 'debit' THEN lt.signed_amount ELSE -lt.signed_amount END), 0)
                       FROM journal_entry_lines lt
                       JOIN journal_entries et ON et.id = lt.entry_id
                      WHERE lt.supplier_id = ? AND lt.account_id = MAX(l.account_id)
@@ -880,7 +882,7 @@ final class ClosingRepository
     public function openingBalancesInPeriod(int $supplierId, int $periodId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT a.account_code, SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS bal
+            "SELECT a.account_code, SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS bal
                FROM journal_entries e
                JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                JOIN chart_of_accounts a   ON a.id = l.account_id
@@ -1056,7 +1058,7 @@ final class ClosingRepository
         $sql =
             "WITH booked AS (
                 SELECT e.source_id AS invoice_id,
-                       SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS booked
+                       SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS booked
                   FROM journal_entries e
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
@@ -1069,7 +1071,7 @@ final class ClosingRepository
                  GROUP BY e.source_id
             ), bank_credit AS (
                 SELECT e.source_id AS bank_transaction_id,
-                       SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS net_credit
+                       SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_credit
                   FROM journal_entries e
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
@@ -1135,7 +1137,7 @@ final class ClosingRepository
                  GROUP BY t.invoice_id
             ), settled_cash AS (
                 SELECT COALESCE(cd.invoice_id, ip.invoice_id) AS invoice_id,
-                       SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS settled
+                       SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS settled
                   FROM cash_documents cd
                   LEFT JOIN invoice_payments ip ON ip.id = cd.invoice_payment_id
                   JOIN journal_entries e ON e.supplier_id = cd.supplier_id
@@ -1156,7 +1158,7 @@ final class ClosingRepository
                 -- Bez něj by kontrola započtenou fakturu hlásila jako otevřené saldo v plné
                 -- výši, přestože 311 je vyrovnané.
                 SELECT stl.doc_id AS invoice_id,
-                       SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS settled
+                       SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS settled
                   FROM invoice_settlements stl
                   JOIN journal_entries e ON e.supplier_id = stl.supplier_id
                    AND e.source_type = 'settlement' AND e.source_id = stl.id
@@ -1179,7 +1181,7 @@ final class ClosingRepository
                 -- kontrola každou fakturu placenou kartou jako marked_paid_unposted,
                 -- přestože 311 je v deníku vyrovnané.
                 SELECT COALESCE(gm.invoice_id, gm.credit_note_id) AS invoice_id,
-                       SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS settled
+                       SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS settled
                   FROM gopay_movements gm
                   JOIN journal_entries e ON e.supplier_id = gm.supplier_id
                    AND e.source_type = 'gopay' AND e.source_id = gm.id
@@ -1272,7 +1274,7 @@ final class ClosingRepository
         $sql =
             "WITH booked AS (
                 SELECT e.source_id AS purchase_invoice_id,
-                       SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS booked
+                       SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS booked
                   FROM journal_entries e
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
@@ -1285,7 +1287,7 @@ final class ClosingRepository
                  GROUP BY e.source_id
             ), bank_debit AS (
                 SELECT e.source_id AS bank_transaction_id,
-                       SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS net_debit
+                       SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_debit
                   FROM journal_entries e
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
@@ -1311,7 +1313,7 @@ final class ClosingRepository
                  GROUP BY pm.purchase_invoice_id
             ), settled_cash AS (
                 SELECT cd.purchase_invoice_id,
-                       SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS settled
+                       SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS settled
                   FROM cash_documents cd
                   JOIN journal_entries e ON e.supplier_id = cd.supplier_id
                    AND e.source_type = 'cash' AND e.source_id = cd.id
@@ -1330,7 +1332,7 @@ final class ClosingRepository
                 -- vedle banky a pokladny — bez něj by kontrola započtenou fakturu hlásila
                 -- jako otevřené saldo v plné výši, přestože 321 je vyrovnané.
                 SELECT stl.doc_id AS purchase_invoice_id,
-                       SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS settled
+                       SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS settled
                   FROM invoice_settlements stl
                   JOIN journal_entries e ON e.supplier_id = stl.supplier_id
                    AND e.source_type = 'settlement' AND e.source_id = stl.id
@@ -1350,7 +1352,7 @@ final class ClosingRepository
                 -- bankovní pohyb rozdělený mezi víc faktur — bez toho by dohoda pokrývající
                 -- dvě přijaté faktury přiznala každé z nich celý debet.
                 SELECT e.source_id AS agreement_id,
-                       SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS net_debit
+                       SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_debit
                   FROM journal_entries e
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
@@ -1645,7 +1647,7 @@ final class ClosingRepository
             "SELECT e.id AS entry_id, e.entry_date, e.source_type, e.source_id,
                     COALESCE(NULLIF(e.document_no, ''), CONCAT('#', e.id)) AS doc_no,
                     COALESCE(ci.company_name, cv.company_name, '') AS partner_name,
-                    ROUND(COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE 0 END), 0), 2) AS booked
+                    ROUND(COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE 0 END), 0), 2) AS booked
                FROM journal_entries e
                LEFT JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                LEFT JOIN invoices i
@@ -1698,7 +1700,7 @@ final class ClosingRepository
     {
         $sql =
             "SELECT d.id, d.doc_no, d.partner_name, d.source_type, e.id AS entry_id,
-                    ROUND(COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE 0 END), 0), 2) AS booked
+                    ROUND(COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE 0 END), 0), 2) AS booked
                FROM (
                    SELECT 'invoice' AS source_type, i.id, i.supplier_id,
                           COALESCE(NULLIF(i.varsymbol, ''), CONCAT('#', i.id)) AS doc_no,
@@ -1755,7 +1757,7 @@ final class ClosingRepository
                JOIN clients cl ON cl.id = i.client_id
                JOIN (
                     SELECT e.source_id AS invoice_id,
-                           SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS booked
+                           SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS booked
                       FROM journal_entries e
                       JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                       JOIN chart_of_accounts ca ON ca.id = l.account_id
@@ -1818,7 +1820,7 @@ final class ClosingRepository
                JOIN clients cl ON cl.id = pi.vendor_id
                JOIN (
                     SELECT e.source_id AS purchase_invoice_id,
-                           SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS booked
+                           SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS booked
                       FROM journal_entries e
                       JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                       JOIN chart_of_accounts ca ON ca.id = l.account_id
@@ -1911,7 +1913,7 @@ final class ClosingRepository
         $sql =
             "WITH booked AS (
                 SELECT e.source_id AS invoice_id,
-                       SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS booked,
+                       SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS booked,
                        MAX(l.currency_code) AS currency
                   FROM journal_entries e
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
@@ -1926,7 +1928,7 @@ final class ClosingRepository
                  GROUP BY e.source_id
             ), bank_credit AS (
                 SELECT e.source_id AS bank_transaction_id,
-                       SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS net_credit
+                       SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_credit
                   FROM journal_entries e
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
@@ -1952,7 +1954,7 @@ final class ClosingRepository
                  GROUP BY ip.invoice_id
             ), settled_cash AS (
                 SELECT COALESCE(cd.invoice_id, ip.invoice_id) AS invoice_id,
-                       SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS settled
+                       SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS settled
                   FROM cash_documents cd
                   LEFT JOIN invoice_payments ip ON ip.id = cd.invoice_payment_id
                   JOIN journal_entries e ON e.supplier_id = cd.supplier_id
@@ -2040,7 +2042,7 @@ final class ClosingRepository
         $sql =
             "WITH booked AS (
                 SELECT e.source_id AS purchase_invoice_id,
-                       SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS booked,
+                       SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS booked,
                        MAX(l.currency_code) AS currency
                   FROM journal_entries e
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
@@ -2055,7 +2057,7 @@ final class ClosingRepository
                  GROUP BY e.source_id
             ), bank_debit AS (
                 SELECT e.source_id AS bank_transaction_id,
-                       SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS net_debit
+                       SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_debit
                   FROM journal_entries e
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
@@ -2081,7 +2083,7 @@ final class ClosingRepository
                  GROUP BY pm.purchase_invoice_id
             ), settled_cash AS (
                 SELECT cd.purchase_invoice_id,
-                       SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS settled
+                       SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS settled
                   FROM cash_documents cd
                   JOIN journal_entries e ON e.supplier_id = cd.supplier_id
                    AND e.source_type = 'cash' AND e.source_id = cd.id

@@ -244,7 +244,7 @@ final class DppoReturnDataProvider
         $params = array_merge([$supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE], array_map(static fn (string $p): string => $p . '%', $prefixes));
         $stmt = $this->db->pdo()->prepare(
             "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT a.account_code, a.name, a.tax_deductibility,
-                    COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0) AS turnover
+                    COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS turnover
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
@@ -365,7 +365,7 @@ final class DppoReturnDataProvider
     private function accountGroupExpense(int $supplierId, string $startsOn, string $endsOn, string $groupPrefix): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0) AS c
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS c
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
@@ -394,7 +394,7 @@ final class DppoReturnDataProvider
     private function profitBeforeTax(int $supplierId, string $startsOn, string $endsOn): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0) AS vh
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS vh
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
@@ -668,7 +668,7 @@ final class DppoReturnDataProvider
                     (SELECT de.residual_value_end FROM depreciation_entries de
                       WHERE de.supplier_id = a.supplier_id AND de.asset_id = a.id AND de.kind = \'tax\'
                       ORDER BY de.fiscal_year DESC LIMIT 1) AS tax_residual,
-                    (SELECT SUM(jl.amount)
+                    (SELECT SUM(jl.signed_amount)
                        FROM journal_entries je
                        JOIN journal_entry_lines jl ON jl.entry_id = je.id AND jl.supplier_id = je.supplier_id
                        JOIN chart_of_accounts ca ON ca.id = jl.account_id

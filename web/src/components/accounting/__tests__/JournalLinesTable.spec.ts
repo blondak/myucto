@@ -27,6 +27,19 @@ const RouterLinkStub = {
 }
 
 describe('JournalLinesTable', () => {
+  it('ukáže červené storno záporně v souvztažnosti i na samostatné straně', () => {
+    const base = { entry_id: 10, supplier_id: 1, currency_code: null, fx_rate: null,
+      amount_foreign: null, cost_center: null, amount: 100, is_red_storno: true }
+    const debit = { ...base, id: 1, account_id: 1, account_code: '501', line_no: 1, side: 'debit' as const }
+    const credit = { ...base, id: 2, account_id: 2, account_code: '321', line_no: 2, side: 'credit' as const }
+    for (const lines of [[debit, credit], [debit]]) {
+      const wrapper = mount(JournalLinesTable, { props: { lines }, global: { stubs: { RouterLink: RouterLinkStub } } })
+      expect(wrapper.text()).toContain('-100')
+      expect(wrapper.text()).toContain('accounting.journal.red_storno')
+      wrapper.unmount()
+    }
+  })
+
   it('odkazuje z účtu přímo na jeho pohyby ve zvoleném rozsahu', () => {
     const wrapper = mount(JournalLinesTable, {
       props: {
