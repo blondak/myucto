@@ -297,7 +297,12 @@ zápisy v deníku, samostatný doklad z nich nevzniká.
   v `Dokumenty → Skeny k dokladům`.
 - **Číselné řady a podaná přiznání.** Přiznání k DPH a kontrolní hlášení za
   převáděný rok zůstávají v POHODĚ.
-- **Cizí měny.** Doklady v cizí měně se převezmou v Kč.
+- **Cizí měny.** Doklad v cizí měně se převezme v měně a kurzu dokladu, když
+  částky položek v měně přepočtené kurzem dávají na haléř koruny z POHODY
+  (DPH, kontrolní hlášení i deník tak zůstávají v Kč přesně stejné). Jinak se
+  převezme v Kč a poznámka dokladu i protokol uvedou důvod: samovyměření,
+  odpočet nedaňové zálohy, částečná úhrada vydaného dokladu, položky jen
+  z rekapitulace, nesedící přepočet nebo měna mimo číselník měn firmy.
 
 ## 107.4 Postup
 
