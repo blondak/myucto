@@ -691,6 +691,37 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
     }
 
     /**
+     * Na rodičovské není zaměstnanec v evidenčním stavu (10265), souhrn proto
+     * nese nulu. Souhrn potvrzený dřív s celým trváním vztahu (31) projde
+     * tak, jak byl potvrzen; jiný počet dní ne.
+     */
+    public function testEvidenceDaysOfParentalLeaveMonthExcludeTheLeave(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $build = function (int $evidenceDays) use ($builder): void {
+            $source = $this->withZeroAssessmentBase($this->absenceSource(
+                'parental',
+                '2026-07-01',
+                '2026-07-31',
+                ['parental_millihours' => 160_000],
+            ));
+            $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+            self::assertIsArray($input);
+            $input['people'][0]['employments'][0]['time_month']['jmhz_work_summary']
+                ['values']['evidence_days'] = $evidenceDays;
+            $source = $this->withInput($source, $input);
+            $builder->build(7, 101, $source, $builder->deriveOrdinaryConfirmation(7, 101, $source));
+        };
+
+        $build(0);
+        $build(31);
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('Pracovní souhrn');
+        $build(15);
+    }
+
+    /**
      * Celý měsíc nemoci je omluvný důvod podle § 16 odst. 4 věty třetí
      * písm. a): dobou pojištění zůstává s plným počtem dnů, vyloučenou dobou
      * a nulovým základem. Dřív ho odmítla kontrola kladného základu.

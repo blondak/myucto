@@ -199,6 +199,10 @@ jsou pouze dohledatelný podklad; před schválením je potvrď jako přesná de
 nezaokrouhluje minuty ani nedopočítá
 chybějící profesní fond. Potvrzený souhrn je neměnný a navázaný na konkrétní
 revizi schváleného měsíce; po znovuotevření je nutné vytvořit nové potvrzení.
+Evidenční dny aplikace u pracovního poměru sníží o dny mateřské, rodičovské
+a otcovské, protože po tu dobu zaměstnanec není v evidenčním stavu zaměstnanců
+(tak to vykládá MPSV i ČSÚ). Měsíční fondy pracovní doby zůstávají plné
+a nemoc ani neplacené volno evidenční dny nesnižují.
 
 Součástí potvrzení jsou také dvě povinná rozhodnutí **Ano/Ne**: zda v měsíci
 nastaly neodpracované hodiny (IN07) a zda nastaly překážky v práci (IN08).

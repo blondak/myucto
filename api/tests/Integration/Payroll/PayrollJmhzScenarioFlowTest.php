@@ -176,6 +176,8 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         self::assertStringContainsString('<form:kod>1++</form:kod>', $xml);
         self::assertStringContainsString('<form:pocetDnu>0</form:pocetDnu>', $xml);
         self::assertStringContainsString('<form:omluvenaNepritomnost>31</form:omluvenaNepritomnost>', $xml);
+        // Neplacené volno evidenční stav nemění.
+        self::assertStringContainsString('<form:dnyEvidencniStav>31</form:dnyEvidencniStav>', $xml);
         // Kontroly 282 a 283: při nulových hodinách a nulovém příjmu se
         // rozpad přesčasu ani osvobozený příjem neuvádějí.
         self::assertStringNotContainsString('<form:rozpad>', $xml);
@@ -292,6 +294,10 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         self::assertStringContainsString('<form:penezitaPomocMaterstvi>31</form:penezitaPomocMaterstvi>', $xml);
         self::assertStringContainsString('<form:vylouceneDobyCelkem>31</form:vylouceneDobyCelkem>', $xml);
         self::assertStringNotContainsString('<form:osvobozenoCelkem>', $xml);
+        // Na mateřské není zaměstnankyně v evidenčním stavu (10265 = 0),
+        // fondy 10259 a 10260 zůstávají plné.
+        self::assertStringContainsString('<form:dnyEvidencniStav>0</form:dnyEvidencniStav>', $xml);
+        self::assertStringContainsString('<form:sjednanyFond>184.000</form:sjednanyFond>', $xml);
         // Za příjemkyni PPM platí pojistné stát (§ 7 odst. 1 písm. d) zák.
         // 48/1997), minimum se po celý měsíc nepoužije: bez doplatku.
         self::assertStringContainsString(
