@@ -665,6 +665,9 @@
     "placeholder": "Hledat… (menu, klienti, faktury)",
     "no_results": "Nic nenalezeno",
     "group_menu": "Menu",
+    "group_companies": "Přepnout firmu",
+    "company_ic": "IČ {ic} · přepnout firmu",
+    "company_switch": "Přepnout na tuto firmu",
     "group_clients": "Klienti / dodavatelé",
     "group_invoices": "Vydané faktury",
     "group_purchase": "Přijaté faktury"

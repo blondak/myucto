@@ -2,11 +2,10 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSupplierStore } from '@/stores/supplier'
-import { useAuthStore } from '@/stores/auth'
-import { authApi } from '@/api/auth'
+import { useSupplierSwitch } from '@/composables/useSupplierSwitch'
 
 const supplierStore = useSupplierStore()
-const auth = useAuthStore()
+const { switching, switchTo } = useSupplierSwitch()
 const { t } = useI18n()
 const props = withDefaults(defineProps<{
   placement?: 'above' | 'below'
@@ -21,42 +20,13 @@ const props = withDefaults(defineProps<{
 })
 
 const open = ref(false)
-const switching = ref(false)
 
 const current = computed(() => supplierStore.currentSupplier)
 const list = computed(() => supplierStore.availableSuppliers)
 
 async function pick(id: number) {
-  if (id === supplierStore.currentSupplierId) {
-    open.value = false
-    return
-  }
-  switching.value = true
-  auth.clearPermissions()
-  supplierStore.setSupplier(id)
   open.value = false
-
-  // Volba se ukládá i k účtu, ať se stejná firma otevře v jiném prohlížeči či
-  // zařízení. Před reloadem dole, jinak by ho prohlížeč přerušil. Selhání
-  // přepnutí nebrání — localStorage výše drží volbu v tomhle prohlížeči.
-  // Demo mutace odmítá globálně, uložení by jen vyvolalo hlášku.
-  if (!auth.isDemo) await authApi.setDefaultSupplier(id).catch(() => undefined)
-
-  const refreshed = await auth.refresh()
-  if (!refreshed) {
-    switching.value = false
-    return
-  }
-
-  // Pokud je user na detail/edit záznamu, který v jiném supplier neexistuje, přesměruj na list.
-  // Jinak hard reload (invaliduje všechny seznamy/cache stores čistě).
-  const path = window.location.pathname
-  const detailMatch = path.match(/^\/(invoices|clients|projects|bank)\/\d+/)
-  if (detailMatch) {
-    window.location.href = '/' + detailMatch[1]
-  } else {
-    window.location.reload()
-  }
+  await switchTo(id)
 }
 </script>
 
