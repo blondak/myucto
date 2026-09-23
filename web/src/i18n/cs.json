@@ -27412,5 +27412,33 @@
       "classifications": "Zařazení peněžního deníku",
       "skipped_zero_cash": "Vynechané nulové počáteční záznamy pokladny"
     }
+  },
+  "company_profile": {
+    "title": "Profil firmy",
+    "hint": "Ručně vybudované nastavení firmy v jednom souboru: výjimky mapování výkazů, volby výkazů a uzávěrky (čistý obrat, minulé období, souhrnné vykázání daní vůči FÚ), daňový profil, dimenze a výchozí dimenze klientů, předkontace a pravidla banky. Stáhněte ho před smazáním nebo novým převodem firmy a po převodu ho nahrajte zpět.",
+    "hint_migration": "Převádíte firmu znovu? Před převodem stáhněte profil firmy, po dokončení ostrého převodu ho nahrajte zpět. Obnoví výjimky mapování výkazů, volby výkazů, daňový profil, dimenze, předkontace a pravidla banky, které převod nezaloží.",
+    "export": "Stáhnout profil firmy",
+    "import": "Nahrát profil firmy",
+    "invalid_json": "Soubor není platný JSON.",
+    "preview_title": "Náhled nahrání profilu {file}, zatím nic nezapsáno",
+    "applied_title": "Profil firmy nahrán",
+    "no_changes": "Firma už má všechno nastavené podle profilu, není co měnit.",
+    "counts": "přidáno {created}, změněno {updated}, odebráno {removed}, beze změny {unchanged}",
+    "warnings": "upozornění: {count}",
+    "apply": "Nahrát profil",
+    "applied": "Profil firmy nahrán, změn: {count}.",
+    "applied_nothing": "Profil firmy nahrán, nic se nezměnilo.",
+    "error_in_section": "{section}: {message}",
+    "section": {
+      "company": "Volby firmy",
+      "tax_profile": "Daňový profil",
+      "accounting_settings": "Výkazy a účetní politiky",
+      "statement_overrides": "Výjimky mapování výkazů",
+      "dimensions": "Dimenze",
+      "dimension_defaults": "Výchozí dimenze klientů a zakázek",
+      "posting_rules": "Předkontace",
+      "bank_rule_templates": "Šablony bankovních pravidel",
+      "bank_posting_rules": "Pravidla účtování banky"
+    }
   }
 }

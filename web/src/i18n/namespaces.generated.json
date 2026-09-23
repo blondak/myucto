@@ -46,6 +46,7 @@
     "cash_settlement",
     "checks",
     "codebookTransfer",
+    "company_profile",
     "costs",
     "creditas_bank",
     "cron_jobs",
@@ -147,6 +148,7 @@
       "cash_settlement",
       "checks",
       "codebookTransfer",
+      "company_profile",
       "costs",
       "creditas_bank",
       "cron_jobs",
@@ -417,24 +419,29 @@
       "purchase_invoice"
     ],
     "imports-money-s3": [
+      "company_profile",
       "imports",
       "money_s3"
     ],
     "imports-pohoda": [
+      "company_profile",
       "imports",
       "pamica",
       "pohoda"
     ],
     "imports-pamica": [
+      "company_profile",
       "imports",
       "pamica",
       "pohoda"
     ],
     "imports-premier": [
+      "company_profile",
       "imports",
       "premier"
     ],
     "imports-stereo-nx": [
+      "company_profile",
       "imports",
       "stereo_nx"
     ],
@@ -888,6 +895,7 @@
     "admin-settings": [
       "activation",
       "automation",
+      "company_profile",
       "domains",
       "invoice_default_note",
       "settings",
