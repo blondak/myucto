@@ -53,17 +53,32 @@ final class DpfoReturnCalculator
     {
         $warnings = [];
 
+        // Každý řádek přiznání i příloh je v celých korunách, zaokrouhlený JEDNOU z haléřové
+        // hodnoty ({@see TaxFormAmount}); součtové řádky (ř. 41, 42, 45, 54, 55, Příloha 1
+        // ř. 104 a 113, Příloha 2 ř. 203 a úhrny § 10) se skládají až ze zaokrouhlených
+        // řádků, jak je EPO kontroluje. Haléřový součet zaokrouhlený až na konci se od
+        // součtu uvedených řádků liší až o korunu.
+
         // ── Dílčí základy ────────────────────────────────────────────────────
-        $s6Income = max(0.0, $this->num($inputs['s6_employment']['income'] ?? 0));
-        $s6Withholding = max(0.0, $this->num($inputs['s6_employment']['withholding'] ?? 0));
+        $s6Income = max(0.0, $this->kc($inputs['s6_employment']['income'] ?? 0));
+        $s6Withholding = max(0.0, $this->kc($inputs['s6_employment']['withholding'] ?? 0));
         $s6 = $s6Income; // od 2021 dílčí základ §6 = úhrn příjmů (bez superhrubé mzdy)
 
         $activities = (array) ($data['activities'] ?? $profile['activities'] ?? []);
         $activityCalc = $activities !== [] ? DpfoCalculator::section7Activities($activities, $c) : null;
-        $s7Income = round((float) ($activityCalc['income'] ?? $data['s7_income'] ?? 0), 2);
-        $s7Expenses = round((float) ($activityCalc['expenses'] ?? $data['s7_expenses'] ?? 0), 2);
-        $s7Increase = round((float) ($data['s7_increase'] ?? 0), 2);
-        $s7Decrease = round((float) ($data['s7_decrease'] ?? 0), 2);
+        if ($activityCalc !== null) {
+            // Tabulka B Přílohy 1: řádky činností v celých korunách, ř. 101/102 jsou jejich součtem.
+            foreach ($activityCalc['items'] as $i => $item) {
+                $activityCalc['items'][$i]['income'] = TaxFormAmount::kc((float) $item['income']);
+                $activityCalc['items'][$i]['expenses'] = TaxFormAmount::kc((float) $item['expenses']);
+            }
+            $activityCalc['income'] = (float) array_sum(array_column($activityCalc['items'], 'income'));
+            $activityCalc['expenses'] = (float) array_sum(array_column($activityCalc['items'], 'expenses'));
+        }
+        $s7Income = $this->kc($activityCalc['income'] ?? $data['s7_income'] ?? 0);
+        $s7Expenses = $this->kc($activityCalc['expenses'] ?? $data['s7_expenses'] ?? 0);
+        $s7Increase = $this->kc($data['s7_increase'] ?? 0);
+        $s7Decrease = $this->kc($data['s7_decrease'] ?? 0);
         // Položkový rozpis pro oddíl E Přílohy 1 (VetaC/VetaE) — jen prošedě, ČISTÁ třída
         // nesumarizuje ani nevaliduje popisy, to dělá DpfoXmlBuilder (má i fallback bez
         // položek). Sem se dostane jen to, co volající v $data skutečně předal.
@@ -79,12 +94,12 @@ final class DpfoReturnCalculator
         $s7BeforeAdjustments = $activityCalc !== null
             ? $s7Income - $s7Expenses
             : (array_key_exists('s7_base', $data)
-                ? $this->num($data['s7_base'])
+                ? $this->kc($data['s7_base'])
                 : $s7Income - $s7Expenses);
-        $s7 = round($s7BeforeAdjustments + $s7Increase - $s7Decrease, 2); // může být záporný (ztráta)
+        $s7 = $s7BeforeAdjustments + $s7Increase - $s7Decrease; // může být záporný (ztráta)
 
-        $s8 = max(0.0, $this->num($inputs['s8_capital']['base'] ?? 0));
-        $s9Income = max(0.0, $this->num($inputs['s9_rental']['income'] ?? 0));
+        $s8 = max(0.0, $this->kc($inputs['s8_capital']['base'] ?? 0));
+        $s9Income = max(0.0, $this->kc($inputs['s9_rental']['income'] ?? 0));
         // Výdaje procentem z příjmů podle § 9 odst. 4 (30 %, nejvýše dle `expense_caps`).
         // Bez téhle volby se do přiznání plnilo `vyd9proc="N"` i poplatníkovi, který
         // paušál uplatňuje — částky by seděly, ale způsob uplatnění výdajů by byl
@@ -92,9 +107,9 @@ final class DpfoReturnCalculator
         $s9Pausal = (string) ($inputs['s9_rental']['expense_mode'] ?? 'actual') === 'pausal';
         $s9Cap = (float) (($c['expense_caps'][30] ?? 600000));
         $s9Expenses = $s9Pausal
-            ? min(round($s9Income * 0.30, 2), $s9Cap)
-            : max(0.0, $this->num($inputs['s9_rental']['expenses'] ?? 0));
-        $s9 = round($s9Income - $s9Expenses, 2); // §9 smí být záporný (ztráta z nájmu, §5/3 → offset §7/§8/§10)
+            ? min(TaxFormAmount::kc($s9Income * 0.30), $s9Cap)
+            : max(0.0, $this->kc($inputs['s9_rental']['expenses'] ?? 0));
+        $s9 = $s9Income - $s9Expenses; // §9 smí být záporný (ztráta z nájmu, §5/3 → offset §7/§8/§10)
         $s10Items = [];
         $s10Income = 0.0;
         $s10Expenses = 0.0;
@@ -103,8 +118,8 @@ final class DpfoReturnCalculator
                 if (!is_array($item)) {
                     continue;
                 }
-                $income = max(0.0, $this->num($item['income'] ?? 0));
-                $expensesClaimed = max(0.0, $this->num($item['expenses'] ?? 0));
+                $income = max(0.0, $this->kc($item['income'] ?? 0));
+                $expensesClaimed = max(0.0, $this->kc($item['expenses'] ?? 0));
                 $expenses = min($income, $expensesClaimed);
                 $s10Income += $income;
                 $s10Expenses += $expenses;
@@ -112,19 +127,19 @@ final class DpfoReturnCalculator
                     'income' => $income,
                     'expenses' => $expenses,
                     'allowed_expenses' => $expenses,
-                    'disallowed_expenses' => round($expensesClaimed - $expenses, 2),
+                    'disallowed_expenses' => $expensesClaimed - $expenses,
                 ]);
             }
         } else {
-            $s10Income = max(0.0, $this->num($inputs['s10_other']['income'] ?? 0));
-            $s10Expenses = min($s10Income, max(0.0, $this->num($inputs['s10_other']['expenses'] ?? 0)));
+            $s10Income = max(0.0, $this->kc($inputs['s10_other']['income'] ?? 0));
+            $s10Expenses = min($s10Income, max(0.0, $this->kc($inputs['s10_other']['expenses'] ?? 0)));
         }
-        $s10 = round($s10Income - $s10Expenses, 2);
+        $s10 = $s10Income - $s10Expenses;
 
         // Úhrn dílčích základů §7–§10 (§7 ztráta smí offsetovat §8/§9/§10). ř. 41 (kc_uhrn)
         // SMÍ být záporný (viz XSD dpfdp7_epo2.xsd kc_uhrn — signed decimal); záporný úhrn
         // je daňová ztráta roku, kterou vykazujeme a evidujeme (§34), nikoli ořízneme na 0.
-        $group710 = round($s7 + $s8 + $s9 + $s10, 2);
+        $group710 = $s7 + $s8 + $s9 + $s10;
         $base710 = max(0.0, $group710); // kladná část úhrnu §7–§10 (pro základ daně)
         if ($group710 < 0) {
             $warnings[] = 'Součet dílčích základů §7–§10 je záporný (daňová ztráta '
@@ -134,13 +149,13 @@ final class DpfoReturnCalculator
 
         // Základ daně (ř. 42) = §6 + kladný úhrn §7–§10 (dle instrukce kc_zakldan23: pokud je
         // ř. 41 záporný, tvoří základ jen dílčí základ §6 z ř. 36).
-        $totalBase = round($s6 + $base710, 2);
+        $totalBase = $s6 + $base710;
 
         // ── Odečet daňové ztráty minulých let §34 (ř. 44, kc_ztrata2) ────────
         // Uplatní se max do výše úhrnu §7–§10 (ř. 41), NE do výše §6 — ztráta z podnikání
         // nesmí snížit základ ze závislé činnosti. Vstup loss_carryforward je ruční
         // (návrh FIFO z evidence tax_losses počítá TaxLossService).
-        $lossCarry = max(0.0, $this->num($inputs['loss_carryforward'] ?? 0));
+        $lossCarry = max(0.0, $this->kc($inputs['loss_carryforward'] ?? 0));
         $lossApplied = min($lossCarry, $base710); // ř. 44
         if ($lossApplied > 0) {
             $warnings[] = 'Uplatňujete daňovou ztrátu minulých let (' . number_format($lossApplied, 0, ',', ' ')
@@ -150,7 +165,7 @@ final class DpfoReturnCalculator
             $warnings[] = 'Ztráta minulých let se uplatnila jen do výše úhrnu §7–§10 (ř. 41); zbytek '
                 . number_format($lossCarry - $lossApplied, 0, ',', ' ') . ' Kč zůstává k převodu.';
         }
-        $baseAfterLoss = round($totalBase - $lossApplied, 2); // ř. 45 = ř. 42 − ř. 44 (≥ §6 ≥ 0)
+        $baseAfterLoss = $totalBase - $lossApplied; // ř. 45 = ř. 42 − ř. 44 (≥ §6 ≥ 0)
 
         // ── §15 nezdanitelné části (odečítají se od ř. 45) ──────────────────
         // §15/3-4 ZDP: strop úroků 300 000 Kč pro bytovou potřebu obstaranou do 31. 12. 2020,
@@ -159,20 +174,22 @@ final class DpfoReturnCalculator
             ? (float) ($c['mortgage_cap_pre2021'] ?? 300000)
             : (float) ($c['mortgage_cap'] ?? 150000);
         $mortgageMonths = max(0, min(12, (int) ($profile['mortgage_months'] ?? 12)));
-        $uroky = min($this->num($profile['mortgage_interest'] ?? 0), $mortgageCap * $mortgageMonths / 12);
+        // Strop se krátí po měsících, takže nemusí vyjít na celé koruny; „nejvýše" → dolů.
+        $uroky = min($this->kc($profile['mortgage_interest'] ?? 0), floor(round($mortgageCap * $mortgageMonths / 12, 2)));
         // §15a (od 2024): penzijní produkty + soukromé životní pojištění (+ DIP) sdílejí
         // JEDEN společný roční strop 48 000 Kč. Alokujeme nejdřív penzijko, zbytek životko.
         $retirementCap = (float) ($c['pension_cap'] ?? 48000);
-        $penzijko = min($this->num($profile['pension_contrib'] ?? 0), $retirementCap);
-        $zivotko = min($this->num($profile['life_insurance'] ?? 0), max(0.0, $retirementCap - $penzijko));
-        $dip = min($this->num($profile['dip_contrib'] ?? 0), max(0.0, $retirementCap - $penzijko - $zivotko));
-        $care = min($this->num($profile['long_term_care'] ?? 0), max(0.0, $retirementCap - $penzijko - $zivotko - $dip));
+        $penzijko = min($this->kc($profile['pension_contrib'] ?? 0), $retirementCap);
+        $zivotko = min($this->kc($profile['life_insurance'] ?? 0), max(0.0, $retirementCap - $penzijko));
+        $dip = min($this->kc($profile['dip_contrib'] ?? 0), max(0.0, $retirementCap - $penzijko - $zivotko));
+        $care = min($this->kc($profile['long_term_care'] ?? 0), max(0.0, $retirementCap - $penzijko - $zivotko - $dip));
 
         // Dary §15/1: odečet jen když ≥ spodní limit (1 000 Kč nebo 2 % ZD), max % ZD.
-        $donations = $this->num($profile['donations'] ?? 0);
+        // Strop „nejvýše 30 %" v celých korunách dolů, aby ho zaokrouhlení nepřekročilo.
+        $donations = $this->kc($profile['donations'] ?? 0);
         $donationCapPct = (float) ($c['donation_cap_fo_pct'] ?? 0.30);
         $donationMin = min((float) ($c['donation_min_fo'] ?? 1000), (float) ($c['donation_min_fo_pct'] ?? 0.02) * $totalBase);
-        $donationCap = round($donationCapPct * $totalBase, 2);
+        $donationCap = floor(round($donationCapPct * $totalBase, 2));
         $daryDeduct = 0.0;
         if ($donations >= $donationMin && $donations > 0) {
             $daryDeduct = min($donations, $donationCap);
@@ -184,19 +201,19 @@ final class DpfoReturnCalculator
             $warnings[] = 'Dary nedosahují spodního limitu §15/1 (min. 1 000 Kč nebo 2 % základu) — neodečtou se.';
         }
 
-        $deductions = round($uroky + $penzijko + $zivotko + $dip + $care + $daryDeduct, 2);
-        $baseAfter15 = max(0.0, round($baseAfterLoss - $deductions, 2)); // ř. 55 = ř. 45 − ř. 54
+        $deductions = $uroky + $penzijko + $zivotko + $dip + $care + $daryDeduct;
+        $baseAfter15 = max(0.0, $baseAfterLoss - $deductions); // ř. 55 = ř. 45 − ř. 54
 
         // ── Základ zaokrouhlený ↓ 100 Kč + daň 15/23 % ───────────────────────
         $roundedBase = $this->floorTo($baseAfter15, (int) ($c['rounding_base_fo'] ?? 100));
         $tax16 = ceil(DpfoCalculator::progressiveTax((float) $roundedBase, $c));
 
         // ── Slevy §35ba ──────────────────────────────────────────────────────
-        $creditTaxpayer = (float) ($c['credit_taxpayer'] ?? 30840);
+        $creditTaxpayer = TaxFormAmount::kc((float) ($c['credit_taxpayer'] ?? 30840));
         $spouseClaim = is_array($profile['spouse_claim'] ?? null) ? $profile['spouse_claim'] : null;
-        $creditSpouse = $spouseClaim !== null
+        $creditSpouse = TaxFormAmount::kc($spouseClaim !== null
             ? DpfoCalculator::spouseCreditFromClaim($spouseClaim, $c)
-            : (!empty($profile['spouse_credit']) ? (float) ($c['credit_spouse'] ?? 24840) : 0.0);
+            : (!empty($profile['spouse_credit']) ? (float) ($c['credit_spouse'] ?? 24840) : 0.0));
         // m_manz (ř.65a) — EPO ověřuje součin počet měsíců × sazba i při nulovém nároku;
         // legacy vstup bez měsíců (jen spouse_credit=true) znamená celý rok.
         $spouseMonths = $spouseClaim !== null
@@ -205,31 +222,31 @@ final class DpfoReturnCalculator
         // ř. 65b (kc_manztpp) — ZTP/P u manžela/manželky zdvojnásobuje slevu (viz
         // DpfoCalculator::spouseCreditFromClaim); EPO chce zvlášť i tu "přidanou" polovinu.
         $spouseZtppExtra = !empty($spouseClaim['ztpp'] ?? null)
-            ? round((float) ($c['credit_spouse'] ?? 24840) * $spouseMonths / 12, 2)
+            ? TaxFormAmount::kc((float) ($c['credit_spouse'] ?? 24840) * $spouseMonths / 12)
             : 0.0;
-        $creditDisability12 = round((float) ($c['credit_disability_12'] ?? 2520) * max(0, min(12, (int) ($profile['disability_12_months'] ?? 0))) / 12, 2);
-        $creditDisability3 = round((float) ($c['credit_disability_3'] ?? 5040) * max(0, min(12, (int) ($profile['disability_3_months'] ?? 0))) / 12, 2);
-        $creditZtpp = round((float) ($c['credit_ztpp'] ?? 16140) * max(0, min(12, (int) ($profile['ztpp_months'] ?? 0))) / 12, 2);
-        $slevy35ba = round($creditTaxpayer + $creditSpouse + $creditDisability12 + $creditDisability3 + $creditZtpp, 2);
-        $taxAfter35ba = max(0.0, round($tax16 - $slevy35ba, 2));
+        $creditDisability12 = TaxFormAmount::kc((float) ($c['credit_disability_12'] ?? 2520) * max(0, min(12, (int) ($profile['disability_12_months'] ?? 0))) / 12);
+        $creditDisability3 = TaxFormAmount::kc((float) ($c['credit_disability_3'] ?? 5040) * max(0, min(12, (int) ($profile['disability_3_months'] ?? 0))) / 12);
+        $creditZtpp = TaxFormAmount::kc((float) ($c['credit_ztpp'] ?? 16140) * max(0, min(12, (int) ($profile['ztpp_months'] ?? 0))) / 12);
+        $slevy35ba = $creditTaxpayer + $creditSpouse + $creditDisability12 + $creditDisability3 + $creditZtpp;
+        $taxAfter35ba = max(0.0, $tax16 - $slevy35ba);
 
         // ── Daňové zvýhodnění §35c (sleva + vratitelný bonus) ────────────────
         $children = (array) ($profile['children'] ?? []);
         $childrenCount = count($children) ?: (int) ($profile['children_count'] ?? 0);
-        $childTotal = $children !== []
+        $childTotal = TaxFormAmount::kc($children !== []
             ? DpfoCalculator::childCreditFromClaims($children, $c['child_credits'])
-            : DpfoCalculator::childCreditTotal($childrenCount, $c['child_credits']);
+            : DpfoCalculator::childCreditTotal($childrenCount, $c['child_credits']));
         $childCredit = min($taxAfter35ba, $childTotal);        // sleva do výše daně
-        $childBonus = max(0.0, round($childTotal - $taxAfter35ba, 2)); // vratitelný bonus
+        $childBonus = max(0.0, $childTotal - $taxAfter35ba); // vratitelný bonus
         $childBonusMinimum = (float) ($c['child_bonus_min'] ?? 100);
         if ($childBonus > 0 && $childBonus < $childBonusMinimum) {
             $warnings[] = 'Vypočtený daňový bonus na děti je nižší než zákonné minimum '
                 . number_format($childBonusMinimum, 0, ',', ' ') . ' Kč (§35c odst. 3), proto se neuplatní.';
             $childBonus = 0.0;
         }
-        $taxAfterChildren = max(0.0, round($taxAfter35ba - $childCredit, 2)); // daň po zvýhodnění
+        $taxAfterChildren = max(0.0, $taxAfter35ba - $childCredit); // daň po zvýhodnění
 
-        $bonusIncome = round($s6Income + $s7Income, 2);
+        $bonusIncome = $s6Income + $s7Income;
         $bonusIncomeMinimum = (float) ($c['child_bonus_min_income'] ?? 0);
         if ($childBonus > 0 && $bonusIncome < $bonusIncomeMinimum) {
             $warnings[] = 'Daňový bonus na děti se neuplatnil: příjem ze §6 a §7 nedosahuje zákonného minima '
@@ -263,13 +280,13 @@ final class DpfoReturnCalculator
 
         // Výsledná daňová povinnost (po zvýhodnění, − bonus) a vypořádání záloh.
         // Daň ze samostatného základu se přičítá až sem — slevy ji nesnižují.
-        $finalTax = round($taxAfterChildren - $childBonus + $separateTax, 2); // záporné = přeplatek z bonusu
-        $advancesPaid = max(0.0, $this->num($inputs['tax_paid_advances'] ?? 0));
-        $advances = round($s6Withholding + $advancesPaid, 2);
-        $balanceDue = round($finalTax - $advances, 2);
+        $finalTax = $taxAfterChildren - $childBonus + $separateTax; // záporné = přeplatek z bonusu
+        $advancesPaid = max(0.0, $this->kc($inputs['tax_paid_advances'] ?? 0));
+        $advances = $s6Withholding + $advancesPaid;
+        $balanceDue = $finalTax - $advances;
         // Poslední známá daňová povinnost pro zálohy (§ 38a) zahrnuje i daň ze samostatného
         // základu — je to součást stanovené daně, ne položka vedle ní.
-        $lastKnownTax = max(0.0, round($taxAfterChildren + $separateTax, 2));
+        $lastKnownTax = max(0.0, $taxAfterChildren + $separateTax);
         // § 38a odst. 5 ZDP — podíl § 6 na celkovém základu: od horní hranice se zálohy
         // neplatí vůbec, od dolní (ale ne dosahující horní) jen v poloviční výši.
         $employmentExemptShare = (float) ($c['advance_employment_exempt_share'] ?? 0.50);
@@ -509,6 +526,12 @@ final class DpfoReturnCalculator
     private function num(mixed $v): float
     {
         return round((float) $v, 2);
+    }
+
+    /** Vstupní částka rovnou jako řádek přiznání v celých korunách ({@see TaxFormAmount}). */
+    private function kc(mixed $v): float
+    {
+        return TaxFormAmount::kc($this->num($v));
     }
 
     private function i(float $v): float

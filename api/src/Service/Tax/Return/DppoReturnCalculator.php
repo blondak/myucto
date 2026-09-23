@@ -12,6 +12,9 @@ namespace MyInvoice\Service\Tax\Return;
  * výstup = struktura řádků formuláře (číslo řádku → hodnota + zdroj/popis) pro FE
  * náhled i XML builder. Podklady dodává {@see DppoReturnDataProvider}.
  *
+ * Každý řádek je v celých korunách a součtové řádky se sčítají ze zaokrouhlených
+ * řádků, jak je kontroluje EPO ({@see TaxFormAmount}).
+ *
  * Pipeline (§23–§35 ZDP, formulář DPPDP9):
  *   ř.10  VH před zdaněním (Σ 6xx − Σ 5xx mimo 59x)
  *   ř.40  výdaje neuznávané za náklady §25 (nedaňové účty + neuznatelná ZC vyřazení
@@ -120,16 +123,17 @@ final class DppoReturnCalculator
         // jeden řádek volného textu na položku, ne souhrn, proto se filtruje tady a ne
         // až v builderu (jediné místo, které zná pravidlo paušálu dopravy).
         $line62Items = $this->line62Items($inputs['manual_increase_items'] ?? []);
-        $lossCarry = max(0.0, round((float) ($inputs['loss_carryforward'] ?? 0), 2));
+        $lossCarry = max(0.0, TaxFormAmount::kc((float) ($inputs['loss_carryforward'] ?? 0)));
         [$donations, $donationWarnings] = $this->resolveDonations($inputs, (float) ($c['donation_min_po'] ?? 2000));
+        $donations = TaxFormAmount::kc($donations);
         $warnings = array_merge($warnings, $donationWarnings);
         $disabledAvg = max(0.0, (float) ($inputs['disabled_employees_avg'] ?? 0));
         $disabledSevereAvg = max(0.0, (float) ($inputs['disabled_employees_severe_avg'] ?? 0));
         // § 35 odst. 4 ZDP — sleva za zastavenou exekuci (ř. 3 tabulky H, `kc_dpp_f3`).
         // Odvodit z účetnictví nelze: nárok vzniká usnesením exekutora o zastavení exekuce,
         // ne účetním dokladem. Proto ruční vstup.
-        $stoppedExecutionCredit = max(0.0, round((float) ($inputs['stopped_execution_credit'] ?? 0), 2));
-        $advancesPaid = max(0.0, round((float) ($inputs['tax_paid_advances'] ?? 0), 2));
+        $stoppedExecutionCredit = max(0.0, TaxFormAmount::kc((float) ($inputs['stopped_execution_credit'] ?? 0)));
+        $advancesPaid = max(0.0, TaxFormAmount::kc((float) ($inputs['tax_paid_advances'] ?? 0)));
 
         // ── Konstanty ───────────────────────────────────────────────────────
         $rate = (float) ($c['corporate_tax_rate'] ?? 0.21);
@@ -154,16 +158,6 @@ final class DppoReturnCalculator
         // (resp. 109 až 161) — pro ZC tedy ne. Základ daně to nemění, jen řádky.
         $line40 = self::accountingAdjustments($data)[40];
 
-        // ř.200 základ daně před odečty (může být záporný) — POZOR: záměrně počítá
-        // s celkovými (nerozdělenými) $manualIncrease/$manualDecrease/$line40, aby
-        // rozpad paušálu na dopravu níže (na ř.40/62/112/162/170) NEOVLIVNIL základ
-        // ani daň — jde jen o přerozdělení MEZI řádky výpisu/XML, ne o novou částku.
-        $base = round(
-            $vh + $line40 + $depIncrease + $manualIncrease
-            - $depDecrease - $manualDecrease - $disposalDecrease,
-            2
-        );
-
         // ── Rozpad výpisu ř.40/62/112/162/170 — §24/2/zt paušál na dopravu ────
         // Přesouvá add-back PHM (increase) z obecného ř.62 na ř.40 a paušální výdaj
         // (decrease) z obecného ř.162 na ř.112/170, PŘESNĚ dle toho, jak to podává
@@ -177,12 +171,31 @@ final class DppoReturnCalculator
         // vykážou na svém řádku místo obecného ř. 62/162; součty ř. 70/170/200 se nemění.
         $increaseByLine = $this->itemsByLine($inputs['manual_increase_items'] ?? [], self::INCREASE_ITEM_LINES, 62);
         $decreaseByLine = $this->itemsByLine($inputs['manual_decrease_items'] ?? [], self::DECREASE_ITEM_LINES, 162);
-        $line40Reported = round($line40 + $flatRateTravelAddback + ($increaseByLine[40] ?? 0.0), 2);
-        $line62Reported = round($manualIncrease - $flatRateTravelAddback - array_sum($increaseByLine), 2);
-        $line160Reported = round($disposalDecrease + ($decreaseByLine[160] ?? 0.0), 2);
-        $line162Reported = round($manualDecrease - $flatRateTravelDeduction - array_sum($decreaseByLine), 2);
-        $line112Reported = round($flatRateTravelDeduction + ($decreaseByLine[112] ?? 0.0), 2);
-        $line170Reported = round($depDecrease + $manualDecrease + $disposalDecrease, 2);
+        // Každý řádek formuláře v celých korunách, zaokrouhlený JEDNOU z haléřové hodnoty
+        // ({@see TaxFormAmount}); součtové řádky se skládají až z těchto zaokrouhlených
+        // řádků. Tiskopis: ř. 70 = 20 + 30 + 40 + 50 + 61 + 62, ř. 170 = 100 + 101 + 109
+        // + 110 + 111 + 112 + 120 + 130 + 140 + 150 + 160 + 161 + 162, ř. 200 = 10 + 70
+        // − 170. Součet v haléřích zaokrouhlený až na konci se od součtu uvedených řádků
+        // liší až o korunu a EPO ho odmítne („Hodnota ř.200 se nerovná správné
+        // (ř.10+70-170)"). Rozpad paušálu na dopravu tak může posunout základ nejvýš
+        // o zaokrouhlení jednotlivých řádků — základ daně JE součtem uvedených řádků.
+        $line10 = TaxFormAmount::kc($vh);
+        $increaseLines = array_map(TaxFormAmount::kc(...), $increaseByLine);
+        $decreaseLines = array_map(TaxFormAmount::kc(...), $decreaseByLine);
+        $line40Reported = TaxFormAmount::kc($line40 + $flatRateTravelAddback + ($increaseByLine[40] ?? 0.0));
+        $line50 = TaxFormAmount::kc($depIncrease);
+        $line62Reported = TaxFormAmount::kc($manualIncrease - $flatRateTravelAddback - array_sum($increaseByLine));
+        $line150 = TaxFormAmount::kc($depDecrease);
+        $line160Reported = TaxFormAmount::kc($disposalDecrease + ($decreaseByLine[160] ?? 0.0));
+        $line162Reported = TaxFormAmount::kc($manualDecrease - $flatRateTravelDeduction - array_sum($decreaseByLine));
+        $line112Reported = TaxFormAmount::kc($flatRateTravelDeduction + ($decreaseByLine[112] ?? 0.0));
+        $line70Reported = $line40Reported + $line50 + $line62Reported
+            + ($increaseLines[20] ?? 0.0) + ($increaseLines[30] ?? 0.0) + ($increaseLines[61] ?? 0.0);
+        $line170Reported = $line150 + $line160Reported + $line162Reported + $line112Reported
+            + array_sum(array_diff_key($decreaseLines, [112 => true, 160 => true]));
+
+        // ř.200 základ daně před odečty (může být záporný).
+        $base = $line10 + $line70Reported - $line170Reported;
 
         // Položky, které o dopravě mluví, ale za paušál označené nejsou. Systém je zařadit
         // neumí; tiše je vykázat na obecném ř. 62/162 by znamenalo špatně vyplněné přiznání,
@@ -210,7 +223,7 @@ final class DppoReturnCalculator
             $warnings[] = 'Ztráta minulých let se uplatnila jen do výše základu daně; zbytek '
                 . number_format($lossCarry - $lossApplied, 0, ',', ' ') . ' Kč zůstává k převodu.';
         }
-        $baseAfterLoss = round($base - $lossApplied, 2); // ř.250
+        $baseAfterLoss = $base - $lossApplied; // ř.250
 
         // ř.242 odečet na podporu výzkumu a vývoje (§ 34 odst. 4 a § 34a–34e) a ř.243
         // odečet na podporu odborného vzdělávání (§ 34 odst. 4 a § 34f–34h).
@@ -223,28 +236,28 @@ final class DppoReturnCalculator
         //
         // Pořadí je dané anotací XSD u `kc_ii_243`: odborné vzdělávání se odečítá až od
         // základu sníženého mimo jiné o VaV, ne od původního.
-        $rndClaimed = max(0.0, (float) ($inputs['rnd_deduction'] ?? 0));
+        $rndClaimed = max(0.0, TaxFormAmount::kc((float) ($inputs['rnd_deduction'] ?? 0)));
         $rndApplied = min($rndClaimed, max(0.0, $baseAfterLoss));
         if ($rndClaimed > $rndApplied) {
             $warnings[] = 'Odečet na podporu výzkumu a vývoje (ř. 242) se uplatnil jen do výše základu; '
                 . 'zbytek ' . number_format($rndClaimed - $rndApplied, 0, ',', ' ') . ' Kč lze podle § 34 odst. 5 '
                 . 'uplatnit v následujících 3 obdobích — systém tenhle přenos NEEVIDUJE, hlídejte si ho.';
         }
-        $baseAfterRnd = round($baseAfterLoss - $rndApplied, 2);
+        $baseAfterRnd = $baseAfterLoss - $rndApplied;
 
-        $eduClaimed = max(0.0, (float) ($inputs['education_deduction'] ?? 0));
+        $eduClaimed = max(0.0, TaxFormAmount::kc((float) ($inputs['education_deduction'] ?? 0)));
         $eduApplied = min($eduClaimed, max(0.0, $baseAfterRnd));
         if ($eduClaimed > $eduApplied) {
             $warnings[] = 'Odečet na podporu odborného vzdělávání (ř. 243) se uplatnil jen do výše základu '
                 . 'sníženého o ztrátu a o odečet na výzkum a vývoj; zbytek '
                 . number_format($eduClaimed - $eduApplied, 0, ',', ' ') . ' Kč se neodečte.';
         }
-        $baseAfterDeductions = round($baseAfterRnd - $eduApplied, 2);
+        $baseAfterDeductions = $baseAfterRnd - $eduApplied;
 
         // ř.260 odečet darů §20/8 — cap % ze základu sníženého podle § 34, tedy nejen
         // o ztrátu, ale i o odečty na VaV a odborné vzdělávání. Dokud odečty § 34 odst. 4
         // neexistovaly, byl `baseAfterLoss` totéž; s nimi už ne.
-        $donationCap = max(0.0, round($donationCapPct * max(0.0, $baseAfterDeductions), 2));
+        $donationCap = $this->donationCap($donationCapPct, $baseAfterDeductions);
         $donationApplied = min($donations, $donationCap);
         if ($donations > $donationApplied) {
             $warnings[] = 'Dary přesahují limit §20/8 (' . (int) round($donationCapPct * 100)
@@ -259,13 +272,13 @@ final class DppoReturnCalculator
         $roundedBase = $this->floorTo(max(0.0, $baseAfterDeductions - $donationApplied), $roundBase);
 
         // ř.290 daň
-        $taxGross = round($roundedBase * $rate, 2);
+        $taxGross = TaxFormAmount::kc($roundedBase * $rate);
 
         // ř.300 slevy §35 = úhrn ř. 4 tabulky H (ř.1 zaměstnanci se ZP + ř.2 TZP + ř.3
         // zastavené exekuce §35/4), omezený výší daně na ř. 290.
-        $disabledCredit = round($disabledAvg * $creditPerDisabled, 2);
-        $severeDisabledCredit = round($disabledSevereAvg * $creditPerSevere, 2);
-        $creditsEntitlement = round($disabledCredit + $severeDisabledCredit + $stoppedExecutionCredit, 2);
+        $disabledCredit = TaxFormAmount::kc($disabledAvg * $creditPerDisabled);
+        $severeDisabledCredit = TaxFormAmount::kc($disabledSevereAvg * $creditPerSevere);
+        $creditsEntitlement = $disabledCredit + $severeDisabledCredit + $stoppedExecutionCredit;
         $credits = min($creditsEntitlement, $taxGross);
         if ($creditsEntitlement > $credits) {
             $warnings[] = 'Sleva §35 byla omezena výší daně na ř. 290; neuplatněný nárok činí '
@@ -273,7 +286,7 @@ final class DppoReturnCalculator
         }
 
         // ř.310 / ř.340 daň po slevách (nezáporná)
-        $taxAfterCredits = max(0.0, round($taxGross - $credits, 2));
+        $taxAfterCredits = max(0.0, $taxGross - $credits);
         $totalTax = $taxAfterCredits;
 
         // FEATURE 1 — projekce závěrkových operací (§DP): pokud podklady nesou nezaúčtované
@@ -283,8 +296,9 @@ final class DppoReturnCalculator
         $proj = $data['closing_projection'] ?? null;
         if (is_array($proj) && ($proj['is_projection'] ?? false) === true) {
             $vhProjected = round((float) ($proj['vh_projected'] ?? $vh), 2);
-            // Projektovaný základ = posted základ posunutý o rozdíl VH (ostatní úpravy §23 se nemění).
-            $projectedBase = round($base + ($vhProjected - $vh), 2);
+            // Projektovaný základ = posted základ posunutý o rozdíl VH (ostatní úpravy §23 se nemění);
+            // ř. 10 je i v projekci v celých korunách.
+            $projectedBase = $base + (TaxFormAmount::kc($vhProjected) - $line10);
             $projectedTax = $this->taxFromBase($projectedBase, $lossCarry, $donations, $donationCapPct, $rate, $roundBase, $creditsEntitlement, $rndClaimed, $eduClaimed);
             $projection = [
                 'vh_posted' => round($vh, 2),
@@ -297,7 +311,7 @@ final class DppoReturnCalculator
         }
 
         // ř.360 doplatek/přeplatek
-        $balanceDue = round($totalTax - $advancesPaid, 2);
+        $balanceDue = $totalTax - $advancesPaid;
 
         // V. oddíl — zálohy §38a dle poslední známé daňové povinnosti (ř.340). Splatnosti
         // = 15. den N-tého měsíce ZÁLOHOVÉHO období (období FOLLOWING po tomto), u
@@ -330,33 +344,31 @@ final class DppoReturnCalculator
         // (kc_ii80_70) a základ se z něj počítá. Zkušební EPO to 30. 8. 2026 vytklo
         // dvakrát: „Řádek 70 II. oddílu není naplněn" a „Hodnota ř.200 se nerovná
         // správné (ř.10+70-170)". Číslo bylo správné, chyběl součtový řádek, na
-        // kterém stojí křížová kontrola příjemce.
-        $line70Reported = round($line40Reported + $depIncrease + $line62Reported
-            + ($increaseByLine[20] ?? 0.0) + ($increaseByLine[30] ?? 0.0) + ($increaseByLine[61] ?? 0.0), 2);
+        // kterém stojí křížová kontrola příjemce. Počítá se výše s ostatními řádky.
         $itemLine = fn (int $n, array $byLine): array => $this->line($n, (string) $n, self::ITEM_LINE_LABELS[$n], $byLine[$n] ?? 0.0, 'ruční vstup s řádkem přiznání');
 
         $lines = [
-            $this->line(10, '10', 'Výsledek hospodaření před zdaněním', $vh, 'deník: Σ 6xx − Σ 5xx (mimo 59x)'),
-            $itemLine(20, $increaseByLine),
-            $itemLine(30, $increaseByLine),
+            $this->line(10, '10', 'Výsledek hospodaření před zdaněním', $line10, 'deník: Σ 6xx − Σ 5xx (mimo 59x)'),
+            $itemLine(20, $increaseLines),
+            $itemLine(30, $increaseLines),
             $this->line(40, '40', 'Výdaje neuznávané za náklady (§25)', $line40Reported, 'nedaňové účty + účetní ZC vyřazení převyšující daňovou'
                 . ($flatRateTravelAddback > 0 ? ' + add-back PHM při paušálu na dopravu (§24/2/zt)' : '')),
-            $this->line(50, '50', 'Účetní odpisy převyšující daňové', $depIncrease, 'rozdíl odpisů (zvýšení)'),
-            $itemLine(61, $increaseByLine),
+            $this->line(50, '50', 'Účetní odpisy převyšující daňové', $line50, 'rozdíl odpisů (zvýšení)'),
+            $itemLine(61, $increaseLines),
             $this->line(62, '62', 'Ostatní částky zvyšující základ (§23)', $line62Reported, 'ruční vstupy (mimo paušál dopravy)'),
             $this->line(70, '70', 'Souhrn částek zvyšujících výsledek hospodaření', $line70Reported, 'mezisoučet ř. 20–62 (ř.40 + ř.50 + ř.62)'),
-            $itemLine(100, $decreaseByLine),
-            $itemLine(101, $decreaseByLine),
-            $itemLine(109, $decreaseByLine),
-            $itemLine(110, $decreaseByLine),
-            $itemLine(111, $decreaseByLine),
+            $itemLine(100, $decreaseLines),
+            $itemLine(101, $decreaseLines),
+            $itemLine(109, $decreaseLines),
+            $itemLine(110, $decreaseLines),
+            $itemLine(111, $decreaseLines),
             $this->line(112, '112', 'Doplňková informace (§23/3 písm. c) — např. paušální výdaj na dopravu', $line112Reported, 'ruční položka rozpoznaná dle textu (§24/2/zt paušál dopravy)'),
-            $itemLine(120, $decreaseByLine),
-            $itemLine(130, $decreaseByLine),
-            $itemLine(140, $decreaseByLine),
-            $this->line(150, '150', 'Daňové odpisy převyšující účetní', $depDecrease, 'rozdíl odpisů (snížení)'),
+            $itemLine(120, $decreaseLines),
+            $itemLine(130, $decreaseLines),
+            $itemLine(140, $decreaseLines),
+            $this->line(150, '150', 'Daňové odpisy převyšující účetní', $line150, 'rozdíl odpisů (snížení)'),
             $this->line(160, '160', 'Daňové výdaje převyšující účetní náklady (§24)', $line160Reported, 'daňová ZC vyřazeného majetku převyšující účetní'),
-            $itemLine(161, $decreaseByLine),
+            $itemLine(161, $decreaseLines),
             $this->line(162, '162', 'Ostatní částky snižující základ (§23)', $line162Reported, 'ruční vstupy (mimo paušál dopravy)'),
             $this->line(170, '170', 'Souhrn částek snižujících výsledek hospodaření', $line170Reported, 'mezisoučet ř. 101–165 (ř.150 odpisy + ř.160 ZC vyřazení + ř.162 ostatní §23 + ř.112 paušál dopravy)'),
             $this->line(200, '200', 'Základ daně', $base, 'mezisoučet'),
@@ -393,10 +405,15 @@ final class DppoReturnCalculator
             'bank_account' => $data['bank_account'] ?? null,
             'manual_increase_items_line62' => $line62Items,
             'manual_items_line_appendix' => $this->lineAppendixItems($inputs),
-            'line160_appendix' => $this->line160Appendix($data['disposal_decrease_groups'] ?? null, $line160Reported),
+            // Rozpad podle účtových skupin se páruje s haléřovou částkou skupin; je to jen
+            // textová příloha, číselně ji EPO proti ř. 160 nekontroluje.
+            'line160_appendix' => $this->line160Appendix(
+                $data['disposal_decrease_groups'] ?? null,
+                round($disposalDecrease + ($decreaseByLine[160] ?? 0.0), 2),
+            ),
             'summary' => [
                 'rate' => $rate,
-                'vh' => $vh,
+                'vh' => $line10,
                 'base' => $base,
                 'rounded_base' => (float) $roundedBase,
                 'tax_gross' => $taxGross,
@@ -796,17 +813,27 @@ final class DppoReturnCalculator
         float $educationDeduction = 0.0,
     ): float {
         $lossApplied = $base > 0 ? min($lossCarry, $base) : 0.0;
-        $baseAfterLoss = round($base - $lossApplied, 2);
+        $baseAfterLoss = $base - $lossApplied;
         $rndApplied = min(max(0.0, $rndDeduction), max(0.0, $baseAfterLoss));
-        $baseAfterRnd = round($baseAfterLoss - $rndApplied, 2);
+        $baseAfterRnd = $baseAfterLoss - $rndApplied;
         $eduApplied = min(max(0.0, $educationDeduction), max(0.0, $baseAfterRnd));
-        $baseAfterDeductions = round($baseAfterRnd - $eduApplied, 2);
-        $donationCap = max(0.0, round($donationCapPct * max(0.0, $baseAfterDeductions), 2));
+        $baseAfterDeductions = $baseAfterRnd - $eduApplied;
+        $donationCap = $this->donationCap($donationCapPct, $baseAfterDeductions);
         $donationApplied = min($donations, $donationCap);
         $roundedBase = $this->floorTo(max(0.0, $baseAfterDeductions - $donationApplied), $roundBase);
-        $taxGross = round($roundedBase * $rate, 2);
+        $taxGross = TaxFormAmount::kc($roundedBase * $rate);
         $credits = min($creditsEntitlement, $taxGross);
-        return max(0.0, round($taxGross - $credits, 2));
+        return max(0.0, $taxGross - $credits);
+    }
+
+    /**
+     * Strop odečtu darů (ř. 260) v celých korunách. Zákon dovoluje odečíst „nejvýše"
+     * dané procento ze ř. 250, proto se strop zaokrouhluje DOLŮ — matematické
+     * zaokrouhlení by u zlomku nad půl koruny dovolilo odečíst víc, než zákon připouští.
+     */
+    private function donationCap(float $pct, float $baseAfterDeductions): float
+    {
+        return max(0.0, floor(round($pct * max(0.0, $baseAfterDeductions), 2)));
     }
 
     private function floorTo(float $value, int $step): int

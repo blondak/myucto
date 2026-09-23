@@ -200,6 +200,9 @@ společnosti — tedy příspěvek snížený o částky připadající na měs�
 pro maximální státní příspěvek; systém dál pracuje jen s touto (již sníženou) hodnotou.
 Dary musí splnit spodní hranici a souhrnný procentní strop. Základ po odpočtech se zaokrouhlí
 dolů na celé stokoruny, daň v pásmech 15/23 % se zaokrouhlí nahoru na celé Kč.
+Řádky přiznání i příloh jsou v celých korunách a součtové řádky (úhrn dílčích základů,
+základ daně, úhrn odpočtů, dílčí základ v příloze č. 1) se sčítají z už zaokrouhlených
+řádků, jak je kontroluje EPO.
 
 Sleva na poplatníka je roční. Manžel/manželka, invalidita, ZTP/P a děti se posuzují
 podle zadaných měsíců a podmínek; ZTP/P zdvojnásobuje příslušný nárok. U dětí záleží
@@ -241,6 +244,11 @@ minus počáteční daňový stav. U odpisovaného majetku bez jakékoli daňov�
 daňová ZC **neznámá**: přiznání rozdíl nedopočítá, podklady na to upozorní a rozdíl
 zadáte ruční položkou. Základ se před sazbou zaokrouhluje dolů na celé tisíce
 Kč; jednotlivé zálohy na další období se zaokrouhlují nahoru na celé stokoruny.
+
+Každý řádek přiznání se vyplňuje v celých korunách. Částka z účetnictví se zaokrouhlí
+matematicky a součtové řádky (70, 170, 200 a navazující) jsou součtem už
+zaokrouhlených řádků, protože přesně tak je kontroluje EPO. Strop odečtu darů se
+zaokrouhluje dolů, aby odečet nepřekročil zákonné procento.
 
 Výsledkové zápisy skladové uzávěrky se do výpočtu zahrnují. Technický zápis
 uzavření knih se vylučuje, aby převod na uzávěrkové účty nevynuloval výsledek.
