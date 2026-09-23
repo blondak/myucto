@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { formatDate } from '@/composables/useFormat'
 import type { JournalEntryDetail } from '@/api/accounting'
+import type { DimensionSplits } from '@/api/dimensions'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import JournalLinesTable from './JournalLinesTable.vue'
 import JournalRelatedPanel from './JournalRelatedPanel.vue'
@@ -53,9 +54,10 @@ const documentCount = ref(0)
 const extrasTotal = computed(() => extrasCount.value + documentCount.value)
 
 // Uložené dimenze řádků se propíšou do načteného detailu, ať štítky v rozpadu sedí.
-function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>) {
+function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>, splits: Record<number, DimensionSplits> = {}) {
   for (const line of props.detail.lines) {
     line.dimensions = { ...(byLine[line.id] ?? {}) }
+    line.dimension_splits = { ...(splits[line.id] ?? {}) }
   }
 }
 </script>

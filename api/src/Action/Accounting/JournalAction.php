@@ -314,11 +314,13 @@ final class JournalAction
         $accMap = $this->accounts->idToAccountMap($supplierId);
         // Dimenze řádků (Firma → Dimenze) — jen id hodnot, názvy má klient v číselníku.
         $lineDims = $this->dimensions->entryLineDimensions($supplierId, $id);
-        $entry['lines'] = array_map(static function (array $line) use ($accMap, $lineDims): array {
+        $lineSplits = $this->dimensions->entryLineSplits($supplierId, $id);
+        $entry['lines'] = array_map(static function (array $line) use ($accMap, $lineDims, $lineSplits): array {
             $acc = $accMap[(int) $line['account_id']] ?? null;
             $line['account_code'] = $acc['code'] ?? null;
             $line['account_name'] = $acc['name'] ?? null;
             $line['dimensions'] = (object) ($lineDims[(int) $line['id']] ?? []);
+            $line['dimension_splits'] = (object) ($lineSplits[(int) $line['id']] ?? []);
             return $line;
         }, $entry['lines']);
         $entry['automation'] = $this->automationProvenance->forJournalEntries($supplierId, [$id])[$id] ?? null;
@@ -370,6 +372,20 @@ final class JournalAction
                     $line['dimensions'] = $this->dimensions->normalize($supplierId, $l['dimensions']);
                 } catch (DimensionException $e) {
                     return Json::error($response, $e->errorCode, "Řádek #{$i}: " . $e->getMessage(), $e->httpStatus);
+                }
+            }
+            // Rozpad řádku mezi víc hodnot typu: typ => [{value_id, share}], součet 100 %.
+            if (!empty($l['dimension_splits']) && is_array($l['dimension_splits'])) {
+                try {
+                    $splits = $this->dimensions->normalizeSplits($supplierId, $l['dimension_splits']);
+                } catch (DimensionException $e) {
+                    return Json::error($response, $e->errorCode, "Řádek #{$i}: " . $e->getMessage(), $e->httpStatus);
+                }
+                if ($splits !== []) {
+                    $line['dimension_splits'] = $splits;
+                    if (isset($line['dimensions'])) {
+                        $line['dimensions'] = array_diff_key($line['dimensions'], $splits);
+                    }
                 }
             }
             $lines[] = $line;
@@ -441,6 +457,9 @@ final class JournalAction
 
         $created = $this->journal->find($entryId, $supplierId);
         $created['links'] = $this->links->documentLinks($supplierId, $entryId);
+        if ($this->posting->dimensionWarnings() !== []) {
+            $created['dimension_warnings'] = $this->posting->dimensionWarnings();
+        }
 
         return Json::ok($response, $created, 201);
     }
@@ -989,6 +1008,7 @@ final class JournalAction
                 'description' => $this->nullableString($body['description'] ?? null),
             ]);
             $entryId = $this->posting->postDocument($supplierId, $sourceType, $docId, $lines, $meta);
+            $dimensionWarnings = $this->posting->dimensionWarnings();
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
         }
@@ -1009,6 +1029,9 @@ final class JournalAction
         $entry = $this->journal->find($entryId, $supplierId);
         if ($entryDate !== null && substr($effectiveEntryDate, 0, 4) !== substr($docDate, 0, 4)) {
             $entry['_warnings'] = ['entry_date_outside_document_year'];
+        }
+        if ($dimensionWarnings !== []) {
+            $entry['dimension_warnings'] = $dimensionWarnings;
         }
         return Json::ok($response, $entry);
     }

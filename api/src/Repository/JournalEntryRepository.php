@@ -347,9 +347,18 @@ final class JournalEntryRepository
             ]);
             // Dimenze řádku (migrace 1860) — typ => hodnota, zvalidované PostingService
             // resp. volajícím. Řádek se při přepisu maže celý, vazba odejde kaskádou.
-            if (!empty($line['dimensions']) && is_array($line['dimensions'])) {
+            $hasDims = !empty($line['dimensions']) && is_array($line['dimensions']);
+            $hasSplits = !empty($line['dimension_splits']) && is_array($line['dimension_splits']);
+            if ($hasDims || $hasSplits) {
                 $assignments ??= new DimensionAssignmentRepository($this->db);
-                $assignments->insertLineDimensions($supplierId, (int) $pdo->lastInsertId(), $line['dimensions']);
+                $lineId = (int) $pdo->lastInsertId();
+                if ($hasDims) {
+                    $assignments->insertLineDimensions($supplierId, $lineId, $line['dimensions']);
+                }
+                if ($hasSplits) {
+                    // Rozpad řádku mezi víc hodnot typu (pravidla dimenzí, EP-6).
+                    $assignments->insertLineSplits($supplierId, $lineId, $line['dimension_splits']);
+                }
             }
             $n++;
         }

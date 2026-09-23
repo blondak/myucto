@@ -130,6 +130,13 @@ final class PostingService
     private ?DimensionStamper $dimensionStamper = null;
 
     /**
+     * Varování pravidel dimenzí (vynucení `warning`) z posledního {@see postDocument()}.
+     *
+     * @var list<array{account_code:string, account_name:string, type_id:int, type_name:string, message:string}>
+     */
+    private array $dimensionWarnings = [];
+
+    /**
      * Syntetiky, u kterých analytiku vybírá KONTEXT dokladu, ne osnova — proto se na ně
      * automatický přesměr {@see singleAnalyticMap()} nikdy nepoužije:
      *
@@ -229,7 +236,12 @@ final class PostingService
             $sourceId,
             $resolved,
             $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap),
+            $entryDate,
         );
+        // Pravidla dimenzí podle účtu (Firma → Dimenze → Pravidla): povinná dimenze
+        // s vynucením `error` zápis odmítne, `warning` se vrátí přes dimensionWarnings().
+        $this->dimensionWarnings = [];
+        $this->dimensionWarnings = $this->dimensionStamper()->rules()->check($supplierId, $sourceType, $resolved, $entryDate);
         self::assertBalanced($resolved); // v haléřích; UnbalancedEntryException při nerovnosti
 
         // R7 (Epic F4): flag allow_closing_period smí nastavit VÝHRADNĚ ClosingService —
@@ -550,10 +562,10 @@ final class PostingService
         // Zrcadlo: stejný účet, opačná strana, stejná částka (vč. cizoměnové stopy).
         // Dimenze se přenáší ze stejného důvodu jako zakázka — storno musí odečíst
         // tam, kam původní řádek přičetl.
-        $origDims = (new DimensionAssignmentRepository($this->db))->lineDimensions(
-            $supplierId,
-            array_map(static fn (array $l): int => (int) ($l['id'] ?? 0), $origLines),
-        );
+        $assignments = new DimensionAssignmentRepository($this->db);
+        $origLineIds = array_map(static fn (array $l): int => (int) ($l['id'] ?? 0), $origLines);
+        $origDims = $assignments->lineDimensions($supplierId, $origLineIds);
+        $origSplits = $assignments->lineSplits($supplierId, $origLineIds);
         $mirror = [];
         foreach ($origLines as $line) {
             $mirror[] = [
@@ -568,6 +580,7 @@ final class PostingService
                 // odečetl z „bez zakázky" a v marži by původní řádek zůstal navždy.
                 'project_id'     => isset($line['project_id']) ? (int) $line['project_id'] : null,
                 'dimensions'     => $origDims[(int) ($line['id'] ?? 0)] ?? [],
+                'dimension_splits' => $origSplits[(int) ($line['id'] ?? 0)] ?? [],
             ];
         }
 
@@ -2296,6 +2309,16 @@ final class PostingService
     }
 
     /**
+     * Varování pravidel dimenzí z posledního zaúčtování (prázdné = žádné).
+     *
+     * @return list<array{account_code:string, account_name:string, type_id:int, type_name:string, message:string}>
+     */
+    public function dimensionWarnings(): array
+    {
+        return $this->dimensionWarnings;
+    }
+
+    /**
      * Stopa builderu (položka => kód účtu) převedená na id účtů osnovy, se stejným
      * přesměrováním na jedinou analytiku, jakým prošly řádky v resolveLines().
      *
@@ -2438,6 +2461,10 @@ final class PostingService
             // (ruční zápis); dokladové dimenze dorazítkuje DimensionStamper.
             if (!empty($line['dimensions']) && is_array($line['dimensions'])) {
                 $resolvedLine['dimensions'] = array_map('intval', $line['dimensions']);
+            }
+            // Rozpad řádku mezi víc hodnot typu (typ => hodnota => podíl), zvalidovaný volajícím.
+            if (!empty($line['dimension_splits']) && is_array($line['dimension_splits'])) {
+                $resolvedLine['dimension_splits'] = $line['dimension_splits'];
             }
             // cizoměnová stopa (jen saldokontní řádky cizoměnových dokladů)
             if (isset($line['currency_code'])) {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import {
@@ -19,6 +19,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { ICONS, btnFilled, btnFilledSm, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+// Záložka Pravidla se načte až při otevření.
+const DimensionRulesPanel = defineAsyncComponent(() => import('@/components/dimensions/DimensionRulesPanel.vue'))
 import Modal from '@/components/ui/Modal.vue'
 
 /**
@@ -37,6 +39,8 @@ const loading = ref(true)
 const failed = ref(false)
 const busy = ref(false)
 const level = ref<DimensionLevel>('company')
+/** Záložka Pravidla (povinné dimenze podle účtu, kontrola deníku). */
+const showRules = ref(false)
 const selectedTypeId = ref<number | null>(null)
 const groupInfo = ref<DimensionGroupInfo | null>(null)
 const expanded = ref<Set<number>>(new Set())
@@ -395,15 +399,25 @@ function valueCount(typeId: number) {
     <template v-else>
       <div class="flex flex-wrap gap-2 border-b border-neutral-200 mb-4" role="tablist">
         <button v-for="tab in (['company', 'global'] as const)" :key="tab" type="button" role="tab"
-                :aria-selected="level === tab"
+                :aria-selected="!showRules && level === tab"
                 class="px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap"
-                :class="level === tab ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'"
+                :class="!showRules && level === tab ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'"
                 :data-test="`dimensions-tab-${tab}`"
-                @click="level = tab">
+                @click="level = tab; showRules = false">
           {{ t(`dimensions.tab_${tab}`) }}
+        </button>
+        <button type="button" role="tab" :aria-selected="showRules"
+                class="px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap"
+                :class="showRules ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'"
+                data-test="dimensions-tab-rules"
+                @click="showRules = true">
+          {{ t('dimensions.tab_rules') }}
         </button>
       </div>
 
+      <DimensionRulesPanel v-if="showRules" :can-write="canWrite" />
+
+      <template v-else>
       <!-- Skupina firem: jen u globálních dimenzí. -->
       <section v-if="level === 'global'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 mb-4" data-test="dimensions-group">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-2">{{ t('dimensions.group_title') }}</h2>
@@ -540,6 +554,7 @@ function valueCount(typeId: number) {
           </ul>
         </section>
       </div>
+      </template>
 
       <!-- Formulář typu -->
       <Modal v-if="typeFormOpen && canWrite" :title="typeForm.id === null ? t('dimensions.type_new') : t('dimensions.type_edit')"

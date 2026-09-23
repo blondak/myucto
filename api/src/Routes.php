@@ -2239,6 +2239,12 @@ final class Routes
             $g->get   ('/dimensions',                                    [\MyInvoice\Action\Accounting\DimensionAction::class, 'overview']);
             $g->put   ('/dimensions/settings',                           [\MyInvoice\Action\Accounting\DimensionAction::class, 'settings']);
             $g->post  ('/dimensions/defaults',                           [\MyInvoice\Action\Accounting\DimensionAction::class, 'defaults']);
+            $g->get   ('/dimensions/rules',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'listRules']);
+            $g->post  ('/dimensions/rules',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'createRule']);
+            $g->get   ('/dimensions/rules/audit',                        [\MyInvoice\Action\Accounting\DimensionAction::class, 'auditRules']);
+            $g->get   ('/dimensions/rules/coverage',                     [\MyInvoice\Action\Accounting\DimensionAction::class, 'ruleCoverage']);
+            $g->put   ('/dimensions/rules/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\DimensionAction::class, 'updateRule']);
+            $g->delete('/dimensions/rules/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\DimensionAction::class, 'deleteRule']);
             $g->post  ('/dimensions/types',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'createType']);
             $g->patch ('/dimensions/types/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\DimensionAction::class, 'updateType']);
             $g->delete('/dimensions/types/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\DimensionAction::class, 'deleteType']);
