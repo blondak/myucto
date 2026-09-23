@@ -13,6 +13,7 @@ use MyInvoice\Service\Accounting\Assets\DepreciationCalculator;
 use MyInvoice\Service\Accounting\Assets\DepreciationContext;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
 use MyInvoice\Service\Migration\Shared\MigratedDepreciation;
+use MyInvoice\Service\Migration\Shared\MigratedDisposal;
 use MyInvoice\Service\Migration\Shared\SmallAssetCard;
 
 /**
@@ -64,6 +65,7 @@ final class AssetImporter
         private readonly SmallAssetService $smallAssets,
         private readonly DepreciationEntryRepository $entries,
         private readonly DepreciationCalculator $calculator,
+        private readonly MigratedDisposal $disposals,
     ) {}
 
     public function importLongTerm(ImportContext $ctx): void
@@ -277,9 +279,15 @@ final class AssetImporter
         $tax = self::taxSetup($card, $list, $disposal, $helper['card'] ?? null);
         $taxMethod = $tax['method'];
         $plan = $this->taxPlan($ctx, $tax, $helper['card'] ?? $card, $helper['moves'] ?? $list, $inUse, $disposal, $helper !== null, $review);
+        $this->reportResidualWriteOffs($ctx, $no, $name, $list, $disposal, $start, $end);
         if (isset($existing[$key])) {
             $this->depreciation($ctx, $existing[$key], $years, $list, $inUse, $disposal, $plan, $tax['equal']);
             $p->count(self::STEP, 'existing');
+            if ($disposal !== null && $disposal <= $end && $this->unlinkedMigratedDisposal($ctx, $existing[$key])) {
+                // Karta vyřazená dřívějším převodem bez vazby na zápis vyřazení: doplní se
+                // vazba i typ vyřazení, dokud je karta nemá (ruční změnu nepřepisuje).
+                $this->markDisposed($ctx, $existing[$key], $disposal, $card);
+            }
             return;
         }
 
@@ -407,9 +415,7 @@ final class AssetImporter
         }
         $this->depreciation($ctx, $assetId, $years, $list, $inUse, $disposal, $plan, $tax['equal']);
         if ($disposal !== null && $disposal <= $end) {
-            $this->db->pdo()->prepare(
-                "UPDATE assets SET status = 'disposed', disposal_date = ?, disposal_type = ? WHERE id = ? AND supplier_id = ?"
-            )->execute([$disposal, self::disposalType((string) ($card['ZpVyrazeni'] ?? '')), $assetId, $ctx->supplierId]);
+            $this->markDisposed($ctx, $assetId, $disposal, $card);
             $p->count(self::STEP, 'disposed');
         }
     }
@@ -927,15 +933,78 @@ final class AssetImporter
         return $value;
     }
 
-    private static function disposalType(string $reason): string
+    /** Typ vyřazení z důvodu Money (`ZpVyrazeni`); null = důvod typ neurčuje, rozhodne deník. */
+    private static function disposalType(string $reason): ?string
     {
         $r = mb_strtoupper($reason);
         return match (true) {
             str_contains($r, 'PROD') => 'sold',
             str_contains($r, 'DAR') => 'donated',
             str_contains($r, 'MANK'), str_contains($r, 'ŠKOD'), str_contains($r, 'KRÁD') => 'damaged',
-            default => 'liquidated',
+            str_contains($r, 'LIKV') => 'liquidated',
+            default => null,
         };
+    }
+
+    /**
+     * Odpis zůstatkové ceny (`OdpZustCen`) u karty, která ke dni odpisu v užívání zůstala:
+     * Money zůstatek odepsalo, ale kartu nevyřadilo. Převod ho bere jako účetní odpis roku
+     * ({@see accountingMoves()}); rekonciliace majetku ho hlásí, protože jde buď o skryté
+     * vyřazení, nebo o doodpis haléřového zůstatku, který si zaslouží kontrolu.
+     *
+     * @param list<array<string,mixed>> $list
+     */
+    private function reportResidualWriteOffs(ImportContext $ctx, int $no, string $name, array $list, ?string $disposal, string $start, string $end): void
+    {
+        foreach ($list as $m) {
+            if ($m['Typ'] !== 'U' || ($m['OdpZC'] ?? 0) !== 1 || $m['Datum'] === $disposal
+                || $m['Datum'] < $start || $m['Datum'] > $end || abs((float) $m['Castka']) < 0.005) {
+                continue;
+            }
+            $ctx->protocol->count(self::STEP, 'residual_writeoff_in_use');
+            $ctx->protocol->warn(self::STEP, 'residual_writeoff_in_use', sprintf(
+                'Karta %d (%s): Money %s odepsalo zůstatkovou cenu %s, karta přitom zůstala v užívání. '
+                    . 'Převod ho vede jako účetní odpis roku; ověřte, zda nejde o vyřazení.',
+                $no, $name, $m['Datum'], self::money((float) $m['Castka']),
+            ), ['document_no' => (string) $no]);
+        }
+    }
+
+    /** Karta vyřazená převodem (bez zápisu vyřazení z modulu), dosud bez vazby na zápis deníku. */
+    private function unlinkedMigratedDisposal(ImportContext $ctx, int $assetId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM assets a
+              WHERE a.id = ? AND a.supplier_id = ? AND a.status = 'disposed' AND a.disposal_entry_id IS NULL
+                AND NOT EXISTS (SELECT 1 FROM journal_entries je
+                                 WHERE je.supplier_id = a.supplier_id AND je.source_type = 'asset_disposal' AND je.source_id = a.id)"
+        );
+        $stmt->execute([$assetId, $ctx->supplierId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Vyřazení karty zaúčtoval převzatý deník (Money interní doklad 54x / oprávky): karta
+     * se jen přepne na vyřazenou a naváže na ten zápis, přiznání z něj bere účetní ZC.
+     * Typ vyřazení z důvodu Money, jinak z deníku (tržba 641 ke dni vyřazení = prodej),
+     * {@see MigratedDisposal}.
+     *
+     * @param array<string,mixed> $card karta Money
+     */
+    private function markDisposed(ImportContext $ctx, int $assetId, string $disposal, array $card): void
+    {
+        $asset = $this->db->pdo()->prepare('SELECT asset_account_code, accumulated_account_code FROM assets WHERE id = ? AND supplier_id = ?');
+        $asset->execute([$assetId, $ctx->supplierId]);
+        $accounts = $asset->fetch(\PDO::FETCH_ASSOC) ?: ['asset_account_code' => '', 'accumulated_account_code' => null];
+        $type = $this->disposals->type($ctx->supplierId, $disposal, self::disposalType((string) ($card['ZpVyrazeni'] ?? '')));
+        $saleInvoice = $type === 'sold' ? $this->disposals->saleEvidence($ctx->supplierId, $disposal)['invoice_id'] : null;
+        $entryId = $this->disposals->entry($ctx->supplierId, $accounts, $disposal);
+        $this->db->pdo()->prepare(
+            "UPDATE assets SET status = 'disposed', disposal_date = ?, disposal_type = ?, sale_invoice_id = ?, disposal_entry_id = ? WHERE id = ? AND supplier_id = ?"
+        )->execute([$disposal, $type, $saleInvoice, $entryId, $assetId, $ctx->supplierId]);
+        if ($entryId !== null) {
+            $ctx->protocol->count(self::STEP, 'disposal_entry_linked');
+        }
     }
 
     private static function monthsBetween(string $from, string $to): int

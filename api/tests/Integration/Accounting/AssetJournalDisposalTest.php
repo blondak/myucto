@@ -13,6 +13,7 @@ use MyInvoice\Service\Accounting\Assets\AssetService;
 use MyInvoice\Service\Accounting\Assets\DisposalResiduals;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Migration\Shared\MigratedDisposal;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -30,6 +31,7 @@ final class AssetJournalDisposalTest extends TestCase
     private AssetService $service;
     private PostingService $posting;
     private DepreciationEntryRepository $entries;
+    private MigratedDisposal $disposals;
     private int $supplierId = 0;
     private int $userId = 0;
     private bool $inTx = false;
@@ -45,6 +47,7 @@ final class AssetJournalDisposalTest extends TestCase
             $this->service = $container->get(AssetService::class);
             $this->posting = $container->get(PostingService::class);
             $this->entries = $container->get(DepreciationEntryRepository::class);
+            $this->disposals = $container->get(MigratedDisposal::class);
             $periods = $container->get(AccountingPeriodRepository::class);
             $seeder = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
@@ -126,6 +129,23 @@ final class AssetJournalDisposalTest extends TestCase
 
         self::assertNull($result['asset']['disposal_entry_id']);
         self::assertContains('disposal_entry_not_found', array_column($result['warnings'], 'code'));
+    }
+
+    /** Převod bez důvodu vyřazení ve zdroji: tržba 641 ke dni vyřazení = prodej. */
+    public function testMigratedDisposalTypeFollowsSaleRevenueInJournal(): void
+    {
+        $disposals = $this->disposals;
+        $date = self::YEAR . '-09-15';
+        self::assertSame('liquidated', $disposals->type($this->supplierId, $date, null));
+
+        $this->postManual($date, [
+            ['account_code' => '311', 'side' => 'debit', 'amount' => 60000.00],
+            ['account_code' => '641', 'side' => 'credit', 'amount' => 60000.00],
+        ]);
+        self::assertSame('sold', $disposals->type($this->supplierId, $date, null));
+        self::assertSame(['sold' => true, 'invoice_id' => null], $disposals->saleEvidence($this->supplierId, $date), 'Ruční zápis není faktura.');
+        self::assertSame('donated', $disposals->type($this->supplierId, $date, 'donated'), 'Důvod ze zdroje má přednost.');
+        self::assertSame('liquidated', $disposals->type($this->supplierId, self::YEAR . '-09-16', null), 'Tržba jiného dne se nepočítá.');
     }
 
     private function assetInUse(string $number): int

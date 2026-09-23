@@ -1017,6 +1017,27 @@ final class MoneyS3ImportTest extends TestCase
         self::assertSame(22000.0, (float) $car['opening_tax_amount']);
     }
 
+    /** Odpis zůstatku u karty, která zůstala v užívání, rekonciliace majetku ohlásí. */
+    public function testResidualWriteOffOnCardInUseIsReported(): void
+    {
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', SyntheticAgenda::filesWithAssetTaxCases(true));
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(),
+            new ImportOptions(ImportOptions::MODE_IMPORT, true, null, [], []));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $found = [];
+        foreach ($protocol->toArray()['steps'] as $step) {
+            foreach ($step['messages'] as $m) {
+                if ($m['code'] === 'residual_writeoff_in_use') {
+                    $found[] = [$m['level'], $m['context']['document_no'] ?? null];
+                }
+            }
+        }
+        self::assertSame([['warning', '8']], $found, $this->explain($protocol));
+        self::assertSame('in_use', $this->assetsByInventory($supplierId)['DM-008']['status']);
+    }
+
     /** @return array<string,array<string,mixed>> */
     private function assetsByInventory(int $supplierId): array
     {
