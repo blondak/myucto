@@ -13414,7 +13414,12 @@
       "check_assets": "Assets net",
       "check_liabilities": "Liabilities total",
       "version": "Mapping version",
-      "prepared_at": "Prepared at"
+      "prepared_at": "Prepared at",
+      "negative_net_title": "Asset rows with a negative net amount",
+      "negative_net_hint": "The row's correction exceeds its gross amount. The allowance is most likely assigned to a different row than the receivable or asset it belongs to. Adjust the statement mapping overrides (correction following the receivable account).",
+      "negative_net_current": "current period",
+      "negative_net_previous": "previous period",
+      "negative_net_link": "Mapping overrides"
     },
     "income_statement": {
       "title": "Income statement",

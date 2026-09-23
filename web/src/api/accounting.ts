@@ -1216,7 +1216,18 @@ export interface BalanceSheetReport {
     assets_net: number
     liabilities_total: number
     balanced: boolean
+    negative_net_rows?: BalanceSheetNegativeNetRow[]
   }
+}
+
+/** Řádek aktiv se záporným netto (korekce vyšší než brutto) v běžném nebo minulém období. */
+export interface BalanceSheetNegativeNetRow {
+  row_code: string
+  label: string
+  column: 'current' | 'previous'
+  gross: number
+  correction: number
+  net: number
 }
 
 // ── Účelové členění VZZ (vyhl. 500/2002 Sb., př. 2 část II, § 39b) ─────────

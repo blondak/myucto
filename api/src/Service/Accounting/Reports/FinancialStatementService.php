@@ -170,8 +170,65 @@ final class FinancialStatementService
                 'profit_current'    => $profitFromBalances,
                 'profit_matches'    => self::cents($profitInBalanceSheet) === self::cents($profitFromBalances),
                 'unmapped_accounts' => $ctx['unmapped'],
+                'negative_net_rows' => self::negativeNetRows($ctx['rows'], $ctx['values'], $ctx['values_prev']),
             ],
         ];
+    }
+
+    /**
+     * Řádky aktiv se záporným netto (korekce vyšší než brutto nebo brutto s kreditním
+     * zůstatkem) v běžném i minulém období. Aktivum se záporným netto do rozvahy nepatří:
+     * obvykle jde o opravnou položku zařazenou jinam než pohledávka, ke které patří (celá
+     * 391 u obchodních pohledávek, pohledávka výjimkou v dlouhodobých). Výkaz se kvůli tomu
+     * nezastaví, ale uživatel i protokol převodu to musí vidět dřív, než výkaz odevzdá.
+     *
+     * Hlásí se řádek, kde záporné netto vzniká: mezisoučet, jehož podřádek je sám záporný,
+     * se vynechá, aby jedna příčina nebyla v seznamu několikrát.
+     *
+     * @param list<array<string,mixed>>                          $rows
+     * @param array<string, array{gross: float, correction: float}> $values
+     * @param array<string, array{gross: float, correction: float}> $valuesPrev
+     * @return list<array{row_code:string,label:string,column:string,gross:float,correction:float,net:float}>
+     */
+    private static function negativeNetRows(array $rows, array $values, array $valuesPrev): array
+    {
+        $children = [];
+        foreach ($rows as $r) {
+            $parent = (string) ($r['parent_row_code'] ?? '');
+            if ($parent !== '') {
+                $children[$parent][] = (string) $r['row_code'];
+            }
+        }
+
+        $out = [];
+        foreach (['current' => $values, 'previous' => $valuesPrev] as $column => $set) {
+            $negative = [];
+            foreach ($rows as $r) {
+                $code = (string) $r['row_code'];
+                $v = $set[$code] ?? null;
+                if ((string) $r['section'] === 'assets' && $v !== null && self::cents($v['gross'] - $v['correction']) < 0) {
+                    $negative[$code] = $r;
+                }
+            }
+            foreach ($negative as $code => $r) {
+                foreach ($children[$code] ?? [] as $child) {
+                    if (isset($negative[$child])) {
+                        continue 2;
+                    }
+                }
+                $v = $set[$code];
+                $out[] = [
+                    'row_code'   => (string) $code,
+                    'label'      => (string) $r['label'],
+                    'column'     => $column,
+                    'gross'      => $v['gross'],
+                    'correction' => $v['correction'],
+                    'net'        => round($v['gross'] - $v['correction'], 2),
+                ];
+            }
+        }
+
+        return $out;
     }
 
     /**

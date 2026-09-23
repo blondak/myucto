@@ -79,9 +79,14 @@ final class PremierReconciler
             'journal_diffs' => $journalDiffs,
             'documents' => $documents,
             'unmapped_accounts' => $unmapped,
+            'negative_net_rows' => $balanceSheet['negative_net_rows'],
         ]]);
         if (!$ok) {
             $p->error(self::STEP, 'reconciliation_failed', "Rok {$ctx->year}: převod nesedí, podrobnosti v rekonciliaci.", ['year' => $ctx->year]);
+        }
+        $warning = TrialBalanceReconciliation::negativeNetWarning($ctx->year, $balanceSheet['negative_net_rows']);
+        if ($warning !== null) {
+            $p->warn(self::STEP, 'negative_net_rows', $warning, ['year' => $ctx->year, 'rows' => $balanceSheet['negative_net_rows']]);
         }
         $p->finish(self::STEP);
     }

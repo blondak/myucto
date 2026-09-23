@@ -204,6 +204,23 @@ onMounted(async () => {
         <template v-if="unit === 'thousands'"> · {{ t('reports.unit_thousands_note') }}</template>
       </div>
 
+      <div v-if="report.checks.negative_net_rows?.length"
+        class="bg-warning-50 border border-warning-200 rounded-lg p-3 mb-4 text-sm" data-test="negative-net-warning">
+        <div class="font-semibold text-warning-800">{{ t('accounting.balance_sheet.negative_net_title') }}</div>
+        <p class="text-warning-800 mt-1">{{ t('accounting.balance_sheet.negative_net_hint') }}</p>
+        <ul class="mt-2 space-y-0.5 text-warning-900">
+          <li v-for="r in report.checks.negative_net_rows" :key="`${r.column}-${r.row_code}`">
+            <span class="font-mono">{{ r.row_code }}</span> {{ r.label }}:
+            <span class="font-mono">{{ fm(r.net) }}</span>
+            ({{ r.column === 'previous' ? t('accounting.balance_sheet.negative_net_previous') : t('accounting.balance_sheet.negative_net_current') }})
+          </li>
+        </ul>
+        <RouterLink :to="{ name: 'accounting-statement-mapping', query: { period_id: String(filters.period_id) } }"
+          class="inline-block mt-2 text-primary-600 hover:text-primary-700 hover:underline">
+          {{ t('accounting.balance_sheet.negative_net_link') }}
+        </RouterLink>
+      </div>
+
       <!-- AKTIVA -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-4">
         <div class="overflow-x-auto">

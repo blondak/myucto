@@ -45,6 +45,10 @@ final class MoneyS3Reconciler
             if (!$result['ok']) {
                 $p->error(self::STEP, 'reconciliation_failed', "Rok {$year}: převod nesedí, podrobnosti v rekonciliaci.", ['year' => $year]);
             }
+            $warning = TrialBalanceReconciliation::negativeNetWarning($year, $result['negative_net_rows']);
+            if ($warning !== null) {
+                $p->warn(self::STEP, 'negative_net_rows', $warning, ['year' => $year, 'rows' => $result['negative_net_rows']]);
+            }
         }
         $p->set('reconciliation', $years);
         $p->finish(self::STEP);
@@ -134,6 +138,7 @@ final class MoneyS3Reconciler
             'money_report' => $report,
             'documents' => $documents,
             'unmapped_accounts' => $unmapped,
+            'negative_net_rows' => $balanceSheet['negative_net_rows'],
         ];
     }
 

@@ -10516,6 +10516,10 @@ paths:
     get:
       tags: [Accounting]
       summary: Rozvaha (vyhl. 500/2002 Sb., brutto/korekce/netto + minulé období)
+      description: |
+        `checks.negative_net_rows` vypisuje řádky aktiv se záporným netto (korekce vyšší
+        než brutto) v běžném (`column: current`) i minulém (`previous`) období; mezisoučet
+        nad záporným podřádkem se neopakuje. Výkaz se kvůli nim nezastaví, jde o varování.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: period_id, required: true, schema: { type: integer } }

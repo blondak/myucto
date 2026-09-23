@@ -13414,7 +13414,12 @@
       "check_assets": "Aktiva netto",
       "check_liabilities": "Pasiva celkem",
       "version": "Verze mapování",
-      "prepared_at": "Okamžik sestavení"
+      "prepared_at": "Okamžik sestavení",
+      "negative_net_title": "Řádky aktiv se záporným netto",
+      "negative_net_hint": "Korekce řádku je vyšší než brutto. Opravná položka je nejspíš zařazená jinam než pohledávka nebo majetek, ke kterému patří. Upravte výjimky mapování výkazů (korekce k účtu pohledávky).",
+      "negative_net_current": "běžné období",
+      "negative_net_previous": "minulé období",
+      "negative_net_link": "Výjimky mapování"
     },
     "income_statement": {
       "title": "Výkaz zisku a ztráty",
