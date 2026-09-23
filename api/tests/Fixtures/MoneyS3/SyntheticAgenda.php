@@ -811,6 +811,106 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda se mzdami v roce 2025, jak je nese mzdový modul Money: mzdové doklady
+     * (`KnihZav`, `IntDokl` s `MZTyp`, `MZRok`, `MZMesic`, `MZDI_Zauct`) za leden až březen
+     * a jejich řádky v deníku, měsíční úhrn daně (`VYUCDPFO`) a zbytek čitelných mezd
+     * osob (`MZDY`) končící 10/2020.
+     *
+     * Měsíc: hrubé mzdy 30 000 Kč na dvě střediska (druh 3), sociální pojištění 2 130 +
+     * 7 440 (druh 7, analytika 336200), zdravotní 1 350 + 2 700 (druh 10, 336100), záloha
+     * na daň 3 810 (druh 5), čistá mzda na analytiku zaměstnance (druh 1). V únoru navíc
+     * exekuce 1 000 Kč (druh 14), v lednu zákonné pojištění odpovědnosti (druh 15, jen do
+     * přehledu). Doklady bez druhu (starší způsob): odměna 5 000 Kč 521/331 a doplatek
+     * pojistného 331/336100 - analytika 336 se pozná podle dokladů s druhem, ne podle
+     * názvu (názvy analytik 336 jsou záměrně neutrální). Úhrn daně za březen v Money
+     * nesedí na doklady (3 000 Kč).
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithPayroll(): array
+    {
+        $files = self::files();
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        $append('ROK.002/UcOsnova.DAT', self::CHART_FIELDS, [
+            ['Ucet' => '331000', 'Nazev' => 'Zaměstnanci'],
+            ['Ucet' => '331001', 'Nazev' => 'Zaměstnanci - výplaty'],
+            ['Ucet' => '336100', 'Nazev' => 'Zúčtování s institucemi 1'],
+            ['Ucet' => '336200', 'Nazev' => 'Zúčtování s institucemi 2'],
+            ['Ucet' => '342100', 'Nazev' => 'Záloha na daň ze závislé činnosti'],
+            ['Ucet' => '379000', 'Nazev' => 'Jiné závazky'],
+            ['Ucet' => '379100', 'Nazev' => 'Pojištění odpovědnosti'],
+            ['Ucet' => '521000', 'Nazev' => 'Mzdové náklady'],
+            ['Ucet' => '524100', 'Nazev' => 'Zákonné sociální pojištění'],
+            ['Ucet' => '524200', 'Nazev' => 'Zákonné zdravotní pojištění'],
+            ['Ucet' => '548000', 'Nazev' => 'Ostatní provozní náklady'],
+        ]);
+        $journal = [];
+        $liabilities = [];
+        $internal = [];
+        $no = 100;
+        foreach ([1, 2, 3] as $month) {
+            $date = (new \DateTimeImmutable(sprintf('2025-%02d-01', $month)))->format('Y-m-t');
+            $doc = static fn (string $prefix, int $n): string => sprintf('%s25%02d%d', $prefix, $month, $n);
+            $mz = ['MZTyp' => 1, 'MZRok' => 2025, 'MZMesic' => $month];
+            $internal[] = ['Cislo' => 10 + $month, 'Doklad' => $doc('IDM', 1), 'Popis' => 'Předpis mezd', 'DatUcPr' => $date, 'MZDI_Zauct' => 3] + $mz;
+            $journal[] = ['Cislo' => ++$no, 'Zdroj' => 'ID', 'Doklad' => $doc('IDM', 1), 'Datum' => $date, 'Popis' => 'Hrubé mzdy', 'UcMD' => '521000', 'UcD' => '331000', 'Castka' => 20000.0, 'Stred' => 'REZIE'];
+            $journal[] = ['Cislo' => ++$no, 'Zdroj' => 'ID', 'Doklad' => $doc('IDM', 1), 'Datum' => $date, 'Popis' => 'Hrubé mzdy', 'UcMD' => '521000', 'UcD' => '331000', 'Castka' => 10000.0, 'Stred' => 'VYROBA'];
+            $net = 22710.0;
+            $entries = [
+                [7, 'Odvod ČSSZ', [['331000', '336200', 2130.0], ['524100', '336200', 7440.0]]],
+                [10, 'Odvod ZP', [['331000', '336100', 1350.0], ['524200', '336100', 2700.0]]],
+                [5, 'Odvod daně', [['331000', '342100', 3810.0]]],
+            ];
+            if ($month === 2) {
+                $entries[] = [14, 'Exekuce', [['331000', '379000', 1000.0]]];
+                $net -= 1000.0;
+            }
+            if ($month === 1) {
+                $entries[] = [15, 'Pojištění odpovědnosti', [['548000', '379100', 150.0]]];
+            }
+            $entries[] = [1, 'Čistá mzda', [['331000', '331001', $net]]];
+            foreach ($entries as $i => [$kind, $text, $lines]) {
+                $number = $doc('ZA', $i + 1);
+                $liabilities[] = ['Cislo' => 100 * $month + $i, 'Doklad' => $number, 'Popis' => $text, 'MZDI_Zauct' => $kind, 'AdCislo' => 0] + $mz;
+                foreach ($lines as [$md, $d, $amount]) {
+                    $journal[] = ['Cislo' => ++$no, 'Zdroj' => 'KZ', 'Doklad' => $number, 'Datum' => $date, 'Popis' => $text, 'UcMD' => $md, 'UcD' => $d, 'Castka' => $amount];
+                }
+            }
+        }
+        // Doklady bez druhu i bez příznaku mzdového dokladu (starší způsob účtování mezd).
+        $internal[] = ['Cislo' => 90, 'Doklad' => 'IDM25090', 'Popis' => 'Odměna', 'DatUcPr' => '2025-01-20'];
+        $journal[] = ['Cislo' => ++$no, 'Zdroj' => 'ID', 'Doklad' => 'IDM25090', 'Datum' => '2025-01-20', 'Popis' => 'Odměna', 'UcMD' => '521000', 'UcD' => '331000', 'Castka' => 5000.0];
+        $liabilities[] = ['Cislo' => 90, 'Doklad' => 'ZA25090', 'Popis' => 'Doplatek pojistného', 'MZTyp' => 0];
+        $journal[] = ['Cislo' => ++$no, 'Zdroj' => 'KZ', 'Doklad' => 'ZA25090', 'Datum' => '2025-01-20', 'Popis' => 'Doplatek pojistného', 'UcMD' => '331000', 'UcD' => '336100', 'Castka' => 100.0];
+        $append('ROK.002/UcDenik.DAT', self::JOURNAL_FIELDS, $journal);
+
+        $mzFields = [['MZTyp', 'V', 1], ['MZRok', 'W', 2], ['MZMesic', 'V', 1], ['MZDI_Zauct', 'V', 1]];
+        $files['ROK.002/KnihZav.DAT'] = Ms3FixtureWriter::table(
+            array_merge([['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['AdCislo', 'L', 4]], $mzFields),
+            $liabilities,
+        );
+        $append('ROK.002/IntDokl.DAT', array_merge([
+            ['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['DatUcPr', 'D', 2], ['DatUplDPH', 'D', 2],
+            ['Cleneni', 'C', 12], ['ZaklZS', 'E', 10], ['DPHZS', 'E', 10],
+        ], $mzFields), $internal);
+        $files['VYUCDPFO.DAT'] = Ms3FixtureWriter::table([['Mesic', 'V', 1], ['Rok', 'W', 2], ['DPFO', 'E', 10], ['Odvod', 'E', 10]], [
+            ['Mesic' => 255, 'Rok' => 65535],
+            ['Mesic' => 1, 'Rok' => 2025, 'DPFO' => 3810.0, 'Odvod' => 3810.0],
+            ['Mesic' => 2, 'Rok' => 2025, 'DPFO' => 3810.0, 'Odvod' => 3810.0],
+            ['Mesic' => 3, 'Rok' => 2025, 'DPFO' => 3000.0, 'Odvod' => 3000.0],
+        ]);
+        $files['MZDY.DAT'] = Ms3FixtureWriter::table([['OsCislo', 'C', 10], ['Rok', 'W', 2], ['Mesic', 'V', 1], ['HRUBA', 'E', 10]], [
+            ['OsCislo' => '1', 'Rok' => 2020, 'Mesic' => 9, 'HRUBA' => 25000.0],
+            ['OsCislo' => '1', 'Rok' => 2020, 'Mesic' => 10, 'HRUBA' => 25000.0],
+        ]);
+        return $files;
+    }
+
+    /**
      * Záloha agendy z daných souborů (varianty agendy pro jednotlivé testy).
      *
      * @param array<string,string> $files
