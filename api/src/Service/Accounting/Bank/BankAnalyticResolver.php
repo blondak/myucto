@@ -46,6 +46,12 @@ final class BankAnalyticResolver
     public function __construct(
         private readonly SupplierBankAccountRepository $bankAccounts,
         private readonly BankAnalyticAssigner $assigner,
+        /**
+         * Úvěrový účet kreditní karty (kind = credit_card) nemá vlastní nohu na bance, ale na
+         * úvěru 231.x. Pravidla, párování i detektory dál píšou `221` jako „účet výpisu";
+         * JEDINÉ místo, kde se z něj stane 231.x, je tady.
+         */
+        private readonly \MyInvoice\Service\Accounting\CreditCard\CreditCardAccounts $creditCards,
     ) {}
 
     /**
@@ -92,6 +98,10 @@ final class BankAnalyticResolver
         if (!is_array($own)) {
             return null;
         }
+        if (($own['kind'] ?? null) === BankAnalyticAssigner::CREDIT_CARD_KIND) {
+            // Bez 231 v osnově vyhodí, pohyb kreditky nesmí tiše zůstat na 221.
+            return $this->creditCards->codeForBankAccount($supplierId, $own);
+        }
         $suffix = $this->assigner->ensureSuffix($supplierId, $own);
         if ($suffix === null) {
             return null;
@@ -129,6 +139,9 @@ final class BankAnalyticResolver
         );
         if (!is_array($own)) {
             return null;
+        }
+        if (($own['kind'] ?? null) === BankAnalyticAssigner::CREDIT_CARD_KIND) {
+            return $this->creditCards->existingCodeForBankAccount($supplierId, $own);
         }
         $suffix = $own['analytic_suffix'] ?? null;
         if (!BankAnalyticAssigner::isValidSuffix($suffix)) {

@@ -356,6 +356,9 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'payment-cards',           name: 'payment-cards',       component: () => import('@/pages/company/PaymentCardsPage.vue'),  meta: { requiresSupplier: true } },
       { path: 'payment-cards/new',       name: 'payment-card-new',    component: () => import('@/pages/company/PaymentCardDetail.vue'), meta: { requiresSupplier: true } },
       { path: 'payment-cards/:id(\\d+)', name: 'payment-card-detail', component: () => import('@/pages/company/PaymentCardDetail.vue'), meta: { requiresSupplier: true } },
+      // Peníze → Kreditní karty: úvěrové účty ke kartě (231.x), import PDF výpisů, nastavení účtování.
+      { path: 'credit-cards',            name: 'credit-cards',        component: () => import('@/pages/company/CreditCardsPage.vue'),   meta: { requiresSupplier: true } },
+      { path: 'credit-cards/:id(\\d+)',  name: 'credit-card-detail',  component: () => import('@/pages/company/CreditCardDetail.vue'),  meta: { requiresSupplier: true } },
       {
         path: 'admin/codebooks',
         name: 'admin-codebooks',

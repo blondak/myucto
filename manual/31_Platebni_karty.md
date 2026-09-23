@@ -3,7 +3,8 @@
 Sekce **Peníze → Platební karty** vede firemní platební karty a jejich držitele.
 Z bankovních výpisů pak aplikace pozná, kterou kartou se platilo, spáruje
 platbu s účtenkou nebo fakturou téže karty a ukáže, ke kterým platbám kartou
-ještě chybí doklad.
+ještě chybí doklad. Úvěrový účet ke kreditní kartě a jeho výpisy vede sekce
+[Kreditní karty](112_Kreditni_karty.md).
 
 ## 31.1 Co se o kartě eviduje
 

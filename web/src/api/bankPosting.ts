@@ -246,7 +246,8 @@ export const bankPostingApi = {
 }
 
 // ── Vlastní bankovní účty (kontace 221.xxx) ─────────────────────────────────
-export type BankAccountKind = 'current' | 'savings' | 'term_deposit'
+/** `credit_card` = úvěrový účet kreditní karty (231.xxx); spravuje ho stránka Kreditní karty. */
+export type BankAccountKind = 'current' | 'savings' | 'term_deposit' | 'credit_card'
 
 export interface SupplierBankAccount {
   id: number

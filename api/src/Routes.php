@@ -3308,6 +3308,18 @@ final class Routes
         $app->post  ('/api/payment-cards/{id:[0-9]+}/archive',                      [\MyInvoice\Action\Bank\PaymentCardAction::class, 'archive']);
         $app->post  ('/api/payment-cards/{id:[0-9]+}/restore',                      [\MyInvoice\Action\Bank\PaymentCardAction::class, 'restore']);
 
+        // Kreditní karty: úvěrové účty ke kartě (231.x). Specifické cesty PŘED /{id}.
+        $app->get   ('/api/credit-cards',                          [\MyInvoice\Action\Bank\CreditCardAction::class, 'list']);
+        $app->post  ('/api/credit-cards/import',                   [\MyInvoice\Action\Bank\CreditCardAction::class, 'import']);
+        $app->post  ('/api/credit-cards/convert',                  [\MyInvoice\Action\Bank\CreditCardAction::class, 'convert']);
+        $app->get   ('/api/credit-cards/settings',                 [\MyInvoice\Action\Bank\CreditCardAction::class, 'getSettings']);
+        $app->put   ('/api/credit-cards/settings',                 [\MyInvoice\Action\Bank\CreditCardAction::class, 'saveSettings']);
+        $app->get   ('/api/credit-cards/{id:[0-9]+}',              [\MyInvoice\Action\Bank\CreditCardAction::class, 'get']);
+        $app->put   ('/api/credit-cards/{id:[0-9]+}',              [\MyInvoice\Action\Bank\CreditCardAction::class, 'update']);
+        $app->put   ('/api/credit-cards/{id:[0-9]+}/analytic',     [\MyInvoice\Action\Bank\CreditCardAction::class, 'setAnalytic']);
+        $app->post  ('/api/credit-cards/{id:[0-9]+}/archive',      [\MyInvoice\Action\Bank\CreditCardAction::class, 'archive']);
+        $app->post  ('/api/credit-cards/{id:[0-9]+}/restore',      [\MyInvoice\Action\Bank\CreditCardAction::class, 'restore']);
+
         $app->get   ('/api/logbook/trip-categories',              [\MyInvoice\Action\Logbook\TripCategoriesAction::class, 'list']);
         $app->post  ('/api/logbook/trip-categories',              [\MyInvoice\Action\Logbook\TripCategoriesAction::class, 'create']);
         $app->put   ('/api/logbook/trip-categories/{id:[0-9]+}',  [\MyInvoice\Action\Logbook\TripCategoriesAction::class, 'update']);
