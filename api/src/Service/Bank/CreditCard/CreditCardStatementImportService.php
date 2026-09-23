@@ -74,6 +74,18 @@ final class CreditCardStatementImportService
      */
     public function importParsed(int $supplierId, array $parsed, string $pdfBytes, string $fileName, ?int $userId, ?int $expectedAccountId = null): array
     {
+        // Úvěrový účet (231) je pojem podvojného účetnictví. V daňové evidenci by výpis
+        // kreditky vstoupil do peněžního deníku jako peníze: dluh by snižoval zůstatek
+        // a splátky by se tvářily jako příjem (resp. výdaj dvakrát).
+        $mode = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
+        $mode->execute([$supplierId]);
+        if ((string) $mode->fetchColumn() !== 'double_entry') {
+            throw new PostingException(
+                'credit_card_requires_double_entry',
+                'Výpisy kreditní karty jde načíst jen u firmy v podvojném účetnictví.',
+                422,
+            );
+        }
         $h = $parsed['header'];
         $currency = strtoupper((string) ($h['currency'] ?? 'CZK'));
         if ($currency !== 'CZK') {

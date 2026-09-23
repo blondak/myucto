@@ -41,7 +41,14 @@ Při načtení aplikace:
 
 Úvěrový účet, který eviduje jiná firma, načíst nejde. Kreditní účet vedený
 v cizí měně aplikace odmítne; všechny podporované banky vedou kreditní účty
-podnikatelů v korunách.
+podnikatelů v korunách. Výpisy kreditní karty jde načíst jen ve firmě
+v podvojném účetnictví (viz Daňová evidence).
+
+Úvěrový účet se na záložce **Kontace účtů** v bance nevypíná: jeho pohyby se účtují na 231 a vypnutý by je poslal na 221.
+Kartu, kterou už nepoužíváte, archivujte v detailu kreditní karty.
+Nákupy kreditkou se automaticky párují s přijatými fakturami stejně jako
+odchozí platby z běžného účtu; splátky na kreditní účet se s vydanými
+fakturami nepárují.
 
 ### 112.1.1 Účet vedený dřív jako bankovní účet
 
@@ -225,10 +232,11 @@ zaúčtované pohyby se nepřeúčtovávají.
 
 ### 112.3.4 Daňová evidence
 
-Firma v daňové evidenci výpisy kreditní karty načte stejně. Pohyby vstoupí do
-peněžního deníku: nákup spárovaný s dokladem je výdaj v den zaúčtování bankou,
-splátka z vlastního účtu je převod mezi účty. Účtování na 231 a nastavení
-účtování se uplatní jen v podvojném účetnictví.
+Kreditní karty jsou jen pro firmy v **podvojném účetnictví**. Firma v daňové
+evidenci výpis kreditní karty nenačte: úvěrový účet by v peněžním deníku
+vystupoval jako peníze, dluh by snižoval zůstatek peněz a splátky by se tvářily
+jako příjem. Nákupy kreditkou v daňové evidenci evidujte přes doklady
+(výdaj v den úhrady splátkou z běžného účtu).
 
 ## 112.4 Oprávnění
 

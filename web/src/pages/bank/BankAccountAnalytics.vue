@@ -94,9 +94,10 @@ async function saveAll() {
         toast.error(t('bank.analytics.suffix_taken', { suffix: BANK_PREFIX + d.analytic_suffix, account: accountLabel(clash) }))
         return
       }
-      // Úvěrový účet kreditní karty: druh a analytiku (231) spravuje stránka Kreditní karty.
+      // Úvěrový účet kreditní karty: druh, analytiku (231) i archivaci spravuje stránka
+      // Kreditní karty; vypnout ho tu nejde (pohyby by spadly na 221).
       await bankPostingApi.updateAccount(a.id, a.kind === 'credit_card'
-        ? { label: d.label.trim() || null, is_active: d.is_active }
+        ? { label: d.label.trim() || null }
         : {
             kind: d.kind,
             label: d.label.trim() || null,
@@ -189,7 +190,7 @@ onMounted(load)
                   </div>
                 </td>
                 <td class="px-3 py-2 text-center">
-                  <input v-model="drafts[a.id].is_active" type="checkbox" :disabled="!canWrite"
+                  <input v-model="drafts[a.id].is_active" type="checkbox" :disabled="!canWrite || a.kind === 'credit_card'"
                          class="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500" />
                 </td>
               </tr>

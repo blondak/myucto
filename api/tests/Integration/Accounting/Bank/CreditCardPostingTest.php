@@ -79,6 +79,33 @@ final class CreditCardPostingTest extends BankPostingTestCase
         self::assertEqualsWithDelta(-500.00, $this->balance($this->ccCode), 0.001);
     }
 
+    /**
+     * Vypnutý úvěrový účet nesmí spadnout na 221 (dluh by se tvářil jako peníze):
+     * API vypnutí odmítne a resolver kreditku najde i neaktivní.
+     */
+    public function testDeactivatedCreditCardAccountStillPostsTo231AndCannotBeDeactivated(): void
+    {
+        $bankAccountId = (int) $this->cards->find($this->supplierId, $this->ccId)['bank_account_id'];
+        $action = $this->container->get(\MyInvoice\Action\Accounting\Bank\SupplierBankAccountAction::class);
+        $request = (new \Slim\Psr7\Factory\ServerRequestFactory())
+            ->createServerRequest('PATCH', '/api/accounting/bank-accounts/' . $bankAccountId)
+            ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withParsedBody(['is_active' => false]);
+        $response = $action->update($request, new \Slim\Psr7\Response(), ['id' => (string) $bankAccountId]);
+        self::assertSame(422, $response->getStatusCode(), 'Kreditka se nevypíná.');
+
+        // Starší data / přímý zásah: vypnutý řádek účtu.
+        $this->db->pdo()->prepare('UPDATE supplier_bank_accounts SET is_active = 0 WHERE id = ? AND supplier_id = ?')
+            ->execute([$bankAccountId, $this->supplierId]);
+        $tx = $this->ccTx(-80.00, 'Nákup u obchodníka | d.tran. 15.06.2099');
+        $this->service->postManual($this->supplierId, $tx, ['debit_account_code' => '518', 'credit_account_code' => '221'], $this->meta());
+
+        $lines = $this->linesByAccountCode((int) $this->journal->findBySource($this->supplierId, 'bank', $tx)['id']);
+        self::assertEqualsWithDelta(80.00, $lines[$this->ccCode]['credit'], 0.001);
+        self::assertSame([], $this->bankCodes($lines), 'Nic na 221.');
+    }
+
     /** RED bez přesměrování v BankAnalyticResolver: ruční zápis 518/221 skončil na bance. */
     public function testManualPostingOfPurchaseWithoutDocumentGoesTo231(): void
     {
@@ -301,6 +328,46 @@ final class CreditCardPostingTest extends BankPostingTestCase
         } catch (PostingException $e) {
             self::assertSame('account_foreign', $e->errorCode);
         }
+    }
+
+    /**
+     * Kreditka v `currencies` není, firmu párování bere z hlavičky výpisu: nákup se spáruje
+     * s přijatou fakturou, příchozí pohyb (splátka) se s vydanou fakturou nepáruje nikdy.
+     */
+    public function testPurchaseOnCreditCardReachesMatchingButRepaymentDoesNot(): void
+    {
+        // Samotný zápis spárování si matcher otevírá ve vlastní transakci (testovací třída
+        // drží celý test v transakci), proto se tu ověřuje jen určení firmy: bez něj nákup
+        // skončil hned na „neznámý účet" a k hledání dokladu se nikdy nedostal.
+        $matcher = $this->container->get(\MyInvoice\Service\Bank\StatementMatcher::class);
+
+        $purchase = $this->ccTx(-345.67, 'Nákup u dodavatele bez dokladu');
+        $result = $matcher->match($purchase);
+        self::assertSame('unmatched', $result['status'] ?? null, json_encode($result));
+        self::assertNotSame('unknown_supplier_for_account', $result['reason'] ?? null, 'Nákup kreditkou se páruje za firmu výpisu.');
+
+        $repayment = $this->ccTx(345.67, 'Splátka kreditní karty');
+        self::assertSame('unknown_supplier_for_account', $matcher->match($repayment)['reason'] ?? null,
+            'Příchozí pohyb na kreditce se s vydanou fakturou nepáruje.');
+
+        // Cizí firma se výpisem kreditky nevydává: účet u ní jako kreditka evidovaný není.
+        $foreign = $this->transaction($this->statement(self::CC_ACCOUNT, self::CC_BANK, $this->otherSupplierId()), -10.00);
+        self::assertSame('unknown_supplier_for_account', $matcher->match($foreign)['reason'] ?? null);
+    }
+
+    /** Daňová evidence: výpis kreditky by v peněžním deníku vystupoval jako peníze. */
+    public function testImportIsRefusedOutsideDoubleEntry(): void
+    {
+        $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")->execute([$this->supplierId]);
+        try {
+            $this->importer()->importParsed($this->supplierId, $this->parsed('19-5000000007', '0100', 0.0, []), $this->pdf(), 'vypis.pdf', $this->userId);
+            self::fail('Import kreditky mimo podvojné účetnictví musí být odmítnut.');
+        } catch (PostingException $e) {
+            self::assertSame('credit_card_requires_double_entry', $e->errorCode);
+        }
+        $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM bank_statements WHERE supplier_id = ?');
+        $count->execute([$this->supplierId]);
+        self::assertSame(0, (int) $count->fetchColumn(), 'Nic se nenaimportovalo.');
     }
 
     public function testImportRefusesForeignCurrencyAccount(): void

@@ -333,6 +333,75 @@ final class StatementMatcher
         return $result;
     }
 
+    /** @var list<string|null> otevřené úrovně: null = vlastní transakce, jinak jméno savepointu */
+    private array $txStack = [];
+
+    /**
+     * Transakce párování. Běží-li už transakce volajícího (import v transakci, test),
+     * použije se savepoint: dřív tu PDO spadlo na „There is already an active
+     * transaction". Bez vnější transakce se chová přesně jako dřív.
+     */
+    private function begin(PDO $pdo): void
+    {
+        if ($pdo->inTransaction()) {
+            $name = 'stmt_match_' . count($this->txStack);
+            $pdo->exec('SAVEPOINT ' . $name);
+            $this->txStack[] = $name;
+            return;
+        }
+        $pdo->beginTransaction();
+        $this->txStack[] = null;
+    }
+
+    private function commit(PDO $pdo): void
+    {
+        $level = array_pop($this->txStack);
+        if ($level === null) {
+            $pdo->commit();
+            return;
+        }
+        $pdo->exec('RELEASE SAVEPOINT ' . $level);
+    }
+
+    private function rollBack(PDO $pdo): void
+    {
+        $level = array_pop($this->txStack);
+        if ($level === null) {
+            $pdo->rollBack();
+            return;
+        }
+        $pdo->exec('ROLLBACK TO SAVEPOINT ' . $level);
+        $pdo->exec('RELEASE SAVEPOINT ' . $level);
+    }
+
+    private function rollBackIfOpen(PDO $pdo): void
+    {
+        if ($this->txStack !== [] && $pdo->inTransaction()) {
+            $this->rollBack($pdo);
+        } else {
+            $this->txStack = [];
+        }
+    }
+
+    /**
+     * Firma výpisu kreditní karty: hlavička výpisu ji nese, ale platí jen tehdy, když
+     * je účet výpisu u té firmy evidovaný jako úvěrový účet kreditní karty. Jinak 0
+     * (neznámý účet zůstane nespárovaný jako dosud).
+     */
+    private function creditCardStatementSupplier(int $statementSupplierId, string $account): int
+    {
+        $canonical = AccountNumberNormalizer::canonical($account);
+        if ($canonical === null) {
+            return 0;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM supplier_bank_accounts
+              WHERE supplier_id = ? AND kind = 'credit_card' AND account_canonical = ? LIMIT 1"
+        );
+        $stmt->execute([$statementSupplierId, $canonical]);
+        return $stmt->fetchColumn() !== false ? $statementSupplierId : 0;
+    }
+
     /** @return array<string,mixed> */
     private function afterMatch(int $transactionId, array $result): array
     {
@@ -350,7 +419,7 @@ final class StatementMatcher
         $pdo = $this->db->pdo();
         $tx = $pdo->prepare(
             'SELECT bt.*, bs.account_number AS recipient_account, bs.bank_code AS recipient_bank,
-                    bs.currency AS statement_currency
+                    bs.currency AS statement_currency, bs.supplier_id AS statement_supplier_id
                FROM bank_transactions bt
                JOIN bank_statements   bs ON bs.id = bt.statement_id
               WHERE bt.id = ?'
@@ -442,6 +511,15 @@ final class StatementMatcher
         }
         $supplierIds = array_values(array_unique($supplierIds));
         $supplierId = count($supplierIds) === 1 ? $supplierIds[0] : 0;
+        // Úvěrový účet kreditní karty v `currencies` není (není to účet plátce), firmu
+        // proto nese hlavička výpisu. Jen nákupy (odchozí) — příchozí pohyb na kreditce
+        // je splátka nebo vratka, úhradou vydané faktury být nemůže.
+        if ($supplierId === 0 && $supplierIds === [] && $isOutgoing && !empty($row['statement_supplier_id'])) {
+            $supplierId = $this->creditCardStatementSupplier(
+                (int) $row['statement_supplier_id'],
+                (string) ($row['recipient_account'] ?? ''),
+            );
+        }
         if ($supplierId === 0) {
             return ['status' => 'unmatched', 'reason' => 'unknown_supplier_for_account'];
         }
@@ -667,7 +745,7 @@ final class StatementMatcher
             // Exact match — pokud faktura ještě není paid, zaevidovat platbu (service
             // překlopí status + paid_at) a u proformy vyrobit final draft.
             // Pro již ručně paid fakturu jen navážeme transakci (status/paid_at netknuté).
-            $pdo->beginTransaction();
+            $this->begin($pdo);
             try {
                 $recorded = null;
                 if (!$alreadyPaid) {
@@ -722,9 +800,9 @@ final class StatementMatcher
                     $finalDraftId = $followUp['final_draft_id'];
                     $taxDocId = $followUp['tax_document_id'];
                 }
-                $pdo->commit();
+                $this->commit($pdo);
             } catch (\Throwable $e) {
-                if ($pdo->inTransaction()) $pdo->rollBack();
+                $this->rollBackIfOpen($pdo);
                 throw $e;
             }
 
@@ -757,7 +835,7 @@ final class StatementMatcher
         // Zaeviduj platbu (faktura zůstává pohledávkou se sníženým zůstatkem) a u
         // proformy vystav DRAFT daňového dokladu k přijaté platbě (plátce DPH, ne-RC).
         if (!$alreadyPaid && $this->payments !== null && $amount < $m['expected'] - $m['exact']) {
-            $pdo->beginTransaction();
+            $this->begin($pdo);
             try {
                 $recorded = $this->payments->recordPayment(
                     (int) $inv['id'],
@@ -777,9 +855,9 @@ final class StatementMatcher
                 )->execute([$inv['id'], $transactionId]);
 
                 $taxDocId = $recorded['tax_document_id'];
-                $pdo->commit();
+                $this->commit($pdo);
             } catch (\Throwable $e) {
-                if ($pdo->inTransaction()) $pdo->rollBack();
+                $this->rollBackIfOpen($pdo);
                 throw $e;
             }
             $this->clientBankAccounts?->captureForInvoiceTransaction((int) $inv['id'], $transactionId);
@@ -918,10 +996,10 @@ final class StatementMatcher
                     'purchase_invoice_id' => (int) $pi['id'],
                 ];
             }
-            $pdo->beginTransaction();
+            $this->begin($pdo);
             try {
                 if (!$this->claimTransaction($pdo, $transactionId)) {
-                    $pdo->rollBack();
+                    $this->rollBack($pdo);
                     return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
                 }
                 $pdo->prepare(
@@ -934,9 +1012,9 @@ final class StatementMatcher
                         SET match_status = 'auto_exact', matched_at = NOW()
                       WHERE id = ?"
                 )->execute([$transactionId]);
-                $pdo->commit();
+                $this->commit($pdo);
             } catch (\Throwable $e) {
-                if ($pdo->inTransaction()) $pdo->rollBack();
+                $this->rollBackIfOpen($pdo);
                 throw $e;
             }
             $this->clientBankAccounts?->captureForPurchaseInvoiceTransaction((int) $pi['id'], $transactionId);
@@ -957,10 +1035,10 @@ final class StatementMatcher
             // částky transakce a BankPostingService::buildOutgoingMatched by doklad odmítl
             // jako 'allocation_mismatch' — tj. haléřová platba by se nikdy nezaúčtovala.
             // Párování je (tx, PF) jedinečné → existující řádek jen aktualizujeme.
-            $pdo->beginTransaction();
+            $this->begin($pdo);
             try {
                 if (!$this->claimTransaction($pdo, $transactionId)) {
-                    $pdo->rollBack();
+                    $this->rollBack($pdo);
                     return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
                 }
                 PurchasePaymentMatchWriter::record($pdo, $supplierId, $transactionId, (int) $pi['id'], $absAmount, 'auto', 70);
@@ -969,9 +1047,9 @@ final class StatementMatcher
                         SET match_status = 'auto_partial', matched_at = NOW()
                       WHERE id = ?"
                 )->execute([$transactionId]);
-                $pdo->commit();
+                $this->commit($pdo);
             } catch (\Throwable $e) {
-                if ($pdo->inTransaction()) $pdo->rollBack();
+                $this->rollBackIfOpen($pdo);
                 throw $e;
             }
             $this->clientBankAccounts?->captureForPurchaseInvoiceTransaction((int) $pi['id'], $transactionId);
@@ -1116,10 +1194,10 @@ final class StatementMatcher
                     'card_last4' => $last4,
                 ];
             }
-            $pdo->beginTransaction();
+            $this->begin($pdo);
             try {
                 if (!$this->claimTransaction($pdo, $transactionId, ['unmatched'])) {
-                    $pdo->rollBack();
+                    $this->rollBack($pdo);
                     return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
                 }
                 $pdo->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ? AND supplier_id = ?")
@@ -1129,9 +1207,9 @@ final class StatementMatcher
                     "UPDATE bank_transactions SET match_status = 'auto_exact', matched_at = NOW()
                       WHERE id = ? AND match_status = 'unmatched'"
                 )->execute([$transactionId]);
-                $pdo->commit();
+                $this->commit($pdo);
             } catch (\Throwable $e) {
-                if ($pdo->inTransaction()) $pdo->rollBack();
+                $this->rollBackIfOpen($pdo);
                 throw $e;
             }
             $this->logPaymentMatch('purchase_invoice', (int) $pi['id'], $supplierId, 'auto_exact', $absAmount, '', $transactionId);
@@ -1257,7 +1335,7 @@ final class StatementMatcher
         }
         $currency = strtoupper($txCurrency);
         $settled = PurchaseSettledExpr::settled('pi');
-        $pdo->beginTransaction();
+        $this->begin($pdo);
         try {
             $lock = $pdo->prepare(
                 "SELECT match_status, variable_symbol
@@ -1270,7 +1348,7 @@ final class StatementMatcher
             if ($lockedTx === false
                 || (string) $lockedTx['match_status'] !== 'unmatched'
                 || trim((string) ($lockedTx['variable_symbol'] ?? '')) !== '') {
-                $pdo->rollBack();
+                $this->rollBack($pdo);
                 return ['status' => 'unmatched', 'reason' => 'amount_date_transaction_not_free'];
             }
 
@@ -1285,7 +1363,7 @@ final class StatementMatcher
             );
             $sameAmount->execute([$statementId, $absAmount, $currency, $currency]);
             if ((int) $sameAmount->fetchColumn() !== 1) {
-                $pdo->rollBack();
+                $this->rollBack($pdo);
                 return ['status' => 'unmatched', 'reason' => 'ambiguous_amount_transaction'];
             }
 
@@ -1327,7 +1405,7 @@ final class StatementMatcher
                 $matches[] = $candidate;
             }
             if (count($matches) !== 1) {
-                $pdo->rollBack();
+                $this->rollBack($pdo);
                 return [
                     'status' => 'unmatched',
                     'reason' => $matches === [] ? 'no_amount_date_match' : 'ambiguous_amount_date_match',
@@ -1339,7 +1417,7 @@ final class StatementMatcher
             // se stejnou částkou — v tu chvíli by shoda jen podle částky párovala křížem.
             if ($cardLast4 !== null && ($pi['card_last4'] ?? null) === null
                 && $this->cardCandidates()->competingTransactions($supplierId, $transactionId, $cardLast4, $absAmount, $postedAt, false) > 0) {
-                $pdo->rollBack();
+                $this->rollBack($pdo);
                 return ['status' => 'unmatched', 'reason' => 'ambiguous_amount_date_match'];
             }
             $alreadyPaid = (string) $pi['status'] === 'paid';
@@ -1347,7 +1425,7 @@ final class StatementMatcher
                 (string) ($pi['paid_at'] ?? '') !== $postedAt
                 || $this->nameSimilarity($counterpartyName, (string) $pi['vendor_name']) <= 0.0
             )) {
-                $pdo->rollBack();
+                $this->rollBack($pdo);
                 return [
                     'status' => 'unmatched',
                     'reason' => 'amount_date_requires_review',
@@ -1367,9 +1445,9 @@ final class StatementMatcher
                     SET match_status = 'auto_exact', matched_at = NOW()
                   WHERE id = ? AND match_status = 'unmatched'"
             )->execute([$transactionId]);
-            $pdo->commit();
+            $this->commit($pdo);
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            $this->rollBackIfOpen($pdo);
             throw $e;
         }
 
@@ -1427,10 +1505,10 @@ final class StatementMatcher
             return ['status' => 'unmatched', 'reason' => count($matches) > 1 ? 'ambiguous_credit_refund' : 'no_credit_refund'];
         }
         $credit = $matches[0];
-        $pdo->beginTransaction();
+        $this->begin($pdo);
         try {
             if (!$this->claimTransaction($pdo, $transactionId)) {
-                $pdo->rollBack();
+                $this->rollBack($pdo);
                 return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
             }
             $pdo->prepare("UPDATE invoices SET status='paid', paid_at=? WHERE id=? AND status<>'paid'")
@@ -1442,9 +1520,9 @@ final class StatementMatcher
             )->execute([$supplierId, $transactionId, $credit['id'], $absAmount]);
             $pdo->prepare("UPDATE bank_transactions SET matched_invoice_id=?, match_status='auto_exact', matched_at=NOW() WHERE id=?")
                 ->execute([$credit['id'], $transactionId]);
-            $pdo->commit();
+            $this->commit($pdo);
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            $this->rollBackIfOpen($pdo);
             throw $e;
         }
         $this->clientBankAccounts?->captureForInvoiceTransaction((int) $credit['id'], $transactionId);
@@ -1494,10 +1572,10 @@ final class StatementMatcher
             return ['status' => 'unmatched', 'reason' => count($matches) > 1 ? 'ambiguous_purchase_credit_refund' : 'no_purchase_credit_refund'];
         }
         $credit = $matches[0];
-        $pdo->beginTransaction();
+        $this->begin($pdo);
         try {
             if (!$this->claimTransaction($pdo, $transactionId)) {
-                $pdo->rollBack();
+                $this->rollBack($pdo);
                 return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
             }
             $pdo->prepare("UPDATE purchase_invoices SET status='paid', paid_at=? WHERE id=? AND status<>'paid'")
@@ -1505,9 +1583,9 @@ final class StatementMatcher
             PurchasePaymentMatchWriter::record($pdo, $supplierId, $transactionId, (int) $credit['id'], $amount, 'auto', 95);
             $pdo->prepare("UPDATE bank_transactions SET match_status='auto_exact', matched_at=NOW() WHERE id=?")
                 ->execute([$transactionId]);
-            $pdo->commit();
+            $this->commit($pdo);
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            $this->rollBackIfOpen($pdo);
             throw $e;
         }
         $this->clientBankAccounts?->captureForPurchaseInvoiceTransaction((int) $credit['id'], $transactionId);

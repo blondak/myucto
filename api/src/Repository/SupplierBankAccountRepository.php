@@ -55,8 +55,10 @@ final class SupplierBankAccountRepository
             return null;
         }
         $bank = AccountNumberNormalizer::canonicalBankCode($counterpartyBank, $counterpartyAccount);
-        $sql = 'SELECT ' . self::COLUMNS . ' FROM supplier_bank_accounts
-                 WHERE supplier_id = ? AND is_active = 1 AND account_canonical = ?';
+        // Úvěrový účet kreditní karty se najde i neaktivní: bez něj by vlastní noha pohybu
+        // spadla na holé 221 a dluh vůči bance by se v účetnictví tvářil jako peníze.
+        $sql = "SELECT " . self::COLUMNS . " FROM supplier_bank_accounts
+                 WHERE supplier_id = ? AND (is_active = 1 OR kind = 'credit_card') AND account_canonical = ?";
         $params = [$supplierId, $canonical];
         if ($bank !== null) {
             $sql .= " AND bank_code_norm IN ('', ?) ORDER BY (bank_code_norm = ?) DESC, id ASC";

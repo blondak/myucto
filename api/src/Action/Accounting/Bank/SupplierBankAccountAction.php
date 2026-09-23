@@ -105,6 +105,10 @@ final class SupplierBankAccountAction
             if (!is_bool($body['is_active'])) {
                 return Json::error($response, 'validation_failed', 'is_active musí být boolean.', 422);
             }
+            if ($body['is_active'] === false && ($current['kind'] ?? null) === BankAnalyticAssigner::CREDIT_CARD_KIND) {
+                return Json::error($response, 'validation_failed',
+                    'Úvěrový účet kreditní karty se nevypíná — jeho pohyby se účtují na 231. Kartu archivujte v Kreditních kartách.', 422);
+            }
             $patch['is_active'] = $body['is_active'];
         }
         $this->accounts->update($supplierId, $id, $patch);

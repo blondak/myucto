@@ -97,7 +97,9 @@ U každé platby jsou akce:
 - **Spárovat** — po potvrzení dokladu spustí párování platby znovu. Spárovaná
   platba se hned zaúčtuje i s vypořádáním (viz Účtování plateb kartou).
 - **Uzavřít bez dokladu** a **K tíži držitele** — jen u platby zaúčtované přes
-  mezičlen karty, ke které doklad nebude (viz níže).
+  mezičlen karty, ke které doklad nebude (viz níže). Dialog ukáže platbu a nabídne
+  účet: výchozí podle nastavení účtování, nebo jiný účet z osnovy (u uzavření
+  náklad třídy 5, u držitele 335, 355 nebo 378).
 - **Výpis** — otevře bankovní výpis s platbou.
 
 U platby zaúčtované přes mezičlen se pod obchodníkem zobrazí analytika karty,
