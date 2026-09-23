@@ -46,7 +46,7 @@ api.interceptors.request.use((config) => {
   config.headers.set('Accept-Language', locale)
 
   // Multi-supplier — aktuální supplier z localStorage (Pinia persist).
-  // Server fallbackuje na MIN(supplier.id) když chybí/neplatný.
+  // Když chybí/neplatný, server použije výchozí firmu účtu (users.default_supplier_id).
   if (domainSupplierLock !== null) {
     config.headers.delete('X-Supplier-Id')
   } else {

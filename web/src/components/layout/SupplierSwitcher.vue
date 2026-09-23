@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
+import { authApi } from '@/api/auth'
 
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
@@ -34,6 +35,12 @@ async function pick(id: number) {
   auth.clearPermissions()
   supplierStore.setSupplier(id)
   open.value = false
+
+  // Volba se ukládá i k účtu, ať se stejná firma otevře v jiném prohlížeči či
+  // zařízení. Před reloadem dole, jinak by ho prohlížeč přerušil. Selhání
+  // přepnutí nebrání — localStorage výše drží volbu v tomhle prohlížeči.
+  // Demo mutace odmítá globálně, uložení by jen vyvolalo hlášku.
+  if (!auth.isDemo) await authApi.setDefaultSupplier(id).catch(() => undefined)
 
   const refreshed = await auth.refresh()
   if (!refreshed) {
