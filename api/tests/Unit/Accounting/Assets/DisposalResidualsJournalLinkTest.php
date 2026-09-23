@@ -50,6 +50,24 @@ final class DisposalResidualsJournalLinkTest extends TestCase
         self::assertStringContainsString('zápis č. 10) 1 200,00 Kč, podle karty 1 000,00 Kč', $warnings);
     }
 
+    /** Roční interní doklad nese i odpisy jiných karet: ZC karty je jen MD 54x proti jejím oprávkám. */
+    public function testLinkedEntryWithOtherLinesTakesOnlyResidualOfTheCard(): void
+    {
+        $this->pdo->exec("INSERT INTO chart_of_accounts VALUES (6,'551','expense'),(7,'079','asset'),(8,'548','expense')");
+        $this->entry(10, [['551', 'debit', 2960], ['079', 'credit', 2960], ['541', 'debit', 1000], ['082', 'credit', 1000],
+            ['082', 'debit', 100000], ['022', 'credit', 100000]]);
+        $this->card(1, 'A', 100000, 99000, 10);
+
+        $result = $this->residuals->forPeriod(1, '2025-01-01', '2025-12-31');
+        self::assertSame([1000.0, 'linked_entry'], [$result['rows'][0]['book_residual_value'], $result['rows'][0]['book_residual_source']]);
+        self::assertSame([], $result['warnings']);
+
+        // 54x jiné karty v témže dokladu: ZC nejvýš to, co zápis připsal na oprávky karty.
+        $this->entry(11, [['548', 'debit', 700], ['221', 'credit', 700], ['541', 'debit', 500], ['082', 'credit', 500]]);
+        $this->pdo->exec('UPDATE assets SET disposal_entry_id = 11, opening_acc_amount = 99500 WHERE id = 1');
+        self::assertSame(500.0, $this->residuals->forPeriod(1, '2025-01-01', '2025-12-31')['rows'][0]['book_residual_value']);
+    }
+
     public function testEntrySharedByMoreCardsChecksTheirSumAgainstTheEntry(): void
     {
         $this->entry(10, [['541', 'debit', 1800], ['082', 'credit', 1800]]);

@@ -129,12 +129,19 @@ final class DisposalResiduals
                        FROM journal_entry_lines jl
                        JOIN chart_of_accounts ca ON ca.id = jl.account_id
                       WHERE jl.entry_id = a.disposal_entry_id AND jl.supplier_id = a.supplier_id
-                        AND jl.side = \'debit\' AND ca.account_type = \'expense\') AS linked_residual,
+                        AND jl.side = \'debit\' AND ca.account_code LIKE \'' . self::JOURNAL_EXPENSE_PREFIX . '%\') AS linked_residual,
+                    (SELECT SUM(jl.amount)
+                       FROM journal_entry_lines jl
+                       JOIN chart_of_accounts ca ON ca.id = jl.account_id
+                      WHERE jl.entry_id = a.disposal_entry_id AND jl.supplier_id = a.supplier_id AND jl.side = \'credit\'
+                        AND (ca.account_code = COALESCE(NULLIF(a.accumulated_account_code, \'\'), a.asset_account_code)
+                             OR ca.account_code LIKE CONCAT(COALESCE(NULLIF(a.accumulated_account_code, \'\'), a.asset_account_code), \'.%\'))
+                    ) AS linked_account_credit,
                     (SELECT MIN(ca.account_code)
                        FROM journal_entry_lines jl
                        JOIN chart_of_accounts ca ON ca.id = jl.account_id
                       WHERE jl.entry_id = a.disposal_entry_id AND jl.supplier_id = a.supplier_id
-                        AND jl.side = \'debit\' AND ca.account_type = \'expense\') AS linked_expense_account,
+                        AND jl.side = \'debit\' AND ca.account_code LIKE \'' . self::JOURNAL_EXPENSE_PREFIX . '%\') AS linked_expense_account,
                     (SELECT COUNT(*) FROM assets la
                       WHERE la.supplier_id = a.supplier_id AND la.disposal_entry_id = a.disposal_entry_id
                         AND la.status = \'disposed\') AS linked_share
@@ -167,7 +174,10 @@ final class DisposalResiduals
                 $bookSource = self::BOOK_SOURCE_CARD;
                 $expenseAccount = null;
                 if ($r['linked_entry_id'] !== null && (int) $r['linked_share'] === 1) {
-                    $journal = round((float) ($r['linked_residual'] ?? 0), 2);
+                    // Doklad vyřazení může nést i jiné řádky (Money: roční interní doklad s odpisy
+                    // dalších karet): ZC karty je MD 54x zápisu, nejvýš to, co zápis připsal na
+                    // oprávky (majetkový účet) karty.
+                    $journal = round(min((float) ($r['linked_residual'] ?? 0), (float) ($r['linked_account_credit'] ?? 0)), 2);
                     if (abs($journal - $book) >= 0.01) {
                         $warnings[] = 'Účetní ZC vyřazeného majetku ' . $number . ' ke dni ' . (string) $r['disposal_date']
                             . ': v zápisu vyřazení (deník, zápis č. ' . (int) $r['linked_entry_id'] . ') ' . self::money($journal)
