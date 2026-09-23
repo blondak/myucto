@@ -64,6 +64,13 @@ enum PayrollRevealPurpose: string
     case DOCUMENT_SECURE_DELIVERY = 'document:secure_delivery';
 
     /**
+     * Pseudonymizace kopie databáze pro testovací instanci
+     * (`api/bin/anonymize-clone.php`). Odhalená hodnota se okamžitě nahradí
+     * pseudonymem a znovu zapečetí; ven z procesu neteče.
+     */
+    case ANONYMIZATION = 'security:anonymization';
+
+    /**
      * Je odhalení zákonnou náležitostí dokumentu nebo podání?
      *
      * Rozlišení je tu proto, aby budoucí auditní zápis uměl oddělit systémový
