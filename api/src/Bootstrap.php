@@ -998,7 +998,8 @@ final class Bootstrap
             ]),
             \MyInvoice\Service\Bank\Connector\FioBankConnector::class => fn (ContainerInterface $c)
                 => new \MyInvoice\Service\Bank\Connector\FioBankConnector(
-                    $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->create('fio')),
+                    $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->create('fio'),
+                    $c->get(LoggerInterface::class)),
             \MyInvoice\Service\Bank\Connector\RaiffeisenbankPremiumClient::class => fn (ContainerInterface $c)
                 => new \MyInvoice\Service\Bank\Connector\RaiffeisenbankPremiumClient(
                     $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->create('raiffeisenbank', new \GuzzleHttp\Handler\CurlHandler([

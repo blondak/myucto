@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Bank\Connector;
 
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use Psr\Log\LoggerInterface;
 
 final class FioBankConnector implements BankConnector
 {
@@ -14,7 +15,10 @@ final class FioBankConnector implements BankConnector
     private const MAX_IMPORT_RESPONSE_BYTES = 512 * 1024;
     private const MAX_ABO_BYTES = 2 * 1024 * 1024;
 
-    public function __construct(private readonly ClientInterface $http)
+    public function __construct(
+        private readonly ClientInterface $http,
+        private readonly ?LoggerInterface $logger = null,
+    )
     {
     }
 
@@ -37,16 +41,40 @@ final class FioBankConnector implements BankConnector
 
         $url = self::BASE_URL . 'periods/' . rawurlencode($token)
             . '/' . $from . '/' . $to . '/transactions.gpc';
-        $response = $this->request('GET', $url, [
-            'headers' => [
-                'Accept' => 'text/plain, application/octet-stream',
-                'User-Agent' => 'MyUcto-Bank-Connector/1.0',
-            ],
-        ], false);
-        $body = $this->readResponse($response, self::MAX_STATEMENT_BYTES, false);
-        $this->validateGpc($body);
-
-        return $body;
+        $stage = 'request';
+        $reason = null;
+        $response = null;
+        $body = null;
+        try {
+            $response = $this->request('GET', $url, [
+                'headers' => [
+                    'Accept' => 'text/plain, application/octet-stream',
+                    'User-Agent' => 'MyUcto-Bank-Connector/1.0',
+                ],
+            ], false);
+            $stage = 'read';
+            $body = $this->readResponse($response, self::MAX_STATEMENT_BYTES, false);
+            $stage = 'gpc';
+            $reason = $this->gpcFailureReason($body);
+            if ($reason !== null) {
+                throw new BankConnectorException(
+                    BankConnectorException::INVALID_RESPONSE,
+                    'Banka vrátila neplatný formát GPC.',
+                    false,
+                    $response->getStatusCode(),
+                );
+            }
+            return $body;
+        } catch (BankConnectorException $e) {
+            $this->logger?->warning('fio_statement_failed', [
+                'stage' => $stage,
+                'reason' => $reason,
+                'code' => $e->errorCode,
+                'http_status' => $e->remoteHttpStatus ?? $response?->getStatusCode(),
+                'response_bytes' => $body !== null ? strlen($body) : null,
+            ]);
+            throw $e;
+        }
     }
 
     public function submitPaymentOrder(
@@ -235,31 +263,22 @@ final class FioBankConnector implements BankConnector
         return $parsed;
     }
 
-    private function validateGpc(#[\SensitiveParameter] string $gpc): void
+    private function gpcFailureReason(#[\SensitiveParameter] string $gpc): ?string
     {
         if (!str_ends_with($gpc, "\r\n")) {
-            throw new BankConnectorException(
-                BankConnectorException::INVALID_RESPONSE,
-                'Banka vrátila neplatný formát GPC.',
-            );
+            return 'line_ending_invalid';
         }
 
         $records = explode("\r\n", substr($gpc, 0, -2));
         $account = substr($records[0], 3, 16);
         foreach ($records as $index => $record) {
             $validType = $index === 0 ? str_starts_with($record, '074') : str_starts_with($record, '075');
-            if (
-                strlen($record) !== 128
-                || !$validType
-                || ($index === 0 && preg_match('/^\d{16}$/D', $account) !== 1)
-                || ($index > 0 && substr($record, 3, 16) !== $account)
-            ) {
-                throw new BankConnectorException(
-                    BankConnectorException::INVALID_RESPONSE,
-                    'Banka vrátila neplatný formát GPC.',
-                );
-            }
+            if (strlen($record) !== 128) return 'record_length_invalid';
+            if (!$validType) return 'record_type_invalid';
+            if ($index === 0 && preg_match('/^\d{16}$/D', $account) !== 1) return 'header_account_invalid';
+            if ($index > 0 && substr($record, 3, 16) !== $account) return 'record_account_mismatch';
         }
+        return null;
     }
 
     private function validateAbo(#[\SensitiveParameter] string $abo): void
