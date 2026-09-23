@@ -6048,7 +6048,7 @@
         "imported": {
           "action": "Import protocol from the data box",
           "importing": "Importing protocol…",
-          "hint": "This overview does not know about submissions filed by other software. The processing protocol delivered by ČSSZ to your data box can be imported here as XML, so filings made outside the app show up as well. A protocol issued to another variable symbol is refused.",
+          "hint": "This overview does not know about submissions filed by other software. The processing protocol delivered by ČSSZ to your data box can be imported here as XML, so filings made outside the app show up as well. The JMHZ partial protocol (attachment JMH-DILCI-PROTOKOL-…) can be imported too; upload it under its original name, which carries the variable symbol and period. A protocol issued to another variable symbol, with an invalid ČSSZ seal or with an employment the company does not have on record is refused.",
           "added": "The protocol was imported. Submission status: {status}.",
           "replaced": "This protocol had already been imported — the record was updated, no duplicate was created.",
           "failed": "The protocol could not be imported.",

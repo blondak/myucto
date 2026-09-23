@@ -114,10 +114,12 @@ final readonly class JmhzIsdsSubmissionService
     {
         return [
             'subject_prefix' => JmhzIsdsResponseMatcher::SUBJECT_PREFIX,
-            'attachment_prefix' => JmhzIsdsResponseMatcher::ATTACHMENT_PREFIX,
+            'attachment_prefix' => JmhzIsdsResponseMatcher::JMHZ_ATTACHMENT_PREFIX,
             'note' => 'ČSSZ pošle odpověď do schránky, ze které podání odešlo.'
                 . ' Ve věci uvede v hranaté závorce ID vaší odeslané zprávy.'
-                . ' Zpráva zůstává ve schránce 90 dnů.',
+                . ' Dílčí protokol je v příloze, jejíž název začíná '
+                . JmhzIsdsResponseMatcher::JMHZ_ATTACHMENT_PREFIX . ' a obsahuje'
+                . ' variabilní symbol a období. Zpráva zůstává ve schránce 90 dnů.',
         ];
     }
 }

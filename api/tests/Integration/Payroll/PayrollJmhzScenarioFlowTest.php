@@ -176,6 +176,8 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         self::assertStringContainsString('<form:kod>1++</form:kod>', $xml);
         self::assertStringContainsString('<form:pocetDnu>0</form:pocetDnu>', $xml);
         self::assertStringContainsString('<form:omluvenaNepritomnost>31</form:omluvenaNepritomnost>', $xml);
+        // Neplacené volno evidenční stav nemění.
+        self::assertStringContainsString('<form:dnyEvidencniStav>31</form:dnyEvidencniStav>', $xml);
         // Kontroly 282 a 283: při nulových hodinách a nulovém příjmu se
         // rozpad přesčasu ani osvobozený příjem neuvádějí.
         self::assertStringNotContainsString('<form:rozpad>', $xml);
@@ -231,7 +233,36 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         self::assertStringContainsString('<form:docasNeschopnost>26</form:docasNeschopnost>', $xml);
         self::assertStringContainsString('<form:hodinyNeodpracNeschop>80.000</form:hodinyNeodpracNeschop>', $xml);
         self::assertStringContainsString('<form:hodinyNeodpracBezNahrady>80.000</form:hodinyNeodpracBezNahrady>', $xml);
-        self::assertStringContainsString('<form:hodinyNeodpracNahrada>80.000</form:hodinyNeodpracNahrada>', $xml);
+        // Pokyny MPSV k 10276: hodiny DPN se neuvádějí. Nemoc s náhradou mzdy
+        // je překážkou na straně zaměstnance (ZP část osmá, hlava I), 10471.
+        self::assertStringNotContainsString('<form:hodinyNeodpracNahrada>', $xml);
+        self::assertStringContainsString(
+            '<form:prekazkyVPraci><form:prekazkaZamestnanec>80.000</form:prekazkaZamestnanec></form:prekazkyVPraci>',
+            $xml,
+        );
+        // Pracovní souhrn, ze kterého sleva § 7a ZPSZ počítá hodiny s náhradou
+        // mzdy, nemoc v okně náhrady dál nese: převod na 10276/10471 je jen
+        // v hlášení a výpočet slevy se nemění.
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT unworked_paid_millihours, dpn_with_employer_compensation_millihours,
+                    employee_obstacle_paid_millihours, work_obstacles_occurred
+               FROM payroll_jmhz_work_month_revisions
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY id DESC LIMIT 1'
+        );
+        $stmt->execute([$this->supplierId, $person['employment_id']]);
+        self::assertSame(
+            [
+                'unworked_paid_millihours' => 80_000,
+                'dpn_with_employer_compensation_millihours' => 80_000,
+                'employee_obstacle_paid_millihours' => null,
+                'work_obstacles_occurred' => 0,
+            ],
+            array_map(
+                static fn (mixed $value): ?int => $value === null ? null : (int) $value,
+                $stmt->fetch(\PDO::FETCH_ASSOC) ?: [],
+            ),
+        );
         // § 3 odst. 9 písm. b) zák. 592/1992: minimum se krátí o 26 dnů DPN
         // na 3 613 Kč, základ 9 000 Kč ho převyšuje, takže doplatek nevzniká:
         // 9 % a 4,5 % z 9 000 Kč.
@@ -263,6 +294,10 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         self::assertStringContainsString('<form:penezitaPomocMaterstvi>31</form:penezitaPomocMaterstvi>', $xml);
         self::assertStringContainsString('<form:vylouceneDobyCelkem>31</form:vylouceneDobyCelkem>', $xml);
         self::assertStringNotContainsString('<form:osvobozenoCelkem>', $xml);
+        // Na mateřské není zaměstnankyně v evidenčním stavu (10265 = 0),
+        // fondy 10259 a 10260 zůstávají plné.
+        self::assertStringContainsString('<form:dnyEvidencniStav>0</form:dnyEvidencniStav>', $xml);
+        self::assertStringContainsString('<form:sjednanyFond>184.000</form:sjednanyFond>', $xml);
         // Za příjemkyni PPM platí pojistné stát (§ 7 odst. 1 písm. d) zák.
         // 48/1997), minimum se po celý měsíc nepoužije: bez doplatku.
         self::assertStringContainsString(

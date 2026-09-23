@@ -294,6 +294,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $employment,
             $period,
             $periodEnd,
+            $absences,
         );
         $workedSource = PayrollWorkedTimeSource::fromEntries($entries, $periodStart);
         $worked = [
@@ -401,7 +402,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $periodEnd->format('Y-m-d'),
             $lockSources,
         );
-        [$evidenceFrom, $evidenceTo, $evidenceDays] = self::evidenceInterval($employment, $period, $periodEnd);
+        [$evidenceFrom, $evidenceTo, $evidenceDays] = self::evidenceInterval($employment, $period, $periodEnd, $absences);
         $worked = PayrollWorkedTimeSource::fromImportSummary($summary);
         $workedSuggestion = $worked['worked_millihours'] === null
             ? null
@@ -1269,19 +1270,38 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     }
 
     /**
+     * Interval vztahu v měsíci (z něj se počítají fondy 10259/10260) a počet
+     * dní v evidenčním stavu (10265), který je o mateřskou, rodičovskou
+     * a otcovskou kratší, viz {@see PayrollJmhzEvidenceStateDays}.
+     *
      * @param array<string,mixed> $employment
+     * @param list<array<string,mixed>> $absences
      * @return array{?\DateTimeImmutable,?\DateTimeImmutable,int}
      */
     private static function evidenceInterval(
         array $employment,
         \DateTimeImmutable $period,
         \DateTimeImmutable $periodEnd,
+        array $absences,
     ): array {
         if (self::isAgreement($employment['relation_type'])) {
             return [null, null, 0];
         }
+        [$from, $to] = self::employmentInterval($employment, $period, $periodEnd);
+        if ($from === null || $to === null) {
+            return [null, null, 0];
+        }
 
-        return self::employmentInterval($employment, $period, $periodEnd);
+        return [
+            $from,
+            $to,
+            PayrollJmhzEvidenceStateDays::days(
+                $employment['relation_type'],
+                $from->format('Y-m-d'),
+                $to->format('Y-m-d'),
+                $absences,
+            ),
+        ];
     }
 
     private static function isAgreement(mixed $relationType): bool

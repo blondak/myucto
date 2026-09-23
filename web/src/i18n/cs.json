@@ -6048,7 +6048,7 @@
         "imported": {
           "action": "Načíst protokol z datové schránky",
           "importing": "Načítám protokol…",
-          "hint": "Podání odeslaná jiným softwarem tenhle přehled nezná. Protokol o zpracování, který ČSSZ doručí do datové schránky, sem jde načíst jako XML — do přehledu se tím dostane i to, co odešlo mimo aplikaci. Protokol vystavený na cizí variabilní symbol systém odmítne.",
+          "hint": "Podání odeslaná jiným softwarem tenhle přehled nezná. Protokol o zpracování, který ČSSZ doručí do datové schránky, sem jde načíst jako XML — do přehledu se tím dostane i to, co odešlo mimo aplikaci. Načíst jde i dílčí protokol k JMHZ (příloha JMH-DILCI-PROTOKOL-…); nahrajte ho pod původním názvem, ten nese variabilní symbol a období. Protokol vystavený na cizí variabilní symbol, s neplatnou pečetí ČSSZ nebo s pracovním vztahem, který v evidenci firmy není, systém odmítne.",
           "added": "Protokol byl načten. Stav hlášení: {status}.",
           "replaced": "Tenhle protokol už načtený byl — záznam se aktualizoval, druhý se nezaložil.",
           "failed": "Protokol se nepodařilo načíst.",

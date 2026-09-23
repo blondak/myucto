@@ -551,6 +551,15 @@ a podání se nepohne. U takového pokusu ukáže **Stav odeslání** tlačítko
 když projde, převezme z něj stav podání. Když neprojde, nezmění nic a ukáže
 důvod. Opakované kliknutí nic nezdvojí.
 
+Protokol k hlášení podanému jiným softwarem načtete na záložce **Stav
+odeslání** tlačítkem **Načíst protokol z datové schránky**. Vedle protokolu
+o zpracování jde načíst i dílčí protokol k JMHZ, tedy přílohu
+`JMH-DILCI-PROTOKOL-…`. Ten variabilní symbol v podepsané části nenese, proto ho
+nahrajte pod původním názvem z datové schránky. Aplikace u něj ověří pečeť ČSSZ
+a to, že všechny pracovní vztahy v protokolu (ID PPV) má firma v evidenci. Když
+některý vztah chybí, protokol neuloží; načtěte nejdřív měsíční hlášení, ze
+kterých se ID PPV doplní.
+
 Před každým odesláním aplikace znovu ověří, že odesílat vůbec lze: podání musí
 být ve stavu **připraveno**, musí souhlasit prostředí i kanál a **druh podání
 musí odpovídat agendě**, do které míří. Neodpovídající kombinaci odmítne ještě

@@ -66,6 +66,15 @@ final readonly class JmhzIsdsResponseMatcher
     public const ATTACHMENT_PREFIX = 'ČSSZ_Protokol_o_zpracování_e-Podání_';
 
     /**
+     * Skutečný název přílohy s dílčím protokolem k podání JMHZ:
+     * `JMH-DILCI-PROTOKOL-VS{VS}-{RRRR}-{MM}-IDCSSZ-{id}.xml`. Obecný tvar
+     * {@see ATTACHMENT_PREFIX} z podacího protokolu JMHZ nedodržuje. Automatické
+     * zpracování se o název neopírá (hledá podle obsahu), je to jen nápověda
+     * pro ruční dohledání.
+     */
+    public const JMHZ_ATTACHMENT_PREFIX = 'JMH-DILCI-PROTOKOL-';
+
+    /**
      * Rozebere věc odpovědi na tři prvky, nebo vrátí `null`, když to odpověď
      * ČSSZ na e-Podání není.
      */
