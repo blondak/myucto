@@ -18,7 +18,8 @@ use MyInvoice\Service\Vat\VatStatusService;
 /**
  * Podklady §7 pro DPFO přiznání ({@see DpfoReturnCalculator}) — Epic DP (issue #18).
  *
- * §7 dílčí základ = příjmy − výdaje. Zdroj příjmů:
+ * §7 dílčí základ `s7_base` = příjmy − výdaje + úpravy § 23 z roční uzávěrky daňové
+ * evidence, tj. konečný ř. 113 Přílohy 1 ({@see DpfoReturnCalculator::section7}). Zdroj příjmů:
  *   - režim tax_evidence → daňový příjem z peněžního deníku (CashJournalService, kasová
  *     báze: hotovostní tržby bez faktury i částečné úhrady, ne jen faktury status='paid')
  *     bez ohledu na to, zda se výdaje uplatňují paušálem nebo skutečné;
@@ -133,7 +134,15 @@ final class DpfoReturnDataProvider
         }
         $increase = round((float) ($closing['adjustments']['increase'] ?? 0), 2);
         $decrease = round((float) ($closing['adjustments']['decrease'] ?? 0), 2);
-        $base = round($income - $expenses + $increase - $decrease, 2);
+        // Konečný dílčí základ § 7 (ř. 113) ze stejného výpočtu jako přiznání, včetně
+        // činností na profilu. Přehledy ČSSZ a ZP ho berou odsud, takže nesmí vzniknout jinak.
+        $base = DpfoReturnCalculator::section7([
+            's7_income' => $income,
+            's7_expenses' => $expenses,
+            's7_increase' => $increase,
+            's7_decrease' => $decrease,
+            'activities' => (array) ($profile['activities'] ?? []),
+        ], $c)['base'];
 
         [$payrollGross, $payrollWarning] = $this->payrollGross($supplierId, $year);
         if ($payrollWarning !== null) {
