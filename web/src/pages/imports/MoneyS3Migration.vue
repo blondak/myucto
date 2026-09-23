@@ -12,6 +12,7 @@ import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
+import MoneyS3BatchWizard from '@/components/migration/MoneyS3BatchWizard.vue'
 
 /**
  * Průvodce „Přechod z Money S3": záloha agendy → náhled a volby → zkouška nanečisto →
@@ -20,6 +21,25 @@ import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
  * je v useMigrationWizard.
  */
 const TOKEN_KEY = 'myucto.moneyS3.token'
+const TAB_KEY = 'myucto.moneyS3.tab'
+
+// Režim průvodce: jedna firma, nebo dávka více firem (účetní kancelář). Volba přežije obnovení stránky.
+function storedTab(): 'single' | 'batch' {
+  try {
+    return sessionStorage.getItem(TAB_KEY) === 'batch' ? 'batch' : 'single'
+  } catch {
+    return 'single'
+  }
+}
+const tab = ref<'single' | 'batch'>(storedTab())
+function setTab(value: 'single' | 'batch'): void {
+  tab.value = value
+  try {
+    sessionStorage.setItem(TAB_KEY, value)
+  } catch {
+    // úložiště prohlížeče nedostupné, volba platí do obnovení stránky
+  }
+}
 
 const { t, tm, rt } = useI18n()
 const toast = useToast()
@@ -131,6 +151,16 @@ const actions = computed<ActionItem[]>(() => {
       <RouterLink to="/admin/support" class="mt-1 inline-block font-medium underline hover:no-underline">{{ t('money_s3.support_notice_link') }}</RouterLink>
     </div>
 
+    <div role="tablist" :aria-label="t('money_s3.title')" class="flex flex-wrap items-center gap-1.5" data-testid="money-s3-mode-tabs">
+      <button v-for="m in (['single', 'batch'] as const)" :key="m" type="button" role="tab" :aria-selected="tab === m"
+        class="h-8 shrink-0 cursor-pointer whitespace-nowrap rounded-full border px-3 text-sm transition-colors"
+        :class="tab === m ? 'border-primary-300 bg-primary-50 font-medium text-primary-700' : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+        :data-testid="`money-s3-tab-${m}`" @click="setTab(m)">{{ t(`money_s3.batch.tab_${m}`) }}</button>
+    </div>
+
+    <MoneyS3BatchWizard v-if="tab === 'batch'" />
+
+    <template v-else>
     <ol class="grid grid-cols-2 gap-2 sm:grid-cols-4">
       <li v-for="step in steps" :key="step.number">
         <button type="button" :disabled="!canGoTo(step.number)" class="flex w-full items-center rounded-lg border px-3 py-3 text-left text-sm transition-colors"
@@ -311,5 +341,6 @@ const actions = computed<ActionItem[]>(() => {
     </section>
 
     <CompanyProfileBox variant="migration" />
+    </template>
   </div>
 </template>

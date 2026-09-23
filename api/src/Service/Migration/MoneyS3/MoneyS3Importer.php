@@ -133,8 +133,8 @@ final class MoneyS3Importer
                 $b['year'], $b['next'], count($b['accounts']), $code, number_format($b['accounts'][$code], 2, ',', ' ')
             ), ['year' => $b['year'], 'next' => $b['next'], 'accounts' => array_slice($b['accounts'], 0, 20, true)]);
         }
-        if ($breaks !== []) {
-            $suggested = $breaks[count($breaks) - 1]['next'];
+        $suggested = JournalImporter::suggestedFromYear($breaks);
+        if ($suggested !== null) {
             $add('info', 'suggested_from_year', "Roky od {$suggested} v Money navazují — převod od roku {$suggested} (volba „Převést od roku“) půjde celý uzavřít. Starší roky zůstanou v archivu Money.", ['from_year' => $suggested]);
         }
         foreach ($plan as $item) {

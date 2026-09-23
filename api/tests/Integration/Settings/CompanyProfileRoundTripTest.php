@@ -13,6 +13,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\StatementOverrideService;
+use MyInvoice\Service\Migration\Shared\CompanyProfileCarryOver;
 use MyInvoice\Service\Settings\CompanyProfile\CompanyProfileException;
 use MyInvoice\Service\Settings\CompanyProfile\CompanyProfileExporter;
 use MyInvoice\Service\Settings\CompanyProfile\CompanyProfileImporter;
@@ -45,6 +46,7 @@ final class CompanyProfileRoundTripTest extends TestCase
     private PostingService $posting;
     private AccountingPeriodRepository $periods;
     private ChartOfAccountsSeeder $seeder;
+    private CompanyProfileCarryOver $carryOver;
     private int $versionId = 0;
     private int $sourceSupplierId = 0;
     private int $userId = 0;
@@ -70,6 +72,7 @@ final class CompanyProfileRoundTripTest extends TestCase
             $this->posting = $c->get(PostingService::class);
             $this->periods = $c->get(AccountingPeriodRepository::class);
             $this->seeder = $c->get(ChartOfAccountsSeeder::class);
+            $this->carryOver = $c->get(CompanyProfileCarryOver::class);
             $version = $c->get(StatementDefinitionRepository::class)->findVersion('balance_sheet', self::YEAR . '-12-31');
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
@@ -129,6 +132,30 @@ final class CompanyProfileRoundTripTest extends TestCase
         $row = $rule->fetch(\PDO::FETCH_ASSOC);
         self::assertSame('auto', $row['mode'], 'Automatika pravidla se obnoví auditovaným povýšením.');
         self::assertNotNull($row['mode_set_manually_at']);
+    }
+
+    /** Dávkový převod odloží profil před převodem do existující firmy a po převodu ho obnoví. */
+    public function testBatchCarryOverRestoresSettingsDroppedByReconversion(): void
+    {
+        $a = $this->company();
+        $this->buildSettings($a);
+        $expected = $this->statementsFingerprint($a);
+
+        $profile = $this->carryOver->capture($a);
+        self::assertNotNull($profile, 'Firma s nastavením má co odložit.');
+
+        $pdo = $this->db->pdo();
+        $pdo->prepare('DELETE FROM statement_account_overrides WHERE supplier_id = ?')->execute([$a]);
+        $pdo->prepare(
+            'UPDATE accounting_supplier_settings
+                SET comparative_from_prior_year = 0, tax_authority_offset = 0, tax_authority_offset_from_year = NULL
+              WHERE supplier_id = ?'
+        )->execute([$a]);
+        self::assertNotSame($expected, $this->statementsFingerprint($a), 'Fixture: bez nastavení vyjdou výkazy jinak.');
+
+        $messages = $this->carryOver->restore($a, $profile);
+        self::assertSame($expected, $this->statementsFingerprint($a), 'Po obnově profilu jsou výkazy shodné.');
+        self::assertNotEmpty($messages, 'Obnova se hlásí do protokolu dávky.');
     }
 
     public function testProfileOfForeignFormatOrNewerVersionIsRejected(): void

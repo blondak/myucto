@@ -349,6 +349,18 @@ final class JournalImporter
     }
 
     /**
+     * První rok, od kterého v Money roky navazují (rok za posledním přerušením řetězu),
+     * nebo null, když navazují všechny. Převod od něj půjde celý uzavřít; doporučuje ho
+     * kontrola před převodem a volí ho dávkový převod s „od roku automaticky".
+     *
+     * @param list<array{year:int,next:int}> $breaks výsledek {@see chainBreaks()}
+     */
+    public static function suggestedFromYear(array $breaks): ?int
+    {
+        return $breaks !== [] ? (int) $breaks[count($breaks) - 1]['next'] : null;
+    }
+
+    /**
      * Místa, kde v Money nenavazují roky: konečné stavy roku (počáteční stavy + deník bez
      * uzávěrky XZ) nesedí na počáteční stavy dalšího roku. Money to dovolí (počáteční stavy
      * jdou přepsat ručně, starý rok může být v agendě jen zčásti), uzávěrka MyÚčta ne —
