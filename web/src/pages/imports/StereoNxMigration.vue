@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
 import { stereoNxApi, type StereoCompany, type StereoPreview, type StereoProtocolRun, type StereoReport, type StereoUpload } from '@/api/stereoNx'
@@ -32,12 +33,26 @@ const deleteAfterImport = ref(false)
 const cleanupWarning = ref('')
 const reportCompany = ref<{ name: string; ico: string } | null>(null)
 const blankCountryIsCz = ref(false)
+const profileFilled = ref<string[]>([])
+const selectedProfileFields = ref<string[]>([])
 // Zkouška i převod běží na serveru jako job; stav jobu pro ukazatel průběhu.
 const job = ref<FileImportJob | null>(null)
 const error = ref('')
 
 const selectedCompany = computed(() => companies.value.find(item => item.index === selected.value))
-const canRun = computed(() => !!token.value && selectedCompany.value?.matches_target === true && selectedCompany.value.identity.vat_payer && target.value?.accounting_mode === 'tax_evidence' && target.value.vat_payer)
+const modeMismatch = computed(() => !!selectedCompany.value?.identity.accounting_mode && !!target.value?.accounting_mode && selectedCompany.value.identity.accounting_mode !== target.value.accounting_mode)
+function modeLabel(mode: string | null | undefined): string {
+  return mode === 'tax_evidence' || mode === 'double_entry' ? t(`stereo_nx.accounting_modes.${mode}`) : t('stereo_nx.accounting_modes.unknown')
+}
+const profileFields = ['company_name', 'dic', 'street', 'city', 'zip', 'email', 'phone', 'web'] as const
+const profileSuggestions = computed(() => profileFields.flatMap(field => {
+  const value = selectedCompany.value?.profile_suggestions?.[field]?.trim()
+  return value ? [{ field, value, current: selectedCompany.value?.profile_current?.[field] ?? '' }] : []
+}))
+watch([selected, companies], () => {
+  selectedProfileFields.value = profileSuggestions.value.filter(item => !item.current.trim()).map(item => item.field)
+})
+const canRun = computed(() => !!token.value && selectedCompany.value?.matches_target === true && selectedCompany.value.identity.vat_payer && ['tax_evidence', 'double_entry'].includes(target.value?.accounting_mode ?? '') && !modeMismatch.value && target.value?.vat_payer)
 const canImport = computed(() => canRun.value && dryReport.value?.ok === true && confirmed.value)
 const backupHelpItems = computed(() => {
   const items = tm('stereo_nx.upload_help_items') as unknown
@@ -96,6 +111,7 @@ function resetSelection(): void {
   cleanupWarning.value = ''
   reportCompany.value = null
   blankCountryIsCz.value = false
+  profileFilled.value = []
   error.value = ''
 }
 
@@ -143,6 +159,7 @@ function onFile(event: Event): void {
   cleanupWarning.value = ''
   reportCompany.value = null
   blankCountryIsCz.value = false
+  profileFilled.value = []
 }
 
 function invalidateDryRun(): void {
@@ -152,11 +169,13 @@ function invalidateDryRun(): void {
   deleteAfterImport.value = false
   cleanupWarning.value = ''
   reportCompany.value = null
+  profileFilled.value = []
 }
 
 function message(caught: unknown): string {
   const response = caught as { response?: { data?: { error?: { code?: string; message?: string } } } }
   if (response.response?.data?.error?.code === 'migration_required') return t('stereo_nx.migration_required')
+  if (response.response?.data?.error?.code === 'company_profile_changed') return t('stereo_nx.profile_changed')
   return response.response?.data?.error?.message || t('stereo_nx.failed')
 }
 
@@ -201,6 +220,7 @@ async function openUpload(upload: StereoUpload): Promise<void> {
   cleanupWarning.value = ''
   reportCompany.value = null
   blankCountryIsCz.value = false
+  profileFilled.value = []
   await preview()
 }
 
@@ -220,6 +240,34 @@ async function preview(): Promise<void> {
     dryReport.value = null
     importReport.value = null
     currentStep.value = 2
+    profileFilled.value = []
+  } catch (caught) {
+    if (supplier.currentSupplierId !== supplierId || token.value !== uploadToken) return
+    error.value = message(caught)
+    toast.error(error.value)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function fillCompanyProfile(): Promise<void> {
+  if (!token.value || !selectedCompany.value?.matches_target || !selectedProfileFields.value.length || busy.value) return
+  const supplierId = supplier.currentSupplierId
+  const uploadToken = token.value
+  const companyIndex = selectedCompany.value.index
+  const fields = profileFields.filter(field => selectedProfileFields.value.includes(field) && profileSuggestions.value.some(item => item.field === field))
+  const expectedValues = Object.fromEntries(fields.map(field => [field, selectedCompany.value?.profile_current?.[field] ?? '']))
+  busy.value = true
+  error.value = ''
+  try {
+    const result = await stereoNxApi.fillCompanyProfile(uploadToken, companyIndex, fields, expectedValues)
+    if (supplier.currentSupplierId !== supplierId || token.value !== uploadToken || selected.value !== companyIndex) return
+    const refreshed = await stereoNxApi.preview(uploadToken)
+    if (supplier.currentSupplierId !== supplierId || token.value !== uploadToken || selected.value !== companyIndex) return
+    companies.value = refreshed.companies
+    target.value = refreshed.target
+    invalidateDryRun()
+    profileFilled.value = result.filled_fields.filter(field => profileFields.some(allowed => allowed === field))
   } catch (caught) {
     if (supplier.currentSupplierId !== supplierId || token.value !== uploadToken) return
     error.value = message(caught)
@@ -258,7 +306,7 @@ async function run(mode: 'dry_run' | 'import'): Promise<void> {
       dryReport.value = null
       confirmed.value = false
       currentStep.value = 4
-      if (report.ok && report.database_writes === true && deleteAfterImport.value) {
+      if (report.ok && report.database_writes === true && report.partial !== true && deleteAfterImport.value) {
         try {
           await stereoNxApi.remove(uploadToken)
           if (supplier.currentSupplierId !== supplierId || token.value !== uploadToken) return
@@ -327,7 +375,13 @@ function reportMessage(item: unknown): string {
 function asProtocol(report: StereoReport, mode: 'dry_run' | 'import'): StereoProtocolRun {
   const messages: MoneyS3Step['messages'] = []
   const seen = new Set<string>()
+  const reviewedDocuments = report.review_documents ?? []
   const addMessage = (item: unknown, fallback: 'error' | 'warning' | 'info'): void => {
+    // Server uchovává důvod v reportu; v UI se stejný doklad zobrazuje s důvody
+    // v části Kontrola dokladů, a proto ho neopakujeme v souhrnu.
+    if (item && typeof item === 'object' && 'document_no' in item && typeof item.document_no === 'string'
+      && 'code' in item && typeof item.code === 'string'
+      && reviewedDocuments.some(document => document.document_no === item.document_no && document.review_codes.includes(item.code as string))) return
     const message = reportMessage(item)
     const level = typeof item === 'object' && item && 'level' in item && item.level === 'error' ? 'error'
       : typeof item === 'object' && item && 'level' in item && item.level === 'warning' ? 'warning' : fallback
@@ -339,10 +393,12 @@ function asProtocol(report: StereoReport, mode: 'dry_run' | 'import'): StereoPro
   for (const item of report.preflight ?? []) addMessage(item, 'info')
   for (const item of report.errors ?? []) addMessage(item, 'error')
   for (const item of report.warnings ?? []) addMessage(item, 'warning')
-  const reviewMessages: MoneyS3Step['messages'] = Object.entries(report.review_reasons ?? {}).map(([code, count]) => ({
+  const reasons = { ...report.review_reasons }
+  for (const [code, count] of Object.entries(report.movement_review_reasons ?? {})) reasons[code] = (reasons[code] ?? 0) + count
+  const reviewMessages: MoneyS3Step['messages'] = Object.entries(reasons).map(([code, count]) => ({
     level: 'warning', code, text: t('stereo_nx.review_count', { reason: reviewLabel(code), count }), context: {},
   }))
-  for (const document of report.review_documents ?? []) {
+  for (const document of [...(report.review_documents ?? []), ...(report.review_movements ?? [])]) {
     reviewMessages.push({
       level: 'warning', code: document.source_key,
       text: t('stereo_nx.review_document', {
@@ -354,7 +410,7 @@ function asProtocol(report: StereoReport, mode: 'dry_run' | 'import'): StereoPro
   }
   const steps: MoneyS3Step[] = [
     { key: 'source_summary', status: report.ok ? 'ok' : 'error', counts: report.counts ?? {}, messages },
-    { key: 'review', status: reviewMessages.length ? 'warning' : 'ok', counts: { requires_draft: report.counts?.requires_draft ?? 0 }, messages: reviewMessages },
+    { key: 'review', status: reviewMessages.length ? 'warning' : 'ok', counts: { requires_draft: report.counts?.requires_draft ?? 0, requires_movement_review: report.counts?.requires_movement_review ?? 0 }, messages: reviewMessages },
   ]
   if (report.written) steps.push({ key: mode === 'dry_run' ? 'would_write' : 'written', status: report.ok ? 'ok' : 'error', counts: report.written, messages: [] })
   const status = !report.ok ? 'failed' : messages.some(item => item.level === 'warning') || reviewMessages.length ? 'completed_with_warnings' : 'completed'
@@ -366,6 +422,29 @@ function asProtocol(report: StereoReport, mode: 'dry_run' | 'import'): StereoPro
     protocol: { mode, status, failure: null, steps },
   }
 }
+
+const reviewLinks = computed(() => {
+  const report = importReport.value
+  if (!report?.ok || report.database_writes !== true) return []
+  const records = [...(report.review_documents ?? []), ...(report.review_movements ?? [])]
+  return records.flatMap(record => {
+    if (!record.target_id || !Number.isSafeInteger(record.target_id) || record.target_id < 1) return []
+    let to: string
+    if (record.kind === 'issued') to = `/invoices/${record.target_id}`
+    else if (record.kind === 'purchase') to = `/purchase-invoices/${record.target_id}`
+    else if (record.kind === 'cash') to = `/accounting/cash/${record.target_id}/edit`
+    else {
+      if (!('statement_id' in record) || !record.statement_id || !Number.isSafeInteger(record.statement_id) || record.statement_id < 1) return []
+      to = `/bank/${record.statement_id}?tx=${record.target_id}`
+    }
+    return [{ key: `${record.kind}:${record.target_id}`, to,
+      label: t('stereo_nx.review_document', {
+        kind: t(`stereo_nx.document_kind.${record.kind}`),
+        number: record.document_no || `#${record.target_id}`,
+        reasons: record.review_codes.map(reviewLabel).join(', '),
+      }) }]
+  })
+})
 
 const dryProtocol = computed(() => dryReport.value ? asProtocol(dryReport.value, 'dry_run') : null)
 const importProtocol = computed(() => importReport.value ? asProtocol(importReport.value, 'import') : null)
@@ -438,8 +517,25 @@ const importProtocol = computed(() => importReport.value ? asProtocol(importRepo
       </select>
       <p v-if="selectedCompany && !selectedCompany.matches_target" class="mt-3 text-sm text-danger-600">{{ t('stereo_nx.ico_mismatch') }}</p>
       <p v-if="selectedCompany && !selectedCompany.identity.vat_payer" class="mt-3 text-sm text-danger-600">{{ t('stereo_nx.vat_required') }}</p>
-      <p v-if="target && target.accounting_mode !== 'tax_evidence'" class="mt-3 text-sm text-danger-600">{{ t('stereo_nx.mode_required') }}</p>
+      <p v-if="target && !['tax_evidence', 'double_entry'].includes(target.accounting_mode)" class="mt-3 text-sm text-danger-600">{{ t('stereo_nx.mode_required') }}</p>
+      <p v-if="selectedCompany?.identity.accounting_mode === null" class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700">{{ t('stereo_nx.source_mode_unknown') }}</p>
+      <div v-if="modeMismatch && selectedCompany && target" data-testid="stereo-mode-mismatch" class="mt-4 rounded-lg border border-danger-300 bg-danger-50 px-4 py-3 text-sm text-danger-700">
+        <p>{{ t('stereo_nx.mode_mismatch', { source: modeLabel(selectedCompany.identity.accounting_mode), target: modeLabel(target.accounting_mode) }) }}</p>
+        <RouterLink :to="{ name: 'admin-settings', query: { tab: 'accounting' } }" class="mt-2 inline-flex text-primary-700 underline hover:text-primary-800">{{ t('stereo_nx.open_accounting_settings') }}</RouterLink>
+      </div>
       <p v-if="target && !target.vat_payer" class="mt-3 text-sm text-danger-600">{{ t('stereo_nx.target_vat_required') }}</p>
+      <div v-if="selectedCompany?.matches_target && profileSuggestions.length" class="mt-5 rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm" data-testid="stereo-profile-suggestions">
+        <h3 class="font-medium">{{ t('stereo_nx.profile_suggestions_title') }}</h3>
+        <p class="mt-1 text-neutral-600">{{ t('stereo_nx.profile_suggestions_hint') }}</p>
+        <div class="mt-3 space-y-2">
+          <label v-for="item in profileSuggestions" :key="item.field" class="flex items-start gap-3 rounded-md border border-neutral-200 bg-surface px-3 py-2">
+            <input v-model="selectedProfileFields" type="checkbox" :value="item.field" class="mt-1" :disabled="busy" />
+            <span class="min-w-0 flex-1"><strong class="block">{{ t(`stereo_nx.profile_fields.${item.field}`) }}</strong><span class="block break-words text-neutral-600">{{ t('stereo_nx.profile_current') }}: {{ item.current || t('stereo_nx.profile_empty') }}</span><span class="block break-words">{{ t('stereo_nx.profile_backup') }}: {{ item.value }}</span></span>
+          </label>
+        </div>
+        <button type="button" :class="btnOutline('primary')" class="mt-4 whitespace-nowrap" :disabled="busy || !selectedProfileFields.length" @click="fillCompanyProfile"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('stereo_nx.fill_company_profile') }}</button>
+      </div>
+      <p v-if="profileFilled.length" data-testid="stereo-profile-filled" class="mt-3 text-sm text-success-700">{{ t('stereo_nx.profile_filled', { fields: profileFilled.map(field => t(`stereo_nx.profile_fields.${field}`)).join(', ') }) }}</p>
       <label class="mt-4 flex items-start gap-2 text-sm"><input v-model="blankCountryIsCz" type="checkbox" class="mt-1" :disabled="busy" @change="invalidateDryRun" />{{ t('stereo_nx.blank_country_is_cz') }}</label>
     </section>
 
@@ -462,6 +558,14 @@ const importProtocol = computed(() => importReport.value ? asProtocol(importRepo
       <template v-if="importReport">
         <p v-if="importReport.date_bounds" class="mb-4 text-sm text-neutral-600">{{ t('stereo_nx.date_bounds', importReport.date_bounds) }}</p>
         <MoneyS3Protocol v-if="importProtocol" :run="importProtocol" prefix="stereo_nx" />
+        <section v-if="reviewLinks.length" class="mt-5" data-testid="stereo-review-links">
+          <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stereo_nx.open_review_records') }}</h4>
+          <ul class="space-y-2 text-sm">
+            <li v-for="record in reviewLinks" :key="record.key">
+              <RouterLink :to="record.to" class="text-primary-600 underline hover:text-primary-700">{{ record.label }}</RouterLink>
+            </li>
+          </ul>
+        </section>
         <p v-if="cleanupWarning" class="mt-4 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700" role="alert">{{ cleanupWarning }}</p>
       </template>
       <template v-else>
@@ -469,7 +573,8 @@ const importProtocol = computed(() => importReport.value ? asProtocol(importRepo
         <p v-if="dryReport?.date_bounds" class="mb-4 text-sm text-neutral-600">{{ t('stereo_nx.date_bounds', dryReport.date_bounds) }}</p>
         <MoneyS3Protocol v-if="dryProtocol" :run="dryProtocol" prefix="stereo_nx" />
         <label class="mt-5 flex cursor-pointer items-start gap-3 rounded-lg border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-700"><input v-model="confirmed" data-testid="stereo-import-confirm" type="checkbox" class="mt-1" :disabled="busy" />{{ t('stereo_nx.confirm') }}</label>
-        <label class="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-neutral-200 p-4 text-sm"><input v-model="deleteAfterImport" data-testid="stereo-delete-after-import" type="checkbox" class="mt-1" :disabled="busy" />{{ t('stereo_nx.delete_after_import') }}</label>
+        <p v-if="dryReport?.partial" class="mt-3 text-sm text-warning-700">{{ t('stereo_nx.partial_backup_kept') }}</p>
+        <label class="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-neutral-200 p-4 text-sm"><input v-model="deleteAfterImport" data-testid="stereo-delete-after-import" type="checkbox" class="mt-1" :disabled="busy || dryReport?.partial === true" />{{ t('stereo_nx.delete_after_import') }}</label>
       </template>
     </section>
     <div data-testid="stereo-actions" class="flex flex-wrap justify-end"><ActionBar :actions="actions" /></div>

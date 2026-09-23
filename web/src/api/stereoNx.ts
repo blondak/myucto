@@ -9,8 +9,10 @@ const POLL_MS = 2000
 export interface StereoCompany {
   index: number
   label: string
-  identity: { ico: string; dic: string; name: string; vat_payer: boolean }
+  identity: { ico: string; dic: string; name: string; vat_payer: boolean; accounting_mode?: 'tax_evidence' | 'double_entry' | null }
   matches_target: boolean
+  profile_suggestions?: Partial<Record<'company_name' | 'dic' | 'street' | 'city' | 'zip' | 'email' | 'phone' | 'web', string>>
+  profile_current?: Partial<Record<'company_name' | 'dic' | 'street' | 'city' | 'zip' | 'email' | 'phone' | 'web', string>>
 }
 
 export interface StereoPreview {
@@ -29,13 +31,24 @@ export interface StereoUpload {
 
 export interface StereoReport {
   ok: boolean
+  partial?: boolean
+  not_transferred?: Array<{ table: string; count: number }>
   preflight?: Array<{ level: string; code: string; message: string }>
   errors?: Array<string | { level: string; code: string; message: string }>
-  warnings?: Array<string | { level: string; code: string; message: string }>
+  warnings?: Array<string | { level: string; code: string; message: string; document_no?: string }>
   counts?: Record<string, number>
   written?: Record<string, number>
   review_reasons?: Record<string, number>
+  movement_review_reasons?: Record<string, number>
   date_bounds?: { from: string; to: string }
+  review_movements?: Array<{
+    kind: 'bank' | 'cash'
+    source_key: string
+    document_no?: string
+    review_codes: string[]
+    target_id: number | null
+    statement_id?: number | null
+  }>
   review_documents?: Array<{
     kind: 'issued' | 'purchase'
     source_key: string
@@ -65,6 +78,8 @@ export const stereoNxApi = {
     uploadChunked(BASE, file, onProgress, onStarted),
   preview: async (token: string): Promise<StereoPreview> =>
     (await api.post<StereoPreview>(`${BASE}/uploads/${token}/preview`, {})).data,
+  fillCompanyProfile: async (token: string, company: number, fields: string[], expectedValues: Record<string, string>): Promise<{ filled_fields: string[] }> =>
+    (await api.post<{ filled_fields: string[] }>(`${BASE}/uploads/${token}/company-profile`, { company, fields, expected_values: expectedValues })).data,
   /**
    * Zkouška nanečisto i převod běží na serveru jako job: po založení se polluje jeho stav
    * (společné `/admin/imports/{id}`, `onJob` dostává každý stav) a po doběhnutí se stáhne

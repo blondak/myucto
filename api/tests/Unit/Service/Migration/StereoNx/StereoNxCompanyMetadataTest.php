@@ -35,12 +35,38 @@ final class StereoNxCompanyMetadataTest extends TestCase
             . $this->encode([count($fields), ...array_fill(0, count($fields), 1)]) . $this->encode([$row]);
     }
 
-    public function testReadsNamedFieldsAndReturnsOnlyCompanyIdentity(): void
+    public function testReadsNamedFieldsAndReturnsOnlyApprovedCompanyProfile(): void
     {
         $result = StereoNxCompanyMetadata::parse($this->fixture());
-        self::assertSame(['ico' => '00000000', 'dic' => 'CZ00000000',
-            'name' => 'Syntetická testovací firma', 'vat_payer' => true], $result);
+        self::assertSame('00000000', $result['ico']);
+        self::assertSame('CZ00000000', $result['dic']);
+        self::assertSame('Syntetická testovací firma', $result['name']);
+        self::assertTrue($result['vat_payer']);
+        self::assertSame('Syntetická testovací firma', $result['company_profile']['company_name']);
+        self::assertNull($result['company_profile']['street']);
         self::assertStringNotContainsString('synthetic-private-value', json_encode($result));
+    }
+
+    public function testMapsVerifiedAddressAndContactFieldsWithoutPersonalFields(): void
+    {
+        $result = StereoNxCompanyMetadata::parse($this->fixture([
+            'ObchJmeno' => ['String', 'Testovací s.r.o.'], 'Ulice' => ['String', 'Testovací'],
+            'CisloPopisne' => ['String', '12'], 'CisloOrientacni' => ['String', '3'],
+            'Misto' => ['String', 'Praha'], 'PSC' => ['String', '10000'],
+            'Stat' => ['String', 'ČR'], 'Email' => ['String', 'test@example.invalid'],
+            'Telefon' => ['String', '+420000000000'], 'WWW' => ['String', 'example.invalid'],
+            'RodneCislo' => ['String', 'synthetic-private-value'],
+        ]));
+        self::assertSame(['company_name' => 'Testovací s.r.o.', 'street' => 'Testovací 12/3',
+            'city' => 'Praha', 'zip' => '10000', 'email' => 'test@example.invalid',
+            'phone' => '+420000000000', 'web' => 'example.invalid', 'country_code' => 'CZ'], $result['company_profile']);
+        self::assertStringNotContainsString('synthetic-private-value', json_encode($result));
+    }
+
+    public function testUnknownCountryDoesNotGetGuessed(): void
+    {
+        $result = StereoNxCompanyMetadata::parse($this->fixture(['Stat' => ['String', 'EU']]));
+        self::assertNull($result['company_profile']['country_code']);
     }
 
     public function testNullUnrelatedFieldDoesNotShiftFollowingValues(): void

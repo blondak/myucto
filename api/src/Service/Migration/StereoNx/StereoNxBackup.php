@@ -13,6 +13,7 @@ final class StereoNxBackup
     private const MAX_ENTRIES = 20000;
     private const MAX_TABLE_BYTES = 64 * 1024 * 1024;
     private const MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
+    private ?array $companyIdentityCache = null;
 
     private function __construct(
         private readonly Nx1Database $database,
@@ -39,9 +40,10 @@ final class StereoNxBackup
         throw new StereoNxException('company_missing', 'Vybraná firma není uvedena v ObsahBck.txt.');
     }
 
-    /** @return array{ico:string,dic:string,name:string,vat_payer:bool} */
+    /** @return array<string,mixed> */
     public function companyIdentity(): array
     {
+        if ($this->companyIdentityCache !== null) return $this->companyIdentityCache;
         $zip = new ZipArchive();
         if ($zip->open($this->path, ZipArchive::RDONLY) !== true) {
             throw new StereoNxException('archive_open', 'Zálohu Stereo NX nelze otevřít.');
@@ -56,10 +58,42 @@ final class StereoNxBackup
             if ($bytes === false) {
                 throw new StereoNxException('company_metadata_read', 'Soubor firma.bin nelze přečíst; ověřte heslo a integritu zálohy.');
             }
-            return StereoNxCompanyMetadata::parse($bytes);
+            $identity = StereoNxCompanyMetadata::parse($bytes);
+            $mode = $this->accountingModeEvidence();
+            return $this->companyIdentityCache = $identity
+                + ['accounting_mode' => $mode['mode'], 'accounting_mode_evidence' => $mode['evidence']];
         } finally {
             $zip->close();
         }
+    }
+
+    /** @return array{mode:?string,evidence:array{method:string,rows:int,with_both_accounts:int,without_accounts:int,partial_accounts:int}} */
+    private function accountingModeEvidence(): array
+    {
+        $evidence = ['method' => 'Cdenik.UcetMD/UcetD', 'rows' => 0,
+            'with_both_accounts' => 0, 'without_accounts' => 0, 'partial_accounts' => 0];
+        if (!in_array('Cdenik', $this->tableNames(), true)) {
+            return ['mode' => null, 'evidence' => $evidence];
+        }
+        foreach ($this->rows('Cdenik') as $row) {
+            $evidence['rows']++;
+            if (!isset($row['UcetMD'], $row['UcetD'])
+                || !is_string($row['UcetMD']) || !is_string($row['UcetD'])) {
+                $evidence['partial_accounts']++;
+                continue;
+            }
+            $md = trim($row['UcetMD']) !== '';
+            $dal = trim($row['UcetD']) !== '';
+            if ($md && $dal) $evidence['with_both_accounts']++;
+            elseif (!$md && !$dal) $evidence['without_accounts']++;
+            else $evidence['partial_accounts']++;
+        }
+        $mode = match (true) {
+            $evidence['rows'] > 0 && $evidence['with_both_accounts'] === $evidence['rows'] => 'double_entry',
+            $evidence['rows'] > 0 && $evidence['without_accounts'] === $evidence['rows'] => 'tax_evidence',
+            default => null,
+        };
+        return ['mode' => $mode, 'evidence' => $evidence];
     }
 
     /** @return list<string> */
