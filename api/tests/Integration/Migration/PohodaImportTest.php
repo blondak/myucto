@@ -649,6 +649,75 @@ final class PohodaImportTest extends TestCase
         self::assertArrayNotHasKey('source_differences', $issued);
     }
 
+    /**
+     * Doklad převzatý v cizí měně nese částky v EUR a kurz. Všechno, co převod kontroluje
+     * nebo páruje v Kč (doklady proti deníku 311/321, změna dokladu v POHODĚ, doplnění
+     * úhrady, párování nezaúčtované platby podle částky), ho musí přepočítat kurzem
+     * dokladu - jinak by rekonciliace nesouhlasila, opakovaný převod hlásil změnu a platba
+     * v Kč by se s fakturou nespárovala.
+     */
+    public function testForeignCurrencyDocumentsAreComparedAndPairedInCrowns(): void
+    {
+        $supplierId = $this->supplier();
+        $eur = $this->currency($supplierId, 'EUR');
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withForeignCurrencyDocuments($dir);
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        // Doklady v EUR tak, jak je převezme převod v měně (idempotentní i po zapnutí převzetí).
+        $pdo = $this->db->pdo();
+        foreach ([['invoices', 'invoice_items', 'invoice_id', SyntheticPohodaExport::FOREIGN_ISSUED, [[100.0, 21.0, 50.0], [40.0, 8.4, 40.0]]],
+            ['purchase_invoices', 'purchase_invoice_items', 'purchase_invoice_id', SyntheticPohodaExport::FOREIGN_PURCHASE, [[200.0, 42.0, 200.0]]]] as [$table, $itemsTable, $fk, $number, $items]) {
+            $id = $this->documentId($table, $supplierId, $number);
+            $base = array_sum(array_column($items, 0));
+            $vat = array_sum(array_column($items, 1));
+            $pdo->prepare("UPDATE {$table} SET currency_id = ?, exchange_rate = ?, total_without_vat = ?, total_vat = ?, total_with_vat = ?, rounding = 0"
+                . ($table === 'invoices' ? ', paid_total = IF(paid_total = 0, 0, ?)' : '') . ' WHERE id = ?')
+                ->execute(array_merge([$eur, SyntheticPohodaExport::FOREIGN_RATE, $base, $vat, $base + $vat], $table === 'invoices' ? [$base + $vat] : [], [$id]));
+            foreach ($items as $i => [$itemBase, $itemVat, $unit]) {
+                $pdo->prepare("UPDATE {$itemsTable} SET unit_price_without_vat = ?, total_without_vat = ?, total_vat = ?, total_with_vat = ? WHERE {$fk} = ? AND order_index = ?")
+                    ->execute([$unit, $itemBase, $itemVat, $itemBase + $itemVat, $id, $i]);
+            }
+        }
+
+        SyntheticPohodaExport::withForeignCurrencyReceipt($dir);
+        $again = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertNotContains('changed_in_pohoda', $this->messageCodes($again), $this->explain($again));
+        $reconciliation = $again->get('reconciliation')[0];
+        self::assertTrue($reconciliation['ok'], json_encode($reconciliation, JSON_UNESCAPED_UNICODE));
+        $documents = array_column($reconciliation['documents'], null, 'key');
+        self::assertEqualsWithDelta($documents['issued_invoices']['journal'], $documents['issued_invoices']['documents'], 0.005);
+        self::assertEqualsWithDelta($documents['purchase_invoices']['journal'], $documents['purchase_invoices']['documents'], 0.005);
+
+        // Nezaúčtovaný příjem 4 255,33 Kč s VS faktury: spárovaný podle částky v Kč, platba
+        // evidovaná v měně faktury, úhrada zaúčtovaná v Kč bez kurzového rozdílu.
+        self::assertSame(['auto_exact', null, 1], $this->txState($supplierId, SyntheticPohodaExport::FOREIGN_RECEIPT), $this->explain($again));
+        self::assertSame(1, $this->rows('invoices', $supplierId, sprintf("varsymbol = '%s' AND status = 'paid' AND paid_total = 169.40", SyntheticPohodaExport::FOREIGN_ISSUED)));
+        self::assertSame(1, $this->rows('invoice_payments', $supplierId, "amount = 169.40 AND currency = 'EUR' AND source = 'bank'"));
+        self::assertSame([['debit', '221.001', '4255.33'], ['credit', '311.001', '4255.33']], $this->bankEntryLines($supplierId, SyntheticPohodaExport::FOREIGN_RECEIPT));
+    }
+
+    private function documentId(string $table, int $supplierId, string $number): int
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT id FROM {$table} WHERE supplier_id = ? AND varsymbol = ?");
+        $stmt->execute([$supplierId, $number]);
+        $id = (int) $stmt->fetchColumn();
+        self::assertGreaterThan(0, $id, $number);
+        return $id;
+    }
+
+    private function currency(int $supplierId, string $code): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)
+             VALUES (?, ?, ?, ?, ?, ?, 2, 1, 0)"
+        )->execute([$supplierId, $code, $code, $code, $code, $code]);
+        return (int) $pdo->lastInsertId();
+    }
+
     /** @return list<string> */
     private function messageCodes(ImportProtocol $protocol): array
     {

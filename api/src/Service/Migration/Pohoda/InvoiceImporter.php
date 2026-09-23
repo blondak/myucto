@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
@@ -679,14 +680,17 @@ final class InvoiceImporter
                   WHERE id = ? AND supplier_id = ? AND status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument(''));
             $stmt->execute([$doc['paid_date'], $id, $ctx->supplierId]);
         } else {
+            // Zbývá uhradit je v Kč. Doklad převzatý v cizí měně se proto doplní jen o celou
+            // úhradu - částečnou úhradu v měně dokladu POHODA spolehlivě nenese.
             $stmt = $this->stmt('settle_issued',
                 "UPDATE invoices
                     SET paid_total = total_with_vat - advance_paid_amount - ?,
                         paid_at = IF(?, COALESCE(paid_at, ?), paid_at),
                         status = IF(?, 'paid', status)
                   WHERE id = ? AND supplier_id = ? AND status IN ('issued', 'sent', 'reminded')
+                    AND (exchange_rate IS NULL OR ?)
                     AND ABS(total_with_vat - advance_paid_amount - ?) > ABS(paid_total) + 0.005");
-            $stmt->execute([$remaining, (int) $settled, $doc['paid_date'], (int) $settled, $id, $ctx->supplierId, $remaining]);
+            $stmt->execute([$remaining, (int) $settled, $doc['paid_date'], (int) $settled, $id, $ctx->supplierId, (int) $settled, $remaining]);
         }
         if ($stmt->rowCount() > 0) {
             $ctx->protocol->count($step, $settled ? 'settled_in_pohoda' : 'partially_paid_in_pohoda');
@@ -1123,7 +1127,8 @@ final class InvoiceImporter
                 $pohoda = round($pohoda + PohodaXml::num($a, 'homeCurrency/priceSum'), 2);
             }
         }
-        $stmt = $this->stmt('changed_' . $table, "SELECT total_with_vat FROM {$table} WHERE id = ? AND supplier_id = ?");
+        // Doklad převzatý v cizí měně se porovná v Kč přepočtený kurzem dokladu.
+        $stmt = $this->stmt('changed_' . $table, 'SELECT ' . ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate') . " FROM {$table} WHERE id = ? AND supplier_id = ?");
         $stmt->execute([$id, $ctx->supplierId]);
         $stored = $stmt->fetchColumn();
         if ($stored === false || abs((float) $stored - $pohoda) < 0.005) {

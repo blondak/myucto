@@ -9,6 +9,7 @@ use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter as PohodaPartners;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
@@ -589,7 +590,8 @@ final class InvoiceImporter
      */
     private function reportChanged(PremierContext $ctx, string $step, string $table, int $id, string $label, float $total): void
     {
-        $stmt = $this->stmt('changed_' . $table, "SELECT total_with_vat FROM {$table} WHERE id = ? AND supplier_id = ?");
+        // Doklad převzatý v cizí měně se porovná v Kč přepočtený kurzem dokladu.
+        $stmt = $this->stmt('changed_' . $table, 'SELECT ' . ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate') . " FROM {$table} WHERE id = ? AND supplier_id = ?");
         $stmt->execute([$id, $ctx->supplierId]);
         $stored = $stmt->fetchColumn();
         if ($stored === false || abs((float) $stored - $total) < 0.005) {

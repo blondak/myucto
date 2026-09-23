@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
@@ -776,7 +777,8 @@ final class InvoiceImporter
         if (!array_key_exists('CelkemSDPH', $r)) {
             return;
         }
-        $stmt = $this->db->pdo()->prepare("SELECT total_with_vat FROM {$table} WHERE id = ? AND supplier_id = ?");
+        // Doklad převzatý v cizí měně se porovná v Kč přepočtený kurzem dokladu.
+        $stmt = $this->db->pdo()->prepare('SELECT ' . ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate') . " FROM {$table} WHERE id = ? AND supplier_id = ?");
         $stmt->execute([$id, $ctx->supplierId]);
         $stored = $stmt->fetchColumn();
         $money = self::expectedTotal($r);
