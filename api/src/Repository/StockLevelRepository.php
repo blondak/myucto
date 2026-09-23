@@ -252,7 +252,7 @@ final class StockLevelRepository
 
         $params = [];
         $sql = $this->ledgerSql($supplierId, $stockItemId, $opts, true, $params)
-             . ' ORDER BY doc_date ASC, document_id ASC, line_no ASC, line_id ASC'
+             . ' ORDER BY doc_date ASC, document_id ASC, line_no ASC, line_id ASC, leg ASC'
              . ' LIMIT ? OFFSET ?';
 
         $stmt = $this->db->pdo()->prepare($sql);
@@ -307,7 +307,7 @@ final class StockLevelRepository
         $params = [];
         $sql = 'SELECT COALESCE(SUM(qty_signed), 0) FROM ('
              . $this->ledgerSql($supplierId, $stockItemId, $opts, false, $params)
-             . ' ORDER BY doc_date ASC, document_id ASC, line_no ASC, line_id ASC LIMIT ?) first_rows';
+             . ' ORDER BY doc_date ASC, document_id ASC, line_no ASC, line_id ASC, leg ASC LIMIT ?) first_rows';
         $stmt = $this->db->pdo()->prepare($sql);
         $idx = 1;
         foreach ($params as $v) {
@@ -316,6 +316,18 @@ final class StockLevelRepository
         $stmt->bindValue($idx, $offset, PDO::PARAM_INT);
         $stmt->execute();
         return bcadd((string) $stmt->fetchColumn(), '0', 3);
+    }
+
+    /**
+     * Jednotková prodejní cena řádku faktury bez DPH. U faktury s cenami s DPH
+     * (`prices_include_vat`) drží `unit_price_without_vat` cenu S DPH (InvoiceMath),
+     * netto cena se proto odvodí ze základu řádku.
+     */
+    public static function netUnitPriceSql(string $invoiceAlias, string $itemAlias): string
+    {
+        return "CASE WHEN {$invoiceAlias}.prices_include_vat = 1 AND {$itemAlias}.quantity <> 0"
+            . " THEN ROUND({$itemAlias}.total_without_vat / {$itemAlias}.quantity, 6)"
+            . " ELSE {$itemAlias}.unit_price_without_vat END";
     }
 
     /**
@@ -358,7 +370,7 @@ final class StockLevelRepository
             $documentCols = $withDocuments
                 ? ", inv.id AS invoice_id, inv.varsymbol AS invoice_number, inv.invoice_type, inv.client_id,
                    {$clientName} AS client_name,
-                   ii.unit_price_without_vat AS sale_unit_price, ii.unit AS sale_unit, cur.code AS sale_currency,
+                   " . self::netUnitPriceSql('inv', 'ii') . " AS sale_unit_price, ii.unit AS sale_unit, cur.code AS sale_currency,
                    pinv.id AS purchase_invoice_id,
                    COALESCE(NULLIF(pinv.vendor_invoice_number, ''), pinv.varsymbol) AS purchase_invoice_number,
                    pinv.vendor_id, {$vendorName} AS vendor_name, d.partner_name"
@@ -372,7 +384,7 @@ final class StockLevelRepository
             $sql = "SELECT l.id AS line_id, l.document_id, d.doc_number, d.doc_type, d.origin,
                            d.status, l.doc_date, l.line_no, {$warehouseExpr} AS warehouse_id,
                            w.code AS warehouse_code, {$signedQty} AS qty_signed,
-                           l.qty, l.unit_cost, l.value_total, l.note{$documentCols}
+                           l.qty, l.unit_cost, l.value_total, l.note, " . ($receiptLeg ? 1 : 0) . " AS leg{$documentCols}
                       FROM stock_document_lines l
                       JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
                       JOIN warehouses w ON w.id = {$warehouseExpr} AND w.supplier_id = l.supplier_id{$documentJoins}

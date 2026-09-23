@@ -257,7 +257,7 @@ final class StockSalesReportService
                     ' . StockLevelRepository::snapshotNameSql('i.client_snapshot') . ' AS client_name,
                     si.id AS stock_item_id, si.sku, si.name, ii.description, ii.warehouse_id,
                     ' . self::QTY . ' AS qty, ii.unit,
-                    ii.unit_price_without_vat AS unit_price,
+                    ' . StockLevelRepository::netUnitPriceSql('i', 'ii') . ' AS unit_price,
                     ' . self::TOTAL . ' AS total_without_vat,
                     cur.code AS currency'
             . self::FROM . ' WHERE ' . $where

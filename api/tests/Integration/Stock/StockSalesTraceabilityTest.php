@@ -119,6 +119,26 @@ final class StockSalesTraceabilityTest extends StockTestCase
         self::assertSame('CZK', $issue['sale_currency']);
     }
 
+    public function testSalePriceIsNetAlsoOnInvoiceWithPricesIncludingVat(): void
+    {
+        $supplierId = $this->createSupplier();
+        $whId = $this->warehouse($supplierId);
+        $itemId = $this->item($supplierId, 'LEDGER-GROSS');
+        $this->receiveStock($supplierId, $whId, $itemId, '5.000', 40.0);
+        $invoiceId = $this->issuedInvoice($supplierId, $this->client($supplierId), [[$itemId, $whId, '2.000', 121.0]]);
+        // Faktura s cenami s DPH: jednotková cena řádku je brutto 121, základ 2 × 100.
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE invoices SET prices_include_vat = 1 WHERE id = ?')->execute([$invoiceId]);
+        $pdo->prepare('UPDATE invoice_items SET total_without_vat = 200.00, total_vat = 42.00, total_with_vat = 242.00 WHERE invoice_id = ?')
+            ->execute([$invoiceId]);
+
+        $issue = $this->levelsRepo->ledgerForItem($supplierId, $itemId)[1];
+        self::assertSame(100.0, (float) $issue['sale_unit_price'], 'Prodejní cena v knize karty je bez DPH.');
+        $report = $this->sales($supplierId, ['date_from' => '2099-06-01', 'date_to' => '2099-06-30']);
+        self::assertSame(100.0, (float) $report['items'][0]['unit_price'], 'Cena/MJ v sestavě je bez DPH.');
+        self::assertSame(200.0, (float) $report['items'][0]['total_without_vat']);
+    }
+
     public function testLedgerShowsVendorOfPurchaseReceipt(): void
     {
         $supplierId = $this->createSupplier();
