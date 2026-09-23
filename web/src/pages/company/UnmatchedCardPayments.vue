@@ -92,6 +92,18 @@ async function load() {
 }
 onMounted(load)
 
+/**
+ * Platební a kreditní karty se v přehledu nemíchají: kreditní karta je úvěrový účet
+ * s vlastním výpisem, platby jejích nákupů jdou do samostatné sekce pod platebními kartami.
+ */
+const sections = computed(() => {
+  const groups = data.value?.groups ?? []
+  return [
+    { key: 'payment', groups: groups.filter(g => !g.credit_card) },
+    { key: 'credit', groups: groups.filter(g => !!g.credit_card) },
+  ].filter(sec => sec.groups.length > 0)
+})
+
 function groupTitle(g: CardPaymentGroup): string {
   if (g.credit_card) return t('payment_cards.unmatched.credit_card_group', { label: g.credit_card.label })
   return g.holder || g.card?.label || t('payment_cards.unmatched.unknown_holder')
@@ -185,7 +197,10 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
     <template v-else-if="data">
       <p v-if="data.truncated" class="mb-3 text-xs text-warning-700">{{ t('payment_cards.unmatched.truncated', { n: data.count }) }}</p>
 
-      <section v-for="g in data.groups" :key="g.key"
+      <template v-for="sec in sections" :key="sec.key">
+      <h3 v-if="sections.length > 1" class="mt-2 mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500"
+        :data-testid="`unmatched-section-${sec.key}`">{{ t(`payment_cards.unmatched.section_${sec.key}`) }}</h3>
+      <section v-for="g in sec.groups" :key="g.key"
         class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-4">
         <header class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-neutral-100 bg-neutral-50">
           <div class="min-w-0">
@@ -339,6 +354,7 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
           </div>
         </div>
       </section>
+      </template>
     </template>
 
     <Modal v-if="writeOffDialog" :title="t(`payment_cards.unmatched.write_off_${writeOffDialog.target}`)" width-class="max-w-lg"

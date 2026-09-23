@@ -26228,6 +26228,8 @@
       "write_off_confirm_holder": "Přeúčtovat platbu k tíži držitele karty? Když doklad později dorazí, uzavření se samo zruší.",
       "write_off_account": "Účet",
       "write_off_account_default": "Výchozí podle nastavení účtování",
+      "section_payment": "Platební karty",
+      "section_credit": "Kreditní karty",
       "written_off": "Platba uzavřena na účet {account}.",
       "write_off_failed": "Platbu se nepodařilo uzavřít."
     }
