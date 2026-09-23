@@ -29,6 +29,7 @@ const TYPE_STYLE: Record<EntityType, string> = {
   journal_entry:    'bg-neutral-100 text-neutral-600',
   bank_transaction: 'bg-primary-50 text-primary-700',
   cash_document:    'bg-success-50 text-success-600',
+  other_item:       'bg-primary-50 text-primary-700',
 }
 
 function typeLabel(tp: EntityType): string {

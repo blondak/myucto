@@ -1,0 +1,125 @@
+import { api } from './client'
+
+export type OtherItemSide = 'receivable' | 'payable'
+export type OtherItemStatus = 'draft' | 'posted' | 'reversed' | 'confirmed' | 'cancelled' | 'paid' | 'partial' | 'forecast'
+
+export interface OtherItem {
+  id: string | number
+  source_kind: string
+  source_id: number | string
+  side: OtherItemSide
+  kind: string
+  title: string
+  partner_id?: number | null
+  partner_name: string | null
+  issued_on: string | null
+  accounting_on?: string | null
+  due_on: string | null
+  currency: string
+  exchange_rate?: number | null
+  amount_czk?: number | null
+  amount: number
+  paid_amount: number
+  remaining_amount: number
+  status: OtherItemStatus | string
+  certainty: 'confirmed' | 'scheduled' | 'estimate'
+  editable: boolean
+  document_count: number
+  source_url: string | null
+  variable_symbol?: string | null
+  account_code?: string | null
+  counter_account_code?: string | null
+  note?: string | null
+  journal_entry_id?: number | null
+}
+
+export interface OtherItemPayload {
+  side: OtherItemSide
+  kind: string
+  title: string
+  partner_id: number | null
+  partner_name: string | null
+  issued_on: string
+  accounting_on: string
+  due_on: string
+  currency: string
+  exchange_rate: number | null
+  amount: number
+  variable_symbol: string | null
+  account_code: string | null
+  counter_account_code: string | null
+  note: string | null
+}
+
+export interface OtherItemsResult {
+  items: OtherItem[]
+  sources?: OtherItem[]
+  total: number
+  page: number
+  per_page: number
+  totals?: Record<string, unknown>
+}
+
+export interface OtherItemAllocation {
+  id: number
+  bank_transaction_id: number | null
+  cash_document_id: number | null
+  amount: number
+  payment_on: string
+  reversed_on: string | null
+}
+
+export interface OtherItemAllocationPayload {
+  bank_transaction_id?: number
+  cash_document_id?: number
+  amount: number
+}
+
+export interface OtherItemPaymentCandidate {
+  source: 'bank' | 'cash'
+  id: number
+  payment_on: string
+  amount: number
+  currency: string
+  description: string
+}
+
+export interface OtherItemRepostPayload {
+  account_code?: string
+  counter_account_code: string
+  entry_date: string
+  reason: string
+}
+
+export const otherItemsApi = {
+  list: (params: { side?: OtherItemSide; status?: 'open' | 'all'; page?: number }) =>
+    api.get<OtherItemsResult>('/accounting/other-items', { params }).then(r => ({
+      ...r.data,
+      items: r.data.items.map(item => ({
+        ...item,
+        id: `manual:${item.id}`,
+        source_id: Number(item.id),
+        source_kind: 'manual',
+        certainty: item.status === 'draft' ? 'estimate' as const : 'confirmed' as const,
+        editable: item.status === 'draft',
+        document_count: item.document_count || 0,
+        source_url: `/other-items/${item.id}`,
+      })),
+    })),
+  get: (id: number) => api.get<OtherItem>(`/accounting/other-items/${id}`).then(r => r.data),
+  create: (payload: OtherItemPayload) => api.post<OtherItem>('/accounting/other-items', payload).then(r => r.data),
+  update: (id: number, payload: OtherItemPayload) => api.put<OtherItem>(`/accounting/other-items/${id}`, payload).then(r => r.data),
+  remove: (id: number) => api.delete(`/accounting/other-items/${id}`).then(r => r.data),
+  post: (id: number) => api.post<OtherItem>(`/accounting/other-items/${id}/post`).then(r => r.data),
+  reverse: (id: number, payload: { reason: string; entry_date?: string }) =>
+    api.post<OtherItem>(`/accounting/other-items/${id}/reverse`, payload).then(r => r.data),
+  repost: (id: number, payload: OtherItemRepostPayload) =>
+    api.post<OtherItem>(`/accounting/other-items/${id}/repost`, payload).then(r => r.data),
+  allocations: (id: number) => api.get<{ items: OtherItemAllocation[] }>(`/accounting/other-items/${id}/allocations`).then(r => r.data.items),
+  paymentCandidates: (id: number, q: string) =>
+    api.get<{ items: OtherItemPaymentCandidate[] }>(`/accounting/other-items/${id}/payment-candidates`, { params: { q, limit: 20 } }).then(r => r.data.items),
+  allocate: (id: number, payload: OtherItemAllocationPayload) =>
+    api.post<OtherItem>(`/accounting/other-items/${id}/allocations`, payload).then(r => r.data),
+  unallocate: (id: number, allocationId: number) =>
+    api.delete<OtherItem>(`/accounting/other-items/${id}/allocations/${allocationId}`).then(r => r.data),
+}

@@ -574,6 +574,7 @@ const navSections = computed<NavSection[]>(() => {
         ...(dimensionsEnabled ? [{ to: '/accounting/dimension-profit', label: t('nav.accounting_dimension_profit'), icon: ICONS.tax_income, permission: 'accounting' as PermissionKey }] : []),
         { to: '/accounting/statement-mapping', label: t('nav.accounting_statement_mapping'), icon: ICONS.codebooks, permission: 'accounting' },
         { to: '/accounting/saldo',            label: t('nav.accounting_saldo'),            icon: ICONS.coin },
+        { to: '/other-items', label: t('nav.other_items'), icon: ICONS.crm, permission: 'other_items' as PermissionKey, newTo: '/other-items/new' },
         { to: '/accounting/document-completeness', label: t('nav.accounting_document_completeness'), icon: ICONS.approvals, permission: 'accounting' },
         { to: '/accounting/monthly-check',    label: t('nav.accounting_monthly_check'),    icon: ICONS.approvals },
         { to: '/accounting/monthly-report',   label: t('nav.accounting_monthly_report'),   icon: ICONS.reports },
@@ -629,6 +630,7 @@ const navSections = computed<NavSection[]>(() => {
       items: [
         { to: '/tax-evidence/cash-journal',         label: t('nav.de_cash_journal'),         icon: ICONS.tax_book },
         { to: '/tax-evidence/receivables-payables', label: t('nav.de_receivables_payables'), icon: ICONS.crm },
+        { to: '/other-items', label: t('nav.other_items'), icon: ICONS.coin, permission: 'other_items' as PermissionKey, newTo: '/other-items/new' },
         // Přechodový můstek § 7b → § 24 — jen u firem na DE (chystaný/probíhající přechod);
         // firmě, co už podvojné vede, se v menu neukazuje (stránka zůstává na URL).
         { to: '/accounting/transition-report', label: t('nav.accounting_transition_report'), icon: ICONS.reports, permission: 'tax_evidence' as PermissionKey },

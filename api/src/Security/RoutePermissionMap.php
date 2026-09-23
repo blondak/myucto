@@ -629,6 +629,8 @@ final class RoutePermissionMap
         ['*', '#^/api/accounting/settlements(/|$)#', 'accounting.offsets', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/journal(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/journal(/|$)#', 'accounting.journal.write', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/other-items(/|$)#', 'other_items', AccessLevel::READ],
+        ['*', '#^/api/accounting/other-items(/|$)#', 'other_items', AccessLevel::WRITE],
         ['GET', '#^/api/accounting(?:$|/(?!cash-|assets|bank-posting-))#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting(?:$|/(?!cash-|assets|bank-posting-))#', 'accounting', AccessLevel::WRITE],
 

@@ -83,6 +83,7 @@
     "money_s3",
     "monthly_report",
     "oss_rates",
+    "other_items",
     "pamica",
     "parallelRun",
     "payment_method",
@@ -187,6 +188,7 @@
       "money_s3",
       "monthly_report",
       "oss_rates",
+      "other_items",
       "pamica",
       "parallelRun",
       "payment_method",
@@ -513,6 +515,20 @@
     "document-detail": [
       "documents"
     ],
+    "other-items": [
+      "other_items"
+    ],
+    "other-item-new": [
+      "other_items"
+    ],
+    "other-item-detail": [
+      "documents",
+      "linked_documents",
+      "other_items"
+    ],
+    "other-item-edit": [
+      "other_items"
+    ],
     "document-requests": [
       "document_requests"
     ],
@@ -837,6 +853,7 @@
     "stats": [
       "dashboard",
       "errors",
+      "other_items",
       "project",
       "stats"
     ],
@@ -844,6 +861,7 @@
       "costs",
       "dashboard",
       "errors",
+      "other_items",
       "purchase_invoice"
     ],
     "bank-statements": [
@@ -980,6 +998,9 @@
       "aiGateway",
       "automation",
       "integrations"
+    ],
+    "crm-dashboard": [
+      "other_items"
     ],
     "portfolio-overview": [
       "portfolio"

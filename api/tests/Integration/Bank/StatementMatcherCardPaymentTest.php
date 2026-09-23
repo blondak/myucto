@@ -135,6 +135,46 @@ final class StatementMatcherCardPaymentTest extends TestCase
         self::assertSame([$doc], $this->matchedPurchases($tx));
     }
 
+    public function testLateCardDocumentDoesNotUseOtherItemPayment(): void
+    {
+        $doc = $this->seedPurchase(812.50, '2093-06-13', '4321');
+        $tx = $this->seedTransaction($this->seedStatement(), -812.50, self::DAY, '4321');
+        $this->allocateOtherItemPayment($tx, 812.50);
+
+        self::assertNull($this->matcher->matchCardDocument($this->supplierId, $doc));
+        self::assertSame('received', $this->purchaseStatus($doc));
+        self::assertSame(0, $this->matchCount($tx));
+    }
+
+    public function testLockedCardBranchRejectsOtherItemPayment(): void
+    {
+        $doc = $this->seedPurchase(410.00, '2093-06-14', '4321');
+        $tx = $this->seedTransaction($this->seedStatement(), -410.00, self::DAY, '4321');
+        $this->allocateOtherItemPayment($tx, 410.00);
+
+        $result = $this->callBranch('matchPurchaseByCard', [$this->db->pdo(), $this->supplierId, '4321', 410.00, self::DAY, $tx, 'CZK']);
+
+        self::assertSame('unmatched', $result['status'] ?? null);
+        self::assertSame('received', $this->purchaseStatus($doc));
+        self::assertSame(0, $this->matchCount($tx));
+    }
+
+    public function testLockedAmountDateBranchRejectsOtherItemPayment(): void
+    {
+        $doc = $this->seedPurchase(410.00, '2093-06-14', null);
+        $statement = $this->seedStatement();
+        $tx = $this->seedTransaction($statement, -410.00, self::DAY, '4321');
+        $this->allocateOtherItemPayment($tx, 410.00);
+
+        $result = $this->callBranch('matchPurchaseByAmountDate', [
+            $this->db->pdo(), $this->supplierId, 410.00, self::DAY, $tx, 'CZK', $statement, '', '4321',
+        ]);
+
+        self::assertSame('other_item_allocated', $result['reason'] ?? null);
+        self::assertSame('received', $this->purchaseStatus($doc));
+        self::assertSame(0, $this->matchCount($tx));
+    }
+
     /** Doklad placený kartou bez koncovky je jen návrh — a jen když ho nechce i jiná karta. */
     public function testCardDocumentWithoutLast4IsOnlySuggested(): void
     {
@@ -277,6 +317,8 @@ final class StatementMatcherCardPaymentTest extends TestCase
               WHERE pi.supplier_id = ? AND pi.vendor_invoice_number LIKE ?'
         )->execute([$this->supplierId, self::DOC_PREFIX . '%']);
         $pdo->prepare('DELETE FROM bank_statements WHERE file_name LIKE ?')->execute(['%' . self::MARKER . '%']);
+        $pdo->prepare('DELETE FROM other_items WHERE supplier_id = ? AND title = ?')
+            ->execute([$this->supplierId, self::MARKER]);
         $pdo->prepare('DELETE FROM purchase_invoices WHERE supplier_id = ? AND vendor_invoice_number LIKE ?')
             ->execute([$this->supplierId, self::DOC_PREFIX . '%']);
     }
@@ -316,6 +358,18 @@ final class StatementMatcherCardPaymentTest extends TestCase
              VALUES (?, ?, ?, 'CZK', NULL, ?, ?)"
         )->execute([$statementId, $date, $amount, $last4, 'PK: 000000******' . $last4]);
         return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function allocateOtherItemPayment(int $transactionId, float $amount): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO other_items (supplier_id, side, title, issued_on, due_on, amount, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)')
+            ->execute([$this->supplierId, 'payable', self::MARKER, self::DAY, self::DAY, $amount, 'confirmed']);
+        $itemId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO other_item_allocations (supplier_id, other_item_id, bank_transaction_id, amount, payment_on)
+            VALUES (?, ?, ?, ?, ?)')
+            ->execute([$this->supplierId, $itemId, $transactionId, $amount, self::DAY]);
     }
 
     private function purchaseStatus(int $id): string

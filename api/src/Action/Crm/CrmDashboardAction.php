@@ -10,6 +10,8 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Crm\CrmAggregationService;
+use MyInvoice\Service\Accounting\Obligations\ExistingObligationSourceService;
+use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -28,6 +30,7 @@ final class CrmDashboardAction
 {
     public function __construct(
         private readonly CrmAggregationService $crm,
+        private readonly ExistingObligationSourceService $obligations,
     ) {}
 
     public function overview(Request $request, Response $response): Response
@@ -262,7 +265,19 @@ final class CrmDashboardAction
         $q = $request->getQueryParams();
         $weeks = max(1, min(12, (int) ($q['weeks'] ?? 4)));
         $currency = isset($q['currency']) ? (string) $q['currency'] : 'CZK';
-        return Json::ok($response, $this->crm->cashFlowForecast($supplierId, $weeks, $currency));
+        $forecast = $this->crm->cashFlowForecast($supplierId, $weeks, $currency);
+        $from = date('Y-m-d');
+        $to = date('Y-m-d', strtotime('+' . ($weeks * 7) . ' days'));
+        $sources = [];
+        if (RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
+            $sources = $this->obligations->taxAdvances($supplierId, $from, $to);
+            array_push($sources, ...$this->obligations->taxForecasts($supplierId, $from, $to));
+        }
+        if (RequestAuthorization::allows($request, 'payroll.payments', AccessLevel::READ)) {
+            array_push($sources, ...$this->obligations->payrollLiabilities($supplierId, $from, $to));
+            array_push($sources, ...$this->obligations->payrollForecasts($supplierId, $from, $to));
+        }
+        return Json::ok($response, OtherItemForecastService::mergeSourceWeekly($forecast, $sources));
     }
 
     /** Late payment risk score per klient. */

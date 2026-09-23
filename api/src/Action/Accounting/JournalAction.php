@@ -1132,6 +1132,10 @@ final class JournalAction
 
         // Zdroj zápisu si přečti PŘED reversem — kvůli odemknutí dokladu níže (§4.7).
         $original = $this->journal->find($id, $supplierId);
+        if (($original['source_type'] ?? null) === 'other_item') {
+            return Json::error($response, 'other_item_use_detail',
+                'Účetní zápis ostatní položky stornujte v jejím detailu, aby se aktualizoval i stav položky.', 409);
+        }
 
         $body = (array) ($request->getParsedBody() ?? []);
         $entryDate = $this->nullableString($body['entry_date'] ?? null);

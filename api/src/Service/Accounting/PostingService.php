@@ -608,6 +608,15 @@ final class PostingService
             if (!$this->journal->setReversedBy($entryId, $supplierId, $reversalId)) {
                 throw new PostingException('already_reversed', 'Zápis #' . $entryId . ' byl mezitím stornován.');
             }
+            if (in_array((string) $original['source_type'], ['bank', 'cash'], true)
+                && $original['source_id'] !== null) {
+                $column = $original['source_type'] === 'bank' ? 'bank_transaction_id' : 'cash_document_id';
+                $released = $pdo->prepare(
+                    "UPDATE other_item_allocations SET reversed_on = ?
+                      WHERE supplier_id = ? AND {$column} = ? AND reversed_on IS NULL"
+                );
+                $released->execute([$reversalDate, $supplierId, (int) $original['source_id']]);
+            }
 
             $this->activity->log(
                 'accounting.reversed',

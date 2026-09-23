@@ -6,6 +6,10 @@ Zrcadlový protějšek [Tržeb](12_Trzby.md) pro **nákladovou stranu** — hlou
 pohled jen na **přijaté faktury**. U **plátce DPH** se náklady počítají **bez DPH**
 (na vstupu se odečte), u neplátce **s DPH**.
 
+Samostatná karta výsledkového dopadu [ostatních pohledávek a závazků](50_Pruvodce_ucetniho.md#ostatni-pohledavky-a-zavazky)
+ukazuje náklady jen podle nákladového protiúčtu. Splátka jistiny či vrácená
+kauce jsou peněžní pohyby, které samy náklad nevytvářejí.
+
 ## 13.1 KPI dlaždice
 
 - **Plovoucí 12měsíční náklady** (rolling) per měna + meziroční srovnání

@@ -6,12 +6,12 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-09-stock-fulfillment-v1';
+    public const VERSION = '2026-09-other-items-v1';
 
     /** @var list<string> */
     private const GROUPS = [
         'dashboard', 'clients', 'projects', 'invoices', 'purchase_invoices', 'recurring',
-        'bank', 'documents', 'accounting', 'tax_evidence', 'reports', 'payroll', 'cash', 'assets',
+        'bank', 'documents', 'accounting', 'other_items', 'tax_evidence', 'reports', 'payroll', 'cash', 'assets',
         'stock', 'eshop', 'logbook', 'settings', 'utilities', 'profile',
     ];
 
@@ -80,6 +80,7 @@ final class PermissionCatalog
             ['accounting.periods.close_override', 'accounting', 'Uzavřít období přes nezaúčtované doklady', $staffOnly],
             ['accounting.offsets', 'accounting', 'Vzájemné zápočty', $staffOnly],
             ['accounting.templates', 'accounting', 'Účetní šablony', $staffOnly],
+            ['other_items', 'other_items', 'Ostatní pohledávky a závazky', $staffOnly],
             ['tax_evidence', 'tax_evidence', 'Daňová evidence', $staffOnly],
             ['tax_evidence.classification.write', 'tax_evidence', 'Klasifikovat pohyby', $staffOnly],
             ['tax_evidence.export', 'tax_evidence', 'Exportovat daňovou evidenci', $staffOnly],
@@ -219,7 +220,7 @@ final class PermissionCatalog
             'readonly' => [
                 'dashboard', 'dashboard.portfolio', 'clients', 'projects', 'invoices',
                 'purchase_invoices', 'recurring', 'bank', 'documents', 'documents.requests', 'documents.inbox',
-                'accounting', 'tax_evidence', 'tax_evidence.export', 'reports', 'reports.export',
+                'accounting', 'other_items', 'tax_evidence', 'tax_evidence.export', 'reports', 'reports.export',
                 'cash', 'assets', 'stock', 'eshop', 'logbook', 'settings.company', 'utilities',
                 'utilities.export', 'utilities.archives', 'profile', 'profile.tokens',
             ],

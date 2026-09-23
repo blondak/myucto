@@ -1430,7 +1430,7 @@ export interface SaldoParams {
 }
 
 export interface SaldoItem {
-  doc_type: 'invoice' | 'purchase_invoice'
+  doc_type: 'invoice' | 'purchase_invoice' | 'other_item'
   doc_id: number
   doc_no: string
   issue_date: string

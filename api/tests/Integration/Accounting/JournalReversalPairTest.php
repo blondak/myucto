@@ -11,6 +11,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\OtherItemService;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -35,6 +36,7 @@ final class JournalReversalPairTest extends TestCase
 
     private Connection $db;
     private JournalAction $journalAction;
+    private OtherItemService $otherItems;
     private AccountingPeriodRepository $periods;
 
     private int $supplierId = 0;
@@ -52,6 +54,7 @@ final class JournalReversalPairTest extends TestCase
             $container = Bootstrap::buildApp()->getContainer();
             $this->db            = $container->get(Connection::class);
             $this->journalAction = $container->get(JournalAction::class);
+            $this->otherItems    = $container->get(OtherItemService::class);
             $this->periods       = $container->get(AccountingPeriodRepository::class);
             $seeder              = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
@@ -175,6 +178,34 @@ final class JournalReversalPairTest extends TestCase
 
         self::assertSame(403, $res['status']);
         self::assertSame(2, $this->countEntries([$entryId, $reversalId]));
+    }
+
+    public function testOtherItemEntryMustBeReversedFromItsDetail(): void
+    {
+        $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $draft = $this->otherItems->create($this->supplierId, [
+            'side' => 'payable', 'kind' => 'rent', 'title' => 'Syntetické nájemné',
+            'issued_on' => self::YEAR . '-06-15', 'accounting_on' => self::YEAR . '-06-15',
+            'due_on' => self::YEAR . '-06-30', 'currency' => 'CZK', 'amount' => 1200,
+            'counter_account_code' => '518',
+        ], $this->userId);
+        $posted = $this->otherItems->post($this->supplierId, (int) $draft['id'], $this->userId);
+        $entryId = (int) $posted['journal_entry_id'];
+
+        $res = $this->call('reverse', 'POST', 'accountant', ['id' => (string) $entryId],
+            ['entry_date' => self::YEAR . '-06-16']);
+
+        self::assertSame(409, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('other_item_use_detail', $res['body']['error']['code']);
+        self::assertStringContainsString('detail', $res['body']['error']['message']);
+        self::assertSame('posted', $this->otherItems->get($this->supplierId, (int) $draft['id'])['status']);
+        self::assertSame(1, $this->countEntries([$entryId]));
+
+        $reversed = $this->otherItems->reverse($this->supplierId, (int) $draft['id'],
+            'Oprava syntetického dokladu', $this->userId);
+        self::assertSame('reversed', $reversed['status']);
+        self::assertGreaterThan(0, (int) $reversed['reversal_entry_id']);
     }
 
     public function testReversalFilterSeparatesBothSidesOfThePair(): void

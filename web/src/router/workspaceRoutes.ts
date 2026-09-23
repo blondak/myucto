@@ -119,6 +119,10 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // Připojení skenů k existujícím dokladům (dávky na pozadí).
       { path: 'documents/scan-attach',  name: 'scan-attach',      component: () => import('@/pages/documents/ScanAttach.vue'), meta: { requiresSupplier: true } },
       { path: 'documents/:id(\\d+)',    name: 'document-detail',  component: () => import('@/pages/documents/DocumentDetail.vue') },
+      { path: 'other-items', name: 'other-items', component: () => import('@/pages/other-items/OtherItems.vue'), meta: { requiresSupplier: true, requiresAccountingMode: true } },
+      { path: 'other-items/new', name: 'other-item-new', component: () => import('@/pages/other-items/OtherItemEditor.vue'), meta: { requiresSupplier: true, requiresAccountingMode: true } },
+      { path: 'other-items/:id(\\d+)', name: 'other-item-detail', component: () => import('@/pages/other-items/OtherItemDetail.vue'), meta: { requiresSupplier: true, requiresAccountingMode: true } },
+      { path: 'other-items/:id(\\d+)/edit', name: 'other-item-edit', component: () => import('@/pages/other-items/OtherItemEditor.vue'), meta: { requiresSupplier: true, requiresAccountingMode: true } },
       // Vyžádání chybějících dokladů (Fáze F, audit 2026-07) — účetní pohled.
       { path: 'document-requests',      name: 'document-requests', component: () => import('@/pages/documents/DocumentRequests.vue') },
       // Úplné mzdy — samostatný bounded context dostupný v obou účetních režimech.

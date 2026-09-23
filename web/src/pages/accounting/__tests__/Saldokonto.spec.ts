@@ -114,6 +114,22 @@ describe('Saldokonto.vue', () => {
     expect(rows[1].text()).toContain('F-102')
   })
 
+  it('otevře ostatní pohledávku v její agendě', async () => {
+    const report = makeReport()
+    report.accounts[0].account.code = '315'
+    report.accounts[0].partners[0].items[0] = {
+      doc_type: 'other_item', doc_id: 301, doc_no: 'OP-301',
+      issue_date: '2099-01-10', due_date: '2099-01-24', currency_code: 'CZK',
+      amount_foreign: 0, booked_czk: 1000, paid_czk: 0, remaining_czk: 1000, days_overdue: 20,
+    }
+    m.getSaldo.mockResolvedValue(report)
+    const wrapper = mount(Saldokonto)
+    await flushPromises()
+
+    const link = wrapper.findAllComponents({ name: 'RouterLink' }).find(c => c.text() === 'OP-301')
+    expect(link?.props('to')).toEqual({ name: 'other-item-detail', params: { id: 301 } })
+  })
+
   it('(b) přepnutí na "podle partnera" vykreslí seskupenou tabulku se dvěma partnery', async () => {
     m.getSaldo.mockResolvedValue(makeReport())
     const wrapper = mount(Saldokonto)

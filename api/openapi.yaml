@@ -7386,7 +7386,10 @@ paths:
       tags: [CRM]
       summary: KPI overview (current month + last + YTD + trailing 12m + prev year per currency)
       parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
-      responses: { '200': { description: KPI } }
+      responses:
+        '200':
+          description: KPI a oddělený výsledkový dopad ostatních položek
+          content: { application/json: { schema: { type: object, properties: { other_item_result_impact: { type: array, items: { $ref: '#/components/schemas/OtherItemResultImpact' } } } } } }
 
   /api/v1/crm/monthly:
     get:
@@ -7759,7 +7762,7 @@ paths:
   /api/v1/documents/{id}/links:
     post:
       tags: [Documents]
-      summary: Připojit dokument k entitě (faktura / přijatá faktura / klient / projekt / pokladní doklad)
+      summary: Připojit dokument k entitě včetně ostatní pohledávky nebo závazku
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -7771,7 +7774,7 @@ paths:
               type: object
               required: [entity_type, entity_id]
               properties:
-                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] }
+                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] }
                 entity_id: { type: integer }
       responses:
         '200': { description: Aktuální vazby, content: { application/json: { schema: { type: object, properties: { links: { type: array, items: { $ref: '#/components/schemas/DocumentLink' } } } } } } }
@@ -7788,7 +7791,7 @@ paths:
             schema:
               type: object
               properties:
-                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] }
+                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] }
                 entity_id: { type: integer }
       responses:
         '200': { description: Aktuální vazby, content: { application/json: { schema: { type: object, properties: { links: { type: array, items: { $ref: '#/components/schemas/DocumentLink' } } } } } } }
@@ -7799,7 +7802,7 @@ paths:
       summary: Dokumenty navázané na entitu (oboustranné párování)
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
-        - { name: type, in: path, required: true, schema: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] } }
         - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         '200': { description: Navázané dokumenty, content: { application/json: { schema: { type: object, properties: { documents: { type: array, items: { $ref: '#/components/schemas/Document' } } } } } } }
@@ -8271,7 +8274,9 @@ paths:
         (`purchase_invoices.exchange_rate`) — protějšek téhož pole v `/dashboard/summary`
         a jediné číslo porovnatelné s účetnictvím vedeným v korunách.
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK, včetně odděleného výsledkového dopadu ostatních položek
+          content: { application/json: { schema: { type: object, properties: { other_item_result_impact: { type: array, items: { $ref: '#/components/schemas/OtherItemResultImpact' } } } } } }
 
   # ── Daňový optimalizátor ─────────────────────────────────────────────────
   /api/v1/tax/analysis:
@@ -10636,8 +10641,9 @@ paths:
       tags: [Accounting]
       summary: Saldokonto — otevřené položky per partner + konfrontace se zůstatkem účtu
       description: |
-        Otevřené (nezaplacené/částečně zaplacené) faktury seskupené per partner na
-        saldokontních účtech (default 311/321/314/324), s automatickou konfrontací
+        Otevřené (nezaplacené/částečně zaplacené) faktury a ostatní pohledávky
+        a závazky seskupené per partner na saldokontních účtech
+        (default 311/321/314/324/315/325), s automatickou konfrontací
         Σ otevřených položek proti zůstatku účtu z hlavní knihy k rozvahovému dni.
         Rozdíl (inventarizační hodnota) odhalí ruční zápisy, storna či zapomenuté
         faktury nepokryté fakturačním zdrojem.
@@ -12867,6 +12873,232 @@ paths:
         - { in: query, name: purpose, schema: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] } }
       responses:
         '200': { description: PDF, content: { application/pdf: { schema: { type: string, format: binary } } } }
+
+  /api/v1/accounting/other-items:
+    get:
+      tags: [Accounting]
+      summary: Ostatní pohledávky a závazky včetně převzatých mzdových a daňových předpisů
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: query, name: side, schema: { type: string, enum: [receivable, payable] } }
+        - { in: query, name: status, schema: { type: string, enum: [open, all, draft, confirmed, posted, reversed, cancelled] } }
+        - { in: query, name: kind, schema: { type: string } }
+        - { in: query, name: from, schema: { type: string, format: date } }
+        - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200': { description: Stránkované ruční položky a oddělené převzaté zdroje, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemList' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Accounting]
+      summary: Vytvoří koncept ostatní pohledávky nebo závazku
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemInput' } } }
+      responses:
+        '201': { description: Koncept, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/other-items/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/SupplierIdHeader' }
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    get:
+      tags: [Accounting]
+      summary: Detail ostatní pohledávky nebo závazku
+      responses:
+        '200': { description: Detail, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Accounting]
+      summary: Změní pouze koncept
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemInput' } } }
+      responses:
+        '200': { description: Změněný koncept, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [Accounting]
+      summary: Měkce smaže pouze koncept
+      responses:
+        '200': { description: Smazáno }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/post:
+    post:
+      tags: [Accounting]
+      summary: Potvrdí doklad; v podvojném účetnictví jej zaúčtuje
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Potvrzený nebo zaúčtovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/reverse:
+    post:
+      tags: [Accounting]
+      summary: Stornuje zaúčtovaný nebo zruší potvrzený doklad
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3 }, entry_date: { type: string, format: date } } } } }
+      responses:
+        '200': { description: Stornovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/repost:
+    post:
+      tags: [Accounting]
+      summary: Přeúčtuje potvrzený doklad stornem původního a novým zápisem
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [counter_account_code, entry_date, reason], properties: { account_code: { type: string }, counter_account_code: { type: string }, entry_date: { type: string, format: date }, reason: { type: string, minLength: 3 } } } } }
+      responses:
+        '200': { description: Přeúčtovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/allocations:
+    get:
+      tags: [Accounting]
+      summary: Spárované úhrady dokladu
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Úhrady, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemAllocation' } } } } } } }
+    post:
+      tags: [Accounting]
+      summary: Spáruje část bankovní nebo pokladní platby
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [amount], properties: { bank_transaction_id: { type: integer }, cash_document_id: { type: integer }, amount: { type: number, exclusiveMinimum: 0 } } } } }
+      responses:
+        '200': { description: Aktualizovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/allocations/{allocation_id}:
+    delete:
+      tags: [Accounting]
+      summary: Odpojí spárovanou úhradu
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: allocation_id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Aktualizovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/payment-candidates:
+    get:
+      tags: [Accounting]
+      summary: Volné bankovní a pokladní platby ve stejné měně a směru
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, maximum: 50 } }
+      responses:
+        '200': { description: Kandidáti, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemPaymentCandidate' } } } } } } }
+
+  /api/v1/accounting/other-items/schedules:
+    get:
+      tags: [Accounting]
+      summary: Rozvrhy opakovaných ostatních položek
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      responses:
+        '200': { description: Rozvrhy, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemSchedule' } } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/schedules/{id}:
+    get:
+      tags: [Accounting]
+      summary: Rozvrh včetně vygenerovaných konceptů
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/schedules/{id}/generate:
+    post:
+      tags: [Accounting]
+      summary: Idempotentně vytvoří koncepty do zadaného data
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [through], properties: { through: { type: string, format: date } } } } }
+      responses:
+        '200': { description: Identifikátory nových konceptů a rozvrh, content: { application/json: { schema: { type: object, properties: { created_ids: { type: array, items: { type: integer } }, schedule: { $ref: '#/components/schemas/OtherItemSchedule' } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/schedules/{id}/status:
+    put:
+      tags: [Accounting]
+      summary: Aktivuje nebo pozastaví opakování
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [active, paused] } } } } }
+      responses:
+        '200': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{item_id}/schedule:
+    post:
+      tags: [Accounting]
+      summary: Založí opakování z existujícího dokladu
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: item_id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [frequency], properties: { frequency: { type: string, enum: [monthly, quarterly, yearly] }, ends_on: { type: [string, 'null'], format: date } } } } }
+      responses:
+        '201': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{item_id}/installments:
+    get:
+      tags: [Accounting]
+      summary: Splátkový kalendář dokladu
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: item_id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Splátky, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemInstallment' } } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Accounting]
+      summary: Nastaví termíny splátek; prázdné pole kalendář zruší
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: item_id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemInstallmentInput' } } } } } }
+      responses:
+        '200': { description: Splátky, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemInstallment' } } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /api/v1/accounting/cash-documents:
     get:
@@ -21163,6 +21395,137 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    OtherItemSchedule:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        source_item_id: { type: [integer, 'null'], format: int64 }
+        frequency: { type: string, enum: [monthly, quarterly, yearly] }
+        anchor_on: { type: string, format: date }
+        due_days: { type: integer }
+        ends_on: { type: [string, 'null'], format: date }
+        next_index: { type: integer }
+        status: { type: string, enum: [active, paused] }
+        template:
+          type: object
+          properties:
+            side: { type: string, enum: [receivable, payable] }
+            kind: { type: string }
+            title: { type: string }
+            partner_id: { type: [integer, 'null'] }
+            partner_name: { type: [string, 'null'] }
+            currency: { type: string }
+            amount: { type: number }
+            exchange_rate: { type: [number, 'null'] }
+            variable_symbol: { type: [string, 'null'] }
+            account_code: { type: [string, 'null'] }
+            counter_account_code: { type: [string, 'null'] }
+            note: { type: [string, 'null'] }
+        occurrences: { type: array, items: { type: object, properties: { occurrence_index: { type: integer }, item_id: { type: integer } } } }
+    OtherItemInstallmentInput:
+      type: object
+      required: [due_on, amount]
+      properties:
+        due_on: { type: string, format: date }
+        amount: { type: number, exclusiveMinimum: 0 }
+    OtherItemInstallment:
+      allOf:
+        - { $ref: '#/components/schemas/OtherItemInstallmentInput' }
+        - type: object
+          properties:
+            id: { type: integer, format: int64 }
+            position: { type: integer }
+    OtherItemInput:
+      type: object
+      required: [side, title, issued_on, due_on, amount]
+      properties:
+        side: { type: string, enum: [receivable, payable] }
+        kind: { type: string, enum: [other, rent, loan, deposit, insurance, fee, claim], default: other }
+        title: { type: string, maxLength: 255 }
+        partner_id: { type: [integer, 'null'] }
+        partner_name: { type: [string, 'null'] }
+        issued_on: { type: string, format: date }
+        accounting_on: { type: [string, 'null'], format: date }
+        due_on: { type: string, format: date }
+        currency: { type: string, enum: [CZK], default: CZK }
+        amount: { type: number, exclusiveMinimum: 0 }
+        exchange_rate: { type: [number, 'null'], description: Ignorováno, pro tuto agendu je podporována pouze CZK }
+        variable_symbol: { type: [string, 'null'] }
+        account_code: { type: [string, 'null'], description: Rozvahový účet pohledávky nebo závazku }
+        counter_account_code: { type: [string, 'null'], description: Protiúčet pro podvojné účetnictví }
+        note: { type: [string, 'null'] }
+    OtherItem:
+      allOf:
+        - { $ref: '#/components/schemas/OtherItemInput' }
+        - type: object
+          required: [id, status, paid_amount, remaining_amount]
+          properties:
+            id: { type: integer, format: int64 }
+            status: { type: string, enum: [draft, confirmed, posted, reversed, cancelled] }
+            document_no: { type: [string, 'null'] }
+            amount_czk: { type: number }
+            paid_amount: { type: number }
+            remaining_amount: { type: number }
+            journal_entry_id: { type: [integer, 'null'], format: int64 }
+            reversal_entry_id: { type: [integer, 'null'], format: int64 }
+            posted_at: { type: [string, 'null'], format: date-time }
+    OtherItemList:
+      type: object
+      required: [items, total, page, per_page, sources]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OtherItem' } }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+        sources:
+          type: array
+          description: Převzaté položky ze mzdového a daňového modulu, pouze ke čtení
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              source_kind: { type: string, enum: [payroll, tax_advance, payroll_forecast, vat_forecast, dppo_forecast] }
+              side: { type: string, enum: [receivable, payable] }
+              title: { type: string }
+              due_on: { type: string, format: date }
+              amount: { type: number }
+              paid_amount: { type: number }
+              remaining_amount: { type: number }
+              certainty: { type: string, enum: [confirmed, scheduled, estimate] }
+              status: { type: string, enum: [open, overdue, partial, paid, forecast] }
+              source_url: { type: string }
+              editable: { type: boolean, const: false }
+    OtherItemResultImpact:
+      type: object
+      description: Výsledkový dopad ostatních položek za rok podle typu protiúčtu; rozvahové položky se vynechají.
+      properties:
+        currency: { type: string }
+        revenue: { type: number }
+        costs: { type: number }
+        profit: { type: number }
+        revenue_czk: { type: number }
+        costs_czk: { type: number }
+        profit_czk: { type: number }
+        posted: { type: number }
+        draft: { type: number }
+    OtherItemAllocation:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        bank_transaction_id: { type: [integer, 'null'], format: int64 }
+        cash_document_id: { type: [integer, 'null'], format: int64 }
+        amount: { type: number }
+        payment_on: { type: string, format: date }
+        reversed_on: { type: [string, 'null'], format: date }
+    OtherItemPaymentCandidate:
+      type: object
+      properties:
+        source: { type: string, enum: [bank, cash] }
+        id: { type: integer, format: int64 }
+        payment_on: { type: string, format: date }
+        amount: { type: number }
+        currency: { type: string }
+        description: { type: string }
     ShoptetFeed:
       type: object
       description: Kořen `SHOP` feedu pro automatický import produktů Shoptetu.
@@ -25190,13 +25553,13 @@ components:
     DocumentLink:
       type: object
       properties:
-        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] }
+        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] }
         entity_id: { type: integer }
         label: { type: string }
     DocumentLinkCandidate:
       type: object
       properties:
-        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] }
+        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] }
         entity_id: { type: integer }
         label: { type: string }
         sublabel: { type: string }
@@ -26369,6 +26732,9 @@ components:
         is_vat_payer:
           type: boolean
           description: "Plátce DPH? Určuje použitý sloupec obratu (total_without_vat vs total_with_vat)."
+        other_item_result_impact:
+          type: array
+          items: { $ref: '#/components/schemas/OtherItemResultImpact' }
         kpi:
           type: object
           properties:

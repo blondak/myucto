@@ -352,6 +352,13 @@ final class CashDocumentService
             if ($doc['status'] !== 'posted') {
                 throw new CashException('doc_not_posted', 'Stornovat lze jen zaúčtovaný doklad.');
             }
+            $allocated = $pdo->prepare(
+                'SELECT 1 FROM other_item_allocations WHERE supplier_id = ? AND cash_document_id = ? LIMIT 1 FOR UPDATE'
+            );
+            $allocated->execute([$supplierId, $id]);
+            if ($allocated->fetchColumn()) {
+                throw new CashException('payment_allocated', 'Nejprve zrušte přiřazení platby k ostatní pohledávce nebo závazku.', 409);
+            }
             // H-3: zámek se posuzuje nad datem PROTIZÁPISU, ne nad datem původního dokladu.
             // Doklad v uzamčeném období stornovat LZE — PostingService::reverse() (B8) je na to
             // stavěný a protizápis si sám posune do otevřeného data. Kontrolou nad původním

@@ -64,6 +64,7 @@ má vždy přednost před oběma.
 | `cron-jmhz-poll.{cmd,sh}` | Dotažení protokolu ČSSZ k měsíčnímu hlášení a uzavření transakce u VREP; neúspěšný dotaz nikdy neuzavře podání (`--limit=N`) |
 | `cron-jmhz-source-monitor.{cmd,ps1,sh}` | Denní read-only sledování veřejných indexů dokumentace JMHZ MPSV/ČSSZ. Do **Systém → Plánované úlohy** ukládá konkrétní nový/změněný dokument, starou a novou verzi, URL a hash; nikdy samo neaktualizuje číselník (`--dry-run`) |
 | `cron-generate-recurring-invoices.{cmd,sh}` | Generování faktur ze šablon pravidelné fakturace; volitelné rovnou vystavení a odeslání klientovi (`--dry-run`) |
+| `cron-generate-other-items.{cmd,sh}` | Denní idempotentní generování konceptů ostatních pohledávek a závazků z aktivních rozvrhů (`--dry-run`); nikdy samo neúčtuje |
 | `cron-automation-digest.{cmd,sh}` | Ranní souhrn kokpitu Automat podle nastavené hodiny (`--dry-run`, `--hour=N`) |
 | `cron-ai-worker.{cmd,sh}` | Zpracování fronty AI návrhů účtování (`--supplier=N`, `--limit=N`, `--dry-run`) |
 | `cron-catalog-worker.{cmd,sh}` | Dávkový přepočet cen, historické ocenění a příprava inventur; pokračuje od posledního dokončeného checkpointu |
@@ -151,6 +152,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-jmhz-poll` | každých 10 minut; odstup dotazů si řídí sám ledger pokusů | `*/10 * * * *` |
 | `cron-jmhz-source-monitor` | 1× denně; jen kontroluje veřejné podklady a vypíše diff, nic neaktualizuje | 07:00 |
 | `cron-generate-recurring-invoices` | 1× denně | 06:30 |
+| `cron-generate-other-items` | 1× denně | 06:35 |
 | `cron-automation-digest` | každou hodinu v ranním okně | 06:00–08:00 |
 | `cron-ai-worker` | každých 10 minut | `*/10 * * * *` |
 | `cron-catalog-worker` | každou minutu | `* * * * *` |
@@ -242,6 +244,7 @@ schtasks /create /tn "MyUcto EpoStatus" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cr
 schtasks /create /tn "MyUcto JmhzPoll"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-jmhz-poll.cmd" /sc minute /mo 10 /ru SYSTEM
 schtasks /create /tn "MyUcto JmhzSourceMonitor" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-jmhz-source-monitor.cmd" /sc daily /st 07:00 /ru SYSTEM
 schtasks /create /tn "MyUcto Recurring"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-generate-recurring-invoices.cmd" /sc daily /st 06:30 /ru SYSTEM
+schtasks /create /tn "MyUcto Other Items"       /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-generate-other-items.cmd" /sc daily /st 06:35 /ru SYSTEM
 schtasks /create /tn "MyUcto AutomationDigest"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-automation-digest.cmd" /sc hourly /mo 1 /st 06:00 /et 08:59 /ru SYSTEM
 schtasks /create /tn "MyUcto AI Worker"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-worker.cmd" /sc minute /mo 10 /ru SYSTEM
 schtasks /create /tn "MyUcto Catalog Worker" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-catalog-worker.cmd" /sc minute /mo 1 /ru SYSTEM
@@ -309,6 +312,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
 */10 *  *   *   *    /var/www/myucto.cz/cmd/cron-jmhz-poll.sh
   0  7  *   *   *    /var/www/myucto.cz/cmd/cron-jmhz-source-monitor.sh
  30  6  *   *   *    /var/www/myucto.cz/cmd/cron-generate-recurring-invoices.sh
+ 35  6  *   *   *    /var/www/myucto.cz/cmd/cron-generate-other-items.sh
   0  6-8 *   *   *    /var/www/myucto.cz/cmd/cron-automation-digest.sh
 */10 *  *   *   *    /var/www/myucto.cz/cmd/cron-ai-worker.sh
   *  *  *   *   *    /var/www/myucto.cz/cmd/cron-catalog-worker.sh

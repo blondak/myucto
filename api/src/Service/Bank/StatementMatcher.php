@@ -384,6 +384,9 @@ final class StatementMatcher
             }
             return $result;
         }
+        if ($this->hasOtherItemAllocation($pdo, $transactionId)) {
+            return ['status' => 'unmatched', 'reason' => 'other_item_allocated'];
+        }
         // Pohyb, který už spotřebovala mzdová platba, není volný — druhé
         // přiřazení k faktuře by tutéž korunu použilo dvakrát. Důvod
         // `payroll_settled` záměrně NENÍ v MatchSuggestionService::ALLOWED_REASONS,
@@ -669,6 +672,10 @@ final class StatementMatcher
             // Pro již ručně paid fakturu jen navážeme transakci (status/paid_at netknuté).
             $pdo->beginTransaction();
             try {
+                if (!$this->claimTransaction($pdo, $transactionId)) {
+                    $pdo->rollBack();
+                    return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
+                }
                 $recorded = null;
                 if (!$alreadyPaid) {
                     if ($this->payments !== null) {
@@ -759,6 +766,10 @@ final class StatementMatcher
         if (!$alreadyPaid && $this->payments !== null && $amount < $m['expected'] - $m['exact']) {
             $pdo->beginTransaction();
             try {
+                if (!$this->claimTransaction($pdo, $transactionId)) {
+                    $pdo->rollBack();
+                    return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
+                }
                 $recorded = $this->payments->recordPayment(
                     (int) $inv['id'],
                     $this->txAmountInInvoiceCurrency($amount, $inv, $txCurrency, 0.0),
@@ -800,11 +811,22 @@ final class StatementMatcher
 
         if ($diff <= $m['partial']) {
             // Partial match (legacy fallback / již paid faktura) — flag, ale nepaint paid.
-            $pdo->prepare(
-                "UPDATE bank_transactions
-                    SET matched_invoice_id = ?, match_status = 'auto_partial', matched_at = NOW()
-                  WHERE id = ?"
-            )->execute([$inv['id'], $transactionId]);
+            $pdo->beginTransaction();
+            try {
+                if (!$this->claimTransaction($pdo, $transactionId)) {
+                    $pdo->rollBack();
+                    return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
+                }
+                $pdo->prepare(
+                    "UPDATE bank_transactions
+                        SET matched_invoice_id = ?, match_status = 'auto_partial', matched_at = NOW()
+                      WHERE id = ?"
+                )->execute([$inv['id'], $transactionId]);
+                $pdo->commit();
+            } catch (\Throwable $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                throw $e;
+            }
             $this->clientBankAccounts?->captureForInvoiceTransaction((int) $inv['id'], $transactionId);
             return ['status' => 'auto_partial', 'invoice_id' => (int) $inv['id'], 'diff' => $diff];
         }
@@ -1062,7 +1084,15 @@ final class StatementMatcher
         $stmt = $pdo->prepare('SELECT match_status FROM bank_transactions WHERE id = ?' . $lock);
         $stmt->execute([$transactionId]);
         $status = $stmt->fetchColumn();
-        return $status !== false && in_array((string) $status, $free, true);
+        return $status !== false && in_array((string) $status, $free, true)
+            && !$this->hasOtherItemAllocation($pdo, $transactionId);
+    }
+
+    private function hasOtherItemAllocation(PDO $pdo, int $transactionId): bool
+    {
+        $stmt = $pdo->prepare('SELECT 1 FROM other_item_allocations WHERE bank_transaction_id = ? LIMIT 1');
+        $stmt->execute([$transactionId]);
+        return $stmt->fetchColumn() !== false;
     }
 
     private ?\MyInvoice\Service\Bank\Card\CardPaymentCandidates $cardCandidatesInstance = null;
@@ -1198,6 +1228,7 @@ final class StatementMatcher
                 AND bt.amount < 0
                 AND DATEDIFF(bt.posted_at, ?) BETWEEN ? AND ?
                 AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.bank_transaction_id = bt.id)
+                AND NOT EXISTS (SELECT 1 FROM other_item_allocations oia WHERE oia.bank_transaction_id = bt.id)
                 AND " . \MyInvoice\Repository\BankStatementOwnershipResolver::sql('bs') . '
               ORDER BY bt.posted_at, bt.id'
         );
@@ -1273,6 +1304,10 @@ final class StatementMatcher
                 $pdo->rollBack();
                 return ['status' => 'unmatched', 'reason' => 'amount_date_transaction_not_free'];
             }
+            if ($this->hasOtherItemAllocation($pdo, $transactionId)) {
+                $pdo->rollBack();
+                return ['status' => 'unmatched', 'reason' => 'other_item_allocated'];
+            }
 
             $sameAmount = $pdo->prepare(
                 "SELECT COUNT(*)
@@ -1280,6 +1315,7 @@ final class StatementMatcher
                   WHERE bt.statement_id = ?
                     AND bt.match_status = 'unmatched'
                     AND bt.amount < 0
+                    AND NOT EXISTS (SELECT 1 FROM other_item_allocations oia WHERE oia.bank_transaction_id = bt.id)
                     AND ABS(ABS(bt.amount) - ?) < 0.005
                     AND UPPER(COALESCE(NULLIF(bt.currency, ''), ?)) = ?"
             );

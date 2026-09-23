@@ -7,10 +7,10 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 
-/** Polymorfní vazba dokument ↔ entita (client/invoice/purchase_invoice/project/journal_entry/bank_transaction/cash_document). */
+/** Polymorfní vazba dokument ↔ entita. */
 final class DocumentLinkRepository
 {
-    public const ENTITY_TYPES = ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction', 'cash_document'];
+    public const ENTITY_TYPES = ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction', 'cash_document', 'other_item'];
 
     public function __construct(private readonly Connection $db) {}
 
@@ -19,9 +19,10 @@ final class DocumentLinkRepository
      *
      * @param list<string> $redactedTypes typy, jejichž popisek volající nesmí vidět
      *        (chybí mu právo na agendu) — vazba zůstane, popisek bude jen „#id"
+     * @param list<string> $hiddenTypes typy, jejichž vazby volající vůbec nesmí vidět
      * @return list<array{entity_type:string,entity_id:int,label:string}>
      */
-    public function linksForDocument(int $documentId, int $supplierId, array $redactedTypes = []): array
+    public function linksForDocument(int $documentId, int $supplierId, array $redactedTypes = [], array $hiddenTypes = []): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT entity_type, entity_id FROM document_links
@@ -29,6 +30,7 @@ final class DocumentLinkRepository
         );
         $stmt->execute([$supplierId, $documentId]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rows = array_values(array_filter($rows, static fn (array $r): bool => !in_array((string) $r['entity_type'], $hiddenTypes, true)));
 
         // Popisky dávkově — jeden dotaz na typ entity místo N+1 (labelFor per řádek).
         $labels = $this->labelsForBatch(
@@ -68,6 +70,7 @@ final class DocumentLinkRepository
             // bank_transactions nemá supplier_id přímo — scope jde přes bank_statements (viz BankPostingSuggestionRepository).
             'bank_transaction' => 'SELECT 1 FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bt.id = ? AND bs.supplier_id = ? LIMIT 1',
             'cash_document'    => 'SELECT 1 FROM cash_documents WHERE id = ? AND supplier_id = ? LIMIT 1',
+            'other_item'       => 'SELECT 1 FROM other_items WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL LIMIT 1',
         };
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$id, $supplierId]);
@@ -215,6 +218,15 @@ final class DocumentLinkRepository
                             $id = (int) $r['id'];
                             $who = (string) ($r['partner_name'] ?: $r['description'] ?: '');
                             $labels['cash_document:' . $id] = $this->invoiceLabel((string) ($r['doc_number'] ?? ''), $who, $r['issue_date'], $r['total_amount'], (string) $r['currency_code'], $id);
+                        }
+                        break;
+                    case 'other_item':
+                        $stmt = $pdo->prepare(
+                            "SELECT id, title FROM other_items WHERE supplier_id = ? AND deleted_at IS NULL AND id IN ($place)"
+                        );
+                        $stmt->execute([$supplierId, ...$ids]);
+                        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                            $labels['other_item:' . (int) $r['id']] = (string) $r['title'];
                         }
                         break;
                 }

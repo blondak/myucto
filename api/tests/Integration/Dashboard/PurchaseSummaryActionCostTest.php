@@ -54,7 +54,7 @@ final class PurchaseSummaryActionCostTest extends TestCase
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
         $this->pdo = $this->db->pdo();
-        $this->action = new PurchaseSummaryAction($this->db);
+        $this->action = $container->get(PurchaseSummaryAction::class);
 
         $this->supplierId = (int) ($this->pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
         $this->userId = (int) ($this->pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);

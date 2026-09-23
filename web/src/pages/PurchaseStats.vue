@@ -14,6 +14,7 @@ import PaymentDaysHistogramChart from '@/components/charts/PaymentDaysHistogramC
 import VatBreakdownChart from '@/components/charts/VatBreakdownChart.vue'
 import AgingChart from '@/components/charts/AgingChart.vue'
 import InvoiceSizeChart from '@/components/charts/InvoiceSizeChart.vue'
+import OtherItemResultImpact from '@/components/accounting/OtherItemResultImpact.vue'
 
 const { t } = useI18n()
 
@@ -318,6 +319,8 @@ const hasAnyData = computed(() =>
           <div v-else class="text-[11px] text-neutral-400 mt-1">{{ t('costs.unpaid_payables_hint') }}</div>
         </RouterLink>
       </div>
+
+      <OtherItemResultImpact :rows="summary.other_item_result_impact" />
 
       <!-- Měsíční náklady — bar + prev-year linka -->
       <div v-if="summary.costs_by_month.length" class="space-y-4">

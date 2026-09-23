@@ -16,6 +16,7 @@ import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import RevenueChart from '@/components/charts/RevenueChart.vue'
 import CumulativeYtdChart from '@/components/charts/CumulativeYtdChart.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import OtherItemResultImpact from '@/components/accounting/OtherItemResultImpact.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -601,6 +602,8 @@ onMounted(loadAll)
         </div>
         </div>
       </div>
+
+      <OtherItemResultImpact v-if="overview.other_item_result_impact" :rows="overview.other_item_result_impact" />
 
       <!-- ═══ Srovnání období (tržby / náklady / zisk / marže) — nezávislé na přepínači níže ═══ -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">

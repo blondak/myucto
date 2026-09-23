@@ -149,6 +149,42 @@ final class SyntheticPohodaExport
         return $dir;
     }
 
+    public static function withOtherItems(string $dir): void
+    {
+        $append = static function (string $file, string $needle, string $xml): void {
+            $source = (string) file_get_contents($file);
+            $needle = (string) iconv('UTF-8', 'Windows-1250', $needle);
+            $xml = (string) iconv('UTF-8', 'Windows-1250', $xml);
+            if (substr_count($source, $needle) !== 1) {
+                throw new \RuntimeException('Nečekaný formát syntetického exportu.');
+            }
+            file_put_contents($file, str_replace($needle, $xml . $needle, $source));
+        };
+        $append($dir . '/02_uctova_osnova.xml', '</lst:listAccount>',
+            '<lst:itemAccount id="315000" code="315000" name="Ostatní pohledávky"/>'
+            . '<lst:itemAccount id="325000" code="325000" name="Ostatní závazky"/>');
+        $append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Ostatní pohledávky', '26OP0001', 'Nájem', 1200, '315000', '602000', '2026-02-01')
+            . self::entry('Ostatní závazky', '26OZ0001', 'Nájem', 800, '518000', '325000', '2026-02-02'));
+        foreach ([
+            ['18_faktury_receivable.xml', '26OP0001', 'UN', 1200, '2026-02-01'],
+            ['26_faktury_commitment.xml', '26OZ0001', 'PN', 800, '2026-02-02'],
+        ] as [$file, $number, $vat, $amount, $date]) {
+            self::file($dir . '/' . $file,
+                '<lst:listInvoice version="2.0" state="ok"><lst:invoice version="2.0"><inv:invoiceHeader>'
+                . '<inv:number><typ:numberRequested>' . $number . '</typ:numberRequested></inv:number>'
+                . '<inv:date>' . $date . '</inv:date><inv:dateAccounting>' . $date . '</inv:dateAccounting>'
+                . '<inv:dateDue>2026-03-01</inv:dateDue><inv:text>Nájem</inv:text>'
+                . '<inv:classificationVAT><typ:ids>' . $vat . '</typ:ids></inv:classificationVAT>'
+                . '<inv:liquidation><typ:amountHome>' . $amount . '</typ:amountHome></inv:liquidation>'
+                . '</inv:invoiceHeader><inv:invoiceSummary><inv:homeCurrency>'
+                . '<typ:priceNone>' . $amount . '</typ:priceNone><typ:priceLow>0</typ:priceLow>'
+                . '<typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh>'
+                . '<typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary>'
+                . '</lst:invoice></lst:listInvoice>');
+        }
+    }
+
     /**
      * Agenda následujícího roku po agendě `write(..., unbooked: true)`: POHODA do ní převzala
      * doklady, které vedla už agenda minulého roku (vydaná faktura s úhradou a nezaúčtovaný

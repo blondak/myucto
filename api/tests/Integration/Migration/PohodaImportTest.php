@@ -153,6 +153,29 @@ final class PohodaImportTest extends TestCase
         self::assertSame('completed', $again->status(), $this->explain($again));
     }
 
+    public function testOtherItemsReuseImportedJournalAndDoNotDuplicateOnRerun(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withOtherItems($dir);
+        $export = PohodaExport::open($dir);
+
+        $first = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        self::assertSame(2, $this->rows('other_items', $supplierId));
+        self::assertSame(0, $this->rows('invoices', $supplierId, "varsymbol = '26OP0001'"));
+        self::assertSame(0, $this->rows('purchase_invoices', $supplierId, "varsymbol = '26OZ0001'"));
+        self::assertSame(2, $this->rows('journal_entries', $supplierId,
+            "source_type = 'other_item' AND source_id IS NOT NULL"));
+        self::assertSame(8, $this->rows('journal_entries', $supplierId));
+
+        $again = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame(2, $this->rows('other_items', $supplierId));
+        self::assertSame(8, $this->rows('journal_entries', $supplierId));
+        self::assertSame(2, $this->rows('pohoda_import_map', $supplierId, "kind = 'other_item'"));
+    }
+
     /** @return array<string,int|float> */
     private static function stepCounts(ImportProtocol $protocol, string $key): array
     {

@@ -39,6 +39,7 @@ a můžeš se z něj prokliknout zpět na zdrojový doklad. Podle sloupce **Zdro
 |---|---|
 | **Vydaná faktura** | zaúčtování vydané faktury (311/6xx + DPH na výstupu **343.200** podle [Knihy DPH](42_Kniha_DPH.md)) |
 | **Přijatá faktura** | zaúčtování přijaté faktury (321/5xx nebo 04x/02x u majetku + DPH na vstupu **343.100**) |
+| **Ostatní pohledávka nebo závazek** | zaúčtování potvrzené položky z agendy Peníze → Ostatní pohledávky a závazky; při stornu vzniká opravný zápis |
 | **Banka** | spárování položky bankovního výpisu s dokladem — viz [Banka](29_Banka.md) |
 | **Pokladna** | zaúčtování pokladního dokladu — viz [Pokladna](32_Pokladna.md) |
 | **Zápočet / vypořádání** | vzájemný zápočet nebo jiné vypořádání otevřených položek |
@@ -1056,3 +1057,38 @@ Co se nikdy nepřepíše:
 
 Mění se **jen text popisu**. Částky, účty, data, období ani čísla dokladů zůstávají, takže
 se sestavy ani výkazy nezmění. Opakované spuštění už nic nepřepíše.
+
+## 52.13 Ostatní pohledávky a závazky
+
+**Peníze → Ostatní pohledávky a závazky** slouží pro peněžní nároky a dluhy,
+které nepatří do vydaných či přijatých faktur ani do specializovaného mzdového
+a daňového modulu. Příkladem je nájemné podle smlouvy, vratná kauce nebo jiná
+samostatná pohledávka. Zdanitelné plnění se zadává fakturační cestou, aby jeho
+řádky správně vstoupily do knihy DPH a výkazů.
+
+V konceptu zadej důvod, protistranu, datum vzniku, splatnost, měnu a částku.
+V podvojném účetnictví vyber bilanční účet a protiúčet podle skutečného
+účetního případu. Pro běžnou pohledávku se nabízí účet 315, pro závazek 325.
+Účet 5xx na druhé straně znamená náklad, účet 6xx výnos; rozvahový protiúčet
+nemění zisk. Stejný účet na obou stranách není platnou předkontací. Potvrzením
+se dokladu přidělí číslo a vznikne zápis v deníku. V daňové evidenci potvrzení
+založí otevřenou evidenční položku bez účetního zápisu.
+
+Na detailu můžeš propojit jednu či více smluv, skenů nebo jiných podkladů se
+skladem dokumentů. Originál zůstává ve skladu a stejná smlouva může být
+podkladem několika období. K platbě se přiřazuje existující bankovní pohyb
+nebo pokladní doklad; jedna položka může mít více dílčích úhrad. Párování
+znovu nezaúčtuje banku ani pokladnu. U cizí měny je potřeba nejprve vyřešit
+kurzové vypořádání.
+
+Chybný zaúčtovaný doklad opravíš přeúčtováním: zadáš důvod, datum a nové účty.
+Původní zápis se stornuje a vytvoří se nový se stejným číslem dokladu. Doklad
+s již přiřazenou úhradou nejprve odpoj od platby. Otevřené položky na účtech
+315 a 325 lze kontrolovat v [Saldokontu](60_Saldokonto.md) i zpětně k
+rozvahovému dni.
+
+Přehled ukazuje také mzdové předpisy, daňové zálohy a označené odhady mezd,
+DPH a DPPO z jejich vlastních agend. Tyto položky se zde ručně nezakládají.
+Odhad se nepovažuje za potvrzený dluh. Budoucí peněžní dopad se zobrazuje ve
+výhledu cash-flow, zatímco tržby, náklady a zisk se řídí výsledkovým účtem
+a účetním obdobím.

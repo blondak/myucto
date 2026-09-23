@@ -79,6 +79,11 @@ final class ArchiveRestoreService
         'cash_registers',
         'cash_documents',
         'cash_document_vat_lines',
+        'other_items',
+        'other_item_schedules',
+        'other_item_schedule_occurrences',
+        'other_item_installments',
+        'other_item_allocations',
         'invoice_payments',
         'income_tax_returns',
         'tax_losses',
@@ -593,6 +598,20 @@ final class ArchiveRestoreService
         $nonFk = self::NONFK_REFS[$table] ?? [];
 
         foreach ($row as $col => $val) {
+            if ($table === 'other_item_schedules' && $col === 'template_json') {
+                $template = json_decode((string) $val, true, 512, JSON_THROW_ON_ERROR);
+                if (!is_array($template)) {
+                    throw new RestoreException('snapshot_reference', 'Neplatná šablona opakovaného dokladu v archivu.');
+                }
+                if (array_key_exists('partner_id', $template) && $template['partner_id'] !== null) {
+                    $oldPartnerId = (int) $template['partner_id'];
+                    $template['partner_id'] = $this->maps['clients'][$oldPartnerId]
+                        ?? throw new RestoreException('snapshot_reference', 'Chybí mapování protistrany opakovaného dokladu.');
+                }
+                $cols[] = $col;
+                $vals[] = json_encode($template, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+                continue;
+            }
             if ($table === 'accounting_closing_steps' && ($row['step_key'] ?? null) === 'provisions' && $col === 'payload' && $val !== null) {
                 $payload = json_decode((string) $val, true, 512, JSON_THROW_ON_ERROR);
                 foreach ($payload['entries'] ?? [] as $index => $entry) {
@@ -883,6 +902,7 @@ final class ArchiveRestoreService
         $docMap = [
             'invoice' => 'invoices',
             'purchase_invoice' => 'purchase_invoices',
+            'other_item' => 'other_items',
             'provision' => 'invoices',        // opravná položka k pohledávce → invoice id
             'bank' => 'bank_transactions',
             'asset' => 'assets',

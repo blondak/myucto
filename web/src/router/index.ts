@@ -31,6 +31,7 @@ declare module 'vue-router' {
     requiresDoubleEntry?: boolean
     requiresTaxEvidence?: boolean
     requiresCashMode?: boolean
+    requiresAccountingMode?: boolean
     requiresStock?: boolean
     requiresPayroll?: boolean
     commercialOnly?: boolean
@@ -98,6 +99,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // AiExtractPdfAction; readonly/client roli položka nesvítí a route ji nepustí.
   'purchase-invoice-ai-import': ['purchase_invoices.scan', 'write'],
   documents: ['documents'], 'document-detail': ['documents'], 'document-requests': ['documents.requests'],
+  'other-items': ['other_items'], 'other-item-new': ['other_items', 'write'], 'other-item-detail': ['other_items'], 'other-item-edit': ['other_items', 'write'],
   'scan-attach': ['documents.upload', 'write'],
   'accounting-accounts': ['accounting'], 'accounting-account-detail': ['accounting'],
   'accounting-journal': ['accounting'], 'accounting-journal-new': ['accounting.journal.write', 'write'],
@@ -535,6 +537,12 @@ export async function authorizationGuard(
     if (mode !== 'double_entry' && mode !== 'tax_evidence') {
       return { name: 'home' }
     }
+  }
+
+  const requiresAccountingMode = to.matched.some((r) => r.meta.requiresAccountingMode)
+  if (requiresAccountingMode) {
+    const mode = useSupplierStore().currentSupplier?.accounting_mode
+    if (mode !== 'double_entry' && mode !== 'tax_evidence') return { name: 'home' }
   }
 
   // Sklad (Epic SKLAD) je dostupný jen firmám s zapnutou skladovou evidencí.

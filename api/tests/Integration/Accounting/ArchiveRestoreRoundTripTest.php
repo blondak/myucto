@@ -59,6 +59,92 @@ final class ArchiveRestoreRoundTripTest extends TestCase
     /** @var list<int> */
     private array $cleanupSuppliers = [];
 
+    public function testOtherItemScheduleAndInstallmentsSurviveArchiveRoundTrip(): void
+    {
+        $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $container = Bootstrap::buildApp()->getContainer();
+        $items = $container->get(\MyInvoice\Service\Accounting\OtherItemService::class);
+        $plans = $container->get(\MyInvoice\Service\Accounting\OtherItemScheduleService::class);
+        $partnerId = $this->client();
+        $source = $items->create($this->supplierId, [
+            'side' => 'payable', 'kind' => 'rent', 'title' => 'Syntetický archivní nájem',
+            'issued_on' => '2097-01-01', 'due_on' => '2097-01-20',
+            'currency' => 'CZK', 'amount' => 1200, 'counter_account_code' => '518',
+            'partner_id' => $partnerId,
+        ], $this->userId);
+        $posted = $items->post($this->supplierId, (int) $source['id'], $this->userId);
+        $plans->setInstallments($this->supplierId, (int) $source['id'], [
+            ['due_on' => '2097-01-20', 'amount' => 500],
+            ['due_on' => '2097-02-20', 'amount' => 700],
+        ]);
+        $schedule = $plans->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly'], $this->userId);
+        self::assertCount(2, $plans->generate($this->supplierId, (int) $schedule['id'], '2097-03-01', $this->userId)['created_ids']);
+
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, statement_date, currency)
+            VALUES (?, ?, ?, ?, ?, ?)')->execute([
+            $this->supplierId, 'synteticky-archivni-vypis', hash('sha256', uniqid('', true)),
+            '1000000005/0100', '2097-01-20', 'CZK',
+        ]);
+        $statementId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO bank_transactions (statement_id, posted_at, amount, currency)
+            VALUES (?, ?, ?, ?)')->execute([$statementId, '2097-01-20', -500, 'CZK']);
+        $transactionId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO other_item_allocations
+            (supplier_id, other_item_id, bank_transaction_id, amount, payment_on)
+            VALUES (?,?,?,?,?)')->execute([$this->supplierId, $source['id'], $transactionId, 500, '2097-01-20']);
+
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $path = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $path;
+        $report = $this->restore->restore($path);
+        $newSid = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+        foreach (['other_items' => 3, 'other_item_schedules' => 1,
+                  'other_item_schedule_occurrences' => 3, 'other_item_installments' => 2,
+                  'other_item_allocations' => 1] as $table => $expected) {
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE supplier_id = ?");
+            $stmt->execute([$newSid]);
+            self::assertSame($expected, (int) $stmt->fetchColumn(), $table);
+        }
+        $stmt = $pdo->prepare("SELECT oi.id, oi.journal_entry_id, je.source_id
+            FROM other_items oi JOIN journal_entries je ON je.id = oi.journal_entry_id
+            WHERE oi.supplier_id = ? AND oi.status = 'posted'");
+        $stmt->execute([$newSid]);
+        $restored = $stmt->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($restored);
+        self::assertNotEquals($source['id'], $restored['id']);
+        self::assertNotEquals($posted['journal_entry_id'], $restored['journal_entry_id']);
+        self::assertSame((int) $restored['id'], (int) $restored['source_id']);
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM other_item_schedule_occurrences o
+            JOIN other_item_schedules s ON s.id = o.schedule_id AND s.supplier_id = o.supplier_id
+            JOIN other_items i ON i.id = o.item_id AND i.supplier_id = o.supplier_id
+            WHERE o.supplier_id = ?');
+        $stmt->execute([$newSid]);
+        self::assertSame(3, (int) $stmt->fetchColumn());
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM bank_statements WHERE supplier_id = ?');
+        $stmt->execute([$newSid]);
+        self::assertSame(1, (int) $stmt->fetchColumn(), 'bank_statements');
+        $stmt = $pdo->prepare('SELECT bank_transaction_id FROM other_item_allocations WHERE supplier_id = ?');
+        $stmt->execute([$newSid]);
+        self::assertGreaterThan(0, (int) $stmt->fetchColumn(), 'bank_transaction_id');
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM other_item_allocations a
+            JOIN other_items i ON i.id = a.other_item_id AND i.supplier_id = a.supplier_id
+            JOIN bank_transactions bt ON bt.id = a.bank_transaction_id
+            JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = a.supplier_id
+            WHERE a.supplier_id = ?');
+        $stmt->execute([$newSid]);
+        self::assertSame(1, (int) $stmt->fetchColumn());
+        $restoredSchedule = (int) $pdo->query('SELECT id FROM other_item_schedules WHERE supplier_id = ' . $newSid)->fetchColumn();
+        $restoredPartner = (int) $pdo->query('SELECT id FROM clients WHERE supplier_id = ' . $newSid)->fetchColumn();
+        self::assertNotSame($partnerId, $restoredPartner);
+        $generated = $plans->generate($newSid, $restoredSchedule, '2097-04-01', $this->userId);
+        self::assertCount(1, $generated['created_ids']);
+        $item = $items->get($newSid, (int) $generated['created_ids'][0]);
+        self::assertSame($restoredPartner, (int) $item['partner_id']);
+    }
+
     protected function setUp(): void
     {
         $rootDir = dirname(__DIR__, 4);

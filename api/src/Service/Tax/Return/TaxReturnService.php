@@ -190,6 +190,36 @@ final class TaxReturnService
     }
 
     /**
+     * Výpočet pro peněžní predikci bez zakládání draftu a bez automatického párování záloh.
+     * U rozpracovaného DPPO zahrnuje také dosud nezaúčtované závěrkové projekce.
+     * @return array{balance_due:float,filing_deadline_input:string,status:string}|null
+     */
+    public function balanceDueReadOnly(int $supplierId, int $year, string $type): ?array
+    {
+        $this->assertType($type);
+        $this->assertSupplierType($supplierId, $type);
+        $row = $this->returns->find($supplierId, $year, $type, 'radne', 1);
+        if ($row === null) {
+            return null;
+        }
+        $result = $row['status'] === 'final'
+            ? (array) ($row['computed']['computed'] ?? [])
+            : $this->compute($supplierId, $year, $type, (array) $row['inputs'], 'radne')['result'];
+        $balanceDue = (float) ($result['balance_due'] ?? 0);
+        $projection = $result['projection'] ?? null;
+        if ($type === 'po' && $row['status'] === 'draft' && is_array($projection)
+            && ($projection['is_projection'] ?? false) === true) {
+            $balanceDue = (float) ($projection['projected_tax'] ?? 0)
+                - (float) ($result['advances_paid'] ?? 0);
+        }
+        return [
+            'balance_due' => round($balanceDue, 2),
+            'filing_deadline_input' => trim((string) ($row['inputs']['filing_deadline'] ?? '')),
+            'status' => (string) $row['status'],
+        ];
+    }
+
+    /**
      * Uloží ruční vstupy (draft, CAS na row_version). Vrací aktualizovaný stav.
      *
      * @param array<string,mixed> $inputs

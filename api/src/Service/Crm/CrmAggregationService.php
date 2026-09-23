@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\AccountingPeriodHealthService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
+use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\Report\CzechWorkingDays;
 use MyInvoice\Service\Accounting\UnbookedDocumentsCounter;
@@ -359,6 +360,8 @@ final class CrmAggregationService
             'prev_year_full' => $this->aggregateRange($supplierId, $payer, $d($prevYearStart), $d($yearStart)),
             'prev_year_ytd'  => $this->aggregateRange($supplierId, $payer, $d($prevYearStart), $d($prevYearYtdEnd)),
             'current_month_pipeline' => $this->currentMonthPipeline($supplierId, $payer, $d($firstThisMonth), $d($firstNextMonth)),
+            'other_item_result_impact' => (new OtherItemForecastService($this->db))->resultImpact(
+                $supplierId, $d($yearStart), $d($yearStart->modify('+1 year'))),
             'currencies'     => $this->listCurrencies($supplierId),
         ];
     }
@@ -680,8 +683,7 @@ final class CrmAggregationService
     }
 
     /**
-     * Měny, ve kterých má dodavatel relevantní doklady (vydané tržby + přijaté náklady).
-     * Živě z faktur, ať se nabídka měn shoduje s tím, co aggregateRange skutečně vrací.
+     * Měny, ve kterých má dodavatel faktury nebo otevřené ostatní položky.
      *
      * @return list<string>
      */
@@ -694,9 +696,13 @@ final class CrmAggregationService
                 UNION
                 SELECT cur.code AS code FROM purchase_invoices pi JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ? AND pi.status IN " . self::COST_STATUS . "
+                UNION
+                SELECT oi.currency AS code FROM other_items oi
+                 WHERE oi.supplier_id = ? AND oi.deleted_at IS NULL
+                   AND oi.status IN ('draft', 'confirmed', 'posted')
              ) t ORDER BY code"
         );
-        $stmt->execute([$supplierId, $supplierId]);
+        $stmt->execute([$supplierId, $supplierId, $supplierId]);
         return array_column($stmt->fetchAll(\PDO::FETCH_ASSOC), 'code');
     }
 
@@ -2937,6 +2943,15 @@ final class CrmAggregationService
         foreach ($outStmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
             if ($r['bucket'] === null) continue;
             $outByBucket[(int) $r['bucket']] = (float) $r['amt'];
+        }
+
+        foreach ((new OtherItemForecastService($this->db))->dueBetween($supplierId, $globalStart, $globalEnd, $currency) as $item) {
+            foreach ($bounds as $idx => [$start, $end]) {
+                if ($item['due_on'] < $start->format('Y-m-d') || $item['due_on'] > $end->format('Y-m-d')) continue;
+                if ($item['side'] === 'receivable') $inByBucket[$idx] = ($inByBucket[$idx] ?? 0.0) + $item['remaining'];
+                else $outByBucket[$idx] = ($outByBucket[$idx] ?? 0.0) + $item['remaining'];
+                break;
+            }
         }
 
         $weeks = [];

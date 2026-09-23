@@ -24,7 +24,14 @@ const supplierStore = useSupplierStore()
 const auth = useAuthStore()
 
 const now = new Date()
-const year = ref(now.getFullYear() - 1)
+function yearFromQuery(value: unknown): number | null {
+  return typeof value === 'string' && /^(20|21)\d{2}$/.test(value) ? Number(value) : null
+}
+const year = ref(yearFromQuery(route.query.year) ?? now.getFullYear() - 1)
+watch(() => route.query.year, requested => {
+  const selected = yearFromQuery(requested)
+  if (selected !== null) year.value = selected
+})
 const yearOptions = useYearOptions('combined', year)
 
 // Účetní období (pro DPPO nabízíme reálná období vč. hospodářského roku, label 2025/2026).

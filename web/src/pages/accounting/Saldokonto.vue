@@ -25,7 +25,7 @@ const periods = ref<AccountingPeriod[]>([])
 const report = ref<SaldoReport | null>(null)
 const loading = ref(false)
 
-const ACCOUNT_OPTIONS = ['all', '311', '321', '314', '324']
+const ACCOUNT_OPTIONS = ['all', '311', '321', '314', '324', '315', '325']
 
 const filters = reactive({
   period_id: '' as number | '',
@@ -213,6 +213,9 @@ function toggle(accCode: string, partnerId: number) {
 }
 
 function docLink(it: SaldoItem) {
+  if (it.doc_type === 'other_item') {
+    return { name: 'other-item-detail', params: { id: it.doc_id } }
+  }
   return it.doc_type === 'purchase_invoice'
     ? { name: 'purchase-invoice-detail', params: { id: it.doc_id } }
     : { name: 'invoice-detail', params: { id: it.doc_id } }

@@ -183,13 +183,20 @@ final class SaldoRepository
 
         try {
             if ($accountCode === '324') {
-                $result = $this->fetchReceivedAdvances($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue);
+                $result = array_merge(
+                    $this->fetchReceivedAdvances($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
+                    $this->fetchOpenOtherItems($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
+                );
             } elseif ($accountCode === '314') {
-                $result = $this->fetchPaidAdvances($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue);
+                $result = array_merge(
+                    $this->fetchPaidAdvances($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
+                    $this->fetchOpenOtherItems($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
+                );
             } else {
                 $result = array_merge(
                     $this->fetchOpenInvoices($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
                     $this->fetchOpenPurchases($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
+                    $this->fetchOpenOtherItems($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
                 );
             }
             if ($ownsSnapshot) {
@@ -202,6 +209,105 @@ final class SaldoRepository
             }
             throw $e;
         }
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function fetchOpenOtherItems(
+        int $supplierId,
+        int $accountId,
+        string $asOf,
+        ?int $limit,
+        ?int $partnerId,
+        ?string $dueBefore,
+        bool $orderByDue,
+    ): array {
+        $booked = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2)";
+        $paid = 'COALESCE(paid.paid_sum, 0)';
+        $ratio = "CASE WHEN ABS({$booked}) < 0.005 THEN 0
+                       ELSE LEAST(1, GREATEST(0, {$paid} / ABS({$booked}))) END";
+        $partnerFilter = $partnerId === null ? '' : ' AND oi.partner_id = ' . $partnerId;
+        $dueFilter = self::dueBeforeSql('oi', $dueBefore, 'due_on');
+        $order = $orderByDue
+            ? ' ORDER BY oi.due_on, oi.id'
+            : ' ORDER BY partner_name, oi.due_on, oi.id';
+        $sql = "SELECT oi.id AS doc_id, COALESCE(oi.document_no, CONCAT('#', oi.id)) AS doc_no,
+                       oi.issued_on AS issue_date, oi.due_on AS due_date, oi.status,
+                       COALESCE(oi.partner_id, -CAST(oi.id AS SIGNED)) AS partner_id,
+                       COALESCE(cl.company_name, NULLIF(oi.partner_name, ''), 'Bez partnera') AS partner_name,
+                       oi.currency AS currency_code, oi.amount AS amount_foreign,
+                       {$booked} AS booked_signed, {$paid} AS paid_as_of
+                  FROM journal_entries e
+                  JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+                  JOIN chart_of_accounts ca ON ca.id = l.account_id
+                  LEFT JOIN journal_entries rev ON rev.id = e.reversed_by
+                  JOIN other_items oi ON oi.id = e.source_id AND oi.supplier_id = e.supplier_id
+                  LEFT JOIN clients cl ON cl.id = oi.partner_id AND cl.supplier_id = oi.supplier_id
+                  LEFT JOIN (
+                    SELECT a.other_item_id, SUM(a.amount) AS paid_sum
+                      FROM other_item_allocations a
+                      JOIN other_items payment_item ON payment_item.id = a.other_item_id
+                           AND payment_item.supplier_id = a.supplier_id
+                     WHERE a.supplier_id = {$supplierId}
+                       AND (a.reversed_on IS NULL OR a.reversed_on > ?)
+                       AND EXISTS (
+                           SELECT 1 FROM journal_entries pe
+                           JOIN journal_entry_lines pl ON pl.entry_id = pe.id AND pl.supplier_id = pe.supplier_id
+                           LEFT JOIN journal_entries prev ON prev.id = pe.reversed_by
+                          WHERE pe.supplier_id = a.supplier_id
+                            AND pe.source_type = CASE WHEN a.bank_transaction_id IS NOT NULL THEN 'bank' ELSE 'cash' END
+                            AND pe.source_id = COALESCE(a.bank_transaction_id, a.cash_document_id)
+                            AND pe.posted_at IS NOT NULL AND pe.entry_date <= ?
+                            AND (pe.reversed_by IS NULL OR prev.entry_date > ?)
+                            AND pl.side = CASE WHEN payment_item.side = 'receivable' THEN 'credit' ELSE 'debit' END
+                            AND EXISTS (
+                                SELECT 1 FROM journal_entries item_entry
+                                JOIN journal_entry_lines item_line ON item_line.entry_id = item_entry.id
+                                     AND item_line.supplier_id = item_entry.supplier_id
+                                 WHERE item_entry.supplier_id = payment_item.supplier_id
+                                   AND item_entry.source_type = 'other_item'
+                                   AND item_entry.source_id = payment_item.id
+                                   AND item_entry.posted_at IS NOT NULL
+                                   AND item_line.account_id = pl.account_id
+                                   AND item_line.side = CASE WHEN payment_item.side = 'receivable' THEN 'debit' ELSE 'credit' END
+                            )
+                       )
+                     GROUP BY a.other_item_id
+                  ) paid ON paid.other_item_id = oi.id
+                 WHERE e.supplier_id = {$supplierId} AND e.source_type = 'other_item'
+                   AND e.posted_at IS NOT NULL AND e.entry_date <= ?
+                   AND (e.reversed_by IS NULL OR rev.entry_date > ?)
+                   AND (ca.id = {$accountId} OR ca.parent_id = {$accountId})
+                   AND l.side = CASE WHEN oi.side = 'receivable' THEN 'debit' ELSE 'credit' END
+                   AND oi.deleted_at IS NULL
+                   {$partnerFilter}{$dueFilter}
+                 GROUP BY oi.id, oi.document_no, oi.issued_on, oi.due_on, oi.status,
+                          oi.partner_id, cl.company_name, oi.partner_name, oi.currency, oi.amount, paid.paid_sum
+                HAVING " . self::openFilterSql($booked, $ratio) . $order;
+
+        return $this->fetchDefinitiveOpenRows(
+            $sql,
+            static fn (string $pageSql): array => self::asOfParams($pageSql, $asOf),
+            function (array $row): array {
+                $booked = round((float) $row['booked_signed'], 2);
+                $paid = (float) $row['paid_as_of'];
+                return [
+                    'doc_type' => 'other_item',
+                    'doc_id' => (int) $row['doc_id'],
+                    'doc_no' => (string) $row['doc_no'],
+                    'issue_date' => (string) $row['issue_date'],
+                    'due_date' => (string) $row['due_date'],
+                    'status' => (string) $row['status'],
+                    'partner_id' => (int) $row['partner_id'],
+                    'partner_name' => (string) $row['partner_name'],
+                    'currency_code' => (string) $row['currency_code'],
+                    'booked_signed' => $booked,
+                    'foreign_signed' => $row['currency_code'] === 'CZK' ? 0.0
+                        : ($booked < 0 ? -1 : 1) * (float) $row['amount_foreign'],
+                    'paid_ratio' => abs($booked) < 0.005 ? 0.0 : min(1.0, max(0.0, $paid / abs($booked))),
+                ];
+            },
+            $limit,
+        );
     }
 
     /** `AND cl.id = <id>` (int literál, viz fetchOpenInvoices) nebo prázdný řetězec. */
@@ -265,7 +371,7 @@ final class SaldoRepository
         return self::openFilterSql($m, "CASE WHEN {$m} > 0 THEN LEAST(1, GREATEST(0, {$s} / {$m})) ELSE 0 END");
     }
 
-    private static function dueBeforeSql(string $alias, ?string $dueBefore): string
+    private static function dueBeforeSql(string $alias, ?string $dueBefore, string $column = 'due_date'): string
     {
         if ($dueBefore === null) {
             return '';
@@ -273,7 +379,7 @@ final class SaldoRepository
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', $dueBefore) !== 1) {
             throw new \InvalidArgumentException('saldo_due_date_invalid');
         }
-        return " AND {$alias}.due_date < '{$dueBefore}'";
+        return " AND {$alias}.{$column} < '{$dueBefore}'";
     }
 
     private static function orderSql(string $alias, bool $orderByDue): string
