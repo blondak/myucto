@@ -122,6 +122,33 @@ final class PaymentCardRepository
     }
 
     /**
+     * Úvěrový účet kreditní karty, jehož výpisy koncovku nesou, pokud se koncovka ve výpisech
+     * firmy objevuje JEN u kreditní karty. Taková karta se vede v Kreditních kartách, ne mezi
+     * platebními kartami (účtuje se přes úvěrový účet). Koncovka viděná i na běžném účtu → null.
+     *
+     * @return array{id:int, label:string}|null
+     */
+    public function creditCardOwningLast4(int $supplierId, string $last4): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT MAX(cca.id) AS credit_id, MAX(cca.label) AS credit_label,
+                    SUM(cca.id IS NULL) AS on_other
+               FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = ?
+          LEFT JOIN supplier_bank_accounts sba
+                 ON " . \MyInvoice\Service\Bank\Card\CardPaymentOverview::creditCardAccountJoin('sba', 'bs') . "
+          LEFT JOIN credit_card_accounts cca ON cca.bank_account_id = sba.id AND cca.supplier_id = sba.supplier_id
+              WHERE bt.card_last4 = ?"
+        );
+        $stmt->execute([$supplierId, $supplierId, $last4]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || $row['credit_id'] === null || (int) $row['on_other'] > 0) {
+            return null;
+        }
+        return ['id' => (int) $row['credit_id'], 'label' => (string) $row['credit_label']];
+    }
+
+    /**
      * Karta téže firmy se stejnou koncovkou, jejíž platnost se překrývá s <$from, $to>.
      * NULL hranice = neomezeno.
      *

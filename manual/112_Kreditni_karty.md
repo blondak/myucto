@@ -6,9 +6,12 @@ snižují. Aplikace načte PDF výpis ke kreditní kartě, pohyby zaúčtuje na
 **231 Krátkodobé úvěry** s analytikou pro každý úvěrový účet a nákupy spáruje
 s přijatými doklady stejně jako platby z běžného účtu.
 
-Samotné karty (koncovka, držitel) dál vedete v [Platebních kartách](31_Platebni_karty.md)
-s typem „kreditní". Stránka Kreditní karty eviduje úvěrový účet, ke kterému karty
-patří, a jeho výpisy.
+Kreditní karta se vede **jen tady**, ne mezi [Platebními kartami](31_Platebni_karty.md).
+Platební karty jsou karty k běžnému účtu: jejich platby jdou z bankovního výpisu
+běžného účtu a účtují se přes mezičlen platební karty. Nákup kreditkou jde z výpisu
+úvěrového účtu a účtuje se přes úvěrový účet, i když výpis nese koncovku karty.
+Platební kartu s koncovkou, kterou nesou jen výpisy kreditní karty, aplikace
+nezaloží a odkáže sem.
 
 ## 112.1 Načtení výpisu
 

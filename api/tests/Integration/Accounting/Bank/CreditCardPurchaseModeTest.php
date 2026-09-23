@@ -355,6 +355,34 @@ final class CreditCardPurchaseModeTest extends BankPostingTestCase
         self::assertSame('clearing', $detail['clearing']['mode']);
     }
 
+    /** Koncovka, kterou nesou jen výpisy kreditní karty, není platební karta: založit ji mezi platebními nejde. */
+    public function testPaymentCardWithCreditCardSuffixIsRefused(): void
+    {
+        $tx = $this->ccTx(-90.00, 'Platba kartou | d.tran. 11.06.2099');
+        $this->db->pdo()->prepare("UPDATE bank_transactions SET card_last4 = '3532' WHERE id = ?")->execute([$tx]);
+        $action = $this->container->get(\MyInvoice\Action\Bank\PaymentCardAction::class);
+        $create = function (string $last4) use ($action): array {
+            $request = (new \Slim\Psr7\Factory\ServerRequestFactory())
+                ->createServerRequest('POST', '/api/payment-cards')
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+                ->withParsedBody(['label' => 'Karta ' . $last4, 'last4' => $last4, 'card_type' => 'debit']);
+            $response = $action->create($request, new \Slim\Psr7\Response());
+            $response->getBody()->rewind();
+            return ['status' => $response->getStatusCode(), 'body' => (array) json_decode((string) $response->getBody(), true)];
+        };
+
+        $refused = $create('3532');
+        self::assertSame(422, $refused['status'], json_encode($refused['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('credit_card_last4', $refused['body']['error']['code'] ?? null);
+
+        // Stejná koncovka viděná i na běžném účtu (platební karta téhož čísla) projde.
+        $this->transaction($this->statement(), -20.00, ['description' => 'Platba kartou']);
+        $this->db->pdo()->exec("UPDATE bank_transactions SET card_last4 = '3532' WHERE card_last4 IS NULL AND description = 'Platba kartou' ORDER BY id DESC LIMIT 1");
+        self::assertSame(201, $create('3532')['status']);
+        self::assertSame(201, $create('7777')['status'], 'Koncovka bez výpisu kreditky jde založit jako dřív.');
+    }
+
     /** Měsíční kontrola plateb kartou bez dokladu hlídá platební karty; nákupy kreditkou řeší detail kreditky. */
     public function testMonthlyCardCheckDoesNotReportCreditCardPurchases(): void
     {
