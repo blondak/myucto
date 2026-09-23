@@ -583,8 +583,11 @@ final class DpfoXmlBuilder
                 . '(jednotlivé důvody úpravy podle § 23 zákona). Před podáním ověřte v portálu EPO, '
                 . 'zda finanční úřad nevyžaduje rozepsání na víc řádků.';
         } else {
+            // Řádky oddílu E se níže rozdělí tak, aby jejich součet byl zaokrouhlený součet
+            // položek; ř. 105/106 je v celých korunách (DpfoReturnCalculator), takže se
+            // porovnávají celé koruny, ne haléře.
             $sum = round(array_sum(array_column($rows, 'amount')), 2);
-            if ((int) round($sum * 100) !== (int) round($total * 100)) {
+            if ((int) round($sum) !== (int) round($total)) {
                 $warnings[] = 'Součet položek oddílu E (' . $element . ', ' . number_format($sum, 0, ',', ' ')
                     . ' Kč) neodpovídá částce na ř. ' . $line . ' (' . number_format($total, 0, ',', ' ')
                     . ' Kč) — ověřte podklady před podáním.';
