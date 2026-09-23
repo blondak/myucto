@@ -125,4 +125,32 @@ final class TextScrubberTest extends TestCase
 
         self::assertStringContainsString('<anonymized>', PlaceholderFiles::content('xml'));
     }
+
+    public function testStorageMirrorReplacesContentAndHumanNamesButKeepsLayout(): void
+    {
+        $root = sys_get_temp_dir() . '/anon_mirror_' . bin2hex(random_bytes(6));
+        $from = $root . '/storage';
+        $to = $root . '/out';
+        mkdir($from . '/documents/sup-3/ab', 0777, true);
+        mkdir($from . '/cache', 0777, true);
+        file_put_contents($from . '/documents/sup-3/ab/Smlouva Zkušební.pdf', 'SKUTECNY OBSAH');
+        file_put_contents($from . '/documents/sup-3/ab/3f9a0c1d2e4b5a6c.jpg', 'SKUTECNY OBSAH');
+        file_put_contents($from . '/cache/x.txt', 'cache');
+        try {
+            $result = PlaceholderFiles::mirror($from, $to, $this->p, static function (): void {});
+
+            self::assertSame(2, $result['files']);
+            $renamed = $to . '/' . $this->p->filePath('documents/sup-3/ab/Smlouva Zkušební.pdf');
+            self::assertFileExists($renamed);
+            self::assertStringStartsWith('%PDF', (string) file_get_contents($renamed));
+            self::assertIsArray(getimagesize($to . '/documents/sup-3/ab/3f9a0c1d2e4b5a6c.jpg'));
+            self::assertDirectoryDoesNotExist($to . '/cache');
+        } finally {
+            $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST);
+            foreach ($it as $item) {
+                $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
+            }
+            rmdir($root);
+        }
+    }
 }

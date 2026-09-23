@@ -702,24 +702,26 @@ final class Pseudonymizer
     }
 
     /**
-     * Uložená cesta k souboru. Strojově generované úseky (hash, datum, `sup-3`)
-     * zůstávají, lidsky pojmenované se nahradí — stejnou funkcí se přejmenují
-     * i zástupné soubory v zrcadle úložiště, takže cesta v databázi sedí na disk.
+     * Uložená cesta k souboru. Adresáře a strojově generované názvy (hash, datum)
+     * zůstávají, lidsky pojmenovaný soubor se nahradí — stejnou funkcí se
+     * přejmenují i zástupné soubory v zrcadle úložiště, takže cesta v databázi
+     * sedí na disk.
      */
     public function filePath(string $value): string
     {
         if (trim($value) === '') {
             return $value;
         }
-        $parts = preg_split('#([/\\\\])#', $value, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [$value];
-        foreach ($parts as $i => $part) {
-            if ($part === '/' || $part === '\\' || $part === '' || $part === '.' || $part === '..' || self::isMachineName($part) || preg_match('/^[A-Za-z]:$/D', $part) === 1) {
-                continue;
-            }
-            $parts[$i] = $this->fileName($part);
+        // Adresáře úložiště pojmenovává aplikace (documents/sup-3/ab), lidský název
+        // nese jen poslední úsek — soubor.
+        $cut = max((int) strrpos($value, '/'), (int) strrpos($value, '\\'));
+        $dir = $cut > 0 || str_starts_with($value, '/') || str_starts_with($value, '\\') ? substr($value, 0, $cut + 1) : '';
+        $name = substr($value, strlen($dir));
+        if ($name === '' || $name === '.' || $name === '..' || self::isMachineName($name)) {
+            return $value;
         }
 
-        return implode('', $parts);
+        return $dir . $this->fileName($name);
     }
 
     public static function isMachineName(string $segment): bool

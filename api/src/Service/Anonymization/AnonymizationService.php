@@ -204,6 +204,14 @@ final class AnonymizationService
         $order = implode(', ', array_map(DatabaseCloner::quote(...), $pkNames));
         $keyset = count($primaryKey) === 1 && $primaryKey[0]['integer'];
         $where = implode(' AND ', array_map(static fn (string $c): string => DatabaseCloner::quote($c) . ' = ?', $pkNames));
+        // Sloupce `ON UPDATE CURRENT_TIMESTAMP` se přiřadí samy sobě — pseudonymizace
+        // není změna záznamu a časy poslední úpravy mají v kopii zůstat původní.
+        $keepTimestamps = '';
+        foreach ($meta as $column => $info) {
+            if (($info['on_update'] ?? false) && !isset($columns[$column])) {
+                $keepTimestamps .= ', ' . DatabaseCloner::quote($column) . ' = ' . DatabaseCloner::quote($column);
+            }
+        }
 
         $changedRows = 0;
         $last = null;
@@ -232,6 +240,7 @@ final class AnonymizationService
                     $statements[$signature] ??= $pdo->prepare(
                         'UPDATE ' . DatabaseCloner::quote($table) . ' SET '
                         . implode(', ', array_map(static fn (string $c): string => DatabaseCloner::quote($c) . ' = ?', array_keys($updates)))
+                        . $keepTimestamps
                         . ' WHERE ' . $where,
                     );
                     $params = array_values($updates);
@@ -554,7 +563,7 @@ final class AnonymizationService
     private function columnMeta(PDO $pdo, string $schema): array
     {
         $stmt = $pdo->prepare(
-            'SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH
+            'SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH, EXTRA
                FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ?',
         );
         $stmt->execute([$schema]);
@@ -568,6 +577,7 @@ final class AnonymizationService
                 'type' => $binary ? 'binary' : $type,
                 'max' => $max === null ? null : (int) $max,
                 'json' => false,
+                'on_update' => str_contains(strtolower((string) $row['EXTRA']), 'on update'),
             ];
         }
         $checks = $pdo->prepare('SELECT TABLE_NAME, CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = ?');
