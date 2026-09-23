@@ -5,7 +5,8 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate, formatMoney } from '@/composables/useFormat'
-import { accountingApi, type JournalRelatedItem, type JournalLine } from '@/api/accounting'
+import { accountingApi, type JournalRelatedItem, type JournalLine, type JournalNote } from '@/api/accounting'
+import { ICONS } from '@/components/ui/buttonStyles'
 import JournalLinesTable from '@/components/accounting/JournalLinesTable.vue'
 import type { PermissionKey } from '@/security/permissions'
 
@@ -71,6 +72,13 @@ async function load(id: number) {
  */
 const relatedLines = ref<Record<number, JournalLine[]>>({})
 
+/**
+ * Poznámky protějšku. Poznámka k úhradě (typicky zapsaná u bankovního pohybu) patří
+ * k témuž případu jako doklad, proto ji doklad ukazuje taky; upravuje se v deníku
+ * nebo u pohybu, tady jen pro čtení.
+ */
+const relatedNotes = ref<Record<number, JournalNote[]>>({})
+
 async function loadRelatedLines(): Promise<void> {
   const ids = items.value.map(i => i.entry_id).filter((id): id is number => id !== null)
   await Promise.all(ids.map(async (id) => {
@@ -82,8 +90,18 @@ async function loadRelatedLines(): Promise<void> {
   }))
 }
 
+async function loadRelatedNotes(): Promise<void> {
+  const ids = items.value.map(i => i.entry_id).filter((id): id is number => id !== null)
+  await Promise.all(ids.map(async (id) => {
+    if (relatedNotes.value[id]) return
+    try {
+      relatedNotes.value = { ...relatedNotes.value, [id]: await accountingApi.listJournalNotes(id) }
+    } catch { /* protějšek zůstane bez poznámek */ }
+  }))
+}
+
 watch(() => props.entryId, id => {
-  if (id > 0) void load(id).then(loadRelatedLines)
+  if (id > 0) void load(id).then(() => Promise.all([loadRelatedLines(), loadRelatedNotes()]))
 }, { immediate: true })
 
 function typeLabel(type: string): string {
@@ -212,6 +230,13 @@ function onEntryClick(e: MouseEvent, entryId: number): void {
            Tatáž komponenta jako u prohlíženého zápisu, jen kompaktní. -->
       <JournalLinesTable v-if="it.entry_id !== null && relatedLines[it.entry_id]?.length"
         class="mt-2" dense :lines="relatedLines[it.entry_id]!" :context-date="it.date" />
+      <ul v-if="it.entry_id !== null && relatedNotes[it.entry_id]?.length" class="mt-2 space-y-1" data-test="related-entry-notes">
+        <li v-for="n in relatedNotes[it.entry_id]" :key="n.id" class="flex items-start gap-1 text-xs"
+          :class="n.pinned ? 'text-warning-600' : 'text-neutral-700'" :title="t('accounting.journal.related.note_title')">
+          <svg class="mt-0.5 h-3 w-3 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+          <span class="whitespace-pre-wrap break-words">{{ n.body }}</span>
+        </li>
+      </ul>
       </li>
 
       <li v-if="truncated" class="bg-neutral-50 px-3 py-1.5 text-xs text-neutral-500">

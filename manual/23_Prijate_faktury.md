@@ -733,7 +733,8 @@ postup i chování v zamčeném období popisuje
 [§ 48.8.2](52_Ucetni_denik.md#5282-preuctovani-z-dokladu-sekce-zauctovani).
 
 Pod kontací každého zápisu je panel **Souvisí** (úhrady, bankovní pohyby a ručně
-navázané doklady s odkazem do deníku) a **Poznámky** zápisu, tytéž jako v deníku
+navázané doklady s odkazem do deníku, jejich kontací a poznámkami) a **Poznámky**
+zápisu, tytéž jako v deníku
 a u bankovního pohybu ([§ 52.6.3](52_Ucetni_denik.md#5263-poznamky-k-zapisu)).
 
 ## 23.4 Scan inbox — automatický import z adresáře

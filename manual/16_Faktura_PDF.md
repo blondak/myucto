@@ -148,7 +148,8 @@ viz [§ 96.11 Automatické zaúčtování](96_Nastaveni.md#9611-automaticke-zauc
   období se zápis přepíše, v zamčeném nebo uzavřeném vznikne storno a nový zápis;
   viz [§ 48.8.2](52_Ucetni_denik.md#5282-preuctovani-z-dokladu-sekce-zauctovani).
 - **Souvisí** — protějšky zápisu (úhrady, bankovní pohyby, ručně navázané doklady)
-  s odkazem do deníku i na zdrojový doklad.
+  s odkazem do deníku i na zdrojový doklad, jejich kontací a poznámkami (např.
+  poznámka zapsaná u bankovního pohybu úhrady).
 - **Poznámky** — poznámky zápisu, tytéž jako v deníku a u bankovního pohybu
   ([§ 52.6.3](52_Ucetni_denik.md#5263-poznamky-k-zapisu)).
 

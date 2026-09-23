@@ -12494,6 +12494,7 @@
         "preview": "Náhled",
         "open_entry": "Zápis",
         "open_document": "Otevřít doklad",
+        "note_title": "Poznámka zápisu v deníku, upravuje se v deníku nebo u bankovního pohybu",
         "back": "Zpět na výchozí zápis",
         "badge_title": "Zápis je propojený s dokladem nebo jeho úhradou",
         "truncated": "Zobrazeno prvních {shown} vazeb.",

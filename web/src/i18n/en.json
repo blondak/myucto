@@ -12494,6 +12494,7 @@
         "preview": "Preview",
         "open_entry": "Entry",
         "open_document": "Open document",
+        "note_title": "Journal entry note, edited in the journal or on the bank transaction",
         "back": "Back to the original entry",
         "badge_title": "Entry is linked to a document or its payment",
         "truncated": "Showing the first {shown} links.",
