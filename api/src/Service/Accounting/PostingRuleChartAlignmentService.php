@@ -248,11 +248,16 @@ final class PostingRuleChartAlignmentService
     /** @return array<string,array<string,mixed>> kód → účet */
     private function chart(int $supplierId): array
     {
+        // Vyhrazené analytiky (karta, kreditní karta) nejsou náhradou syntetiky — stejná
+        // definice jako přesměr v enginu, jinak by náhled hlásil „auto" na účet, kam engine
+        // nepřesměruje.
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, account_code, name, is_synthetic, is_active, parent_id, tax_deductibility
-               FROM chart_of_accounts
-              WHERE supplier_id = ?
-           ORDER BY account_code'
+            'SELECT c.id, c.account_code, c.name, c.is_synthetic, c.is_active, c.parent_id, c.tax_deductibility,
+                    CASE WHEN p.id IS NOT NULL AND ' . PostingService::dedicatedAnalyticSql('c', 'p') . ' THEN 1 ELSE 0 END AS is_dedicated
+               FROM chart_of_accounts c
+          LEFT JOIN chart_of_accounts p ON p.id = c.parent_id AND p.supplier_id = c.supplier_id
+              WHERE c.supplier_id = ?
+           ORDER BY c.account_code'
         );
         $stmt->execute([$supplierId]);
         $map = [];
@@ -265,6 +270,7 @@ final class PostingRuleChartAlignmentService
                 'is_active'     => (bool) $row['is_active'],
                 'parent_id'     => $row['parent_id'] === null ? null : (int) $row['parent_id'],
                 'is_deductible' => (string) $row['tax_deductibility'] === 'deductible',
+                'is_dedicated'  => (bool) $row['is_dedicated'],
             ];
         }
         return $map;
@@ -282,7 +288,8 @@ final class PostingRuleChartAlignmentService
         }
         $children = [];
         foreach ($accounts as $account) {
-            if ($account['parent_id'] === null || !$account['is_active'] || !isset($byId[$account['parent_id']])) {
+            if ($account['parent_id'] === null || !$account['is_active'] || !isset($byId[$account['parent_id']])
+                || !empty($account['is_dedicated'])) {
                 continue;
             }
             $parentCode = (string) $byId[$account['parent_id']]['account_code'];
