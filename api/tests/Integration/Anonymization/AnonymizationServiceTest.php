@@ -64,6 +64,8 @@ final class AnonymizationServiceTest extends TestCase
             (string) $this->config->get('db.pass', ''),
             [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC],
         );
+        // Jako v CI: bez striktního režimu projde lokálně i INSERT bez povinného sloupce.
+        $this->server->exec("SET SESSION sql_mode = CONCAT_WS(',', NULLIF(@@SESSION.sql_mode, ''), 'STRICT_ALL_TABLES')");
         $this->dropDatabases();
         $cloner = new DatabaseCloner($this->server);
         $plan = $cloner->plan($testDb);
@@ -161,9 +163,10 @@ final class AnonymizationServiceTest extends TestCase
             }
         }
         $country = (int) $pdo->query('SELECT MIN(id) FROM countries')->fetchColumn();
+        $currency = (int) $pdo->query('SELECT MIN(id) FROM currencies')->fetchColumn();
 
-        $pdo->prepare('INSERT INTO clients (supplier_id, company_name, ic, dic, street, city, zip, country_id, main_email, phone, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-            ->execute([$this->supplierId, self::COMPANY, $this->ico, 'CZ' . $this->ico, 'Zkušební 12', 'Zkušebnice', '123 45', $country,
+        $pdo->prepare('INSERT INTO clients (supplier_id, company_name, ic, dic, street, city, zip, country_id, currency_default_id, main_email, phone, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            ->execute([$this->supplierId, self::COMPANY, $this->ico, 'CZ' . $this->ico, 'Zkušební 12', 'Zkušebnice', '123 45', $country, $currency,
                 self::EMAIL, '+420 601 234 567', 'Smlouvu podepsala ' . self::PERSON . ', IČO: ' . $this->ico . ', účet ' . self::ACCOUNT . '/0100']);
         $this->clientId = (int) $pdo->lastInsertId();
         $pdo->prepare('INSERT INTO client_bank_accounts (supplier_id, client_id, account_number, bank_code, account_key, bank_key) VALUES (?, ?, ?, ?, ?, ?)')
