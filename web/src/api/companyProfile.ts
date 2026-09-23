@@ -8,6 +8,7 @@ export const COMPANY_PROFILE_SECTIONS = [
   'statement_overrides',
   'dimensions',
   'dimension_defaults',
+  'dimension_rules',
   'posting_rules',
   'bank_rule_templates',
   'bank_posting_rules',

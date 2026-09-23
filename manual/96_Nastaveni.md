@@ -1046,6 +1046,7 @@ nezaloží:
 | Výjimky mapování výkazů | všechny výjimky včetně platnosti po letech a korekce za pohledávkou |
 | Dimenze | firemní typy a hodnoty včetně názvů, stromu, uzavření a vazby na vůz, středisko a zakázku |
 | Výchozí dimenze klientů a zakázek | podle IČO klienta a čísla nebo názvu zakázky |
+| Pravidla dimenzí podle účtu | maska účtů, typ dimenze, vynucení, výchozí hodnota (podle kódu, u vozidla i podle registrační značky), vozidlo podle platební karty a platnost |
 | Předkontace | předkontace firmy včetně vypnutých |
 | Šablony a pravidla banky | šablony bankovních pravidel a pravidla účtování banky včetně automatiky |
 
@@ -1064,6 +1065,10 @@ Při nahrání platí:
 - výjimky mapování každé verze výkazu v profilu se nahradí sadou z profilu,
 - dimenze, výchozí dimenze, předkontace, šablony a pravidla banky se doplní
   a upraví podle kódu; co profil nezná (typicky to, co založil převod), zůstane,
+- pravidlo dimenze se páruje podle typu dimenze, masky účtů a začátku platnosti;
+  pravidlo s typem nebo výchozí hodnotou, kterou firma nemá, se přeskočí
+  s upozorněním,
+- sekci, kterou starší verze aplikace nezná, nahrání přeskočí s upozorněním,
 - automatiku pravidla banky zapne nahrání stejným krokem jako tlačítko
   *Povýšit*, v historii pravidla je proto dohledatelná,
 - chyba v kterékoli sekci nezapíše nic,

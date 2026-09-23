@@ -27617,6 +27617,7 @@
       "statement_overrides": "Statement mapping overrides",
       "dimensions": "Dimensions",
       "dimension_defaults": "Client and project default dimensions",
+      "dimension_rules": "Dimension rules by account",
       "posting_rules": "Posting templates",
       "bank_rule_templates": "Bank rule templates",
       "bank_posting_rules": "Bank posting rules"
