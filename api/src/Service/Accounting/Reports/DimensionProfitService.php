@@ -7,7 +7,7 @@ namespace MyInvoice\Service\Accounting\Reports;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
-use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
+use MyInvoice\Service\Accounting\Dimension\DimensionSplitAllocation;
 use MyInvoice\Service\Tax\Return\JournalTaxOrigin;
 use PDO;
 
@@ -18,7 +18,9 @@ use PDO;
  *
  * Hodnota ve stromu má vlastní částky (řádky přímo s ní) a souhrn za celou větev.
  * Řádky bez hodnoty daného typu tvoří řádek „bez hodnoty", takže součet sestavy
- * sedí na výsledek hospodaření firmy za období.
+ * sedí na výsledek hospodaření firmy za období. Řádek s rozpadem mezi víc hodnot
+ * se rozdělí po haléřích ({@see DimensionSplitAllocation}), stejně jako ve výkazech
+ * filtrovaných na hodnotu.
  *
  * Globální typ lze sečíst za víc firem skupiny najednou (projekt vedený přes
  * mateřskou firmu i SPV); které firmy smí do součtu, určuje volající.
@@ -161,49 +163,41 @@ final class DimensionProfitService
     }
 
     /**
-     * Řádky s rozpadem mezi víc hodnot typu (pravidla dimenzí): částka řádku se
-     * rozdělí podle podílů po haléřích se zbytkem na největší podíl
-     * ({@see DimensionStamper::distributeCents()}), takže součet sestavy dál sedí
-     * na výsledek firmy.
+     * Řádky s rozpadem mezi víc hodnot typu (pravidla dimenzí): díl každé hodnoty
+     * z téhož pravidla jako filtr výkazů ({@see DimensionSplitAllocation}) — po haléřích
+     * se zbytkem na největší podíl — takže součet sestavy dál sedí na výsledek firmy
+     * a řádek hodnoty na výkaz filtrovaný na tutéž hodnotu.
      *
      * @return array<string,array{revenue:int,cost:int}>
      */
     private function splitSums(int $supplierId, int $typeId, string $from, string $to): array
     {
+        [$partsSql, $partsParams] = DimensionSplitAllocation::partsSql($typeId, null, $supplierId);
         $stmt = $this->db->pdo()->prepare(
             'WITH RECURSIVE ' . JournalTaxOrigin::cte($supplierId) . "
-            SELECT l.id AS line_id, a.account_type,
-                   CASE WHEN a.account_type = 'revenue'
-                        THEN CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END
-                        ELSE CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END END AS signed,
-                   s.dimension_value_id, s.share
-              FROM journal_entry_lines l
+            SELECT sp.value_id,
+                   SUM(CASE WHEN a.account_type = 'revenue'
+                            THEN CASE WHEN l.side = 'credit' THEN sp.amount ELSE -sp.amount END ELSE 0 END) AS revenue,
+                   SUM(CASE WHEN a.account_type = 'expense'
+                            THEN CASE WHEN l.side = 'debit' THEN sp.amount ELSE -sp.amount END ELSE 0 END) AS cost
+              FROM ({$partsSql}) sp
+              JOIN journal_entry_lines l ON l.id = sp.line_id
               JOIN journal_entries e ON e.id = l.entry_id
               " . JournalTaxOrigin::join() . "
               JOIN chart_of_accounts a ON a.id = l.account_id
-              JOIN journal_entry_line_dimension_splits s ON s.line_id = l.id AND s.dimension_type_id = ?
              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                AND e.entry_date BETWEEN ? AND ?
                AND a.account_type IN ('revenue', 'expense')
                AND " . JournalTaxOrigin::includedSql() . '
-             ORDER BY l.id, s.dimension_value_id'
+             GROUP BY sp.value_id'
         );
-        $stmt->execute([$typeId, $supplierId, $from, $to, ClosingSourceId::STOCK_SLOT_BASE]);
-        $lines = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $id = (int) $r['line_id'];
-            $lines[$id]['column'] = $r['account_type'] === 'revenue' ? 'revenue' : 'cost';
-            $lines[$id]['cents'] = (int) round(((float) $r['signed']) * 100);
-            $lines[$id]['shares'][(int) $r['dimension_value_id']] = (float) $r['share'];
-        }
+        $stmt->execute([...$partsParams, $supplierId, $from, $to, ClosingSourceId::STOCK_SLOT_BASE]);
         $out = [];
-        foreach ($lines as $line) {
-            $cents = DimensionStamper::distributeCents($line['cents'], array_values($line['shares']));
-            foreach (array_keys($line['shares']) as $i => $valueId) {
-                $key = (string) $valueId;
-                $out[$key] ??= ['revenue' => 0, 'cost' => 0];
-                $out[$key][$line['column']] += $cents[$i];
-            }
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(string) (int) $r['value_id']] = [
+                'revenue' => (int) round(((float) $r['revenue']) * 100),
+                'cost' => (int) round(((float) $r['cost']) * 100),
+            ];
         }
         return $out;
     }
