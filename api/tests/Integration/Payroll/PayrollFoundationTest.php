@@ -453,7 +453,12 @@ final class PayrollFoundationTest extends TestCase
         self::assertSame(0, (int) $stored->fetchColumn());
     }
 
-    public function testLegalPersonCannotStoreEmployerIdentifiersInCompanySettings(): void
+    /**
+     * Bez nastavení zaměstnavatele nemají identifikátory v Mzdách kam jít, a proto
+     * zůstávají na firmě. Přenos do Mezd a úklid firmy hlídá
+     * {@see \MyInvoice\Tests\Integration\Settings\PayrollEmployerIdentifiersTest}.
+     */
+    public function testLegalPersonKeepsEmployerIdentifiersUntilPayrollHoldsThem(): void
     {
         $request = $this->request('PUT', 'admin')->withParsedBody([
             'taxpayer_type' => 'po',
@@ -471,9 +476,9 @@ final class PayrollFoundationTest extends TestCase
         );
         $stored->execute([$this->supplierId]);
         self::assertSame([
-            'cssz_vsdp' => null,
-            'cssz_ossz_code' => null,
-            'health_insurance_number' => null,
+            'cssz_vsdp' => '87654321',
+            'cssz_ossz_code' => '110',
+            'health_insurance_number' => '555666777',
         ], $stored->fetch(\PDO::FETCH_ASSOC));
     }
 

@@ -572,6 +572,27 @@ final class PayrollInstitutionAccountRepository
         return $this->find($supplierId, $id);
     }
 
+    /**
+     * Doplní variabilní symbol účtu, který ho nemá.
+     *
+     * Jen prázdný symbol, podmínkou přímo v UPDATE; nová `row_version` splní
+     * integritní trigger platebních cílů a rozpracovanou úpravu účtu shodí na
+     * konflikt. Ověření účtu (kdo a kdy) se nemění, mění se jen symbol.
+     */
+    public function fillEmptyVariableSymbol(int $supplierId, int $id, string $variableSymbol, ?int $userId): bool
+    {
+        $update = $this->db->pdo()->prepare(
+            'UPDATE payroll_institution_accounts
+                SET variable_symbol = ?,
+                    updated_by = ?,
+                    row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ? AND variable_symbol IS NULL'
+        );
+        $update->execute([$variableSymbol, $userId, $supplierId, $id]);
+
+        return $update->rowCount() === 1;
+    }
+
     private function lockTenant(int $supplierId): void
     {
         $lock = $this->db->pdo()->prepare('SELECT id FROM supplier WHERE id = ? FOR UPDATE');

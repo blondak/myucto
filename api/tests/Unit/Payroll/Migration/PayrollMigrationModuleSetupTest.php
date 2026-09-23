@@ -57,6 +57,27 @@ final class PayrollMigrationModuleSetupTest extends TestCase
         self::assertSame('warning', $step['status']);
     }
 
+    public function testReportNamesIdentifiersTakenFromCompanySettings(): void
+    {
+        $protocol = new ImportProtocol('import');
+        PayrollMigrationModuleSetup::report($protocol, 'payroll', [
+            'outcome' => PayrollMigrationModuleSetup::OUTCOME_READY,
+            'enabled_now' => false,
+            'office_created' => false,
+            'start_period' => '2026-09',
+            'start_set' => false,
+            'start_unsupported' => null,
+            'last_period' => '2026-08',
+            'carried' => ['cssz_vsdp' => '0012345678', 'cssz_ossz_code' => '301'],
+            'todo' => [PayrollMigrationModuleSetup::TODO_SOCIAL_SECURITY_REGISTRATION],
+        ], 'PREMIER');
+        $messages = $protocol->toArray()['steps'][0]['messages'];
+        self::assertSame(['payroll_module_enabled', 'payroll_setup_incomplete'], array_column($messages, 'code'));
+        self::assertStringContainsString('převzal z Nastavení firmy variabilní symbol ČSSZ 0012345678 k mzdové účtárně a kód OSSZ 301', $messages[0]['text']);
+        self::assertStringContainsString('registrace mzdové účtárny', $messages[1]['text']);
+        self::assertStringNotContainsString('variabilní symbol plátce pojistného', $messages[1]['text']);
+    }
+
     public function testNothingDoneNothingReported(): void
     {
         $protocol = new ImportProtocol('import');

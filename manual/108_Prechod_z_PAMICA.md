@@ -162,8 +162,11 @@ zapíše a schválí. Protokol vypíše počty podle druhu.
 **Zapnutí mezd a začátek vedení mezd.** Firmě, která mzdy v MyÚčtu ještě
 nemá, převod zapne modul Mzdy a začátek vedení mezd v MyÚčtu nastaví na měsíc
 po posledním měsíci v exportu. Chybí-li nastavení zaměstnavatele, založí ho
-s mzdovou účtárnou `MZDY` a výchozími předkontacemi; variabilní symbol ČSSZ,
-kód OSSZ a účty institucí vypíše protokol k doplnění v Mzdy → Nastavení.
+s mzdovou účtárnou `MZDY` a výchozími předkontacemi. Variabilní symbol ČSSZ,
+kód OSSZ a číslo plátce zdravotního pojištění, které firma vede v Nastavení
+firmy, převezme do Mezd
+(viz [§ 90.8](90_Nastaveni_mezd.md#908-podrobny-pracovni-postup-a-kontroly));
+co chybí, včetně účtů institucí, vypíše protokol k doplnění v Mzdy → Nastavení.
 Zapnutý modul, jeho začátek ani existující nastavení převod nemění. Počáteční
 stavy kumulací převod zapíše jen tehdy, když má firma začátek vedení mezd
 nastavený; jiný než navržený začátek nastavte ještě před převodem.
