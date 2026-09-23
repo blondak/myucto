@@ -1286,8 +1286,9 @@ výběr **Cenová hladina dokladu** (jen se zapnutým skladem a aspoň jednou hl
   Individuální cena odběratele má dál přednost.
 - Změna výběru přecení skladové řádky s automaticky doplněnou cenou. Ručně upravené
   ceny a ceny už uloženého dokladu zůstanou.
-- Hladina se uloží s dokladem, takže při další úpravě konceptu zůstane vybraná. Ceny
-  jsou uložené na řádcích, pozdější změna nebo deaktivace hladiny vystavený doklad nemění.
+- Hladina se uloží s dokladem, takže při další úpravě konceptu zůstane vybraná, detail
+  faktury ji ukazuje a kopie faktury ji převezme. Ceny jsou uložené na řádcích, pozdější
+  změna nebo deaktivace hladiny vystavený doklad nemění.
 
 Příklad: odběratel má hladinu **Dealer**, urgentní objednávky se prodávají s nižší
 slevou. Založ hladinu **Dealer urgentní** s jejími slevami a u urgentní objednávky ji

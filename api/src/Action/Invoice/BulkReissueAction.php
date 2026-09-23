@@ -189,6 +189,8 @@ final class BulkReissueAction
         // vědomě opt-outovaná faktura po klonu tiše vrátila na DB default 1 (upomínky
         // zapnuté). Guard na existenci sloupce kvůli instalacím pozadu s migrací.
         $hasReminders = $this->db->hasColumn('invoices', 'auto_send_reminders');
+        // Cenová hladina dokladu (migrace 1866): kopie urgentní objednávky zůstane urgentní.
+        $hasPriceLevel = $this->db->hasColumn('invoices', 'price_level_id');
         $supportsOss = $this->db->hasColumn('invoice_items', 'oss_applicable');
         // Vlastní guard, ne společný s ostatními OSS sloupci: mezi migracemi 0137 a 1293
         // je řada verzí, takže instance s OSS schématem a bez příznaku je běžný stav
@@ -205,9 +207,11 @@ final class BulkReissueAction
                      supplier_order_number, note_above_items, note_below_items, discount_percent, payment_method,
                     revenue_category_id, payment_variable_symbol,'
                 . ($hasReminders ? ' auto_send_reminders,' : '')
+                . ($hasPriceLevel ? ' price_level_id,' : '')
                 . ' status, created_by)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,'
                 . ($hasReminders ? ' ?,' : '')
+                . ($hasPriceLevel ? ' ?,' : '')
                 . ' "draft", ?)'
             );
             $params = [
@@ -237,6 +241,9 @@ final class BulkReissueAction
             ];
             if ($hasReminders) {
                 $params[] = !empty($source['auto_send_reminders']) ? 1 : 0;
+            }
+            if ($hasPriceLevel) {
+                $params[] = isset($source['price_level_id']) ? (int) $source['price_level_id'] : null;
             }
             $params[] = $userId;
             $stmt->execute($params);

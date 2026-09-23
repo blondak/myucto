@@ -344,6 +344,21 @@ final class PriceLevelTest extends StockTestCase
         self::assertNull($repo->find($plain)['price_level_id']);
     }
 
+    public function testCopiedInvoiceKeepsDocumentLevel(): void
+    {
+        $sid = $this->createSupplier();
+        $level = $this->priceLevel($sid, 'URG', 'Urgentní', '5');
+        $repo = $this->container->get(\MyInvoice\Repository\InvoiceRepository::class);
+        $source = $repo->createDraft([
+            'invoice_type' => 'invoice', 'client_id' => $this->client($sid), 'issue_date' => self::TODAY,
+            'tax_date' => self::TODAY, 'due_date' => self::TODAY, 'currency_id' => $this->currencyIdFor($sid),
+            'reverse_charge' => false, 'language' => 'cs', 'price_level_id' => $level,
+        ], $this->userId);
+
+        $copy = $this->container->get(\MyInvoice\Action\Invoice\BulkReissueAction::class)->cloneOne($source, self::TODAY, false, $this->userId);
+        self::assertSame($level, $repo->find($copy)['price_level_id']);
+    }
+
     public function testInvoiceActionsRejectForeignOrInactiveDocumentLevel(): void
     {
         $sid = $this->createSupplier();
