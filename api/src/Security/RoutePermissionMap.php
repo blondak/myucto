@@ -819,6 +819,10 @@ final class RoutePermissionMap
         // ostatní importy; převod zapisuje deník, proto nahrání i spuštění chce WRITE.
         ['POST',   '#^/api/admin/imports/money-s3/uploads(/chunked|/[a-f0-9]+/(reports|start|chunks|complete))?$#', 'utilities.import', AccessLevel::WRITE],
         ['GET',    '#^/api/admin/imports/money-s3/(uploads/[a-f0-9]+|runs(/[0-9]+)?)$#', 'utilities.import', AccessLevel::READ],
+        // Dávkový převod více záloh Money S3 (MoneyS3BatchAction) - stejná pravidla.
+        ['POST',   '#^/api/admin/imports/money-s3/batch/(uploads/(chunked|[a-f0-9]{16}/(chunks|complete))|filings|start)$#', 'utilities.import', AccessLevel::WRITE],
+        ['DELETE', '#^/api/admin/imports/money-s3/batch/(uploads/[a-f0-9]{16}|filings/[a-f0-9]{40})$#', 'utilities.import', AccessLevel::WRITE],
+        ['GET',    '#^/api/admin/imports/money-s3/batch/(uploads|jobs(/[0-9]+)?)$#', 'utilities.import', AccessLevel::READ],
         // Průvodce „Přechod z POHODA" (PohodaMigrationAction) - stejná pravidla jako Money S3.
         ['POST',   '#^/api/admin/imports/pohoda/uploads(/chunked|/[a-f0-9]+/(start|chunks|complete))$#', 'utilities.import', AccessLevel::WRITE],
         ['GET',    '#^/api/admin/imports/pohoda/(uploads/[a-f0-9]+|runs(/[0-9]+)?|tool(/download)?)$#', 'utilities.import', AccessLevel::READ],
