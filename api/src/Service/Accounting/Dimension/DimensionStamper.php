@@ -46,6 +46,8 @@ final class DimensionStamper
     /** @var array<int,bool> */
     private array $enabledCache = [];
 
+    private ?DimensionRuleService $rules = null;
+
     public function __construct(private readonly Connection $db) {}
 
     public function enabled(int $supplierId): bool
@@ -53,31 +55,82 @@ final class DimensionStamper
         return $this->enabledCache[$supplierId] ??= (new DimensionRepository($this->db))->enabled($supplierId);
     }
 
+    public function rules(): DimensionRuleService
+    {
+        return $this->rules ??= new DimensionRuleService($this->db);
+    }
+
     /**
      * @param list<array<string,mixed>> $resolved řádky po překladu účtů (account_id, side, amount, …)
      * @param array<int,int>|null $itemAccounts id položky => id účtu, na který se položka účtuje (je-li známé)
+     * @param string|null $entryDate datum účetního případu — podle něj platí pravidla dimenzí (null = pravidla se neuplatní)
      * @return list<array<string,mixed>>
      */
-    public function stamp(int $supplierId, string $sourceType, ?int $sourceId, array $resolved, ?array $itemAccounts = null): array
+    public function stamp(int $supplierId, string $sourceType, ?int $sourceId, array $resolved, ?array $itemAccounts = null, ?string $entryDate = null): array
     {
         $hasExplicit = false;
         foreach ($resolved as $line) {
-            if (!empty($line['dimensions'])) {
+            if (!empty($line['dimensions']) || !empty($line['dimension_splits'])) {
                 $hasExplicit = true;
                 break;
             }
         }
-        if (!$hasExplicit && !$this->enabled($supplierId)) {
+        $enabled = $this->enabled($supplierId);
+        if (!$hasExplicit && !$enabled) {
             return $resolved;
         }
-        [$header, $items] = $sourceId !== null && isset(self::SOURCES[$sourceType]) && $this->enabled($supplierId)
+        [$header, $items, $splits] = $sourceId !== null && isset(self::SOURCES[$sourceType]) && $enabled
             ? $this->documentContext($supplierId, $sourceType, $sourceId, $itemAccounts)
-            : [[], []];
-        if ($header === [] && $items === [] && !$hasExplicit) {
-            return $resolved;
+            : [[], [], []];
+        if ($header !== [] || $items !== [] || $hasExplicit) {
+            $resolved = self::expandSplits(
+                self::assign($resolved, $header, $items, $this->accountTypes($supplierId), true)['lines'],
+                $splits,
+            );
         }
-        $result = self::assign($resolved, $header, $items, $this->accountTypes($supplierId), true);
-        return $this->syncLinkedColumns($supplierId, $result['lines']);
+        if ($enabled && $entryDate !== null) {
+            // Výchozí hodnoty pravidel dimenzí až po dokladu — doklad má vždy přednost.
+            $resolved = $this->rules()->applyDefaults($supplierId, $sourceType, $sourceId, $resolved, $entryDate);
+        }
+        return $this->syncLinkedColumns($supplierId, $resolved);
+    }
+
+    /**
+     * Rozpad dokladu (hlavička nebo položka) jede jádrem {@see assign()} jako zástupná
+     * záporná „hodnota" (-1 = první rozpad dokladu): položky se stejným rozpadem se tak
+     * seskupí stejně jako položky se stejnou hodnotou. Tady se zástupná hodnota nahradí
+     * rozpadem řádku (`dimension_splits`). Rozpad zadaný přímo na řádku (ruční zápis)
+     * přebíjí jedinou hodnotu téhož typu.
+     *
+     * @param list<array<string,mixed>> $lines
+     * @param list<array<int,float>> $splits zástupný index => hodnota => podíl
+     * @return list<array<string,mixed>>
+     */
+    public static function expandSplits(array $lines, array $splits): array
+    {
+        foreach ($lines as $i => $line) {
+            $dims = (array) ($line['dimensions'] ?? []);
+            $lineSplits = (array) ($line['dimension_splits'] ?? []);
+            foreach ($dims as $typeId => $valueId) {
+                if ((int) $valueId < 0) {
+                    unset($dims[$typeId]);
+                    if (!isset($lineSplits[$typeId]) && isset($splits[-(int) $valueId - 1])) {
+                        $lineSplits[$typeId] = $splits[-(int) $valueId - 1];
+                    }
+                } elseif (isset($lineSplits[$typeId])) {
+                    unset($dims[$typeId]);
+                }
+            }
+            unset($lines[$i]['dimensions'], $lines[$i]['dimension_splits']);
+            if ($dims !== []) {
+                $lines[$i]['dimensions'] = $dims;
+            }
+            if ($lineSplits !== []) {
+                ksort($lineSplits);
+                $lines[$i]['dimension_splits'] = $lineSplits;
+            }
+        }
+        return array_values($lines);
     }
 
     /**
@@ -92,26 +145,41 @@ final class DimensionStamper
         }
         $pdo = $this->db->pdo();
         $entries = $pdo->prepare(
-            'SELECT id FROM journal_entries
+            'SELECT id, entry_date FROM journal_entries
               WHERE supplier_id = ? AND source_type = ? AND source_id = ? AND reversed_by IS NULL'
         );
         $entries->execute([$supplierId, $sourceType, $sourceId]);
-        $entryIds = array_map('intval', $entries->fetchAll(PDO::FETCH_COLUMN));
-        if ($entryIds === []) {
+        $entryDates = [];
+        foreach ($entries->fetchAll(PDO::FETCH_ASSOC) as $e) {
+            $entryDates[(int) $e['id']] = (string) $e['entry_date'];
+        }
+        if ($entryDates === []) {
             return ['lines' => 0, 'needs_repost' => false];
         }
-        [$header, $items] = $this->documentContext($supplierId, $sourceType, $sourceId, null);
+        [$header, $items, $splits] = $this->documentContext($supplierId, $sourceType, $sourceId, null);
         $types = $this->accountTypes($supplierId);
         $assignments = new DimensionAssignmentRepository($this->db);
         $changed = 0;
         $needsRepost = false;
-        foreach ($entryIds as $entryId) {
+        foreach ($entryDates as $entryId => $entryDate) {
             $stmt = $pdo->prepare(
                 'SELECT id, account_id, side, amount, currency_code FROM journal_entry_lines
                   WHERE supplier_id = ? AND entry_id = ? ORDER BY line_no, id'
             );
             $stmt->execute([$supplierId, $entryId]);
             $current = $assignments->entryLineDimensions($supplierId, $entryId);
+            // Rozpad, který řádek už nese, se pro porovnání převede na zástupnou hodnotu
+            // téhož rozpadu dokladu — řádek rozdělený při zaúčtování si ho ponechá.
+            foreach ($assignments->entryLineSplits($supplierId, $entryId) as $lineId => $byType) {
+                foreach ($byType as $typeId => $shares) {
+                    foreach ($splits as $k => $docShares) {
+                        if (DimensionAssignmentRepository::sameSplits([$typeId => $shares], [$typeId => $docShares])) {
+                            $current[$lineId][$typeId] = -($k + 1);
+                            break;
+                        }
+                    }
+                }
+            }
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
             $siblings = [];
             foreach ($rows as $l) {
@@ -125,8 +193,17 @@ final class DimensionStamper
             }, $rows);
             $result = self::assign($lines, $header, $items, $types, false);
             $needsRepost = $needsRepost || $result['needs_split'];
-            foreach ($result['lines'] as $line) {
-                if ($assignments->replaceLineDimensions($supplierId, (int) $line['id'], $line['dimensions'] ?? [])) {
+            $restamped = $this->rules()->applyDefaults(
+                $supplierId,
+                $sourceType,
+                $sourceId,
+                self::expandSplits($result['lines'], $splits),
+                $entryDate,
+            );
+            foreach ($restamped as $line) {
+                $dimsChanged = $assignments->replaceLineDimensions($supplierId, (int) $line['id'], $line['dimensions'] ?? []);
+                $splitsChanged = $assignments->replaceLineSplits($supplierId, (int) $line['id'], $line['dimension_splits'] ?? []);
+                if ($dimsChanged || $splitsChanged) {
                     $changed++;
                 }
             }
@@ -229,13 +306,29 @@ final class DimensionStamper
     }
 
     /**
+     * Hlavička, položky a rozpady dokladu. Rozpad se do map typ => hodnota vkládá jako
+     * zástupná záporná hodnota, kterou po rozdělení řádků nahradí {@see expandSplits()}.
+     *
      * @param array<int,int>|null $itemAccounts
-     * @return array{0:array<int,int>, 1:list<array{dims:array<int,int>, weight:float, account_id:?int}>}
+     * @return array{0:array<int,int>, 1:list<array{dims:array<int,int>, weight:float, account_id:?int}>, 2:list<array<int,float>>}
      */
     private function documentContext(int $supplierId, string $sourceType, int $sourceId, ?array $itemAccounts): array
     {
         [$docType, $itemTable, $itemColumn] = self::SOURCES[$sourceType];
-        $dims = (new DimensionAssignmentRepository($this->db))->documentDimensions($supplierId, $docType, $sourceId);
+        $assignments = new DimensionAssignmentRepository($this->db);
+        $dims = $assignments->documentDimensions($supplierId, $docType, $sourceId);
+        $splits = [];
+        foreach ($assignments->documentSplits($supplierId, $docType, $sourceId) as $itemNo => $byType) {
+            foreach ($byType as $typeId => $shares) {
+                $splits[] = $shares;
+                if ($itemNo === 0) {
+                    $dims['header'][$typeId] = -count($splits);
+                } else {
+                    $dims['items'][$itemNo][$typeId] = -count($splits);
+                }
+            }
+        }
+        ksort($dims['header']);
         $items = [];
         if ($itemTable !== null && $dims['items'] !== []) {
             // Pořadí položky = pořadí v editoru (order_index), číslováno od 1 — stejně
@@ -256,7 +349,7 @@ final class DimensionStamper
             $dims['header'],
             (new DimensionDefaults($this->db))->forSource($supplierId, $sourceType, $sourceId),
         );
-        return [$header, $items];
+        return [$header, $items, $splits];
     }
 
     /** @return array<int,string> */

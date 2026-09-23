@@ -291,6 +291,16 @@ final class DimensionImporter
             );
             $delete->execute([$ctx->supplierId, ...$managedTypes]);
             $count += $delete->rowCount();
+            // Rozpad řádku (pravidla dimenzí) u typu, který převod spravuje, by vedle
+            // hodnoty z Money dal řádku dvě odpovědi — pro řádky z Money rozhoduje Money.
+            $deleteSplits = $pdo->prepare(
+                "DELETE s FROM journal_entry_line_dimension_splits s
+                   JOIN journal_entry_lines jel ON jel.id = s.line_id AND jel.supplier_id = s.supplier_id
+                   JOIN tmp_money_s3_dimensions t ON t.entry_id = jel.entry_id AND t.line_no = jel.line_no
+                  WHERE s.supplier_id = ? AND s.dimension_type_id IN ({$marks})"
+            );
+            $deleteSplits->execute([$ctx->supplierId, ...$managedTypes]);
+            $count += $deleteSplits->rowCount();
         }
         foreach (['center', 'job'] as $col) {
             $insert = $pdo->prepare(
@@ -331,9 +341,12 @@ final class DimensionImporter
                           WHERE je.supplier_id = ? AND je.source_type = ? AND je.source_id IS NOT NULL
                             AND jd.dimension_type_id IN ({$marks})
                           GROUP BY je.source_id, jd.dimension_type_id
-                         HAVING COUNT(DISTINCT jd.dimension_value_id) = 1) x"
+                         HAVING COUNT(DISTINCT jd.dimension_value_id) = 1) x
+                  WHERE NOT EXISTS (SELECT 1 FROM document_dimension_splits ds
+                                     WHERE ds.supplier_id = ? AND ds.doc_type = ? AND ds.doc_id = x.source_id
+                                       AND ds.item_no = 0 AND ds.dimension_type_id = x.type_id)"
             );
-            $stmt->execute([$ctx->supplierId, $docType, $ctx->supplierId, $sourceType, ...$managedTypes]);
+            $stmt->execute([$ctx->supplierId, $docType, $ctx->supplierId, $sourceType, ...$managedTypes, $ctx->supplierId, $docType]);
             $count += $stmt->rowCount();
         }
         return $count;
