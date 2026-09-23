@@ -243,11 +243,20 @@ final class AnonymizationService
                         . $keepTimestamps
                         . ' WHERE ' . $where,
                     );
-                    $params = array_values($updates);
-                    foreach ($pkNames as $pk) {
-                        $params[] = $row[$pk];
+                    $pkValues = array_map(static fn (string $pk): mixed => $row[$pk], $pkNames);
+                    for ($attempt = 1; ; $attempt++) {
+                        try {
+                            $statements[$signature]->execute([...array_values($updates), ...$pkValues]);
+                            break;
+                        } catch (\PDOException $e) {
+                            // Jména z pseudonymů nejsou prostá (dva lidé mohou dostat stejné
+                            // příjmení). Narazí-li to na jedinečný index, odliší se číslem.
+                            if (($e->errorInfo[1] ?? null) !== 1062 || $attempt > 20) {
+                                throw $e;
+                            }
+                            $updates = $this->disambiguate($updates, $columns, $attempt, $meta);
+                        }
                     }
-                    $statements[$signature]->execute($params);
                     $changedRows++;
                 }
                 $pdo->commit();
@@ -303,6 +312,31 @@ final class AnonymizationService
             if ($new !== $old) {
                 $updates[$column] = $new;
             }
+        }
+
+        return $updates;
+    }
+
+    /**
+     * @param array<string, string|null> $updates
+     * @param array<string,string> $columns
+     * @param array<string, array{nullable:bool, type:string, max:?int, json:bool, on_update?:bool}> $meta
+     * @return array<string, string|null>
+     */
+    private function disambiguate(array $updates, array $columns, int $attempt, array $meta): array
+    {
+        foreach ($updates as $column => $value) {
+            $strategy = $columns[$column] ?? '';
+            if ($value === null || !in_array($strategy, ['party_name', 'person_name', 'first_name', 'last_name', 'text', 'street', 'city', 'address', 'file_name'], true)) {
+                continue;
+            }
+            $base = preg_replace('/ #\d+$/', '', $value) ?? $value;
+            $suffix = ' #' . ($attempt + 1);
+            $max = $meta[$column]['max'] ?? null;
+            if ($max !== null && mb_strlen($base . $suffix, 'UTF-8') > $max) {
+                $base = mb_substr($base, 0, max(0, $max - mb_strlen($suffix, 'UTF-8')), 'UTF-8');
+            }
+            $updates[$column] = $base . $suffix;
         }
 
         return $updates;
