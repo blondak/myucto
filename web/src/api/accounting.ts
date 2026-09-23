@@ -1387,6 +1387,8 @@ export interface StatementOverrideSuggestions {
   suggestions: StatementOverrideSuggestion[]
   differences: StatementOverrideDifference[]
   source: { type: 'filed_return' | 'upload'; submission_id?: number; status?: string; submitted_at?: string | null }
+  /** Návrhy pro sloupec minulého období (výjimky platné do minulého roku); null = podání ho nenese. */
+  prior_period?: { period_id: number; year: number; suggestions: StatementOverrideSuggestion[]; differences: StatementOverrideDifference[] } | null
 }
 
 export interface IncomeStatementReport {

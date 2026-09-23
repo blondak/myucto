@@ -306,9 +306,51 @@ function suggestionKey(s: StatementOverrideSuggestion): string {
 const visibleSuggestions = computed(() => (suggestions.value?.suggestions ?? []).filter(s => s.statement_type === statementType.value))
 const otherTabSuggestions = computed(() => (suggestions.value?.suggestions ?? []).length - visibleSuggestions.value.length)
 
+/** Návrhy pro sloupec minulého období — výjimky platné do minulého roku. */
+const priorSuggestions = computed(() => (suggestions.value?.prior_period?.suggestions ?? []).filter(s => s.statement_type === statementType.value))
+
+function priorKey(s: StatementOverrideSuggestion): string {
+  return `prior|${suggestionKey(s)}`
+}
+
 function acceptSuggestions(result: StatementOverrideSuggestions) {
   suggestions.value = result
-  selected.value = new Set(result.suggestions.filter(s => !s.ambiguous).map(suggestionKey))
+  selected.value = new Set([
+    ...result.suggestions.filter(s => !s.ambiguous).map(suggestionKey),
+    ...(result.prior_period?.suggestions ?? []).filter(s => !s.ambiguous).map(priorKey),
+  ])
+}
+
+function togglePrior(s: StatementOverrideSuggestion) {
+  const next = new Set(selected.value)
+  const key = priorKey(s)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  selected.value = next
+}
+
+function validInYear(o: StatementOverride, y: number): boolean {
+  return (o.valid_from_year == null || o.valid_from_year <= y) && (o.valid_to_year == null || o.valid_to_year >= y)
+}
+
+/**
+ * Výjimka pro minulé období platí do minulého roku. Když účet už má výjimku platnou i v něm
+ * (typicky bez omezení), rozdělí se: stávající platí od běžného roku, návrh do minulého.
+ */
+function applyPriorSuggestion(next: StatementOverride, prevYear: number) {
+  const idx = draft.value.findIndex(d => d.account_prefix === next.account_prefix
+    && d.balance_condition === next.balance_condition && validInYear(d, prevYear))
+  if (idx < 0) {
+    draft.value.push({ ...next, valid_from_year: null, valid_to_year: prevYear })
+    return
+  }
+  const existing = draft.value[idx]
+  if (existing.valid_to_year != null && existing.valid_to_year <= prevYear) {
+    draft.value[idx] = { ...next, valid_from_year: existing.valid_from_year ?? null, valid_to_year: existing.valid_to_year }
+    return
+  }
+  draft.value[idx] = { ...existing, valid_from_year: prevYear + 1 }
+  draft.value.push({ ...next, valid_from_year: existing.valid_from_year ?? null, valid_to_year: prevYear })
 }
 
 async function suggestFromFiled() {
@@ -372,6 +414,21 @@ function applySuggestions() {
       } else {
         draft.value.push({ ...next, valid_from_year: draft.value.some(d => d.account_prefix === next.account_prefix) ? year.value : null, valid_to_year: null })
       }
+    }
+  }
+  const prior = suggestions.value?.prior_period
+  for (const s of priorSuggestions.value) {
+    if (!prior || !selected.value.has(priorKey(s))) continue
+    for (const o of s.overrides) {
+      applyPriorSuggestion({
+        account_prefix: o.account_prefix,
+        row_code: o.row_code,
+        target: o.target,
+        balance_condition: o.balance_condition,
+        sign: 1,
+        note: t('accounting.statements.mapping.suggestion_note', { year: prior.year }),
+        ...(o.follows_prefix ? { follows_prefix: o.follows_prefix } : {}),
+      }, o.valid_to_year ?? prior.year)
     }
   }
   preview.value = null
@@ -463,7 +520,7 @@ onMounted(async () => {
             {{ t(suggestions.source.type === 'filed_return' ? 'accounting.statements.mapping.suggestions_source_filed' : 'accounting.statements.mapping.suggestions_source_upload', { year: suggestions.year }) }}
           </p>
         </div>
-        <button v-if="canWrite && visibleSuggestions.length > 0" type="button" data-test="apply-suggestions"
+        <button v-if="canWrite && (visibleSuggestions.length > 0 || priorSuggestions.length > 0)" type="button" data-test="apply-suggestions"
                 :class="btnFilled('primary')" :disabled="selected.size === 0" @click="applySuggestions">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
           {{ t('accounting.statements.mapping.suggestions_apply') }}
@@ -490,6 +547,26 @@ onMounted(async () => {
           </div>
         </li>
       </ul>
+      <div v-if="priorSuggestions.length > 0 && suggestions.prior_period" class="border-t border-neutral-200" data-test="prior-suggestions">
+        <div class="px-4 py-2 bg-neutral-50">
+          <h3 class="text-xs font-semibold">{{ t('accounting.statements.mapping.prior_title', { year: suggestions.prior_period.year }) }}</h3>
+          <p class="text-[11px] text-neutral-600 mt-0.5">{{ t('accounting.statements.mapping.prior_hint', { year: suggestions.prior_period.year }) }}</p>
+        </div>
+        <ul class="divide-y divide-neutral-100">
+          <li v-for="s in priorSuggestions" :key="priorKey(s)" class="px-4 py-2 text-sm flex gap-3 items-start" data-test="prior-suggestion">
+            <input type="checkbox" class="mt-1" :checked="selected.has(priorKey(s))" :disabled="!canWrite" @change="togglePrior(s)" />
+            <div class="min-w-0">
+              <p class="font-medium flex flex-wrap items-baseline gap-x-2">
+                <span class="font-mono whitespace-nowrap">{{ s.account_code }}</span>
+                <span>{{ s.account_name }}</span>
+                <span class="font-mono text-neutral-500 whitespace-nowrap">{{ s.from_row_code }} → {{ s.to_row_code }}</span>
+              </p>
+              <p class="text-xs text-neutral-600">{{ s.reason }}</p>
+              <p v-if="s.ambiguous" class="text-xs text-warning-700">{{ t('accounting.statements.mapping.suggestion_ambiguous') }}</p>
+            </div>
+          </li>
+        </ul>
+      </div>
       <p v-if="otherTabSuggestions > 0" class="px-4 py-2 text-xs text-neutral-500 border-t border-neutral-100">
         {{ t('accounting.statements.mapping.suggestions_other_tab', { count: otherTabSuggestions }) }}
       </p>

@@ -133,6 +133,52 @@ final class StatementOverrideSuggester
 
         $out = $this->suggest($supplierId, $periodId, $parsed['appendix'], $parsed['scope']);
         $out['source'] = ['type' => 'upload'];
+        $out['prior_period'] = $this->suggestPriorPeriod($supplierId, $periodId, $parsed['appendix'], $parsed['scope']);
+
+        return $out;
+    }
+
+    /**
+     * Návrhy pro sloupec minulého období: podané přiznání nese i údaje minulého období
+     * (kc_netto_min, kc_min), tedy zařazení z uzavřeného výkazu minulého roku. Porovnají
+     * se s výkazem minulého období aplikace (s výjimkami platnými v minulém roce) a návrhy
+     * dostanou platnost do minulého roku. Sloupec je pak shodný s podanou závěrkou, když má
+     * firma zapnuté převzetí srovnávacího období z uzavřeného výkazu.
+     *
+     * @param array<string, array<int, array<string,int|float>>> $filed
+     * @return array<string,mixed>|null null = firma nemá minulé období nebo podání údaje minulého období nenese
+     */
+    public function suggestPriorPeriod(int $supplierId, int $periodId, array $filed, ?string $scope = null): ?array
+    {
+        $prev = $this->ledger->previousPeriod($supplierId, (string) $this->period($supplierId, $periodId)['starts_on']);
+        if ($prev === null) {
+            return null;
+        }
+        $columns = ['VetaUA' => ['kc_netto_min' => 'kc_netto'], 'VetaUD' => ['kc_min' => 'kc_sled'], 'VetaUB' => ['kc_min' => 'kc_sled']];
+        $prior = [];
+        $any = false;
+        foreach ($columns as $sentence => $map) {
+            foreach ($filed[$sentence] ?? [] as $c => $values) {
+                foreach ($map as $from => $to) {
+                    if (array_key_exists($from, $values)) {
+                        $prior[$sentence][$c][$to] = $values[$from];
+                        $any = $any || (int) $values[$from] !== 0;
+                    }
+                }
+            }
+        }
+        if (!$any) {
+            return null;
+        }
+
+        $out = $this->suggest($supplierId, (int) $prev['id'], $prior, $scope);
+        $prevYear = (int) $prev['fiscal_year'];
+        foreach ($out['suggestions'] as $i => $s) {
+            foreach ($s['overrides'] as $j => $o) {
+                $out['suggestions'][$i]['overrides'][$j]['valid_to_year'] = $prevYear;
+            }
+            $out['suggestions'][$i]['reason'] .= sprintf(' Týká se sloupce minulého období, výjimka platí do roku %d.', $prevYear);
+        }
 
         return $out;
     }

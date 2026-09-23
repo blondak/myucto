@@ -294,6 +294,38 @@ final class BalanceSheetPresentationTest extends TestCase
         self::assertStringContainsString('30 000,00 Kč', (string) $principles['hint']);
     }
 
+    /**
+     * Podané přiznání nese sloupec minulého období tak, jak byl v uzavřeném výkazu minulého
+     * roku. Návrh ho porovná s výkazem minulého období aplikace a navrhne výjimku platnou
+     * do minulého roku; běžné období se tím nemění.
+     */
+    public function testSuggesterProposesOverridesForThePriorPeriodColumn(): void
+    {
+        $this->post(self::PREV_YEAR, '351.100', '602', 200_000.00);
+        $this->db->pdo()->prepare('UPDATE accounting_supplier_settings SET comparative_from_prior_year = 1 WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
+        $this->overrides->save($this->supplierId, $this->versionId, [
+            ['account_prefix' => '351.100', 'row_code' => 'C.II.1.5.4.', 'valid_to_year' => self::PREV_YEAR],
+        ], $this->userId);
+        $filed = $this->suggester->appAppendix($this->supplierId, $this->periodId, 'full');
+        $this->overrides->save($this->supplierId, $this->versionId, [], $this->userId);
+
+        $out = $this->suggester->suggestFromXml($this->supplierId, $this->periodId, $this->filedXml($filed));
+
+        self::assertNotContains('351.100', array_column($out['suggestions'], 'account_code'), 'Běžné období sedí, návrh pro něj nic nemění.');
+        self::assertNotNull($out['prior_period']);
+        $prior = array_column($out['prior_period']['suggestions'], null, 'account_code');
+        self::assertArrayHasKey('351.100', $prior, json_encode($out['prior_period'], JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertSame('C.II.1.5.4.', $prior['351.100']['to_row_code']);
+        self::assertSame(self::PREV_YEAR, $prior['351.100']['overrides'][0]['valid_to_year']);
+
+        // Převzetí návrhu: sloupec minulého období je shodný s podaným.
+        $this->overrides->save($this->supplierId, $this->versionId, $prior['351.100']['overrides'], $this->userId);
+        $assets = $this->assets($this->periodId, self::ENDS_ON);
+        self::assertEqualsWithDelta(200_000.0, $assets['C.II.1.5.4.']['prev_net'], 0.01);
+        self::assertEqualsWithDelta(200_000.0, $assets['C.II.2.2.']['net'], 0.01, 'Běžné období podle globální mapy.');
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
 
     /** Obchodní pohledávka 100 000 s OP 20 000, pohledávka za ovládanou osobou 200 000 s OP 150 000. */

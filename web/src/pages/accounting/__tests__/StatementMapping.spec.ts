@@ -266,6 +266,40 @@ describe('StatementMapping.vue', () => {
     ])
   })
 
+  it('(k) návrh pro minulé období rozdělí stávající výjimku podle let platnosti', async () => {
+    m.getStatementOverrides.mockResolvedValue(overview({
+      filed_return: { submission_id: 9, year: 2099, status: 'submitted', submitted_at: '2100-03-31 10:00:00', form_variant: 'B' },
+      overrides: [{ id: 3, version_id: 1, account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null }],
+    }))
+    const prior = {
+      statement_type: 'balance_sheet' as const, version_id: 1, account_code: '365.100', account_name: 'Půjčka od společníka',
+      amount: 500000, amount_thousands: 500, current_row_code: 'P.C.I.9.1.', from_row_code: 'P.C.I.9.1.', from_label: 'Závazky ke společníkům',
+      to_row_code: 'P.C.II.8.1.', to_label: 'Závazky ke společníkům', to_is_subtotal: false, balance_condition: 'any' as const, target: 'gross' as const,
+      sign: 1, reason: 'minulé období', ambiguous: false, confidence: 'exact' as const, accounts: ['365.100'],
+      overrides: [{ account_prefix: '365.100', row_code: 'P.C.II.8.1.', target: 'gross' as const, balance_condition: 'any' as const, note: null, valid_to_year: 2098 }],
+    }
+    m.suggestStatementOverrides.mockResolvedValue({
+      period_id: 6, year: 2099, source: { type: 'filed_return', submission_id: 9 }, differences: [], suggestions: [],
+      prior_period: { period_id: 5, year: 2098, suggestions: [prior], differences: [] },
+    })
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    const suggestBtn = wrapper.findAll('button').find(b => b.text().includes('accounting.statements.mapping.action_suggest'))
+    await suggestBtn!.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[data-test="prior-suggestion"]')).toHaveLength(1)
+
+    await wrapper.find('[data-test="apply-suggestions"]').trigger('click')
+    await wrapper.find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveStatementOverrides).toHaveBeenCalledWith(1, [
+      { account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null, valid_from_year: 2099, valid_to_year: null },
+      expect.objectContaining({ account_prefix: '365.100', row_code: 'P.C.II.8.1.', valid_from_year: null, valid_to_year: 2098 }),
+    ])
+  })
+
   it('(f) bez podaného přiznání je návrh zašedlý s vysvětlením', async () => {
     m.getStatementOverrides.mockResolvedValue(overview())
     const wrapper = mount(StatementMapping)

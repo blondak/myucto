@@ -12273,6 +12273,8 @@
         "orphans_title": "Exceptions for account groups",
         "orphans_hint": "The exception applies to every account whose number starts with the prefix. A specific account can have its own exception, which takes precedence.",
         "orphans_accounts": "{count} accounts",
+        "prior_title": "Previous period {year}",
+        "prior_hint": "The filed return also carries the previous period column. These exceptions apply up to {year}; an existing exception of the same account is limited to later years. The previous period column uses them when taking it from last year's closed statements is enabled in the closing settings.",
         "follows_label": "for receivable",
         "follows_placeholder": "e.g. 351.100",
         "follows_hint": "The allowance goes to the row where the statement places the given receivable account, even after you reclassify it. The selected row applies only if the receivable account is not in the map.",

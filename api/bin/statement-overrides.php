@@ -228,6 +228,15 @@ try {
                 }
             }
         }
+        $prior = $result['prior_period'] ?? null;
+        if ($prior !== null && $prior['suggestions'] !== []) {
+            printf("\nMinulé období %d (sloupec minulého období podání, výjimky platné do roku %d; importujte přes --json):\n", $prior['year'], $prior['year']);
+            foreach ($prior['suggestions'] as $s) {
+                printf("  %s%-10s %-12s → %-12s %6d tis.  %s\n",
+                    $s['ambiguous'] ? '? ' : '  ',
+                    $s['account_code'], $s['from_row_code'], $s['to_row_code'], $s['amount_thousands'], $s['reason']);
+            }
+        }
         exit(0);
     }
 

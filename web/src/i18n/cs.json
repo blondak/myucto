@@ -12273,6 +12273,8 @@
         "orphans_title": "Výjimky pro skupinu účtů",
         "orphans_hint": "Výjimka platí pro všechny účty, jejichž číslo začíná uvedeným prefixem. Konkrétní účet může mít vlastní výjimku, ta má přednost.",
         "orphans_accounts": "{count} účtů",
+        "prior_title": "Minulé období {year}",
+        "prior_hint": "Podané přiznání nese i sloupec minulého období. Tyto výjimky platí do roku {year}; u účtu, který už výjimku má, se ta stávající omezí na pozdější roky. Sloupec minulého období se podle nich počítá, když je v nastavení uzávěrky zapnuté převzetí z uzavřeného výkazu.",
         "follows_label": "k pohledávce",
         "follows_placeholder": "např. 351.100",
         "follows_hint": "Opravná položka půjde do řádku, kam výkaz zařadí uvedený účet pohledávky, i když ho později přeřadíte. Vybraný řádek platí, jen když účet pohledávky v mapě není.",
