@@ -26227,7 +26227,7 @@
     },
     "registration": {
       "title": "JMHZ",
-      "hint": "Upload employee registration XML files (REGZEC, PREZEC) accepted by ČSSZ or JMHZ monthly reports from another payroll program. Registrations are matched to people and employments, the missing ones are created and changed data is filled in. From monthly reports the app takes over the taxpayer declaration, tax credits and dependants and offers to take over the payroll history. First and last names are never changed automatically.",
+      "hint": "Upload employee registration XML files (REGZEC, PREZEC) accepted by ČSSZ, the employee export from the ČSSZ ePortal or JMHZ monthly reports from another payroll program. Registrations are matched to people and employments, the missing ones are created and changed data is filled in. The employee export fills in OIČ and ID PPV; a new person is created from it only together with a monthly report from which the start date is derived. From monthly reports the app takes over the taxpayer declaration, tax credits and dependants and offers to take over the payroll history. First and last names are never changed automatically.",
       "no_permission": "You are not allowed to edit payroll people, so the registration preview and import cannot run.",
       "environment": "Submission environment",
       "environments": {
@@ -26235,7 +26235,7 @@
         "test": "Test environment"
       },
       "environment_hint": "ČSSZ identifiers are stored for the environment the registration comes from.",
-      "drop_hint": "Drag registration or monthly report XML files here or choose them",
+      "drop_hint": "Drag registration, ČSSZ employee export or monthly report XML files here or choose them",
       "preview": "Load preview",
       "refresh_preview": "Reload preview",
       "preview_failed": "The registration preview could not be loaded.",
@@ -26243,6 +26243,9 @@
       "applied": "Applied {applied} records, skipped {skipped}.",
       "applied_with_errors": "Applied {applied} records, {failed} failed and {skipped} skipped. See the result below the table for details.",
       "record_count": "records: {count}",
+      "document_types": {
+        "CSSZ_EXPORT": "ČSSZ employee export"
+      },
       "summary": {
         "total": "Records total",
         "create": "Create",

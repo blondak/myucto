@@ -62,6 +62,7 @@ final class JmhzReportFixtures
             'average_minor' => 23_810,
             'irregular' => 0,
             'withholding' => null,
+            'insurance_from' => null,
         ];
         $childCredit = null;
         if ($o['declaration'] && $o['children'] !== []) {
@@ -75,6 +76,7 @@ final class JmhzReportFixtures
         }
 
         return [
+            'insurance_from' => $o['insurance_from'],
             'summary' => [
                 'income_total_czk' => $o['wage'],
                 'exempt_income_czk' => null,
@@ -177,14 +179,15 @@ final class JmhzReportFixtures
         $bonus = 0;
         foreach ($people as $person) {
             $employment = $person['employment'];
+            $insuranceFrom = $person['insurance_from'] ?? $monthStart;
             $employment['eldp'] = [
-                'insurance_interval' => ['insurance_from' => $monthStart, 'insurance_to' => $monthEnd],
+                'insurance_interval' => ['insurance_from' => $insuranceFrom, 'insurance_to' => $monthEnd],
                 'eldp_sections' => [[
                     'ordinal' => 1,
                     'code' => '1++',
-                    'valid_from' => $monthStart,
+                    'valid_from' => $insuranceFrom,
                     'valid_to' => $monthEnd,
-                    'insurance_days' => $days,
+                    'insurance_days' => $days - (int) substr($insuranceFrom, 8, 2) + 1,
                     'assessment_base_czk' => $employment['social_base']['assessment_base_czk'],
                     'excluded_days' => null,
                 ]],

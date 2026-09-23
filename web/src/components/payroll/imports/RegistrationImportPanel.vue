@@ -231,6 +231,12 @@ function isJmhz(record: RegistrationRecord): boolean {
   return record.document_type === 'JMHZ'
 }
 
+/** Kód formuláře ČSSZ zůstává kódem; export zaměstnanců žádný kód nemá, dostane název. */
+function documentTypeLabel(code: string): string {
+  const key = `payroll_imports.registration.document_types.${code}`
+  return te(key) ? t(key) : code
+}
+
 function needsPairSelect(record: RegistrationRecord): boolean {
   return registrationNeedsPairSelect(record, pairs.value)
 }
@@ -388,7 +394,7 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <span class="min-w-0 truncate font-medium text-neutral-800" :title="file.name">{{ file.name }}</span>
                 <span class="flex flex-wrap items-center gap-2 text-xs">
-                  <span v-if="file.document_type" class="rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-neutral-700">{{ file.document_type }}</span>
+                  <span v-if="file.document_type" class="rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-700" :class="{ 'font-mono': file.document_type !== 'CSSZ_EXPORT' }">{{ documentTypeLabel(file.document_type) }}</span>
                   <span v-if="file.period" class="whitespace-nowrap text-neutral-700">{{ formatPeriod(file.period) }}</span>
                   <span v-if="file.submission_type" class="whitespace-nowrap rounded-full px-2 py-0.5" :class="submissionClass(file.submission_type)">{{ t(`payroll_imports.registration.submission_types.${file.submission_type}`) }}</span>
                   <span class="text-neutral-500">{{ t('payroll_imports.registration.record_count', { count: file.record_count }) }}</span>
@@ -456,7 +462,7 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                     <p class="text-xs text-neutral-500"><span class="font-mono">{{ record.document_type }}</span></p>
                   </template>
                   <template v-else>
-                    <p class="text-xs text-neutral-500"><span class="font-mono">{{ record.document_type }}</span> · {{ t('payroll_imports.registration.action_code', { code: record.action_code }) }}</p>
+                    <p v-if="record.document_type !== 'CSSZ_EXPORT'" class="text-xs text-neutral-500"><span class="font-mono">{{ record.document_type }}</span> · {{ t('payroll_imports.registration.action_code', { code: record.action_code }) }}</p>
                     <p class="text-xs text-neutral-500">{{ t('payroll_imports.registration.effective_on', { date: dateText(record.effective_on) }) }}</p>
                   </template>
                   <p class="truncate text-[11px] text-neutral-400" :title="record.file">{{ record.file }} #{{ record.sequence }}</p>

@@ -78,6 +78,7 @@ final readonly class JmhzReportForm
         public ?int $irregularBonuses = null,
         public ?int $standbyPay = null,
         public ?int $averageHourlyMilli = null,
+        public ?string $insuranceFrom = null,
     ) {}
 
     public function hasBody(): bool

@@ -26227,7 +26227,7 @@
     },
     "registration": {
       "title": "JMHZ",
-      "hint": "Nahrajte XML registrací zaměstnanců (REGZEC, PREZEC) přijaté ČSSZ nebo měsíční hlášení JMHZ z jiného mzdového programu. Registrace aplikace spáruje s osobami a pracovními vztahy, založí chybějící a doplní změněné údaje. Z měsíčních hlášení převezme prohlášení poplatníka, slevy a vyživované osoby a nabídne převzetí historie mezd. Jméno a příjmení se automaticky nemění.",
+      "hint": "Nahrajte XML registrací zaměstnanců (REGZEC, PREZEC) přijaté ČSSZ, export zaměstnanců z ePortálu ČSSZ nebo měsíční hlášení JMHZ z jiného mzdového programu. Registrace aplikace spáruje s osobami a pracovními vztahy, založí chybějící a doplní změněné údaje. Export zaměstnanců doplní OIČ a ID PPV; novou osobu z něj aplikace založí jen spolu s měsíčním hlášením, ze kterého odvodí nástup. Z měsíčních hlášení převezme prohlášení poplatníka, slevy a vyživované osoby a nabídne převzetí historie mezd. Jméno a příjmení se automaticky nemění.",
       "no_permission": "Nemáte oprávnění upravovat osoby v mzdách. Náhled ani import registrací proto nejde spustit.",
       "environment": "Prostředí podání",
       "environments": {
@@ -26235,7 +26235,7 @@
         "test": "Testovací prostředí"
       },
       "environment_hint": "Identifikátory ČSSZ se uloží k prostředí, ze kterého registrace pochází.",
-      "drop_hint": "Přetáhněte sem XML soubory registrací nebo měsíčních hlášení, případně je vyberte",
+      "drop_hint": "Přetáhněte sem XML soubory registrací, exportu zaměstnanců ČSSZ nebo měsíčních hlášení, případně je vyberte",
       "preview": "Načíst náhled",
       "refresh_preview": "Načíst náhled znovu",
       "preview_failed": "Náhled registrací se nepodařilo načíst.",
@@ -26243,6 +26243,9 @@
       "applied": "Použito {applied} vět, přeskočeno {skipped}.",
       "applied_with_errors": "Použito {applied} vět, {failed} selhalo a {skipped} přeskočeno. Podrobnosti najdete ve výsledku pod tabulkou.",
       "record_count": "vět: {count}",
+      "document_types": {
+        "CSSZ_EXPORT": "Export zaměstnanců ČSSZ"
+      },
       "summary": {
         "total": "Vět celkem",
         "create": "Založit",
