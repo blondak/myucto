@@ -376,8 +376,13 @@ final class FinancialStatementService
             $dimension,
         );
         $mapped   = $this->mapper->map($rows, $map, $balances);
-        // § 58 odst. 2 vyhl.: souhrnné vykázání daňových pohledávek a závazků vůči FÚ, jen na volbu firmy.
-        $taxOffsetOn = $type === 'balance_sheet' && $this->settings->getTaxAuthorityOffset($supplierId);
+        // § 58 odst. 2 vyhl.: souhrnné vykázání daňových pohledávek a závazků vůči FÚ, jen na
+        // volbu firmy a od roku, kdy ho začala používat. Sloupec minulého období se řídí
+        // stejně jako výjimky mapování: pravidly běžného roku, nebo s převzetím z uzavřeného
+        // výkazu pravidly minulého roku.
+        $comparativeFromPriorYear = $this->settings->getComparativeFromPriorYear($supplierId);
+        $offsetIn = fn (int $year): bool => $type === 'balance_sheet' && $this->settings->taxAuthorityOffsetAppliesIn($supplierId, $year);
+        $taxOffsetOn = $offsetIn((int) $period['fiscal_year']);
         $taxOffset = ['current' => 0.0, 'previous' => 0.0];
         if ($taxOffsetOn) {
             ['mapped' => $mapped, 'amount' => $taxOffset['current']] = TaxAuthorityOffset::apply($rows, $mapped);
@@ -400,7 +405,7 @@ final class FinancialStatementService
         if ($prevPeriod !== null) {
             $prevMap = $baseMap;
             $prevSplitCodes = $splitCodes;
-            if ($this->settings->getComparativeFromPriorYear($supplierId)) {
+            if ($comparativeFromPriorYear) {
                 $prevMap = $this->maps->accountMap($version, $supplierId, (int) $prevPeriod['fiscal_year']);
                 $prevSplitCodes = $this->mapper->noCompensationPrefixes($prevMap);
             }
@@ -413,7 +418,7 @@ final class FinancialStatementService
                 $dimension,
             );
             $mappedPrev = $this->mapper->map($rows, $prevMap, $balancesPrev);
-            if ($taxOffsetOn) {
+            if ($comparativeFromPriorYear ? $offsetIn((int) $prevPeriod['fiscal_year']) : $taxOffsetOn) {
                 ['mapped' => $mappedPrev, 'amount' => $taxOffset['previous']] = TaxAuthorityOffset::apply($rows, $mappedPrev);
             }
             $valuesPrev = $this->computeValues($rows, $mappedPrev, $balancesPrev, $type, (string) $prevPeriod['starts_on'], $turnoverExtra);

@@ -201,7 +201,16 @@ final class ReportingSettingsAction
             if ($v === null) {
                 return Json::error($response, 'validation_failed', 'tax_authority_offset musí být boolean (true/false).', 422);
             }
-            $this->settings->setTaxAuthorityOffset($supplierId, $v);
+            $from = $body['tax_authority_offset_from_year'] ?? null;
+            if ($from !== null && $from !== '') {
+                if (!is_numeric($from) || (int) $from != $from || (int) $from < 1900 || (int) $from > 2999) {
+                    return Json::error($response, 'validation_failed', 'tax_authority_offset_from_year musí být rok (1900–2999), nebo null.', 422);
+                }
+                $from = (int) $from;
+            } else {
+                $from = null;
+            }
+            $this->settings->setTaxAuthorityOffset($supplierId, $v, $from);
         }
 
         return Json::ok($response, $this->payload($supplierId));

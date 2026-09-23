@@ -616,6 +616,8 @@ export interface AccountingClosingSettings extends ReportingSettings {
   comparative_from_prior_year?: boolean | number
   // Souhrnné vykázání daňových pohledávek a závazků vůči FÚ (§ 58 odst. 2 vyhl. 500/2002 Sb.).
   tax_authority_offset?: boolean | number
+  /** Od kterého účetního období se daně vykazují souhrnně; null = všechna. */
+  tax_authority_offset_from_year?: number | null
 }
 
 export interface NetTurnoverExtraRows {

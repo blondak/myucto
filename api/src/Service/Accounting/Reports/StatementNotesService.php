@@ -459,14 +459,14 @@ final class StatementNotesService
      */
     private function taxAuthorityOffsetText(int $supplierId, int $periodId): ?string
     {
-        if (!$this->settings->getTaxAuthorityOffset($supplierId)) {
+        $period = $this->periods->findById($supplierId, $periodId);
+        if ($period === null || !$this->settings->taxAuthorityOffsetAppliesIn($supplierId, (int) $period['fiscal_year'])) {
             return null;
         }
         $amounts = ['current' => 0.0, 'previous' => 0.0];
         try {
             // Příloha patří k závěrce, částky proto k rozvahovému dni (konci období).
-            $period = $this->periods->findById($supplierId, $periodId);
-            $sheet = $this->statements->balanceSheet($supplierId, $periodId, $period === null ? null : (string) $period['ends_on'], 'full');
+            $sheet = $this->statements->balanceSheet($supplierId, $periodId, (string) $period['ends_on'], 'full');
             $amounts = (array) ($sheet['checks']['tax_authority_offset'] ?? $amounts) + $amounts;
         } catch (ReportException) {
             // Bez výkazu zůstane věta bez částek — příloha se kvůli tomu nezastaví.

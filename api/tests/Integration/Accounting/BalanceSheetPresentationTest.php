@@ -295,6 +295,31 @@ final class BalanceSheetPresentationTest extends TestCase
     }
 
     /**
+     * Souhrnné vykázání zavedené od roku 2092: výkaz roku 2091 ho nemá, sloupec minulého
+     * období ve výkazu 2092 ho má jen bez převzetí z uzavřeného výkazu (pravidla běžného roku).
+     */
+    public function testTaxAuthorityOffsetFromYear(): void
+    {
+        $this->post(self::PREV_YEAR, '341', '602', 30_000.00);
+        $this->post(self::PREV_YEAR, '548', '343', 50_000.00);
+        $this->db->pdo()->prepare('UPDATE accounting_supplier_settings SET tax_authority_offset = 1, tax_authority_offset_from_year = ? WHERE supplier_id = ?')
+            ->execute([self::YEAR, $this->supplierId]);
+
+        $prevYear = $this->statements->balanceSheet($this->supplierId, $this->prevPeriodId, self::PREV_YEAR . '-12-31', 'full');
+        self::assertNull($prevYear['checks']['tax_authority_offset'], 'Před rokem zavedení se nezapočítává.');
+        self::assertEqualsWithDelta(30_000.0, array_column($prevYear['assets'], null, 'row_code')['C.II.2.4.3.']['net'], 0.01);
+
+        $current = $this->assets($this->periodId, self::ENDS_ON);
+        self::assertEqualsWithDelta(0.0, $current['C.II.2.4.3.']['net'], 0.01, 'Od roku zavedení se započítává.');
+        self::assertEqualsWithDelta(0.0, $current['C.II.2.4.3.']['prev_net'], 0.01, 'Minulé období podle pravidel běžného roku.');
+
+        $this->db->pdo()->prepare('UPDATE accounting_supplier_settings SET comparative_from_prior_year = 1 WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
+        $comparative = $this->assets($this->periodId, self::ENDS_ON);
+        self::assertEqualsWithDelta(30_000.0, $comparative['C.II.2.4.3.']['prev_net'], 0.01, 'Minulé období jako uzavřený výkaz roku 2091.');
+    }
+
+    /**
      * Podané přiznání nese sloupec minulého období tak, jak byl v uzavřeném výkazu minulého
      * roku. Návrh ho porovná s výkazem minulého období aplikace a navrhne výjimku platnou
      * do minulého roku; běžné období se tím nemění.

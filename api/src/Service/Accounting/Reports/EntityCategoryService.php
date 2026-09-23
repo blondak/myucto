@@ -237,7 +237,7 @@ final class EntityCategoryService
         );
         $mapped   = $this->mapper->map($rows, $map, $balances);
         // Aktiva netto stejná jako v rozvaze i při souhrnném vykázání daní vůči FÚ (§ 58/2).
-        if ($this->settings->getTaxAuthorityOffset($supplierId)) {
+        if ($this->settings->taxAuthorityOffsetAppliesIn($supplierId, (int) $period['fiscal_year'])) {
             $mapped = TaxAuthorityOffset::apply($rows, $mapped)['mapped'];
         }
 
