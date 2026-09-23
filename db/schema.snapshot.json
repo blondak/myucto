@@ -864,7 +864,8 @@
         "1877_payroll_enforcement_claim_key_unique_restore.sql",
         "1878_vat_classification_24z_selected_supplies.sql",
         "1879_users_default_supplier.sql",
-        "1880_invoice_price_level.sql"
+        "1880_invoice_price_level.sql",
+        "1881_credit_card_accounts.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -3435,6 +3436,82 @@
                 "uq_country_iso2": "UNIQUE BTREE (iso2)"
             },
             "foreign_keys": [],
+            "checks": []
+        },
+        "credit_card_accounts": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_number": "varchar(40) NOT NULL",
+                "analytic_suffix": "varchar(6) NULL DEFAULT NULL",
+                "archived_at": "datetime NULL DEFAULT NULL",
+                "bank_account_id": "bigint(20) unsigned NOT NULL",
+                "bank_code": "char(4) NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "credit_limit": "decimal(14,2) NULL DEFAULT NULL",
+                "currency": "char(3) NOT NULL DEFAULT 'CZK'",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "is_verified": "tinyint(1) NOT NULL DEFAULT 1",
+                "issuer": "enum('kb','rb','csob','erste','other') NOT NULL DEFAULT 'other'",
+                "label": "varchar(120) NOT NULL",
+                "note": "varchar(500) NULL DEFAULT NULL",
+                "repayment_account": "varchar(40) NULL DEFAULT NULL",
+                "repayment_bank_code": "char(4) NULL DEFAULT NULL",
+                "repayment_vs": "varchar(20) NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_cca_supplier": "BTREE (supplier_id, archived_at)",
+                "uq_cca_bank_account": "UNIQUE BTREE (bank_account_id)",
+                "uq_cca_supplier_analytic": "UNIQUE BTREE (supplier_id, analytic_suffix)"
+            },
+            "foreign_keys": {
+                "fk_cca_bank_account": "(bank_account_id) -> supplier_bank_accounts (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_cca_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_cca_analytic_suffix": "`analytic_suffix` is null or `analytic_suffix` regexp '^[0-9]{1,6}$'",
+                "chk_cca_currency": "`currency` regexp '^[A-Z]{3}$'",
+                "chk_cca_limit": "`credit_limit` is null or `credit_limit` >= 0"
+            }
+        },
+        "credit_card_settings": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "cash_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "fee_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "interest_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "repayment_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "reward_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id)",
+                "fk_ccst_cash": "BTREE (cash_account_id)",
+                "fk_ccst_fee": "BTREE (fee_account_id)",
+                "fk_ccst_interest": "BTREE (interest_account_id)",
+                "fk_ccst_repayment": "BTREE (repayment_account_id)",
+                "fk_ccst_reward": "BTREE (reward_account_id)",
+                "fk_ccst_user": "BTREE (updated_by)"
+            },
+            "foreign_keys": {
+                "fk_ccst_cash": "(cash_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_fee": "(fee_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_interest": "(interest_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_repayment": "(repayment_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_reward": "(reward_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_ccst_user": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
             "checks": []
         },
         "crm_action_item_dismissals": {
@@ -19968,7 +20045,7 @@
                 "iban": "varchar(34) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
-                "kind": "enum('current','savings','term_deposit') NOT NULL DEFAULT 'current'",
+                "kind": "enum('current','savings','term_deposit','credit_card') NOT NULL DEFAULT 'current'",
                 "label": "varchar(120) NULL DEFAULT NULL",
                 "source": "enum('currencies','statement','manual') NOT NULL DEFAULT 'manual'",
                 "supplier_id": "int(10) unsigned NOT NULL",
