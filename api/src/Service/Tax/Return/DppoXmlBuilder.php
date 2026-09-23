@@ -1709,25 +1709,27 @@ final class DppoXmlBuilder
         // atributy podle skupiny 1:1 (jen kc_dpp_b6 má "b6" prefix, zbytek kc_dppbN).
         $groupAttr = [1 => 'kc_dppb1', 2 => 'kc_dppb2', 3 => 'kc_dppb3', 4 => 'kc_dppb4', 5 => 'kc_dppb5', 6 => 'kc_dpp_b6'];
 
+        // Ř. 11 = součet UVEDENÝCH řádků v celých korunách, ne zaokrouhlený haléřový součet
+        // (viz TaxFormAmount) — jinak se může o korunu rozejít s ř. 1–10.
         $vetaF = $dom->createElement('VetaF');
         $any = false;
-        $total = 0.0;
+        $total = 0;
         foreach ($groupAttr as $group => $attr) {
             $amount = round((float) ($tangible[$group] ?? 0.0), 2);
             if ($amount === 0.0) {
                 continue;
             }
             $vetaF->setAttribute($attr, (string) (int) round($amount));
-            $total = round($total + $amount, 2);
+            $total += (int) round($amount);
             $any = true;
         }
         if ($intangible !== 0.0) {
             $vetaF->setAttribute('kc_dpp_b_onm', (string) (int) round($intangible));
-            $total = round($total + $intangible, 2);
+            $total += (int) round($intangible);
             $any = true;
         }
         if ($any) {
-            $vetaF->setAttribute('kc_dppb6_b8', (string) (int) round($total));
+            $vetaF->setAttribute('kc_dppb6_b8', (string) $total);
         }
         if ($unclassified !== 0.0) {
             $warnings[] = 'Daňové odpisy hmotného majetku ' . number_format($unclassified, 0, ',', ' ')
