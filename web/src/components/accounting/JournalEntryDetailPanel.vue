@@ -13,6 +13,7 @@ import WhyPanel from '@/components/automation/WhyPanel.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
 import JournalLineDimensionsEditor from '@/components/dimensions/JournalLineDimensionsEditor.vue'
+import OtherItemSourceContext from './OtherItemSourceContext.vue'
 
 /**
  * Obsah rozbaleného zápisu deníku (rozpad na účty, Souvisí, přílohy, akce).
@@ -74,6 +75,8 @@ function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>, s
       :key="`related-${detail.id}-${relatedKey}`"
       :entry-id="detail.id" show-preview
       @preview="id => emit('preview', id)" @focus-entry="id => emit('focus-entry', id)" />
+    <OtherItemSourceContext v-if="detail.source_type === 'other_item' && detail.source_id"
+      :key="detail.id" :entry-id="detail.id" />
     <WhyPanel v-if="detail.automation" class="mt-3" :provenance="detail.automation" />
     <!-- Epic F7: inline editace description (§35) + přílohy §33a -->
     <CollapsibleSection class="mt-4" :title="t('accounting.journal.extras_title')"

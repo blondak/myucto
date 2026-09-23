@@ -11,6 +11,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\JournalSourceSummaryService;
@@ -201,6 +202,60 @@ final class JournalSourceResolverTest extends TestCase
         self::assertFalse($summary['available']);
         self::assertSame('no_source', $summary['unavailable_reason']);
         self::assertSame([], $summary['blocks']);
+    }
+
+    public function testOtherItemPreviewUsesJournalEntryAndStaysWithinSupplier(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO other_items
+            (supplier_id, side, kind, title, partner_name, issued_on, due_on, amount,
+             status, currency, note, account_code, counter_account_code)
+            VALUES (?, 'receivable', 'rent', 'Nárok ze smlouvy', 'Syntetická protistrana',
+                    '2097-06-01', '2097-06-30', 1250, 'posted', 'CZK', 'Podklad k nároku', '315', '602')")
+            ->execute([$this->supplierId]);
+        $itemId = (int) $pdo->lastInsertId();
+        $entryId = $this->journal->insert(
+            [
+                'supplier_id' => $this->supplierId,
+                'period_id' => $this->periodId,
+                'entry_date' => self::YEAR . '-06-01',
+                'source_type' => 'other_item',
+                'source_id' => $itemId,
+                'posted_at' => date('Y-m-d H:i:s'),
+                'posted_by' => $this->userId,
+            ],
+            [
+                ['account_id' => $this->accountId, 'side' => 'debit', 'amount' => 1250.0],
+                ['account_id' => $this->accountId, 'side' => 'credit', 'amount' => 1250.0],
+            ],
+        );
+
+        $res = $this->invoke('GET', 'readonly', ['id' => (string) $entryId]);
+        self::assertSame(200, $res['status']);
+        self::assertTrue($res['body']['available']);
+        self::assertSame('other-item-detail', $res['body']['route']['name']);
+        self::assertSame($itemId, $res['body']['route']['params']['id']);
+        self::assertSame('other_items', $res['body']['actions'][0]['permission']);
+        $fields = array_column($res['body']['fields'], 'value', 'key');
+        self::assertSame('receivable', $fields['side']);
+        self::assertSame('rent', $fields['kind']);
+        self::assertSame('Podklad k nároku', $fields['note']);
+        self::assertSame(1250, $fields['amount_to_pay']);
+
+        $restrictedRequest = (new ServerRequestFactory())
+            ->createServerRequest('GET', '/api/accounting/journal/' . $entryId . '/source')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute('auth.effective_role', new EffectiveRole(
+                1, 'Accounting only', 'staff', true, ['accounting' => 1, 'other_items' => 0],
+            ));
+        $restricted = $this->action->__invoke($restrictedRequest, new Psr7Response(), ['id' => (string) $entryId]);
+        self::assertSame(403, $restricted->getStatusCode());
+
+        $foreign = $this->summaries->summarize($this->supplierId + 99999, [
+            'source_type' => 'other_item', 'source_id' => $itemId,
+        ]);
+        self::assertFalse($foreign['available']);
+        self::assertSame('not_found', $foreign['unavailable_reason']);
     }
 
     public function testMissingDocumentReportsNotFoundInsteadOfForeignRow(): void

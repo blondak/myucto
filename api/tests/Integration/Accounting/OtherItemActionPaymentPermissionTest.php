@@ -146,6 +146,41 @@ final class OtherItemActionPaymentPermissionTest extends TestCase
         self::assertSame(['cash'], array_column($cashOnly['items'], 'source'));
     }
 
+    public function testListAllowsOpenEndedFutureDueDateFilter(): void
+    {
+        $response = $this->call('list', 'GET', ['other_items' => 1], [], null,
+            ['from' => '2099-01-01']);
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame(1, $this->data($response)['total']);
+
+        $response = $this->call('list', 'GET', ['other_items' => 1], [], null,
+            ['to' => '2020-01-01']);
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame(0, $this->data($response)['total']);
+    }
+
+    public function testOpenEndedDueDateFiltersIncludeDerivedTaxAdvances(): void
+    {
+        $insert = $this->pdo->prepare(
+            'INSERT INTO tax_advance_schedules
+                (supplier_id, taxpayer_type, advance_kind, period_year, seq_no, amount, due_date)
+             VALUES (?, "po", "tax", ?, 1, 1200.00, ?)'
+        );
+        $insert->execute([$this->supplierId, 2024, '2024-06-15']);
+        $pastId = (int) $this->pdo->lastInsertId();
+        $insert->execute([$this->supplierId, 2099, '2099-06-15']);
+        $futureId = (int) $this->pdo->lastInsertId();
+
+        $permissions = ['other_items' => 1, 'reports' => 1];
+        $past = $this->data($this->call('list', 'GET', $permissions, [], null,
+            ['to' => '2024-12-31']));
+        self::assertContains('tax_advance:' . $pastId, array_column($past['sources'], 'id'));
+
+        $future = $this->data($this->call('list', 'GET', $permissions, [], null,
+            ['from' => '2099-01-01']));
+        self::assertContains('tax_advance:' . $futureId, array_column($future['sources'], 'id'));
+    }
+
     private function call(string $method, string $http, array $permissions, array $body = [],
         ?int $allocationId = null, array $query = []): ResponseInterface
     {

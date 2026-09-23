@@ -11,8 +11,10 @@ import { formatDate, formatMoney } from '@/composables/useFormat'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import OtherItemPlans from '@/components/accounting/OtherItemPlans.vue'
+import OtherItemJournalContext from '@/components/accounting/OtherItemJournalContext.vue'
 import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
 
@@ -38,6 +40,7 @@ const repostCounterAccountCode = ref('')
 const repostDate = ref(appIsoDate())
 const repostReason = ref('')
 const isDoubleEntry = computed(() => supplier.currentSupplier?.accounting_mode === 'double_entry')
+const isTaxEvidence = computed(() => supplier.currentSupplier?.accounting_mode === 'tax_evidence')
 const canEdit = computed(() => item.value?.status === 'draft' && auth.canWrite('other_items'))
 const canPost = computed(() => auth.canWrite('other_items') && (!isDoubleEntry.value || auth.canWrite('accounting.journal.post')))
 const canManageBankPayment = computed(() => auth.canRead('bank') && auth.canWrite('bank.match'))
@@ -46,6 +49,12 @@ const canAllocate = computed(() => auth.canWrite('other_items') && (canManageBan
   && (item.value?.status === 'posted' || item.value?.status === 'confirmed') && Number(item.value?.remaining_amount || 0) > 0)
 const canRepost = computed(() => isDoubleEntry.value && item.value?.status === 'posted' && !!item.value?.journal_entry_id
   && auth.canWrite('other_items') && auth.canWrite('accounting.journal.post'))
+const documentFolderPath = computed(() => {
+  const issuedOn = item.value?.issued_on || ''
+  return /^\d{4}-\d{2}-\d{2}$/.test(issuedOn)
+    ? `Ostatní pohledávky a závazky/${issuedOn.slice(0, 4)}/${issuedOn.slice(5, 7)}`
+    : undefined
+})
 const repostAccountChoices = computed(() => repostAccounts.value.filter(account => account.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)))
 const repostBalanceAccounts = computed(() => repostAccountChoices.value.filter(account =>
   account.account_type === (item.value?.side === 'receivable' ? 'asset' : 'liability'),
@@ -268,12 +277,16 @@ onMounted(load)
     <template v-else>
       <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <RouterLink :to="{ name: 'other-items' }" class="text-sm text-primary-700 hover:underline">{{ t('other_items.back') }}</RouterLink>
+          <RouterLink :to="{ name: 'other-items' }" class="text-sm text-primary-700 hover:underline">← {{ t('other_items.back') }}</RouterLink>
           <div class="mt-1 flex flex-wrap items-center gap-2">
             <h1 class="text-2xl font-semibold">{{ item.title }}</h1>
             <span class="rounded bg-primary-50 px-2 py-1 text-xs font-medium text-primary-700">{{ statusLabel(item.status) }}</span>
           </div>
-          <p class="mt-0.5 text-sm text-neutral-500">{{ t(`other_items.side.${item.side}`) }} · {{ item.kind }}<span v-if="item.partner_name"> · {{ item.partner_name }}</span></p>
+          <p class="mt-0.5 text-sm text-neutral-500">{{ t(`other_items.side.${item.side}`) }} · {{ t(`other_items.kind_by_side.${item.side}.${item.kind}`) }}<span v-if="item.partner_name"> · {{ item.partner_name }}</span></p>
+          <a href="#other-item-plans" class="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary-700 hover:underline">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.calendar" /></svg>
+            {{ t('other_items.plans.schedule_title') }} · {{ t('other_items.plans.installments_title') }}
+          </a>
         </div>
         <ActionBar :actions="actions" />
       </div>
@@ -283,7 +296,7 @@ onMounted(load)
           <h2 class="mb-3 font-semibold">{{ t('other_items.details') }}</h2>
           <dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
             <div><dt class="text-neutral-500">{{ t('other_items.partner') }}</dt><dd>{{ item.partner_name || t('other_items.no_partner') }}</dd></div>
-            <div><dt class="text-neutral-500">{{ t('other_items.kind_label') }}</dt><dd>{{ item.kind }}</dd></div>
+            <div><dt class="text-neutral-500">{{ t('other_items.kind_label') }}</dt><dd>{{ t(`other_items.kind_by_side.${item.side}.${item.kind}`) }}</dd></div>
             <div><dt class="text-neutral-500">{{ t('other_items.issued_on') }}</dt><dd>{{ item.issued_on ? formatDate(item.issued_on) : '–' }}</dd></div>
             <div><dt class="text-neutral-500">{{ t('other_items.due_on') }}</dt><dd>{{ item.due_on ? formatDate(item.due_on) : '–' }}</dd></div>
             <div v-if="isDoubleEntry"><dt class="text-neutral-500">{{ t('other_items.accounting_on') }}</dt><dd>{{ item.accounting_on ? formatDate(item.accounting_on) : '–' }}</dd></div>
@@ -306,15 +319,23 @@ onMounted(load)
           <div>
             <h2 class="font-semibold">{{ t('other_items.accounting') }}</h2>
             <p class="mt-1 text-sm text-neutral-500">{{ item.account_code || '–' }} / {{ item.counter_account_code || '–' }} · {{ item.accounting_on ? formatDate(item.accounting_on) : '–' }}</p>
-            <RouterLink :to="{ name: 'accounting-journal', query: { entry_id: String(item.journal_entry_id) } }" class="mt-2 inline-block text-sm text-primary-700 hover:underline">{{ t('other_items.open_journal') }}</RouterLink>
+            <RouterLink :to="{ name: 'accounting-journal', query: { entry_id: String(item.journal_entry_id) } }" :class="[btnOutline('primary'), 'mt-3']">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+              {{ t('other_items.open_journal') }}
+            </RouterLink>
           </div>
           <ActionBar :actions="postingActions" />
         </div>
       </section>
-      <LinkedDocumentsPanel v-if="auth.canRead('documents')" class="mt-4" entity-type="other_item" :entity-id="id" uploadable :title="t('linked_documents.title')" />
+      <OtherItemJournalContext v-if="isDoubleEntry && item.journal_entry_id" :entry-id="Number(item.journal_entry_id)" />
+      <LinkedDocumentsPanel v-if="auth.canRead('documents')" class="mt-4" entity-type="other_item" :entity-id="id" uploadable :upload-folder-path="documentFolderPath" :title="t('linked_documents.title')" />
       <OtherItemPlans :item="item" />
       <section class="mt-4 rounded-lg border border-neutral-200 bg-surface p-4">
         <h2 class="mb-3 font-semibold">{{ t('other_items.payments') }}</h2>
+        <p v-if="isTaxEvidence && allocations.some(allocation => !allocation.reversed_on)" class="mb-3 text-sm text-warning-700">
+          {{ t('other_items.tax_classification_hint') }}
+          <RouterLink v-if="auth.canRead('tax_evidence')" :to="{ name: 'tax-evidence-cash-journal' }" class="font-medium underline">{{ t('other_items.open_cash_journal') }}</RouterLink>
+        </p>
         <div v-if="allocations.length" class="divide-y divide-neutral-100 text-sm">
           <div v-for="allocation in allocations" :key="allocation.id" class="flex flex-wrap items-center justify-between gap-2 py-2">
             <div>
@@ -392,16 +413,10 @@ onMounted(load)
           <div class="mt-1 font-medium">{{ item?.account_code || '–' }} / {{ item?.counter_account_code || '–' }} · {{ item ? formatMoney(item.amount, item.currency) : '' }}</div>
         </div>
         <label class="block text-sm font-medium">{{ t('other_items.account_code') }}
-          <select v-model="repostAccountCode" required class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2">
-            <option value="">{{ t('other_items.choose_account') }}</option>
-            <option v-for="account in repostBalanceAccounts" :key="account.id" :value="account.account_code">{{ account.account_code }} · {{ account.name }}</option>
-          </select>
+          <ChartAccountSelect v-model="repostAccountCode" :accounts="repostBalanceAccounts" :placeholder="t('other_items.choose_account')" class="mt-1 block" />
         </label>
         <label class="block text-sm font-medium">{{ t('other_items.counter_account_code') }}
-          <select v-model="repostCounterAccountCode" required class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2">
-            <option value="">{{ t('other_items.choose_account') }}</option>
-            <option v-for="account in repostAccountChoices" :key="account.id" :value="account.account_code">{{ account.account_code }} · {{ account.name }}</option>
-          </select>
+          <ChartAccountSelect v-model="repostCounterAccountCode" :accounts="repostAccountChoices" :placeholder="t('other_items.choose_account')" class="mt-1 block" />
         </label>
         <label class="block text-sm font-medium">{{ t('other_items.repost_date') }}
           <DateInput v-model="repostDate" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 px-2" />

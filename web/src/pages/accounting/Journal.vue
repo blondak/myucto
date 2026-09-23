@@ -87,7 +87,7 @@ function accountName(code: string): string {
 }
 
 const SOURCE_TYPES = [
-  'manual', 'invoice', 'purchase_invoice', 'bank', 'gopay', 'cash',
+  'manual', 'invoice', 'purchase_invoice', 'other_item', 'bank', 'gopay', 'cash',
   'depreciation', 'asset', 'asset_disposal',
   'closing', 'opening', 'fx_revaluation', 'stock',
   'offset', 'settlement', 'vat_clearing', 'card_settlement', 'card_writeoff',
@@ -687,6 +687,7 @@ function sourceLabel(type: string): string {
  * dokud žilo jen tady, vedla z opisu účtu proklikem jen faktura.
  */
 function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
+  if (entry.source_type === 'other_item' && !auth.canRead('other_items')) return null
   return journalSourceLink(entry)
 }
 

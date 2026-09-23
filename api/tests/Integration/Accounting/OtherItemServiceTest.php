@@ -100,6 +100,18 @@ final class OtherItemServiceTest extends TestCase
         }
     }
 
+    public function testItemAmountMustBePositiveWholeCents(): void
+    {
+        foreach ([0.001, 100.005] as $amount) {
+            try {
+                $this->service->create($this->supplierId, $this->input(['amount' => $amount]), null);
+                self::fail('Částka se nesmí tiše zaokrouhlit na haléře.');
+            } catch (OtherItemException $e) {
+                self::assertSame('invalid_amount', $e->errorCode);
+            }
+        }
+    }
+
     public function testPostingAndRepostingRejectSameAccountOnBothSides(): void
     {
         $invalid = $this->service->create($this->supplierId, $this->input(['counter_account_code' => '325']), null);
@@ -157,6 +169,13 @@ final class OtherItemServiceTest extends TestCase
              VALUES (?, ?, ?, ?)'
         )->execute([$statementId, '2099-01-20', -500, 'CZK']);
         $transactionId = (int) $this->pdo->lastInsertId();
+        try {
+            $this->service->allocate($this->supplierId, (int) $draft['id'],
+                ['bank_transaction_id' => $transactionId, 'amount' => 0.001], null);
+            self::fail('Alokace se nesmí tiše zaokrouhlit na nulu.');
+        } catch (OtherItemException $e) {
+            self::assertSame('invalid_amount', $e->errorCode);
+        }
         $part = $this->service->allocate($this->supplierId, (int) $draft['id'],
             ['bank_transaction_id' => $transactionId, 'amount' => 500], null);
         self::assertEqualsWithDelta(700.0, (float) $part['remaining_amount'], 0.001);

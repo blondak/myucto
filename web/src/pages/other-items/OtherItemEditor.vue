@@ -3,12 +3,15 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
+import type { Client } from '@/api/clients'
 import { otherItemsApi, type OtherItemPayload, type OtherItemSide } from '@/api/otherItems'
 import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { appIsoDate } from '@/utils/date'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
+import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
+import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -38,13 +41,21 @@ const form = reactive({
   note: '',
 })
 
+const kindChoices = ['rent', 'deposit', 'loan', 'insurance', 'fee', 'claim', 'other'] as const
 const accountChoices = computed(() => accounts.value.filter(a => a.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)))
 const balanceAccountChoices = computed(() => accountChoices.value.filter(a =>
   a.account_type === (form.side === 'receivable' ? 'asset' : 'liability'),
 ))
-function onSideChange() { form.account_code = '' }
+function onSideChange() {
+  form.kind = 'other'
+  form.account_code = ''
+  form.counter_account_code = ''
+}
 function onPartnerNameInput() {
-  if (!form.partner_name.trim()) form.partner_id = null
+  form.partner_id = null
+}
+function onPartnerSelected(client: Client | null) {
+  form.partner_name = client?.company_name || ''
 }
 
 async function load() {
@@ -121,7 +132,7 @@ onMounted(load)
   <div>
     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div>
-        <RouterLink :to="isEdit ? { name: 'other-item-detail', params: { id: editId } } : { name: 'other-items' }" class="text-sm text-primary-700 hover:underline">{{ t('other_items.back') }}</RouterLink>
+        <RouterLink :to="isEdit ? { name: 'other-item-detail', params: { id: editId } } : { name: 'other-items' }" class="text-sm text-primary-700 hover:underline">← {{ t('other_items.back') }}</RouterLink>
         <h1 class="mt-1 text-2xl font-semibold">{{ t(isEdit ? 'other_items.edit' : 'other_items.new') }}</h1>
         <p class="mt-0.5 text-sm text-neutral-500">{{ t('other_items.form_hint') }}</p>
       </div>
@@ -139,17 +150,14 @@ onMounted(load)
           </label>
           <label class="text-sm font-medium">{{ t('other_items.kind_label') }}
             <select v-model="form.kind" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2">
-              <option value="rent">{{ t('other_items.kind.rent') }}</option>
-              <option value="deposit">{{ t('other_items.kind.deposit') }}</option>
-              <option value="loan">{{ t('other_items.kind.loan') }}</option>
-              <option value="insurance">{{ t('other_items.kind.insurance') }}</option>
-              <option value="fee">{{ t('other_items.kind.fee') }}</option>
-              <option value="claim">{{ t('other_items.kind.claim') }}</option>
-              <option value="other">{{ t('other_items.kind.other') }}</option>
+              <option v-for="kind in kindChoices" :key="kind" :value="kind">{{ t(`other_items.kind_by_side.${form.side}.${kind}`) }}</option>
             </select>
           </label>
           <label class="text-sm font-medium sm:col-span-2">{{ t('other_items.item') }}
             <input v-model="form.title" required maxlength="255" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" />
+          </label>
+          <label class="text-sm font-medium sm:col-span-2">{{ t('other_items.partner_directory') }}
+            <ClientSearchSelect v-model="form.partner_id" :selected-label="form.partner_name" :role="form.side === 'payable' ? 'vendors' : 'customers'" class="mt-1 block" @selected="onPartnerSelected" />
           </label>
           <label class="text-sm font-medium sm:col-span-2">{{ t('other_items.partner') }}
             <input v-model="form.partner_name" maxlength="190" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" @input="onPartnerNameInput" />
@@ -180,16 +188,10 @@ onMounted(load)
           </label>
           <div></div>
           <label class="text-sm font-medium">{{ t('other_items.account_code') }}
-            <select v-model="form.account_code" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2">
-              <option value="">{{ t('other_items.choose_account') }}</option>
-              <option v-for="account in balanceAccountChoices" :key="account.id" :value="account.account_code">{{ account.account_code }} · {{ account.name }}</option>
-            </select>
+            <ChartAccountSelect v-model="form.account_code" :accounts="balanceAccountChoices" :placeholder="t('other_items.choose_account')" class="mt-1 block" />
           </label>
           <label class="text-sm font-medium">{{ t('other_items.counter_account_code') }}
-            <select v-model="form.counter_account_code" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2">
-              <option value="">{{ t('other_items.choose_account') }}</option>
-              <option v-for="account in accountChoices" :key="account.id" :value="account.account_code">{{ account.account_code }} · {{ account.name }}</option>
-            </select>
+            <ChartAccountSelect v-model="form.counter_account_code" :accounts="accountChoices" :placeholder="t('other_items.choose_account')" class="mt-1 block" />
           </label>
         </div>
       </section>

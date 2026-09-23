@@ -143,11 +143,17 @@ final class JournalSourceSummaryService
     {
         $row = $this->one(
             'SELECT id, side, kind, title, partner_name, issued_on, due_on, currency,
-                    amount, document_no, status, variable_symbol, account_code, counter_account_code
+                    amount, document_no, status, variable_symbol, account_code, counter_account_code, note
                FROM other_items WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL',
             [$id, $supplierId],
         );
         if ($row === null) return null;
+        $paid = $this->one(
+            'SELECT COALESCE(SUM(amount), 0) AS amount FROM other_item_allocations
+              WHERE other_item_id = ? AND supplier_id = ? AND reversed_on IS NULL',
+            [$id, $supplierId],
+        );
+        $paidAmount = (float) ($paid['amount'] ?? 0);
         $route = ['name' => 'other-item-detail', 'params' => ['id' => $id]];
         $currency = (string) $row['currency'];
         return [
@@ -156,13 +162,18 @@ final class JournalSourceSummaryService
             'status' => $this->status((string) $row['status'], $row['status'] === 'posted' ? 'success' : 'neutral'),
             'currency' => $currency,
             'fields' => [
-                $this->kv('partner_name', 'partner', $row['partner_name'], 'text'),
-                $this->kv('issued_on', 'issue_date', $row['issued_on'], 'date'),
+                $this->kv('side', 'other_item_side', $row['side'], 'text'),
+                $this->kv('kind', 'other_item_kind', $row['kind'], 'text'),
+                $this->kv('partner_name', 'other_item_partner', $row['partner_name'], 'text'),
+                $this->kv('issued_on', 'other_item_issued_on', $row['issued_on'], 'date'),
                 $this->kv('due_on', 'due_date', $row['due_on'], 'date'),
                 $this->kv('amount', 'amount', (float) $row['amount'], 'currency'),
+                $this->kv('paid_total', 'paid_total', $paidAmount, 'currency'),
+                $this->kv('amount_to_pay', 'amount_to_pay', max(0, (float) $row['amount'] - $paidAmount), 'currency'),
                 $this->kv('variable_symbol', 'variable_symbol', $row['variable_symbol'], 'text'),
-                $this->kv('account_code', 'account_code', $row['account_code'], 'text'),
-                $this->kv('counter_account_code', 'counter_account_code', $row['counter_account_code'], 'text'),
+                $this->kv('account_code', 'other_item_account', $row['account_code'], 'text'),
+                $this->kv('counter_account_code', 'other_item_counter_account', $row['counter_account_code'], 'text'),
+                $this->kv('note', 'other_item_note', $row['note'], 'text'),
             ],
             'blocks' => [],
             'route' => $route,

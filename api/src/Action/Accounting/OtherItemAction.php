@@ -35,18 +35,20 @@ final class OtherItemAction
         foreach (['side', 'status', 'kind', 'q', 'from', 'to'] as $field) {
             if (isset($q[$field]) && is_scalar($q[$field])) $filters[$field] = trim((string) $q[$field]);
         }
-        $result = $this->service->list(
-            $this->currentSupplierId($request), $filters,
-            (int) ($q['page'] ?? 1), (int) ($q['per_page'] ?? 50),
-        );
-        $from = isset($q['from']) && is_scalar($q['from']) ? (string) $q['from'] : date('Y-m-d', strtotime('-1 year'));
-        $to = isset($q['to']) && is_scalar($q['to']) ? (string) $q['to'] : date('Y-m-d', strtotime('+1 year'));
+        $hasFrom = isset($filters['from']);
+        $hasTo = isset($filters['to']);
+        $from = $hasFrom ? $filters['from'] : ($hasTo ? '1000-01-01' : date('Y-m-d', strtotime('-1 year')));
+        $to = $hasTo ? $filters['to'] : ($hasFrom ? '9999-12-31' : date('Y-m-d', strtotime('+1 year')));
         $fromDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $from);
         $toDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $to);
         if ($fromDate === false || $fromDate->format('Y-m-d') !== $from
             || $toDate === false || $toDate->format('Y-m-d') !== $to || $from > $to) {
             return Json::error($response, 'other_items.error.invalid_date', 'Neplatný rozsah splatnosti.', 422);
         }
+        $result = $this->service->list(
+            $this->currentSupplierId($request), $filters,
+            (int) ($q['page'] ?? 1), (int) ($q['per_page'] ?? 50),
+        );
         $derived = [];
         $sid = $this->currentSupplierId($request);
         $forecastFrom = max($from, date('Y-m-d'));

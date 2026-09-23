@@ -454,6 +454,9 @@
     "purchase-invoices-payment-orders": [
       "bank_connection",
       "dimensions",
+      "documents",
+      "linked_documents",
+      "other_items",
       "payment_method",
       "payment_order",
       "purchase_invoice"
@@ -619,21 +622,28 @@
       "users"
     ],
     "accounting-account-detail": [
-      "dimensions"
+      "dimensions",
+      "documents",
+      "linked_documents",
+      "other_items"
     ],
     "accounting-journal": [
       "activation",
       "automation",
       "dimensions",
       "documents",
-      "linked_documents"
+      "linked_documents",
+      "other_items"
     ],
     "accounting-journal-new": [
       "dimensions"
     ],
     "accounting-setup-assistant": [
       "dimensions",
-      "imports"
+      "documents",
+      "imports",
+      "linked_documents",
+      "other_items"
     ],
     "accounting-general-ledger": [
       "activation",
@@ -644,7 +654,10 @@
       "dimensions"
     ],
     "accounting-account-statement": [
-      "dimensions"
+      "dimensions",
+      "documents",
+      "linked_documents",
+      "other_items"
     ],
     "accounting-balance-sheet": [
       "activation",

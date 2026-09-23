@@ -369,8 +369,9 @@ final class OtherItemService
             throw new OtherItemException('invalid_payment', 'Zvolte právě jednu bankovní nebo pokladní platbu.');
         }
         $amount = filter_var($input['amount'] ?? null, FILTER_VALIDATE_FLOAT);
-        if ($amount === false || $amount <= 0) {
-            throw new OtherItemException('invalid_amount', 'Párovaná částka musí být kladná.');
+        if ($amount === false || !is_finite((float) $amount) || $amount <= 0
+            || round((float) $amount, 2) !== (float) $amount) {
+            throw new OtherItemException('invalid_amount', 'Párovaná částka musí být kladná a zadaná na haléře.');
         }
         $amount = round((float) $amount, 2);
         $pdo = $this->db->pdo();
@@ -620,8 +621,9 @@ final class OtherItemService
         if ($accounting !== null && $accounting !== '') self::assertDate((string) $accounting, 'accounting_on');
         else $accounting = $issued;
         $amount = filter_var($input['amount'] ?? null, FILTER_VALIDATE_FLOAT);
-        if ($amount === false || $amount <= 0 || $amount > 999999999999.99) {
-            throw new OtherItemException('invalid_amount', 'Částka musí být kladná.');
+        if ($amount === false || !is_finite((float) $amount) || $amount <= 0
+            || $amount > 999999999999.99 || round((float) $amount, 2) !== (float) $amount) {
+            throw new OtherItemException('invalid_amount', 'Částka musí být kladná a zadaná na haléře.');
         }
         $currency = strtoupper(trim((string) ($input['currency'] ?? 'CZK')));
         if (!preg_match('/^[A-Z]{3}$/', $currency)) {

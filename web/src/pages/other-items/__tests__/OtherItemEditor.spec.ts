@@ -6,14 +6,18 @@ const m = vi.hoisted(() => ({
   update: vi.fn(),
   routerPush: vi.fn(),
   routerReplace: vi.fn(),
+  listAccounts: vi.fn(),
+  supplier: { accounting_mode: 'tax_evidence' },
 }))
+
+vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: m.listAccounts } }))
 
 vi.mock('@/api/otherItems', () => ({
   otherItemsApi: { get: m.get, update: m.update, create: vi.fn() },
 }))
 
 vi.mock('@/stores/supplier', () => ({
-  useSupplierStore: () => ({ currentSupplier: { accounting_mode: 'tax_evidence' } }),
+  useSupplierStore: () => ({ currentSupplier: m.supplier }),
 }))
 
 vi.mock('@/composables/useToast', () => ({
@@ -35,6 +39,7 @@ import OtherItemEditor from '../OtherItemEditor.vue'
 describe('OtherItemEditor partner', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.supplier.accounting_mode = 'tax_evidence'
     m.get.mockResolvedValue({
       id: 42,
       status: 'draft',
@@ -83,5 +88,58 @@ describe('OtherItemEditor partner', () => {
       partner_id: null,
       partner_name: null,
     }))
+  })
+
+  it('při ruční změně názvu protistrany odstraní vazbu na původního klienta', async () => {
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    await wrapper.get('input[maxlength="190"]').setValue('Jiná protistrana')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.update).toHaveBeenCalledWith(42, expect.objectContaining({
+      partner_id: null,
+      partner_name: 'Jiná protistrana',
+    }))
+  })
+
+  it('výběr protistrany z adresáře uloží její identifikátor i název', async () => {
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    const picker = wrapper.getComponent({ name: 'ClientSearchSelect' })
+    picker.vm.$emit('update:modelValue', 23)
+    picker.vm.$emit('selected', { id: 23, company_name: 'Syntetický klient' })
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.update).toHaveBeenCalledWith(42, expect.objectContaining({
+      partner_id: 23,
+      partner_name: 'Syntetický klient',
+    }))
+  })
+
+  it('při změně směru přepne význam druhu a vrátí jej na obecnou položku', async () => {
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    const kind = wrapper.findAll('select')[1]!
+    expect(kind.find('option[value="loan"]').text()).toBe('other_items.kind_by_side.payable.loan')
+    await wrapper.findAll('select')[0]!.setValue('receivable')
+    expect(kind.find('option[value="loan"]').text()).toBe('other_items.kind_by_side.receivable.loan')
+    expect((kind.element as HTMLSelectElement).value).toBe('other')
+  })
+
+  it('v podvojném účetnictví nabízí našeptávač zvlášť pro rozvahový účet a protiúčet', async () => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.listAccounts.mockResolvedValue([
+      { id: 1, account_code: '311.100', name: 'Pohledávka', account_type: 'asset', is_active: true },
+      { id: 2, account_code: '325.100', name: 'Závazek', account_type: 'liability', is_active: true },
+      { id: 3, account_code: '648', name: 'Výnos', account_type: 'revenue', is_active: true },
+    ])
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    const pickers = wrapper.findAllComponents({ name: 'ChartAccountSelect' })
+    expect(pickers).toHaveLength(2)
+    expect(pickers[0]!.props('accounts').map((account: { account_code: string }) => account.account_code)).toEqual(['325.100'])
+    expect(pickers[1]!.props('accounts')).toHaveLength(3)
   })
 })

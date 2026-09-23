@@ -1066,20 +1066,49 @@ a daňového modulu. Příkladem je nájemné podle smlouvy, vratná kauce nebo 
 samostatná pohledávka. Zdanitelné plnění se zadává fakturační cestou, aby jeho
 řádky správně vstoupily do knihy DPH a výkazů.
 
-V konceptu zadej důvod, protistranu, datum vzniku, splatnost, měnu a částku.
+V konceptu zadej důvod, protistranu, datum vzniku, splatnost a částku v CZK.
+Názvy druhů se mění podle směru, aby například nárok na vrácení kauce nezněl
+jako přijatá kauce. Při změně směru se druh a účetní předkontace vymažou.
+Protistranu můžeš vybrat z adresáře nebo zadat ručně. Přehled nabízí u každého
+ručního dokladu přímý vstup do detailu; rozpracovaný koncept lze z přehledu také
+upravit nebo odstranit. Seznam lze filtrovat podle směru, stavu, zdroje,
+textu a rozmezí splatnosti. Text hledá název, protistranu, číslo dokladu a
+variabilní symbol.
 V podvojném účetnictví vyber bilanční účet a protiúčet podle skutečného
-účetního případu. Pro běžnou pohledávku se nabízí účet 315, pro závazek 325.
+účetního případu. Účty lze hledat podle kódu i názvu včetně analytiky.
+Pro běžnou pohledávku se nabízí účet 315, pro závazek 325.
 Účet 5xx na druhé straně znamená náklad, účet 6xx výnos; rozvahový protiúčet
 nemění zisk. Stejný účet na obou stranách není platnou předkontací. Potvrzením
 se dokladu přidělí číslo a vznikne zápis v deníku. V daňové evidenci potvrzení
-založí otevřenou evidenční položku bez účetního zápisu.
+založí otevřenou evidenční položku bez účetního zápisu. Daňovou povahu
+skutečné bankovní nebo pokladní platby je v daňové evidenci potřeba správně
+zařadit v peněžním deníku; druh pohledávky či závazku to neurčuje sám.
+
+V účetním deníku lze u zápisu otevřít náhled ostatní položky a přejít na její
+detail. Náhled ukazuje směr, druh, splatnost, částku, úhradu, kontaci,
+poznámku a připojené dokumenty. Rozbalený zápis ukazuje poznámku a dokumenty
+zdrojové položky vedle vlastních poznámek a příloh zápisu. Z detailu ostatní
+položky lze otevřít zápis a zobrazit také jeho samostatné poznámky a přílohy.
+Originály zůstávají ve skladu dokumentů, vazba je nekopíruje.
 
 Na detailu můžeš propojit jednu či více smluv, skenů nebo jiných podkladů se
-skladem dokumentů. Originál zůstává ve skladu a stejná smlouva může být
+skladem dokumentů. Nově nahraný sken se ve skladu zařadí do složky
+**Ostatní pohledávky a závazky / rok / měsíc** podle data vzniku položky.
+Originál zůstává ve skladu a stejná smlouva může být
 podkladem několika období. K platbě se přiřazuje existující bankovní pohyb
 nebo pokladní doklad; jedna položka může mít více dílčích úhrad. Párování
 znovu nezaúčtuje banku ani pokladnu. U cizí měny je potřeba nejprve vyřešit
 kurzové vypořádání.
+
+V detailu v části **Opakování položky** nastavíš měsíční, čtvrtletní nebo roční
+opakování a případné datum konce. Denní úloha připravuje samostatné koncepty
+až 90 dní dopředu, aby se ukázaly v predikci. Můžeš je vytvořit také ručně
+tlačítkem **Vytvořit koncepty**. Vzniklé doklady se automaticky nezaúčtují.
+Pod rozvrhem se zobrazí až další vytvořené položky s datem a stavem; zdrojová
+položka se v seznamu znovu nevypisuje.
+Podklady zdrojové položky se připojí i k novým konceptům. Vedle lze nastavit
+splátky jedné pohledávky nebo závazku, které rozloží očekávané platby bez
+dalšího účetního nákladu či výnosu.
 
 Chybný zaúčtovaný doklad opravíš přeúčtováním: zadáš důvod, datum a nové účty.
 Původní zápis se stornuje a vytvoří se nový se stejným číslem dokladu. Doklad

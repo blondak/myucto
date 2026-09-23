@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { otherItemsApi, type OtherItem, type OtherItemSide } from '@/api/otherItems'
@@ -8,12 +8,15 @@ import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
+import { ICONS, btnOutlineSm } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const route = useRoute()
 const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(false)
+const removingId = ref<number | null>(null)
 const items = ref<OtherItem[]>([])
 const sources = ref<OtherItem[]>([])
 const total = ref(0)
@@ -22,6 +25,11 @@ const perPage = ref(50)
 const side = ref<'' | OtherItemSide>(route.query.side === 'receivable' || route.query.side === 'payable' ? route.query.side : '')
 const status = ref<'open' | 'all'>('open')
 const source = ref('')
+const search = ref('')
+const dueFrom = ref('')
+const dueTo = ref('')
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let loadRequest = 0
 
 const pages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
 const visibleItems = computed(() => source.value === '' || source.value === 'manual' ? items.value : [])
@@ -62,27 +70,60 @@ function isEstimate(item: OtherItem): boolean {
 }
 
 async function load() {
+  const request = ++loadRequest
   loading.value = true
   try {
     const result = await otherItemsApi.list({
       ...(side.value ? { side: side.value } : {}), status: status.value,
+      ...(search.value.trim() ? { q: search.value.trim() } : {}),
+      ...(dueFrom.value ? { from: dueFrom.value } : {}),
+      ...(dueTo.value ? { to: dueTo.value } : {}),
       page: page.value,
     })
+    if (request !== loadRequest) return
     items.value = result.items
     sources.value = result.sources || []
     total.value = result.total
     perPage.value = result.per_page || 50
   } catch (error: any) {
+    if (request !== loadRequest) return
     items.value = []
     sources.value = []
     toast.error(error?.response?.data?.error?.message || t('common.error'))
   } finally {
-    loading.value = false
+    if (request === loadRequest) loading.value = false
   }
 }
 
-watch([side, status], () => { page.value = 1; void load() })
+function reloadFirstPage() {
+  if (page.value !== 1) page.value = 1
+  else void load()
+}
+
+async function removeItem(item: OtherItem) {
+  const id = Number(item.source_id)
+  if (item.status !== 'draft' || !auth.canWrite('other_items') || removingId.value !== null
+    || !window.confirm(t('other_items.confirm_delete'))) return
+  removingId.value = id
+  try {
+    await otherItemsApi.remove(id)
+    toast.success(t('common.deleted'))
+    if (items.value.length === 1 && page.value > 1) page.value--
+    else await load()
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    removingId.value = null
+  }
+}
+
+watch([side, status, dueFrom, dueTo], reloadFirstPage)
+watch(search, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(reloadFirstPage, 300)
+})
 watch(page, () => void load())
+onBeforeUnmount(() => { if (searchTimer) clearTimeout(searchTimer) })
 onMounted(load)
 </script>
 
@@ -121,6 +162,18 @@ onMounted(load)
           <option value="tax">{{ t('other_items.source.tax') }}</option>
         </select>
       </label>
+      <label class="min-w-52 flex-1 text-xs font-medium text-neutral-500">
+        {{ t('other_items.search') }}
+        <input v-model="search" type="search" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm text-neutral-800" />
+      </label>
+      <label class="min-w-40 flex-1 text-xs font-medium text-neutral-500">
+        {{ t('other_items.due_from') }}
+        <DateInput v-model="dueFrom" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 px-2 text-sm" />
+      </label>
+      <label class="min-w-40 flex-1 text-xs font-medium text-neutral-500">
+        {{ t('other_items.due_to') }}
+        <DateInput v-model="dueTo" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 px-2 text-sm" />
+      </label>
     </div>
 
     <div v-if="loading" class="py-12 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
@@ -139,6 +192,7 @@ onMounted(load)
               <th class="px-3 py-2 text-right font-medium">{{ t('other_items.amount') }}</th>
               <th class="px-3 py-2 text-right font-medium">{{ t('other_items.remaining') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('other_items.status_label') }}</th>
+              <th class="px-3 py-2 text-left font-medium">{{ t('common.actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
@@ -146,7 +200,7 @@ onMounted(load)
               <td class="px-3 py-3">
                 <RouterLink v-if="itemRoute(item)" :to="itemRoute(item)!" class="font-medium text-primary-700 hover:underline">{{ item.title }}</RouterLink>
                 <span v-else class="font-medium">{{ item.title }}</span>
-                <div class="mt-0.5 text-xs text-neutral-500">{{ t(`other_items.side.${item.side}`) }} · {{ label('kind', item.kind) }}</div>
+                <div class="mt-0.5 text-xs text-neutral-500">{{ t(`other_items.side.${item.side}`) }} · {{ t(`other_items.kind_by_side.${item.side}.${item.kind}`) }}</div>
               </td>
               <td class="px-3 py-3">{{ item.partner_name || t('other_items.no_partner') }}</td>
               <td class="whitespace-nowrap px-3 py-3">{{ item.due_on ? formatDate(item.due_on) : '–' }}</td>
@@ -154,6 +208,22 @@ onMounted(load)
               <td class="whitespace-nowrap px-3 py-3 text-right tabular-nums">{{ formatMoney(item.amount, item.currency) }}</td>
               <td class="whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums">{{ formatMoney(item.remaining_amount, item.currency) }}</td>
               <td class="px-3 py-3"><span class="rounded px-2 py-1 text-xs font-medium" :class="badgeClass(item)">{{ label('status', item.status) }}</span><span v-if="isEstimate(item)" class="ml-1 text-xs text-neutral-500">{{ t('other_items.forecast') }}</span></td>
+              <td class="px-3 py-3">
+                <div class="flex flex-wrap gap-1.5">
+                  <RouterLink :to="{ name: 'other-item-detail', params: { id: item.source_id } }" :class="btnOutlineSm('primary')">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+                    {{ t('common.detail') }}
+                  </RouterLink>
+                  <RouterLink v-if="item.status === 'draft' && auth.canWrite('other_items')" :to="{ name: 'other-item-edit', params: { id: item.source_id } }" :class="btnOutlineSm('neutral')">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                    {{ t('common.edit') }}
+                  </RouterLink>
+                  <button v-if="item.status === 'draft' && auth.canWrite('other_items')" type="button" :disabled="removingId !== null" :class="btnOutlineSm('danger')" @click="removeItem(item)">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+                    {{ t('common.delete') }}
+                  </button>
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -164,13 +234,27 @@ onMounted(load)
             <div>
               <RouterLink v-if="itemRoute(item)" :to="itemRoute(item)!" class="font-semibold text-primary-700">{{ item.title }}</RouterLink>
               <span v-else class="font-semibold">{{ item.title }}</span>
-              <div class="text-xs text-neutral-500">{{ t(`other_items.side.${item.side}`) }} · {{ label('source', item.source_kind) }}</div>
+              <div class="text-xs text-neutral-500">{{ t(`other_items.side.${item.side}`) }} · {{ t(`other_items.kind_by_side.${item.side}.${item.kind}`) }}</div>
               <span v-if="isEstimate(item)" class="mt-1 inline-block rounded bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">{{ t('other_items.forecast') }}</span>
             </div>
             <span class="rounded px-2 py-1 text-xs font-medium" :class="badgeClass(item)">{{ label('status', item.status) }}</span>
           </div>
           <div class="mt-3 flex flex-wrap justify-between gap-2 text-sm"><span>{{ item.partner_name || t('other_items.no_partner') }}</span><span>{{ item.due_on ? formatDate(item.due_on) : '–' }}</span></div>
           <div class="mt-2 flex flex-wrap justify-between gap-2 border-t border-neutral-100 pt-2 text-sm"><span>{{ t('other_items.remaining') }}</span><strong class="tabular-nums">{{ formatMoney(item.remaining_amount, item.currency) }}</strong></div>
+          <div class="mt-3 flex flex-wrap gap-1.5">
+            <RouterLink :to="{ name: 'other-item-detail', params: { id: item.source_id } }" :class="btnOutlineSm('primary')">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+              {{ t('common.detail') }}
+            </RouterLink>
+            <RouterLink v-if="item.status === 'draft' && auth.canWrite('other_items')" :to="{ name: 'other-item-edit', params: { id: item.source_id } }" :class="btnOutlineSm('neutral')">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+              {{ t('common.edit') }}
+            </RouterLink>
+            <button v-if="item.status === 'draft' && auth.canWrite('other_items')" type="button" :disabled="removingId !== null" :class="btnOutlineSm('danger')" @click="removeItem(item)">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+              {{ t('common.delete') }}
+            </button>
+          </div>
         </div>
       </div>
       <div v-if="visibleItems.length && pages > 1" class="mt-4 flex flex-wrap items-center justify-end gap-3 text-sm">

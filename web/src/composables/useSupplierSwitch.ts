@@ -32,6 +32,12 @@ export function matchSwitchableSuppliers(
     .slice(0, limit)
 }
 
+export function supplierSwitchDestination(path: string): string | null {
+  if (path === '/portfolio') return '/'
+  const detailMatch = path.match(/^\/(invoices|clients|projects|bank)\/\d+/)
+  return detailMatch ? '/' + detailMatch[1] : null
+}
+
 /**
  * Přepnutí aktivní firmy — jediná cesta pro přepínač v hlavičce, hledání (Alt+Q)
  * i paletu příkazů (Ctrl+K).
@@ -61,10 +67,9 @@ export function useSupplierSwitch() {
       return
     }
 
-    const path = window.location.pathname
-    const detailMatch = path.match(/^\/(invoices|clients|projects|bank)\/\d+/)
-    if (detailMatch) {
-      window.location.href = '/' + detailMatch[1]
+    const destination = supplierSwitchDestination(window.location.pathname)
+    if (destination) {
+      window.location.href = destination
     } else {
       window.location.reload()
     }

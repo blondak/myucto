@@ -20,8 +20,10 @@ const props = defineProps<{
   entityType: EntityType
   entityId: number
   uploadable?: boolean
+  uploadFolderPath?: string
   title?: string
   collapsible?: boolean
+  readonly?: boolean
 }>()
 
 /** Počet připojených dokumentů ven — nadřazená sekce podle něj pozná, že něco obsahuje. */
@@ -48,7 +50,7 @@ const fileInput = ref<HTMLInputElement | null>(null)
 let debounce: ReturnType<typeof setTimeout> | null = null
 
 const canUpload = computed(() =>
-  !!props.uploadable && auth.canWrite('documents.upload') && auth.canWrite('documents.move'))
+  !props.readonly && !!props.uploadable && auth.canWrite('documents.upload') && auth.canWrite('documents.move'))
 
 function pickFiles() {
   fileInput.value?.click()
@@ -61,7 +63,10 @@ async function onFiles(e: Event) {
   if (files.length === 0) return
   uploading.value = true
   try {
-    const r = await documentsApi.upload(files, { zipMode: 'keep' })
+    const r = await documentsApi.upload(files, {
+      zipMode: 'keep',
+      ...(props.uploadFolderPath ? { relpaths: files.map(() => props.uploadFolderPath!) } : {}),
+    })
     for (const id of r.root_ids ?? []) {
       await documentsApi.addLink(id, props.entityType, props.entityId)
     }
@@ -140,7 +145,7 @@ onMounted(load)
       </template>
       <!-- Stejný tvar jako „Přidat přílohu" o panel výš: obě tlačítka dělají
            v témže detailu totéž (přiložit něco k dokladu), takže se nesmí lišit. -->
-      <button v-if="auth.canWrite('documents.move')" type="button"
+      <button v-if="!readonly && auth.canWrite('documents.move')" type="button"
         :class="[btnOutline('neutral'), 'whitespace-nowrap']" @click="toggleAttach">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
         {{ t('documents.panel_attach') }}
@@ -202,7 +207,7 @@ onMounted(load)
         <a :href="documentsApi.downloadUrl(d.id)" class="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-primary-600" :title="t('documents.download')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 10l5 5 5-5M12 15V3" /></svg>
         </a>
-        <button v-if="auth.canWrite('documents.move')" type="button" class="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-warning-600" :title="t('documents.unlink_hint')" @click="unlink(d)">
+        <button v-if="!readonly && auth.canWrite('documents.move')" type="button" class="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-warning-600" :title="t('documents.unlink_hint')" @click="unlink(d)">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244M3 3l18 18" /></svg>
         </button>
       </li>

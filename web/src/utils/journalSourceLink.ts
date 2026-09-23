@@ -40,6 +40,9 @@ export function journalSourceLink(entry: JournalSourceRef): RouteLocationRaw | n
   if (entry.source_type === 'purchase_invoice' && sourceId) {
     return { name: 'purchase-invoice-detail', params: { id: sourceId } }
   }
+  if (entry.source_type === 'other_item' && sourceId) {
+    return { name: 'other-item-detail', params: { id: sourceId } }
+  }
   if (entry.source_type === 'bank' && entry.source_statement_id) {
     return { name: 'bank-detail', params: { id: entry.source_statement_id } }
   }

@@ -87,6 +87,32 @@ describe('LinkedDocumentsPanel', () => {
     expect(m.toastSuccess).toHaveBeenCalledWith('linked_documents.uploaded')
   })
 
+  it('v náhledu zdrojového dokladu dovolí dokument číst, ale ne změnit jeho vazbu', async () => {
+    const wrapper = await mountPanel({ entityType: 'other_item', readonly: true, uploadable: true })
+    expect(m.byEntity).toHaveBeenCalledWith('other_item', 42)
+    expect(wrapper.text()).toContain('Účtenka 7')
+    expect(wrapper.find('[data-testid="linked-docs-preview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="linked-docs-upload"]').exists()).toBe(false)
+    expect(wrapper.find('button[title="documents.unlink_hint"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('documents.panel_attach')
+  })
+
+  it('uloží sken ostatní položky do složky roku a měsíce jejího vzniku', async () => {
+    m.upload.mockResolvedValue({ created: 1, root_ids: [11], skipped: [], errors: [] })
+    const wrapper = await mountPanel({ entityType: 'other_item', uploadable: true,
+      uploadFolderPath: 'Ostatní pohledávky a závazky/2099/01' })
+    const input = wrapper.find('[data-testid="linked-docs-file"]')
+    const file = new File(['%PDF-1.4'], 'smlouva.pdf', { type: 'application/pdf' })
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(m.upload).toHaveBeenCalledWith([file], {
+      zipMode: 'keep', relpaths: ['Ostatní pohledávky a závazky/2099/01'],
+    })
+    expect(m.addLink).toHaveBeenCalledWith(11, 'other_item', 42)
+  })
+
   it('bez práva nahrávat dokumenty tlačítko skryje i s `uploadable`', async () => {
     m.canWrite.mockImplementation((p: string) => p !== 'documents.upload')
     const wrapper = await mountPanel({ uploadable: true })

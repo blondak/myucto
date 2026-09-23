@@ -85,8 +85,10 @@ final class OtherItemScheduleService
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) throw new OtherItemException('schedule_not_found', 'Rozvrh nebyl nalezen.', 404);
         $row = self::decode($row);
-        $stmt = $this->db->pdo()->prepare('SELECT occurrence_index, item_id FROM other_item_schedule_occurrences
-            WHERE supplier_id = ? AND schedule_id = ? ORDER BY occurrence_index');
+        $stmt = $this->db->pdo()->prepare('SELECT o.occurrence_index, o.item_id, oi.issued_on, oi.status
+            FROM other_item_schedule_occurrences o
+            JOIN other_items oi ON oi.id = o.item_id AND oi.supplier_id = o.supplier_id
+            WHERE o.supplier_id = ? AND o.schedule_id = ? ORDER BY o.occurrence_index');
         $stmt->execute([$supplierId, $id]);
         $row['occurrences'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
         return $row;

@@ -10,7 +10,7 @@ export interface OtherItemSchedule {
   next_index: number
   status: 'active' | 'paused'
   template: Record<string, unknown>
-  occurrences?: Array<{ occurrence_index: number; item_id: number }>
+  occurrences?: Array<{ occurrence_index: number; item_id: number; issued_on: string; status: string }>
 }
 
 export interface OtherItemInstallment {

@@ -21421,7 +21421,7 @@ components:
             account_code: { type: [string, 'null'] }
             counter_account_code: { type: [string, 'null'] }
             note: { type: [string, 'null'] }
-        occurrences: { type: array, items: { type: object, properties: { occurrence_index: { type: integer }, item_id: { type: integer } } } }
+        occurrences: { type: array, items: { type: object, properties: { occurrence_index: { type: integer }, item_id: { type: integer }, issued_on: { type: string, format: date }, status: { type: string } } } }
     OtherItemInstallmentInput:
       type: object
       required: [due_on, amount]

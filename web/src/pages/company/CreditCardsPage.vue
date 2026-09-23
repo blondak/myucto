@@ -103,6 +103,11 @@ function differenceLabel(a: CreditCardAccount): string {
       <input ref="fileInput" type="file" accept="application/pdf,.pdf" class="hidden" data-testid="credit-card-file" @change="onFile" />
     </div>
 
+    <div class="mb-4 rounded-lg border border-primary-200 bg-primary-50 px-4 py-3 text-sm text-neutral-700">
+      <p>{{ t('credit_cards.supported_banks') }}</p>
+      <p class="mt-1">{{ t('credit_cards.import_destination') }}</p>
+    </div>
+
     <div class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto">
       <button v-for="tt in tabs" :key="tt" type="button" @click="tab = tt"
         class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap"

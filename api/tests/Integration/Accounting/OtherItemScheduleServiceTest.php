@@ -52,8 +52,11 @@ final class OtherItemScheduleServiceTest extends TestCase
         $first = $this->items->create($this->supplierId, $this->input(), null);
         $schedule = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
         self::assertCount(1, $schedule['occurrences']);
+        self::assertSame('2099-01-31', $schedule['occurrences'][0]['issued_on']);
+        self::assertSame('draft', $schedule['occurrences'][0]['status']);
         $generated = $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-03-31', null);
         self::assertCount(2, $generated['created_ids']);
+        self::assertSame(['2099-02-28', '2099-03-31'], array_column(array_slice($generated['schedule']['occurrences'], 1), 'issued_on'));
         self::assertSame([], $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-03-31', null)['created_ids']);
         $dates = [];
         foreach ($generated['created_ids'] as $id) {

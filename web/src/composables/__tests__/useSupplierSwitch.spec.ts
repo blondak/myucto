@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchSwitchableSuppliers } from '../useSupplierSwitch'
+import { matchSwitchableSuppliers, supplierSwitchDestination } from '../useSupplierSwitch'
 import type { SupplierBrief } from '@/api/auth'
 
 const firm = (id: number, company_name: string, ic: string | null) => ({ id, company_name, ic }) as SupplierBrief
@@ -29,5 +29,16 @@ describe('matchSwitchableSuppliers', () => {
   it('bez víc firem (nebo u uzamčené domény) ani bez dotazu nic nenabízí', () => {
     expect(matchSwitchableSuppliers(LIST, 1, 'beta', false)).toEqual([])
     expect(matchSwitchableSuppliers(LIST, 1, '   ', true)).toEqual([])
+  })
+})
+
+describe('supplierSwitchDestination', () => {
+  it('z přehledu všech firem otevře domovskou stránku zvolené firmy', () => {
+    expect(supplierSwitchDestination('/portfolio')).toBe('/')
+  })
+
+  it('z detailu přejde na seznam a na běžné stránce ponechá adresu', () => {
+    expect(supplierSwitchDestination('/invoices/42')).toBe('/invoices')
+    expect(supplierSwitchDestination('/bank')).toBeNull()
   })
 })

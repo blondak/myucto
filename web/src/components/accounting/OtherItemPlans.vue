@@ -5,7 +5,7 @@ import { otherItemPlansApi, type OtherItemInstallment, type OtherItemSchedule } 
 import type { OtherItem } from '@/api/otherItems'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { formatMoney } from '@/composables/useFormat'
+import { formatDate, formatMoney } from '@/composables/useFormat'
 import DateInput from '@/components/ui/DateInput.vue'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
@@ -22,6 +22,7 @@ const frequency = ref<OtherItemSchedule['frequency']>('monthly')
 const endsOn = ref('')
 const through = ref(appIsoDate())
 const canWrite = computed(() => auth.canWrite('other_items'))
+const generatedOccurrences = computed(() => schedule.value?.occurrences?.filter(row => row.occurrence_index > 0) || [])
 const canEditInstallments = computed(() => canWrite.value && ['draft', 'posted', 'confirmed'].includes(props.item.status)
   && Number(props.item.paid_amount) === 0)
 
@@ -117,7 +118,7 @@ watch(() => props.item.id, () => void load(), { immediate: true })
 </script>
 
 <template>
-  <div class="mt-4 grid gap-4 lg:grid-cols-2">
+  <div id="other-item-plans" class="mt-4 grid scroll-mt-4 gap-4 lg:grid-cols-2">
     <section class="rounded-lg border border-neutral-200 bg-surface p-4">
       <h2 class="font-semibold">{{ t('other_items.plans.schedule_title') }}</h2>
       <p class="mt-1 text-sm text-neutral-500">{{ t('other_items.plans.schedule_hint') }}</p>
@@ -137,13 +138,14 @@ watch(() => props.item.id, () => void load(), { immediate: true })
             {{ t(schedule.status === 'active' ? 'other_items.plans.pause' : 'other_items.plans.resume') }}
           </button>
         </div>
-        <ul v-if="schedule.occurrences?.length" class="mt-3 space-y-1 text-sm">
-          <li v-for="occurrence in schedule.occurrences" :key="occurrence.occurrence_index">
+        <ul v-if="generatedOccurrences.length" class="mt-3 space-y-1 text-sm">
+          <li v-for="occurrence in generatedOccurrences" :key="occurrence.occurrence_index">
             <RouterLink :to="`/other-items/${occurrence.item_id}`" class="text-primary-700 hover:underline">
-              {{ t('other_items.plans.occurrence', { number: occurrence.occurrence_index + 1 }) }} #{{ occurrence.item_id }}
+              {{ t('other_items.plans.created_for', { date: formatDate(occurrence.issued_on) }) }} · {{ t(`other_items.status.${occurrence.status}`) }}
             </RouterLink>
           </li>
         </ul>
+        <p v-else class="mt-3 text-sm text-neutral-500">{{ t('other_items.plans.no_generated') }}</p>
       </template>
       <form v-else-if="canWrite && ['draft', 'posted', 'confirmed'].includes(item.status)" class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="createSchedule">
         <label class="text-sm font-medium">{{ t('other_items.plans.frequency') }}
