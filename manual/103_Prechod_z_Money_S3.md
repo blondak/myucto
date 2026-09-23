@@ -278,6 +278,12 @@ mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změni
 v Money celková částka faktury, protokol ji vypíše jako změněnou v Money
 a ponechanou v MyÚčtu; upravte ji ručně.
 
+Účtuje-li firma po převodu ještě nějaký čas i v Money, porovnávejte každý měsíc
+MyÚčto s výstupy Money nebo s novou zálohou agendy na stránce
+`Účetnictví → Souběh se starým systémem` (kapitola
+[Souběh se starým systémem](111_Soubeh_se_starym_systemem.md)). Záloha se tam
+čte bez zápisu do MyÚčta.
+
 ## 103.9 Omezení
 
 - Formát dat Money není veřejně dokumentovaný. Čtení je ověřené na verzi

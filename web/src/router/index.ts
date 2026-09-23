@@ -148,7 +148,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'accounting-balance-inventory': ['accounting'],
   'accounting-section18-statements': ['accounting'],
   'accounting-periods': ['accounting'],
-  'accounting-monthly-check': ['accounting'], 'accounting-monthly-report': ['accounting'], 'accounting-offsets': ['accounting.offsets'],
+  'accounting-monthly-check': ['accounting'], 'accounting-parallel-run': ['accounting'], 'accounting-monthly-report': ['accounting'], 'accounting-offsets': ['accounting.offsets'],
   'accounting-tax-base-adjustments': ['accounting'],
   'manual-posting-queue': ['accounting'],
   'accounting-assets': ['assets'], 'accounting-asset-new': ['assets.write', 'write'], 'accounting-asset-detail': ['assets'], 'accounting-asset-edit': ['assets.write', 'write'],

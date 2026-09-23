@@ -59,6 +59,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/accounting\/document-completeness(?:\/|$)/, '61_Uplnost_dokladu'],
   [/^\/accounting\/monthly-check(?:\/|$)/, '62_Mesicni_kontrola'],
   [/^\/accounting\/monthly-report(?:\/|$)/, '63_Mesicni_report'],
+  [/^\/accounting\/parallel-run(?:\/|$)/, '111_Soubeh_se_starym_systemem'],
   ...PAYROLL_MANUAL_CHAPTERS,
   [/^\/accounting\/payroll(?:\/|$)/, '64_Mzdy'],
   [/^\/accounting\/assets(?:\/|$)|^\/accounting\/small-assets(?:\/|$)/, '28_Majetek'],

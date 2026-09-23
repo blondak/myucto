@@ -102,6 +102,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 61. [Úplnost dokladů](61_Uplnost_dokladu.md)
 62. [Měsíční kontrola](62_Mesicni_kontrola.md)
 63. [Měsíční přehled](63_Mesicni_report.md)
+111. [Souběh se starým systémem](111_Soubeh_se_starym_systemem.md)
 64. [Mzdová rekapitulace a mzdový list](64_Mzdy.md)
 
 ### Nástroje
