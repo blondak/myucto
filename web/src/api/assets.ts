@@ -32,6 +32,8 @@ export interface Asset {
   disposal_date: string | null
   disposal_type: DisposalType | null
   disposal_price: number | null
+  /** Zápis deníku, který vyřazení zaúčtoval mimo modul majetku (převod, ruční zápis). */
+  disposal_entry_id?: number | null
   status: AssetStatus
   tax_method: TaxMethod
   tax_group: number | null
@@ -217,6 +219,9 @@ export interface DisposePayload {
   date: string
   type: DisposalType
   price?: number | null
+  /** false = vyřazení už zaúčtoval deník, karta se vyřadí bez zaúčtování. */
+  book_entry?: boolean
+  entry_id?: number | null
 }
 
 export const assetsApi = {

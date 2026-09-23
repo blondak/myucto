@@ -573,7 +573,7 @@ export interface TaxBaseDisposalRow {
   tax_residual_value: number | null
   tax_residual_source?: 'tax_entries' | 'by_accounting' | 'non_depreciable' | 'opening' | 'unknown'
   accounting_residual_value: number | null
-  accounting_residual_source?: 'disposal_entry' | 'card'
+  accounting_residual_source?: 'disposal_entry' | 'linked_entry' | 'card'
   deductibility: 'full' | 'none' | 'limited'
   note: string
 }

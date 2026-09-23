@@ -13727,6 +13727,9 @@
         "improvement": "Technical improvement",
         "dispose": "Dispose",
         "dispose_confirm_btn": "Dispose asset",
+        "dispose_book": "Post the disposal (net book value and removal from the register)",
+        "dispose_no_book_hint": "Without posting: the disposal is already in the journal (conversion from another program, manual 54x entry against accumulated depreciation). The card is linked to the disposal entry on the disposal date and the tax return takes the net book value from it.",
+        "disposal_entry_link": "Disposal entry in the journal",
         "disposed": "The asset has been disposed.",
         "revert": "Revert disposal",
         "revert_confirm": "Really revert the disposal? Reversal entries will be created and the disposal-year depreciation deleted.",
@@ -22392,6 +22395,7 @@
     "residual_unknown": "unknown",
     "residual_source": {
       "disposal_entry": "disposal entry",
+      "linked_entry": "disposal entry in the journal",
       "card": "from card",
       "tax_entries": "tax depreciation",
       "by_accounting": "= book",

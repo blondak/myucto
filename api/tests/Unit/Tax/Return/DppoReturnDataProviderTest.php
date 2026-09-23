@@ -386,7 +386,8 @@ final class DppoReturnDataProviderTest extends TestCase
         $this->pdo->exec('CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, tax_deductible INTEGER, vendor_id INTEGER, status TEXT, document_kind TEXT, effective_cost_date TEXT, total_without_vat REAL)');
         $this->pdo->exec('CREATE TABLE assets (id INTEGER PRIMARY KEY, supplier_id INTEGER, inventory_number TEXT, name TEXT, kind TEXT, tax_group INTEGER,
             disposal_date TEXT, disposal_type TEXT, disposal_price REAL, input_price REAL, opening_tax_years INTEGER DEFAULT 0, opening_tax_amount REAL DEFAULT 0,
-            opening_acc_amount REAL DEFAULT 0, tax_method TEXT, asset_account_code TEXT, accumulated_account_code TEXT, status TEXT)');
+            opening_acc_amount REAL DEFAULT 0, tax_method TEXT, asset_account_code TEXT, accumulated_account_code TEXT, status TEXT,
+            disposal_entry_id INTEGER)');
         $this->pdo->exec('CREATE TABLE asset_improvements (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, completed_on TEXT, amount REAL)');
         $this->pdo->exec('CREATE TABLE depreciation_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, kind TEXT, fiscal_year INTEGER, amount REAL, residual_value_end REAL)');
         // Podklady pro VetaD/spoj_zahr (relatedPartyCountryFlag) a VetaNP (bankAccount) —

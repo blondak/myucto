@@ -13727,6 +13727,9 @@
         "improvement": "Technické zhodnocení",
         "dispose": "Vyřadit",
         "dispose_confirm_btn": "Vyřadit majetek",
+        "dispose_book": "Zaúčtovat vyřazení (zůstatková cena a vyřazení z evidence)",
+        "dispose_no_book_hint": "Bez zaúčtování: vyřazení už zaúčtoval deník (převod z jiného programu, ruční zápis 54x proti oprávkám). Karta se naváže na zápis vyřazení ke dni vyřazení a přiznání z něj vezme účetní zůstatkovou cenu.",
+        "disposal_entry_link": "Zápis vyřazení v deníku",
         "disposed": "Majetek byl vyřazen.",
         "revert": "Vrátit vyřazení",
         "revert_confirm": "Opravdu vrátit vyřazení? Vytvoří se storna zápisů a smažou se odpisy roku vyřazení.",
@@ -22392,6 +22395,7 @@
     "residual_unknown": "neznámá",
     "residual_source": {
       "disposal_entry": "zápis vyřazení",
+      "linked_entry": "zápis vyřazení v deníku",
       "card": "z karty",
       "tax_entries": "daňové odpisy",
       "by_accounting": "= účetní",

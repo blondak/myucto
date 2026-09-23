@@ -216,6 +216,7 @@ const disposeForm = ref({
   date: appIsoDate(),
   type: 'sold' as DisposalType,
   price: null as number | null,
+  book_entry: true,
 })
 
 async function runDispose() {
@@ -225,6 +226,7 @@ async function runDispose() {
       date: disposeForm.value.date,
       type: disposeForm.value.type,
       price: disposeForm.value.type === 'sold' ? disposeForm.value.price : undefined,
+      book_entry: disposeForm.value.book_entry,
     })
     showDispose.value = false
     toast.success(t('accounting.assets.lifecycle.disposed'))
@@ -417,6 +419,13 @@ const yearOptions = computed(() => {
           · {{ t('accounting.assets.fields.disposal_price') }}: {{ formatMoney(num(asset.disposal_price)) }}
           <div class="text-xs text-warning-600 mt-1">{{ t('accounting.assets.hints.sale_invoice_641') }}</div>
         </template>
+        <div v-if="asset.disposal_entry_id" class="mt-1">
+          <RouterLink :to="{ name: 'accounting-journal', query: { entry_id: String(asset.disposal_entry_id) } }"
+            class="inline-flex items-center gap-1.5 text-xs text-primary-600 hover:text-primary-700 hover:underline">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
+            {{ t('accounting.assets.lifecycle.disposal_entry_link') }}
+          </RouterLink>
+        </div>
       </div>
 
       <!-- Souhrn -->
@@ -711,6 +720,11 @@ const yearOptions = computed(() => {
             <input v-model.number="disposeForm.price" type="number" min="0" step="0.01" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
             <p class="text-xs text-neutral-400 mt-1">{{ t('accounting.assets.hints.sale_invoice_641') }}</p>
           </div>
+          <label class="inline-flex items-center gap-2 text-sm">
+            <input v-model="disposeForm.book_entry" type="checkbox" class="rounded border-neutral-300" />
+            {{ t('accounting.assets.lifecycle.dispose_book') }}
+          </label>
+          <p v-if="!disposeForm.book_entry" class="text-xs text-warning-600">{{ t('accounting.assets.lifecycle.dispose_no_book_hint') }}</p>
         </div>
         <div class="flex justify-end gap-2">
           <button @click="showDispose = false" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>

@@ -166,13 +166,30 @@ final class AssetLifecycleAction
             }
         }
 
+        // book_entry=false: vyřazení už zaúčtoval deník (převod, ruční zápis) — karta se
+        // vyřadí bez zaúčtování a naváže na zápis (entry_id, jinak jediný zápis ke dni).
+        $bookEntry = array_key_exists('book_entry', $body) ? (bool) $body['book_entry'] : true;
+        $entryId = null;
+        if (isset($body['entry_id']) && $body['entry_id'] !== '' && $body['entry_id'] !== null) {
+            if ($bookEntry) {
+                return Json::error($response, 'validation_failed', 'entry_id lze zadat jen u vyřazení bez zaúčtování (book_entry=false).', 422);
+            }
+            $entryId = (int) $body['entry_id'];
+            if ($entryId <= 0) {
+                return Json::error($response, 'validation_failed', 'entry_id musí být kladné číslo.', 422);
+            }
+        }
+
         try {
-            $result = $this->service->dispose($supplierId, $id, [
+            $input = [
                 'date'            => $date,
                 'type'            => $type,
                 'price'           => $price,
                 'sale_invoice_id' => $saleInvoiceId,
-            ], $this->auditMeta($request));
+            ];
+            $result = $bookEntry
+                ? $this->service->dispose($supplierId, $id, $input, $this->auditMeta($request))
+                : $this->service->disposeFromJournal($supplierId, $id, $input + ['entry_id' => $entryId], $this->auditMeta($request));
         } catch (AssetException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (UnbalancedEntryException | PostingException $e) {
@@ -181,7 +198,9 @@ final class AssetLifecycleAction
             return $this->serverError($response, $e, 'Vyřazení majetku selhalo');
         }
 
-        $this->logEvent($request, 'asset.disposed', $id, ['date' => $date, 'type' => $type]);
+        $this->logEvent($request, 'asset.disposed', $id, $bookEntry
+            ? ['date' => $date, 'type' => $type]
+            : ['date' => $date, 'type' => $type, 'book_entry' => false, 'entry_id' => $result['asset']['disposal_entry_id'] ?? null]);
         return Json::ok($response, $result);
     }
 

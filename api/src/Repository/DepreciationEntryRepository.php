@@ -20,7 +20,20 @@ final class DepreciationEntryRepository
      */
     public const MIGRATED_JOURNAL = 'migration';
 
+    /** Klíč původu daňového řádku v `detail`; hodnota {@see MIGRATED_JOURNAL} = potvrdil ho převod. */
+    public const MIGRATED_TAX_SOURCE = 'source';
+
     public function __construct(private readonly Connection $db) {}
+
+    /** Daňový řádek potvrdil převod z jiného programu (původ v `detail`). */
+    public static function isConfirmedByMigration(?array $entry): bool
+    {
+        if ($entry === null) {
+            return false;
+        }
+        $detail = is_string($entry['detail'] ?? null) ? json_decode((string) $entry['detail'], true) : ($entry['detail'] ?? null);
+        return is_array($detail) && ($detail[self::MIGRATED_TAX_SOURCE] ?? null) === self::MIGRATED_JOURNAL;
+    }
 
     /** @param array<string,mixed>|null $entry řádek z {@see findYear()} */
     public static function isBookedByMigratedJournal(?array $entry): bool
