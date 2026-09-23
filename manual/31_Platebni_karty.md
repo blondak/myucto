@@ -87,7 +87,10 @@ automatické účtování přijatých dokladů.
 
 Záložka **Platby bez dokladu** ukazuje odchozí platby kartou za zvolené období,
 ke kterým zatím není spárovaný žádný doklad. Platby jsou seskupené podle karty
-a držitele; karty, které nejsou v evidenci, jsou na konci seznamu.
+a držitele; karty, které nejsou v evidenci, jsou na konci seznamu. Nákupy
+kreditní kartou (z výpisu úvěrového účtu, viz [Kreditní karty](112_Kreditni_karty.md))
+mají vlastní sekci **Kreditní karty** pod platebními kartami, s platebními se
+nemíchají.
 
 U každé platby jsou akce:
 
