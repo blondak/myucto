@@ -555,11 +555,12 @@ final class DphPriznaniBuilder
         // zatím neřeší (viz VatDeductionAdjustmentService). Hodnota může být záporná.
         $upravOdp = 0.0;
         if ($isLastPeriodOfYear) {
-            $upravOdp = $this->deductionAdjustments->totalForReturn(
+            // Na celé Kč hned, ať ř. 63 = 46 + 52 + 53 + 60 sedí na vyplněné řádky.
+            $upravOdp = (float) round($this->deductionAdjustments->totalForReturn(
                 $supplierId,
                 $year,
                 $annualCoef !== null ? (int) $annualCoef['final_percent'] : null,
-            );
+            ));
             // POZOR: `uprav_odp` je atribut Veta6 (rekapitulace), NE Veta5. Na Veta5
             // ho XSD odmítne — ověřeno validací, ne odhadem.
         }
@@ -573,7 +574,8 @@ final class DphPriznaniBuilder
         // Řádek se dřív negeneroval vůbec (viz komentář u lineMap): klasifikace na něj
         // mířit nemůže, protože nejde o vlastnost dokladu, ale o jednorázovou událost
         // registrace. Proto se plní z vlastní evidence, ne z ledgeru dokladů.
-        $registrationCorrection = $this->section79->totalForReturn($supplierId, $vatStart, $vatEnd);
+        // Na celé Kč HNED: ř. 46 je součtem řádků tak, jak jsou vyplněné (viz ř. 43 v mapperu).
+        $registrationCorrection = (float) round($this->section79->totalForReturn($supplierId, $vatStart, $vatEnd));
         if ($registrationCorrection !== 0.0) {
             $veta4Raw['odp_rez_nar'] = $registrationCorrection;
             // ř.46 je součet ř.40–45 „V plné výši", takže korekce do něj patří — jinak by

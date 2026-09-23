@@ -2204,6 +2204,41 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertCount(0, $sh->DPHSHV->VetaR, 'OSS plnění nepatří do souhrnného hlášení');
     }
 
+    /**
+     * Ř. 43 (odpočet ze samovyměření) EPO kontroluje proti součtu ř. 3–13 TAK, JAK JSOU
+     * VYPLNĚNÉ, tedy zaokrouhlených na celé Kč (propustná chyba č. 90). Hlášený případ:
+     * ř. 5 = 50 646 a ř. 12 = 539, ale ř. 43 = round(51 185,53) = 51 186.
+     */
+    public function testSelfAssessmentDeductionEqualsSumOfRoundedOutputLines(): void
+    {
+        $usId = $this->countryId('US');
+        if ($usId === 0) {
+            $this->markTestSkipped('US není v číselníku countries.');
+        }
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $de = $this->client('DE služba zaokrouhlení', $this->deId, 'DE123456789', vendor: true);
+        $us = $this->client('US služba zaokrouhlení', $usId, null, vendor: true);
+        // 241 172,38 × 21 % = 50 646,20 · 2 568,24 × 21 % = 539,33 → součet 51 185,53.
+        $this->purchase('P-2099-4301', $de, '24e', false, 'invoice', $d(10), $d(10), [[241172.38, 0, 21]]);
+        $this->purchase('P-2099-4302', $us, '24', false, 'invoice', $d(10), $d(10), [[2568.24, 0, 21]]);
+
+        $res = $this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly');
+        $this->assertXmlValidatesAgainstXsd($res['xml'], 'dphdp3.xsd');
+        $dp = (new \SimpleXMLElement($res['xml']))->DPHDP3;
+        $this->assertSame('50646', (string) $dp->Veta1['dan_psl23_e']);
+        $this->assertSame('539', (string) $dp->Veta1['dan_psl23_z']);
+        $this->assertSame('51185', (string) $dp->Veta4['od_zdp23'], 'ř. 43 = ř. 5 + ř. 12 ve formuláři');
+        $this->assertSame(
+            (int) $dp->Veta1['p_sl23_e'] + (int) $dp->Veta1['p_sl23_z'],
+            (int) $dp->Veta4['nar_zdp23'],
+            'základ ř. 43 = základ ř. 5 + ř. 12 ve formuláři',
+        );
+        $this->assertSame('51185', (string) $dp->Veta4['odp_sum_nar'], 'ř. 46 = ř. 43');
+        $this->assertSame((string) $dp->Veta6['dan_zocelk'], (string) $dp->Veta6['odp_zocelk'],
+            'samovyměření se musí vyrušit (ř. 62 = ř. 63)');
+        $this->assertFalse(isset($dp->Veta6['dano_da']), 'žádná vlastní daň z pouhého samovyměření');
+    }
+
     private function assertXmlValidatesAgainstXsd(string $xml, string $xsdFile): void
     {
         $xsd = dirname(__DIR__, 3) . '/xsd/' . $xsdFile;
