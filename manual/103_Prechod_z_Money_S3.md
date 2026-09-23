@@ -104,8 +104,9 @@ tři věci:
   jen v přehledu.
 - **Kontrolní úhrny po měsících.** Protokol ukáže za každý měsíc mezd součty
   celé firmy: hrubé mzdy, pojistné zaměstnanců a zaměstnavatele, zálohovou
-  a srážkovou daň, srážky a čistou mzdu k výplatě. Daň porovná s měsíčním
-  úhrnem daně z příjmů ze závislé činnosti, který Money vede zvlášť; měsíc, kde
+  a srážkovou daň, srážky a čistou mzdu k výplatě. Zálohovou daň porovná
+  s odvodem v měsíčním vyúčtování daně z příjmů ze závislé činnosti, které Money
+  vede zvlášť (sražené zálohy po přeplatcích z ročního zúčtování); měsíc, kde
   nesedí, vyznačí. Úhrny jsou kontrola, ne převzaté mzdy jednotlivých zaměstnanců.
 - **Zapnutí modulu Mzdy.** Firmě, která mzdy vede, převod zapne modul Mzdy
   a nastaví začátek vedení mezd v MyÚčtu na měsíc po posledním mzdovém dokladu.

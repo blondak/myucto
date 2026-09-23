@@ -9,8 +9,11 @@ namespace MyInvoice\Service\Migration\MoneyS3;
  *
  * Za měsíce, kdy Money vedlo mzdy osob v šifrované databázi agendy, je tohle jediný
  * čitelný souhrn zpracovaných mezd: doklady mzdového modulu nesou období mezd
- * a jejich řádky v deníku částky. Úhrn daně se porovná s měsíčním úhrnem daně
- * z příjmů ze závislé činnosti, který Money vede zvlášť (`VYUCDPFO`).
+ * a jejich řádky v deníku částky. Zálohová daň se porovná s měsíčním vyúčtováním
+ * daně z příjmů ze závislé činnosti, které Money vede zvlášť (`VYUCDPFO`): sražené
+ * zálohy (`DPFO`) snížené o přeplatky z ročního zúčtování (`Preplatek`) dávají
+ * odvod (`Odvod`), a právě ten mzdový doklad daně zaúčtuje. Srážková daň se
+ * vyúčtovává zvlášť a v `VYUCDPFO` není.
  *
  * ── Proč úhrny nejdou do převzatých mezd ────────────────────────────────────
  * `payroll_migration_reference_totals` je evidence po vztazích (osoba × měsíc):
@@ -30,7 +33,7 @@ final class MoneyS3PayrollTotals
         'advance_tax', 'withholding_tax', 'deductions', 'net_payable',
     ];
 
-    /** Rozdíl daně proti `VYUCDPFO`, který se ještě bere jako zaokrouhlení. */
+    /** Rozdíl zálohové daně proti odvodu ve `VYUCDPFO`, který se ještě bere jako zaokrouhlení. */
     private const TAX_TOLERANCE = 1.0;
 
     private const CONCEPT_METRIC = [
@@ -56,8 +59,9 @@ final class MoneyS3PayrollTotals
      * Úhrny po měsících mezd, vzestupně.
      *
      * @return list<array<string,mixed>> `period`, metriky {@see self::METRICS} v Kč,
-     *         `dpfo` a `dpfo_remitted` z `VYUCDPFO` (nebo `null`) a `tax_ok`
-     *         (`null`, když úhrn daně v Money chybí)
+     *         `dpfo` (sražené zálohy) a `dpfo_remitted` (odvod) z `VYUCDPFO`, nebo
+     *         `null`, a `tax_ok` = zálohová daň z dokladů sedí na odvod (`null`, když
+     *         vyúčtování v Money chybí)
      */
     public static function fromLedger(MoneyS3PayrollLedger $ledger): array
     {
@@ -101,7 +105,7 @@ final class MoneyS3PayrollTotals
             $row['dpfo'] = $tax['dpfo'] ?? null;
             $row['dpfo_remitted'] = $tax['remitted'] ?? null;
             $row['tax_ok'] = $tax === null ? null
-                : abs($row['advance_tax'] + $row['withholding_tax'] - $tax['dpfo']) <= self::TAX_TOLERANCE;
+                : abs($row['advance_tax'] - $tax['remitted']) <= self::TAX_TOLERANCE;
             $out[] = $row;
         }
         return $out;

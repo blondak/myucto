@@ -145,11 +145,11 @@ final class PayrollPostingMapTest extends TestCase
         $totals = MoneyS3PayrollTotals::fromLedger($ledger);
         self::assertSame(['2025-01', '2025-02', '2025-03'], array_column($totals, 'period'));
         $feb = $totals[1];
-        self::assertSame([30000.0, 2130.0, 1350.0, 7440.0, 2700.0, 3810.0, 0.0, 1000.0, 21710.0, 3810.0, true], [
+        self::assertSame([30000.0, 2130.0, 1350.0, 7440.0, 2700.0, 3810.0, 0.0, 1000.0, 21710.0, 4810.0, 3810.0, true], [
             $feb['gross'], $feb['employee_social'], $feb['employee_health'], $feb['employer_social'], $feb['employer_health'],
-            $feb['advance_tax'], $feb['withholding_tax'], $feb['deductions'], $feb['net_payable'], $feb['dpfo'], $feb['tax_ok'],
-        ]);
-        self::assertFalse($totals[2]['tax_ok'], 'Březnový úhrn daně v Money na doklady nesedí.');
+            $feb['advance_tax'], $feb['withholding_tax'], $feb['deductions'], $feb['net_payable'], $feb['dpfo'], $feb['dpfo_remitted'], $feb['tax_ok'],
+        ], 'Záloha z dokladů se porovnává s odvodem (sražené zálohy minus přeplatky z ročního zúčtování).');
+        self::assertFalse($totals[2]['tax_ok'], 'Březnový odvod v Money na doklady nesedí.');
     }
 
     private function removeTree(string $dir): void

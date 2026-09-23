@@ -818,12 +818,12 @@ final class SyntheticAgenda
      *
      * Měsíc: hrubé mzdy 30 000 Kč na dvě střediska (druh 3), sociální pojištění 2 130 +
      * 7 440 (druh 7, analytika 336200), zdravotní 1 350 + 2 700 (druh 10, 336100), záloha
-     * na daň 3 810 (druh 5), čistá mzda na analytiku zaměstnance (druh 1). V únoru navíc
+     * na daň 3 810 (druh 5), závazek čisté mzdy 331/331 na témž účtu (druh 1). V únoru navíc
      * exekuce 1 000 Kč (druh 14), v lednu zákonné pojištění odpovědnosti (druh 15, jen do
      * přehledu). Doklady bez druhu (starší způsob): odměna 5 000 Kč 521/331 a doplatek
      * pojistného 331/336100 - analytika 336 se pozná podle dokladů s druhem, ne podle
-     * názvu (názvy analytik 336 jsou záměrně neutrální). Úhrn daně za březen v Money
-     * nesedí na doklady (3 000 Kč).
+     * názvu (názvy analytik 336 jsou záměrně neutrální). Odvod zálohové daně za březen
+     * ve vyúčtování Money nesedí na doklady (3 000 Kč).
      *
      * @return array<string,string>
      */
@@ -837,7 +837,6 @@ final class SyntheticAgenda
         };
         $append('ROK.002/UcOsnova.DAT', self::CHART_FIELDS, [
             ['Ucet' => '331000', 'Nazev' => 'Zaměstnanci'],
-            ['Ucet' => '331001', 'Nazev' => 'Zaměstnanci - výplaty'],
             ['Ucet' => '336100', 'Nazev' => 'Zúčtování s institucemi 1'],
             ['Ucet' => '336200', 'Nazev' => 'Zúčtování s institucemi 2'],
             ['Ucet' => '342100', 'Nazev' => 'Záloha na daň ze závislé činnosti'],
@@ -872,7 +871,8 @@ final class SyntheticAgenda
             if ($month === 1) {
                 $entries[] = [15, 'Pojištění odpovědnosti', [['548000', '379100', 150.0]]];
             }
-            $entries[] = [1, 'Čistá mzda', [['331000', '331001', $net]]];
+            // Závazek čisté mzdy vede Money na témž účtu (zaměstnance rozliší párový symbol).
+            $entries[] = [1, 'Čistá mzda', [['331000', '331000', $net]]];
             foreach ($entries as $i => [$kind, $text, $lines]) {
                 $number = $doc('ZA', $i + 1);
                 $liabilities[] = ['Cislo' => 100 * $month + $i, 'Doklad' => $number, 'Popis' => $text, 'MZDI_Zauct' => $kind, 'AdCislo' => 0] + $mz;
@@ -897,10 +897,11 @@ final class SyntheticAgenda
             ['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['DatUcPr', 'D', 2], ['DatUplDPH', 'D', 2],
             ['Cleneni', 'C', 12], ['ZaklZS', 'E', 10], ['DPHZS', 'E', 10],
         ], $mzFields), $internal);
-        $files['VYUCDPFO.DAT'] = Ms3FixtureWriter::table([['Mesic', 'V', 1], ['Rok', 'W', 2], ['DPFO', 'E', 10], ['Odvod', 'E', 10]], [
+        // Únor: sražené zálohy 4 810 Kč, z toho 1 000 Kč přeplatek z ročního zúčtování, odvod 3 810 Kč.
+        $files['VYUCDPFO.DAT'] = Ms3FixtureWriter::table([['Mesic', 'V', 1], ['Rok', 'W', 2], ['Preplatek', 'E', 10], ['DPFO', 'E', 10], ['Odvod', 'E', 10]], [
             ['Mesic' => 255, 'Rok' => 65535],
             ['Mesic' => 1, 'Rok' => 2025, 'DPFO' => 3810.0, 'Odvod' => 3810.0],
-            ['Mesic' => 2, 'Rok' => 2025, 'DPFO' => 3810.0, 'Odvod' => 3810.0],
+            ['Mesic' => 2, 'Rok' => 2025, 'Preplatek' => 1000.0, 'DPFO' => 4810.0, 'Odvod' => 3810.0],
             ['Mesic' => 3, 'Rok' => 2025, 'DPFO' => 3000.0, 'Odvod' => 3000.0],
         ]);
         $files['MZDY.DAT'] = Ms3FixtureWriter::table([['OsCislo', 'C', 10], ['Rok', 'W', 2], ['Mesic', 'V', 1], ['HRUBA', 'E', 10]], [

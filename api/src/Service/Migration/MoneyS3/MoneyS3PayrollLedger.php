@@ -83,13 +83,13 @@ final class MoneyS3PayrollLedger
                 if ($month !== '' && ($lastData === null || $month > $lastData)) {
                     $lastData = $month;
                 }
-                $effect = Ms3Journal::effect($row);
-                if ($effect === null) {
-                    continue;
-                }
                 $source = strtoupper(trim((string) ($row['Zdroj'] ?? '')));
                 $document = $documents[$source][trim((string) ($row['Doklad'] ?? ''))] ?? null;
                 $flagged = $document !== null && $document['flagged'];
+                $effect = Ms3Journal::effect($row) ?? ($flagged ? self::sameAccount($row) : null);
+                if ($effect === null) {
+                    continue;
+                }
                 if (!$flagged && !self::mayBePayroll($effect['debit'], $effect['credit'])) {
                     continue;
                 }
@@ -210,6 +210,24 @@ final class MoneyS3PayrollLedger
             }
         }
         return $last === 0 ? null : sprintf('%04d-%02d', intdiv($last, 100), $last % 100);
+    }
+
+    /**
+     * Řádek mzdového dokladu se stejným účtem na obou stranách. Účetně nemá účinek,
+     * Money jím ale vede závazek čisté mzdy vůči zaměstnanci (331/331, zaměstnance
+     * rozliší párový symbol) - pro kontrolní úhrn čisté mzdy je to jediný zdroj.
+     *
+     * @param array<string,mixed> $row
+     * @return array{debit:string,credit:string,amount:float}|null
+     */
+    private static function sameAccount(array $row): ?array
+    {
+        $amount = round((float) ($row['Castka'] ?? 0), 2);
+        $account = trim((string) ($row['UcMD'] ?? ''));
+        if ($amount === 0.0 || $account === '' || $account !== trim((string) ($row['UcD'] ?? ''))) {
+            return null;
+        }
+        return ['debit' => $account, 'credit' => $account, 'amount' => abs($amount)];
     }
 
     private static function mayBePayroll(string $debit, string $credit): bool
