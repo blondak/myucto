@@ -866,7 +866,7 @@
         "1879_users_default_supplier.sql",
         "1880_invoice_price_level.sql",
         "1881_credit_card_accounts.sql",
-        "1882_credit_card_purchase_modes.sql"
+        "1883_credit_card_purchase_modes.sql"
     ],
     "tables": {
         "accounting_archives": {
