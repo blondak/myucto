@@ -158,6 +158,76 @@ Změna výchozích dimenzí už zaúčtované doklady nemění. Projeví se u do
 zaúčtovaných později a u dokladu, jehož dimenze na detailu znovu uložíte.
 Smazáním klienta, zakázky nebo hodnoty dimenze se výchozí nastavení odstraní.
 
+## Pravidla dimenzí podle účtu
+
+Na záložce **Pravidla** v sekci Firma → Dimenze se nastavuje, které účty musí
+nést hodnotu kterého typu dimenze, například „náklady a výnosy musí mít
+středisko". Pravidlo má:
+
+- **Účty** – předpony účtů oddělené čárkou, vyloučení vykřičníkem. `5, 6, !59, !69`
+  znamená třídy 5 a 6 kromě daně z příjmů. Maska `518` platí pro 518 i všechny
+  jeho analytiky.
+- **Typ dimenze**, kterou řádek musí nést.
+- **Vynucení**:
+  - **Povinné** – doklad ani ruční zápis bez hodnoty nejde zaúčtovat. Chyba
+    jmenuje účet, stranu, částku a chybějící dimenzi.
+  - **Varovat** – zápis se zaúčtuje a aplikace zobrazí upozornění.
+  - **Jen doplnit** – pravidlo nic nevynucuje, jen doplňuje výchozí hodnotu.
+- **Výchozí hodnota** – doplní se řádku na účtu z masky, který hodnotu typu
+  nemá. Hodí se jako výchozí hodnota firmy, třeba projekt, ke kterému firma patří.
+- **Doplnit vozidlo podle platební karty** (jen u typu Vozidlo) – u platby kartou
+  z bankovního výpisu a u přijatého dokladu zaplaceného kartou se podle koncovky
+  karty najde karta, její držitel a jeho jediné aktivní vozidlo. Hodnota typu
+  Vozidlo navázaná na tento vůz se doplní na řádky z masky. Když se vozidlo
+  určit nedá, použije se výchozí hodnota pravidla.
+- **Platí od / do** – rozhoduje datum účetního případu. Pravidlo zavedené od
+  určitého data nezablokuje přeúčtování starších dokladů.
+
+Pořadí přednosti hodnoty na řádku: ruční volba na řádku, dimenze položky
+a hlavičky dokladu, výchozí dimenze zakázky a klienta, teprve potom výchozí
+hodnota pravidla. Když na jeden účet míří víc pravidel téhož typu, výchozí
+hodnotu určí pravidlo s delší předponou a vynucení to nejpřísnější.
+
+Pravidla platí pro zaúčtování vystavených a přijatých faktur, pokladních dokladů,
+bankovních pohybů a ručních zápisů. Automatické zápisy (uzávěrka, otevření účtů,
+odpisy, mzdy, přeúčtování DPH, kurzové rozdíly) pravidla neblokují. Při ruční
+úpravě dimenzí řádků v deníku nejde povinnou dimenzi z řádku odebrat.
+
+Firma bez pravidel účtuje stejně jako dřív.
+
+### Kontrola deníku
+
+Pod seznamem pravidel se za zvolené období spouští **Zkontrolovat deník**.
+Výsledek ukáže zaúčtované řádky, kterým podle pravidel chybí hodnota. Souhrn je
+po účtech, zdrojích zápisu a vynucení, seznam řádků vede do deníku. Typicky jde
+o převzatou historii, automatické zápisy nebo zápisy z doby před zavedením
+pravidla. Uzávěrka, otevření účtů a stornované zápisy se nepočítají.
+
+**Pokrytí účtů** ukáže, jaká část řádků na každém syntetickém účtu nese hodnotu
+typu dimenze. Účet, který historie členila téměř vždy (aspoň 90 % z deseti
+a více řádků), nabídne tlačítko **Vytvořit pravidlo**. Hodí se po převodu
+z jiného systému.
+
+## Rozpad mezi více hodnot
+
+Náklad, který patří víc střediskům nebo projektům, se dá rozdělit tlačítkem
+**Rozpad**:
+
+- na detailu dokladu v panelu Dimenze (rozpad celého dokladu),
+- v účetním deníku v úpravě dimenzí řádků (rozpad jednoho řádku).
+
+V rozpadu se vybere typ dimenze a hodnoty s procentem, u řádku deníku také
+s částkou. Součet musí dát 100 %, resp. částku řádku. Typ s rozpadem pak nemá
+jedinou hodnotu. Když typu později vyberete jedinou hodnotu, rozpad se zruší.
+
+Řádek zápisu se rozpadem nedělí, zůstává jeden se svou částkou. Rozpad se ukládá
+jako podíly. **Výsledovka po dimenzi** ho počítá poměrem po haléřích, součet
+sestavy tak dál sedí na výsledek firmy. Filtr na dimenzi ve Výsledovce, Obratové
+předvaze a Hlavní knize bere jen řádky s jedinou hodnotou. Rozpad dokladu se při
+zaúčtování přenese na řádky zápisu. Storno zápisu přenese stejný rozpad, takže
+odečte přesně to, co původní zápis přičetl. Rozpad splní i povinnou dimenzi
+pravidla.
+
 ## Sestavy
 
 - **Výsledovka**, **Obratová předvaha** a **Hlavní kniha** mají filtr na dimenzi:

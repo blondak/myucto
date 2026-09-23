@@ -1,5 +1,6 @@
 import { api } from './client'
 import type { AutomationProvenance } from './automation'
+import type { DimensionRuleWarning, DimensionSplits } from './dimensions'
 
 /**
  * Podvojné účetnictví (Epic F1) — typovaný klient pro /api/accounting.
@@ -116,6 +117,8 @@ export interface JournalLine {
   line_no: number
   /** Dimenze řádku (Firma → Dimenze): typ → hodnota; chodí v detailu zápisu. */
   dimensions?: Record<number, number>
+  /** Rozpad řádku mezi víc hodnot typu: typ → [{value_id, share}]; chodí v detailu zápisu. */
+  dimension_splits?: DimensionSplits
   /** Obohaceno v detailu (GET /journal/{id}). */
   account_code?: string | null
   account_name?: string | null
@@ -232,6 +235,8 @@ export interface JournalEntryDetail extends JournalEntry {
   lines: JournalLine[]
   /** Měkké vazby na doklady (migrace 1514); chodí s detailem zápisu. */
   links?: JournalDocumentLink[]
+  /** Varování pravidel dimenzí (vynucení „varovat") po zaúčtování. */
+  dimension_warnings?: DimensionRuleWarning[]
 }
 
 // ── Měkká vazba zápisu na doklad (migrace 1514) ────────────────────────────
@@ -536,6 +541,8 @@ export interface ManualLinePayload {
   cost_center?: string
   /** Dimenze řádku: typ → hodnota. */
   dimensions?: Record<number, number>
+  /** Rozpad řádku mezi víc hodnot typu: typ → [{value_id, share}], součet 100 %. */
+  dimension_splits?: DimensionSplits
 }
 
 /** Tělo zaúčtování dokladu. `lines` = kontace upravená v popupu; bez nich staví server. */

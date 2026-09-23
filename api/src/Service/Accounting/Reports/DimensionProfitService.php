@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Reports;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
+use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 use MyInvoice\Service\Tax\Return\JournalTaxOrigin;
 use PDO;
 
@@ -138,10 +139,12 @@ final class DimensionProfitService
              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                AND e.entry_date BETWEEN ? AND ?
                AND a.account_type IN ('revenue', 'expense')
+               AND NOT EXISTS (SELECT 1 FROM journal_entry_line_dimension_splits s
+                                WHERE s.line_id = l.id AND s.dimension_type_id = ?)
                AND " . JournalTaxOrigin::includedSql() . '
              GROUP BY COALESCE(jd.dimension_value_id, ccv.id)'
         );
-        $stmt->execute([$typeId, $typeId, $supplierId, $from, $to, ClosingSourceId::STOCK_SLOT_BASE]);
+        $stmt->execute([$typeId, $typeId, $supplierId, $from, $to, $typeId, ClosingSourceId::STOCK_SLOT_BASE]);
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $key = $r['value_id'] === null ? '' : (string) (int) $r['value_id'];
@@ -149,6 +152,58 @@ final class DimensionProfitService
                 'revenue' => (int) round(((float) $r['revenue']) * 100),
                 'cost' => (int) round(((float) $r['cost']) * 100),
             ];
+        }
+        foreach ($this->splitSums($supplierId, $typeId, $from, $to) as $key => $sum) {
+            $out[$key]['revenue'] = ($out[$key]['revenue'] ?? 0) + $sum['revenue'];
+            $out[$key]['cost'] = ($out[$key]['cost'] ?? 0) + $sum['cost'];
+        }
+        return $out;
+    }
+
+    /**
+     * Řádky s rozpadem mezi víc hodnot typu (pravidla dimenzí): částka řádku se
+     * rozdělí podle podílů po haléřích se zbytkem na největší podíl
+     * ({@see DimensionStamper::distributeCents()}), takže součet sestavy dál sedí
+     * na výsledek firmy.
+     *
+     * @return array<string,array{revenue:int,cost:int}>
+     */
+    private function splitSums(int $supplierId, int $typeId, string $from, string $to): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'WITH RECURSIVE ' . JournalTaxOrigin::cte($supplierId) . "
+            SELECT l.id AS line_id, a.account_type,
+                   CASE WHEN a.account_type = 'revenue'
+                        THEN CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END
+                        ELSE CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END END AS signed,
+                   s.dimension_value_id, s.share
+              FROM journal_entry_lines l
+              JOIN journal_entries e ON e.id = l.entry_id
+              " . JournalTaxOrigin::join() . "
+              JOIN chart_of_accounts a ON a.id = l.account_id
+              JOIN journal_entry_line_dimension_splits s ON s.line_id = l.id AND s.dimension_type_id = ?
+             WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
+               AND e.entry_date BETWEEN ? AND ?
+               AND a.account_type IN ('revenue', 'expense')
+               AND " . JournalTaxOrigin::includedSql() . '
+             ORDER BY l.id, s.dimension_value_id'
+        );
+        $stmt->execute([$typeId, $supplierId, $from, $to, ClosingSourceId::STOCK_SLOT_BASE]);
+        $lines = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $id = (int) $r['line_id'];
+            $lines[$id]['column'] = $r['account_type'] === 'revenue' ? 'revenue' : 'cost';
+            $lines[$id]['cents'] = (int) round(((float) $r['signed']) * 100);
+            $lines[$id]['shares'][(int) $r['dimension_value_id']] = (float) $r['share'];
+        }
+        $out = [];
+        foreach ($lines as $line) {
+            $cents = DimensionStamper::distributeCents($line['cents'], array_values($line['shares']));
+            foreach (array_keys($line['shares']) as $i => $valueId) {
+                $key = (string) $valueId;
+                $out[$key] ??= ['revenue' => 0, 'cost' => 0];
+                $out[$key][$line['column']] += $cents[$i];
+            }
         }
         return $out;
     }

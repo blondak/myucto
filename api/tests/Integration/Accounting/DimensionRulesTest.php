@@ -16,6 +16,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionRuleService;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\Reports\DimensionProfitService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -40,6 +41,7 @@ final class DimensionRulesTest extends TestCase
     private DimensionAssignmentRepository $assignments;
     private DimensionRuleService $rules;
     private DimensionRuleAudit $audit;
+    private DimensionProfitService $profit;
 
     private int $supplierId = 0;
     private int $currencyId = 0;
@@ -64,6 +66,7 @@ final class DimensionRulesTest extends TestCase
             $this->assignments = $container->get(DimensionAssignmentRepository::class);
             $this->rules = $container->get(DimensionRuleService::class);
             $this->audit = $container->get(DimensionRuleAudit::class);
+            $this->profit = $container->get(DimensionProfitService::class);
             $periods = $container->get(AccountingPeriodRepository::class);
             $seeder = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
@@ -247,6 +250,28 @@ final class DimensionRulesTest extends TestCase
         // Jediná hodnota zvolená teď rozpad téhož typu nahradí.
         $again = $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $purchase, [$this->centerType => $a], []);
         self::assertSame([], $again['splits']);
+    }
+
+    public function testDimensionProfitCountsSplitProportionallyToTheCent(): void
+    {
+        $a = $this->value($this->centerType, 'S-PA');
+        $b = $this->value($this->centerType, 'S-PB');
+        $entryId = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 100.01,
+             'dimension_splits' => [$this->centerType => [$a => 1 / 3, $b => 2 / 3]]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 100.01],
+        ], ['entry_date' => self::DATE, 'posted_by' => $this->userId]);
+        self::assertGreaterThan(0, $entryId);
+
+        $report = $this->profit->build($this->supplierId, $this->centerType, self::YEAR . '-01-01', self::YEAR . '-12-31', [$this->supplierId]);
+        $own = [];
+        foreach ($report['rows'] as $row) {
+            $own[$row['value_id']] = $row['own']['cost'];
+        }
+        self::assertEqualsWithDelta(33.34, $own[$a], 0.001);
+        self::assertEqualsWithDelta(66.67, $own[$b], 0.001);
+        self::assertEqualsWithDelta(0.0, $report['unassigned']['cost'], 0.001, 'Řádek s rozpadem nepadá do Bez hodnoty.');
+        self::assertEqualsWithDelta(100.01, $report['totals']['cost'], 0.001);
     }
 
     public function testSplitMustSumToHundredPercent(): void

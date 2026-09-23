@@ -66,10 +66,106 @@ export interface DimensionGroupInfo {
 /** typ → hodnota; `null` = typ bez hodnoty (při ukládání se vypustí). */
 export type DimensionMap = Record<number, number | null>
 
+/** Podíl hodnoty v rozpadu (0–1). */
+export interface DimensionSplitShare {
+  value_id: number
+  share: number
+}
+
+/** Rozpad mezi víc hodnot: typ → seznam podílů (součet 1). */
+export type DimensionSplits = Record<number, DimensionSplitShare[]>
+
 export interface DocumentDimensions {
   header: DimensionMap
   /** pořadí položky od 1 → mapa typ → hodnota */
   items: Record<number, DimensionMap>
+  /** pořadí položky (0 = hlavička) → rozpad */
+  splits?: Record<number, DimensionSplits>
+}
+
+export type DimensionRuleEnforcement = 'error' | 'warning' | 'none'
+
+export interface DimensionRule {
+  id: number
+  dimension_type_id: number
+  type_name: string
+  type_code: string
+  type_kind: DimensionKind
+  type_active: boolean
+  account_mask: string
+  enforcement: DimensionRuleEnforcement
+  default_value_id: number | null
+  default_value_code: string | null
+  default_value_name: string | null
+  default_value_active: boolean | null
+  default_from_card: boolean
+  valid_from: string | null
+  valid_to: string | null
+  is_active: boolean
+  note: string | null
+}
+
+export interface DimensionRulePayload {
+  dimension_type_id: number
+  account_mask: string
+  enforcement: DimensionRuleEnforcement
+  default_value_id: number | null
+  default_from_card: boolean
+  valid_from: string | null
+  valid_to: string | null
+  is_active: boolean
+  note: string | null
+}
+
+export interface DimensionRuleWarning {
+  account_code: string
+  account_name: string
+  type_id: number
+  type_name: string
+  message: string
+}
+
+export interface DimensionRuleAuditRow {
+  line_id: number
+  entry_id: number
+  entry_date: string
+  document_no: string | null
+  source_type: string
+  source_id: number | null
+  account_code: string
+  account_name: string
+  side: 'debit' | 'credit'
+  amount: number
+  type_id: number
+  type_name: string
+  enforcement: 'error' | 'warning'
+}
+
+export interface DimensionRuleAuditSummary {
+  type_id: number
+  type_name: string
+  synthetic: string
+  enforcement: 'error' | 'warning'
+  source_type: string
+  lines: number
+  amount: number
+}
+
+export interface DimensionRuleAudit {
+  rows: DimensionRuleAuditRow[]
+  summary: DimensionRuleAuditSummary[]
+  total: number
+  truncated: boolean
+}
+
+export interface DimensionCoverageRow {
+  type_id: number
+  type_name: string
+  synthetic: string
+  lines: number
+  covered: number
+  ratio: number
+  suggested: boolean
 }
 
 export interface DocumentDimensionsSaveResult extends DocumentDimensions {
@@ -98,15 +194,18 @@ export interface DocumentDimensionsPayload {
   header: DimensionMap
   /** Bez položek zůstanou dimenze položek dokladu beze změny. */
   items?: Record<number, DimensionMap>
+  /** Bez rozpadů zůstane rozpad dokladu beze změny (jen typ s novou jedinou hodnotou ho ztratí). */
+  splits?: Record<number, DimensionSplits>
 }
 
-/** Tělo pro uložení i náhled; `items` jen tehdy, když je volající opravdu posílá. */
+/** Tělo pro uložení i náhled; `items` a `splits` jen tehdy, když je volající opravdu posílá. */
 export function documentDimensionsBody(payload: DocumentDimensionsPayload) {
   return {
     header: compactDimensions(payload.header),
     ...(payload.items === undefined ? {} : {
       items: Object.fromEntries(Object.entries(payload.items).map(([no, map]) => [no, compactDimensions(map)])),
     }),
+    ...(payload.splits === undefined ? {} : { splits: payload.splits }),
   }
 }
 
@@ -236,10 +335,26 @@ export const dimensionsApi = {
 
   getJournal: (entryId: number) =>
     api.get<Record<number, Record<number, number>>>(`/accounting/dimensions/journal/${entryId}`).then(r => r.data),
-  saveJournal: (entryId: number, lines: Record<number, DimensionMap>) =>
-    api.put<{ changed: number; lines: Record<number, Record<number, number>> }>(`/accounting/dimensions/journal/${entryId}`, {
+  /** `splits` = id řádku → rozpad; bez nich zůstanou rozpady řádků beze změny. */
+  saveJournal: (entryId: number, lines: Record<number, DimensionMap>, splits?: Record<number, DimensionSplits>) =>
+    api.put<{ changed: number; lines: Record<number, Record<number, number>>; splits: Record<number, DimensionSplits> }>(`/accounting/dimensions/journal/${entryId}`, {
       lines: Object.fromEntries(Object.entries(lines).map(([id, map]) => [id, compactDimensions(map)])),
+      ...(splits === undefined ? {} : { splits }),
     }).then(r => r.data),
+
+  listRules: () => api.get<DimensionRule[]>('/accounting/dimensions/rules').then(r => r.data),
+  createRule: (payload: DimensionRulePayload) =>
+    api.post<DimensionRule>('/accounting/dimensions/rules', payload).then(r => r.data),
+  updateRule: (id: number, payload: DimensionRulePayload) =>
+    api.put<DimensionRule>(`/accounting/dimensions/rules/${id}`, payload).then(r => r.data),
+  deleteRule: (id: number) =>
+    api.delete<{ deleted: boolean }>(`/accounting/dimensions/rules/${id}`).then(r => r.data),
+  /** Zaúčtované řádky, kterým podle pravidel chybí dimenze. */
+  auditRules: (params: { date_from: string; date_to: string }) =>
+    api.get<DimensionRuleAudit>('/accounting/dimensions/rules/audit', { params }).then(r => r.data),
+  /** Pokrytí syntetických účtů dimenzemi — podklad pro návrh pravidel. */
+  ruleCoverage: (params: { date_from: string; date_to: string }) =>
+    api.get<DimensionCoverageRow[]>('/accounting/dimensions/rules/coverage', { params }).then(r => r.data),
 
   group: () => api.get<DimensionGroupInfo>('/accounting/dimensions/group').then(r => r.data),
   createGroup: (name: string) => api.post<DimensionGroupInfo>('/accounting/dimensions/group', { name }).then(r => r.data),
