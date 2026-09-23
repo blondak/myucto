@@ -1191,12 +1191,11 @@ final class KontrolniHlaseniBuilder
     public static function a2Identification(?string $countryIso2, bool $countryIsEu, ?string $vatId): array
     {
         $none = ['k_stat' => '', 'vatid_dod' => ''];
-        // Prefix se stráhá podle TÉHOŽ hodnoty, která jde do `k_stat`, jinak by v čísle
-        // zůstal cizi prefix (Řecko: ISO GR vs. DPH kód EL).
-        $seat = $countryIsEu ? self::khCountryCode($countryIso2) : '';
-        if ($seat !== '') {
-            $clean = self::cleanEuVatId($vatId, $countryIso2);
-            return $clean === '' ? $none : ['k_stat' => $seat, 'vatid_dod' => $clean];
+        // Sídlo v EU: `k_stat` i číslo bez prefixu určuje registrace ({@see euVatRegistration()}),
+        // ne adresa — dodavatel se sídlem v DE registrovaný v AT má `k_stat` AT a číslo U….
+        if ($countryIsEu && self::khCountryCode($countryIso2) !== '') {
+            $reg = self::euVatRegistration($vatId, $countryIso2);
+            return $reg['vat_id'] === '' ? $none : ['k_stat' => $reg['k_stat'], 'vatid_dod' => $reg['vat_id']];
         }
         // Sídlo mimo EU (nebo neznámé): jediná použitelná identifikace je registrace
         // v členském státě, kterou nese prefix samotného VAT ID.
@@ -1302,6 +1301,47 @@ final class KontrolniHlaseniBuilder
             }
         }
         return $s;
+    }
+
+    /**
+     * Kód státu, který DIČ registrace k DPH přidělil, a číslo BEZ tohoto kódu — dvojice
+     * `k_stat` + `c_vat` (souhrnné hlášení) resp. `k_stat` + `vatid_dod` (KH A.2).
+     *
+     * Obě XSD (dphshv.xsd `c_vat`, dphkh1.xsd `vatid_dod`) chtějí číslo „bez kódu státu"
+     * a `k_stat` jako „kód státu, který přidělil daňové identifikační číslo". Karta
+     * kontaktu DIČ ukládá s prefixem, import často bez něj.
+     *
+     * Pořadí pravidel:
+     *  1. prefix odpovídající zemi adresy (DPH kód i ISO, Řecko EL/GR) se strhne —
+     *     tím zůstane zachovaná alfanumerická národní část (FR „FRAB123…" → „AB123…"),
+     *  2. jinak prefix JINÉHO členského státu (tvarově platné DIČ, {@see euVatIdPrefix()})
+     *     určuje `k_stat` a strhne se — dřív se tu strhával jen prefix země adresy, takže
+     *     odběratel s adresou v jiném státě, než který mu DIČ přidělil, šel do SH jako
+     *     `k_stat="PL" c_vat="PL5372631811"`,
+     *  3. bez prefixu je `k_stat` země adresy a číslo zůstává, jak je.
+     *
+     * @return array{k_stat:string, vat_id:string} vat_id '' = DIČ chybí
+     */
+    public static function euVatRegistration(?string $vatId, ?string $countryIso2): array
+    {
+        $s = preg_replace('/[^A-Z0-9]/', '', strtoupper(trim((string) $vatId))) ?? '';
+        $address = self::khCountryCode($countryIso2);
+        if ($s === '') {
+            return ['k_stat' => $address, 'vat_id' => ''];
+        }
+        $addressIso = strtoupper(trim((string) $countryIso2));
+        foreach (array_unique([$address, $addressIso]) as $prefix) {
+            if ($prefix !== '' && str_starts_with($s, $prefix)) {
+                return ['k_stat' => $address, 'vat_id' => substr($s, strlen($prefix))];
+            }
+        }
+        // Řecké DIČ zapsané s ISO kódem GR u odběratele s adresou jinde.
+        $normalized = str_starts_with($s, 'GR') ? 'EL' . substr($s, 2) : $s;
+        $issuer = self::euVatIdPrefix($normalized);
+        if ($issuer !== '') {
+            return ['k_stat' => $issuer, 'vat_id' => substr($normalized, 2)];
+        }
+        return ['k_stat' => $address, 'vat_id' => $s];
     }
 
     /**

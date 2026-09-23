@@ -2239,6 +2239,51 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertFalse(isset($dp->Veta6['dano_da']), 'žádná vlastní daň z pouhého samovyměření');
     }
 
+    /**
+     * Souhrnné hlášení: `c_vat` je DIČ BEZ kódu státu, `k_stat` stát, který DIČ přidělil
+     * (dphshv.xsd). Karta kontaktu ukládá DIČ s prefixem; když adresa a prefix nesouhlasí,
+     * strhával se jen prefix země adresy a do SH šlo `k_stat="PL" c_vat="PL…"`. Francouzské
+     * DIČ bez prefixu naopak dostalo `k_stat` z prvních dvou písmen národní části.
+     */
+    public function testShStripsPrefixOfIssuingStateNotAddress(): void
+    {
+        $frId = $this->countryId('FR');
+        if ($frId === 0) {
+            $this->markTestSkipped('Země FR není v číselníku countries.');
+        }
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $plRegistered = $this->client('Odběratel s adresou v DE a polským DIČ', $this->deId, 'PL1234567890', customer: true);
+        $frNoPrefix = $this->client('FR odběratel bez prefixu', $frId, 'AB123456789', customer: true);
+        $this->sale('2099063301', $plRegistered, '22', false, $d(10), $d(10), [[15000, 0, 0]]);
+        $this->sale('2099063302', $frNoPrefix, '22', false, $d(11), $d(11), [[8000, 0, 0]]);
+
+        $res = $this->shv->build($this->supplierId, self::YEAR, self::MONTH);
+        $this->assertXmlValidatesAgainstXsd($res['xml'], 'dphshv.xsd');
+        $rows = [];
+        foreach ((new \SimpleXMLElement($res['xml']))->DPHSHV->VetaR as $v) {
+            $rows[(string) $v['k_stat']] = (string) $v['c_vat'];
+        }
+        $this->assertSame(['PL' => '1234567890', 'FR' => 'AB123456789'], $rows);
+    }
+
+    /**
+     * KH A.2: totéž pravidlo jako SH — `k_stat` je stát registrace a `vatid_dod` číslo bez
+     * JEHO prefixu. Dodavatel se sídlem v DE registrovaný v AT šel jako DE + „ATU…".
+     */
+    public function testKhA2UsesIssuingStateOfVatIdForEuSeatedSupplier(): void
+    {
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $vend = $this->client('DE sídlo, AT registrace', $this->deId, 'ATU12345678', vendor: true);
+        $this->purchase('P-2099-3303', $vend, '24e', false, 'invoice', $d(12), $d(12), [[4000, 0, 21]]);
+
+        $xml = $this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml'];
+        $this->assertKhXmlValidatesAgainstXsd($xml);
+        $a2 = (new \SimpleXMLElement($xml))->DPHKH1->VetaA2;
+        $this->assertCount(1, $a2);
+        $this->assertSame('AT', (string) $a2[0]['k_stat']);
+        $this->assertSame('U12345678', (string) $a2[0]['vatid_dod']);
+    }
+
     private function assertXmlValidatesAgainstXsd(string $xml, string $xsdFile): void
     {
         $xsd = dirname(__DIR__, 3) . '/xsd/' . $xsdFile;
