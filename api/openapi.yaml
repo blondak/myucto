@@ -11333,7 +11333,10 @@ paths:
     patch:
       tags: [Accounting]
       summary: Upraví vlastní bankovní účet
-      description: Účetní/admin. Mění klasifikaci a aktivaci účtu; cizí tenant vrací 404.
+      description: >-
+        Účetní/admin. Mění klasifikaci a aktivaci účtu; cizí tenant vrací 404. Úvěrový účet
+        kreditní karty (kind = credit_card) se tudy neupravuje (422) a na kreditní účet nejde
+        účet ani přepnout, to dělá import výpisu nebo převod na stránce Kreditní karty.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
@@ -26644,8 +26647,13 @@ components:
         bank_code: { type: [string, "null"], pattern: '^[0-9]{4}$' }
         iban: { type: [string, "null"] }
         currency: { type: [string, "null"], minLength: 3, maxLength: 3 }
-        kind: { type: string, enum: [current, savings, term_deposit] }
-        analytic_suffix: { type: [string, "null"], description: 'Analytika účtu 221 (221<suffix>); přiděluje se automaticky každému aktivnímu účtu.' }
+        kind:
+          type: string
+          enum: [current, savings, term_deposit, credit_card]
+          description: >-
+            credit_card = úvěrový účet kreditní karty. Jeho pohyby se účtují na analytiku 231
+            (spravuje ji stránka Kreditní karty), analytic_suffix 221 zůstává prázdný.
+        analytic_suffix: { type: [string, "null"], description: 'Analytika účtu 221 (221<suffix>); přiděluje se automaticky každému aktivnímu účtu kromě úvěrového účtu kreditní karty.' }
         is_active: { type: boolean }
         source: { type: string, enum: [currencies, statement, manual] }
         currency_id: { type: [integer, "null"] }

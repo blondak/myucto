@@ -2180,7 +2180,9 @@ final class PostingService
      *
      *  - analytika mezičlenu platební karty (378.101 …): přesměr by na ni poslal cizí zápisy
      *    na 378 a zůstatek karty by přestal odpovídat nevypořádaným platbám,
-     *  - záchranná analytika neevidovaných karet (378/261/395 .199).
+     *  - záchranná analytika neevidovaných karet (378/261/395 .199),
+     *  - analytika úvěrového účtu kreditní karty (231.101 …): holé 231 z jiného zápisu
+     *    (bankovní úvěr) by jinak skončilo na dluhu kreditky.
      */
     public static function dedicatedAnalyticSql(string $child, string $parent): string
     {
@@ -2189,7 +2191,12 @@ final class PostingService
                      WHERE pc.supplier_id = {$child}.supplier_id AND pc.analytic_suffix IS NOT NULL
                        AND {$child}.account_code = CONCAT({$parent}.account_code, '.', pc.analytic_suffix)
                 )
-                OR ({$parent}.account_code IN ('378', '261', '395') AND {$child}.account_code = CONCAT({$parent}.account_code, '.199')))";
+                OR ({$parent}.account_code IN ('378', '261', '395') AND {$child}.account_code = CONCAT({$parent}.account_code, '.199'))
+                OR EXISTS (
+                    SELECT 1 FROM credit_card_accounts cca
+                     WHERE cca.supplier_id = {$child}.supplier_id AND cca.analytic_suffix IS NOT NULL
+                       AND {$child}.account_code = CONCAT('231.', cca.analytic_suffix)
+                ))";
     }
 
     /**

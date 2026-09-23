@@ -732,6 +732,15 @@ final class RoutePermissionMap
         // Evidence karet patří k nastavení bankovních účtů firmy.
         ['GET', '#^/api/payment-cards(/|$)#', 'settings.bank_accounts', AccessLevel::READ],
         ['*', '#^/api/payment-cards(/|$)#', 'settings.bank_accounts', AccessLevel::WRITE],
+        // Kreditní karty: výpisy a pohyby jsou bankovní data, načtení výpisu je import banky,
+        // nastavení účtování, analytika 231 a převod účtu jsou zápis do účetnictví, evidence
+        // úvěrového účtu (název, limit, splátka) patří k nastavení bankovních účtů.
+        ['GET', '#^/api/credit-cards(/|$)#', 'bank', AccessLevel::READ],
+        ['POST', '#^/api/credit-cards/import$#', 'bank.import', AccessLevel::WRITE],
+        ['POST', '#^/api/credit-cards/convert$#', 'bank.post', AccessLevel::WRITE],
+        ['PUT', '#^/api/credit-cards/settings$#', 'bank.post', AccessLevel::WRITE],
+        ['PUT', '#^/api/credit-cards/[0-9]+/analytic$#', 'bank.post', AccessLevel::WRITE],
+        ['*', '#^/api/credit-cards(/|$)#', 'settings.bank_accounts', AccessLevel::WRITE],
         ['POST', '#^/api/logbook/.*/import#', 'logbook.import', AccessLevel::WRITE],
         ['DELETE', '#^/api/logbook(/|$)#', 'logbook.delete', AccessLevel::WRITE],
         ['GET', '#^/api/logbook(/|$)#', 'logbook', AccessLevel::READ],

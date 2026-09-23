@@ -47,6 +47,11 @@ final class SupplierBankAccountAction
             return Json::error($response, 'not_found', 'Bankovní účet nenalezen.', 404);
         }
         $body = (array) ($request->getParsedBody() ?? []);
+        // Úvěrový účet kreditní karty má analytiku 231 a spravuje ho stránka Kreditní karty;
+        // přepnutím druhu nebo analytiky 221 tady by se jeho pohyby začaly účtovat na banku.
+        if (($current['kind'] ?? null) === 'credit_card' && array_intersect(array_keys($body), ['kind', 'analytic_suffix']) !== []) {
+            return Json::error($response, 'validation_failed', 'Úvěrový účet kreditní karty se upravuje na stránce Kreditní karty.', 422);
+        }
         $patch = [];
         if (array_key_exists('kind', $body)) {
             $kind = (string) $body['kind'];

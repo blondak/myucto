@@ -248,7 +248,7 @@ final class PostingRuleChartAlignmentService
     /** @return array<string,array<string,mixed>> kód → účet */
     private function chart(int $supplierId): array
     {
-        // Vyhrazené analytiky (karta, kreditní karta) nejsou náhradou syntetiky — stejná
+        // Vyhrazené analytiky (karta, kreditní karta) nejsou náhradou syntetiky, stejná
         // definice jako přesměr v enginu, jinak by náhled hlásil „auto" na účet, kam engine
         // nepřesměruje.
         $stmt = $this->db->pdo()->prepare(
