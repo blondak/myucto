@@ -134,14 +134,16 @@ final class DimensionStamperTest extends TestCase
         self::assertSame([-50, -50], DimensionStamper::distributeCents(-100, [1.0, 1.0]));
     }
 
-    public function testFilterSqlCountsCostCentreTextOnlyWithoutDimension(): void
+    public function testFilterLineSourceCountsCostCentreTextOnlyWithoutDimensionAndSplitsByShare(): void
     {
         $filter = new DimensionFilter(5, 11, [11, 12], ['REZ']);
-        [$sql, $params] = $filter->sql('l');
-        self::assertStringContainsString('dim_f.dimension_value_id IN (?,?)', $sql);
-        self::assertStringContainsString('l.cost_center IN (?)', $sql);
-        self::assertStringContainsString('NOT EXISTS', $sql, 'Řádek s dimenzí téhož typu rozhoduje dimenzí, ne textem.');
-        self::assertSame([5, 11, 12, 'REZ', 5], $params);
+        [$sql, $params] = $filter->lineSource(7, 'l');
+        self::assertStringContainsString('fd.dimension_value_id IN (?,?)', $sql);
+        self::assertStringContainsString('fl.cost_center IN (?)', $sql);
+        self::assertStringContainsString('journal_entry_line_dimension_splits dim_cs', $sql, 'Řádek s rozpadem téhož typu nerozhoduje textem.');
+        self::assertStringContainsString('ROUND(sl.amount * s.share', $sql, 'Řádek s rozpadem jen svým dílem.');
+        self::assertStringEndsWith(') l', $sql);
+        self::assertSame([5, 11, 12, 7, 7, 'REZ', 5, 5, 5, 7, 5, 11, 12, 11, 12, 7], $params);
     }
 
     /** @return list<array<string,mixed>> 518 MD / 343 MD / 321 D */

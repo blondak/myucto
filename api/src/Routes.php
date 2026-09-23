@@ -2324,6 +2324,9 @@ final class Routes
             $g->put   ('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'update']);
             $g->delete('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'delete']);
             $g->get('/reports/dimension-profit',                  \MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class);
+            $g->get('/reports/dimension-profit/export',           [\MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class, 'export']);
+            $g->get('/reports/dimension-cash-flow',               \MyInvoice\Action\Accounting\Reports\DimensionCashFlowAction::class);
+            $g->get('/reports/dimension-cash-flow/export',        [\MyInvoice\Action\Accounting\Reports\DimensionCashFlowAction::class, 'export']);
             $g->get('/reports/saldo',                             [SaldoAction::class, 'get']);
             $g->get('/reports/saldo/export',                      [SaldoAction::class, 'export']);
             // Kontrola souběhu se starým účetním programem (měsíční rekonciliace K1, K5–K13).

@@ -918,6 +918,7 @@ export interface ReportDimensionFilter {
   type_id: number
   value_id: number
   value_ids: number[]
+  label?: string | null
 }
 
 export interface GeneralLedgerReport {
@@ -1162,7 +1163,7 @@ export interface StatementParams {
   period_id: number
   as_of?: string
   scope?: StatementScope
-  /** Filtr druhové výsledovky na hodnotu dimenze (rozvaha ho ignoruje). */
+  /** Filtr výsledovky i rozvahy na hodnotu dimenze (řádek s rozpadem jen svým dílem). */
   dimension_value_id?: number
   dimension_descendants?: 0 | 1
 }
@@ -1214,6 +1215,7 @@ export interface BalanceSheetReport {
   version_code: string
   as_of: string
   scope: EffectiveScope
+  dimension?: ReportDimensionFilter | null
   entity: StatementEntity
   period: ReportPeriod
   prev_period: ReportPeriod | null

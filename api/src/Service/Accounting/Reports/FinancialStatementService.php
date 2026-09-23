@@ -98,9 +98,9 @@ final class FinancialStatementService
      * @param 'full'|'small'|'micro'|'auto' $scope
      * @return array<string,mixed> struktura dle spec §2.7
      */
-    public function balanceSheet(int $supplierId, int $periodId, ?string $asOf, string $scope): array
+    public function balanceSheet(int $supplierId, int $periodId, ?string $asOf, string $scope, ?DimensionFilter $dimension = null): array
     {
-        $ctx = $this->buildStatement('balance_sheet', $supplierId, $periodId, $asOf, $scope);
+        $ctx = $this->buildStatement('balance_sheet', $supplierId, $periodId, $asOf, $scope, $dimension);
 
         // D1 (audit 2026-07, H8): §3a odst. 2 písm. b) vyhl. 500/2002 Sb. — zkrácená
         // rozvaha malé ÚJ obsahuje položky písmen a římských číslic (level ≤ 2) A NAVÍC
@@ -163,6 +163,10 @@ final class FinancialStatementService
             'prev_period'    => $ctx['prev_period'] === null ? null : $this->periodOut($ctx['prev_period']),
             'assets'         => $assets,
             'liabilities'    => $liabilities,
+            // Rozvaha za hodnotu dimenze obsahuje jen řádky s touto hodnotou (u rozpadu
+            // jejich díl). Vyrovnaná je jen tehdy, když hodnotu nesou obě strany všech
+            // zápisů — platba bez dimenze nechá pohledávku projektu „otevřenou".
+            'dimension'      => $dimension?->toArray(),
             'checks'         => [
                 'assets_net'        => $assetsNet,
                 'liabilities_total' => $liabilitiesTotal,
@@ -248,9 +252,9 @@ final class FinancialStatementService
      * @param 'full'|'small'|'micro'|'auto' $scope
      * @return array<string,mixed>
      */
-    public function incomeStatementByFunction(int $supplierId, int $periodId, ?string $asOf, string $scope): array
+    public function incomeStatementByFunction(int $supplierId, int $periodId, ?string $asOf, string $scope, ?DimensionFilter $dimension = null): array
     {
-        $out = $this->incomeStatementFor(self::TYPE_PURPOSE, $supplierId, $periodId, $asOf, $scope);
+        $out = $this->incomeStatementFor(self::TYPE_PURPOSE, $supplierId, $periodId, $asOf, $scope, $dimension);
 
         $unmapped = $out['checks']['unmapped_accounts'];
         if ($unmapped !== []) {
@@ -446,6 +450,7 @@ final class FinancialStatementService
                 $startsOn,
                 $splitCodes,
                 $this->mapper->analyticPrefixes($baseMap),
+                $dimension,
             );
             $mappedOpening = $this->mapper->map($rows, $baseMap, $balancesOpening);
             if ($taxOffsetOn) {

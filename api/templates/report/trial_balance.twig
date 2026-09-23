@@ -58,6 +58,7 @@
     <tr>
         <td style="width:30%;">
             <div class="header-meta">Ze dne: {{ "now"|date("d.m.Y") }}</div>
+            {% if dimension is defined and dimension and dimension.label %}<div class="header-meta"><strong>Dimenze: {{ dimension.label }}</strong> (jen řádky s touto hodnotou, rozpad poměrem)</div>{% endif %}
         </td>
         <td style="width:40%;">
             <div class="header-title">Obratová předvaha</div>

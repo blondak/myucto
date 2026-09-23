@@ -269,6 +269,16 @@ export interface DimensionProfitRow {
   has_children: boolean
   own: DimensionProfitAmounts
   total: DimensionProfitAmounts
+  responsible_user_id?: number | null
+  responsible_user_name?: string | null
+}
+
+/** Rozpad po syntetických účtech: řádky = účty, sloupce = kořeny sestavy (+ bez hodnoty). */
+export interface DimensionProfitMatrix {
+  columns: { key: string; value_id: number | null; code: string; name: string | null }[]
+  rows: { code: string; name: string; account_type: 'revenue' | 'expense'; cells: number[]; total: number }[]
+  results: number[]
+  total_result: number
 }
 
 export interface DimensionProfitReport {
@@ -277,9 +287,62 @@ export interface DimensionProfitReport {
   to: string
   supplier_ids: number[]
   hidden_companies: number
+  value_id?: number | null
+  responsible_user_id?: number | null
+  /** Omezeno na větev nebo odpovědnou osobu — řádek „bez hodnoty" se nevykazuje. */
+  restricted?: boolean
   rows: DimensionProfitRow[]
   unassigned: DimensionProfitAmounts
   totals: DimensionProfitAmounts
+  matrix?: DimensionProfitMatrix
+}
+
+export interface DimensionProfitParams {
+  type_id: number
+  from: string
+  to: string
+  scope?: 'group'
+  value_id?: number
+  responsible_user_id?: number
+  accounts?: 1
+}
+
+export interface DimensionCashFlowAccount {
+  account_code: string
+  name: string
+  amount: number
+}
+
+export interface DimensionCashFlowGroup {
+  total: number
+  accounts: DimensionCashFlowAccount[]
+}
+
+/** Peněžní tok nepřímou metodou (celá firma nebo hodnota dimenze). */
+export interface DimensionCashFlowReport {
+  from: string
+  to: string
+  supplier_ids: number[]
+  hidden_companies: number
+  dimension: { type_id: number; value_id: number; value_ids: number[]; label: string | null } | null
+  profit: number
+  non_cash: DimensionCashFlowGroup
+  working_capital: DimensionCashFlowGroup
+  operating: number
+  investing: DimensionCashFlowGroup
+  financing: DimensionCashFlowGroup
+  net_cash_flow: number
+  cash_movement: number
+  untagged_cash: number
+  reconciles: boolean
+}
+
+export interface DimensionCashFlowParams {
+  from: string
+  to: string
+  dimension_value_id?: number
+  dimension_descendants?: 0 | 1
+  scope?: 'group'
 }
 
 /** Vyhodí z mapy prázdné typy — server bere jen vyplněné dvojice. */
@@ -362,6 +425,12 @@ export const dimensionsApi = {
   renameGroup: (name: string) => api.put<DimensionGroupInfo>('/accounting/dimensions/group', { name }).then(r => r.data),
   leaveGroup: () => api.delete<DimensionGroupInfo>('/accounting/dimensions/group').then(r => r.data),
 
-  profit: (params: { type_id: number; from: string; to: string; scope?: 'group' }) =>
+  profit: (params: DimensionProfitParams) =>
     api.get<DimensionProfitReport>('/accounting/reports/dimension-profit', { params }).then(r => r.data),
+  exportProfit: (params: DimensionProfitParams) =>
+    api.get<Blob>('/accounting/reports/dimension-profit/export', { params, responseType: 'blob' }).then(r => r.data),
+  cashFlow: (params: DimensionCashFlowParams) =>
+    api.get<DimensionCashFlowReport>('/accounting/reports/dimension-cash-flow', { params }).then(r => r.data),
+  exportCashFlow: (params: DimensionCashFlowParams) =>
+    api.get<Blob>('/accounting/reports/dimension-cash-flow/export', { params, responseType: 'blob' }).then(r => r.data),
 }
