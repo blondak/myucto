@@ -860,7 +860,8 @@
         "1873_asset_account_summary.sql",
         "1874_migration_batches.sql",
         "1875_migration_parallel_checks.sql",
-        "1876_dimension_account_rules.sql"
+        "1876_dimension_account_rules.sql",
+        "1877_payroll_enforcement_claim_key_unique_restore.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -9410,6 +9411,7 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "idx_payroll_enforcement_claim_active": "BTREE (supplier_id, case_id, is_active, priority_date)",
                 "idx_payroll_enforcement_claim_first_payer_delivery": "BTREE (supplier_id, case_id, first_payer_delivered_on, id)",
+                "uq_payroll_enforcement_claim_key": "UNIQUE BTREE (supplier_id, claim_key)",
                 "uq_payroll_enforcement_claim_tenant_id": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
