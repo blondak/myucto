@@ -146,6 +146,41 @@ final class DimensionStamperTest extends TestCase
         self::assertSame([5, 11, 12, 7, 7, 'REZ', 5, 5, 5, 7, 5, 11, 12, 11, 12, 7], $params);
     }
 
+    public function testPaymentOfSeveralDocumentsTagsCounterLinesAndSplitsTheRest(): void
+    {
+        $lines = [
+            ['account_id' => 3, 'side' => 'debit', 'amount' => 600.00],
+            ['account_id' => 3, 'side' => 'debit', 'amount' => 400.00],
+            ['account_id' => 4, 'side' => 'credit', 'amount' => 1000.00],
+        ];
+        $documents = [
+            ['amount' => 600.0, 'header' => [self::CENTER => 21, self::PROJECT => 100]],
+            ['amount' => 400.0, 'header' => [self::CENTER => 22, self::PROJECT => 100]],
+        ];
+        $out = DimensionStamper::allocateDocuments($lines, $documents, 'debit', []);
+        self::assertSame([self::PROJECT => 100, self::CENTER => 21], $out[0]['dimensions']);
+        self::assertSame([self::PROJECT => 100, self::CENTER => 22], $out[1]['dimensions']);
+        self::assertArrayNotHasKey('dimensions', $out[2], 'Společnou hodnotu doplní hlavička, ne řádek.');
+        self::assertSame([self::CENTER => [21 => 0.6, 22 => 0.4]], $out[2]['dimension_splits'], 'Banka se rozdělí v poměru alokací.');
+    }
+
+    public function testTypeMissingOnOneDocumentAndTypeGivenOnTransactionAreNotSplit(): void
+    {
+        $lines = [
+            ['account_id' => 3, 'side' => 'debit', 'amount' => 700.00],
+            ['account_id' => 3, 'side' => 'debit', 'amount' => 300.00],
+            ['account_id' => 4, 'side' => 'credit', 'amount' => 1000.00],
+        ];
+        $documents = [
+            ['amount' => 700.0, 'header' => [self::CENTER => 21, self::PROJECT => 100]],
+            ['amount' => 300.0, 'header' => [self::PROJECT => 101]],
+        ];
+        $out = DimensionStamper::allocateDocuments($lines, $documents, 'debit', [self::PROJECT => 999]);
+        self::assertSame([self::CENTER => 21], $out[0]['dimensions'], 'Typ zadaný na pohybu se z dokladu nebere.');
+        self::assertArrayNotHasKey('dimensions', $out[1]);
+        self::assertArrayNotHasKey('dimension_splits', $out[2], 'Středisko jen na části plateb se nerozpočítává.');
+    }
+
     /** @return list<array<string,mixed>> 518 MD / 343 MD / 321 D */
     private function purchaseLines(float $base): array
     {

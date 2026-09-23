@@ -419,6 +419,9 @@ final class BankPostingService
             // 'posted' (ne 'skipped') — volající se ptá „ať je tahle tx zaúčtovaná takhle",
             // a ona je. postMatched() jinak vrátí null, což SampleDataGenerator bere jako
             // chybu, a FE by ukázal matoucí toast „spárováno, ale nezaúčtováno".
+            // Podpis zápisu dimenze nezná: přepárování na jinou fakturu se stejnou částkou
+            // nechá zápis být, dimenze nové faktury se proto dorovnají zvlášť.
+            $this->posting->restampDimensions($supplierId, 'bank', $txId);
             $this->afterCardBankPosted($supplierId, $txId, $userId);
             return ['action' => 'posted', 'reason' => 'already_posted', 'entry_id' => $liveEntryId];
         }

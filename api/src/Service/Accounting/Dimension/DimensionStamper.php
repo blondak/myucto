@@ -68,6 +68,9 @@ final class DimensionStamper
      */
     public function stamp(int $supplierId, string $sourceType, ?int $sourceId, array $resolved, ?array $itemAccounts = null, ?string $entryDate = null): array
     {
+        if ($sourceType === 'bank' && $sourceId !== null && $this->enabled($supplierId)) {
+            $resolved = $this->allocateBankDocuments($supplierId, $sourceId, $resolved);
+        }
         $hasExplicit = false;
         foreach ($resolved as $line) {
             if (!empty($line['dimensions']) || !empty($line['dimension_splits'])) {
@@ -191,6 +194,9 @@ final class DimensionStamper
                 $l['split_siblings'] = $siblings[$l['account_id'] . '|' . $l['side']];
                 return $l;
             }, $rows);
+            if ($sourceType === 'bank') {
+                $lines = $this->allocateBankDocuments($supplierId, $sourceId, $lines);
+            }
             $result = self::assign($lines, $header, $items, $types, false);
             $needsRepost = $needsRepost || $result['needs_split'];
             $restamped = $this->rules()->applyDefaults(
@@ -278,6 +284,109 @@ final class DimensionStamper
             }
         }
         return ['lines' => $out, 'needs_split' => $needsSplit];
+    }
+
+    /**
+     * Pohyb hradící víc dokladů: řádek saldokonta, jehož částka odpovídá alokaci dokladu,
+     * nese dimenze toho dokladu. Ostatní řádky (banka, zaokrouhlení, kurzový rozdíl)
+     * dostanou typ, ve kterém se doklady liší, jako rozpad v poměru alokací — jen když
+     * hodnotu toho typu mají všechny doklady. Dimenze zadaná na pohybu přebíjí obojí.
+     *
+     * @param list<array<string,mixed>> $lines
+     * @return list<array<string,mixed>>
+     */
+    private function allocateBankDocuments(int $supplierId, int $txId, array $lines): array
+    {
+        $bank = (new DimensionDefaults($this->db))->bankDocuments($supplierId, $txId);
+        $documents = $bank['documents'];
+        if (count($documents) < 2) {
+            return $lines;
+        }
+        $assignments = new DimensionAssignmentRepository($this->db);
+        $ownTypes = $assignments->documentDimensions($supplierId, 'bank_transaction', $txId)['header'];
+        foreach ($assignments->documentSplits($supplierId, 'bank_transaction', $txId)[0] ?? [] as $typeId => $_) {
+            $ownTypes[$typeId] = 0;
+        }
+        return self::allocateDocuments($lines, $documents, $bank['incoming'] ? 'credit' : 'debit', $ownTypes);
+    }
+
+    /**
+     * Čisté jádro {@see allocateBankDocuments()} (jednotkově testovatelné).
+     *
+     * @param list<array<string,mixed>> $lines
+     * @param list<array{amount:float, header:array<int,int>}> $documents
+     * @param array<int,int> $ownTypes typy zadané přímo na pohybu (klíče)
+     * @return list<array<string,mixed>>
+     */
+    public static function allocateDocuments(array $lines, array $documents, string $counterSide, array $ownTypes): array
+    {
+        $remaining = [];
+        foreach ($documents as $i => $doc) {
+            $remaining[$i] = (int) round($doc['amount'] * 100);
+        }
+        $tagged = [];
+        foreach ($lines as $li => $line) {
+            if (($line['side'] ?? null) !== $counterSide) {
+                continue;
+            }
+            $cents = (int) round(((float) $line['amount']) * 100);
+            $docIndex = array_search($cents, $remaining, true);
+            if ($docIndex !== false) {
+                $tagged[$li] = $docIndex;
+                unset($remaining[$docIndex]);
+            }
+        }
+
+        $total = array_sum(array_column($documents, 'amount'));
+        $splits = [];
+        $types = [];
+        foreach ($documents as $doc) {
+            $types += $doc['header'];
+        }
+        foreach (array_keys($types) as $typeId) {
+            if (isset($ownTypes[$typeId]) || $total <= 0.0) {
+                continue;
+            }
+            $weights = [];
+            foreach ($documents as $doc) {
+                if (!isset($doc['header'][$typeId])) {
+                    continue 2;
+                }
+                $valueId = $doc['header'][$typeId];
+                $weights[$valueId] = ($weights[$valueId] ?? 0.0) + $doc['amount'];
+            }
+            if (count($weights) < 2) {
+                continue;
+            }
+            $shares = [];
+            $assigned = 0.0;
+            $last = array_key_last($weights);
+            foreach ($weights as $valueId => $weight) {
+                $share = $valueId === $last ? round(1.0 - $assigned, 10) : round($weight / $total, 10);
+                $assigned += $share;
+                if ($share > 0.0) {
+                    $shares[$valueId] = $share;
+                }
+            }
+            $splits[$typeId] = $shares;
+        }
+
+        foreach ($lines as $li => $line) {
+            if (isset($tagged[$li])) {
+                $dims = self::merge(
+                    array_diff_key($documents[$tagged[$li]]['header'], $ownTypes),
+                    array_map('intval', (array) ($line['dimensions'] ?? [])),
+                );
+                if ($dims !== []) {
+                    $lines[$li]['dimensions'] = $dims;
+                }
+                continue;
+            }
+            if ($splits !== []) {
+                $lines[$li]['dimension_splits'] = (array) ($line['dimension_splits'] ?? []) + $splits;
+            }
+        }
+        return $lines;
     }
 
     /**

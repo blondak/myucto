@@ -516,12 +516,54 @@ final class DimensionService
             ? $this->posting->restampDimensions($supplierId, $sourceType, $docId)
             : ['lines' => 0, 'needs_repost' => false];
         $restamp['locked'] = $sourceType !== null && $this->postedOutsideOpenPeriod($supplierId, $sourceType, $docId);
+        if ($sourceType === 'invoice' || $sourceType === 'purchase_invoice') {
+            $restamp['lines'] += $this->restampPayments($supplierId, $sourceType, $docId);
+        }
         return [
             'header' => $normHeader,
             'items' => $normItems,
             'splits' => array_map([self::class, 'splitsForApi'], $normSplits),
             'restamp' => $restamp,
         ];
+    }
+
+    /**
+     * Úhrady (bankovní pohyby, pokladní doklady) přebírají dimenze placené faktury
+     * při zaúčtování. Změna dimenzí faktury se proto promítne i do jejich zápisů,
+     * jinak by saldo po dimenzi zůstalo rozjeté.
+     */
+    private function restampPayments(int $supplierId, string $sourceType, int $docId): int
+    {
+        $pdo = $this->db->pdo();
+        if ($sourceType === 'invoice') {
+            $bank = $pdo->prepare(
+                'SELECT ip.bank_transaction_id FROM invoice_payments ip
+                   JOIN invoices i ON i.id = ip.invoice_id AND i.supplier_id = ?
+                  WHERE ip.invoice_id = ? AND ip.bank_transaction_id IS NOT NULL
+                 UNION
+                 SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = ? AND invoice_id = ?
+                 UNION
+                 SELECT bt.id FROM bank_transactions bt
+                   JOIN bank_statements bs ON bs.id = bt.statement_id
+                  WHERE bt.matched_invoice_id = ? AND ' . BankStatementOwnershipResolver::sql()
+            );
+            $bank->execute([$supplierId, $docId, $supplierId, $docId, $docId, ...BankStatementOwnershipResolver::params($supplierId)]);
+            $cashColumn = 'invoice_id';
+        } else {
+            $bank = $pdo->prepare('SELECT DISTINCT bank_transaction_id FROM payment_matches WHERE supplier_id = ? AND purchase_invoice_id = ?');
+            $bank->execute([$supplierId, $docId]);
+            $cashColumn = 'purchase_invoice_id';
+        }
+        $cash = $pdo->prepare("SELECT id FROM cash_documents WHERE supplier_id = ? AND {$cashColumn} = ?");
+        $cash->execute([$supplierId, $docId]);
+        $lines = 0;
+        foreach ($bank->fetchAll(PDO::FETCH_COLUMN) as $txId) {
+            $lines += $this->posting->restampDimensions($supplierId, 'bank', (int) $txId)['lines'];
+        }
+        foreach ($cash->fetchAll(PDO::FETCH_COLUMN) as $cashId) {
+            $lines += $this->posting->restampDimensions($supplierId, 'cash', (int) $cashId)['lines'];
+        }
+        return $lines;
     }
 
     /**
