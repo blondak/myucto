@@ -179,6 +179,8 @@ final class StockReportXlsxExporter
                 }
             }
             $this->finishTable($summary, 3, $r - 1, count($groupHeaders), count($groupHeaders) - 4);
+            // Seskupení si uživatel vybral kvůli souhrnu, proto se sešit otevře na něm.
+            $ss->setActiveSheetIndexByName('Souhrn');
         }
 
         return $this->out($ss, 'prodeje-skladovych-karet-' . (string) ($f['date_from'] ?? '') . '-' . (string) ($f['date_to'] ?? '') . '.xlsx');

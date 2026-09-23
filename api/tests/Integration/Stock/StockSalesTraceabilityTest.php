@@ -392,6 +392,44 @@ final class StockSalesTraceabilityTest extends StockTestCase
         self::assertSame(0, $this->sales($supplierId, $range + ['warehouse_id' => (string) $other])['totals']['lines']);
     }
 
+    public function testMovementsExportIncludesInvoiceAndPartnerInPdfAndXlsx(): void
+    {
+        $supplierId = $this->createSupplier();
+        $whId = $this->warehouse($supplierId);
+        $itemId = $this->item($supplierId, 'EXPORT-1');
+        $this->receiveStock($supplierId, $whId, $itemId, '2.000', 10.0); // ruční příjem bez partnera
+        $this->issuedInvoice($supplierId, $this->client($supplierId, 'Exportní odběratel'), [[$itemId, $whId, '1.000', 50.0]], varsymbol: '2099990077');
+
+        foreach (['pdf' => 'application/pdf', 'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'] as $format => $mime) {
+            $response = $this->call(StockItemAction::class, 'movementsExport', $supplierId, ['format' => $format], ['id' => (string) $itemId]);
+            self::assertSame(200, $response->getStatusCode(), $format . ': ' . substr((string) $response->getBody(), 0, 300));
+            self::assertSame($mime, $response->getHeaderLine('Content-Type'));
+        }
+        $sheet = $this->xlsxRows($this->call(StockItemAction::class, 'movementsExport', $supplierId, ['format' => 'xlsx'], ['id' => (string) $itemId]));
+        $issueRow = array_values(array_filter($sheet, static fn (array $r): bool => ($r[3] ?? null) === '2099990077'));
+        self::assertCount(1, $issueRow);
+        self::assertSame('Exportní odběratel', $issueRow[0][4]);
+    }
+
+    public function testSalesExportIsXlsxOnlyAndNeedsInvoiceAccess(): void
+    {
+        $supplierId = $this->createSupplier();
+        $whId = $this->warehouse($supplierId);
+        $itemId = $this->item($supplierId, 'EXPORT-SALE');
+        $this->receiveStock($supplierId, $whId, $itemId, '2.000', 10.0);
+        $this->issuedInvoice($supplierId, $this->client($supplierId, 'Souhrnný odběratel'), [[$itemId, $whId, '2.000', 75.0]], date: '2099-11-02');
+        $query = ['date_from' => '2099-11-01', 'date_to' => '2099-11-30', 'group_by' => 'client'];
+
+        $xlsx = $this->call(StockReportAction::class, 'export', $supplierId, $query + ['format' => 'xlsx'], ['name' => 'sales']);
+        self::assertSame(200, $xlsx->getStatusCode(), substr((string) $xlsx->getBody(), 0, 300));
+        self::assertContains('EXPORT-SALE', array_column($this->xlsxRows($xlsx, 'Řádky'), 4));
+        self::assertContains('Souhrnný odběratel', array_column($this->xlsxRows($xlsx), 0), 'Při seskupení se sešit otevře na souhrnu.');
+        self::assertSame(422, $this->call(StockReportAction::class, 'export', $supplierId, $query + ['format' => 'pdf'], ['name' => 'sales'])->getStatusCode());
+
+        $stockOnly = new EffectiveRole(9, 'Skladník', 'staff', true, ['stock' => 1]);
+        self::assertSame(403, $this->call(StockReportAction::class, 'export', $supplierId, $query + ['format' => 'xlsx'], ['name' => 'sales'], $stockOnly)->getStatusCode());
+    }
+
     // ── pomocníci ────────────────────────────────────────────────────────────
 
     private function serialItem(int $supplierId, string $sku): int
@@ -492,6 +530,19 @@ final class StockSalesTraceabilityTest extends StockTestCase
             throw $e;
         }
         return $invoiceId;
+    }
+
+    /** @return list<list<mixed>> řádky listu XLSX (bez názvu aktivního) */
+    private function xlsxRows(\Psr\Http\Message\ResponseInterface $response, ?string $sheet = null): array
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'stocktest_') . '.xlsx';
+        file_put_contents($tmp, (string) $response->getBody());
+        try {
+            $book = \PhpOffice\PhpSpreadsheet\IOFactory::load($tmp);
+            return ($sheet !== null ? $book->getSheetByNameOrThrow($sheet) : $book->getActiveSheet())->toArray(null, false, false, false);
+        } finally {
+            @unlink($tmp);
+        }
     }
 
     /**
