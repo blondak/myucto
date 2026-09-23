@@ -1399,6 +1399,90 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         self::assertContains(297, $this->failedIds($report));
     }
 
+    /**
+     * Příznak slevy v ovocnářství (10546) vykazujeme u každé součásti, i když
+     * jako NE. Kontroly 269 a 298, které se jím spouštějí, proto nesmí končit
+     * jako mezera v pokrytí, ale jako nevyhodnocené pro nepřítomnou slevu.
+     */
+    public function testOrchardDiscountControlsAreEvaluatedWhenTheFlagIsNo(): void
+    {
+        $report = $this->validate(JmhzXmlSample::withEmployeeDiscount());
+
+        foreach ([269, 298] as $controlId) {
+            self::assertSame(
+                JmhzControlOutcome::NotApplicable,
+                $this->finding($report, $controlId)->outcome,
+                "Kontrola {$controlId} se nevyhodnotila.",
+            );
+        }
+    }
+
+    /**
+     * Kontroly 269 a 298 — úhrn vyměřovacích základů 10544 je součet 10477
+     * součástí s 10546 = ANO a počet zaměstnanců 10543 nesmí převýšit počet
+     * těch součástí.
+     */
+    public function testOrchardDiscountTotalsMustMatchClaimingForms(): void
+    {
+        $pvpoj = static fn (int $headcount, int $base): string => str_replace(
+            '<pvpoj:pojistneUhrada>',
+            "<pvpoj:slevyZamestnancuOvoZel>\n"
+                . "<pvpoj:pocetZamestnancu>{$headcount}</pvpoj:pocetZamestnancu>\n"
+                . "<pvpoj:uhrnVymerovacichZakladu>{$base}</pvpoj:uhrnVymerovacichZakladu>\n"
+                . "<pvpoj:pojistneSleva>71</pvpoj:pojistneSleva>\n"
+                . "</pvpoj:slevyZamestnancuOvoZel>\n<pvpoj:pojistneUhrada>",
+            JmhzXmlSample::defaultPvpoj(),
+        );
+        $form = JmhzXmlSample::form(
+            '1000000001',
+            '2000000000000000000001',
+            employeeDiscount: JmhzXmlSample::employeeDiscountBlock(
+                amount: null,
+                claimed: false,
+                orchard: true,
+            ),
+        );
+
+        $matching = $this->validate(JmhzXmlSample::document($form, pvpoj: $pvpoj(1, 1_000)));
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($matching, 269)->outcome);
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($matching, 298)->outcome);
+
+        $wrong = $this->validate(JmhzXmlSample::document($form, pvpoj: $pvpoj(2, 900)));
+        self::assertContains(269, $this->failedIds($wrong));
+        self::assertContains(298, $this->failedIds($wrong));
+    }
+
+    /**
+     * Kontroly 9 a 142 — úhrn dílčích základů zaměstnavatele podle § 5a
+     * odst. 1 písm. b) a c) (10025, 10483) je součet týchž dílčích základů
+     * zaměstnanců (10479, 10480).
+     */
+    public function testEmployerPartialBasesMustMatchTheSumOfForms(): void
+    {
+        $form = str_replace(
+            '<form:pismenoA>1000</form:pismenoA>',
+            "<form:pismenoA>500</form:pismenoA>\n"
+                . "<form:pismenoB>300</form:pismenoB>\n"
+                . '<form:pismenoC>200</form:pismenoC>',
+            JmhzXmlSample::form('1000000001', '2000000000000000000001'),
+        );
+        $pvpoj = static fn (int $letterB, int $letterC): string => str_replace(
+            '<pvpoj:pojistneZamestnavateleCelkem>',
+            "<pvpoj:zakladZamestnavateleB>{$letterB}</pvpoj:zakladZamestnavateleB>\n"
+                . "<pvpoj:zakladZamestnavateleC>{$letterC}</pvpoj:zakladZamestnavateleC>\n"
+                . '<pvpoj:pojistneZamestnavateleCelkem>',
+            JmhzXmlSample::defaultPvpoj(),
+        );
+
+        $matching = $this->validate(JmhzXmlSample::document($form, pvpoj: $pvpoj(300, 200)));
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($matching, 9)->outcome);
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($matching, 142)->outcome);
+
+        $wrong = $this->validate(JmhzXmlSample::document($form, pvpoj: $pvpoj(250, 150)));
+        self::assertContains(9, $this->failedIds($wrong));
+        self::assertContains(142, $this->failedIds($wrong));
+    }
+
     /** Kontrola 208 — výše slevy 10491 jen při 10490 = ANO. */
     public function testEmployeeDiscountAmountWithoutFlagIsRefused(): void
     {
