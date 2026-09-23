@@ -16,7 +16,7 @@ use MyInvoice\Service\Tax\Return\DppoReturnCalculator;
  * zadala do přiznání ručně. Ty se převezmou jako ruční položky přiznání:
  *
  * - zvyšující: ř. 20, 30, 61, 62 a část ř. 40, kterou výpočet z účetnictví nepokryje;
- * - snižující: ř. 100-162 kromě ř. 150; ř. 112 je u zdroje, který ho používá pro
+ * - snižující: ř. 100-162 kromě ř. 150, z ř. 160 jen část nad rozdíl ZC z karet majetku; ř. 112 je u zdroje, který ho používá pro
  *   paušální výdaj na dopravu (§ 24 odst. 2 písm. zt), paušálem i s odpovídajícím
  *   vrácením PHM na ř. 40;
  * - odečet ztráty (ř. 230), odečty § 34 odst. 4 (ř. 242, 243), dary (ř. 260)
@@ -37,7 +37,9 @@ final class FiledDppoInputs
     /**
      * @param array<int,float> $filed řádek II. oddílu → částka z podaného přiznání; pořadí
      *   položek ve výsledku drží INCREASE_LINES a DECREASE_LINES, ne pořadí klíčů
-     * @param float $computedLine40 část ř. 40, kterou MyÚčto spočte z účetnictví samo
+     * @param array{40?:float,160?:float} $computed část ř. 40 a ř. 160, kterou MyÚčto spočte
+     *   z účetnictví samo ({@see DppoReturnCalculator::accountingAdjustments()}); převezme
+     *   se jen zbytek nad ni
      * @param bool $line112IsTravel ř. 112 zdroje je paušál na dopravu
      * @param array{line:string,line40:string,line40_travel:string,travel:string} $texts
      *   texty položek; `line` je šablona sprintf s číslem řádku
@@ -46,10 +48,10 @@ final class FiledDppoInputs
      *   inputs: array<string,mixed>,
      *   increase: list<array{text:string,amount:float,kind?:string}>,
      *   decrease: list<array{text:string,amount:float,kind?:string}>,
-     *   line40_shortfall: ?array{computed:float,filed:float},
+     *   shortfalls: array<int,array{computed:float,filed:float}>,
      * }
      */
-    public static function build(array $filed, float $computedLine40, bool $line112IsTravel, array $texts, float $advancesPaid = 0.0): array
+    public static function build(array $filed, array $computed, bool $line112IsTravel, array $texts, float $advancesPaid = 0.0): array
     {
         $travel = $line112IsTravel && (float) ($filed[self::TRAVEL_LINE] ?? 0) > 0.0;
         $increase = [];
@@ -60,9 +62,9 @@ final class FiledDppoInputs
                 $increase[] = ['text' => sprintf($texts['line'], (string) $line), 'amount' => $amount];
             }
         }
-        $computed = round($computedLine40, 2);
-        $line40 = round((float) ($filed[40] ?? 0) - $computed, 2);
-        $shortfall = null;
+        $shortfalls = [];
+        $computed40 = round((float) ($computed[40] ?? 0), 2);
+        $line40 = round((float) ($filed[40] ?? 0) - $computed40, 2);
         if ($line40 > 0.0) {
             $item = ['text' => $travel ? $texts['line40_travel'] : $texts['line40'], 'amount' => $line40];
             if ($travel) {
@@ -70,10 +72,20 @@ final class FiledDppoInputs
             }
             $increase[] = $item;
         } elseif ($line40 < 0.0) {
-            $shortfall = ['computed' => $computed, 'filed' => (float) ($filed[40] ?? 0)];
+            $shortfalls[40] = ['computed' => $computed40, 'filed' => (float) ($filed[40] ?? 0)];
         }
         foreach (self::DECREASE_LINES as $line) {
             $amount = round((float) ($filed[$line] ?? 0), 2);
+            if ($line === 160) {
+                // Rozdíl ZC vyřazeného majetku spočte MyÚčto z karet sám; převzít celý
+                // ř. 160 by ho odečetlo podruhé.
+                $computed160 = round((float) ($computed[160] ?? 0), 2);
+                $rest = round($amount - $computed160, 2);
+                if ($rest < 0.0) {
+                    $shortfalls[160] = ['computed' => $computed160, 'filed' => $amount];
+                }
+                $amount = $rest;
+            }
             if ($amount <= 0.0) {
                 continue;
             }
@@ -106,6 +118,6 @@ final class FiledDppoInputs
             }
         }
 
-        return ['inputs' => $inputs, 'increase' => $increase, 'decrease' => $decrease, 'line40_shortfall' => $shortfall];
+        return ['inputs' => $inputs, 'increase' => $increase, 'decrease' => $decrease, 'shortfalls' => $shortfalls];
     }
 }

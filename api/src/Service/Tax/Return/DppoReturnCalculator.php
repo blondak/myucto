@@ -127,7 +127,7 @@ final class DppoReturnCalculator
         //     odpisy převyšují daňové" → účetní ZC vyšší = ř. 40 (a tím i tabulka A).
         // Ř. 50/150 jsou jen odpisy, ř. 62/162 jen „případy neuvedené na ř. 20 až 61"
         // (resp. 109 až 161) — pro ZC tedy ne. Základ daně to nemění, jen řádky.
-        $line40 = round($nonDeductible + $disposalResidual + $disposalIncrease, 2);
+        $line40 = self::accountingAdjustments($data)[40];
 
         // ř.200 základ daně před odečty (může být záporný) — POZOR: záměrně počítá
         // s celkovými (nerozdělenými) $manualIncrease/$manualDecrease/$line40, aby
@@ -367,6 +367,28 @@ final class DppoReturnCalculator
                 'donation_applied' => $donationApplied,
             ],
             'warnings' => $warnings,
+        ];
+    }
+
+    /**
+     * Část ř. 40 a ř. 160, kterou přiznání bere z účetnictví a karet majetku (nedaňové účty,
+     * můstek ZC vyřazeného majetku), bez ručních vstupů. Převzetí podaného přiznání
+     * ({@see \MyInvoice\Service\Migration\Shared\FiledDppoInputs}) z ř. 40 a ř. 160 přebírá
+     * jen zbytek nad ni, jinak by se tatáž částka v základu objevila dvakrát.
+     *
+     * @param array<string,mixed> $data podklady z DppoReturnDataProvider
+     * @return array{40:float,160:float}
+     */
+    public static function accountingAdjustments(array $data): array
+    {
+        return [
+            40 => round(
+                round((float) ($data['non_deductible_costs'] ?? 0), 2)
+                + round((float) ($data['disposal_nondeductible_residual'] ?? 0), 2)
+                + max(0.0, round((float) ($data['disposal_tax_increase'] ?? 0), 2)),
+                2
+            ),
+            160 => max(0.0, round((float) ($data['disposal_tax_decrease'] ?? 0), 2)),
         ];
     }
 

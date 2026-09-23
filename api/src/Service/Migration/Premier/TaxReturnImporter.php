@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Premier;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Repository\TaxReturnRepository;
 use MyInvoice\Service\Migration\Shared\FiledDppoInputs;
+use MyInvoice\Service\Tax\Return\DppoReturnCalculator;
 use MyInvoice\Service\Tax\Return\DppoReturnDataProvider;
 
 /**
@@ -18,8 +19,10 @@ use MyInvoice\Service\Tax\Return\DppoReturnDataProvider;
  * ručně (paušál na dopravu, příjmy osvobozené, ztráta minulých let…). Ty se převedou jako
  * ruční položky přiznání s textem, ze kterého řádku PREMIER pocházejí:
  *
- * - zvyšující: ř. 20, 30, 61, 62 a část ř. 40, kterou nedaňové účty osnovy nepokryjí;
- * - snižující: ř. 100-162 kromě ř. 150 (rozdíl odpisů spočte MyÚčto z karet majetku);
+ * - zvyšující: ř. 20, 30, 61, 62 a část ř. 40, kterou nedaňové účty osnovy a můstek ZC
+ *   vyřazeného majetku nepokryjí;
+ * - snižující: ř. 100-162 kromě ř. 150 (rozdíl odpisů spočte MyÚčto z karet majetku),
+ *   z ř. 160 jen část nad rozdíl ZC vyřazeného majetku z karet;
  *   ř. 112 PREMIER používá pro paušální výdaj na dopravu (§ 24 odst. 2 písm. zt), takže se
  *   položka i s odpovídajícím vrácením PHM na ř. 40 označí jako paušál na dopravu;
  * - odečet ztráty (ř. 230) a zaplacené zálohy.
@@ -66,14 +69,17 @@ final class TaxReturnImporter
             return;
         }
         $data = $this->data->gather($ctx->supplierId, $ctx->year, []);
-        $computed = round((float) ($data['non_deductible_costs'] ?? 0) + (float) ($data['disposal_nondeductible_residual'] ?? 0), 2);
-        $built = self::inputsFromPremier($values, $computed);
+        $built = self::inputsFromPremier($values, DppoReturnCalculator::accountingAdjustments($data));
         $inputs = $built['inputs'];
         $increase = $built['increase'];
         $decrease = $built['decrease'];
-        if ($built['line40_shortfall'] !== null) {
+        if (isset($built['shortfalls'][40])) {
             $p->warn(self::STEP, 'line40_higher', sprintf('Nedaňové náklady podle osnovy (%s Kč) jsou vyšší než ř. 40 přiznání v PREMIER (%s Kč). Zkontrolujte daňovou uznatelnost účtů.',
-                number_format($built['line40_shortfall']['computed'], 2, ',', ' '), number_format($built['line40_shortfall']['filed'], 2, ',', ' ')));
+                number_format($built['shortfalls'][40]['computed'], 2, ',', ' '), number_format($built['shortfalls'][40]['filed'], 2, ',', ' ')));
+        }
+        if (isset($built['shortfalls'][160])) {
+            $p->warn(self::STEP, 'line160_higher', sprintf('Rozdíl zůstatkových cen vyřazeného majetku podle karet (%s Kč) je vyšší než ř. 160 přiznání v PREMIER (%s Kč). Zkontrolujte vyřazení majetku.',
+                number_format($built['shortfalls'][160]['computed'], 2, ',', ' '), number_format($built['shortfalls'][160]['filed'], 2, ',', ' ')));
         }
         foreach (['II_240_ODE' => '240', 'II_242_ODE' => '242', 'II_300_SLE' => '300'] as $column => $line) {
             if ((float) ($values[$column] ?? 0) > 0.0) {
@@ -97,9 +103,10 @@ final class TaxReturnImporter
      * Ruční vstupy přiznání z hodnot `D_PO2` podle sdíleného pravidla {@see FiledDppoInputs}.
      *
      * @param array<string,mixed> $values
-     * @return array{inputs:array<string,mixed>,increase:list<array<string,mixed>>,decrease:list<array<string,mixed>>,line40_shortfall:?array{computed:float,filed:float}}
+     * @param array{40?:float,160?:float} $computed část ř. 40 a 160 spočtená z účetnictví
+     * @return array{inputs:array<string,mixed>,increase:list<array<string,mixed>>,decrease:list<array<string,mixed>>,shortfalls:array<int,array{computed:float,filed:float}>}
      */
-    public static function inputsFromPremier(array $values, float $computedLine40): array
+    public static function inputsFromPremier(array $values, array $computed): array
     {
         $filed = [];
         foreach (self::COLUMNS as $column => $line) {
@@ -107,7 +114,7 @@ final class TaxReturnImporter
                 $filed[$line] = (float) $values[$column];
             }
         }
-        return FiledDppoInputs::build($filed, $computedLine40, true, self::TEXTS, (float) ($values['V_1_NA_ZAL'] ?? 0));
+        return FiledDppoInputs::build($filed, $computed, true, self::TEXTS, (float) ($values['V_1_NA_ZAL'] ?? 0));
     }
 
     /**
