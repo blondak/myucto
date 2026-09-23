@@ -242,6 +242,89 @@ final class CreditCardAccountRepository
     }
 
     /**
+     * Výpisy úvěrového účtu (výpisy firmy s jeho číslem a kódem banky), nejnovější první -
+     * jediná definice pro přehled, dohnání nákupů i počáteční dluh.
+     *
+     * @param array<string,mixed> $account řádek z find()
+     * @return list<array<string,mixed>>
+     */
+    public function statements(int $supplierId, array $account): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT bs.id, bs.statement_date, bs.statement_number, bs.prev_balance, bs.curr_balance,
+                    bs.credit_total, bs.debit_total, bs.transaction_count, bs.file_name, bs.source,
+                    (bs.pdf_content IS NOT NULL) AS has_pdf,
+                    (SELECT MIN(bt.posted_at) FROM bank_transactions bt WHERE bt.statement_id = bs.id AND bt.source = 'statement') AS first_posted_at
+               FROM bank_statements bs
+              WHERE bs.supplier_id = ?
+                AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''), '[^0-9]', '')) = ?
+                AND COALESCE(bs.bank_code, '') = ?
+              ORDER BY bs.statement_date DESC, bs.id DESC"
+        );
+        $stmt->execute([$supplierId, (string) $account['account_canonical'], (string) $account['bank_code_norm']]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /** Režim nákupů účtu (null = výchozí režim firmy). */
+    public function setPurchaseMode(int $supplierId, int $id, ?string $mode): void
+    {
+        $this->db->pdo()->prepare('UPDATE credit_card_accounts SET purchase_mode = ? WHERE id = ? AND supplier_id = ?')
+            ->execute([$mode, $id, $supplierId]);
+    }
+
+    /** Přidělí suffix analytiky mezičlenu, jen když ho účet ještě nemá (souběh řeší unikátní index). */
+    public function assignClearingSuffixIfEmpty(int $supplierId, int $id, string $suffix): bool
+    {
+        try {
+            $stmt = $this->db->pdo()->prepare(
+                'UPDATE credit_card_accounts SET clearing_suffix = ?
+                  WHERE id = ? AND supplier_id = ? AND clearing_suffix IS NULL'
+            );
+            $stmt->execute([$suffix, $id, $supplierId]);
+            return $stmt->rowCount() > 0;
+        } catch (\PDOException $e) {
+            if (($e->errorInfo[0] ?? null) === '23000') {
+                return false;
+            }
+            throw $e;
+        }
+    }
+
+    public function setClearingSuffix(int $supplierId, int $id, ?string $suffix): void
+    {
+        $this->db->pdo()->prepare('UPDATE credit_card_accounts SET clearing_suffix = ? WHERE id = ? AND supplier_id = ?')
+            ->execute([$suffix, $id, $supplierId]);
+    }
+
+    /** @return array<string,int> suffix mezičlenu → id úvěrového účtu (i archivovaného) */
+    public function usedClearingSuffixes(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT clearing_suffix, id FROM credit_card_accounts WHERE supplier_id = ? AND clearing_suffix IS NOT NULL'
+        );
+        $stmt->execute([$supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $out[(string) $r['clearing_suffix']] = (int) $r['id'];
+        }
+        return $out;
+    }
+
+    /** Zamkne řádek účtu do konce transakce (počáteční dluh se smí zaúčtovat jen jednou). */
+    public function lockForUpdate(int $supplierId, int $id): ?array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM credit_card_accounts WHERE supplier_id = ? AND id = ? FOR UPDATE');
+        $stmt->execute([$supplierId, $id]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) === false ? null : $this->find($supplierId, $id);
+    }
+
+    public function setOpeningEntry(int $supplierId, int $id, ?int $entryId): void
+    {
+        $this->db->pdo()->prepare('UPDATE credit_card_accounts SET opening_entry_id = ? WHERE id = ? AND supplier_id = ?')
+            ->execute([$entryId, $id, $supplierId]);
+    }
+
+    /**
      * Úvěrové účty firmy, které se splácí na daný účet (RB: sběrný účet banky + VS).
      *
      * @return list<array<string,mixed>>
@@ -281,7 +364,10 @@ final class CreditCardAccountRepository
             'currency'            => (string) $r['currency'],
             'credit_limit'        => $r['credit_limit'] !== null ? round((float) $r['credit_limit'], 2) : null,
             'analytic_suffix'     => $r['analytic_suffix'] !== null ? (string) $r['analytic_suffix'] : null,
-            'repayment_account'   => $r['repayment_account'] !== null ? (string) $r['repayment_account'] : null,
+            'purchase_mode'       => isset($r['purchase_mode']) && $r['purchase_mode'] !== null ? (string) $r['purchase_mode'] : null,
+            'clearing_suffix'     => isset($r['clearing_suffix']) && $r['clearing_suffix'] !== null ? (string) $r['clearing_suffix'] : null,
+            'opening_entry_id'    => isset($r['opening_entry_id']) && $r['opening_entry_id'] !== null ? (int) $r['opening_entry_id'] : null,
+            'repayment_account'  => $r['repayment_account'] !== null ? (string) $r['repayment_account'] : null,
             'repayment_bank_code' => $r['repayment_bank_code'] !== null ? (string) $r['repayment_bank_code'] : null,
             'repayment_vs'        => $r['repayment_vs'] !== null ? (string) $r['repayment_vs'] : null,
             'is_verified'         => (bool) $r['is_verified'],

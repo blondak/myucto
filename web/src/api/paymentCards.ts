@@ -100,7 +100,8 @@ export interface CardClearingSettingsResponse {
   unverified_cards: number
 }
 
-export type CardWriteOffTarget = 'expense' | 'holder'
+/** expense = nedaňový náklad, expense_tax = daňový náklad bez DPH, holder = k tíži držitele (soukromý nákup). */
+export type CardWriteOffTarget = 'expense' | 'expense_tax' | 'holder'
 
 /** Stručný popis karty u bankovního pohybu. */
 export interface PaymentCardSummary {
@@ -141,7 +142,10 @@ export interface CardPaymentRow {
   currency: string
   counterparty_name: string | null
   description: string | null
-  card_last4: string
+  /** Koncovka karty; výpis kreditní karty ji nést nemusí (kreditní účet je karta sám). */
+  card_last4: string | null
+  /** Nákup kreditní kartou (výpis úvěrového účtu). */
+  credit_card?: boolean
   /** Analytika mezičlenu, na které platba čeká na doklad (null = účtováno bez mezičlenu). */
   clearing_account?: string | null
   /** Platba na čerpací stanici: vozidlo držitele karty (reason ambiguous = víc vozidel). */
@@ -158,6 +162,8 @@ export interface CardPaymentVehicleHint {
 export interface CardPaymentGroup {
   key: string
   card: PaymentCardSummary | null
+  /** Úvěrový účet kreditní karty, jehož nákupy skupina nese. */
+  credit_card?: { id: number; label: string } | null
   last4: string
   holder: string | null
   count: number
@@ -173,12 +179,25 @@ export interface UnmatchedCardPayments {
   groups: CardPaymentGroup[]
 }
 
-export interface ReceiptUploadResult {
+/** Účtenka vytěžená AI do konceptu přijatého dokladu. */
+export interface ReceiptExtractedResult {
   purchase_invoice_id: number
   duplicate: boolean
   marked_as_card: boolean
   bank_transaction_id: number
 }
+
+/** Bez AI (nebo při selhání vytěžení): účtenka uložená do Příchozích dokladů, navázaná na platbu. */
+export interface ReceiptStoredResult {
+  stored: 'incoming'
+  submission_id: number
+  duplicate: boolean
+  /** Složka v Dokumentech, např. „Příchozí doklady / 2026 / 09". */
+  folder: string
+  bank_transaction_id: number
+}
+
+export type ReceiptUploadResult = ReceiptExtractedResult | ReceiptStoredResult
 
 export interface CardRematchResult {
   bank_transaction_id: number
@@ -198,7 +217,8 @@ export const paymentCardsApi = {
   archive: (id: number) => api.post<{ card: PaymentCard }>(`/payment-cards/${id}/archive`).then(r => r.data.card),
   restore: (id: number) => api.post<{ card: PaymentCard }>(`/payment-cards/${id}/restore`).then(r => r.data.card),
 
-  unmatchedPayments: (params: { from?: string; to?: string } = {}) =>
+  /** Bez `credit_card_account_id` jen platby platebními kartami (běžné účty), s ním jen nákupy té kreditky. */
+  unmatchedPayments: (params: { from?: string; to?: string; credit_card_account_id?: number } = {}) =>
     api.get<UnmatchedCardPayments>('/payment-cards/unmatched-payments', { params }).then(r => r.data),
   uploadReceipt: (transactionId: number, file: File) => {
     const fd = new FormData()

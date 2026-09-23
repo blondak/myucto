@@ -220,7 +220,9 @@ final class ParallelRunReconciliation
 
     /**
      * Vlastní bankovní účty: analytika 221 a její zůstatek z předvahy, poslední výpis do konce
-     * měsíce (zůstatek v měně účtu).
+     * měsíce (zůstatek v měně účtu). Úvěrový účet kreditní karty se sem nepočítá: jeho dluh
+     * leží na 231 a s 221 by se srovnával chybně (a jako „jediný účet" by shodil srovnání
+     * běžného účtu se syntetickým 221).
      *
      * @return list<array{key:string,numbers:list<string>,label:string,currency:string,ledger_code:?string,ledger_balance:?float,statement_balance:?float,statement_date:?string}>
      */
@@ -230,7 +232,7 @@ final class ParallelRunReconciliation
         $stmt = $pdo->prepare(
             'SELECT id, label, account_number, bank_code, iban, currency, analytic_suffix
                FROM supplier_bank_accounts
-              WHERE supplier_id = ? AND is_active = 1
+              WHERE supplier_id = ? AND is_active = 1 AND kind <> \'credit_card\'
               ORDER BY id'
         );
         $stmt->execute([$supplierId]);

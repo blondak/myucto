@@ -5,8 +5,11 @@ import { useAuthStore } from '@/stores/auth'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import {
   creditCardsApi,
+  CREDIT_CARD_PURCHASE_MODES,
   CREDIT_CARD_SETTINGS_FIELDS,
+  type CreditCardPurchaseMode,
   type CreditCardSettingsField,
+  type CreditCardSettingsPayload,
   type CreditCardSettingsResponse,
 } from '@/api/creditCards'
 import { apiErrorMessage } from '@/api/errors'
@@ -19,14 +22,16 @@ const toast = useToast()
 const loading = ref(true)
 const saving = ref(false)
 const data = ref<CreditCardSettingsResponse | null>(null)
-const form = reactive<Record<CreditCardSettingsField, number | null>>({
-  interest: null, fee: null, repayment: null, cash: null, reward: null,
-})
+const form = reactive<Record<CreditCardSettingsField, number | null>>(
+  Object.fromEntries(CREDIT_CARD_SETTINGS_FIELDS.map(f => [f, null])) as Record<CreditCardSettingsField, number | null>,
+)
+const purchaseMode = ref<CreditCardPurchaseMode>('clearing')
 
 const canConfigure = computed(() => auth.canWrite('bank.post') && !!data.value?.double_entry)
 
 function apply(r: CreditCardSettingsResponse) {
   data.value = r
+  purchaseMode.value = r.settings.purchase_mode
   for (const f of CREDIT_CARD_SETTINGS_FIELDS) form[f] = r.settings[`${f}_account_id`]
 }
 
@@ -45,13 +50,9 @@ onMounted(load)
 async function save() {
   saving.value = true
   try {
-    apply(await creditCardsApi.saveSettings({
-      interest_account_id: form.interest,
-      fee_account_id: form.fee,
-      repayment_account_id: form.repayment,
-      cash_account_id: form.cash,
-      reward_account_id: form.reward,
-    }))
+    const payload: CreditCardSettingsPayload = { purchase_mode: purchaseMode.value }
+    for (const f of CREDIT_CARD_SETTINGS_FIELDS) payload[`${f}_account_id`] = form[f]
+    apply(await creditCardsApi.saveSettings(payload))
     toast.success(t('credit_cards.settings.saved'))
   } catch (e) {
     toast.error(apiErrorMessage(e, t('credit_cards.settings.save_failed')))
@@ -72,11 +73,23 @@ function effectiveCode(field: CreditCardSettingsField): string {
   return chosen ?? data.value?.defaults[field] ?? ''
 }
 
+const syn = computed(() => data.value?.clearing_synthetic ?? '378')
 const scheme = computed(() => [
-  { key: 'purchase', entry: '321 / 231.x' },
-  { key: 'purchase_card', entry: '378.x / 231.x' },
-  { key: 'purchase_rule', entry: '5xx / 231.x' },
-  { key: 'refund', entry: '231.x / 321' },
+  ...(purchaseMode.value === 'clearing'
+    ? [
+        { key: 'purchase_card', entry: `${syn.value}.x / 231.x` },
+        { key: 'settlement', entry: `321 / ${syn.value}.x` },
+        { key: 'writeoff_nontax', entry: `${effectiveCode('writeoff_nontax')} / ${syn.value}.x` },
+        { key: 'writeoff_tax', entry: `${effectiveCode('writeoff_tax')} / ${syn.value}.x` },
+        { key: 'private', entry: `${effectiveCode('private')} / ${syn.value}.x` },
+        { key: 'refund_card', entry: `231.x / ${syn.value}.x` },
+      ]
+    : [
+        { key: 'purchase', entry: '321 / 231.x' },
+        { key: 'purchase_rule', entry: '5xx / 231.x' },
+        { key: 'refund', entry: '231.x / 321' },
+      ]),
+  { key: 'opening', entry: `${effectiveCode('opening')} / 231.x` },
   { key: 'repayment_own', entry: '231.x / 261 · 261 / 221.x' },
   { key: 'repayment', entry: `231.x / ${effectiveCode('repayment')}` },
   { key: 'interest', entry: `${effectiveCode('interest')} / 231.x` },
@@ -114,11 +127,18 @@ const SELECT = 'h-9 w-full px-2 border border-neutral-300 rounded-md text-sm bg-
         </div>
 
         <form class="grid gap-4 md:grid-cols-2 xl:grid-cols-3" @submit.prevent="save()">
+          <label class="block text-sm font-medium text-neutral-700 md:col-span-2 xl:col-span-3">
+            {{ t('credit_cards.settings.field_purchase_mode') }}
+            <select v-model="purchaseMode" :class="SELECT" class="mt-1 md:max-w-md" :disabled="!canConfigure" data-testid="cc-setting-mode">
+              <option v-for="m in CREDIT_CARD_PURCHASE_MODES" :key="m" :value="m">{{ t(`credit_cards.mode.${m}`) }}</option>
+            </select>
+            <span class="mt-1 block text-xs text-neutral-500">{{ t(`credit_cards.mode_help.${purchaseMode}`) }} {{ t('credit_cards.settings.help_purchase_mode') }}</span>
+          </label>
           <label v-for="f in CREDIT_CARD_SETTINGS_FIELDS" :key="f" class="block text-sm font-medium text-neutral-700">
             {{ t(`credit_cards.settings.field_${f}`) }}
             <select v-model="form[f]" :class="SELECT" class="mt-1" :disabled="!canConfigure" :data-testid="`cc-setting-${f}`">
               <option :value="null">{{ t('credit_cards.settings.default_account', { code: data.defaults[f] }) }}</option>
-              <option v-for="a in optionsFor(f)" :key="a.id" :value="a.id">{{ a.account_code }} - {{ a.name }}</option>
+              <option v-for="a in optionsFor(f)" :key="a.id" :value="a.id">{{ a.account_code }} - {{ a.name }}{{ a.non_deductible ? ` (${t('credit_cards.settings.non_deductible')})` : '' }}</option>
             </select>
             <span class="mt-1 block text-xs text-neutral-500">{{ t(`credit_cards.settings.help_${f}`) }}</span>
           </label>

@@ -222,6 +222,16 @@ final class ParallelRunTest extends TestCase
         $february = $this->runFiles(2024, 2, [ParallelRunInput::COST_CENTERS => "Středisko;Výnosy;Náklady\nREZIE;0;10 000\n"]);
         self::assertSame('ok', $february['status'], json_encode($february['criteria'], JSON_UNESCAPED_UNICODE));
 
+        // Úvěrový účet kreditní karty (dluh na 231) se s 221 nesrovnává a srovnání běžného
+        // účtu nesmí shodit.
+        $this->db->pdo()->prepare(
+            "INSERT INTO supplier_bank_accounts (supplier_id, label, account_number, bank_code, currency, account_canonical, bank_code_norm, kind, source)
+             VALUES (?, 'Kreditní karta', '19-5000000007', '0100', 'CZK', '195000000007', '0100', 'credit_card', 'manual')"
+        )->execute([$this->supplierId]);
+        $withCard = array_column($this->runFiles(2024, 12, $files)['criteria'], null, 'key');
+        self::assertSame('ok', $withCard['K8']['status'] ?? null, json_encode($withCard['K8'] ?? null, JSON_UNESCAPED_UNICODE));
+        self::assertSame(1, $withCard['K8']['summary']['accounts_myucto'] ?? null, 'Kreditka mezi bankovní účty (221) nepatří.');
+
         $files[ParallelRunInput::BANK_BALANCES] = "Účet;Měna;Zůstatek\n3000000004/0100;CZK;62 000,00\n";
         $files[ParallelRunInput::COST_CENTERS] = "Středisko;Výnosy;Náklady\nREZIE;0;100\n";
         $files[ParallelRunInput::BALANCE_SHEET] = "Označení;Strana;Běžné období\nAKTIVA;A;1\n";

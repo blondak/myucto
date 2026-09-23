@@ -1622,9 +1622,12 @@ final class BankPostingService
      */
     private function cardClearingFor(int $supplierId, array $tx, bool $create = false): ?array
     {
-        if ($this->cardRegime === null
-            || (string) ($tx['source'] ?? 'statement') !== 'statement'
-            || !\MyInvoice\Service\Bank\Card\CardNumberMask::isValidLast4((string) ($tx['card_last4'] ?? ''))) {
+        if ($this->cardRegime === null || (string) ($tx['source'] ?? 'statement') !== 'statement') {
+            return null;
+        }
+        // Kreditní karta: režim určuje úvěrový účet výpisu, koncovka nerozhoduje.
+        $creditCard = $this->cardRegime->creditCardAccountFor($supplierId, $tx);
+        if ($creditCard === null && !\MyInvoice\Service\Bank\Card\CardNumberMask::isValidLast4((string) ($tx['card_last4'] ?? ''))) {
             return null;
         }
         $liveCodes = $this->liveBankEntryCodes($supplierId, (int) $tx['id']);
@@ -1635,6 +1638,9 @@ final class BankPostingService
                 }
             }
             return null;
+        }
+        if ($creditCard !== null) {
+            return $this->cardRegime->creditCardClearingFor($supplierId, $tx, $creditCard, $create);
         }
         if (!$this->cardRegime->isActiveOn($supplierId, (string) $tx['posted_at'])
             || $this->isCardCashOrFee($supplierId, $tx)) {

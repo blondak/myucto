@@ -24,6 +24,10 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET  /api/credit-cards/{id}             - detail s výpisy a pohyby
  *   PUT  /api/credit-cards/{id}             - úprava (název, limit, účet a VS pro splátku, poznámka)
  *   PUT  /api/credit-cards/{id}/analytic    - ruční výběr analytiky 231
+ *   PUT  /api/credit-cards/{id}/purchase-mode - režim nákupů účtu (clearing | direct | null = výchozí firmy)
+ *   PUT  /api/credit-cards/{id}/clearing-analytic - ruční výběr analytiky mezičlenu (account_code, confirm)
+ *   POST /api/credit-cards/{id}/post-pending - zaúčtovat čekající pohyby výpisů účtu automatikou
+ *   POST /api/credit-cards/{id}/opening     - zaúčtovat počáteční dluh z prvního výpisu (contra_account_code, entry_date)
  *   POST /api/credit-cards/{id}/archive     - archivace
  *   POST /api/credit-cards/{id}/restore     - obnovení
  *   POST /api/credit-cards/import           - načtení PDF výpisu (multipart file, ?credit_card_account_id)
@@ -47,6 +51,7 @@ final class CreditCardAction
         private readonly CreditCardConversionService $conversion,
         private readonly CreditCardSettingsService $settings,
         private readonly CreditCardAccounts $analytics,
+        private readonly \MyInvoice\Service\Accounting\CreditCard\CreditCardPostingService $postingActions,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
     ) {}
@@ -98,6 +103,81 @@ final class CreditCardAction
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
         }
+    }
+
+    public function setPurchaseMode(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'bank.post', AccessLevel::WRITE, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $raw = ((array) ($request->getParsedBody() ?? []))['purchase_mode'] ?? null;
+        $mode = $raw === null || $raw === '' ? null : (string) $raw;
+        try {
+            $this->postingActions->setPurchaseMode($supplierId, $id, $mode);
+        } catch (\Throwable $e) {
+            return $this->mapPostingError($response, $e);
+        }
+        $this->log($request, 'credit_card.purchase_mode_changed', $id, ['purchase_mode' => $mode]);
+        return Json::ok($response, $this->overview->detail($supplierId, $id));
+    }
+
+    public function setClearingAnalytic(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'bank.post', AccessLevel::WRITE, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $body = (array) ($request->getParsedBody() ?? []);
+        $code = trim((string) ($body['account_code'] ?? ''));
+        try {
+            $this->postingActions->setClearingAnalytic($supplierId, $id, $code !== '' ? $code : null, !empty($body['confirm']));
+        } catch (\Throwable $e) {
+            return $this->mapPostingError($response, $e);
+        }
+        $this->log($request, 'credit_card.clearing_analytic_changed', $id, ['account_code' => $code !== '' ? $code : null]);
+        return Json::ok($response, $this->overview->detail($supplierId, $id));
+    }
+
+    public function postPending(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'bank.post', AccessLevel::WRITE, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $id = (int) ($args['id'] ?? 0);
+        try {
+            $result = $this->postingActions->postPending($supplierId, $id, $this->userId($request));
+        } catch (\Throwable $e) {
+            return $this->mapPostingError($response, $e);
+        }
+        $this->log($request, 'credit_card.pending_posted', $id, $result);
+        return Json::ok($response, ['result' => $result, 'detail' => $this->overview->detail($supplierId, $id)]);
+    }
+
+    public function postOpening(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'bank.post', AccessLevel::WRITE, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            $result = $this->postingActions->postOpening(
+                $supplierId,
+                $id,
+                isset($body['contra_account_code']) ? (string) $body['contra_account_code'] : null,
+                isset($body['entry_date']) ? (string) $body['entry_date'] : null,
+                $this->userId($request),
+            );
+        } catch (\Throwable $e) {
+            return $this->mapPostingError($response, $e);
+        }
+        $this->log($request, 'credit_card.opening_posted', $id, $result);
+        return Json::ok($response, ['result' => $result, 'detail' => $this->overview->detail($supplierId, $id)]);
     }
 
     public function archive(Request $request, Response $response, array $args): Response

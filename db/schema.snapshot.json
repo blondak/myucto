@@ -868,12 +868,13 @@
         "1881_credit_card_accounts.sql",
         "1882_bank_statement_tenant_hash.sql",
         "1883_other_items.sql",
-        "1884_document_links_other_item.sql",
-        "1885_other_item_payment_cascade.sql",
-        "1886_other_item_schedules.sql",
-        "1887_other_items_role_permissions.sql",
-        "1888_other_item_payment_ownership.sql",
-        "1889_other_item_allocation_reversal.sql"
+        "1884_credit_card_purchase_modes.sql",
+        "1885_document_links_other_item.sql",
+        "1886_other_item_payment_cascade.sql",
+        "1887_other_item_schedules.sql",
+        "1888_other_items_role_permissions.sql",
+        "1889_other_item_payment_ownership.sql",
+        "1890_other_item_allocation_reversal.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -3459,6 +3460,7 @@
                 "archived_at": "datetime NULL DEFAULT NULL",
                 "bank_account_id": "bigint(20) unsigned NOT NULL",
                 "bank_code": "char(4) NULL DEFAULT NULL",
+                "clearing_suffix": "varchar(6) NULL DEFAULT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "credit_limit": "decimal(14,2) NULL DEFAULT NULL",
@@ -3468,6 +3470,8 @@
                 "issuer": "enum('kb','rb','csob','erste','other') NOT NULL DEFAULT 'other'",
                 "label": "varchar(120) NOT NULL",
                 "note": "varchar(500) NULL DEFAULT NULL",
+                "opening_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "purchase_mode": "enum('clearing','direct') NULL DEFAULT NULL",
                 "repayment_account": "varchar(40) NULL DEFAULT NULL",
                 "repayment_bank_code": "char(4) NULL DEFAULT NULL",
                 "repayment_vs": "varchar(20) NULL DEFAULT NULL",
@@ -3476,16 +3480,20 @@
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_cca_opening_entry": "BTREE (opening_entry_id)",
                 "idx_cca_supplier": "BTREE (supplier_id, archived_at)",
                 "uq_cca_bank_account": "UNIQUE BTREE (bank_account_id)",
-                "uq_cca_supplier_analytic": "UNIQUE BTREE (supplier_id, analytic_suffix)"
+                "uq_cca_supplier_analytic": "UNIQUE BTREE (supplier_id, analytic_suffix)",
+                "uq_cca_supplier_clearing": "UNIQUE BTREE (supplier_id, clearing_suffix)"
             },
             "foreign_keys": {
                 "fk_cca_bank_account": "(bank_account_id) -> supplier_bank_accounts (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_cca_opening_entry": "(opening_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_cca_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
                 "chk_cca_analytic_suffix": "`analytic_suffix` is null or `analytic_suffix` regexp '^[0-9]{1,6}$'",
+                "chk_cca_clearing_suffix": "`clearing_suffix` is null or `clearing_suffix` regexp '^[0-9]{1,6}$'",
                 "chk_cca_currency": "`currency` regexp '^[A-Z]{3}$'",
                 "chk_cca_limit": "`credit_limit` is null or `credit_limit` >= 0"
             }
@@ -3499,29 +3507,42 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "fee_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "interest_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "opening_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "private_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "purchase_mode": "enum('clearing','direct') NOT NULL DEFAULT 'clearing'",
                 "repayment_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "reward_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
-                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "writeoff_nontax_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "writeoff_tax_account_id": "bigint(20) unsigned NULL DEFAULT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (supplier_id)",
                 "fk_ccst_cash": "BTREE (cash_account_id)",
                 "fk_ccst_fee": "BTREE (fee_account_id)",
                 "fk_ccst_interest": "BTREE (interest_account_id)",
+                "fk_ccst_opening": "BTREE (opening_account_id)",
+                "fk_ccst_private": "BTREE (private_account_id)",
                 "fk_ccst_repayment": "BTREE (repayment_account_id)",
                 "fk_ccst_reward": "BTREE (reward_account_id)",
-                "fk_ccst_user": "BTREE (updated_by)"
+                "fk_ccst_user": "BTREE (updated_by)",
+                "fk_ccst_writeoff_nontax": "BTREE (writeoff_nontax_account_id)",
+                "fk_ccst_writeoff_tax": "BTREE (writeoff_tax_account_id)"
             },
             "foreign_keys": {
                 "fk_ccst_cash": "(cash_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ccst_fee": "(fee_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ccst_interest": "(interest_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_opening": "(opening_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_private": "(private_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ccst_repayment": "(repayment_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ccst_reward": "(reward_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ccst_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
-                "fk_ccst_user": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+                "fk_ccst_user": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_writeoff_nontax": "(writeoff_nontax_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_writeoff_tax": "(writeoff_tax_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": []
         },

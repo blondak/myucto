@@ -16,6 +16,55 @@ export interface CreditCardStatement {
   transaction_count: number
   file_name: string
   has_pdf: boolean
+  /** Jen v detailu: zůstatek 231.x ke dni výpisu, rozdíl proti výpisu a počet nevyřešených pohybů. */
+  ledger_balance?: number | null
+  difference?: number | null
+  todo_count?: number
+}
+
+/** Režim nákupů: mezičlen 378.x (zaúčtovat hned, vypořádat dokladem), nebo bez mezičlenu. */
+export type CreditCardPurchaseMode = 'clearing' | 'direct'
+export const CREDIT_CARD_PURCHASE_MODES: CreditCardPurchaseMode[] = ['clearing', 'direct']
+
+/** Stav pohybu z pohledu účetní - co s ním zbývá udělat. */
+export type CreditCardTransactionState = 'unposted' | 'suggested' | 'clearing_open' | 'settled' | 'posted' | 'ignored'
+export const CREDIT_CARD_TODO_STATES = ['unposted', 'suggested', 'clearing_open'] as const
+export type CreditCardTodoState = typeof CREDIT_CARD_TODO_STATES[number]
+
+export interface CreditCardTodoRow {
+  count: number
+  amount: number
+  first_statement_id: number | null
+  first_tx_id: number | null
+}
+
+export interface CreditCardClearingInfo {
+  /** Účinný režim (vlastní, jinak výchozí firmy). */
+  mode: CreditCardPurchaseMode
+  /** Režim nastavený u účtu, null = výchozí firmy. */
+  account_mode: CreditCardPurchaseMode | null
+  default_mode: CreditCardPurchaseMode
+  synthetic: string
+  /** Analytika mezičlenu účtu, null = vznikne u prvního nákupu. */
+  account_code: string | null
+  /** Zůstatek mezičlenu = nákupy, ke kterým chybí doklad. */
+  balance: number
+  options: Array<{ id: number; account_code: string; name: string; card_id: number | null; credit_card_account_id: number | null }>
+}
+
+export interface CreditCardOpening {
+  account_code: string | null
+  statement: { id: number; statement_date: string; statement_number: string; prev_balance: number } | null
+  entry_date: string | null
+  contra_account_code: string
+  contra_account_id: number | null
+  /** Už zaúčtovaný zápis počátečního dluhu. */
+  posted_entry_id: number | null
+  /** Co na 231.x leží mimo pohyby výpisů (dříve převzatý zůstatek). */
+  other_balance: number
+  /** Částka k zaúčtování se znaménkem výpisu (dluh záporný). */
+  amount: number
+  needed: boolean
 }
 
 export interface CreditCardTransaction {
@@ -34,6 +83,12 @@ export interface CreditCardTransaction {
   entry_id: number | null
   /** Otevřený návrh zaúčtování ve frontě, jinak null. */
   suggestion_id: number | null
+  ignore_note?: string | null
+  /** Analytika mezičlenu, na které nákup leží (null = bez mezičlenu). */
+  clearing_code?: string | null
+  /** Ke pohybu je spárovaný přijatý doklad. */
+  has_document?: boolean
+  state: CreditCardTransactionState
 }
 
 /** Úvěrový účet kreditní karty (účtuje se na 231.xxx). */
@@ -47,6 +102,9 @@ export interface CreditCardAccount {
   currency: string
   credit_limit: number | null
   analytic_suffix: string | null
+  purchase_mode: CreditCardPurchaseMode | null
+  clearing_suffix: string | null
+  opening_entry_id: number | null
   repayment_account: string | null
   repayment_bank_code: string | null
   repayment_vs: string | null
@@ -70,7 +128,18 @@ export interface CreditCardAccount {
 export interface CreditCardDetail extends CreditCardAccount {
   statements: CreditCardStatement[]
   transactions: CreditCardTransaction[]
+  todo: Record<CreditCardTodoState, CreditCardTodoRow>
+  clearing: CreditCardClearingInfo
+  opening: CreditCardOpening
   analytic_options: Array<{ id: number; account_code: string; name: string; credit_card_account_id: number | null }>
+}
+
+export interface CreditCardPostPendingResult {
+  total: number
+  posted: number
+  suggested: number
+  skipped: number
+  reasons: Record<string, number>
 }
 
 export interface CreditCardPayload {
@@ -82,30 +151,41 @@ export interface CreditCardPayload {
   note: string | null
 }
 
-export type CreditCardSettingsField = 'interest' | 'fee' | 'repayment' | 'cash' | 'reward'
-export const CREDIT_CARD_SETTINGS_FIELDS: CreditCardSettingsField[] = ['interest', 'fee', 'repayment', 'cash', 'reward']
+export type CreditCardSettingsField =
+  | 'interest' | 'fee' | 'repayment' | 'cash' | 'reward'
+  | 'writeoff_tax' | 'writeoff_nontax' | 'private' | 'opening'
+export const CREDIT_CARD_SETTINGS_FIELDS: CreditCardSettingsField[] = [
+  'interest', 'fee', 'repayment', 'cash', 'reward', 'writeoff_tax', 'writeoff_nontax', 'private', 'opening',
+]
 
-export interface CreditCardSettings {
+export type CreditCardSettings = {
   configured: boolean
-  interest_account_id: number | null
-  fee_account_id: number | null
-  repayment_account_id: number | null
-  cash_account_id: number | null
-  reward_account_id: number | null
-  interest_account_code: string
-  fee_account_code: string
-  repayment_account_code: string
-  cash_account_code: string
-  reward_account_code: string
+  purchase_mode: CreditCardPurchaseMode
+} & Record<`${CreditCardSettingsField}_account_id`, number | null>
+  & Record<`${CreditCardSettingsField}_account_code`, string | null>
+
+export interface CreditCardAccountOption {
+  id: number
+  account_code: string
+  name: string
+  is_synthetic: boolean
+  non_deductible: boolean
 }
 
 export interface CreditCardSettingsResponse {
   double_entry: boolean
   settings: CreditCardSettings
   defaults: Record<CreditCardSettingsField, string>
+  modes: CreditCardPurchaseMode[]
+  default_mode: CreditCardPurchaseMode
+  /** Syntetika mezičlenu z nastavení platebních karet (378 / 261 / 395). */
+  clearing_synthetic: string
   allowed_prefixes: Record<CreditCardSettingsField, string[]>
-  account_options: Array<{ id: number; account_code: string; name: string; is_synthetic: boolean }>
+  account_options: CreditCardAccountOption[]
 }
+
+export type CreditCardSettingsPayload = { purchase_mode?: CreditCardPurchaseMode }
+  & Partial<Record<`${CreditCardSettingsField}_account_id`, number | null>>
 
 export interface CreditCardImportResult {
   statement_id: number
@@ -139,6 +219,17 @@ export const creditCardsApi = {
     api.post<{ credit_card_account_id: number; reposted: number }>('/credit-cards/convert', { bank_account_id: bankAccountId })
       .then(r => r.data),
   settings: () => api.get<CreditCardSettingsResponse>('/credit-cards/settings').then(r => r.data),
-  saveSettings: (payload: Partial<Record<`${CreditCardSettingsField}_account_id`, number | null>>) =>
+  saveSettings: (payload: CreditCardSettingsPayload) =>
     api.put<CreditCardSettingsResponse>('/credit-cards/settings', payload).then(r => r.data),
+  setPurchaseMode: (id: number, mode: CreditCardPurchaseMode | null) =>
+    api.put<CreditCardDetail>(`/credit-cards/${id}/purchase-mode`, { purchase_mode: mode }).then(r => r.data),
+  setClearingAnalytic: (id: number, accountCode: string | null, confirm = false) =>
+    api.put<CreditCardDetail>(`/credit-cards/${id}/clearing-analytic`, { account_code: accountCode, confirm }).then(r => r.data),
+  postPending: (id: number) =>
+    api.post<{ result: CreditCardPostPendingResult; detail: CreditCardDetail }>(`/credit-cards/${id}/post-pending`, {}, { timeout: 300000 })
+      .then(r => r.data),
+  postOpening: (id: number, payload: { contra_account_code: string | null; entry_date: string | null }) =>
+    api.post<{ result: { entry_id: number; amount: number; contra_account_code: string; entry_date: string }; detail: CreditCardDetail }>(
+      `/credit-cards/${id}/opening`, payload,
+    ).then(r => r.data),
 }

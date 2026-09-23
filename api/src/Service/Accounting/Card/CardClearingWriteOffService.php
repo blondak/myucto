@@ -16,14 +16,30 @@ use PDO;
  *
  *   - `expense` → MD 548 (výchozí nedaňová analytika 548.x) / D 378.x — nedaňový náklad
  *     bez DPH,
- *   - `holder`  → MD 335.x / D 378.x — k tíži držitele karty.
+ *   - `expense_tax` → MD 518 (nebo zvolený 5xx) / D 378.x — daňový náklad bez DPH, jen
+ *     s jiným průkazným dokladem (potvrzení obchodníka, interní doklad),
+ *   - `holder`  → MD 335.x / D 378.x — k tíži držitele karty (soukromý nákup; u společníka
+ *     355, obecně 378 mimo analytiky mezičlenu).
+ *
+ * Vratka (kladný pohyb na mezičlenu) se uzavírá zrcadlově - strany bere zápis z bankovní
+ * nohy mezičlenu. Pohyb kreditní karty bere výchozí účty z nastavení kreditních karet.
  *
  * Bankovní zápis platby zůstává. Dorazí-li doklad později, vypořádání uzavření samo
  * stornuje (viz BankPostingService::syncCardSettlement) — uzavření tedy není konečné.
  */
 final class CardClearingWriteOffService
 {
-    public const TARGETS = ['expense', 'holder'];
+    public const TARGETS = ['expense', 'expense_tax', 'holder'];
+
+    /** Povolené účty podle způsobu uzavření (prefix kódu). */
+    private const TARGET_PREFIXES = [
+        'expense'     => ['5'],
+        'expense_tax' => ['5'],
+        'holder'      => ['335', '355', '378'],
+    ];
+
+    /** Daňový náklad bez dokladu, když ho nastavení nemá (jen s jiným průkazným dokladem). */
+    private const DEFAULT_TAX_EXPENSE = '518';
 
     public function __construct(
         private readonly Connection $db,
@@ -32,6 +48,7 @@ final class CardClearingWriteOffService
         private readonly CardClearingRegime $regime,
         private readonly CardClearingSettingsService $settingsService,
         private readonly CardPaymentOverview $overview,
+        private readonly \MyInvoice\Repository\CreditCardSettingsRepository $creditSettings,
     ) {}
 
     /** @return array{entry_id:int, account_code:string} */
@@ -53,7 +70,7 @@ final class CardClearingWriteOffService
             throw new PostingException('has_document', 'K platbě už je spárovaný doklad — uzavření bez dokladu nedává smysl.', 409);
         }
 
-        $code = $this->accountCode($supplierId, $target, $accountId);
+        $code = $this->accountCode($supplierId, $target, $accountId, !empty($tx['credit_card']));
         $accountSide = $clearing['side'];
         $clearingSide = $accountSide === 'debit' ? 'credit' : 'debit';
         $clearingLine = ['account_code' => $clearing['code'], 'side' => $clearingSide, 'amount' => $clearing['amount']];
@@ -68,9 +85,11 @@ final class CardClearingWriteOffService
         ];
         $res = $this->settlements->sync($supplierId, $txId, CardSettlementService::SOURCE_WRITEOFF, $lines, [
             'txDate'      => substr($tx['posted_at'], 0, 10),
-            'description' => $target === 'holder'
-                ? 'Platba kartou bez dokladu k tíži držitele karty'
-                : 'Platba kartou bez dokladu — nedaňový náklad',
+            'description' => match ($target) {
+                'holder'      => 'Platba kartou bez dokladu k tíži držitele karty',
+                'expense_tax' => 'Platba kartou bez dokladu — daňový náklad',
+                default       => 'Platba kartou bez dokladu — nedaňový náklad',
+            },
             'document_no' => 'KARTA-' . $txId,
             'user_id'     => $userId,
         ]);
@@ -89,25 +108,44 @@ final class CardClearingWriteOffService
         return $this->settlements->reverseLive($supplierId, $txId, CardSettlementService::SOURCE_WRITEOFF, ['user_id' => $userId]);
     }
 
-    private function accountCode(int $supplierId, string $target, ?int $accountId): string
+    /**
+     * Účet uzavření: výslovně zvolený, jinak z nastavení. Pohyb kreditní karty bere nejdřív
+     * nastavení kreditních karet; nevyplněné pole přebírá nastavení platebních karet.
+     */
+    private function accountCode(int $supplierId, string $target, ?int $accountId, bool $creditCard = false): string
     {
-        $prefix = $target === 'holder' ? '335' : '5';
         if ($accountId !== null && $accountId > 0) {
             $stmt = $this->db->pdo()->prepare(
                 'SELECT account_code FROM chart_of_accounts WHERE id = ? AND supplier_id = ? AND is_active = 1'
             );
             $stmt->execute([$accountId, $supplierId]);
             $code = $stmt->fetchColumn();
-            if (!is_string($code) || !str_starts_with($code, $prefix)) {
+            if (!is_string($code) || !$this->allowedFor($supplierId, $target, $code)) {
                 throw new PostingException('invalid_account', 'Účet se pro uzavření platby nehodí.', 422, ['field' => 'account_id']);
             }
             return $code;
         }
+        $credit = $creditCard ? $this->creditSettings->find($supplierId) : [];
         $settings = $this->regime->settings($supplierId);
-        if ($target === 'holder') {
-            return (string) (($settings['holder_account_code'] ?? null) ?: '335');
+        return match ($target) {
+            'holder'      => (string) (($credit['private_account_code'] ?? null) ?: (($settings['holder_account_code'] ?? null) ?: '335')),
+            'expense_tax' => (string) (($credit['writeoff_tax_account_code'] ?? null) ?: self::DEFAULT_TAX_EXPENSE),
+            default       => (string) (($credit['writeoff_nontax_account_code'] ?? null)
+                ?: (($settings['writeoff_account_code'] ?? null) ?: $this->settingsService->defaultWriteoffCode($supplierId))),
+        };
+    }
+
+    private function allowedFor(int $supplierId, string $target, string $code): bool
+    {
+        if ($this->regime->isClearingCode($supplierId, $code)) {
+            return false;
         }
-        return (string) (($settings['writeoff_account_code'] ?? null) ?: $this->settingsService->defaultWriteoffCode($supplierId));
+        foreach (self::TARGET_PREFIXES[$target] as $prefix) {
+            if (str_starts_with($code, $prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function hasAllocation(int $supplierId, int $txId): bool

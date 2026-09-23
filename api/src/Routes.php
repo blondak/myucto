@@ -3336,6 +3336,10 @@ final class Routes
         $app->get   ('/api/credit-cards/{id:[0-9]+}',              [\MyInvoice\Action\Bank\CreditCardAction::class, 'get']);
         $app->put   ('/api/credit-cards/{id:[0-9]+}',              [\MyInvoice\Action\Bank\CreditCardAction::class, 'update']);
         $app->put   ('/api/credit-cards/{id:[0-9]+}/analytic',     [\MyInvoice\Action\Bank\CreditCardAction::class, 'setAnalytic']);
+        $app->put   ('/api/credit-cards/{id:[0-9]+}/purchase-mode', [\MyInvoice\Action\Bank\CreditCardAction::class, 'setPurchaseMode']);
+        $app->put   ('/api/credit-cards/{id:[0-9]+}/clearing-analytic', [\MyInvoice\Action\Bank\CreditCardAction::class, 'setClearingAnalytic']);
+        $app->post  ('/api/credit-cards/{id:[0-9]+}/post-pending', [\MyInvoice\Action\Bank\CreditCardAction::class, 'postPending']);
+        $app->post  ('/api/credit-cards/{id:[0-9]+}/opening',      [\MyInvoice\Action\Bank\CreditCardAction::class, 'postOpening']);
         $app->post  ('/api/credit-cards/{id:[0-9]+}/archive',      [\MyInvoice\Action\Bank\CreditCardAction::class, 'archive']);
         $app->post  ('/api/credit-cards/{id:[0-9]+}/restore',      [\MyInvoice\Action\Bank\CreditCardAction::class, 'restore']);
 
