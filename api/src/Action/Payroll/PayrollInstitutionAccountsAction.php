@@ -14,6 +14,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\PayrollEmployerLegacyIdentifierCarryOver;
 use MyInvoice\Service\Payroll\PayrollInstitutionAccountValidator;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -31,6 +32,7 @@ final class PayrollInstitutionAccountsAction
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollEmployerLegacyIdentifierCarryOver $legacyIdentifiers,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -99,6 +101,12 @@ final class PayrollInstitutionAccountsAction
         }
 
         $this->audit($request, 'payroll.institution_account.created', $account);
+        // Nový účet výchozí pojišťovny bez VS převezme číslo plátce, které firma
+        // dosud vedla v Nastavení firmy.
+        if (isset($account['id'])
+            && $this->legacyIdentifiers->settle($supplierId, $this->userId($request))['carried'] !== []) {
+            $account = $this->accounts->find($supplierId, (int) $account['id']) ?? $account;
+        }
         return Json::ok($response, ['account' => $account], 201);
     }
 

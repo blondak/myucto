@@ -12,6 +12,7 @@ use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\License\LicenseSeatLimitExceeded;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
+use MyInvoice\Service\Payroll\PayrollEmployerLegacyIdentifierCarryOver;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\SupportMatrix;
 use PDO;
@@ -28,7 +29,9 @@ use PDO;
  *  2. nastaví začátek vedení mezd v MyÚčtu na měsíc po posledních převzatých mzdách
  *     (stav modulu `setup`, jako uložení v Mzdy → Nastavení → Aktivace),
  *  3. když firma nastavení zaměstnavatele nemá, založí ho s výchozí mzdovou účtárnou
- *     a výchozími předkontacemi ({@see PayrollEmployerSettingsRepository::save()}).
+ *     a výchozími předkontacemi ({@see PayrollEmployerSettingsRepository::save()}),
+ *  4. převezme z Nastavení firmy VS ČSSZ, kód OSSZ a číslo plátce zdravotního
+ *     pojištění do prázdných míst v Mzdách ({@see PayrollEmployerLegacyIdentifierCarryOver}).
  *
  * ── Co se nikdy nepřepisuje ─────────────────────────────────────────────────
  * Zapnutý modul, existující stav modulu (i vědomě vypnutý) a jeho začátek, ani
@@ -36,8 +39,9 @@ use PDO;
  *
  * ── Co se nevymýšlí ─────────────────────────────────────────────────────────
  * Variabilní symbol ČSSZ, kód OSSZ ani účty institucí: jsou to údaje z rozhodnutí
- * úřadů a zástupná hodnota by prošla do přehledů a plateb. Účtárna vznikne bez nich
- * a protokol řekne, co doplnit.
+ * úřadů a zástupná hodnota by prošla do přehledů a plateb. Převezme se jen to, co
+ * firma už má v Nastavení firmy; zbytek protokol vypíše k doplnění. Datum účinnosti
+ * registrace účtárny se nevymýšlí ani k převzatému VS.
  *
  * ── Firma, která mzdy už nevede ─────────────────────────────────────────────
  * Poslední mzdy víc než rok před koncem převáděných dat znamenají, že firma
@@ -59,6 +63,7 @@ final class PayrollMigrationModuleSetup
 
     /** Údaje, které převod nevymýšlí a účetní je musí doplnit. */
     public const TODO_SOCIAL_SECURITY_SYMBOL = 'social_security_variable_symbol';
+    public const TODO_SOCIAL_SECURITY_REGISTRATION = 'social_security_registration';
     public const TODO_SOCIAL_SECURITY_OFFICE = 'social_security_office_code';
     public const TODO_INSTITUTION_ACCOUNTS = 'institution_accounts';
     public const TODO_START_PERIOD = 'start_period';
@@ -70,6 +75,7 @@ final class PayrollMigrationModuleSetup
         private readonly PayrollModuleStateRepository $state,
         private readonly PayrollEmployerSettingsRepository $settings,
         private readonly SupportMatrix $support,
+        private readonly PayrollEmployerLegacyIdentifierCarryOver $identifiers,
     ) {}
 
     /**
@@ -120,7 +126,7 @@ final class PayrollMigrationModuleSetup
      *
      * @return array{
      *   outcome:string,enabled_now:bool,office_created:bool,start_period:?string,start_set:bool,
-     *   start_unsupported:?string,last_period:string,todo:list<string>
+     *   start_unsupported:?string,last_period:string,carried:array<string,string>,todo:list<string>
      * }
      */
     public function ensure(int $supplierId, ?int $userId, string $lastPayrollPeriod, ?string $lastDataPeriod = null): array
@@ -134,6 +140,7 @@ final class PayrollMigrationModuleSetup
             'start_set' => false,
             'start_unsupported' => $plan['start_unsupported'],
             'last_period' => $plan['last_period'],
+            'carried' => [],
             'todo' => [],
         ];
         if ($plan['outcome'] !== self::OUTCOME_READY) {
@@ -163,8 +170,9 @@ final class PayrollMigrationModuleSetup
             }
         }
         $result['start_period'] = $this->state->get($supplierId)['start_period'];
+        $result['carried'] = $this->identifiers->settle($supplierId, $userId)['carried'];
 
-        if ($result['enabled_now'] || $result['office_created'] || $result['start_set']) {
+        if ($result['enabled_now'] || $result['office_created'] || $result['start_set'] || $result['carried'] !== []) {
             $result['todo'] = $this->todo($supplierId, $result['start_period']);
         }
 
@@ -219,6 +227,18 @@ final class PayrollMigrationModuleSetup
         if ($result['start_set']) {
             $done[] = 'nastavil začátek vedení mezd v MyÚčtu na ' . self::monthLabel((string) $result['start_period']);
         }
+        $carriedLabels = [
+            PayrollEmployerLegacyIdentifierCarryOver::SOCIAL_SECURITY_SYMBOL => 'variabilní symbol ČSSZ %s k mzdové účtárně',
+            PayrollEmployerLegacyIdentifierCarryOver::SOCIAL_SECURITY_OFFICE => 'kód OSSZ %s',
+            PayrollEmployerLegacyIdentifierCarryOver::HEALTH_INSURANCE_NUMBER => 'číslo plátce zdravotního pojištění %s k účtu výchozí pojišťovny',
+        ];
+        $carried = [];
+        foreach ((array) ($result['carried'] ?? []) as $field => $value) {
+            $carried[] = sprintf($carriedLabels[$field] ?? ($field . ' %s'), $value);
+        }
+        if ($carried !== []) {
+            $done[] = 'převzal z Nastavení firmy ' . self::joinCzech($carried);
+        }
         if ($done !== []) {
             $protocol->count($step, 'payroll_module_setup');
             $protocol->info($step, 'payroll_module_enabled', sprintf(
@@ -241,6 +261,7 @@ final class PayrollMigrationModuleSetup
         if ($todo !== []) {
             $labels = [
                 self::TODO_SOCIAL_SECURITY_SYMBOL => 'variabilní symbol plátce pojistného ČSSZ u mzdové účtárny',
+                self::TODO_SOCIAL_SECURITY_REGISTRATION => 'datum, od kdy variabilní symbol ČSSZ platí (registrace mzdové účtárny)',
                 self::TODO_SOCIAL_SECURITY_OFFICE => 'kód příslušné OSSZ',
                 self::TODO_INSTITUTION_ACCOUNTS => 'účty ČSSZ, zdravotních pojišťoven a finančního úřadu (Účty institucí)',
                 self::TODO_START_PERIOD => 'začátek vedení mezd v MyÚčtu',
@@ -335,6 +356,9 @@ final class PayrollMigrationModuleSetup
         $row = $office->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row) || trim((string) ($row['social_security_variable_symbol'] ?? '')) === '') {
             $todo[] = self::TODO_SOCIAL_SECURITY_SYMBOL;
+        } elseif (!$this->hasOfficeRegistration($supplierId)) {
+            // Převzatý VS nemá doloženou účinnost; bez ní mzdový běh neprojde.
+            $todo[] = self::TODO_SOCIAL_SECURITY_REGISTRATION;
         }
         if (!is_array($row) || trim((string) ($row['social_security_office_code'] ?? '')) === '') {
             $todo[] = self::TODO_SOCIAL_SECURITY_OFFICE;
@@ -351,6 +375,25 @@ final class PayrollMigrationModuleSetup
         }
 
         return $todo;
+    }
+
+    private function hasOfficeRegistration(int $supplierId): bool
+    {
+        if (!$this->db->hasTable('payroll_office_registration_versions')) {
+            return true;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_employer_settings settings
+               JOIN payroll_office_registration_versions version
+                 ON version.supplier_id = settings.supplier_id
+                AND version.office_id = settings.default_office_id
+              WHERE settings.supplier_id = ?
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId]);
+
+        return $stmt->fetchColumn() !== false;
     }
 
     private function schemaAvailable(): bool

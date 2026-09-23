@@ -22,6 +22,7 @@ use MyInvoice\Service\License\LicenseCompanyLimitExceeded;
 use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\Mail\RecipientResolver;
 use MyInvoice\Service\Mail\SafeLogoPath;
+use MyInvoice\Service\Payroll\PayrollEmployerLegacyIdentifierCarryOver;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Supplier\SupplierCreator;
 use MyInvoice\Service\Supplier\SupplierInitializer;
@@ -71,9 +72,10 @@ final class SettingsAction
         // VH-01: sdílená zápisová cesta do supplier_vat_status_history.
         private readonly \MyInvoice\Service\Vat\VatStatusService $vatStatus,
         private readonly \MyInvoice\Service\Vat\VatStatusGuard $vatStatusGuard,
-        // MZ-03: legacy identifikátory odvodů se u PO nulují jen proti zapnutému mzdovému
-        // modulu — s vypnutými Mzdami jsou jediným zdrojem (viz updateSupplier()).
         private readonly \MyInvoice\Service\Payroll\PayrollModuleAccess $payrollAccess,
+        // MZ-03: legacy identifikátory odvodů PO se se zapnutými Mzdami přenesou do Mezd
+        // a smažou až potom (viz updateSupplierById()).
+        private readonly PayrollEmployerLegacyIdentifierCarryOver $employerIdentifiers,
         // Zastoupení daňovým poradcem (§29/2 DŘ) — jen ke čtení historie do respondSupplier();
         // zápis jde přes TaxRepresentationAction (samostatná historizovaná evidence, vzor VH-01).
         private readonly \MyInvoice\Service\Tax\Return\TaxRepresentationService $taxRepresentation,
@@ -745,35 +747,16 @@ final class SettingsAction
         }
         // Identifikátory odvodů: u OSVČ jsou to VŽDY osobní údaje na supplier. U právnické
         // osoby je kanonickým zdrojem mzdový modul (migrace 1189/1221) — ale jen když je
-        // zapnutý. S vypnutými Mzdami (payroll_enabled = 0) není kam VS ČSSZ / VS zdravotní
-        // pojišťovny uložit, a tahle legacy pole zůstávají jediným zdrojem pro detekci
-        // odvodů v bance i pro šablony pravidel. Nulovat je tedy smíme pouze proti běžícímu
-        // mzdovému modulu, jinak by je každé uložení Nastavení firmy tiše smazalo.
-        $personalInsuranceFields = [
-            'cssz_vsdp',
-            'cssz_ossz_code',
-            'health_insurance_number',
-        ];
-        if (array_key_exists('taxpayer_type', $body)
-            || array_intersect_key($body, array_flip($personalInsuranceFields)) !== []
-        ) {
-            $effectiveTaxpayerType = $body['taxpayer_type'] ?? null;
-            if ($effectiveTaxpayerType === null) {
-                $stmt = $this->db->pdo()->prepare(
-                    'SELECT taxpayer_type FROM supplier WHERE id = ?'
-                );
-                $stmt->execute([$id]);
-                $effectiveTaxpayerType = $stmt->fetchColumn();
-            }
-            $payrollEnabled = array_key_exists('payroll_enabled', $body)
-                ? (bool) $body['payroll_enabled']
-                : $this->payrollAccess->isEnabled($id);
-            if ($effectiveTaxpayerType === 'po' && $payrollEnabled) {
-                foreach ($personalInsuranceFields as $field) {
-                    $body[$field] = null;
-                }
-            }
-        }
+        // zapnutý. S vypnutými Mzdami (payroll_enabled = 0) zůstávají tahle pole jediným
+        // zdrojem pro detekci odvodů v bance i pro šablony pravidel. Se zapnutými Mzdami
+        // se po uložení nejdřív přenesou do prázdných cílů v Mzdách a smažou se jen ty,
+        // které Mzdy opravdu drží (viz PayrollEmployerLegacyIdentifierCarryOver::settle()).
+        // Dřív se nulovaly vždy, takže zapnutí Mezd firmě bez nastavení zaměstnavatele
+        // údaj nenávratně smazalo.
+        $settlesEmployerIdentifiers = array_intersect_key(
+            $body,
+            array_flip(['taxpayer_type', 'payroll_enabled', ...PayrollEmployerLegacyIdentifierCarryOver::LEGACY_FIELDS]),
+        ) !== [];
         // Validace email_accent_color — musí být hex (#RRGGBB)
         if (array_key_exists('email_accent_color', $body)) {
             $v = trim((string) ($body['email_accent_color'] ?? ''));
@@ -896,6 +879,18 @@ final class SettingsAction
                     403,
                     ['buy_url' => '/activation/purchase#payroll-addon'],
                 );
+            }
+        }
+        if ($settlesEmployerIdentifiers) {
+            $settled = $this->employerIdentifiers->settle(
+                $id,
+                (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0) ?: null,
+            );
+            if ($settled['carried'] !== [] || $settled['cleared'] !== []) {
+                $this->log($request, 'supplier.employer_identifiers_moved_to_payroll', $id, [
+                    'carried' => array_keys($settled['carried']),
+                    'cleared' => $settled['cleared'],
+                ]);
             }
         }
         if ($paymentQrBody !== []) {

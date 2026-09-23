@@ -60,6 +60,21 @@ instituce. Pole
 **Registrační číslo zaměstnavatele** slouží pro evidenci a podání; není
 variabilním symbolem platby.
 
+**Převzetí z Nastavení firmy.** Právnická osoba, která vedla variabilní symbol
+zaměstnavatele u ČSSZ, kód OSSZ nebo číslo plátce zdravotního pojištění
+v Nastavení firmy, o ně zapnutím Mezd nepřijde. Údaje se přenesou do Mezd
+(ručním zapnutím v Nastavení firmy, převodem mezd z jiného programu i prvním
+uložením nastavení zaměstnavatele): variabilní symbol k výchozí mzdové účtárně,
+kód OSSZ do nastavení zaměstnavatele a číslo plátce jako variabilní symbol
+účinného účtu výchozí zdravotní pojišťovny v **Účtech institucí** (i účtu
+založeného později). Přenáší se jen do prázdného pole, vyplněnou hodnotu nic
+nepřepíše. Variabilní symbol a číslo plátce se přenesou jen jako 1 až 10 číslic,
+kód OSSZ jen jako trojmístné číslo. Z Nastavení firmy se údaj odstraní teprve
+tehdy, když ho Mzdy opravdu drží; dokud nastavení zaměstnavatele nebo účet
+pojišťovny chybí, zůstává tam. Datum, od kdy převzatý variabilní symbol ČSSZ
+platí, se nevymýšlí: doplňte ho v historii registrace účtárny, jinak mzdový běh
+za dané období neprojde.
+
 U každé účtárny lze vyplnit **Testovací VS ČSSZ**. Testovací prostředí ČSSZ má
 vlastní přidělený variabilní symbol, jiný než ostrý, a podání poslané pod cizím
 symbolem zamítne. Odmítnutí přitom hlásí chybějící pověření k e-službě nebo

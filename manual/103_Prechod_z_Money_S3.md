@@ -111,8 +111,11 @@ tři věci:
 - **Zapnutí modulu Mzdy.** Firmě, která mzdy vede, převod zapne modul Mzdy
   a nastaví začátek vedení mezd v MyÚčtu na měsíc po posledním mzdovém dokladu.
   Chybí-li nastavení zaměstnavatele, založí ho s mzdovou účtárnou `MZDY`
-  a výchozími předkontacemi. Variabilní symbol ČSSZ, kód OSSZ a účty institucí
-  převod nevymýšlí, protokol je vypíše k doplnění v Mzdy → Nastavení. Zapnutý
+  a výchozími předkontacemi. Variabilní symbol ČSSZ, kód OSSZ a číslo plátce
+  zdravotního pojištění, které firma vede v Nastavení firmy, převezme do Mezd
+  (viz [§ 90.8](90_Nastaveni_mezd.md#908-podrobny-pracovni-postup-a-kontroly)).
+  Co v Nastavení firmy není, ani účty institucí převod nevymýšlí; protokol
+  vypíše k doplnění v Mzdy → Nastavení jen to, co opravdu chybí. Zapnutý
   modul, jeho začátek ani existující nastavení převod nemění. Firmě, jejíž mzdy
   skončily víc než rok před koncem převáděných dat, se modul nezapíná.
 

@@ -9,6 +9,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -21,7 +22,10 @@ use Slim\Psr7\Response as Psr7Response;
  * (migrace 1290): s vypnutým modulem kanonický záznam vůbec neexistuje, takže se údaj
  * neměl kam uložit a legacy pole se místo záložního zdroje jen tiše mazala.
  *
- * Pravidlo, které tenhle test drží: přesměrování do Mezd platí jen proti ZAPNUTÉMU modulu.
+ * Pravidlo, které tenhle test drží: přesměrování do Mezd platí jen proti ZAPNUTÉMU modulu,
+ * a i tehdy se smí smazat jen údaj, který Mzdy opravdu drží. Nejdřív se přenese do
+ * prázdných míst v nastavení zaměstnavatele. Firma, která Mzdy zapnula a nastavení
+ * zaměstnavatele ještě nemá, údaj nesmí ztratit.
  *
  * Běží v transakci → rollback.
  */
@@ -30,6 +34,7 @@ final class PayrollEmployerIdentifiersTest extends TestCase
 {
     private Connection $db;
     private SettingsAction $settings;
+    private PayrollInstitutionAccountRepository $accounts;
     private int $supplierId = 0;
     private int $userId = 0;
     private bool $inTx = false;
@@ -44,6 +49,7 @@ final class PayrollEmployerIdentifiersTest extends TestCase
             $container = Bootstrap::buildApp()->getContainer();
             $this->db       = $container->get(Connection::class);
             $this->settings = $container->get(SettingsAction::class);
+            $this->accounts = $container->get(PayrollInstitutionAccountRepository::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -109,12 +115,14 @@ final class PayrollEmployerIdentifiersTest extends TestCase
         self::assertSame('555666777', $health);
     }
 
-    public function testEnabledPayrollStillClearsLegacyIdentifiers(): void
+    public function testEnabledPayrollMovesLegacyIdentifiersIntoPayroll(): void
     {
         $this->setSupplier(taxpayerType: 'po', payrollEnabled: true);
+        $officeId = $this->createEmployerSettings();
+        $accountId = $this->createHealthAccount();
         $this->db->pdo()->prepare(
             "UPDATE supplier
-                SET cssz_vsdp = '87654321', health_insurance_number = '555666777'
+                SET cssz_vsdp = '87654321', cssz_ossz_code = '301', health_insurance_number = '555666777'
               WHERE id = ?"
         )->execute([$this->supplierId]);
 
@@ -126,6 +134,26 @@ final class PayrollEmployerIdentifiersTest extends TestCase
             $this->storedIdentifiers(),
             'Se zapnutými Mzdami zůstává kanonickým zdrojem mzdový záznam.',
         );
+        self::assertSame(['87654321', '301', '555666777'], $this->payrollIdentifiers($officeId, $accountId));
+    }
+
+    /**
+     * Zapnuté Mzdy bez nastavení zaměstnavatele: údaj nemá kam jít, a proto se
+     * nesmí smazat. Dřív se tu nuloval a firma o VS zaměstnavatele přišla.
+     */
+    public function testEnabledPayrollWithoutEmployerSettingsKeepsIdentifiers(): void
+    {
+        $this->setSupplier(taxpayerType: 'po', payrollEnabled: true);
+        $this->db->pdo()->prepare(
+            "UPDATE supplier
+                SET cssz_vsdp = '87654321', health_insurance_number = '555666777'
+              WHERE id = ?"
+        )->execute([$this->supplierId]);
+
+        $resp = $this->save(['taxpayer_type' => 'po']);
+        self::assertSame(200, $resp->getStatusCode());
+
+        self::assertSame(['87654321', null, '555666777'], $this->storedIdentifiers());
     }
 
     /**
@@ -136,6 +164,8 @@ final class PayrollEmployerIdentifiersTest extends TestCase
     public function testPayrollToggleInSameBodyDecidesTheOutcome(): void
     {
         $this->setSupplier(taxpayerType: 'po', payrollEnabled: false);
+        $officeId = $this->createEmployerSettings();
+        $accountId = $this->createHealthAccount();
 
         $resp = $this->save([
             'payroll_enabled' => true,
@@ -145,6 +175,27 @@ final class PayrollEmployerIdentifiersTest extends TestCase
         self::assertSame(200, $resp->getStatusCode());
 
         self::assertSame([null, null, null], $this->storedIdentifiers());
+        self::assertSame(['87654321', null, '555666777'], $this->payrollIdentifiers($officeId, $accountId));
+    }
+
+    /**
+     * Ruční zapnutí Mezd v Nastavení firmy u firmy, která nastavení zaměstnavatele
+     * ještě nemá (typicky první zapnutí): VS zaměstnavatele zůstane na firmě, dokud
+     * ho nepřevezme nastavení zaměstnavatele.
+     */
+    public function testEnablingPayrollWithoutEmployerSettingsKeepsIdentifiers(): void
+    {
+        $this->setSupplier(taxpayerType: 'po', payrollEnabled: false);
+
+        $resp = $this->save([
+            'payroll_enabled' => true,
+            'cssz_vsdp' => '87654321',
+            'cssz_ossz_code' => '301',
+            'health_insurance_number' => '555666777',
+        ]);
+        self::assertSame(200, $resp->getStatusCode());
+
+        self::assertSame(['87654321', '301', '555666777'], $this->storedIdentifiers());
     }
 
     public function testNaturalPersonKeepsPersonalIdentifiersRegardlessOfPayroll(): void
@@ -167,6 +218,58 @@ final class PayrollEmployerIdentifiersTest extends TestCase
         $this->db->pdo()->prepare(
             'UPDATE supplier SET taxpayer_type = ?, payroll_enabled = ? WHERE id = ?'
         )->execute([$taxpayerType, $payrollEnabled ? 1 : 0, $this->supplierId]);
+    }
+
+    private function createEmployerSettings(): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_offices (supplier_id, code, name, is_active)
+             VALUES (?, "SYNTID", "Syntetická účtárna", 1)'
+        )->execute([$this->supplierId]);
+        $officeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_employer_settings (supplier_id, default_office_id, default_health_insurer_code)
+             VALUES (?, ?, "111")'
+        )->execute([$this->supplierId, $officeId]);
+
+        return $officeId;
+    }
+
+    private function createHealthAccount(): int
+    {
+        $account = $this->accounts->create($this->supplierId, [
+            'institution_type' => 'health_insurer',
+            'institution_code' => '111',
+            'institution_name' => 'Syntetická zdravotní pojišťovna',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => null,
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:settings-identifiers',
+            'verified_on' => '2026-06-15',
+        ], $this->userId);
+
+        return (int) $account['id'];
+    }
+
+    /** @return array{0:?string,1:?string,2:?string} */
+    private function payrollIdentifiers(int $officeId, int $accountId): array
+    {
+        $pdo = $this->db->pdo();
+        $office = $pdo->prepare('SELECT social_security_variable_symbol FROM payroll_offices WHERE id = ?');
+        $office->execute([$officeId]);
+        $code = $pdo->prepare('SELECT social_security_office_code FROM payroll_employer_settings WHERE supplier_id = ?');
+        $code->execute([$this->supplierId]);
+        $account = $pdo->prepare('SELECT variable_symbol FROM payroll_institution_accounts WHERE id = ?');
+        $account->execute([$accountId]);
+        $value = static fn (mixed $v): ?string => $v === null || $v === false ? null : (string) $v;
+
+        return [$value($office->fetchColumn()), $value($code->fetchColumn()), $value($account->fetchColumn())];
     }
 
     /** @param array<string,mixed> $body */
