@@ -278,6 +278,13 @@ mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změni
 v Money celková částka faktury, protokol ji vypíše jako změněnou v Money
 a ponechanou v MyÚčtu; upravte ji ručně.
 
+Převádíte-li firmu znovu od začátku (firmu smažete a převedete znovu), ztratí
+se s ní i nastavení, které převod nezakládá: výjimky mapování výkazů, volby
+výkazů a uzávěrky, daňový profil, dimenze, předkontace a pravidla banky. Před
+smazáním proto v průvodci (nebo v Nastavení) stáhněte **profil firmy** a po
+ostrém převodu ho nahrajte zpět. Výkazy pak vyjdou stejně jako před smazáním.
+Popis profilu je v [§ 96.18](96_Nastaveni.md#9618-profil-firmy).
+
 ## 103.9 Omezení
 
 - Formát dat Money není veřejně dokumentovaný. Čtení je ověřené na verzi

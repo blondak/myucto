@@ -27412,5 +27412,33 @@
       "classifications": "Cashbook classifications",
       "skipped_zero_cash": "Zero-value opening cash entries skipped"
     }
+  },
+  "company_profile": {
+    "title": "Company profile",
+    "hint": "The company's hand-built settings in one file: statement mapping overrides, statement and closing options (net turnover, prior period, offsetting of tax balances with the tax office), tax profile, dimensions and client default dimensions, posting templates and bank rules. Download it before deleting or re-converting the company and upload it back after the conversion.",
+    "hint_migration": "Converting the company again? Download the company profile before the conversion and upload it back once the live conversion finishes. It restores statement mapping overrides, statement options, tax profile, dimensions, posting templates and bank rules that the conversion does not create.",
+    "export": "Download company profile",
+    "import": "Upload company profile",
+    "invalid_json": "The file is not valid JSON.",
+    "preview_title": "Preview of uploading profile {file}, nothing saved yet",
+    "applied_title": "Company profile uploaded",
+    "no_changes": "The company already matches the profile, nothing to change.",
+    "counts": "added {created}, changed {updated}, removed {removed}, unchanged {unchanged}",
+    "warnings": "warnings: {count}",
+    "apply": "Upload profile",
+    "applied": "Company profile uploaded, changes: {count}.",
+    "applied_nothing": "Company profile uploaded, nothing changed.",
+    "error_in_section": "{section}: {message}",
+    "section": {
+      "company": "Company options",
+      "tax_profile": "Tax profile",
+      "accounting_settings": "Statements and accounting policies",
+      "statement_overrides": "Statement mapping overrides",
+      "dimensions": "Dimensions",
+      "dimension_defaults": "Client and project default dimensions",
+      "posting_rules": "Posting templates",
+      "bank_rule_templates": "Bank rule templates",
+      "bank_posting_rules": "Bank posting rules"
+    }
   }
 }

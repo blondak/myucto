@@ -18,6 +18,8 @@ final class BankRuleTemplateValidator
     private const OPERATION_TYPES = [
         OperationType::REMITTANCE_SOCIAL,
         OperationType::REMITTANCE_HEALTH,
+        OperationType::REMITTANCE_SOCIAL_EMPLOYER,
+        OperationType::REMITTANCE_HEALTH_EMPLOYER,
         OperationType::REMITTANCE_VAT,
         OperationType::REMITTANCE_INCOME,
         OperationType::REMITTANCE_WITHHOLDING,

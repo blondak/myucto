@@ -16,6 +16,7 @@ import { renderVarsymbolTemplate, hasCounterPlaceholder, templatesCollide } from
 import { DEFAULT_NOTE_MAX_LENGTH } from '@/pages/invoices/invoiceDefaultNote'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import AutomationPolicyBox from '@/components/settings/AutomationPolicyBox.vue'
+import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SupplierDomainsSettings from '@/components/settings/SupplierDomainsSettings.vue'
@@ -2189,6 +2190,8 @@ async function confirmTaxRepDelete() {
         </div>
 
       </section>
+
+      <CompanyProfileBox v-if="tab === 'accounting'" />
 
       <!-- Ukázková data — jen pokud nějaká evidovaná existují (issue #162) -->
       <section v-if="tab === 'accounting' && sampleStatus?.has" class="bg-surface border border-warning-500/40 rounded-lg p-5 shadow-sm">
