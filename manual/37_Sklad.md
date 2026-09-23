@@ -66,6 +66,13 @@ typ karty, sklad, štítky, chybějící obrázek/kategorii/cenu/výrobce/EAN, r
 a filtrovatelný atribut. Sklad omezí stav a hodnotu na vybraný sklad. Podmínky platí
 pro celý katalog, ne pouze zobrazenou stránku.
 
+Hledání od tří znaků prochází i **sériová čísla a šarže** kusů na kartě a **textové
+parametry** karty (například VIN nebo výrobní číslo uložené v parametru). Stačí část
+čísla. Když karta vyhoví jen takto, zobrazí se pod jejím názvem, co hledání našlo,
+například „Sériové číslo: …“ nebo „VIN: …“. Stejně hledá i výběr karty na řádku
+faktury a skladového dokladu. Číselné parametry a parametry s výběrem hodnot se
+prohledávají jen filtrem parametru.
+
 Filtry si můžeš uložit jako výchozí přes uložené filtry, sloupce si zapneš/vypneš
 přes výběr sloupců a hustotu řádků přes přepínač hustoty (viz
 [§ 96.9 Uložené filtry a předvolby zobrazení](96_Nastaveni.md#969-ulozene-filtry-a-predvolby-zobrazeni)).
@@ -172,8 +179,17 @@ pohybů se natahuje po 100 řádcích (dá se vyžádat až 500 najednou), poč�
 před zobrazenou stránkou se dopočítává ze všech předchozích řádků se stejnými filtry.
 Stornované doklady se v knize zobrazí ztlumeně, ale zůstávají viditelné.
 
+Sloupec **Faktura / partner** ukazuje, co pohyb vyvolalo: u výdeje k faktuře a vratky
+k dobropisu číslo dokladu s proklikem a odběratele, u příjmu z přijaté faktury číslo
+faktury dodavatele a dodavatele, u ručního dokladu volně zapsaného partnera. Sloupec
+**Prodejní cena** má cenu bez DPH z řádku faktury, u ostatních pohybů je prázdný.
+Jméno odběratele je z dokladu, tedy takové, jaké bylo při vystavení. Uživatel bez
+práva číst vydané, resp. přijaté faktury vidí jen skladový doklad, bez faktury,
+partnera a ceny. Oba sloupce jsou i v exportu skladové karty.
+
 Akce v hlavičce detailu: **Nová výdejka** (rovnou předvyplní kartu do nového dokladu),
-**Upravit**, **export do PDF** a **export do XLSX** (kompletní skladová kniha karty,
+**Upravit**, **Prodeje karty** (otevře sestavu prodejů filtrovanou na tuto kartu,
+viz [§ 37.8](#378-skladove-sestavy)), **export do PDF** a **export do XLSX** (kompletní skladová kniha karty,
 natažená dávkově po 500 řádcích bez ohledu na to, kolik pohybů karta má) a
 **Deaktivovat** (jen pokud je karta aktivní).
 
@@ -609,7 +625,7 @@ sklad se odečte ze skutečných lokací, na kterých je šarže vedena.
 
 ## 37.8 Skladové sestavy
 
-**Sklad → Sestavy** nabízí dvě záložky:
+**Sklad → Sestavy** nabízí tři záložky:
 
 - **Stav zásob** — aktuální množství, průměrná cena a hodnota po jednotlivých
   kartách a skladech k okamžiku zobrazení; řádky pod nastaveným minimem se zvýrazní.
@@ -618,9 +634,37 @@ sklad se odečte ze skutečných lokací, na kterých je šarže vedena.
   na pozadí a zobrazuje průběh. Hotové výsledky lze stránkovat. Opakovaný výpočet
   využívá uložené snapshoty; změna skladových pohybů dotčené snapshoty zneplatní.
 
-Obě sestavy mají **součtový řádek** (počet položek a celková hodnota) a jdou
+Stav zásob a ocenění mají **součtový řádek** (počet položek a celková hodnota) a jdou
 exportovat do **PDF** i **XLSX**; každý export se zaznamenává do žurnálu aktivit
 firmy (typ, formát, čas, uživatel).
+
+### 37.8.1 Prodeje skladových karet
+
+Záložka **Prodeje** odpovídá na otázky typu „kolik kusů z této kategorie odebral
+odběratel za rok, za kolik a které to byly“. Každý řádek je jeden řádek vydané faktury
+nebo dobropisu se skladovou kartou: DUZP, doklad s proklikem, odběratel, karta, prodaná
+sériová čísla nebo šarže, množství, cena za jednotku a celkem bez DPH.
+
+- **Filtry:** období podle DUZP (výchozí od 1. ledna do dneška), sklad, odběratel,
+  kategorie (včetně podkategorií) a hledání v kódu, názvu, textu řádku, prodaném
+  sériovém čísle nebo šarži a textovém parametru karty.
+- **Co se počítá:** vystavené faktury a dobropisy. Dobropis vždy snižuje tržbu.
+  Prodané množství snižuje jen o zboží vrácené na sklad (vratka k dobropisu);
+  dobropis bez vratky, například dodatečná sleva, množství nemění. Koncept,
+  stornovaný doklad, zálohová faktura a daňový doklad k platbě se nepočítají.
+  Stornovaná výdejka se neukáže, v řádku jsou jen kusy, které opravdu odešly.
+- **Sklad:** řádek faktury bez vybraného skladu patří k výchozímu skladu firmy,
+  ze kterého ho vydala automatická výdejka.
+- **Souhrn** nad tabulkou platí pro celý filtr, ne jen pro zobrazenou stránku: počet
+  řádků, prodané množství (když mají všechny řádky stejnou jednotku) a tržbu bez DPH
+  po měnách. Částky se nepřepočítávají kurzem, každá měna má svůj součet.
+- **Zobrazit po odběratelích / po kartách** sečte počet dokladů, řádků, množství
+  a tržbu za každého odběratele nebo kartu. Kliknutím na řádek souhrnu se zobrazí
+  jeho jednotlivé řádky.
+- **Export XLSX** obsahuje všechny řádky filtru (nejvýše 20 000) a při seskupení
+  i list se souhrnem.
+
+Záložku vidí jen uživatel, který má kromě skladu i právo číst vydané faktury.
 
 ## 37.9 Kolik toho vlastně máš — skladem, rezervováno, na cestě, u dodavatele
 

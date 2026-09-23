@@ -40,6 +40,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
 import { stockApi, type StockItemPackagingUnit, type StockItemSearchResult, type Warehouse } from '@/api/stock'
+import { stockSearchMatchLabel } from '@/utils/stockSearchMatch'
 import { smallAssetsApi, type SmallAsset } from '@/api/smallAssets'
 import { assetsApi, type AssetListItem } from '@/api/assets'
 import { priceListApi, type PriceListItem } from '@/api/priceList'
@@ -343,7 +344,10 @@ async function onStockSearch(rowIndex: number, q: string) {
     stockRowOptions[rowIndex] = res.map(r => ({
       value: r.id,
       label: `${r.sku} — ${r.name}`,
-      secondary: r.matched_unit ? `${r.unit} · ${r.matched_unit}` : r.unit,
+      secondary: [
+        r.matched_unit ? `${r.unit} · ${r.matched_unit}` : r.unit,
+        r.search_match ? `${stockSearchMatchLabel(r.search_match, t)}: ${r.search_match.value}` : null,
+      ].filter(Boolean).join(' · '),
     }))
   } catch {
     stockRowOptions[rowIndex] = []
