@@ -300,6 +300,34 @@ final class StatementOverrideService
             }
         }
 
+        // Korekce, která následuje pohledávku, musí skončit v řádku aktiv: účet pohledávky
+        // zařazený do pasiv (nebo do výsledovky) by z ní udělal nesmysl.
+        foreach ($out as $n) {
+            if ($n['follows_prefix'] === null) {
+                continue;
+            }
+            $base ??= $this->maps->simulate(
+                $supplierId,
+                (int) $version['id'],
+                [],
+                fn (): array => $this->maps->accountMap($version, $supplierId),
+            );
+            $resolved = StatementMapResolver::applyOverrides(
+                $base,
+                StatementMapResolver::validIn($out, $n['valid_from_year'] ?? $n['valid_to_year']),
+            );
+            foreach ($resolved as $m) {
+                if ((string) $m['account_prefix'] === $n['account_prefix'] && ($m['follows_prefix'] ?? null) === $n['follows_prefix']
+                    && (string) ($rows[(string) $m['row_code']]['section'] ?? '') !== 'assets') {
+                    throw new ReportException('validation_failed', sprintf(
+                        'Výjimka pro účet %s: účet pohledávky %s výkaz nezařazuje do aktiv, korekce ho následovat nemůže.',
+                        $n['account_prefix'],
+                        $n['follows_prefix'],
+                    ), 422);
+                }
+            }
+        }
+
         return $out;
     }
 
@@ -350,6 +378,27 @@ final class StatementOverrideService
         if (mb_strlen($note) > 255) {
             throw new ReportException('validation_failed', sprintf('Výjimka pro účet %s: poznámka je delší než 255 znaků.', $prefix), 422);
         }
+        $follows = rtrim(trim((string) ($item['follows_prefix'] ?? '')), '*');
+        if ($follows !== '') {
+            if (preg_match('/^\d{3}[0-9A-Za-z.]{0,7}$/', $follows) !== 1) {
+                throw new ReportException('validation_failed', sprintf(
+                    'Výjimka pro účet %s: účet pohledávky musí být kód syntetiky nebo analytiky, nejvýš 10 znaků.',
+                    $prefix,
+                ), 422);
+            }
+            if ($target !== 'correction') {
+                throw new ReportException('validation_failed', sprintf(
+                    'Výjimka pro účet %s: vazbu na pohledávku může mít jen korekce.',
+                    $prefix,
+                ), 422);
+            }
+            if ($follows === $prefix) {
+                throw new ReportException('validation_failed', sprintf(
+                    'Výjimka pro účet %s: korekce nemůže následovat sama sebe.',
+                    $prefix,
+                ), 422);
+            }
+        }
         $from = self::year($item['valid_from_year'] ?? null, $prefix);
         $to = self::year($item['valid_to_year'] ?? null, $prefix);
         if ($from !== null && $to !== null && $from > $to) {
@@ -365,6 +414,7 @@ final class StatementOverrideService
             'account_prefix'    => $prefix,
             'row_code'          => $rowCode,
             'target'            => $target,
+            'follows_prefix'    => $follows === '' ? null : $follows,
             'balance_condition' => $condition,
             'sign'              => $sign,
             'note'              => $note === '' ? null : $note,
@@ -582,6 +632,7 @@ final class StatementOverrideService
             'account_prefix'    => (string) ($o['account_prefix'] ?? ''),
             'row_code'          => (string) ($o['row_code'] ?? ''),
             'target'            => (string) ($o['target'] ?? 'gross'),
+            'follows_prefix'    => isset($o['follows_prefix']) && $o['follows_prefix'] !== '' ? (string) $o['follows_prefix'] : null,
             'balance_condition' => (string) ($o['balance_condition'] ?? 'any'),
             'sign'              => (int) ($o['sign'] ?? 1),
             'note'              => $o['note'] ?? null,

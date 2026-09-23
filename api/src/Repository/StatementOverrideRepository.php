@@ -28,7 +28,7 @@ final class StatementOverrideRepository
     public function forVersion(int $supplierId, int $versionId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, version_id, account_prefix, row_code, target, balance_condition, sign, note,
+            'SELECT id, version_id, account_prefix, row_code, target, follows_prefix, balance_condition, sign, note,
                     valid_from_year, valid_to_year, created_by, created_at, updated_at
                FROM statement_account_overrides
               WHERE supplier_id = ? AND version_id = ?
@@ -43,7 +43,7 @@ final class StatementOverrideRepository
     public function find(int $supplierId, int $id): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, version_id, account_prefix, row_code, target, balance_condition, sign, note,
+            'SELECT id, version_id, account_prefix, row_code, target, follows_prefix, balance_condition, sign, note,
                     valid_from_year, valid_to_year, created_by, created_at, updated_at
                FROM statement_account_overrides
               WHERE supplier_id = ? AND id = ?'
@@ -55,15 +55,15 @@ final class StatementOverrideRepository
     }
 
     /**
-     * @param array{account_prefix:string,row_code:string,target:string,balance_condition:string,sign:int,note:?string,valid_from_year?:?int,valid_to_year?:?int} $data
+     * @param array{account_prefix:string,row_code:string,target:string,balance_condition:string,sign:int,note:?string,valid_from_year?:?int,valid_to_year?:?int,follows_prefix?:?string} $data
      */
     public function create(int $supplierId, int $versionId, array $data, ?int $userId): int
     {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO statement_account_overrides
-                (supplier_id, version_id, account_prefix, row_code, target, balance_condition, sign, note,
+                (supplier_id, version_id, account_prefix, row_code, target, follows_prefix, balance_condition, sign, note,
                  valid_from_year, valid_to_year, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $supplierId,
@@ -71,6 +71,7 @@ final class StatementOverrideRepository
             $data['account_prefix'],
             $data['row_code'],
             $data['target'],
+            $data['follows_prefix'] ?? null,
             $data['balance_condition'],
             $data['sign'],
             $data['note'],
@@ -83,13 +84,13 @@ final class StatementOverrideRepository
     }
 
     /**
-     * @param array{account_prefix:string,row_code:string,target:string,balance_condition:string,sign:int,note:?string,valid_from_year?:?int,valid_to_year?:?int} $data
+     * @param array{account_prefix:string,row_code:string,target:string,balance_condition:string,sign:int,note:?string,valid_from_year?:?int,valid_to_year?:?int,follows_prefix?:?string} $data
      */
     public function update(int $supplierId, int $id, array $data): void
     {
         $stmt = $this->db->pdo()->prepare(
             'UPDATE statement_account_overrides
-                SET account_prefix = ?, row_code = ?, target = ?, balance_condition = ?, sign = ?, note = ?,
+                SET account_prefix = ?, row_code = ?, target = ?, follows_prefix = ?, balance_condition = ?, sign = ?, note = ?,
                     valid_from_year = ?, valid_to_year = ?
               WHERE supplier_id = ? AND id = ?'
         );
@@ -97,6 +98,7 @@ final class StatementOverrideRepository
             $data['account_prefix'],
             $data['row_code'],
             $data['target'],
+            $data['follows_prefix'] ?? null,
             $data['balance_condition'],
             $data['sign'],
             $data['note'],

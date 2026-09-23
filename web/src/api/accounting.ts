@@ -1268,6 +1268,8 @@ export interface StatementOverride {
   balance_condition: StatementBalanceCondition
   sign?: number
   note: string | null
+  /** Korekce: účet pohledávky, jejíž řádek výkazu korekce přebírá. */
+  follows_prefix?: string | null
   /** Účetní období, od kterého / do kterého výjimka platí; null = bez omezení. */
   valid_from_year?: number | null
   valid_to_year?: number | null
@@ -1357,6 +1359,8 @@ export interface StatementOverrideSuggestion {
   to_is_subtotal: boolean
   balance_condition: StatementBalanceCondition
   target: 'gross' | 'correction'
+  /** Korekce navázaná na pohledávku, kterou návrh přesouvá do stejného řádku. */
+  follows_prefix?: string | null
   sign: number
   reason: string
   ambiguous: boolean

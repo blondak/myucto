@@ -158,6 +158,7 @@ final class StatementMapResolver
                     'balance_condition' => $condition,
                     'sign'              => (int) $o['sign'],
                     'source'            => 'override',
+                    'follows_prefix'    => ($o['follows_prefix'] ?? null) === null || $o['follows_prefix'] === '' ? null : (string) $o['follows_prefix'],
                 ];
             }
 
@@ -176,7 +177,37 @@ final class StatementMapResolver
             }
         }
 
-        return $out;
+        return self::resolveFollowers($out);
+    }
+
+    /**
+     * Korekce, která následuje pohledávku (`follows_prefix`), dostane řádek, kam sloučená
+     * mapa zařadí účet té pohledávky (brutto, debetní nebo jakýkoli zůstatek). Když účet
+     * pohledávky v mapě není, zůstane uložený řádek výjimky.
+     *
+     * @param list<array<string,mixed>> $map
+     * @return list<array<string,mixed>>
+     */
+    private static function resolveFollowers(array $map): array
+    {
+        $gross = array_values(array_filter(
+            $map,
+            static fn (array $m): bool => (string) $m['target'] === 'gross' && ($m['follows_prefix'] ?? null) === null,
+        ));
+        foreach ($map as $i => $m) {
+            $follows = $m['follows_prefix'] ?? null;
+            if ($follows === null || (string) $m['target'] !== 'correction') {
+                continue;
+            }
+            foreach (self::longestMatching($gross, (string) $follows) as $receivable) {
+                if ((string) $receivable['balance_condition'] !== 'credit') {
+                    $map[$i]['row_code'] = (string) $receivable['row_code'];
+                    break;
+                }
+            }
+        }
+
+        return $map;
     }
 
     /**

@@ -244,6 +244,28 @@ describe('StatementMapping.vue', () => {
     ])
   })
 
+  it('(j) korekce jde navázat na účet pohledávky a vazba se uloží', async () => {
+    m.getStatementOverrides.mockResolvedValue(overview({
+      rows: [
+        ...overview().rows,
+        { row_code: 'C.II.1.5.4.', display_code: 'C.II.1.5.4.', parent_row_code: 'C.II.1.5.', section: 'assets', label: 'Jiné pohledávky', level: 4, row_type: 'detail', value: 0 },
+      ],
+      overrides: [{ id: 8, version_id: 1, account_prefix: '365.100', row_code: 'C.II.1.5.4.', target: 'correction', balance_condition: 'any', sign: 1, note: null }],
+    }))
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    const follows = wrapper.find('[data-test="account-365.100"] [data-test="follows"]')
+    await follows.setValue('351.100')
+    await follows.trigger('change')
+    await wrapper.find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveStatementOverrides).toHaveBeenCalledWith(1, [
+      { account_prefix: '365.100', row_code: 'C.II.1.5.4.', target: 'correction', balance_condition: 'any', sign: 1, note: null, valid_from_year: null, valid_to_year: null, follows_prefix: '351.100' },
+    ])
+  })
+
   it('(f) bez podaného přiznání je návrh zašedlý s vysvětlením', async () => {
     m.getStatementOverrides.mockResolvedValue(overview())
     const wrapper = mount(StatementMapping)

@@ -13,6 +13,7 @@ use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\StatementOverrideService;
+use MyInvoice\Service\Accounting\Reports\StatementOverrideSuggester;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -36,6 +37,7 @@ final class BalanceSheetPresentationTest extends TestCase
     private Connection $db;
     private FinancialStatementService $statements;
     private StatementOverrideService $overrides;
+    private StatementOverrideSuggester $suggester;
     private StatementDefinitionRepository $definitions;
     private PostingService $posting;
     private AccountingPeriodRepository $periods;
@@ -59,6 +61,7 @@ final class BalanceSheetPresentationTest extends TestCase
             $this->db          = $c->get(Connection::class);
             $this->statements  = $c->get(FinancialStatementService::class);
             $this->overrides   = $c->get(StatementOverrideService::class);
+            $this->suggester   = $c->get(StatementOverrideSuggester::class);
             $this->definitions = $c->get(StatementDefinitionRepository::class);
             $this->posting     = $c->get(PostingService::class);
             $this->periods     = $c->get(AccountingPeriodRepository::class);
@@ -187,7 +190,110 @@ final class BalanceSheetPresentationTest extends TestCase
         }
     }
 
+    /**
+     * Opravná položka navázaná na pohledávku jde do řádku, kam výkaz zařadí pohledávku,
+     * a při jejím přeřazení ji následuje. Uložený řádek výjimky je jen záloha.
+     */
+    public function testCorrectionFollowsItsReceivable(): void
+    {
+        $this->postCorrectionScenario();
+        $this->overrides->save($this->supplierId, $this->versionId, [
+            ['account_prefix' => '351.100', 'row_code' => 'C.II.1.5.4.'],
+            ['account_prefix' => '391.100', 'row_code' => 'C.II.2.1.', 'target' => 'correction', 'follows_prefix' => '351.100'],
+        ], $this->userId);
+
+        $sheet = $this->statements->balanceSheet($this->supplierId, $this->periodId, self::ENDS_ON, 'full');
+        $assets = array_column($sheet['assets'], null, 'row_code');
+        self::assertEqualsWithDelta(200_000.0, $assets['C.II.1.5.4.']['gross'], 0.01);
+        self::assertEqualsWithDelta(150_000.0, $assets['C.II.1.5.4.']['correction'], 0.01, 'Korekce jde k pohledávce, ne do uloženého řádku.');
+        self::assertEqualsWithDelta(80_000.0, $assets['C.II.2.1.']['net'], 0.01, 'U obchodních pohledávek zůstane jen jejich vlastní opravná položka.');
+        self::assertSame([], $sheet['checks']['negative_net_rows']);
+        self::assertTrue($sheet['checks']['balanced']);
+
+        $this->overrides->save($this->supplierId, $this->versionId, [
+            ['account_prefix' => '351.100', 'row_code' => 'C.II.2.4.6.'],
+            ['account_prefix' => '391.100', 'row_code' => 'C.II.2.1.', 'target' => 'correction', 'follows_prefix' => '351.100'],
+        ], $this->userId);
+        $moved = $this->assets($this->periodId, self::ENDS_ON);
+        self::assertEqualsWithDelta(50_000.0, $moved['C.II.2.4.6.']['net'], 0.01, 'Po přeřazení pohledávky jde korekce s ní.');
+        self::assertEqualsWithDelta(0.0, $moved['C.II.1.5.4.']['net'] ?? 0.0, 0.01);
+    }
+
+    public function testCorrectionCannotFollowALiabilityAccount(): void
+    {
+        $this->expectException(ReportException::class);
+        $this->overrides->save($this->supplierId, $this->versionId, [
+            ['account_prefix' => '391.100', 'row_code' => 'C.II.2.1.', 'target' => 'correction', 'follows_prefix' => '321'],
+        ], $this->userId);
+    }
+
+    /**
+     * Návrh z podaného přiznání porovná u aktiv brutto a korekci zvlášť: najde přesun
+     * pohledávky i její opravné položky do dlouhodobých pohledávek a korekci naváže
+     * na pohledávku.
+     */
+    public function testSuggesterMovesReceivableAndLinksItsCorrection(): void
+    {
+        $this->postCorrectionScenario();
+        $suggester = $this->suggester;
+        $this->overrides->save($this->supplierId, $this->versionId, [
+            ['account_prefix' => '351.100', 'row_code' => 'C.II.1.5.4.'],
+            ['account_prefix' => '391.100', 'row_code' => 'C.II.1.5.4.', 'target' => 'correction'],
+        ], $this->userId);
+        $filed = $suggester->appAppendix($this->supplierId, $this->periodId, 'full');
+        $this->overrides->save($this->supplierId, $this->versionId, [], $this->userId);
+
+        $out = $suggester->suggestFromXml($this->supplierId, $this->periodId, $this->filedXml($filed));
+        $byAccount = array_column($out['suggestions'], null, 'account_code');
+
+        self::assertArrayHasKey('351.100', $byAccount, json_encode($out['suggestions'], JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertSame('C.II.1.5.4.', $byAccount['351.100']['to_row_code']);
+        self::assertSame('gross', $byAccount['351.100']['target']);
+        self::assertArrayHasKey('391.100', $byAccount);
+        self::assertSame('C.II.1.5.4.', $byAccount['391.100']['to_row_code']);
+        self::assertSame('correction', $byAccount['391.100']['target']);
+        self::assertSame('351.100', $byAccount['391.100']['overrides'][0]['follows_prefix'], 'Korekce je navázaná na pohledávku.');
+        self::assertFalse($byAccount['391.100']['ambiguous']);
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
+
+    /** Obchodní pohledávka 100 000 s OP 20 000, pohledávka za ovládanou osobou 200 000 s OP 150 000. */
+    private function postCorrectionScenario(): void
+    {
+        $this->post(self::YEAR, '311', '602', 100_000.00);
+        $this->post(self::YEAR, '351.100', '602', 200_000.00);
+        $this->post(self::YEAR, '558', '391.100', 150_000.00);
+        $this->post(self::YEAR, '558', '391.200', 20_000.00);
+    }
+
+    /**
+     * Minimální XML podaného přiznání s přílohou — jen to, co návrh čte.
+     *
+     * @param array<string, array<int, array<string,int>>> $appendix
+     */
+    private function filedXml(array $appendix): string
+    {
+        $dom = new \DOMDocument('1.0', 'UTF-8');
+        $root = $dom->appendChild($dom->createElement('Pisemnost'))->appendChild($dom->createElement('DPPDP9'));
+        $vetaD = $dom->createElement('VetaD');
+        $vetaD->setAttribute('zdobd_od', '01.01.' . self::YEAR);
+        $vetaD->setAttribute('zdobd_do', '31.12.' . self::YEAR);
+        $vetaD->setAttribute('uv_rozsah_rozv', 'P');
+        $root->appendChild($vetaD);
+        foreach ($appendix as $sentence => $rows) {
+            foreach ($rows as $cRadku => $values) {
+                $el = $dom->createElement($sentence);
+                $el->setAttribute('c_radku', (string) $cRadku);
+                foreach ($values as $attr => $value) {
+                    $el->setAttribute($attr, (string) $value);
+                }
+                $root->appendChild($el);
+            }
+        }
+
+        return (string) $dom->saveXML();
+    }
 
     /** @return array<string, array<string,mixed>> aktiva podle kódu řádku */
     private function assets(int $periodId, string $asOf): array

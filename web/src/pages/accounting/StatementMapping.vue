@@ -68,6 +68,7 @@ function normalize(o: StatementOverride): StatementOverride {
     note: o.note ? o.note : null,
     valid_from_year: o.valid_from_year ?? null,
     valid_to_year: o.valid_to_year ?? null,
+    ...(o.target === 'correction' && o.follows_prefix ? { follows_prefix: o.follows_prefix } : {}),
   }
 }
 
@@ -361,6 +362,7 @@ function applySuggestions() {
         balance_condition: o.balance_condition,
         sign: 1,
         note: t('accounting.statements.mapping.suggestion_note', { year: suggestionYear }),
+        ...(o.follows_prefix ? { follows_prefix: o.follows_prefix } : {}),
       }
       // Návrh je za rok editoru: nahradí výjimku, která v něm platí, a převezme její platnost.
       const idx = draft.value.findIndex(d => d.account_prefix === next.account_prefix
@@ -615,8 +617,16 @@ onMounted(async () => {
                     <label v-if="overrideFor(a.account_code) && sectionOf(overrideFor(a.account_code)!.row_code) === 'assets'"
                            class="mt-1 flex items-center gap-1 text-[11px] text-neutral-600">
                       <input type="checkbox" :checked="overrideFor(a.account_code)!.target === 'correction'" :disabled="!canWrite"
-                             @change="setField(a.account_code, { target: ($event.target as HTMLInputElement).checked ? 'correction' : 'gross' })" />
+                             @change="setField(a.account_code, ($event.target as HTMLInputElement).checked ? { target: 'correction' } : { target: 'gross', follows_prefix: null })" />
                       {{ t('accounting.statements.mapping.target_correction') }}
+                    </label>
+                    <label v-if="overrideFor(a.account_code)?.target === 'correction'" class="mt-1 flex items-center gap-1 text-[11px] text-neutral-600"
+                           :title="t('accounting.statements.mapping.follows_hint')">
+                      {{ t('accounting.statements.mapping.follows_label') }}
+                      <input type="text" maxlength="10" :value="overrideFor(a.account_code)!.follows_prefix ?? ''" :disabled="!canWrite"
+                             :placeholder="t('accounting.statements.mapping.follows_placeholder')" data-test="follows"
+                             class="h-7 w-24 px-1.5 border border-neutral-300 rounded-md bg-surface text-[11px] font-mono"
+                             @change="setField(a.account_code, { follows_prefix: ($event.target as HTMLInputElement).value.trim() || null })" />
                     </label>
                   </td>
                   <td class="px-2 py-1.5">

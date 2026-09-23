@@ -18,7 +18,8 @@ declare(strict_types=1);
  * Soubor CSV: account_prefix;row_code;balance_condition;note[;statement_type[;valid_from_year[;valid_to_year]]]
  *   oddělovač středník nebo čárka, hlavička volitelná, prázdné řádky a řádky začínající # se
  *   přeskočí. `account_prefix` smí končit hvězdičkou (351.* = všechny analytiky 351).
- * Soubor JSON: pole objektů se stejnými klíči.
+ * Soubor JSON: pole objektů se stejnými klíči, navíc 	arget (gross | correction) a u korekce
+ * ollows_prefix (účet pohledávky, jejíž řádek korekce přebírá).
  * `statement_type` (balance_sheet | income_statement | income_statement_purpose) je povinný
  * jen u kódu řádku, který existuje v rozvaze i ve výsledovce (A., C. …); jinak se odvodí.
  * alid_from_year / alid_to_year omezí platnost výjimky na účetní období (prázdné = bez omezení).
@@ -75,7 +76,7 @@ function soFail(string $message, int $code = 2): never
 }
 
 /**
- * @return list<array{line:int, account_prefix:string, row_code:string, balance_condition:string, note:?string, statement_type:?string, target:string, valid_from_year:?int, valid_to_year:?int}>
+ * @return list<array{line:int, account_prefix:string, row_code:string, balance_condition:string, note:?string, statement_type:?string, target:string, follows_prefix:?string, valid_from_year:?int, valid_to_year:?int}>
  */
 function soReadFile(string $path): array
 {
@@ -103,6 +104,7 @@ function soReadFile(string $path): array
                 'note'              => isset($row['note']) && trim((string) $row['note']) !== '' ? trim((string) $row['note']) : null,
                 'statement_type'    => isset($row['statement_type']) && trim((string) $row['statement_type']) !== '' ? trim((string) $row['statement_type']) : null,
                 'target'            => trim((string) ($row['target'] ?? '')) ?: 'gross',
+                'follows_prefix'    => isset($row['follows_prefix']) && trim((string) $row['follows_prefix']) !== '' ? trim((string) $row['follows_prefix']) : null,
                 'valid_from_year'   => soYear($row['valid_from_year'] ?? null),
                 'valid_to_year'     => soYear($row['valid_to_year'] ?? null),
             ];
@@ -128,6 +130,7 @@ function soReadFile(string $path): array
             'note'              => ($cells[3] ?? '') !== '' ? $cells[3] : null,
             'statement_type'    => ($cells[4] ?? '') !== '' ? $cells[4] : null,
             'target'            => 'gross',
+            'follows_prefix'    => null,
             'valid_from_year'   => soYear($cells[5] ?? null),
             'valid_to_year'     => soYear($cells[6] ?? null),
         ];
@@ -218,8 +221,9 @@ try {
             echo "\n# CSV pro import (account_prefix;row_code;balance_condition;note;statement_type), nejisté jsou zakomentované:\n";
             foreach ($result['suggestions'] as $s) {
                 foreach ($s['overrides'] as $o) {
+                    // CSV nese jen brutto; korekci (a její vazbu na pohledávku) převezměte přes --json.
                     printf("%s%s;%s;%s;Návrh z podaného přiznání %d;%s\n",
-                        $s['ambiguous'] ? '# ' : '',
+                        $s['ambiguous'] || $o['target'] === 'correction' ? '# ' : '',
                         $o['account_prefix'], $o['row_code'], $o['balance_condition'], $year, $s['statement_type']);
                 }
             }
@@ -322,6 +326,7 @@ try {
                 'balance_condition' => $item['balance_condition'],
                 'sign'              => 1,
                 'note'              => $item['note'],
+                'follows_prefix'    => $item['follows_prefix'],
                 'valid_from_year'   => $item['valid_from_year'],
                 'valid_to_year'     => $item['valid_to_year'],
             ];
@@ -331,7 +336,8 @@ try {
                 $lines[] = sprintf('  + %-10s %-6s → %s', $new['account_prefix'], $new['balance_condition'], $new['row_code']);
             } elseif ($old['row_code'] === $new['row_code'] && (string) $old['target'] === $new['target']
                 && (string) ($old['note'] ?? '') === (string) ($new['note'] ?? '')
-                && ($old['valid_to_year'] ?? null) === $new['valid_to_year']) {
+                && ($old['valid_to_year'] ?? null) === $new['valid_to_year']
+                && ($old['follows_prefix'] ?? null) === $new['follows_prefix']) {
                 $report['unchanged']++;
             } else {
                 $report['changed']++;

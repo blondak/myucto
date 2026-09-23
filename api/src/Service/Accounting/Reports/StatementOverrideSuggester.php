@@ -210,20 +210,35 @@ final class StatementOverrideSuggester
             }
         }
 
+        // Aktiva podání nesou brutto a korekci zvlášť. Porovnávají se pak odděleně: přesun
+        // pohledávky se hledá v brutto (s pasivy), přesun opravné položky v korekci. Na netto
+        // by se pohledávka a její opravná položka ze dvou různých řádků jako jeden přesun
+        // najít nedaly (netto záporné v jednom řádku, téměř nulové v cílovém).
+        $channels = [
+            ['balance_sheet', null, $diffByRow['balance_sheet'] ?? []],
+            ['income_statement', null, $diffByRow['income_statement'] ?? []],
+        ];
+        if (self::hasGrossAndCorrection($filed)) {
+            $channels[0] = ['balance_sheet', 'gross', self::columnDiffs($ours, $filed, 'VetaUA', 'kc_brutto', $rowByC)
+                + self::columnDiffs($ours, $filed, 'VetaUD', 'kc_sled', $rowByC)];
+            $channels[] = ['balance_sheet', 'correction', self::columnDiffs($ours, $filed, 'VetaUA', 'kc_korekce', $rowByC)];
+        }
+
         $suggestions = [];
-        foreach (['balance_sheet', 'income_statement'] as $type) {
-            $reported = $diffByRow[$type] ?? [];
+        $versions = [];
+        foreach ($channels as [$type, $channel, $reported]) {
             if (array_filter($reported) === []) {
                 continue;
             }
-            $version = $this->definitions->findVersion($type, (string) $period['ends_on']);
+            $version = $versions[$type] ??= $this->definitions->findVersion($type, (string) $period['ends_on']);
             if ($version === null) {
                 continue;
             }
-            foreach ($this->movesFor($type, $version, $supplierId, $period, $reported) as $move) {
+            foreach ($this->movesFor($type, $version, $supplierId, $period, $reported, $channel) as $move) {
                 $suggestions[] = $move;
             }
         }
+        $suggestions = self::linkCorrectionsToReceivables($suggestions);
         usort($suggestions, static fn (array $a, array $b): int => abs($b['amount_thousands']) <=> abs($a['amount_thousands'])
             ?: strcmp($a['account_code'], $b['account_code']));
 
@@ -234,6 +249,79 @@ final class StatementOverrideSuggester
             'suggestions' => $suggestions,
             'differences' => $differences,
         ];
+    }
+
+    /**
+     * Nese podání u aktiv brutto i korekci? (Příloha z EPO je nese vždy, ručně sestavené
+     * XML nemusí — pak se aktiva porovnají jen na netto jako dřív.)
+     *
+     * @param array<string, array<int, array<string,int|float>>> $filed
+     */
+    private static function hasGrossAndCorrection(array $filed): bool
+    {
+        foreach ($filed['VetaUA'] ?? [] as $values) {
+            if (array_key_exists('kc_brutto', $values) && array_key_exists('kc_korekce', $values)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Rozdíly aplikace − podání v jednom sloupci jedné věty, klíčované kódem řádku výkazu.
+     *
+     * @param array<string, array<int, array<string,int|float>>> $ours
+     * @param array<string, array<int, array<string,int|float>>> $filed
+     * @param array<string, array<int,string>>                    $rowByC
+     * @return array<string,int>
+     */
+    private static function columnDiffs(array $ours, array $filed, string $sentence, string $column, array $rowByC): array
+    {
+        $out = [];
+        $cs = array_unique(array_merge(array_keys($ours[$sentence] ?? []), array_keys($filed[$sentence] ?? [])));
+        sort($cs);
+        foreach ($cs as $c) {
+            $rowCode = $rowByC[$sentence][$c] ?? null;
+            if ($rowCode === null || isset($out[$rowCode])) {
+                continue;
+            }
+            $out[$rowCode] = (int) round((float) ($ours[$sentence][$c][$column] ?? 0))
+                - (int) round((float) ($filed[$sentence][$c][$column] ?? 0));
+        }
+
+        return $out;
+    }
+
+    /**
+     * Opravná položka přesunutá do téhož řádku jako pohledávka navržená jedním prefixem
+     * dostane vazbu na tu pohledávku (`follows_prefix`): řádek korekce se pak bere z toho,
+     * kam výkaz zařadí pohledávku, a při dalším přeřazení pohledávky ji korekce následuje.
+     *
+     * @param list<array<string,mixed>> $suggestions
+     * @return list<array<string,mixed>>
+     */
+    private static function linkCorrectionsToReceivables(array $suggestions): array
+    {
+        $receivables = [];
+        foreach ($suggestions as $s) {
+            if ($s['statement_type'] === 'balance_sheet' && $s['target'] === 'gross' && count($s['overrides']) === 1) {
+                $receivables[(string) $s['to_row_code']][] = (string) $s['overrides'][0]['account_prefix'];
+            }
+        }
+        foreach ($suggestions as $i => $s) {
+            if ($s['target'] !== 'correction' || count($receivables[(string) $s['to_row_code']] ?? []) !== 1) {
+                continue;
+            }
+            $follows = $receivables[(string) $s['to_row_code']][0];
+            foreach ($s['overrides'] as $j => $o) {
+                $suggestions[$i]['overrides'][$j]['follows_prefix'] = $follows;
+            }
+            $suggestions[$i]['follows_prefix'] = $follows;
+            $suggestions[$i]['reason'] .= sprintf(' Korekce patří k pohledávce %s a bude následovat její zařazení.', $follows);
+        }
+
+        return $suggestions;
     }
 
     /**
@@ -291,9 +379,10 @@ final class StatementOverrideSuggester
      * @param array<string,mixed> $version
      * @param array<string,mixed> $period
      * @param array<string,int>   $reported row_code → aplikace − podané (tis. Kč), řádky uvedené v příloze
+     * @param 'gross'|'correction'|null $channel rozdíly jen brutto / jen korekce; null = netto
      * @return list<array<string,mixed>>
      */
-    private function movesFor(string $type, array $version, int $supplierId, array $period, array $reported): array
+    private function movesFor(string $type, array $version, int $supplierId, array $period, array $reported, ?string $channel = null): array
     {
         $rows = $this->definitions->rows((int) $version['id']);
         $byCode = [];
@@ -346,7 +435,7 @@ final class StatementOverrideSuggester
                 foreach ($v['accounts'] as $a) {
                     $code = (string) $a['account_code'];
                     $allCodes[$code] = true;
-                    if ($node === null) {
+                    if ($node === null || ($channel !== null && (string) $a['target'] !== $channel)) {
                         continue;
                     }
                     $condition = 'any';
@@ -356,7 +445,8 @@ final class StatementOverrideSuggester
                             break;
                         }
                     }
-                    $net = $a['target'] === 'correction' ? -(float) $a['amount'] : (float) $a['amount'];
+                    // Ve sloupci korekce se porovnává korekce sama (kladná), jinak netto příspěvek.
+                    $net = $a['target'] === 'correction' && $channel !== 'correction' ? -(float) $a['amount'] : (float) $a['amount'];
                     $item = $contrib[$node][$code] ?? [
                         'net' => 0.0, 'name' => (string) $a['name'], 'row' => (string) $rowCode,
                         'target' => (string) $a['target'], 'condition' => $condition,
@@ -584,6 +674,7 @@ final class StatementOverrideSuggester
                 'balance_condition' => $c['condition'],
                 'sign'              => 1,
                 'note'              => null,
+                'follows_prefix'    => null,
             ],
             $exclusive ? [$prefix] : $members,
         );
@@ -605,13 +696,15 @@ final class StatementOverrideSuggester
             'to_is_subtotal'    => (string) $toRow['row_type'] === 'subtotal',
             'balance_condition' => (string) $c['condition'],
             'target'            => $target,
+            'follows_prefix'    => null,
             'sign'              => 1,
             'overrides'         => $overrides,
             'confidence'        => $confidence,
             'ambiguous'         => $tie || $confidence === 'fit',
             'reason'            => sprintf(
-                '%s (%s tis. Kč) aplikace vykazuje v řádku %s, podané přiznání ho má v řádku %s (%s)%s.',
+                '%s%s (%s tis. Kč) aplikace vykazuje v řádku %s, podané přiznání ho má v řádku %s (%s)%s.',
                 $label,
+                $target === 'correction' ? ' jako korekci' : '',
                 number_format($c['t'], 0, ',', ' '),
                 (string) $c['node'],
                 $to,
