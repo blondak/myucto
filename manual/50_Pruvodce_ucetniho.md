@@ -33,6 +33,9 @@ přiřadit volnou bankovní či pokladní úhradu. Částečná úhrada sníží
 částku. U zaúčtované položky musí být bankovní nebo pokladní zápis veden
 proti stejnému účtu pohledávky či závazku. Cizoměnové úhrady vyžadují
 samostatné kurzové vypořádání a v této agendě se automaticky nepárují.
+Storno účetního zápisu platby znovu otevře zůstatek. Pokud stejnou platbu
+zaúčtuješ znovu, přiřaď ji k položce znovu ve stejné částce. Původní
+úhrada tak zůstane správně započtená v historickém saldu před stornem.
 
 Na detailu můžeš založit **opakování** z aktuální položky. Zvol měsíční,
 čtvrtletní nebo roční četnost a případné koncové datum. Denní plánovač

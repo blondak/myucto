@@ -274,7 +274,8 @@ final class OtherItemService
                    FROM bank_transactions bt
                    JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = ?
               LEFT JOIN (SELECT bank_transaction_id, SUM(amount) used_amount FROM other_item_allocations
-                         WHERE supplier_id = ? AND bank_transaction_id IS NOT NULL GROUP BY bank_transaction_id) a
+                         WHERE supplier_id = ? AND bank_transaction_id IS NOT NULL AND reversed_on IS NULL
+                         GROUP BY bank_transaction_id) a
                      ON a.bank_transaction_id = bt.id
                   WHERE ' . $direction . '
                     AND COALESCE(bt.currency, bs.currency, \'CZK\') = \'CZK\'
@@ -284,10 +285,19 @@ final class OtherItemService
                     AND NOT EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.bank_transaction_id = bt.id)
                     AND NOT EXISTS (SELECT 1 FROM payroll_payment_matches ppm WHERE ppm.bank_transaction_id = bt.id)
                     AND NOT EXISTS (SELECT 1 FROM tax_advance_schedules tas WHERE tas.matched_transaction_id = bt.id)
+                    AND (
+                        NOT EXISTS (SELECT 1 FROM other_item_allocations previous
+                                     WHERE previous.supplier_id = bs.supplier_id
+                                       AND previous.bank_transaction_id = bt.id AND previous.reversed_on IS NOT NULL)
+                        OR EXISTS (SELECT 1 FROM other_item_allocations previous
+                                    WHERE previous.supplier_id = bs.supplier_id
+                                      AND previous.bank_transaction_id = bt.id
+                                      AND previous.other_item_id = ? AND previous.reversed_on IS NOT NULL)
+                    )
                     AND (bt.variable_symbol LIKE ? OR bt.counterparty_name LIKE ? OR bt.description LIKE ?)
                   ORDER BY bt.posted_at DESC, bt.id DESC LIMIT ' . $limit
             );
-            $stmt->execute([$supplierId, $supplierId, $term, $term, $term]);
+            $stmt->execute([$supplierId, $supplierId, $id, $term, $term, $term]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $rows[] = [
                     'source' => 'bank', 'id' => (int) $row['id'], 'payment_on' => $row['payment_on'],
@@ -304,16 +314,26 @@ final class OtherItemService
                         cd.description, COALESCE(a.used_amount, 0) used_amount
                    FROM cash_documents cd
               LEFT JOIN (SELECT cash_document_id, SUM(amount) used_amount FROM other_item_allocations
-                         WHERE supplier_id = ? AND cash_document_id IS NOT NULL GROUP BY cash_document_id) a
+                         WHERE supplier_id = ? AND cash_document_id IS NOT NULL AND reversed_on IS NULL
+                         GROUP BY cash_document_id) a
                      ON a.cash_document_id = cd.id
                   WHERE cd.supplier_id = ? AND cd.doc_type = ? AND cd.purpose = \'other\'
                     AND cd.status = \'posted\' AND cd.currency_code = \'CZK\'
                     AND cd.invoice_id IS NULL AND cd.purchase_invoice_id IS NULL
                     AND cd.total_amount > COALESCE(a.used_amount, 0)
+                    AND (
+                        NOT EXISTS (SELECT 1 FROM other_item_allocations previous
+                                     WHERE previous.supplier_id = cd.supplier_id
+                                       AND previous.cash_document_id = cd.id AND previous.reversed_on IS NOT NULL)
+                        OR EXISTS (SELECT 1 FROM other_item_allocations previous
+                                    WHERE previous.supplier_id = cd.supplier_id
+                                      AND previous.cash_document_id = cd.id
+                                      AND previous.other_item_id = ? AND previous.reversed_on IS NOT NULL)
+                    )
                     AND (cd.doc_number LIKE ? OR cd.partner_name LIKE ? OR cd.description LIKE ?)
                   ORDER BY cd.issue_date DESC, cd.id DESC LIMIT ' . $limit
             );
-            $stmt->execute([$supplierId, $supplierId, $cashDirection, $term, $term, $term]);
+            $stmt->execute([$supplierId, $supplierId, $cashDirection, $id, $term, $term, $term]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $rows[] = [
                     'source' => 'cash', 'id' => (int) $row['id'], 'payment_on' => $row['payment_on'],
@@ -376,7 +396,8 @@ final class OtherItemService
             }
             $stmt = $pdo->prepare(
                 'SELECT COALESCE(SUM(amount), 0) FROM other_item_allocations
-                  WHERE supplier_id = ? AND ' . ($bankId > 0 ? 'bank_transaction_id' : 'cash_document_id') . ' = ?'
+                  WHERE supplier_id = ? AND reversed_on IS NULL AND '
+                    . ($bankId > 0 ? 'bank_transaction_id' : 'cash_document_id') . ' = ?'
             );
             $stmt->execute([$supplierId, $bankId > 0 ? $bankId : $cashId]);
             $used = (float) $stmt->fetchColumn();
@@ -389,6 +410,39 @@ final class OtherItemService
                     $bankId > 0 ? $bankId : $cashId, $accountId, (string) $item['side'],
                     $amount + $this->allocatedOnAccount($supplierId, $bankId > 0 ? 'bank' : 'cash',
                         $bankId > 0 ? $bankId : $cashId, $accountId));
+            }
+            $sourceColumn = $bankId > 0 ? 'bank_transaction_id' : 'cash_document_id';
+            $sourceId = $bankId > 0 ? $bankId : $cashId;
+            $previous = $pdo->prepare(
+                "SELECT id, other_item_id, amount, reversed_on FROM other_item_allocations
+                  WHERE supplier_id = ? AND {$sourceColumn} = ? FOR UPDATE"
+            );
+            $previous->execute([$supplierId, $sourceId]);
+            $prior = false;
+            $hasReversed = false;
+            foreach ($previous->fetchAll(PDO::FETCH_ASSOC) as $allocation) {
+                if ($allocation['reversed_on'] !== null) $hasReversed = true;
+                if ((int) $allocation['other_item_id'] === $id) $prior = $allocation;
+            }
+            if ($hasReversed && $prior === false) {
+                throw new OtherItemException('payment_reallocation_conflict',
+                    'Po stornu lze platbu znovu přiřadit jen k původní položce.', 409);
+            }
+            if ($prior !== false) {
+                if ($prior['reversed_on'] === null) {
+                    throw new OtherItemException('payment_used', 'Tato platba už je k dokladu přiřazena.', 409);
+                }
+                if (abs((float) $prior['amount'] - $amount) > 0.001) {
+                    throw new OtherItemException('payment_reallocation_amount',
+                        'Po stornu lze znovu přiřadit stejnou částku původní úhrady.', 409);
+                }
+                $reactivate = $pdo->prepare(
+                    'UPDATE other_item_allocations SET reversed_on = NULL
+                      WHERE id = ? AND supplier_id = ? AND reversed_on IS NOT NULL'
+                );
+                $reactivate->execute([(int) $prior['id'], $supplierId]);
+                if ($ownTx) $pdo->commit();
+                return $this->get($supplierId, $id);
             }
             $stmt = $pdo->prepare(
                 'INSERT INTO other_item_allocations

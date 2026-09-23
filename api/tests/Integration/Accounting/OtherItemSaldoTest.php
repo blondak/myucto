@@ -113,7 +113,9 @@ final class OtherItemSaldoTest extends TestCase
     public function testRepostingPaymentDoesNotReactivateReversedAllocation(string $sourceType): void
     {
         $itemId = $this->item('receivable', '315', '602', 'Syntetická pohledávka');
-        $this->post($itemId, '315', 'debit', '602', '2099-01-10');
+        $itemEntry = $this->post($itemId, '315', 'debit', '602', '2099-01-10');
+        $this->pdo->prepare('UPDATE other_items SET journal_entry_id = ? WHERE id = ?')
+            ->execute([$itemEntry, $itemId]);
         $paymentId = $sourceType === 'bank' ? $this->bankPayment(400.0) : $this->cashPayment(400.0);
         $cashAccount = $sourceType === 'bank' ? '221' : '211';
         $entry = $this->posting->postDocument($this->supplierId, $sourceType, $paymentId, [
@@ -143,6 +145,38 @@ final class OtherItemSaldoTest extends TestCase
         self::assertSame(60000, $this->cents($april['gl_balance']));
         self::assertSame(100000, $this->cents($april['open_items_total']));
         self::assertFalse($april['matches']);
+
+        $otherId = $this->item('receivable', '315', '602', 'Jiná syntetická pohledávka');
+        $otherEntry = $this->post($otherId, '315', 'debit', '602', '2099-05-05');
+        $this->pdo->prepare('UPDATE other_items SET journal_entry_id = ? WHERE id = ?')
+            ->execute([$otherEntry, $otherId]);
+        self::assertNotContains($paymentId, array_column(
+            $this->items->paymentCandidates($this->supplierId, $otherId, '', 20,
+                $sourceType === 'bank', $sourceType === 'cash'), 'id'));
+        try {
+            $this->items->allocate($this->supplierId, $otherId,
+                [$sourceType === 'bank' ? 'bank_transaction_id' : 'cash_document_id' => $paymentId, 'amount' => 400], null);
+            self::fail('Zpětně by se platba započetla k oběma pohledávkám.');
+        } catch (OtherItemException $e) {
+            self::assertSame('payment_reallocation_conflict', $e->errorCode);
+        }
+
+        self::assertContains($paymentId, array_column(
+            $this->items->paymentCandidates($this->supplierId, $itemId, '', 20,
+                $sourceType === 'bank', $sourceType === 'cash'), 'id'));
+        try {
+            $this->items->allocate($this->supplierId, $itemId,
+                [$sourceType === 'bank' ? 'bank_transaction_id' : 'cash_document_id' => $paymentId, 'amount' => 300], null);
+            self::fail('Jiná částka by zpětně změnila historické saldo.');
+        } catch (OtherItemException $e) {
+            self::assertSame('payment_reallocation_amount', $e->errorCode);
+        }
+        $allocated = $this->items->allocate($this->supplierId, $itemId,
+            [$sourceType === 'bank' ? 'bank_transaction_id' : 'cash_document_id' => $paymentId, 'amount' => 400], null);
+        self::assertSame(60000, $this->cents($allocated['remaining_amount']));
+        self::assertSame(60000, $this->cents($this->account('315', '2099-02-28')['open_items_total']));
+        self::assertSame(100000, $this->cents($this->account('315', '2099-03-31')['open_items_total']));
+        self::assertTrue($this->account('315', '2099-04-30')['matches']);
     }
 
     public function testRepostingMovesPayableBetweenAccountsAtItsEntryDate(): void
