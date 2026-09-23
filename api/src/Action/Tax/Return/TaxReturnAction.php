@@ -11,6 +11,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Migration\Shared\FiledDppoImporter;
 use MyInvoice\Service\Tax\Return\DppoReconciliationService;
 use MyInvoice\Service\Tax\Return\TaxReturnException;
 use MyInvoice\Service\Tax\Return\TaxReturnReportService;
@@ -28,6 +29,10 @@ use Psr\Http\Message\UploadedFileInterface;
  *   GET    /api/tax-return/{type}/{year}/xml      → validované EPO XML (archivace + log)
  *   POST   /api/tax-return/{type}/{year}/reconcile → Featura A: diff proti nahranému
  *                                                     podanému EPO XML (jen po, read-only)
+ *   POST   /api/tax-return/{type}/{year}/filed-import/preview → náhled převzetí podaného
+ *                                                     EPO XML do vstupů (jen po, nic neukládá)
+ *   POST   /api/tax-return/{type}/{year}/filed-import → převzetí podaného EPO XML do vstupů
+ *                                                     a evidence ztrát (jen po)
  *
  * RBAC (defense-in-depth, zrcadlí PermissionMiddleware): čtení/XML admin|účetní|readonly,
  * zápis (vstupy/finalize/reopen) admin|účetní. Klient nemá přístup (CLIENT_DENY).
@@ -43,6 +48,7 @@ final class TaxReturnAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly TaxReturnReportService $reports,
+        private readonly FiledDppoImporter $filedImporter,
     ) {}
 
     public function get(Request $request, Response $response, array $args): Response
@@ -528,6 +534,72 @@ final class TaxReturnAction
             return Json::error($response, 'invalid_type', 'Rekonciliace proti podanému přiznání je zatím jen pro DPPO (právnické osoby).', 400);
         }
 
+        $xml = $this->uploadedXml($request, $response);
+        if ($xml instanceof Response) {
+            return $xml;
+        }
+
+        $variant = $this->variant($request);
+        $seq = $this->seq($request) ?: 1;
+
+        return $this->run($response, fn () => $this->reconciliation->reconcile(
+            SupplierGuard::currentId($request), $year, $xml, $variant, $seq
+        ));
+    }
+
+    /**
+     * Náhled převzetí podaného přiznání k DPPO (multipart pole `file`) do vstupů
+     * přiznání: navržené vstupy, dosavadní vstupy a porovnání s podáním. Nic neukládá.
+     */
+    public function filedImportPreview(Request $request, Response $response, array $args): Response
+    {
+        return $this->filedImport($request, $response, $args, false);
+    }
+
+    /**
+     * Převzetí podaného přiznání k DPPO do rozpracovaného přiznání (přepíše vstupy, které
+     * převzetí vlastní) a do evidence daňových ztrát.
+     */
+    public function filedImportApply(Request $request, Response $response, array $args): Response
+    {
+        return $this->filedImport($request, $response, $args, true);
+    }
+
+    private function filedImport(Request $request, Response $response, array $args, bool $apply): Response
+    {
+        if (($err = $this->requireAccess($request, $response, $apply ? AccessLevel::WRITE : AccessLevel::READ)) !== null) {
+            return $err;
+        }
+        [$type, $year, $bad] = $this->params($args);
+        if ($bad !== null) {
+            return $bad($response);
+        }
+        if ($type !== 'po') {
+            return Json::error($response, 'invalid_type', 'Převzetí podaného přiznání je jen pro DPPO (právnické osoby).', 400);
+        }
+        $xml = $this->uploadedXml($request, $response);
+        if ($xml instanceof Response) {
+            return $xml;
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $variant = $this->variant($request);
+        $seq = $this->seq($request) ?: 1;
+        if (!$apply) {
+            return $this->run($response, fn () => $this->filedImporter->preview($supplierId, $xml, $year, $variant, $seq));
+        }
+        $userId = $this->userId($request);
+        return $this->run($response, function () use ($supplierId, $xml, $userId, $year, $variant, $seq, $request): array {
+            $result = $this->filedImporter->apply($supplierId, $xml, $userId, $year, $variant, $seq, true, true);
+            $this->logger->log('tax_return.filed_imported', $userId, null, null, [
+                'year' => $year, 'variant' => $variant, 'forma' => $result['filing']['dapdpp_forma'] ?? null, 'status' => $result['status'] ?? null,
+            ], $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
+            return $result;
+        });
+    }
+
+    /** Obsah nahraného XML podaného přiznání (multipart pole `file`), nebo chybová odpověď. */
+    private function uploadedXml(Request $request, Response $response): string|Response
+    {
         $file = $this->firstFile($request->getUploadedFiles());
         if ($file === null || $file->getError() !== UPLOAD_ERR_OK) {
             return Json::error($response, 'bad_file', 'Nahrajte soubor XML podaného přiznání DPPDP9.', 415);
@@ -540,14 +612,7 @@ final class TaxReturnAction
         if ($ext !== '' && $ext !== 'xml') {
             return Json::error($response, 'bad_file', 'Podporovaný formát je jen XML.', 415);
         }
-        $xml = (string) $file->getStream()->getContents();
-
-        $variant = $this->variant($request);
-        $seq = $this->seq($request) ?: 1;
-
-        return $this->run($response, fn () => $this->reconciliation->reconcile(
-            SupplierGuard::currentId($request), $year, $xml, $variant, $seq
-        ));
+        return (string) $file->getStream()->getContents();
     }
 
     /** @param array<string, UploadedFileInterface|array<int,UploadedFileInterface>> $uploads */
