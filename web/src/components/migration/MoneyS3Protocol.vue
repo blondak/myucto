@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { MoneyS3Diff, MoneyS3Run } from '@/api/moneyS3'
+import type { MoneyS3Diff, MoneyS3PayrollMonth, MoneyS3Run } from '@/api/moneyS3'
 import type { PohodaRun } from '@/api/pohoda'
 import type { PremierRun } from '@/api/premier'
 import type { StereoProtocolRun } from '@/api/stereoNx'
@@ -52,6 +52,14 @@ const closing = computed(() => {
   return data && 'closing' in data ? data.closing ?? [] : []
 })
 const orphans = computed<{ type: string; document_no: string; id: number; year?: number }[]>(() => protocol.value?.orphans ?? [])
+const payrollTotals = computed<MoneyS3PayrollMonth[]>(() => {
+  const data = protocol.value
+  return data && 'payroll_totals' in data ? data.payroll_totals ?? [] : []
+})
+
+function pair(a: number, b: number): string {
+  return `${money.value.format(a)} / ${money.value.format(b)}`
+}
 
 /** Seznam účtů (`{account, name}` nebo text) či počet z backendu jako krátký text; prázdný, když není co ukázat. */
 function listed(value: unknown): string {
@@ -206,6 +214,42 @@ function levelClass(level: string): string {
       <ul class="space-y-1 text-sm">
         <li v-for="o in orphans" :key="`${o.type}-${o.id}`">{{ label('doc_type', o.type) }} {{ o.document_no }}<template v-if="o.year"> ({{ o.year }})</template></li>
       </ul>
+    </section>
+
+    <section v-if="payrollTotals.length" data-testid="payroll-totals">
+      <h4 class="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t(k('protocol.payroll_totals_title')) }}</h4>
+      <p class="mb-2 text-sm text-neutral-500">{{ t(k('protocol.payroll_totals_hint')) }}</p>
+      <div class="overflow-x-auto rounded-lg border border-neutral-200">
+        <table class="min-w-full text-sm">
+          <thead class="text-left text-xs text-neutral-500">
+            <tr>
+              <th class="px-2 py-1">{{ t(k('protocol.col_period')) }}</th>
+              <th class="px-2 py-1 text-right">{{ t(k('protocol.col_gross')) }}</th>
+              <th class="px-2 py-1 text-right">{{ t(k('protocol.col_employee_insurance')) }}</th>
+              <th class="px-2 py-1 text-right">{{ t(k('protocol.col_employer_insurance')) }}</th>
+              <th class="px-2 py-1 text-right">{{ t(k('protocol.col_tax')) }}</th>
+              <th class="px-2 py-1 text-right">{{ t(k('protocol.col_deductions')) }}</th>
+              <th class="px-2 py-1 text-right">{{ t(k('protocol.col_net_payable')) }}</th>
+              <th class="px-2 py-1 text-right">{{ t(k('protocol.col_dpfo')) }}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-neutral-100">
+            <tr v-for="m in payrollTotals" :key="m.period">
+              <td class="px-2 py-1 font-mono whitespace-nowrap">{{ m.period }}</td>
+              <td class="px-2 py-1 text-right font-mono whitespace-nowrap">{{ money.format(m.gross) }}</td>
+              <td class="px-2 py-1 text-right font-mono whitespace-nowrap">{{ pair(m.employee_social, m.employee_health) }}</td>
+              <td class="px-2 py-1 text-right font-mono whitespace-nowrap">{{ pair(m.employer_social, m.employer_health) }}</td>
+              <td class="px-2 py-1 text-right font-mono whitespace-nowrap">{{ pair(m.advance_tax, m.withholding_tax) }}</td>
+              <td class="px-2 py-1 text-right font-mono whitespace-nowrap">{{ money.format(m.deductions) }}</td>
+              <td class="px-2 py-1 text-right font-mono whitespace-nowrap">{{ money.format(m.net_payable) }}</td>
+              <td class="px-2 py-1 text-right whitespace-nowrap">
+                <span v-if="m.dpfo === null" class="text-xs text-neutral-500">{{ t(k('protocol.tax_missing')) }}</span>
+                <span v-else class="rounded-full px-2 py-0.5 font-mono text-xs font-medium" :class="m.tax_ok ? statusClass('ok') : statusClass('error')">{{ money.format(m.dpfo) }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <section v-if="protocol.automation">

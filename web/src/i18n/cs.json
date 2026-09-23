@@ -25116,6 +25116,7 @@
       "small_assets": "Drobný majetek",
       "vat_coefficients": "Koeficient krácení DPH",
       "closing": "Uzávěrka historických let",
+      "payroll": "Mzdy",
       "reconciliation": "Rekonciliace",
       "cancelled": "Zrušeno uživatelem",
       "unexpected": "Neočekávaná chyba"
@@ -25170,7 +25171,13 @@
       "tax_computed": "karet s dopočteným daňovým plánem",
       "accounting_depreciation_booked": "účetních odpisů z deníku",
       "tax_depreciation_confirmed": "potvrzených daňových odpisů",
-      "accounts_checked": "zkontrolovaných účtů"
+      "accounts_checked": "zkontrolovaných účtů",
+      "payroll_lines": "mzdových řádků deníku",
+      "payroll_months": "měsíců kontrolních úhrnů",
+      "payroll_tax_mismatches": "měsíců s daní mimo úhrn Money",
+      "posting_map_conflicts": "kontací mezd s více účty",
+      "posting_map_unmapped": "nezařazených dvojic účtů",
+      "payroll_module_setup": "nastavení mezd doplněno"
     },
     "checks": {
       "turnover_balanced": "Obraty MD = D",
@@ -25231,7 +25238,18 @@
       "automation_title": "Automatika účtování",
       "automation_during": "Během převodu: {level}",
       "automation_after": "Po převodu: {level}",
-      "automation_left_off": "Automatika zůstává vypnutá, dokud převod neskončí bez chyb. Doklady bez vazby na deník by se jinak zaúčtovaly podruhé."
+      "automation_left_off": "Automatika zůstává vypnutá, dokud převod neskončí bez chyb. Doklady bez vazby na deník by se jinak zaúčtovaly podruhé.",
+      "payroll_totals_title": "Mzdy po měsících (kontrolní úhrny z Money)",
+      "payroll_totals_hint": "Součty mzdových dokladů celé firmy, ne převzaté mzdy zaměstnanců. Daň se porovnává s měsíčním úhrnem daně z příjmů ze závislé činnosti v Money.",
+      "col_period": "Měsíc",
+      "col_gross": "Hrubé mzdy",
+      "col_employee_insurance": "Pojistné zaměstnanců (SP / ZP)",
+      "col_employer_insurance": "Pojistné zaměstnavatele (SP / ZP)",
+      "col_tax": "Daň (záloha / srážková)",
+      "col_deductions": "Srážky",
+      "col_net_payable": "Čistá mzda k výplatě",
+      "col_dpfo": "Úhrn daně v Money",
+      "tax_missing": "bez úhrnu"
     },
     "batch": {
       "tab_single": "Jedna firma",
@@ -25689,7 +25707,8 @@
       "reference_totals": "převzatých mezd pro srovnání",
       "reference_totals_skipped": "mezd bez identifikace vztahu",
       "posting_map_conflicts": "kontací s rozporem",
-      "sickness_absences_approved": "převzatých nepřítomností schváleno"
+      "sickness_absences_approved": "převzatých nepřítomností schváleno",
+      "payroll_module_setup": "nastavení mezd doplněno"
     },
     "checks": {
       "turnover_balanced": "Obraty MD = D",
@@ -26997,7 +27016,7 @@
     "file_help_items": [
       "Záloha obsahuje všechny účetní roky vedené v PREMIERu, ne jen jeden. Roky se ale převádějí postupně, jeden po druhém, od nejstaršího.",
       "Firma musí v MyÚčtu existovat a mít stejné IČO jako v PREMIERu. Převádí se do firmy, ve které právě pracujete; novou firmu nejdřív založte.",
-      "Záloha obsahuje i mzdy. Průvodce založí zaměstnance a převezme zpracované mzdy jako evidenci předchozího systému, pokud má firma zapnutý modul Mzdy a nastavenou mzdovou účtárnu. Účetní zápisy mezd jsou v převedeném deníku a znovu nevznikají.",
+      "Záloha obsahuje i mzdy. Průvodce založí zaměstnance a převezme zpracované mzdy jako evidenci předchozího systému. Firmě, která mzdy v MyÚčtu ještě nemá, zapne modul Mzdy, založí mzdovou účtárnu a nastaví začátek vedení mezd za posledním zpracovaným měsícem; VS ČSSZ a účty institucí doplníte v Mzdy → Nastavení. Účetní zápisy mezd jsou v převedeném deníku a znovu nevznikají.",
       "Nahraný soubor aplikace po 7 dnech bez práce s převodem sama smaže."
     ],
     "choose_file": "Soubor zálohy (.izip nebo .icab)",
@@ -27190,6 +27209,7 @@
       "months": "mzdových měsíců",
       "months_existing": "mzdových měsíců už převedeno",
       "months_skipped": "mzdových měsíců bez modulu Mzdy",
+      "payroll_module_setup": "nastavení mezd doplněno",
       "months_after_start": "měsíců od začátku vedení mezd (nepřebírají se)",
       "identity": "doplněných údajů o narození",
       "person_card": "doplněných adres a kontaktů",

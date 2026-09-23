@@ -136,6 +136,34 @@ describe('MoneyS3Protocol', () => {
     expect(wrapper.find('[data-testid="unmapped-accounts"]').text()).toContain('395100')
   })
 
+  it('mzdové kontrolní úhrny vypíše po měsících a nesedící daň vyznačí', () => {
+    const month = { gross: 30000, employee_social: 2130, employee_health: 1350, employer_social: 7440, employer_health: 2700,
+      advance_tax: 3810, withholding_tax: 0, deductions: 0, net_payable: 22710, dpfo_remitted: 3810 }
+    const wrapper = mount(MoneyS3Protocol, {
+      props: {
+        run: run({
+          payroll_totals: [
+            { period: '2025-01', ...month, dpfo: 3810, tax_ok: true },
+            { period: '2025-02', ...month, dpfo: 3000, tax_ok: false },
+            { period: '2025-03', ...month, dpfo: null, dpfo_remitted: null, tax_ok: null },
+          ],
+        }),
+      },
+    })
+    const block = wrapper.find('[data-testid="payroll-totals"]')
+
+    expect(block.text()).toContain('money_s3.protocol.payroll_totals_title')
+    expect(block.findAll('tbody tr')).toHaveLength(3)
+    expect(block.text()).toMatch(/30\s?000,00/)
+    expect(block.findAll('tbody tr')[1].find('.bg-danger-50').exists()).toBe(true)
+    expect(block.text()).toContain('money_s3.protocol.tax_missing')
+  })
+
+  it('bez mzdových úhrnů sekci nezobrazí', () => {
+    const wrapper = mount(MoneyS3Protocol, { props: { run: run() } })
+    expect(wrapper.find('[data-testid="payroll-totals"]').exists()).toBe(false)
+  })
+
   it('rozdíl, který je už ve zdrojovém programu, vypíše po dokladech', () => {
     const wrapper = mount(MoneyS3Protocol, {
       props: {

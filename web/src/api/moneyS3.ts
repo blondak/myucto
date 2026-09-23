@@ -121,6 +121,24 @@ export interface MoneyS3ProtocolData {
   closing?: MoneyS3ClosingYear[]
   orphans?: { type: string; year: number; document_no: string; id: number }[]
   automation?: { during: string; restored: boolean; after: string | null }
+  payroll_totals?: MoneyS3PayrollMonth[]
+}
+
+/** Měsíční kontrolní úhrny mezd celé firmy z mzdových dokladů Money (Kč). */
+export interface MoneyS3PayrollMonth {
+  period: string
+  gross: number
+  employee_social: number
+  employee_health: number
+  employer_social: number
+  employer_health: number
+  advance_tax: number
+  withholding_tax: number
+  deductions: number
+  net_payable: number
+  dpfo: number | null
+  dpfo_remitted: number | null
+  tax_ok: boolean | null
 }
 
 export type MoneyS3RunStatus = 'running' | 'completed' | 'completed_with_warnings' | 'failed' | 'cancelled'
