@@ -456,6 +456,9 @@ mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změni
 v POHODĚ celková částka faktury, protokol ji vypíše jako změněnou v POHODĚ
 a ponechanou v MyÚčtu; upravte ji ručně.
 
+Před převodem firmy znovu od začátku stáhněte v průvodci **profil firmy** a po
+ostrém převodu ho nahrajte zpět, viz [§ 96.18](96_Nastaveni.md#9618-profil-firmy).
+
 ## 107.8 Omezení
 
 - Převádí se kalendářní účetní rok, období se vždy založí od 1. 1. do 31. 12.
