@@ -53,12 +53,17 @@ final class OtherItemService
             if ($existing['status'] !== 'draft') {
                 throw new OtherItemException('not_draft', 'Upravovat lze jen koncept.', 409);
             }
-            $planned = $pdo->prepare('SELECT 1 FROM other_item_installments WHERE supplier_id = ? AND other_item_id = ? LIMIT 1');
-            $planned->execute([$supplierId, $id]);
-            if ($planned->fetchColumn()) {
-                throw new OtherItemException('has_installments', 'Před úpravou dokladu nejprve zrušte splátkový kalendář.', 409);
-            }
             $data = $this->normalize($supplierId, $input);
+            $planned = $pdo->prepare('SELECT COALESCE(SUM(amount), 0) AS total, MIN(due_on) AS first_due
+                FROM other_item_installments WHERE supplier_id = ? AND other_item_id = ?');
+            $planned->execute([$supplierId, $id]);
+            $plan = $planned->fetch(PDO::FETCH_ASSOC);
+            if ($plan['first_due'] !== null && (int) round((float) $plan['total'] * 100) !== (int) round($data['amount'] * 100)) {
+                throw new OtherItemException('has_installments', 'Částka musí odpovídat součtu splátek. Před změnou částky zrušte splátkový kalendář.', 409);
+            }
+            if ($plan['first_due'] !== null && $data['issued_on'] > $plan['first_due']) {
+                throw new OtherItemException('installment_date', 'Datum vzniku musí předcházet první splátce.', 409);
+            }
             $this->items->updateDraft($supplierId, $id, $data, $userId);
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
@@ -179,6 +184,9 @@ final class OtherItemService
                 ])
                 : null;
             $this->items->setReversed($supplierId, $id, $entryId !== null ? 'reversed' : 'cancelled', $entryId);
+            $pdo->prepare("UPDATE other_item_schedules SET status = 'paused'
+                WHERE supplier_id = ? AND source_item_id = ? AND status = 'active'")
+                ->execute([$supplierId, $id]);
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();

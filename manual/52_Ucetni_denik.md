@@ -1106,9 +1106,15 @@ až 90 dní dopředu, aby se ukázaly v predikci. Můžeš je vytvořit také ru
 tlačítkem **Vytvořit koncepty**. Vzniklé doklady se automaticky nezaúčtují.
 Pod rozvrhem se zobrazí až další vytvořené položky s datem a stavem; zdrojová
 položka se v seznamu znovu nevypisuje.
+Stornování zdrojové položky pozastaví opakování. Denní úloha ani ruční akce
+pak z tohoto zdroje nevytvoří další koncepty a rozvrh nelze znovu aktivovat.
+Již vytvořené koncepty zůstávají samostatnými položkami k posouzení.
 Podklady zdrojové položky se připojí i k novým konceptům. Vedle lze nastavit
 splátky jedné pohledávky nebo závazku, které rozloží očekávané platby bez
 dalšího účetního nákladu či výnosu.
+Uložený splátkový kalendář nebrání změně názvu, poznámky nebo jiných údajů
+konceptu, pokud částka nadále odpovídá součtu splátek a datum vzniku není
+pozdější než první splátka. Před změnou částky je potřeba kalendář zrušit.
 
 Chybný zaúčtovaný doklad opravíš přeúčtováním: zadáš důvod, datum a nové účty.
 Původní zápis se stornuje a vytvoří se nový se stejným číslem dokladu. Doklad

@@ -22,8 +22,10 @@ $service = $container->get(OtherItemScheduleService::class);
 $through = (new DateTimeImmutable('today'))->modify('+90 days')->format('Y-m-d');
 $run = $dryRun ? null : CronRun::start($pdo, 'cron-generate-other-items');
 $report = ['schedules' => 0, 'generated' => 0, 'errors' => 0, 'through' => $through, 'dry_run' => $dryRun];
-$stmt = $pdo->prepare("SELECT id, supplier_id FROM other_item_schedules
-    WHERE status = 'active' AND anchor_on <= ? ORDER BY supplier_id, id");
+$stmt = $pdo->prepare("SELECT s.id, s.supplier_id FROM other_item_schedules s
+    JOIN other_items oi ON oi.id = s.source_item_id AND oi.supplier_id = s.supplier_id
+    WHERE s.status = 'active' AND oi.status IN ('draft', 'confirmed', 'posted')
+      AND s.anchor_on <= ? ORDER BY s.supplier_id, s.id");
 $stmt->execute([$through]);
 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $schedule) {
     $report['schedules']++;

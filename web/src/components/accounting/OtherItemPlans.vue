@@ -22,6 +22,7 @@ const frequency = ref<OtherItemSchedule['frequency']>('monthly')
 const endsOn = ref('')
 const through = ref(appIsoDate())
 const canWrite = computed(() => auth.canWrite('other_items'))
+const sourceActive = computed(() => ['draft', 'posted', 'confirmed'].includes(props.item.status))
 const generatedOccurrences = computed(() => schedule.value?.occurrences?.filter(row => row.occurrence_index > 0) || [])
 const canEditInstallments = computed(() => canWrite.value && ['draft', 'posted', 'confirmed'].includes(props.item.status)
   && Number(props.item.paid_amount) === 0)
@@ -57,7 +58,7 @@ async function createSchedule() {
 }
 
 async function generate() {
-  if (!schedule.value || busy.value) return
+  if (!schedule.value || busy.value || !sourceActive.value) return
   busy.value = true
   try {
     const result = await otherItemPlansApi.generate(schedule.value.id, through.value)
@@ -71,7 +72,7 @@ async function generate() {
 }
 
 async function toggleSchedule() {
-  if (!schedule.value || busy.value) return
+  if (!schedule.value || busy.value || !sourceActive.value) return
   busy.value = true
   try {
     schedule.value = await otherItemPlansApi.setStatus(schedule.value.id,
@@ -125,7 +126,8 @@ watch(() => props.item.id, () => void load(), { immediate: true })
       <p v-if="loading" class="mt-3 text-sm text-neutral-500">{{ t('common.loading') }}</p>
       <template v-else-if="schedule">
         <p class="mt-3 text-sm">{{ t(`other_items.plans.${schedule.frequency}`) }} · {{ t(`other_items.plans.${schedule.status}`) }}</p>
-        <div v-if="canWrite" class="mt-3 flex flex-wrap items-end gap-2">
+        <p v-if="!sourceActive" class="mt-2 text-sm text-neutral-500">{{ t('other_items.plans.source_inactive') }}</p>
+        <div v-if="canWrite && sourceActive" class="mt-3 flex flex-wrap items-end gap-2">
           <label class="text-sm font-medium">{{ t('other_items.plans.generate_through') }}
             <DateInput v-model="through" class="mt-1 block h-9 rounded-md border border-neutral-300 px-2" />
           </label>

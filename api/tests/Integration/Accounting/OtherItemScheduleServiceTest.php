@@ -6,7 +6,9 @@ namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\DocumentRepository;
+use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\OtherItemException;
 use MyInvoice\Service\Accounting\OtherItemScheduleService;
 use MyInvoice\Service\Accounting\OtherItemService;
@@ -90,6 +92,49 @@ final class OtherItemScheduleServiceTest extends TestCase
         }
     }
 
+    public function testCancelledSourceStopsRecurrenceAndCannotBeResumed(): void
+    {
+        $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $first = $this->items->create($this->supplierId, $this->input(), null);
+        $schedule = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        $this->items->post($this->supplierId, (int) $first['id'], null);
+        $this->items->reverse($this->supplierId, (int) $first['id'], 'Ukončená smlouva', null);
+
+        self::assertSame('paused', $this->schedules->get($this->supplierId, (int) $schedule['id'])['status']);
+        self::assertSame('paused', $this->schedules->list($this->supplierId)[0]['status']);
+        $this->pdo->prepare("UPDATE other_item_schedules SET status = 'active' WHERE supplier_id = ? AND id = ?")
+            ->execute([$this->supplierId, $schedule['id']]);
+        self::assertSame('paused', $this->schedules->get($this->supplierId, (int) $schedule['id'])['status']);
+        self::assertSame('paused', $this->schedules->list($this->supplierId)[0]['status']);
+        foreach (['generate', 'resume'] as $action) {
+            try {
+                if ($action === 'generate') {
+                    $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-03-31', null);
+                } else {
+                    $this->schedules->setStatus($this->supplierId, (int) $schedule['id'], 'active');
+                }
+                self::fail('Stornovaný zdroj nesmí pokračovat v opakování.');
+            } catch (OtherItemException $e) {
+                self::assertContains($e->errorCode, ['schedule_paused', 'schedule_source_inactive']);
+            }
+        }
+        self::assertCount(1, $this->schedules->get($this->supplierId, (int) $schedule['id'])['occurrences']);
+    }
+
+    public function testReversedPostedSourcePausesRecurrence(): void
+    {
+        $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        (new ChartOfAccountsSeeder($this->db))->seedForSupplier($this->supplierId);
+        (new AccountingPeriodRepository($this->db))->create($this->supplierId, 2099, '2099-01-01', '2099-12-31');
+        $first = $this->items->create($this->supplierId, $this->input(), null);
+        $schedule = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        $this->items->post($this->supplierId, (int) $first['id'], null);
+        self::assertSame('reversed', $this->items->reverse($this->supplierId, (int) $first['id'], 'Ukončená smlouva', null)['status']);
+        self::assertSame('paused', $this->schedules->get($this->supplierId, (int) $schedule['id'])['status']);
+    }
+
     public function testInstallmentsReplaceSingleCashflowWithoutDuplicatingResult(): void
     {
         $first = $this->items->create($this->supplierId, $this->input(), null);
@@ -113,6 +158,26 @@ final class OtherItemScheduleServiceTest extends TestCase
         self::assertCount(1, $original);
         self::assertSame('2099-02-05', $original[0]['due_on']);
         self::assertSame(1200.0, $original[0]['remaining']);
+    }
+
+    public function testDraftWithInstallmentsAllowsUnrelatedEdits(): void
+    {
+        $first = $this->items->create($this->supplierId, $this->input(), null);
+        $this->schedules->setInstallments($this->supplierId, (int) $first['id'], [
+            ['due_on' => '2099-02-05', 'amount' => 500],
+            ['due_on' => '2099-03-05', 'amount' => 700],
+        ]);
+        $updated = $this->items->update($this->supplierId, (int) $first['id'],
+            $this->input(['title' => 'Upravené nájemné', 'due_on' => '2099-02-06']), null);
+        self::assertSame('Upravené nájemné', $updated['title']);
+        self::assertCount(2, $this->schedules->installments($this->supplierId, (int) $first['id']));
+        try {
+            $this->items->update($this->supplierId, (int) $first['id'],
+                $this->input(['issued_on' => '2099-02-06']), null);
+            self::fail('Datum vzniku po první splátce nesmí projít.');
+        } catch (OtherItemException $e) {
+            self::assertSame('installment_date', $e->errorCode);
+        }
     }
 
     public function testGeneratedItemKeepsSourceContractAndSourceCannotBeDeleted(): void
