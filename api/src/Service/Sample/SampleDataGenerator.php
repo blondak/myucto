@@ -1288,7 +1288,7 @@ final class SampleDataGenerator
             // nad 29.–31. dnem přeteče do dalšího měsíce (29. 7. − 5 měsíců = 29. 2.,
             // což se u nepřestupného roku normalizuje na 1. 3.), takže dva různé kroky
             // smyčky vyrobily TÝŽ měsíc — a s ním i shodný název souboru a hash výpisu.
-            // Generování ukázkových dat pak padalo na duplicitním klíči uq_bs_hash,
+            // Generování ukázkových dat pak padalo na duplicitním klíči výpisu,
             // spolehlivě vždy 29.–31. dne v měsíci.
             $month = $today->modify('first day of this month')->modify('-' . (5 - $s) . ' months');
             $statementDate = min($month->modify('last day of this month')->format('Y-m-d'), $today->format('Y-m-d'));

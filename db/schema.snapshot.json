@@ -865,7 +865,8 @@
         "1878_vat_classification_24z_selected_supplies.sql",
         "1879_users_default_supplier.sql",
         "1880_invoice_price_level.sql",
-        "1881_credit_card_accounts.sql"
+        "1881_credit_card_accounts.sql",
+        "1882_bank_statement_tenant_hash.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -2670,6 +2671,7 @@
                 "curr_balance": "decimal(14,2) NULL DEFAULT NULL",
                 "currency": "char(3) NULL DEFAULT NULL",
                 "debit_total": "decimal(14,2) NULL DEFAULT NULL",
+                "dedup_scope_supplier_id": "int(10) unsigned NULL DEFAULT NULL STORED GENERATED AS (coalesce(`supplier_id`,0))",
                 "file_content": "mediumblob NULL DEFAULT NULL",
                 "file_hash": "char(64) NOT NULL",
                 "file_name": "varchar(255) NOT NULL",
@@ -2697,7 +2699,8 @@
                 "idx_bs_date": "BTREE (statement_date)",
                 "idx_bs_supplier": "BTREE (supplier_id, statement_date)",
                 "uq_bank_statement_supplier_id": "UNIQUE BTREE (supplier_id, id)",
-                "uq_bs_hash": "UNIQUE BTREE (file_hash)"
+                "uq_bs_scope_hash": "UNIQUE BTREE (dedup_scope_supplier_id, file_hash)",
+                "uq_bs_supplier_hash": "UNIQUE BTREE (supplier_id, file_hash)"
             },
             "foreign_keys": {
                 "fk_bs_user": "(imported_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
@@ -2752,6 +2755,7 @@
                 "matched_at": "timestamp NULL DEFAULT NULL",
                 "matched_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "matched_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "portable_fingerprint": "char(64) NULL DEFAULT NULL",
                 "posted_at": "date NOT NULL",
                 "source": "enum('statement','email_notice','idoklad') NOT NULL DEFAULT 'statement'",
                 "source_ref": "varchar(190) NULL DEFAULT NULL",

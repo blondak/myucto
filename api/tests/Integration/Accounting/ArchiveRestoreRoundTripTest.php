@@ -16,6 +16,10 @@ use MyInvoice\Service\Accounting\Cash\CashDocumentService;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Bank\EmailNoticeReconciler;
+use MyInvoice\Service\Bank\GpcParser;
+use MyInvoice\Service\Bank\StatementImporter;
+use MyInvoice\Service\Bank\StatementMatcher;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -419,10 +423,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         // Majetek: zařazení do užívání (source_type='asset') + roční odpis (source_type='depreciation')
         $assetSeeded = $this->seedAsset();
 
-        // Banka: bank_statements/bank_transactions NEMAJÍ supplier_id (jsou tenant jen
-        // tranzitivně, přes payment_matches / matched_invoice_id) — přesně případ, který
-        // adversariální review (2026-07) označilo za kriticky nebezpečný (tichý cross-tenant
-        // odkaz při chybějícím remapu).
+        // Bankovní výpis má přímého vlastníka, transakce ho dědí přes statement_id.
         $bankHash = bin2hex(random_bytes(32));
         $bankInvoiceId = $this->saleInvoice('FV-2097-2', $clientId, 5000.00);
         $oldStatementId = $this->bankStatement($bankHash);
@@ -442,15 +443,6 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $zipPath = $this->archive->filePath($sid, $meta);
         $this->tempFiles[] = $zipPath;
         self::assertFileExists($zipPath);
-
-        // Originální bank_statements řádek smaž PO exportu (cascade smaže i
-        // bank_transactions/payment_matches originálu) — jinak by find-or-create dedup
-        // (stejný file_hash, cíleně přidaný proti UNIQUE kolizi, viz importBankStatement)
-        // vždy „úspěšně" namapoval na PŮVODNÍ (dosud existující) řádek i BEZ opraveného
-        // remapu, a test by tak neodlišil opravený kód od chybného (oba by dali stejné
-        // číslo). Smazáním se vynutí, že restore MUSÍ vložit genuinně NOVÝ řádek — pokud
-        // by byl FK ponechán na starém (smazaném) id, INSERT by tvrdě spadl na FK constraint.
-        $this->db->pdo()->exec('DELETE FROM bank_statements WHERE id = ' . $oldStatementId);
 
         $report = $this->restore->restore($zipPath);
         $newSid = (int) $report['new_supplier_id'];
@@ -510,10 +502,8 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $newSup = $this->db->pdo()->query("SELECT company_name, ic FROM supplier WHERE id = {$newSid}")->fetch(PDO::FETCH_ASSOC);
         self::assertSame('12345678', (string) $newSup['ic']);
 
-        // 8) KRITICKÉ (adversariální review): bank_transactions/bank_statements nemají
-        // supplier_id — musí se přesto remapovat na NOVÁ id (jinak by po obnově do běžící
-        // instance tiše ukazovaly na bankovní data PŮVODNÍ firmy; ON DELETE CASCADE by pak
-        // smazání výpisu originálu smazalo i "obnovenou" transakci/párování).
+        // 8) Výpis i pohyb obnovené firmy musí dostat vlastní id a výpis nového vlastníka.
+        // Sdílení by při smazání originálu zrušilo i obnovené párování.
         $newMatch = $this->db->pdo()->query(
             "SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = {$newSid}"
         )->fetch(PDO::FETCH_ASSOC);
@@ -527,6 +517,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         self::assertNotFalse($newBt, 'Nová bankovní transakce existuje.');
         $newStatementId = (int) $newBt['statement_id'];
         self::assertNotSame($oldStatementId, $newStatementId, 'bank_transactions.statement_id po obnově NEukazuje na starý (cizí) výpis.');
+        self::assertSame($newSid, (int) $this->db->pdo()->query('SELECT supplier_id FROM bank_statements WHERE id = ' . $newStatementId)->fetchColumn());
 
         $stStmt = $this->db->pdo()->prepare('SELECT file_hash FROM bank_statements WHERE id = ?');
         $stStmt->execute([$newStatementId]);
@@ -537,11 +528,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         )->fetchColumn();
         self::assertSame($newBankInvoiceId, (int) $newBt['matched_invoice_id'], 'bank_transactions.matched_invoice_id ukazuje na fakturu NOVÉ firmy.');
 
-        // 9) Dedup pojistka: bank_statements je celoinstanční content-addressed tabulka
-        // (UNIQUE file_hash) — restore STEJNÉHO archivu podruhé (simulace obnovy do běžící
-        // instance, kde stejný výpis díky prvnímu restoru z kroku 8 už existuje) nesmí
-        // spadnout na UNIQUE constraint a musí sdílet TENTÝŽ řádek (find-or-create), ne
-        // selhat celou transakcí.
+        // 9) Každá další obnova vytváří novou firmu a vlastní výpis se stejným obsahem.
         $hashStmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM bank_statements WHERE file_hash = ?');
         $hashStmt->execute([$bankHash]);
         $countBefore = (int) $hashStmt->fetchColumn();
@@ -553,7 +540,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
 
         $hashStmt->execute([$bankHash]);
         $countAfter = (int) $hashStmt->fetchColumn();
-        self::assertSame($countBefore, $countAfter, 'Druhá obnova sdílí existující bank_statements řádek (dedup dle file_hash), nevytváří duplicitu.');
+        self::assertSame($countBefore + 1, $countAfter, 'Další firma má vlastní výpis stejného souboru.');
 
         $match2 = $this->db->pdo()->query(
             "SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = {$newSid2}"
@@ -562,7 +549,83 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $bt2 = $this->db->pdo()->query(
             'SELECT statement_id FROM bank_transactions WHERE id = ' . (int) $match2['bank_transaction_id']
         )->fetch(PDO::FETCH_ASSOC);
-        self::assertSame($newStatementId, (int) $bt2['statement_id'], 'Třetí firma sdílí stejný dedupovaný bank_statements řádek jako druhá.');
+        self::assertNotSame($newStatementId, (int) $bt2['statement_id'], 'Třetí firma nemá sdílet výpis druhé firmy.');
+        self::assertSame($newSid2, (int) $this->db->pdo()->query('SELECT supplier_id FROM bank_statements WHERE id = ' . (int) $bt2['statement_id'])->fetchColumn());
+    }
+
+    public function testRestoredPdfMovementIsRecognizedInOverlappingImport(): void
+    {
+        $this->assertRestoredPdfMovementIsRecognized(false);
+    }
+
+    public function testLegacyArchiveWithoutPortableFingerprintRecognizesOverlappingImport(): void
+    {
+        $this->assertRestoredPdfMovementIsRecognized(true);
+    }
+
+    private function assertRestoredPdfMovementIsRecognized(bool $legacyArchive): void
+    {
+        $this->db->pdo()->prepare('UPDATE currencies SET account_number = ?, bank_code = ? WHERE id = ?')
+            ->execute(['1000000005', '0100', $this->currencyId]);
+        $matcher = $this->createStub(StatementMatcher::class);
+        $matcher->method('matchBatch')->willReturn([]);
+        $importer = new StatementImporter(
+            $this->db,
+            new GpcParser(),
+            $matcher,
+            $this->createStub(EmailNoticeReconciler::class),
+        );
+        $parsed = [
+            'header' => [
+                'account_number' => '1000000005', 'statement_number' => '001',
+                'statement_date' => self::YEAR . '-06-18', 'prev_balance' => 0,
+                'curr_balance' => 5000, 'credit_total' => 5000, 'debit_total' => 0,
+            ],
+            'transactions' => [[
+                'posted_at' => self::YEAR . '-06-18', 'amount' => 5000,
+                'currency' => 'CZK', 'variable_symbol' => '20970002',
+                'constant_symbol' => null, 'specific_symbol' => null,
+                'counterparty_account' => null, 'counterparty_bank' => null,
+                'counterparty_name' => 'Synthetic payer',
+                'description' => 'Synthetic receipt', 'bank_ref' => 'SYNTHETIC-ARCHIVE-1',
+            ]],
+        ];
+        $first = $importer->importParsedPdf($parsed, 'synthetic-pdf-first', 'first.pdf', $this->userId, $this->currencyId);
+        self::assertSame(1, $first['transactions']);
+        $tx = (int) $this->db->pdo()->query('SELECT id FROM bank_transactions WHERE statement_id = ' . (int) $first['statement_id'])->fetchColumn();
+        $invoice = $this->saleInvoice('FV-2097-PDF', $this->client(), 5000);
+        $this->db->pdo()->prepare('UPDATE bank_transactions SET matched_invoice_id = ? WHERE id = ?')->execute([$invoice, $tx]);
+        $this->paymentMatch($tx, $invoice, 5000);
+
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $zip = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $zip;
+        if ($legacyArchive) {
+            $archive = new \ZipArchive();
+            self::assertTrue($archive->open($zip) === true);
+            $rows = array_filter(explode("\n", (string) $archive->getFromName('bank_transactions.jsonl')));
+            self::assertCount(1, $rows);
+            $row = json_decode((string) reset($rows), true, 512, JSON_THROW_ON_ERROR);
+            $row['import_fingerprint'] = $row['portable_fingerprint'];
+            unset($row['portable_fingerprint']);
+            $jsonl = json_encode($row, JSON_THROW_ON_ERROR) . "\n";
+            $manifest = json_decode((string) $archive->getFromName('manifest.json'), true, 512, JSON_THROW_ON_ERROR);
+            $manifest['schema_version'] = '1881_credit_card_accounts.sql';
+            $manifest['tables']['bank_transactions']['sha256'] = hash('sha256', $jsonl);
+            self::assertTrue($archive->addFromString('bank_transactions.jsonl', $jsonl));
+            self::assertTrue($archive->addFromString('manifest.json', json_encode($manifest, JSON_THROW_ON_ERROR)));
+            self::assertTrue($archive->close());
+        }
+        $newSupplier = (int) $this->restore->restore($zip)['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSupplier;
+        $currency = (int) $this->db->pdo()->query('SELECT default_currency_id FROM supplier WHERE id = ' . $newSupplier)->fetchColumn();
+        $restored = (int) $this->db->pdo()->query('SELECT COUNT(*) FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bs.supplier_id = ' . $newSupplier)->fetchColumn();
+        self::assertSame(1, $restored);
+
+        $overlap = $importer->importParsedPdf($parsed, 'synthetic-pdf-overlap', 'overlap.pdf', $this->userId, $currency);
+        self::assertSame(0, $overlap['transactions']);
+        self::assertSame(1, $overlap['skipped_duplicates']);
+        self::assertSame(1, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bs.supplier_id = ' . $newSupplier)->fetchColumn());
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -629,11 +692,11 @@ final class ArchiveRestoreRoundTripTest extends TestCase
     {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO bank_statements
-                (file_name, file_hash, account_number, bank_code, currency, statement_date,
+                (supplier_id, file_name, file_hash, account_number, bank_code, currency, statement_date,
                  prev_balance, curr_balance, credit_total, debit_total, transaction_count)
-             VALUES (?, ?, "1234567890/0100", "0100", "CZK", ?, 0, 5000, 5000, 0, 1)'
+             VALUES (?, ?, ?, "1234567890/0100", "0100", "CZK", ?, 0, 5000, 5000, 0, 1)'
         );
-        $stmt->execute(['vypis-' . $hash . '.gpc', $hash, self::YEAR . '-06-18']);
+        $stmt->execute([$this->supplierId, 'vypis-' . $hash . '.gpc', $hash, self::YEAR . '-06-18']);
         return (int) $this->db->pdo()->lastInsertId();
     }
 

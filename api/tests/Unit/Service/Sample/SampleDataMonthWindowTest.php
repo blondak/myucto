@@ -15,7 +15,7 @@ use PHPUnit\Framework\TestCase;
  * `$today->modify('-N months')` nad 29.–31. dnem přeteče: 29. 7. − 5 měsíců je
  * 29. 2., což se u nepřestupného roku normalizuje na 1. 3. Dva různé kroky smyčky
  * tak vyrobily TÝŽ měsíc, s ním shodný název souboru `demo-vypis-RRRR-MM.gpc`
- * a shodný `file_hash` — generování pak spadlo na duplicitním klíči `uq_bs_hash`.
+ * a shodný `file_hash` - generování pak spadlo na duplicitním klíči výpisu.
  * Rozbité to bylo spolehlivě vždy 29.–31. dne v měsíci.
  *
  * Test drží pravidlo „ukotvit na první den měsíce PŘED odečtem", ne konkrétní

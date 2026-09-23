@@ -579,6 +579,9 @@ final class ArchiveRestoreService
     private function buildInsert(string $table, array $row, int $target, array $processedSet, array &$warnings): array
     {
         $row = $this->remapStockSnapshots($table, $row);
+        if ($table === 'bank_transactions' && ($row['import_fingerprint'] ?? null) !== null) {
+            $row['portable_fingerprint'] ??= $row['import_fingerprint'];
+        }
         $cols = [];
         $vals = [];
         $defers = [];
@@ -628,6 +631,11 @@ final class ArchiveRestoreService
             if ($col === 'supplier_id') {
                 $cols[] = $col;
                 $vals[] = $target;
+                continue;
+            }
+            if ($table === 'bank_transactions' && $col === 'import_fingerprint' && $val !== null) {
+                $cols[] = $col;
+                $vals[] = hash('sha256', 'supplier:' . $target . ':' . $row['portable_fingerprint']);
                 continue;
             }
 
@@ -831,14 +839,8 @@ final class ArchiveRestoreService
     }
 
     /**
-     * `bank_statements` NENÍ tenant tabulka svým obsahem — je to celoinstanční
-     * content-addressed dedup (UNIQUE `file_hash`), stejná sémantika jako
-     * {@see \MyInvoice\Service\Bank\StatementImporter} / BankEmailNoticeRepository
-     * (find-or-create podle hashe). Restore firmy do BĚŽÍCÍ instance, kde originální
-     * (nebo jakákoli jiná) firma už tentýž soubor výpisu má naimportovaný, by na
-     * INSERT jinak spadl na UNIQUE constraint — místo insertu se proto řádek se
-     * shodným file_hash namapuje na existující id (žádná duplicita dat, sdílený
-     * `bank_statements` řádek beztak neobsahuje nic tenant-specifického).
+     * Každá obnova zakládá novou firmu, a proto i její vlastní bankovní výpis.
+     * Stejný hash v jiné firmě nesmí způsobit sdílení hlavičky ani transakcí.
      *
      * @param array<string,mixed> $row
      * @param array<string,bool> $processedSet
@@ -846,15 +848,6 @@ final class ArchiveRestoreService
      */
     private function importBankStatement(array $row, int $target, array $processedSet, array &$warnings): int
     {
-        $hash = (string) ($row['file_hash'] ?? '');
-        if ($hash !== '') {
-            $stmt = $this->db->pdo()->prepare('SELECT id FROM bank_statements WHERE file_hash = ?');
-            $stmt->execute([$hash]);
-            $existing = $stmt->fetchColumn();
-            if ($existing !== false) {
-                return (int) $existing;
-            }
-        }
         [$cols, $vals, $rowDefers] = $this->buildInsert('bank_statements', $row, $target, $processedSet, $warnings);
         if ($rowDefers !== []) {
             // bank_statements nemá tenant/RESTORE_ORDER FK kromě globálního imported_by

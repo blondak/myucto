@@ -114,10 +114,8 @@ final class CreditCardStatementImportService
         // pak ukazují přesně). Firma bez podvojného účetnictví 231 v osnově nemá - nic se neděje.
         $this->analytics->ensureAnalytic($supplierId, $this->accounts->find($supplierId, (int) $account['id']) ?? $account);
 
-        $result = $this->importer->importParsedPdf($parsed, $pdfBytes, $fileName, $userId, null);
+        $result = $this->importer->importParsedPdf($parsed, $pdfBytes, $fileName, $userId, null, $supplierId);
         $statementId = (int) $result['statement_id'];
-        $this->db->pdo()->prepare('UPDATE bank_statements SET supplier_id = ? WHERE id = ? AND supplier_id IS NULL')
-            ->execute([$supplierId, $statementId]);
         if (!$this->ownership->statementOwned($statementId, $supplierId)) {
             throw new PostingException('statement_not_owned', 'Výpis nejde přiřadit této firmě.', 409);
         }
@@ -125,22 +123,18 @@ final class CreditCardStatementImportService
     }
 
     /**
-     * Týž soubor už je naimportovaný: u vlastní firmy idempotentně vrátí původní výpis,
-     * u cizí odmítne (bez prozrazení, čí je).
+     * Týž soubor už je naimportovaný u vlastní firmy: vrátí původní výpis.
      *
      * @return array<string,mixed>|null
      */
     private function duplicateStatement(int $supplierId, string $pdfBytes): ?array
     {
         $hash = hash('sha256', $pdfBytes);
-        $stmt = $this->db->pdo()->prepare('SELECT id FROM bank_statements WHERE file_hash = ? OR pdf_hash = ? ORDER BY id LIMIT 1');
-        $stmt->execute([$hash, $hash]);
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM bank_statements WHERE supplier_id = ? AND (file_hash = ? OR pdf_hash = ?) ORDER BY id LIMIT 1');
+        $stmt->execute([$supplierId, $hash, $hash]);
         $id = $stmt->fetchColumn();
         if ($id === false) {
             return null;
-        }
-        if (!$this->ownership->statementOwned((int) $id, $supplierId)) {
-            throw new PostingException('statement_not_owned', 'Tento výpis nejde u této firmy načíst.', 409);
         }
         $row = $this->db->pdo()->prepare('SELECT account_number, bank_code FROM bank_statements WHERE id = ?');
         $row->execute([(int) $id]);
