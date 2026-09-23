@@ -240,7 +240,9 @@ podpory; dřív potvrzený měsíc je potřeba znovu otevřít a potvrdit.
 nenechaly žádný započitatelný příjem**, se podle § 11 odst. 2 zákona
 č. 155/1995 Sb. za dobu pojištění nepovažuje. Hlášení ho vykáže s kódem
 činnosti, nulou dnů pojištění a nulovým vyměřovacím základem; dny neplaceného
-volna uvede jako vyloučené dny pro nemocenské dávky. Roční evidenční list
+volna i rodičovské dovolené uvede jako vyloučené dny pro nemocenské dávky
+(omluvená nepřítomnost bez náhrady příjmu). U rodičovské to platí i v měsíci,
+kdy začala nebo skončila, pro její dny uvnitř měsíce. Roční evidenční list
 takový měsíc započítá stejně, tedy s nulou dnů pojištění. Celý měsíc nemoci nebo
 ošetřovného je naopak omluvný důvod, takže zůstává dobou pojištění s plným
 počtem dnů a nulovým základem.
