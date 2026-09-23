@@ -25240,7 +25240,7 @@
       "automation_after": "Po převodu: {level}",
       "automation_left_off": "Automatika zůstává vypnutá, dokud převod neskončí bez chyb. Doklady bez vazby na deník by se jinak zaúčtovaly podruhé.",
       "payroll_totals_title": "Mzdy po měsících (kontrolní úhrny z Money)",
-      "payroll_totals_hint": "Součty mzdových dokladů celé firmy, ne převzaté mzdy zaměstnanců. Zálohová daň se porovnává s odvodem v měsíčním vyúčtování daně z příjmů ze závislé činnosti v Money (sražené zálohy po přeplatcích z ročního zúčtování).",
+      "payroll_totals_hint": "Součty mzdových dokladů celé firmy, ne převzaté mzdy zaměstnanců. Zálohová daň se porovnává s měsíčním vyúčtováním daně z příjmů ze závislé činnosti v Money (sražené zálohy po přeplatcích z ročního zúčtování).",
       "col_period": "Měsíc",
       "col_gross": "Hrubé mzdy",
       "col_employee_insurance": "Pojistné zaměstnanců (SP / ZP)",
@@ -25248,7 +25248,7 @@
       "col_tax": "Daň (záloha / srážková)",
       "col_deductions": "Srážky",
       "col_net_payable": "Čistá mzda k výplatě",
-      "col_dpfo": "Odvod zálohy v Money",
+      "col_dpfo": "Vyúčtování zálohy v Money",
       "tax_missing": "bez úhrnu"
     },
     "batch": {

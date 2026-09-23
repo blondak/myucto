@@ -25240,7 +25240,7 @@
       "automation_after": "After the transfer: {level}",
       "automation_left_off": "Automation stays off until the transfer finishes without errors. Documents not linked to the journal would otherwise be posted twice.",
       "payroll_totals_title": "Payroll by month (control totals from Money)",
-      "payroll_totals_hint": "Totals of the company's payroll documents, not taken-over payroll of individual employees. Advance tax is compared with the amount remitted in Money's monthly employment income tax statement (withheld advances after annual settlement refunds).",
+      "payroll_totals_hint": "Totals of the company's payroll documents, not taken-over payroll of individual employees. Advance tax is compared with Money's monthly employment income tax statement (withheld advances after annual settlement refunds).",
       "col_period": "Month",
       "col_gross": "Gross wages",
       "col_employee_insurance": "Employee insurance (social / health)",
@@ -25248,7 +25248,7 @@
       "col_tax": "Tax (advance / withholding)",
       "col_deductions": "Deductions",
       "col_net_payable": "Net pay",
-      "col_dpfo": "Advance tax remitted in Money",
+      "col_dpfo": "Advance tax statement in Money",
       "tax_missing": "no total"
     },
     "batch": {

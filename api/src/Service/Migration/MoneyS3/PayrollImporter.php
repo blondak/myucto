@@ -130,13 +130,13 @@ final class PayrollImporter
         }
         $p->setCount(self::STEP, 'payroll_tax_mismatches', count($mismatch));
         $p->warn(self::STEP, 'payroll_tax_mismatch', sprintf(
-            'Zálohová daň ze mzdových dokladů nesedí na odvod v měsíčním vyúčtování daně z příjmů ze závislé činnosti '
-            . 'v Money za %d měsíců: %s. Rozdíl je už v Money (doklady vs. vyúčtování daně), převod ho nemění; ověřte ho '
-            . 'před podáním vyúčtování.',
+            'Zálohová daň ze mzdových dokladů nesedí na měsíční vyúčtování daně z příjmů ze závislé činnosti v Money '
+            . '(sražené zálohy po přeplatcích z ročního zúčtování) za %d měsíců: %s. Rozdíl je už v Money (doklady vs. '
+            . 'vyúčtování daně), převod ho nemění; ověřte ho před podáním vyúčtování.',
             count($mismatch),
             implode(', ', array_map(
-                static fn (array $m): string => sprintf('%s (doklady %s Kč, odvod %s Kč)', $m['period'],
-                    self::money($m['advance_tax']), self::money((float) $m['dpfo_remitted'])),
+                static fn (array $m): string => sprintf('%s (doklady %s Kč, vyúčtování %s Kč)', $m['period'],
+                    self::money($m['advance_tax']), self::money((float) $m['dpfo_net'])),
                 array_slice($mismatch, 0, self::LIST_LIMIT),
             )) . (count($mismatch) > self::LIST_LIMIT ? ', …' : ''),
         ), ['periods' => array_column($mismatch, 'period')]);

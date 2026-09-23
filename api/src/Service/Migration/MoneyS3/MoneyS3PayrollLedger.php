@@ -35,7 +35,7 @@ final class MoneyS3PayrollLedger
     /**
      * @param list<array{year:int,period:?string,flagged:bool,code:?int,debit:string,credit:string,amount:float,signed:float,text:string,cost_center:?string,month:string}> $lines
      * @param array<string,string> $accountNames účet Money (`336100`) => název z osnovy
-     * @param array<string,array{dpfo:float,remitted:float}> $taxTotals `YYYY-MM` => úhrn `VYUCDPFO`
+     * @param array<string,array{dpfo:float,refunds:float,remitted:float}> $taxTotals `YYYY-MM` => úhrn `VYUCDPFO`
      */
     private function __construct(
         public readonly array $lines,
@@ -117,7 +117,7 @@ final class MoneyS3PayrollLedger
      *
      * @param list<array<string,mixed>> $lines
      * @param array<string,string> $accountNames
-     * @param array<string,array{dpfo:float,remitted:float}> $taxTotals
+     * @param array<string,array{dpfo:float,refunds:float,remitted:float}> $taxTotals
      */
     public static function fromLines(array $lines, array $accountNames = [], array $taxTotals = [], ?string $lastDataPeriod = null, ?string $lastPersonPeriod = null): self
     {
@@ -139,17 +139,6 @@ final class MoneyS3PayrollLedger
         }
 
         return new self($normalized, $accountNames, $taxTotals, $lastDataPeriod, $lastPersonPeriod);
-    }
-
-    /** Má deník převáděných let mzdové doklady s příznakem mzdového modulu? */
-    public function hasFlaggedDocuments(): bool
-    {
-        foreach ($this->lines as $line) {
-            if ($line['flagged']) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -178,7 +167,7 @@ final class MoneyS3PayrollLedger
         return $out;
     }
 
-    /** @return array<string,array{dpfo:float,remitted:float}> */
+    /** @return array<string,array{dpfo:float,refunds:float,remitted:float}> */
     private static function taxTotals(Ms3Backup $backup): array
     {
         $out = [];
@@ -191,6 +180,7 @@ final class MoneyS3PayrollLedger
             }
             $out[sprintf('%04d-%02d', $year, $month)] = [
                 'dpfo' => round((float) ($row['DPFO'] ?? 0), 2),
+                'refunds' => round((float) ($row['Preplatek'] ?? 0), 2),
                 'remitted' => round((float) ($row['Odvod'] ?? 0), 2),
             ];
         }

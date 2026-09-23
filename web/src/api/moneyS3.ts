@@ -136,8 +136,11 @@ export interface MoneyS3PayrollMonth {
   withholding_tax: number
   deductions: number
   net_payable: number
+  /** Sražené zálohy, přeplatky z ročního zúčtování, odvod a zálohy po přeplatcích z vyúčtování Money. */
   dpfo: number | null
+  dpfo_refunds: number | null
   dpfo_remitted: number | null
+  dpfo_net: number | null
   tax_ok: boolean | null
 }
 

@@ -10,9 +10,10 @@ namespace MyInvoice\Service\Migration\MoneyS3;
  * Za měsíce, kdy Money vedlo mzdy osob v šifrované databázi agendy, je tohle jediný
  * čitelný souhrn zpracovaných mezd: doklady mzdového modulu nesou období mezd
  * a jejich řádky v deníku částky. Zálohová daň se porovná s měsíčním vyúčtováním
- * daně z příjmů ze závislé činnosti, které Money vede zvlášť (`VYUCDPFO`): sražené
- * zálohy (`DPFO`) snížené o přeplatky z ročního zúčtování (`Preplatek`) dávají
- * odvod (`Odvod`), a právě ten mzdový doklad daně zaúčtuje. Srážková daň se
+ * daně z příjmů ze závislé činnosti, které Money vede zvlášť (`VYUCDPFO`): mzdový
+ * doklad daně účtuje sražené zálohy (`DPFO`) snížené o přeplatky z ročního zúčtování
+ * (`Preplatek`). Vyjde-li to záporně, doklad je záporný, kdežto odvod (`Odvod`)
+ * zůstane nula - proto se porovnává s rozdílem, ne s odvodem. Srážková daň se
  * vyúčtovává zvlášť a v `VYUCDPFO` není.
  *
  * ── Proč úhrny nejdou do převzatých mezd ────────────────────────────────────
@@ -33,7 +34,7 @@ final class MoneyS3PayrollTotals
         'advance_tax', 'withholding_tax', 'deductions', 'net_payable',
     ];
 
-    /** Rozdíl zálohové daně proti odvodu ve `VYUCDPFO`, který se ještě bere jako zaokrouhlení. */
+    /** Rozdíl zálohové daně proti vyúčtování ve `VYUCDPFO`, který se ještě bere jako zaokrouhlení. */
     private const TAX_TOLERANCE = 1.0;
 
     private const CONCEPT_METRIC = [
@@ -59,9 +60,10 @@ final class MoneyS3PayrollTotals
      * Úhrny po měsících mezd, vzestupně.
      *
      * @return list<array<string,mixed>> `period`, metriky {@see self::METRICS} v Kč,
-     *         `dpfo` (sražené zálohy) a `dpfo_remitted` (odvod) z `VYUCDPFO`, nebo
-     *         `null`, a `tax_ok` = zálohová daň z dokladů sedí na odvod (`null`, když
-     *         vyúčtování v Money chybí)
+     *         z `VYUCDPFO` `dpfo` (sražené zálohy), `dpfo_refunds` (přeplatky z ročního
+     *         zúčtování), `dpfo_remitted` (odvod) a `dpfo_net` (zálohy po přeplatcích),
+     *         nebo `null`, a `tax_ok` = zálohová daň z dokladů sedí na `dpfo_net`
+     *         (`null`, když vyúčtování v Money chybí)
      */
     public static function fromLedger(MoneyS3PayrollLedger $ledger): array
     {
@@ -103,9 +105,11 @@ final class MoneyS3PayrollTotals
             }
             $tax = $ledger->taxTotals[$period] ?? null;
             $row['dpfo'] = $tax['dpfo'] ?? null;
+            $row['dpfo_refunds'] = $tax['refunds'] ?? null;
             $row['dpfo_remitted'] = $tax['remitted'] ?? null;
+            $row['dpfo_net'] = $tax === null ? null : round($tax['dpfo'] - $tax['refunds'], 2);
             $row['tax_ok'] = $tax === null ? null
-                : abs($row['advance_tax'] - $tax['remitted']) <= self::TAX_TOLERANCE;
+                : abs($row['advance_tax'] - $row['dpfo_net']) <= self::TAX_TOLERANCE;
             $out[] = $row;
         }
         return $out;

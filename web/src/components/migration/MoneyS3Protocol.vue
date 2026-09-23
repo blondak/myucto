@@ -243,8 +243,8 @@ function levelClass(level: string): string {
               <td class="px-2 py-1 text-right font-mono whitespace-nowrap">{{ money.format(m.deductions) }}</td>
               <td class="px-2 py-1 text-right font-mono whitespace-nowrap">{{ money.format(m.net_payable) }}</td>
               <td class="px-2 py-1 text-right whitespace-nowrap">
-                <span v-if="m.dpfo_remitted === null" class="text-xs text-neutral-500">{{ t(k('protocol.tax_missing')) }}</span>
-                <span v-else class="rounded-full px-2 py-0.5 font-mono text-xs font-medium" :class="m.tax_ok ? statusClass('ok') : statusClass('error')">{{ money.format(m.dpfo_remitted) }}</span>
+                <span v-if="m.dpfo_net === null" class="text-xs text-neutral-500">{{ t(k('protocol.tax_missing')) }}</span>
+                <span v-else class="rounded-full px-2 py-0.5 font-mono text-xs font-medium" :class="m.tax_ok ? statusClass('ok') : statusClass('error')">{{ money.format(m.dpfo_net) }}</span>
               </td>
             </tr>
           </tbody>

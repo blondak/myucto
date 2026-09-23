@@ -152,6 +152,20 @@ final class PayrollPostingMapTest extends TestCase
         self::assertFalse($totals[2]['tax_ok'], 'Březnový odvod v Money na doklady nesedí.');
     }
 
+    /**
+     * Přeplatky z ročního zúčtování převyšují sražené zálohy: mzdový doklad daně je
+     * záporný, odvod ve vyúčtování nula. Doklad se porovnává se zálohami po přeplatcích.
+     */
+    public function testNegativeTaxAfterAnnualRefundsMatchesStatement(): void
+    {
+        $ledger = MoneyS3PayrollLedger::fromLines([
+            ['year' => 2025, 'period' => '2025-02', 'flagged' => true, 'code' => 5, 'debit' => '342100', 'credit' => '331000', 'amount' => 1000.0,
+                'text' => 'Záloha na daň'],
+        ], [], ['2025-02' => ['dpfo' => 2000.0, 'refunds' => 3000.0, 'remitted' => 0.0]]);
+        $month = MoneyS3PayrollTotals::fromLedger($ledger)[0];
+        self::assertSame([-1000.0, -1000.0, 0.0, true], [$month['advance_tax'], $month['dpfo_net'], $month['dpfo_remitted'], $month['tax_ok']]);
+    }
+
     private function removeTree(string $dir): void
     {
         if (!is_dir($dir)) {

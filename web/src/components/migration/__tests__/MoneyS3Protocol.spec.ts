@@ -138,14 +138,14 @@ describe('MoneyS3Protocol', () => {
 
   it('mzdové kontrolní úhrny vypíše po měsících a nesedící daň vyznačí', () => {
     const month = { gross: 30000, employee_social: 2130, employee_health: 1350, employer_social: 7440, employer_health: 2700,
-      advance_tax: 3810, withholding_tax: 0, deductions: 0, net_payable: 22710, dpfo_remitted: 3810 }
+      advance_tax: 3810, withholding_tax: 0, deductions: 0, net_payable: 22710, dpfo_refunds: 0 }
     const wrapper = mount(MoneyS3Protocol, {
       props: {
         run: run({
           payroll_totals: [
-            { period: '2025-01', ...month, dpfo: 3810, tax_ok: true },
-            { period: '2025-02', ...month, dpfo: 3000, tax_ok: false },
-            { period: '2025-03', ...month, dpfo: null, dpfo_remitted: null, tax_ok: null },
+            { period: '2025-01', ...month, dpfo: 3810, dpfo_remitted: 3810, dpfo_net: 3810, tax_ok: true },
+            { period: '2025-02', ...month, dpfo: 3000, dpfo_remitted: 3000, dpfo_net: 3000, tax_ok: false },
+            { period: '2025-03', ...month, dpfo: null, dpfo_refunds: null, dpfo_remitted: null, dpfo_net: null, tax_ok: null },
           ],
         }),
       },
