@@ -554,6 +554,12 @@ hodnoty:
   nebo `flat_pct`; nové účetní období ji při založení převezme. Konkrétní
   uzávěrka pak ukládá a používá snapshot politiky svého období, takže změna
   firemního defaultu nepřepíše starší roky.
+- **Daně vůči finančnímu úřadu vykazovat v rozvaze souhrnně** — přeplatek jedné
+  daně se v rozvaze započte s nedoplatkem jiné (§ 58 odst. 2 vyhl. 500/2002 Sb.),
+  volitelně **od účetního období**; viz [§ 57.2](57_Rozvaha.md).
+- **Minulé období výkazů převzít z uzavřeného výkazu minulého roku** — sloupec
+  minulého období se sestaví s výjimkami mapování a volbami platnými v minulém
+  roce; bez volby podle pravidel běžného roku. Viz [§ 57.1](57_Rozvaha.md).
 
 > [!NOTE]
 > Řada **PP** (Převody mezi účty) se využívá i mimo uzávěrkový průvodce — na
