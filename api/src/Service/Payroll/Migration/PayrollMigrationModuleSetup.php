@@ -1,0 +1,414 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Payroll\Migration;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollEmployerSettingsRepository;
+use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
+use MyInvoice\Repository\Payroll\PayrollStateConflictException;
+use MyInvoice\Service\License\LicenseCapacityGate;
+use MyInvoice\Service\License\LicensePayrollLimitExceeded;
+use MyInvoice\Service\License\LicenseSeatLimitExceeded;
+use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\SupportMatrix;
+use PDO;
+
+/**
+ * Zapnutí mezd firmě, u které převod z jiného programu zjistil, že mzdy vede.
+ *
+ * Společné pro všechny převody (PAMICA, PREMIER, Money S3). Dřív převod mzdy
+ * přeskočil, dokud účetní ručně nezapnula modul a nezaložila mzdovou účtárnu,
+ * a pak ho musela spustit znovu. Převod teď udělá totéž, co by udělala ona:
+ *
+ *  1. zapne modul Mzdy (`supplier.payroll_enabled`) stejnou licenční branou jako
+ *     Nastavení → Moduly ({@see LicenseCapacityGate::mutateSeats()}),
+ *  2. nastaví začátek vedení mezd v MyÚčtu na měsíc po posledních převzatých mzdách
+ *     (stav modulu `setup`, jako uložení v Mzdy → Nastavení → Aktivace),
+ *  3. když firma nastavení zaměstnavatele nemá, založí ho s výchozí mzdovou účtárnou
+ *     a výchozími předkontacemi ({@see PayrollEmployerSettingsRepository::save()}).
+ *
+ * ── Co se nikdy nepřepisuje ─────────────────────────────────────────────────
+ * Zapnutý modul, existující stav modulu (i vědomě vypnutý) a jeho začátek, ani
+ * existující nastavení zaměstnavatele. Převod doplňuje jen to, co chybí.
+ *
+ * ── Co se nevymýšlí ─────────────────────────────────────────────────────────
+ * Variabilní symbol ČSSZ, kód OSSZ ani účty institucí: jsou to údaje z rozhodnutí
+ * úřadů a zástupná hodnota by prošla do přehledů a plateb. Účtárna vznikne bez nich
+ * a protokol řekne, co doplnit.
+ *
+ * ── Firma, která mzdy už nevede ─────────────────────────────────────────────
+ * Poslední mzdy víc než rok před koncem převáděných dat znamenají, že firma
+ * zaměstnance neměla ani v posledním roce. Modul (a s ním licenční místo) se jí
+ * nezapíná; protokol to řekne.
+ */
+final class PayrollMigrationModuleSetup
+{
+    public const OFFICE_CODE = 'MZDY';
+    private const OFFICE_NAME = 'Mzdová účtárna';
+    /** O kolik měsíců smí poslední mzdy předcházet konci převáděných dat, aby firma mzdy „vedla". */
+    private const ENDED_AFTER_MONTHS = 12;
+
+    public const OUTCOME_READY = 'ready';
+    public const OUTCOME_ENDED = 'ended';
+    public const OUTCOME_UNLICENSED = 'unlicensed';
+    public const OUTCOME_LICENSE_LIMIT = 'license_limit';
+    public const OUTCOME_UNAVAILABLE = 'unavailable';
+
+    /** Údaje, které převod nevymýšlí a účetní je musí doplnit. */
+    public const TODO_SOCIAL_SECURITY_SYMBOL = 'social_security_variable_symbol';
+    public const TODO_SOCIAL_SECURITY_OFFICE = 'social_security_office_code';
+    public const TODO_INSTITUTION_ACCOUNTS = 'institution_accounts';
+    public const TODO_START_PERIOD = 'start_period';
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollModuleAccess $access,
+        private readonly LicenseCapacityGate $capacity,
+        private readonly PayrollModuleStateRepository $state,
+        private readonly PayrollEmployerSettingsRepository $settings,
+        private readonly SupportMatrix $support,
+    ) {}
+
+    /**
+     * Co by převod udělal - nic nezapisuje (kontrola před převodem).
+     *
+     * @param string $lastPayrollPeriod poslední měsíc mezd ve zdroji (`YYYY-MM`)
+     * @param ?string $lastDataPeriod poslední měsíc převáděných dat (`YYYY-MM`); bez něj
+     *        se konec mezd neposuzuje
+     * @return array{outcome:string,enable:bool,create_office:bool,start_period:?string,start_unsupported:?string,last_period:string}
+     */
+    public function plan(int $supplierId, string $lastPayrollPeriod, ?string $lastDataPeriod = null): array
+    {
+        $last = self::period($lastPayrollPeriod);
+        $plan = [
+            'outcome' => self::OUTCOME_READY,
+            'enable' => false,
+            'create_office' => false,
+            'start_period' => null,
+            'start_unsupported' => null,
+            'last_period' => $last,
+        ];
+        if (!$this->schemaAvailable()) {
+            return ['outcome' => self::OUTCOME_UNAVAILABLE] + $plan;
+        }
+        $enabled = $this->payrollEnabled($supplierId);
+        if (!$enabled && self::ended($last, $lastDataPeriod)) {
+            return ['outcome' => self::OUTCOME_ENDED] + $plan;
+        }
+        if (!$enabled && !$this->access->isLicensed()) {
+            return ['outcome' => self::OUTCOME_UNLICENSED] + $plan;
+        }
+        $plan['enable'] = !$enabled;
+        $plan['create_office'] = !$this->hasSettings($supplierId);
+        if (!$this->hasModuleState($supplierId)) {
+            $start = self::startAfter($last);
+            if ($this->support->supportsYear((int) substr($start, 0, 4))) {
+                $plan['start_period'] = $start;
+            } else {
+                $plan['start_unsupported'] = $start;
+            }
+        }
+
+        return $plan;
+    }
+
+    /**
+     * Zapne mzdy, pokud je firma vede; nic existujícího nepřepíše.
+     *
+     * @return array{
+     *   outcome:string,enabled_now:bool,office_created:bool,start_period:?string,start_set:bool,
+     *   start_unsupported:?string,last_period:string,todo:list<string>
+     * }
+     */
+    public function ensure(int $supplierId, ?int $userId, string $lastPayrollPeriod, ?string $lastDataPeriod = null): array
+    {
+        $plan = $this->plan($supplierId, $lastPayrollPeriod, $lastDataPeriod);
+        $result = [
+            'outcome' => $plan['outcome'],
+            'enabled_now' => false,
+            'office_created' => false,
+            'start_period' => null,
+            'start_set' => false,
+            'start_unsupported' => $plan['start_unsupported'],
+            'last_period' => $plan['last_period'],
+            'todo' => [],
+        ];
+        if ($plan['outcome'] !== self::OUTCOME_READY) {
+            return $result;
+        }
+
+        if ($plan['enable']) {
+            try {
+                $this->capacity->mutateSeats(fn (): bool => $this->db->pdo()
+                    ->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')
+                    ->execute([$supplierId]));
+            } catch (LicensePayrollLimitExceeded|LicenseSeatLimitExceeded) {
+                return ['outcome' => self::OUTCOME_LICENSE_LIMIT] + $result;
+            }
+            $result['enabled_now'] = true;
+        }
+        if ($plan['create_office']) {
+            $this->createSettings($supplierId);
+            $result['office_created'] = true;
+        }
+        if ($plan['start_period'] !== null) {
+            try {
+                $this->state->setActivation($supplierId, true, $plan['start_period'] . '-01', 0, $userId);
+                $result['start_set'] = true;
+            } catch (PayrollStateConflictException) {
+                // Stav mezitím založil někdo jiný; jeho začátek platí.
+            }
+        }
+        $result['start_period'] = $this->state->get($supplierId)['start_period'];
+
+        if ($result['enabled_now'] || $result['office_created'] || $result['start_set']) {
+            $result['todo'] = $this->todo($supplierId, $result['start_period']);
+        }
+
+        return $result;
+    }
+
+    /**
+     * Zprávy do protokolu převodu - stejné texty pro všechny převody.
+     *
+     * @param array<string,mixed> $result {@see self::ensure()}
+     * @param string $program název zdrojového programu do textu (`PREMIER`, `Money S3`…)
+     */
+    public static function report(ImportProtocol $protocol, string $step, array $result, string $program): void
+    {
+        $last = self::monthLabel((string) $result['last_period']);
+        switch ($result['outcome']) {
+            case self::OUTCOME_ENDED:
+                $protocol->info($step, 'payroll_ended', sprintf(
+                    'Mzdy vedla firma v %s naposledy za %s, v posledním roce převáděných dat už ne. Modul Mzdy se proto nezapnul; '
+                    . 'převzaté mzdy zůstávají jen v převedeném deníku.',
+                    $program,
+                    $last,
+                ));
+                return;
+            case self::OUTCOME_UNLICENSED:
+                $protocol->warn($step, 'payroll_module_unlicensed', sprintf(
+                    'Firma vede mzdy (v %s naposledy za %s), modul Mzdy ale nejde zapnout: licence nezahrnuje mzdový doplněk. '
+                    . 'Po jeho zakoupení převod zopakujte.',
+                    $program,
+                    $last,
+                ));
+                return;
+            case self::OUTCOME_LICENSE_LIMIT:
+                $protocol->warn($step, 'payroll_module_license_limit', sprintf(
+                    'Firma vede mzdy (v %s naposledy za %s), zapnutí modulu Mzdy by ale překročilo zaplacený počet uživatelů '
+                    . 'mzdového doplňku. Navyšte rozsah doplňku a převod zopakujte.',
+                    $program,
+                    $last,
+                ));
+                return;
+            case self::OUTCOME_UNAVAILABLE:
+                return;
+        }
+
+        $done = [];
+        if ($result['enabled_now']) {
+            $done[] = 'zapnul modul Mzdy';
+        }
+        if ($result['office_created']) {
+            $done[] = 'založil nastavení zaměstnavatele s mzdovou účtárnou ' . self::OFFICE_CODE . ' a výchozími předkontacemi';
+        }
+        if ($result['start_set']) {
+            $done[] = 'nastavil začátek vedení mezd v MyÚčtu na ' . self::monthLabel((string) $result['start_period']);
+        }
+        if ($done !== []) {
+            $protocol->count($step, 'payroll_module_setup');
+            $protocol->info($step, 'payroll_module_enabled', sprintf(
+                'Firma vede mzdy (v %s naposledy za %s). Převod %s.',
+                $program,
+                $last,
+                self::joinCzech($done),
+            ), ['start_period' => $result['start_period']]);
+        }
+        if ($result['start_unsupported'] !== null) {
+            $protocol->warn($step, 'payroll_start_unsupported', sprintf(
+                'Začátek vedení mezd v MyÚčtu by po posledních mzdách z %s připadl na %s, MyÚčto ale pro rok %s mzdová pravidla '
+                . 'zatím nemá. Začátek se nenastavil; nastavte ho v Mzdy → Nastavení → Aktivace, až bude rok podporovaný.',
+                $program,
+                self::monthLabel((string) $result['start_unsupported']),
+                substr((string) $result['start_unsupported'], 0, 4),
+            ));
+        }
+        $todo = $result['todo'] ?? [];
+        if ($todo !== []) {
+            $labels = [
+                self::TODO_SOCIAL_SECURITY_SYMBOL => 'variabilní symbol plátce pojistného ČSSZ u mzdové účtárny',
+                self::TODO_SOCIAL_SECURITY_OFFICE => 'kód příslušné OSSZ',
+                self::TODO_INSTITUTION_ACCOUNTS => 'účty ČSSZ, zdravotních pojišťoven a finančního úřadu (Účty institucí)',
+                self::TODO_START_PERIOD => 'začátek vedení mezd v MyÚčtu',
+            ];
+            $protocol->warn($step, 'payroll_setup_incomplete', sprintf(
+                'Nastavení mezd je třeba doplnit v Mzdy → Nastavení: %s. Převod tyto údaje nevymýšlí, jsou z rozhodnutí úřadů. '
+                . 'Předkontace mezd zkontrolujte podle návrhu z původního programu (Mzdy → Importy → Kontace mezd).',
+                implode('; ', array_map(static fn (string $code): string => $labels[$code] ?? $code, $todo)),
+            ), ['todo' => $todo]);
+        }
+    }
+
+    /** Měsíc po posledních převzatých mzdách (`YYYY-MM`). */
+    public static function startAfter(string $lastPayrollPeriod): string
+    {
+        return (new \DateTimeImmutable(self::period($lastPayrollPeriod) . '-01'))->modify('+1 month')->format('Y-m');
+    }
+
+    /** Skončily mzdy víc než rok před koncem převáděných dat? */
+    public static function ended(string $lastPayrollPeriod, ?string $lastDataPeriod): bool
+    {
+        if ($lastDataPeriod === null) {
+            return false;
+        }
+        $limit = (new \DateTimeImmutable(self::period($lastDataPeriod) . '-01'))
+            ->modify('-' . self::ENDED_AFTER_MONTHS . ' months')->format('Y-m');
+
+        return self::period($lastPayrollPeriod) < $limit;
+    }
+
+    private function createSettings(int $supplierId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT code, name, test_social_security_variable_symbol, is_active FROM payroll_offices WHERE supplier_id = ? ORDER BY is_active DESC, id'
+        );
+        $stmt->execute([$supplierId]);
+        $offices = [];
+        $default = null;
+        // Účtárny, které firma už má, se do sady vezmou beze změny: uložení nastavení
+        // vypíná účtárny, které v sadě nejsou.
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $offices[] = [
+                'code' => (string) $row['code'],
+                'name' => (string) $row['name'],
+                'social_security_variable_symbol' => null,
+                'social_security_variable_symbol_provided' => false,
+                'test_social_security_variable_symbol' => $row['test_social_security_variable_symbol'] === null ? null : (string) $row['test_social_security_variable_symbol'],
+                'is_active' => (bool) $row['is_active'],
+            ];
+            if ($default === null && (bool) $row['is_active']) {
+                $default = (string) $row['code'];
+            }
+        }
+        if ($default === null) {
+            $offices = array_values(array_filter($offices, static fn (array $o): bool => $o['code'] !== self::OFFICE_CODE));
+            $offices[] = [
+                'code' => self::OFFICE_CODE,
+                'name' => self::OFFICE_NAME,
+                'social_security_variable_symbol' => null,
+                'social_security_variable_symbol_provided' => false,
+                'test_social_security_variable_symbol' => null,
+                'is_active' => true,
+            ];
+            $default = self::OFFICE_CODE;
+        }
+        $defaults = $this->settings->get($supplierId);
+        $this->settings->save($supplierId, [
+            'default_office_code' => $default,
+            'employer_registration_number' => null,
+            'social_security_office_code' => null,
+            'default_health_insurer_code' => null,
+            'payroll_contact_name' => null,
+            'payroll_contact_email' => null,
+            'payroll_contact_phone' => null,
+            'accounts' => $defaults['accounts'],
+            'offices' => $offices,
+        ], 0);
+    }
+
+    /** @return list<string> */
+    private function todo(int $supplierId, ?string $startPeriod): array
+    {
+        $pdo = $this->db->pdo();
+        $todo = [];
+        $office = $pdo->prepare(
+            'SELECT o.social_security_variable_symbol, s.social_security_office_code
+               FROM payroll_employer_settings s
+               JOIN payroll_offices o ON o.supplier_id = s.supplier_id AND o.id = s.default_office_id
+              WHERE s.supplier_id = ?'
+        );
+        $office->execute([$supplierId]);
+        $row = $office->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row) || trim((string) ($row['social_security_variable_symbol'] ?? '')) === '') {
+            $todo[] = self::TODO_SOCIAL_SECURITY_SYMBOL;
+        }
+        if (!is_array($row) || trim((string) ($row['social_security_office_code'] ?? '')) === '') {
+            $todo[] = self::TODO_SOCIAL_SECURITY_OFFICE;
+        }
+        if ($this->db->hasTable('payroll_institution_accounts')) {
+            $accounts = $pdo->prepare('SELECT COUNT(*) FROM payroll_institution_accounts WHERE supplier_id = ?');
+            $accounts->execute([$supplierId]);
+            if ((int) $accounts->fetchColumn() === 0) {
+                $todo[] = self::TODO_INSTITUTION_ACCOUNTS;
+            }
+        }
+        if ($startPeriod === null) {
+            $todo[] = self::TODO_START_PERIOD;
+        }
+
+        return $todo;
+    }
+
+    private function schemaAvailable(): bool
+    {
+        return $this->db->hasColumn('supplier', 'payroll_enabled')
+            && $this->db->hasTable('payroll_module_state')
+            && $this->db->hasTable('payroll_employer_settings')
+            && $this->db->hasTable('payroll_offices');
+    }
+
+    private function payrollEnabled(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT payroll_enabled FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+
+        return (int) $stmt->fetchColumn() === 1;
+    }
+
+    private function hasSettings(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM payroll_employer_settings WHERE supplier_id = ?');
+        $stmt->execute([$supplierId]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /** Stav modulu jakýkoli, i vědomě vypnutý: rozhodnutí účetní převod nepřepisuje. */
+    private function hasModuleState(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM payroll_module_state WHERE supplier_id = ?');
+        $stmt->execute([$supplierId]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    private static function period(string $value): string
+    {
+        $period = substr(trim($value), 0, 7);
+        if (preg_match('/^[0-9]{4}-(0[1-9]|1[0-2])$/D', $period) !== 1) {
+            throw new \InvalidArgumentException("Mzdové období musí být ve tvaru YYYY-MM: {$value}.");
+        }
+
+        return $period;
+    }
+
+    private static function monthLabel(string $period): string
+    {
+        return preg_match('/^([0-9]{4})-([0-9]{2})/', $period, $m) === 1 ? ((int) $m[2]) . '/' . $m[1] : $period;
+    }
+
+    /** @param list<string> $parts */
+    private static function joinCzech(array $parts): string
+    {
+        if (count($parts) <= 1) {
+            return implode('', $parts);
+        }
+        $last = array_pop($parts);
+
+        return implode(', ', $parts) . ' a ' . $last;
+    }
+}

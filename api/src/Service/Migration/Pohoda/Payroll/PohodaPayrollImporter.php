@@ -12,6 +12,7 @@ use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
+use MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalService;
@@ -58,7 +59,30 @@ final class PohodaPayrollImporter
         private readonly PohodaPayrollSicknessWriter $sickness,
         private readonly PayrollMigrationReferenceTotalsWriter $referenceTotals,
         private readonly PayrollPostingMapProposalService $postingMap,
+        private readonly PayrollMigrationModuleSetup $moduleSetup,
     ) {}
+
+    /**
+     * Co by převod udělal s nastavením mezd (nic nezapisuje); `null`, když export mzdy nemá.
+     *
+     * @return array<string,mixed>|null {@see PayrollMigrationModuleSetup::plan()}
+     */
+    private function moduleSetupPlan(int $supplierId, string $file): ?array
+    {
+        try {
+            $last = self::lastPeriod(PohodaPayrollConverter::read($file));
+        } catch (PohodaException) {
+            return null;
+        }
+        return $last === null ? null : $this->moduleSetup->plan($supplierId, $last);
+    }
+
+    /** Poslední měsíc zpracovaných mezd v exportu (všechny roky), nebo `null`. */
+    private static function lastPeriod(PohodaPayrollConverter $converter): ?string
+    {
+        $periods = $converter->periods();
+        return $periods === [] ? null : (string) max($periods);
+    }
 
     /** @return list<string> */
     public static function stepKeys(): array
@@ -79,14 +103,23 @@ final class PohodaPayrollImporter
             $out[] = ['level' => $level, 'code' => $code, 'message' => $message, 'context' => $context];
         };
         $pdo = $this->db->pdo();
+        // Chybějící nastavení mezd převod doplní sám ({@see PayrollMigrationModuleSetup});
+        // chybou zůstává jen to, co doplnit nejde (licence).
+        $plan = $this->moduleSetupPlan($supplierId, $file);
+        $willSetUp = ($plan['outcome'] ?? null) === PayrollMigrationModuleSetup::OUTCOME_READY;
         $stmt = $pdo->prepare('SELECT payroll_enabled FROM supplier WHERE id = ?');
         $stmt->execute([$supplierId]);
         if ((int) $stmt->fetchColumn() !== 1) {
-            $add('error', 'payroll_disabled', 'Firma nemá zapnutý modul Mzdy. Zapněte ho v Nastavení → Moduly, jinak mzdy nejde převést.');
+            if ($willSetUp) {
+                $add('info', 'payroll_module_will_enable', 'Firma nemá zapnutý modul Mzdy. Převod ho zapne'
+                    . ($plan['start_period'] !== null ? ' a nastaví začátek vedení mezd na ' . $plan['start_period'] : '') . '.');
+            } else {
+                $add('error', 'payroll_disabled', 'Firma nemá zapnutý modul Mzdy. Zapněte ho v Nastavení → Moduly, jinak mzdy nejde převést.');
+            }
         }
         // Počáteční stavy ročních kumulací se zapisují za měsíce před začátkem vedení mezd
         // v MyÚčtu; bez něj je převod nezapíše a mzdový běh je bude hlásit jako chybějící.
-        if ($this->db->hasTable('payroll_module_state')) {
+        if ($this->db->hasTable('payroll_module_state') && ($plan['start_period'] ?? null) === null) {
             $moduleStart = $pdo->prepare('SELECT start_period FROM payroll_module_state WHERE supplier_id = ?');
             $moduleStart->execute([$supplierId]);
             if (($moduleStart->fetchColumn() ?: null) === null) {
@@ -97,7 +130,11 @@ final class PohodaPayrollImporter
             $office = $pdo->prepare('SELECT default_office_id FROM payroll_employer_settings WHERE supplier_id = ?');
             $office->execute([$supplierId]);
             if (($office->fetchColumn() ?: null) === null) {
-                $add('error', 'payroll_office_missing', 'Chybí výchozí mzdová účtárna zaměstnavatele (Mzdy → Nastavení). Bez ní převod nezaloží pracovní vztahy.');
+                if ($willSetUp) {
+                    $add('info', 'payroll_office_will_create', 'Firma nemá nastavení mezd zaměstnavatele. Převod založí výchozí mzdovou účtárnu; VS ČSSZ a účty institucí doplníte v Mzdy → Nastavení.');
+                } else {
+                    $add('error', 'payroll_office_missing', 'Chybí výchozí mzdová účtárna zaměstnavatele (Mzdy → Nastavení). Bez ní převod nezaloží pracovní vztahy.');
+                }
             }
         }
         try {
@@ -151,6 +188,12 @@ final class PohodaPayrollImporter
             $pdo->beginTransaction();
         }
         try {
+            // Nastavení mezd, které firma nemá, doplní převod dřív, než založí první osobu.
+            $last = self::lastPeriod($converter);
+            if ($last !== null) {
+                PayrollMigrationModuleSetup::report($protocol, self::STEP_PREFLIGHT,
+                    $this->moduleSetup->ensure($supplierId, $userOrNull, $last), 'PAMICA');
+            }
             $months = array_map($converter->month(...), $converter->periods($year));
             // Údaje osob a vztahů se čtou jednou: krok měsíců z nich zapisuje pracoviště
             // průběžně a krok osob pak zbytek.

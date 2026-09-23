@@ -507,20 +507,37 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertTrue($this->db->pdo()->inTransaction(), 'Zkouška nanečisto nesmí vrátit vnější transakci.');
     }
 
-    public function testPreflightRequiresPayrollModuleAndOffice(): void
+    /**
+     * Firma bez mezd: kontrola před převodem oznámí, že je převod zapne, a převod pak
+     * modul zapne, založí účtárnu, nastaví začátek za posledním měsícem exportu a mzdy
+     * převezme. Existující nastavení při opakování nepřepíše.
+     */
+    public function testWithoutPayrollModuleTheImportEnablesIt(): void
     {
         $supplierId = $this->createIsolatedSupplier($this->db->pdo(), $this->sourceSupplierId);
         $this->db->pdo()->prepare('UPDATE supplier SET payroll_enabled = 0 WHERE id = ?')->execute([$supplierId]);
         $file = SyntheticPohodaPayroll::write($this->tmp);
 
         $codes = array_column($this->importer->preflight($supplierId, $file, SyntheticPohodaPayroll::YEAR), 'code');
-        self::assertContains('payroll_disabled', $codes);
-        self::assertContains('payroll_office_missing', $codes);
+        self::assertContains('payroll_module_will_enable', $codes);
+        self::assertContains('payroll_office_will_create', $codes);
+        self::assertNotContains('payroll_disabled', $codes);
+        self::assertNotContains('payroll_office_missing', $codes);
         self::assertContains('payroll_no_months', array_column($this->importer->preflight($supplierId, $file, 2025), 'code'));
 
         $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
-        self::assertTrue($protocol->hasErrors());
-        self::assertSame(0, $this->rows('payroll_employees', $supplierId));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertGreaterThan(0, $this->rows('payroll_employees', $supplierId), $this->explain($protocol));
+        $stmt = $this->db->pdo()->prepare('SELECT s.payroll_enabled, m.status, m.start_period FROM supplier s
+            JOIN payroll_module_state m ON m.supplier_id = s.id WHERE s.id = ?');
+        $stmt->execute([$supplierId]);
+        $state = $stmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame(['1', 'setup', '2026-03-01'], [(string) $state['payroll_enabled'], (string) $state['status'], (string) $state['start_period']]);
+        self::assertSame(1, $this->rows('payroll_offices', $supplierId));
+
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame(1, $this->rows('payroll_offices', $supplierId));
     }
 
     /** Izolovaná firma se zapnutými mzdami a výchozí účtárnou (stejně jako test importu docházky). */

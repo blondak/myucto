@@ -549,16 +549,48 @@ final class PremierPayrollImportTest extends TestCase
         self::assertSame(1, self::stepCounts($protocol, 'payroll')['reconciliation_diffs'] ?? 0);
     }
 
-    public function testWithoutPayrollModuleAccountingIsImportedAndPayrollSkipped(): void
+    /**
+     * Firma bez mezd a bez mzdové účtárny: převod modul zapne, založí nastavení
+     * zaměstnavatele s účtárnou, nastaví začátek vedení mezd za posledním měsícem mezd
+     * v záloze (2/2026 → 3/2026) a zaměstnance převezme. Údaje z rozhodnutí úřadů
+     * nevymýšlí, jen je vypíše k doplnění.
+     */
+    public function testWithoutPayrollModuleTheImportEnablesItAndTakesPayrollOver(): void
     {
         $supplierId = $this->supplier(false);
         $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true]), SyntheticPremierBackup::YEAR1, false);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
-        self::assertContains('payroll_module_missing', array_column($protocol->get('preflight'), 'code'));
-        self::assertContains('payroll_module_missing', $this->messageCodes($protocol));
-        self::assertSame(16, self::stepCounts($protocol, 'payroll')['months_skipped'] ?? 0, $this->explain($protocol));
-        self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_employees WHERE supplier_id = ?', $supplierId));
-        self::assertTrue($protocol->get('payroll_reconciliation')[0]['ok'], 'Rekonciliace mezd proti deníku běží i bez modulu Mzdy.');
+        self::assertContains('payroll_module_will_enable', array_column($protocol->get('preflight'), 'code'));
+        self::assertNotContains('payroll_module_missing', $this->messageCodes($protocol), $this->explain($protocol));
+        self::assertContains('payroll_module_enabled', $this->messageCodes($protocol));
+        self::assertContains('payroll_setup_incomplete', $this->messageCodes($protocol));
+
+        self::assertSame(1, $this->scalar('SELECT payroll_enabled FROM supplier WHERE id = ?', $supplierId));
+        self::assertSame([['setup', '2026-03-01']], $this->fetch('SELECT status, start_period FROM payroll_module_state WHERE supplier_id = ?', $supplierId));
+        self::assertSame([['MZDY', null, '1']], $this->fetch('SELECT o.code, o.social_security_variable_symbol, o.is_active FROM payroll_employer_settings s
+            JOIN payroll_offices o ON o.supplier_id = s.supplier_id AND o.id = s.default_office_id WHERE s.supplier_id = ?', $supplierId));
+
+        $counts = self::stepCounts($protocol, 'payroll');
+        self::assertSame([2, 16], [$counts['employees_created'] ?? 0, $counts['months'] ?? 0], $this->explain($protocol));
+        self::assertArrayNotHasKey('months_skipped', $counts);
+        self::assertTrue($protocol->get('payroll_reconciliation')[0]['ok'], $this->explain($protocol));
+
+        // Opakovaný převod už nic nezapíná ani nepřepisuje.
+        $again = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertNotContains('payroll_module_enabled', $this->messageCodes($again));
+        self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM payroll_offices WHERE supplier_id = ?', $supplierId));
+    }
+
+    /** Zapnutý modul s vlastním začátkem vedení mezd převod nechá, jak je. */
+    public function testExistingPayrollSetupIsNeverOverwritten(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(['payroll' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertNotContains('payroll_module_enabled', $this->messageCodes($protocol));
+        self::assertSame([['setup', '2026-02-01']], $this->fetch('SELECT status, start_period FROM payroll_module_state WHERE supplier_id = ?', $supplierId));
+        self::assertSame([['PRM']], $this->fetch('SELECT code FROM payroll_offices WHERE supplier_id = ?', $supplierId));
     }
 
     public function testDryRunWritesNothing(): void
