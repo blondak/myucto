@@ -850,7 +850,8 @@ final class SaldoRepository
      * nějaký navazující doklad" ({@see $childExists}) není nový filtr, jen předvýběr:
      * zálohy bez následníka se stejně nemají na co napojit, takže výsledek je shodný.
      *
-     * Obsahuje DVA placeholdery, oba asOf (entry_date, storno); ID jsou literály.
+     * Obsahuje ČTYŘI placeholdery, všechny asOf (entry_date a storno za každou větev);
+     * ID jsou literály.
      *
      * @param 'credit'|'debit' $side strana, na kterou úhrada zálohy dopadá na daném účtu
      *                               (311 pohledávka → credit, 321 závazek → debit)
@@ -875,31 +876,39 @@ final class SaldoRepository
             $cashLink = 'cd.purchase_invoice_id = pf.id';
         }
 
+        // Bankovní a pokladní větev jsou dva samostatné EXISTS, ne jeden s OR uvnitř.
+        // Jediný EXISTS MariaDB přepsala na semi-join a vedla ho od CELÉHO deníku firmy
+        // přes všechny zálohy do plateb (ZENERGO: 3,7 mil. bodových čtení, 3,5 s). Takhle
+        // je každá větev bodový dotaz přes idx_je_supplier_source na jednu platbu.
+        $postedOnAccount = "JOIN journal_entry_lines pl ON pl.entry_id = pe.id AND pl.supplier_id = pe.supplier_id
+                      JOIN chart_of_accounts pca ON pca.id = pl.account_id
+                      LEFT JOIN journal_entries prev ON prev.id = pe.reversed_by
+                     WHERE pe.posted_at IS NOT NULL AND pe.entry_date <= ?
+                       AND (pe.reversed_by IS NULL OR prev.entry_date > ?)
+                       AND pl.side = '{$side}'
+                       AND (pca.id = {$accountId} OR pca.parent_id = {$accountId})";
+
         return
             "SELECT {$key} AS advance_id, SUM(pip.amount) AS advance_sum
                {$from}
               WHERE pip.supplier_id = {$supplierId}
                 AND {$childExists}
-                AND EXISTS (
-                    SELECT 1
-                      FROM journal_entries pe
-                      JOIN journal_entry_lines pl ON pl.entry_id = pe.id AND pl.supplier_id = pe.supplier_id
-                      JOIN chart_of_accounts pca ON pca.id = pl.account_id
-                      LEFT JOIN journal_entries prev ON prev.id = pe.reversed_by
-                     WHERE pe.supplier_id = pip.supplier_id
-                       AND pe.posted_at IS NOT NULL AND pe.entry_date <= ?
-                       AND (pe.reversed_by IS NULL OR prev.entry_date > ?)
-                       AND pl.side = '{$side}'
-                       AND (pca.id = {$accountId} OR pca.parent_id = {$accountId})
-                       AND (
-                           (pip.bank_transaction_id IS NOT NULL
-                            AND pe.source_type = 'bank' AND pe.source_id = pip.bank_transaction_id)
-                           OR EXISTS (
-                               SELECT 1 FROM cash_documents cd
-                                WHERE cd.supplier_id = pip.supplier_id AND {$cashLink}
-                                  AND pe.source_type = 'cash' AND pe.source_id = cd.id
-                           )
-                       )
+                AND (
+                    (pip.bank_transaction_id IS NOT NULL AND EXISTS (
+                        SELECT 1
+                          FROM journal_entries pe
+                          {$postedOnAccount}
+                           AND pe.supplier_id = pip.supplier_id
+                           AND pe.source_type = 'bank' AND pe.source_id = pip.bank_transaction_id
+                    ))
+                    OR EXISTS (
+                        SELECT 1
+                          FROM cash_documents cd
+                          JOIN journal_entries pe ON pe.supplier_id = cd.supplier_id
+                                                 AND pe.source_type = 'cash' AND pe.source_id = cd.id
+                          {$postedOnAccount}
+                           AND cd.supplier_id = pip.supplier_id AND {$cashLink}
+                    )
                 )
               GROUP BY {$key}";
     }
