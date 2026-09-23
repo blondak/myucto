@@ -86,6 +86,42 @@ Na konci kroku převod porovná karty se zůstatky majetkových a oprávkových 
 po syntetikách. Rozdíl, který je už v evidenci Money (majetek účtovaný bez karty),
 protokol označí zvlášť.
 
+### 103.2.2 Mzdy
+
+Zápisy mezd jsou v převedeném deníku a znovu nevznikají. Z mzdových dokladů
+(závazky a interní doklady mzdového modulu Money) převod v kroku **Mzdy** udělá
+tři věci:
+
+- **Návrh kontací mezd.** Z mzdových zápisů posledního převáděného roku odvodí,
+  které účty firma používá pro hrubé mzdy, pojistné, daň a srážky, a uloží je jako
+  návrh v Mzdy → Importy → **Kontace mezd** (viz
+  [§ 108.11](108_Prechod_z_PAMICA.md#10811-kontace-mezd-z-puvodniho-programu)).
+  Nastavení mezd se nemění, dokud návrh nepotvrdíte. Význam zápisu se bere
+  z druhu mzdového dokladu, který Money u novějších dokladů vede (sociální,
+  zdravotní pojištění, daň, srážky…); starší doklady bez druhu se zařadí podle
+  páru účtů. Analytiku účtu 336 pro sociální a zdravotní pojištění pozná převod
+  podle dokladů s druhem, jinak podle názvu účtu. Co zařadit nejde, je v návrhu
+  jen v přehledu.
+- **Kontrolní úhrny po měsících.** Protokol ukáže za každý měsíc mezd součty
+  celé firmy: hrubé mzdy, pojistné zaměstnanců a zaměstnavatele, zálohovou
+  a srážkovou daň, srážky a čistou mzdu k výplatě. Daň porovná s měsíčním
+  úhrnem daně z příjmů ze závislé činnosti, který Money vede zvlášť; měsíc, kde
+  nesedí, vyznačí. Úhrny jsou kontrola, ne převzaté mzdy jednotlivých zaměstnanců.
+- **Zapnutí modulu Mzdy.** Firmě, která mzdy vede, převod zapne modul Mzdy
+  a nastaví začátek vedení mezd v MyÚčtu na měsíc po posledním mzdovém dokladu.
+  Chybí-li nastavení zaměstnavatele, založí ho s mzdovou účtárnou `MZDY`
+  a výchozími předkontacemi. Variabilní symbol ČSSZ, kód OSSZ a účty institucí
+  převod nevymýšlí, protokol je vypíše k doplnění v Mzdy → Nastavení. Zapnutý
+  modul, jeho začátek ani existující nastavení převod nemění. Firmě, jejíž mzdy
+  skončily víc než rok před koncem převáděných dat, se modul nezapíná.
+
+**Zaměstnanci se nepřevádějí.** Novější verze Money vedou osoby a mzdy
+jednotlivých zaměstnanců v šifrované databázi agendy, kterou převod přečíst
+nemůže. Starší čitelné tabulky mzdového modulu v záloze (u agend vedených dlouho
+končí typicky rokem 2020) převod také nepřebírá: historie osob se nepřevádí.
+Aktuální zaměstnance převezměte importem přijatých podání JMHZ a registrací
+v Mzdy → Importy, viz [§ 90.9.1](90_Nastaveni_mezd.md#9091-jmhz-registrace-a-mesicni-hlaseni).
+
 **Zaúčtování se nepřepočítává.** Deník je přesná kopie toho, co bylo v Money,
 a doklady se k němu jen připojí. Z dokladu je proto vidět jeho zápis a naopak,
 detail faktury ukazuje úhradu jako zaúčtovanou a automatika už doklad znovu
@@ -150,8 +186,9 @@ bankovních účtech nebo ve dvou pokladnách.
 
 - **Přílohy a elektronický archiv.** Money je drží v šifrovaných souborech,
   které ze zálohy číst nejde. Skeny dokladů se připojují zvlášť.
-- **Mzdy a sklad.** Jejich zápisy jsou v převedeném deníku, evidence
-  (zaměstnanci, zásoby) se zakládá v MyÚčtu.
+- **Zaměstnanci, mzdy osob a sklad.** Zápisy mezd a zásob jsou v převedeném
+  deníku; zaměstnance převezmete z podání JMHZ (viz 103.2.2), zásoby se zakládají
+  v MyÚčtu.
 - **Interní doklady, kniha pohledávek a závazků.** V deníku jsou jako ruční
   zápisy s původním číslem dokladu, samostatný doklad z nich nevzniká.
 - **Číselné řady a řádky DPH pokladních dokladů.** Podaná přiznání k DPH za

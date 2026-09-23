@@ -136,10 +136,14 @@ potvrďte.
 
 ### 109.2.1 Zaměstnanci a mzdy
 
-Mzdy převod přenese jen firmě, která má zapnutý modul Mzdy a v Mzdy →
-Nastavení nastavenou výchozí mzdovou účtárnu. Bez toho převede účetnictví,
-mzdy přeskočí a protokol to řekne; po nastavení mezd převod roku zopakujte
-a mzdy se doplní.
+Firmě, která mzdy v MyÚčtu ještě nemá, převod modul Mzdy zapne. Začátek
+vedení mezd v MyÚčtu nastaví na měsíc po poslední mzdě zpracované v PREMIERu
+a chybí-li nastavení zaměstnavatele, založí ho s mzdovou účtárnou `MZDY`
+a výchozími předkontacemi. Variabilní symbol ČSSZ, kód OSSZ a účty institucí
+převod nevymýšlí, protokol je vypíše k doplnění v Mzdy → Nastavení. Zapnutý
+modul, jeho začátek ani existující nastavení převod nemění. Když modul zapnout
+nejde (licence bez mzdového doplňku), převede účetnictví, mzdy přeskočí
+a protokol to řekne; po zakoupení doplňku převod roku zopakujte a mzdy se doplní.
 
 - **Zaměstnanci.** Každý pracovní vztah z PREMIERu se založí jako osoba
   a pracovní vztah s osobním číslem z PREMIERu: jméno, rodné číslo, datum
@@ -180,9 +184,9 @@ a mzdy se doplní.
 - **Počáteční stavy ročních kumulací.** Za měsíce roku, ve kterém začíná
   vedení mezd v MyÚčtu, před jeho prvním měsícem převod zapíše počáteční
   stavy kumulací (roční zúčtování daně a potvrzení o zdanitelných příjmech
-  na ně navážou). Začátek vedení mezd nastavte v Mzdy → Nastavení ještě před
-  převodem posledního roku; když chybí, protokol navrhne měsíc po poslední
-  mzdě z PREMIERu.
+  na ně navážou). Začátek vedení mezd, který firma nemá, nastaví převod na
+  měsíc po poslední mzdě z PREMIERu; jiný začátek nastavte v Mzdy → Nastavení
+  ještě před převodem posledního roku.
 
 Zkontrolujte po převodu:
 
