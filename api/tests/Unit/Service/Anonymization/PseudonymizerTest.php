@@ -148,6 +148,16 @@ final class PseudonymizerTest extends TestCase
         self::assertNotSame('1AB 2345', $plate);
     }
 
+    public function testShapeSurvivesTinyValueSpaceAndPunctuation(): void
+    {
+        $p = new Pseudonymizer(self::SECRET);
+        self::assertSame('-', $p->shape('-'));
+        for ($i = 0; $i < 10; $i++) {
+            self::assertNotSame((string) $i, $p->shape((string) $i));
+        }
+        self::assertMatchesRegularExpression('/^\d$/', $p->shape('0'));
+    }
+
     public function testFileNamesKeepExtensionAndMachineSegments(): void
     {
         $p = new Pseudonymizer(self::SECRET);

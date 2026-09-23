@@ -77,8 +77,12 @@ final class Pseudonymizer
     public function partyName(string $value): string
     {
         $value = trim($value);
-        if ($value === '' || !self::hasLetters($value)) {
+        if ($value === '') {
             return $value;
+        }
+        if (!self::hasLetters($value)) {
+            // Místo názvu jen číslo (terminál, číslo smlouvy) — i to identifikuje.
+            return $this->shape($value);
         }
         [$core, $separator, $suffix] = self::splitLegalForm($value);
         if ($suffix === '' && self::looksLikePersonName($core)) {
@@ -642,7 +646,7 @@ final class Pseudonymizer
     public function shape(string $value): string
     {
         $trimmed = trim($value);
-        if ($trimmed === '') {
+        if ($trimmed === '' || preg_match('/[\p{L}\p{N}]/u', $trimmed) !== 1) {
             return $trimmed;
         }
         $pseudo = $this->unique('shape', $trimmed, fn (int $attempt): string => $this->shapeWith('shape', $trimmed, $attempt));
@@ -876,7 +880,14 @@ final class Pseudonymizer
 
             return $candidate;
         }
-        throw new \RuntimeException("Pro druh {$kind} se nepodařilo najít volný pseudonym.");
+        // Malý prostor hodnot (jednociferný kód): prostost se vzdá, jen ne za cenu originálu.
+        for ($attempt = 1000; $attempt < 1100; $attempt++) {
+            $candidate = $generate($attempt);
+            if ($candidate !== $key) {
+                return $this->maps[$kind][$key] = $candidate;
+            }
+        }
+        throw new \RuntimeException("Pro druh {$kind} se nepodařilo najít pseudonym.");
     }
 
     private function shapeWith(string $kind, string $value, int $attempt, bool $digitsOnly = false): string

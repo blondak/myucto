@@ -102,6 +102,17 @@ final class TextScrubberTest extends TestCase
         self::assertSame($json, $this->scrubber->scrubJson($json));
     }
 
+    public function testDictionaryIgnoresCaseDiacriticsAndSeparatorsButNotCommonWords(): void
+    {
+        $dictionary = new ReplacementDictionary();
+        $dictionary->add('Zkušební Obchod s.r.o.', 'Alfa Servis s.r.o.');
+        $dictionary->add('Nový', 'Tichý');
+
+        self::assertSame('Platba Alfa Servis s.r.o.', $dictionary->apply('Platba Zkusebni obchod, s. r. o.'));
+        self::assertSame('ALFA SERVIS S.R.O.', $dictionary->apply('ZKUŠEBNÍ OBCHOD S.R.O.'));
+        self::assertSame('Tichý: nový rok', $dictionary->apply('Nový: nový rok'));
+    }
+
     public function testDictionaryHandlesNumericPhrases(): void
     {
         $dictionary = new ReplacementDictionary();

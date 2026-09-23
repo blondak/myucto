@@ -215,17 +215,23 @@ final class AnonymizationService
 
         $changedRows = 0;
         $last = null;
-        $offset = 0;
         $statements = [];
+        // Složený nebo textový primární klíč se pseudonymizací může měnit (mapy převodů
+        // klíčované kódem z cizího programu) — stránkování přes ORDER BY … OFFSET by pak
+        // řádky přeskakovalo nebo bralo dvakrát. Takové tabulky se načtou naráz.
+        $pending = $keyset ? null : array_chunk(
+            $pdo->query("SELECT {$selectSql} FROM " . DatabaseCloner::quote($table) . " ORDER BY {$order}")->fetchAll(PDO::FETCH_ASSOC),
+            self::PAGE,
+        );
         while (true) {
             if ($keyset) {
                 $sql = "SELECT {$selectSql} FROM " . DatabaseCloner::quote($table)
                     . ($last === null ? '' : ' WHERE ' . $order . ' > ' . (int) $last)
                     . " ORDER BY {$order} LIMIT " . self::PAGE;
+                $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
             } else {
-                $sql = "SELECT {$selectSql} FROM " . DatabaseCloner::quote($table) . " ORDER BY {$order} LIMIT " . self::PAGE . " OFFSET {$offset}";
+                $rows = array_shift($pending) ?? [];
             }
-            $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
             if ($rows === []) {
                 break;
             }
@@ -265,8 +271,7 @@ final class AnonymizationService
                 throw new \RuntimeException("Pseudonymizace tabulky {$table} selhala: " . $e->getMessage(), 0, $e);
             }
             $last = $keyset ? end($rows)[$pkNames[0]] : null;
-            $offset += count($rows);
-            if (count($rows) < self::PAGE) {
+            if ($keyset ? count($rows) < self::PAGE : $pending === []) {
                 break;
             }
         }
