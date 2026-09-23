@@ -103,6 +103,18 @@ final class JmhzScenario1XmlSerializer
         $vendor->setAttribute('productName', $envelope->productName);
         $vendor->setAttribute('productVersion', $envelope->productVersion);
         $root->appendChild($vendor);
+        /*
+         * `SENDER` (XSD ho má nepovinný, i s `ISDSreport`) se u JMHZ záměrně
+         * neposílá, na rozdíl od NEMPRI, HZUPN a OZUSPOJ, kde `ISDSreport="3"`
+         * zajišťuje strojově čitelnou odpověď v datové schránce. U JMHZ to
+         * nic nedokládá: pokyny ani pravidla podání JMHZ atribut nezmiňují,
+         * vzorový soubor MPSV ho má jen se zástupnými hodnotami a dílčí
+         * protokol ČSSZ chodí do schránky jako XML (JMH-DILCI-PROTOKOL-…),
+         * který zpracování čte podle obsahu. Přidat ho by změnilo zmrazenou
+         * datovou větu bez doloženého přínosu; e-mailovou notifikaci aplikace
+         * u JMHZ nesbírá. Změnit se to má, až ČSSZ pro JMHZ doloží, že bez
+         * `ISDSreport` odpověď strojově čitelná není.
+         */
         $root->appendChild($this->header($dom, $payload, $envelope, $people));
         $root->appendChild($this->summary($dom, $payload));
         $root->appendChild($this->pvpoj($dom, $payload));
