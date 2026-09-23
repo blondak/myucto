@@ -19,14 +19,14 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * Profil firmy — export a nahrání ručně vybudovaného nastavení (Nastavení → Profil firmy,
+ * Profil firmy: export a nahrání ručně vybudovaného nastavení (Nastavení → Profil firmy,
  * průvodci převodu z jiného programu).
  *
  *   GET  /api/settings/company-profile          stáhne profil (sekce, které uživatel smí číst)
  *   POST /api/settings/company-profile/import   {profile, dry_run = true, sections?}
  *
  * Nahrání vyžaduje zápisové oprávnění každé sekce, kterou profil nese; bez něj se
- * nenahraje nic. Výchozí je zkouška nanečisto — ostré nahrání musí klient vyžádat.
+ * nenahraje nic. Výchozí je zkouška nanečisto, ostré nahrání musí klient vyžádat.
  */
 final class CompanyProfileAction
 {

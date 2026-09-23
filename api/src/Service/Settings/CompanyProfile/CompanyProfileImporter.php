@@ -98,7 +98,7 @@ final class CompanyProfileImporter
         }
         $profileIc = trim((string) ($profile['company']['ic'] ?? ''));
         if ($profileIc !== '' && $profileIc !== trim((string) $ic)) {
-            $warnings[] = sprintf('Profil je z firmy s IČO %s, nahrává se do firmy s IČO %s.', $profileIc, trim((string) $ic) ?: '—');
+            $warnings[] = sprintf('Profil je z firmy s IČO %s, nahrává se do firmy s IČO %s.', $profileIc, trim((string) $ic) ?: '(bez IČO)');
         }
 
         $this->report = [];
@@ -393,7 +393,7 @@ final class CompanyProfileImporter
             $version = $find->fetch(PDO::FETCH_ASSOC);
             if ($version === false) {
                 throw new CompanyProfileException('statement_version_missing', sprintf(
-                    'Verze výkazu %s „%s" v této instalaci není — aktualizujte aplikaci a spusťte migrace.',
+                    'Verze výkazu %s „%s" v této instalaci není, aktualizujte aplikaci a spusťte migrace.',
                     $type,
                     $code,
                 ));
@@ -503,7 +503,7 @@ final class CompanyProfileImporter
                 $typeId = (int) $typeId;
                 $type = (array) $this->dimensionRepo->findType($supplierId, $typeId);
                 if (($t['kind'] ?? $type['kind']) !== $type['kind']) {
-                    $this->warn($section, sprintf('Typ %s má ve firmě druh %s, v profilu %s — druh se nemění.', $code, $type['kind'], (string) $t['kind']));
+                    $this->warn($section, sprintf('Typ %s má ve firmě druh %s, v profilu %s, druh se nemění.', $code, $type['kind'], (string) $t['kind']));
                 }
                 $changes = [];
                 foreach ($wanted as $field => $value) {
@@ -586,7 +586,7 @@ final class CompanyProfileImporter
             $current = $this->dimensionRepo->findValue($supplierId, $ids[$code]);
             if ($current !== null && ($current['parent_id'] ?? null) !== $parentId) {
                 $this->dimensions->updateValue($supplierId, $ids[$code], ['parent_id' => $parentId]);
-                $this->changed($section, 'updated', sprintf('hodnota %s/%s: nadřízená %s', $typeCode, $code, $parentCode === '' ? '—' : $parentCode));
+                $this->changed($section, 'updated', sprintf('hodnota %s/%s: nadřízená %s', $typeCode, $code, $parentCode === '' ? '(žádná)' : $parentCode));
             }
         }
     }
@@ -777,7 +777,7 @@ final class CompanyProfileImporter
                     'INSERT INTO posting_rules (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active)
                      VALUES (?, ?, ?, ?, ?, ?, ?)'
                 )->execute([$supplierId, $key, $description, $debit, $credit, $priority, $active]);
-                $this->changed($section, 'created', sprintf('%s (%s/%s)', $key, $debit ?? '—', $credit ?? '—'));
+                $this->changed($section, 'created', sprintf('%s (%s/%s)', $key, $debit ?? '-', $credit ?? '-'));
                 continue;
             }
             if ((string) $current['description'] === $description && $current['debit_account_code'] === $debit
@@ -789,7 +789,7 @@ final class CompanyProfileImporter
                 'UPDATE posting_rules SET description = ?, debit_account_code = ?, credit_account_code = ?, is_active = ?
                   WHERE id = ? AND supplier_id = ?'
             )->execute([$description, $debit, $credit, $active, (int) $current['id'], $supplierId]);
-            $this->changed($section, 'updated', sprintf('%s (%s/%s%s)', $key, $debit ?? '—', $credit ?? '—', $active === 1 ? '' : ', vypnutá'));
+            $this->changed($section, 'updated', sprintf('%s (%s/%s%s)', $key, $debit ?? '-', $credit ?? '-', $active === 1 ? '' : ', vypnutá'));
         }
     }
 
@@ -976,7 +976,7 @@ final class CompanyProfileImporter
 
     private static function show(mixed $value): string
     {
-        return $value === null ? '—' : (is_bool($value) ? ($value ? '1' : '0') : (string) $value);
+        return $value === null ? '(prázdné)' : (is_bool($value) ? ($value ? '1' : '0') : (string) $value);
     }
 
     private function changed(string $section, string $kind, string $line): void

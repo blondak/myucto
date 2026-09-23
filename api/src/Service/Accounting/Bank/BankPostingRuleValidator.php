@@ -23,7 +23,7 @@ final class BankPostingRuleValidator
     public function __construct(private readonly ChartOfAccountsRepository $accounts) {}
 
     /**
-     * Nové pravidlo. `mode` je vždy 'suggest' (R7, H4e) — automatiku zapíná jen
+     * Nové pravidlo. `mode` je vždy 'suggest' (R7, H4e); automatiku zapíná jen
      * auditovaný krok povýšení.
      *
      * @param array<string,mixed> $body

@@ -24,7 +24,7 @@ use PHPUnit\Framework\TestCase;
  * Profil firmy přežije nový převod: firma A má ručně vybudované nastavení (výjimky
  * mapování s platností po letech, sloupec minulého období z uzavřeného výkazu,
  * souhrnné vykázání daní vůči FÚ, dimenze, předkontace, pravidlo banky), firma B má
- * stejné účetnictví bez nastavení — tak vypadá firma po smazání a novém převodu.
+ * stejné účetnictví bez nastavení, tak vypadá firma po smazání a novém převodu.
  * Po nahrání profilu A do B musí výkazy obou firem vyjít stejně.
  */
 #[Group('integration')]
@@ -57,7 +57,7 @@ final class CompanyProfileRoundTripTest extends TestCase
     {
         $rootDir = dirname(__DIR__, 4);
         if (!is_file($rootDir . '/cfg.php')) {
-            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
+            $this->markTestSkipped('cfg.php neexistuje, test vyžaduje DB.');
         }
         try {
             $c = Bootstrap::buildApp()->getContainer();

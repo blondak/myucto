@@ -9,7 +9,7 @@ namespace MyInvoice\Service\Settings\CompanyProfile;
  * nezaloží a smazání či nový převod firmy by ho ztratily.
  *
  * Profil je JSON s verzí formátu a sekcemi. Všechny odkazy jsou přirozené klíče (kód
- * účtu, kód dimenze, IČO klienta, kód verze výkazu), nikdy id z databáze — profil tak
+ * účtu, kód dimenze, IČO klienta, kód verze výkazu), nikdy id z databáze, profil tak
  * jde nahrát do znovu založené firmy i do jiné instalace.
  *
  *   {
@@ -23,7 +23,7 @@ namespace MyInvoice\Service\Settings\CompanyProfile;
  *
  * Sekce a jejich sémantika při nahrání:
  *   - company, tax_profile, accounting_settings: přepíšou se jen uvedené volby,
- *   - statement_overrides: výjimky mapování — celá sada každé uvedené verze výkazu
+ *   - statement_overrides: výjimky mapování: celá sada každé uvedené verze výkazu
  *     se nahradí sadou z profilu (jako „Uložit" v editoru výjimek),
  *   - dimensions, dimension_defaults, posting_rules, bank_rule_templates,
  *     bank_posting_rules: doplní chybějící a upraví existující položky podle klíče;

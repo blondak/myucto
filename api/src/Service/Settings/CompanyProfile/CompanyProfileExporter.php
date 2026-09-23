@@ -156,7 +156,7 @@ final class CompanyProfileExporter
     }
 
     /**
-     * Firemní typy dimenzí s hodnotami. Globální typy patří skupině firem, ne firmě —
+     * Firemní typy dimenzí s hodnotami. Globální typy patří skupině firem, ne firmě:
      * smazání firmy je nezasáhne, proto v profilu nejsou.
      *
      * @return array{types: list<array<string,mixed>>}

@@ -14,7 +14,7 @@ declare(strict_types=1);
  *   php api/bin/company-profile.php --ico=12345678|--supplier-id=<id> --import --file=profil.json [--dry-run] [--sections=a,b] [--json]
  *
  * Typický opakovaný převod: export před smazáním firmy, převod, nahrání profilu.
- * Nahrání je idempotentní — opakované spuštění se stejným souborem nic nezmění.
+ * Nahrání je idempotentní: opakované spuštění se stejným souborem nic nezmění.
  *
  * Sekce: company, tax_profile, accounting_settings, statement_overrides, dimensions,
  * dimension_defaults, posting_rules, bank_rule_templates, bank_posting_rules.
@@ -73,7 +73,7 @@ if (isset($opts['supplier-id'])) {
 }
 $suppliers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 if (count($suppliers) !== 1) {
-    cpFail(count($suppliers) === 0 ? 'Firma nenalezena.' : 'IČO odpovídá víc firmám — použijte --supplier-id=<id>.');
+    cpFail(count($suppliers) === 0 ? 'Firma nenalezena.' : 'IČO odpovídá víc firmám, použijte --supplier-id=<id>.');
 }
 $supplierId = (int) $suppliers[0]['id'];
 $companyName = (string) $suppliers[0]['company_name'];
