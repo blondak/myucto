@@ -48,6 +48,31 @@ final class DppoReturnCalculator
      */
     public const KIND_FLAT_RATE_TRAVEL = 'flat_rate_travel';
 
+    /** Řádky, na které lze ruční zvyšující položku zařadit (`line`); bez něj ř. 62. */
+    public const INCREASE_ITEM_LINES = [20, 30, 40, 61, 62];
+
+    /** Řádky, na které lze ruční snižující položku zařadit (`line`); bez něj ř. 162. */
+    public const DECREASE_ITEM_LINES = [100, 101, 109, 110, 111, 112, 120, 130, 140, 160, 161, 162];
+
+    /** Řádky, jejichž částku pokyny k tiskopisu chtějí rozvést na zvláštní příloze (VetaR). */
+    public const ITEM_LINES_WITH_APPENDIX = [20, 30, 109, 110, 111, 112, 140];
+
+    /** Popisky řádků, které nesou jen ruční položky s explicitním řádkem. */
+    private const ITEM_LINE_LABELS = [
+        20 => 'Částky neoprávněně zkracující příjmy a nepeněžní příjmy (§23/3/a/1)',
+        30 => 'Částky zvyšující výsledek hospodaření podle §23/3/a (mimo ř. 20 a 40)',
+        61 => 'Úprava výsledku hospodaření při vstupu do likvidace (zvýšení)',
+        100 => 'Příjmy, které nejsou předmětem daně (§18/2)',
+        101 => 'Příjmy veřejně prospěšného poplatníka, které nejsou předmětem daně (§18a/1)',
+        109 => 'Příjmy osvobozené od daně (§19b)',
+        110 => 'Příjmy osvobozené od daně (§19)',
+        111 => 'Částky snižující výsledek hospodaření podle §23/3/b',
+        120 => 'Příjmy zdaňované zvláštní sazbou daně vybírané srážkou (§36)',
+        130 => 'Příjmy zdaňované v samostatném základu daně (§21/4)',
+        140 => 'Částky nezahrnované do základu daně (§23/4)',
+        161 => 'Úprava výsledku hospodaření při vstupu do likvidace (snížení)',
+    ];
+
     /**
      * @param array<string,mixed> $data   podklady z DppoReturnDataProvider
      * @param array<string,mixed> $inputs ruční vstupy (income_tax_returns.inputs)
@@ -148,11 +173,15 @@ final class DppoReturnCalculator
         // paušál sám podle pokynů GFŘ patří na ř. 162, podání na ř. 112 s textovou
         // přílohou je ale přijímaná praxe a základ daně (ř. 170/200) je identický.
         // Jinak stejné částky, jen jiné řádky (kosmetika, součty výše beze změny).
-        $line40Reported = round($line40 + $flatRateTravelAddback, 2);
-        $line62Reported = round($manualIncrease - $flatRateTravelAddback, 2);
-        $line160Reported = $disposalDecrease;
-        $line162Reported = round($manualDecrease - $flatRateTravelDeduction, 2);
-        $line112Reported = $flatRateTravelDeduction;
+        // Položky s explicitním řádkem (`line`, typicky převzaté z podaného přiznání) se
+        // vykážou na svém řádku místo obecného ř. 62/162; součty ř. 70/170/200 se nemění.
+        $increaseByLine = $this->itemsByLine($inputs['manual_increase_items'] ?? [], self::INCREASE_ITEM_LINES, 62);
+        $decreaseByLine = $this->itemsByLine($inputs['manual_decrease_items'] ?? [], self::DECREASE_ITEM_LINES, 162);
+        $line40Reported = round($line40 + $flatRateTravelAddback + ($increaseByLine[40] ?? 0.0), 2);
+        $line62Reported = round($manualIncrease - $flatRateTravelAddback - array_sum($increaseByLine), 2);
+        $line160Reported = round($disposalDecrease + ($decreaseByLine[160] ?? 0.0), 2);
+        $line162Reported = round($manualDecrease - $flatRateTravelDeduction - array_sum($decreaseByLine), 2);
+        $line112Reported = round($flatRateTravelDeduction + ($decreaseByLine[112] ?? 0.0), 2);
         $line170Reported = round($depDecrease + $manualDecrease + $disposalDecrease, 2);
 
         // Položky, které o dopravě mluví, ale za paušál označené nejsou. Systém je zařadit
@@ -302,18 +331,32 @@ final class DppoReturnCalculator
         // dvakrát: „Řádek 70 II. oddílu není naplněn" a „Hodnota ř.200 se nerovná
         // správné (ř.10+70-170)". Číslo bylo správné, chyběl součtový řádek, na
         // kterém stojí křížová kontrola příjemce.
-        $line70Reported = round($line40Reported + $depIncrease + $line62Reported, 2);
+        $line70Reported = round($line40Reported + $depIncrease + $line62Reported
+            + ($increaseByLine[20] ?? 0.0) + ($increaseByLine[30] ?? 0.0) + ($increaseByLine[61] ?? 0.0), 2);
+        $itemLine = fn (int $n, array $byLine): array => $this->line($n, (string) $n, self::ITEM_LINE_LABELS[$n], $byLine[$n] ?? 0.0, 'ruční vstup s řádkem přiznání');
 
         $lines = [
             $this->line(10, '10', 'Výsledek hospodaření před zdaněním', $vh, 'deník: Σ 6xx − Σ 5xx (mimo 59x)'),
+            $itemLine(20, $increaseByLine),
+            $itemLine(30, $increaseByLine),
             $this->line(40, '40', 'Výdaje neuznávané za náklady (§25)', $line40Reported, 'nedaňové účty + účetní ZC vyřazení převyšující daňovou'
                 . ($flatRateTravelAddback > 0 ? ' + add-back PHM při paušálu na dopravu (§24/2/zt)' : '')),
             $this->line(50, '50', 'Účetní odpisy převyšující daňové', $depIncrease, 'rozdíl odpisů (zvýšení)'),
+            $itemLine(61, $increaseByLine),
             $this->line(62, '62', 'Ostatní částky zvyšující základ (§23)', $line62Reported, 'ruční vstupy (mimo paušál dopravy)'),
             $this->line(70, '70', 'Souhrn částek zvyšujících výsledek hospodaření', $line70Reported, 'mezisoučet ř. 20–62 (ř.40 + ř.50 + ř.62)'),
+            $itemLine(100, $decreaseByLine),
+            $itemLine(101, $decreaseByLine),
+            $itemLine(109, $decreaseByLine),
+            $itemLine(110, $decreaseByLine),
+            $itemLine(111, $decreaseByLine),
             $this->line(112, '112', 'Doplňková informace (§23/3 písm. c) — např. paušální výdaj na dopravu', $line112Reported, 'ruční položka rozpoznaná dle textu (§24/2/zt paušál dopravy)'),
+            $itemLine(120, $decreaseByLine),
+            $itemLine(130, $decreaseByLine),
+            $itemLine(140, $decreaseByLine),
             $this->line(150, '150', 'Daňové odpisy převyšující účetní', $depDecrease, 'rozdíl odpisů (snížení)'),
             $this->line(160, '160', 'Daňové výdaje převyšující účetní náklady (§24)', $line160Reported, 'daňová ZC vyřazeného majetku převyšující účetní'),
+            $itemLine(161, $decreaseByLine),
             $this->line(162, '162', 'Ostatní částky snižující základ (§23)', $line162Reported, 'ruční vstupy (mimo paušál dopravy)'),
             $this->line(170, '170', 'Souhrn částek snižujících výsledek hospodaření', $line170Reported, 'mezisoučet ř. 101–165 (ř.150 odpisy + ř.160 ZC vyřazení + ř.162 ostatní §23 + ř.112 paušál dopravy)'),
             $this->line(200, '200', 'Základ daně', $base, 'mezisoučet'),
@@ -329,6 +372,10 @@ final class DppoReturnCalculator
             $this->line(340, '340', 'Celková daňová povinnost', $totalTax, 'výsledná daň'),
             $this->line(360, '360', 'Poslední známá daň pro stanovení záloh (§38a)', $totalTax, 'ř. 340'),
         ];
+        // Řádky ručních položek s explicitním řádkem jen, když na nich něco je - přiznání
+        // bez takových položek má výpis řádků beze změny.
+        $lines = array_values(array_filter($lines, fn (array $l): bool
+            => !isset(self::ITEM_LINE_LABELS[$l['line']]) || $l['value'] !== 0.0));
 
         return [
             'lines' => $lines,
@@ -345,6 +392,7 @@ final class DppoReturnCalculator
             'legal_provisions' => (array) ($data['legal_provisions'] ?? LegalProvisionLedgerService::empty()),
             'bank_account' => $data['bank_account'] ?? null,
             'manual_increase_items_line62' => $line62Items,
+            'manual_items_line_appendix' => $this->lineAppendixItems($inputs),
             'line160_appendix' => $this->line160Appendix($data['disposal_decrease_groups'] ?? null, $line160Reported),
             'summary' => [
                 'rate' => $rate,
@@ -530,7 +578,8 @@ final class DppoReturnCalculator
         }
         $out = [];
         foreach ($items as $item) {
-            if (!is_array($item) || $this->isFlatRateTravelItem($item)) {
+            if (!is_array($item) || $this->isFlatRateTravelItem($item)
+                || $this->explicitLine($item, self::INCREASE_ITEM_LINES, 62) !== null) {
                 continue;
             }
             $amount = round((float) ($item['amount'] ?? 0), 2);
@@ -539,6 +588,79 @@ final class DppoReturnCalculator
                 continue;
             }
             $out[] = ['text' => $text, 'amount' => $amount];
+        }
+        return $out;
+    }
+
+    /**
+     * Explicitní řádek ruční položky, pokud je povolený a liší se od obecného řádku.
+     * Paušál na dopravu má vlastní zařazení (ř. 40/112) a řádek u něj nerozhoduje.
+     *
+     * @param array<string,mixed> $item
+     * @param list<int> $allowed
+     */
+    private function explicitLine(array $item, array $allowed, int $default): ?int
+    {
+        $line = $item['line'] ?? null;
+        if (!is_numeric($line) || $this->isFlatRateTravelItem($item)) {
+            return null;
+        }
+        $line = (int) $line;
+        return in_array($line, $allowed, true) && $line !== $default ? $line : null;
+    }
+
+    /**
+     * Součty ručních položek s explicitním řádkem (mimo obecný ř. 62/162).
+     *
+     * @param list<int> $allowed
+     * @return array<int,float>
+     */
+    private function itemsByLine(mixed $items, array $allowed, int $default): array
+    {
+        if (!is_array($items)) {
+            return [];
+        }
+        $out = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $line = $this->explicitLine($item, $allowed, $default);
+            if ($line !== null) {
+                $out[$line] = round(($out[$line] ?? 0.0) + (float) ($item['amount'] ?? 0), 2);
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Ruční položky na řádcích, které pokyny chtějí rozvést na zvláštní příloze
+     * ({@see ITEM_LINES_WITH_APPENDIX}), pro VetaR: řádek, text a částka.
+     *
+     * @param array<string,mixed> $inputs
+     * @return list<array{line:int,text:string,amount:float}>
+     */
+    private function lineAppendixItems(array $inputs): array
+    {
+        $out = [];
+        $groups = [
+            [$inputs['manual_increase_items'] ?? [], self::INCREASE_ITEM_LINES, 62],
+            [$inputs['manual_decrease_items'] ?? [], self::DECREASE_ITEM_LINES, 162],
+        ];
+        foreach ($groups as [$items, $allowed, $default]) {
+            if (!is_array($items)) {
+                continue;
+            }
+            foreach ($items as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                $line = $this->explicitLine($item, $allowed, $default);
+                $amount = round((float) ($item['amount'] ?? 0), 2);
+                if ($line !== null && in_array($line, self::ITEM_LINES_WITH_APPENDIX, true) && $amount > 0.0) {
+                    $out[] = ['line' => $line, 'text' => trim((string) ($item['text'] ?? '')), 'amount' => $amount];
+                }
+            }
         }
         return $out;
     }

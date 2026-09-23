@@ -35,13 +35,28 @@ final class DppoXmlBuilder
      */
     public const LINE_ATTR = [
         10 => 'kc_ii10_10',
+        // Ř. 20, 30, 61, 100-140 a 161 nesou jen ruční položky zařazené na konkrétní
+        // řádek (DppoReturnCalculator::INCREASE_ITEM_LINES/DECREASE_ITEM_LINES), typicky
+        // převzaté z podaného přiznání. Bez nich by se v podání slily do ř. 62/162.
+        20 => 'kc_ii30_20',
+        30 => 'kc_ii40_30',
         40 => 'kc_ii50_40',
         50 => 'kc_ii60_50',
+        61 => 'kc_ii71_61',
         62 => 'kc_ii72_62',
         70 => 'kc_ii80_70',
+        100 => 'kc_ii110_100',
+        101 => 'kc_ii111_101',
+        109 => 'kc_ii_109',
+        110 => 'kc_ii120_110',
+        111 => 'kc_ii_111',
         112 => 'kc_ii_112',
+        120 => 'kc_ii130_120',
+        130 => 'kc_ii140_130',
+        140 => 'kc_ii150_140',
         150 => 'kc_ii170_150',
         160 => 'kc_ii180_160',
+        161 => 'kc_ii181_161',
         162 => 'kc_ii182_162',
         170 => 'kc_ii190_170',
         200 => 'kc_ii200_200',
@@ -1622,6 +1637,23 @@ final class DppoXmlBuilder
             $vetaR->setAttribute('c_radku', '62');
             $vetaR->setAttribute('t_prilohy', mb_substr($label, 0, 72)); // XSD maxLength 72
             $vetaR->setAttribute('kod_sekce', '2'); // 2 = II. oddíl (XSD dokumentace)
+            $vetaR->setAttribute('poradi', (string) $poradi);
+            $elements[] = $vetaR;
+            $poradi++;
+        }
+
+        // Ruční položky zařazené na řádek, jehož částku pokyny chtějí rozvést na zvláštní
+        // příloze (ř. 20, 30, 109-112, 140): jeden řádek přílohy na položku.
+        foreach ((array) ($calc['manual_items_line_appendix'] ?? []) as $item) {
+            if (!is_array($item) || (float) ($item['amount'] ?? 0) <= 0.0) {
+                continue;
+            }
+            $text = trim((string) ($item['text'] ?? ''));
+            $amount = number_format((float) $item['amount'], 0, ',', ' ') . ' Kč';
+            $vetaR = $dom->createElement('VetaR');
+            $vetaR->setAttribute('c_radku', (string) (int) $item['line']);
+            $vetaR->setAttribute('t_prilohy', mb_substr($text !== '' ? $text . ' (' . $amount . ')' : $amount, 0, 72));
+            $vetaR->setAttribute('kod_sekce', '2');
             $vetaR->setAttribute('poradi', (string) $poradi);
             $elements[] = $vetaR;
             $poradi++;

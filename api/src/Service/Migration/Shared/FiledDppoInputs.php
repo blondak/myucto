@@ -16,11 +16,14 @@ use MyInvoice\Service\Tax\Return\DppoReturnCalculator;
  * zadala do přiznání ručně. Ty se převezmou jako ruční položky přiznání:
  *
  * - zvyšující: ř. 20, 30, 61, 62 a část ř. 40, kterou výpočet z účetnictví nepokryje;
- * - snižující: ř. 100-162 kromě ř. 150, z ř. 160 jen část nad rozdíl ZC z karet majetku; ř. 112 je u zdroje, který ho používá pro
- *   paušální výdaj na dopravu (§ 24 odst. 2 písm. zt), paušálem i s odpovídajícím
- *   vrácením PHM na ř. 40;
+ * - snižující: ř. 100-162 kromě ř. 150, z ř. 160 jen část nad rozdíl ZC z karet majetku;
+ *   ř. 112 je u zdroje, který ho používá pro paušální výdaj na dopravu (§ 24 odst. 2
+ *   písm. zt), paušálem i s odpovídajícím vrácením PHM na ř. 40;
  * - odečet ztráty (ř. 230), odečty § 34 odst. 4 (ř. 242, 243), dary (ř. 260)
  *   a zaplacené zálohy.
+ *
+ * Každá položka nese řádek podání (`line`), takže ji přiznání vykáže na stejném řádku
+ * jako podání, ne na obecném ř. 62/162.
  *
  * Třída je čistá (bez DB): částky spočtené z účetnictví dodává volající.
  */
@@ -46,8 +49,8 @@ final class FiledDppoInputs
      * @param float $advancesPaid zaplacené zálohy na daň
      * @return array{
      *   inputs: array<string,mixed>,
-     *   increase: list<array{text:string,amount:float,kind?:string}>,
-     *   decrease: list<array{text:string,amount:float,kind?:string}>,
+     *   increase: list<array{text:string,amount:float,kind?:string,line:int}>,
+     *   decrease: list<array{text:string,amount:float,kind?:string,line:int}>,
      *   shortfalls: array<int,array{computed:float,filed:float}>,
      * }
      */
@@ -59,7 +62,7 @@ final class FiledDppoInputs
         foreach (self::INCREASE_LINES as $line) {
             $amount = round((float) ($filed[$line] ?? 0), 2);
             if ($amount > 0.0) {
-                $increase[] = ['text' => sprintf($texts['line'], (string) $line), 'amount' => $amount];
+                $increase[] = ['text' => sprintf($texts['line'], (string) $line), 'amount' => $amount, 'line' => $line];
             }
         }
         $shortfalls = [];
@@ -70,6 +73,7 @@ final class FiledDppoInputs
             if ($travel) {
                 $item['kind'] = DppoReturnCalculator::KIND_FLAT_RATE_TRAVEL;
             }
+            $item['line'] = 40;
             $increase[] = $item;
         } elseif ($line40 < 0.0) {
             $shortfalls[40] = ['computed' => $computed40, 'filed' => (float) ($filed[40] ?? 0)];
@@ -94,6 +98,7 @@ final class FiledDppoInputs
             if ($isTravel) {
                 $item['kind'] = DppoReturnCalculator::KIND_FLAT_RATE_TRAVEL;
             }
+            $item['line'] = $line;
             $decrease[] = $item;
         }
         $inputs = [];

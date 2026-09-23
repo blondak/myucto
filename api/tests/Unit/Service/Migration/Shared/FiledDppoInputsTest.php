@@ -30,13 +30,13 @@ final class FiledDppoInputsTest extends TestCase
 
         self::assertSame([
             'manual_increase_items' => [
-                ['text' => 'Z podání (ř. 30)', 'amount' => 1200.0],
-                ['text' => 'Z podání (ř. 62)', 'amount' => 800.0],
-                ['text' => 'Nedaňové z podání (ř. 40)', 'amount' => 2500.0],
+                ['text' => 'Z podání (ř. 30)', 'amount' => 1200.0, 'line' => 30],
+                ['text' => 'Z podání (ř. 62)', 'amount' => 800.0, 'line' => 62],
+                ['text' => 'Nedaňové z podání (ř. 40)', 'amount' => 2500.0, 'line' => 40],
             ],
             'manual_decrease_items' => [
-                ['text' => 'Z podání (ř. 110)', 'amount' => 20000.0],
-                ['text' => 'Z podání (ř. 162)', 'amount' => 150.0],
+                ['text' => 'Z podání (ř. 110)', 'amount' => 20000.0, 'line' => 110],
+                ['text' => 'Z podání (ř. 162)', 'amount' => 150.0, 'line' => 162],
             ],
             'loss_carryforward' => 90000.0,
             'tax_paid_advances' => 12000.0,
@@ -49,12 +49,12 @@ final class FiledDppoInputsTest extends TestCase
     public function testLine112IsGenericUnlessTheSourceUsesItForTravel(): void
     {
         $generic = FiledDppoInputs::build([40 => 100.0, 112 => 700.0], [], false, self::TEXTS);
-        self::assertSame([['text' => 'Z podání (ř. 112)', 'amount' => 700.0]], $generic['inputs']['manual_decrease_items']);
-        self::assertSame([['text' => 'Nedaňové z podání (ř. 40)', 'amount' => 100.0]], $generic['inputs']['manual_increase_items']);
+        self::assertSame([['text' => 'Z podání (ř. 112)', 'amount' => 700.0, 'line' => 112]], $generic['inputs']['manual_decrease_items']);
+        self::assertSame([['text' => 'Nedaňové z podání (ř. 40)', 'amount' => 100.0, 'line' => 40]], $generic['inputs']['manual_increase_items']);
 
         $travel = FiledDppoInputs::build([40 => 100.0, 112 => 700.0], [], true, self::TEXTS);
-        self::assertSame([['text' => 'Paušál na dopravu (ř. 112)', 'amount' => 700.0, 'kind' => 'flat_rate_travel']], $travel['inputs']['manual_decrease_items']);
-        self::assertSame([['text' => 'PHM k paušálu (ř. 40)', 'amount' => 100.0, 'kind' => 'flat_rate_travel']], $travel['inputs']['manual_increase_items']);
+        self::assertSame([['text' => 'Paušál na dopravu (ř. 112)', 'amount' => 700.0, 'kind' => 'flat_rate_travel', 'line' => 112]], $travel['inputs']['manual_decrease_items']);
+        self::assertSame([['text' => 'PHM k paušálu (ř. 40)', 'amount' => 100.0, 'kind' => 'flat_rate_travel', 'line' => 40]], $travel['inputs']['manual_increase_items']);
     }
 
     public function testComputedLine40AboveFiledIsReportedNotImported(): void
@@ -68,7 +68,7 @@ final class FiledDppoInputsTest extends TestCase
     public function testLine160TakesOnlyThePartAboveTheResidualBridgeFromAssetCards(): void
     {
         $built = FiledDppoInputs::build([160 => 1_000.0], [160 => 600.0], false, self::TEXTS);
-        self::assertSame([['text' => 'Z podání (ř. 160)', 'amount' => 400.0]], $built['inputs']['manual_decrease_items'], 'bez odečtu by se rozdíl ZC z karet odečetl dvakrát');
+        self::assertSame([['text' => 'Z podání (ř. 160)', 'amount' => 400.0, 'line' => 160]], $built['inputs']['manual_decrease_items'], 'bez odečtu by se rozdíl ZC z karet odečetl dvakrát');
 
         $missing = FiledDppoInputs::build([], [160 => 600.0], false, self::TEXTS);
         self::assertSame([], $missing['inputs']);
@@ -84,12 +84,12 @@ final class FiledDppoInputsTest extends TestCase
 
         self::assertSame([
             'manual_increase_items' => [
-                ['text' => 'Úprava základu z přiznání v PREMIER (ř. 20)', 'amount' => 10.0],
-                ['text' => 'Vrácení PHM do základu u paušálu na dopravu (ř. 40 z PREMIER)', 'amount' => 500.46, 'kind' => 'flat_rate_travel'],
+                ['text' => 'Úprava základu z přiznání v PREMIER (ř. 20)', 'amount' => 10.0, 'line' => 20],
+                ['text' => 'Vrácení PHM do základu u paušálu na dopravu (ř. 40 z PREMIER)', 'amount' => 500.46, 'kind' => 'flat_rate_travel', 'line' => 40],
             ],
             'manual_decrease_items' => [
-                ['text' => 'Paušální výdaj na dopravu (§ 24 odst. 2 písm. zt), ř. 112 z PREMIER', 'amount' => 45000.0, 'kind' => 'flat_rate_travel'],
-                ['text' => 'Úprava základu z přiznání v PREMIER (ř. 160)', 'amount' => 70.0],
+                ['text' => 'Paušální výdaj na dopravu (§ 24 odst. 2 písm. zt), ř. 112 z PREMIER', 'amount' => 45000.0, 'kind' => 'flat_rate_travel', 'line' => 112],
+                ['text' => 'Úprava základu z přiznání v PREMIER (ř. 160)', 'amount' => 70.0, 'line' => 160],
             ],
             'loss_carryforward' => 1000.0,
             'tax_paid_advances' => 300.0,

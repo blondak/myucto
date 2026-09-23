@@ -35,6 +35,16 @@ final class DppoReconciliationDiffBuilder
         $maxAbsDiff = 0.0;
         $maxAbsDiffLine = null;
 
+        // Řádek, který náš výpočet nevykazuje (řádky ručních položek s explicitním řádkem
+        // jsou ve výpisu jen nenulové), ale podání ho má, se porovná proti nule.
+        $ours = array_map('intval', array_column($ourLines, 'line'));
+        foreach ($filedLines as $line => $value) {
+            if (!in_array((int) $line, $ours, true) && round((float) $value, 2) !== 0.0) {
+                $ourLines[] = ['line' => (int) $line, 'code' => (string) $line, 'label' => TaxReturnLineCatalog::PO[(int) $line] ?? 'ř. ' . $line, 'value' => 0.0];
+            }
+        }
+        usort($ourLines, static fn (array $a, array $b): int => (int) $a['line'] <=> (int) $b['line']);
+
         foreach ($ourLines as $l) {
             $line = (int) $l['line'];
             $our = round((float) $l['value'], 2);

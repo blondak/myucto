@@ -1734,8 +1734,8 @@ final class TaxReturnService
         $out['notes'] = $this->text($inputs['notes'] ?? '', 2000);
 
         if ($type === 'po') {
-            $out['manual_increase_items'] = $this->items($inputs['manual_increase_items'] ?? []);
-            $out['manual_decrease_items'] = $this->items($inputs['manual_decrease_items'] ?? []);
+            $out['manual_increase_items'] = $this->items($inputs['manual_increase_items'] ?? [], DppoReturnCalculator::INCREASE_ITEM_LINES);
+            $out['manual_decrease_items'] = $this->items($inputs['manual_decrease_items'] ?? [], DppoReturnCalculator::DECREASE_ITEM_LINES);
             $out['loss_carryforward'] = $this->money($inputs['loss_carryforward'] ?? 0);
             $out['donations'] = $this->money($inputs['donations'] ?? 0);
             // Položkové dary §20/8 (min. 2 000 Kč/dar) — preferováno před agregátem `donations`.
@@ -1836,10 +1836,14 @@ final class TaxReturnService
      * označí, což ale nešlo natrvalo udělat. Propouští se jen ZNÁMÝ druh: neznámý řetězec
      * by heuristiku vypnul, aniž by ji cokoli nahradilo.
      *
+     * `line` je řádek přiznání, na který položka patří (u DPPO položek převzatých
+     * z podaného přiznání); propouští se jen řádek z `$lines`.
+     *
      * @param mixed $items
-     * @return list<array{text:string,amount:float,kind?:string}>
+     * @param list<int> $lines
+     * @return list<array{text:string,amount:float,kind?:string,line?:int}>
      */
-    private function items(mixed $items): array
+    private function items(mixed $items, array $lines = []): array
     {
         if (!is_array($items)) {
             return [];
@@ -1857,6 +1861,10 @@ final class TaxReturnService
             $row = ['text' => $text, 'amount' => $amount];
             if ($this->text($item['kind'] ?? '', 30) === DppoReturnCalculator::KIND_FLAT_RATE_TRAVEL) {
                 $row['kind'] = DppoReturnCalculator::KIND_FLAT_RATE_TRAVEL;
+            }
+            $line = $item['line'] ?? null;
+            if (is_numeric($line) && in_array((int) $line, $lines, true)) {
+                $row['line'] = (int) $line;
             }
             $out[] = $row;
         }
