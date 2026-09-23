@@ -15,14 +15,15 @@ namespace MyInvoice\Service\Tax\Return;
  * Pipeline (§23–§35 ZDP, formulář DPPDP9):
  *   ř.10  VH před zdaněním (Σ 6xx − Σ 5xx mimo 59x)
  *   ř.40  výdaje neuznávané za náklady §25 (nedaňové účty + neuznatelná ZC vyřazení
- *         + add-back PHM při uplatnění paušálu na dopravu §24/2/zt)
+ *         + účetní ZC vyřazení převyšující daňovou + add-back PHM při paušálu na dopravu §24/2/zt)
  *   ř.50  účetní odpisy převyšující daňové (zvýšení základu)
- *   ř.62  ostatní částky zvyšující základ §23 (ruční mimo paušál dopravy + rozdíl ZC vyřazení)
+ *   ř.62  ostatní částky zvyšující základ §23 (ruční mimo paušál dopravy)
  *   ř.112 doplňková informace k §23/3 písm. c) — např. paušální výdaj na dopravu (§24/2/zt),
  *         rozpoznáno dle textu ruční snižující položky (klíčová slova „paušál" + „doprav")
  *   ř.150 daňové odpisy převyšující účetní (snížení základu)
- *   ř.162 ostatní částky snižující základ §23 (ruční mimo paušál dopravy + rozdíl ZC vyřazení)
- *   ř.170 souhrn částek snižujících výsledek hospodaření (ř. 101–165 mezisoučet: ř.150+ř.162+ř.112)
+ *   ř.160 daňové výdaje převyšující účetní náklady §24 (daňová ZC vyřazení převyšující účetní)
+ *   ř.162 ostatní částky snižující základ §23 (ruční mimo paušál dopravy)
+ *   ř.170 souhrn částek snižujících výsledek hospodaření (ř. 101–165 mezisoučet: ř.150+ř.160+ř.162+ř.112)
  *   ř.200 základ daně (mezisoučet; může být záporný = daňová ztráta)
  *   ř.230 odečet ztráty minulých let §34
  *   ř.250 základ snížený o ztrátu
@@ -61,6 +62,7 @@ final class DppoReturnCalculator
      *   related_party_appendix: list<array{name:string,country_iso2:string,ic:?string,issued_total:float,received_total:float}>,
      *   bank_account: array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null,
      *   manual_increase_items_line62: list<array{text:string,amount:float}>,
+     *   line160_appendix: list<array{group:string,amount:float}>,
      *   warnings: list<string>
      * }
      */
@@ -116,14 +118,23 @@ final class DppoReturnCalculator
         // ── Úpravy základu (§23) ────────────────────────────────────────────
         $depIncrease = max(0.0, round($depAcc - $depTax, 2)); // ř.50: účetní > daňové → +
         $depDecrease = max(0.0, round($depTax - $depAcc, 2)); // ř.150: daňové > účetní → −
-        $line40 = round($nonDeductible + $disposalResidual, 2);
+        // Můstek ZC vyřazeného majetku podle pokynů k tiskopisu 25 5404 (vzor pro 2024):
+        //   - „K ř. 160 … např. při prodeji hmotného a nehmotného majetku rozdíl, o který
+        //     daňová zůstatková cena (§ 29 zákona) převyšuje účetní zůstatkovou cenu" →
+        //     daňová ZC vyšší = ř. 160 (se zvláštní přílohou podle účtových skupin nákladů);
+        //   - „K ř. 40 … souhrn rozdílů, o které náklady uplatněné v účetnictví převyšují
+        //     … daňové výdaje podle § 24 a 25 zákona, s výjimkou rozdílu, o který účetní
+        //     odpisy převyšují daňové" → účetní ZC vyšší = ř. 40 (a tím i tabulka A).
+        // Ř. 50/150 jsou jen odpisy, ř. 62/162 jen „případy neuvedené na ř. 20 až 61"
+        // (resp. 109 až 161) — pro ZC tedy ne. Základ daně to nemění, jen řádky.
+        $line40 = round($nonDeductible + $disposalResidual + $disposalIncrease, 2);
 
         // ř.200 základ daně před odečty (může být záporný) — POZOR: záměrně počítá
         // s celkovými (nerozdělenými) $manualIncrease/$manualDecrease/$line40, aby
         // rozpad paušálu na dopravu níže (na ř.40/62/112/162/170) NEOVLIVNIL základ
         // ani daň — jde jen o přerozdělení MEZI řádky výpisu/XML, ne o novou částku.
         $base = round(
-            $vh + $line40 + $depIncrease + $manualIncrease + $disposalIncrease
+            $vh + $line40 + $depIncrease + $manualIncrease
             - $depDecrease - $manualDecrease - $disposalDecrease,
             2
         );
@@ -138,8 +149,9 @@ final class DppoReturnCalculator
         // přílohou je ale přijímaná praxe a základ daně (ř. 170/200) je identický.
         // Jinak stejné částky, jen jiné řádky (kosmetika, součty výše beze změny).
         $line40Reported = round($line40 + $flatRateTravelAddback, 2);
-        $line62Reported = round(($manualIncrease - $flatRateTravelAddback) + $disposalIncrease, 2);
-        $line162Reported = round(($manualDecrease - $flatRateTravelDeduction) + $disposalDecrease, 2);
+        $line62Reported = round($manualIncrease - $flatRateTravelAddback, 2);
+        $line160Reported = $disposalDecrease;
+        $line162Reported = round($manualDecrease - $flatRateTravelDeduction, 2);
         $line112Reported = $flatRateTravelDeduction;
         $line170Reported = round($depDecrease + $manualDecrease + $disposalDecrease, 2);
 
@@ -294,15 +306,16 @@ final class DppoReturnCalculator
 
         $lines = [
             $this->line(10, '10', 'Výsledek hospodaření před zdaněním', $vh, 'deník: Σ 6xx − Σ 5xx (mimo 59x)'),
-            $this->line(40, '40', 'Výdaje neuznávané za náklady (§25)', $line40Reported, 'nedaňové účty + neuznatelná ZC vyřazení'
+            $this->line(40, '40', 'Výdaje neuznávané za náklady (§25)', $line40Reported, 'nedaňové účty + účetní ZC vyřazení převyšující daňovou'
                 . ($flatRateTravelAddback > 0 ? ' + add-back PHM při paušálu na dopravu (§24/2/zt)' : '')),
             $this->line(50, '50', 'Účetní odpisy převyšující daňové', $depIncrease, 'rozdíl odpisů (zvýšení)'),
-            $this->line(62, '62', 'Ostatní částky zvyšující základ (§23)', $line62Reported, 'ruční vstupy (mimo paušál dopravy) + můstek účetní/daňové ZC'),
+            $this->line(62, '62', 'Ostatní částky zvyšující základ (§23)', $line62Reported, 'ruční vstupy (mimo paušál dopravy)'),
             $this->line(70, '70', 'Souhrn částek zvyšujících výsledek hospodaření', $line70Reported, 'mezisoučet ř. 20–62 (ř.40 + ř.50 + ř.62)'),
             $this->line(112, '112', 'Doplňková informace (§23/3 písm. c) — např. paušální výdaj na dopravu', $line112Reported, 'ruční položka rozpoznaná dle textu (§24/2/zt paušál dopravy)'),
             $this->line(150, '150', 'Daňové odpisy převyšující účetní', $depDecrease, 'rozdíl odpisů (snížení)'),
-            $this->line(162, '162', 'Ostatní částky snižující základ (§23)', $line162Reported, 'ruční vstupy (mimo paušál dopravy) + můstek účetní/daňové ZC'),
-            $this->line(170, '170', 'Souhrn částek snižujících výsledek hospodaření', $line170Reported, 'mezisoučet ř. 101–165 (ř.150 odpisy + ř.162 ostatní §23 + ř.112 paušál dopravy)'),
+            $this->line(160, '160', 'Daňové výdaje převyšující účetní náklady (§24)', $line160Reported, 'daňová ZC vyřazeného majetku převyšující účetní'),
+            $this->line(162, '162', 'Ostatní částky snižující základ (§23)', $line162Reported, 'ruční vstupy (mimo paušál dopravy)'),
+            $this->line(170, '170', 'Souhrn částek snižujících výsledek hospodaření', $line170Reported, 'mezisoučet ř. 101–165 (ř.150 odpisy + ř.160 ZC vyřazení + ř.162 ostatní §23 + ř.112 paušál dopravy)'),
             $this->line(200, '200', 'Základ daně', $base, 'mezisoučet'),
             $this->line(230, '230', 'Odečet daňové ztráty minulých let (§34)', $lossApplied, 'ruční vstup'),
             $this->line(242, '242', 'Odečet na podporu výzkumu a vývoje (§34/4, §34a–34e)', $rndApplied, 'ruční vstup (projekt VaV)'),
@@ -332,6 +345,7 @@ final class DppoReturnCalculator
             'legal_provisions' => (array) ($data['legal_provisions'] ?? LegalProvisionLedgerService::empty()),
             'bank_account' => $data['bank_account'] ?? null,
             'manual_increase_items_line62' => $line62Items,
+            'line160_appendix' => $this->line160Appendix($data['disposal_decrease_groups'] ?? null, $line160Reported),
             'summary' => [
                 'rate' => $rate,
                 'vh' => $vh,
@@ -503,6 +517,35 @@ final class DppoReturnCalculator
                 continue;
             }
             $out[] = ['text' => $text, 'amount' => $amount];
+        }
+        return $out;
+    }
+
+    /**
+     * Zvláštní příloha k ř. 160: „rozdělení této souhrnné částky podle účtových skupin
+     * účtové třídy - náklady" (pokyny k DPPO). Skupiny dodává {@see DppoReturnDataProvider}
+     * z nákladového účtu vyřazení; bez nich (volající předává jen souhrn) jde celá
+     * částka do skupiny 54 (zůstatková cena prodaného a vyřazeného majetku).
+     *
+     * @return list<array{group:string,amount:float}>
+     */
+    private function line160Appendix(mixed $groups, float $total): array
+    {
+        if ($total <= 0.0) {
+            return [];
+        }
+        $out = [];
+        if (is_array($groups)) {
+            ksort($groups);
+            foreach ($groups as $group => $amount) {
+                $amount = round((float) $amount, 2);
+                if ($amount > 0.0) {
+                    $out[] = ['group' => (string) $group, 'amount' => $amount];
+                }
+            }
+        }
+        if ($out === [] || abs(array_sum(array_column($out, 'amount')) - $total) >= 0.01) {
+            return [['group' => '54', 'amount' => $total]];
         }
         return $out;
     }

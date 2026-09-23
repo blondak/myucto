@@ -569,8 +569,11 @@ export interface TaxBaseDisposalRow {
   disposal_date: string
   disposal_type: string
   disposal_price: number | null
-  tax_residual_value: number
+  /** null = daňová ZC není známa (odpisovaný majetek bez daňové historie) */
+  tax_residual_value: number | null
+  tax_residual_source?: 'tax_entries' | 'by_accounting' | 'non_depreciable' | 'opening' | 'unknown'
   accounting_residual_value: number | null
+  accounting_residual_source?: 'disposal_entry' | 'card'
   deductibility: 'full' | 'none' | 'limited'
   note: string
 }

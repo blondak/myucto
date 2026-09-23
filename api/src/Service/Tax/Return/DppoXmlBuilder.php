@@ -41,6 +41,7 @@ final class DppoXmlBuilder
         70 => 'kc_ii80_70',
         112 => 'kc_ii_112',
         150 => 'kc_ii170_150',
+        160 => 'kc_ii180_160',
         162 => 'kc_ii182_162',
         170 => 'kc_ii190_170',
         200 => 'kc_ii200_200',
@@ -1589,7 +1590,7 @@ final class DppoXmlBuilder
     }
 
     /**
-     * VetaR — zvláštní (textová) příloha k ř. 62 II. oddílu (§23), jeden řádek na
+     * VetaR — zvláštní (textová) příloha k ř. 62 a ř. 160 II. oddílu (§23), jeden řádek na
      * ruční položku z `manual_increase_items_line62` (viz DppoReturnCalculator::compute
      * — už vyfiltrované o paušál dopravy, který jde na ř. 40/VetaE). Bez ní zkušební
      * EPO hlásí „Zvláštní příloha ř. 62 II. odd. není vyplněna." Počet vrácených vět
@@ -1621,6 +1622,24 @@ final class DppoXmlBuilder
             $vetaR->setAttribute('c_radku', '62');
             $vetaR->setAttribute('t_prilohy', mb_substr($label, 0, 72)); // XSD maxLength 72
             $vetaR->setAttribute('kod_sekce', '2'); // 2 = II. oddíl (XSD dokumentace)
+            $vetaR->setAttribute('poradi', (string) $poradi);
+            $elements[] = $vetaR;
+            $poradi++;
+        }
+
+        // Ř. 160 (daňová ZC vyřazeného majetku převyšující účetní): pokyny i anotace XSD
+        // u kc_ii180_160 chtějí „na zvláštní příloze rozdělení této souhrnné částky podle
+        // účtových skupin účtové třídy - náklady" — jeden řádek na skupinu.
+        foreach ((array) ($calc['line160_appendix'] ?? []) as $item) {
+            if (!is_array($item) || (float) ($item['amount'] ?? 0) <= 0.0) {
+                continue;
+            }
+            $label = 'Úč. skupina ' . (string) ($item['group'] ?? '') . ': daňová ZC vyřaz. majetku nad účetní ('
+                . number_format((float) $item['amount'], 0, ',', ' ') . ' Kč)';
+            $vetaR = $dom->createElement('VetaR');
+            $vetaR->setAttribute('c_radku', '160');
+            $vetaR->setAttribute('t_prilohy', mb_substr($label, 0, 72));
+            $vetaR->setAttribute('kod_sekce', '2');
             $vetaR->setAttribute('poradi', (string) $poradi);
             $elements[] = $vetaR;
             $poradi++;

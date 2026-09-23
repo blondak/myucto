@@ -646,6 +646,9 @@
     "accounting-monthly-check": [
       "checks"
     ],
+    "accounting-tax-base-adjustments": [
+      "taxReturn"
+    ],
     "manual-posting-queue": [
       "manualQueue"
     ],

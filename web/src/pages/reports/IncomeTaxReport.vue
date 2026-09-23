@@ -855,12 +855,20 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
             <div class="text-sm font-semibold mb-2">{{ t('taxReturn.po_disposals') }}</div>
             <table class="w-full text-sm">
               <thead><tr class="text-left text-neutral-500 text-xs">
-                <th class="py-1">{{ t('taxReturn.inv') }}</th><th>{{ t('taxReturn.name') }}</th><th class="text-right">{{ t('taxReturn.tax_residual') }}</th><th>{{ t('taxReturn.deductibility') }}</th>
+                <th class="py-1">{{ t('taxReturn.inv') }}</th><th>{{ t('taxReturn.name') }}</th><th class="text-right">{{ t('taxReturn.book_residual') }}</th><th class="text-right">{{ t('taxReturn.tax_residual') }}</th><th>{{ t('taxReturn.deductibility') }}</th>
               </tr></thead>
               <tbody>
                 <tr v-for="d in (state.podklady.disposals as any[])" :key="d.asset_id" class="border-t border-neutral-100">
                   <td class="py-1">{{ d.inventory_number }}</td><td>{{ d.name }}</td>
-                  <td class="text-right font-mono">{{ formatMoney(d.tax_residual_value, 'CZK') }}</td><td>{{ d.deductibility }}</td>
+                  <td class="text-right font-mono whitespace-nowrap">
+                    {{ d.book_residual_value != null ? formatMoney(d.book_residual_value, 'CZK') : '—' }}
+                    <div v-if="d.book_residual_source" class="text-xs text-neutral-500 font-sans">{{ t(`taxReturn.residual_source.${d.book_residual_source}`) }}</div>
+                  </td>
+                  <td class="text-right font-mono whitespace-nowrap" :class="d.tax_residual_value == null ? 'text-warning-600' : ''">
+                    {{ d.tax_residual_value != null ? formatMoney(d.tax_residual_value, 'CZK') : t('taxReturn.residual_unknown') }}
+                    <div v-if="d.tax_residual_source" class="text-xs text-neutral-500 font-sans">{{ t(`taxReturn.residual_source.${d.tax_residual_source}`) }}</div>
+                  </td>
+                  <td>{{ d.deductibility }}</td>
                 </tr>
               </tbody>
             </table>

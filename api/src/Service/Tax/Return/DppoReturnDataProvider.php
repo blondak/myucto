@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Tax\Return;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\Assets\DisposalResiduals;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 
@@ -66,6 +67,7 @@ final class DppoReturnDataProvider
      *   bank_accounts: list<array{id:int,account_number:?string,bank_code:?string,bank_name:?string,iban:?string,is_default:int}>,
      *   disposal_nondeductible_residual: float,
      *   disposal_tax_increase: float, disposal_tax_decrease: float,
+     *   disposal_decrease_groups: array<string,float>,
      *   disposals: list<array<string,mixed>>,
      *   closing_projection: array<string,mixed>,
      *   legal_provisions: array<string,mixed>,
@@ -93,6 +95,7 @@ final class DppoReturnDataProvider
                 'disposal_nondeductible_residual' => 0.0,
                 'disposal_tax_increase' => 0.0,
                 'disposal_tax_decrease' => 0.0,
+                'disposal_decrease_groups' => [],
                 'disposals' => [],
                 'closing_projection' => (new ClosingProjectionCalculator())->project(0.0, []),
                 'legal_provisions' => LegalProvisionLedgerService::empty(),
@@ -112,7 +115,7 @@ final class DppoReturnDataProvider
         $depByGroup = $this->depreciationByGroup($supplierId, $year);
         $relatedPartyFlag = $this->relatedPartyCountryFlag($supplierId, $startsOn, $endsOn);
         $relatedPartyAppendix = $this->relatedPartyAppendix($supplierId, $startsOn, $endsOn);
-        [$disposalIncrease, $disposalDecrease, $disposals, $disposalWarnings] = $this->disposalResiduals($supplierId, $startsOn, $endsOn);
+        [$disposalIncrease, $disposalDecrease, $disposals, $disposalWarnings, $disposalDecreaseGroups] = $this->disposalResiduals($supplierId, $startsOn, $endsOn);
         $projection = $this->closingProjection($supplierId, (int) $period['id'], $endsOn, $vh);
         // Tabulka C přílohy č. 1 II. oddílu (VetaG) — zákonné OP k pohledávkám (§8/§8a/§8b/§8c)
         // a zákonné rezervy (§7). Bez služby (unit testy nad SQLite) zůstane prázdný podklad
@@ -158,6 +161,7 @@ final class DppoReturnDataProvider
             'disposal_nondeductible_residual' => 0.0,
             'disposal_tax_increase' => $disposalIncrease,
             'disposal_tax_decrease' => $disposalDecrease,
+            'disposal_decrease_groups' => $disposalDecreaseGroups,
             'disposals' => $disposals,
             'closing_projection' => $projection,
             'legal_provisions' => $legalProvisions,
@@ -654,74 +658,60 @@ final class DppoReturnDataProvider
     /**
      * Můstek účetní a daňové ZC vyřazeného majetku. U daru/škody je účetní ZC
      * už přičtena přes nedaňový účet 543/549, proto se daňová ZC znovu nepřičítá.
-     * U prodeje/likvidace se rozdíl promítne do ř. 62 nebo 162.
+     * U prodeje/likvidace se rozdíl promítne do ř. 40 (účetní ZC vyšší) nebo ř. 160
+     * (daňová ZC vyšší), viz {@see DppoReturnCalculator}.
      *
-     * @return array{0:float,1:float,2:list<array<string,mixed>>,3:list<string>}
+     * Obě ZC dodává {@see DisposalResiduals} (jediné místo, kde se určují): účetní ZC
+     * i u majetku vyřazeného mimo modul majetku (převzatý deník), daňovou ZC nikdy
+     * jako vstupní cenu odpisovaného majetku bez daňové historie — ta je neznámá
+     * a můstek se u ní nedopočítá (varování, ne fiktivní odpočet).
+     *
+     * Pátý prvek rozděluje snížení (ř. 160) podle účtové skupiny nákladu vyřazení —
+     * zvláštní příloha k ř. 160 ho podle pokynů vyžaduje.
+     *
+     * @return array{0:float,1:float,2:list<array<string,mixed>>,3:list<string>,4:array<string,float>}
      */
     private function disposalResiduals(int $supplierId, string $startsOn, string $endsOn): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT a.id, a.inventory_number, a.name, a.disposal_date, a.disposal_type,
-                    a.input_price, a.opening_tax_amount,
-                    (SELECT COALESCE(SUM(ai.amount), 0) FROM asset_improvements ai
-                      WHERE ai.supplier_id = a.supplier_id AND ai.asset_id = a.id) AS improvements_total,
-                    (SELECT de.residual_value_end FROM depreciation_entries de
-                      WHERE de.supplier_id = a.supplier_id AND de.asset_id = a.id AND de.kind = \'tax\'
-                      ORDER BY de.fiscal_year DESC LIMIT 1) AS tax_residual,
-                    (SELECT SUM(jl.amount)
-                       FROM journal_entries je
-                       JOIN journal_entry_lines jl ON jl.entry_id = je.id AND jl.supplier_id = je.supplier_id
-                       JOIN chart_of_accounts ca ON ca.id = jl.account_id
-                      WHERE je.supplier_id = a.supplier_id AND je.source_type = \'asset_disposal\'
-                        AND je.source_id = a.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL
-                        AND jl.side = \'debit\' AND ca.account_type = \'expense\') AS book_residual,
-                    (SELECT je.id FROM journal_entries je
-                      WHERE je.supplier_id = a.supplier_id AND je.source_type = \'asset_disposal\'
-                        AND je.source_id = a.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL
-                      ORDER BY je.id DESC LIMIT 1) AS disposal_entry_id
-               FROM assets a
-              WHERE a.supplier_id = ? AND a.status = \'disposed\'
-                AND a.disposal_date BETWEEN ? AND ?
-              ORDER BY a.disposal_date, a.inventory_number'
-        );
-        $stmt->execute([$supplierId, $startsOn, $endsOn]);
+        $residuals = (new DisposalResiduals($this->db))->forPeriod($supplierId, $startsOn, $endsOn);
 
         $increase = 0.0;
         $decrease = 0.0;
+        $decreaseGroups = [];
         $disposals = [];
-        $warnings = [];
+        $warnings = $residuals['warnings'];
         $hasLimited = false;
-        foreach ($stmt->fetchAll() as $row) {
-            $taxResidual = $row['tax_residual'] !== null
-                ? (float) $row['tax_residual']
-                : max(0.0, (float) $row['input_price'] + (float) $row['improvements_total'] - (float) $row['opening_tax_amount']);
-            $deductibility = $this->classifyDisposal((string) $row['disposal_type']);
+        foreach ($residuals['rows'] as $row) {
+            $deductibility = $this->classifyDisposal($row['disposal_type']);
+            $bookResidual = $row['book_residual_value'];
+            $taxResidual = $row['tax_residual_value'];
 
-            $bookResidual = $row['disposal_entry_id'] !== null
-                ? round((float) ($row['book_residual'] ?? 0), 2)
-                : null;
             $taxIncrease = 0.0;
             $taxDecrease = 0.0;
-            if ($deductibility === 'full' && $bookResidual !== null) {
+            if ($deductibility === 'full' && $taxResidual !== null) {
                 $taxIncrease = max(0.0, round($bookResidual - $taxResidual, 2));
                 $taxDecrease = max(0.0, round($taxResidual - $bookResidual, 2));
                 $increase += $taxIncrease;
                 $decrease += $taxDecrease;
-            } elseif ($deductibility === 'full') {
-                $warnings[] = 'U majetku ' . (string) $row['inventory_number']
-                    . ' chybí aktivní zápis vyřazení; rozdíl účetní a daňové ZC nelze automaticky promítnout.';
+                if ($taxDecrease > 0.0) {
+                    $decreaseGroups[$row['expense_group']] = round(($decreaseGroups[$row['expense_group']] ?? 0.0) + $taxDecrease, 2);
+                }
             } elseif ($deductibility === 'limited') {
                 $hasLimited = true;
             }
 
             $disposals[] = [
-                'asset_id' => (int) $row['id'],
-                'inventory_number' => (string) $row['inventory_number'],
-                'name' => (string) $row['name'],
-                'disposal_date' => (string) $row['disposal_date'],
-                'disposal_type' => (string) $row['disposal_type'],
-                'tax_residual_value' => round($taxResidual, 2),
+                'asset_id' => $row['asset_id'],
+                'inventory_number' => $row['inventory_number'],
+                'name' => $row['name'],
+                'disposal_date' => $row['disposal_date'],
+                'disposal_type' => $row['disposal_type'],
+                'tax_residual_value' => $taxResidual,
+                'tax_residual_source' => $row['tax_residual_source'],
                 'book_residual_value' => $bookResidual,
+                'book_residual_source' => $row['book_residual_source'],
+                'journal_residual_value' => $row['journal_residual_value'],
+                'expense_group' => $row['expense_group'],
                 'deductibility' => $deductibility,
                 'non_deductible_part' => 0.0,
                 'tax_increase' => $taxIncrease,
@@ -734,7 +724,7 @@ final class DppoReturnDataProvider
                 . '(nebo při živelní pohromě dle §24/2/l ZDP) uplatněte ruční snižující položkou §23.';
         }
 
-        return [round($increase, 2), round($decrease, 2), $disposals, $warnings];
+        return [round($increase, 2), round($decrease, 2), $disposals, $warnings, $decreaseGroups];
     }
 
     private function classifyDisposal(string $type): string

@@ -160,15 +160,25 @@ final class DppoReturnCalculatorTest extends TestCase
         self::assertSame(0.0, self::lineValue($r['lines'], 250));
     }
 
+    /**
+     * Pokyny k DPPO: účetní ZC vyřazeného majetku vyšší než daňová = ř. 40 (náklad nad
+     * daňový výdaj § 24/25), daňová ZC vyšší = ř. 160 (výslovně „rozdíl, o který daňová
+     * zůstatková cena převyšuje účetní"). Ř. 62/162 jsou jen pro případy neuvedené jinde.
+     */
     public function testDisposalResidualBridgeAdjustsBaseBothWays(): void
     {
-        $increase = $this->calcRun(['vh' => 100000, 'disposal_tax_increase' => 20000], []);
-        self::assertSame(20000.0, self::lineValue($increase['lines'], 62));
-        self::assertSame(120000.0, self::lineValue($increase['lines'], 200));
+        $increase = $this->calcRun(['vh' => 100000, 'non_deductible_costs' => 1000, 'disposal_tax_increase' => 20000], []);
+        self::assertSame(21000.0, self::lineValue($increase['lines'], 40));
+        self::assertSame(0.0, self::lineValue($increase['lines'], 62));
+        self::assertSame(21000.0, self::lineValue($increase['lines'], 70));
+        self::assertSame(121000.0, self::lineValue($increase['lines'], 200));
 
-        $decrease = $this->calcRun(['vh' => 100000, 'disposal_tax_decrease' => 30000], []);
-        self::assertSame(30000.0, self::lineValue($decrease['lines'], 162));
+        $decrease = $this->calcRun(['vh' => 100000, 'disposal_tax_decrease' => 30000, 'disposal_decrease_groups' => ['54' => 25000, '55' => 5000]], []);
+        self::assertSame(30000.0, self::lineValue($decrease['lines'], 160));
+        self::assertSame(0.0, self::lineValue($decrease['lines'], 162));
+        self::assertSame(30000.0, self::lineValue($decrease['lines'], 170));
         self::assertSame(70000.0, self::lineValue($decrease['lines'], 200));
+        self::assertSame([['group' => '54', 'amount' => 25000.0], ['group' => '55', 'amount' => 5000.0]], $decrease['line160_appendix']);
     }
 
     public function testDonationItemsExcludeBelow2000(): void

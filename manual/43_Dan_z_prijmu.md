@@ -218,7 +218,21 @@ podkladů s úhrnem na řádku 105 nebo 106 se hlásí samostatně.
 Výchozí řádek 10 je výsledek hospodaření z účtů 6xx minus 5xx bez daně z příjmů a bez
 technických uzávěrkových zápisů. Základ upravují nedaňové náklady, ruční položky § 23,
 rozdíl daňových a účetních odpisů a rozdíl zůstatkových cen vyřazeného majetku.
-Následují ztráty, dary a slevy. Základ se před sazbou zaokrouhluje dolů na celé tisíce
+Následují ztráty, dary a slevy.
+
+Rozdíl zůstatkových cen prodaného nebo zlikvidovaného majetku jde podle pokynů
+k přiznání na dva řádky: účetní ZC vyšší než daňová zvyšuje základ na **ř. 40**,
+daňová ZC vyšší než účetní ho snižuje na **ř. 160** (se zvláštní přílohou podle účtové
+skupiny nákladů). Účetní ZC se bere ze zápisu vyřazení v modulu majetku. Majetek
+vyřazený mimo modul, třeba převzatý z jiného účetního programu, kde vyřazení
+zaúčtoval převzatý deník, má účetní ZC z karty (vstupní cena po zhodnocení minus
+oprávky) a aplikace ji porovná s deníkem (MD 54x proti oprávkám karty ke dni
+vyřazení). Když nesedí, podklady ukážou obě čísla. Daňová ZC se bere z daňových
+odpisů karty. Karta bez nich má daňovou ZC rovnou účetní (nehmotný majetek „daňový
+= účetní"), vstupní ceně (neodpisovaný majetek, třeba pozemek), nebo vstupní ceně
+minus počáteční daňový stav. U odpisovaného majetku bez jakékoli daňové historie je
+daňová ZC **neznámá**: přiznání rozdíl nedopočítá, podklady na to upozorní a rozdíl
+zadáte ruční položkou. Základ se před sazbou zaokrouhluje dolů na celé tisíce
 Kč; jednotlivé zálohy na další období se zaokrouhlují nahoru na celé stokoruny.
 
 Výsledkové zápisy skladové uzávěrky se do výpočtu zahrnují. Technický zápis

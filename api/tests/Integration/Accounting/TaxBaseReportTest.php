@@ -96,7 +96,8 @@ final class TaxBaseReportTest extends TestCase
         $this->depreciation($soldId, 'tax', 100000.00, 30000.00);
         $this->depreciation($soldId, 'accounting', 80000.00, 35000.00);
 
-        // Darovaný majetek bez odpisových řádků → tax ZC fallback = vstupní cena
+        // Darovaný odpisovaný majetek bez daňových řádků i počátečního stavu → daňová ZC
+        // neznámá (ne vstupní cena, ta by u odepsaného majetku byla fiktivní)
         $this->asset('INV-002', 'Notebook (dar)', 50000.00, 'donated', self::YEAR . '-08-01');
 
         $res = $this->report(self::YEAR);
@@ -122,7 +123,10 @@ final class TaxBaseReportTest extends TestCase
         $donated = $byInv['INV-002'];
         self::assertSame('donated', $donated['disposal_type']);
         self::assertSame('none', $donated['deductibility'], 'Dar — daňová ZC neuznatelná (§25/1/t ZDP).');
-        self::assertSame(self::cents(50000.00), self::cents((float) $donated['tax_residual_value']), 'Fallback ZC = vstupní cena bez odpisů.');
+        self::assertNull($donated['tax_residual_value'], 'Bez daňové historie je daňová ZC neznámá.');
+        self::assertSame('unknown', $donated['tax_residual_source']);
+        self::assertSame(self::cents(50000.00), self::cents((float) $donated['accounting_residual_value']), 'Účetní ZC z karty: bez oprávek celá cena.');
+        self::assertSame('card', $donated['accounting_residual_source']);
 
         // (c) informativní sekce existuje; report nic neúčtuje
         self::assertArrayHasKey('estimates_388_balance', $body['info']);

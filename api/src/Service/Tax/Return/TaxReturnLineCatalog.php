@@ -25,6 +25,7 @@ final class TaxReturnLineCatalog
         70 => 'Úhrn částek zvyšujících výsledek hospodaření (ř. 20 až 62)',
         112 => 'Doplňková informace podle § 23 odst. 3 písm. c), např. paušální výdaj na dopravu',
         150 => 'Rozdíl, o který daňové odpisy převyšují účetní odpisy (§ 26 až § 33)',
+        160 => 'Rozdíl, o který daňové výdaje převyšují účetní náklady (§ 24), např. daňová zůstatková cena vyřazeného majetku nad účetní',
         162 => 'Ostatní částky snižující výsledek hospodaření (§ 23)',
         170 => 'Úhrn částek snižujících výsledek hospodaření (ř. 100 až 165)',
         200 => 'Základ daně (ř. 10 + ř. 70 − ř. 170)',
