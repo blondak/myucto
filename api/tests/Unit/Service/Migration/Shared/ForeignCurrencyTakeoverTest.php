@@ -1,0 +1,137 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Unit\Service\Migration\Shared;
+
+use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
+use PDO;
+use PHPUnit\Framework\TestCase;
+
+final class ForeignCurrencyTakeoverTest extends TestCase
+{
+    private PDO $pdo;
+    private ForeignCurrencyTakeover $takeover;
+
+    protected function setUp(): void
+    {
+        $this->pdo = new \Pdo\Sqlite('sqlite::memory:');
+        $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $this->pdo->exec('CREATE TABLE currencies (id INTEGER PRIMARY KEY, supplier_id INT, code TEXT, is_default INT)');
+        $this->pdo->exec("INSERT INTO currencies VALUES (1, 5, 'CZK', 1), (2, 5, 'EUR', 0), (3, 6, 'USD', 0)");
+        $db = new Connection(new Config([]));
+        (new \ReflectionProperty($db, 'pdo'))->setValue($db, $this->pdo);
+        $this->takeover = new ForeignCurrencyTakeover($db);
+    }
+
+    public function testDocumentInCrownsIsNotForeign(): void
+    {
+        $d = $this->takeover->decide(5, 'CZK', 1.0, 1.0, [['base' => 100.0, 'vat' => 21.0]], 121.0);
+        self::assertFalse($d->isForeignDocument());
+        self::assertFalse($d->inForeignCurrency());
+        self::assertNull($d->note());
+        self::assertFalse($this->takeover->decide(5, '', 0.0, 1.0, [], 0.0)->isForeignDocument());
+    }
+
+    public function testExactConversionIsTakenInForeignCurrency(): void
+    {
+        // 100 EUR × 25,125 = 2 512,50; 21 EUR × 25,125 = 527,625 → 527,63 (HALF_UP obě cesty).
+        $items = [['base' => 2512.50, 'vat' => 527.63, 'foreign_base' => 100.0, 'foreign_vat' => 21.0]];
+        $d = $this->takeover->decide(5, 'eur', 25.125, 1.0, $items, 3040.13);
+        self::assertTrue($d->inForeignCurrency());
+        self::assertSame(2, $d->currencyId);
+        self::assertSame(25.125, $d->rate);
+        self::assertSame('doklad v EUR, převzat v měně dokladu kurzem 25,125 Kč', $d->note());
+    }
+
+    public function testRatePerHundredUnitsIsPerUnit(): void
+    {
+        self::assertSame(0.0752, ForeignCurrencyTakeover::rate(7.52, 100.0));
+        self::assertNull(ForeignCurrencyTakeover::rate(0.0, 1.0));
+        self::assertNull(ForeignCurrencyTakeover::rate(25.0, 0.0));
+        $items = [['base' => 752.0, 'vat' => 0.0, 'foreign_base' => 10000.0, 'foreign_vat' => 0.0]];
+        self::assertNull(ForeignCurrencyTakeover::check(ForeignCurrencyTakeover::rate(7.52, 100.0), $items, 752.0));
+    }
+
+    public function testItemThatDoesNotConvertToSourceCrownsKeepsDocumentInCrowns(): void
+    {
+        // Zdroj spočítal daň z korunového základu (2 512,50 × 21 % = 527,63) - to sedí; ale
+        // základ 2 512,49 kurzem nevyjde.
+        $items = [['base' => 2512.49, 'vat' => 527.63, 'foreign_base' => 100.0, 'foreign_vat' => 21.0]];
+        $d = $this->takeover->decide(5, 'EUR', 25.125, 1.0, $items, 3040.12);
+        self::assertFalse($d->inForeignCurrency());
+        self::assertTrue($d->isForeignDocument());
+        self::assertStringContainsString('základ 1. položky 100,00 × kurz 25,125 nedává 2 512,49 Kč ze zdroje', (string) $d->reason);
+        self::assertStringStartsWith('doklad v EUR, převzat v Kč (základ 1. položky', (string) $d->note());
+    }
+
+    public function testBothApplicationRoundingsMustGiveSourceCrowns(): void
+    {
+        // 3,00 × 25,305 = 75,915: bcmath HALF_UP dá 75,92, float round() evidence DPH 75,91.
+        // Kdyby pojistka hlídala jen jednu cestu, evidence DPH by se od zdroje lišila o haléř.
+        $items = [['base' => 75.92, 'vat' => 0.0, 'foreign_base' => 3.0, 'foreign_vat' => 0.0]];
+        self::assertNotNull(ForeignCurrencyTakeover::check(25.305, $items, 75.92));
+        $items[0]['base'] = 75.91;
+        self::assertNotNull(ForeignCurrencyTakeover::check(25.305, $items, 75.91));
+    }
+
+    public function testDocumentTotalMustConvertToo(): void
+    {
+        // Položky sedí, ale zdroj zaokrouhlil celkem v Kč na celé koruny.
+        $items = [['base' => 2512.50, 'vat' => 527.63, 'foreign_base' => 100.0, 'foreign_vat' => 21.0]];
+        $reason = ForeignCurrencyTakeover::check(25.125, $items, 3040.0);
+        self::assertSame('celkem 121,00 × kurz 25,125 nedává celkem 3 040,00 Kč ze zdroje (zaokrouhlení dokladu v Kč)', $reason);
+    }
+
+    public function testItemsWithoutForeignAmountsKeepCrowns(): void
+    {
+        $items = [['base' => 2512.50, 'vat' => 527.63, 'foreign_base' => 100.0, 'foreign_vat' => 21.0], ['base' => 1.0, 'vat' => 0.0]];
+        self::assertSame('položky dokladu nemají částky v měně dokladu', ForeignCurrencyTakeover::check(25.125, $items, 3041.13));
+        self::assertSame('doklad nemá kurz', ForeignCurrencyTakeover::check(null, $items, 0.0));
+        self::assertSame('doklad nemá položky', ForeignCurrencyTakeover::check(25.0, [], 0.0));
+    }
+
+    public function testCurrencyMissingInCompanyCodebookKeepsCrowns(): void
+    {
+        $items = [['base' => 2300.0, 'vat' => 0.0, 'foreign_base' => 100.0, 'foreign_vat' => 0.0]];
+        $d = $this->takeover->decide(5, 'USD', 23.0, 1.0, $items, 2300.0);
+        self::assertFalse($d->inForeignCurrency());
+        self::assertSame('měna USD není v číselníku měn firmy', $d->reason);
+        self::assertTrue($this->takeover->decide(6, 'USD', 23.0, 1.0, $items, 2300.0)->inForeignCurrency());
+    }
+
+    public function testReasonFromSourceWins(): void
+    {
+        $items = [['base' => 2512.50, 'vat' => 0.0, 'foreign_base' => 100.0, 'foreign_vat' => 0.0]];
+        $d = $this->takeover->decide(5, 'EUR', 25.125, 1.0, $items, 2512.50, 'samovyměření DPH');
+        self::assertFalse($d->inForeignCurrency());
+        self::assertSame('doklad v EUR, převzat v Kč podle zaúčtování (samovyměření DPH)', $d->note('převzat v Kč podle zaúčtování'));
+    }
+
+    public function testForeignItemsAndTotals(): void
+    {
+        $items = ForeignCurrencyTakeover::foreignItems([
+            ['quantity' => 4.0, 'unit_price' => 628.125, 'base' => 2512.50, 'vat' => 527.63, 'foreign_base' => 100.0, 'foreign_vat' => 21.0],
+            ['quantity' => 0.0, 'unit_price' => -25.13, 'base' => -25.13, 'vat' => 0.0, 'foreign_base' => -1.0, 'foreign_vat' => 0.0],
+        ]);
+        self::assertSame(100.0, $items[0]['base']);
+        self::assertSame(21.0, $items[0]['vat']);
+        self::assertSame(25.0, $items[0]['unit_price']);
+        self::assertSame(2512.50, $items[0]['home_base']);
+        self::assertSame(-1.0, $items[1]['unit_price']);
+        self::assertSame(['base' => 99.0, 'vat' => 21.0, 'total' => 120.0], ForeignCurrencyTakeover::totals($items));
+    }
+
+    public function testHomeAmountHelpersMatchSqlAndRecap(): void
+    {
+        self::assertSame(527.63, ForeignCurrencyTakeover::toHome(21.0, 25.125));
+        self::assertSame(-527.63, ForeignCurrencyTakeover::toHome(-21.0, 25.125));
+        self::assertSame(121.0, ForeignCurrencyTakeover::toHome(121.004, null));
+        self::assertSame(
+            '(CASE WHEN d.exchange_rate IS NULL THEN d.total_with_vat ELSE ROUND(d.total_with_vat * d.exchange_rate, 2) END)',
+            ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate'),
+        );
+    }
+}
