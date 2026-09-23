@@ -109,6 +109,13 @@ final class DppoEpoXmlParser
                 $lines[$reverse[$name]] = $value;
                 continue;
             }
+            // Jiná verze formuláře může u téhož řádku nést jiné „staré" číslo
+            // (kc_ii_110 místo kc_ii120_110); rozhoduje druhé číslo = aktuální řádek.
+            if (preg_match('/^kc_ii\d*_(\d+)$/', $name, $m) === 1
+                && isset(DppoXmlBuilder::LINE_ATTR[(int) $m[1]]) && !isset($lines[(int) $m[1]])) {
+                $lines[(int) $m[1]] = $value;
+                continue;
+            }
             if ($name === 'kc_ii270_280') {
                 // sazba v % — zvlášť, ne řádek Kč
                 continue;

@@ -75,6 +75,14 @@ final class FiledDppoInputsTest extends TestCase
         self::assertSame([160 => ['computed' => 600.0, 'filed' => 0.0]], $missing['shortfalls']);
     }
 
+    public function testDifferenceBelowToleranceIsRoundingNotAnItem(): void
+    {
+        $built = FiledDppoInputs::build([40 => 1_001.0, 160 => 17_006.0], [40 => 1_000.6, 160 => 17_005.86], false, self::TEXTS, 0.0, 1.0);
+
+        self::assertSame([], $built['inputs'], 'podání v celých korunách proti haléřovému výpočtu');
+        self::assertSame([], $built['shortfalls']);
+    }
+
     public function testPremierColumnsGoThroughTheSharedRule(): void
     {
         $built = TaxReturnImporter::inputsFromPremier([

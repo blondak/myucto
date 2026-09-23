@@ -47,6 +47,8 @@ final class FiledDppoInputs
      * @param array{line:string,line40:string,line40_travel:string,travel:string} $texts
      *   texty položek; `line` je šablona sprintf s číslem řádku
      * @param float $advancesPaid zaplacené zálohy na daň
+     * @param float $tolerance rozdíl podání a výpočtu na ř. 40/160 menší než tolerance je
+     *   zaokrouhlení (podání v celých korunách proti haléřovému výpočtu), ne položka
      * @return array{
      *   inputs: array<string,mixed>,
      *   increase: list<array{text:string,amount:float,kind?:string,line:int}>,
@@ -54,7 +56,7 @@ final class FiledDppoInputs
      *   shortfalls: array<int,array{computed:float,filed:float}>,
      * }
      */
-    public static function build(array $filed, array $computed, bool $line112IsTravel, array $texts, float $advancesPaid = 0.0): array
+    public static function build(array $filed, array $computed, bool $line112IsTravel, array $texts, float $advancesPaid = 0.0, float $tolerance = 0.0): array
     {
         $travel = $line112IsTravel && (float) ($filed[self::TRAVEL_LINE] ?? 0) > 0.0;
         $increase = [];
@@ -68,6 +70,9 @@ final class FiledDppoInputs
         $shortfalls = [];
         $computed40 = round((float) ($computed[40] ?? 0), 2);
         $line40 = round((float) ($filed[40] ?? 0) - $computed40, 2);
+        if (abs($line40) < $tolerance) {
+            $line40 = 0.0;
+        }
         if ($line40 > 0.0) {
             $item = ['text' => $travel ? $texts['line40_travel'] : $texts['line40'], 'amount' => $line40];
             if ($travel) {
@@ -85,6 +90,9 @@ final class FiledDppoInputs
                 // ř. 160 by ho odečetlo podruhé.
                 $computed160 = round((float) ($computed[160] ?? 0), 2);
                 $rest = round($amount - $computed160, 2);
+                if (abs($rest) < $tolerance) {
+                    $rest = 0.0;
+                }
                 if ($rest < 0.0) {
                     $shortfalls[160] = ['computed' => $computed160, 'filed' => $amount];
                 }

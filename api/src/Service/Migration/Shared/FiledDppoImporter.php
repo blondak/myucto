@@ -223,7 +223,7 @@ final class FiledDppoImporter
         if ($yearLoss > 0.0) {
             $notices[] = sprintf('Do evidence ztrát zapsána daňová ztráta roku %d: %s Kč.', $year, number_format($yearLoss, 0, ',', ' '));
         }
-        if ($appliedLoss > 0.0) {
+        if (min($appliedLoss, $available) > 0.0) {
             $notices[] = sprintf('Do evidence ztrát zapsáno uplatnění ztráty v roce %d: %s Kč.', $year, number_format(min($appliedLoss, $available), 0, ',', ' '));
         }
         return $notices;
@@ -259,11 +259,11 @@ final class FiledDppoImporter
         foreach ((array) ($appendix[FiledDppoInputs::TRAVEL_LINE] ?? []) as $text) {
             $travel = $travel || DppoReturnCalculator::looksLikeFlatRateTravel((string) $text);
         }
-        $built = FiledDppoInputs::build($lines, DppoReturnCalculator::accountingAdjustments($gathered), $travel, self::TEXTS, (float) ($parsed['advances_paid'] ?? 0));
+        $built = FiledDppoInputs::build($lines, DppoReturnCalculator::accountingAdjustments($gathered), $travel, self::TEXTS, (float) ($parsed['advances_paid'] ?? 0), ReconciliationTolerance::FILING_ROUNDING);
 
         foreach ($built['shortfalls'] as $line => $s) {
             $notices[] = $line === 40
-                ? sprintf('Nedaňové náklady podle účtů (%s Kč) jsou vyšší než ř. 40 podání (%s Kč). Zkontrolujte daňovou uznatelnost účtů.',
+                ? sprintf('Část ř. 40 spočtená z účetnictví (nedaňové účty a rozdíl zůstatkových cen vyřazeného majetku, %s Kč) je vyšší než ř. 40 podání (%s Kč), z ř. 40 se nic nepřevzalo. Zkontrolujte daňovou uznatelnost účtů a vyřazení majetku; chybí-li podání část ř. 40, doplňte ji ručně.',
                     number_format($s['computed'], 2, ',', ' '), number_format($s['filed'], 2, ',', ' '))
                 : sprintf('Rozdíl zůstatkových cen vyřazeného majetku podle karet (%s Kč) je vyšší než ř. 160 podání (%s Kč). Zkontrolujte vyřazení majetku.',
                     number_format($s['computed'], 2, ',', ' '), number_format($s['filed'], 2, ',', ' '));
@@ -325,9 +325,12 @@ final class FiledDppoImporter
         if ($f3 > 0.0) {
             $out['stopped_execution_credit'] = round($f3, 2);
         }
-        if ($line300 > 0.0 && $f1 + $f2 + $f3 <= 0.0) {
-            $notices[] = sprintf('Podání uplatňuje slevu na dani %s Kč (ř. 300) bez rozpisu v tabulce H. Doplňte v přiznání počet zaměstnanců se zdravotním postižením, případně slevu za zastavenou exekuci.',
-                number_format($line300, 0, ',', ' '));
+        if ($line300 > 0.0 && $f1 + $f2 + $f3 <= 0.0 && $perDisabled > 0.0) {
+            // Bez rozpisu tabulky H je nejčastější sleva na zaměstnance se zdravotním
+            // postižením (§ 35 odst. 1 písm. a); přepočtený počet může být i desetinný.
+            $out['disabled_employees_avg'] = round($line300 / $perDisabled, 4);
+            $notices[] = sprintf('Podání uplatňuje slevu na dani %s Kč (ř. 300) bez rozpisu v tabulce H. Převzata jako sleva na zaměstnance se zdravotním postižením (přepočtený počet %s); jde-li o těžší postižení nebo zastavenou exekuci, opravte ji v přiznání.',
+                number_format($line300, 0, ',', ' '), rtrim(rtrim(number_format($out['disabled_employees_avg'], 4, ',', ''), '0'), ','));
         }
         return $out;
     }
