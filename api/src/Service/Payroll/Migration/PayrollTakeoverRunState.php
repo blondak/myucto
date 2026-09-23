@@ -36,6 +36,8 @@ final class PayrollTakeoverRunState
     public array $absencesWithoutDates = [];
     /** @var array<string,int> osobní číslo => nepřítomnosti vynechané pro překryv s jinou */
     public array $absenceOverlaps = [];
+    /** @var array<string,int> osobní číslo => nepřítomnosti, které evidence odmítla zapsat */
+    public array $absencesRejected = [];
     /** @var array<string,array<string,int>|null> vztah a měsíc => hodiny souhrnu importu */
     public array $importSummaries = [];
 }

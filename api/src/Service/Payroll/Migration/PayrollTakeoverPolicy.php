@@ -52,19 +52,6 @@ final readonly class PayrollTakeoverPolicy
          * „{label}:"), uloží znovu; zadané jinak (ručně, z hlášení) nepřepíše.
          */
         public bool $rewriteOwnOpenings = false,
-        /**
-         * `true`: položku Zákonných termínů, kterou nejde odškrtnout kvůli jakékoli
-         * RuntimeException (včetně chyby databáze), přeskočí. `false`: přeskočí jen
-         * konflikt verze, chybějící vztah a zamítnutí kontrolou; chyba databáze projde výš.
-         */
-        public bool $checklistToleratesRuntime = false,
-        /**
-         * `false`: vztah, který už nějakou nepřítomnost má, se přeskočí celý (převod jednoho
-         * roku, opakovaný běh nic nezdvojí). `true`: nepřítomnosti se doplňují po záznamech
-         * a přeskočí se jen ta, která už je zapsaná se stejným druhem a daty - pro zdroj,
-         * který se převádí po letech a každý rok přináší další nepřítomnosti téhož vztahu.
-         */
-        public bool $absencesPerRecord = false,
     ) {}
 
     /** Začátek poznámky u převzatého údaje. */

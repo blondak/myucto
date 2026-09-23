@@ -414,6 +414,14 @@ final class PayrollImporter
                 self::personalNumbers(array_keys($this->state->absenceOverlaps)),
             ));
         }
+        if ($this->state->absencesRejected !== []) {
+            $p->warn(self::STEP, 'absences_rejected', sprintf(
+                'Nepřítomností, které evidence odmítla zapsat (datum mimo roky s mzdovými pravidly, uzavřené období '
+                . 'nebo jiná kontrola): %d u osobních čísel %s. Převod je nezapsal; doplňte je v kartě zaměstnance.',
+                array_sum($this->state->absencesRejected),
+                self::personalNumbers(array_keys($this->state->absencesRejected)),
+            ), ['personal_numbers' => array_keys($this->state->absencesRejected)]);
+        }
         if ($this->openSickness !== []) {
             $p->count(self::STEP, 'sickness_open', array_sum($this->openSickness));
             $p->warn(self::STEP, 'sickness_open', sprintf(
@@ -532,9 +540,19 @@ final class PayrollImporter
                     . 'vztah je založený jako pracovní poměr. Zkontrolujte ho na kartě zaměstnance.');
             }
             if (($relation['statutory_flag'] ?? false) === true && $relation['relation_type'] !== 'statutory_body') {
-                $this->warn($p, 'relation_type_statutory_flag', "Osobní číslo {$number}: PREMIER vede vztah s příznakem jednatele, hlášení JMHZ přijaté ČSSZ "
-                    . 'ho ale vykazuje jiným druhem činnosti; vztah je založený podle hlášení. K ověření: zkontrolujte druh vztahu na kartě zaměstnance.',
-                    ['personal_number' => $number]);
+                $type = match ($relation['relation_type']) {
+                    'employment' => 'pracovní poměr',
+                    'dpc' => 'dohoda o pracovní činnosti',
+                    'dpp' => 'dohoda o provedení práce',
+                    default => (string) $relation['relation_type'],
+                };
+                $activity = $relation['registry']['jmhz']['activity'] ?? null;
+                $this->warn($p, 'relation_type_statutory_flag', "Osobní číslo {$number}: PREMIER má u vztahu příznak jednatele, ale hlášení JMHZ, které přijala ČSSZ, "
+                    . 'vykazuje ' . (is_string($activity) ? "druh činnosti {$activity} ({$type})" : "druh činnosti {$type}") . ". Vztah je založený jako {$type}: "
+                    . 'přednost dostalo přijaté hlášení, protože podle něj vztah eviduje ČSSZ a další hlášení z MyÚčta s ním musí souhlasit. '
+                    . 'K ověření: je-li osoba ve skutečnosti jednatel (člen statutárního orgánu), změňte druh vztahu na kartě zaměstnance '
+                    . 'a ČSSZ podejte opravné hlášení.',
+                    ['personal_number' => $number, 'relation_type' => $relation['relation_type'], 'jmhz_activity' => $activity]);
             }
         }
 

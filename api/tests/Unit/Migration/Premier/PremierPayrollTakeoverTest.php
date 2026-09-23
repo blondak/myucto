@@ -106,12 +106,11 @@ final class PremierPayrollTakeoverTest extends TestCase
         $policy = PremierPayrollTakeover::policy();
 
         self::assertSame(['premier', 'PREMIER'], [$policy->sourceKey, $policy->label]);
-        self::assertFalse($policy->strict);
+        self::assertTrue($policy->strict);
         self::assertTrue($policy->addressesPerType);
         self::assertFalse($policy->verifyPayoutAccounts);
         self::assertTrue($policy->ignoreEndBeforeStart);
         self::assertTrue($policy->rewriteOwnOpenings);
-        self::assertTrue($policy->checklistToleratesRuntime);
     }
 
     /** @return list<array<string,mixed>> */

@@ -36,6 +36,14 @@ final class PayrollAbsenceValidator
         'vacation', 'dpn', 'quarantine', 'employee_obstacle', 'employer_obstacle',
     ];
 
+    /**
+     * Druhy s náhradou z průměru čtvrtletí (náhrada 100 % průměru, překážky), které
+     * nesmí přejít přes konec kalendářního čtvrtletí; zbytek {@see self::absence()}.
+     */
+    public const TYPES_WITHIN_QUARTER = [
+        'vacation', 'employee_obstacle', 'employer_obstacle',
+    ];
+
     public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
 
     /** @param array<string,mixed> $body @return array<string,mixed> */
@@ -73,7 +81,7 @@ final class PayrollAbsenceValidator
             'unexcused' => 'none',
             default => 'none',
         };
-        if (in_array($policy, ['average_100', 'statutory_manual_review'], true)
+        if (in_array($type, self::TYPES_WITHIN_QUARTER, true)
             && $this->calendarQuarter($from) !== $this->calendarQuarter($to)
         ) {
             /*

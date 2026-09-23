@@ -394,6 +394,119 @@ final class PremierPayrollImportTest extends TestCase
     }
 
     /**
+     * Neschopnost přes konec roku: převod po letech ji zapíše jako dvě nepřítomnosti
+     * (do 31. 12. a od 1. 1.). Druhá musí navázat na okno náhrady mzdy první, jinak by
+     * MyÚčto od 1. 1. vyplatilo čtrnáct dnů náhrady znovu.
+     */
+    public function testSicknessAcrossYearEndContinuesCompensationWindow(): void
+    {
+        $flags = ['payroll' => true, 'payroll_detail' => true];
+        $dir = $this->tmp . DIRECTORY_SEPARATOR . 'backup_sickness_year_end';
+        SyntheticPremierBackup::writeDir($dir, false, $flags);
+        $tables = SyntheticPremierBackup::tables(false, $flags);
+        // Bez případu eNeschopenky: rok 2025 skončí neschopnost 31. 12., leden nese rok 2026.
+        DbfWriter::write($dir . DIRECTORY_SEPARATOR . 'MZ_HDPN.DBF', $tables['MZ_HDPN'][0], []);
+        [$fields, $rows] = $tables['DNY'];
+        $rows[] = ['INTER' => 5, 'DATUM_OD' => '2026-01-01', 'DATUM_DO' => '2026-01-20', 'KOD' => '600', 'CASTKA' => 0, 'N_DNY' => 20,
+            'DNY_ROK' => 2026, 'DNY_MES' => 1, 'TYP' => 3, 'ID' => 'D5-SY-2026-1'];
+        DbfWriter::write($dir . DIRECTORY_SEPARATOR . 'DNY.DBF', $fields, $rows);
+        $backup = PremierBackup::open($dir);
+
+        $supplierId = $this->supplier(true);
+        $first = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        $next = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR2, false);
+        self::assertFalse($next->hasErrors(), $this->explain($next));
+
+        self::assertSame([['2025-11-10', '2025-12-31', '0'], ['2026-01-01', '2026-01-20', '14']],
+            $this->fetch("SELECT a.date_from, a.date_to, a.sickness_window_carried_days FROM payroll_absences a JOIN payroll_employments e ON e.id = a.employment_id
+                WHERE e.supplier_id = ? AND e.code = '5' AND a.absence_type = 'dpn' ORDER BY a.date_from", $supplierId), $this->explain($next));
+        self::assertSame(1, self::stepCounts($next, 'payroll')['sickness_window_continued'] ?? 0);
+    }
+
+    /**
+     * Příznak jednatele proti druhu činnosti z hlášení JMHZ přijatého ČSSZ: vztah vznikne
+     * podle hlášení a protokol řekne, jaký druh zvolil, podle čeho a proč.
+     */
+    public function testStatutoryFlagAgainstAcceptedJmhzExplainsChosenType(): void
+    {
+        $flags = ['payroll' => true, 'payroll_detail' => true];
+        $dir = $this->tmp . DIRECTORY_SEPARATOR . 'backup_statutory_flag';
+        SyntheticPremierBackup::writeDir($dir, false, $flags);
+        [$fields, $rows] = SyntheticPremierBackup::tables(false, $flags)['PERSONAL'];
+        foreach ($rows as $i => $row) {
+            if ($row['INTER'] === 5) {
+                $rows[$i]['JEDNATEL'] = true;
+            }
+        }
+        DbfWriter::write($dir . DIRECTORY_SEPARATOR . 'PERSONAL.DBF', $fields, $rows);
+
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, PremierBackup::open($dir), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['employment']], $this->fetch("SELECT relation_type FROM payroll_employments WHERE supplier_id = ? AND code = '5'", $supplierId));
+        $messages = array_values(array_filter(self::step($protocol, 'payroll')['messages'], static fn (array $m): bool => $m['code'] === 'relation_type_statutory_flag'));
+        self::assertCount(1, $messages, $this->explain($protocol));
+        self::assertStringContainsString('vykazuje druh činnosti 1 (pracovní poměr). Vztah je založený jako pracovní poměr', $messages[0]['text']);
+        self::assertStringContainsString('podle něj vztah eviduje ČSSZ', $messages[0]['text']);
+        self::assertSame(['employment', '1'], [$messages[0]['context']['relation_type'] ?? null, $messages[0]['context']['jmhz_activity'] ?? null]);
+    }
+
+    /**
+     * Osoba bez evidované identity je nekonzistence, ne důvod údaj mlčky přeskočit: převod
+     * z PREMIER ji ohlásí stejně jako převod z PAMICA a zbytek osoby převede.
+     */
+    public function testMissingIdentityIsReportedNotSkippedSilently(): void
+    {
+        $supplierId = $this->supplier(true);
+        $backup = $this->backup(['payroll' => true, 'payroll_detail' => true]);
+        $first = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        $this->db->pdo()->prepare("DELETE h FROM payroll_person_identity_history h JOIN payroll_employments e ON e.employee_id = h.employee_id AND e.supplier_id = h.supplier_id
+            WHERE e.supplier_id = ? AND e.code = '5'")->execute([$supplierId]);
+
+        $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        $failed = array_values(array_filter(self::step($again, 'payroll')['messages'],
+            static fn (array $m): bool => $m['code'] === 'detail_failed' && str_contains($m['text'], 'nemá evidovanou identitu')));
+        self::assertCount(1, $failed, $this->explain($again));
+        self::assertStringStartsWith('Osobní číslo 5: Údaje o narození a občanství se nepřevzal', $failed[0]['text']);
+    }
+
+    /**
+     * Dovolená rozepsaná po měsících se spojí v jednu nepřítomnost, která přejde přes konec
+     * čtvrtletí. Evidence takovou náhradu odmítne (průměr se zjišťuje ke čtvrtletí), takže
+     * se dřív tiše nezapsala vůbec. Rozdělí se na hranici čtvrtletí a obě části se schválí.
+     */
+    public function testAbsenceAcrossQuarterEndIsSplitAtQuarterBoundary(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backupWithQuarterVacation(), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['vacation', '2025-09-29', '2025-09-30', 'approved'], ['vacation', '2025-10-01', '2025-10-03', 'approved']],
+            $this->fetch("SELECT a.absence_type, a.date_from, a.date_to, a.status FROM payroll_absences a JOIN payroll_employments e ON e.id = a.employment_id
+                WHERE e.supplier_id = ? AND e.code = '5' AND a.absence_type = 'vacation' AND a.date_from >= '2025-09-01' ORDER BY a.date_from", $supplierId),
+            $this->explain($protocol));
+        self::assertArrayNotHasKey('absences_rejected', self::stepCounts($protocol, 'payroll'), $this->explain($protocol));
+    }
+
+    /**
+     * Nepřítomnost, kterou evidence odmítne (peněžitá pomoc v mateřství bez dne porodu),
+     * se dřív vynechala bez počtu i hlášky. Protokol ji musí spočítat a říct, u koho.
+     */
+    public function testRejectedAbsenceIsCountedAndReported(): void
+    {
+        $supplierId = $this->supplier(true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backupWithQuarterVacation([[2, '2025-02-03', '2025-02-07', '603']]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, self::stepCounts($protocol, 'payroll')['absences_rejected'] ?? 0, $this->explain($protocol));
+        $messages = array_values(array_filter(self::step($protocol, 'payroll')['messages'], static fn (array $m): bool => $m['code'] === 'absences_rejected'));
+        self::assertCount(1, $messages, $this->explain($protocol));
+        self::assertSame('warning', $messages[0]['level']);
+        self::assertStringContainsString(': 1 u osobních čísel 5.', $messages[0]['text']);
+    }
+
+    /**
      * Trvalé srážky z PREMIER: exekuce jako nedoložený exekuční případ se zbývající
      * pohledávkou, odbory jako dohoda o srážkách, skončené spoření jen v počtu. Zakládají se
      * až v běhu roku posledních zpracovaných mezd.
@@ -488,6 +601,27 @@ final class PremierPayrollImportTest extends TestCase
             }
         }
         DbfWriter::write($dir . DIRECTORY_SEPARATOR . 'MZDY.DBF', $fields, $rows);
+        return PremierBackup::open($dir);
+    }
+
+    /**
+     * Záloha s podrobnými mzdami, kde vztah INTER 5 čerpá dovolenou 29. 9. - 3. 10. 2025,
+     * v `DNY` rozepsanou po měsících (září a říjen), a volitelně další nepřítomnosti
+     * (měsíc, od, do, kód). Syntetická data jen těchto testů.
+     *
+     * @param list<array{0:int,1:string,2:string,3:string}> $extra
+     */
+    private function backupWithQuarterVacation(array $extra = []): PremierBackup
+    {
+        $flags = ['payroll' => true, 'payroll_detail' => true];
+        $dir = $this->tmp . DIRECTORY_SEPARATOR . 'backup_quarter_vacation_' . md5((string) json_encode($extra));
+        SyntheticPremierBackup::writeDir($dir, false, $flags);
+        [$fields, $rows] = SyntheticPremierBackup::tables(false, $flags)['DNY'];
+        foreach ([[9, '2025-09-29', '2025-09-30', '500'], [10, '2025-10-01', '2025-10-03', '500'], ...$extra] as [$month, $from, $to, $code]) {
+            $rows[] = ['INTER' => 5, 'DATUM_OD' => $from, 'DATUM_DO' => $to, 'KOD' => $code, 'CASTKA' => 2000, 'DNY_ROK' => 2025, 'DNY_MES' => $month,
+                'TYP' => 2, 'ID' => "D5-QV-{$month}-{$code}"];
+        }
+        DbfWriter::write($dir . DIRECTORY_SEPARATOR . 'DNY.DBF', $fields, $rows);
         return PremierBackup::open($dir);
     }
 

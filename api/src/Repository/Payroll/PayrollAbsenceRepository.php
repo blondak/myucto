@@ -534,8 +534,12 @@ final class PayrollAbsenceRepository
         );
     }
 
-    /** @param array<string,mixed> $absence */
-    private static function isSickness(array $absence): bool
+    /**
+     * Druh s oknem náhrady mzdy podle § 192 ZP (neschopnost, karanténa).
+     *
+     * @param array<string,mixed> $absence
+     */
+    public static function isSickness(array $absence): bool
     {
         return in_array($absence['absence_type'] ?? null, ['dpn', 'quarantine'], true);
     }

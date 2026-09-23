@@ -386,6 +386,77 @@ final class PohodaPayrollImportTest extends TestCase
     }
 
     /**
+     * Převod PAMICA po letech: nepřítomnosti dalšího roku se zapíšou i u vztahu, který už
+     * nepřítomnost z dřívějšího roku má. Dřív se takový vztah přeskočil celý. Neschopnost
+     * přes konec roku navazuje na okno náhrady mzdy a opakovaný převod nic nezdvojí.
+     */
+    public function testAbsencesOfNextYearAreWrittenForRelationWithEarlierAbsence(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        // Mzdy vede MyÚčto až od roku 2027: oba převáděné roky jsou evidence předchozího programu.
+        $this->db->pdo()->prepare("UPDATE payroll_module_state SET start_period = '2027-01-01' WHERE supplier_id = ?")->execute([$supplierId]);
+        $file = $this->writeTwoYearSicknessPayroll();
+
+        foreach ([2025, 2026, 2026] as $year) {
+            $protocol = $this->importer->run($supplierId, $this->userId, $file, $year, false, null, null, null, false, true);
+            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        }
+        $employment = $this->employment($supplierId, '5001');
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT date_from, date_to, sickness_window_carried_days FROM payroll_absences
+              WHERE supplier_id = ? AND employment_id = ? AND absence_type = 'dpn' AND status NOT IN ('cancelled', 'rejected') ORDER BY date_from"
+        );
+        $stmt->execute([$supplierId, $employment['id']]);
+        self::assertSame([
+            ['2025-12-20', '2025-12-31', 0],
+            ['2026-01-01', '2026-01-10', 12],
+        ], array_map(static fn (array $r): array => [$r['date_from'], $r['date_to'], (int) $r['sickness_window_carried_days']], $stmt->fetchAll(\PDO::FETCH_ASSOC)),
+            $this->explain($protocol));
+        self::assertSame(1, self::stepCounts($protocol, PohodaPayrollImporter::STEP_PEOPLE)['absences_existing'] ?? 0, $this->explain($protocol));
+    }
+
+    /**
+     * Osoba s neschopností od 20. 12. 2025 do 10. 1. 2026, kterou PAMICA vede po měsících
+     * (prosincová a lednová mzda). Syntetická data, žádné reálné doklady ani osoby.
+     */
+    private function writeTwoYearSicknessPayroll(): string
+    {
+        $dir = $this->tmp . '/12345678_2026_2y';
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        $x = '';
+        $row = static function (string $table, array $cols) use (&$x): void {
+            $x .= "<{$table}>";
+            foreach ($cols as $k => $v) {
+                $x .= "<{$k}>" . htmlspecialchars((string) $v, ENT_XML1) . "</{$k}>";
+            }
+            $x .= "</{$table}>";
+        };
+        $row('sMZneprit', ['ID' => 1, 'Cislo' => 'H01', 'Nazev' => 'Náhrada za nemoc']);
+        $row('sMZslozky', ['ID' => 1, 'Cislo' => 'M01', 'Nazev' => 'Základní mzda měsíční']);
+        $row('sMzPoj', ['ID' => 1, 'IDS' => 'VZP', 'Kod' => '111']);
+        $row('ZAM', ['ID' => 1, 'OsCislo' => '5001', 'Jmeno' => 'Hana', 'Prijmeni' => 'Nemocná', 'DatNar' => '1988-02-03',
+            'StatPris' => 'CZ', 'Nerezident' => 0, 'RefPoj' => 1, 'Ulice' => 'Zkušební', 'CP' => '1', 'Obec' => 'Brno',
+            'PSC' => '60200', 'Stat' => 'CZ']);
+        $row('ZAMpomer', ['ID' => 1, 'RefZAM' => 1, 'Poradi' => 1, 'Cislo' => '1', 'JeDPP' => 0, 'DatNast' => '2024-01-01', 'TUvazek' => 40]);
+        foreach ([[30, 2025, 12, '2026-01-10', '2025-12-20', '2025-12-31', 64], [31, 2026, 1, '2026-02-10', '2026-01-01', '2026-01-10', 56]] as $i => [$id, $year, $month, $paid, $from, $to, $hours]) {
+            $row('MZ', ['ID' => $id, 'RefZAM' => 1, 'RefPomer' => 1, 'Rok' => $year, 'RelMes' => $month, 'HodFond' => 176, 'DnyFond2' => 22,
+                'TUvazek' => 40, 'HodOdpra' => 176 - $hours, 'RefPoj' => 1, 'KcHrubaM' => 35000, 'KcCistaM' => 27000, 'Prohlas' => 1,
+                'JeSocPP' => 1, 'KcSoc' => 2485, 'KcZaklM' => 35000, 'DnyPrac' => 22, 'DnyOdpra' => 14, 'KcPrum' => 200,
+                'Datum' => $paid, 'KcVyplat' => 27000]);
+            $row('MZslozky', ['ID' => $i + 1, 'RefAg' => $id, 'RefSlozka' => 1, 'KcMzda' => 35000, 'Hodnota1' => 35000]);
+            $row('MZneprit', ['ID' => $i + 1, 'RefAg' => $id, 'RefSlozka' => 1, 'HodPrac' => $hours, 'KcNahr' => 3000,
+                'DatZac' => $from, 'DatKon' => $to]);
+        }
+
+        $file = $dir . '/91_mzdy.xml';
+        file_put_contents($file, '<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+            . '<mdbExport version="1" group="mzdy" ico="12345678" year="2026" source="POHODA" state="ok">' . $x . '</mdbExport>');
+        return $file;
+    }
+
+    /**
      * Jedna fiktivní osoba s měsíční mzdou a nemocí, kterou PAMICA nese s datem od a do.
      * Syntetická data, žádné reálné doklady ani osoby.
      */
