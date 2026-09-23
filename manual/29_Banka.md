@@ -527,7 +527,9 @@ zvýrazněné. Novou poznámku přidáš v nabídce **…** u pohybu volbou **Po
 (admin/účetní), která otevře tytéž poznámky jako deník: jde je přidat, upravit,
 připnout i smazat. Co napíšeš u pohybu, uvidíš v deníku i v sekci **Zaúčtování**
 spárované faktury a naopak. Nezaúčtovaný pohyb zápis nemá, proto je volba
-**Poznámka** u něj neaktivní s vysvětlením.
+**Poznámka** u něj neaktivní s vysvětlením. Poznámku ale můžeš napsat rovnou při
+ručním zaúčtování pohybu (pole **Poznámka** pod popisem v dialogu **Zaúčtovat**)
+a v dialogu **Přeúčtovat**; uloží se k zápisu v deníku stejně.
 
 **Přeúčtovat vs. Zrušit zaúčtování.** Obojí míří na už zaúčtovaný pohyb, ale dělá
 něco jiného:

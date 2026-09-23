@@ -158,6 +158,30 @@ final class JournalEntryNoteRepository
     }
 
     /**
+     * Zkopíruje živé poznámky zápisu na zápis, který ho nahradil (přeúčtování stornem).
+     * Poznámka patří k účetnímu případu, ne k verzi zápisu: bez kopie by z dokladu
+     * i z bankovního pohybu zmizela, protože ty ukazují jen živý zápis. Stornovaný
+     * zápis si svoje poznámky nechává pro dohledatelnost.
+     *
+     * @return int počet zkopírovaných poznámek
+     */
+    public function copyToEntry(int $fromEntryId, int $toEntryId, int $supplierId): int
+    {
+        if ($fromEntryId === $toEntryId) {
+            return 0;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO journal_entry_notes (supplier_id, entry_id, body, pinned, created_by, created_at)
+             SELECT supplier_id, ?, body, pinned, created_by, created_at
+               FROM journal_entry_notes
+              WHERE supplier_id = ? AND entry_id = ? AND deleted_at IS NULL
+              ORDER BY id'
+        );
+        $stmt->execute([$toEntryId, $supplierId, $fromEntryId]);
+        return $stmt->rowCount();
+    }
+
+    /**
      * Živé poznámky pro sadu zápisů v jednom dotazu — přehled bankovních pohybů
      * ukazuje poznámku zaúčtovaného zápisu přímo v řádku, bez N+1. Pořadí jako
      * {@see list()}: připnuté první, pak nejnovější.

@@ -385,6 +385,30 @@ final class DimensionLockedPeriodTest extends TestCase
         self::assertSame('repost', json_decode((string) $log->fetchColumn(), true)['via'] ?? null);
     }
 
+    public function testRepostByReversalCarriesNotesToNewEntry(): void
+    {
+        $purchase = $this->purchase('REPOST-NOTE', [[500.00, 105.00]]);
+        $entryId = $this->postPurchase($purchase);
+        $notes = new \MyInvoice\Repository\JournalEntryNoteRepository($this->db);
+        $notes->add($entryId, $this->supplierId, 'Poznámka k případu', true, $this->userId);
+        $gone = $notes->add($entryId, $this->supplierId, 'Smazaná', false, $this->userId);
+        $notes->softDelete($gone, $entryId, $this->supplierId, $this->userId);
+        $this->periods->setStatus($this->periodId, $this->supplierId, 'closed');
+
+        $res = $this->call($this->journalAction, 'repost', 'POST',
+            ['source' => 'purchase-invoices', 'id' => (string) $purchase],
+            ['lines' => $this->repostLines($entryId), 'confirm_date_shift' => true]);
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_THROW_ON_ERROR));
+        self::assertSame('reverse', $res['body']['repost']['strategy']);
+        $newEntry = (int) $res['body']['repost']['entry_id'];
+        self::assertNotSame($entryId, $newEntry);
+
+        $carried = $notes->list($newEntry, $this->supplierId);
+        self::assertSame(['Poznámka k případu'], array_column($carried, 'body'), 'Živá poznámka jde s novým zápisem, smazaná ne.');
+        self::assertTrue($carried[0]['pinned']);
+        self::assertCount(1, $notes->list($entryId, $this->supplierId), 'Stornovaný zápis si poznámku nechává.');
+    }
+
     public function testForeignTenantCannotChangeOrPreviewDimensions(): void
     {
         $project = $this->value($this->projectType, 'T-OWN');

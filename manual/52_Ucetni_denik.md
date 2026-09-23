@@ -793,6 +793,11 @@ potvrzení, řekne dialog dopředu a rozhoduje o tom stav účetního období:
 Když do původního data zapsat nejde, storno i oprava padnou na nejbližší otevřené
 datum — dialog to napíše a **vyžádá si potvrzení**. Datum se nikdy neposune samo.
 
+Dole v dialogu jsou **Poznámky** zápisu, tytéž jako v deníku a u bankovního pohybu.
+Přidání i úprava poznámky se ukládá hned a nezávisle na přeúčtování, takže jde i tam,
+kde je přeúčtování zablokované. Když přeúčtování vytvoří storno a nový zápis, živé
+poznámky se zkopírují na nový zápis; stornovaný si je nechá.
+
 **Přeúčtování v zamčeném datu bez storna.** Zámek k datu se posouvá s podaným
 přiznáním k DPH, chrání tedy DPH, ne kontaci nákladu. Dokud rok není v uzávěrce, zápis
 v zamčeném datu se přepíše na místě, pokud oprava splní všechny podmínky:

@@ -29,6 +29,7 @@ import {
 import Modal from '../ui/Modal.vue'
 import JournalLinesEditor, { type EditorLine } from './JournalLinesEditor.vue'
 import PostingOriginRow from './PostingOriginRow.vue'
+import JournalEntryNotes from './JournalEntryNotes.vue'
 import DimensionFields from '../dimensions/DimensionFields.vue'
 import DimensionChips from '../dimensions/DimensionChips.vue'
 import { btnOutline, btnFilled, ICONS } from '../ui/buttonStyles'
@@ -345,6 +346,11 @@ async function submit(): Promise<void> {
 
           <p class="text-xs text-neutral-500">{{ t('accounting.repost.hint') }}</p>
         </template>
+
+        <!-- Poznámky zápisu — tatáž komponenta jako v deníku a u bankovního pohybu.
+             Ukládají se hned a nezávisle na přeúčtování (jdou psát i u zablokovaného);
+             přeúčtování stornem je přenese na nový zápis. -->
+        <JournalEntryNotes :entry-id="plan.entry_id" data-test="repost-notes" />
       </template>
 
       <div class="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-neutral-200">

@@ -18081,7 +18081,10 @@
       "title": "Transaction note",
       "hint": "The note is stored with journal entry {entry}. You will see it in the journal, on the transaction and on the posted document.",
       "no_entry": "The transaction has no journal entry yet. A note can be added once it is posted.",
-      "from_journal": "Journal entry note"
+      "from_journal": "Journal entry note",
+      "field": "Note",
+      "field_placeholder": "Optional note on the journal entry (shown on the transaction, in the journal and on the document)",
+      "save_failed": "Posted, but the note could not be saved."
     },
     "sort": {
       "label": "Sort by",

@@ -18081,7 +18081,10 @@
       "title": "Poznámka k pohybu",
       "hint": "Poznámka se ukládá k zápisu {entry} v účetním deníku. Uvidíte ji v deníku, u pohybu i u zaúčtovaného dokladu.",
       "no_entry": "Pohyb zatím nemá zápis v deníku. Poznámku lze přidat po zaúčtování.",
-      "from_journal": "Poznámka zápisu v deníku"
+      "from_journal": "Poznámka zápisu v deníku",
+      "field": "Poznámka",
+      "field_placeholder": "Nepovinná poznámka k zápisu v deníku (uvidíte ji u pohybu, v deníku i u dokladu)",
+      "save_failed": "Zaúčtováno, ale poznámku se nepodařilo uložit."
     },
     "sort": {
       "label": "Řadit podle",
