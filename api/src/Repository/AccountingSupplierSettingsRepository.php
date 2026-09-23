@@ -24,7 +24,7 @@ final class AccountingSupplierSettingsRepository
      *               fx_rate_mode: string, small_asset_accrual_mode: string,
      *               small_asset_accrual_pct: ?float,
      *               net_turnover_extra_rows: array{income_statement: list<string>, income_statement_purpose: list<string>},
-     *               comparative_from_prior_year: bool}
+     *               comparative_from_prior_year: bool, tax_authority_offset: bool}
      */
     public function get(int $supplierId): array
     {
@@ -32,7 +32,7 @@ final class AccountingSupplierSettingsRepository
             'SELECT avg_employees, statement_scope_override, statutory_audit,
                     manual_doc_series, fx_reversal_at_open, fx_rate_mode,
                     small_asset_accrual_mode, small_asset_accrual_pct, net_turnover_extra_rows,
-                    comparative_from_prior_year
+                    comparative_from_prior_year, tax_authority_offset
                FROM accounting_supplier_settings
               WHERE supplier_id = ?'
         );
@@ -50,6 +50,7 @@ final class AccountingSupplierSettingsRepository
                 'small_asset_accrual_pct'  => null,
                 'net_turnover_extra_rows'  => self::decodeTurnoverRows(null),
                 'comparative_from_prior_year' => false,
+                'tax_authority_offset'     => false,
             ];
         }
         return [
@@ -63,6 +64,7 @@ final class AccountingSupplierSettingsRepository
             'small_asset_accrual_pct'  => $row['small_asset_accrual_pct'] === null ? null : (float) $row['small_asset_accrual_pct'],
             'net_turnover_extra_rows'  => self::decodeTurnoverRows($row['net_turnover_extra_rows'] ?? null),
             'comparative_from_prior_year' => (bool) ($row['comparative_from_prior_year'] ?? false),
+            'tax_authority_offset'     => (bool) ($row['tax_authority_offset'] ?? false),
         ];
     }
 
@@ -142,6 +144,31 @@ final class AccountingSupplierSettingsRepository
             'INSERT INTO accounting_supplier_settings (supplier_id, comparative_from_prior_year)
              VALUES (?, ?)
              ON DUPLICATE KEY UPDATE comparative_from_prior_year = VALUES(comparative_from_prior_year)'
+        )->execute([$supplierId, $enabled ? 1 : 0]);
+    }
+
+    /**
+     * Souhrnné vykázání daňových pohledávek a závazků vůči finančnímu úřadu v rozvaze
+     * (§ 58 odst. 2 vyhl. 500/2002 Sb.). Výchozí false = nekompenzuje se. Čte
+     * {@see \MyInvoice\Service\Accounting\Reports\FinancialStatementService}.
+     */
+    public function getTaxAuthorityOffset(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT tax_authority_offset FROM accounting_supplier_settings WHERE supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $v = $stmt->fetchColumn();
+        return $v !== false && $v !== null && (int) $v === 1;
+    }
+
+    /** Partial upsert jen tohoto sloupce. */
+    public function setTaxAuthorityOffset(int $supplierId, bool $enabled): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO accounting_supplier_settings (supplier_id, tax_authority_offset)
+             VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE tax_authority_offset = VALUES(tax_authority_offset)'
         )->execute([$supplierId, $enabled ? 1 : 0]);
     }
 

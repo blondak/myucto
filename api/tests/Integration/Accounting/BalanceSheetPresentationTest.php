@@ -12,6 +12,7 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
+use MyInvoice\Service\Accounting\Reports\StatementNotesService;
 use MyInvoice\Service\Accounting\Reports\StatementOverrideService;
 use MyInvoice\Service\Accounting\Reports\StatementOverrideSuggester;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -38,6 +39,7 @@ final class BalanceSheetPresentationTest extends TestCase
     private FinancialStatementService $statements;
     private StatementOverrideService $overrides;
     private StatementOverrideSuggester $suggester;
+    private StatementNotesService $notes;
     private StatementDefinitionRepository $definitions;
     private PostingService $posting;
     private AccountingPeriodRepository $periods;
@@ -62,6 +64,7 @@ final class BalanceSheetPresentationTest extends TestCase
             $this->statements  = $c->get(FinancialStatementService::class);
             $this->overrides   = $c->get(StatementOverrideService::class);
             $this->suggester   = $c->get(StatementOverrideSuggester::class);
+            $this->notes       = $c->get(StatementNotesService::class);
             $this->definitions = $c->get(StatementDefinitionRepository::class);
             $this->posting     = $c->get(PostingService::class);
             $this->periods     = $c->get(AccountingPeriodRepository::class);
@@ -254,6 +257,41 @@ final class BalanceSheetPresentationTest extends TestCase
         self::assertSame('correction', $byAccount['391.100']['target']);
         self::assertSame('351.100', $byAccount['391.100']['overrides'][0]['follows_prefix'], 'Korekce je navázaná na pohledávku.');
         self::assertFalse($byAccount['391.100']['ambiguous']);
+    }
+
+    /**
+     * § 58 odst. 2 vyhl. 500/2002 Sb.: přeplatek daně z příjmů (341) a nedoplatek DPH (343)
+     * vůči finančnímu úřadu. Bez volby jsou v rozvaze zvlášť, s volbou se vykážou souhrnně
+     * a příloha dostane větu s částkou.
+     */
+    public function testTaxAuthorityOffsetIsOptInAndGoesToNotes(): void
+    {
+        $this->post(self::YEAR, '341', '602', 30_000.00);
+        $this->post(self::YEAR, '548', '343', 50_000.00);
+
+        $plain = $this->statements->balanceSheet($this->supplierId, $this->periodId, self::ENDS_ON, 'full');
+        $assets = array_column($plain['assets'], null, 'row_code');
+        $liabilities = array_column($plain['liabilities'], null, 'row_code');
+        self::assertEqualsWithDelta(30_000.0, $assets['C.II.2.4.3.']['net'], 0.01, 'Výchozí: bez kompenzace.');
+        self::assertEqualsWithDelta(50_000.0, $liabilities['P.C.II.8.5.']['amount'], 0.01);
+        self::assertNull($plain['checks']['tax_authority_offset']);
+
+        $this->db->pdo()->prepare('UPDATE accounting_supplier_settings SET tax_authority_offset = 1 WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
+        $offset = $this->statements->balanceSheet($this->supplierId, $this->periodId, self::ENDS_ON, 'full');
+        $assets = array_column($offset['assets'], null, 'row_code');
+        $liabilities = array_column($offset['liabilities'], null, 'row_code');
+        self::assertEqualsWithDelta(0.0, $assets['C.II.2.4.3.']['net'], 0.01, 'Přeplatek se započte s nedoplatkem.');
+        self::assertEqualsWithDelta(20_000.0, $liabilities['P.C.II.8.5.']['amount'], 0.01);
+        self::assertEqualsWithDelta($plain['checks']['assets_net'] - 30_000.0, $offset['checks']['assets_net'], 0.01);
+        self::assertTrue($offset['checks']['balanced']);
+        self::assertEqualsWithDelta(30_000.0, $offset['checks']['tax_authority_offset']['current'], 0.01);
+        self::assertSame([], $offset['checks']['negative_net_rows'], 'Započtení nesmí žádnou stranu přetočit přes nulu.');
+
+        $notes = $this->notes->build($this->supplierId, $this->periodId);
+        $principles = array_column($notes['sections'], null, 'key')['accounting_principles'];
+        self::assertStringContainsString('§ 58 odst. 2', (string) $principles['hint']);
+        self::assertStringContainsString('30 000,00 Kč', (string) $principles['hint']);
     }
 
     // ── fixtures ─────────────────────────────────────────────────────────────

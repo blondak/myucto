@@ -268,7 +268,7 @@ onMounted(async () => {
                       <tbody class="divide-y divide-neutral-200">
                         <tr v-for="acc in row.accounts" :key="`${acc.account_id}-${acc.target}`">
                           <td class="px-2 py-1">
-                            <RouterLink :to="accountLink(acc)"
+                            <RouterLink v-if="acc.account_id > 0" :to="accountLink(acc)"
                               class="font-mono text-primary-600 hover:text-primary-700 hover:underline">
                               {{ acc.account_code }}
                             </RouterLink>
@@ -333,7 +333,7 @@ onMounted(async () => {
                       <tbody class="divide-y divide-neutral-200">
                         <tr v-for="acc in row.accounts" :key="`${acc.account_id}-${acc.target}`">
                           <td class="px-2 py-1">
-                            <RouterLink :to="accountLink(acc)"
+                            <RouterLink v-if="acc.account_id > 0" :to="accountLink(acc)"
                               class="font-mono text-primary-600 hover:text-primary-700 hover:underline">
                               {{ acc.account_code }}
                             </RouterLink>

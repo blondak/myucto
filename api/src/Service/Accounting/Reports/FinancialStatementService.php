@@ -171,6 +171,8 @@ final class FinancialStatementService
                 'profit_matches'    => self::cents($profitInBalanceSheet) === self::cents($profitFromBalances),
                 'unmapped_accounts' => $ctx['unmapped'],
                 'negative_net_rows' => self::negativeNetRows($ctx['rows'], $ctx['values'], $ctx['values_prev']),
+                // null = firma souhrnné vykázání daní vůči FÚ nepoužívá; jinak započtená částka.
+                'tax_authority_offset' => $ctx['tax_offset'],
             ],
         ];
     }
@@ -374,6 +376,12 @@ final class FinancialStatementService
             $dimension,
         );
         $mapped   = $this->mapper->map($rows, $map, $balances);
+        // § 58 odst. 2 vyhl.: souhrnné vykázání daňových pohledávek a závazků vůči FÚ, jen na volbu firmy.
+        $taxOffsetOn = $type === 'balance_sheet' && $this->settings->getTaxAuthorityOffset($supplierId);
+        $taxOffset = ['current' => 0.0, 'previous' => 0.0];
+        if ($taxOffsetOn) {
+            ['mapped' => $mapped, 'amount' => $taxOffset['current']] = TaxAuthorityOffset::apply($rows, $mapped);
+        }
         $unmapped = $this->mapper->unmappedBalances(
             $map,
             $balances,
@@ -405,6 +413,9 @@ final class FinancialStatementService
                 $dimension,
             );
             $mappedPrev = $this->mapper->map($rows, $prevMap, $balancesPrev);
+            if ($taxOffsetOn) {
+                ['mapped' => $mappedPrev, 'amount' => $taxOffset['previous']] = TaxAuthorityOffset::apply($rows, $mappedPrev);
+            }
             $valuesPrev = $this->computeValues($rows, $mappedPrev, $balancesPrev, $type, (string) $prevPeriod['starts_on'], $turnoverExtra);
             // Čistý obrat v pojetí od 1. 1. 2024 se za minulé období spočtené po staru
             // neuvádí (stanovisko MF a Komory auditorů ČR z 24. 7. 2024): dvě různé veličiny
@@ -432,6 +443,9 @@ final class FinancialStatementService
                 $this->mapper->analyticPrefixes($baseMap),
             );
             $mappedOpening = $this->mapper->map($rows, $baseMap, $balancesOpening);
+            if ($taxOffsetOn) {
+                ['mapped' => $mappedOpening, 'amount' => $taxOffset['previous']] = TaxAuthorityOffset::apply($rows, $mappedOpening);
+            }
             $valuesPrev = $this->computeValues($rows, $mappedOpening, $balancesOpening, $type, $startsOn, $turnoverExtra);
         }
 
@@ -457,6 +471,7 @@ final class FinancialStatementService
             'unmapped'    => $unmapped,
             'values'      => $values,
             'values_prev' => $valuesPrev,
+            'tax_offset'  => $taxOffsetOn ? $taxOffset : null,
         ];
     }
 

@@ -614,6 +614,8 @@ export interface AccountingClosingSettings extends ReportingSettings {
   net_turnover_extra_row_options?: Record<keyof NetTurnoverExtraRows, NetTurnoverRowOption[]>
   // Minulé období výkazů s výjimkami mapování platnými v minulém roce (jako uzavřený výkaz).
   comparative_from_prior_year?: boolean | number
+  // Souhrnné vykázání daňových pohledávek a závazků vůči FÚ (§ 58 odst. 2 vyhl. 500/2002 Sb.).
+  tax_authority_offset?: boolean | number
 }
 
 export interface NetTurnoverExtraRows {

@@ -10520,6 +10520,8 @@ paths:
         `checks.negative_net_rows` vypisuje řádky aktiv se záporným netto (korekce vyšší
         než brutto) v běžném (`column: current`) i minulém (`previous`) období; mezisoučet
         nad záporným podřádkem se neopakuje. Výkaz se kvůli nim nezastaví, jde o varování.
+        `checks.tax_authority_offset` je null, když firma daně vůči finančnímu úřadu nevykazuje
+        souhrnně; jinak nese započtenou částku (`current`, `previous`).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: period_id, required: true, schema: { type: integer } }
@@ -10937,7 +10939,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { avg_employees: { type: [integer, "null"] }, statement_scope_override: { type: [string, "null"], enum: [full, small, micro, null] }, statutory_audit: { type: boolean }, manual_doc_series: { type: boolean }, fx_reversal_at_open: { type: boolean }, comparative_from_prior_year: { type: boolean } } } } } }
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { avg_employees: { type: [integer, "null"] }, statement_scope_override: { type: [string, "null"], enum: [full, small, micro, null] }, statutory_audit: { type: boolean }, manual_doc_series: { type: boolean }, fx_reversal_at_open: { type: boolean }, comparative_from_prior_year: { type: boolean }, tax_authority_offset: { type: boolean } } } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
     put:
       tags: [Accounting]
@@ -10961,6 +10963,7 @@ paths:
                 manual_doc_series: { type: boolean, description: "Auto číslo dokladu ID-{rok}-{NNNN} pro ruční zápisy" }
                 fx_reversal_at_open: { type: boolean, description: "Storno přecenění saldokonta k 1. dni nového období (ČÚS 006)" }
                 comparative_from_prior_year: { type: boolean, description: "Minulé období výkazů s výjimkami mapování platnými v minulém roce (jako uzavřený výkaz); false = přepočet podle zařazení běžného roku" }
+                tax_authority_offset: { type: boolean, description: "Rozvaha: souhrnné vykázání daňových pohledávek a závazků vůči FÚ (§ 58 odst. 2 vyhl. 500/2002 Sb.); výchozí false" }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }

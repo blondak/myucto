@@ -14621,6 +14621,8 @@
         "manual_doc_series_hint": "A manual entry without a document number gets one from the ID series.",
         "fx_reversal_at_open": "Reverse receivable/payable revaluation on the first day of the new period",
         "fx_reversal_at_open_hint": "Unrealised FX differences on receivables and payables are reversed on the first day of the new year (the subledger keeps the document rate).",
+        "tax_authority_offset": "Present taxes due to/from the tax office as a single net amount",
+        "tax_authority_offset_hint": "An overpayment of one tax (income tax, VAT, other taxes) is offset against an underpayment of another in the balance sheet, as allowed by Section 58(2) of Decree No. 500/2002 Coll. Disclose the net presentation in the notes; a suggested sentence is shown with the accounting principles. Without this option tax receivables and payables are presented separately.",
         "comparative_from_prior_year": "Take the prior period of the statements from last year's closed statements",
         "comparative_from_prior_year_hint": "The prior period column is built with the mapping exceptions valid in the previous year, i.e. the same way as the statements you filed for that year. Without this option the prior period is recalculated using the current year's classification; explain the change in the notes.",
         "small_asset_accrual": "Small-asset accrual policy (§DM)",
