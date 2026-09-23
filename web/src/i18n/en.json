@@ -13009,6 +13009,7 @@
       "target_date": "Correction date",
       "description": "Entry description",
       "confirm": "Re-post",
+      "save_note": "Save note",
       "done": "The document was re-posted.",
       "strategy_replace": "The existing entry will be rewritten — its current lines are deleted and these are written instead.",
       "strategy_reverse": "The existing entry is not deleted: it is reversed by a mirror entry and the correction is written as a new entry. Both stay in the journal (§35 of the Accounting Act).",

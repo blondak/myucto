@@ -13009,6 +13009,7 @@
       "target_date": "Datum opravy",
       "description": "Popis zápisu",
       "confirm": "Přeúčtovat",
+      "save_note": "Uložit poznámku",
       "done": "Doklad byl přeúčtován.",
       "strategy_replace": "Původní zápis se přepíše — staré řádky se smažou a zapíšou se tyhle.",
       "strategy_reverse": "Původní zápis se nemaže: stornuje se protizápisem a oprava se zapíše jako nový zápis. Obojí zůstane v deníku (§35 ZoÚ).",
