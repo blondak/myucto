@@ -28,6 +28,8 @@ use Psr\Log\LoggerInterface;
  *   POST   /api/accounting/assets/depreciations/book                — hromadné potvrzení + zaúčtování roku — účetní|admin
  *   POST   /api/accounting/assets/{id}/depreciation/pause           — přerušení daňového odpisu roku — účetní|admin
  *   DELETE /api/accounting/assets/{id}/depreciation/pause/{year}    — zrušení přerušení — účetní|admin
+ *   POST   /api/accounting/assets/{id}/depreciation/tax-override    - ruční přepis daňového odpisu roku (R8)
+ *   DELETE /api/accounting/assets/{id}/depreciation/tax-override/{year} - zrušení ručního přepisu
  */
 final class DepreciationAction
 {
@@ -140,6 +142,63 @@ final class DepreciationAction
         }
 
         return Json::ok($response, ['deleted' => true, 'fiscal_year' => $fiscalYear]);
+    }
+
+    /** Ruční přepis daňového odpisu roku s povinným důvodem (R8). */
+    public function overrideTax(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $body = (array) ($request->getParsedBody() ?? []);
+
+        $fiscalYear = (int) ($body['fiscal_year'] ?? 0);
+        if ($fiscalYear < 2000 || $fiscalYear > 2100) {
+            return Json::error($response, 'validation_failed', 'fiscal_year je povinný (celé číslo 2000–2100).', 422);
+        }
+        if (!is_numeric($body['amount'] ?? null) || (float) $body['amount'] < 0) {
+            return Json::error($response, 'validation_failed', 'amount musí být nezáporné číslo.', 422);
+        }
+        $amount = round((float) $body['amount'], 2);
+        $reason = trim((string) ($body['reason'] ?? ''));
+
+        try {
+            $result = $this->service->overrideTaxYear($supplierId, $id, $fiscalYear, $amount, $reason, $this->auditMeta($request));
+        } catch (AssetException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\Throwable $e) {
+            return $this->serverError($response, $e, 'Ruční přepis daňového odpisu se nepodařilo uložit');
+        }
+
+        $this->logEvent($request, 'asset.tax_depreciation_overridden', $id, [
+            'fiscal_year' => $fiscalYear,
+            'amount' => $amount,
+            'previous_amount' => $result['previous_amount'],
+            'reason' => $reason,
+        ]);
+        return Json::ok($response, $result);
+    }
+
+    public function clearTaxOverride(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $fiscalYear = (int) ($args['year'] ?? 0);
+
+        try {
+            $result = $this->service->clearTaxOverride($supplierId, $id, $fiscalYear);
+        } catch (AssetException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\Throwable $e) {
+            return $this->serverError($response, $e, 'Zrušení ručního přepisu daňového odpisu selhalo');
+        }
+
+        $this->logEvent($request, 'asset.tax_depreciation_override_cleared', $id, [
+            'fiscal_year' => $fiscalYear,
+            'amount' => $result['entry']['amount'] ?? null,
+        ]);
+        return Json::ok($response, $result);
     }
 
     private function serverError(Response $response, \Throwable $e, string $logPrefix): Response

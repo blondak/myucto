@@ -107,8 +107,9 @@ final class DppoMigratedDisposalTest extends TestCase
         $rows = array_column($data['disposals'], null, 'inventory_number');
         self::assertArrayHasKey('DM-005', $rows);
         $car = $rows['DM-005'];
+        // Převod kartu navázal na interní doklad vyřazení (IDH24010): ZC je z něj.
         self::assertSame(
-            [146000.0, 'card', 146000.0, 155750.0, 'tax_entries'],
+            [146000.0, 'linked_entry', 146000.0, 155750.0, 'tax_entries'],
             [$car['book_residual_value'], $car['book_residual_source'], $car['journal_residual_value'], $car['tax_residual_value'], $car['tax_residual_source']],
         );
         self::assertSame(9750.0, $data['disposal_tax_decrease'], 'Daňová ZC 155 750 − účetní 146 000.');

@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Migration;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Assets\DisposalResiduals;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Premier\PremierBackup;
 use MyInvoice\Service\Migration\Premier\PremierImporter;
@@ -223,6 +224,41 @@ final class PremierSmallAssetImportTest extends TestCase
         self::assertFalse($again->hasErrors(), $this->explain($again));
         self::assertSame(1, self::stepCounts($again, 'assets')['existing'] ?? 0, $this->explain($again));
         self::assertSame(2, $this->scalar('SELECT COUNT(*) FROM depreciation_entries e JOIN assets a ON a.id = e.asset_id WHERE a.supplier_id = ?', $supplierId));
+    }
+
+    /**
+     * Karta vyřazená v převáděném roce: vyřazení zaúčtoval převedený deník (ZC 541/082),
+     * karta se proto vyřadí BEZ zaúčtování a naváže na ten zápis. Dřív zůstala konceptem
+     * s pokynem „vyřaďte v MyÚčtu" a vyřazení v modulu by ZC zaúčtovalo podruhé.
+     */
+    public function testMajHCardDisposedInYearIsDisposedWithoutSecondPosting(): void
+    {
+        $supplierId = $this->supplier();
+        $backup = $this->backup(['maj_h' => true, 'maj_h_disposed' => true]);
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertSame([['HM-001', 'disposed', '2025-12-31', 'liquidated', '1']],
+            $this->fetch("SELECT a.inventory_number, a.status, a.disposal_date, a.disposal_type,
+                                 (SELECT COUNT(*) FROM journal_entry_lines l JOIN chart_of_accounts c ON c.id = l.account_id
+                                   WHERE l.entry_id = a.disposal_entry_id AND c.account_code = '541.000' AND l.side = 'debit') AS linked
+                            FROM assets a WHERE a.supplier_id = ?", $supplierId), $this->explain($protocol));
+        self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ? AND source_type = 'asset_disposal'", $supplierId),
+            'Vyřazení se neúčtuje znovu.');
+        self::assertSame(100000, $this->scalar("SELECT SUM(l.amount) FROM journal_entry_lines l JOIN chart_of_accounts c ON c.id = l.account_id
+            WHERE l.supplier_id = ? AND c.account_code LIKE '541%' AND l.side = 'debit'", $supplierId), 'ZC je v deníku jen jednou.');
+        $counts = self::stepCounts($protocol, 'assets');
+        self::assertSame([1, 1], [$counts['disposed_from_journal'] ?? 0, $counts['disposal_entry_linked'] ?? 0], $this->explain($protocol));
+        self::assertNotContains('asset_review', $this->messageCodes($protocol), $this->explain($protocol));
+
+        $residuals = (new DisposalResiduals($this->db))->forPeriod($supplierId, '2025-01-01', '2025-12-31');
+        self::assertSame([100000.0, DisposalResiduals::BOOK_SOURCE_LINKED_ENTRY],
+            [$residuals['rows'][0]['book_residual_value'], $residuals['rows'][0]['book_residual_source']]);
+
+        $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertArrayNotHasKey('disposed_from_journal', self::stepCounts($again, 'assets'), $this->explain($again));
+        self::assertSame(1, $this->scalar("SELECT COUNT(*) FROM assets WHERE supplier_id = ? AND status = 'disposed'", $supplierId));
     }
 
     private function assertReconciled(ImportProtocol $protocol): void

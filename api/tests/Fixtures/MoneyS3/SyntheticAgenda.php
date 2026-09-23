@@ -563,10 +563,12 @@ final class SyntheticAgenda
      *   - 9 elektromobil 1 mil. Kč zařazený 10. 3. 2024 (`FL_LGMajSk` 5, mimořádně §30a),
      *   - 10 FVE 120 000 Kč s daňovým odpisem rovným účetnímu (`UcRovnyDan`), první měsíc
      *     účetně poloviční.
+     * `$residualWriteOffInUse`: stroji 8 Money 30. 6. 2025 odepíše zůstatek 120 Kč
+     * (`OdpZustCen`), karta přitom zůstane v užívání.
      *
      * @return array<string,string>
      */
-    public static function filesWithAssetTaxCases(): array
+    public static function filesWithAssetTaxCases(bool $residualWriteOffInUse = false): array
     {
         $files = self::filesWithAssets();
         $append = static function (string $path, array $fields, array $rows) use (&$files): void {
@@ -622,6 +624,10 @@ final class SyntheticAgenda
         $monthly(9, '2024-04-30', '2025-12-31', 10000.0, 1000000.0);
         $moves[] = ['CisloMajet' => 10, 'Cislo' => 1, 'Datum' => '2024-05-31', 'Typ' => 'Z', 'Castka' => 120000.0, 'ZustCena' => 120000.0];
         $monthly(10, '2024-06-30', '2025-12-31', 1000.0, 120000.0, ['2024-06' => 500.0]);
+        if ($residualWriteOffInUse) {
+            $moves[] = ['CisloMajet' => 8, 'Cislo' => 300, 'Datum' => '2025-06-15', 'Typ' => 'U', 'Castka' => 120.0, 'ZustCena' => 214880.0,
+                'OdpZustCen' => 1, 'PrUcOpr' => '082100'];
+        }
         $append('MjInvPoh.DAT', self::ASSET_MOVE_FIELDS, $moves);
         return $files;
     }

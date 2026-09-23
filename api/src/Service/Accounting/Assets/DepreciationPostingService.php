@@ -160,9 +160,10 @@ final class DepreciationPostingService
                     }
                 }
 
-                // 2) daňový řádek roku → upsert confirmed; existující pauza se nechá být (R14)
+                // 2) daňový řádek roku → upsert confirmed; existující pauza (R14) i ručně
+                //    přepsaný odpis roku se nechají být
                 $existingTax = $this->entries->findYear($assetId, 'tax', $fiscalYear);
-                if ($existingTax === null || !$existingTax['is_paused']) {
+                if ($existingTax === null || (!$existingTax['is_paused'] && !DepreciationEntryRepository::isOverridden($existingTax))) {
                     $taxRow = $this->calculator->taxYearRow($ctx, (string) $asset['tax_method'], $fiscalYear);
                     if ($taxRow !== null) {
                         $this->entries->upsert([

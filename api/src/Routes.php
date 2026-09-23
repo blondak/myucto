@@ -2404,6 +2404,8 @@ final class Routes
             $g->post  ('/assets',                                   [AssetAction::class, 'create']);
             $g->get   ('/assets/purchase-candidates',               [AssetAction::class, 'purchaseCandidates']);
             $g->post  ('/assets/depreciations/book',                [DepreciationAction::class, 'bookYear']);
+            $g->get   ('/assets/account-summary',                   [\MyInvoice\Action\Accounting\Assets\AssetAccountSummaryAction::class, 'candidates']);
+            $g->post  ('/assets/account-summary',                   [\MyInvoice\Action\Accounting\Assets\AssetAccountSummaryAction::class, 'sync']);
             $g->get   ('/assets/{id:[0-9]+}',                       [AssetAction::class, 'get']);
             $g->put   ('/assets/{id:[0-9]+}',                       [AssetAction::class, 'update']);
             $g->delete('/assets/{id:[0-9]+}',                       [AssetAction::class, 'delete']);
@@ -2416,6 +2418,8 @@ final class Routes
             $g->post  ('/assets/{id:[0-9]+}/dispose/revert',        [AssetLifecycleAction::class, 'revertDisposal']);
             $g->post  ('/assets/{id:[0-9]+}/depreciation/pause',    [DepreciationAction::class, 'pause']);
             $g->delete('/assets/{id:[0-9]+}/depreciation/pause/{year:[0-9]+}', [DepreciationAction::class, 'unpause']);
+            $g->post  ('/assets/{id:[0-9]+}/depreciation/tax-override', [DepreciationAction::class, 'overrideTax']);
+            $g->delete('/assets/{id:[0-9]+}/depreciation/tax-override/{year:[0-9]+}', [DepreciationAction::class, 'clearTaxOverride']);
             // Uzávěrka období (Epic F4). Segmenty se s /periods/{id}/status nekryjí;
             // celá rodina closing/close/open-next/revert běží na právu accounting.periods.close
             // (RoutePermissionMap + Action requireClose), /status na accounting.periods.manage.

@@ -128,6 +128,8 @@ final class SyntheticPremierBackup
      *                           plánem `MAJ_H_OU` a pohyby `MAJ_H_PO`
      *   `maj_h_unbooked`        s `maj_h`: pohyby bez „zaúčtován odpis" - převod neví, že odpisy
      *                           2025 jsou v deníku, a uzávěrka by je účtovala znovu
+     *   `maj_h_disposed`        s `maj_h`: server vyřazený 31. 12. 2025, deník nese zůstatkovou cenu
+     *                           100 000 (541/082) i vyřazení z evidence (082/022)
      *   `dppo`                  podané přiznání k DPPO za 2025 (`D_PO1` + `D_PO2` bez úprav)
      *   `periody` / `periody_11` zamčení období 2025 (`PERIODY`): všech 12 / jen 11 měsíců
      *   `payroll`               zaměstnanci a mzdy (`PERSONAL`, `PER_MAIN`, `PERSON2`, `MZDY`, `MZDY_POL`…)
@@ -335,11 +337,19 @@ final class SyntheticPremierBackup
                 self::row(71, '2025-03-01', 'ID', '1', 'Nepeněžitý vklad serveru', 120000, '042100', '411000'),
                 self::row(72, '2025-12-31', 'ID', '2', 'Účetní odpisy 2025', 20000, '551000', '082100'),
             );
+            if (!empty($flags['maj_h_disposed'])) {
+                // Server vyřazený 31. 12. 2025: PREMIER zaúčtoval ZC 100 000 na 541 a vyřazení z evidence.
+                $chart[] = ['541', '000', 'Zůstatková cena prodaného majetku'];
+                array_push($tables['PUB_UCTO'][1],
+                    self::row(73, '2025-12-31', 'ID', '3', 'Vyřazení serveru - zůstatková cena', 100000, '541000', '082100'),
+                    self::row(74, '2025-12-31', 'ID', '3', 'Vyřazení serveru z evidence', 120000, '082100', '022100'),
+                );
+            }
             $tables['MAJ_H'] = [self::cardFields(), [[
                 'INTER' => 7, 'ID' => $id, 'DOKLAD' => 'HM', 'CISLO' => 'HM-001', 'POPIS' => 'Server', 'DATUM' => '2025-03-01', 'DATUM_P' => '2025-03-01',
                 'DATUM_UO' => '2025-03-01', 'KUSY' => 1, 'CENA' => 120000, 'D_CENA' => 120000, 'ZPUSOB' => 1, 'SKUPINA' => 2,
                 'PMD' => '022100', 'PDAL' => '042100', 'UMD' => '551000', 'UDAL' => '082100',
-            ]]];
+            ] + (!empty($flags['maj_h_disposed']) ? ['DATUM_V' => '2025-12-31'] : [])]];
             $tables['MAJ_H_OD'] = [
                 [['ID_MAJ_H', 'C', 10], ['O_DATUM', 'D'], ['O_ODPIS', 'N', 15, 2], ['O_ZUST2', 'N', 15, 2]],
                 [

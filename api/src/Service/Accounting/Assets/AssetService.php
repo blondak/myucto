@@ -62,6 +62,7 @@ final class AssetService
         private readonly ChartOfAccountsRepository $chart,
         private readonly JournalEntryRepository $journal,
         private readonly TaxConstantsRepository $constants,
+        private readonly DisposalResiduals $residuals,
     ) {}
 
     // ── CRUD ──────────────────────────────────────────────────────────────────
@@ -114,12 +115,16 @@ final class AssetService
         // řádky, prošlo z těla requestu do whitelistu AssetRepository::COLUMNS bez jediné
         // kontroly vlastnictví. Cizí `invoices.id` se tak dal natrvalo zapsat na vlastní
         // kartu (CWE-639, externí report 2026-08 R2 — třída, kterou sweep u /assets minul).
+        // Stejně vazba vyřazení na zápis deníku a účet souhrnné karty: píší je jen
+        // disposeFromJournal() a AccountSummaryCardService.
         unset(
             $data['status'],
             $data['disposal_date'],
             $data['disposal_type'],
             $data['disposal_price'],
             $data['sale_invoice_id'],
+            $data['disposal_entry_id'],
+            $data['summary_account_code'],
         );
         $card = $this->normalize($data, $existing);
         $this->assertLocks($existing, $card, $data);
@@ -513,35 +518,7 @@ final class AssetService
         if ($asset === null) {
             throw new AssetException('not_found', 'Majetek nenalezen.', 404);
         }
-        if ($asset['status'] !== 'in_use') {
-            throw new AssetException('invalid_status', 'Vyřadit lze jen majetek v užívání.');
-        }
-        $date = (string) ($data['date'] ?? '');
-        if (!self::isDate($date)) {
-            throw new AssetException('validation_failed', 'Neplatné datum vyřazení (YYYY-MM-DD).');
-        }
-        if ($date < (string) $asset['put_into_use_date']) {
-            throw new AssetException('validation_failed', 'Datum vyřazení nesmí předcházet datu zařazení do užívání.');
-        }
-        $type = (string) ($data['type'] ?? '');
-        if (!isset(self::DISPOSAL_RULES[$type])) {
-            throw new AssetException('validation_failed', 'Neplatný typ vyřazení (sold|liquidated|donated|damaged).');
-        }
-        $price = $type === 'sold' && isset($data['price']) && $data['price'] !== null
-            ? round((float) $data['price'], 2)
-            : null;
-
-        // Volitelná vazba na vydanou fakturu prodeje (jen evidenční, R20 — tržba se účtuje
-        // z faktury, ne z karty). ZC se doúčtuje 541/08x beze změny. Jen u type=sold.
-        $saleInvoiceId = null;
-        if ($type === 'sold' && isset($data['sale_invoice_id']) && $data['sale_invoice_id'] !== null && $data['sale_invoice_id'] !== '') {
-            $saleInvoiceId = (int) $data['sale_invoice_id'];
-            $owned = $this->db->pdo()->prepare('SELECT 1 FROM invoices WHERE id = ? AND supplier_id = ?');
-            $owned->execute([$saleInvoiceId, $supplierId]);
-            if ($owned->fetchColumn() === false) {
-                throw new AssetException('sale_invoice_not_found', 'Faktura prodeje nenalezena.', 422);
-            }
-        }
+        [$date, $type, $price, $saleInvoiceId] = $this->disposalInput($supplierId, $asset, $data);
 
         $period = $this->periods->ensureOpenPeriodFor($supplierId, $date);
         if ($period['status'] !== 'open') {
@@ -586,9 +563,10 @@ final class AssetService
                 }
             }
 
-            // 2) daňový řádek roku vyřazení (půlodpis / §30a / by_accounting); pauza se nechá být
+            // 2) daňový řádek roku vyřazení (půlodpis / §30a / by_accounting); pauza i ručně
+            //    přepsaný odpis roku se nechají být
             $existingTax = $this->entries->findYear($id, 'tax', $year);
-            if ($existingTax === null || !$existingTax['is_paused']) {
+            if ($existingTax === null || (!$existingTax['is_paused'] && !DepreciationEntryRepository::isOverridden($existingTax))) {
                 $taxRow = $this->calculator->taxYearRow($ctx, (string) $asset['tax_method'], $year);
                 if ($taxRow !== null) {
                     $this->entries->upsert([
@@ -659,6 +637,7 @@ final class AssetService
                 'disposal_type' => $type,
                 'disposal_price' => $price,
                 'sale_invoice_id' => $saleInvoiceId,
+                'disposal_entry_id' => null,
                 'status' => 'disposed',
             ]);
 
@@ -678,7 +657,172 @@ final class AssetService
                 'code' => 'sale_invoice_641',
                 'message' => 'Tržba z prodeje se z karty neúčtuje (R20) — vystavte fakturu s výnosem 641 (+ DPH).',
             ];
-        } elseif ($type === 'donated') {
+        }
+        return ['asset' => $this->get($supplierId, $id), 'warnings' => array_merge($warnings, self::disposalTypeWarnings($type))];
+    }
+
+    /**
+     * Vyřazení, které už zaúčtoval deník (převod z jiného programu, ruční zápis 54x proti
+     * oprávkám): karta se vyřadí BEZ zaúčtování. Zůstatková cena ani účetní odpis roku se
+     * znovu neúčtují, jinak by byly v deníku dvakrát. Karta se naváže na zápis, který
+     * vyřazení zaúčtoval (`entry_id`, jinak jediný zápis ke dni vyřazení s MD 54x proti
+     * účtu karty, {@see DisposalResiduals::journalEntriesFor()}); z něj přiznání bere účetní
+     * zůstatkovou cenu. Daňový odpis roku vyřazení se potvrdí jako u vyřazení v modulu,
+     * existující řádek převodu, pauza i ruční přepis zůstávají.
+     *
+     * @param array{date?:mixed, type?:mixed, price?:mixed, sale_invoice_id?:mixed, entry_id?:mixed} $data
+     * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
+     * @return array{asset: array<string,mixed>, warnings: list<array{code:string, message:string}>}
+     */
+    public function disposeFromJournal(int $supplierId, int $id, array $data, array $meta = []): array
+    {
+        $asset = $this->assets->find($supplierId, $id);
+        if ($asset === null) {
+            throw new AssetException('not_found', 'Majetek nenalezen.', 404);
+        }
+        if ($asset['status'] !== 'in_use') {
+            throw new AssetException('invalid_status', 'Vyřadit lze jen majetek v užívání.');
+        }
+        [$date, $type, $price, $saleInvoiceId] = $this->disposalInput($supplierId, $asset, $data);
+
+        $period = $this->periods->findForDate($supplierId, $date);
+        if ($period === null || $period['status'] !== 'open') {
+            throw new AssetException(
+                'period_not_open',
+                'Účetní období data vyřazení ' . $date . ' není otevřené, vyřazení nelze zaznamenat.',
+            );
+        }
+
+        $account = DisposalResiduals::residualCreditAccount($asset);
+        $warnings = [];
+        $entryId = isset($data['entry_id']) && $data['entry_id'] !== null && $data['entry_id'] !== '' ? (int) $data['entry_id'] : null;
+        if ($entryId !== null) {
+            if (!$this->residuals->isJournalDisposalEntry($supplierId, $entryId, $account)) {
+                throw new AssetException(
+                    'disposal_entry_mismatch',
+                    'Zápis deníku č. ' . $entryId . ' vyřazení této karty nezaúčtoval: čeká se zaúčtovaný zápis s MD 54x proti účtu ' . $account . '.',
+                    422,
+                );
+            }
+        } else {
+            $candidates = $this->residuals->journalEntriesFor($supplierId, $date, $account);
+            if (count($candidates) === 1) {
+                $entryId = $candidates[0];
+            } else {
+                $warnings[] = [
+                    'code' => $candidates === [] ? 'disposal_entry_not_found' : 'disposal_entry_ambiguous',
+                    'message' => ($candidates === []
+                        ? 'V deníku ke dni ' . $date . ' není zápis s MD 54x proti účtu ' . $account . '.'
+                        : 'V deníku ke dni ' . $date . ' je více zápisů s MD 54x proti účtu ' . $account . ' (' . implode(', ', $candidates) . ').')
+                        . ' Karta se na zápis vyřazení nenavázala; účetní zůstatková cena se v přiznání vezme z karty.',
+                ];
+            }
+        }
+
+        $year = (int) $period['fiscal_year'];
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $lockedAsset = $this->assets->findForUpdate($supplierId, $id);
+            if ($lockedAsset === null || $lockedAsset['status'] !== 'in_use') {
+                throw new AssetException('invalid_status', 'Vyřadit lze jen majetek v užívání.');
+            }
+            $assetView = $lockedAsset;
+            $assetView['disposal_date'] = $date;
+            $ctx = $this->depreciationPosting->buildContext($assetView);
+            $this->assertDisposalChronology($supplierId, $lockedAsset, $ctx, $year);
+
+            $existingTax = $this->entries->findYear($id, 'tax', $year);
+            if ($existingTax === null) {
+                $taxRow = $this->calculator->taxYearRow($ctx, (string) $lockedAsset['tax_method'], $year);
+                if ($taxRow !== null) {
+                    $this->entries->upsert([
+                        'supplier_id' => $supplierId,
+                        'asset_id' => $id,
+                        'kind' => 'tax',
+                        'fiscal_year' => $year,
+                        'amount' => (float) $taxRow['amount'],
+                        'full_amount' => (float) $taxRow['full_amount'],
+                        'residual_value_end' => (float) $taxRow['residual_end'],
+                        'is_paused' => (bool) $taxRow['is_paused'],
+                        'is_half' => (bool) $taxRow['is_half'],
+                        'months_count' => $taxRow['months_count'] ?? null,
+                        'detail' => isset($taxRow['months']) && $taxRow['months'] !== null
+                            ? json_encode($taxRow['months'], JSON_UNESCAPED_UNICODE)
+                            : null,
+                        'status' => 'confirmed',
+                    ]);
+                }
+            }
+
+            $this->assets->update($supplierId, $id, [
+                'disposal_date' => $date,
+                'disposal_type' => $type,
+                'disposal_price' => $price,
+                'sale_invoice_id' => $saleInvoiceId,
+                'disposal_entry_id' => $entryId,
+                'status' => 'disposed',
+            ]);
+
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $this->translate($e);
+        }
+
+        return ['asset' => $this->get($supplierId, $id), 'warnings' => array_merge($warnings, self::disposalTypeWarnings($type))];
+    }
+
+    /**
+     * Datum, typ, prodejní cena a faktura prodeje z požadavku na vyřazení.
+     *
+     * @param array<string,mixed> $asset
+     * @param array<string,mixed> $data
+     * @return array{0:string,1:string,2:?float,3:?int}
+     */
+    private function disposalInput(int $supplierId, array $asset, array $data): array
+    {
+        $date = (string) ($data['date'] ?? '');
+        if (!self::isDate($date)) {
+            throw new AssetException('validation_failed', 'Neplatné datum vyřazení (YYYY-MM-DD).');
+        }
+        if ($date < (string) $asset['put_into_use_date']) {
+            throw new AssetException('validation_failed', 'Datum vyřazení nesmí předcházet datu zařazení do užívání.');
+        }
+        $type = (string) ($data['type'] ?? '');
+        if (!isset(self::DISPOSAL_RULES[$type])) {
+            throw new AssetException('validation_failed', 'Neplatný typ vyřazení (sold|liquidated|donated|damaged).');
+        }
+        $price = $type === 'sold' && isset($data['price']) && $data['price'] !== null
+            ? round((float) $data['price'], 2)
+            : null;
+
+        // Volitelná vazba na vydanou fakturu prodeje (jen evidenční, R20 — tržba se účtuje
+        // z faktury, ne z karty). ZC se doúčtuje 541/08x beze změny. Jen u type=sold.
+        $saleInvoiceId = null;
+        if ($type === 'sold' && isset($data['sale_invoice_id']) && $data['sale_invoice_id'] !== null && $data['sale_invoice_id'] !== '') {
+            $saleInvoiceId = (int) $data['sale_invoice_id'];
+            $owned = $this->db->pdo()->prepare('SELECT 1 FROM invoices WHERE id = ? AND supplier_id = ?');
+            $owned->execute([$saleInvoiceId, $supplierId]);
+            if ($owned->fetchColumn() === false) {
+                throw new AssetException('sale_invoice_not_found', 'Faktura prodeje nenalezena.', 422);
+            }
+        }
+        return [$date, $type, $price, $saleInvoiceId];
+    }
+
+    /** @return list<array{code:string, message:string}> */
+    private static function disposalTypeWarnings(string $type): array
+    {
+        $warnings = [];
+        if ($type === 'donated') {
             $warnings[] = [
                 'code' => 'donation_vat_output',
                 'message' => 'U darovaného majetku s uplatněným odpočtem DPH ověřte odvod DPH z ceny obvyklé (§13/4/a a §36/6/a ZDPH); vyřazení interní daňový doklad nevytváří.',
@@ -689,13 +833,14 @@ final class AssetService
                 'message' => 'U likvidace, manka nebo škody doložte způsob vyřazení a ověřte případné vyrovnání či úpravu odpočtu DPH (§77 a §78e ZDPH).',
             ];
         }
-        return ['asset' => $this->get($supplierId, $id), 'warnings' => $warnings];
+        return $warnings;
     }
 
     /**
      * Revert vyřazení (R24) — jen dokud je období data vyřazení otevřené: storna
      * disposal zápisu i účetního odpisu roku vyřazení, DELETE řádků obou druhů,
      * vynulování disposal_*, status in_use. Storno páry v deníku zůstávají.
+     * Vyřazení bez zaúčtování ({@see disposeFromJournal()}) v deníku nic nestornuje.
      *
      * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
      * @return array{asset: array<string,mixed>, warnings: list<array{code:string, message:string}>}
@@ -746,17 +891,24 @@ final class AssetService
                 $free->execute([(int) $disposalEntry['id'], $supplierId]);
             }
 
-            $accEntry = $this->entries->findYear($id, 'accounting', $year);
-            if ($accEntry !== null) {
-                $accJournal = $this->journal->findBySource($supplierId, 'depreciation', (int) $accEntry['id']);
-                if ($accJournal !== null && ($accJournal['reversed_by'] ?? null) === null) {
-                    $this->posting->reverse($supplierId, (int) $accJournal['id'], $reverseMeta);
-                }
-            }
-
             $taxEntry = $this->entries->findYear($id, 'tax', $year);
-            $this->entries->deleteOne($id, 'accounting', $year);
-            if ($taxEntry !== null && !$taxEntry['is_paused']) {
+            if ($disposalEntry !== null) {
+                $accEntry = $this->entries->findYear($id, 'accounting', $year);
+                if ($accEntry !== null) {
+                    $accJournal = $this->journal->findBySource($supplierId, 'depreciation', (int) $accEntry['id']);
+                    if ($accJournal !== null && ($accJournal['reversed_by'] ?? null) === null) {
+                        $this->posting->reverse($supplierId, (int) $accJournal['id'], $reverseMeta);
+                    }
+                }
+                $this->entries->deleteOne($id, 'accounting', $year);
+                if ($taxEntry !== null && !$taxEntry['is_paused'] && !DepreciationEntryRepository::isOverridden($taxEntry)) {
+                    $this->entries->deleteOne($id, 'tax', $year);
+                }
+            } elseif ($taxEntry !== null && !$taxEntry['is_paused'] && !DepreciationEntryRepository::isOverridden($taxEntry)
+                && !DepreciationEntryRepository::isConfirmedByMigration($taxEntry)) {
+                // Vyřazení bez zaúčtování (disposeFromJournal, převod): účetní odpisy roku
+                // zaúčtoval deník a zůstávají; vrací se jen daňový odpis, který k vyřazení
+                // dopočetlo MyÚčto. Řádek převzatý převodem zůstává.
                 $this->entries->deleteOne($id, 'tax', $year);
             }
             $this->assets->update($supplierId, $id, [
@@ -764,6 +916,7 @@ final class AssetService
                 'disposal_type' => null,
                 'disposal_price' => null,
                 'sale_invoice_id' => null,
+                'disposal_entry_id' => null,
                 'status' => 'in_use',
             ]);
 
@@ -881,6 +1034,147 @@ final class AssetService
     }
 
     /**
+     * Ruční přepis daňového odpisu roku (R8, „převzít čísla účetní"): potvrzený daňový
+     * řádek roku dostane jinou částku, než spočítala kalkulačka nebo převzal převod.
+     * Důvod je povinný, řádek si drží původní hodnoty, kdo a kdy ho přepsal. Stanovený
+     * i uplatněný odpis je zadaná částka, zůstatková cena roku se o rozdíl posune a stejně
+     * zůstatková cena potvrzených pozdějších let (jejich částky zůstávají). Hromadné
+     * potvrzení odpisů, vyřazení ani opakovaný převod přepsaný řádek nemění. Do přiznání
+     * se promítne rozdílem účetních a daňových odpisů a v příloze (tabulka odpisů).
+     *
+     * @param array{user_id?:?int} $meta
+     * @return array{entry: array<string,mixed>, previous_amount: float}
+     */
+    public function overrideTaxYear(int $supplierId, int $id, int $fiscalYear, float $amount, string $reason, array $meta = []): array
+    {
+        $reason = trim($reason);
+        if ($reason === '') {
+            throw new AssetException('validation_failed', 'Důvod ručního přepisu daňového odpisu je povinný.');
+        }
+        if (mb_strlen($reason) > 500) {
+            throw new AssetException('validation_failed', 'Důvod ručního přepisu může mít nejvýš 500 znaků.');
+        }
+        $amount = round($amount, 2);
+        if ($amount < 0) {
+            throw new AssetException('validation_failed', 'Daňový odpis nesmí být záporný.');
+        }
+        $asset = $this->assets->find($supplierId, $id);
+        if ($asset === null) {
+            throw new AssetException('not_found', 'Majetek nenalezen.', 404);
+        }
+        $this->assertTaxYearEditable($supplierId, $fiscalYear);
+
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->assets->findForUpdate($supplierId, $id);
+            $row = $this->entries->findYear($id, 'tax', $fiscalYear);
+            if ($row === null || (int) $row['supplier_id'] !== $supplierId) {
+                throw new AssetException(
+                    'not_found',
+                    'Rok ' . $fiscalYear . ' nemá potvrzený daňový odpis, ručně přepsat jde jen potvrzený rok.',
+                    404,
+                );
+            }
+            if ($row['is_paused']) {
+                throw new AssetException('validation_failed', 'Rok ' . $fiscalYear . ' je přerušený (§26/8), nejdřív zrušte přerušení.');
+            }
+            $residualStart = round((float) $row['residual_value_end'] + (float) $row['full_amount'], 2);
+            if ($amount > $residualStart + 0.005) {
+                throw new AssetException(
+                    'validation_failed',
+                    'Daňový odpis ' . self::money($amount) . ' převyšuje daňovou zůstatkovou cenu na začátku roku ' . self::money($residualStart) . '.',
+                );
+            }
+            $delta = round($amount - (float) $row['full_amount'], 2);
+            $later = $this->entries->minLaterTaxResidual($id, $fiscalYear);
+            if ($later !== null && $later - $delta < -0.005) {
+                throw new AssetException(
+                    'validation_failed',
+                    'Přepis by u pozdějšího potvrzeného roku snížil daňovou zůstatkovou cenu pod nulu, nejdřív upravte pozdější roky.',
+                );
+            }
+            $this->entries->applyOverride($supplierId, (int) $row['id'], $amount, round($residualStart - $amount, 2), $reason, $meta['user_id'] ?? null);
+            if (abs($delta) >= 0.005) {
+                $this->entries->shiftLaterTaxResiduals($supplierId, $id, $fiscalYear, $delta);
+            }
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $this->translate($e);
+        }
+
+        return ['entry' => $this->entries->findYear($id, 'tax', $fiscalYear), 'previous_amount' => (float) $row['amount']];
+    }
+
+    /**
+     * Zruší ruční přepis daňového odpisu roku: řádek se vrátí na původní odpis
+     * a zůstatkovou cenu, pozdější potvrzené roky zpět posune.
+     *
+     * @return array{entry: array<string,mixed>}
+     */
+    public function clearTaxOverride(int $supplierId, int $id, int $fiscalYear): array
+    {
+        $asset = $this->assets->find($supplierId, $id);
+        if ($asset === null) {
+            throw new AssetException('not_found', 'Majetek nenalezen.', 404);
+        }
+        $this->assertTaxYearEditable($supplierId, $fiscalYear);
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->assets->findForUpdate($supplierId, $id);
+            $row = $this->entries->findYear($id, 'tax', $fiscalYear);
+            $original = $row !== null && (int) $row['supplier_id'] === $supplierId
+                ? $this->entries->clearOverride($supplierId, (int) $row['id'])
+                : null;
+            if ($original === null) {
+                throw new AssetException('not_found', 'Daňový odpis roku ' . $fiscalYear . ' není ručně přepsaný.', 404);
+            }
+            $delta = round($original['full_amount'] - (float) $row['full_amount'], 2);
+            if (abs($delta) >= 0.005) {
+                $this->entries->shiftLaterTaxResiduals($supplierId, $id, $fiscalYear, $delta);
+            }
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $this->translate($e);
+        }
+        return ['entry' => $this->entries->findYear($id, 'tax', $fiscalYear)];
+    }
+
+    /** Daňový odpis roku se schválenou účetní závěrkou (§17/7 ZoÚ) se už nemění. */
+    private function assertTaxYearEditable(int $supplierId, int $fiscalYear): void
+    {
+        $period = $this->periods->findByYear($supplierId, $fiscalYear);
+        if ($period !== null && (string) $period['status'] === 'approved') {
+            throw new AssetException(
+                'period_approved',
+                'Účetní závěrka roku ' . $fiscalYear . ' je schválená, daňový odpis roku už nelze měnit.',
+            );
+        }
+    }
+
+    private static function money(float $amount): string
+    {
+        return number_format($amount, 2, ',', ' ') . ' Kč';
+    }
+
+    /**
      * Plán odpisů on-the-fly (R11): minulost z potvrzených řádků, budoucnost
      * dopočtená strategií A2.
      *
@@ -927,6 +1221,11 @@ final class AssetService
                 }
                 $row['depreciation_entry_id'] = (int) $entry['id'];
                 $row['journal_entry_id'] = $journalByYear[(int) $row['fiscal_year']] ?? null;
+                if ($kind === 'tax' && DepreciationEntryRepository::isOverridden($entry)) {
+                    $row['override_reason'] = (string) $entry['override_reason'];
+                    $row['override_original_amount'] = $entry['override_original_amount'];
+                    $row['override_at'] = $entry['override_at'];
+                }
             }
             unset($row);
         }
@@ -1492,6 +1791,13 @@ final class AssetService
                     . $year . ' jej nejdřív zaúčtujte nebo přerušte.',
             );
         }
+    }
+
+    /** Majetkový účet neodpisovaného majetku (§27, pozemky, umělecká díla) podle mapy R18. */
+    public static function isNonDepreciableAccount(string $assetAccountCode): bool
+    {
+        $prefix = substr($assetAccountCode, 0, 3);
+        return array_key_exists($prefix, self::ACCUMULATED_MAP) && self::ACCUMULATED_MAP[$prefix] === null;
     }
 
     private static function deriveAccumulated(string $assetAccountCode): ?string

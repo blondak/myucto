@@ -11402,6 +11402,45 @@ paths:
       responses:
         '200': { description: "OK (id, varsymbol, vendor, částky, kurz, has_asset)", content: { application/json: { schema: { type: array, items: { type: object } } } } }
 
+  /api/v1/accounting/assets/account-summary:
+    get:
+      tags: [Accounting]
+      summary: Účty neodpisovaného majetku a jejich souhrnné karty
+      description: >-
+        Účty 031/032 (a analytiky) se zůstatkem v deníku nebo se souhrnnou kartou:
+        zůstatek, počet pohybů, počet vlastních karet (`eligible` = účet bez aktivních
+        karet), id a hodnota souhrnné karty.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200': { description: "OK {items: [account_code, name, balance, movements, active_cards, summary_asset_id, summary_value, eligible]}", content: { application/json: { schema: { type: object } } } }
+    post:
+      tags: [Accounting]
+      summary: Založení nebo srovnání souhrnné karty účtu bez karet s deníkem
+      description: >-
+        Účetní/admin. Majetek vedený jen v deníku (portfolio pozemků) dostane jednu kartu:
+        vstupní cena = počáteční stav účtu, pohyby deníku = zvýšení a snížení ceny, karta
+        sedí na zůstatek účtu, nic neúčtuje a neodpisuje se. Opakované volání kartu
+        přepočte z deníku. Účet s vlastními kartami vrací 409 `account_has_cards`.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_code]
+              properties:
+                account_code: { type: string }
+      responses:
+        '200': { description: "Srovnáno {asset, created, improvements, warnings}", content: { application/json: { schema: { type: object } } } }
+        '201': { description: "Založeno {asset, created, improvements, warnings}", content: { application/json: { schema: { type: object } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Účet má vlastní karty majetku, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/assets/depreciations/book:
     post:
       tags: [Accounting]
@@ -11572,6 +11611,12 @@ paths:
         výnos 641 vznikne vydanou fakturou (R20). Operace blokuje přeskočený
         předchozí rok i potvrzené odpisy pozdějších let. V `warnings` upozorní
         na DPH při darování a na doložení likvidace, manka či škody.
+
+        `book_entry=false`: vyřazení už zaúčtoval deník (převod z jiného programu,
+        ruční zápis 54x proti oprávkám). Karta se vyřadí bez zaúčtování a naváže na
+        zápis vyřazení (`entry_id`, jinak jediný zápis ke dni vyřazení s MD 54x proti
+        účtu karty; `disposal_entry_id` v odpovědi). Nenalezený nebo nejednoznačný
+        zápis ohlásí `warnings` (`disposal_entry_not_found`, `disposal_entry_ambiguous`).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -11586,6 +11631,9 @@ paths:
                 date: { type: string, format: date }
                 type: { type: string, enum: [sold, liquidated, donated, damaged] }
                 price: { type: [number, "null"], description: "Prodejní cena bez DPH, jen type=sold (evidenční)" }
+                sale_invoice_id: { type: [integer, "null"], description: "Vydaná faktura prodeje, jen type=sold (evidenční)" }
+                book_entry: { type: boolean, default: true, description: "false = vyřazení už zaúčtoval deník, karta se vyřadí bez zaúčtování" }
+                entry_id: { type: [integer, "null"], description: "Zápis deníku, který vyřazení zaúčtoval (jen book_entry=false)" }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -11640,6 +11688,51 @@ paths:
         - { in: path, name: year, required: true, schema: { type: integer } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/assets/{id}/depreciation/tax-override:
+    post:
+      tags: [Accounting]
+      summary: Ruční přepis daňového odpisu roku
+      description: >-
+        Účetní/admin. Potvrzený daňový odpis roku dostane zadanou částku (typicky
+        převzetí čísel účetní). Důvod je povinný; řádek si drží původní odpis, kdo
+        a kdy ho přepsal (`override_*` v plánu odpisů), změna jde do protokolu
+        činností. Zůstatková cena roku i potvrzených pozdějších let se posune o rozdíl.
+        Rok se schválenou závěrkou vrací 422 `period_approved`.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fiscal_year, amount, reason]
+              properties:
+                fiscal_year: { type: integer, minimum: 2000, maximum: 2100 }
+                amount: { type: number, minimum: 0 }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: "OK {entry, previous_amount}", content: { application/json: { schema: { type: object } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/assets/{id}/depreciation/tax-override/{year}:
+    delete:
+      tags: [Accounting]
+      summary: Zrušení ručního přepisu daňového odpisu roku
+      description: Účetní/admin. Vrátí původní odpis a zůstatkovou cenu, pozdější potvrzené roky posune zpět.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: year, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: "OK {entry}", content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
