@@ -447,6 +447,8 @@ final class Routes
             $g->post  ('/session/lock',                       [SessionAction::class, 'lock']);
             $g->get   ('/session/lock-preference',            [SessionAction::class, 'lockPreference']);
             $g->put   ('/session/lock-preference',            [SessionAction::class, 'updateLockPreference']);
+            // Výchozí firma uživatele (přepínač firem) — viz DefaultSupplierService.
+            $g->put   ('/default-supplier',                   \MyInvoice\Action\Auth\DefaultSupplierAction::class);
             $g->post  ('/session/unlock/options',             [SessionAction::class, 'unlockOptions']);
             $g->post  ('/session/unlock/verify',              [SessionAction::class, 'unlockVerify']);
             // API tokeny (Personal Access Tokens) — správa jen ze session auth

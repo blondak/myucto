@@ -706,6 +706,7 @@ final class Bootstrap
                 $c->get(Connection::class),
                 $c->get(\MyInvoice\Repository\UserSupplierRepository::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
+                $c->get(\MyInvoice\Service\Tenant\DefaultSupplierService::class),
             ),
             \MyInvoice\Service\Invoice\InvoicePublicLinkService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Invoice\InvoicePublicLinkService(
                 $c->get(Config::class),

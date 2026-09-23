@@ -22,8 +22,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *     zachová membership výjimku, ale zamkne ho na firmu ověřené domény
  *   - každý non-superadmin BEZ membership řádků = denied (fail-closed)
  *   - uživatel S membership: explicitní požadavek na cizí firmu → denied
- *     (middleware vrací 403); bez explicitního požadavku fallback na nejnižší
- *     PŘIŘAZENÝ supplier (ne globální MIN — ten může patřit cizí firmě)
+ *     (middleware vrací 403); bez explicitního požadavku fallback na výchozí
+ *     firmu uživatele mezi PŘIŘAZENÝMI firmami (DefaultSupplierService),
+ *     nikdy globální MIN — ten může patřit cizí firmě
  *   - PAT bound na supplier_id: pokud má uživatel membership a token je bound
  *     mimo něj → denied (token nesmí obejít membership); admin/bez-membership
  *     beze změny
@@ -40,10 +41,15 @@ final class SupplierAccessResolver
     /** @var array<int, array<int, ?int>> memo membership mapy per user */
     private array $assignmentsMemo = [];
 
+    /**
+     * @param DefaultSupplierService|null $defaultSupplier výchozí firma uživatele pro
+     *        požadavek bez výběru firmy; null = dřívější nejnižší id (unit testy)
+     */
     public function __construct(
         private readonly Connection $db,
         private readonly UserSupplierRepository $memberships,
         ?EntityCache $cache = null,
+        private readonly ?DefaultSupplierService $defaultSupplier = null,
     ) {
         $this->cache = $cache ?? EntityCache::disabled();
     }
@@ -121,7 +127,13 @@ final class SupplierAccessResolver
         // Globální admin = bez membership omezení a bez per-supplier override
         // (vidí všechny firmy; override by ho mohl zamknout z admin endpointů).
         if ($isSuperadmin) {
-            return new SupplierAccess($this->resolveExisting($requested), false, null);
+            if ($requested > 0 && $this->exists($requested)) {
+                return new SupplierAccess($requested, false, null);
+            }
+            if ($this->defaultSupplier !== null && $userId > 0) {
+                return new SupplierAccess($this->defaultSupplier->resolve($userId, null), false, null);
+            }
+            return new SupplierAccess($this->resolveExisting(0), false, null);
         }
 
         $assignments = $this->assignmentsFor($userId);
@@ -139,11 +151,13 @@ final class SupplierAccessResolver
             return new SupplierAccess($requested, false, $assignments[$requested]);
         }
 
-        // Bez headeru (nebo neexistující id) → nejnižší přiřazená firma.
+        // Bez headeru (nebo neexistující id) → výchozí firma uživatele
+        // (DefaultSupplierService: uložená, jinak jednorázově zvolená podle
+        // počtu dokladů), bez služby nejnižší přiřazená firma.
         // FK v user_suppliers garantuje existenci supplier řádku.
         $ids = array_keys($assignments);
         sort($ids);
-        $sid = (int) $ids[0];
+        $sid = $this->defaultSupplier?->resolve($userId, $ids) ?? (int) $ids[0];
         return new SupplierAccess($sid, false, $assignments[$sid]);
     }
 

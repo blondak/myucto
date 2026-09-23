@@ -28,6 +28,16 @@ Při přepnutí:
 - Aplikace se reloadne (router-link na `/`)
 - Pokud jsi byl na detailu / editoru entity, přesměruje na seznam (entita
   patří jinému dodavateli, neviděl bys ji)
+- Zvolená firma se uloží jako tvoje **výchozí firma**. Otevře se i v jiném
+  prohlížeči nebo na jiném zařízení.
+
+### 95.1.1 Výchozí firma
+
+Když přijdeš do aplikace bez vybrané firmy (poprvé, v novém prohlížeči nebo na
+jiném zařízení), otevře se tvoje výchozí firma. Dokud žádnou nemáš, aplikace ji
+jednou vybere sama: ze firem, ke kterým máš přístup, tu s nejvíc doklady
+(vydané faktury + přijaté doklady), při shodě tu dříve založenou. Výběr si
+uloží a dál ho nepřepočítává. Změníš ho kdykoli přepínačem firem.
 
 ## 95.2 Přidání nového dodavatele
 
@@ -498,8 +508,9 @@ rovnou. Poslední zbývajícího dodavatele instalace smazat nejde vůbec
 Aktuální dodavatel se posílá v každém API requestu jako header
 `X-Supplier-Id: N`. UI ho posílá z localStorage (`myinvoice.current_supplier_id`).
 
-Pokud header chybí, server fallbackuje na `MIN(supplier.id)` — typicky první
-dodavatel = ten z setup wizardu.
+Pokud header chybí, server použije výchozí firmu uživatele (§ 95.1.1). Ukládá
+ji `PUT /api/auth/default-supplier` s tělem `{"supplier_id": N}`, které volá
+přepínač firem.
 
 ## 95.9 Přehled firem (pro účetní kancelář)
 

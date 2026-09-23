@@ -43,6 +43,8 @@ final class RoutePermissionMap
         '/api/auth/mfa/offer/dismiss',
         '/api/auth/session/status', '/api/auth/session/activity', '/api/auth/session/lock',
         '/api/auth/session/lock-preference',
+        // Výchozí firma je volba vlastního účtu; přístup k firmě ověřuje akce.
+        '/api/auth/default-supplier',
         '/api/auth/domain-login/authorize',
         '/api/auth/session/unlock/options', '/api/auth/session/unlock/verify',
     ];
