@@ -83,6 +83,7 @@ final class ForeignCurrencyTakeover
             return 'doklad nemá položky';
         }
         $foreignTotal = 0.0;
+        $sums = ['základ' => [0.0, 0.0], 'daň' => [0.0, 0.0]];
         $n = 0;
         foreach ($items as $item) {
             $n++;
@@ -98,6 +99,18 @@ final class ForeignCurrencyTakeover
                 }
             }
             $foreignTotal += (float) $fb + (float) $fv;
+            $sums['základ'][0] += (float) $fb;
+            $sums['základ'][1] += (float) $item['base'];
+            $sums['daň'][0] += (float) $fv;
+            $sums['daň'][1] += (float) $item['vat'];
+        }
+        // Součty dokladu: část aplikace (obrat § 4a, rekapitulace hlavičky) přepočítává
+        // základ a daň z hlavičky, ne po položkách - i ty musí dát koruny zdroje.
+        foreach ($sums as $what => [$foreign, $home]) {
+            if (!self::convertsTo(round($foreign, 2), $rate, round($home, 2))) {
+                return sprintf('%s dokladu celkem %s × kurz %s nedává %s Kč ze zdroje', $what,
+                    self::amount(round($foreign, 2)), self::amount($rate, 6), self::amount(round($home, 2)));
+            }
         }
         $foreignTotal = round($foreignTotal, 2);
         if (!self::convertsTo($foreignTotal, $rate, $homeTotal)) {

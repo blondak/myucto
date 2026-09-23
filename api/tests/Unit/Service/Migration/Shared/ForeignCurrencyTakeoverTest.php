@@ -85,6 +85,17 @@ final class ForeignCurrencyTakeoverTest extends TestCase
         self::assertSame('celkem 121,00 × kurz 25,125 nedává celkem 3 040,00 Kč ze zdroje', $reason);
     }
 
+    public function testHeaderBaseAndVatMustConvertEvenWhenTotalDoes(): void
+    {
+        // Každá položka i celkem sedí (55,28), ale základ hlavičky 2,00 × 25,126 = 50,25
+        // místo 50,26 a daň 0,20 × 25,126 = 5,03 místo 5,02 - obrat § 4a z hlavičky by se lišil.
+        $items = [
+            ['base' => 25.13, 'vat' => 2.51, 'foreign_base' => 1.0, 'foreign_vat' => 0.1],
+            ['base' => 25.13, 'vat' => 2.51, 'foreign_base' => 1.0, 'foreign_vat' => 0.1],
+        ];
+        self::assertSame('základ dokladu celkem 2,00 × kurz 25,126 nedává 50,26 Kč ze zdroje', ForeignCurrencyTakeover::check(25.126, $items, 55.28));
+    }
+
     public function testItemsWithoutForeignAmountsKeepCrowns(): void
     {
         $items = [['base' => 2512.50, 'vat' => 527.63, 'foreign_base' => 100.0, 'foreign_vat' => 21.0], ['base' => 1.0, 'vat' => 0.0]];
