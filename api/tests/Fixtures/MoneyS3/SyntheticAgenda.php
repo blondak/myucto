@@ -68,6 +68,7 @@ final class SyntheticAgenda
         ['DPH_1', 'E', 10], ['DPH_2', 'E', 10],
         ['CelkemSDPH', 'E', 10], ['Uhrazeno', 'D', 2], ['UDoklad', 'C', 10], ['Popis', 'C', 50], ['BarCode', 'C', 20],
         ['Mena', 'C', 3], ['PocetJedn', 'L', 4], ['Kurs', 'E', 10], ['Neuctovat', 'B', 1], ['FlagDel', 'B', 1],
+        ['ValutyZak0', 'E', 10], ['ValutyZak1', 'E', 10], ['ValutyZak2', 'E', 10], ['ValutyDPH1', 'E', 10], ['ValutyDPH2', 'E', 10],
     ];
     private const ISSUED_FIELDS = [
         ['Doklad', 'C', 10], ['Storno', 'B', 1], ['VarSymbol', 'C', 10], ['O_ICO', 'C', 12], ['O_DIC', 'C', 14], ['O_Nazev', 'C', 60],
@@ -328,8 +329,10 @@ final class SyntheticAgenda
                     'Zaklad_2' => -500.0, 'DPH_2' => -105.0, 'CelkemSDPH' => -605.0, 'Popis' => 'Dobropis služeb'] + $purchaseDates('2025-03-20') + $vendor,
                 ['KodDPH' => self::KOD_DPH_REVERSE_CHARGE, 'Doklad' => 'FP25003', 'PrijatDokl' => 'RC-2025-001', 'VarSymbol' => '2025012',
                     'Zaklad_2' => 2000.0, 'DPH_2' => 0.0, 'CelkemSDPH' => 2000.0, 'Popis' => 'Stavební práce'] + $purchaseDates('2025-04-05') + $vendor,
+                // V měně dokladu 100 + 21 EUR (`ValutyZak2`, `ValutyDPH2`) - kurzem 25 přesně Kč z Money.
                 ['Mena' => 'EUR', 'PocetJedn' => 1, 'Kurs' => 25.0, 'Doklad' => 'FP25004', 'PrijatDokl' => 'EU-2025-001', 'VarSymbol' => '2025013',
-                    'Zaklad_2' => 2500.0, 'DPH_2' => 525.0, 'CelkemSDPH' => 3025.0, 'Popis' => 'Licence v cizí měně'] + $purchaseDates('2025-04-15') + $vendor,
+                    'Zaklad_2' => 2500.0, 'DPH_2' => 525.0, 'CelkemSDPH' => 3025.0, 'ValutyZak2' => 100.0, 'ValutyDPH2' => 21.0,
+                    'Popis' => 'Licence v cizí měně'] + $purchaseDates('2025-04-15') + $vendor,
                 // Money čísluje řadu každý rok od začátku: FP24001 je i v roce 2024.
                 // Licence z EU: faktura mimo přiznání, DPH samovyměřuje interní doklad ICH25001.
                 ['KodDPH' => '19Ř00P', 'Doklad' => 'FP25005', 'PrijatDokl' => 'DE-2025-001', 'VarSymbol' => '2025014',
