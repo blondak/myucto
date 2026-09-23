@@ -563,8 +563,10 @@ v detailu inventury; po chybě lze přípravu opakovat a běžící přípravu z
 
 1. **Založení** — inventura je ve stavu **Založena**; tlačítkem **Zahájit sčítání**
    se pořídí snapshot očekávaných stavů (množství i hodnota) **k rozhodnému datu
-   inventury** replayem skladové knihy. Zahrne všechny aktivní karty firmy, i ty bez
-   pohybu, a také neaktivní karty s nenulovou zásobou k danému dni. Inventura přejde do
+   inventury** replayem skladové knihy. Zahrne karty, které na daném skladu k datu
+   inventury někdy byly (měly na něm příjem, výdej nebo převod), včetně vyprodaných
+   s očekávaným stavem 0, a také neaktivní karty s nenulovou zásobou k danému dni.
+   Karty, které na skladu nikdy nebyly, v inventuře nejsou. Inventura přejde do
    stavu **Probíhá sčítání**. Po dobu sčítání nelze na daném skladu zaúčtovat žádný
    jiný skladový pohyb (příjemku, výdejku ani převodku z/do něj) — pokus o to skončí
    chybou „Na skladu probíhá inventura — dokončete ji před zaúčtováním pohybu."
@@ -576,6 +578,8 @@ v detailu inventury; po chybě lze přípravu opakovat a běžící přípravu z
    ukládat tlačítkem **Uložit průběh**, aniž by se inventura uzavřela. U kladného
    rozdílu se zadává reprodukční pořizovací cena za jednotku; systém nabídne cenu
    očekávaného stavu nebo poslední známou cenu. Přebytek bez kladné ceny nelze uzavřít.
+   Kartu, kterou na skladu najdeš navíc a v inventuře není, přidáš polem **Přidat kartu
+   nalezenou na skladu** pod řádky; dostane očekávaný stav 0 a zapíšeš k ní přebytek.
 3. **Rekapitulace** — po uzavření (tlačítko **Uzavřít**, s potvrzovacím dialogem —
    akci nejde vzít zpět) se zobrazí jen řádky s nenulovým rozdílem. Uzavření
    v jedné databázové transakci vytvoří (podle znaménka rozdílu) jednu souhrnnou
@@ -605,7 +609,9 @@ zaúčtuje rozdíl mezi těmito dvěma uloženými hodnotami. Pohyby provedené 
 počtu tak zůstanou zachované. Opakované uložení stejného počtu zachová původní
 referenci i čas sčítání; změna počtu zaznamená nové sčítání. Lze inventarizovat celý sklad nebo konkrétní lokaci;
 u sledovaných karet vznikají řádky po šaržích a sériových číslech a manko za celý
-sklad se odečte ze skutečných lokací, na kterých je šarže vedena.
+sklad se odečte ze skutečných lokací, na kterých je šarže vedena. Cyklická inventura
+celého skladu zahrne jen karty, které na něm někdy byly; nalezenou kartu mimo ně
+zapíšeš běžnou inventurou (pole **Přidat kartu nalezenou na skladu**).
 
 ## 37.8 Skladové sestavy
 

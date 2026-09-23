@@ -1069,8 +1069,8 @@ export const stockApi = {
   getTake: (id: number) => api.get<StockTake>(`/stock/takes/${id}`).then(r => r.data),
   createTake: (payload: { warehouse_id: number; take_date: string; note?: string | null; counting_method: string; responsible_count_name: string; responsible_inventory_name: string }) =>
     api.post<StockTake>('/stock/takes', payload).then(r => r.data),
-  updateTake: (id: number, lines: Array<{ id: number; counted_qty: string | number | null; surplus_unit_cost?: string | number | null }>) =>
-    api.put<StockTake>(`/stock/takes/${id}`, { lines }).then(r => r.data),
+  updateTake: (id: number, lines: Array<{ id: number; counted_qty: string | number | null; surplus_unit_cost?: string | number | null }>, addItemIds: number[] = []) =>
+    api.put<StockTake>(`/stock/takes/${id}`, addItemIds.length > 0 ? { lines, add_item_ids: addItemIds } : { lines }).then(r => r.data),
   startTake: (id: number) => api.post<StockTake>(`/stock/takes/${id}/start`).then(r => r.data),
   closeTake: (id: number) =>
     api.post<StockTake & { receipt_document: StockDocument | null; issue_document: StockDocument | null }>(`/stock/takes/${id}/close`).then(r => r.data),
