@@ -311,6 +311,9 @@ novější zálohy založí jen to, co ještě chybí, a nic nezdvojí. Převod
 přerušený chybou tak stačí po opravě spustit znovu. Takhle se převádí i další
 rok: ve stejné záloze zaškrtněte další rok v pořadí.
 
+Před převodem firmy znovu od začátku stáhněte v průvodci **profil firmy** a po
+ostrém převodu ho nahrajte zpět, viz [§ 96.18](96_Nastaveni.md#9618-profil-firmy).
+
 ## 109.8 Omezení
 
 - Převádí se kalendářní účetní rok, období se vždy založí od 1. 1. do 31. 12.

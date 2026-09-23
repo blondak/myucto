@@ -178,6 +178,8 @@ $report['scan_attach_staging'] = (new ScanStagingCleaner($connection))->purge();
 
 // 8) Nahrané zálohy agend Money S3 — rozbalené účetnictví firmy, týden bez práce s ní.
 $report['money_s3_uploads'] = \MyInvoice\Service\Migration\MoneyS3\MoneyS3Uploads::purgeStaleAll();
+// 8a) Zálohy a podaná přiznání nahraná do dávkového převodu z Money S3 - totéž.
+$report['money_s3_batch_uploads'] = \MyInvoice\Service\Migration\MoneyS3\MoneyS3BatchUploads::purgeStaleAll();
 // 8b) Nahrané exporty z POHODY - totéž, celé účetnictví firmy v XML.
 $report['pohoda_uploads'] = \MyInvoice\Service\Migration\Pohoda\PohodaUploads::purgeStaleAll();
 // 8c) Nahrané zálohy dat z PREMIER - totéž, celá databáze firmy (všechny roky).

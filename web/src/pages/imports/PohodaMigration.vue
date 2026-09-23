@@ -9,6 +9,7 @@ import type { PermissionKey } from '@/security/permissions'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
+import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
 import { formatBytes } from '@/components/documents/docFormat'
 
@@ -611,5 +612,7 @@ const actions = computed<ActionItem[]>(() => {
     <section v-if="run && !(currentStep >= 3 && jobRuns.some(r => r.id === run?.id))" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
       <MoneyS3Protocol :run="run" prefix="pohoda" />
     </section>
+
+    <CompanyProfileBox variant="migration" />
   </div>
 </template>

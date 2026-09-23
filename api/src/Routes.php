@@ -2565,6 +2565,17 @@ final class Routes
         $app->get    ('/api/admin/imports/money-s3/runs', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'runs']);
         $app->get    ('/api/admin/imports/money-s3/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'run']);
         $app->delete ('/api/admin/imports/money-s3/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'deleteRun']);
+        // Dávkový převod více záloh Money S3 (účetní kancelář) - zálohy, podaná DPPO, spuštění, protokol dávky.
+        $app->get    ('/api/admin/imports/money-s3/batch/uploads', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'listUploads']);
+        $app->post   ('/api/admin/imports/money-s3/batch/uploads/chunked', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'initChunked']);
+        $app->post   ('/api/admin/imports/money-s3/batch/uploads/{token:[a-f0-9]{16}}/chunks', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'chunk']);
+        $app->post   ('/api/admin/imports/money-s3/batch/uploads/{token:[a-f0-9]{16}}/complete', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'complete']);
+        $app->delete ('/api/admin/imports/money-s3/batch/uploads/{token:[a-f0-9]{16}}', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'deleteUpload']);
+        $app->post   ('/api/admin/imports/money-s3/batch/filings', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'uploadFiling']);
+        $app->delete ('/api/admin/imports/money-s3/batch/filings/{id:[a-f0-9]{40}}', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'deleteFiling']);
+        $app->post   ('/api/admin/imports/money-s3/batch/start', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'start']);
+        $app->get    ('/api/admin/imports/money-s3/batch/jobs', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'jobs']);
+        $app->get    ('/api/admin/imports/money-s3/batch/jobs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'job']);
         // Průvodce „Přechod z POHODA" - XML export (ZIP), náhled, zkouška nanečisto, převod, protokoly, exportní nástroj.
         $app->post   ('/api/admin/imports/pohoda/uploads/chunked', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'initChunked']);
         $app->post   ('/api/admin/imports/pohoda/uploads/{token:[a-f0-9]{16}}/chunks', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'chunk']);
@@ -2888,6 +2899,9 @@ final class Routes
         $app->get ('/api/settings/ai-assist',               [\MyInvoice\Action\Settings\AiAssistSettingsAction::class, 'get']);
         $app->put ('/api/settings/ai-assist',               [\MyInvoice\Action\Settings\AiAssistSettingsAction::class, 'put']);
         $app->get ('/api/settings/mode-switch-preview',     [SettingsAction::class, 'modeSwitchPreview']);
+        // Profil firmy — export/nahrání ručně vybudovaného nastavení (přežije nový převod firmy).
+        $app->get ('/api/settings/company-profile',         [\MyInvoice\Action\Settings\CompanyProfileAction::class, 'export']);
+        $app->post('/api/settings/company-profile/import',  [\MyInvoice\Action\Settings\CompanyProfileAction::class, 'import']);
         // Ciselnik CINNOSTI (CZ-NACE) - read-only referencni data pro c_okec.
         $app->get ('/api/settings/nace-codes',              \MyInvoice\Action\Settings\NaceCodesAction::class);
         $app->get ('/api/settings/accounting-activation/status', [AccountingActivationAction::class, 'status']);

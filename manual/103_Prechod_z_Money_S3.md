@@ -278,7 +278,91 @@ mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změni
 v Money celková částka faktury, protokol ji vypíše jako změněnou v Money
 a ponechanou v MyÚčtu; upravte ji ručně.
 
-## 103.9 Omezení
+Převádíte-li firmu znovu od začátku (firmu smažete a převedete znovu), ztratí
+se s ní i nastavení, které převod nezakládá: výjimky mapování výkazů, volby
+výkazů a uzávěrky, daňový profil, dimenze, předkontace a pravidla banky. Před
+smazáním proto v průvodci (nebo v Nastavení) stáhněte **profil firmy** a po
+ostrém převodu ho nahrajte zpět. Výkazy pak vyjdou stejně jako před smazáním.
+Popis profilu je v [§ 96.18](96_Nastaveni.md#9618-profil-firmy).
+
+## 103.9 Dávkový převod více firem
+
+Účetní kancelář nebo skupina firem převede víc agend najednou v záložce
+**Dávka více firem** nahoře v průvodci. Dávka dělá u každé firmy totéž co
+průvodce jedné firmy (stejný převod, stejný protokol u firmy) a navíc firmu
+najde nebo založí.
+
+- **Zálohy.** Vyberte zálohy `.lz` všech firem najednou. Nahrávají se po jedné,
+  server každou po nahrání přečte a ukáže IČO, název, roky, doporučený rok „od"
+  a firmu v MyÚčtu, do které se převede. Z více záloh téže firmy platí nejnovější
+  podle data zálohy. Nahrané zálohy zůstávají týden; zálohu úspěšně převedené
+  firmy dávka smaže.
+- **Firma podle IČO.** Firma se stejným IČO, ke které máte přístup, se převede
+  (nebo přeskočí, podle volby *Firma už v MyÚčtu je*). Chybějící firmu dávka
+  založí stejně jako zakládání další firmy v aplikaci: název, sídlo a DIČ ze
+  zálohy, co v ní chybí, z posledního podaného přiznání k DPPO a z ARES.
+  Plátcovství DPH ověří registr plátců; bez něj rozhodnou obraty na účtu 343
+  a protokol vyzve k ověření. Zakládat firmy smí jen uživatel s oprávněním
+  zakládat firmy. Firmu, ke které přístup nemáte, dávka nepřevede a vypíše ji
+  jako chybu. E-mail založené firmy doplňte v nastavení firmy.
+- **Rok „od" automaticky.** U každé firmy začne převod prvním rokem, od kterého
+  v Money navazují konečné a počáteční stavy (viz 103.6). Starší roky zůstanou
+  v archivu Money. Volbou *Všechny roky* převedete celou zálohu.
+- **Podaná přiznání k DPPO (volitelné).** Přiložte EPO XML podaných přiznání
+  (DPPDP9). Přiřadí se podle IČO, za každý rok platí poslední podání (dodatečné
+  před opravným před řádným). Zakládaná firma z nich dostane NACE, kategorii
+  účetní jednotky, audit a začátek prvního účetního období u firmy vzniklé
+  během roku. Po ostrém převodu dávka přiznání převezme do Daní a do evidence
+  daňových ztrát stejným převzetím jako `api/bin/tax-return-import.php`; existující
+  rozpracované přiznání nepřepíše a finální nikdy nemění.
+- **Skupina firem.** Firmy lze zařadit do skupiny aktuální firmy nebo do nové
+  skupiny. Zařazení proběhne před převodem, takže zakázky Money se převedou jako
+  globální projekty skupiny (viz 103.2). Volba *Firmy dávky jsou spřízněné osoby*
+  označí partnery s IČO jiné firmy dávky nebo skupiny jako spřízněné osoby; pro
+  nezávislé klienty kanceláře ji nezapínejte.
+
+Zkouška nanečisto založí firmy i celý převod v transakci, která se na konci
+vrátí: nezůstane ani firma, ani protokol u firmy, výsledek je jen v protokolu
+dávky i s podrobným protokolem každé firmy.
+
+Dávka běží jako jeden úkol na pozadí se společným průběhem. Firmy se převádějí
+po jedné a pád jedné firmy ostatní nezastaví. Zrušení platí od další firmy,
+u ostrého převodu i uvnitř právě převáděné firmy.
+
+**Protokol dávky** ukazuje u každé firmy, zda se založila, převedla do
+existující, nebo přeskočila, rok „od", stav, převzatá přiznání, upozornění
+a kontroly:
+
+| Kontrola | Co ověřuje |
+|---|---|
+| K1 | obratová předvaha proti deníku Money (a proti sestavě z Money) na haléř |
+| K2 | obraty MD = D, předvaha = deník, vyrovnané počáteční stavy, žádné koncepty |
+| K3 | rozvaha vychází a žádný účet ve výkazech nechybí |
+| K4 | doklady po knihách proti zápisům na 321, 311, 211 a 221 |
+
+Podrobný protokol ostrého převodu je u firmy v záložce *Jedna firma* (po
+přepnutí do firmy). Předchozí dávky zůstávají v přehledu pod průvodcem.
+
+**Opakování.** Dávku jde spustit znovu se stejnými nebo novějšími zálohami.
+S volbou *Převést znovu* se do existujících firem doplní jen to, co chybí
+(viz 103.8), nic se nezdvojí; firma, která minule selhala, se převede znovu.
+Profil nastavení existující firmy si dávka před převodem odloží a po úspěšném
+převodu ho obnoví, takže ho při opakování není potřeba stahovat ručně.
+
+Správce instalace může dávku spustit i z příkazové řádky nad adresářem
+záloh:
+
+```
+php api/bin/money-s3-batch.php --dir=<adresář se zálohami> --list
+php api/bin/money-s3-batch.php --dir=<adresář se zálohami> --all --dry-run
+php api/bin/money-s3-batch.php --dir=<adresář se zálohami> --all --dppo-dir=<adresář s XML> --report=souhrn.json
+```
+
+Volby odpovídají průvodci (`--from-year=auto|RRRR|all`, `--existing=skip|update`,
+`--group="Název"`, `--related-parties`, `--no-close`, `--no-registry`), na konci
+je souhrn po firmách s K1 až K4.
+
+## 103.10 Omezení
 
 - Formát dat Money není veřejně dokumentovaný. Čtení je ověřené na verzi
   Money S3 26.600; u jiné verze průvodce upozorní a výsledek je o to důležitější

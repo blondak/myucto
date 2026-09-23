@@ -857,7 +857,8 @@
         "1870_tax_authority_offset_from_year.sql",
         "1871_asset_disposal_entry.sql",
         "1872_depreciation_tax_override.sql",
-        "1873_asset_account_summary.sql"
+        "1873_asset_account_summary.sql",
+        "1874_migration_batches.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -5018,7 +5019,7 @@
                 "result_path": "varchar(255) NULL DEFAULT NULL",
                 "result_size": "bigint(20) unsigned NULL DEFAULT NULL",
                 "skipped_count": "int(10) unsigned NOT NULL DEFAULT 0",
-                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import','stereo_nx_import') NOT NULL",
+                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import','stereo_nx_import','money_s3_batch') NOT NULL",
                 "started_at": "timestamp NULL DEFAULT NULL",
                 "status": "enum('queued','running','completed','failed','cancelled','completed_with_warnings') NOT NULL DEFAULT 'queued'",
                 "supplier_id": "int(10) unsigned NOT NULL",
@@ -6375,6 +6376,46 @@
                 "fk_mfa_step_up_proofs_user": "(user_id) -> users (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
+        },
+        "migration_batch_items": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "agenda_ico": "varchar(20) NULL DEFAULT NULL",
+                "agenda_name": "varchar(190) NULL DEFAULT NULL",
+                "company_action": "enum('created','existing','skipped') NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "error": "varchar(1000) NULL DEFAULT NULL",
+                "file_name": "varchar(255) NULL DEFAULT NULL",
+                "finished_at": "timestamp NULL DEFAULT NULL",
+                "from_year": "smallint(5) unsigned NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "job_id": "bigint(20) unsigned NOT NULL",
+                "position": "int(10) unsigned NOT NULL",
+                "run_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "source": "varchar(32) NOT NULL",
+                "started_at": "timestamp NULL DEFAULT NULL",
+                "status": "enum('queued','running','completed','completed_with_warnings','failed','skipped','cancelled') NOT NULL DEFAULT 'queued'",
+                "summary": "longtext NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "target_supplier_id": "int(10) unsigned NULL DEFAULT NULL",
+                "token": "varchar(32) NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_migration_batch_items_supplier": "BTREE (supplier_id, job_id)",
+                "ix_migration_batch_items_target": "BTREE (target_supplier_id)",
+                "uq_migration_batch_items_position": "UNIQUE BTREE (job_id, position)"
+            },
+            "foreign_keys": {
+                "fk_migration_batch_items_job": "(job_id) -> import_jobs (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_migration_batch_items_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_migration_batch_items_target": "(target_supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "summary": "`summary` is null or json_valid(`summary`)"
+            }
         },
         "migrations": {
             "type": "BASE TABLE",
