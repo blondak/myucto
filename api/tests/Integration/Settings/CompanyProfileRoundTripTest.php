@@ -233,7 +233,7 @@ final class CompanyProfileRoundTripTest extends TestCase
 
         $pdo->prepare(
             "INSERT INTO posting_rules (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active)
-             VALUES (?, 'profile.test.rule', 'Testovací předkontace', '501', '321', 100, 0)"
+             VALUES (?, 'TEST-ÚČET 1', 'Testovací předkontace se zkratkou z jiného programu', '501', '321', 100, 0)"
         )->execute([$id]);
         $pdo->prepare(
             "INSERT INTO bank_posting_rules (supplier_id, name, direction, message_contains, debit_account_code, credit_account_code,

@@ -754,7 +754,9 @@ final class CompanyProfileImporter
                 continue;
             }
             $key = trim((string) ($r['rule_key'] ?? ''));
-            if (preg_match('/^[A-Za-z0-9._-]{1,64}$/', $key) !== 1) {
+            // Předkontace převzaté z jiného programu nesou jeho zkratku (diakritika, mezery),
+            // proto jen délka sloupce a žádné řídicí znaky.
+            if ($key === '' || mb_strlen($key) > 64 || preg_match('/[\x00-\x1F\x7F]/u', $key) === 1) {
                 throw new CompanyProfileException('validation_failed', sprintf('Neplatný klíč předkontace „%s".', $key));
             }
             $priority = filter_var($r['priority'] ?? 0, FILTER_VALIDATE_INT);
