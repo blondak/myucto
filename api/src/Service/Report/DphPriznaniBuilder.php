@@ -207,7 +207,8 @@ final class DphPriznaniBuilder
         }
 
         [$vatStart, $vatEnd] = $this->periodRange($year, $month, $period);
-        $vatRows = $this->ledger->rows($supplierId, $vatStart, $vatEnd, includeDrafts: false);
+        // returnRows = kanonické řádky + plnění v režimu OSS na ř. 24 (§ 110b odst. 2).
+        $vatRows = $this->ledger->returnRows($supplierId, $vatStart, $vatEnd, includeDrafts: false);
         $lines = $this->mapper->projectDphLines($vatRows);
         // #238: doklady v cizí měně bez kurzu — NEházíme chybu, vrátíme je v
         // `missing_rates` a akce je při stažení doplní z ČNB (náhled jen varuje).
@@ -376,7 +377,9 @@ final class DphPriznaniBuilder
             '13' => ['veta' => 1, 'base' => 'p_sl5_z',    'vat' => 'dan_psl5_z'],
             // Veta2 (oddíl C — ostatní plnění s nárokem na odpočet; jen základ, bez daně):
             //   ř.20 dodání zboží do JČS · ř.21 služby do JČS (§9/1) · ř.22 vývoz (§66)
-            //   ř.23 dodání nového dopr. prostředku neregistrované osobě · ř.24 zasílání zboží
+            //   ř.23 dodání nového dopr. prostředku neregistrované osobě
+            //   ř.24 vybraná plnění (§ 110b odst. 2) — plnění v režimu OSS (VatLedgerService::
+            //        ossSelectedSupplyRows) i ručně klasifikovaná 24z
             //   ř.25 RC dodavatel (§92a) · ř.26 ostatní plnění s nárokem na odpočet
             '20' => ['veta' => 2, 'base' => 'dod_zb',      'vat' => null],
             '21' => ['veta' => 2, 'base' => 'pln_sluzby',  'vat' => null],
@@ -1002,7 +1005,10 @@ final class DphPriznaniBuilder
         // Zrcadlový odpočet ř. 43 (dphdp3_line_secondary klasifikací 23/24/25)
         // a navázaný doplňující ř. 47 vznikají u IO automaticky z klasifikace —
         // jejich vyřazení JE pointa režimu (IO nemá nárok na odpočet), žádný warning.
-        $silentDrop = ['43', '47'];
+        // Ř. 24 (vybraná plnění v OSS, § 110b odst. 2) je oddíl C „s nárokem na odpočet"
+        // — IO ho nevyplňuje a plnění v OSS má vlastní přiznání, takže ani tady není
+        // co opravovat.
+        $silentDrop = ['24', '43', '47'];
         $kept = [];
         foreach ($lines as $line => $data) {
             $key = (string) $line;

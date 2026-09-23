@@ -216,9 +216,11 @@ spotřeby, typu plnění, typu sazby a sazby DPH a oddělí běžná plnění od
 vztahujících se k dřívějším obdobím. Výpočet vychází z řádkových základů a daně
 v daňovém ledgeru, nikoli jen z celkové částky hlavičky faktury.
 
-**OSS řádky jsou vyřazené z českého přiznání k DPH, z kontrolního hlášení
-i z Knihy DPH.** Zařazení do OSS se odvozuje automaticky ve všech vstupních
-kanálech — ruční označování řádků není potřeba.
+**Daň z OSS řádků do českého přiznání k DPH nevstupuje a OSS řádky nejsou
+v kontrolním ani souhrnném hlášení.** V přiznání k DPH se ale jejich **základ
+bez daně** uvádí na **ř. 24 „Vybraná plnění (§ 110b odst. 2)"**, stejně jako
+v Knize DPH (kód 24z). Zařazení do OSS se odvozuje automaticky ve všech
+vstupních kanálech — ruční označování řádků není potřeba.
 
 > **Celý režim OSS popisuje samostatná kapitola [43. Režim OSS (One Stop
 > Shop)](45_OSS.md)**: nastavení a registrace, odvození řádku, plnění k ručnímu
@@ -227,6 +229,14 @@ kanálech — ruční označování řádků není potřeba.
 > archiv podání, rekonciliace a evidence § 110f.
 
 ### 41.3.1 Co se z OSS promítne do přiznání k DPH
+
+Ř. 24 přiznání obsahuje hodnotu plnění, na která je použit režim OSS: služby
+osobám nepovinným k dani s místem plnění v jiném členském státě i prodej zboží
+na dálku. Uvádí se základ bez zahraniční daně, přepočtený na Kč kurzem dokladu,
+v přiznání za období, do kterého patří datum uskutečnění plnění (ne za kvartál
+OSS podání). Dobropis k OSS faktuře ř. 24 snižuje. Řádek se nesčítá do daně
+na výstupu (ř. 62), ale vstupuje do výpočtu koeficientu podle § 76 stejně jako
+ostatní řádky 20 až 26. Přiznání identifikované osoby ř. 24 neobsahuje.
 
 Přiznání k DPH hlásí varování se seznamem dokladů u řádků, které zůstaly **mimo
 OSS s příznakem „k ručnímu posouzení"** — vstupují na **ř. 1 a 2**, aniž to kdo
@@ -589,7 +599,7 @@ Každá faktura (nebo její řádek) má `vat_classification_code` (např. "1", 
 | **22** | Poskytnutí služby do JČS (§ 9 odst. 1) | 21 | SH kód plnění 3 |
 | **31** | Dodání zboží prostřední osobou při třístranném obchodu (§ 17) | 31 | SH kód plnění 2 |
 | **23n** | Dodání nového dopravního prostředku neregistrované osobě (§ 19) | 23 | — |
-| **24z** | Zasílání zboží do JČS (§ 8) — mimo režim OSS | 24 | — |
+| **24z** | Vybraná plnění (§ 110b odst. 2) — služby nepovinným osobám a prodej zboží na dálku do JČS; OSS řádky se sem propisují samy, kód slouží pro ruční zařazení mimo OSS | 24 | — |
 | **25s** | Tuzemský přenos — **stavební a montážní práce § 92e** (dodavatel) | 25 | KH A.1, `kod_pred_pl=4` |
 | **25s5** | Tuzemský přenos — **odpad a šrot § 92c** (dodavatel) | 25 | KH A.1, `kod_pred_pl=5` |
 | **25s3** | Tuzemský přenos — **dodání nemovité věci § 92d** (dodavatel) | 25 | KH A.1, `kod_pred_pl=3` |

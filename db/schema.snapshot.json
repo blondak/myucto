@@ -860,7 +860,8 @@
         "1873_asset_account_summary.sql",
         "1874_migration_batches.sql",
         "1875_migration_parallel_checks.sql",
-        "1876_dimension_account_rules.sql"
+        "1876_dimension_account_rules.sql",
+        "XXXX_vat_classification_24z_selected_supplies.sql"
     ],
     "tables": {
         "accounting_archives": {

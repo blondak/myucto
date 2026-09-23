@@ -136,7 +136,7 @@ final class VatClassificationMapper
     public function aggregateForDphPriznani(int $supplierId, int $year, int $month, string $period = 'monthly'): array
     {
         [$start, $end] = $this->periodRange($year, $month, $period);
-        return $this->projectDphLines($this->ledger->rows($supplierId, $start, $end, includeDrafts: false));
+        return $this->projectDphLines($this->ledger->returnRows($supplierId, $start, $end, includeDrafts: false));
     }
 
     /**
@@ -150,7 +150,7 @@ final class VatClassificationMapper
     {
         [$start, $end] = $this->periodRange($year, $month, $period);
         return VatLedgerService::missingExchangeRateRows(
-            $this->ledger->rows($supplierId, $start, $end, includeDrafts: false)
+            $this->ledger->returnRows($supplierId, $start, $end, includeDrafts: false)
         );
     }
 
@@ -165,7 +165,7 @@ final class VatClassificationMapper
     {
         $start = sprintf('%04d-01-01', $year);
         $end   = sprintf('%04d-12-31', $year);
-        return $this->projectDphLines($this->ledger->rows($supplierId, $start, $end, includeDrafts: false));
+        return $this->projectDphLines($this->ledger->returnRows($supplierId, $start, $end, includeDrafts: false));
     }
 
     /**

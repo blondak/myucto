@@ -142,7 +142,7 @@ final class VatClassificationMapperTest extends TestCase
         $this->assertSame([], $lines, 'Drafty se do DPHDP3 nezapočítávají');
     }
 
-    public function testOssSaleIsExcludedFromDomesticVatLedger(): void
+    public function testOssSaleLandsOnlyOnLine24(): void
     {
         $this->pdo->exec(
             "INSERT INTO invoices
@@ -160,7 +160,11 @@ final class VatClassificationMapperTest extends TestCase
 
         $lines = $this->mapper->aggregateForDphPriznani(1, 2026, 5, 'monthly');
 
-        $this->assertSame([], $lines, 'OSS plneni nesmi vstoupit do tuzemskeho DPH priznani');
+        // Daň z OSS plnění do tuzemského přiznání nepatří (ř. 1 ani ř. 62), ale základ
+        // se uvádí na ř. 24 „Vybraná plnění (§ 110b odst. 2)" — pokyny k tiskopisu 5401.
+        $this->assertSame([24], array_keys($lines), 'OSS plnění patří jen na ř. 24');
+        $this->assertEqualsWithDelta(100.0, $lines['24']['base'], 0.001);
+        $this->assertEqualsWithDelta(0.0, $lines['24']['vat'], 0.001, 'zahraniční daň do přiznání nevstupuje');
     }
 
     public function testPerTenantOverrideWinsOverGlobal(): void
