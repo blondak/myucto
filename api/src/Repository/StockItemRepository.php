@@ -19,6 +19,23 @@ final class StockItemRepository
     public const AVAILABILITY_FILTERS = ['in_stock', 'out_of_stock', 'below_min'];
     public const MISSING_FIELDS = ['manufacturer', 'category', 'image', 'price', 'ean'];
 
+    /**
+     * Od kolika znaků hledání prochází i identifikátory kusů (sériová čísla, šarže)
+     * a textové parametry karty. Kratší text by prohledával všechny kusy skladu
+     * a vracel šum; VIN, výrobní číslo nebo kód šarže má vždy víc znaků.
+     */
+    public const IDENTIFIER_SEARCH_MIN_LENGTH = 3;
+
+    /** Tři placeholdery `%text%`: sériové číslo, kód šarže, hodnota textového parametru. */
+    private const IDENTIFIER_SEARCH_SQL =
+        'EXISTS (SELECT 1 FROM stock_tracking_units stu
+                  WHERE stu.supplier_id = si.supplier_id AND stu.stock_item_id = si.id
+                    AND (stu.serial_number LIKE ? OR stu.lot_code LIKE ?))
+         OR EXISTS (SELECT 1 FROM stock_item_attribute_values siav
+                      JOIN stock_attributes sa ON sa.id = siav.attribute_id AND sa.supplier_id = siav.supplier_id
+                     WHERE siav.supplier_id = si.supplier_id AND siav.stock_item_id = si.id
+                       AND sa.data_type = \'text\' AND siav.value_text LIKE ?)';
+
     private const COLUMNS =
         'id, supplier_id, sku, name, item_type, manufacturer_id, unit, default_sale_unit, tracking_mode, ean, vat_rate_id,
          sale_price_without_vat, min_qty, warranty_months, delivery_days, export_eshop,
@@ -247,10 +264,15 @@ final class StockItemRepository
         }
         if (!empty($filters['q'])) {
             $q = addcslashes((string) $filters['q'], '%_\\');
-            $where[] = '(si.sku LIKE ? OR si.name LIKE ? OR si.ean LIKE ?)';
+            $identifiers = self::identifierSearchable((string) $filters['q']);
+            $where[] = '(si.sku LIKE ? OR si.name LIKE ? OR si.ean LIKE ?'
+                . ($identifiers ? ' OR ' . self::IDENTIFIER_SEARCH_SQL : '') . ')';
             $whereParams[] = '%' . $q . '%';
             $whereParams[] = '%' . $q . '%';
             $whereParams[] = '%' . $q . '%';
+            if ($identifiers) {
+                array_push($whereParams, '%' . $q . '%', '%' . $q . '%', '%' . $q . '%');
+            }
         }
 
         if (!empty($filters['manufacturer_id'])) {
@@ -266,16 +288,7 @@ final class StockItemRepository
             $whereParams[] = (int) $filters['vendor_id'];
         }
         if (!empty($filters['category_id'])) {
-            $where[] = 'EXISTS (
-                SELECT 1
-                  FROM stock_item_categories sic
-                  JOIN stock_categories sc
-                    ON sc.id = sic.category_id AND sc.supplier_id = sic.supplier_id
-                  JOIN stock_categories root
-                    ON root.id = ? AND root.supplier_id = sic.supplier_id
-                 WHERE sic.supplier_id = si.supplier_id AND sic.stock_item_id = si.id
-                   AND sc.path LIKE CONCAT(root.path, "%")
-            )';
+            $where[] = self::categorySubtreeSql('si');
             $whereParams[] = (int) $filters['category_id'];
         }
         foreach (array_values(array_unique(array_filter(
@@ -412,7 +425,83 @@ final class StockItemRepository
     }
 
     /**
-     * Autocomplete — aktivní karty dle sku/name/ean a přesného EAN balení (issue #17).
+     * Karta `$itemAlias` leží v kategorii `?` nebo v kterékoli její podkategorii
+     * (jeden placeholder = id kategorie). Stejné pravidlo pro seznam karet i sestavy.
+     */
+    public static function categorySubtreeSql(string $itemAlias): string
+    {
+        return "EXISTS (
+            SELECT 1
+              FROM stock_item_categories sic
+              JOIN stock_categories sc
+                ON sc.id = sic.category_id AND sc.supplier_id = sic.supplier_id
+              JOIN stock_categories root
+                ON root.id = ? AND root.supplier_id = sic.supplier_id
+             WHERE sic.supplier_id = {$itemAlias}.supplier_id AND sic.stock_item_id = {$itemAlias}.id
+               AND sc.path LIKE CONCAT(root.path, '%')
+        )";
+    }
+
+    public static function identifierSearchable(string $q): bool
+    {
+        return mb_strlen(trim($q)) >= self::IDENTIFIER_SEARCH_MIN_LENGTH;
+    }
+
+    /**
+     * Proč karta vyhověla hledání, když ne podle kódu, názvu ani EAN: první sériové
+     * číslo, kód šarže nebo textový parametr obsahující text. Seznam tak u karty
+     * rovnou ukáže, který kus (VIN, výrobní číslo) uživatel hledal. Karty, které
+     * vyhověly už kódem, názvem nebo EAN (stejným LIKE a kolací jako hledání),
+     * se vynechají, protože shodu uživatel vidí sám.
+     *
+     * @param list<int> $itemIds
+     * @return array<int,array{kind:string,value:string,attribute:?string}>
+     */
+    public function searchMatches(int $supplierId, array $itemIds, string $q): array
+    {
+        $q = trim($q);
+        $itemIds = array_values(array_unique(array_filter(array_map('intval', $itemIds), static fn (int $id): bool => $id > 0)));
+        if ($itemIds === [] || !self::identifierSearchable($q)) {
+            return [];
+        }
+        $like = '%' . addcslashes($q, '%_\\') . '%';
+        $in = implode(',', array_fill(0, count($itemIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT stock_item_id, kind, value, attribute FROM (
+                SELECT stu.stock_item_id,
+                       CASE WHEN stu.serial_number LIKE ? THEN \'serial\' ELSE \'lot\' END AS kind,
+                       CASE WHEN stu.serial_number LIKE ? THEN stu.serial_number ELSE stu.lot_code END AS value,
+                       NULL AS attribute, 0 AS source_order, stu.id AS source_id
+                  FROM stock_tracking_units stu
+                 WHERE stu.supplier_id = ? AND stu.stock_item_id IN (' . $in . ')
+                   AND (stu.serial_number LIKE ? OR stu.lot_code LIKE ?)
+                UNION ALL
+                SELECT siav.stock_item_id, \'attribute\', siav.value_text, sa.name, 1, siav.id
+                  FROM stock_item_attribute_values siav
+                  JOIN stock_attributes sa ON sa.id = siav.attribute_id AND sa.supplier_id = siav.supplier_id
+                 WHERE siav.supplier_id = ? AND siav.stock_item_id IN (' . $in . ')
+                   AND sa.data_type = \'text\' AND siav.value_text LIKE ?
+             ) m
+             JOIN stock_items si ON si.id = m.stock_item_id AND si.supplier_id = ?
+            WHERE NOT (si.sku LIKE ? OR si.name LIKE ? OR COALESCE(si.ean, \'\') LIKE ?)
+            ORDER BY stock_item_id, source_order, source_id'
+        );
+        $stmt->execute([$like, $like, $supplierId, ...$itemIds, $like, $like, $supplierId, ...$itemIds, $like, $supplierId, $like, $like, $like]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $out[(int) $row['stock_item_id']] ??= [
+                'kind'      => (string) $row['kind'],
+                'value'     => (string) $row['value'],
+                'attribute' => $row['attribute'] !== null ? (string) $row['attribute'] : null,
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Autocomplete — aktivní karty dle sku/name/ean, přesného EAN balení (issue #17)
+     * a od {@see IDENTIFIER_SEARCH_MIN_LENGTH} znaků i dle sériových čísel, šarží
+     * a textových parametrů.
      * @return list<array<string,mixed>>
      */
     public function search(int $supplierId, string $q, int $limit = 50): array
@@ -424,17 +513,19 @@ final class StockItemRepository
         $lim = max(1, min(200, $limit));
         $like = '%' . addcslashes($q, '%_\\') . '%';
 
+        $identifiers = self::identifierSearchable($q);
         $stmt = $this->db->pdo()->prepare(
             'SELECT si.id, si.sku, si.name, si.unit, si.default_sale_unit, si.tracking_mode, si.vat_rate_id, si.sale_price_without_vat
                FROM stock_items si
               WHERE si.supplier_id = ? AND si.is_active = 1 AND si.lifecycle_status = \'ready\'
                 AND (si.sku LIKE ? OR si.name LIKE ? OR si.ean LIKE ?
                      OR EXISTS (SELECT 1 FROM stock_item_units u
-                                 WHERE u.supplier_id = si.supplier_id AND u.stock_item_id = si.id AND u.ean = ?))
+                                 WHERE u.supplier_id = si.supplier_id AND u.stock_item_id = si.id AND u.ean = ?)'
+                     . ($identifiers ? ' OR ' . self::IDENTIFIER_SEARCH_SQL : '') . ')
               ORDER BY si.name ASC
               LIMIT ' . $lim
         );
-        $stmt->execute([$supplierId, $like, $like, $like, $q]);
+        $stmt->execute([$supplierId, $like, $like, $like, $q, ...($identifiers ? [$like, $like, $like] : [])]);
         return array_map(static function (array $r): array {
             return [
                 'id'                     => (int) $r['id'],

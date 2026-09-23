@@ -14848,15 +14848,17 @@ paths:
       tags: [Stock]
       summary: Našeptávač skladových karet (autocomplete)
       description: |
-        Aktivní karty podle SKU, názvu, EAN karty nebo přesného EAN balení. Každý
+        Aktivní karty podle SKU, názvu, EAN karty nebo přesného EAN balení; od 3 znaků
+        i podle sériového čísla, šarže nebo textového parametru. Každý
         výsledek nese i `effective_price` (CZK, dnes, bez odběratele), `default_sale_unit`,
         `units` (balení karty, `StockItemSalesUnit`), `matched_unit` (kód balení, jehož
-        EAN přesně odpovídá `q`, jinak null) a `has_customer_prices`.
+        EAN přesně odpovídá `q`, jinak null), `has_customer_prices` a `search_match`
+        (stejný význam jako v seznamu karet).
       parameters:
         - in: query
           name: q
           schema: { type: string }
-          description: Hledaný text (SKU, název, EAN karty nebo EAN balení).
+          description: Hledaný text (SKU, název, EAN karty nebo EAN balení, sériové číslo, šarže, textový parametr).
         - in: query
           name: limit
           schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
@@ -14916,7 +14918,11 @@ paths:
         name: q
         schema:
           type: string
-        description: Fulltextové hledání (SKU, název, EAN).
+        description: |
+          Fulltextové hledání (SKU, název, EAN). Od 3 znaků hledá i v sériových
+          číslech a šaržích kusů a v textových parametrech karty. Řádek, který vyhověl
+          jen takto, nese `search_match` (`kind` = serial | lot | attribute, `value`,
+          `attribute` = název parametru); jinak je `search_match` null.
       - in: query
         name: only_below_min
         schema:
@@ -15381,6 +15387,14 @@ paths:
       description: |
         Stránkovaný výpis pohybů karty s běžnou bilancí (`balance_after` po každém
         řádku) a počáteční bilancí (`opening_balance`) k dané stránce.
+
+        Pohyb vyvolaný fakturou nebo dobropisem nese `invoice_id`, `invoice_number`,
+        `invoice_type`, prodejní cenu řádku (`sale_unit_price` bez DPH za `sale_unit`
+        v měně `sale_currency`) a odběratele v `partner`. Příjem z přijaté faktury nese
+        `purchase_invoice_id`, `purchase_invoice_number` a dodavatele. `partner` je
+        `{kind: client | vendor | text, id, name}`; jméno je ze snapshotu dokladu,
+        u ručního dokladu volný text bez `id`. Token bez práva ke čtení vydaných,
+        resp. přijatých faktur dostane tyto údaje jako null.
       parameters:
         - in: query
           name: warehouse_id
@@ -16980,6 +16994,63 @@ paths:
           schema: { type: integer }
       responses:
         '200': { description: OK }
+  /api/v1/stock/reports/sales:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Stock]
+      summary: Sestava prodejů skladových karet
+      description: |
+        Řádky vydaných faktur a dobropisů navázané na skladovou kartu: kdo, kdy, co
+        a za kolik koupil. Koncept, stornovaný doklad, proforma a daňový doklad
+        k platbě se nepočítají. Dobropis snižuje tržbu vždy, prodané množství jen
+        o zboží vrácené na sklad (vratka k řádku dobropisu). Filtr `warehouse_id`
+        zahrne i řádky bez skladu, pokud je zvolený sklad výchozí.
+        Období se určuje podle DUZP (bez něj podle data vystavení). Částky jsou
+        v měně dokladu a součty po měnách (`totals.amounts`), bez přepočtu kurzem.
+        Řádek nese `identifiers` = sériová čísla a šarže vydané k řádku faktury
+        (bez stornovaných výdejek).
+        Vyžaduje právo ke skladu i ke čtení vydaných faktur.
+      parameters:
+        - in: query
+          name: date_from
+          schema: { type: string, format: date }
+          description: Výchozí 1. ledna aktuálního roku.
+        - in: query
+          name: date_to
+          schema: { type: string, format: date }
+          description: Výchozí dnešní datum.
+        - in: query
+          name: client_id
+          schema: { type: integer }
+        - in: query
+          name: category_id
+          schema: { type: integer }
+          description: Kategorie karty včetně podkategorií.
+        - in: query
+          name: warehouse_id
+          schema: { type: integer }
+        - in: query
+          name: stock_item_id
+          schema: { type: integer }
+        - in: query
+          name: q
+          schema: { type: string }
+          description: SKU, název karty nebo text řádku; od 3 znaků i prodané sériové číslo nebo šarže a textový parametr karty.
+        - in: query
+          name: group_by
+          schema: { type: string, enum: [none, client, item], default: none }
+          description: Souhrn `groups` po odběratelích nebo kartách (dokladů, řádků, množství, částky po měnách).
+        - in: query
+          name: page
+          schema: { type: integer, default: 1, minimum: 1 }
+        - in: query
+          name: per_page
+          schema: { type: integer, default: 50, minimum: 1, maximum: 500 }
+      responses:
+        '200': { description: OK }
+        '403': { description: Chybí právo ke čtení vydaných faktur. }
+        '422': { description: Neplatný filtr (datum, identifikátor, seskupení). }
   /api/v1/stock/reports/{name}/export:
     parameters:
     - $ref: '#/components/parameters/SupplierIdHeader'
@@ -16991,12 +17062,14 @@ paths:
         enum:
         - status
         - valuation
+        - sales
     get:
       tags:
       - Stock
       summary: Export sestavy (PDF/XLSX)
-      description: Export sestavy `status` nebo `valuation` (stejné filtry jako u dat
-        sestavy).
+      description: Export sestavy `status` nebo `valuation` (PDF i XLSX) a `sales` (jen
+        XLSX, nejvýše 20 000 řádků; vyžaduje i čtení vydaných faktur). Filtry jsou
+        stejné jako u dat sestavy.
       parameters:
       - in: query
         name: format

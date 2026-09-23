@@ -14,6 +14,7 @@ use MyInvoice\Repository\StockPackagingUnitRepository;
 use MyInvoice\Repository\StockTrackingRepository;
 use MyInvoice\Service\Stock\StockItemPackagingService;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
 use MyInvoice\Service\Eshop\CatalogFilter;
@@ -39,7 +40,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET    /api/stock/items/{id}                   — detail
  *   PUT    /api/stock/items/{id}                   — úprava
  *   DELETE /api/stock/items/{id}                   — smazání (jen bez pohybů; jinak deaktivace)
- *   GET    /api/stock/items/{id}/movements         — skladová kniha karty (stránkovaná, s běžnou bilancí)
+ *   GET    /api/stock/items/{id}/movements         — skladová kniha karty (stránkovaná, s běžnou bilancí,
+ *                                                     dokladem a protistranou podle práv k fakturám)
  *   GET    /api/stock/items/{id}/movements/export  — export skladové karty (?format=pdf|xlsx)
  */
 final class StockItemAction
@@ -107,7 +109,7 @@ final class StockItemAction
 
         $p = Pagination::fromQuery($q, 50);
         [$rows, $total] = $this->items->listPaged($supplierId, $filters, $p['per_page'], $p['offset']);
-        $rows = $this->withEffectivePrice($supplierId, $rows);
+        $rows = $this->withSearchMatch($supplierId, $this->withEffectivePrice($supplierId, $rows), (string) ($filters['q'] ?? ''));
         return Json::ok($response, Pagination::envelope($rows, $total, $p['page'], $p['per_page']));
     }
 
@@ -121,7 +123,32 @@ final class StockItemAction
         $limit = max(1, min(200, (int) ($q['limit'] ?? 50)));
         $term = trim((string) ($q['q'] ?? ''));
         $rows = $this->items->search($supplierId, $term, $limit);
-        return Json::ok($response, $this->withPackaging($supplierId, $this->withEffectivePrice($supplierId, $rows), $term));
+        return Json::ok($response, $this->withSearchMatch(
+            $supplierId,
+            $this->withPackaging($supplierId, $this->withEffectivePrice($supplierId, $rows), $term),
+            $term,
+        ));
+    }
+
+    /**
+     * `search_match` = kde karta hledanému textu vyhověla, pokud ne v kódu, názvu
+     * ani EAN (sériové číslo, šarže, textový parametr); jinak null. Rozhoduje SQL
+     * se stejnou kolací jako hledání ({@see StockItemRepository::searchMatches()}).
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function withSearchMatch(int $supplierId, array $rows, string $term): array
+    {
+        $matches = trim($term) === '' ? [] : $this->items->searchMatches(
+            $supplierId,
+            array_map(static fn (array $r): int => (int) $r['id'], $rows),
+            $term,
+        );
+        foreach ($rows as $i => $row) {
+            $rows[$i]['search_match'] = $matches[(int) $row['id']] ?? null;
+        }
+        return $rows;
     }
 
     /**
@@ -371,17 +398,11 @@ final class StockItemAction
         ], static fn ($v): bool => $v !== null);
 
         // Počáteční bilance = součet qty_signed VŠECH řádků PŘED touto stránkou
-        // (stejné filtry). Počítáno v celočíselných tisícinách (StockValuation),
-        // ne floatem — money-safe vzor napříč appkou.
-        $openingT = 0;
-        if ($offset > 0) {
-            $prior = $this->levels->ledgerForItem($supplierId, $itemId, $baseOpts + ['limit' => $offset, 'offset' => 0]);
-            foreach ($prior as $p) {
-                $openingT += StockValuation::qtyToT((string) $p['qty_signed']);
-            }
-        }
+        // (stejné filtry) jedním SUM v DB; dřív se řádky načítaly přes ledgerForItem,
+        // jehož strop 500 řádků bilanci od sedmé stránky tiše uřízl.
+        $openingT = StockValuation::qtyToT($this->levels->ledgerQtyBefore($supplierId, $itemId, $baseOpts, $offset));
 
-        $rows = $this->levels->ledgerForItem($supplierId, $itemId, $baseOpts + ['limit' => $limit, 'offset' => $offset]);
+        $rows = $this->withDocumentAccess($request, $this->levels->ledgerForItem($supplierId, $itemId, $baseOpts + ['limit' => $limit, 'offset' => $offset]));
         $runningT = $openingT;
         foreach ($rows as &$r) {
             $runningT += StockValuation::qtyToT((string) $r['qty_signed']);
@@ -423,6 +444,7 @@ final class StockItemAction
         ], static fn ($v): bool => $v !== null);
 
         $movements = $this->fetchAllMovements($supplierId, $itemId, $baseOpts);
+        $movements['items'] = $this->withDocumentAccess($request, $movements['items']);
 
         $out = $format === 'pdf'
             ? [
@@ -444,6 +466,36 @@ final class StockItemAction
             ->withHeader('Content-Disposition', 'attachment; filename="' . $safeName . '"')
             ->withHeader('Content-Length', (string) strlen($out['bytes']))
             ->withHeader('Cache-Control', 'private, no-store');
+    }
+
+    /**
+     * Pohyb nese číslo faktury, odběratele a prodejní cenu z FV, resp. číslo
+     * a dodavatele z PF. Sklad smí vidět i role bez přístupu k fakturám; té se
+     * údaje z dokladu, ke kterému nemá právo, vynulují (odkaz i protistrana).
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function withDocumentAccess(Request $request, array $rows): array
+    {
+        $invoices = RequestAuthorization::allows($request, 'invoices', AccessLevel::READ);
+        $purchases = RequestAuthorization::allows($request, 'purchase_invoices', AccessLevel::READ);
+        if ($invoices && $purchases) {
+            return $rows;
+        }
+        foreach ($rows as &$r) {
+            if (!$invoices && $r['invoice_id'] !== null) {
+                $r['invoice_id'] = $r['invoice_number'] = $r['invoice_type'] = null;
+                $r['sale_unit_price'] = $r['sale_unit'] = $r['sale_currency'] = null;
+                $r['partner'] = null;
+            }
+            if (!$purchases && $r['purchase_invoice_id'] !== null) {
+                $r['purchase_invoice_id'] = $r['purchase_invoice_number'] = null;
+                $r['partner'] = null;
+            }
+        }
+        unset($r);
+        return $rows;
     }
 
     /**

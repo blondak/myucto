@@ -249,52 +249,9 @@ final class StockLevelRepository
     {
         $limit  = max(1, min(500, (int) ($opts['limit'] ?? 100)));
         $offset = max(0, (int) ($opts['offset'] ?? 0));
-        $warehouseId = isset($opts['warehouse_id']) && (int) $opts['warehouse_id'] > 0
-            ? (int) $opts['warehouse_id'] : null;
-
-        $legSelect = static function (bool $receiptLeg): string {
-            // Výdejová noha: receipt/issue/transfer-out na d.warehouse_id;
-            // příjmová noha převodky: d.warehouse_to_id.
-            $warehouseExpr = $receiptLeg ? 'd.warehouse_to_id' : 'd.warehouse_id';
-            $signedQty = $receiptLeg
-                ? 'l.qty'
-                : "CASE WHEN d.doc_type = 'receipt' THEN l.qty ELSE -l.qty END";
-            $typeCond = $receiptLeg
-                ? "d.doc_type = 'transfer'"
-                : "d.doc_type IN ('receipt','issue','transfer')";
-            return "SELECT l.id AS line_id, l.document_id, d.doc_number, d.doc_type, d.origin,
-                           d.status, l.doc_date, l.line_no, {$warehouseExpr} AS warehouse_id,
-                           w.code AS warehouse_code, {$signedQty} AS qty_signed,
-                           l.qty, l.unit_cost, l.value_total, l.note
-                      FROM stock_document_lines l
-                      JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
-                      JOIN warehouses w ON w.id = {$warehouseExpr} AND w.supplier_id = l.supplier_id
-                     WHERE l.supplier_id = ? AND l.stock_item_id = ?
-                       AND d.status IN ('posted','reversed')
-                       AND {$typeCond}";
-        };
 
         $params = [];
-        $buildLegParams = function (bool $receiptLeg) use ($supplierId, $stockItemId, $warehouseId, $opts, &$params, $legSelect): string {
-            $sql = $legSelect($receiptLeg);
-            $params[] = $supplierId;
-            $params[] = $stockItemId;
-            if ($warehouseId !== null) {
-                $sql     .= $receiptLeg ? ' AND d.warehouse_to_id = ?' : ' AND d.warehouse_id = ?';
-                $params[] = $warehouseId;
-            }
-            if (!empty($opts['from'])) {
-                $sql     .= ' AND l.doc_date >= ?';
-                $params[] = (string) $opts['from'];
-            }
-            if (!empty($opts['to'])) {
-                $sql     .= ' AND l.doc_date <= ?';
-                $params[] = (string) $opts['to'];
-            }
-            return $sql;
-        };
-
-        $sql = '(' . $buildLegParams(false) . ') UNION ALL (' . $buildLegParams(true) . ')'
+        $sql = $this->ledgerSql($supplierId, $stockItemId, $opts, true, $params)
              . ' ORDER BY doc_date ASC, document_id ASC, line_no ASC, line_id ASC'
              . ' LIMIT ? OFFSET ?';
 
@@ -323,6 +280,145 @@ final class StockLevelRepository
             'unit_cost'      => (string) $r['unit_cost'],
             'value_total'    => (string) $r['value_total'],
             'note'           => $r['note'] !== null ? (string) $r['note'] : null,
+            'invoice_id'     => $r['invoice_id'] !== null ? (int) $r['invoice_id'] : null,
+            'invoice_number' => $r['invoice_number'] !== null ? (string) $r['invoice_number'] : null,
+            'invoice_type'   => $r['invoice_type'] !== null ? (string) $r['invoice_type'] : null,
+            'purchase_invoice_id'     => $r['purchase_invoice_id'] !== null ? (int) $r['purchase_invoice_id'] : null,
+            'purchase_invoice_number' => $r['purchase_invoice_number'] !== null ? (string) $r['purchase_invoice_number'] : null,
+            'partner'        => self::ledgerPartner($r),
+            'sale_unit_price' => $r['sale_unit_price'] !== null ? (string) $r['sale_unit_price'] : null,
+            'sale_unit'       => $r['sale_unit'] !== null ? (string) $r['sale_unit'] : null,
+            'sale_currency'   => $r['sale_currency'] !== null ? (string) $r['sale_currency'] : null,
         ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Součet pohybů PŘED stránkou (prvních `$offset` řádků ve stejném pořadí a se
+     * stejnými filtry) = počáteční bilance stránky. Bez stropu 500 řádků a bez
+     * připojování dokladů, protože potřebuje jen množství.
+     *
+     * @param array{warehouse_id?:int|null, from?:string|null, to?:string|null} $opts
+     */
+    public function ledgerQtyBefore(int $supplierId, int $stockItemId, array $opts, int $offset): string
+    {
+        if ($offset <= 0) {
+            return '0.000';
+        }
+        $params = [];
+        $sql = 'SELECT COALESCE(SUM(qty_signed), 0) FROM ('
+             . $this->ledgerSql($supplierId, $stockItemId, $opts, false, $params)
+             . ' ORDER BY doc_date ASC, document_id ASC, line_no ASC, line_id ASC LIMIT ?) first_rows';
+        $stmt = $this->db->pdo()->prepare($sql);
+        $idx = 1;
+        foreach ($params as $v) {
+            $stmt->bindValue($idx++, $v);
+        }
+        $stmt->bindValue($idx, $offset, PDO::PARAM_INT);
+        $stmt->execute();
+        return bcadd((string) $stmt->fetchColumn(), '0', 3);
+    }
+
+    /**
+     * Jméno protistrany ze snapshotu dokladu (JSON sloupec): firma, jinak jméno
+     * a příjmení, jinak `name` (starší a převzaté snapshoty). Stav k datu dokladu,
+     * ne dnešní název v adresáři.
+     */
+    public static function snapshotNameSql(string $jsonColumn): string
+    {
+        return "COALESCE(NULLIF(JSON_VALUE({$jsonColumn}, '$.company_name'), ''),"
+            . " NULLIF(TRIM(CONCAT_WS(' ', JSON_VALUE({$jsonColumn}, '$.first_name'), JSON_VALUE({$jsonColumn}, '$.last_name'))), ''),"
+            . " NULLIF(JSON_VALUE({$jsonColumn}, '$.name'), ''))";
+    }
+
+    /**
+     * Obě nohy skladové knihy (výdejová a příjmová noha převodky) jako UNION ALL
+     * bez ORDER/LIMIT. `$withDocuments` připojí fakturu, řádek faktury a přijatou
+     * fakturu, které pohyb vyvolaly (číslo, protistrana, prodejní cena).
+     *
+     * @param array{warehouse_id?:int|null, from?:string|null, to?:string|null} $opts
+     * @param list<mixed> $params plní se v pořadí placeholderů
+     */
+    private function ledgerSql(int $supplierId, int $stockItemId, array $opts, bool $withDocuments, array &$params): string
+    {
+        $warehouseId = isset($opts['warehouse_id']) && (int) $opts['warehouse_id'] > 0
+            ? (int) $opts['warehouse_id'] : null;
+        $clientName = self::snapshotNameSql('inv.client_snapshot');
+        $vendorName = self::snapshotNameSql('pinv.vendor_snapshot');
+
+        $leg = function (bool $receiptLeg) use ($supplierId, $stockItemId, $warehouseId, $opts, $withDocuments, $clientName, $vendorName, &$params): string {
+            // Výdejová noha: receipt/issue/transfer-out na d.warehouse_id;
+            // příjmová noha převodky: d.warehouse_to_id.
+            $warehouseExpr = $receiptLeg ? 'd.warehouse_to_id' : 'd.warehouse_id';
+            $signedQty = $receiptLeg
+                ? 'l.qty'
+                : "CASE WHEN d.doc_type = 'receipt' THEN l.qty ELSE -l.qty END";
+            $typeCond = $receiptLeg
+                ? "d.doc_type = 'transfer'"
+                : "d.doc_type IN ('receipt','issue','transfer')";
+            $documentCols = $withDocuments
+                ? ", inv.id AS invoice_id, inv.varsymbol AS invoice_number, inv.invoice_type, inv.client_id,
+                   {$clientName} AS client_name,
+                   ii.unit_price_without_vat AS sale_unit_price, ii.unit AS sale_unit, cur.code AS sale_currency,
+                   pinv.id AS purchase_invoice_id,
+                   COALESCE(NULLIF(pinv.vendor_invoice_number, ''), pinv.varsymbol) AS purchase_invoice_number,
+                   pinv.vendor_id, {$vendorName} AS vendor_name, d.partner_name"
+                : '';
+            $documentJoins = $withDocuments
+                ? ' LEFT JOIN invoices inv ON inv.id = d.invoice_id AND inv.supplier_id = d.supplier_id
+                    LEFT JOIN invoice_items ii ON ii.id = l.invoice_item_id AND ii.invoice_id = inv.id
+                    LEFT JOIN currencies cur ON cur.id = inv.currency_id
+                    LEFT JOIN purchase_invoices pinv ON pinv.id = d.purchase_invoice_id AND pinv.supplier_id = d.supplier_id'
+                : '';
+            $sql = "SELECT l.id AS line_id, l.document_id, d.doc_number, d.doc_type, d.origin,
+                           d.status, l.doc_date, l.line_no, {$warehouseExpr} AS warehouse_id,
+                           w.code AS warehouse_code, {$signedQty} AS qty_signed,
+                           l.qty, l.unit_cost, l.value_total, l.note{$documentCols}
+                      FROM stock_document_lines l
+                      JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
+                      JOIN warehouses w ON w.id = {$warehouseExpr} AND w.supplier_id = l.supplier_id{$documentJoins}
+                     WHERE l.supplier_id = ? AND l.stock_item_id = ?
+                       AND d.status IN ('posted','reversed')
+                       AND {$typeCond}";
+            $params[] = $supplierId;
+            $params[] = $stockItemId;
+            if ($warehouseId !== null) {
+                $sql     .= $receiptLeg ? ' AND d.warehouse_to_id = ?' : ' AND d.warehouse_id = ?';
+                $params[] = $warehouseId;
+            }
+            if (!empty($opts['from'])) {
+                $sql     .= ' AND l.doc_date >= ?';
+                $params[] = (string) $opts['from'];
+            }
+            if (!empty($opts['to'])) {
+                $sql     .= ' AND l.doc_date <= ?';
+                $params[] = (string) $opts['to'];
+            }
+            return $sql;
+        };
+
+        return '(' . $leg(false) . ') UNION ALL (' . $leg(true) . ')';
+    }
+
+    /**
+     * Protistrana pohybu: odběratel u výdeje k FV a vratky k dobropisu, dodavatel
+     * u příjmu z PF, jinak volný text ručního dokladu (bez odkazu do adresáře).
+     *
+     * @param array<string,mixed> $r
+     * @return array{kind:string,id:?int,name:string}|null
+     */
+    private static function ledgerPartner(array $r): ?array
+    {
+        if ($r['invoice_id'] !== null) {
+            $name = (string) ($r['client_name'] ?? '');
+            return $name === '' && $r['client_id'] === null ? null
+                : ['kind' => 'client', 'id' => $r['client_id'] !== null ? (int) $r['client_id'] : null, 'name' => $name];
+        }
+        if ($r['purchase_invoice_id'] !== null) {
+            $name = (string) ($r['vendor_name'] ?? '');
+            return $name === '' && $r['vendor_id'] === null ? null
+                : ['kind' => 'vendor', 'id' => $r['vendor_id'] !== null ? (int) $r['vendor_id'] : null, 'name' => $name];
+        }
+        $name = trim((string) ($r['partner_name'] ?? ''));
+        return $name === '' ? null : ['kind' => 'text', 'id' => null, 'name' => $name];
     }
 }
