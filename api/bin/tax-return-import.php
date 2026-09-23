@@ -30,6 +30,7 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Migration\Shared\FiledDppoFiling;
 use MyInvoice\Service\Migration\Shared\FiledDppoImporter;
 use MyInvoice\Service\Tax\Return\DppoEpoXmlParser;
 use MyInvoice\Service\Tax\Return\TaxLossService;
@@ -132,31 +133,24 @@ $supplierId = (int) $suppliers[0]['id'];
 $supplierIc = ltrim(trim((string) $suppliers[0]['ic']), '0');
 
 // Za každý rok poslední podání této firmy.
-$rank = ['B' => 1, 'O' => 2, 'D' => 3, 'E' => 3];
-$byYear = [];
+$entries = [];
 $skipped = [];
 foreach (triFiles($filed) as $file) {
     $xml = (string) file_get_contents($file);
     try {
         $parsed = $parser->parse($xml);
         $year = $importer->filedYear($parsed);
+        $filing = FiledDppoFiling::parse($xml);
     } catch (TaxReturnException $e) {
         $skipped[] = ['file' => $file, 'reason' => $e->getMessage()];
-        continue;
-    }
-    $ic = ltrim(trim((string) $parsed['supplier']['ic']), '0');
-    if ($ic !== '' && $supplierIc !== '' && $ic !== $supplierIc) {
         continue;
     }
     if ($yearArg !== null && $year !== (int) $yearArg) {
         continue;
     }
-    $key = [$rank[$parsed['dapdpp_forma']] ?? 1, (string) ($parsed['amendment']['d_zjist'] ?? ''), $file];
-    if (!isset($byYear[$year]) || $key > $byYear[$year]['key']) {
-        $byYear[$year] = ['key' => $key, 'file' => $file, 'xml' => $xml];
-    }
+    $entries[] = ['filing' => $filing, 'file' => $file, 'xml' => $xml];
 }
-ksort($byYear);
+$byYear = FiledDppoFiling::latestPerYear($entries, $supplierIc, static fn (array $e): string => $e['file']);
 if ($byYear === []) {
     triFail('Žádné podané přiznání DPPDP9 této firmy' . ($yearArg !== null ? " za rok {$yearArg}" : '') . '.');
 }
