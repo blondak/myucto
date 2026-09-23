@@ -850,7 +850,14 @@
         "1863_payment_matches_supplier_doc_index.sql",
         "1864_stereo_nx_import.sql",
         "1865_import_jobs_stereo_nx.sql",
-        "1866_vat_classification_purchase_outside_scope.sql"
+        "1866_vat_classification_purchase_outside_scope.sql",
+        "1867_statement_override_validity.sql",
+        "1868_statement_override_correction_follows.sql",
+        "1869_tax_authority_offset.sql",
+        "1870_tax_authority_offset_from_year.sql",
+        "1871_asset_disposal_entry.sql",
+        "1872_depreciation_tax_override.sql",
+        "1873_asset_account_summary.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -1344,6 +1351,7 @@
                 "automation_digest_hour": "tinyint(3) unsigned NOT NULL DEFAULT 7",
                 "automation_level": "enum('off','suggest','assisted','full') NOT NULL DEFAULT 'suggest'",
                 "avg_employees": "smallint(5) unsigned NULL DEFAULT NULL",
+                "comparative_from_prior_year": "tinyint(1) NOT NULL DEFAULT 0",
                 "fuel_account_code": "varchar(10) NULL DEFAULT NULL",
                 "fx_rate_mode": "enum('daily','fixed_monthly','fixed_annual') NOT NULL DEFAULT 'daily'",
                 "fx_reversal_at_open": "tinyint(1) NOT NULL DEFAULT 1",
@@ -1356,6 +1364,8 @@
                 "statement_scope_override": "enum('full','small','micro') NULL DEFAULT NULL",
                 "statutory_audit": "tinyint(1) NOT NULL DEFAULT 0",
                 "supplier_id": "int(10) unsigned NOT NULL",
+                "tax_authority_offset": "tinyint(1) NOT NULL DEFAULT 0",
+                "tax_authority_offset_from_year": "smallint(5) unsigned NULL DEFAULT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "vehicle_repair_account_code": "varchar(10) NULL DEFAULT NULL"
             },
@@ -1750,6 +1760,7 @@
                 "depreciator_note": "varchar(255) NULL DEFAULT NULL",
                 "description": "text NULL DEFAULT NULL",
                 "disposal_date": "date NULL DEFAULT NULL",
+                "disposal_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "disposal_price": "decimal(14,2) NULL DEFAULT NULL",
                 "disposal_type": "enum('sold','liquidated','donated','damaged') NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
@@ -1770,6 +1781,7 @@
                 "put_into_use_date": "date NULL DEFAULT NULL",
                 "sale_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "status": "enum('draft','in_use','disposed') NOT NULL DEFAULT 'draft'",
+                "summary_account_code": "varchar(20) NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_first_year_increase": "enum('none','p10','p15','p20') NOT NULL DEFAULT 'none'",
                 "tax_group": "tinyint(3) unsigned NULL DEFAULT NULL",
@@ -1778,12 +1790,15 @@
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_assets_disposal_entry": "BTREE (disposal_entry_id)",
                 "idx_assets_purchase_invoice": "BTREE (purchase_invoice_id)",
                 "idx_assets_sale_invoice": "BTREE (sale_invoice_id)",
+                "idx_assets_summary_account": "BTREE (supplier_id, summary_account_code)",
                 "idx_assets_supplier_status": "BTREE (supplier_id, status)",
                 "uq_assets_supplier_invno": "UNIQUE BTREE (supplier_id, inventory_number)"
             },
             "foreign_keys": {
+                "fk_assets_disposal_entry": "(disposal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_assets_pi": "(purchase_invoice_id) -> purchase_invoices (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_assets_sale_invoice": "(sale_invoice_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_assets_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
@@ -3681,6 +3696,12 @@
                 "is_paused": "tinyint(1) NOT NULL DEFAULT 0",
                 "kind": "enum('tax','accounting') NOT NULL",
                 "months_count": "tinyint(3) unsigned NULL DEFAULT NULL",
+                "override_at": "datetime NULL DEFAULT NULL",
+                "override_by": "int(11) NULL DEFAULT NULL",
+                "override_original_amount": "decimal(14,2) NULL DEFAULT NULL",
+                "override_original_full_amount": "decimal(14,2) NULL DEFAULT NULL",
+                "override_original_residual": "decimal(14,2) NULL DEFAULT NULL",
+                "override_reason": "varchar(500) NULL DEFAULT NULL",
                 "residual_value_end": "decimal(14,2) NOT NULL",
                 "status": "enum('confirmed','posted') NOT NULL DEFAULT 'confirmed'",
                 "supplier_id": "int(10) unsigned NOT NULL",
@@ -17675,6 +17696,7 @@
                 "balance_condition": "enum('any','debit','credit') NOT NULL DEFAULT 'any'",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "created_by": "int(10) unsigned NULL DEFAULT NULL",
+                "follows_prefix": "varchar(10) NULL DEFAULT NULL",
                 "id": "int(10) unsigned NOT NULL AUTO_INCREMENT",
                 "note": "varchar(255) NULL DEFAULT NULL",
                 "row_code": "varchar(20) NOT NULL",
@@ -17682,12 +17704,14 @@
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "target": "enum('gross','correction') NOT NULL DEFAULT 'gross'",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "valid_from_year": "smallint(5) unsigned NULL DEFAULT NULL",
+                "valid_to_year": "smallint(5) unsigned NULL DEFAULT NULL",
                 "version_id": "smallint(5) unsigned NOT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "ix_stmt_ovr_version": "BTREE (version_id)",
-                "uq_stmt_ovr_supplier_version_prefix": "UNIQUE BTREE (supplier_id, version_id, account_prefix, balance_condition)"
+                "uq_stmt_ovr_supplier_version_prefix_from": "UNIQUE BTREE (supplier_id, version_id, account_prefix, balance_condition, valid_from_year)"
             },
             "foreign_keys": {
                 "fk_stmt_ovr_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
