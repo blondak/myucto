@@ -26192,7 +26192,7 @@
       "scheme_holder_entry": "Dr 335 / Cr {syn}.x"
     },
     "unmatched": {
-      "hint": "Outgoing card payments that have no matched document yet. Upload a receipt and AI will extract it. After confirming the document, match the payment.",
+      "hint": "Outgoing card payments that have no matched document yet. Upload a receipt: with AI it is extracted straight into a document, without AI it is saved to Incoming documents (Documents / Incoming documents / year / month). After confirming the document, match the payment.",
       "from": "From",
       "to": "To",
       "refresh": "Load",
@@ -26205,6 +26205,9 @@
       "upload": "Upload receipt",
       "uploaded": "Receipt extracted. Review and confirm the document, then match the payment.",
       "uploaded_duplicate": "This receipt is already among your documents.",
+      "stored": "The receipt is saved in Incoming documents ({folder}) and linked to the payment. Create the document from it there.",
+      "stored_duplicate": "This receipt is already in Incoming documents ({folder}).",
+      "open_incoming": "Open incoming documents",
       "upload_failed": "The receipt could not be extracted.",
       "open_document": "Open document",
       "rematch": "Match",

@@ -58,6 +58,7 @@ Do fronty vede několik cest:
 | Nahrání dokladu k **vyžádanému požadavku** | klient, jako odpověď účetní |
 | **Uložit a předat účetní** v editoru přijaté faktury | klient, když se doklad nevytěžil sám |
 | **Nahrát do fronty** přímo na stránce Příchozí doklady | účetní u dokladů, které přišly mimo portál (e-mailem, papírově) |
+| **Nahrát účtenku** u platby kartou bez dokladu, když není AI nebo vytěžení selže | účetní; doklad je rovnou navázaný na platbu kartou |
 
 Účetní tak nemusí čekat na klienta: co dostane e-mailem nebo naskenuje, vloží do
 fronty sama a zpracuje to stejným postupem. Podrobný průchod klientskou stranou je v

@@ -96,7 +96,10 @@ U každé platby jsou akce:
 
 - **Nahrát účtenku** — nahrajete PDF nebo fotografii účtenky. Doklad se vytěží
   stejně jako při AI importu přijaté faktury, dostane formu úhrady „karta"
-  a koncovku karty z platby. Otevřete ho, zkontrolujte a potvrďte.
+  a koncovku karty z platby. Otevřete ho, zkontrolujte a potvrďte. Bez AI (nebo
+  když vytěžení selže) se účtenka neztratí: uloží se do [Příchozích dokladů](23_Prijate_faktury.md)
+  (v Dokumentech složka Příchozí doklady / rok / měsíc), navázaná na platbu
+  kartou, a doklad z ní založíte tam.
 - **Spárovat** — po potvrzení dokladu spustí párování platby znovu. Spárovaná
   platba se hned zaúčtuje i s vypořádáním (viz Účtování plateb kartou).
 - **Uzavřít bez dokladu** a **K tíži držitele** — jen u platby zaúčtované přes

@@ -144,6 +144,21 @@ describe('Platby kartou bez dokladu', () => {
     expect(m.writeOff).toHaveBeenCalledWith(41, 'expense', 1)
   })
 
+  it('bez AI oznámí uložení účtenky do Příchozích dokladů s odkazem na ně', async () => {
+    m.uploadReceipt.mockResolvedValue({ stored: 'incoming', submission_id: 3, duplicate: false, folder: 'Příchozí doklady / 2026 / 09', bank_transaction_id: 41 })
+    const wrapper = await render()
+    await wrapper.findAll('button').find(b => b.text().includes('payment_cards.unmatched.upload'))!.trigger('click')
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [new File(['%PDF-1.4'], 'uctenka.pdf', { type: 'application/pdf' })], configurable: true })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(m.toast.success).toHaveBeenCalledWith('payment_cards.unmatched.stored', expect.objectContaining({ label: 'payment_cards.unmatched.open_incoming' }))
+    const action = m.toast.success.mock.calls[0][1] as { handler: () => void }
+    action.handler()
+    expect(m.push).toHaveBeenCalledWith({ name: 'purchase-invoice-submissions' })
+  })
+
   it('nahraná účtenka jde k vybrané platbě kartou', async () => {
     m.uploadReceipt.mockResolvedValue({ purchase_invoice_id: 9, duplicate: false, marked_as_card: true, bank_transaction_id: 42 })
     const wrapper = await render()

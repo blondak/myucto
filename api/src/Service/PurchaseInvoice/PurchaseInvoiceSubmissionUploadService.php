@@ -73,6 +73,7 @@ final class PurchaseInvoiceSubmissionUploadService
         string $via,
         ?string $note = null,
         ?string $kindHint = null,
+        ?int $bankTransactionId = null,
     ): array {
         return $this->ingest(
             basename(str_replace('\\', '/', trim($originalName))),
@@ -81,7 +82,7 @@ final class PurchaseInvoiceSubmissionUploadService
             $via,
             $note,
             $kindHint,
-            null,
+            $bankTransactionId,
             null,
             static function (string $tmp) use ($bytes): void {
                 if (@file_put_contents($tmp, $bytes) === false) {

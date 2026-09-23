@@ -26192,7 +26192,7 @@
       "scheme_holder_entry": "MD 335 / D {syn}.x"
     },
     "unmatched": {
-      "hint": "Odchozí platby kartou, ke kterým zatím není spárovaný žádný doklad. Nahrajte účtenku, AI ji vytěží. Po potvrzení dokladu platbu spárujte.",
+      "hint": "Odchozí platby kartou, ke kterým zatím není spárovaný žádný doklad. Nahrajte účtenku: s AI se vytěží rovnou do dokladu, bez AI se uloží do Příchozích dokladů (Dokumenty / Příchozí doklady / rok / měsíc). Po potvrzení dokladu platbu spárujte.",
       "from": "Od",
       "to": "Do",
       "refresh": "Načíst",
@@ -26205,6 +26205,9 @@
       "upload": "Nahrát účtenku",
       "uploaded": "Účtenka vytěžena. Zkontrolujte a potvrďte doklad, potom platbu spárujte.",
       "uploaded_duplicate": "Tahle účtenka už v dokladech je.",
+      "stored": "Účtenka je uložená v Příchozích dokladech ({folder}) a navázaná na platbu. Doklad z ní založíte tam.",
+      "stored_duplicate": "Tahle účtenka už v Příchozích dokladech je ({folder}).",
+      "open_incoming": "Otevřít příchozí doklady",
       "upload_failed": "Účtenku se nepodařilo vytěžit.",
       "open_document": "Otevřít doklad",
       "rematch": "Spárovat",

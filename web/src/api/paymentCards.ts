@@ -179,12 +179,25 @@ export interface UnmatchedCardPayments {
   groups: CardPaymentGroup[]
 }
 
-export interface ReceiptUploadResult {
+/** Účtenka vytěžená AI do konceptu přijatého dokladu. */
+export interface ReceiptExtractedResult {
   purchase_invoice_id: number
   duplicate: boolean
   marked_as_card: boolean
   bank_transaction_id: number
 }
+
+/** Bez AI (nebo při selhání vytěžení): účtenka uložená do Příchozích dokladů, navázaná na platbu. */
+export interface ReceiptStoredResult {
+  stored: 'incoming'
+  submission_id: number
+  duplicate: boolean
+  /** Složka v Dokumentech, např. „Příchozí doklady / 2026 / 09". */
+  folder: string
+  bank_transaction_id: number
+}
+
+export type ReceiptUploadResult = ReceiptExtractedResult | ReceiptStoredResult
 
 export interface CardRematchResult {
   bank_transaction_id: number

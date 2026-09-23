@@ -127,6 +127,15 @@ async function onFile(e: Event) {
   busyTx.value = tx.id
   try {
     const r = await paymentCardsApi.uploadReceipt(tx.id, file)
+    if ('stored' in r) {
+      // Bez AI: účtenka čeká v Příchozích dokladech (Dokumenty / Příchozí doklady / rok / měsíc).
+      const incoming = {
+        label: t('payment_cards.unmatched.open_incoming'),
+        handler: () => { void router.push({ name: 'purchase-invoice-submissions' }) },
+      }
+      toast.success(t(r.duplicate ? 'payment_cards.unmatched.stored_duplicate' : 'payment_cards.unmatched.stored', { folder: r.folder }), incoming)
+      return
+    }
     const open = {
       label: t('payment_cards.unmatched.open_document'),
       handler: () => { void router.push(`/purchase-invoices/${r.purchase_invoice_id}`) },
