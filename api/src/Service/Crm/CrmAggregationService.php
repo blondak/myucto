@@ -2040,12 +2040,41 @@ final class CrmAggregationService
             return $this->buildDppoBalanceDueItem($prev['balance_due'], $deadline, $now, $prevYear);
         }
 
+        if ($this->currentDppoDeadlineIsDistant($supplierId, $y, $now)) {
+            return null;
+        }
+
         $current = $this->safeBalancePreview($supplierId, $y, 'po');
         if ($current !== null && $current['balance_due'] > 0.5) {
             $deadline = $this->dppoDeadlineFromInput($supplierId, $current['filing_deadline_input'], $y + 1);
             return $this->buildDppoBalanceDueItem($current['balance_due'], $deadline, $now, $y);
         }
         return null;
+    }
+
+    private function currentDppoDeadlineIsDistant(int $supplierId, int $year, \DateTimeImmutable $now): bool
+    {
+        try {
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT JSON_VALUE(inputs, '$.filing_deadline') AS filing_deadline
+                   FROM income_tax_returns
+                  WHERE supplier_id = ? AND year = ? AND taxpayer_type = 'po'
+                    AND variant = 'radne' AND variant_seq = 1"
+            );
+            $stmt->execute([$supplierId, $year]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if ($row === false) {
+                return true;
+            }
+            $deadline = $this->dppoDeadlineFromInput(
+                $supplierId,
+                trim((string) ($row['filing_deadline'] ?? '')),
+                $year + 1,
+            );
+            return (int) $now->diff(new \DateTimeImmutable($deadline))->format('%r%a') > 14;
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     /** Obalí {@see TaxReturnService::balanceDuePreview()} — chyba výpočtu nesmí shodit dashboard. */
