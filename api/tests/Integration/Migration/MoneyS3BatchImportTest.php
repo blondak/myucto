@@ -82,7 +82,7 @@ final class MoneyS3BatchImportTest extends TestCase
         $this->tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'ms3batch_' . bin2hex(random_bytes(5));
         mkdir($this->tmp, 0755, true);
         SyntheticAgenda::writeLzFiles($this->tmp . '/alfa.lz', SyntheticAgenda::forCompany(SyntheticAgenda::files(), self::ICO_A, 'Dávková alfa s.r.o.'));
-        SyntheticAgenda::writeLzFiles($this->tmp . '/beta.lz', SyntheticAgenda::forCompany(SyntheticAgenda::filesWithOpeningReclass(), self::ICO_B, 'Dávková beta s.r.o.', 'Vzorová 3', 'Plzeň', '301 00'));
+        SyntheticAgenda::writeLzFiles($this->tmp . '/beta.lz', SyntheticAgenda::forCompany(SyntheticAgenda::filesWithOpeningReclass(), self::ICO_B, 'Dávková beta s.r.o.', 'Vzorová 3', 'Jihlava', '586 01'));
         file_put_contents($this->tmp . '/rozbita.lz', 'tohle není záloha');
 
         $pdo->beginTransaction();
@@ -146,7 +146,7 @@ final class MoneyS3BatchImportTest extends TestCase
         self::assertSame($options->groupId, (int) $a['supplier_group_id']);
         self::assertSame((int) $a['id'], $results[0]['target_supplier_id']);
         $b = $this->supplierRow(self::ICO_B);
-        self::assertSame('Plzeň', $b['city']);
+        self::assertSame('Jihlava', $b['city']);
         self::assertGreaterThan(0, $this->rows('journal_entries', (int) $a['id']));
         self::assertSame(1, $this->rows('money_s3_imports', (int) $a['id']), 'Protokol převodu zůstává u firmy jako u průvodce jedné firmy.');
     }
