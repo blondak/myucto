@@ -160,7 +160,7 @@ function movementLink(line: JournalLine) {
               <span class="font-mono font-medium">{{ p.debit.account_code }}</span>
               <span class="text-neutral-600">{{ p.debit.account_name }}</span>
             </RouterLink>
-            <DimensionChips v-if="p.debit" class="mt-0.5 flex" :dimensions="p.debit.dimensions" :splits="p.debit.dimension_splits" />
+            <DimensionChips v-if="p.debit" class="ml-1.5" :dimensions="p.debit.dimensions" :splits="p.debit.dimension_splits" />
           </td>
           <td v-if="creditSpans[i].render" :rowspan="creditSpans[i].span" class="align-middle" :class="[cell, rowBorder(i)]">
             <RouterLink v-if="p.credit" :to="movementLink(p.credit)"
@@ -169,7 +169,7 @@ function movementLink(line: JournalLine) {
               <span class="font-mono font-medium">{{ p.credit.account_code }}</span>
               <span class="text-neutral-600">{{ p.credit.account_name }}</span>
             </RouterLink>
-            <DimensionChips v-if="p.credit" class="mt-0.5 flex" :dimensions="p.credit.dimensions" :splits="p.credit.dimension_splits" />
+            <DimensionChips v-if="p.credit" class="ml-1.5" :dimensions="p.credit.dimensions" :splits="p.credit.dimension_splits" />
           </td>
           <td v-if="showsCostCenter" class="text-neutral-500 text-xs" :class="[cell, rowBorder(i)]">{{ p.costCenter || '—' }}</td>
           <td class="text-right font-mono font-medium text-neutral-900 whitespace-nowrap" :class="[cell, rowBorder(i)]">
@@ -213,7 +213,7 @@ function movementLink(line: JournalLine) {
               <span class="font-mono font-medium">{{ l.account_code }}</span>
               <span class="text-neutral-600">{{ l.account_name }}</span>
             </RouterLink>
-            <DimensionChips class="mt-0.5 flex" :dimensions="l.dimensions" :splits="l.dimension_splits" />
+            <DimensionChips class="ml-1.5" :dimensions="l.dimensions" :splits="l.dimension_splits" />
           </td>
           <td v-if="showsCostCenter" class="text-neutral-500 text-xs" :class="cell">{{ l.cost_center || '—' }}</td>
           <td class="text-right font-mono font-medium text-neutral-900" :class="cell">
