@@ -12,6 +12,7 @@ use MyInvoice\Service\Migration\MoneyS3\AccountingUnitSwitch;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter as PohodaPartners;
 use MyInvoice\Service\Migration\Shared\VatCoefficientSeeder;
+use MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup;
 use PDO;
 
 /**
@@ -144,8 +145,14 @@ final class PremierImporter
         }
         if ($backup->hasRows('MZDY')) {
             $blocker = $this->payroll->prerequisite($supplierId);
+            $plan = $blocker === null ? null : $this->payroll->moduleSetupPlan($supplierId, $backup);
             if ($blocker === null) {
                 $add('info', 'payroll_included', 'Záloha obsahuje mzdy. Převod založí zaměstnance a převezme zpracované mzdy jako evidenci předchozího systému; jejich účetní zápisy jsou v deníku a znovu nevznikají.');
+            } elseif (($plan['outcome'] ?? null) === PayrollMigrationModuleSetup::OUTCOME_READY) {
+                $add('info', 'payroll_module_will_enable', 'Záloha obsahuje mzdy a firma je v MyÚčtu zatím nemá nastavené. Převod zapne modul Mzdy'
+                    . ($plan['create_office'] ? ', založí mzdovou účtárnu' : '')
+                    . ($plan['start_period'] !== null ? ', nastaví začátek vedení mezd na ' . $plan['start_period'] : '')
+                    . ' a převezme zaměstnance a zpracované mzdy. Údaje z rozhodnutí úřadů (VS ČSSZ, účty institucí) doplníte v Mzdy → Nastavení.');
             } else {
                 $add('warning', 'payroll_module_missing', "Záloha obsahuje mzdy. {$blocker} Bez toho se zaměstnanci a mzdy nepřevedou, účetnictví ano.");
             }

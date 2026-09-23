@@ -273,9 +273,12 @@ měsíc nepočítalo.
 
 Na stránce **Mzdy → Mzdové běhy** proto svítí panel **Převzaté měsíce roku
 přechodu**. Vypíše historické měsíce, ke kterým jsou v aplikaci převzaté
-mzdy (z převodu z PAMICA, POHODY, Money S3 nebo z importu CSV/XLSX), a u
+mzdy (z převodu z PAMICA, POHODY, PREMIER nebo z importu CSV/XLSX), a u
 každého nabídne **Převzít měsíc**. Panel se u firmy bez převzatých
-historických měsíců nezobrazí.
+historických měsíců nezobrazí. Převod z Money S3 převzaté mzdy jednotlivých
+zaměstnanců nemá (Money je vede v šifrované databázi agendy); protokol převodu
+ukáže jen kontrolní úhrny celé firmy po měsících, viz
+[§ 103.2.2](103_Prechod_z_Money_S3.md#10322-mzdy).
 
 **Převzatý běh** je zrcadlo cizího výpočtu, ne pracovní dokument:
 

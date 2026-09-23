@@ -25116,6 +25116,7 @@
       "small_assets": "Small assets",
       "vat_coefficients": "VAT deduction coefficient",
       "closing": "Closing of historical years",
+      "payroll": "Payroll",
       "reconciliation": "Reconciliation",
       "cancelled": "Cancelled by user",
       "unexpected": "Unexpected error"
@@ -25170,7 +25171,13 @@
       "tax_computed": "cards with computed tax plan",
       "accounting_depreciation_booked": "accounting depreciation from the journal",
       "tax_depreciation_confirmed": "confirmed tax depreciation",
-      "accounts_checked": "accounts checked"
+      "accounts_checked": "accounts checked",
+      "payroll_lines": "payroll journal lines",
+      "payroll_months": "months of control totals",
+      "payroll_tax_mismatches": "months with tax off the Money total",
+      "posting_map_conflicts": "payroll postings with several accounts",
+      "posting_map_unmapped": "unclassified account pairs",
+      "payroll_module_setup": "payroll settings completed"
     },
     "checks": {
       "turnover_balanced": "Debit = credit turnover",
@@ -25231,7 +25238,18 @@
       "automation_title": "Posting automation",
       "automation_during": "During the transfer: {level}",
       "automation_after": "After the transfer: {level}",
-      "automation_left_off": "Automation stays off until the transfer finishes without errors. Documents not linked to the journal would otherwise be posted twice."
+      "automation_left_off": "Automation stays off until the transfer finishes without errors. Documents not linked to the journal would otherwise be posted twice.",
+      "payroll_totals_title": "Payroll by month (control totals from Money)",
+      "payroll_totals_hint": "Totals of the company's payroll documents, not taken-over payroll of individual employees. Advance tax is compared with Money's monthly employment income tax statement (withheld advances after annual settlement refunds).",
+      "col_period": "Month",
+      "col_gross": "Gross wages",
+      "col_employee_insurance": "Employee insurance (social / health)",
+      "col_employer_insurance": "Employer insurance (social / health)",
+      "col_tax": "Tax (advance / withholding)",
+      "col_deductions": "Deductions",
+      "col_net_payable": "Net pay",
+      "col_dpfo": "Advance tax statement in Money",
+      "tax_missing": "no total"
     },
     "batch": {
       "tab_single": "Single company",
@@ -25689,7 +25707,8 @@
       "reference_totals": "reference payslips stored for comparison",
       "reference_totals_skipped": "payslips without employment identification",
       "posting_map_conflicts": "posting rules in conflict",
-      "sickness_absences_approved": "taken-over absences approved"
+      "sickness_absences_approved": "taken-over absences approved",
+      "payroll_module_setup": "payroll settings completed"
     },
     "checks": {
       "turnover_balanced": "Debit = credit turnover",
@@ -26997,7 +27016,7 @@
     "file_help_items": [
       "The backup contains all fiscal years kept in PREMIER, not just one. Years are still migrated one at a time, starting with the oldest.",
       "The company must already exist in MyUcto with the same company ID as in PREMIER. Data is migrated into the company you are working in; create a new company first if needed.",
-      "The backup also contains payroll. The wizard creates the employees and takes over the processed payroll as records of the previous system, provided the company has the Payroll module enabled and a payroll office set up. Payroll entries are in the migrated journal and are not created again.",
+      "The backup also contains payroll. The wizard creates the employees and takes over the processed payroll as records of the previous system. For a company that has no payroll in MyÚčto yet it enables the Payroll module, creates a payroll office and sets the payroll start after the last processed month; fill in the social security variable symbol and institution accounts in Payroll → Settings. Payroll entries are in the migrated journal and are not created again.",
       "The uploaded file is deleted automatically after 7 days of inactivity."
     ],
     "choose_file": "Backup file (.izip or .icab)",
@@ -27190,6 +27209,7 @@
       "months": "payroll months",
       "months_existing": "payroll months already migrated",
       "months_skipped": "payroll months without the Payroll module",
+      "payroll_module_setup": "payroll settings completed",
       "months_after_start": "months from payroll start (not taken over)",
       "identity": "birth details added",
       "person_card": "addresses and contacts added",

@@ -10,6 +10,7 @@ use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Geo\CountryNameMatcher;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportWriter;
+use MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationTakeoverFacts;
@@ -99,6 +100,7 @@ final class PayrollImporter
         private readonly PayrollTakeoverAbsenceWriter $absences,
         private readonly PayrollRulesetProvider $rulesets,
         private readonly PayrollTakeoverDeductionsWriter $deductionsWriter,
+        private readonly PayrollMigrationModuleSetup $moduleSetup,
     ) {}
 
     public function import(PremierContext $ctx): void
@@ -139,6 +141,14 @@ final class PayrollImporter
                 continue;
             }
             $relations[] = $relation;
+        }
+        // Firma, která mzdy vede, je dostane zapnuté převodem (dřív se mzdy přeskočily,
+        // dokud účetní modul a účtárnu nezaložila ručně).
+        $lastPayroll = self::lastPayrollPeriod($ctx->backup);
+        if ($relations !== [] && $lastPayroll !== null) {
+            PayrollMigrationModuleSetup::report($p, self::STEP, $this->moduleSetup->ensure(
+                $ctx->supplierId, $ctx->userOrNull(), $lastPayroll, self::lastDataPeriod($ctx->backup),
+            ), 'PREMIER');
         }
         $blocker = $this->prerequisite($ctx->supplierId);
         if ($blocker !== null) {
@@ -492,6 +502,42 @@ final class PayrollImporter
         );
         $office->execute([$supplierId]);
         return $office->fetchColumn() === false ? 'Chybí výchozí mzdová účtárna zaměstnavatele (Mzdy → Nastavení).' : null;
+    }
+
+    /**
+     * Co by převod udělal s nastavením mezd firmy, která je ještě nemá (kontrola před
+     * převodem, nic nezapisuje); `null`, když záloha mzdy nemá.
+     *
+     * @return array<string,mixed>|null {@see PayrollMigrationModuleSetup::plan()}
+     */
+    public function moduleSetupPlan(int $supplierId, PremierBackup $backup): ?array
+    {
+        $last = self::lastPayrollPeriod($backup);
+        return $last === null ? null : $this->moduleSetup->plan($supplierId, $last, self::lastDataPeriod($backup));
+    }
+
+    /** Poslední měsíc zpracovaných mezd v záloze (`MZDY`, `YYYY-MM`), nebo `null`. */
+    public static function lastPayrollPeriod(PremierBackup $backup): ?string
+    {
+        if (!$backup->hasRows('MZDY')) {
+            return null;
+        }
+        $last = 0;
+        foreach ($backup->rows('MZDY') as $row) {
+            $year = (int) ($row['ROK'] ?? 0);
+            $month = (int) ($row['MESIC'] ?? 0);
+            if ($year >= 1990 && $month >= 1 && $month <= 12) {
+                $last = max($last, $year * 100 + $month);
+            }
+        }
+        return $last === 0 ? null : sprintf('%04d-%02d', intdiv($last, 100), $last % 100);
+    }
+
+    /** Konec dat zálohy: prosinec posledního účetního roku. */
+    private static function lastDataPeriod(PremierBackup $backup): ?string
+    {
+        $years = $backup->years();
+        return $years === [] ? null : sprintf('%04d-12', max($years));
     }
 
     /**
