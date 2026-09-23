@@ -2487,6 +2487,8 @@ async function deleteDraft() {
               <p v-if="priceLevelStale" class="text-xs text-warning-600 mt-1">{{ t('invoice.price_level.stale') }}</p>
               <p v-else class="text-xs text-neutral-500 mt-1">{{ t('invoice.price_level.hint') }}</p>
             </div>
+            <!-- Firma mezitím deaktivovala všechny hladiny: výběr zmizí, zrušení hladiny konceptu ale nesmí být tiché. -->
+            <p v-else-if="stockEnabled && priceLevelStale && !auth.isClientRole" class="text-xs text-warning-600">{{ t('invoice.price_level.stale') }}</p>
             <div v-if="!auth.isClientRole">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.project') }}</label>
               <div class="flex gap-2">

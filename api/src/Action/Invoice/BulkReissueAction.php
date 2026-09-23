@@ -189,7 +189,7 @@ final class BulkReissueAction
         // vědomě opt-outovaná faktura po klonu tiše vrátila na DB default 1 (upomínky
         // zapnuté). Guard na existenci sloupce kvůli instalacím pozadu s migrací.
         $hasReminders = $this->db->hasColumn('invoices', 'auto_send_reminders');
-        // Cenová hladina dokladu (migrace 1866): kopie urgentní objednávky zůstane urgentní.
+        // Cenová hladina dokladu (migrace 1880): kopie urgentní objednávky zůstane urgentní.
         $hasPriceLevel = $this->db->hasColumn('invoices', 'price_level_id');
         $supportsOss = $this->db->hasColumn('invoice_items', 'oss_applicable');
         // Vlastní guard, ne společný s ostatními OSS sloupci: mezi migracemi 0137 a 1293

@@ -247,7 +247,7 @@ final class PriceLevelTest extends StockTestCase
         self::assertSame(['1000.00', 'standard', null, null], [$plain['unit_price'], $plain['price_source'], $plain['price_level'], $plain['discount_pct']]);
     }
 
-    // ── hladina zvolená na dokladu (migrace 1866) ──────────────────────────
+    // ── hladina zvolená na dokladu (migrace 1880) ──────────────────────────
 
     public function testDocumentLevelReplacesClientLevelAndWorksWithoutClient(): void
     {
@@ -357,6 +357,15 @@ final class PriceLevelTest extends StockTestCase
 
         $copy = $this->container->get(\MyInvoice\Action\Invoice\BulkReissueAction::class)->cloneOne($source, self::TODAY, false, $this->userId);
         self::assertSame($level, $repo->find($copy)['price_level_id']);
+
+        $proforma = $repo->createDraft([
+            'invoice_type' => 'proforma', 'client_id' => $this->client($sid), 'issue_date' => self::TODAY,
+            'tax_date' => self::TODAY, 'due_date' => self::TODAY, 'currency_id' => $this->currencyIdFor($sid),
+            'reverse_charge' => false, 'language' => 'cs', 'price_level_id' => $level,
+        ], $this->userId);
+        $final = $this->container->get(\MyInvoice\Service\Invoice\FinalFromProformaCreator::class)
+            ->create($proforma, $this->userId, self::TODAY, self::TODAY, 0.0);
+        self::assertSame($level, $repo->find($final)['price_level_id'], 'Finální faktura z proformy převezme hladinu.');
     }
 
     public function testInvoiceActionsRejectForeignOrInactiveDocumentLevel(): void
@@ -388,6 +397,7 @@ final class PriceLevelTest extends StockTestCase
         $this->db->pdo()->prepare('DELETE FROM stock_price_levels WHERE id = ?')->execute([$gone]);
         $res = $update($this->request('PUT', $sid, ['price_level_id' => $gone]), new Psr7Response(), ['id' => (string) $invoiceId]);
         self::assertNotSame('invalid_price_level', $this->body($res)['error']['code'] ?? null);
+        self::assertSame($gone, $repo->find($invoiceId)['price_level_id'], 'Hladina na konceptu zůstala.');
     }
 
     // ── číselník hladin a pravidla ─────────────────────────────────────────

@@ -175,6 +175,8 @@ final class ArchiveRestoreService
         'tax_advance_schedules' => ['source_return_id' => 'income_tax_returns'],
         // Cenová hladina odběratele (1833) — bez FK; bez hladiny v archivu → NULL (Default).
         'clients' => ['price_level_id' => 'stock_price_levels'],
+        // Cenová hladina zvolená na dokladu (1880) — totéž, bez remapu by faktura mířila na hladinu jiné firmy.
+        'invoices' => ['price_level_id' => 'stock_price_levels'],
     ];
 
     /** Tabulky bez sloupce `id` (PK = supplier_id / kompozit) — bez id-mapy. */

@@ -283,7 +283,7 @@ final class UpdateInvoiceAction
             return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
         }
 
-        // Cenová hladina dokladu (1866): stejné pravidlo jako hladina na kartě odběratele,
+        // Cenová hladina dokladu (1880): stejné pravidlo jako hladina na kartě odběratele,
         // musí patřit firmě a být aktivní; null / 0 / '' = hladina odběratele.
         // Nezměněná hodnota projde i tehdy, když hladinu mezitím někdo deaktivoval nebo
         // smazal; jinak by koncept nešel uložit, dokud uživatel hladinu ručně nezruší.

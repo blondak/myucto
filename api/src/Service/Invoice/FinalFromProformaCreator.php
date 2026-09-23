@@ -218,6 +218,11 @@ final class FinalFromProformaCreator
                 $userId ?: null,
             ]);
             $finalId = (int) $pdo->lastInsertId();
+            // Cenová hladina dokladu (1880): doplatek zakázky se naceňuje stejně jako proforma.
+            if (($proforma['price_level_id'] ?? null) !== null && $this->db->hasColumn('invoices', 'price_level_id')) {
+                $pdo->prepare('UPDATE invoices SET price_level_id = ? WHERE id = ? AND supplier_id = ?')
+                    ->execute([(int) $proforma['price_level_id'], $finalId, (int) $proforma['supplier_id']]);
+            }
 
             // Položky kopírujeme včetně případné slevové (item_kind='discount') —
             // zachová částku po slevě. Marker item_kind umožní pozdější re-save přepočítat.

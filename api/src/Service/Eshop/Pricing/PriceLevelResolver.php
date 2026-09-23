@@ -36,7 +36,7 @@ final class PriceLevelResolver
     }
 
     /**
-     * Hladina zvolená na dokladu (migrace 1866), přepisuje hladinu odběratele.
+     * Hladina zvolená na dokladu (migrace 1880), přepisuje hladinu odběratele.
      *
      * @return array{id:int, code:string, name:string, default_discount_pct:string}|null
      */

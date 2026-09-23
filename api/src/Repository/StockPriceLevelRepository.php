@@ -93,6 +93,8 @@ final class StockPriceLevelRepository
     /**
      * Smaže hladinu i s pravidly (kaskáda). Odběratele odpojí v téže transakci —
      * `clients.price_level_id` nemá cizí klíč a nesmí zůstat viset.
+     * `invoices.price_level_id` se záměrně nemaže: je to záznam, jakou hladinou byl
+     * doklad naceněný (detail ukáže `#id`, editor konceptu ji při načtení zruší).
      */
     public function delete(int $supplierId, int $id): void
     {

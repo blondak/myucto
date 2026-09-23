@@ -81,7 +81,7 @@ final class InvoiceRepository
     }
 
     /**
-     * Cache existence sloupce price_level_id (migrace 1866, cenová hladina dokladu). Bez
+     * Cache existence sloupce price_level_id (migrace 1880, cenová hladina dokladu). Bez
      * sloupce se doklad uloží bez hladiny; ceny řádků jsou uložené samostatně, hladina
      * je jen pomůcka pro nacenění v editoru.
      */

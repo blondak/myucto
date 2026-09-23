@@ -351,6 +351,10 @@ final class ArchiveRestoreRoundTripTest extends TestCase
             "INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email, language, currency_default_id, price_level_id)
              VALUES (?, 'Odběratel Gold', 'Test 1', 'Praha', '11000', ?, 'gold@example.test', 'cs', ?, ?)"
         )->execute([$sid, $czId, $this->currencyId, $level]);
+        $clientId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO invoices (supplier_id, client_id, invoice_type, issue_date, due_date, currency_id, created_by, status, note_above_items, price_level_id)
+                       VALUES (?, ?, 'invoice', '2099-06-01', '2099-06-15', ?, ?, 'draft', 'Doklad s hladinou', ?)")
+            ->execute([$sid, $clientId, $this->currencyId, $this->userId, $level]);
 
         $meta = $this->archive->export($sid, $this->userId);
         $path = $this->archive->filePath($sid, $meta);
@@ -367,6 +371,11 @@ final class ArchiveRestoreRoundTripTest extends TestCase
             $newLevel,
             $idOf("SELECT price_level_id FROM clients WHERE supplier_id = {$newSid} AND company_name = 'Odběratel Gold'"),
             'Odběratel míří na hladinu OBNOVENÉ firmy.',
+        );
+        self::assertSame(
+            $newLevel,
+            $idOf("SELECT price_level_id FROM invoices WHERE supplier_id = {$newSid} AND note_above_items = 'Doklad s hladinou'"),
+            'Hladina zvolená na dokladu míří na hladinu OBNOVENÉ firmy.',
         );
         $rules = $pdo->query("SELECT match_type, match_id, price_level_id FROM stock_price_level_rules WHERE supplier_id = {$newSid} ORDER BY id")
             ->fetchAll(PDO::FETCH_ASSOC);
