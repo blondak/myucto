@@ -861,7 +861,8 @@
         "1874_migration_batches.sql",
         "1875_migration_parallel_checks.sql",
         "1876_dimension_account_rules.sql",
-        "XXXX_vat_classification_24z_selected_supplies.sql"
+        "1877_vat_classification_24z_selected_supplies.sql",
+        "1878_users_default_supplier.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -20959,6 +20960,7 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "default_supplier_id": "int(10) unsigned NULL DEFAULT NULL",
                 "email": "varchar(190) NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
@@ -20979,11 +20981,13 @@
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_users_default_supplier": "BTREE (default_supplier_id)",
                 "idx_users_role_id": "BTREE (role_id)",
                 "uq_users_email": "UNIQUE BTREE (email)",
                 "uq_users_webauthn_user_handle": "UNIQUE BTREE (webauthn_user_handle)"
             },
             "foreign_keys": {
+                "fk_users_default_supplier": "(default_supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_users_role": "(role_id) -> roles (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
