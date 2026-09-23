@@ -204,6 +204,13 @@ Součástí potvrzení jsou také dvě povinná rozhodnutí **Ano/Ne**: zda v m�
 nastaly neodpracované hodiny (IN07) a zda nastaly překážky v práci (IN08).
 Systém žádnou z odpovědí nepředvyplní jako **Ne**. Při IN07 se uvádí celkový
 rozsah a případně placené hodiny, DPN s náhradou nebo bez ní, dovolená a péče.
+Placené hodiny zahrnují všechny neodpracované hodiny s náhradou mzdy, tedy
+i DPN v prvních čtrnácti dnech; z nich se počítá i sleva na pojistném podle
+§ 7a. V samotném hlášení se ale hodiny DPN s náhradou mzdy mezi hodinami
+s náhradou (10276) neuvádějí a vykážou se jako překážka na straně zaměstnance
+(10471), jak to chtějí pokyny MPSV. Tenhle převod udělá aplikace sama, při
+potvrzení je nepřesouvej a u měsíce, kde byla jen nemoc, odpověz na otázku
+o překážkách v práci **Ne**.
 Při IN08 musí být uvedena alespoň jedna hodnota překážek na straně zaměstnance
 nebo zaměstnavatele. Jednotlivé kategorie se mohou překrývat, proto se jejich
 součet nesmí automaticky rovnat celkovým neodpracovaným hodinám. Evidence

@@ -1953,7 +1953,7 @@ final class JmhzScenario1XmlSerializer
     /** @param array<string,mixed> $employment */
     private function workMonth(DOMDocument $dom, array $employment): DOMElement
     {
-        $values = $this->workSummaryValues($employment);
+        $values = $this->reportedUnworkedHours($this->workSummaryValues($employment));
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:prubehZamestnani');
         $days = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:odpracovaneDny');
         $this->text(
@@ -2074,6 +2074,52 @@ final class JmhzScenario1XmlSerializer
         }
 
         return $node;
+    }
+
+    /**
+     * Hodiny nemoci s náhradou mzdy (§ 192 ZP) v atributech 10276 a 10471.
+     *
+     * Pracovní souhrn vede v `unworked_paid_millihours` všechny neodpracované
+     * hodiny, za které náleží náhrada mzdy, včetně nemoci v okně § 192 ZP.
+     * Tak je potřebuje sleva zaměstnavatele podle § 7a ZPSZ („hodina, za
+     * kterou náleží náhrada mzdy") a tak je souhrn potvrzuje účetní. ELDP
+     * builder to vynucuje: úhrn se musí rovnat součtu dovolené, nemoci
+     * s náhradou a obou překážek.
+     *
+     * Hlášení je ale chce jinak. Pokyny MPSV k vyplnění MH 1.4.13 u 10276:
+     * „Neuvádí se hodiny neodpracované z důvodu dočasné pracovní neschopnosti
+     * a ošetřování člena rodiny." A 10471 jsou překážky na straně zaměstnance
+     * podle zákoníku práce části osmé, hlavy I a II, tedy včetně dočasné
+     * pracovní neschopnosti (§ 191 a 192). Oficiální vzorový příklad (nemoc
+     * v okně náhrady): 10275 = 80, 10276 = 0, 10278 = 80, 10471 = 80.
+     *
+     * Proto se tady, a jen tady, hodiny nemoci s náhradou z 10276 odečtou
+     * a k 10471 přičtou. Nulové 10276 se vynechá stejně jako u měsíce bez
+     * placených hodin (XSD ho má nepovinné).
+     *
+     * @param array<string,mixed> $values
+     * @return array<string,mixed>
+     */
+    private function reportedUnworkedHours(array $values): array
+    {
+        $sickness = $values['dpn_with_employer_compensation_millihours'] ?? null;
+        if (!is_int($sickness) || $sickness <= 0) {
+            return $values;
+        }
+        $paid = $this->int($values['unworked_paid_millihours'] ?? null, '10276') - $sickness;
+        if ($paid < 0) {
+            $this->invalid(
+                'jmhz_xml_paid_unworked_hours_below_sickness',
+                'Placené neodpracované hodiny pracovního souhrnu nezahrnují hodiny'
+                    . ' nemoci s náhradou mzdy.',
+            );
+        }
+        $obstacle = $values['employee_obstacle_paid_millihours'] ?? null;
+        $values['unworked_paid_millihours'] = $paid === 0 ? null : $paid;
+        $values['employee_obstacle_paid_millihours']
+            = ($obstacle === null ? 0 : $this->int($obstacle, '10471')) + $sickness;
+
+        return $values;
     }
 
     /**

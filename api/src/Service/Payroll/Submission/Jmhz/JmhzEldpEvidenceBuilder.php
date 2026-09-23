@@ -92,11 +92,14 @@ final class JmhzEldpEvidenceBuilder
     ];
 
     /**
-     * Neodpracované hodiny, za které platí náhradu ZAMĚSTNAVATEL (10276).
+     * Neodpracované hodiny, za které platí náhradu ZAMĚSTNAVATEL
+     * (`unworked_paid_millihours` pracovního souhrnu).
      *
      * Dovolená (§ 222 ZP) a nemoc uvnitř okna § 192 ZP. Nemoc za oknem platí
      * dávka ČSSZ a ošetřovné taky, proto tam nepatří — stejná definice, jakou
      * počítá {@see \MyInvoice\Service\Payroll\Time\PayrollJmhzAbsenceHoursDeriver}.
+     * Atribut 10276 je užší o nemoc, kterou hlášení vede v 10471; převádí
+     * ji serializér ({@see JmhzScenario1XmlSerializer::reportedUnworkedHours()}).
      */
     private const PAID_UNWORKED_FIELDS = [
         'vacation_millihours',
