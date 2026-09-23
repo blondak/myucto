@@ -212,6 +212,12 @@ async function saveSettings() {
       statutory_audit: settings.value.statutory_audit ? 1 : 0,
       manual_doc_series: settings.value.manual_doc_series ? 1 : 0,
       fx_reversal_at_open: settings.value.fx_reversal_at_open ? 1 : 0,
+      comparative_from_prior_year: settings.value.comparative_from_prior_year ? 1 : 0,
+      tax_authority_offset: settings.value.tax_authority_offset ? 1 : 0,
+      tax_authority_offset_from_year: settings.value.tax_authority_offset_from_year === null
+        || (settings.value.tax_authority_offset_from_year as unknown) === ''
+        || settings.value.tax_authority_offset_from_year === undefined
+        ? null : Number(settings.value.tax_authority_offset_from_year),
     })
     toast.success(t('common.saved'))
   } catch (e: any) {
@@ -448,6 +454,22 @@ function statusBadge(status: string): string {
               <input type="checkbox" v-model="settings.fx_reversal_at_open" class="mt-0.5" />
               <span>{{ t('accounting.closing.settings.fx_reversal_at_open') }}
                 <span class="block text-xs text-neutral-500">{{ t('accounting.closing.settings.fx_reversal_at_open_hint') }}</span></span>
+            </label>
+            <label class="flex items-start gap-2 text-sm cursor-pointer">
+              <input type="checkbox" v-model="settings.comparative_from_prior_year" class="mt-0.5" data-test="comparative-from-prior-year" />
+              <span>{{ t('accounting.closing.settings.comparative_from_prior_year') }}
+                <span class="block text-xs text-neutral-500">{{ t('accounting.closing.settings.comparative_from_prior_year_hint') }}</span></span>
+            </label>
+            <label class="flex items-start gap-2 text-sm cursor-pointer">
+              <input type="checkbox" v-model="settings.tax_authority_offset" class="mt-0.5" data-test="tax-authority-offset" />
+              <span>{{ t('accounting.closing.settings.tax_authority_offset') }}
+                <span class="block text-xs text-neutral-500">{{ t('accounting.closing.settings.tax_authority_offset_hint') }}</span></span>
+            </label>
+            <label v-if="settings.tax_authority_offset" class="flex flex-wrap items-center gap-2 text-sm pl-6">
+              {{ t('accounting.closing.settings.tax_authority_offset_from_year') }}
+              <input type="number" min="1900" max="2999" step="1" v-model.number="settings.tax_authority_offset_from_year"
+                :placeholder="t('accounting.closing.settings.tax_authority_offset_from_year_placeholder')"
+                class="w-28 h-9 px-2 border border-neutral-300 rounded-md text-sm" data-test="tax-authority-offset-from" />
             </label>
             <div class="text-sm pt-1 border-t border-neutral-100">
               <span class="block">{{ t('accounting.closing.settings.small_asset_accrual') }}

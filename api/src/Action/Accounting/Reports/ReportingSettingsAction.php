@@ -185,6 +185,34 @@ final class ReportingSettingsAction
             $this->settings->setNetTurnoverExtraRows($supplierId, $clean);
         }
 
+        // Sloupec minulého období podle výjimek mapování platných v minulém roce
+        // (převzetí z uzavřeného výkazu). Partial update — jen je-li klíč v body.
+        if (array_key_exists('comparative_from_prior_year', $body)) {
+            $v = filter_var($body['comparative_from_prior_year'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($v === null) {
+                return Json::error($response, 'validation_failed', 'comparative_from_prior_year musí být boolean (true/false).', 422);
+            }
+            $this->settings->setComparativeFromPriorYear($supplierId, $v);
+        }
+
+        // § 58 odst. 2 vyhl. 500/2002 Sb.: souhrnné vykázání daní vůči FÚ v rozvaze.
+        if (array_key_exists('tax_authority_offset', $body)) {
+            $v = filter_var($body['tax_authority_offset'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($v === null) {
+                return Json::error($response, 'validation_failed', 'tax_authority_offset musí být boolean (true/false).', 422);
+            }
+            $from = $body['tax_authority_offset_from_year'] ?? null;
+            if ($from !== null && $from !== '') {
+                if (!is_numeric($from) || (int) $from != $from || (int) $from < 1900 || (int) $from > 2999) {
+                    return Json::error($response, 'validation_failed', 'tax_authority_offset_from_year musí být rok (1900–2999), nebo null.', 422);
+                }
+                $from = (int) $from;
+            } else {
+                $from = null;
+            }
+            $this->settings->setTaxAuthorityOffset($supplierId, $v, $from);
+        }
+
         return Json::ok($response, $this->payload($supplierId));
     }
 }

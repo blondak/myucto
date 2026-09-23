@@ -101,7 +101,7 @@ describe('StatementMapping.vue', () => {
     await flushPromises()
 
     expect(m.saveStatementOverrides).toHaveBeenCalledWith(1, [
-      { account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null },
+      { account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null, valid_from_year: null, valid_to_year: null },
     ])
     expect(m.toastSuccess).toHaveBeenCalled()
   })
@@ -139,7 +139,7 @@ describe('StatementMapping.vue', () => {
     await flushPromises()
 
     expect(m.previewStatementOverrides).toHaveBeenCalledWith(6, 'balance_sheet', [
-      { account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null },
+      { account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null, valid_from_year: null, valid_to_year: null },
     ])
     expect(wrapper.findAll('[data-test="preview-row"]')).toHaveLength(2)
     expect(m.saveStatementOverrides).not.toHaveBeenCalled()
@@ -202,7 +202,7 @@ describe('StatementMapping.vue', () => {
     await flushPromises()
 
     expect(m.saveStatementOverrides).toHaveBeenCalledWith(1, [
-      { account_prefix: '365.', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: 'dlouhodobá půjčka' },
+      { account_prefix: '365.', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: 'dlouhodobá půjčka', valid_from_year: null, valid_to_year: null },
     ])
   })
 
@@ -220,6 +220,84 @@ describe('StatementMapping.vue', () => {
     expect((own.element as HTMLSelectElement).value).toBe('P.C.II.8.1.')
     expect(own.find('option').text()).toBe('accounting.statements.mapping.row_global')
     expect(wrapper.find('[data-test="account-365.100"] [data-test="inherited-note"]').exists()).toBe(false)
+  })
+
+  it('(i) výjimka jiného roku platnosti je v samostatném přehledu a nový řádek platí od roku editoru', async () => {
+    m.getStatementOverrides.mockResolvedValue(overview({
+      overrides: [{ id: 7, version_id: 1, account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null, valid_from_year: null, valid_to_year: 2098 }],
+    }))
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    const select = wrapper.find('[data-test="account-365.100"] [data-test="row-select"]')
+    // Výjimka do roku 2098 v roce 2099 neplatí.
+    expect((select.element as HTMLSelectElement).value).toBe('')
+    expect(wrapper.find('[data-test="other-years"]').text()).toContain('365.100')
+
+    await select.setValue('P.C.II.8.1.')
+    await wrapper.find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveStatementOverrides).toHaveBeenCalledWith(1, [
+      { account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null, valid_from_year: null, valid_to_year: 2098 },
+      { account_prefix: '365.100', row_code: 'P.C.II.8.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null, valid_from_year: 2099, valid_to_year: null },
+    ])
+  })
+
+  it('(j) korekce jde navázat na účet pohledávky a vazba se uloží', async () => {
+    m.getStatementOverrides.mockResolvedValue(overview({
+      rows: [
+        ...overview().rows,
+        { row_code: 'C.II.1.5.4.', display_code: 'C.II.1.5.4.', parent_row_code: 'C.II.1.5.', section: 'assets', label: 'Jiné pohledávky', level: 4, row_type: 'detail', value: 0 },
+      ],
+      overrides: [{ id: 8, version_id: 1, account_prefix: '365.100', row_code: 'C.II.1.5.4.', target: 'correction', balance_condition: 'any', sign: 1, note: null }],
+    }))
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    const follows = wrapper.find('[data-test="account-365.100"] [data-test="follows"]')
+    await follows.setValue('351.100')
+    await follows.trigger('change')
+    await wrapper.find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveStatementOverrides).toHaveBeenCalledWith(1, [
+      { account_prefix: '365.100', row_code: 'C.II.1.5.4.', target: 'correction', balance_condition: 'any', sign: 1, note: null, valid_from_year: null, valid_to_year: null, follows_prefix: '351.100' },
+    ])
+  })
+
+  it('(k) návrh pro minulé období rozdělí stávající výjimku podle let platnosti', async () => {
+    m.getStatementOverrides.mockResolvedValue(overview({
+      filed_return: { submission_id: 9, year: 2099, status: 'submitted', submitted_at: '2100-03-31 10:00:00', form_variant: 'B' },
+      overrides: [{ id: 3, version_id: 1, account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null }],
+    }))
+    const prior = {
+      statement_type: 'balance_sheet' as const, version_id: 1, account_code: '365.100', account_name: 'Půjčka od společníka',
+      amount: 500000, amount_thousands: 500, current_row_code: 'P.C.I.9.1.', from_row_code: 'P.C.I.9.1.', from_label: 'Závazky ke společníkům',
+      to_row_code: 'P.C.II.8.1.', to_label: 'Závazky ke společníkům', to_is_subtotal: false, balance_condition: 'any' as const, target: 'gross' as const,
+      sign: 1, reason: 'minulé období', ambiguous: false, confidence: 'exact' as const, accounts: ['365.100'],
+      overrides: [{ account_prefix: '365.100', row_code: 'P.C.II.8.1.', target: 'gross' as const, balance_condition: 'any' as const, note: null, valid_to_year: 2098 }],
+    }
+    m.suggestStatementOverrides.mockResolvedValue({
+      period_id: 6, year: 2099, source: { type: 'filed_return', submission_id: 9 }, differences: [], suggestions: [],
+      prior_period: { period_id: 5, year: 2098, suggestions: [prior], differences: [] },
+    })
+    const wrapper = mount(StatementMapping)
+    await flushPromises()
+
+    const suggestBtn = wrapper.findAll('button').find(b => b.text().includes('accounting.statements.mapping.action_suggest'))
+    await suggestBtn!.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[data-test="prior-suggestion"]')).toHaveLength(1)
+
+    await wrapper.find('[data-test="apply-suggestions"]').trigger('click')
+    await wrapper.find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveStatementOverrides).toHaveBeenCalledWith(1, [
+      { account_prefix: '365.100', row_code: 'P.C.I.9.1.', target: 'gross', balance_condition: 'any', sign: 1, note: null, valid_from_year: 2099, valid_to_year: null },
+      expect.objectContaining({ account_prefix: '365.100', row_code: 'P.C.II.8.1.', valid_from_year: null, valid_to_year: 2098 }),
+    ])
   })
 
   it('(f) bez podaného přiznání je návrh zašedlý s vysvětlením', async () => {

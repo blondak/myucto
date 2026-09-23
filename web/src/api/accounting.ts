@@ -1216,7 +1216,18 @@ export interface BalanceSheetReport {
     assets_net: number
     liabilities_total: number
     balanced: boolean
+    negative_net_rows?: BalanceSheetNegativeNetRow[]
   }
+}
+
+/** Řádek aktiv se záporným netto (korekce vyšší než brutto) v běžném nebo minulém období. */
+export interface BalanceSheetNegativeNetRow {
+  row_code: string
+  label: string
+  column: 'current' | 'previous'
+  gross: number
+  correction: number
+  net: number
 }
 
 // ── Účelové členění VZZ (vyhl. 500/2002 Sb., př. 2 část II, § 39b) ─────────
@@ -1257,6 +1268,11 @@ export interface StatementOverride {
   balance_condition: StatementBalanceCondition
   sign?: number
   note: string | null
+  /** Korekce: účet pohledávky, jejíž řádek výkazu korekce přebírá. */
+  follows_prefix?: string | null
+  /** Účetní období, od kterého / do kterého výjimka platí; null = bez omezení. */
+  valid_from_year?: number | null
+  valid_to_year?: number | null
   updated_at?: string | null
 }
 
@@ -1343,6 +1359,8 @@ export interface StatementOverrideSuggestion {
   to_is_subtotal: boolean
   balance_condition: StatementBalanceCondition
   target: 'gross' | 'correction'
+  /** Korekce navázaná na pohledávku, kterou návrh přesouvá do stejného řádku. */
+  follows_prefix?: string | null
   sign: number
   reason: string
   ambiguous: boolean
@@ -1369,6 +1387,8 @@ export interface StatementOverrideSuggestions {
   suggestions: StatementOverrideSuggestion[]
   differences: StatementOverrideDifference[]
   source: { type: 'filed_return' | 'upload'; submission_id?: number; status?: string; submitted_at?: string | null }
+  /** Návrhy pro sloupec minulého období (výjimky platné do minulého roku); null = podání ho nenese. */
+  prior_period?: { period_id: number; year: number; suggestions: StatementOverrideSuggestion[]; differences: StatementOverrideDifference[] } | null
 }
 
 export interface IncomeStatementReport {

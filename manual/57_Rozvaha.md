@@ -18,7 +18,12 @@ Rozvaha sestavuje aktiva a pasiva k rozvahovému dni ve struktuře přílohy
 Systém vybere verzi definice výkazu platnou k rozvahovému dni. Její kód se
 zobrazuje v záhlaví. Minulé období se sestaví z předchozího fiskálního období
 k jeho poslednímu dni, ale se stejnou verzí řádků a mapy jako běžný výkaz,
-aby byly sloupce srovnatelné.
+aby byly sloupce srovnatelné. Výjimky mapování firmy a souhrnné vykázání daní
+se ve sloupci minulého období řídí pravidly běžného roku; změnu zařazení pak
+vysvětlete v příloze. Kdo chce sloupec minulého období převzít tak, jak byl
+v uzavřeném výkazu minulého roku, zapne v **Nastavení uzávěrky** na stránce Účetní období
+volbu **Minulé období výkazů převzít z uzavřeného výkazu minulého roku**: sloupec
+se pak sestaví s výjimkami a volbami platnými v minulém roce.
 
 ## 57.2 Zůstatky, znaménka a mapování
 
@@ -49,6 +54,21 @@ pohledávky a krátkodobou část dlouhodobého úvěru. Nezařazený nenulový
 rozvahový účet je vrácen v kontrole jako nenamapovaný; účetní jej musí
 správně zařadit, jinak může výkaz zůstat neúplný.
 
+### Souhrnné vykázání daní vůči finančnímu úřadu
+
+Daňové pohledávky a závazky se ve výchozím stavu vykazují zvlášť: přeplatek
+jedné daně v aktivech (**Stát — daňové pohledávky**), nedoplatek jiné
+v pasivech (**Stát — daňové závazky a dotace**). Vyhláška v § 58 odst. 2 za
+vzájemné zúčtování nepovažuje souhrnné vykázání pohledávek a závazků vůči téže
+osobě se splatností do jednoho roku. Volba **Daně vůči finančnímu úřadu
+vykazovat v rozvaze souhrnně** v **Nastavení uzávěrky** na stránce Účetní období proto
+započte přeplatky a nedoplatky na účtech 341 až 345 (daň z příjmů, ostatní
+přímé daně, DPH, ostatní daně); dotace (346) a pojistné (336) do započtení
+nevstupují. Aktiva i pasiva klesnou o stejnou, menší z obou částek, v detailu
+řádku je vidět jako samostatná položka. Pole **Od účetního období** omezí
+volbu na roky, kdy ji firma používá. Souhrnné vykázání je třeba uvést
+v příloze; příloha u účetních zásad nabídne větu se započtenými částkami.
+
 ## 57.3 Strom a výpočtové řádky
 
 Řádek typu **detail** obsahuje přímo namapované účty. **Mezisoučet** sčítá
@@ -73,6 +93,13 @@ Další vazba porovnává výsledek hospodaření v rozvaze s výsledkem vypočt
 přímo ze všech nákladových a výnosových účtů. Backendová odpověď navíc vrací
 nenamapované nenulové účty; aktuální stránka z kontrolního bloku zobrazuje
 rovnost stran a obě bilanční částky.
+
+Řádek aktiv se **záporným netto** (korekce vyšší než brutto) stránka ukáže nad
+tabulkou jako varování, v běžném i minulém období. Nejčastější příčinou je
+opravná položka zařazená jinam než pohledávka, ke které patří, třeba celá 391
+v obchodních pohledávkách, zatímco pohledávka je výjimkou v dlouhodobých.
+Opravte ji výjimkou mapování s vazbou na pohledávku (kapitola 57.7). Stejné
+varování zapíše do protokolu převod dat z jiného programu.
 
 Nesoulad není zaokrouhlovací rozdíl obrazovky; před použitím výkazu je nutné
 prověřit obratovou předvahu, mapu účtů a závěrkové zápisy.
@@ -139,6 +166,20 @@ vyhrává nejdelší prefix a při stejné délce vyhrává výjimka firmy. Výj
 analytiku (365.100) proto přesune jen tu analytiku, ostatní analytiky
 syntetiky zůstanou podle globální mapy.
 
+**Opravná položka k pohledávce.** U výjimky zařazené jako korekce lze do pole
+**k pohledávce** zapsat účet pohledávky (například 351.100). Korekce pak jde
+vždy do řádku, kam výkaz zařadí tuto pohledávku, i když ji později přeřadíte;
+vybraný řádek platí jen tehdy, když účet pohledávky v mapě není. Netto řádku
+pohledávky tak odpovídá pohledávce snížené o její opravnou položku a opravná
+položka nesnižuje obchodní pohledávky.
+
+**Platnost po letech.** Sloupec **Platí v letech** omezí výjimku na účetní
+období od roku / do roku (prázdné = bez omezení). Tabulka ukazuje výjimky
+platné ve vybraném období; výjimky jiných let jsou v přehledu pod tabulkou.
+Pro jeden účet a stranu zůstatku se roky platnosti výjimek nesmí překrývat.
+Když účet už výjimku jiných let má, nová výjimka vybraná v tabulce platí od
+roku vybraného období.
+
 Změny se nejdřív jen připravují a ukládají se najednou tlačítkem **Uložit**
 v liště dole; **Zahodit změny** vrátí uložený stav. **Náhled dopadu** ukáže
 řádky výkazu, jejichž hodnota se po uložení změní, a upozorní, kdyby rozvaha
@@ -158,6 +199,16 @@ odpovídá zůstatku jednoho účtu nebo analytiky (s tolerancí 1 tis. Kč na
 zaokrouhlení), navrhne tento účet přeřadit do řádku, kde ho má podané
 přiznání. Přiznání, které v evidenci není, lze nahrát jako XML přes
 **Navrhnout z XML přiznání** v nabídce dalších akcí.
+
+U aktiv se brutto a korekce porovnávají zvlášť. Návrh tak najde přesun
+pohledávky i její opravné položky, i když jsou v aplikaci každá v jiném řádku,
+a korekci přesunutou do stejného řádku jako pohledávku k ní rovnou naváže.
+
+Podané přiznání nese i sloupec minulého období, jak byl v uzavřeném výkazu
+minulého roku. Blok **Minulé období** navrhne výjimky platné do minulého roku,
+se kterými bude sloupec minulého období shodný s podaným (při zapnutém převzetí
+z uzavřeného výkazu). Má-li účet výjimku bez omezení, převzetí ji omezí na
+pozdější roky a návrh přidá pro minulý rok.
 
 Každý návrh uvádí účet, výchozí a cílový řádek a odůvodnění. Návrh, který by
 stejně dobře vysvětlil víc účtů, je označený jako nejistý a není předvybraný.

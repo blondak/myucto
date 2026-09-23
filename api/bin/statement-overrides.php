@@ -15,12 +15,14 @@ declare(strict_types=1);
  * Výpis uložených výjimek:
  *   php api/bin/statement-overrides.php --ico=12345678 --list [--year=2025]
  *
- * Soubor CSV: account_prefix;row_code;balance_condition;note[;statement_type]
+ * Soubor CSV: account_prefix;row_code;balance_condition;note[;statement_type[;valid_from_year[;valid_to_year]]]
  *   oddělovač středník nebo čárka, hlavička volitelná, prázdné řádky a řádky začínající # se
  *   přeskočí. `account_prefix` smí končit hvězdičkou (351.* = všechny analytiky 351).
- * Soubor JSON: pole objektů se stejnými klíči.
+ * Soubor JSON: pole objektů se stejnými klíči, navíc 	arget (gross | correction) a u korekce
+ * ollows_prefix (účet pohledávky, jejíž řádek korekce přebírá).
  * `statement_type` (balance_sheet | income_statement | income_statement_purpose) je povinný
  * jen u kódu řádku, který existuje v rozvaze i ve výsledovce (A., C. …); jinak se odvodí.
+ * alid_from_year / alid_to_year omezí platnost výjimky na účetní období (prázdné = bez omezení).
  * `--replace` nahradí celou sadu výjimek dotčených výkazů obsahem souboru.
  * Firmu lze místo IČO určit přes --supplier-id=<id>.
  *
@@ -61,6 +63,12 @@ function soFlag(array $argv, string $key): bool
     return in_array("--{$key}", $argv, true);
 }
 
+function soYear(mixed $value): ?int
+{
+    $value = trim((string) ($value ?? ''));
+    return $value === '' ? null : (int) $value;
+}
+
 function soFail(string $message, int $code = 2): never
 {
     fwrite(STDERR, $message . "\n");
@@ -68,7 +76,7 @@ function soFail(string $message, int $code = 2): never
 }
 
 /**
- * @return list<array{line:int, account_prefix:string, row_code:string, balance_condition:string, note:?string, statement_type:?string, target:string}>
+ * @return list<array{line:int, account_prefix:string, row_code:string, balance_condition:string, note:?string, statement_type:?string, target:string, follows_prefix:?string, valid_from_year:?int, valid_to_year:?int}>
  */
 function soReadFile(string $path): array
 {
@@ -96,6 +104,9 @@ function soReadFile(string $path): array
                 'note'              => isset($row['note']) && trim((string) $row['note']) !== '' ? trim((string) $row['note']) : null,
                 'statement_type'    => isset($row['statement_type']) && trim((string) $row['statement_type']) !== '' ? trim((string) $row['statement_type']) : null,
                 'target'            => trim((string) ($row['target'] ?? '')) ?: 'gross',
+                'follows_prefix'    => isset($row['follows_prefix']) && trim((string) $row['follows_prefix']) !== '' ? trim((string) $row['follows_prefix']) : null,
+                'valid_from_year'   => soYear($row['valid_from_year'] ?? null),
+                'valid_to_year'     => soYear($row['valid_to_year'] ?? null),
             ];
         }
         return $items;
@@ -119,6 +130,9 @@ function soReadFile(string $path): array
             'note'              => ($cells[3] ?? '') !== '' ? $cells[3] : null,
             'statement_type'    => ($cells[4] ?? '') !== '' ? $cells[4] : null,
             'target'            => 'gross',
+            'follows_prefix'    => null,
+            'valid_from_year'   => soYear($cells[5] ?? null),
+            'valid_to_year'     => soYear($cells[6] ?? null),
         ];
     }
     return $items;
@@ -207,10 +221,20 @@ try {
             echo "\n# CSV pro import (account_prefix;row_code;balance_condition;note;statement_type), nejisté jsou zakomentované:\n";
             foreach ($result['suggestions'] as $s) {
                 foreach ($s['overrides'] as $o) {
+                    // CSV nese jen brutto; korekci (a její vazbu na pohledávku) převezměte přes --json.
                     printf("%s%s;%s;%s;Návrh z podaného přiznání %d;%s\n",
-                        $s['ambiguous'] ? '# ' : '',
+                        $s['ambiguous'] || $o['target'] === 'correction' ? '# ' : '',
                         $o['account_prefix'], $o['row_code'], $o['balance_condition'], $year, $s['statement_type']);
                 }
+            }
+        }
+        $prior = $result['prior_period'] ?? null;
+        if ($prior !== null && $prior['suggestions'] !== []) {
+            printf("\nMinulé období %d (sloupec minulého období podání, výjimky platné do roku %d; importujte přes --json):\n", $prior['year'], $prior['year']);
+            foreach ($prior['suggestions'] as $s) {
+                printf("  %s%-10s %-12s → %-12s %6d tis.  %s\n",
+                    $s['ambiguous'] ? '? ' : '  ',
+                    $s['account_code'], $s['from_row_code'], $s['to_row_code'], $s['amount_thousands'], $s['reason']);
             }
         }
         exit(0);
@@ -226,7 +250,9 @@ try {
             $items = $repository->forVersion($supplierId, (int) $version['id']);
             printf("\n%s (%s): %d\n", $type, (string) $version['version_code'], count($items));
             foreach ($items as $o) {
-                printf("  %-10s %-6s → %-12s %s\n", $o['account_prefix'], $o['balance_condition'], $o['row_code'], (string) ($o['note'] ?? ''));
+                printf("  %-10s %-6s → %-12s %-11s %s\n", $o['account_prefix'], $o['balance_condition'], $o['row_code'],
+                    ($o['valid_from_year'] ?? $o['valid_to_year']) === null ? '' : (($o['valid_from_year'] ?? '…') . '–' . ($o['valid_to_year'] ?? '…')),
+                    (string) ($o['note'] ?? ''));
             }
         }
         exit(0);
@@ -292,7 +318,7 @@ try {
         $versionId = (int) $version['id'];
         $existing = [];
         foreach ($repository->forVersion($supplierId, $versionId) as $o) {
-            $existing[$o['account_prefix'] . '|' . $o['balance_condition']] = $o;
+            $existing[$o['account_prefix'] . '|' . $o['balance_condition'] . '|' . ($o['valid_from_year'] ?? '')] = $o;
         }
 
         $merged = $replace ? [] : $existing;
@@ -300,7 +326,7 @@ try {
         $lines = [];
         $seen = [];
         foreach ($typeItems as $item) {
-            $key = rtrim($item['account_prefix'], '*') . '|' . $item['balance_condition'];
+            $key = rtrim($item['account_prefix'], '*') . '|' . $item['balance_condition'] . '|' . ($item['valid_from_year'] ?? '');
             $seen[$key] = true;
             $new = [
                 'account_prefix'    => rtrim($item['account_prefix'], '*'),
@@ -309,13 +335,18 @@ try {
                 'balance_condition' => $item['balance_condition'],
                 'sign'              => 1,
                 'note'              => $item['note'],
+                'follows_prefix'    => $item['follows_prefix'],
+                'valid_from_year'   => $item['valid_from_year'],
+                'valid_to_year'     => $item['valid_to_year'],
             ];
             $old = $existing[$key] ?? null;
             if ($old === null) {
                 $report['added']++;
                 $lines[] = sprintf('  + %-10s %-6s → %s', $new['account_prefix'], $new['balance_condition'], $new['row_code']);
             } elseif ($old['row_code'] === $new['row_code'] && (string) $old['target'] === $new['target']
-                && (string) ($old['note'] ?? '') === (string) ($new['note'] ?? '')) {
+                && (string) ($old['note'] ?? '') === (string) ($new['note'] ?? '')
+                && ($old['valid_to_year'] ?? null) === $new['valid_to_year']
+                && ($old['follows_prefix'] ?? null) === $new['follows_prefix']) {
                 $report['unchanged']++;
             } else {
                 $report['changed']++;

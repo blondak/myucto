@@ -170,8 +170,67 @@ final class FinancialStatementService
                 'profit_current'    => $profitFromBalances,
                 'profit_matches'    => self::cents($profitInBalanceSheet) === self::cents($profitFromBalances),
                 'unmapped_accounts' => $ctx['unmapped'],
+                'negative_net_rows' => self::negativeNetRows($ctx['rows'], $ctx['values'], $ctx['values_prev']),
+                // null = firma souhrnné vykázání daní vůči FÚ nepoužívá; jinak započtená částka.
+                'tax_authority_offset' => $ctx['tax_offset'],
             ],
         ];
+    }
+
+    /**
+     * Řádky aktiv se záporným netto (korekce vyšší než brutto nebo brutto s kreditním
+     * zůstatkem) v běžném i minulém období. Aktivum se záporným netto do rozvahy nepatří:
+     * obvykle jde o opravnou položku zařazenou jinam než pohledávka, ke které patří (celá
+     * 391 u obchodních pohledávek, pohledávka výjimkou v dlouhodobých). Výkaz se kvůli tomu
+     * nezastaví, ale uživatel i protokol převodu to musí vidět dřív, než výkaz odevzdá.
+     *
+     * Hlásí se řádek, kde záporné netto vzniká: mezisoučet, jehož podřádek je sám záporný,
+     * se vynechá, aby jedna příčina nebyla v seznamu několikrát.
+     *
+     * @param list<array<string,mixed>>                          $rows
+     * @param array<string, array{gross: float, correction: float}> $values
+     * @param array<string, array{gross: float, correction: float}> $valuesPrev
+     * @return list<array{row_code:string,label:string,column:string,gross:float,correction:float,net:float}>
+     */
+    private static function negativeNetRows(array $rows, array $values, array $valuesPrev): array
+    {
+        $children = [];
+        foreach ($rows as $r) {
+            $parent = (string) ($r['parent_row_code'] ?? '');
+            if ($parent !== '') {
+                $children[$parent][] = (string) $r['row_code'];
+            }
+        }
+
+        $out = [];
+        foreach (['current' => $values, 'previous' => $valuesPrev] as $column => $set) {
+            $negative = [];
+            foreach ($rows as $r) {
+                $code = (string) $r['row_code'];
+                $v = $set[$code] ?? null;
+                if ((string) $r['section'] === 'assets' && $v !== null && self::cents($v['gross'] - $v['correction']) < 0) {
+                    $negative[$code] = $r;
+                }
+            }
+            foreach ($negative as $code => $r) {
+                foreach ($children[$code] ?? [] as $child) {
+                    if (isset($negative[$child])) {
+                        continue 2;
+                    }
+                }
+                $v = $set[$code];
+                $out[] = [
+                    'row_code'   => (string) $code,
+                    'label'      => (string) $r['label'],
+                    'column'     => $column,
+                    'gross'      => $v['gross'],
+                    'correction' => $v['correction'],
+                    'net'        => round($v['gross'] - $v['correction'], 2),
+                ];
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -292,9 +351,10 @@ final class FinancialStatementService
             throw new ReportException('statement_version_missing', 'Pro rozvahový den ' . $asOf . ' neexistuje verze mapování výkazu.');
         }
         $rows = $this->definitions->rows((int) $version['id']);
-        // Sloučená mapa firmy: globální + (účelová VZZ) mapa funkcí + výjimky firmy.
-        // Skládá ji jen StatementMapResolver, aby výjimka platila ve všech výkazech stejně.
-        $baseMap = $this->maps->accountMap($version, $supplierId);
+        // Sloučená mapa firmy: globální + (účelová VZZ) mapa funkcí + výjimky firmy platné
+        // v roce období. Skládá ji jen StatementMapResolver, aby výjimka platila ve všech
+        // výkazech stejně.
+        $baseMap = $this->maps->accountMap($version, $supplierId, (int) $period['fiscal_year']);
         $map = $baseMap;
         if ($type === 'balance_sheet' && $asOf < (string) $period['ends_on']) {
             foreach ($map as &$mapping) {
@@ -316,6 +376,17 @@ final class FinancialStatementService
             $dimension,
         );
         $mapped   = $this->mapper->map($rows, $map, $balances);
+        // § 58 odst. 2 vyhl.: souhrnné vykázání daňových pohledávek a závazků vůči FÚ, jen na
+        // volbu firmy a od roku, kdy ho začala používat. Sloupec minulého období se řídí
+        // stejně jako výjimky mapování: pravidly běžného roku, nebo s převzetím z uzavřeného
+        // výkazu pravidly minulého roku.
+        $comparativeFromPriorYear = $this->settings->getComparativeFromPriorYear($supplierId);
+        $offsetIn = fn (int $year): bool => $type === 'balance_sheet' && $this->settings->taxAuthorityOffsetAppliesIn($supplierId, $year);
+        $taxOffsetOn = $offsetIn((int) $period['fiscal_year']);
+        $taxOffset = ['current' => 0.0, 'previous' => 0.0];
+        if ($taxOffsetOn) {
+            ['mapped' => $mapped, 'amount' => $taxOffset['current']] = TaxAuthorityOffset::apply($rows, $mapped);
+        }
         $unmapped = $this->mapper->unmappedBalances(
             $map,
             $balances,
@@ -326,18 +397,30 @@ final class FinancialStatementService
         $values   = $this->computeValues($rows, $mapped, $balances, $type, $startsOn, $turnoverExtra);
 
         // R13: minulé období stejným během k ends_on předchozího období, stejná verze.
+        // Výchozí zařazení je podle běžného roku (údaje minulého období přepočtené, aby byly
+        // srovnatelné). Firma, která sloupec přebírá z uzavřeného výkazu minulého roku,
+        // ho má s výjimkami platnými v minulém roce.
         $prevPeriod = $this->ledger->previousPeriod($supplierId, $startsOn);
         $valuesPrev = [];
         if ($prevPeriod !== null) {
+            $prevMap = $baseMap;
+            $prevSplitCodes = $splitCodes;
+            if ($comparativeFromPriorYear) {
+                $prevMap = $this->maps->accountMap($version, $supplierId, (int) $prevPeriod['fiscal_year']);
+                $prevSplitCodes = $this->mapper->noCompensationPrefixes($prevMap);
+            }
             $balancesPrev = $this->ledger->syntheticBalances(
                 $supplierId,
                 (string) $prevPeriod['ends_on'],
                 (string) $prevPeriod['starts_on'],
-                $splitCodes,
-                $this->mapper->analyticPrefixes($baseMap),
+                $prevSplitCodes,
+                $this->mapper->analyticPrefixes($prevMap),
                 $dimension,
             );
-            $mappedPrev = $this->mapper->map($rows, $baseMap, $balancesPrev);
+            $mappedPrev = $this->mapper->map($rows, $prevMap, $balancesPrev);
+            if ($comparativeFromPriorYear ? $offsetIn((int) $prevPeriod['fiscal_year']) : $taxOffsetOn) {
+                ['mapped' => $mappedPrev, 'amount' => $taxOffset['previous']] = TaxAuthorityOffset::apply($rows, $mappedPrev);
+            }
             $valuesPrev = $this->computeValues($rows, $mappedPrev, $balancesPrev, $type, (string) $prevPeriod['starts_on'], $turnoverExtra);
             // Čistý obrat v pojetí od 1. 1. 2024 se za minulé období spočtené po staru
             // neuvádí (stanovisko MF a Komory auditorů ČR z 24. 7. 2024): dvě různé veličiny
@@ -365,6 +448,9 @@ final class FinancialStatementService
                 $this->mapper->analyticPrefixes($baseMap),
             );
             $mappedOpening = $this->mapper->map($rows, $baseMap, $balancesOpening);
+            if ($taxOffsetOn) {
+                ['mapped' => $mappedOpening, 'amount' => $taxOffset['previous']] = TaxAuthorityOffset::apply($rows, $mappedOpening);
+            }
             $valuesPrev = $this->computeValues($rows, $mappedOpening, $balancesOpening, $type, $startsOn, $turnoverExtra);
         }
 
@@ -390,6 +476,7 @@ final class FinancialStatementService
             'unmapped'    => $unmapped,
             'values'      => $values,
             'values_prev' => $valuesPrev,
+            'tax_offset'  => $taxOffsetOn ? $taxOffset : null,
         ];
     }
 

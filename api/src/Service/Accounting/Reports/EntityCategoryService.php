@@ -219,7 +219,7 @@ final class EntityCategoryService
         $rows = $this->definitions->rows((int) $version['id']);
         // Stejná sloučená mapa jako rozvaha (globální + výjimky firmy) — aktiva netto pro
         // kategorii ÚJ se nesmí počítat z jiného zařazení než rozvaha sama.
-        $map  = $this->maps->accountMap($version, $supplierId);
+        $map  = $this->maps->accountMap($version, $supplierId, (int) $period['fiscal_year']);
 
         // D2 (H9): saldové účty (balance_condition != 'any') se nettují per analytika,
         // ne přes syntetiku — aktiva netto pak nezahrnou kompenzovaný kontokorent. N1 guard
@@ -236,6 +236,10 @@ final class EntityCategoryService
             $this->mapper->analyticPrefixes($map),
         );
         $mapped   = $this->mapper->map($rows, $map, $balances);
+        // Aktiva netto stejná jako v rozvaze i při souhrnném vykázání daní vůči FÚ (§ 58/2).
+        if ($this->settings->taxAuthorityOffsetAppliesIn($supplierId, (int) $period['fiscal_year'])) {
+            $mapped = TaxAuthorityOffset::apply($rows, $mapped)['mapped'];
+        }
 
         return [
             'assets_net'   => $this->mapper->assetsNet($rows, $mapped),
