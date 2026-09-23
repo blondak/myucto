@@ -858,7 +858,8 @@
         "1871_asset_disposal_entry.sql",
         "1872_depreciation_tax_override.sql",
         "1873_asset_account_summary.sql",
-        "1874_migration_batches.sql"
+        "1874_migration_batches.sql",
+        "1875_migration_parallel_checks.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -6415,6 +6416,39 @@
             },
             "checks": {
                 "summary": "`summary` is null or json_valid(`summary`)"
+            }
+        },
+        "migration_parallel_checks": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "classifications": "longtext NULL DEFAULT NULL",
+                "closed_at": "timestamp NULL DEFAULT NULL",
+                "closed_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "cycle_status": "enum('open','closed') NOT NULL DEFAULT 'open'",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "inputs": "longtext NULL DEFAULT NULL",
+                "note": "text NULL DEFAULT NULL",
+                "period_month": "char(7) NOT NULL",
+                "result": "longtext NULL DEFAULT NULL",
+                "source_system": "varchar(20) NOT NULL",
+                "status": "enum('ok','differences','incomplete') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_migration_parallel_checks_month": "BTREE (supplier_id, period_month, id)"
+            },
+            "foreign_keys": {
+                "fk_migration_parallel_checks_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "classifications": "`classifications` is null or json_valid(`classifications`)",
+                "inputs": "`inputs` is null or json_valid(`inputs`)",
+                "result": "`result` is null or json_valid(`result`)"
             }
         },
         "migrations": {
