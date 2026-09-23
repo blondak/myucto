@@ -18,7 +18,8 @@ use MyInvoice\Service\Tax\DpfoCalculator;
  * {@see DpfoCalculator} — jeden zdroj pravdy s daňovým optimalizátorem.
  *
  * Vstup:
- *   $data    = podklady §7 (DpfoReturnDataProvider): s7_income, s7_expenses, s7_base,
+ *   $data    = podklady §7 (DpfoReturnDataProvider): s7_income, s7_expenses, s7_base
+ *              (konečný dílčí základ ř.113 včetně úprav, viz {@see section7}),
  *              expense_mode ('actual'|'pausal'), expense_rate, s7_increase, s7_decrease
  *              (úhrn úprav §23 — ř.105/106 Přílohy 1) a volitelně s7_increase_items/
  *              s7_decrease_items — položkový rozpis pro oddíl E Přílohy 1 (VetaC/VetaE,
@@ -64,21 +65,11 @@ final class DpfoReturnCalculator
         $s6Withholding = max(0.0, $this->kc($inputs['s6_employment']['withholding'] ?? 0));
         $s6 = $s6Income; // od 2021 dílčí základ §6 = úhrn příjmů (bez superhrubé mzdy)
 
-        $activities = (array) ($data['activities'] ?? $profile['activities'] ?? []);
-        $activityCalc = $activities !== [] ? DpfoCalculator::section7Activities($activities, $c) : null;
-        if ($activityCalc !== null) {
-            // Tabulka B Přílohy 1: řádky činností v celých korunách, ř. 101/102 jsou jejich součtem.
-            foreach ($activityCalc['items'] as $i => $item) {
-                $activityCalc['items'][$i]['income'] = TaxFormAmount::kc((float) $item['income']);
-                $activityCalc['items'][$i]['expenses'] = TaxFormAmount::kc((float) $item['expenses']);
-            }
-            $activityCalc['income'] = (float) array_sum(array_column($activityCalc['items'], 'income'));
-            $activityCalc['expenses'] = (float) array_sum(array_column($activityCalc['items'], 'expenses'));
-        }
-        $s7Income = $this->kc($activityCalc['income'] ?? $data['s7_income'] ?? 0);
-        $s7Expenses = $this->kc($activityCalc['expenses'] ?? $data['s7_expenses'] ?? 0);
-        $s7Increase = $this->kc($data['s7_increase'] ?? 0);
-        $s7Decrease = $this->kc($data['s7_decrease'] ?? 0);
+        $section7 = self::section7($data, $c, (array) ($profile['activities'] ?? []));
+        $s7Income = $section7['income'];
+        $s7Expenses = $section7['expenses'];
+        $s7Increase = $section7['increase'];
+        $s7Decrease = $section7['decrease'];
         // Položkový rozpis pro oddíl E Přílohy 1 (VetaC/VetaE) — jen prošedě, ČISTÁ třída
         // nesumarizuje ani nevaliduje popisy, to dělá DpfoXmlBuilder (má i fallback bez
         // položek). Sem se dostane jen to, co volající v $data skutečně předal.
@@ -91,12 +82,8 @@ final class DpfoReturnCalculator
         $payrollGross = ($payrollManual === null || $payrollManual === '')
             ? (isset($data['payroll_gross']) && $data['payroll_gross'] !== null ? $this->num($data['payroll_gross']) : null)
             : max(0.0, $this->num($payrollManual));
-        $s7BeforeAdjustments = $activityCalc !== null
-            ? $s7Income - $s7Expenses
-            : (array_key_exists('s7_base', $data)
-                ? $this->kc($data['s7_base'])
-                : $s7Income - $s7Expenses);
-        $s7 = $s7BeforeAdjustments + $s7Increase - $s7Decrease; // může být záporný (ztráta)
+        $s7BeforeAdjustments = $section7['before_adjustments'];
+        $s7 = $section7['base']; // může být záporný (ztráta)
 
         $s8 = max(0.0, $this->kc($inputs['s8_capital']['base'] ?? 0));
         $s9Income = max(0.0, $this->kc($inputs['s9_rental']['income'] ?? 0));
@@ -454,7 +441,7 @@ final class DpfoReturnCalculator
                 'expense_mode' => (string) ($data['expense_mode'] ?? 'pausal'),
                 'expense_rate' => (int) ($data['expense_rate'] ?? 0),
                 'accounting_mode' => (string) ($data['accounting_mode'] ?? 'tax_evidence'),
-                'activities' => $activityCalc['items'] ?? [],
+                'activities' => $section7['activities'],
                 'increase' => $s7Increase,
                 'decrease' => $s7Decrease,
                 // Oddíl E Přílohy 1 (VetaC/VetaE) — položkový rozpis, viz komentář u
@@ -520,6 +507,57 @@ final class DpfoReturnCalculator
                 ),
             ],
             'warnings' => $warnings,
+        ];
+    }
+
+    /**
+     * Dílčí základ § 7 Přílohy č. 1 — jediné místo, kde se skládá z rozdílu příjmů
+     * a výdajů (ř. 104) a úprav § 5 a § 23 ZDP (ř. 105 zvýšení, ř. 106 snížení) do ř. 113.
+     * Volá ho přiznání ({@see compute}) i podklady ({@see DpfoReturnDataProvider::gather}),
+     * ze kterých berou dílčí základ přehledy ČSSZ a ZP. Daňový základ přehledů je podle
+     * pokynů ČSSZ i ZP dílčí základ § 7 z ř. 113, tedy i s úpravami, přesně jednou.
+     *
+     * `s7_base` v $data je KONEČNÝ dílčí základ (ř. 113, úpravy už obsahuje). Rozdíl ř. 104
+     * se z něj proto odvozuje odečtením úprav, ne tak, že by se k němu úpravy přičetly
+     * podruhé. Činnosti na profilu mají přednost před souhrnnými příjmy a výdaji.
+     *
+     * @param array<string,mixed> $data podklady § 7 (s7_income, s7_expenses, s7_base?,
+     *   s7_increase, s7_decrease, activities?)
+     * @param array<string,mixed> $c roční konstanty (stropy paušálu činností)
+     * @param list<array<string,mixed>> $fallbackActivities činnosti z profilu, když $data žádné nenese
+     * @return array{income:float,expenses:float,before_adjustments:float,increase:float,
+     *   decrease:float,base:float,activities:list<array<string,mixed>>}
+     */
+    public static function section7(array $data, array $c, array $fallbackActivities = []): array
+    {
+        $activities = (array) ($data['activities'] ?? $fallbackActivities);
+        $activityCalc = $activities !== [] ? DpfoCalculator::section7Activities($activities, $c) : null;
+        if ($activityCalc !== null) {
+            // Tabulka B Přílohy 1: řádky činností v celých korunách, ř. 101/102 jsou jejich součtem.
+            foreach ($activityCalc['items'] as $i => $item) {
+                $activityCalc['items'][$i]['income'] = TaxFormAmount::kc((float) $item['income']);
+                $activityCalc['items'][$i]['expenses'] = TaxFormAmount::kc((float) $item['expenses']);
+            }
+            $activityCalc['income'] = (float) array_sum(array_column($activityCalc['items'], 'income'));
+            $activityCalc['expenses'] = (float) array_sum(array_column($activityCalc['items'], 'expenses'));
+        }
+        // Každý řádek v celých korunách (zaokrouhlený jednou), součty ze zaokrouhlených řádků.
+        $income = TaxFormAmount::kc(round((float) ($activityCalc['income'] ?? $data['s7_income'] ?? 0), 2));
+        $expenses = TaxFormAmount::kc(round((float) ($activityCalc['expenses'] ?? $data['s7_expenses'] ?? 0), 2));
+        $increase = TaxFormAmount::kc(round((float) ($data['s7_increase'] ?? 0), 2));
+        $decrease = TaxFormAmount::kc(round((float) ($data['s7_decrease'] ?? 0), 2));
+        $before = $activityCalc === null && array_key_exists('s7_base', $data)
+            ? TaxFormAmount::kc(round((float) $data['s7_base'], 2)) - $increase + $decrease
+            : $income - $expenses;
+
+        return [
+            'income' => $income,
+            'expenses' => $expenses,
+            'before_adjustments' => $before,
+            'increase' => $increase,
+            'decrease' => $decrease,
+            'base' => $before + $increase - $decrease,
+            'activities' => $activityCalc['items'] ?? [],
         ];
     }
 
