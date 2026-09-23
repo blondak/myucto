@@ -44,7 +44,8 @@ final class CreditCardTransactionKind
             if (preg_match('/\bSPLATK|\bVASE PLATBA|\bUHRADA (?:UVERU|DLUHU|DLUZNE)|\bPLATBA DEKUJEME/', $t) === 1) {
                 return self::REPAYMENT;
             }
-            if (preg_match('/\bODMEN|\bCASHBACK|\bBONUS/', $t) === 1) {
+            // ERSTE připisuje odměnu jako „Moneyback".
+            if (preg_match('/\bODMEN|\bCASHBACK|\bMONEYBACK|\bBONUS/', $t) === 1) {
                 return self::REWARD;
             }
             if (preg_match('/\bUROK/', $t) === 1) {

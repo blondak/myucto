@@ -518,6 +518,7 @@ TXT;
         self::assertSame(CreditCardTransactionKind::FEE, CreditCardTransactionKind::classify('Cena za výpis', -15.0));
         self::assertSame(CreditCardTransactionKind::CASH, CreditCardTransactionKind::classify('Výběr z bankomatu', -1000.0));
         self::assertSame(CreditCardTransactionKind::REWARD, CreditCardTransactionKind::classify('Odměna za platby kartou', 50.0));
+        self::assertSame(CreditCardTransactionKind::REWARD, CreditCardTransactionKind::classify('Moneyback 440507XXXXXX1111', 20.0), 'ERSTE: odměna jako „Moneyback", ne vratka.');
         self::assertSame(CreditCardTransactionKind::REFUND, CreditCardTransactionKind::classify('Platba kartou', 120.0));
     }
 }
