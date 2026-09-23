@@ -25,10 +25,19 @@ final class DepreciationEntryRepository
 
     public function __construct(private readonly Connection $db) {}
 
-    /** Daňový řádek potvrdil převod z jiného programu (původ v `detail`). */
+    /** Daňový odpis roku ručně přepsaný na kartě (důvod v `override_reason`). */
+    public static function isOverridden(?array $entry): bool
+    {
+        return $entry !== null && ($entry['override_reason'] ?? null) !== null && (string) $entry['override_reason'] !== '';
+    }
+
+    /**
+     * Daňový řádek potvrdil převod z jiného programu (původ v `detail`). Ručně přepsaný
+     * řádek už převodu nepatří: opakovaný převod ho nemění.
+     */
     public static function isConfirmedByMigration(?array $entry): bool
     {
-        if ($entry === null) {
+        if ($entry === null || self::isOverridden($entry)) {
             return false;
         }
         $detail = is_string($entry['detail'] ?? null) ? json_decode((string) $entry['detail'], true) : ($entry['detail'] ?? null);
@@ -55,6 +64,7 @@ final class DepreciationEntryRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, asset_id, kind, fiscal_year, amount, full_amount,
                     residual_value_end, is_paused, is_half, months_count, detail, status,
+                    override_reason, override_original_amount, override_by, override_at,
                     created_at, updated_at
                FROM depreciation_entries
               WHERE asset_id = ?
@@ -69,6 +79,7 @@ final class DepreciationEntryRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, asset_id, kind, fiscal_year, amount, full_amount,
                     residual_value_end, is_paused, is_half, months_count, detail, status,
+                    override_reason, override_original_amount, override_by, override_at,
                     created_at, updated_at
                FROM depreciation_entries
               WHERE supplier_id = ? AND id = ?'
@@ -83,6 +94,7 @@ final class DepreciationEntryRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, asset_id, kind, fiscal_year, amount, full_amount,
                     residual_value_end, is_paused, is_half, months_count, detail, status,
+                    override_reason, override_original_amount, override_by, override_at,
                     created_at, updated_at
                FROM depreciation_entries
               WHERE asset_id = ? AND kind = ? AND fiscal_year = ?'
@@ -136,6 +148,78 @@ final class DepreciationEntryRepository
             (string) ($row['status'] ?? 'confirmed'),
         ]);
         return (int) $pdo->lastInsertId();
+    }
+
+    /**
+     * Ruční přepis daňového odpisu roku: nová částka a zůstatková cena, původní hodnoty
+     * se uloží jen při prvním přepisu (další přepis vrací pořád k odpisu kalkulačky/převodu).
+     */
+    public function applyOverride(int $supplierId, int $id, float $amount, float $residualEnd, string $reason, ?int $userId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE depreciation_entries
+                SET override_original_amount = COALESCE(override_original_amount, amount),
+                    override_original_full_amount = COALESCE(override_original_full_amount, full_amount),
+                    override_original_residual = COALESCE(override_original_residual, residual_value_end),
+                    amount = ?, full_amount = ?, residual_value_end = ?,
+                    override_reason = ?, override_by = ?, override_at = NOW()
+              WHERE id = ? AND supplier_id = ?'
+        )->execute([round($amount, 2), round($amount, 2), round($residualEnd, 2), $reason, $userId, $id, $supplierId]);
+    }
+
+    /**
+     * Zruší ruční přepis: vrátí původní odpis a zůstatkovou cenu.
+     *
+     * @return array{amount:float, full_amount:float, residual:float}|null původní hodnoty; null = řádek přepsaný nebyl
+     */
+    public function clearOverride(int $supplierId, int $id): ?array
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'SELECT override_original_amount, override_original_full_amount, override_original_residual
+               FROM depreciation_entries WHERE id = ? AND supplier_id = ? AND override_reason IS NOT NULL'
+        );
+        $stmt->execute([$id, $supplierId]);
+        $original = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($original === false) {
+            return null;
+        }
+        $pdo->prepare(
+            'UPDATE depreciation_entries
+                SET amount = override_original_amount, full_amount = override_original_full_amount,
+                    residual_value_end = override_original_residual,
+                    override_reason = NULL, override_original_amount = NULL, override_original_full_amount = NULL,
+                    override_original_residual = NULL, override_by = NULL, override_at = NULL
+              WHERE id = ? AND supplier_id = ?'
+        )->execute([$id, $supplierId]);
+        return [
+            'amount' => (float) $original['override_original_amount'],
+            'full_amount' => (float) $original['override_original_full_amount'],
+            'residual' => (float) $original['override_original_residual'],
+        ];
+    }
+
+    /**
+     * Posune daňovou zůstatkovou cenu potvrzených řádků po roce `$year` o `-$delta`
+     * (změna stanoveného odpisu dřívějšího roku). Částky odpisů pozdějších let zůstávají.
+     */
+    public function shiftLaterTaxResiduals(int $supplierId, int $assetId, int $year, float $delta): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE depreciation_entries SET residual_value_end = residual_value_end - ?
+              WHERE supplier_id = ? AND asset_id = ? AND kind = 'tax' AND fiscal_year > ?"
+        )->execute([round($delta, 2), $supplierId, $assetId, $year]);
+    }
+
+    /** Nejnižší daňová zůstatková cena potvrzených řádků po roce `$year`, null = žádné nejsou. */
+    public function minLaterTaxResidual(int $assetId, int $year): ?float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT MIN(residual_value_end) FROM depreciation_entries WHERE asset_id = ? AND kind = 'tax' AND fiscal_year > ?"
+        );
+        $stmt->execute([$assetId, $year]);
+        $min = $stmt->fetchColumn();
+        return $min === null || $min === false ? null : (float) $min;
     }
 
     /** Smaže oba druhy řádku daného roku (revert vyřazení R24). */
@@ -211,6 +295,10 @@ final class DepreciationEntryRepository
         $r['is_paused'] = (bool) $r['is_paused'];
         $r['is_half'] = (bool) $r['is_half'];
         $r['months_count'] = $r['months_count'] === null ? null : (int) $r['months_count'];
+        if (array_key_exists('override_original_amount', $r)) {
+            $r['override_original_amount'] = $r['override_original_amount'] === null ? null : (float) $r['override_original_amount'];
+            $r['override_by'] = $r['override_by'] === null ? null : (int) $r['override_by'];
+        }
         return $r;
     }
 }

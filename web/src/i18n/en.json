@@ -13755,6 +13755,21 @@
         "delete_confirm": "Really delete the technical improvement?",
         "err_fields": "Completion date and a positive amount are required."
       },
+      "override": {
+        "action": "Override the year's tax depreciation",
+        "clear": "Remove the override",
+        "badge": "manual",
+        "badge_title": "Manually overridden depreciation ({original} computed): {reason}",
+        "title": "Tax depreciation for {year}",
+        "hint": "Sets the year's tax depreciation manually, typically when taking over figures from an accountant who calculated them outside the program. The amount flows into the tax return (difference between book and tax depreciation, depreciation table in the appendix) and shifts the tax net book value. Bulk confirmation of depreciation does not overwrite it. The change is recorded in the activity log.",
+        "amount": "Tax depreciation for the year (CZK)",
+        "computed": "Computed or converted depreciation: {amount}",
+        "reason": "Reason",
+        "saved": "The tax depreciation for {year} has been overridden.",
+        "cleared": "The override for {year} has been removed.",
+        "clear_confirm": "Remove the manual override of the {year} tax depreciation and restore the computed amount?",
+        "err_fields": "A non-negative amount and a reason are required."
+      },
       "hints": {
         "sale_invoice_641": "Issue an invoice — the sale revenue (641, incl. VAT) is booked via an issued invoice, not the asset card.",
         "donation_vat_output": "For donated assets where input VAT was deducted, verify output VAT based on the open market value (§13(4)(a) and §36(6)(a) of the Czech VAT Act). Disposal does not create an internal tax document.",

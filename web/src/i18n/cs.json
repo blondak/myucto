@@ -13755,6 +13755,21 @@
         "delete_confirm": "Opravdu smazat technické zhodnocení?",
         "err_fields": "Datum dokončení a kladná částka jsou povinné."
       },
+      "override": {
+        "action": "Ručně přepsat daňový odpis roku",
+        "clear": "Zrušit ruční přepis",
+        "badge": "ručně",
+        "badge_title": "Ručně přepsaný odpis ({original} spočteno): {reason}",
+        "title": "Daňový odpis roku {year}",
+        "hint": "Nastaví daňový odpis roku ručně, typicky když přebíráte čísla účetní, která počítala mimo program. Odpis se promítne do přiznání (rozdíl účetních a daňových odpisů, tabulka odpisů v příloze) a posune daňovou zůstatkovou cenu. Hromadné potvrzení odpisů ho nepřepíše. Změnu zapisuje protokol činností.",
+        "amount": "Daňový odpis roku (Kč)",
+        "computed": "Spočtený nebo převzatý odpis: {amount}",
+        "reason": "Důvod",
+        "saved": "Daňový odpis roku {year} byl ručně přepsán.",
+        "cleared": "Ruční přepis odpisu roku {year} byl zrušen.",
+        "clear_confirm": "Zrušit ruční přepis daňového odpisu roku {year} a vrátit spočtený odpis?",
+        "err_fields": "Nezáporná částka a důvod jsou povinné."
+      },
       "hints": {
         "sale_invoice_641": "Vystavte fakturu — výnos z prodeje (641, příp. DPH) se účtuje vydanou fakturou, ne kartou majetku.",
         "donation_vat_output": "U darovaného majetku s uplatněným odpočtem DPH ověřte odvod DPH z ceny obvyklé (§13 odst. 4 písm. a) a §36 odst. 6 písm. a) ZDPH). Vyřazení interní daňový doklad nevytváří.",

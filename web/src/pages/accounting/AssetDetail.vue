@@ -210,6 +210,45 @@ async function runUnpause(year: number) {
   } catch (e: any) { apiError(e) }
 }
 
+// ── Ruční přepis daňového odpisu roku (převzetí čísel účetní) ──────────────
+const overrideRow = ref<DepreciationPlanRow | null>(null)
+const overrideForm = ref({ amount: null as number | null, reason: '' })
+const canOverrideTax = computed(() => auth.canWrite('assets.depreciation'))
+
+function openOverride(row: DepreciationPlanRow) {
+  overrideRow.value = row
+  overrideForm.value = { amount: num(row.amount), reason: row.override_reason ?? '' }
+}
+
+async function runOverride() {
+  const row = overrideRow.value
+  if (!row || overrideForm.value.amount === null || overrideForm.value.amount < 0 || !overrideForm.value.reason.trim()) {
+    toast.error(t('accounting.assets.override.err_fields'))
+    return
+  }
+  acting.value = true
+  try {
+    await assetsApi.overrideTax(assetId.value, {
+      fiscal_year: row.fiscal_year,
+      amount: Number(overrideForm.value.amount),
+      reason: overrideForm.value.reason.trim(),
+    })
+    overrideRow.value = null
+    toast.success(t('accounting.assets.override.saved', { year: row.fiscal_year }))
+    await load()
+  } catch (e: any) { apiError(e) } finally { acting.value = false }
+}
+
+async function runClearOverride(row: DepreciationPlanRow) {
+  if (!confirm(t('accounting.assets.override.clear_confirm', { year: row.fiscal_year }))) return
+  acting.value = true
+  try {
+    await assetsApi.clearTaxOverride(assetId.value, row.fiscal_year)
+    toast.success(t('accounting.assets.override.cleared', { year: row.fiscal_year }))
+    await load()
+  } catch (e: any) { apiError(e) } finally { acting.value = false }
+}
+
 // ── Lifecycle: vyřazení ────────────────────────────────────────────────────
 const showDispose = ref(false)
 const disposeForm = ref({
@@ -572,6 +611,9 @@ const yearOptions = computed(() => {
                       class="ml-1 text-xs px-1.5 py-0.5 rounded bg-warning-50 text-warning-600 font-semibold">½</span>
                     <span v-if="row.is_paused" :title="t('accounting.assets.plan.badge_paused')"
                       class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-semibold">⏸</span>
+                    <span v-if="row.override_reason"
+                      :title="t('accounting.assets.override.badge_title', { reason: row.override_reason, original: formatMoney(num(row.override_original_amount)) })"
+                      class="ml-1 text-xs px-1.5 py-0.5 rounded bg-warning-50 text-warning-600 font-semibold">{{ t('accounting.assets.override.badge') }}</span>
                   </td>
                   <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(num(row.residual_start)) }}</td>
                   <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(num(row.full_amount)) }}</td>
@@ -601,6 +643,18 @@ const yearOptions = computed(() => {
                         :title="t('accounting.assets.lifecycle.unpause')" :aria-label="t('accounting.assets.lifecycle.unpause')"
                         :class="btnIconSm('primary')">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
+                      </button>
+                      <button v-if="planTab === 'tax' && row.source === 'confirmed' && !row.is_paused && canOverrideTax"
+                        :disabled="acting" @click.stop="openOverride(row)"
+                        :title="t('accounting.assets.override.action')" :aria-label="t('accounting.assets.override.action')"
+                        :class="btnIconSm('warning')">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                      </button>
+                      <button v-if="planTab === 'tax' && row.override_reason && canOverrideTax"
+                        :disabled="acting" @click.stop="runClearOverride(row)"
+                        :title="t('accounting.assets.override.clear')" :aria-label="t('accounting.assets.override.clear')"
+                        :class="btnIconSm('neutral')">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
                       </button>
                       <button v-if="row.source === 'confirmed' && row.journal_entry_id && row.fiscal_year === latestMaterializedYear && auth.canWrite('assets.write')"
                         :disabled="acting" :class="btnIconSm('danger')"
@@ -696,6 +750,31 @@ const yearOptions = computed(() => {
           <button :disabled="acting" @click="runPause" :class="btnFilled('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.pause" /></svg>
             {{ t('common.confirm') }}
+          </button>
+        </div>
+      </Modal>
+
+      <!-- Modal: ruční přepis daňového odpisu roku -->
+      <Modal v-if="overrideRow" :title="t('accounting.assets.override.title', { year: overrideRow.fiscal_year })" widthClass="max-w-md" @close="overrideRow = null">
+        <p class="text-xs text-neutral-500 mb-3">{{ t('accounting.assets.override.hint') }}</p>
+        <div class="space-y-3 mb-4">
+          <div>
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.override.amount') }} *</label>
+            <input v-model.number="overrideForm.amount" type="number" min="0" step="0.01" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <p class="text-xs text-neutral-400 mt-1">
+              {{ t('accounting.assets.override.computed', { amount: formatMoney(num(overrideRow.override_original_amount ?? overrideRow.amount)) }) }}
+            </p>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.override.reason') }} *</label>
+            <textarea v-model="overrideForm.reason" rows="3" maxlength="500" class="w-full px-2 py-1.5 border border-neutral-300 rounded-md text-sm"></textarea>
+          </div>
+        </div>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button @click="overrideRow = null" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
+          <button :disabled="acting || !overrideForm.reason.trim()" @click="runOverride" :class="btnFilled('warning')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('common.save') }}
           </button>
         </div>
       </Modal>

@@ -191,6 +191,10 @@ export interface DepreciationPlanRow {
   note: string | null
   depreciation_entry_id?: number | null
   journal_entry_id?: number | null
+  /** Ručně přepsaný daňový odpis roku: důvod, původní odpis a kdy (R8). */
+  override_reason?: string | null
+  override_original_amount?: number | null
+  override_at?: string | null
 }
 
 export interface AssetSummary {
@@ -264,4 +268,9 @@ export const assetsApi = {
     api.post(`/accounting/assets/${id}/depreciation/pause`, { fiscal_year: fiscalYear }).then(r => r.data),
   unpause: (id: number, fiscalYear: number) =>
     api.delete(`/accounting/assets/${id}/depreciation/pause/${fiscalYear}`).then(r => r.data),
+  /** Ruční přepis daňového odpisu roku s povinným důvodem. */
+  overrideTax: (id: number, payload: { fiscal_year: number; amount: number; reason: string }) =>
+    api.post(`/accounting/assets/${id}/depreciation/tax-override`, payload).then(r => r.data),
+  clearTaxOverride: (id: number, fiscalYear: number) =>
+    api.delete(`/accounting/assets/${id}/depreciation/tax-override/${fiscalYear}`).then(r => r.data),
 }

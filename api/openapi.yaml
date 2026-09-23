@@ -11644,6 +11644,51 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/v1/accounting/assets/{id}/depreciation/tax-override:
+    post:
+      tags: [Accounting]
+      summary: Ruční přepis daňového odpisu roku
+      description: >-
+        Účetní/admin. Potvrzený daňový odpis roku dostane zadanou částku (typicky
+        převzetí čísel účetní). Důvod je povinný; řádek si drží původní odpis, kdo
+        a kdy ho přepsal (`override_*` v plánu odpisů), změna jde do protokolu
+        činností. Zůstatková cena roku i potvrzených pozdějších let se posune o rozdíl.
+        Rok se schválenou závěrkou vrací 422 `period_approved`.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fiscal_year, amount, reason]
+              properties:
+                fiscal_year: { type: integer, minimum: 2000, maximum: 2100 }
+                amount: { type: number, minimum: 0 }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: "OK {entry, previous_amount}", content: { application/json: { schema: { type: object } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/assets/{id}/depreciation/tax-override/{year}:
+    delete:
+      tags: [Accounting]
+      summary: Zrušení ručního přepisu daňového odpisu roku
+      description: Účetní/admin. Vrátí původní odpis a zůstatkovou cenu, pozdější potvrzené roky posune zpět.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: year, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: "OK {entry}", content: { application/json: { schema: { type: object } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/periods/{id}/closing:
     get:
       tags: [Accounting]
