@@ -12,7 +12,12 @@ nepatří; vykazuje se v přiznání DPH, případně v KH.
 Zdroj tvoří řádky vystavených, ne-stornovaných a ne-konceptních faktur ve stejné
 evidenci DPH jako [DPHDP3](41_Vykazy_DPH.md). Rozhoduje DUZP, případně datum vystavení,
 nikoli úhrada. Protistrana musí mít zemi EU mimo ČR a použitelné EU VAT ID. VAT ID se
-normalizuje bez mezer; řecký prefix se pro XML převádí na `EL`.
+normalizuje bez mezer a oddělovačů. Kód státu (`k_stat`) je stát, který DIČ přidělil:
+nese-li DIČ prefix členského státu, rozhoduje prefix, jinak země adresy. Do čísla DIČ
+(`c_vat`) jde DIČ **bez** tohoto prefixu, jak vyžaduje XSD. Na kartě kontaktu tedy můžete
+DIČ vést s prefixem (`PL1234567890`) i bez něj, do hlášení jde vždy `k_stat="PL"`
+a `c_vat="1234567890"`. Řecký prefix `GR` se převádí na `EL`. Když prefix DIČ nesouhlasí
+se zemí adresy, hlášení na to upozorní.
 
 Podporované mapování je:
 

@@ -584,8 +584,10 @@ rozbalovací **Detail řádků** vypíše jednotlivé doklady včetně měny a k
 
 Náhled kontroluje zejména vyplněnou zemi spotřeby, existenci a shodu sazby proti
 číselníku, přítomnost typu sazby, přepočet do měny podání a údaje potřebné pro
-opravy minulých období. OSS řádky jsou současně vyřazené z českého přiznání k DPH,
-kontrolního hlášení i [Knihy DPH](42_Kniha_DPH.md).
+opravy minulých období. Daň z OSS řádků do českého přiznání k DPH nevstupuje
+a řádky nejsou v kontrolním ani souhrnném hlášení. Jejich základ bez daně se ale
+v přiznání k DPH i v [Knize DPH](42_Kniha_DPH.md) uvádí na ř. 24 „Vybraná plnění
+(§ 110b odst. 2)", viz [§ 41.3.1](41_Vykazy_DPH.md#4131-co-se-z-oss-promitne-do-priznani-k-dph).
 
 ### 45.9.2 Přepočet do měny podání
 
@@ -779,7 +781,8 @@ může vyjít služba. **Zkontroluj to** a případně oprav —
 Doklady, které do systému natekly dřív, než byl OSS správně nastavený, mohou mít
 příznak OSS prázdný a jejich zahraniční daň může být vykázaná v českém přiznání.
 Než podáš přiznání za období, do kterého takový import spadl, projdi si zahraniční
-doklady v tom období a ověř, že v přiznání k DPH nefigurují. Filtr **Místo plnění
+doklady v tom období a ověř, že v přiznání k DPH nejsou na ř. 1 a 2 (patří jen
+na ř. 24). Filtr **Místo plnění
 (OSS)** a hromadná úprava jsou na to ta správná dvojice.
 
 ### 45.10.7 Náhled je poslední kontrolní bod
