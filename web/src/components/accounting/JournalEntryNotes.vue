@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -21,18 +21,27 @@ import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
  * těch generovaných ze zdrojového dokladu, kde je popis read-only — v tom je
  * celý smysl téhle featury.
  */
-const props = defineProps<{ entryId: number }>()
-/** Počet poznámek ven — nadřazená sekce podle něj pozná, že něco obsahuje. */
-const emit = defineEmits<{ (e: 'count', n: number): void }>()
+const props = withDefaults(defineProps<{
+  entryId: number
+  /** Otevřít i bez poznámek — dialog „Poznámka" z bankovního pohybu je tu kvůli psaní. */
+  defaultOpen?: boolean
+}>(), { defaultOpen: false })
+const emit = defineEmits<{
+  /** Počet poznámek ven — nadřazená sekce podle něj pozná, že něco obsahuje. */
+  (e: 'count', n: number): void
+  /** Aktuální seznam po každé změně — řádek bankovního pohybu ho ukazuje bez přenačtení stránky. */
+  (e: 'changed', notes: JournalNote[]): void
+}>()
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 
-const open = ref(false)
+const open = ref(props.defaultOpen)
 const loading = ref(false)
 const loaded = ref(false)
 const notes = ref<JournalNote[]>([])
+watch(notes, list => emit('changed', list), { deep: true })
 
 const draft = ref('')
 const draftPinned = ref(false)
@@ -152,7 +161,7 @@ function metaLine(n: JournalNote): string {
 
 <template>
   <CollapsibleSection :title="t('accounting.journal.notes.title')" :icon="ICONS.doc"
-    :count="loaded ? notes.length : null" @toggle="toggle">
+    :count="loaded ? notes.length : null" :default-open="defaultOpen" @toggle="toggle">
     <div>
       <div v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
 

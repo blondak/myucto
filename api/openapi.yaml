@@ -3077,6 +3077,13 @@ paths:
           name: posting_status
           schema: { type: string, enum: [unposted, posted] }
           description: Filtr podle existence aktivního účetního zápisu bankovního pohybu.
+        - in: query
+          name: sort
+          schema: { type: string, enum: [posted_at, amount, variable_symbol, counterparty, invoice, status, posting], default: posted_at }
+          description: Sloupec řazení transakcí (řadí se na serveru přes všechny stránky, druhý klíč je id). Neznámá hodnota = datum.
+        - in: query
+          name: direction
+          schema: { type: string, enum: [asc, desc], default: asc }
       responses:
         '200':
           description: OK
@@ -3897,6 +3904,8 @@ paths:
         - { in: query, name: year, schema: { type: integer } }
         - { in: query, name: q, schema: { type: string }, description: "Fulltext přes protistranu, VS, popis, číslo účtu a částku." }
         - { in: query, name: account, schema: { type: string }, description: Náš zdrojový účet výpisu (account_number). }
+        - { in: query, name: sort, schema: { type: string, enum: [posted_at, amount, variable_symbol, counterparty, invoice, status, posting, account], default: posted_at }, description: "Sloupec řazení (řadí se na serveru přes všechny stránky, druhý klíč je id). Neznámá hodnota = datum." }
+        - { in: query, name: direction, schema: { type: string, enum: [asc, desc], default: desc } }
       responses:
         '200':
           description: OK
@@ -27083,6 +27092,15 @@ components:
             note: { type: [string, "null"], description: "payroll_partial_posting označuje neúplné pokrytí částky mzdovými zápisy; status je null a pohyb zůstává ve filtru unposted." }
             journal_entry_id: { type: integer, format: int64, description: "Existující bankovní nebo mzdový účetní zápis úhrady." }
             document_no: { type: [string, "null"] }
+            journal_notes:
+              type: array
+              description: "Živé poznámky zápisu `journal_entry_id` (připnuté první). Poznámka patří zápisu deníku; zakládá a mění se přes /api/accounting/journal/{id}/notes. Jen u pohybu se zápisem."
+              items:
+                type: object
+                properties:
+                  id: { type: integer, format: int64 }
+                  body: { type: string }
+                  pinned: { type: boolean }
             suggestion_source: { type: [string, "null"], enum: [rule, learned, payment_match, transfer, null] }
             transfer: { $ref: '#/components/schemas/BankTransferPostingInfo' }
         dimensions:

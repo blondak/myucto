@@ -157,6 +157,38 @@ final class JournalEntryNoteRepository
         return $out;
     }
 
+    /**
+     * Živé poznámky pro sadu zápisů v jednom dotazu — přehled bankovních pohybů
+     * ukazuje poznámku zaúčtovaného zápisu přímo v řádku, bez N+1. Pořadí jako
+     * {@see list()}: připnuté první, pak nejnovější.
+     *
+     * @param  list<int> $entryIds
+     * @return array<int,list<array{id:int,body:string,pinned:bool}>> entry_id => poznámky
+     */
+    public function briefForEntries(array $entryIds, int $supplierId): array
+    {
+        $entryIds = array_values(array_unique(array_filter(array_map('intval', $entryIds), static fn (int $i): bool => $i > 0)));
+        if ($entryIds === []) {
+            return [];
+        }
+        $in   = implode(',', array_fill(0, count($entryIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, entry_id, body, pinned FROM journal_entry_notes
+              WHERE supplier_id = ? AND deleted_at IS NULL AND entry_id IN (' . $in . ')
+              ORDER BY entry_id, pinned DESC, created_at DESC, id DESC'
+        );
+        $stmt->execute(array_merge([$supplierId], $entryIds));
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $out[(int) $r['entry_id']][] = [
+                'id'     => (int) $r['id'],
+                'body'   => (string) $r['body'],
+                'pinned' => (bool) $r['pinned'],
+            ];
+        }
+        return $out;
+    }
+
     private function cast(array $r): array
     {
         return [

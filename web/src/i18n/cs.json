@@ -18075,6 +18075,27 @@
     "documents_hide": "Skrýt dokumenty",
     "dimensions_action": "Dimenze",
     "dimensions_hide": "Skrýt dimenze",
+    "note": {
+      "action": "Poznámka",
+      "title": "Poznámka k pohybu",
+      "hint": "Poznámka se ukládá k zápisu {entry} v účetním deníku. Uvidíte ji v deníku, u pohybu i u zaúčtovaného dokladu.",
+      "no_entry": "Pohyb zatím nemá zápis v deníku. Poznámku lze přidat po zaúčtování.",
+      "from_journal": "Poznámka zápisu v deníku"
+    },
+    "sort": {
+      "label": "Řadit podle",
+      "default": "Výchozí pořadí",
+      "keys": {
+        "posted_at": "Datum",
+        "amount": "Částka",
+        "variable_symbol": "VS",
+        "counterparty": "Protistrana",
+        "invoice": "Faktura",
+        "status": "Stav",
+        "posting": "Stav zaúčtování",
+        "account": "Náš účet"
+      }
+    },
     "document_request": {
       "action": "Vyžádat doklad",
       "title": "Vyžádat doklad od klienta",

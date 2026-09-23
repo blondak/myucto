@@ -607,6 +607,11 @@ znaků; v detailu se načítá nejvýše 200 živých poznámek. Důležitou poz
 poznámku upravit nebo ji odstranit; odstranění je auditovatelné měkké smazání,
 nikoli přepis historie účetního zápisu.
 
+Tytéž poznámky jsou vidět a jdou psát i mimo deník: v řádku zaúčtovaného
+[bankovního pohybu](29_Banka.md#297-automaticke-zauctovani-sparovanych-plateb-jen-podvojne-ucetnictvi)
+(volba **Poznámka**) a v sekci **Zaúčtování** na detailu vydané i přijaté faktury.
+Poznámka má jediné úložiště, u zápisu v deníku.
+
 > [!NOTE]
 > Poznámka slouží pro pracovní vysvětlení a předání případu kolegovi. Nenahrazuje
 > účetní doklad ani přílohu, která tvrzení prokazuje. Role jen pro čtení poznámky

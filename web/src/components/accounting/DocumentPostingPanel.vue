@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { accountingApi, type JournalDocumentSource, type JournalEntryWithLines } from '@/api/accounting'
 import JournalLinesTable from '@/components/accounting/JournalLinesTable.vue'
 import JournalRelatedPanel from '@/components/accounting/JournalRelatedPanel.vue'
+import JournalEntryNotes from '@/components/accounting/JournalEntryNotes.vue'
 import PostingOriginRow from '@/components/accounting/PostingOriginRow.vue'
 import RepostModal from '@/components/accounting/RepostModal.vue'
 import { btnOutlineSm } from '@/components/ui/buttonStyles'
@@ -133,6 +134,9 @@ defineExpose({ reload: () => load(props.docId) })
         <!-- Souvisí: protějšky v grafu doklad ↔ úhrada. Panel si data tahá sám
              podle entry-id a když nic nenajde, nevykreslí se. -->
         <JournalRelatedPanel class="mt-3 block" :entry-id="entry.id" />
+        <!-- Poznámky zápisu — tatáž komponenta jako v deníku (i u bankovního pohybu),
+             takže poznámka k zaúčtování dokladu je vidět a jde psát i odsud. -->
+        <JournalEntryNotes class="mt-3" :entry-id="entry.id" />
       </div>
     </div>
 

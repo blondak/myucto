@@ -26,7 +26,10 @@ import BankRequestDocModal from '@/components/bank/BankRequestDocModal.vue'
 import type { PostResult } from '@/api/bankPosting'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { useBankTransactionActions } from '@/composables/useBankTransactionActions'
+import { useBankTransactionSort } from '@/composables/useBankTransactionSort'
 import { usePaneDom } from '@/composables/usePaneDom'
+import SortableTh from '@/components/ui/SortableTh.vue'
+import BankTransactionSortSelect from '@/components/bank/BankTransactionSortSelect.vue'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -100,6 +103,8 @@ function statusLabel(s: string): string {
 }
 const statusFilter = ref<string>('')
 const postingFilter = ref<PostingFilter | ''>(route.query.posting_status === 'unposted' ? 'unposted' : '')
+// Řazení podle sloupce — řadí server přes všechny stránky (stránkuje se tam).
+const txSort = useBankTransactionSort(['posted_at', 'amount', 'variable_symbol', 'counterparty', 'invoice', 'status'])
 // Aktuálně načtené (a serverem filtrované) transakce — název ponechán kvůli šabloně.
 const filteredTransactions = computed<BankTransaction[]>(() => statement.value?.transactions ?? [])
 // Souhrn pro měsíční avízo-výpis: disponibilní zůstatek z nejnovějšího avíza,
@@ -142,17 +147,19 @@ async function loadPage(reset: boolean) {
     const statementId = Number(route.params.id)
     const status = statusFilter.value
     const posting = postingFilter.value
+    const sort = txSort.sort.value
     const [res, suggestionsResult] = await Promise.all([
       bankApi.get(statementId, {
         page: txPage.value,
         status: statusFilter.value ? (statusFilter.value as MatchStatus) : undefined,
         posting_status: postingFilter.value || undefined,
+        ...txSort.params.value,
       }),
       reset
         ? bankApi.matchSuggestions(statementId)
         : Promise.resolve(null),
     ])
-    if (generation !== loadGeneration || statementId !== Number(route.params.id) || status !== statusFilter.value || posting !== postingFilter.value) return
+    if (generation !== loadGeneration || statementId !== Number(route.params.id) || status !== statusFilter.value || posting !== postingFilter.value || sort !== txSort.sort.value) return
     const transactions = reset || !statement.value
       ? res.transactions
       : [...statement.value.transactions, ...res.transactions]
@@ -179,7 +186,8 @@ async function refreshTransactions() {
   const status = statusFilter.value
   const posting = postingFilter.value
   const requestedPage = txPage.value
-  const params = { status: status ? status as MatchStatus : undefined, posting_status: posting || undefined }
+  const sort = txSort.sort.value
+  const params = { status: status ? status as MatchStatus : undefined, posting_status: posting || undefined, ...txSort.params.value }
   try {
     const [first, suggestions] = await Promise.all([
       bankApi.get(statementId, { ...params, page: 1 }), bankApi.matchSuggestions(statementId),
@@ -188,7 +196,7 @@ async function refreshTransactions() {
     const lastPage = Math.max(1, Math.min(requestedPage, first.transactions_meta.pages))
     const remaining = await Promise.all(Array.from({ length: lastPage - 1 }, (_, index) =>
       bankApi.get(statementId, { ...params, page: index + 2 })))
-    if (generation !== loadGeneration || statementId !== Number(route.params.id) || status !== statusFilter.value || posting !== postingFilter.value) return
+    if (generation !== loadGeneration || statementId !== Number(route.params.id) || status !== statusFilter.value || posting !== postingFilter.value || sort !== txSort.sort.value) return
     statement.value = { ...first, transactions: [first, ...remaining].flatMap(result => result.transactions) }
     txPage.value = lastPage
     txTotal.value = first.transactions_meta.total
@@ -246,7 +254,7 @@ async function highlightLinkedTx(): Promise<void> {
 }
 
 // Změna filtru stavu spárování → reset na 1. stránku (server-side filtr).
-watch([statusFilter, postingFilter], () => {
+watch([statusFilter, postingFilter, txSort.sort], () => {
   if (statement.value) load(true)
 })
 
@@ -540,6 +548,8 @@ const statementActions = computed<ActionItem[]>(() => {
             <option value="unposted">{{ t('bank.filter_posting_unposted') }}</option>
             <option value="posted">{{ t('bank.filter_posting_posted') }}</option>
           </select>
+          <!-- Mobilní karty nemají hlavičku tabulky — řazení přes výběr. -->
+          <BankTransactionSortSelect v-model="txSort.selectValue.value" class="md:hidden" :keys="txSort.keys" />
           <!-- Pět akcí v řadě porušovalo konvenci „max 3 a zbytek do …". ActionBar
                cap řeší sám; nahrávání PDF jede přes skrytý input, protože položka
                lišty je tlačítko, ne <label>. -->
@@ -552,12 +562,12 @@ const statementActions = computed<ActionItem[]>(() => {
       <table class="w-full text-sm table-sticky-first">
         <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
           <tr>
-            <th class="px-3 py-2 text-left font-medium">{{ t('bank.date') }}</th>
-            <th class="px-3 py-2 text-right font-medium">{{ t('bank.amount') }}</th>
-            <th class="px-3 py-2 text-left font-medium">{{ t('bank.vs_ks') }}</th>
-            <th class="px-3 py-2 text-left font-medium">{{ t('bank.counterparty') }}</th>
-            <th class="px-3 py-2 text-left font-medium">{{ t('bank.invoice') }}</th>
-            <th class="px-3 py-2 text-center font-medium">{{ t('invoice.status_label') }}</th>
+            <SortableTh :label="t('bank.date')" sort-key="posted_at" :sort="txSort.sort.value" @toggle="txSort.toggle" />
+            <SortableTh :label="t('bank.amount')" sort-key="amount" :sort="txSort.sort.value" align="right" @toggle="txSort.toggle" />
+            <SortableTh :label="t('bank.vs_ks')" sort-key="variable_symbol" :sort="txSort.sort.value" @toggle="txSort.toggle" />
+            <SortableTh :label="t('bank.counterparty')" sort-key="counterparty" :sort="txSort.sort.value" @toggle="txSort.toggle" />
+            <SortableTh :label="t('bank.invoice')" sort-key="invoice" :sort="txSort.sort.value" @toggle="txSort.toggle" />
+            <SortableTh :label="t('invoice.status_label')" sort-key="status" :sort="txSort.sort.value" @toggle="txSort.toggle" />
             <th class="px-3 py-2 w-32"></th>
           </tr>
         </thead>

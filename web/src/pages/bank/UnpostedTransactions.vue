@@ -11,7 +11,10 @@ import BankRequestDocModal from '@/components/bank/BankRequestDocModal.vue'
 import { bankPostingApi, type UnpostedBankTransaction } from '@/api/bankPosting'
 import { bankApi, type BankAccountOption, type MatchSuggestion } from '@/api/bank'
 import { useBankTransactionActions } from '@/composables/useBankTransactionActions'
+import { useBankTransactionSort } from '@/composables/useBankTransactionSort'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
+import BankTransactionSortSelect from '@/components/bank/BankTransactionSortSelect.vue'
 
 // scope='all' → záložka „Všechny pohyby": tatáž tabulka, ale i zaúčtované pohyby, napříč účty.
 const props = withDefaults(defineProps<{ scope?: 'unposted' | 'all' }>(), { scope: 'unposted' })
@@ -39,6 +42,9 @@ function accountLabel(a: BankAccountOption): string {
 // reload = changed() (přepočítá i county v záložkách bank sekce).
 const bankActions = useBankTransactionActions({ reload: () => changed(), refresh: () => changed(true) })
 const colspan = computed(() => props.scope === 'all' ? 8 : 7)
+// Řazení podle sloupce — seznam je stránkovaný na serveru, řadí se tam (výchozí = nejnovější nahoře).
+const txSort = useBankTransactionSort(['posted_at', 'amount', 'account', 'variable_symbol', 'counterparty', 'invoice', 'posting'])
+const sortKeys = computed(() => txSort.keys.filter(k => k !== 'account' || props.scope === 'all'))
 
 // Match v2 („⏳ návrh párování") je párovaný per-výpis na BE — „Všechny pohyby"
 // agreguje víc výpisů, takže návrhy dotáhneme dávkově (1 request na distinct
@@ -70,6 +76,7 @@ async function load(silent = false) {
       ...(year.value ? { year: year.value } : {}),
       ...(search.value.trim() ? { q: search.value.trim() } : {}),
       ...(accountFilter.value ? { account: accountFilter.value } : {}),
+      ...txSort.params.value,
     })
     if (generation !== loadGeneration) return
     if (result.items.length === 0 && result.total > 0 && page.value > 1) {
@@ -95,7 +102,7 @@ async function changed(silent = false) {
 
 // Změna filtru vždy zpět na první stranu — jinak by uživatel skončil na prázdné stránce.
 let searchTimer: ReturnType<typeof setTimeout> | undefined
-watch([search, year, accountFilter, page, () => props.scope], () => { loadGeneration++ }, { flush: 'sync' })
+watch([search, year, accountFilter, page, () => props.scope, txSort.sort], () => { loadGeneration++ }, { flush: 'sync' })
 function resetAndLoad() {
   if (page.value !== 1) { page.value = 1; return } // watch(page) načte sám
   void load()
@@ -106,7 +113,11 @@ watch(search, () => {
 })
 watch(year, resetAndLoad)
 watch(accountFilter, resetAndLoad)
-watch(() => props.scope, resetAndLoad)
+watch(txSort.sort, resetAndLoad)
+watch(() => props.scope, () => {
+  if (props.scope !== 'all' && txSort.sort.value?.key === 'account') txSort.sort.value = null
+  resetAndLoad()
+})
 
 onMounted(load)
 onUnmounted(() => {
@@ -138,6 +149,7 @@ watch(page, () => {
         <option value="">{{ t('bank.all_own_accounts') }}</option>
         <option v-for="a in accounts" :key="a.account_number" :value="a.account_number">{{ accountLabel(a) }}</option>
       </select>
+      <BankTransactionSortSelect v-model="txSort.selectValue.value" class="md:hidden" :keys="sortKeys" />
       <span class="text-xs text-neutral-500 whitespace-nowrap">{{ t('bank.posting.count_found', { n: total }) }}</span>
     </div>
 
@@ -150,13 +162,13 @@ watch(page, () => {
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
-              <th class="px-3 py-2 text-left font-medium">{{ t('bank.date') }}</th>
-              <th class="px-3 py-2 text-right font-medium">{{ t('bank.amount') }}</th>
-              <th v-if="scope === 'all'" class="px-3 py-2 text-left font-medium">{{ t('bank.posting.col_account') }}</th>
-              <th class="px-3 py-2 text-left font-medium">{{ t('bank.vs_ks') }}</th>
-              <th class="px-3 py-2 text-left font-medium">{{ t('bank.counterparty') }}</th>
-              <th class="px-3 py-2 text-left font-medium">{{ t('bank.invoice') }}</th>
-              <th class="px-3 py-2 text-center font-medium">{{ t('bank.posting_state') }}</th>
+              <SortableTh :label="t('bank.date')" sort-key="posted_at" :sort="txSort.sort.value" @toggle="txSort.toggle" />
+              <SortableTh :label="t('bank.amount')" sort-key="amount" :sort="txSort.sort.value" align="right" @toggle="txSort.toggle" />
+              <SortableTh v-if="scope === 'all'" :label="t('bank.posting.col_account')" sort-key="account" :sort="txSort.sort.value" @toggle="txSort.toggle" />
+              <SortableTh :label="t('bank.vs_ks')" sort-key="variable_symbol" :sort="txSort.sort.value" @toggle="txSort.toggle" />
+              <SortableTh :label="t('bank.counterparty')" sort-key="counterparty" :sort="txSort.sort.value" @toggle="txSort.toggle" />
+              <SortableTh :label="t('bank.invoice')" sort-key="invoice" :sort="txSort.sort.value" @toggle="txSort.toggle" />
+              <SortableTh :label="t('bank.posting_state')" sort-key="posting" :sort="txSort.sort.value" @toggle="txSort.toggle" />
               <th class="px-3 py-2 w-32"></th>
             </tr>
           </thead>

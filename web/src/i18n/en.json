@@ -18075,6 +18075,27 @@
     "documents_hide": "Hide documents",
     "dimensions_action": "Dimensions",
     "dimensions_hide": "Hide dimensions",
+    "note": {
+      "action": "Note",
+      "title": "Transaction note",
+      "hint": "The note is stored with journal entry {entry}. You will see it in the journal, on the transaction and on the posted document.",
+      "no_entry": "The transaction has no journal entry yet. A note can be added once it is posted.",
+      "from_journal": "Journal entry note"
+    },
+    "sort": {
+      "label": "Sort by",
+      "default": "Default order",
+      "keys": {
+        "posted_at": "Date",
+        "amount": "Amount",
+        "variable_symbol": "VS",
+        "counterparty": "Counterparty",
+        "invoice": "Invoice",
+        "status": "Status",
+        "posting": "Posting status",
+        "account": "Our account"
+      }
+    },
     "document_request": {
       "action": "Request document",
       "title": "Request a document from the client",
