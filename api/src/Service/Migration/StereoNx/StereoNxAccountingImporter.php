@@ -18,6 +18,7 @@ final class StereoNxAccountingImporter
         private readonly StereoNxAccountingWriter $journal,
         private readonly StereoNxAssets $assets,
         private readonly StereoNxEmployees $employees,
+        private readonly StereoNxPayrollWriter $payroll,
         private readonly StereoNxInventory $inventoryWriter,
         private readonly StereoNxAccountingDocuments $accountingDocuments,
         private readonly StereoNxAccountingPayments $accountingPayments,
@@ -49,14 +50,28 @@ final class StereoNxAccountingImporter
                     break;
                 }
             }
+            $payrollMonths = iterator_to_array($backup->rows('MMzdy'), false);
             $plans = [
                 'journal' => $this->journal->prepare($backup),
                 'assets' => $this->assets->prepare($backup),
                 'employees' => $this->employees->prepare($backup),
+                'payroll' => StereoNxPayrollMonths::fromTables([
+                    'MZAMEST' => iterator_to_array($backup->rows('MZAMEST'), false),
+                    'MMzdy' => $payrollMonths,
+                    'Gparrok' => $payrollMonths === [] ? [] : $backup->payrollRates(),
+                    'MOdvPar' => in_array('MOdvPar', $backup->tableNames(), true)
+                        ? iterator_to_array($backup->rows('MOdvPar'), false) : [],
+                ], $backup->companyIdentity(), $backup->companyIndex()),
                 'inventory' => $this->inventoryWriter->prepare($backup),
                 'documents' => $this->accountingDocuments->prepare($backup, $blankCountryIsCz),
                 'payments' => $this->accountingPayments->prepare($backup),
             ];
+            // Samostatný převod osob stále hlásí mzdy jako nepřevzaté. V účetním
+            // převodu už měsíce posoudí a spočítá modul historických mezd.
+            $plans['employees']['warnings'] = array_values(array_filter(
+                $plans['employees']['warnings'],
+                static fn (array $warning): bool => $warning['code'] !== 'historical_payroll_skipped',
+            ));
             $plans['payments'] = $this->accountingPayments->resolveNonVatCash($plans['payments'], $plans['journal']);
             $plans['payments']['documents'] = $plans['documents']['records'];
             $plans['payments']['journal_plan'] = $plans['journal'];
@@ -133,6 +148,7 @@ final class StereoNxAccountingImporter
                 $this->assertDocumentDatesOpen($supplierId, $targetDates);
                 $report['written'] = $this->documents->writeAccountingPartners($partners, $identity, $backup->companyIndex(), $supplierId);
                 foreach (['journal' => $this->journal, 'assets' => $this->assets, 'employees' => $this->employees,
+                    'payroll' => $this->payroll,
                     'inventory' => $this->inventoryWriter, 'documents' => $this->accountingDocuments,
                     'payments' => $this->accountingPayments] as $key => $module) {
                     $result = $module->write($plans[$key], $supplierId, $userId);

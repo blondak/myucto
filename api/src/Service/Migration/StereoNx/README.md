@@ -111,6 +111,30 @@ nejasné technické zhodnocení, skladové stavy, leasing a další nepodporovan
 agendy se výslovně vykazují jako nepřevedené. Částečný převod nemaže zálohu.
 Neověřené hodnoty se nedoplňují odhadem.
 
+### Historické mzdy
+
+`StereoNxPayrollMonths` převádí doložený standardní HPP ze `MMzdy` na měsíční
+reference; `StereoNxPayrollWriter` je ukládá přes společný
+`PayrollMigrationReferenceTotalsWriter` pod samostatným zdrojem `stereo_nx`.
+Hranici převzatých měsíců určuje `PayrollHistoricalPeriodService`; import
+ji neposouvá a nevytváří mzdové běhy, platby ani další kontace.
+
+Mapování hrubé a čisté mzdy, srážek a dobírky bylo ověřeno na podrobných
+páskách a měsíční rekapitulaci. `StravPO` je osvobozený stravenkový paušál;
+`Dobirka` je částka k výplatě, nikoli součet `NaUcet` a `VHotovosti`.
+`TypDan=Z` odpovídá záloze na daň; ostatní kódy nejsou odhadovány.
+Zaměstnavatelské pojistné se v podporovaném jednoduchém případě rekonstruuje
+z globální `DataPrg/GDATA/Gparrok`, podle platnosti k mzdovému měsíci.
+Sociální částka na historické pásce je zaokrouhlena nahoru za každou osobu;
+zdravotní částka je zaokrouhlené celkové pojistné minus zdrojová zaměstnanecká
+část. Nejde o nový výpočet dnešního odvodu zaměstnavatele. Souběhy, doplatky,
+slevy a jiné neověřené varianty se odmítají, nikoli doplňují nulou.
+
+Reference zachovávají oddělenou čistou mzdu, srážky a dobírku. Historická
+srážka není karta exekuce; počáteční kumulace se touto cestou nezakládají.
+Zdrojové klíče a otisky brání změně již převzaté mzdy i dvojímu převodu;
+cílová osoba a pracovní vztah musejí patřit vybrané firmě.
+
 Výklad prázdné země jako ČR je explicitní volbou průvodce. Označení EU bez
 konkrétního státu zůstává neurčené. Kvůli povinnému cílovému `country_id`
 mají takové protistrany technický zástupný stát CZ, poznámku a všechny

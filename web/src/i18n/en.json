@@ -1748,7 +1748,8 @@
         "pamica": "PAMICA",
         "pohoda": "POHODA Payroll",
         "money_s3": "Money S3",
-        "other": "Other payroll system"
+        "other": "Other payroll system",
+        "stereo_nx": "Stereo NX"
       },
       "takeover": {
         "title": "Taken-over payroll for the year",
@@ -27335,6 +27336,7 @@
     "job_counts": "documents and journal entries written {created}, errors {failed}",
     "background_hint": "The migration runs on the server and finishes even if you close the page. The result is shown while the page stays open.",
     "blank_country_is_cz": "I confirm that a blank counterparty country in this backup means the Czech Republic. Other ambiguous countries will remain for review.",
+    "open_payroll": "Open transferred wages",
     "written_title": "New records saved",
     "counts": {
       "identity": "Employee identification details",
@@ -27396,6 +27398,9 @@
       "employees_matched": "Matched employees",
       "employments_created": "New employments",
       "historical_payroll_source": "Source payroll records",
+      "historical_payroll_ready": "Historical wages ready to transfer",
+      "historical_payroll_created": "New historical wages",
+      "historical_payroll_existing": "Previously transferred historical wages",
       "historical_payroll_skipped": "Historical payroll not imported",
       "assets_source": "Fixed assets — in source",
       "assets_ready": "Fixed assets — ready to import",

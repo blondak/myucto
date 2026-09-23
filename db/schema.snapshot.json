@@ -850,7 +850,8 @@
         "1863_payment_matches_supplier_doc_index.sql",
         "1864_stereo_nx_import.sql",
         "1865_import_jobs_stereo_nx.sql",
-        "1866_journal_red_storno.sql"
+        "1866_journal_red_storno.sql",
+        "1867_payroll_migration_stereo_nx_source.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -11372,7 +11373,7 @@
                 "relationship_end_date": "date NULL DEFAULT NULL",
                 "relationship_start_date": "date NULL DEFAULT NULL",
                 "social_base_minor": "bigint(20) NOT NULL DEFAULT 0",
-                "source": "enum('pamica','pohoda','money_s3','other') NOT NULL",
+                "source": "enum('pamica','pohoda','money_s3','other','stereo_nx') NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_bonus_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",

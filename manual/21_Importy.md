@@ -708,7 +708,21 @@ karty a vozidla. Tyto evidence nevytvářejí další účetní zápisy vedle
 převzatého deníku. Dostupnost některých evidencí závisí na zapnutých
 modulech cílové firmy.
 
-Historické mzdové výpočty, neúplné údaje dětí, mzdové daňové údaje,
+Ověřené historické mzdy standardního hlavního pracovního poměru se přebírají
+do **Mzdy → Importy → Převzaté mzdy** se zdrojem Stereo NX. Přenáší se měsíční
+hrubá a čistá mzda, základy a pojistné, zálohová daň, odpracovaná doba,
+sražené částky a dobírka. Odvody zaměstnavatele se rekonstruují podle
+historických sazeb přiložených v záloze a protokol na to upozorní.
+Převod nevytváří nový mzdový výpočet ani další účetní zápisy.
+
+V cílové firmě musí být nastaven začátek vedení mezd. Převzít lze pouze
+měsíce před tímto začátkem; měsíce od tohoto data patří výpočtům MyÚčta.
+Převod datum sám nemění. Chybějící sazby, neúplné údaje nebo nepodporované
+varianty mezd se označí v protokolu a nepřevezmou jako úplné historické mzdy.
+Převzatá srážka je částka již sražená v daném měsíci, nezakládá exekuci ani
+dohodu pro budoucí výpočty. Počáteční roční kumulace se zatím nedoplňují.
+
+Neúplné údaje dětí, mzdové daňové údaje,
 dovolené a průměry se bez ověřeného významu a období nepřebírají.
 Nepřevádí se leasing, skladové doklady a stavy zásob, objednávky ani
 opakované trasy jako skutečně uskutečněné jízdy. Neověřené technické

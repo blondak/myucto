@@ -1748,7 +1748,8 @@
         "pamica": "PAMICA",
         "pohoda": "POHODA Mzdy",
         "money_s3": "Money S3",
-        "other": "Jiný mzdový systém"
+        "other": "Jiný mzdový systém",
+        "stereo_nx": "Stereo NX"
       },
       "takeover": {
         "title": "Převzaté mzdy za rok",
@@ -27335,6 +27336,7 @@
     "job_counts": "zapsáno dokladů a účetních zápisů {created}, chyb {failed}",
     "background_hint": "Převod běží na serveru a doběhne i po zavření stránky. Výsledek se ukáže, když stránku necháte otevřenou.",
     "blank_country_is_cz": "Potvrzuji, že prázdná země u protistrany v této záloze znamená Českou republiku. Ostatní nejasné země zůstanou ke kontrole.",
+    "open_payroll": "Otevřít převzaté mzdy",
     "written_title": "Nově uložené záznamy",
     "counts": {
       "identity": "Identifikační údaje zaměstnanců",
@@ -27396,6 +27398,9 @@
       "employees_matched": "Nalezení zaměstnanci",
       "employments_created": "Nové pracovní vztahy",
       "historical_payroll_source": "Mzdy ve zdroji",
+      "historical_payroll_ready": "Historické mzdy k převodu",
+      "historical_payroll_created": "Nově převzaté historické mzdy",
+      "historical_payroll_existing": "Dříve převzaté historické mzdy",
       "historical_payroll_skipped": "Nepřevedené historické mzdy",
       "assets_source": "Dlouhodobý majetek — ve zdroji",
       "assets_ready": "Dlouhodobý majetek — k převodu",

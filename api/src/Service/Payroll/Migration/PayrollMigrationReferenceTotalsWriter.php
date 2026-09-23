@@ -23,7 +23,7 @@ final class PayrollMigrationReferenceTotalsWriter
      * systému. Existuje proto, aby převzaté mzdy nebyly vázané na PAMICU:
      * pojmenované zdroje jsou jen ty, pro které v aplikaci běží vlastní feeder.
      */
-    public const SOURCES = ['pamica', 'pohoda', 'money_s3', 'other'];
+    public const SOURCES = ['pamica', 'pohoda', 'money_s3', 'other', 'stereo_nx'];
 
     public function __construct(private readonly Connection $db) {}
 
