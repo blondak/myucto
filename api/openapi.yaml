@@ -14873,7 +14873,7 @@ paths:
       description: |
         Jen čte. Jednotka řádku se převede na základní jednotku karty (jen balení,
         neznámá jednotka = základní), cena za základní jednotku vznikne stejně jako
-        `effective_price` (se zákaznickou cenou nebo cenovou hladinou odběratele, akce se stropem
+        `effective_price` (se zákaznickou cenou nebo cenovou hladinou dokladu či odběratele, akce se stropem
         v základních jednotkách) a `unit_price` = cena za základní jednotku × poměr
         na haléře. Karta bez ceny v požadované měně vrací `unit_price`
         i `base_unit_price` null, nikdy 0.
@@ -22389,6 +22389,9 @@ components:
       required: [lines]
       properties:
         client_id: { type: [integer, 'null'] }
+        price_level_id:
+          type: [integer, 'null']
+          description: Cenová hladina dokladu; přepíše hladinu odběratele a platí i bez odběratele. Individuální cena zákazníka má přednost. Neexistující nebo neaktivní hladina = 422 `invalid_price_level`.
         currency: { type: string, minLength: 3, maxLength: 3, default: CZK }
         date: { type: [string, 'null'], format: date, description: Default dnes. }
         lines:
@@ -25743,6 +25746,7 @@ components:
         reverse_charge: { type: boolean }
         prices_include_vat: { type: boolean, description: "Ceny položek zadané včetně DPH (DPH se počítá shora koeficientem). Per-doklad, migrace 0083." }
         auto_send_reminders: { type: boolean, description: "Per-faktura přepínač automatických upomínek (migrace 0088). False = cron tuto fakturu přeskočí, i když má dodavatel i klient upomínky zapnuté." }
+        price_level_id: { type: [integer, "null"], description: "Cenová hladina zvolená na dokladu (migrace 1866); null = hladina odběratele. Slouží k nacenění skladových řádků, ceny zůstávají uložené na řádcích." }
         client_ic: { type: [string, "null"], description: "Denormalizováno z klienta" }
         client_dic: { type: [string, "null"] }
         revenue_category_id: { type: [integer, "null"], description: "FK do /revenue-categories — kategorie tržby pro CRM/Grafy" }
@@ -25932,6 +25936,13 @@ components:
           description: |
             Zjednodušený daňový doklad podle § 30 ZDPH (do 10 000 Kč včetně daně).
             Ukládá se jen na instalacích s migrací 1170 — starší sloupec nemají a pole se ignoruje.
+        price_level_id:
+          type: [integer, "null"]
+          description: |
+            Cenová hladina dokladu (migrace 1866), přepíše hladinu odběratele při nacenění
+            skladových řádků. Musí patřit firmě a být aktivní (neaktivní projde jen, když ji
+            doklad už má), jinak 422 `invalid_price_level`. Null ji zruší, chybějící klíč
+            hodnotu nemění.
         income_tax_exempt:
           type: boolean
           default: false

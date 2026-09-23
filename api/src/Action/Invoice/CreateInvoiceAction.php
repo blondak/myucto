@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Service\Stock\StockException;
+use MyInvoice\Service\Stock\StockPriceLevelService;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
@@ -50,6 +52,7 @@ final class CreateInvoiceAction
         private readonly TenantReferenceGuard $tenantRefs,
         private readonly OssItemDeriver $ossDeriver,
         private readonly OssItemPlanner $ossPlanner,
+        private readonly StockPriceLevelService $priceLevels,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -71,6 +74,20 @@ final class CreateInvoiceAction
         );
         if ($badRefs !== []) {
             return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
+        }
+
+        // Cenová hladina dokladu (1866): stejné pravidlo jako hladina na kartě odběratele,
+        // musí patřit firmě a být aktivní; null / 0 / '' = hladina odběratele.
+        if (array_key_exists('price_level_id', $body)) {
+            try {
+                $body['price_level_id'] = $this->priceLevels->assignableLevelId(
+                    SupplierGuard::currentId($request),
+                    $body['price_level_id'],
+                    null,
+                );
+            } catch (StockException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+            }
         }
 
         try {

@@ -80,6 +80,26 @@ final class InvoiceRepository
         return $this->hasSimplified;
     }
 
+    /**
+     * Cache existence sloupce price_level_id (migrace 1866, cenová hladina dokladu). Bez
+     * sloupce se doklad uloží bez hladiny; ceny řádků jsou uložené samostatně, hladina
+     * je jen pomůcka pro nacenění v editoru.
+     */
+    private ?bool $hasPriceLevel = null;
+
+    private function supportsPriceLevel(): bool
+    {
+        if ($this->hasPriceLevel === null) {
+            $this->hasPriceLevel = $this->db->hasColumn('invoices', 'price_level_id');
+        }
+        return $this->hasPriceLevel;
+    }
+
+    private static function normalizePriceLevelId(mixed $value): ?int
+    {
+        return is_numeric($value) && (int) $value > 0 ? (int) $value : null;
+    }
+
     private ?bool $hasOssItemColumns = null;
 
     private function supportsOssItemColumns(): bool
@@ -1133,6 +1153,7 @@ final class InvoiceRepository
         $hasExempt = $this->supportsIncomeTaxExempt();
         $hasReminders = $this->supportsAutoSendReminders();
         $hasSimplified = $this->supportsSimplified();
+        $hasPriceLevel = $this->supportsPriceLevel() && array_key_exists('price_level_id', $data);
         $sql = 'INSERT INTO invoices
             (invoice_type, parent_invoice_id, client_id, project_id, supplier_id, branding_profile_id,
              issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language,
@@ -1142,11 +1163,13 @@ final class InvoiceRepository
             . ($hasExempt ? ' income_tax_exempt, income_tax_exempt_reason,' : '')
             . ($hasReminders ? ' auto_send_reminders,' : '')
             . ($hasSimplified ? ' is_simplified,' : '')
+            . ($hasPriceLevel ? ' price_level_id,' : '')
             . ' created_by)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?,'
             . ($hasExempt ? ' ?, ?,' : '')
             . ($hasReminders ? ' ?,' : '')
             . ($hasSimplified ? ' ?,' : '')
+            . ($hasPriceLevel ? ' ?,' : '')
             . ' ?)';
 
         $params = [
@@ -1184,6 +1207,9 @@ final class InvoiceRepository
         }
         if ($hasSimplified) {
             $params[] = !empty($data['is_simplified']) ? 1 : 0;
+        }
+        if ($hasPriceLevel) {
+            $params[] = self::normalizePriceLevelId($data['price_level_id']);
         }
         $params[] = $userId;
 
@@ -1239,6 +1265,9 @@ final class InvoiceRepository
         // payloadu JE. Příznak nastavuje editor faktury, ale doklad ukládají i jiné cesty
         // (import, opakovaná fakturace) — ty by ho bez tohoto rozlišení tiše shodily na 0.
         $hasSimplified = $this->supportsSimplified() && array_key_exists('is_simplified', $data);
+        // Stejně jako `is_simplified`: jen když klíč v payloadu je, jinak by ho ostatní cesty
+        // ukládající doklad (import, opakovaná fakturace) tiše smazaly.
+        $hasPriceLevel = $this->supportsPriceLevel() && array_key_exists('price_level_id', $data);
         $currentStmt = $this->db->pdo()->prepare('SELECT supplier_id, branding_profile_id FROM invoices WHERE id = ?');
         $currentStmt->execute([$id]);
         $current = $currentStmt->fetch(PDO::FETCH_ASSOC);
@@ -1259,6 +1288,7 @@ final class InvoiceRepository
               . ($hasExempt ? ', income_tax_exempt = ?, income_tax_exempt_reason = ?' : '')
               . ($hasReminders ? ', auto_send_reminders = ?' : '')
               . ($hasSimplified ? ', is_simplified = ?' : '')
+              . ($hasPriceLevel ? ', price_level_id = ?' : '')
               . ($hasVarsymbol ? ', varsymbol = ?' : '')
               . ($hasPaymentVs ? ', payment_variable_symbol = ?' : '')
               . ($hasPaymentMethod ? ', payment_method = ?' : '')
@@ -1294,6 +1324,7 @@ final class InvoiceRepository
             $params[] = array_key_exists('auto_send_reminders', $data) ? ((int) (bool) $data['auto_send_reminders']) : 1;
         }
         if ($hasSimplified) $params[] = !empty($data['is_simplified']) ? 1 : 0;
+        if ($hasPriceLevel) $params[] = self::normalizePriceLevelId($data['price_level_id']);
         if ($hasVarsymbol) $params[] = $manualVarsymbol;
         if ($hasPaymentVs) $params[] = $paymentVs;
         if ($hasPaymentMethod) $params[] = $paymentMethod;
@@ -2020,6 +2051,7 @@ final class InvoiceRepository
         // Vždy klíč vrátit, i na instalaci bez migrace 1170 — editor by jinak checkbox
         // po načtení dokladu tiše zrušil (undefined → false → uložení jako běžný doklad).
         $row['is_simplified']       = isset($row['is_simplified']) ? (bool) $row['is_simplified'] : false;
+        $row['price_level_id']      = isset($row['price_level_id']) ? (int) $row['price_level_id'] : null;
         $row['prices_include_vat']  = isset($row['prices_include_vat']) ? (bool) $row['prices_include_vat'] : false;
         if (array_key_exists('income_tax_exempt', $row)) {
             $row['income_tax_exempt'] = (bool) $row['income_tax_exempt'];

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { eshopApi } from '@/api/eshop'
 import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
@@ -63,6 +64,17 @@ const route = useRoute()
 const router = useRouter()
 
 const invoice = ref<Invoice | null>(null)
+
+// Cenová hladina dokladu (např. urgentní objednávka): jméno z číselníku, bez práva
+// k číselníku nebo u smazané hladiny aspoň id.
+const priceLevelName = ref<string | null>(null)
+watch(() => invoice.value?.price_level_id ?? null, async (id) => {
+  priceLevelName.value = null
+  if (id == null || !stockEnabled.value) return
+  try {
+    priceLevelName.value = (await eshopApi.listPriceLevels()).find(l => l.id === id)?.name ?? `#${id}`
+  } catch { priceLevelName.value = `#${id}` }
+}, { immediate: true })
 const postingPanelRef = ref<InstanceType<typeof DocumentPostingPanel> | null>(null)
 // Zámek dokladu (F6) — čte se VÝHRADNĚ z BE pole `locked`, FE ze status/booked_at
 // nic neodvozuje. Blokuje mutace jen roli client; staff UI zůstává (autorita je BE).
@@ -2559,6 +2571,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
               </template>
               <span v-else class="text-neutral-400">{{ t('invoice.classification.no_vat_class') }}</span>
             </dd>
+          </div>
+          <div v-if="stockEnabled && invoice.price_level_id != null" class="flex justify-between gap-3">
+            <dt class="text-neutral-500">{{ t('invoice.price_level.label') }}</dt>
+            <dd class="font-medium text-right">{{ priceLevelName ?? '…' }}</dd>
           </div>
           <div class="flex justify-between gap-3">
             <dt class="text-neutral-500">{{ t('invoice.simplified_document') }}</dt>

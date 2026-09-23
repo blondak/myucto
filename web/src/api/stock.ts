@@ -334,6 +334,8 @@ export interface StockQuoteRequestLine {
 
 export interface StockQuoteRequest {
   client_id: number | null
+  /** Cenová hladina zvolená na dokladu; null = hladina odběratele. */
+  price_level_id?: number | null
   currency: string
   date: string | null
   lines: StockQuoteRequestLine[]

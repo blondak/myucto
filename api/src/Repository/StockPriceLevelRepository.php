@@ -133,7 +133,34 @@ final class StockPriceLevelRepository
               WHERE c.supplier_id = ? AND c.id = ?'
         );
         $stmt->execute([$supplierId, $clientId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return self::pricingLevel($stmt->fetch(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Aktivní hladina firmy podle id (hladina zvolená na dokladu). Null, když hladina
+     * neexistuje, je neaktivní, patří jiné firmě, anebo firma nemá zapnutý sklad;
+     * stejné podmínky jako {@see activeLevelForClient()}.
+     *
+     * @return array{id:int, code:string, name:string, default_discount_pct:string}|null
+     */
+    public function activeLevel(int $supplierId, int $levelId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT l.id, l.code, l.name, l.default_discount_pct
+               FROM stock_price_levels l
+               JOIN supplier s ON s.id = l.supplier_id AND s.stock_enabled = 1
+              WHERE l.supplier_id = ? AND l.id = ? AND l.is_active = 1'
+        );
+        $stmt->execute([$supplierId, $levelId]);
+        return self::pricingLevel($stmt->fetch(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * @param array<string,mixed>|false $row
+     * @return array{id:int, code:string, name:string, default_discount_pct:string}|null
+     */
+    private static function pricingLevel(array|false $row): ?array
+    {
         if ($row === false) {
             return null;
         }
