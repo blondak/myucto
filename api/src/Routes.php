@@ -2888,6 +2888,9 @@ final class Routes
         $app->get ('/api/settings/ai-assist',               [\MyInvoice\Action\Settings\AiAssistSettingsAction::class, 'get']);
         $app->put ('/api/settings/ai-assist',               [\MyInvoice\Action\Settings\AiAssistSettingsAction::class, 'put']);
         $app->get ('/api/settings/mode-switch-preview',     [SettingsAction::class, 'modeSwitchPreview']);
+        // Profil firmy — export/nahrání ručně vybudovaného nastavení (přežije nový převod firmy).
+        $app->get ('/api/settings/company-profile',         [\MyInvoice\Action\Settings\CompanyProfileAction::class, 'export']);
+        $app->post('/api/settings/company-profile/import',  [\MyInvoice\Action\Settings\CompanyProfileAction::class, 'import']);
         // Ciselnik CINNOSTI (CZ-NACE) - read-only referencni data pro c_okec.
         $app->get ('/api/settings/nace-codes',              \MyInvoice\Action\Settings\NaceCodesAction::class);
         $app->get ('/api/settings/accounting-activation/status', [AccountingActivationAction::class, 'status']);
