@@ -333,6 +333,18 @@ final class RegistrationImportPlanner
         if ($record->isCsszExport()) {
             if ($row !== null) {
                 $this->verifyExportActivity($supplierId, $plan, $record, $row, $relationType);
+                // ID PPV v exportu dokládá, že ČSSZ vztah přihlášený má: jen
+                // naplánovaný vztah se aktivuje stejně jako u přihlášky A1.
+                if (in_array($row['status'], self::NOT_STARTED_STATUSES, true)) {
+                    $start = $row['start_date'] ?? $record->startOn;
+                    if ($row['start_date'] === null) {
+                        $this->derivedStartWarnings($plan, $record);
+                    }
+                    if (is_string($start) && $start <= date('Y-m-d')) {
+                        $plan['_steps']['activate_on'] = $start;
+                        $this->change($plan, 'status', 'Stav vztahu', (string) $row['status'], 'active');
+                    }
+                }
             } elseif ($plan['_steps']['create_employment'] !== null && $relationType !== null) {
                 $this->newEmploymentTerms($plan, $record, $relationType);
                 $start = $plan['employment']['start_on'];

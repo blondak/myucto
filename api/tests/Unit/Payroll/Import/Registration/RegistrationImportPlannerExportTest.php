@@ -131,6 +131,70 @@ final class RegistrationImportPlannerExportTest extends TestCase
         self::assertFalse($this->hasWarning($plan, 'Nástup ve vztahu'));
     }
 
+    public function testPlannedEmploymentIsActivatedFromItsPlannedStart(): void
+    {
+        $plan = $this->planner($this->plannedLookup('2026-01-01'))
+            ->plan(1, 'test', $this->record(), 'export.xml', self::SHA);
+
+        self::assertNull($plan['blocker'], (string) $plan['blocker']);
+        self::assertSame(50, $plan['match']['employment_id']);
+        self::assertSame('2026-01-01', $plan['_steps']['activate_on']);
+        self::assertSame('update', $plan['operation']);
+        self::assertContains(
+            ['field' => 'status', 'label' => 'Stav vztahu', 'current' => 'planned', 'imported' => 'active'],
+            $plan['changes'],
+        );
+    }
+
+    public function testPlannedEmploymentWithoutStartTakesStartFromMonthlyReport(): void
+    {
+        $record = $this->record()->withDerivedStart([
+            'on' => '2026-02-01',
+            'source' => 'insurance_from',
+            'period' => '2026-02',
+            'earliest_period' => '2026-02',
+        ]);
+
+        $plan = $this->planner($this->plannedLookup(null))->plan(1, 'test', $record, 'export.xml', self::SHA);
+
+        self::assertSame('2026-02-01', $plan['_steps']['activate_on']);
+        self::assertTrue($this->hasWarning($plan, 'první den nejstaršího hlášeného měsíce'));
+    }
+
+    public function testPlannedEmploymentWithFutureStartStaysPlanned(): void
+    {
+        $future = (new \DateTimeImmutable('+2 months'))->format('Y-m-01');
+
+        $plan = $this->planner($this->plannedLookup($future))
+            ->plan(1, 'test', $this->record(), 'export.xml', self::SHA);
+
+        self::assertNull($plan['_steps']['activate_on']);
+        self::assertNotContains('status', array_column($plan['changes'], 'field'));
+    }
+
+    private function plannedLookup(?string $startDate): RegistrationImportLookup
+    {
+        $lookup = $this->createStub(RegistrationImportLookup::class);
+        $lookup->method('employeesByPersonExternalIdHash')->willReturn([5]);
+        $lookup->method('employeesByIdentifierHash')->willReturn([]);
+        $lookup->method('variableSymbols')->willReturn([]);
+        $lookup->method('employeeName')->willReturn('Syntetická Osoba');
+        $lookup->method('employments')->willReturn([[
+            'id' => 50,
+            'employee_id' => 5,
+            'code' => 'PV-1',
+            'relation_type' => 'employment',
+            'status' => 'planned',
+            'is_primary' => true,
+            'start_date' => $startDate,
+            'actual_start_date' => null,
+            'end_date' => null,
+            'row_version' => 1,
+        ]]);
+
+        return $lookup;
+    }
+
     private function record(
         string $activityCode = '1',
         bool $smallScale = false,

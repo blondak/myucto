@@ -263,7 +263,10 @@ rozsahu a variabilní symbol zaměstnavatele. Datum nástupu v exportu není.
 
 - U osoby, kterou už evidujete, import doplní chybějící OIČ a ID zaměstnání.
   Druh činnosti a druh vztahu jen porovná; nesoulad ohlásí varováním
-  a podmínky vztahu nemění.
+  a podmínky vztahu nemění. Vztah, který je zatím jen naplánovaný, import
+  aktivuje, protože ID zaměstnání v exportu dokládá přihlášení u ČSSZ.
+  Nástupem je plánovaný nástup vztahu, a když chybí, datum z měsíčního
+  hlášení v dávce. Vztah s nástupem v budoucnu zůstane naplánovaný.
 - Osobu, kterou v evidenci nemáte, založí i s pracovním vztahem jen tehdy,
   když v téže dávce nahrajete měsíční hlášení JMHZ s formulářem stejného ID
   zaměstnání. Nástupem je nejdřívější datum nástupu z formulářů, a když ho

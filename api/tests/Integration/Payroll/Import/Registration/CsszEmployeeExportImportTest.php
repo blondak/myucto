@@ -233,6 +233,34 @@ final class CsszEmployeeExportImportTest extends TestCase
         self::assertSame(1, $this->tableRows('payroll_employments'));
     }
 
+    /** Vztah jen naplánovaný z přihlášky před nástupem: ID PPV v exportu ho aktivuje k plánovanému nástupu. */
+    public function testExportActivatesPlannedEmploymentFromPreRegistration(): void
+    {
+        $p1 = [$this->file('p1.xml', RegistrationXmlFixtures::prezecP1($this->birthNumber, 'Jana', 'Testovací', '2026-08-01'))];
+        $planned = $this->apply($p1, [$this->imports->preview($this->supplierId, 'test', $p1)['records'][0]['key']])['results'][0];
+        self::assertSame('applied', $planned['status'], (string) $planned['message']);
+        $employmentId = (int) $planned['employment_id'];
+        self::assertSame('planned', $this->lookup->employment($this->supplierId, $employmentId)['status']);
+
+        $files = [$this->file('zamestnanci.xml', RegistrationXmlFixtures::csszExport([$this->employee()]))];
+        $export = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+        self::assertSame($employmentId, $export['match']['employment_id'], $this->dump($export));
+        self::assertSame('update', $export['operation'], $this->dump($export));
+        self::assertContains(
+            ['field' => 'status', 'label' => 'Stav vztahu', 'current' => 'planned', 'imported' => 'active'],
+            $export['changes'],
+        );
+
+        $result = $this->apply($files, [$export['key']])['results'][0];
+        self::assertSame('applied', $result['status'], (string) $result['message']);
+        self::assertContains('activated', $result['operations']);
+        self::assertContains('identifiers', $result['operations']);
+        $employment = $this->lookup->employment($this->supplierId, $employmentId);
+        self::assertSame('active', $employment['status']);
+        self::assertSame('2026-08-01', $employment['start_date']);
+        self::assertSame(1, $this->tableRows('payroll_employments'));
+    }
+
     /**
      * @param array<string,string|null> $overrides
      * @return array<string,string|null>
