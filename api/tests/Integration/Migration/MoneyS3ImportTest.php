@@ -1495,6 +1495,64 @@ final class MoneyS3ImportTest extends TestCase
         self::assertSame(1, $this->rowCount('journal_entries', $supplierId));
     }
 
+    /**
+     * Doklad v cizí měně FP25004 (100 + 21 EUR, kurz 25 = 2 500 + 525 Kč z Money) se ve firmě
+     * s eurem v číselníku měn převezme v EUR; firma bez eura ho převezme v Kč jako dřív.
+     * Přiznání DPH, KH, rekonciliace i deník obou firem se musí shodovat na haléř.
+     */
+    public function testForeignCurrencyDocumentIsTakenOverInItsCurrencyWithIdenticalReturn(): void
+    {
+        $foreign = $this->supplier();
+        $this->db->pdo()->prepare(
+            "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default) VALUES (?, 'EUR', 'EUR', '€', 'Euro', 'Euro', 2, 1, 0)"
+        )->execute([$foreign]);
+        $protocol = $this->import($foreign);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        foreach ($protocol->get('reconciliation') as $year) {
+            self::assertTrue($year['ok'], json_encode($year, JSON_UNESCAPED_UNICODE) ?: '');
+        }
+        $home = $this->supplier();
+        $inCrowns = $this->import($home);
+        self::assertFalse($inCrowns->hasErrors(), $this->explain($inCrowns));
+
+        $doc = static fn (Connection $db, int $supplierId): array => (function () use ($db, $supplierId): array {
+            $stmt = $db->pdo()->prepare("SELECT c.code, d.exchange_rate, d.total_without_vat, d.total_vat, d.total_with_vat, d.note_below_items
+                FROM purchase_invoices d JOIN currencies c ON c.id = d.currency_id WHERE d.supplier_id = ? AND d.vendor_invoice_number = 'EU-2025-001'");
+            $stmt->execute([$supplierId]);
+            return $stmt->fetch(PDO::FETCH_NUM) ?: [];
+        })();
+        $eur = $doc($this->db, $foreign);
+        self::assertSame(['EUR', '25.000000', '100.00', '21.00', '121.00'], array_slice($eur, 0, 5));
+        self::assertStringContainsString('doklad v EUR, převzat v měně dokladu kurzem 25 Kč', (string) $eur[5]);
+        $czk = $doc($this->db, $home);
+        self::assertSame(['CZK', null, '2500.00', '525.00', '3025.00'], array_slice($czk, 0, 5));
+        self::assertStringContainsString('doklad v EUR, převzat v Kč (měna EUR není v číselníku měn firmy)', (string) $czk[5]);
+
+        $dph = $this->container(DphPriznaniBuilder::class);
+        $kh = $this->container(\MyInvoice\Service\Report\KontrolniHlaseniBuilder::class);
+        foreach ([4] as $month) {
+            self::assertSame($dph->build($home, 2025, $month, 'monthly')['summary']['lines'], $dph->build($foreign, 2025, $month, 'monthly')['summary']['lines']);
+            $khHome = $kh->build($home, 2025, $month);
+            $khForeign = $kh->build($foreign, 2025, $month);
+            self::assertSame($khHome['summary'], $khForeign['summary']);
+            $sections = static fn (string $xml): array => preg_match_all('~<Veta[ABC][^>]*/>~', $xml, $m) > 0 ? $m[0] : [];
+            self::assertNotSame([], $sections($khHome['xml']));
+            self::assertSame($sections($khHome['xml']), $sections($khForeign['xml']));
+        }
+        $journal = $this->db->pdo()->prepare(
+            "SELECT a.account_code, SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.supplier_id = ? GROUP BY a.account_code ORDER BY a.account_code"
+        );
+        $journal->execute([$home]);
+        $homeJournal = $journal->fetchAll(PDO::FETCH_KEY_PAIR);
+        $journal->execute([$foreign]);
+        self::assertSame($homeJournal, $journal->fetchAll(PDO::FETCH_KEY_PAIR));
+
+        // Opakovaný převod porovná doklad v EUR s Money v Kč - změna to není.
+        $again = $this->import($foreign);
+        self::assertNotContains('changed_in_money', array_column(array_merge(...array_map(static fn (array $s): array => $s['messages'] ?? [], $again->toArray()['steps'])), 'code'));
+    }
+
     // ── pomocníci ─────────────────────────────────────────────────────────────
 
     private function supplier(string $ico = SyntheticAgenda::ICO, string $mode = 'tax_evidence'): int

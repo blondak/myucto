@@ -440,6 +440,69 @@ final class PremierImportTest extends TestCase
         self::assertEqualsWithDelta(9.2, (float) $sk['vat'], 0.001);
     }
 
+    /**
+     * Doklad v EUR se převezme v měně a kurzu z PREMIER, jen když částky položek v EUR kurzem
+     * dají přesně Kč ze zaúčtování. Firma bez eura v číselníku měn převezme tentýž export
+     * v Kč (jak to bylo dřív) - přiznání DPH, KH, OSS podání i deník obou firem se shodují.
+     */
+    public function testForeignCurrencyDocumentsAreTakenOverInTheirCurrencyWithIdenticalReturns(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $this->foreignRate(SyntheticPremierBackup::OSS_COUNTRY, SyntheticPremierBackup::OSS_RATE);
+        $backup = $this->backup(true, ['oss_eur' => true, 'eur_exact' => true]);
+        $run = function (bool $withEuro) use ($backup): array {
+            $supplierId = $this->supplier();
+            $this->db->pdo()->prepare(
+                "UPDATE supplier SET oss_enabled = 1, oss_identification_country = 'CZ', oss_return_currency = 'EUR', oss_valid_from = '2025-01-01', oss_valid_to = NULL WHERE id = ?"
+            )->execute([$supplierId]);
+            if ($withEuro) {
+                $this->db->pdo()->prepare(
+                    "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default) VALUES (?, 'EUR', 'EUR', '€', 'Euro', 'Euro', 2, 1, 0)"
+                )->execute([$supplierId]);
+            }
+            $protocol = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+            $this->assertReconciled($protocol, SyntheticPremierBackup::YEAR1);
+            return [$supplierId, $protocol];
+        };
+        [$foreign, $protocol] = $run(true);
+        [$home] = $run(false);
+
+        $header = 'SELECT c.code, d.exchange_rate, d.total_without_vat, d.total_vat, d.total_with_vat FROM %s d JOIN currencies c ON c.id = d.currency_id WHERE d.supplier_id = ? AND d.varsymbol = ?';
+        self::assertSame([['EUR', '25.120000', '140.00', '29.40', '169.40']], $this->fetch(sprintf($header, 'invoices'), $foreign, false, [SyntheticPremierBackup::EUR_DOCUMENT]));
+        self::assertSame([['EUR', '25.000000', '40.00', '9.20', '49.20']], $this->fetch(sprintf($header, 'invoices'), $foreign, false, [SyntheticPremierBackup::OSS_DOCUMENT]));
+        self::assertSame([['40.00', '9.20']], $this->fetch('SELECT it.oss_taxable_amount_return, it.oss_vat_amount_return FROM invoices i JOIN invoice_items it ON it.invoice_id = i.id WHERE i.supplier_id = ? AND i.varsymbol = ?', $foreign, false, [SyntheticPremierBackup::OSS_DOCUMENT]));
+        // PF 250004: haléřový rozdíl kurzu dorovnaný na položku - kurzem nevyjde, zůstává v Kč.
+        $kept = $this->fetch("SELECT c.code, d.total_with_vat, d.note_below_items FROM purchase_invoices d JOIN currencies c ON c.id = d.currency_id WHERE d.supplier_id = ? AND d.vendor_invoice_number = 'D-2025-7004'", $foreign);
+        self::assertSame(['CZK', '12162.58'], array_slice($kept[0] ?? [], 0, 2));
+        self::assertStringContainsString('doklad v EUR, převzat v Kč podle zaúčtování (základ 2. položky 300,10 × kurz 25,123 nedává 7 539,42 Kč ze zdroje)', (string) ($kept[0][2] ?? ''));
+        self::assertSame(2, self::stepCounts($protocol, 'issued_invoices')['foreign_currency'] ?? 0, $this->explain($protocol));
+        self::assertSame(1, self::stepCounts($protocol, 'purchase_invoices')['foreign_currency_in_home'] ?? 0, $this->explain($protocol));
+        self::assertSame([['CZK']], $this->fetch("SELECT c.code FROM invoices d JOIN currencies c ON c.id = d.currency_id WHERE d.supplier_id = ? AND d.varsymbol = ?", $home, false, [SyntheticPremierBackup::EUR_DOCUMENT]));
+
+        foreach ([7, 9, 10] as $month) {
+            self::assertSame($this->dph->build($home, SyntheticPremierBackup::YEAR1, $month, 'monthly')['summary']['lines'],
+                $this->dph->build($foreign, SyntheticPremierBackup::YEAR1, $month, 'monthly')['summary']['lines'], "DPH {$month}/2025");
+            $kh = $container->get(\MyInvoice\Service\Report\KontrolniHlaseniBuilder::class);
+            $khHome = $kh->build($home, SyntheticPremierBackup::YEAR1, $month);
+            $khForeign = $kh->build($foreign, SyntheticPremierBackup::YEAR1, $month);
+            self::assertSame($khHome['summary'], $khForeign['summary'], "KH {$month}/2025");
+            $sections = static fn (string $xml): array => preg_match_all('~<Veta[ABC][^>]*/>~', $xml, $m) > 0 ? $m[0] : [];
+            self::assertSame($sections($khHome['xml']), $sections($khForeign['xml']), "KH {$month}/2025");
+        }
+        $oss = $container->get(\MyInvoice\Service\Oss\OssLedgerService::class);
+        // OSS podání: součty po státech stejné, řádek se liší jen tím, že doklad je v EUR.
+        $countries = static fn (array $preview): array => array_map(static fn (array $c): array => array_diff_key($c, ['rows' => true]), $preview['countries']);
+        self::assertSame($countries($oss->preview($home, SyntheticPremierBackup::YEAR1, 3)), $countries($oss->preview($foreign, SyntheticPremierBackup::YEAR1, 3)));
+        $journal = 'SELECT a.account_code, SUM(CASE WHEN l.side = "debit" THEN l.amount ELSE -l.amount END) FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+                     WHERE l.supplier_id = ? GROUP BY a.account_code ORDER BY a.account_code';
+        self::assertSame($this->fetch($journal, $home), $this->fetch($journal, $foreign));
+
+        // Opakovaný převod porovná doklad v EUR s PREMIER v Kč - změna to není.
+        $again = $this->importer->run($foreign, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertNotContains('changed_in_premier', $this->messageCodes($again), $this->explain($again));
+    }
+
     /** Bez zapnutého OSS se cizí daň do tuzemského přiznání nepustí - doklad se nepřevezme, zbytek ano. */
     public function testIssuedDocumentOutsideReturnWithVatIsNotDomesticWhenOssIsOff(): void
     {

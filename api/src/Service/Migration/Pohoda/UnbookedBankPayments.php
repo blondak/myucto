@@ -13,6 +13,7 @@ use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Bank\Match\MatchScorer;
 use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Support\Sql\PayablePredicate;
 use PDO;
 
@@ -313,7 +314,7 @@ final class UnbookedBankPayments
         }
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
-            "SELECT i.id, i.status, i.amount_to_pay, i.paid_total, cur.code AS currency
+            "SELECT i.id, i.status, i.amount_to_pay, i.paid_total, i.exchange_rate, cur.code AS currency
                FROM payment_matches pm
                JOIN invoices i ON i.id = pm.invoice_id AND i.supplier_id = pm.supplier_id
                JOIN currencies cur ON cur.id = i.currency_id
@@ -327,25 +328,29 @@ final class UnbookedBankPayments
         }
         $invoice = $rows[0];
         $amount = round(abs($tx['amount']), 2);
+        // Pohyb je v Kč; faktura převzatá v cizí měně se porovná přepočtená kurzem dokladu
+        // (pojistka převzetí zaručuje koruny zdroje) a platba se zapíše v měně faktury.
+        $rate = $invoice['exchange_rate'] !== null ? (float) $invoice['exchange_rate'] : null;
         $paid = round((float) $invoice['paid_total'], 2);
         $due = round((float) $invoice['amount_to_pay'], 2);
-        $alreadyPaid = (string) $invoice['status'] === 'paid' && abs($paid - $amount) < self::TOLERANCE;
-        $opening = in_array((string) $invoice['status'], ['issued', 'sent', 'reminded'], true) && abs($paid) < self::TOLERANCE && abs($due - $amount) < self::TOLERANCE;
+        $alreadyPaid = (string) $invoice['status'] === 'paid' && abs(ForeignCurrencyTakeover::toHome($paid, $rate) - $amount) < self::TOLERANCE;
+        $opening = in_array((string) $invoice['status'], ['issued', 'sent', 'reminded'], true) && abs($paid) < self::TOLERANCE && abs(ForeignCurrencyTakeover::toHome($due, $rate) - $amount) < self::TOLERANCE;
         if (!$alreadyPaid && !$opening) {
             return;
         }
+        $recorded = $rate === null ? $amount : ($opening ? $due : $paid);
         $pdo->prepare(
             "INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, variable_symbol, bank_reference, note, source, bank_transaction_id, created_by)
              VALUES (?, ?, ?, ?, ?, ?, ?, 'Převzato z POHODY', 'bank', ?, ?)"
         )->execute([
-            $ctx->supplierId, (int) $invoice['id'], $tx['date'], number_format($amount, 2, '.', ''), (string) $invoice['currency'],
+            $ctx->supplierId, (int) $invoice['id'], $tx['date'], number_format($recorded, 2, '.', ''), (string) $invoice['currency'],
             $tx['vs'], $tx['bank_ref'], $tx['id'], $ctx->userOrNull(),
         ]);
         if ($opening) {
             $pdo->prepare(
                 "UPDATE invoices SET paid_total = ?, paid_at = ?, status = 'paid'
                   WHERE id = ? AND supplier_id = ? AND status IN ('issued', 'sent', 'reminded')"
-            )->execute([number_format($amount, 2, '.', ''), $tx['date'], (int) $invoice['id'], $ctx->supplierId]);
+            )->execute([number_format($recorded, 2, '.', ''), $tx['date'], (int) $invoice['id'], $ctx->supplierId]);
         }
     }
 
@@ -516,14 +521,14 @@ final class UnbookedBankPayments
         $specs = [
             'purchase_invoice' => "SELECT d.id, d.varsymbol, d.payment_variable_symbol, d.vendor_invoice_number AS original,
                                           d.payment_account_number AS account_no, d.payment_bank_code AS bank_code,
-                                          d.amount_to_pay, 0 AS paid_total, d.issue_date, d.due_date, cur.code AS currency,
+                                          d.amount_to_pay, 0 AS paid_total, d.exchange_rate, d.issue_date, d.due_date, cur.code AS currency,
                                           JSON_UNQUOTE(JSON_EXTRACT(d.vendor_snapshot, '$.company_name')) AS party
                                      FROM purchase_invoices d JOIN currencies cur ON cur.id = d.currency_id
                                     WHERE d.supplier_id = ? AND d.status = 'booked' AND d.document_kind = 'invoice'
                                       AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.supplier_id = d.supplier_id AND pm.purchase_invoice_id = d.id)
                                       AND d.id IN (%s)",
             'invoice' => "SELECT d.id, d.varsymbol, d.payment_variable_symbol, NULL AS original, NULL AS account_no, NULL AS bank_code,
-                                 d.amount_to_pay, d.paid_total, d.issue_date, d.due_date, cur.code AS currency,
+                                 d.amount_to_pay, d.paid_total, d.exchange_rate, d.issue_date, d.due_date, cur.code AS currency,
                                  JSON_UNQUOTE(JSON_EXTRACT(d.client_snapshot, '$.company_name')) AS party
                             FROM invoices d JOIN currencies cur ON cur.id = d.currency_id
                            WHERE d.supplier_id = ? AND d.status IN ('issued', 'sent', 'reminded') AND d.invoice_type = 'invoice'
@@ -536,10 +541,13 @@ final class UnbookedBankPayments
                 $stmt->execute(array_merge([$ctx->supplierId], $chunk));
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
                     $id = (int) $r['id'];
-                    if (strtoupper((string) $r['currency']) !== 'CZK') {
+                    // Doklad v cizí měně jen převzatý s kurzem (pojistka převzetí) - páruje se
+                    // v Kč jako pohyby, zbývá uhradit podle POHODY je v Kč i u něj.
+                    $rate = $r['exchange_rate'] !== null ? (float) $r['exchange_rate'] : null;
+                    if (strtoupper((string) $r['currency']) !== 'CZK' && $rate === null) {
                         continue;
                     }
-                    $mine = round((float) $r['amount_to_pay'] - (float) $r['paid_total'], 2);
+                    $mine = round(ForeignCurrencyTakeover::toHome((float) $r['amount_to_pay'], $rate) - ForeignCurrencyTakeover::toHome((float) $r['paid_total'], $rate), 2);
                     $remaining = $ctx->remaining[$type . '|' . $id] ?? $mine;
                     if ($remaining <= self::TOLERANCE) {
                         continue;
@@ -565,7 +573,8 @@ final class UnbookedBankPayments
                         'clean' => $type === 'purchase_invoice' || (abs((float) $r['paid_total']) < self::TOLERANCE && abs($remaining - $mine) < self::TOLERANCE),
                         'issue' => (string) $r['issue_date'],
                         'due' => $r['due_date'] !== null ? (string) $r['due_date'] : null,
-                        'currency' => (string) $r['currency'],
+                        // Měna částky `remaining` (návrh párování ji zobrazí) - u dokladu v měně Kč.
+                        'currency' => $rate === null ? (string) $r['currency'] : 'CZK',
                         'party' => $r['party'] !== null && $r['party'] !== '' ? (string) $r['party'] : null,
                     ];
                 }

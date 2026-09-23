@@ -362,9 +362,10 @@ final class PremierDocuments
                     // Položka z rozpisu nese vlastní účet (i prázdný - odpočet zálohy na 314),
                     // účet dokladu z deníku dostane jen položka složená z deníku.
                     'account' => (string) ($it['account'] ?? ($b['account'] ?? '')),
-                ] + ($doc['direction'] === self::ISSUED && isset($it['foreign_base'], $it['foreign_vat'])
-                    // Základ a daň v měně dokladu, jak jsou na položce - čte je jen OSS větev
-                    // vydaného dokladu ({@see \MyInvoice\Service\Migration\OssMigrationPolicy::returnAmounts()}).
+                ] + (isset($it['foreign_base'], $it['foreign_vat'])
+                    // Základ a daň v měně dokladu, jak jsou na položce - čte je OSS větev vydaného
+                    // dokladu ({@see \MyInvoice\Service\Migration\OssMigrationPolicy::returnAmounts()})
+                    // a převzetí dokladu v měně ({@see \MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover}).
                     ? ['foreign_base' => $it['foreign_base'], 'foreign_vat' => $it['foreign_vat']] : []);
             }
         }

@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\SmallAssetCard;
 
 /**
@@ -153,7 +154,7 @@ final class SmallAssetImporter
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
               WHERE pi.supplier_id = ? AND (pi.issue_date = ? OR pi.tax_date = ?)
-                AND ABS(pii.total_without_vat - ?) < 0.005
+                AND ABS(' . ForeignCurrencyTakeover::homeAmountSql('pii.total_without_vat', 'pi.exchange_rate') . ' - ?) < 0.005
                 AND NOT EXISTS (SELECT 1 FROM small_assets s WHERE s.supplier_id = pi.supplier_id AND s.purchase_invoice_item_id = pii.id)
               LIMIT 2'
         );
@@ -169,10 +170,16 @@ final class SmallAssetImporter
         ];
     }
 
-    /** Položka faktury: jediná se shodným textem, jinak jediná se shodnou částkou bez DPH. */
+    /**
+     * Položka faktury: jediná se shodným textem, jinak jediná se shodnou částkou bez DPH.
+     * Cena karty je v Kč, položka dokladu v cizí měně se porovná přepočtená kurzem dokladu.
+     */
     private function matchItem(int $invoiceId, string $text, float $amount): ?int
     {
-        $stmt = $this->db->pdo()->prepare('SELECT id, description, total_without_vat FROM purchase_invoice_items WHERE purchase_invoice_id = ? ORDER BY order_index, id');
+        $stmt = $this->db->pdo()->prepare('SELECT pii.id, pii.description, '
+            . ForeignCurrencyTakeover::homeAmountSql('pii.total_without_vat', 'pi.exchange_rate') . ' AS total_without_vat
+               FROM purchase_invoice_items pii JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
+              WHERE pii.purchase_invoice_id = ? ORDER BY pii.order_index, pii.id');
         $stmt->execute([$invoiceId]);
         $items = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         $normalize = static fn (string $s): string => mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $s)));

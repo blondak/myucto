@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
 use MyInvoice\Service\Migration\Shared\TrialBalanceReconciliation;
 
@@ -192,8 +193,8 @@ final class MoneyS3Reconciler
 
         $spec = [
             // [klíč, tabulka, částka dokladu, druh v mapě, účet, znaménko řádku]
-            ['purchase_invoices', 'purchase_invoices', 'd.total_with_vat', 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END"],
-            ['issued_invoices', 'invoices', 'd.total_with_vat', 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END"],
+            ['purchase_invoices', 'purchase_invoices', self::documentTotal(), 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END"],
+            ['issued_invoices', 'invoices', self::documentTotal(), 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END"],
             // Znaménko pokladního dokladu nese doc_type (in = příjem na MD 211, out = výdej z 211).
             ['cash', 'cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", 'cash_document', '211', "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END"],
         ];
@@ -238,11 +239,21 @@ final class MoneyS3Reconciler
      * Druh dokladu v kontrole dokladů proti deníku: tabulka, částka dokladu, druh v mapě,
      * typ vazby, účet a znaménko řádku (jako ve {@see documentsAgainstJournal()}).
      */
-    private const SOURCES = [
-        'purchase_invoices' => ['purchase_invoices', 'd.total_with_vat', 'purchase_invoice', 'purchase_invoice', '321', true],
-        'issued_invoices' => ['invoices', 'd.total_with_vat', 'invoice', 'invoice', '311', false],
-        'cash' => ['cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", 'cash_document', 'cash', '211', false],
-    ];
+    private static function sources(): array
+    {
+        $total = self::documentTotal();
+        return [
+            'purchase_invoices' => ['purchase_invoices', $total, 'purchase_invoice', 'purchase_invoice', '321', true],
+            'issued_invoices' => ['invoices', $total, 'invoice', 'invoice', '311', false],
+            'cash' => ['cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", 'cash_document', 'cash', '211', false],
+        ];
+    }
+
+    /** Celkem faktury v Kč - doklad převzatý v cizí měně přepočtený kurzem dokladu. */
+    private static function documentTotal(): string
+    {
+        return ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
+    }
 
     /**
      * Rozdíl dokladů proti deníku, který je už v samotném Money: doklad nese jinou částku než
@@ -290,7 +301,7 @@ final class MoneyS3Reconciler
                       FROM journal_entries e
                      WHERE e.supplier_id = ? AND e.period_id = ? AND EXISTS (SELECT 1 {$linked})";
         } else {
-            $spec = self::SOURCES[$key] ?? null;
+            $spec = self::sources()[$key] ?? null;
             if ($spec === null) {
                 return [];
             }
@@ -336,7 +347,7 @@ final class MoneyS3Reconciler
         if ($wanted === []) {
             return [];
         }
-        [$prefix, $creditPositive] = $key === 'bank' ? ['221', false] : [self::SOURCES[$key][4], self::SOURCES[$key][5]];
+        [$prefix, $creditPositive] = $key === 'bank' ? ['221', false] : [self::sources()[$key][4], self::sources()[$key][5]];
         $journal = [];
         foreach ($ctx->backup->rowsAcrossYears('UcDenik') as $r) {
             $doc = trim((string) ($r['Doklad'] ?? ''));

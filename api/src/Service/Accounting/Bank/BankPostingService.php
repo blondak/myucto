@@ -700,7 +700,7 @@ final class BankPostingService
         $lines = [
             $this->line($bankAcc, 'debit', $bankCzk),
             $this->withFxTrace(
-                $this->line($receivable, 'credit', $predpisCzk),
+                $this->line($this->predpisSaldoCode($supplierId, (int) $entry['id'], $receivable), 'credit', $predpisCzk),
                 (string) $invoice['currency'],
                 $rate,
                 $foreign,
@@ -880,7 +880,7 @@ final class BankPostingService
                 'exchange_rate' => $allocation['purchase_exchange_rate'] ?? null,
             ]);
             $lines[] = $this->withFxTrace(
-                $this->line($payable, 'debit', FxPaymentSettlement::expectedLocalAmount($foreign, $rate)),
+                $this->line($this->predpisSaldoCode($supplierId, (int) $entry['id'], $payable), 'debit', FxPaymentSettlement::expectedLocalAmount($foreign, $rate)),
                 $currency,
                 $rate,
                 $foreign,
@@ -925,7 +925,7 @@ final class BankPostingService
 
         $lines = [
             $this->withFxTrace(
-                $this->line($payable, 'debit', $predpisCzk),
+                $this->line($this->predpisSaldoCode($supplierId, (int) $entry['id'], $payable), 'debit', $predpisCzk),
                 (string) $purchase['currency'],
                 $rate,
                 $foreign,
@@ -1016,8 +1016,10 @@ final class BankPostingService
      * a úhrada visí na syntetice. Jen když předpis má pod syntetikou právě jednu analytiku;
      * předpis na syntetice (běžná firma) nebo víc analytik = kód z pravidla beze změny.
      *
-     * Cizoměnové větve a vratky dobropisů zůstávají u kódu z pravidla - převzaté účetnictví
-     * je vede v Kč a kurzové rozdíly se na analytiky nerozpadají.
+     * Platí i pro cizoměnové větve: převod z cizího programu zakládá doklad v cizí měně
+     * s předpisem na analytice ze zdroje ({@see \MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover}).
+     * Kurzový rozdíl jde na 563/663, saldokonto se odúčtuje na účtu předpisu. Vratky
+     * dobropisů zůstávají u kódu z pravidla.
      */
     private function predpisSaldoCode(int $supplierId, int $entryId, string $code): string
     {

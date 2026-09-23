@@ -8,6 +8,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyDecision;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
@@ -39,6 +41,10 @@ use MyInvoice\Support\Sql\PayablePredicate;
  *
  * Položky se berou z rozpisu dokladu (text, množství, sazba), když rozpis sedí na
  * rekapitulaci; jinak z rekapitulace po sazbách. Ceny jsou vždy bez DPH.
+ *
+ * **Doklad v cizí měně** (`foreignCurrency`, v MDB `RefCM`/`CmKurs`/`CmMnoz` a na položkách
+ * `Cm`/`CmDPH`) se převezme v měně a kurzu dokladu, když částky položek v měně kurzem dají
+ * přesně Kč z POHODY ({@see ForeignCurrencyTakeover}); jinak v Kč s důvodem v poznámce.
  *
  * **Odpočet zálohy** (`invoiceAdvancePaymentItem`): zdaněná záloha (daňový doklad k platbě)
  * je záporná položka se sazbou a daní - v přiznání i v KH je za konečnou fakturu jen
@@ -103,6 +109,8 @@ final class InvoiceImporter
 
     private readonly MigrationVatRateLookup $rates;
 
+    private readonly ForeignCurrencyTakeover $foreignCurrency;
+
     /** @var array<string,\PDOStatement> */
     private array $stmts = [];
 
@@ -116,6 +124,7 @@ final class InvoiceImporter
         private readonly MigrationHomeCurrency $homeCurrency,
     ) {
         $this->rates = new MigrationVatRateLookup($db);
+        $this->foreignCurrency = new ForeignCurrencyTakeover($db);
     }
 
     public function importIssued(PohodaContext $ctx): void
@@ -263,6 +272,12 @@ final class InvoiceImporter
             : self::payment($doc, $amounts);
         $status = $review ? 'draft' : ($pay['settled'] ? 'paid' : 'sent');
         $booked = !$review && $type !== 'proforma';
+        $fx = $this->foreignCurrency->decide($ctx->supplierId, $doc['foreign'], $doc['foreign_rate'], $doc['foreign_units'], $amounts['items'], $amounts['total'],
+            ForeignCurrencyTakeover::paymentBlock($amounts['advance'], $pay['paid'], round($amounts['total'] - $amounts['advance'], 2)));
+        if ($fx->inForeignCurrency()) {
+            $amounts = self::inForeignCurrency($amounts);
+            $pay['paid'] = ForeignCurrencyTakeover::paidInForeignCurrency($pay['paid'], $amounts['total']);
+        }
         try {
             $id = $this->writer->insertIssued(new MigratedIssuedDocument(
                 supplierId: $ctx->supplierId,
@@ -272,15 +287,15 @@ final class InvoiceImporter
                 issueDate: $doc['issue'],
                 taxDate: $type === 'proforma' ? $doc['tax'] : ($doc['tax'] ?? $doc['issue']),
                 dueDate: $doc['due'],
-                currencyId: $this->homeCurrency->id($ctx->supplierId),
-                // Částky jsou z `homeCurrency` - cizoměnový doklad se převezme v Kč (poznámka note()).
-                exchangeRate: null,
+                // Doklad v cizí měně v ní, když částky v měně kurzem dají Kč z Pohody ({@see ForeignCurrencyTakeover}).
+                currencyId: $fx->currencyId ?? $this->homeCurrency->id($ctx->supplierId),
+                exchangeRate: $fx->rate,
                 // Položky i rekapitulace Pohody jsou bez DPH.
                 pricesIncludeVat: false,
                 // Tuzemské přenesení daňové povinnosti (ř. 25) nese kód zařazení i příznak hlavičky.
                 reverseCharge: VatReturnLineClassifier::isDomesticReverseSale([$class['code'], ...array_column($amounts['items'], 'code')]),
                 noteAboveItems: $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
-                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous, $doc['foreign'], $notes),
+                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous, $fx, $notes),
                 clientSnapshot: PartnerImporter::snapshotJson($snapshot),
                 totalWithoutVat: $amounts['base'],
                 totalVat: $amounts['vat'],
@@ -317,6 +332,7 @@ final class InvoiceImporter
             );
         }
         $this->writer->insertIssuedItems($id, $items);
+        ForeignCurrencyTakeover::report($p, $step, $doc['number'], $fx);
         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
         $this->remember($ctx, $bucket, $doc['number'], $id);
         self::rememberRemaining($ctx, 'invoice', $id, $doc);
@@ -421,6 +437,12 @@ final class InvoiceImporter
         $claim = $doc['claim'];
         $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], (float) $item['rate'], (float) $item['vat'],
             ($item['code'] ?? null) === VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE ? null : ($item['code'] ?? null)), $amounts['items']);
+        // Přijatý doklad úhradu v částce nevede (jen stav), částečná úhrada ho proto neblokuje.
+        $fx = $this->foreignCurrency->decide($ctx->supplierId, $doc['foreign'], $doc['foreign_rate'], $doc['foreign_units'], $amounts['items'], $amounts['total'],
+            ForeignCurrencyTakeover::purchaseBlock($class['reverse'], $class['deduction']) ?? ForeignCurrencyTakeover::paymentBlock($amounts['advance'], 0.0, 0.0));
+        if ($fx->inForeignCurrency()) {
+            $amounts = self::inForeignCurrency($amounts);
+        }
         try {
             $id = $this->writer->insertPurchase(new MigratedPurchaseDocument(
                 supplierId: $ctx->supplierId,
@@ -434,9 +456,8 @@ final class InvoiceImporter
                 dueDate: $doc['due'],
                 receivedAt: $claim ?? ($doc['tax'] ?? $doc['issue']),
                 receivedAtSource: $claim !== null ? 'manual' : 'import',
-                currencyId: $this->homeCurrency->id($ctx->supplierId),
-                // Částky jsou z `homeCurrency` - cizoměnový doklad se převezme v Kč (poznámka note()).
-                exchangeRate: null,
+                currencyId: $fx->currencyId ?? $this->homeCurrency->id($ctx->supplierId),
+                exchangeRate: $fx->rate,
                 // Položky i rekapitulace Pohody jsou bez DPH.
                 pricesIncludeVat: false,
                 // Samovyměření z interního dokladu (classifyPurchase()).
@@ -449,7 +470,7 @@ final class InvoiceImporter
                 status: $status,
                 vatDeduction: $class['deduction'],
                 noteAboveItems: $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
-                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous, $doc['foreign']),
+                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous, $fx),
                 createdBy: $ctx->userId,
                 advancePaidAmount: $amounts['advance'],
                 paymentVariableSymbol: preg_match('/^\d{1,10}$/', $doc['symvar']) === 1 ? $doc['symvar'] : null,
@@ -480,6 +501,7 @@ final class InvoiceImporter
             );
         }
         $this->writer->insertPurchaseItems($id, $items);
+        ForeignCurrencyTakeover::report($p, $step, $doc['number'], $fx);
         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_PURCHASE_INVOICE, $key, $id, $ctx->runId);
         $this->remember($ctx, $bucket, $doc['number'], $id);
         self::rememberRemaining($ctx, 'purchase_invoice', $id, $doc);
@@ -520,6 +542,9 @@ final class InvoiceImporter
             'remaining' => PohodaXml::text($h, 'liquidation/amountHome'),
             'paid_date' => PohodaXml::date($h, 'liquidation/date'),
             'foreign' => PohodaXml::text($r, $prefix . 'Summary/foreignCurrency/currency/ids'),
+            // Kurz dokladu za `amount` jednotek měny (MDB: `CmKurs` za `CmMnoz`).
+            'foreign_rate' => PohodaXml::num($r, $prefix . 'Summary/foreignCurrency/rate'),
+            'foreign_units' => PohodaXml::num($r, $prefix . 'Summary/foreignCurrency/amount') ?: 1.0,
             // Stát spotřeby dokladu v režimu OSS; POHODA element vynechává, není-li doklad v OSS.
             'moss' => strtoupper(PohodaXml::text($h, 'MOSS/ids')),
         ];
@@ -679,14 +704,17 @@ final class InvoiceImporter
                   WHERE id = ? AND supplier_id = ? AND status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument(''));
             $stmt->execute([$doc['paid_date'], $id, $ctx->supplierId]);
         } else {
+            // Zbývá uhradit je v Kč. Doklad převzatý v cizí měně se proto doplní jen o celou
+            // úhradu - částečnou úhradu v měně dokladu POHODA spolehlivě nenese.
             $stmt = $this->stmt('settle_issued',
                 "UPDATE invoices
                     SET paid_total = total_with_vat - advance_paid_amount - ?,
                         paid_at = IF(?, COALESCE(paid_at, ?), paid_at),
                         status = IF(?, 'paid', status)
                   WHERE id = ? AND supplier_id = ? AND status IN ('issued', 'sent', 'reminded')
+                    AND (exchange_rate IS NULL OR ?)
                     AND ABS(total_with_vat - advance_paid_amount - ?) > ABS(paid_total) + 0.005");
-            $stmt->execute([$remaining, (int) $settled, $doc['paid_date'], (int) $settled, $id, $ctx->supplierId, $remaining]);
+            $stmt->execute([$remaining, (int) $settled, $doc['paid_date'], (int) $settled, $id, $ctx->supplierId, (int) $settled, $remaining]);
         }
         if ($stmt->rowCount() > 0) {
             $ctx->protocol->count($step, $settled ? 'settled_in_pohoda' : 'partially_paid_in_pohoda');
@@ -1123,7 +1151,8 @@ final class InvoiceImporter
                 $pohoda = round($pohoda + PohodaXml::num($a, 'homeCurrency/priceSum'), 2);
             }
         }
-        $stmt = $this->stmt('changed_' . $table, "SELECT total_with_vat FROM {$table} WHERE id = ? AND supplier_id = ?");
+        // Doklad převzatý v cizí měně se porovná v Kč přepočtený kurzem dokladu.
+        $stmt = $this->stmt('changed_' . $table, 'SELECT ' . ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate') . " FROM {$table} WHERE id = ? AND supplier_id = ?");
         $stmt->execute([$id, $ctx->supplierId]);
         $stored = $stmt->fetchColumn();
         if ($stored === false || abs((float) $stored - $pohoda) < 0.005) {
@@ -1140,14 +1169,14 @@ final class InvoiceImporter
      * @param list<string> $reasons
      * @param list<string> $notes
      */
-    private static function note(string $docNo, array $reasons, bool $previous, string $foreign, array $notes = []): string
+    private static function note(string $docNo, array $reasons, bool $previous, ForeignCurrencyDecision $fx, array $notes = []): string
     {
         $note = 'Převzato z Pohody, doklad ' . $docNo;
         if ($previous) {
             $note .= ' (doklad minulého období, zůstatek je v počátečních stavech)';
         }
-        if ($foreign !== '' && $foreign !== 'CZK') {
-            $note .= '; doklad v ' . $foreign . ', převzat v Kč';
+        if ($fx->note() !== null) {
+            $note .= '; ' . $fx->note();
         }
         foreach ($notes as $n) {
             $note .= '; ' . $n;
@@ -1156,9 +1185,30 @@ final class InvoiceImporter
     }
 
     /**
+     * Částky dokladu v měně dokladu místo Kč ({@see ForeignCurrencyTakeover::foreignItems()}).
+     * Pojistka převzetí pustí jen doklad bez nedaňové zálohy, zaokrouhlení v měně je 0.
+     *
+     * @param array<string,mixed> $amounts
+     * @return array<string,mixed>
+     */
+    private static function inForeignCurrency(array $amounts): array
+    {
+        $amounts['items'] = ForeignCurrencyTakeover::foreignItems($amounts['items']);
+        $totals = ForeignCurrencyTakeover::totals($amounts['items']);
+        $amounts['base'] = $totals['base'];
+        $amounts['vat'] = $totals['vat'];
+        $amounts['total'] = $totals['total'];
+        $amounts['gross_total'] = $totals['total'];
+        $amounts['rounding'] = 0.0;
+        $amounts['advance'] = 0.0;
+        return $amounts;
+    }
+
+    /**
      * Základ a daň řádku v cizí měně dokladu (`foreignCurrency`), jak je na dokladu -
-     * čte je jen OSS větev ({@see OssMigrationPolicy::returnAmounts()}). Řádek bez
-     * cizoměnových částek (doklad v Kč, rozpis z rekapitulace) je nenese.
+     * čte je OSS větev ({@see OssMigrationPolicy::returnAmounts()}) a převzetí dokladu
+     * v měně ({@see ForeignCurrencyTakeover}). Řádek bez cizoměnových částek (doklad v Kč,
+     * rozpis z rekapitulace) je nenese.
      *
      * @return array{foreign_base?:float,foreign_vat?:float}
      */

@@ -127,13 +127,18 @@ spolehlivě neurčuje, převod převezme jako koncept:
 
 - zálohovou fakturu, proformu a daňový doklad k platbě (jiný druh než běžná faktura),
 - dobropis, stornovaný doklad a doklad, který je v Money označený „neúčtovat",
-- doklad v cizí měně (částky se převezmou v Kč, měnu a kurz uvede poznámka dokladu),
 - doklad s členěním DPH mimo tuzemské řádky přiznání: přenesená daňová
   povinnost, plnění z EU a do EU, zvláštní režimy, nebo doklad s daní bez členění.
 
 Koncept nevstoupí do přiznání k DPH, kontrolního hlášení ani do účtování.
-Protokol ho vypíše i s důvodem. Po opravě druhu dokladu, měny nebo klasifikace
-DPH ho potvrďte. Přijatá faktura s členěním „do přiznání nezahrnovat" se
+Protokol ho vypíše i s důvodem. Po opravě druhu dokladu nebo klasifikace
+DPH ho potvrďte.
+
+**Doklad v cizí měně** koncept není. Převezme se v měně a kurzu dokladu,
+když základ a daň po sazbách v měně přepočtené kurzem dávají na haléř koruny,
+které Money vykázalo v přiznání; DPH, kontrolní hlášení i deník tak zůstávají
+v Kč přesně stejné. Jinak (a u samovyměření nebo měny, kterou firma nemá
+v číselníku měn) se převezme v Kč a poznámka dokladu i protokol uvedou důvod. Přijatá faktura s členěním „do přiznání nezahrnovat" se
 převezme bez nároku na odpočet.
 
 Číslo dokladu, které už ve firmě je, dostane příponu roku, například
