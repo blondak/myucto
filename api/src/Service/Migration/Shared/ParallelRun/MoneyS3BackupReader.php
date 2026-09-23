@@ -28,7 +28,6 @@ final class MoneyS3BackupReader
         'purchase_invoices' => ['PFaktury', ['Vystaveno', 'DatUcPr']],
         'cash' => ['PoklKnih', ['DatVyst', 'DatUcPr']],
         'bank' => ['BankKnih', ['DatPlat', 'DatUcPr']],
-        'internal' => ['IntDokl', ['DatUcPr', 'DatVyst']],
     ];
 
     /**
@@ -55,12 +54,21 @@ final class MoneyS3BackupReader
         }
 
         $tb = [];
+        // Interní doklady = zápisy deníku, které převod založí jako ruční zápis
+        // ({@see Ms3Journal::sourceType()}), po skupinách jako při převodu.
+        $internal = [];
         $journal = $backup->table('UcDenik', $yearDir);
         foreach ($journal === null ? [] : $journal->rows() as $r) {
             if (Ms3Journal::isYearEndClosing($r)) {
                 continue;
             }
             $opening = Ms3Journal::isOpening($r);
+            // Zápis knihy roku s datem z předchozího roku převod zařadí k prvnímu dni roku.
+            $date = max(substr((string) ($r['Datum'] ?? ''), 0, 10), sprintf('%04d-01-01', $year));
+            if (!$opening && $date >= $monthStart && $date <= $monthEnd
+                && Ms3Journal::sourceType((string) ($r['Zdroj'] ?? '')) === 'manual' && Ms3Journal::effect($r) !== null) {
+                $internal[Ms3Journal::groupKey($r)] = true;
+            }
             if (!$opening && substr((string) ($r['Datum'] ?? ''), 0, 10) > $monthEnd) {
                 continue;
             }
@@ -101,6 +109,7 @@ final class MoneyS3BackupReader
             }
             $counts[$book] = $n;
         }
+        $counts['internal'] = count($internal);
 
         return ['trial_balance' => $tb, 'document_counts' => $counts, 'year_found' => true];
     }

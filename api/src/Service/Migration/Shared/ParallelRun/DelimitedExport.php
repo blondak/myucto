@@ -69,17 +69,27 @@ final class DelimitedExport
         return MoneyReportParser::number($cell);
     }
 
+    /** Součtový řádek sestavy („Celkem", „Součet", „Total") — do porovnání nepatří. */
+    public static function isTotalLabel(string $cell): bool
+    {
+        return preg_match('/^(celkem|soucet|souhrn|total)\b/', self::fold($cell)) === 1;
+    }
+
     /** Text bez diakritiky, malými písmeny, jen písmena, číslice a mezery. */
     public static function fold(string $text): string
     {
-        $ascii = (string) @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text);
-        if ($ascii === '') {
-            $ascii = $text;
-        }
-        $ascii = strtolower($ascii);
+        // Vlastní převod místo iconv TRANSLIT: ten se na Windows a Linuxu chová různě
+        // (na Windows z „Č" udělá „?") a hlavička by se podle platformy nenašla.
+        $ascii = strtr(mb_strtolower($text), self::DIACRITICS);
         $ascii = preg_replace('/[^a-z0-9]+/', ' ', $ascii) ?? $ascii;
         return trim($ascii);
     }
+
+    private const DIACRITICS = [
+        'á' => 'a', 'ä' => 'a', 'č' => 'c', 'ď' => 'd', 'é' => 'e', 'ě' => 'e', 'ë' => 'e', 'í' => 'i',
+        'ľ' => 'l', 'ĺ' => 'l', 'ň' => 'n', 'ó' => 'o', 'ô' => 'o', 'ö' => 'o', 'ř' => 'r', 'ŕ' => 'r',
+        'š' => 's', 'ť' => 't', 'ú' => 'u', 'ů' => 'u', 'ü' => 'u', 'ý' => 'y', 'ž' => 'z', 'ß' => 'ss',
+    ];
 
     /** @return list<string> */
     private static function lines(string $content): array

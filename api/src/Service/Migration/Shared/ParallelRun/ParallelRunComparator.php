@@ -390,6 +390,10 @@ final class ParallelRunComparator
         sort($keys, SORT_STRING);
         $diffs = [];
         foreach ($keys as $key) {
+            // Obraty bez střediska se porovnají, jen když je sestava zdroje uvádí řádkem.
+            if ($key === '' && !isset($theirsN[''])) {
+                continue;
+            }
             $m = $ours[$key] ?? ['name' => '', 'revenue' => 0.0, 'cost' => 0.0];
             $t = $theirsN[$key] ?? ['revenue' => 0.0, 'cost' => 0.0];
             if (ReconciliationTolerance::sameCent($m['revenue'], $t['revenue']) && ReconciliationTolerance::sameCent($m['cost'], $t['cost'])) {

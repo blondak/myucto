@@ -129,7 +129,7 @@ final class ExportInputParser
         foreach (DelimitedExport::rows($content, self::COUNTS, ['book', 'count'], ParallelRunInput::DOCUMENT_COUNTS) as $row) {
             $book = ParallelRunInput::book($row['book']);
             $count = DelimitedExport::number($row['count']);
-            if ($row['book'] === '' || $count === null) {
+            if ($row['book'] === '' || $count === null || DelimitedExport::isTotalLabel($row['book'])) {
                 continue;
             }
             if ($book === null) {
@@ -147,7 +147,7 @@ final class ExportInputParser
         $out = [];
         foreach (DelimitedExport::rows($content, self::SALDO, ['document', 'amount'], ParallelRunInput::SALDO) as $row) {
             $amount = DelimitedExport::number($row['amount']);
-            if ($row['document'] === '' || $amount === null) {
+            if ($row['document'] === '' || $amount === null || DelimitedExport::isTotalLabel($row['document'])) {
                 continue;
             }
             $account = preg_match('/^(\d{3})/', (string) ($row['account'] ?? ''), $m) === 1 ? $m[1] : null;
@@ -168,10 +168,10 @@ final class ExportInputParser
         $out = [];
         foreach (DelimitedExport::rows($content, self::BANK, ['account', 'balance'], ParallelRunInput::BANK_BALANCES) as $row) {
             $balance = DelimitedExport::number($row['balance']);
-            if ($row['account'] === '' || $balance === null) {
+            if ($row['account'] === '' || $balance === null || DelimitedExport::isTotalLabel($row['account'])) {
                 continue;
             }
-            $currency = strtoupper(trim((string) ($row['currency'] ?? '')));
+            $currency = mb_strtoupper(trim((string) ($row['currency'] ?? '')));
             $czk = isset($row['balance_czk']) ? DelimitedExport::number($row['balance_czk']) : null;
             $out[] = [
                 'account' => $row['account'],
@@ -188,7 +188,7 @@ final class ExportInputParser
     {
         $out = [];
         foreach (DelimitedExport::rows($content, self::ASSETS, ['inventory_number'], ParallelRunInput::ASSETS) as $row) {
-            if ($row['inventory_number'] === '') {
+            if ($row['inventory_number'] === '' || DelimitedExport::isTotalLabel($row['inventory_number'])) {
                 continue;
             }
             $values = [];
@@ -211,8 +211,11 @@ final class ExportInputParser
         $out = [];
         foreach ($rows as $row) {
             $center = trim($row['center']);
-            if ($center === '') {
+            if ($center === '' || DelimitedExport::isTotalLabel($center)) {
                 continue;
+            }
+            if (in_array(DelimitedExport::fold($center), ['bez strediska', 'nezarazeno', 'bez'], true)) {
+                $center = '';
             }
             $out[$center] ??= ['revenue' => 0.0, 'cost' => 0.0];
             if (isset($row['revenue']) || isset($row['cost'])) {
