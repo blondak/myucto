@@ -1016,6 +1016,39 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         return $payload;
     }
 
+    /**
+     * Pokyny MPSV k 10297: úhrn příjmů „bez zaokrouhlení". Zaokrouhlený základ
+     * (23 300) slouží jen k výpočtu 10298 a do hlášení nepatří.
+     */
+    public function testAdvanceTaxBaseIsReportedWithoutRoundingToHundreds(): void
+    {
+        $payload = $this->preparation()->payload;
+        $advance = &$payload['people'][0]['person_summary']['statutory']
+            ['income_tax']['advance_tax'];
+        $advance['taxable_income_minor_units'] = 2_325_000;
+        $advance['rounded_tax_base_minor_units'] = 2_330_000;
+        $advance['tax_before_credits_minor_units'] = 349_500;
+        $advance['tax_after_credits_minor_units'] = 349_500;
+        unset($advance);
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($this->preparation(), $payload),
+            $this->pvpoj(),
+        );
+
+        self::assertSame(
+            [
+                'base' => 23_250,
+                'computed' => 3_495,
+                'after_credits' => 3_495,
+                'bonus' => 0,
+                'taxable_income' => 23_250,
+            ],
+            $resolution->candidate?->payload['people'][0]['summary']
+                ['advance_tax_czk'],
+        );
+    }
+
     public function testMissingAdvanceTaxKeysNeverBecomeSilentZero(): void
     {
         $preparation = $this->preparation();

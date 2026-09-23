@@ -1969,10 +1969,15 @@ final class JmhzScenario1DocumentResolver
                 'taxable_income' => null,
             ];
         }
+        // 10297 je podle Pokynů MPSV k vyplnění MH 1.4.13 úhrn zdaňovaných
+        // příjmů „bez zaokrouhlení" (vzor: 10297 = 15 353, 10298 = 15 % ze
+        // 15 400). Zaokrouhlený základ je jen mezihodnota výpočtu 10298 a do
+        // hlášení nepatří; mzdový list a výplatnice ho dál ukazují jako
+        // „zaokrouhlený základ", tam je na místě.
         return [
             'base' => $this->advanceTaxField(
                 $advance,
-                'rounded_tax_base_minor_units',
+                'taxable_income_minor_units',
                 '10297',
                 $employeeId,
                 $blockers,
