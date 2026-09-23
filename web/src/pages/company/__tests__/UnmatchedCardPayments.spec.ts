@@ -8,12 +8,15 @@ const m = vi.hoisted(() => ({
   uploadReceipt: vi.fn(),
   rematch: vi.fn(),
   writeOff: vi.fn(),
+  listAccounts: vi.fn(),
   push: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 vi.mock('@/api/paymentCards', () => ({
   paymentCardsApi: { unmatchedPayments: m.unmatchedPayments, uploadReceipt: m.uploadReceipt, rematch: m.rematch, writeOff: m.writeOff },
 }))
+vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: m.listAccounts } }))
+vi.mock('@/components/ui/Modal.vue', () => ({ default: { props: ['title', 'widthClass'], template: '<div><slot /><slot name="footer" /></div>' } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => m.toast }))
 vi.mock('@/composables/useFormat', () => ({
@@ -64,6 +67,7 @@ async function render() {
 beforeEach(() => {
   vi.clearAllMocks()
   m.unmatchedPayments.mockResolvedValue(overview)
+  m.listAccounts.mockResolvedValue([])
 })
 
 describe('Platby kartou bez dokladu', () => {
@@ -96,7 +100,6 @@ describe('Platby kartou bez dokladu', () => {
 
   it('platbu na mezičlenu karty jde uzavřít bez dokladu a přehled se načte znovu', async () => {
     m.writeOff.mockResolvedValue({ entry_id: 5, account_code: '548.990' })
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const wrapper = await render()
     expect(wrapper.find('[data-testid="clearing-account"]').exists()).toBe(true)
     // Platba bez mezičlenu (neznámá karta účtovaná postaru) uzavření nenabízí.
@@ -104,9 +107,32 @@ describe('Platby kartou bez dokladu', () => {
 
     await wrapper.find('[data-testid="write-off-expense"]').trigger('click')
     await flushPromises()
+    // Nejdřív dialog, zaúčtuje se až potvrzením — bez volby účtu výchozí z nastavení.
+    expect(m.writeOff).not.toHaveBeenCalled()
+    await wrapper.find('[data-testid="write-off-confirm"]').trigger('click')
+    await flushPromises()
 
-    expect(m.writeOff).toHaveBeenCalledWith(41, 'expense')
+    expect(m.writeOff).toHaveBeenCalledWith(41, 'expense', null)
     expect(m.unmatchedPayments).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="write-off-dialog"]').exists()).toBe(false)
+  })
+
+  it('při uzavření jde zvolit jiný účet, nabídka drží jen účty cíle', async () => {
+    m.writeOff.mockResolvedValue({ entry_id: 6, account_code: '513.100' })
+    const account = (id: number, code: string) => ({ id, supplier_id: 1, account_code: code, name: `Účet ${code}`, account_type: 'expense',
+      normal_side: 'debit', is_synthetic: false, parent_id: null, is_active: true, created_at: '2026-01-01' })
+    m.listAccounts.mockResolvedValue([account(1, '513.100'), account(2, '548.990'), account(3, '311.100'), account(4, '378.101')])
+    const wrapper = await render()
+    await wrapper.find('[data-testid="write-off-expense"]').trigger('click')
+    await flushPromises()
+
+    const select = wrapper.find('[data-testid="write-off-account"]')
+    const codes = select.findAll('option').map(o => o.text())
+    expect(codes).toEqual(['payment_cards.unmatched.write_off_account_default', '513.100 - Účet 513.100', '548.990 - Účet 548.990'])
+    await select.setValue('1')
+    await wrapper.find('[data-testid="write-off-confirm"]').trigger('click')
+    await flushPromises()
+    expect(m.writeOff).toHaveBeenCalledWith(41, 'expense', 1)
   })
 
   it('nahraná účtenka jde k vybrané platbě kartou', async () => {
