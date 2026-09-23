@@ -150,6 +150,25 @@ async function removeNote(n: JournalNote) {
   }
 }
 
+/**
+ * Rozepsaná (neuložená) poznámka — nová nebo upravovaná. Dialog, který poznámky vkládá
+ * (Přeúčtovat), ji uloží svým hlavním tlačítkem, ať se napsaný text neztratí jen proto,
+ * že uživatel neklikl na „Přidat poznámku".
+ */
+const hasPending = computed(() => draft.value.trim() !== ''
+  || (editingId.value !== null && editDraft.value.trim() !== ''
+    && editDraft.value.trim() !== (notes.value.find(n => n.id === editingId.value)?.body ?? '').trim()))
+
+async function savePending(): Promise<void> {
+  if (editingId.value !== null) {
+    const edited = notes.value.find(n => n.id === editingId.value)
+    if (edited) await saveEdit(edited)
+  }
+  if (draft.value.trim() !== '') await addNote()
+}
+
+defineExpose({ hasPending, savePending })
+
 function metaLine(n: JournalNote): string {
   const who = n.created_by_name || t('accounting.journal.notes.unknown_user')
   const base = `${who} · ${formatDate(n.created_at)}`
