@@ -37,6 +37,8 @@ final class DppoEpoXmlParser
      *   supplier: array{ic:string,dic:string,name:string},
      *   lines: array<int,float>, extra: array<string,array{value:float,label:string}>,
      *   rate_pct: ?float, amendment: array{kc_dppiv1:?float,kc_dppiv2:?float,kc_dppiv3:?float,d_zjist:string},
+     *   advances_paid: ?float, credits: array{kc_dpp_f1:?float,kc_dpp_f2:?float,kc_dpp_f3:?float},
+     *   appendix: array<int,list<string>>,
      * }
      */
     public function parse(string $xml): array
@@ -128,6 +130,28 @@ final class DppoEpoXmlParser
             $amendment['d_zjist'] = $this->isoDate($vetaD->getAttribute('d_zjist')) ?? '';
         }
 
+        // Údaje mimo II. oddíl, které převzetí podaného přiznání do vstupů potřebuje:
+        // zaplacené zálohy (VetaD kc_v_1), slevy § 35 z tabulky H (VetaM) a texty
+        // zvláštních příloh II. oddílu (VetaR) po řádcích.
+        $advancesPaid = $vetaD->hasAttribute('kc_v_1') && is_numeric($vetaD->getAttribute('kc_v_1'))
+            ? (float) $vetaD->getAttribute('kc_v_1')
+            : null;
+        $credits = ['kc_dpp_f1' => null, 'kc_dpp_f2' => null, 'kc_dpp_f3' => null];
+        $vetaM = $dom->getElementsByTagName('VetaM')->item(0);
+        foreach (array_keys($credits) as $k) {
+            if ($vetaM !== null && $vetaM->hasAttribute($k) && is_numeric($vetaM->getAttribute($k))) {
+                $credits[$k] = (float) $vetaM->getAttribute($k);
+            }
+        }
+        $appendix = [];
+        foreach ($dom->getElementsByTagName('VetaR') as $vetaR) {
+            $line = (int) $vetaR->getAttribute('c_radku');
+            $text = trim($vetaR->getAttribute('t_prilohy'));
+            if ($line > 0 && $text !== '' && in_array(trim($vetaR->getAttribute('kod_sekce')), ['', '2'], true)) {
+                $appendix[$line][] = $text;
+            }
+        }
+
         return [
             'form_code' => 'dppdp9',
             'dokument' => $dokument,
@@ -141,6 +165,9 @@ final class DppoEpoXmlParser
             'extra' => $extra,
             'rate_pct' => $ratePct,
             'amendment' => $amendment,
+            'advances_paid' => $advancesPaid,
+            'credits' => $credits,
+            'appendix' => $appendix,
         ];
     }
 

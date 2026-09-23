@@ -1763,6 +1763,17 @@ final class TaxReturnService
             // výchozí ANO (rozhodnutí zadavatele 31. 8. 2026, viz DppoXmlBuilder::buildVetaUZ),
             // ruční vstup umožňuje vypnout.
             $out['puz_to_registry'] = filter_var($inputs['puz_to_registry'] ?? true, FILTER_VALIDATE_BOOLEAN);
+            // Evidence, že vstupy vznikly převzetím podaného přiznání (FiledDppoImporter).
+            $source = $inputs['filed_source'] ?? null;
+            if (is_array($source) && $this->text($source['forma'] ?? '', 1) !== '') {
+                $out['filed_source'] = [
+                    'forma' => $this->text($source['forma'] ?? '', 1),
+                    'verze_pis' => $this->text($source['verze_pis'] ?? '', 10),
+                    'period_to' => $this->date($source['period_to'] ?? ''),
+                    'file_sha1' => $this->text($source['file_sha1'] ?? '', 40),
+                    'imported_at' => $this->text($source['imported_at'] ?? '', 25),
+                ];
+            }
         } else {
             // DPFO — sekce §6/§8/§9/§10 (typované) + zálohy pojistného (pro přehledy DP4).
             $s6 = (array) ($inputs['s6_employment'] ?? []);

@@ -722,7 +722,19 @@ final class DppoReturnCalculator
     /** Klíčová slova „paušál" + „doprav" (diakritiku nezávisle) — pokrývá oba směry §24/2/zt. */
     private function matchesFlatRateTravelText(string $text): bool
     {
-        $folded = $this->foldCzechDiacritics(mb_strtolower($text, 'UTF-8'));
+        return self::looksLikeFlatRateTravel($text);
+    }
+
+    /**
+     * Text mluví o paušálním výdaji na dopravu (§ 24/2/zt). Sdílí ho převzetí podaného
+     * přiznání, které podle textu zvláštní přílohy k ř. 112 pozná, zda jde o paušál.
+     */
+    public static function looksLikeFlatRateTravel(string $text): bool
+    {
+        $folded = strtr(mb_strtolower($text, 'UTF-8'), [
+            'á' => 'a', 'č' => 'c', 'ď' => 'd', 'é' => 'e', 'ě' => 'e', 'í' => 'i', 'ň' => 'n',
+            'ó' => 'o', 'ř' => 'r', 'š' => 's', 'ť' => 't', 'ú' => 'u', 'ů' => 'u', 'ý' => 'y', 'ž' => 'z',
+        ]);
         return str_contains($folded, 'pausal') && str_contains($folded, 'doprav');
     }
 
