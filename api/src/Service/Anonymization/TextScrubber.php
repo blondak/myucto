@@ -199,7 +199,7 @@ final class TextScrubber
             if ($new !== (string) $node) {
                 $changed = true;
 
-                return ctype_digit($new) && $new[0] !== '0' ? (int) $new : $new;
+                return ctype_digit($new) ? (int) $new : $new;
             }
 
             return $node;
@@ -224,10 +224,18 @@ final class TextScrubber
     {
         $parsed = Pseudonymizer::parseNationalAccount($value);
         $bank = substr($value, -4);
-        if ($parsed === null || !in_array($bank, PseudonymPools::CZECH_BANK_CODES, true)) {
-            return $value;
-        }
-        if (!Pseudonymizer::isValidAccountPart($parsed['base']) || ($parsed['prefix'] !== '' && !Pseudonymizer::isValidAccountPart($parsed['prefix']))) {
+        $validAccount = $parsed !== null
+            && in_array($bank, PseudonymPools::CZECH_BANK_CODES, true)
+            && Pseudonymizer::isValidAccountPart($parsed['base'])
+            && ($parsed['prefix'] === '' || Pseudonymizer::isValidAccountPart($parsed['prefix']));
+        if (!$validAccount) {
+            // Rodné číslo s lomítkem má týž tvar jako účet „základ/banka".
+            if (preg_match('/^\d{6}\/\d{3,4}$/D', $value) === 1
+                && Pseudonymizer::isValidBirthNumber($value)
+                && !$this->pseudonymizer->isIssuedPseudonym('rc', str_replace('/', '', $value))) {
+                return $this->pseudonymizer->birthNumber($value);
+            }
+
             return $value;
         }
         if ($this->pseudonymizer->isIssuedPseudonym('account', $parsed['base'])) {
