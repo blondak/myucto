@@ -109,6 +109,7 @@ se záměrně nevytvoří a úloha skončí chybou (vidět v **Systém → Plán
 |---|---|
 | `publish.{sh,ps1}` | `cd web && pnpm install && pnpm build` — produkční build frontendu do `web/dist/` (před commitem nebo nasazením na produkční IIS / Apache) |
 | `test.{sh,ps1}`    | `cd api && vendor/bin/phpunit` — spustí testovou sadu (94 testů, ~1 s). Lze passnout filter / testsuite (`cmd/test.sh --filter=GpcParser`) |
+| `anonymize-clone.{sh,ps1}` | Anonymizovaná kopie databáze pro testovací instanci: `--from=DB --to=DB_ANON [--replace] [--password=…] [--files-out=DIR] [--dump=SOUBOR]`. Originál jen čte, kopie je nová databáze s pseudonymizovanými osobními a obchodními údaji, vyprázdněnými relacemi a vypnutými integracemi. Detail v manuálu, kapitola 101.10 |
 | `verify-instance-hardening.{sh,ps1}` | **H-19** — akceptační test hardeningu NASAZENÉ instance (ne repa). Přes HTTP zkouší sadu citlivých URL (`cfg.php`, `api/src/`, `db/`, `storage/`, `private/`, VCS metadata, …) a ověřuje, že každá vrátí 403 nebo 404; k tomu testuje tenantový host gate (neznámý `Host` → `421`, i na přímý `/web/dist/index.html`) a že reverzní proxy nepřepisuje hlavičku `Host`. Jen GET/HEAD, nic nezapisuje. `cmd/verify-instance-hardening.sh --host=www.myucto.cz [--ip=IP] [--json]` / `pwsh -File cmd/verify-instance-hardening.ps1 -InstanceHost www.myucto.cz [-Ip IP] [-Json]`. Detaily a seznam pravidel, na která skript testuje, viz níže |
 
 ### `verify-instance-hardening.{sh,ps1}` — co sada ověřuje

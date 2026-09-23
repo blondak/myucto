@@ -412,6 +412,7 @@ final class TenantPredicateTest extends TestCase
         'LedgerInvariantService.php::ledgerIsEmpty' => 'invariant nad deníkem celé instance (viz docblock služby)',
         'LedgerInvariantService.php::i25AccumulatedNotAboveInputPrice' => 'invariant nad veškerým majetkem instance',
         'ActivityLogHashChain.php::verify' => 'hash chain auditního logu je jeden pro celou instanci',
+        'AnonymizationService.php::resealAuditChain' => 'znovu zapečetí jediný hash chain celé anonymizované kopie instance',
         // Vrací POUZE bool „existuje někde práce?", žádná data nepřecházejí mezi
         // tenanty. Protějšek AiWorker::run(), který stejně tak jede přes všechny
         // dodavatele s opt-inem — cron nemá uživatelský kontext, na který by se
