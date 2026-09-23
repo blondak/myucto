@@ -3704,6 +3704,9 @@ final class Routes
             $g->get('/{type}/{year:[0-9]+}/pdf',       [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'pdf']);
             // Featura A — rekonciliace proti PODANÉMU přiznání (upload EPO XML DPPDP9 od účetní).
             $g->post('/{type}/{year:[0-9]+}/reconcile', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'reconcile']);
+            // Převzetí podaného přiznání (EPO XML) do vstupů přiznání a evidence ztrát.
+            $g->post('/{type}/{year:[0-9]+}/filed-import/preview', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'filedImportPreview']);
+            $g->post('/{type}/{year:[0-9]+}/filed-import', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'filedImportApply']);
             $g->get('/{type}/{year:[0-9]+}/insurance/pdf', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'insurancePdf']);
             // E11 (audit 2026-07): PDF Přehled OSVČ pro zdravotní pojišťovnu.
             $g->get('/{type}/{year:[0-9]+}/insurance/pdf/health', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'healthPdf']);

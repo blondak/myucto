@@ -640,6 +640,9 @@ final class RoutePermissionMap
         // (nic neukládá/neúčtuje) → jen READ, ne module-fallback WRITE níže. Na této
         // úrovni závisí demo brána; začne-li endpoint data ukládat, musí být WRITE.
         ['POST', '#^/api/tax-return/.*/reconcile$#', 'reports', AccessLevel::READ],
+        // Náhled převzetí podaného přiznání nic neukládá (READ); samotné převzetí
+        // (…/filed-import) zapisuje vstupy a evidenci ztrát a padá na WRITE níže.
+        ['POST', '#^/api/tax-return/.*/filed-import/preview$#', 'reports', AccessLevel::READ],
         ['GET', '#^/api/reports/submissions/settings$#', 'reports.submit', AccessLevel::WRITE],
         ['GET', '#^/api/reports/submissions/[0-9]+/artifacts/[0-9]+/download$#', 'reports.export', AccessLevel::READ],
         ['GET', '#^/api/reports/submissions(/|$)#', 'reports', AccessLevel::READ],
