@@ -28,6 +28,7 @@ final class AssetRepository
         'depreciator_ground', 'co_ownership_share', 'depreciator_note',
         'opening_tax_years', 'opening_tax_amount', 'opening_acc_months', 'opening_acc_amount',
         'acc_useful_life_months', 'acc_method', 'acc_residual_value', 'created_by',
+        'summary_account_code',
     ];
 
     /**

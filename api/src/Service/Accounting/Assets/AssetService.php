@@ -1793,6 +1793,13 @@ final class AssetService
         }
     }
 
+    /** Majetkový účet neodpisovaného majetku (§27, pozemky, umělecká díla) podle mapy R18. */
+    public static function isNonDepreciableAccount(string $assetAccountCode): bool
+    {
+        $prefix = substr($assetAccountCode, 0, 3);
+        return array_key_exists($prefix, self::ACCUMULATED_MAP) && self::ACCUMULATED_MAP[$prefix] === null;
+    }
+
     private static function deriveAccumulated(string $assetAccountCode): ?string
     {
         $prefix = substr($assetAccountCode, 0, 3);

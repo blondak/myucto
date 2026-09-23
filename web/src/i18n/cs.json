@@ -13770,6 +13770,22 @@
         "clear_confirm": "Zrušit ruční přepis daňového odpisu roku {year} a vrátit spočtený odpis?",
         "err_fields": "Nezáporná částka a důvod jsou povinné."
       },
+      "account_summary": {
+        "button": "Souhrnná karta z účtu",
+        "title": "Souhrnná karta z účtu bez karet",
+        "hint": "Pro majetek vedený jen v deníku (typicky pozemky na 031 bez inventárních karet) založí jednu souhrnnou kartu: vstupní cena je počáteční stav účtu, pohyby deníku jsou zvýšení a snížení ceny. Karta sedí na zůstatek účtu, nic neúčtuje a neodpisuje se. Po dalších pohybech účtu ji srovnejte s deníkem.",
+        "empty": "Žádný účet neodpisovaného majetku se zůstatkem.",
+        "col_account": "Účet",
+        "col_balance": "Zůstatek v deníku",
+        "col_card": "Souhrnná karta",
+        "movements": "Pohybů v deníku: {count}",
+        "has_cards": "Účet má vlastní karty majetku ({count}), souhrnnou kartu nedostane.",
+        "create": "Založit kartu",
+        "sync": "Srovnat s deníkem",
+        "created": "Souhrnná karta účtu {account} byla založena ({count} pohybů).",
+        "synced": "Souhrnná karta účtu {account} byla srovnána s deníkem ({count} pohybů).",
+        "badge": "Souhrnná karta účtu {account}"
+      },
       "hints": {
         "sale_invoice_641": "Vystavte fakturu — výnos z prodeje (641, příp. DPH) se účtuje vydanou fakturou, ne kartou majetku.",
         "donation_vat_output": "U darovaného majetku s uplatněným odpočtem DPH ověřte odvod DPH z ceny obvyklé (§13 odst. 4 písm. a) a §36 odst. 6 písm. a) ZDPH). Vyřazení interní daňový doklad nevytváří.",

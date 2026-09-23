@@ -34,6 +34,8 @@ export interface Asset {
   disposal_price: number | null
   /** Zápis deníku, který vyřazení zaúčtoval mimo modul majetku (převod, ruční zápis). */
   disposal_entry_id?: number | null
+  /** Souhrnná karta účtu bez karet: účet, jehož pohyby z deníku karta nese. */
+  summary_account_code?: string | null
   status: AssetStatus
   tax_method: TaxMethod
   tax_group: number | null
@@ -228,6 +230,25 @@ export interface DisposePayload {
   entry_id?: number | null
 }
 
+/** Účet neodpisovaného majetku a stav jeho souhrnné karty. */
+export interface AccountSummaryCandidate {
+  account_code: string
+  name: string
+  balance: number
+  movements: number
+  active_cards: number
+  summary_asset_id: number | null
+  summary_value: number | null
+  eligible: boolean
+}
+
+export interface AccountSummaryResult {
+  asset: AssetDetail
+  created: boolean
+  improvements: number
+  warnings: AssetWarning[]
+}
+
 export const assetsApi = {
   list: (filters?: { status?: AssetStatus | ''; q?: string; page?: number; per_page?: number }) => {
     const params: Record<string, string | number> = {}
@@ -273,4 +294,9 @@ export const assetsApi = {
     api.post(`/accounting/assets/${id}/depreciation/tax-override`, payload).then(r => r.data),
   clearTaxOverride: (id: number, fiscalYear: number) =>
     api.delete(`/accounting/assets/${id}/depreciation/tax-override/${fiscalYear}`).then(r => r.data),
+  /** Souhrnné karty účtů bez karet (portfolio pozemků jen v deníku). */
+  accountSummaryCandidates: () =>
+    api.get<{ items: AccountSummaryCandidate[] }>('/accounting/assets/account-summary').then(r => r.data.items),
+  syncAccountSummary: (accountCode: string) =>
+    api.post<AccountSummaryResult>('/accounting/assets/account-summary', { account_code: accountCode }).then(r => r.data),
 }

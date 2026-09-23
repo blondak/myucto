@@ -13770,6 +13770,22 @@
         "clear_confirm": "Remove the manual override of the {year} tax depreciation and restore the computed amount?",
         "err_fields": "A non-negative amount and a reason are required."
       },
+      "account_summary": {
+        "button": "Summary card from account",
+        "title": "Summary card for an account without asset cards",
+        "hint": "For assets kept only in the journal (typically land on 031 without asset cards) creates one summary card: the input price is the account's opening balance and journal movements are increases and decreases of the price. The card matches the account balance, posts nothing and is not depreciated. After further movements on the account, sync it with the journal.",
+        "empty": "No non-depreciable asset account with a balance.",
+        "col_account": "Account",
+        "col_balance": "Journal balance",
+        "col_card": "Summary card",
+        "movements": "Journal movements: {count}",
+        "has_cards": "The account has its own asset cards ({count}) and gets no summary card.",
+        "create": "Create card",
+        "sync": "Sync with journal",
+        "created": "The summary card for account {account} has been created ({count} movements).",
+        "synced": "The summary card for account {account} has been synced with the journal ({count} movements).",
+        "badge": "Summary card for account {account}"
+      },
       "hints": {
         "sale_invoice_641": "Issue an invoice — the sale revenue (641, incl. VAT) is booked via an issued invoice, not the asset card.",
         "donation_vat_output": "For donated assets where input VAT was deducted, verify output VAT based on the open market value (§13(4)(a) and §36(6)(a) of the Czech VAT Act). Disposal does not create an internal tax document.",

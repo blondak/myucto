@@ -11393,6 +11393,45 @@ paths:
       responses:
         '200': { description: "OK (id, varsymbol, vendor, částky, kurz, has_asset)", content: { application/json: { schema: { type: array, items: { type: object } } } } }
 
+  /api/v1/accounting/assets/account-summary:
+    get:
+      tags: [Accounting]
+      summary: Účty neodpisovaného majetku a jejich souhrnné karty
+      description: >-
+        Účty 031/032 (a analytiky) se zůstatkem v deníku nebo se souhrnnou kartou:
+        zůstatek, počet pohybů, počet vlastních karet (`eligible` = účet bez aktivních
+        karet), id a hodnota souhrnné karty.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200': { description: "OK {items: [account_code, name, balance, movements, active_cards, summary_asset_id, summary_value, eligible]}", content: { application/json: { schema: { type: object } } } }
+    post:
+      tags: [Accounting]
+      summary: Založení nebo srovnání souhrnné karty účtu bez karet s deníkem
+      description: >-
+        Účetní/admin. Majetek vedený jen v deníku (portfolio pozemků) dostane jednu kartu:
+        vstupní cena = počáteční stav účtu, pohyby deníku = zvýšení a snížení ceny, karta
+        sedí na zůstatek účtu, nic neúčtuje a neodpisuje se. Opakované volání kartu
+        přepočte z deníku. Účet s vlastními kartami vrací 409 `account_has_cards`.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_code]
+              properties:
+                account_code: { type: string }
+      responses:
+        '200': { description: "Srovnáno {asset, created, improvements, warnings}", content: { application/json: { schema: { type: object } } } }
+        '201': { description: "Založeno {asset, created, improvements, warnings}", content: { application/json: { schema: { type: object } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Účet má vlastní karty majetku, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/assets/depreciations/book:
     post:
       tags: [Accounting]

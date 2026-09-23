@@ -327,6 +327,15 @@ const assetActions = computed<ActionItem[]>(() => {
       run: () => { void runRevertDisposal() },
     },
     {
+      key: 'sync_summary',
+      label: t('accounting.assets.account_summary.sync'),
+      icon: 'cycle',
+      tier: 'secondary',
+      show: canWrite && inUse && !!a.summary_account_code,
+      disabled: acting.value,
+      run: () => { void runSyncSummary() },
+    },
+    {
       key: 'edit',
       label: t('common.edit'),
       icon: 'edit',
@@ -394,6 +403,18 @@ async function downloadDepreciationCard() {
   }
 }
 
+async function runSyncSummary() {
+  const code = asset.value?.summary_account_code
+  if (!code) return
+  acting.value = true
+  try {
+    const r = await assetsApi.syncAccountSummary(code)
+    for (const w of r.warnings || []) toast.warning(w.message)
+    toast.success(t('accounting.assets.account_summary.synced', { account: code, count: r.improvements }))
+    await load()
+  } catch (e: any) { apiError(e) } finally { acting.value = false }
+}
+
 async function runRevertDisposal() {
   if (!confirm(t('accounting.assets.lifecycle.revert_confirm'))) return
   acting.value = true
@@ -425,6 +446,9 @@ const yearOptions = computed(() => {
             <h1 class="text-2xl font-semibold">{{ asset.name }}</h1>
             <span class="text-xs px-2 py-0.5 rounded font-medium" :class="STATUS_BADGE[asset.status]">
               {{ t(`accounting.assets.status.${asset.status}`) }}
+            </span>
+            <span v-if="asset.summary_account_code" class="text-xs px-2 py-0.5 rounded font-medium bg-primary-50 text-primary-600">
+              {{ t('accounting.assets.account_summary.badge', { account: asset.summary_account_code }) }}
             </span>
           </div>
           <p class="text-sm text-neutral-500 mt-0.5">

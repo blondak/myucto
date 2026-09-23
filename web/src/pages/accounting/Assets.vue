@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
-import { assetsApi, type AssetListItem, type AssetStatus, type PurchaseCandidate } from '@/api/assets'
+import { assetsApi, type AccountSummaryCandidate, type AssetListItem, type AssetStatus, type PurchaseCandidate } from '@/api/assets'
 import { postingErrorI18nKey } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -205,6 +205,41 @@ function pickCandidate(c: PurchaseCandidate) {
   router.push({ name: 'accounting-asset-new', query: { invoice_id: c.id } })
 }
 
+// ── Modal: souhrnná karta z účtu bez karet ─────────────────────────────────
+const showSummary = ref(false)
+const summaryCandidates = ref<AccountSummaryCandidate[]>([])
+const summaryLoading = ref(false)
+const summarySyncing = ref<string | null>(null)
+
+async function openSummary() {
+  showSummary.value = true
+  summaryLoading.value = true
+  try {
+    summaryCandidates.value = await assetsApi.accountSummaryCandidates()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+    showSummary.value = false
+  } finally {
+    summaryLoading.value = false
+  }
+}
+
+async function syncSummary(c: AccountSummaryCandidate) {
+  summarySyncing.value = c.account_code
+  try {
+    const r = await assetsApi.syncAccountSummary(c.account_code)
+    for (const w of r.warnings || []) toast.warning(w.message)
+    toast.success(t(r.created ? 'accounting.assets.account_summary.created' : 'accounting.assets.account_summary.synced',
+      { account: c.account_code, count: r.improvements }))
+    summaryCandidates.value = await assetsApi.accountSummaryCandidates()
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    summarySyncing.value = null
+  }
+}
+
 // ── Modal: zaúčtování odpisů roku ──────────────────────────────────────────
 const showBook = ref(false)
 const bookYear = ref(new Date().getFullYear() - 1)
@@ -276,6 +311,10 @@ async function runBook() {
           <button @click="showBook = true" :class="btnOutline('neutral')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
             {{ t('accounting.assets.book_year') }}
+          </button>
+          <button @click="openSummary" :class="btnOutline('neutral')" class="whitespace-nowrap">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
+            {{ t('accounting.assets.account_summary.button') }}
           </button>
           <button @click="openCandidates" :class="btnOutline('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
@@ -500,6 +539,53 @@ async function runBook() {
           </tr>
         </tbody>
       </table>
+    </Modal>
+
+    <!-- Modal: souhrnná karta z účtu bez karet -->
+    <Modal v-if="showSummary" :title="t('accounting.assets.account_summary.title')" widthClass="max-w-3xl" @close="showSummary = false">
+      <p class="text-sm text-neutral-500 mb-3">{{ t('accounting.assets.account_summary.hint') }}</p>
+      <div v-if="summaryLoading" class="text-center text-neutral-500 py-8 text-sm">{{ t('common.loading') }}</div>
+      <EmptyState v-else-if="summaryCandidates.length === 0" dense accent="neutral" icon="chart" :title="t('accounting.assets.account_summary.empty')" />
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="text-xs text-neutral-500 uppercase tracking-wide">
+            <tr>
+              <th class="px-2 py-1 text-left font-medium">{{ t('accounting.assets.account_summary.col_account') }}</th>
+              <th class="px-2 py-1 text-right font-medium">{{ t('accounting.assets.account_summary.col_balance') }}</th>
+              <th class="px-2 py-1 text-right font-medium">{{ t('accounting.assets.account_summary.col_card') }}</th>
+              <th class="px-2 py-1"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-neutral-100">
+            <tr v-for="c in summaryCandidates" :key="c.account_code">
+              <td class="px-2 py-2">
+                <span class="font-mono">{{ c.account_code }}</span> {{ c.name }}
+                <div class="text-xs text-neutral-400">{{ t('accounting.assets.account_summary.movements', { count: c.movements }) }}</div>
+                <div v-if="!c.eligible" class="text-xs text-warning-600">{{ t('accounting.assets.account_summary.has_cards', { count: c.active_cards }) }}</div>
+              </td>
+              <td class="px-2 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(num(c.balance)) }}</td>
+              <td class="px-2 py-2 text-right font-mono whitespace-nowrap">
+                <RouterLink v-if="c.summary_asset_id" :to="{ name: 'accounting-asset-detail', params: { id: c.summary_asset_id } }"
+                  class="text-primary-600 hover:underline" :class="{ 'text-warning-600': Math.abs(num(c.summary_value) - num(c.balance)) >= 0.01 }">
+                  {{ formatMoney(num(c.summary_value)) }}
+                </RouterLink>
+                <template v-else>—</template>
+              </td>
+              <td class="px-2 py-2 text-right">
+                <button v-if="c.eligible" :disabled="summarySyncing !== null" @click="syncSummary(c)"
+                  :class="c.summary_asset_id ? btnOutline('primary') : btnFilled('primary')" class="whitespace-nowrap">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="c.summary_asset_id ? ICONS.cycle : ICONS.plus" /></svg>
+                  {{ summarySyncing === c.account_code ? t('common.loading')
+                    : t(c.summary_asset_id ? 'accounting.assets.account_summary.sync' : 'accounting.assets.account_summary.create') }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="flex justify-end mt-4">
+        <button @click="showSummary = false" :class="btnOutline('neutral')">{{ t('common.close') }}</button>
+      </div>
     </Modal>
 
     <!-- Modal: zaúčtování odpisů roku -->
