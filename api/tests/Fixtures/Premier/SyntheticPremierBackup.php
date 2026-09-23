@@ -42,6 +42,8 @@ final class SyntheticPremierBackup
 
     public const RC_MONTH = 4;
     public const OSS_DOCUMENT = '250003';
+    /** Vydaná faktura v EUR, jejíž koruny v deníku vycházejí přesně kurzem (flag `eur_exact`). */
+    public const EUR_DOCUMENT = '250008';
     public const OSS_COUNTRY = 'SK';
     public const OSS_RATE = 23.0;
 
@@ -144,6 +146,7 @@ final class SyntheticPremierBackup
      *                           s vkladem 1 000 EUR a kurzovým přeceněním s částkou v měně 0
      *   `reduced_deduction`     tuzemský kód odpočtu je krácený (§ 76, `IS_KRACENY`)
      *   `oss_eur`               s `$oss`: VF 250003 v EUR (40 EUR + 9,20 EUR daň, kurz 25 = deník 1 000 + 230 Kč)
+     *   `eur_exact`             VF 250008 v EUR (100 + 21 a 40 + 8,40 EUR, kurz 25,12 = deník 3 516,80 + 738,53 Kč)
      *   `rc_uncoded_line`       služba z EU PF 250002 má navíc položku 200 Kč bez kódu DPH (poplatek mimo přiznání)
      *   `cash_duplicate`        další dva pokladní doklady PP 1 z 2. 1. 2025 (jiný sborník), tedy tři
      *                           doklady se stejnou řadou i číslem a dva i se stejným datem
@@ -410,6 +413,21 @@ final class SyntheticPremierBackup
                 }
             }
             unset($item);
+        }
+        if (!empty($flags['eur_exact'])) {
+            // VF 250008 v EUR, kurz 25,12: 100 + 21 EUR a 40 + 8,40 EUR = v Kč přesně 2 512 + 527,52
+            // a 1 004,80 + 211,01; deník 3 516,80 + 738,53 Kč, neuhrazená.
+            $customer = ['CISLO_ODB' => '1', 'NAZEV_ODB' => 'Odběratel Fiktivní s.r.o.', 'ICO_ODB' => self::CUSTOMER_ICO, 'DIC_ODB' => 'CZ' . self::CUSTOMER_ICO, 'ID_PAR' => 'P1'];
+            array_push($tables['PUB_UCTO'][1],
+                self::row(92, '2025-10-15', 'VF', self::EUR_DOCUMENT, 'Služby v EUR', 3516.80, '311000', '602100', self::vat(self::CODE_SALE, 'P', 'VF', 9) + $customer),
+                self::row(93, '2025-10-15', 'VF', self::EUR_DOCUMENT, 'DPH', 738.53, '311000', '343021', self::vat(self::CODE_SALE, 'D', 'VF', 9) + $customer),
+            );
+            $tables['FA_OUT'][1][] = self::header(9, 'VF', self::EUR_DOCUMENT, '2025-10-15', 'Služby v EUR',
+                ['VS' => self::EUR_DOCUMENT, 'FORMA' => 'převodem', 'MENA' => 'EUR', 'KURS' => 25.12, 'M_KURS' => 1] + $customer);
+            array_push($tables['POLOZKY'][1],
+                self::item(9, 1, 'Konzultace', 2, 'hod', 100.00, 21.00, 21, self::CODE_SALE),
+                self::item(9, 2, 'Licence', 1, 'ks', 40.00, 8.40, 21, self::CODE_SALE),
+            );
         }
         if (!empty($flags['rc_uncoded_line'])) {
             $euVendor = ['CISLO_ODB' => '3', 'NAZEV_ODB' => 'Fiktiv Software GmbH', 'DIC_ODB' => self::EU_VENDOR_DIC, 'STAT_ODB' => 'Německo', 'ID_PAR' => 'P3'];
