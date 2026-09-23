@@ -716,7 +716,84 @@ zamčené relace ani v otevřeném modálním dialogu. **Obnovit výchozí** ods
 uživatelský přepis a vrátí bezpečné kombinace popsané v
 [Přehledu](10_Prehled.md#1061-klavesove-zkratky).
 
-## 101.10 Tipy
+## 101.10 Anonymizovaná kopie pro testovací instanci
+
+Pro ladění, školení nebo předání dat vývojáři se hodí kopie skutečné
+databáze, ve které ale nejsou osobní ani obchodní údaje. Vyrobí ji příkaz
+`anonymize-clone`:
+
+```bash
+# Linux / Docker
+cmd/anonymize-clone.sh --from=myucto --to=myucto_anon
+# Windows
+cmd\anonymize-clone.ps1 --from=myucto --to=myucto_anon
+```
+
+Originální databáze se jen čte. Kopie vznikne jako **nová databáze** na témž
+serveru; do databáze, se kterou instance pracuje, zapsat nejde. Existující
+cíl se přepíše jen volbou `--replace`, a to jen tehdy, když je to předchozí
+anonymizovaná kopie.
+
+**Co se v kopii změní:**
+
+| Údaj | Náhrada |
+|---|---|
+| názvy partnerů, jména osob, adresy | vymyšlené, právní forma (s.r.o., a.s.) a rod příjmení zůstávají |
+| IČO, DIČ | jiné, platné podle kontrolní číslice; DIČ navazuje na nové IČO |
+| rodná čísla | datum narození a pohlaví zůstávají, koncovka je jiná a číslo platné |
+| čísla účtů, IBAN | jiná platná čísla, kód banky a předčíslí zůstávají |
+| e-maily, telefony, datové schránky | vymyšlené (e-maily v doméně `example.invalid`) |
+| texty dokladů, poznámky, protokoly převodů, auditní stopa | tatáž jména a čísla nahrazená týmiž pseudonymy |
+| přílohy a výpisy uložené v databázi | zástupný soubor (prázdné PDF, obrázek 1×1 px, text) |
+| hesla, API klíče, tokeny, certifikáty, šifrované archivy podání | zneplatněné |
+| relace, přihlašovací kódy, fronta odchozí pošty, licence | vyprázdněné |
+
+Pseudonym je v rámci jednoho běhu **stejný všude**: partner má v kontaktu,
+na faktuře, v bankovní transakci i v textu úhrady tentýž nový název a IČO,
+takže párování plateb a výkazy fungují jako v originále. Částky, data, čísla
+dokladů a vazby se nemění — rozvaha, výsledovka i přiznání k DPH dávají stejná
+čísla. Veřejné účty institucí (finanční úřad, ČSSZ, pojišťovny, platební brány)
+zůstávají, aby aplikace dál poznala platby odvodů.
+
+Klíč pseudonymizace je pro každý běh náhodný a nikam se neukládá, takže
+z kopie nejde originál dopočítat. Volba `--seed=TEXT` dá stejné pseudonymy
+i v dalším běhu, ale se známým seedem jde pseudonym zpětně dohledat —
+používej ji jen na vývojovém stroji.
+
+**Po vytvoření kopie:**
+
+- Odchozí integrace jsou vypnuté (banky, e-mailové profily, ISDS, e-shopy)
+  a přístupové údaje k nim smazané. Testovací instance proto nic neodešle.
+- Hesla uživatelů jsou nepoužitelná. Nové nastaví
+  `MYINVOICE_DB_NAME=myucto_anon php api/bin/set-password.php <e-mail>`,
+  nebo rovnou volba `--password=…` (všem uživatelům stejné heslo).
+  Přihlašovací e-maily kopie vypíše příkaz na konci běhu.
+- Dvoufázové ověření je vypnuté; licenci je nutné aktivovat pro testovací
+  instanci zvlášť.
+- Šifrované mzdové údaje jsou znovu zapečetěné klíčem instance, na které
+  příkaz běžel. Testovací instance s jiným `secret_encryption_key` je
+  nerozšifruje.
+- Archivní snímky podání (mzdová podání, EPO) jsou smazané, jejich otisky
+  zůstaly — archiv podání v kopii proto hlásí nečitelné snímky. Auditní stopa
+  je po pseudonymizaci zapečetěná znovu a dokazuje jen integritu kopie.
+
+**Soubory a dump:**
+
+- `--files-out=ADRESÁŘ` vytvoří zrcadlo úložiště (`storage/`) se stejnou
+  strukturou, ve kterém je místo každé přílohy a skenu zástupný soubor téhož
+  typu. Cesty v kopii databáze na ně sedí. Adresář pak nastav testovací
+  instanci jako `MYINVOICE_DATA_DIR/storage`.
+- `--dump=SOUBOR` po dokončení uloží SQL dump kopie (potřebuje
+  `mariadb-dump`, jinou cestu zadá `--dump-bin=…`).
+
+Co se s kterým sloupcem stane, určuje seznam v
+`api/src/Service/Anonymization/AnonymizationPolicy.php`. Příkaz odmítne běžet,
+když databáze obsahuje textový sloupec, o kterém seznam nerozhoduje — nová
+funkce tak nemůže osobní údaje do kopie propašovat nepozorovaně. Na konci běhu
+příkaz vypíše sloupce, ve kterých zůstala hodnota shodná s originálem
+(typicky zachované účty institucí), aby šly zkontrolovat.
+
+## 101.11 Tipy
 
 - **Vždycky 2FA pro admin** — pokud admin účet padne, padá vše. Žádná výmluva.
 - **Pravidelně rotuj hesla** každých 6–12 měsíců.
