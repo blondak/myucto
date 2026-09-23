@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Service\Payroll\CzechBirthNumber;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 
 /**
  * Vykonávací implementace kontrol katalogu ČSSZ nad prvním profilem měsíčního
@@ -1320,11 +1321,7 @@ final class JmhzScenario1ControlEvaluator
             if (preg_match('/^\d{10}$/D', $value) !== 1) {
                 return "IK MPSV {$value} nemá deset číslic.";
             }
-            $body = (int) substr($value, 0, 9);
-            // Zbytek 10 se do jedné kontrolní číslice nevejde; stejně jako
-            // u rodného čísla se zapisuje nulou.
-            $expected = $body % 11 % 10;
-            if ((int) $value[9] !== $expected) {
+            if (!PayrollRegistrationIdentityService::oicChecksumValid($value)) {
                 return "IK MPSV {$value} nesplňuje kontrolní číslici modulo 11.";
             }
 

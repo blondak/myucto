@@ -2601,9 +2601,9 @@ final readonly class PayrollRegistrationIdentityService
     }
 
     /**
-     * Normalizované OIČ / IK MPSV: přesně 10 číslic, poslední je zbytek
-     * prvních devíti po dělení 11. Veřejné, aby stejné pravidlo mohl zavolat
-     * i náhled importu, který nic nezapisuje.
+     * Normalizované OIČ / IK MPSV: přesně 10 číslic se správnou kontrolní
+     * číslicí ({@see oicChecksumValid()}). Veřejné, aby stejné pravidlo mohl
+     * zavolat i náhled importu, který nic nezapisuje.
      *
      * @throws \InvalidArgumentException s větou pro účetní
      */
@@ -2618,11 +2618,7 @@ final readonly class PayrollRegistrationIdentityService
                 'musí mít přesně 10 číslic, bez mezer, lomítek a písmen.',
             ));
         }
-        $remainder = 0;
-        for ($index = 0; $index < 9; $index++) {
-            $remainder = (($remainder * 10) + (int) $normalized[$index]) % 11;
-        }
-        if ($remainder > 9 || $remainder !== (int) $normalized[9]) {
+        if (!self::oicChecksumValid($normalized)) {
             throw new \InvalidArgumentException(self::fieldNote(
                 'person_external_identifier',
                 'má 10 číslic, ale poslední z nich nesedí na kontrolní '
@@ -2632,6 +2628,20 @@ final readonly class PayrollRegistrationIdentityService
         }
 
         return $normalized;
+    }
+
+    /**
+     * Kontrolní číslice OIČ / IK MPSV (modulo 11): zbytek prvních devíti
+     * číslic po dělení 11. Zbytek 10 se do jedné číslice nevejde a stejně jako
+     * u rodného čísla se zapisuje nulou — takové OIČ ČSSZ přiděluje i přijímá.
+     */
+    public static function oicChecksumValid(string $digits): bool
+    {
+        if (preg_match('/^[0-9]{10}$/D', $digits) !== 1) {
+            return false;
+        }
+
+        return ((int) substr($digits, 0, 9)) % 11 % 10 === (int) $digits[9];
     }
 
     private static function idPpv(string $value): string
