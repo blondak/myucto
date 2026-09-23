@@ -189,6 +189,12 @@ try {
 $container = Bootstrap::buildApp()->getContainer();
 $pdo = $container->get(Connection::class)->pdo();
 $userId = isset($opts['user-id']) ? (int) $opts['user-id'] : (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
+$userExists = $pdo->prepare('SELECT COUNT(*) FROM users WHERE id = ?');
+$userExists->execute([$userId]);
+if ($userId <= 0 || (int) $userExists->fetchColumn() === 0) {
+    // Převedené doklady nesou autora (cizí klíč na uživatele); bez něj by se nepřevzaly.
+    ms3bFail(isset($opts['user-id']) ? "Uživatel #{$userId} neexistuje." : 'V instalaci není žádný uživatel, převod nemá komu doklady přiřadit. Dokončete nejdřív instalaci (setup).');
+}
 /** @var MoneyS3BatchImporter $importer */
 $importer = $container->get(MoneyS3BatchImporter::class);
 $options = $importer->prepareBatch($options, array_column($selected, 'ico'));

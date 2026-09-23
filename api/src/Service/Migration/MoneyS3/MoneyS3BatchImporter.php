@@ -154,7 +154,9 @@ final class MoneyS3BatchImporter
                 $result = $protocol->toArray();
                 $summary += self::protocolSummary($result);
                 $status = $result['failure'] === 'cancelled' ? MigrationBatchRunner::CANCELLED : $protocol->status();
-                $converted = !$protocol->failed() || self::onlyReconciliationErrors($result);
+                // Převedená = bez chyb, nebo s jedinou chybou nesouhlasu rekonciliace (rozdíl bývá už
+                // v Money). Jiná chyba (nepřevzatý doklad) další kroky nad firmou nepouští.
+                $converted = !$protocol->hasErrors() || self::onlyReconciliationErrors($result);
                 $summary['converted'] = $converted && $status !== MigrationBatchRunner::CANCELLED;
 
                 $notices = [];
@@ -176,9 +178,12 @@ final class MoneyS3BatchImporter
 
                 $error = null;
                 if ($status === MigrationBatchRunner::FAILED) {
-                    $error = $summary['converted']
-                        ? "Převod firmy doběhl, ale nesedí rekonciliace — podrobnosti v protokolu převodu #{$runId} u firmy."
-                        : "Převod firmy nedoběhl — podrobnosti v protokolu převodu #{$runId} u firmy.";
+                    $where = $dryRun ? 'v protokolu zkoušky' : "v protokolu převodu #{$runId} u firmy";
+                    $error = match (true) {
+                        self::onlyReconciliationErrors($result) => "Převod firmy doběhl, ale nesedí rekonciliace — podrobnosti {$where}.",
+                        $protocol->failed() => "Převod firmy nedoběhl — podrobnosti {$where}.",
+                        default => "Převod firmy doběhl s chybami (" . ($summary['errors'] ?? 0) . ", první: " . ($summary['first_error']['text'] ?? '') . ") — podrobnosti {$where}.",
+                    };
                 }
                 return self::result($status, $dryRun && $action === 'created' ? null : $targetId, $action, $fromYear,
                     $dryRun ? null : $runId, $summary, $error);
