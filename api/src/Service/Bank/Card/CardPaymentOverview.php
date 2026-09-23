@@ -31,13 +31,20 @@ final class CardPaymentOverview
      */
     public function unmatched(int $supplierId, string $from, string $to): array
     {
+        // Nákup kreditní kartou je platba kartou i bez koncovky: kreditní účet je karta sám.
         $stmt = $this->db->pdo()->prepare(
             "SELECT bt.id, bt.statement_id, bt.posted_at, bt.amount,
                     COALESCE(NULLIF(bt.currency, ''), bs.currency) AS currency,
-                    bt.counterparty_name, bt.description, bt.card_last4
+                    bt.counterparty_name, bt.description, bt.card_last4,
+                    cca.id AS credit_card_account_id, cca.label AS credit_card_label
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
-              WHERE bt.card_last4 IS NOT NULL
+          LEFT JOIN supplier_bank_accounts sba
+                 ON sba.supplier_id = ? AND sba.kind = 'credit_card'
+                AND sba.account_canonical = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''), '[^0-9]', ''))
+                AND sba.bank_code_norm = COALESCE(bs.bank_code, '')
+          LEFT JOIN credit_card_accounts cca ON cca.bank_account_id = sba.id AND cca.supplier_id = sba.supplier_id
+              WHERE (bt.card_last4 IS NOT NULL OR cca.id IS NOT NULL)
                 AND bt.amount < 0
                 AND bt.match_status = 'unmatched'
                 AND bt.posted_at BETWEEN ? AND ?
@@ -55,8 +62,16 @@ final class CardPaymentOverview
               ORDER BY bt.posted_at DESC, bt.id DESC
               LIMIT " . (self::MAX_ROWS + 1)
         );
-        $stmt->execute(array_merge([$from, $to, $supplierId, $supplierId], BankStatementOwnershipResolver::params($supplierId)));
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $stmt->execute(array_merge([$supplierId, $from, $to, $supplierId, $supplierId], BankStatementOwnershipResolver::params($supplierId)));
+        // Z kreditky jen nákupy: úrok, poplatek a výběr doklad nečekají.
+        $rows = array_values(array_filter(
+            $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
+            static fn (array $r): bool => $r['credit_card_account_id'] === null
+                || \MyInvoice\Service\Bank\CreditCard\CreditCardTransactionKind::classify(
+                    $r['description'] !== null ? (string) $r['description'] : null,
+                    (float) $r['amount'],
+                ) === \MyInvoice\Service\Bank\CreditCard\CreditCardTransactionKind::PURCHASE,
+        ));
         $truncated = count($rows) > self::MAX_ROWS;
         $rows = array_slice($rows, 0, self::MAX_ROWS);
 
@@ -65,13 +80,15 @@ final class CardPaymentOverview
         $groups = [];
         foreach ($rows as $row) {
             $txId = (int) $row['id'];
-            $card = $cardByTx[$txId] ?? null;
-            $key = $card !== null ? 'card:' . $card['id'] : 'last4:' . $row['card_last4'];
+            $creditId = $row['credit_card_account_id'] !== null ? (int) $row['credit_card_account_id'] : null;
+            $card = $creditId === null ? ($cardByTx[$txId] ?? null) : null;
+            $key = $creditId !== null ? 'credit:' . $creditId : ($card !== null ? 'card:' . $card['id'] : 'last4:' . $row['card_last4']);
             if (!isset($groups[$key])) {
                 $groups[$key] = [
                     'key'          => $key,
                     'card'         => $card,
-                    'last4'        => (string) $row['card_last4'],
+                    'credit_card'  => $creditId !== null ? ['id' => $creditId, 'label' => (string) $row['credit_card_label']] : null,
+                    'last4'        => (string) ($row['card_last4'] ?? ''),
                     'holder'       => $card['holder'] ?? null,
                     'count'        => 0,
                     'totals'       => [],
@@ -90,7 +107,8 @@ final class CardPaymentOverview
                 'currency'          => $currency,
                 'counterparty_name' => $row['counterparty_name'] !== null ? (string) $row['counterparty_name'] : null,
                 'description'       => $row['description'] !== null ? (string) $row['description'] : null,
-                'card_last4'        => (string) $row['card_last4'],
+                'card_last4'        => $row['card_last4'] !== null ? (string) $row['card_last4'] : null,
+                'credit_card'       => $creditId !== null,
                 // Analytika mezičlenu, na které platba čeká na doklad (null = účtováno bez mezičlenu).
                 'clearing_account'  => $clearingByTx[$txId] ?? null,
             ];
@@ -147,43 +165,53 @@ final class CardPaymentOverview
     }
 
     /**
-     * Odchozí pohyb kartou, který patří firmě. Cizí nebo nekaretní pohyb = null.
+     * Pohyb kartou, který patří firmě: odchozí pohyb s koncovkou karty, nebo pohyb z výpisu
+     * úvěrového účtu kreditní karty (kreditní účet je karta sám, koncovku výpis nenese a vratka
+     * obchodníka je kladná). Cizí nebo nekaretní pohyb = null.
      *
-     * @return array{id:int, posted_at:string, amount:float, card_last4:string, match_status:string}|null
+     * @return array{id:int, posted_at:string, amount:float, card_last4:?string, match_status:string, credit_card:bool}|null
      */
     public function findCardTransaction(int $supplierId, int $transactionId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT bt.id, bt.posted_at, bt.amount, bt.card_last4, bt.match_status
+            "SELECT bt.id, bt.posted_at, bt.amount, bt.card_last4, bt.match_status,
+                    EXISTS (SELECT 1 FROM supplier_bank_accounts sba
+                             WHERE sba.supplier_id = ? AND sba.kind = 'credit_card'
+                               AND sba.account_canonical = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''), '[^0-9]', ''))
+                               AND sba.bank_code_norm = COALESCE(bs.bank_code, '')) AS credit_card
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.id = ?
-                AND bt.card_last4 IS NOT NULL
-                AND bt.amount < 0
-                AND ' . BankStatementOwnershipResolver::sql('bs')
+                AND " . BankStatementOwnershipResolver::sql('bs')
         );
-        $stmt->execute(array_merge([$transactionId], BankStatementOwnershipResolver::params($supplierId)));
+        $stmt->execute(array_merge([$supplierId, $transactionId], BankStatementOwnershipResolver::params($supplierId)));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) {
+            return null;
+        }
+        $creditCard = (bool) $row['credit_card'];
+        if (!$creditCard && ($row['card_last4'] === null || (float) $row['amount'] >= 0)) {
             return null;
         }
         return [
             'id'           => (int) $row['id'],
             'posted_at'    => (string) $row['posted_at'],
             'amount'       => (float) $row['amount'],
-            'card_last4'   => (string) $row['card_last4'],
+            'card_last4'   => $row['card_last4'] !== null ? (string) $row['card_last4'] : null,
             'match_status' => (string) $row['match_status'],
+            'credit_card'  => $creditCard,
         ];
     }
 
     /**
      * Doklad právě vytěžený z účtenky k platbě kartou: forma úhrady karta a koncovka
-     * z bankovního pohybu. Jde o výslovné rozhodnutí uživatele (nahrál účtenku K TÉTO
-     * platbě), proto zdroj `manual`. Mění jen čerstvě založený koncept.
+     * z bankovního pohybu (u kreditní karty bez koncovky jen forma úhrady). Jde o výslovné
+     * rozhodnutí uživatele (nahrál účtenku K TÉTO platbě), proto zdroj `manual`. Mění jen
+     * čerstvě založený koncept.
      */
-    public function markReceiptPaidByCard(int $supplierId, int $purchaseInvoiceId, string $last4): bool
+    public function markReceiptPaidByCard(int $supplierId, int $purchaseInvoiceId, ?string $last4): bool
     {
-        if (!CardNumberMask::isValidLast4($last4)) {
+        if ($last4 !== null && !CardNumberMask::isValidLast4($last4)) {
             return false;
         }
         $stmt = $this->db->pdo()->prepare(

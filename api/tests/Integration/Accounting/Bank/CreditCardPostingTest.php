@@ -59,8 +59,11 @@ final class CreditCardPostingTest extends BankPostingTestCase
         $this->ccCode = $code;
     }
 
+    /** Režim bez mezičlenu: spárovaný nákup jde rovnou 321/231.x (mezičlen viz CreditCardPurchaseModeTest). */
     public function testMatchedPurchasePostsPayableAgainstCreditCardLoan(): void
     {
+        $this->container->get(\MyInvoice\Service\Accounting\CreditCard\CreditCardPostingService::class)
+            ->setPurchaseMode($this->supplierId, $this->ccId, 'direct');
         $pi = $this->postedPurchase(500.00);
         $tx = $this->ccTx(-500.00, 'Nákup na internetu | d.tran. 14.06.2099');
         $this->paymentMatch($tx, $pi, 500.00);
@@ -275,7 +278,7 @@ final class CreditCardPostingTest extends BankPostingTestCase
             'SELECT supplier_id FROM bank_statements WHERE id = ' . (int) $result['statement_id']
         )->fetchColumn());
         $code = CreditCardAccounts::codeFor((string) $account['analytic_suffix']);
-        self::assertEqualsWithDelta(-55.00 + 1000.00, $this->balance($code), 0.001, 'Úrok i splátka se zaúčtovaly automaticky; nákup čeká na doklad.');
+        self::assertEqualsWithDelta(-200.00 - 55.00 + 1000.00, $this->balance($code), 0.001, 'Úrok, splátka i nákup (výchozí režim mezičlenu 378.x) se zaúčtovaly automaticky.');
 
         $again = $this->importer()->importParsed($this->supplierId, $parsed, $this->lastPdf, 'vypis.pdf', $this->userId);
         self::assertTrue($again['duplicate']);

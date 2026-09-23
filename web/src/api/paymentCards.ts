@@ -100,7 +100,8 @@ export interface CardClearingSettingsResponse {
   unverified_cards: number
 }
 
-export type CardWriteOffTarget = 'expense' | 'holder'
+/** expense = nedaňový náklad, expense_tax = daňový náklad bez DPH, holder = k tíži držitele (soukromý nákup). */
+export type CardWriteOffTarget = 'expense' | 'expense_tax' | 'holder'
 
 /** Stručný popis karty u bankovního pohybu. */
 export interface PaymentCardSummary {
@@ -141,7 +142,10 @@ export interface CardPaymentRow {
   currency: string
   counterparty_name: string | null
   description: string | null
-  card_last4: string
+  /** Koncovka karty; výpis kreditní karty ji nést nemusí (kreditní účet je karta sám). */
+  card_last4: string | null
+  /** Nákup kreditní kartou (výpis úvěrového účtu). */
+  credit_card?: boolean
   /** Analytika mezičlenu, na které platba čeká na doklad (null = účtováno bez mezičlenu). */
   clearing_account?: string | null
   /** Platba na čerpací stanici: vozidlo držitele karty (reason ambiguous = víc vozidel). */
@@ -158,6 +162,8 @@ export interface CardPaymentVehicleHint {
 export interface CardPaymentGroup {
   key: string
   card: PaymentCardSummary | null
+  /** Úvěrový účet kreditní karty, jehož nákupy skupina nese. */
+  credit_card?: { id: number; label: string } | null
   last4: string
   holder: string | null
   count: number

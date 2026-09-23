@@ -185,8 +185,8 @@ final class CardClearingSettingsService
             if (!$this->accounts->chartHas($supplierId, $accountCode)) {
                 throw new PostingException('invalid_analytic', 'Účet ' . $accountCode . ' v osnově firmy není.', 422, ['field' => 'account_code']);
             }
-            $owner = $this->cards->usedSuffixes($supplierId)[$suffix] ?? null;
-            if ($owner !== null && $owner !== $cardId) {
+            $owner = $this->accounts->suffixOwner($supplierId, $suffix);
+            if ($owner !== null && $owner['card_id'] !== $cardId) {
                 throw new PostingException('analytic_taken', 'Analytiku ' . $accountCode . ' už používá jiná karta.', 409, ['field' => 'account_code']);
             }
         }
@@ -223,7 +223,8 @@ final class CardClearingSettingsService
             // Nabídka ručního výběru: existující analytiky mezičlenu, které nedrží jiná karta.
             'options'   => array_values(array_filter(
                 $this->accounts->analyticOptions($supplierId, $synthetic),
-                static fn (array $o): bool => $o['card_id'] === null || $o['card_id'] === (int) $card['id'],
+                static fn (array $o): bool => $o['credit_card_account_id'] === null
+                    && ($o['card_id'] === null || $o['card_id'] === (int) $card['id']),
             )),
         ];
         $suffix = $card['analytic_suffix'] ?? null;
@@ -270,7 +271,7 @@ final class CardClearingSettingsService
     public function clearingBalance(int $supplierId, string $synthetic): float
     {
         $total = 0.0;
-        foreach (array_keys($this->cards->usedSuffixes($supplierId)) as $suffix) {
+        foreach ($this->accounts->takenSuffixList($supplierId) as $suffix) {
             $total += $this->accounts->balance($supplierId, CardClearingAccounts::codeFor($synthetic, (string) $suffix));
         }
         $total += $this->accounts->balance($supplierId, CardClearingAccounts::codeFor($synthetic, CardClearingAccounts::FALLBACK_SUFFIX));

@@ -12,43 +12,57 @@ use PDO;
  *
  * Firma bez řádku účtuje na výchozí účty ({@see DEFAULT_CODES}) - čtení vrací vždy úplný
  * tvar. Uložený účet, který mezitím zmizel z osnovy, se vrátí jako výchozí (FK SET NULL).
+ *
+ * Účty uzavření bez dokladu (nedaňový náklad) a soukromého nákupu nemají vlastní výchozí
+ * kód: nevyplněné přebírají nastavení platebních karet (jeden mezičlen, jedna pravda) -
+ * kód je pak null a rozhodne {@see \MyInvoice\Service\Accounting\Card\CardClearingWriteOffService}.
  */
 final class CreditCardSettingsRepository
 {
-    /** Výchozí kódy pro nevyplněné účty. */
+    public const MODE_CLEARING = 'clearing';
+    public const MODE_DIRECT = 'direct';
+    public const MODES = [self::MODE_CLEARING, self::MODE_DIRECT];
+
+    /** Výchozí režim nákupů: závazek vůči bance vzniká platbou, ne dokladem. */
+    public const DEFAULT_MODE = self::MODE_CLEARING;
+
+    /** Výchozí kódy pro nevyplněné účty (null = převzít z nastavení platebních karet). */
     public const DEFAULT_CODES = [
-        'interest'  => '562',
-        'fee'       => '568',
-        'repayment' => '261',
-        'cash'      => '261',
-        'reward'    => '648',
+        'interest'        => '562',
+        'fee'             => '568',
+        'repayment'       => '261',
+        'cash'            => '261',
+        'reward'          => '648',
+        'writeoff_tax'    => '518',
+        'writeoff_nontax' => null,
+        'private'         => null,
+        'opening'         => '379',
     ];
 
-    public const FIELDS = ['interest', 'fee', 'repayment', 'cash', 'reward'];
+    public const FIELDS = ['interest', 'fee', 'repayment', 'cash', 'reward', 'writeoff_tax', 'writeoff_nontax', 'private', 'opening'];
 
     public function __construct(private readonly Connection $db) {}
 
     /**
-     * @return array{configured:bool, interest_account_id:?int, fee_account_id:?int, repayment_account_id:?int,
-     *   cash_account_id:?int, reward_account_id:?int, interest_account_code:string, fee_account_code:string,
-     *   repayment_account_code:string, cash_account_code:string, reward_account_code:string}
+     * @return array<string,mixed> configured, purchase_mode a pro každé pole `<field>_account_id`
+     *   (uložené id nebo null) a `<field>_account_code` (uložený kód, výchozí kód, nebo null)
      */
     public function find(int $supplierId): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT s.*, ia.account_code AS interest_code, fa.account_code AS fee_code, ra.account_code AS repayment_code,
-                    ca.account_code AS cash_code, wa.account_code AS reward_code
-               FROM credit_card_settings s
-          LEFT JOIN chart_of_accounts ia ON ia.id = s.interest_account_id AND ia.supplier_id = s.supplier_id
-          LEFT JOIN chart_of_accounts fa ON fa.id = s.fee_account_id AND fa.supplier_id = s.supplier_id
-          LEFT JOIN chart_of_accounts ra ON ra.id = s.repayment_account_id AND ra.supplier_id = s.supplier_id
-          LEFT JOIN chart_of_accounts ca ON ca.id = s.cash_account_id AND ca.supplier_id = s.supplier_id
-          LEFT JOIN chart_of_accounts wa ON wa.id = s.reward_account_id AND wa.supplier_id = s.supplier_id
-              WHERE s.supplier_id = ?'
-        );
+        $joins = '';
+        $cols = '';
+        foreach (self::FIELDS as $i => $field) {
+            $joins .= " LEFT JOIN chart_of_accounts a{$i} ON a{$i}.id = s.{$field}_account_id AND a{$i}.supplier_id = s.supplier_id";
+            $cols .= ", a{$i}.account_code AS {$field}_code";
+        }
+        $stmt = $this->db->pdo()->prepare("SELECT s.*{$cols} FROM credit_card_settings s{$joins} WHERE s.supplier_id = ?");
         $stmt->execute([$supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
-        $out = ['configured' => $row !== null];
+        $mode = (string) ($row['purchase_mode'] ?? '');
+        $out = [
+            'configured'    => $row !== null,
+            'purchase_mode' => in_array($mode, self::MODES, true) ? $mode : self::DEFAULT_MODE,
+        ];
         foreach (self::FIELDS as $field) {
             $id = $row[$field . '_account_id'] ?? null;
             $code = $row[$field . '_code'] ?? null;
@@ -58,28 +72,25 @@ final class CreditCardSettingsRepository
         return $out;
     }
 
-    /** @param array<string,?int> $ids field_account_id → id účtu nebo null */
-    public function save(int $supplierId, array $ids, ?int $userId): void
+    /** @param array<string,mixed> $data purchase_mode + field_account_id → id účtu nebo null */
+    public function save(int $supplierId, array $data, ?int $userId): void
     {
+        $columns = ['supplier_id', 'purchase_mode'];
+        $values = [$supplierId, in_array($data['purchase_mode'] ?? null, self::MODES, true) ? $data['purchase_mode'] : self::DEFAULT_MODE];
+        foreach (self::FIELDS as $field) {
+            $columns[] = $field . '_account_id';
+            $values[] = $data[$field . '_account_id'] ?? null;
+        }
+        $columns[] = 'updated_by';
+        $values[] = $userId;
+        $updates = implode(', ', array_map(
+            static fn (string $c): string => "{$c} = VALUES({$c})",
+            array_slice($columns, 1),
+        ));
         $this->db->pdo()->prepare(
-            'INSERT INTO credit_card_settings
-                (supplier_id, interest_account_id, fee_account_id, repayment_account_id, cash_account_id, reward_account_id, updated_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE
-                interest_account_id = VALUES(interest_account_id),
-                fee_account_id = VALUES(fee_account_id),
-                repayment_account_id = VALUES(repayment_account_id),
-                cash_account_id = VALUES(cash_account_id),
-                reward_account_id = VALUES(reward_account_id),
-                updated_by = VALUES(updated_by)'
-        )->execute([
-            $supplierId,
-            $ids['interest_account_id'] ?? null,
-            $ids['fee_account_id'] ?? null,
-            $ids['repayment_account_id'] ?? null,
-            $ids['cash_account_id'] ?? null,
-            $ids['reward_account_id'] ?? null,
-            $userId,
-        ]);
+            'INSERT INTO credit_card_settings (' . implode(', ', $columns) . ')
+             VALUES (' . implode(', ', array_fill(0, count($columns), '?')) . ')
+             ON DUPLICATE KEY UPDATE ' . $updates
+        )->execute($values);
     }
 }

@@ -177,7 +177,7 @@ final class AnonymizationPolicy
         'cnb_repo_rates' => ['note' => 'keep'],
         'cost_centers' => ['code' => 'keep', 'name' => 'text'],
         'countries' => ['iso2' => 'keep', 'iso3' => 'keep', 'name_cs' => 'keep', 'name_en' => 'keep'],
-        'credit_card_accounts' => ['account_number' => 'bank_account', 'analytic_suffix' => 'keep', 'bank_code' => 'keep', 'currency' => 'keep', 'label' => 'text', 'note' => 'text', 'repayment_account' => 'bank_account', 'repayment_bank_code' => 'keep', 'repayment_vs' => 'symbol'],
+        'credit_card_accounts' => ['account_number' => 'bank_account', 'analytic_suffix' => 'keep', 'bank_code' => 'keep', 'clearing_suffix' => 'keep', 'currency' => 'keep', 'label' => 'text', 'note' => 'text', 'repayment_account' => 'bank_account', 'repayment_bank_code' => 'keep', 'repayment_vs' => 'symbol'],
         'crm_action_item_dismissals' => ['baseline_ids' => 'keep', 'item_type' => 'keep'],
         'crm_monthly_summary' => ['currency' => 'keep', 'period_ym' => 'keep'],
         'cron_dispatch_claims' => ['script' => 'keep'],

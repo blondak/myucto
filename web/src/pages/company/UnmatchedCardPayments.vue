@@ -64,6 +64,7 @@ async function load() {
 onMounted(load)
 
 function groupTitle(g: CardPaymentGroup): string {
+  if (g.credit_card) return t('payment_cards.unmatched.credit_card_group', { label: g.credit_card.label })
   return g.holder || g.card?.label || t('payment_cards.unmatched.unknown_holder')
 }
 function totals(g: CardPaymentGroup): string {
@@ -161,14 +162,18 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
           <div class="min-w-0">
             <div class="font-medium text-neutral-800 truncate">{{ groupTitle(g) }}</div>
             <div class="text-xs text-neutral-500">
-              <span v-if="g.card && g.holder">{{ g.card.label }} · </span>
-              <span class="font-mono">{{ t('payment_cards.masked', { last4: g.last4 }) }}</span>
+              <RouterLink v-if="g.credit_card" :to="{ name: 'credit-card-detail', params: { id: g.credit_card.id } }"
+                class="text-primary-700 hover:underline">{{ t('payment_cards.unmatched.credit_card_open') }}</RouterLink>
+              <template v-else>
+                <span v-if="g.card && g.holder">{{ g.card.label }} · </span>
+                <span class="font-mono">{{ t('payment_cards.masked', { last4: g.last4 }) }}</span>
+              </template>
             </div>
           </div>
           <div class="flex flex-wrap items-center gap-3 text-sm">
             <span class="text-neutral-500 whitespace-nowrap">{{ t('payment_cards.unmatched.count', { n: g.count }) }}</span>
             <span class="font-semibold whitespace-nowrap">{{ totals(g) }}</span>
-            <RouterLink v-if="!g.card && canManageCards" :to="{ name: 'payment-card-new', query: { last4: g.last4 } }"
+            <RouterLink v-if="!g.card && !g.credit_card && canManageCards" :to="{ name: 'payment-card-new', query: { last4: g.last4 } }"
               :class="[BTN_BASE, OUTLINE.primary]" class="whitespace-nowrap">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" />
@@ -226,6 +231,13 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
                         {{ t('payment_cards.unmatched.write_off_expense') }}
                       </button>
                       <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
+                        :disabled="busyTx !== null" data-testid="write-off-expense-tax" @click="writeOff(tx, 'expense_tax')">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
+                        </svg>
+                        {{ t('payment_cards.unmatched.write_off_expense_tax') }}
+                      </button>
+                      <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
                         :disabled="busyTx !== null" @click="writeOff(tx, 'holder')">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                           <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.user" />
@@ -233,7 +245,7 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
                         {{ t('payment_cards.unmatched.write_off_holder') }}
                       </button>
                     </template>
-                    <RouterLink :to="{ name: 'bank-detail', params: { id: tx.statement_id } }"
+                    <RouterLink :to="{ name: 'bank-detail', params: { id: tx.statement_id }, query: { tx: String(tx.id) } }"
                       :class="[BTN_BASE, OUTLINE.neutral]" class="whitespace-nowrap">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" />
@@ -278,6 +290,13 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
                     <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
                   </svg>
                   {{ t('payment_cards.unmatched.write_off_expense') }}
+                </button>
+                <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
+                  :disabled="busyTx !== null" @click="writeOff(tx, 'expense_tax')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
+                  </svg>
+                  {{ t('payment_cards.unmatched.write_off_expense_tax') }}
                 </button>
                 <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
                   :disabled="busyTx !== null" @click="writeOff(tx, 'holder')">
