@@ -518,12 +518,12 @@ onMounted(async () => {
             </div>
             <div class="sm:col-span-2">
               <label class="block text-xs font-medium text-neutral-500 mb-1 sm:hidden">{{ t('stock.documents.col_qty') }}</label>
-              <input v-model="row.qty" type="number" step="0.001" min="0" :readonly="readOnly"
+              <input v-model="row.qty" v-select-on-focus type="number" step="0.001" min="0" :readonly="readOnly"
                 class="w-full h-10 px-2 border border-neutral-300 rounded-md text-right font-mono text-sm disabled:bg-neutral-50" :disabled="readOnly" />
             </div>
             <div class="sm:col-span-2">
               <label class="block text-xs font-medium text-neutral-500 mb-1 sm:hidden">{{ t('stock.documents.col_unit_cost') }}</label>
-              <input v-if="isReceipt" v-model="row.unit_cost" type="number" step="0.000001" min="0" :readonly="readOnly"
+              <input v-if="isReceipt" v-model="row.unit_cost" v-select-on-focus type="number" step="0.000001" min="0" :readonly="readOnly"
                 class="w-full h-10 px-2 border border-neutral-300 rounded-md text-right font-mono text-sm disabled:bg-neutral-50" :disabled="readOnly" />
               <div v-else class="h-10 flex items-center justify-end text-xs text-neutral-400 italic">{{ t('stock.documents.price_computed_hint') }}</div>
               <!-- Rozpuštěné vedlejší náklady jsou na řádku už uložené, ale sekce

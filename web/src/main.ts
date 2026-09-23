@@ -4,6 +4,7 @@ import { router } from './router'
 import { i18n, ensureInitialLocaleReady } from './i18n'
 import App from './App.vue'
 import { vMath } from './directives/vMath'
+import { vSelectOnFocus } from './directives/vSelectOnFocus'
 import './styles/main.css'
 import { setForbiddenPermissionHandler } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -23,6 +24,7 @@ setForbiddenPermissionHandler(async () => {
 app.use(router)
 app.use(i18n)
 app.directive('math', vMath)
+app.directive('select-on-focus', vSelectOnFocus)
 app.mount('#app')
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
