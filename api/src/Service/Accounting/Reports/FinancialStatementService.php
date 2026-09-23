@@ -349,9 +349,10 @@ final class FinancialStatementService
             throw new ReportException('statement_version_missing', 'Pro rozvahový den ' . $asOf . ' neexistuje verze mapování výkazu.');
         }
         $rows = $this->definitions->rows((int) $version['id']);
-        // Sloučená mapa firmy: globální + (účelová VZZ) mapa funkcí + výjimky firmy.
-        // Skládá ji jen StatementMapResolver, aby výjimka platila ve všech výkazech stejně.
-        $baseMap = $this->maps->accountMap($version, $supplierId);
+        // Sloučená mapa firmy: globální + (účelová VZZ) mapa funkcí + výjimky firmy platné
+        // v roce období. Skládá ji jen StatementMapResolver, aby výjimka platila ve všech
+        // výkazech stejně.
+        $baseMap = $this->maps->accountMap($version, $supplierId, (int) $period['fiscal_year']);
         $map = $baseMap;
         if ($type === 'balance_sheet' && $asOf < (string) $period['ends_on']) {
             foreach ($map as &$mapping) {
@@ -383,18 +384,27 @@ final class FinancialStatementService
         $values   = $this->computeValues($rows, $mapped, $balances, $type, $startsOn, $turnoverExtra);
 
         // R13: minulé období stejným během k ends_on předchozího období, stejná verze.
+        // Výchozí zařazení je podle běžného roku (údaje minulého období přepočtené, aby byly
+        // srovnatelné). Firma, která sloupec přebírá z uzavřeného výkazu minulého roku,
+        // ho má s výjimkami platnými v minulém roce.
         $prevPeriod = $this->ledger->previousPeriod($supplierId, $startsOn);
         $valuesPrev = [];
         if ($prevPeriod !== null) {
+            $prevMap = $baseMap;
+            $prevSplitCodes = $splitCodes;
+            if ($this->settings->getComparativeFromPriorYear($supplierId)) {
+                $prevMap = $this->maps->accountMap($version, $supplierId, (int) $prevPeriod['fiscal_year']);
+                $prevSplitCodes = $this->mapper->noCompensationPrefixes($prevMap);
+            }
             $balancesPrev = $this->ledger->syntheticBalances(
                 $supplierId,
                 (string) $prevPeriod['ends_on'],
                 (string) $prevPeriod['starts_on'],
-                $splitCodes,
-                $this->mapper->analyticPrefixes($baseMap),
+                $prevSplitCodes,
+                $this->mapper->analyticPrefixes($prevMap),
                 $dimension,
             );
-            $mappedPrev = $this->mapper->map($rows, $baseMap, $balancesPrev);
+            $mappedPrev = $this->mapper->map($rows, $prevMap, $balancesPrev);
             $valuesPrev = $this->computeValues($rows, $mappedPrev, $balancesPrev, $type, (string) $prevPeriod['starts_on'], $turnoverExtra);
             // Čistý obrat v pojetí od 1. 1. 2024 se za minulé období spočtené po staru
             // neuvádí (stanovisko MF a Komory auditorů ČR z 24. 7. 2024): dvě různé veličiny

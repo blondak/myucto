@@ -29,10 +29,10 @@ final class StatementOverrideRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, version_id, account_prefix, row_code, target, balance_condition, sign, note,
-                    created_by, created_at, updated_at
+                    valid_from_year, valid_to_year, created_by, created_at, updated_at
                FROM statement_account_overrides
               WHERE supplier_id = ? AND version_id = ?
-              ORDER BY account_prefix, balance_condition'
+              ORDER BY account_prefix, balance_condition, valid_from_year'
         );
         $stmt->execute([$supplierId, $versionId]);
 
@@ -44,7 +44,7 @@ final class StatementOverrideRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, version_id, account_prefix, row_code, target, balance_condition, sign, note,
-                    created_by, created_at, updated_at
+                    valid_from_year, valid_to_year, created_by, created_at, updated_at
                FROM statement_account_overrides
               WHERE supplier_id = ? AND id = ?'
         );
@@ -55,14 +55,15 @@ final class StatementOverrideRepository
     }
 
     /**
-     * @param array{account_prefix:string,row_code:string,target:string,balance_condition:string,sign:int,note:?string} $data
+     * @param array{account_prefix:string,row_code:string,target:string,balance_condition:string,sign:int,note:?string,valid_from_year?:?int,valid_to_year?:?int} $data
      */
     public function create(int $supplierId, int $versionId, array $data, ?int $userId): int
     {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO statement_account_overrides
-                (supplier_id, version_id, account_prefix, row_code, target, balance_condition, sign, note, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                (supplier_id, version_id, account_prefix, row_code, target, balance_condition, sign, note,
+                 valid_from_year, valid_to_year, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $supplierId,
@@ -73,6 +74,8 @@ final class StatementOverrideRepository
             $data['balance_condition'],
             $data['sign'],
             $data['note'],
+            $data['valid_from_year'] ?? null,
+            $data['valid_to_year'] ?? null,
             $userId,
         ]);
 
@@ -80,13 +83,14 @@ final class StatementOverrideRepository
     }
 
     /**
-     * @param array{account_prefix:string,row_code:string,target:string,balance_condition:string,sign:int,note:?string} $data
+     * @param array{account_prefix:string,row_code:string,target:string,balance_condition:string,sign:int,note:?string,valid_from_year?:?int,valid_to_year?:?int} $data
      */
     public function update(int $supplierId, int $id, array $data): void
     {
         $stmt = $this->db->pdo()->prepare(
             'UPDATE statement_account_overrides
-                SET account_prefix = ?, row_code = ?, target = ?, balance_condition = ?, sign = ?, note = ?
+                SET account_prefix = ?, row_code = ?, target = ?, balance_condition = ?, sign = ?, note = ?,
+                    valid_from_year = ?, valid_to_year = ?
               WHERE supplier_id = ? AND id = ?'
         );
         $stmt->execute([
@@ -96,6 +100,8 @@ final class StatementOverrideRepository
             $data['balance_condition'],
             $data['sign'],
             $data['note'],
+            $data['valid_from_year'] ?? null,
+            $data['valid_to_year'] ?? null,
             $supplierId,
             $id,
         ]);
@@ -149,6 +155,8 @@ final class StatementOverrideRepository
         $row['account_prefix'] = (string) $row['account_prefix'];
         $row['row_code'] = (string) $row['row_code'];
         $row['sign'] = (int) $row['sign'];
+        $row['valid_from_year'] = $row['valid_from_year'] === null ? null : (int) $row['valid_from_year'];
+        $row['valid_to_year'] = $row['valid_to_year'] === null ? null : (int) $row['valid_to_year'];
         $row['created_by'] = $row['created_by'] === null ? null : (int) $row['created_by'];
 
         return $row;

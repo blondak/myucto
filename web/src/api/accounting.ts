@@ -1268,6 +1268,9 @@ export interface StatementOverride {
   balance_condition: StatementBalanceCondition
   sign?: number
   note: string | null
+  /** Účetní období, od kterého / do kterého výjimka platí; null = bez omezení. */
+  valid_from_year?: number | null
+  valid_to_year?: number | null
   updated_at?: string | null
 }
 

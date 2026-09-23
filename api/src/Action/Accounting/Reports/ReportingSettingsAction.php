@@ -185,6 +185,16 @@ final class ReportingSettingsAction
             $this->settings->setNetTurnoverExtraRows($supplierId, $clean);
         }
 
+        // Sloupec minulého období podle výjimek mapování platných v minulém roce
+        // (převzetí z uzavřeného výkazu). Partial update — jen je-li klíč v body.
+        if (array_key_exists('comparative_from_prior_year', $body)) {
+            $v = filter_var($body['comparative_from_prior_year'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($v === null) {
+                return Json::error($response, 'validation_failed', 'comparative_from_prior_year musí být boolean (true/false).', 422);
+            }
+            $this->settings->setComparativeFromPriorYear($supplierId, $v);
+        }
+
         return Json::ok($response, $this->payload($supplierId));
     }
 }

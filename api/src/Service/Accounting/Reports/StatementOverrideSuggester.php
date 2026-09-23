@@ -328,7 +328,7 @@ final class StatementOverrideSuggester
 
         // Příspěvky účtů (po analytikách) do uzlů.
         $asOf = (string) $period['ends_on'];
-        $map = $this->maps->accountMap($version, $supplierId);
+        $map = $this->maps->accountMap($version, $supplierId, (int) $period['fiscal_year']);
         $balances = $this->ledger->syntheticBalances(
             $supplierId,
             $asOf,

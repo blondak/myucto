@@ -612,6 +612,8 @@ export interface AccountingClosingSettings extends ReportingSettings {
   // § 35 vyhl. 500/2002 — řádky VZZ, které firma počítá do čistého obratu nad I. + II.
   net_turnover_extra_rows?: NetTurnoverExtraRows
   net_turnover_extra_row_options?: Record<keyof NetTurnoverExtraRows, NetTurnoverRowOption[]>
+  // Minulé období výkazů s výjimkami mapování platnými v minulém roce (jako uzavřený výkaz).
+  comparative_from_prior_year?: boolean | number
 }
 
 export interface NetTurnoverExtraRows {

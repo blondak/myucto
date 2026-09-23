@@ -150,7 +150,7 @@ final class FinancialStatementAction
         if ($version !== null) {
             // Táž sloučená mapa jako výkaz (globální + funkce + výjimky firmy) — účet, který
             // firma zařadila výjimkou, přiřazení funkci nepotřebuje.
-            foreach ($this->maps->accountMap($version, $supplierId) as $m) {
+            foreach ($this->maps->accountMap($version, $supplierId, (int) $period['fiscal_year']) as $m) {
                 $prefixes[] = (string) $m['account_prefix'];
             }
         }

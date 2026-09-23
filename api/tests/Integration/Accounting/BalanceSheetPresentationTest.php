@@ -11,6 +11,7 @@ use MyInvoice\Repository\StatementDefinitionRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
+use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\StatementOverrideService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -133,7 +134,66 @@ final class BalanceSheetPresentationTest extends TestCase
         self::assertSame([], $sheet['checks']['negative_net_rows']);
     }
 
+    /**
+     * Výjimka s platností od roku 2092 nesmí přeřadit účet ve výkazu roku 2091. Sloupec
+     * minulého období se ve výchozím stavu přepočítá podle zařazení běžného roku
+     * (srovnatelnost), s volbou „převzít z uzavřeného výkazu" jako výkaz minulého roku.
+     */
+    public function testOverrideValidityByYearAndComparativeColumn(): void
+    {
+        $this->post(self::PREV_YEAR, '351.100', '602', 200_000.00);
+        $this->overrides->save($this->supplierId, $this->versionId, [
+            ['account_prefix' => '351.100', 'row_code' => 'C.II.1.5.4.', 'valid_from_year' => self::YEAR, 'note' => 'Splatnost prodloužena'],
+        ], $this->userId);
+
+        $prevYear = $this->assets($this->prevPeriodId, self::PREV_YEAR . '-12-31');
+        self::assertEqualsWithDelta(200_000.0, $prevYear['C.II.2.2.']['net'], 0.01, 'V roce 2091 výjimka neplatí, účet je podle globální mapy.');
+        self::assertEqualsWithDelta(0.0, $prevYear['C.II.1.5.4.']['net'] ?? 0.0, 0.01);
+
+        $current = $this->assets($this->periodId, self::ENDS_ON);
+        self::assertEqualsWithDelta(200_000.0, $current['C.II.1.5.4.']['net'], 0.01, 'Od roku 2092 platí výjimka.');
+        self::assertEqualsWithDelta(0.0, $current['C.II.2.2.']['net'], 0.01);
+        self::assertEqualsWithDelta(200_000.0, $current['C.II.1.5.4.']['prev_net'], 0.01, 'Výchozí: minulé období podle zařazení běžného roku.');
+        self::assertEqualsWithDelta(0.0, $current['C.II.2.2.']['prev_net'], 0.01);
+
+        $this->db->pdo()->prepare('UPDATE accounting_supplier_settings SET comparative_from_prior_year = 1 WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
+        $comparative = $this->assets($this->periodId, self::ENDS_ON);
+        self::assertEqualsWithDelta(200_000.0, $comparative['C.II.1.5.4.']['net'], 0.01, 'Běžné období se volbou nemění.');
+        self::assertEqualsWithDelta(200_000.0, $comparative['C.II.2.2.']['prev_net'], 0.01, 'Minulé období shodné s výkazem roku 2091.');
+        self::assertEqualsWithDelta(0.0, $comparative['C.II.1.5.4.']['prev_net'], 0.01);
+    }
+
+    public function testOverridesWithDisjointYearsCoexistAndOverlapsAreRejected(): void
+    {
+        $this->post(self::PREV_YEAR, '351.100', '602', 200_000.00);
+        $this->overrides->save($this->supplierId, $this->versionId, [
+            ['account_prefix' => '351.100', 'row_code' => 'C.II.2.4.6.', 'valid_to_year' => self::PREV_YEAR],
+            ['account_prefix' => '351.100', 'row_code' => 'C.II.1.5.4.', 'valid_from_year' => self::YEAR],
+        ], $this->userId);
+
+        self::assertEqualsWithDelta(200_000.0, $this->assets($this->prevPeriodId, self::PREV_YEAR . '-12-31')['C.II.2.4.6.']['net'], 0.01);
+        self::assertEqualsWithDelta(200_000.0, $this->assets($this->periodId, self::ENDS_ON)['C.II.1.5.4.']['net'], 0.01);
+
+        try {
+            $this->overrides->save($this->supplierId, $this->versionId, [
+                ['account_prefix' => '351.100', 'row_code' => 'C.II.2.4.6.', 'valid_to_year' => self::YEAR],
+                ['account_prefix' => '351.100', 'row_code' => 'C.II.1.5.4.', 'valid_from_year' => self::YEAR],
+            ], $this->userId);
+            self::fail('Překrývající se platnost pro stejnou stranu zůstatku musí být odmítnuta.');
+        } catch (ReportException $e) {
+            self::assertSame(422, $e->httpStatus);
+            self::assertStringContainsString('351.100', $e->getMessage());
+        }
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
+
+    /** @return array<string, array<string,mixed>> aktiva podle kódu řádku */
+    private function assets(int $periodId, string $asOf): array
+    {
+        return array_column($this->statements->balanceSheet($this->supplierId, $periodId, $asOf, 'full')['assets'], null, 'row_code');
+    }
 
     private function analytic(string $parentCode, string $code, string $name, string $type, string $side): void
     {

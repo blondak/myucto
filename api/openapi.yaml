@@ -10937,7 +10937,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { avg_employees: { type: [integer, "null"] }, statement_scope_override: { type: [string, "null"], enum: [full, small, micro, null] }, statutory_audit: { type: boolean }, manual_doc_series: { type: boolean }, fx_reversal_at_open: { type: boolean } } } } } }
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { avg_employees: { type: [integer, "null"] }, statement_scope_override: { type: [string, "null"], enum: [full, small, micro, null] }, statutory_audit: { type: boolean }, manual_doc_series: { type: boolean }, fx_reversal_at_open: { type: boolean }, comparative_from_prior_year: { type: boolean } } } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
     put:
       tags: [Accounting]
@@ -10960,6 +10960,7 @@ paths:
                 statutory_audit: { type: boolean, description: "Povinný audit §20 ZoÚ → plný rozsah výkazů (§3a vyhl. 500/2002)" }
                 manual_doc_series: { type: boolean, description: "Auto číslo dokladu ID-{rok}-{NNNN} pro ruční zápisy" }
                 fx_reversal_at_open: { type: boolean, description: "Storno přecenění saldokonta k 1. dni nového období (ČÚS 006)" }
+                comparative_from_prior_year: { type: boolean, description: "Minulé období výkazů s výjimkami mapování platnými v minulém roce (jako uzavřený výkaz); false = přepočet podle zařazení běžného roku" }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }

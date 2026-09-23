@@ -42,10 +42,14 @@ final class StatementMapResolver
     /**
      * Sloučená mapa pro výkaz firmy.
      *
+     * `$year` je účetní období (fiscal_year), za které se výkaz nebo jeho sloupec počítá:
+     * použijí se jen výjimky, které v něm platí ({@see validIn()}). Bez roku se platnost
+     * nekontroluje; to smí jen volající, který pracuje se sadou výjimek jako celkem.
+     *
      * @param array<string,mixed> $version řádek statement_versions (id, statement_type)
      * @return list<array<string,mixed>>
      */
-    public function accountMap(array $version, int $supplierId): array
+    public function accountMap(array $version, int $supplierId, ?int $year = null): array
     {
         $versionId = (int) $version['id'];
         $base = array_map(
@@ -60,7 +64,27 @@ final class StatementMapResolver
             }
         }
 
-        return self::applyOverrides($base, $this->overridesFor($supplierId, $versionId));
+        return self::applyOverrides($base, self::validIn($this->overridesFor($supplierId, $versionId), $year));
+    }
+
+    /**
+     * Výjimky platné v účetním období `$year` (valid_from_year ≤ rok ≤ valid_to_year,
+     * NULL = bez omezení). Bez roku vrací sadu beze změny.
+     *
+     * @param list<array<string,mixed>> $overrides
+     * @return list<array<string,mixed>>
+     */
+    public static function validIn(array $overrides, ?int $year): array
+    {
+        if ($year === null) {
+            return $overrides;
+        }
+
+        return array_values(array_filter(
+            $overrides,
+            static fn (array $o): bool => (($o['valid_from_year'] ?? null) === null || (int) $o['valid_from_year'] <= $year)
+                && (($o['valid_to_year'] ?? null) === null || (int) $o['valid_to_year'] >= $year),
+        ));
     }
 
     /** @return list<array<string,mixed>> výjimky firmy pro verzi (uložené, případně simulované) */
