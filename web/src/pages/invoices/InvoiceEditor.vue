@@ -8,6 +8,7 @@ import { focusLastRow } from '@/composables/useRowFocus'
 import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { useI18n } from 'vue-i18n'
+import { eshopApi, type PriceLevel } from '@/api/eshop'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -362,16 +363,44 @@ function rowHasStockFeatures(item: InvoiceItem): boolean {
   return stockEnabled.value && item.stock_item_id != null && stockFeaturesById[item.stock_item_id] === true
 }
 
-// Cenová hladina vybraného odběratele (klient bez hladiny = „Default", nic se nemění).
-const selectedClientHasLevel = computed(() =>
-  stockEnabled.value && clientHasPriceLevel(clients.value.find(c => c.id === form.value.client_id)))
+// Cenová hladina dokladu, jinak hladina vybraného odběratele (klient bez hladiny = „Default", nic se nemění).
+const selectedClient = computed(() => clients.value.find(c => c.id === form.value.client_id))
+const pricingHasLevel = computed(() =>
+  stockEnabled.value && (form.value.price_level_id != null || clientHasPriceLevel(selectedClient.value)))
+
+// Hladiny pro výběr na dokladu. Nacenit jde jen aktivní hladinou (backend jinou odmítne),
+// proto i název hladiny odběratele jen u aktivní; neaktivní backend ignoruje.
+const priceLevels = ref<PriceLevel[]>([])
+const priceLevelsLoaded = ref(false)
+const priceLevelOptions = computed(() => priceLevels.value.filter(l => l.is_active))
+const clientPriceLevelName = computed(() => {
+  const id = (selectedClient.value as { price_level_id?: number | null } | undefined)?.price_level_id
+  return id != null ? priceLevelOptions.value.find(l => l.id === id)?.name ?? null : null
+})
+// Koncept s hladinou, kterou mezitím někdo deaktivoval nebo smazal: zrušit ji (doklad
+// se nacení podle odběratele) a říct proč, jinak by nacenění řádků tiše selhávalo.
+const priceLevelStale = ref(false)
+async function loadPriceLevels() {
+  if (!stockEnabled.value || priceLevelsLoaded.value) return
+  try {
+    priceLevels.value = await eshopApi.listPriceLevels()
+    priceLevelsLoaded.value = true
+  } catch { priceLevels.value = [] }
+}
+watch(stockEnabled, (enabled) => { if (enabled) void loadPriceLevels() }, { immediate: true })
+watch(() => [priceLevelsLoaded.value, loaded.value] as const, ([levelsReady, invoiceReady]) => {
+  const id = form.value.price_level_id
+  if (!levelsReady || !invoiceReady || id == null || priceLevelOptions.value.some(l => l.id === id)) return
+  form.value.price_level_id = null
+  priceLevelStale.value = true
+})
 
 /** Řádek se naceňuje backendem: karta s balením / individuálními cenami, nebo odběratel s hladinou. */
 function rowUsesQuote(item: InvoiceItem): boolean {
   return usesStockQuote(item, {
     stockEnabled: stockEnabled.value,
     cardFeatures: item.stock_item_id != null && stockFeaturesById[item.stock_item_id] === true,
-    clientHasLevel: selectedClientHasLevel.value,
+    clientHasLevel: pricingHasLevel.value,
   })
 }
 
@@ -399,7 +428,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
     // Sloučené pole (popis = combobox): výběr karty popis přepíše názvem — dosavadní text byl
     // vyhledávací dotaz. Řádek jde dál libovolně přepsat ručně (volný text zůstává první občan).
     item.description = si.name
-    if (!usesStockPricingFeatures(si) && !selectedClientHasLevel.value) {
+    if (!usesStockPricingFeatures(si) && !pricingHasLevel.value) {
       // Karta bez balení a bez individuálních cen, odběratel bez hladiny: původní chování
       // beze změny. Doplněná cena se jen zapamatuje (bez requestu), aby šla přecenit,
       // když uživatel vybere odběratele s cenovou hladinou.
@@ -490,7 +519,7 @@ async function quoteStockRows(rows: InvoiceItem[], mode: QuoteMode, requestUnit?
     return { key, stock_item_id: item.stock_item_id!, unit: unit || null, quantity: quoteQuantity(item.quantity) }
   })
   try {
-    const res = await stockApi.quoteItems({ client_id: form.value.client_id ?? null, currency, date, lines })
+    const res = await stockApi.quoteItems({ client_id: form.value.client_id ?? null, price_level_id: form.value.price_level_id ?? null, currency, date, lines })
     for (const line of res.lines ?? []) {
       const target = pending.get(line.key)
       if (!target) continue
@@ -808,6 +837,7 @@ const form = ref<{
   reverse_charge: boolean
   /** § 30 ZDPH — zjednodušený daňový doklad (do 10 000 Kč vč. daně). */
   is_simplified: boolean
+  price_level_id: number | null
   prices_include_vat: boolean
   income_tax_exempt: boolean
   income_tax_exempt_reason: string
@@ -841,6 +871,7 @@ const form = ref<{
   currency: 'CZK',
   reverse_charge: false,
   is_simplified: false,
+  price_level_id: null,
   prices_include_vat: false,
   income_tax_exempt: false,
   income_tax_exempt_reason: '',
@@ -1083,17 +1114,17 @@ watch(
   () => { if (loaded.value) void loadPriceListItems() },
 )
 
-// Zákaznické ceny a cenové hladiny: po změně odběratele nebo měny přeceň skladové řádky,
+// Zákaznické ceny a cenové hladiny: po změně odběratele, měny nebo hladiny dokladu přeceň skladové řádky,
 // jejichž cena je pořád ta automaticky doplněná. Karta s funkcemi nebo odběratel s hladinou
 // → nacenění; karta bez funkcí u odběratele bez hladiny → zpět původní cena karty.
 // Ruční přepis ani ceny načteného dokladu se nemění.
 watch(
-  () => [form.value.client_id, form.value.currency_id] as const,
+  () => [form.value.client_id, form.value.currency_id, form.value.price_level_id] as const,
   () => {
     const plan = planContextRepricing(form.value.items, row => stockQuoteStates.get(row), {
       stockEnabled: stockEnabled.value,
       loaded: loaded.value,
-      clientHasLevel: selectedClientHasLevel.value,
+      clientHasLevel: pricingHasLevel.value,
     }, row => row.stock_item_id != null && stockFeaturesById[row.stock_item_id] === true)
     for (const row of plan.legacy) restoreLegacyStockPrice(row)
     if (plan.quote.length > 0) void quoteStockRows(plan.quote, 'context')
@@ -1162,6 +1193,7 @@ onMounted(async () => {
       currency: inv.currency,
       reverse_charge: inv.reverse_charge,
       is_simplified: inv.is_simplified === true,
+      price_level_id: inv.price_level_id ?? null,
       prices_include_vat: (inv as { prices_include_vat?: boolean }).prices_include_vat ?? false,
       income_tax_exempt: (inv as { income_tax_exempt?: boolean }).income_tax_exempt ?? false,
       income_tax_exempt_reason: (inv as { income_tax_exempt_reason?: string | null }).income_tax_exempt_reason ?? '',
@@ -2139,6 +2171,7 @@ async function submit() {
       currency_id: form.value.currency_id,
       reverse_charge: form.value.reverse_charge,
       is_simplified: form.value.is_simplified,
+      price_level_id: form.value.price_level_id,
       // Rozpis se posílá JEN u kalendáře. U ostatních typů by prázdné pole smazalo
       // rozpis dokladu, který se na kalendář teprve překlápí zpátky.
       payment_schedule: form.value.invoice_type === 'payment_calendar'
@@ -2437,6 +2470,18 @@ async function deleteDraft() {
                   <span class="text-neutral-400">{{ t('invoice.vies.no_dic') }}</span>
                 </template>
               </div>
+            </div>
+            <!-- Cenová hladina dokladu: přepíše hladinu odběratele pro nacenění skladových řádků
+                 (např. expresní vs. standardní objednávka). Ruční ceny řádků se nemění. -->
+            <div v-if="stockEnabled && priceLevelOptions.length > 0 && !auth.isClientRole">
+              <label for="invoice-price-level" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.price_level.label') }}</label>
+              <select id="invoice-price-level" v-model="form.price_level_id"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface">
+                <option :value="null">{{ clientPriceLevelName ? t('invoice.price_level.from_client', { name: clientPriceLevelName }) : t('invoice.price_level.from_client_none') }}</option>
+                <option v-for="l in priceLevelOptions" :key="l.id" :value="l.id">{{ l.name }}</option>
+              </select>
+              <p v-if="priceLevelStale" class="text-xs text-warning-600 mt-1">{{ t('invoice.price_level.stale') }}</p>
+              <p v-else class="text-xs text-neutral-500 mt-1">{{ t('invoice.price_level.hint') }}</p>
             </div>
             <div v-if="!auth.isClientRole">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.project') }}</label>

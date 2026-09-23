@@ -849,7 +849,8 @@
         "1862_bank_posting_rule_mode_set_manually.sql",
         "1863_payment_matches_supplier_doc_index.sql",
         "1864_stereo_nx_import.sql",
-        "1865_import_jobs_stereo_nx.sql"
+        "1865_import_jobs_stereo_nx.sql",
+        "1866_invoice_price_level.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -5675,6 +5676,7 @@
                 "pdf_generated_at": "timestamp NULL DEFAULT NULL",
                 "pdf_path": "varchar(255) NULL DEFAULT NULL",
                 "penalty_covered_through": "date NULL DEFAULT NULL",
+                "price_level_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "prices_include_vat": "tinyint(1) NOT NULL DEFAULT 0",
                 "project_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "public_token": "char(48) NULL DEFAULT NULL",

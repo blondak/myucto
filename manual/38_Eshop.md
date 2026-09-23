@@ -665,15 +665,15 @@ Editor faktury nacení skladový řádek pro odběratele, měnu a datum dokladu:
 
 1. **Základ** je individuální cena odběratele, pokud je platná k datu dokladu a v měně
    dokladu.
-2. Jinak rozhoduje **cenová hladina** odběratele, pokud ji má přiřazenou a je aktivní
-   ([§ 38.18](#3818-cenove-hladiny)).
+2. Jinak rozhoduje **cenová hladina**: zvolená přímo na dokladu, jinak hladina
+   odběratele, pokud ji má přiřazenou a je aktivní ([§ 38.18](#3818-cenove-hladiny)).
 3. Jinak je základem standardní cena z cenotvorby.
 4. **Akční cena** se použije jen tehdy, když je nižší než tento základ. Zákazník tak
    dostane lepší z obou cen.
 
-Odběratel bez individuální ceny a bez cenové hladiny se naceňuje přesně jako dosud. Změna odběratele nebo
-měny na faktuře přecení jen řádky, jejichž cenu doplnila aplikace; ručně přepsanou
-cenu nechá být. Seznam karet a našeptávač dál ukazují standardní (případně akční) cenu
+Odběratel bez individuální ceny a bez cenové hladiny se naceňuje přesně jako dosud. Změna odběratele,
+měny nebo cenové hladiny dokladu na faktuře přecení jen řádky, jejichž cenu doplnila
+aplikace; ručně přepsanou cenu nechá být. Seznam karet a našeptávač dál ukazují standardní (případně akční) cenu
 bez ohledu na odběratele.
 
 > [!NOTE]
@@ -1273,3 +1273,23 @@ U řádku faktury se ukáže, že cenu určila hladina, například „Gold −1
   odběratelé se pak naceňují standardní cenou a hladinu mají na kartě dál, dokud ji
   nezměníš.
 - Kód hladiny jde měnit kdykoli, odběratelé jsou na hladinu navázaní napevno.
+
+### 38.18.3 Cenová hladina na dokladu
+
+Některé firmy nevolí ceník podle toho, kdo kupuje, ale podle obchodního případu:
+expresní a standardní objednávka, zvláštní podmínky pro jednu zakázku nebo
+velkoobchodní ceník pro jednorázový nákup. Proto má editor faktury pod odběratelem
+výběr **Cenová hladina dokladu** (jen se zapnutým skladem a aspoň jednou hladinou):
+
+- **Podle odběratele** (výchozí) naceňuje jako dosud hladinou z karty odběratele.
+- Zvolená hladina ji pro tento doklad nahradí a platí i u odběratele bez hladiny.
+  Individuální cena odběratele má dál přednost.
+- Změna výběru přecení skladové řádky s automaticky doplněnou cenou. Ručně upravené
+  ceny a ceny už uloženého dokladu zůstanou.
+- Hladina se uloží s dokladem, takže při další úpravě konceptu zůstane vybraná. Ceny
+  jsou uložené na řádcích, pozdější změna nebo deaktivace hladiny vystavený doklad nemění.
+
+Příklad: odběratel má hladinu **Dealer**, urgentní objednávky se prodávají s nižší
+slevou. Založ hladinu **Dealer urgentní** s jejími slevami a u urgentní objednávky ji
+vyber na faktuře. Karta odběratele zůstane beze změny.
+

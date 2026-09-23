@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Service\Stock\StockException;
+use MyInvoice\Service\Stock\StockPriceLevelService;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
@@ -65,6 +67,7 @@ final class UpdateInvoiceAction
         private readonly OssItemDeriver $ossDeriver,
         private readonly OssItemPlanner $ossPlanner,
         private readonly CashSettlementService $cashSettlement,
+        private readonly StockPriceLevelService $priceLevels,
     ) {}
 
     /**
@@ -278,6 +281,25 @@ final class UpdateInvoiceAction
         );
         if ($badRefs !== []) {
             return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
+        }
+
+        // Cenová hladina dokladu (1866): stejné pravidlo jako hladina na kartě odběratele,
+        // musí patřit firmě a být aktivní; null / 0 / '' = hladina odběratele.
+        // Nezměněná hodnota projde i tehdy, když hladinu mezitím někdo deaktivoval nebo
+        // smazal; jinak by koncept nešel uložit, dokud uživatel hladinu ručně nezruší.
+        $currentLevelId = isset($existing['price_level_id']) ? (int) $existing['price_level_id'] : null;
+        $unchangedLevel = array_key_exists('price_level_id', $body) && $currentLevelId !== null
+            && is_numeric($body['price_level_id']) && (int) $body['price_level_id'] === $currentLevelId;
+        if (array_key_exists('price_level_id', $body) && !$unchangedLevel) {
+            try {
+                $body['price_level_id'] = $this->priceLevels->assignableLevelId(
+                    SupplierGuard::currentId($request),
+                    $body['price_level_id'],
+                    $currentLevelId,
+                );
+            } catch (StockException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+            }
         }
 
         try {
@@ -636,7 +658,7 @@ final class UpdateInvoiceAction
             'invoice_type', 'payment_method', 'supplier_order_number', 'note_above_items', 'note_below_items',
             'discount_percent', 'advance_paid_amount', 'reverse_charge',
             'prices_include_vat', 'vat_classification_code', 'income_tax_exempt', 'language',
-            'is_simplified',
+            'is_simplified', 'price_level_id',
         ];
 
         $changed = [];
