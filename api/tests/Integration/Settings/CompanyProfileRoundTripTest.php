@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\StatementDefinitionRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\Dimension\DimensionRuleService;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
@@ -43,6 +44,7 @@ final class CompanyProfileRoundTripTest extends TestCase
     private FinancialStatementService $statements;
     private StatementOverrideService $overrides;
     private DimensionService $dimensions;
+    private DimensionRuleService $rules;
     private PostingService $posting;
     private AccountingPeriodRepository $periods;
     private ChartOfAccountsSeeder $seeder;
@@ -69,6 +71,7 @@ final class CompanyProfileRoundTripTest extends TestCase
             $this->statements = $c->get(FinancialStatementService::class);
             $this->overrides = $c->get(StatementOverrideService::class);
             $this->dimensions = $c->get(DimensionService::class);
+            $this->rules = $c->get(DimensionRuleService::class);
             $this->posting = $c->get(PostingService::class);
             $this->periods = $c->get(AccountingPeriodRepository::class);
             $this->seeder = $c->get(ChartOfAccountsSeeder::class);
@@ -126,6 +129,8 @@ final class CompanyProfileRoundTripTest extends TestCase
 
         $exportB = $this->exporter->export($b);
         self::assertSame($profile['sections'], $exportB['sections'], 'Profil firmy B po nahrání odpovídá profilu firmy A.');
+        self::assertSame(1, $result['sections']['dimension_rules']['created'] ?? null, 'Pravidlo dimenze se přenese.');
+        self::assertSame($this->rulesFingerprint($a), $this->rulesFingerprint($b), 'Pravidla dimenzí firmy B odpovídají firmě A.');
 
         $rule = $this->db->pdo()->prepare('SELECT mode, mode_set_manually_at FROM bank_posting_rules WHERE supplier_id = ?');
         $rule->execute([$b]);
@@ -172,6 +177,10 @@ final class CompanyProfileRoundTripTest extends TestCase
                 self::assertSame($code, $e->errorCode);
             }
         }
+
+        $result = $this->importer->import($b, ['format' => 'myucto.company-profile', 'version' => 1, 'sections' => ['budouci_sekce' => []]], true);
+        self::assertSame(0, $result['changed']);
+        self::assertStringContainsString('budouci_sekce', implode("\n", $result['warnings']), 'Neznámou sekci starší aplikace přeskočí s upozorněním.');
     }
 
     public function testInvalidItemRollsBackWholeImport(): void
@@ -257,6 +266,14 @@ final class CompanyProfileRoundTripTest extends TestCase
         $client = $pdo->prepare('SELECT id FROM clients WHERE supplier_id = ? AND ic = ?');
         $client->execute([$id, self::CLIENT_IC]);
         $this->dimensions->saveEntityDefaults($id, 'client', (int) $client->fetchColumn(), [(int) $type['id'] => (int) $north['id']]);
+        $this->rules->create($id, [
+            'dimension_type_id' => (int) $type['id'],
+            'account_mask' => '5, !59',
+            'enforcement' => 'warning',
+            'default_value_id' => (int) $north['id'],
+            'valid_from' => self::YEAR . '-01-01',
+            'note' => 'Náklady vždy s lokalitou',
+        ], $this->userId);
 
         $pdo->prepare(
             "INSERT INTO posting_rules (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active)
@@ -290,6 +307,22 @@ final class CompanyProfileRoundTripTest extends TestCase
             'liabilities' => $rows($sheet['liabilities']),
             'income' => $rows($income['rows']),
         ]);
+    }
+
+    /** @return list<array<string,mixed>> pravidla dimenzí bez id a časových razítek */
+    private function rulesFingerprint(int $supplierId): array
+    {
+        return array_map(static fn (array $r): array => [
+            'type_code' => $r['type_code'],
+            'account_mask' => $r['account_mask'],
+            'enforcement' => $r['enforcement'],
+            'default_value_code' => $r['default_value_code'],
+            'default_from_card' => $r['default_from_card'],
+            'valid_from' => $r['valid_from'],
+            'valid_to' => $r['valid_to'],
+            'is_active' => $r['is_active'],
+            'note' => $r['note'],
+        ], $this->rules->list($supplierId));
     }
 
     private function versionCode(): string

@@ -25,16 +25,19 @@ namespace MyInvoice\Service\Settings\CompanyProfile;
  *   - company, tax_profile, accounting_settings: přepíšou se jen uvedené volby,
  *   - statement_overrides: výjimky mapování: celá sada každé uvedené verze výkazu
  *     se nahradí sadou z profilu (jako „Uložit" v editoru výjimek),
- *   - dimensions, dimension_defaults, posting_rules, bank_rule_templates,
+ *   - dimensions, dimension_defaults, dimension_rules, posting_rules, bank_rule_templates,
  *     bank_posting_rules: doplní chybějící a upraví existující položky podle klíče;
  *     položky, které profil nezná (typicky založené převodem), zůstanou.
+ *
+ * Nová sekce je aditivní a verzi formátu nemění: starší aplikace ji při nahrání
+ * přeskočí s upozorněním ({@see unknownSections()}).
  */
 final class CompanyProfileFormat
 {
     public const FORMAT = 'myucto.company-profile';
     public const VERSION = 1;
 
-    /** Pořadí je i pořadí nahrání: dimenze před výchozími dimenzemi, předkontace před šablonami a pravidly banky. */
+    /** Pořadí je i pořadí nahrání: dimenze před výchozími dimenzemi a pravidly dimenzí, předkontace před šablonami a pravidly banky. */
     public const SECTIONS = [
         'company',
         'tax_profile',
@@ -42,6 +45,7 @@ final class CompanyProfileFormat
         'statement_overrides',
         'dimensions',
         'dimension_defaults',
+        'dimension_rules',
         'posting_rules',
         'bank_rule_templates',
         'bank_posting_rules',
@@ -55,6 +59,7 @@ final class CompanyProfileFormat
         'statement_overrides' => 'accounting',
         'dimensions' => 'accounting',
         'dimension_defaults' => 'accounting',
+        'dimension_rules' => 'accounting',
         'posting_rules' => 'accounting',
         'bank_rule_templates' => 'bank.rules',
         'bank_posting_rules' => 'accounting',

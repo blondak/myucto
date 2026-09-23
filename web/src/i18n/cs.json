@@ -27617,6 +27617,7 @@
       "statement_overrides": "Výjimky mapování výkazů",
       "dimensions": "Dimenze",
       "dimension_defaults": "Výchozí dimenze klientů a zakázek",
+      "dimension_rules": "Pravidla dimenzí podle účtu",
       "posting_rules": "Předkontace",
       "bank_rule_templates": "Šablony bankovních pravidel",
       "bank_posting_rules": "Pravidla účtování banky"

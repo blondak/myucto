@@ -17,7 +17,7 @@ declare(strict_types=1);
  * Nahrání je idempotentní: opakované spuštění se stejným souborem nic nezmění.
  *
  * Sekce: company, tax_profile, accounting_settings, statement_overrides, dimensions,
- * dimension_defaults, posting_rules, bank_rule_templates, bank_posting_rules.
+ * dimension_defaults, dimension_rules, posting_rules, bank_rule_templates, bank_posting_rules.
  *
  * Návratové kódy: 0 = hotovo, 1 = chyba běhu, 2 = chybné použití nebo neplatný profil.
  */

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Settings\CompanyProfile;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Dimension\DimensionRuleService;
 use PDO;
 
 /**
@@ -55,6 +56,7 @@ final class CompanyProfileExporter
                 'statement_overrides' => $this->statementOverrides($supplierId),
                 'dimensions' => $this->dimensions($supplierId),
                 'dimension_defaults' => $this->dimensionDefaults($supplierId),
+                'dimension_rules' => $this->dimensionRules($supplierId),
                 'posting_rules' => $this->postingRules($supplierId),
                 'bank_rule_templates' => $this->bankRuleTemplates($supplierId),
                 'bank_posting_rules' => $this->bankPostingRules($supplierId),
@@ -256,6 +258,45 @@ final class CompanyProfileExporter
                     'value_code' => (string) $r['value_code'],
                 ];
             }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Pravidla dimenzí podle účtu z {@see DimensionRuleService::list()}. Výchozí hodnota
+     * se odkazuje kódem, u hodnoty navázané na vůz navíc registrační značkou (vůz
+     * znovu založený převodem může dostat hodnotu s jiným kódem).
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function dimensionRules(int $supplierId): array
+    {
+        $plate = $this->db->pdo()->prepare(
+            'SELECT c.registration FROM dimension_values v
+               JOIN cars c ON c.id = v.car_id AND c.supplier_id = v.supplier_id
+              WHERE v.id = ? AND v.supplier_id = ?'
+        );
+        $out = [];
+        foreach ((new DimensionRuleService($this->db))->list($supplierId) as $r) {
+            $registration = null;
+            if ($r['default_value_id'] !== null) {
+                $plate->execute([$r['default_value_id'], $supplierId]);
+                $registration = $plate->fetchColumn();
+                $registration = $registration === false || $registration === null ? null : (string) $registration;
+            }
+            $out[] = [
+                'type_code' => $r['type_code'],
+                'account_mask' => $r['account_mask'],
+                'enforcement' => $r['enforcement'],
+                'default_value_code' => $r['default_value_code'],
+                'default_value_car_registration' => $registration,
+                'default_from_card' => $r['default_from_card'],
+                'valid_from' => $r['valid_from'],
+                'valid_to' => $r['valid_to'],
+                'is_active' => $r['is_active'],
+                'note' => $r['note'],
+            ];
         }
 
         return $out;

@@ -31,6 +31,7 @@ const SECTION_LABELS: Record<CompanyProfileSection, string> = {
   statement_overrides: 'company_profile.section.statement_overrides',
   dimensions: 'company_profile.section.dimensions',
   dimension_defaults: 'company_profile.section.dimension_defaults',
+  dimension_rules: 'company_profile.section.dimension_rules',
   posting_rules: 'company_profile.section.posting_rules',
   bank_rule_templates: 'company_profile.section.bank_rule_templates',
   bank_posting_rules: 'company_profile.section.bank_posting_rules',

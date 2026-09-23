@@ -13,7 +13,9 @@ use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Repository\StatementOverrideRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingRuleValidator;
 use MyInvoice\Service\Accounting\Bank\BankRuleTemplateValidator;
+use MyInvoice\Service\Accounting\Dimension\DimensionAccountMask;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
+use MyInvoice\Service\Accounting\Dimension\DimensionRuleService;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\Learning\RulePromotionService;
 use MyInvoice\Service\Accounting\PostingException;
@@ -28,7 +30,7 @@ use PDO;
  *
  * Každá sekce jde přes validaci, kterou používá i běžné UI (výjimky mapování přes
  * {@see StatementOverrideService::validateSet()}, dimenze přes {@see DimensionService},
- * pravidla banky přes {@see BankPostingRuleValidator}, šablony přes
+ * pravidla dimenzí podle účtu přes {@see DimensionRuleService}, pravidla banky přes {@see BankPostingRuleValidator}, šablony přes
  * {@see BankRuleTemplateValidator}); automatiku pravidla banky zapíná jen auditované
  * povýšení {@see RulePromotionService::promote()}.
  *
@@ -77,6 +79,7 @@ final class CompanyProfileImporter
         private readonly BankRuleTemplateValidator $templates,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly AccountingSupplierSettingsRepository $settings,
+        private readonly DimensionRuleService $dimensionRules,
     ) {}
 
     /**
@@ -116,6 +119,7 @@ final class CompanyProfileImporter
                         'statement_overrides' => $this->importStatementOverrides($supplierId, $data, $userId),
                         'dimensions' => $this->importDimensions($supplierId, $data),
                         'dimension_defaults' => $this->importDimensionDefaults($supplierId, $data),
+                        'dimension_rules' => $this->importDimensionRules($supplierId, $data, $userId),
                         'posting_rules' => $this->importPostingRules($supplierId, $data),
                         'bank_rule_templates' => $this->importBankRuleTemplates($supplierId, $data),
                         'bank_posting_rules' => $this->importBankPostingRules($supplierId, $data, $userId),
@@ -693,6 +697,137 @@ final class CompanyProfileImporter
                 $this->changed($section, $current === [] ? 'created' : 'updated', $label);
             }
         }
+    }
+
+    /**
+     * Pravidla dimenzí podle účtu. Klíčem je typ dimenze, maska účtů a začátek platnosti;
+     * zápis i veškerá validace (maska, vynucení, výchozí hodnota, vozidlo podle karty,
+     * platnost) jde přes {@see DimensionRuleService}.
+     *
+     * @param array<int|string,mixed> $data
+     */
+    private function importDimensionRules(int $supplierId, array $data, ?int $userId): void
+    {
+        $section = 'dimension_rules';
+        if ($data === []) {
+            return;
+        }
+        if (!$this->dimensionRepo->enabled($supplierId)) {
+            $this->warn($section, 'Firma nemá zapnuté dimenze, pravidla dimenzí podle účtu se nenahrála.');
+            return;
+        }
+        $types = [];
+        foreach ($this->dimensionRepo->listTypes($supplierId) as $t) {
+            // Firemní typ má přednost před globálním se stejným kódem.
+            if (!isset($types[$t['code']]) || $t['level'] === 'company') {
+                $types[$t['code']] = $t;
+            }
+        }
+        $existing = $this->dimensionRules->list($supplierId);
+        foreach (array_values($data) as $r) {
+            if (!is_array($r)) {
+                continue;
+            }
+            $typeCode = trim((string) ($r['type_code'] ?? ''));
+            $mask = DimensionAccountMask::parse((string) ($r['account_mask'] ?? ''))->normalized();
+            $validFrom = trim((string) ($r['valid_from'] ?? '')) ?: null;
+            $label = $typeCode . ' ' . $mask . ($validFrom === null ? '' : ' od ' . $validFrom);
+            $type = $types[$typeCode] ?? null;
+            if ($type === null) {
+                $this->warn($section, sprintf('Pravidlo %s: typ dimenze %s ve firmě není, přeskočeno.', $label, $typeCode));
+                continue;
+            }
+            $typeId = (int) $type['id'];
+            $current = null;
+            foreach ($existing as $e) {
+                if ($e['dimension_type_id'] === $typeId && $e['account_mask'] === $mask && $e['valid_from'] === $validFrom) {
+                    $current = $e;
+                    break;
+                }
+            }
+            $valueId = $this->ruleDefaultValue($supplierId, $typeId, $r, $label);
+            if ($valueId === false) {
+                continue;
+            }
+            if ($current === null && !$type['is_active']) {
+                $this->warn($section, sprintf('Pravidlo %s: typ dimenze je neaktivní, přeskočeno.', $label));
+                continue;
+            }
+            if ($valueId !== null && ($current === null || $current['default_value_id'] !== $valueId)) {
+                $value = $this->dimensionRepo->findValue($supplierId, $valueId);
+                if ($value !== null && !$value['is_active']) {
+                    $this->warn($section, sprintf('Pravidlo %s: výchozí hodnota %s je uzavřená, přeskočeno.', $label, (string) $value['code']));
+                    continue;
+                }
+            }
+            $body = [
+                'dimension_type_id' => $typeId,
+                'account_mask' => $mask,
+                'enforcement' => (string) ($r['enforcement'] ?? 'error'),
+                'default_value_id' => $valueId,
+                'default_from_card' => self::flag($r['default_from_card'] ?? false, 'default_from_card'),
+                'valid_from' => $validFrom,
+                'valid_to' => trim((string) ($r['valid_to'] ?? '')) ?: null,
+                'is_active' => self::flag($r['is_active'] ?? true, 'is_active'),
+                'note' => $r['note'] ?? null,
+            ];
+            if ($current === null) {
+                $existing[] = $this->dimensionRules->create($supplierId, $body, $userId);
+                $this->changed($section, 'created', $label);
+                continue;
+            }
+            $note = trim((string) ($body['note'] ?? ''));
+            $body['note'] = $note === '' ? null : $note;
+            $diff = array_values(array_filter(
+                ['enforcement', 'default_value_id', 'default_from_card', 'valid_to', 'is_active', 'note'],
+                static fn (string $f): bool => !self::same($current[$f], $body[$f]),
+            ));
+            if ($diff === []) {
+                $this->report[$section]['unchanged']++;
+                continue;
+            }
+            $this->dimensionRules->update($supplierId, (int) $current['id'], $body);
+            $this->changed($section, 'updated', sprintf('%s: %s', $label, implode(', ', $diff)));
+        }
+    }
+
+    /**
+     * Výchozí hodnota pravidla podle kódu, u vozidla podle registrační značky vozu.
+     *
+     * @param array<string,mixed> $r
+     * @return int|null|false null = pravidlo výchozí hodnotu nemá, false = hodnota ve firmě není (přeskočit)
+     */
+    private function ruleDefaultValue(int $supplierId, int $typeId, array $r, string $label): int|null|false
+    {
+        $code = trim((string) ($r['default_value_code'] ?? ''));
+        $plate = strtoupper(str_replace(' ', '', trim((string) ($r['default_value_car_registration'] ?? ''))));
+        if ($code === '' && $plate === '') {
+            return null;
+        }
+        $value = $code === '' ? null : $this->dimensionRepo->findValueByCode($typeId, $code);
+        if ($value === null && $plate !== '') {
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT v.id FROM dimension_values v
+                   JOIN cars c ON c.id = v.car_id AND c.supplier_id = v.supplier_id
+                  WHERE v.type_id = ? AND v.supplier_id = ? AND REPLACE(UPPER(c.registration), ' ', '') = ?
+                  ORDER BY v.is_active DESC, v.id LIMIT 1"
+            );
+            $stmt->execute([$typeId, $supplierId, $plate]);
+            $id = $stmt->fetchColumn();
+            if ($id !== false) {
+                return (int) $id;
+            }
+        }
+        if ($value === null) {
+            $this->warn('dimension_rules', sprintf(
+                'Pravidlo %s: výchozí hodnota %s ve firmě není, přeskočeno.',
+                $label,
+                $code !== '' ? $code : $plate,
+            ));
+            return false;
+        }
+
+        return (int) $value['id'];
     }
 
     /** @param array<string,mixed> $client */
