@@ -686,12 +686,17 @@ mechanismy podle toho, zda je období, kam zápis patří, ještě **otevřené*
   zápis, který je **už stornovaný** — ten se opravuje jen novým zápisem.
 - **Otevřené období — přímé smazání chybného zápisu.** V detailu podporovaného
   zápisu je vedle storna dostupné tlačítko **„Smazat“**. Bez protizápisu lze odstranit
-  ruční zápis, zápis vydané či přijaté faktury, bankovního pohybu a poslední odpis.
+  ruční zápis, zápis vydané či přijaté faktury, bankovního pohybu, poslední odpis a
+  **Zúčtování DPH** (to se nestornuje, jen maže; při dalším podání přiznání nebo ručním
+  spuštění v agendě DPH se založí znovu).
   Faktura se atomicky odúčtuje (u přijaté faktury ve stavu **Zaúčtovaná** se pracovní
   stav vrátí na **Přijatá**, platební stav zůstane zachovaný); bankovní pohyb se vrátí
   mezi nezaúčtované položky, takže jej lze zkontovat znovu. Tato možnost není dostupná
-  v období, které se uzavírá, je uzavřené či schválené, v části účetnictví uzamčené
-  k datu ani u již stornovaného zápisu nebo jeho protizápisu. Smazání se zaznamená
+  v období, které se uzavírá, je uzavřené či schválené, ani u již stornovaného zápisu
+  nebo jeho protizápisu. Zápis v **části účetnictví uzamčené k datu** (typicky po podání
+  přiznání k DPH) smazat jde, ale až po potvrzení velkého varování: smazání změní údaje,
+  které už mohly být vykázané finančnímu úřadu, a zásah je na odpovědnost účetního
+  (zaškrtávací potvrzení). Přehlasovaný zámek se zapíše do auditního logu. Smazání se zaznamená
   do auditního logu a databázová systémová historie uchová předchozí podobu zápisu.
 - **Zaúčtovaný zápis, který přepisem opravovat nechceš (nebo nejde) — storno.**
   Tlačítko **„Stornovat"** v detailu zápisu vytvoří **zrcadlový protizápis** — stejné
@@ -871,11 +876,14 @@ Smazání se odmítne, když:
 
 - je některá strana dvojice v období, které **není otevřené** (uzavírá se, je uzavřené
   nebo schválené),
-- datum některé strany spadá do **uzamčené části účetnictví**
-  (viz [§ 52.9](#529-zamek-uctovani-k-datu)),
 - na dvojici **navazuje další storno** (storno storna) — řetěz se rozplétá odzadu, od
   posledního protizápisu,
 - se zdroj zápisu ruší **vlastním workflow** (mzdy, odpisy, reklasifikace).
+
+Spadá-li datum některé strany do **uzamčené části účetnictví**
+(viz [§ 52.9](#529-zamek-uctovani-k-datu)), smazání se provede až po potvrzení varování
+o zásahu do uzamčeného období, stejně jako u jednoho zápisu. Stejně jde smazat i dvojici
+stornovaného **Zúčtování DPH**.
 
 Bankovní pohyb, ze kterého zápis vznikl, se smazáním vrátí mezi nezaúčtované položky,
 takže jej lze zkontovat znovu; u faktury se zruší příznak „Zaúčtováno". Smazání se

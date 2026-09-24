@@ -97,7 +97,8 @@ function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>, s
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
           <span class="whitespace-nowrap">{{ t('accounting.journal.copy_as_new') }}</span>
         </RouterLink>
-        <button v-if="canWrite && !detail.reversed_by" @click="emit('reverse', detail)" :class="btnOutline('danger')">
+        <!-- Zúčtování DPH se nestornuje, přepočítává se a maže na místě (VatClearingService). -->
+        <button v-if="canWrite && !detail.reversed_by && detail.source_type !== 'vat_clearing'" @click="emit('reverse', detail)" :class="btnOutline('danger')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
           {{ t('accounting.journal.reverse') }}
         </button>

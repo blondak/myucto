@@ -31,6 +31,8 @@ import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
+import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
+import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import { accountingApi } from '@/api/accounting'
@@ -711,6 +713,10 @@ function payloadText(payload: any): string {
     .join(' · ')
 }
 
+// Zaúčtovaná faktura v uzamčeném období: server vrátí varování, po potvrzení účetním
+// smaže zápis v deníku i fakturu naráz ({@link LockedPeriodAckModal}).
+const lockedAck = useLockedPeriodAck()
+
 async function deleteInvoice() {
   if (!invoice.value) return
   // Pro cancellation doklad: smaž PARENT (cascade pak odstraní i tento storno),
@@ -740,7 +746,9 @@ async function deleteInvoice() {
   if (!confirm(t(confirmKey, { varsymbol: vs }))) return
   busy.value = 'delete'
   try {
-    const res = await invoicesApi.delete(invoice.value.id, status !== 'draft')
+    const invoiceId = invoice.value.id
+    const res = await lockedAck.run(ack => invoicesApi.delete(invoiceId, status !== 'draft', ack))
+    if (res === null) return
     if (res?.cascade_deleted && res.cascade_deleted > 0) {
       toast.success(t('invoice.deleted_with_cascade', { n: res.cascade_deleted }))
     }
@@ -764,7 +772,8 @@ async function deleteCancellationParent() {
   if (!confirm(t('invoice.delete_cancelled_confirm', { varsymbol: parentVs }))) return
   busy.value = 'delete'
   try {
-    const res = await invoicesApi.delete(parentId, true)
+    const res = await lockedAck.run(ack => invoicesApi.delete(parentId, true, ack))
+    if (res === null) return
     if (res?.cascade_deleted && res.cascade_deleted > 0) {
       toast.success(t('invoice.deleted_with_cascade', { n: res.cascade_deleted }))
     }
@@ -3211,5 +3220,6 @@ const invoiceActions = computed<ActionItem[]>(() => {
         :prefill="{ name: invoice.client_company_name || invoice.varsymbol || '', direction: invoice.total_with_vat < 0 ? 'outgoing' : 'incoming', applies_currency: invoice.currency, variable_symbol: invoice.payment_varsymbol || invoice.varsymbol || null }"
         @close="postingRuleOpen = false" @saved="postingRuleOpen = false" />
     </Teleport>
+    <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
   </div>
 </template>

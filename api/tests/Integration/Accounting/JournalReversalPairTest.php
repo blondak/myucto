@@ -153,7 +153,75 @@ final class JournalReversalPairTest extends TestCase
 
         self::assertSame(409, $res['status']);
         self::assertSame('date_locked', $res['body']['error']['code']);
+        self::assertTrue($res['body']['error']['can_acknowledge'] ?? false, 'Uzamčené datum jde vědomě přehlasovat.');
         self::assertSame(2, $this->countEntries([$entryId, $reversalId]));
+    }
+
+    public function testLockedDatePairIsDeletedAfterAcknowledgement(): void
+    {
+        [$entryId, $reversalId] = $this->reversedPair('Uzamčeno, potvrzeno');
+        $this->lockYear();
+
+        $res = $this->call('deleteReversalPair', 'DELETE', 'accountant', ['id' => (string) $entryId], [], ['ack_locked' => '1']);
+
+        self::assertSame(200, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, $this->countEntries([$entryId, $reversalId]));
+        self::assertSame(self::YEAR . '-12-31', $this->auditPayload('accounting.reversal_pair_deleted', $entryId)['locked_override'] ?? null);
+    }
+
+    public function testLockedDateSingleEntryNeedsAcknowledgement(): void
+    {
+        $entryId = $this->manualEntry('Jeden zápis v uzamčené části');
+        $this->lockYear();
+
+        $refused = $this->call('delete', 'DELETE', 'accountant', ['id' => (string) $entryId]);
+        self::assertSame(409, $refused['status']);
+        self::assertSame('date_locked', $refused['body']['error']['code']);
+        self::assertSame(1, $this->countEntries([$entryId]));
+
+        $res = $this->call('delete', 'DELETE', 'accountant', ['id' => (string) $entryId], [], ['ack_locked' => '1']);
+        self::assertSame(200, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, $this->countEntries([$entryId]));
+        self::assertSame(self::YEAR . '-12-31', $this->auditPayload('accounting.entry_deleted', $entryId)['locked_override'] ?? null);
+    }
+
+    public function testClosedPeriodIsNotOverriddenByAcknowledgement(): void
+    {
+        $entryId = $this->manualEntry('Zavřené období');
+        $this->periods->setStatus($this->periodId, $this->supplierId, 'closed');
+
+        $res = $this->call('delete', 'DELETE', 'accountant', ['id' => (string) $entryId], [], ['ack_locked' => '1']);
+
+        self::assertSame(409, $res['status']);
+        self::assertSame('period_not_open', $res['body']['error']['code']);
+        self::assertSame(1, $this->countEntries([$entryId]));
+    }
+
+    /** Zúčtování DPH se nestornuje, přepisuje a maže se na místě — smí ho smazat i účetní. */
+    public function testVatClearingEntryCanBeDeleted(): void
+    {
+        $entryId = $this->manualEntry('Zúčtování DPH');
+        $this->db->pdo()->prepare("UPDATE journal_entries SET source_type = 'vat_clearing', source_id = ? WHERE id = ?")
+            ->execute([(int) (self::YEAR . '061'), $entryId]);
+
+        $res = $this->call('delete', 'DELETE', 'accountant', ['id' => (string) $entryId]);
+
+        self::assertSame(200, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, $this->countEntries([$entryId]));
+    }
+
+    public function testVatClearingReversalPairCanBeDeleted(): void
+    {
+        [$entryId, $reversalId] = $this->reversedPair('Stornované zúčtování DPH');
+        $this->db->pdo()->prepare("UPDATE journal_entries SET source_type = 'vat_clearing' WHERE id IN (?, ?)")
+            ->execute([$entryId, $reversalId]);
+        $this->db->pdo()->prepare('UPDATE journal_entries SET source_id = ? WHERE id = ?')
+            ->execute([(int) (self::YEAR . '061'), $entryId]);
+
+        $res = $this->call('deleteReversalPair', 'DELETE', 'accountant', ['id' => (string) $entryId]);
+
+        self::assertSame(200, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, $this->countEntries([$entryId, $reversalId]));
     }
 
     public function testChainedReversalIsRejected(): void
@@ -233,6 +301,26 @@ final class JournalReversalPairTest extends TestCase
         self::assertNotContains($reversalId, $none);
     }
 
+    private function lockYear(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)'
+        )->execute([$this->supplierId, self::YEAR . '-12-31']);
+    }
+
+    /** @return array<string,mixed> */
+    private function auditPayload(string $action, int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT payload FROM activity_log
+              WHERE supplier_id = ? AND action = ? AND entity_type = 'journal_entry' AND entity_id = ?
+              ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$this->supplierId, $action, $entryId]);
+        return (array) json_decode((string) $stmt->fetchColumn(), true);
+    }
+
     /** @return array{0:int,1:int} [původní zápis, jeho protizápis] */
     private function reversedPair(string $description): array
     {
@@ -294,14 +382,16 @@ final class JournalReversalPairTest extends TestCase
     /**
      * @param array<string,string> $args
      * @param array<string,mixed>  $body
+     * @param array<string,string> $query
      * @return array{status:int, body:array<string,mixed>}
      */
-    private function call(string $method, string $httpMethod, string $role, array $args = [], array $body = []): array
+    private function call(string $method, string $httpMethod, string $role, array $args = [], array $body = [], array $query = []): array
     {
         $req = (new ServerRequestFactory())
             ->createServerRequest($httpMethod, '/api/accounting')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $role]);
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $role])
+            ->withQueryParams($query);
         if ($body !== []) {
             $req = $req->withParsedBody($body);
         }

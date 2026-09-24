@@ -449,15 +449,20 @@ Pokud faktura ani žádný navázaný doklad nebyly zaúčtovány, admin force-d
 provede smazání přímo.
 
 Je-li faktura zaúčtovaná a její zápisy by šlo smazat i ručně v **Účetnictví →
-Deník** (otevřené období, datum mimo uzamčenou část účetnictví), force-delete
-nejdřív smaže tyto zápisy, u stornované faktury celou storno dvojici, a teprve
-pak fakturu. V deníku tak po faktuře nic nezůstane a retenční lhůta se na ni
+Deník** (otevřené období), force-delete v jednom kroku smaže tyto zápisy, u
+stornované faktury celou storno dvojici, a pak fakturu. V deníku předem nic mazat
+nemusíš. V deníku tak po faktuře nic nezůstane a retenční lhůta se na ni
 nevztahuje. Smazání zápisů se zapíše do activity logu (`accounting.entry_deleted`,
 `accounting.reversal_pair_deleted` s důvodem `invoice_force_delete`).
 
-Když zápis smazat nejde (uzavřené období, uzamčené datum), zůstává aktivní
-retenční ochrana účetních a daňových záznamů; v běžící retenční lhůtě proto
-použij storno nebo dobropis.
+Leží-li zápis v **části účetnictví uzamčené k datu** (typicky po podání přiznání
+k DPH), zobrazí se před smazáním velké varování: zásah změní DPH a kontrolní
+hlášení za už vykázané období a je na odpovědnost účetního. Po zaškrtnutí
+potvrzení se zápis i faktura smažou; přehlasovaný zámek je v activity logu.
+
+Když zápis smazat nejde (uzavřené období), zůstává aktivní retenční ochrana
+účetních a daňových záznamů; v běžící retenční lhůtě proto použij storno nebo
+dobropis.
 
 Před skutečným smazáním systém ukáže **detailní per-status varování**
 (jiné pro vystavenou / odeslanou / zaplacenou / stornovanou) s doporučenou

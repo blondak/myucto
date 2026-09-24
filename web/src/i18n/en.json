@@ -12392,6 +12392,13 @@
     }
   },
   "accounting": {
+    "locked_ack": {
+      "title": "Change in a locked period",
+      "headline": "You are deleting data in a locked period",
+      "vat_hint": "The change affects VAT, the VAT control statement and the EC sales list for the period. Check whether a supplementary or corrective return is needed.",
+      "responsibility": "I understand that I am changing a locked period and that this is my responsibility as the accountant.",
+      "confirm": "Delete anyway"
+    },
     "template": {
       "create_posting_rule": "Create posting rule",
       "create_expense": "Create expense template",

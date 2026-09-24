@@ -12392,6 +12392,13 @@
     }
   },
   "accounting": {
+    "locked_ack": {
+      "title": "Zásah do uzamčeného období",
+      "headline": "Mažete údaje v uzamčeném období",
+      "vat_hint": "Změna se promítne do DPH, kontrolního hlášení i souhrnného hlášení za dané období. Zkontrolujte, zda není nutné podat dodatečné nebo opravné přiznání.",
+      "responsibility": "Beru na vědomí, že zasahuji do uzamčeného období a že je to na mou odpovědnost jako účetního.",
+      "confirm": "Přesto smazat"
+    },
     "template": {
       "create_posting_rule": "Vytvořit pravidlo účtování",
       "create_expense": "Vytvořit nákladovou šablonu",

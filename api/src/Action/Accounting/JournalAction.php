@@ -1217,10 +1217,12 @@ final class JournalAction
             $lock->execute([$supplierId]);
             $lockedUntil = $lock->fetchColumn();
             $lockedUntil = ($lockedUntil === false || $lockedUntil === null) ? null : (string) $lockedUntil;
-            if ($block = JournalEntryDeletionRules::blockSingle($entry, $lockedUntil)) {
+            $lockedAck = $this->lockedAcknowledged($request);
+            if ($block = JournalEntryDeletionRules::blockSingle($entry, $lockedUntil, $lockedAck)) {
                 if ($ownTx) $pdo->rollBack();
-                return Json::error($response, $block['code'], $block['message'], 409);
+                return self::blockedResponse($response, $block);
             }
+            $lockedOverride = JournalEntryDeletionRules::isDateLocked($entry, $lockedUntil);
 
             $sourceType = (string) $entry['source_type'];
             $sourceId = $entry['source_id'] === null ? null : (int) $entry['source_id'];
@@ -1374,6 +1376,7 @@ final class JournalAction
                     'asset_id' => $assetId,
                     'fiscal_year' => $fiscalYear,
                     'pause_preserved' => $pausePreserved,
+                    'locked_override' => $lockedOverride ? $lockedUntil : null,
                     'depreciation_entries' => array_map(static fn (array $row): array => [
                         'id' => (int) $row['id'],
                         'kind' => (string) $row['kind'],
@@ -1425,6 +1428,24 @@ final class JournalAction
             'fiscal_year' => $fiscalYear,
             'pause_preserved' => $sourceType === 'depreciation' ? $pausePreserved : null,
         ], static fn ($value): bool => $value !== null));
+    }
+
+    /** Účetní vědomě potvrdil zásah do uzamčeného období ({@see JournalEntryDeletionRules::blockPeriod()}). */
+    private function lockedAcknowledged(Request $request): bool
+    {
+        return ($request->getQueryParams()[JournalEntryDeletionRules::ACK_LOCKED_PARAM] ?? '') === '1';
+    }
+
+    /** @param array{code:string, message:string, can_acknowledge?:bool} $block */
+    private static function blockedResponse(Response $response, array $block): Response
+    {
+        return Json::error(
+            $response,
+            $block['code'],
+            $block['message'],
+            409,
+            !empty($block['can_acknowledge']) ? ['can_acknowledge' => true] : [],
+        );
     }
 
     /**
@@ -1525,11 +1546,14 @@ final class JournalAction
             $lock->execute([$supplierId]);
             $lockedUntil = $lock->fetchColumn();
             $lockedUntil = ($lockedUntil === false || $lockedUntil === null) ? null : (string) $lockedUntil;
+            $lockedAck = $this->lockedAcknowledged($request);
+            $lockedOverride = false;
             foreach ([$original, $reversal] as $row) {
-                if ($block = JournalEntryDeletionRules::blockPeriod($row, $lockedUntil)) {
+                if ($block = JournalEntryDeletionRules::blockPeriod($row, $lockedUntil, $lockedAck)) {
                     if ($ownTx) $pdo->rollBack();
-                    return Json::error($response, $block['code'], $block['message'], 409);
+                    return self::blockedResponse($response, $block);
                 }
+                $lockedOverride = $lockedOverride || JournalEntryDeletionRules::isDateLocked($row, $lockedUntil);
             }
 
             $sourceType = (string) $original['source_type'];
@@ -1599,6 +1623,7 @@ final class JournalAction
                 (int) $original['id'],
                 [
                     'reversal_entry_id' => $reversalId,
+                    'locked_override' => $lockedOverride ? $lockedUntil : null,
                     'period_id' => (int) $original['period_id'],
                     'entry_date' => (string) $original['entry_date'],
                     'document_no' => $original['document_no'],

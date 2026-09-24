@@ -771,9 +771,9 @@ export const invoicesApi = {
    * Vrací `cascade_deleted` = počet navazujících dokladů (storno, dobropis), které byly
    * smazány zároveň přes ON DELETE CASCADE (migrace 0015).
    */
-  delete: (id: number, force = false) =>
+  delete: (id: number, force = false, ackLocked = false) =>
     api.delete<{ ok: boolean; cascade_deleted: number; journal_entries_deleted?: number }>(`/invoices/${id}`, {
-      params: force ? { force: 1 } : undefined,
+      params: force ? { force: 1, ...(ackLocked ? { ack_locked: 1 } : {}) } : undefined,
     }).then(r => r.data),
 
   // Akce nad fakturou

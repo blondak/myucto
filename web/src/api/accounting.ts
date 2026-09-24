@@ -1832,12 +1832,16 @@ export const accountingApi = {
     api.get<PostingOrigin>(`/accounting/journal/posting-origin/${source}/${id}`).then(r => r.data),
   reverseEntry: (id: number) =>
     api.post<JournalEntryDetail>(`/accounting/journal/${id}/reverse`).then(r => r.data),
-  deleteEntry: (id: number) =>
-    api.delete<{ ok: boolean }>(`/accounting/journal/${id}`).then(r => r.data),
+  /** `ackLocked` = účetní potvrdil zásah do uzamčeného období (odpověď 409 `date_locked` s `can_acknowledge`). */
+  deleteEntry: (id: number, ackLocked = false) =>
+    api.delete<{ ok: boolean }>(`/accounting/journal/${id}`, {
+      params: ackLocked ? { ack_locked: 1 } : undefined,
+    }).then(r => r.data),
   /** Smaže celou storno dvojici (zápis i jeho protizápis) v otevřeném období. */
-  deleteEntryReversalPair: (id: number) =>
-    api.delete<{ ok: boolean; deleted_entry_ids: number[] }>(`/accounting/journal/${id}/reversal-pair`)
-      .then(r => r.data),
+  deleteEntryReversalPair: (id: number, ackLocked = false) =>
+    api.delete<{ ok: boolean; deleted_entry_ids: number[] }>(`/accounting/journal/${id}/reversal-pair`, {
+      params: ackLocked ? { ack_locked: 1 } : undefined,
+    }).then(r => r.data),
   // Auditní historie (SYSTEM VERSIONING timeline, audit 2026-07)
   getJournalHistory: (id: number) =>
     api.get<JournalHistoryResponse>(`/accounting/journal/${id}/history`).then(r => r.data),

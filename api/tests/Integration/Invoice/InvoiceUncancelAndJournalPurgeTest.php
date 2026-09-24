@@ -65,7 +65,12 @@ final class InvoiceUncancelAndJournalPurgeTest extends StockTestCase
         self::assertSame(0, $this->journalCount($supplierId));
     }
 
-    public function testForceDeleteWithLockedJournalKeepsRetentionGate(): void
+    /**
+     * Zápis v uzamčeném období (po podání přiznání k DPH): bez potvrzení se nic nesmaže
+     * a UI dostane varování, které jde potvrdit. Dřív to skončilo retenční chybou, kterou
+     * UI potvrdit neumělo, a účetní musela nejdřív ručně mazat v deníku.
+     */
+    public function testForceDeleteWithLockedJournalAsksForAcknowledgement(): void
     {
         $supplierId = $this->doubleEntrySupplier();
         $invoiceId = $this->issuedInvoice($supplierId, 'FV-2099-P3');
@@ -74,10 +79,29 @@ final class InvoiceUncancelAndJournalPurgeTest extends StockTestCase
 
         $res = $this->invoke(DeleteInvoiceAction::class, $supplierId, $invoiceId, [], ['force' => '1']);
 
-        self::assertSame(422, $res['status'], json_encode($res['body']));
-        self::assertSame('retention_period', $res['body']['error']['code'] ?? null);
+        self::assertSame(409, $res['status'], json_encode($res['body']));
+        self::assertSame('date_locked', $res['body']['error']['code'] ?? null);
+        self::assertTrue($res['body']['error']['can_acknowledge'] ?? false);
+        self::assertStringContainsString('odpovědnost účetního', (string) $res['body']['error']['message']);
         self::assertSame(1, $this->rowCount('invoices', $invoiceId));
-        self::assertSame(1, $this->rowCount('journal_entries', $entryId), 'Zamčený zápis zůstal.');
+        self::assertSame(1, $this->rowCount('journal_entries', $entryId), 'Bez potvrzení zápis zůstal.');
+    }
+
+    public function testForceDeleteWithLockedJournalAndAcknowledgementDeletesBoth(): void
+    {
+        $supplierId = $this->doubleEntrySupplier();
+        $invoiceId = $this->issuedInvoice($supplierId, 'FV-2099-P4');
+        $entryId = $this->post($supplierId, $invoiceId);
+        $this->lockUntil($supplierId, '2099-12-31');
+
+        $res = $this->invoke(DeleteInvoiceAction::class, $supplierId, $invoiceId, [], ['force' => '1', 'ack_locked' => '1']);
+
+        self::assertSame(200, $res['status'], json_encode($res['body']));
+        self::assertSame(0, $this->rowCount('invoices', $invoiceId));
+        self::assertSame(0, $this->rowCount('journal_entries', $entryId));
+        self::assertSame(0, $this->journalCount($supplierId), 'Žádný protizápis, žádná storno dvojice.');
+        self::assertSame('2099-12-31', $this->lastLog('accounting.entry_deleted', $entryId)['locked_override'] ?? null,
+            'Přehlasovaný zámek musí být v auditní stopě.');
     }
 
     public function testUncancelRestoresInvoiceAndDeletesReversalPair(): void
