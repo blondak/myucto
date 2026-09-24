@@ -1031,3 +1031,60 @@ Globální registraci externí aplikace spravuje provozovatel v **Systém →
 Odesílací brána ISDS** (`/admin/isds-gateway`); popisuje ji kapitola
 [Odesílací brána ISDS](98_Odesilaci_brana_ISDS.md). Mzdové formuláře a jejich
 věcný stav popisuje kapitola [Podání a hlášení](85_Podani_a_hlaseni.md).
+
+## 96.18 Profil firmy
+
+Nastavení → **Daně a účetnictví** → **Profil firmy** uloží do jednoho souboru
+nastavení, které firma vybudovala ručně a které převod z jiného programu
+nezaloží:
+
+| Sekce | Co obsahuje |
+|---|---|
+| Volby firmy | sklad, dimenze zapnuté |
+| Daňový profil | typ poplatníka pro EPO, účetní vyhláška, příznaky pro přiznání, finanční úřad, sestavitel a oprávněná osoba |
+| Výkazy a účetní politiky | rozsah výkazů, audit, čistý obrat, sloupec minulého období z uzavřeného výkazu, souhrnné vykázání daní vůči FÚ a rok, od kterého platí, kurz, drobný majetek, účty PHM a oprav vozidel |
+| Výjimky mapování výkazů | všechny výjimky včetně platnosti po letech a korekce za pohledávkou |
+| Dimenze | firemní typy a hodnoty včetně názvů, stromu, uzavření a vazby na vůz, středisko a zakázku |
+| Výchozí dimenze klientů a zakázek | podle IČO klienta a čísla nebo názvu zakázky |
+| Pravidla dimenzí podle účtu | maska účtů, typ dimenze, vynucení, výchozí hodnota (podle kódu, u vozidla i podle registrační značky), vozidlo podle platební karty a platnost |
+| Předkontace | předkontace firmy včetně vypnutých |
+| Šablony a pravidla banky | šablony bankovních pravidel a pravidla účtování banky včetně automatiky |
+
+Profil neobsahuje doklady, účetní deník ani přístupové údaje. Odkazy v něm jsou
+přirozené klíče (kód účtu, kód dimenze, IČO klienta, registrační značka), takže
+jde nahrát do znovu založené firmy i do jiné instalace MyÚčta.
+
+**Stáhnout profil firmy** uloží soubor JSON. **Nahrát profil firmy** nejdřív
+ukáže náhled: po sekcích, co přibude, co se změní a co zůstane, a upozornění
+(profil z firmy s jiným IČO, účet, který firma v osnově nemá, klient, kterého
+nezná). Nic se nezapíše, dokud náhled nepotvrdíte tlačítkem **Nahrát profil**.
+
+Při nahrání platí:
+
+- volby firmy, daňový profil a výkazy se přepíšou hodnotami z profilu,
+- výjimky mapování každé verze výkazu v profilu se nahradí sadou z profilu,
+- dimenze, výchozí dimenze, předkontace, šablony a pravidla banky se doplní
+  a upraví podle kódu; co profil nezná (typicky to, co založil převod), zůstane,
+- pravidlo dimenze se páruje podle typu dimenze, masky účtů a začátku platnosti;
+  pravidlo s typem nebo výchozí hodnotou, kterou firma nemá, se přeskočí
+  s upozorněním,
+- sekci, kterou starší verze aplikace nezná, nahrání přeskočí s upozorněním,
+- automatiku pravidla banky zapne nahrání stejným krokem jako tlačítko
+  *Povýšit*, v historii pravidla je proto dohledatelná,
+- chyba v kterékoli sekci nezapíše nic,
+- opakované nahrání téhož profilu nic nezmění.
+
+Nahrát profil smí jen uživatel, který smí měnit každou část nastavení, kterou
+profil obsahuje (nastavení firmy, účetnictví, pravidla banky).
+
+Z příkazové řádky:
+
+```
+php api/bin/company-profile.php --ico=<IČO> --export --file=profil.json
+php api/bin/company-profile.php --ico=<IČO> --import --file=profil.json --dry-run
+php api/bin/company-profile.php --ico=<IČO> --import --file=profil.json
+```
+
+Profil se hodí hlavně při opakovaném převodu firmy z jiného programu: stáhněte
+ho před smazáním firmy nebo před novým převodem a po ostrém převodu ho nahrajte
+zpět. Průvodci převodem ho nabízejí přímo (viz [§ 103.8](103_Prechod_z_Money_S3.md#1038-opakovany-prevod)).

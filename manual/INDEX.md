@@ -31,6 +31,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 11. [Zisk](11_Zisk.md)
 12. [Tržby](12_Trzby.md)
 13. [Náklady](13_Naklady.md)
+[Dimenze](110_Dimenze.md) (při zapnutých dimenzích)
 
 ### Prodej
 
@@ -58,6 +59,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 29. [Banka — výpisy a párování](29_Banka.md)
 30. [Bankovní účty a avíza](30_Bankovni_ucty.md)
 31. [Platební karty](31_Platebni_karty.md)
+112. [Kreditní karty](112_Kreditni_karty.md)
 32. [Pokladna](32_Pokladna.md)
 33. [GoPay](33_GoPay.md)
 
@@ -102,6 +104,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 61. [Úplnost dokladů](61_Uplnost_dokladu.md)
 62. [Měsíční kontrola](62_Mesicni_kontrola.md)
 63. [Měsíční přehled](63_Mesicni_report.md)
+111. [Souběh se starým systémem](111_Soubeh_se_starym_systemem.md)
 64. [Mzdová rekapitulace a mzdový list](64_Mzdy.md)
 
 ### Nástroje

@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { stockApi, type StockStatusReport, type StockValuationReport, type Warehouse } from '@/api/stock'
+import { stockApi, type StockStatusReport, type StockValuationReport, type StockSalesReport, type StockSalesAmount, type Warehouse } from '@/api/stock'
+import { eshopApi, type Category } from '@/api/eshop'
+import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+import { indentedCategoryLabel } from '@/utils/categoryLabel'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
-import { useRoute } from 'vue-router'
-import { formatMoney } from '@/composables/useFormat'
+import { useRoute, RouterLink } from 'vue-router'
+import { formatMoney, formatDate, formatNumber } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
@@ -18,13 +22,108 @@ const toast = useToast()
 const auth = useAuthStore()
 const route = useRoute()
 
-const tab = ref<'status' | 'valuation'>('status')
+type ReportTab = 'status' | 'valuation' | 'sales'
+const tab = ref<ReportTab>('status')
+// Prodeje ukazují odběratele a prodejní ceny, proto jen s právem číst vydané faktury (hlídá i API).
+const canSeeSales = computed(() => auth.canRead('invoices'))
 const warehouses = ref<Warehouse[]>([])
 const loading = ref(false)
 
 const filters = reactive({
   warehouse_id: '' as number | '',
   date: appIsoDate(),
+})
+
+const categories = ref<Category[]>([])
+const sales = ref<StockSalesReport | null>(null)
+const salesFilters = reactive({
+  date_from: `${appIsoDate().slice(0, 4)}-01-01`,
+  date_to: appIsoDate(),
+  client_id: null as number | null,
+  client_label: null as string | null,
+  category_id: '' as number | '',
+  stock_item_id: null as number | null,
+  item_label: null as string | null,
+  q: '',
+  group_by: 'none' as 'none' | 'client' | 'item',
+  page: 1,
+})
+let salesSearchTimer: ReturnType<typeof setTimeout> | undefined
+
+function salesParams() {
+  return {
+    date_from: salesFilters.date_from || undefined,
+    date_to: salesFilters.date_to || undefined,
+    client_id: salesFilters.client_id ?? undefined,
+    category_id: salesFilters.category_id || undefined,
+    warehouse_id: filters.warehouse_id || undefined,
+    stock_item_id: salesFilters.stock_item_id ?? undefined,
+    q: salesFilters.q.trim() || undefined,
+    group_by: salesFilters.group_by,
+  }
+}
+
+// Hledání se posílá při psaní; pomalejší starší odpověď nesmí přepsat novější.
+let salesGeneration = 0
+async function loadSales() {
+  const generation = ++salesGeneration
+  const result = await stockApi.reportSales({ ...salesParams(), page: salesFilters.page, per_page: 50 })
+  if (generation === salesGeneration) sales.value = result
+}
+
+function onWarehouseChange() {
+  if (tab.value === 'sales') reloadSales()
+  else void load()
+}
+
+function reloadSales(resetPage = true) {
+  if (resetPage) salesFilters.page = 1
+  void load()
+}
+
+function onSalesSearch() {
+  if (salesSearchTimer) clearTimeout(salesSearchTimer)
+  salesSearchTimer = setTimeout(() => reloadSales(), 350)
+}
+
+function setGroupBy(value: 'none' | 'client' | 'item') {
+  salesFilters.group_by = value
+  reloadSales()
+}
+
+/** Klik na souhrnný řádek zúží řádky na daného odběratele / kartu. */
+function drillDown(id: number | null, label: string, code: string) {
+  if (id === null) return
+  if (salesFilters.group_by === 'client') {
+    salesFilters.client_id = id
+    salesFilters.client_label = label
+  } else {
+    salesFilters.stock_item_id = id
+    salesFilters.item_label = code || label
+  }
+  salesFilters.group_by = 'none'
+  reloadSales()
+}
+
+function clearItemFilter() {
+  salesFilters.stock_item_id = null
+  salesFilters.item_label = null
+  reloadSales()
+}
+
+function amountText(amounts: StockSalesAmount[]): string[] {
+  return amounts.map(a => formatMoney(Number(a.total_without_vat), a.currency))
+}
+
+/** Množství v českém formátu bez zbytečných nul (3,5 ne 3.500). */
+function qtyText(qty: string): string {
+  return formatNumber(Number(qty), { maximumFractionDigits: 3 })
+}
+
+const salesQty = computed(() => {
+  const totals = sales.value?.totals
+  if (!totals) return ''
+  return totals.units.length === 1 ? `${qtyText(totals.qty)} ${totals.units[0]}` : t('stock.reports.sales.mixed_units')
 })
 
 const statusReport = ref<StockStatusReport | null>(null)
@@ -41,6 +140,8 @@ async function load() {
   try {
     if (tab.value === 'status') {
       statusReport.value = await stockApi.reportStatus({ warehouse_id: filters.warehouse_id || undefined })
+    } else if (tab.value === 'sales') {
+      await loadSales()
     } else { await startValuation() }
   } catch (e: any) {
     const code = e?.response?.data?.error?.code
@@ -103,9 +204,13 @@ async function cancelValuation() {
   finally { cancellingValuation.value = false }
 }
 
-function selectTab(t2: 'status' | 'valuation') { clearValuationTimer(); ++valuationGeneration; tab.value = t2; void load() }
+function selectTab(t2: ReportTab) { clearValuationTimer(); ++valuationGeneration; tab.value = t2; void load() }
 
 async function exportFile(format: 'pdf' | 'xlsx') {
+  if (tab.value === 'sales') {
+    window.open(stockApi.reportExportUrl('sales', 'xlsx', salesParams()), '_blank', 'noopener')
+    return
+  }
   const url = stockApi.reportExportUrl(tab.value, format, {
     warehouse_id: filters.warehouse_id || undefined,
     date: tab.value === 'valuation' ? filters.date : undefined,
@@ -119,6 +224,18 @@ const valuationRows = computed(() => valuationResult.value?.items ?? valuationRe
 
 onMounted(async () => {
   try { warehouses.value = await stockApi.listWarehouses(true) } catch { warehouses.value = [] }
+  if (canSeeSales.value) {
+    eshopApi.listCategories().then(list => { categories.value = list.filter(x => !x.archived) }).catch(() => { categories.value = [] })
+  }
+  // Odkaz z detailu karty: /stock/reports?tab=sales&stock_item_id=…
+  const itemId = Number(route.query.stock_item_id)
+  if (route.query.tab === 'sales' && canSeeSales.value) {
+    tab.value = 'sales'
+    if (Number.isSafeInteger(itemId) && itemId > 0) {
+      salesFilters.stock_item_id = itemId
+      stockApi.getItem(itemId).then(item => { salesFilters.item_label = item.sku }).catch(() => {})
+    }
+  }
   const jobId = Number(route.query.valuation_job)
   if (Number.isSafeInteger(jobId) && jobId > 0) {
     tab.value = 'valuation'
@@ -130,7 +247,7 @@ onMounted(async () => {
   }
   await load()
 })
-onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration })
+onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; if (salesSearchTimer) clearTimeout(salesSearchTimer) })
 </script>
 
 <template>
@@ -151,6 +268,11 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration })
         :class="tab === 'valuation' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-neutral-600 hover:text-neutral-900'">
         {{ t('stock.reports.tab_valuation') }}
       </button>
+      <button v-if="canSeeSales" type="button" @click="selectTab('sales')"
+        class="cursor-pointer px-3 py-2 text-sm border-b-2 transition whitespace-nowrap"
+        :class="tab === 'sales' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-neutral-600 hover:text-neutral-900'">
+        {{ t('stock.reports.tab_sales') }}
+      </button>
     </div>
 
     <!-- Filtry -->
@@ -158,7 +280,7 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration })
       <div class="flex flex-wrap items-end gap-3">
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.filter_warehouse') }}</label>
-          <select v-model="filters.warehouse_id" @change="load" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface min-w-[10rem]">
+          <select v-model="filters.warehouse_id" @change="onWarehouseChange" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface min-w-[10rem]">
             <option value="">{{ t('common.all') }}</option>
             <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
           </select>
@@ -167,7 +289,41 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration })
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.filter_date') }}</label>
           <DateInput v-model="filters.date" @change="load" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
+        <template v-if="tab === 'sales'">
+          <div>
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.sales.filter_from') }}</label>
+            <DateInput v-model="salesFilters.date_from" @change="reloadSales()" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.sales.filter_to') }}</label>
+            <DateInput v-model="salesFilters.date_to" @change="reloadSales()" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+          </div>
+          <div class="min-w-[14rem]">
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.sales.filter_client') }}</label>
+            <ClientSearchSelect :model-value="salesFilters.client_id" :selected-label="salesFilters.client_label"
+              :placeholder="t('stock.reports.sales.all_clients')"
+              @update:model-value="(v: number | null) => { salesFilters.client_id = v; reloadSales() }"
+              @selected="(client) => { salesFilters.client_label = client?.company_name ?? null }" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.sales.filter_category') }}</label>
+            <select v-model="salesFilters.category_id" @change="reloadSales()" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface min-w-[10rem]">
+              <option value="">{{ t('common.all') }}</option>
+              <option v-for="c in categories" :key="c.id" :value="c.id">{{ indentedCategoryLabel(c) }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.sales.filter_q') }}</label>
+            <input v-model="salesFilters.q" type="search" @input="onSalesSearch" :placeholder="t('stock.reports.sales.filter_q_placeholder')"
+              class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface w-56" />
+          </div>
+        </template>
         <div class="flex flex-wrap gap-2 ml-auto">
+          <button v-if="tab === 'sales'" :disabled="loading || !sales || sales.totals.lines === 0" @click="exportFile('xlsx')" :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+            {{ t('stock.reports.export_xlsx') }}
+          </button>
+          <template v-else>
           <button :disabled="loading || (tab === 'valuation' && !valuationResult)" @click="exportFile('pdf')" :class="btnOutline('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             {{ t('stock.reports.export_pdf') }}
@@ -176,7 +332,25 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration })
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             {{ t('stock.reports.export_xlsx') }}
           </button>
+          </template>
         </div>
+      </div>
+      <!-- Aktivní filtr karty (z detailu karty nebo prokliku ze souhrnu) + seskupení. -->
+      <div v-if="tab === 'sales'" class="flex flex-wrap items-center gap-2 mt-3">
+        <span class="text-xs font-medium text-neutral-500">{{ t('stock.reports.sales.group_by') }}</span>
+        <div class="flex w-full sm:inline-flex sm:w-auto rounded-md border border-neutral-300 overflow-hidden" role="group">
+          <button v-for="g in (['none', 'client', 'item'] as const)" :key="g" type="button" @click="setGroupBy(g)"
+            class="cursor-pointer flex-1 sm:flex-none px-2 sm:px-3 h-8 text-xs sm:text-sm whitespace-nowrap border-l first:border-l-0 border-neutral-300"
+            :class="salesFilters.group_by === g ? 'bg-primary-50 text-primary-700 font-medium' : 'bg-surface text-neutral-600 hover:bg-neutral-50'"
+            :aria-pressed="salesFilters.group_by === g">
+            {{ t(`stock.reports.sales.group_${g}`) }}
+          </button>
+        </div>
+        <button v-if="salesFilters.stock_item_id" type="button" @click="clearItemFilter"
+          class="cursor-pointer inline-flex items-center gap-1 h-8 px-2 rounded-md bg-neutral-100 text-xs text-neutral-700 hover:bg-neutral-200 whitespace-nowrap">
+          {{ t('stock.reports.sales.item_filter', { sku: salesFilters.item_label ?? `#${salesFilters.stock_item_id}` }) }}
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+        </button>
       </div>
     </div>
 
@@ -220,6 +394,128 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration })
           </table>
         </div>
       </div>
+    </template>
+
+    <!-- Prodeje skladových karet -->
+    <template v-else-if="tab === 'sales'">
+      <template v-if="sales">
+        <!-- Souhrn za celý filtr (ne jen stránku): řádky, množství, tržba po měnách. -->
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm mb-4 grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-neutral-200">
+          <div class="px-4 py-3">
+            <div class="text-xs font-medium text-neutral-500">{{ t('stock.reports.sales.summary_lines') }}</div>
+            <div class="font-mono text-lg">{{ sales.totals.lines }}</div>
+          </div>
+          <div class="px-4 py-3">
+            <div class="text-xs font-medium text-neutral-500">{{ t('stock.reports.sales.summary_qty') }}</div>
+            <div class="font-mono text-lg">{{ salesQty }}</div>
+          </div>
+          <div class="px-4 py-3">
+            <div class="text-xs font-medium text-neutral-500">{{ t('stock.reports.sales.summary_amount') }}</div>
+            <div v-for="line in amountText(sales.totals.amounts)" :key="line" class="font-mono text-lg">{{ line }}</div>
+            <div v-if="sales.totals.amounts.length === 0" class="font-mono text-lg">—</div>
+          </div>
+        </div>
+
+        <EmptyState v-if="sales.totals.lines === 0" boxed accent="neutral" icon="coin"
+          :title="t('stock.reports.sales.empty_title')" :message="t('stock.reports.sales.empty_hint')" />
+
+        <!-- Souhrn po odběratelích / kartách -->
+        <div v-else-if="salesFilters.group_by !== 'none'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="min-w-[40rem] w-full text-sm">
+              <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+                <tr>
+                  <th class="px-3 py-2 text-left font-medium">{{ t(salesFilters.group_by === 'client' ? 'stock.reports.sales.col_client' : 'stock.reports.sales.col_item') }}</th>
+                  <th class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ t('stock.reports.sales.col_documents') }}</th>
+                  <th class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ t('stock.reports.sales.col_lines') }}</th>
+                  <th class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ t('stock.reports.col_qty') }}</th>
+                  <th class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ t('stock.reports.sales.col_total') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-neutral-100">
+                <tr v-for="g in sales.groups" :key="`${g.id}`" class="hover:bg-neutral-50" :class="g.id !== null ? 'cursor-pointer' : ''"
+                  :title="g.id !== null ? t('stock.reports.sales.drill_down') : undefined" :tabindex="g.id !== null ? 0 : undefined" @click="drillDown(g.id, g.label, g.code)" @keydown.enter="drillDown(g.id, g.label, g.code)">
+                  <td class="px-3 py-2">
+                    <span v-if="salesFilters.group_by === 'item'" class="font-mono text-xs text-neutral-500 mr-2">{{ g.code }}</span>
+                    <span>{{ g.label || t('stock.reports.sales.no_client') }}</span>
+                  </td>
+                  <td class="px-3 py-2 text-right font-mono">{{ g.documents }}</td>
+                  <td class="px-3 py-2 text-right font-mono">{{ g.lines }}</td>
+                  <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ qtyText(g.qty) }}</td>
+                  <td class="px-3 py-2 text-right font-mono whitespace-nowrap">
+                    <div v-for="line in amountText(g.amounts)" :key="line">{{ line }}</div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Řádky: 1 řádek faktury = 1 řádek, proklik na doklad, odběratele i kartu -->
+        <template v-else>
+          <div class="hidden md:block bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="min-w-[56rem] w-full text-sm">
+                <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+                  <tr>
+                    <th class="px-3 py-2 text-left font-medium whitespace-nowrap">{{ t('stock.reports.sales.col_date') }}</th>
+                    <th class="px-3 py-2 text-left font-medium">{{ t('stock.reports.sales.col_document') }}</th>
+                    <th class="px-3 py-2 text-left font-medium">{{ t('stock.reports.sales.col_client') }}</th>
+                    <th class="px-3 py-2 text-left font-medium">{{ t('stock.reports.sales.col_item') }}</th>
+                    <th class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ t('stock.reports.col_qty') }}</th>
+                    <th class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ t('stock.reports.sales.col_unit_price') }}</th>
+                    <th class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ t('stock.reports.sales.col_total') }}</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-neutral-100">
+                  <tr v-for="r in sales.items" :key="r.invoice_item_id" class="hover:bg-neutral-50 align-top">
+                    <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(r.tax_date) }}</td>
+                    <td class="px-3 py-2 whitespace-nowrap">
+                      <RouterLink :to="`/invoices/${r.invoice_id}`" class="font-mono text-xs text-primary-600 hover:text-primary-700">{{ r.invoice_number || `#${r.invoice_id}` }}</RouterLink>
+                      <span v-if="r.invoice_type === 'credit_note'" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-warning-50 text-warning-700">{{ t('stock.item_detail.credit_note') }}</span>
+                    </td>
+                    <td class="px-3 py-2">
+                      <RouterLink v-if="r.client_id" :to="`/clients/${r.client_id}`" class="hover:text-primary-700">{{ r.client_name || `#${r.client_id}` }}</RouterLink>
+                      <span v-else class="text-neutral-400">{{ t('stock.reports.sales.no_client') }}</span>
+                    </td>
+                    <td class="px-3 py-2">
+                      <RouterLink :to="`/stock/items/${r.stock_item_id}`" class="font-mono text-xs text-primary-600 hover:text-primary-700 mr-1">{{ r.sku }}</RouterLink>
+                      <span>{{ r.name }}</span>
+                      <div v-if="r.identifiers.length" class="mt-0.5 font-mono text-xs text-neutral-600 break-all">{{ r.identifiers.join(', ') }}</div>
+                    </td>
+                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap" :class="Number(r.qty) < 0 ? 'text-danger-500' : ''">{{ qtyText(r.qty) }} <span class="text-xs text-neutral-400">{{ r.unit }}</span></td>
+                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(Number(r.unit_price), r.currency) }}</td>
+                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap" :class="Number(r.total_without_vat) < 0 ? 'text-danger-500' : ''">
+                      {{ formatMoney(Number(r.total_without_vat), r.currency) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <!-- Mobil: karty místo tabulky -->
+          <div class="md:hidden space-y-2">
+            <div v-for="r in sales.items" :key="`m-${r.invoice_item_id}`" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
+              <div class="flex items-center justify-between gap-2 text-xs">
+                <span class="flex items-center gap-1">
+                  <RouterLink :to="`/invoices/${r.invoice_id}`" class="font-mono text-primary-600">{{ r.invoice_number || `#${r.invoice_id}` }}</RouterLink>
+                  <span v-if="r.invoice_type === 'credit_note'" class="px-1.5 py-0.5 rounded bg-warning-50 text-warning-700">{{ t('stock.item_detail.credit_note') }}</span>
+                </span>
+                <span class="text-neutral-500">{{ formatDate(r.tax_date) }}</span>
+              </div>
+              <div class="font-medium mt-1">{{ r.name }}</div>
+              <div v-if="r.identifiers.length" class="font-mono text-xs text-neutral-600 break-all">{{ r.identifiers.join(', ') }}</div>
+              <div class="text-sm text-neutral-600 mt-0.5">{{ r.client_name || t('stock.reports.sales.no_client') }}</div>
+              <div class="flex items-center justify-between mt-1.5 text-sm font-mono" :class="Number(r.qty) < 0 ? 'text-danger-500' : ''">
+                <span>{{ qtyText(r.qty) }} {{ r.unit }}</span>
+                <span>{{ formatMoney(Number(r.total_without_vat), r.currency) }}</span>
+              </div>
+            </div>
+          </div>
+          <PaginationBar v-if="sales.pagination.pages > 1" class="mt-3" :page="salesFilters.page" :per-page="sales.pagination.per_page" :total="sales.pagination.total"
+            @update:page="(p: number) => { salesFilters.page = p; reloadSales(false) }" />
+        </template>
+      </template>
     </template>
 
     <!-- Ocenění -->

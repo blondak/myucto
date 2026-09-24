@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer;
@@ -189,7 +190,7 @@ final class StatementImporter
      *
      * @param array{header:array,transactions:list<array>} $parsed
      */
-    public function importParsedPdf(array $parsed, string $pdfBytes, string $fileName, ?int $userId, ?int $currencyId = null): array
+    public function importParsedPdf(array $parsed, string $pdfBytes, string $fileName, ?int $userId, ?int $currencyId = null, ?int $supplierId = null): array
     {
         // Denní výpis („výpis při pohybu") se v přehledu nezobrazuje samostatně —
         // skládá se do měsíčního výpisu účtu stejně jako pohyby ze strojového feedu.
@@ -202,7 +203,8 @@ final class StatementImporter
                 return $this->importScoped($parsed, $pdfBytes, $fileName, $userId, (int) $account['id'], (int) $account['supplier_id'], 'pdf', false);
             }
         }
-        return $this->persist($parsed, $pdfBytes, $fileName, $userId, $currencyId, 'pdf');
+        $processingIds = null;
+        return $this->persist($parsed, $pdfBytes, $fileName, $userId, $currencyId, 'pdf', false, $processingIds, [], $supplierId);
     }
 
     /**
@@ -210,7 +212,7 @@ final class StatementImporter
      * @param string $rawBytes Originální bajty souboru — hashují se pro dedup a ukládají
      *   se buď do file_content (source='gpc') nebo pdf_content (source='pdf').
      */
-    private function persist(array $parsed, string $rawBytes, string $fileName, ?int $userId, ?int $currencyId, string $source, bool $deferProcessing = false, ?array &$processingIds = null, array $reconciliationConfirmations = []): array
+    private function persist(array $parsed, string $rawBytes, string $fileName, ?int $userId, ?int $currencyId, string $source, bool $deferProcessing = false, ?array &$processingIds = null, array $reconciliationConfirmations = [], ?int $supplierId = null): array
     {
         $hash = hash('sha256', $rawBytes);
         $pdo = $this->db->pdo();
@@ -218,9 +220,24 @@ final class StatementImporter
         if (!empty($parsed['header']['reconstructed'])) {
             throw new \InvalidArgumentException('GPC vytvořené MyÚčtem je export pro jiný systém, nikoli bankou potvrzený výpis. Nahrajte originální výpis banky.');
         }
-        // Dedupe
-        $exists = $pdo->prepare('SELECT id FROM bank_statements WHERE file_hash = ?');
-        $exists->execute([$hash]);
+        $h = $parsed['header'];
+        $explicitAccount = $currencyId !== null;
+        $account = $explicitAccount
+            ? $this->loadCurrencyById($currencyId)
+            : $this->lookupAccount($h['account_number']);
+        $registeredOwner = $this->lookupRegisteredOwner($h['account_number']);
+        $statementSupplierId = $supplierId ?? ($explicitAccount
+            ? (isset($account['supplier_id']) && (int) $account['supplier_id'] > 0
+                ? (int) $account['supplier_id']
+                : null)
+            : ($registeredOwner['supplier_id'] ?? null));
+
+        if ($statementSupplierId !== null && $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+            $this->claimLegacyStatements($pdo, $statementSupplierId, (string) $h['account_number']);
+        }
+
+        $exists = $pdo->prepare('SELECT id FROM bank_statements WHERE (supplier_id = ? OR (supplier_id IS NULL AND ? IS NULL)) AND file_hash = ?');
+        $exists->execute([$statementSupplierId, $statementSupplierId, $hash]);
         $existingId = $exists->fetchColumn();
         if ($existingId !== false) {
             if ($deferProcessing) {
@@ -239,8 +256,6 @@ final class StatementImporter
             ];
         }
 
-        $h = $parsed['header'];
-
         // GPC header (074) NEMÁ pole pro měnu — máme to jen v 075 transakcích
         // (pozice 118-122, ISO 4217 numeric). Odvodíme měnu výpisu v pořadí:
         //   1) Lookup do currencies podle account_number/IBAN — GPC výpis je vždy
@@ -258,28 +273,19 @@ final class StatementImporter
         // nenese (na rozdíl od e-mailových avíz) → doplníme ho z konfigurovaného účtu,
         // ať jsou data normalizovaná napříč zdroji (jinak GPC výpis bank_code = NULL).
         // Explicitně zvolený měnový účet (#167) je autoritativní; jinak lookup podle čísla.
-        $explicitAccount = $currencyId !== null;
-        $account = $explicitAccount
-            ? $this->loadCurrencyById($currencyId)
-            : $this->lookupAccount($h['account_number']);
-        $registeredOwner = $this->lookupRegisteredOwner($h['account_number']);
-        $statementSupplierId = $explicitAccount
-            ? (isset($account['supplier_id']) && (int) $account['supplier_id'] > 0
-                ? (int) $account['supplier_id']
-                : null)
-            : ($registeredOwner['supplier_id'] ?? null);
         $accountCurrency = $account['code'] ?? null;
         $accountBankCode = $account['bank_code'] ?? $registeredOwner['bank_code'] ?? null;
         $statementCurrency = $accountCurrency
             ?? $this->detectStatementCurrency($parsed['transactions']);
 
-        $identities = $this->transactionIdentities($parsed['transactions'], (string) $h['account_number'], $accountBankCode, $accountCurrency, $statementCurrency);
+        $identities = $this->transactionIdentities($parsed['transactions'], (string) $h['account_number'], $accountBankCode, $accountCurrency, $statementCurrency, $statementSupplierId);
 
         $crossSource = $deferProcessing && $statementSupplierId !== null
             ? (new AuthoritativeTransactionReconciler($pdo))->candidates(
                 $parsed['transactions'], $statementSupplierId, (string) $h['account_number'],
                 (string) $accountBankCode, (string) $statementCurrency, $source,
                 $reconciliationConfirmations, array_column($identities, 'fingerprint'),
+                array_column($identities, 'candidates'),
             ) : [];
 
         if ($statementSupplierId !== null) {
@@ -323,11 +329,12 @@ final class StatementImporter
         $insertTx = $pdo->prepare(
             'INSERT INTO bank_transactions
                  (statement_id, posted_at, amount, currency, variable_symbol, constant_symbol, specific_symbol,
-                  counterparty_account, counterparty_bank, counterparty_name, card_last4, description, bank_ref, import_fingerprint)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                  counterparty_account, counterparty_bank, counterparty_name, card_last4, description, bank_ref, import_fingerprint, portable_fingerprint)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $findDuplicateTx = $pdo->prepare(
-            'SELECT id FROM bank_transactions WHERE import_fingerprint = ? LIMIT 1'
+            'SELECT bt.id FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
+             WHERE bt.import_fingerprint = ? AND (bs.supplier_id = ? OR (bs.supplier_id IS NULL AND ? IS NULL)) LIMIT 1'
         );
         $linkImport = $deferProcessing ? $pdo->prepare(
             'INSERT INTO bank_transaction_imports (statement_id, bank_transaction_id, import_fingerprint, supplier_id, original_statement_id)
@@ -336,7 +343,7 @@ final class StatementImporter
         $findAlias = $deferProcessing ? $pdo->prepare(
             'SELECT bti.bank_transaction_id FROM bank_transaction_imports bti
              JOIN bank_statements bs ON bs.id = bti.statement_id
-             WHERE bti.import_fingerprint = ? AND bs.supplier_id = ? LIMIT 1'
+             WHERE bti.import_fingerprint = ? AND bs.supplier_id = ?'
         ) : null;
 
         $matched = 0;
@@ -344,12 +351,19 @@ final class StatementImporter
         $skipped = 0;
         $matchIds = [];
         foreach ($parsed['transactions'] as $index => $tx) {
-            ['currency' => $txCurrency, 'fingerprint' => $fingerprint, 'candidates' => $candidates] = $identities[$index];
+            ['currency' => $txCurrency, 'fingerprint' => $fingerprint, 'portable_fingerprint' => $portableFingerprint, 'candidates' => $candidates] = $identities[$index];
             $alreadyStored = false;
             $duplicateId = $crossSource[$index] ?? false;
             if ($duplicateId === false && $findAlias !== null) {
-                $findAlias->execute([$fingerprint, $statementSupplierId]);
-                $duplicateId = $findAlias->fetchColumn();
+                $aliasIds = [];
+                foreach ($candidates as $candidate) {
+                    $findAlias->execute([$candidate, $statementSupplierId]);
+                    foreach ($findAlias->fetchAll(PDO::FETCH_COLUMN) as $aliasId) {
+                        $aliasIds[(int) $aliasId] = true;
+                    }
+                }
+                if (count($aliasIds) > 1) throw new StatementReconciliationException();
+                if ($aliasIds !== []) $duplicateId = (int) array_key_first($aliasIds);
             }
             if ($duplicateId !== false) {
                 $processingIds[] = (int) $duplicateId;
@@ -358,7 +372,7 @@ final class StatementImporter
                 continue;
             }
             foreach ($candidates as $candidate) {
-                $findDuplicateTx->execute([$candidate]);
+                $findDuplicateTx->execute([$candidate, $statementSupplierId, $statementSupplierId]);
                 $duplicateId = $findDuplicateTx->fetchColumn();
                 if ($duplicateId !== false) {
                     if ($deferProcessing) $processingIds[] = (int) $duplicateId;
@@ -377,14 +391,16 @@ final class StatementImporter
                     $tx['variable_symbol'], $tx['constant_symbol'], $tx['specific_symbol'],
                     $tx['counterparty_account'], $tx['counterparty_bank'], $tx['counterparty_name'],
                     \MyInvoice\Service\Bank\Card\CardNumberMask::forParsedTransaction($tx),
-                    $tx['description'], $tx['bank_ref'], $fingerprint,
+                    $tx['description'], $tx['bank_ref'], $fingerprint, $portableFingerprint,
                 ]);
             } catch (\PDOException $e) {
                 if (($e->errorInfo[0] ?? null) === '23000'
                     && str_contains($e->getMessage(), 'uq_bt_import_fingerprint')) {
+                    $findDuplicateTx->execute([$fingerprint, $statementSupplierId, $statementSupplierId]);
+                    $concurrentId = $findDuplicateTx->fetchColumn();
+                    if ($concurrentId === false) throw $e;
                     if ($deferProcessing) {
-                        $findDuplicateTx->execute([$fingerprint]);
-                        $processingIds[] = (int) $findDuplicateTx->fetchColumn();
+                        $processingIds[] = (int) $concurrentId;
                     }
                     $skipped++;
                     continue;
@@ -476,7 +492,7 @@ final class StatementImporter
         return ['matched' => $matched, 'superseded' => $superseded];
     }
 
-    private function transactionIdentities(array $transactions, string $accountNumber, ?string $accountBankCode, ?string $accountCurrency, ?string $statementCurrency): array
+    private function transactionIdentities(array $transactions, string $accountNumber, ?string $accountBankCode, ?string $accountCurrency, ?string $statementCurrency, ?int $supplierId): array
     {
         // Bankovní reference je identitou pohybu jen tehdy, když je v souboru JEDINEČNÁ.
         // Některé banky do pole čísla dokladu píšou konstantu nebo denní pořadí — kdyby
@@ -513,13 +529,16 @@ final class StatementImporter
             $identity = $useReference
                 ? ['bank_ref', $reference]
                 : $this->fallbackIdentity($tx, $ordinal);
-            $fingerprint = $this->transactionFingerprint(
+            $legacyFingerprint = $this->transactionFingerprint(
                 $accountNumber,
                 $accountBankCode,
                 $txCurrency,
                 $tx,
                 $identity,
             );
+            $fingerprint = $supplierId === null
+                ? $legacyFingerprint
+                : hash('sha256', 'supplier:' . $supplierId . ':' . $legacyFingerprint);
 
             // Zpětná kompatibilita: pohyby naimportované DŘÍV (kdy GPC bank_ref neplnil)
             // nesou otisk z náhradní identity bez pořadí. Bez tohohle kandidáta by je
@@ -527,6 +546,9 @@ final class StatementImporter
             // by se stalo tiché zdvojení. Legacy otisk platí jen pro PRVNÍ výskyt identity
             // v souboru, aby druhá legitimní platba dál prošla.
             $candidates = [$fingerprint];
+            if ($fingerprint !== $legacyFingerprint) {
+                $candidates[] = $legacyFingerprint;
+            }
             if ($ordinal === 0) {
                 $legacy = $this->transactionFingerprint(
                     $accountNumber,
@@ -535,13 +557,50 @@ final class StatementImporter
                     $tx,
                     $this->fallbackIdentity($tx, 0),
                 );
-                if ($legacy !== $fingerprint) {
+                if ($supplierId !== null) {
+                    $scopedLegacy = hash('sha256', 'supplier:' . $supplierId . ':' . $legacy);
+                    if (!in_array($scopedLegacy, $candidates, true)) {
+                        $candidates[] = $scopedLegacy;
+                    }
+                }
+                if (!in_array($legacy, $candidates, true)) {
                     $candidates[] = $legacy;
                 }
             }
-            $result[$index] = ['currency' => $txCurrency, 'fingerprint' => $fingerprint, 'candidates' => $candidates];
+            $result[$index] = ['currency' => $txCurrency, 'fingerprint' => $fingerprint, 'portable_fingerprint' => $legacyFingerprint, 'candidates' => $candidates];
         }
         return $result;
+    }
+
+    private function claimLegacyStatements(PDO $pdo, int $supplierId, string $accountNumber): void
+    {
+        $normalized = AccountNumberNormalizer::normalize($accountNumber);
+        if ($normalized === '') return;
+
+        $owned = BankStatementOwnershipResolver::sql('bs');
+        $candidates = $pdo->prepare(
+            'SELECT bs.id, bs.account_number FROM bank_statements bs
+              WHERE bs.supplier_id IS NULL
+                AND ' . $owned . '
+              ORDER BY bs.id' . ($pdo->inTransaction() ? ' FOR UPDATE' : '')
+        );
+        $candidates->execute(BankStatementOwnershipResolver::params($supplierId));
+        $claim = $pdo->prepare(
+            'UPDATE bank_statements bs SET bs.supplier_id = ?
+              WHERE bs.id = ? AND bs.supplier_id IS NULL AND ' . $owned
+        );
+        foreach ($candidates->fetchAll(PDO::FETCH_ASSOC) as $legacy) {
+            if (AccountNumberNormalizer::normalize((string) $legacy['account_number']) !== $normalized) continue;
+            try {
+                $claim->execute([$supplierId, (int) $legacy['id'], ...BankStatementOwnershipResolver::params($supplierId)]);
+            } catch (\PDOException $e) {
+                if (($e->errorInfo[0] ?? null) !== '23000'
+                    || (!str_contains($e->getMessage(), 'uq_bs_supplier_hash')
+                        && !str_contains($e->getMessage(), 'uq_bs_scope_hash'))) {
+                    throw $e;
+                }
+            }
+        }
     }
 
     /**

@@ -57,6 +57,22 @@ final class VariableSymbolNormalizer
     }
 
     /**
+     * `payment_variable_symbol` pro vydaný doklad převzatý z jiného systému (import,
+     * AI vytěžení): VS ze zdroje se uloží jen tehdy, když se liší od VS, který by se
+     * odvodil z čísla dokladu. Typicky daňový doklad k proformě, který nese VS proformy.
+     * Shodný VS se neukládá (odvodí se), nepoužitelný (prázdný, delší než 10 číslic)
+     * taky ne, protože by tiskl jiný symbol, než jaký doklad nese.
+     */
+    public static function importedPaymentOverride(string $documentNumber, ?string $sourceVs): ?string
+    {
+        $vs = self::digits((string) $sourceVs);
+        if ($vs === '' || strlen($vs) > self::MAX_LENGTH) {
+            return null;
+        }
+        return $vs === self::forPayment($documentNumber) ? null : $vs;
+    }
+
+    /**
      * Kanonický klíč pro párování: číslice bez vodicích nul (konzistentní s GPC
      * parserem i bankovními e-mailovými avízy). Když by ořez vodicích nul vrátil
      * prázdno (samé nuly), vrátí původní číslice — VS „0" tak nezmizí.

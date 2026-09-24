@@ -56,6 +56,9 @@ final class BankAnalyticAssigner
      */
     public const SUFFIX_PATTERN = '/^[0-9]{1,6}$/';
 
+    /** Druh vlastního účtu, jehož vlastní noha nejde na 221, ale na 231 (úvěr kreditní karty). */
+    public const CREDIT_CARD_KIND = 'credit_card';
+
     public function __construct(
         private readonly Connection $db,
         private readonly SupplierBankAccountRepository $bankAccounts,
@@ -108,7 +111,7 @@ final class BankAnalyticAssigner
             return $existing;
         }
         $id = (int) ($account['id'] ?? 0);
-        if ($id <= 0) {
+        if ($id <= 0 || ($account['kind'] ?? null) === self::CREDIT_CARD_KIND) {
             return null;
         }
         $suffix = $this->nextFreeSuffix($supplierId);
@@ -164,6 +167,10 @@ final class BankAnalyticAssigner
         $assigned = 0;
         foreach ($this->bankAccounts->findActive($supplierId) as $account) {
             if (self::isValidSuffix($account['analytic_suffix'] ?? null)) {
+                continue;
+            }
+            // Úvěrový účet kreditní karty se účtuje na 231.x (CreditCardAccounts), 221 nedostane.
+            if (($account['kind'] ?? null) === self::CREDIT_CARD_KIND) {
                 continue;
             }
             $suffix = $this->ensureSuffix($supplierId, $account);

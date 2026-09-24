@@ -28,10 +28,11 @@ final class StockItemQuoteService
         private readonly StockUnitConverter $units,
         private readonly EffectivePriceResolver $resolver,
         private readonly StockItemCustomerPriceRepository $customerPrices,
+        private readonly StockPriceLevelService $priceLevels,
     ) {}
 
     /**
-     * @param array<string,mixed> $body {client_id, currency, date, lines: list<{key, stock_item_id, unit, quantity}>}
+     * @param array<string,mixed> $body {client_id, price_level_id?, currency, date, lines: list<{key, stock_item_id, unit, quantity}>}
      * @return array{lines: list<array<string,mixed>>}
      */
     public function quote(int $supplierId, array $body): array
@@ -41,6 +42,9 @@ final class StockItemQuoteService
         if ($clientId !== null && ($clientId <= 0 || $this->customerPrices->clientsOfSupplier($supplierId, [$clientId]) === [])) {
             throw new StockException('invalid_client', 'Odběratel nepatří této firmě.', 422, ['client_id' => $body['client_id']]);
         }
+        // Hladina zvolená na dokladu přepíše hladinu odběratele. Stejné pravidlo jako při
+        // uložení dokladu: musí patřit firmě a být aktivní (nacenit se neaktivní nedá).
+        $priceLevelId = $this->priceLevels->assignableLevelId($supplierId, $body['price_level_id'] ?? null, null);
         $currency = strtoupper(trim((string) ($body['currency'] ?? 'CZK')));
         if ($currency === '') {
             $currency = 'CZK';
@@ -109,7 +113,7 @@ final class StockItemQuoteService
             foreach ($bucket as $index => $itemId) {
                 $qtyMap[$itemId] = ltrim($baseQty[$index], '-');
             }
-            $resolved = $this->resolver->resolveMany($supplierId, array_values($bucket), $currency, $qtyMap, $date, $clientId);
+            $resolved = $this->resolver->resolveMany($supplierId, array_values($bucket), $currency, $qtyMap, $date, $clientId, $priceLevelId);
             foreach ($bucket as $index => $itemId) {
                 $prices[$index] = $resolved[$itemId] ?? null;
             }

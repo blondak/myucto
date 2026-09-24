@@ -66,11 +66,33 @@ function normalize(o: StatementOverride): StatementOverride {
     balance_condition: o.balance_condition ?? 'any',
     sign: o.sign ?? 1,
     note: o.note ? o.note : null,
+    valid_from_year: o.valid_from_year ?? null,
+    valid_to_year: o.valid_to_year ?? null,
+    ...(o.target === 'correction' && o.follows_prefix ? { follows_prefix: o.follows_prefix } : {}),
   }
 }
 
 function keyOf(o: StatementOverride): string {
-  return `${o.account_prefix}|${o.balance_condition}`
+  return `${o.account_prefix}|${o.balance_condition}|${o.valid_from_year ?? ''}`
+}
+
+/** Účetní období editoru — tabulka účtů ukazuje výjimky platné v něm. */
+const year = computed<number | null>(() => overview.value?.period.fiscal_year ?? null)
+
+function validIn(o: StatementOverride): boolean {
+  const y = year.value
+  if (y === null) return true
+  return (o.valid_from_year == null || o.valid_from_year <= y) && (o.valid_to_year == null || o.valid_to_year >= y)
+}
+
+function parseYear(value: string): number | null {
+  const n = Number.parseInt(value.trim(), 10)
+  return Number.isFinite(n) ? n : null
+}
+
+function validityLabel(o: StatementOverride): string {
+  if (o.valid_from_year == null && o.valid_to_year == null) return t('accounting.statements.mapping.validity_always')
+  return `${o.valid_from_year ?? '…'}–${o.valid_to_year ?? '…'}`
 }
 
 function snapshot(list: StatementOverride[]): string {
@@ -100,9 +122,17 @@ function rowOptionLabel(r: StatementOverrideRow): string {
 /** Řádky, do kterých smí účet daného druhu jít — rozvaha obě strany, výsledovka jen VZZ. */
 const rowOptions = computed(() => (overview.value?.rows ?? []).filter(r => r.row_type !== 'computed' || r.row_code === 'P.A.V.'))
 
-function overrideFor(code: string): StatementOverride | undefined {
-  return draft.value.find(o => o.account_prefix === code)
+function activeIndex(code: string): number {
+  return draft.value.findIndex(o => o.account_prefix === code && validIn(o))
 }
+
+function overrideFor(code: string): StatementOverride | undefined {
+  const idx = activeIndex(code)
+  return idx >= 0 ? draft.value[idx] : undefined
+}
+
+/** Výjimky, které v roce editoru neplatí (jiné roky platnosti) — spravují se zvlášť. */
+const otherYears = computed(() => draft.value.filter(o => !validIn(o)))
 
 /**
  * Výjimka pro skupinu účtů (prefix `062.`), která na účet dopadá, když účet nemá vlastní.
@@ -112,7 +142,7 @@ function inheritedOverride(code: string): StatementOverride | undefined {
   if (overrideFor(code)) return undefined
   let best: StatementOverride | undefined
   for (const o of draft.value) {
-    if (o.account_prefix !== code && code.startsWith(o.account_prefix)
+    if (validIn(o) && o.account_prefix !== code && code.startsWith(o.account_prefix)
       && (!best || o.account_prefix.length > best.account_prefix.length)) {
       best = o
     }
@@ -166,7 +196,7 @@ function sectionOf(rowCode: string): string | undefined {
 }
 
 function setRow(code: string, rowCode: string) {
-  const idx = draft.value.findIndex(o => o.account_prefix === code)
+  const idx = activeIndex(code)
   preview.value = null
   if (rowCode === '') {
     if (idx >= 0) draft.value.splice(idx, 1)
@@ -176,19 +206,41 @@ function setRow(code: string, rowCode: string) {
     const current = draft.value[idx]
     draft.value[idx] = { ...current, row_code: rowCode, target: sectionOf(rowCode) === 'assets' ? current.target : 'gross' }
   } else {
-    draft.value.push({ account_prefix: code, row_code: rowCode, target: 'gross', balance_condition: 'any', sign: 1, note: null })
+    // Účet má výjimku jen pro jiné roky: nová platí od roku editoru, ať se s ní nepřekrývá.
+    const hasOtherYears = draft.value.some(o => o.account_prefix === code)
+    draft.value.push({
+      account_prefix: code, row_code: rowCode, target: 'gross', balance_condition: 'any', sign: 1, note: null,
+      valid_from_year: hasOtherYears ? year.value : null, valid_to_year: null,
+    })
   }
 }
 
 function setField(code: string, patch: Partial<StatementOverride>) {
-  const idx = draft.value.findIndex(o => o.account_prefix === code)
+  const idx = activeIndex(code)
   if (idx < 0) return
   draft.value[idx] = { ...draft.value[idx], ...patch }
   preview.value = null
 }
 
 function removeOverride(code: string) {
-  draft.value = draft.value.filter(o => o.account_prefix !== code)
+  const idx = activeIndex(code)
+  if (idx < 0) return
+  draft.value.splice(idx, 1)
+  preview.value = null
+}
+
+/** Úprava výjimky jiného roku platnosti — ta nemá v tabulce účtů vlastní řádek. */
+function setOtherField(o: StatementOverride, patch: Partial<StatementOverride>) {
+  const idx = draft.value.indexOf(o)
+  if (idx < 0) return
+  draft.value[idx] = { ...draft.value[idx], ...patch }
+  preview.value = null
+}
+
+function removeOther(o: StatementOverride) {
+  const idx = draft.value.indexOf(o)
+  if (idx < 0) return
+  draft.value.splice(idx, 1)
   preview.value = null
 }
 
@@ -219,7 +271,7 @@ const filteredAccounts = computed(() => {
 })
 
 /** Výjimky na prefix, který v osnově není účtem (zadané přes API nebo převzaté z návrhu). */
-const orphans = computed(() => draft.value.filter(o => !accountCodes.value.has(o.account_prefix)))
+const orphans = computed(() => draft.value.filter(o => validIn(o) && !accountCodes.value.has(o.account_prefix)))
 
 async function runPreview() {
   if (!periodId.value) return
@@ -254,9 +306,51 @@ function suggestionKey(s: StatementOverrideSuggestion): string {
 const visibleSuggestions = computed(() => (suggestions.value?.suggestions ?? []).filter(s => s.statement_type === statementType.value))
 const otherTabSuggestions = computed(() => (suggestions.value?.suggestions ?? []).length - visibleSuggestions.value.length)
 
+/** Návrhy pro sloupec minulého období — výjimky platné do minulého roku. */
+const priorSuggestions = computed(() => (suggestions.value?.prior_period?.suggestions ?? []).filter(s => s.statement_type === statementType.value))
+
+function priorKey(s: StatementOverrideSuggestion): string {
+  return `prior|${suggestionKey(s)}`
+}
+
 function acceptSuggestions(result: StatementOverrideSuggestions) {
   suggestions.value = result
-  selected.value = new Set(result.suggestions.filter(s => !s.ambiguous).map(suggestionKey))
+  selected.value = new Set([
+    ...result.suggestions.filter(s => !s.ambiguous).map(suggestionKey),
+    ...(result.prior_period?.suggestions ?? []).filter(s => !s.ambiguous).map(priorKey),
+  ])
+}
+
+function togglePrior(s: StatementOverrideSuggestion) {
+  const next = new Set(selected.value)
+  const key = priorKey(s)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  selected.value = next
+}
+
+function validInYear(o: StatementOverride, y: number): boolean {
+  return (o.valid_from_year == null || o.valid_from_year <= y) && (o.valid_to_year == null || o.valid_to_year >= y)
+}
+
+/**
+ * Výjimka pro minulé období platí do minulého roku. Když účet už má výjimku platnou i v něm
+ * (typicky bez omezení), rozdělí se: stávající platí od běžného roku, návrh do minulého.
+ */
+function applyPriorSuggestion(next: StatementOverride, prevYear: number) {
+  const idx = draft.value.findIndex(d => d.account_prefix === next.account_prefix
+    && d.balance_condition === next.balance_condition && validInYear(d, prevYear))
+  if (idx < 0) {
+    draft.value.push({ ...next, valid_from_year: null, valid_to_year: prevYear })
+    return
+  }
+  const existing = draft.value[idx]
+  if (existing.valid_to_year != null && existing.valid_to_year <= prevYear) {
+    draft.value[idx] = { ...next, valid_from_year: existing.valid_from_year ?? null, valid_to_year: existing.valid_to_year }
+    return
+  }
+  draft.value[idx] = { ...existing, valid_from_year: prevYear + 1 }
+  draft.value.push({ ...next, valid_from_year: existing.valid_from_year ?? null, valid_to_year: prevYear })
 }
 
 async function suggestFromFiled() {
@@ -299,7 +393,7 @@ function toggleSuggestion(s: StatementOverrideSuggestion) {
 }
 
 function applySuggestions() {
-  const year = suggestions.value?.year ?? ''
+  const suggestionYear = suggestions.value?.year ?? ''
   for (const s of visibleSuggestions.value) {
     if (!selected.value.has(suggestionKey(s))) continue
     for (const o of s.overrides) {
@@ -309,11 +403,32 @@ function applySuggestions() {
         target: o.target,
         balance_condition: o.balance_condition,
         sign: 1,
-        note: t('accounting.statements.mapping.suggestion_note', { year }),
+        note: t('accounting.statements.mapping.suggestion_note', { year: suggestionYear }),
+        ...(o.follows_prefix ? { follows_prefix: o.follows_prefix } : {}),
       }
-      const idx = draft.value.findIndex(d => keyOf(d) === keyOf(next))
-      if (idx >= 0) draft.value[idx] = next
-      else draft.value.push(next)
+      // Návrh je za rok editoru: nahradí výjimku, která v něm platí, a převezme její platnost.
+      const idx = draft.value.findIndex(d => d.account_prefix === next.account_prefix
+        && d.balance_condition === next.balance_condition && validIn(d))
+      if (idx >= 0) {
+        draft.value[idx] = { ...next, valid_from_year: draft.value[idx].valid_from_year ?? null, valid_to_year: draft.value[idx].valid_to_year ?? null }
+      } else {
+        draft.value.push({ ...next, valid_from_year: draft.value.some(d => d.account_prefix === next.account_prefix) ? year.value : null, valid_to_year: null })
+      }
+    }
+  }
+  const prior = suggestions.value?.prior_period
+  for (const s of priorSuggestions.value) {
+    if (!prior || !selected.value.has(priorKey(s))) continue
+    for (const o of s.overrides) {
+      applyPriorSuggestion({
+        account_prefix: o.account_prefix,
+        row_code: o.row_code,
+        target: o.target,
+        balance_condition: o.balance_condition,
+        sign: 1,
+        note: t('accounting.statements.mapping.suggestion_note', { year: prior.year }),
+        ...(o.follows_prefix ? { follows_prefix: o.follows_prefix } : {}),
+      }, o.valid_to_year ?? prior.year)
     }
   }
   preview.value = null
@@ -405,7 +520,7 @@ onMounted(async () => {
             {{ t(suggestions.source.type === 'filed_return' ? 'accounting.statements.mapping.suggestions_source_filed' : 'accounting.statements.mapping.suggestions_source_upload', { year: suggestions.year }) }}
           </p>
         </div>
-        <button v-if="canWrite && visibleSuggestions.length > 0" type="button" data-test="apply-suggestions"
+        <button v-if="canWrite && (visibleSuggestions.length > 0 || priorSuggestions.length > 0)" type="button" data-test="apply-suggestions"
                 :class="btnFilled('primary')" :disabled="selected.size === 0" @click="applySuggestions">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
           {{ t('accounting.statements.mapping.suggestions_apply') }}
@@ -432,6 +547,26 @@ onMounted(async () => {
           </div>
         </li>
       </ul>
+      <div v-if="priorSuggestions.length > 0 && suggestions.prior_period" class="border-t border-neutral-200" data-test="prior-suggestions">
+        <div class="px-4 py-2 bg-neutral-50">
+          <h3 class="text-xs font-semibold">{{ t('accounting.statements.mapping.prior_title', { year: suggestions.prior_period.year }) }}</h3>
+          <p class="text-[11px] text-neutral-600 mt-0.5">{{ t('accounting.statements.mapping.prior_hint', { year: suggestions.prior_period.year }) }}</p>
+        </div>
+        <ul class="divide-y divide-neutral-100">
+          <li v-for="s in priorSuggestions" :key="priorKey(s)" class="px-4 py-2 text-sm flex gap-3 items-start" data-test="prior-suggestion">
+            <input type="checkbox" class="mt-1" :checked="selected.has(priorKey(s))" :disabled="!canWrite" @change="togglePrior(s)" />
+            <div class="min-w-0">
+              <p class="font-medium flex flex-wrap items-baseline gap-x-2">
+                <span class="font-mono whitespace-nowrap">{{ s.account_code }}</span>
+                <span>{{ s.account_name }}</span>
+                <span class="font-mono text-neutral-500 whitespace-nowrap">{{ s.from_row_code }} → {{ s.to_row_code }}</span>
+              </p>
+              <p class="text-xs text-neutral-600">{{ s.reason }}</p>
+              <p v-if="s.ambiguous" class="text-xs text-warning-700">{{ t('accounting.statements.mapping.suggestion_ambiguous') }}</p>
+            </div>
+          </li>
+        </ul>
+      </div>
       <p v-if="otherTabSuggestions > 0" class="px-4 py-2 text-xs text-neutral-500 border-t border-neutral-100">
         {{ t('accounting.statements.mapping.suggestions_other_tab', { count: otherTabSuggestions }) }}
       </p>
@@ -526,6 +661,7 @@ onMounted(async () => {
                   <th class="px-2 py-2 text-left font-medium">{{ t('accounting.statements.mapping.col_new_row') }}</th>
                   <th class="px-2 py-2 text-left font-medium">{{ t('accounting.statements.mapping.col_condition') }}</th>
                   <th class="px-2 py-2 text-left font-medium">{{ t('accounting.statements.mapping.col_note') }}</th>
+                  <th class="px-2 py-2 text-left font-medium whitespace-nowrap">{{ t('accounting.statements.mapping.col_validity') }}</th>
                   <th class="px-3 py-2 w-8"></th>
                 </tr>
               </thead>
@@ -558,8 +694,16 @@ onMounted(async () => {
                     <label v-if="overrideFor(a.account_code) && sectionOf(overrideFor(a.account_code)!.row_code) === 'assets'"
                            class="mt-1 flex items-center gap-1 text-[11px] text-neutral-600">
                       <input type="checkbox" :checked="overrideFor(a.account_code)!.target === 'correction'" :disabled="!canWrite"
-                             @change="setField(a.account_code, { target: ($event.target as HTMLInputElement).checked ? 'correction' : 'gross' })" />
+                             @change="setField(a.account_code, ($event.target as HTMLInputElement).checked ? { target: 'correction' } : { target: 'gross', follows_prefix: null })" />
                       {{ t('accounting.statements.mapping.target_correction') }}
+                    </label>
+                    <label v-if="overrideFor(a.account_code)?.target === 'correction'" class="mt-1 flex items-center gap-1 text-[11px] text-neutral-600"
+                           :title="t('accounting.statements.mapping.follows_hint')">
+                      {{ t('accounting.statements.mapping.follows_label') }}
+                      <input type="text" maxlength="10" :value="overrideFor(a.account_code)!.follows_prefix ?? ''" :disabled="!canWrite"
+                             :placeholder="t('accounting.statements.mapping.follows_placeholder')" data-test="follows"
+                             class="h-7 w-24 px-1.5 border border-neutral-300 rounded-md bg-surface text-[11px] font-mono"
+                             @change="setField(a.account_code, { follows_prefix: ($event.target as HTMLInputElement).value.trim() || null })" />
                     </label>
                   </td>
                   <td class="px-2 py-1.5">
@@ -578,6 +722,20 @@ onMounted(async () => {
                       <span class="font-mono not-italic">{{ inheritedOverride(a.account_code)!.account_prefix }}</span>
                       {{ inheritedOverride(a.account_code)!.note ?? '' }}
                     </span>
+                  </td>
+                  <td class="px-2 py-1.5">
+                    <div v-if="overrideFor(a.account_code)" class="flex items-center gap-1" data-test="validity">
+                      <input type="number" min="1900" max="2999" step="1" :value="overrideFor(a.account_code)!.valid_from_year ?? ''" :disabled="!canWrite"
+                             :placeholder="t('accounting.statements.mapping.validity_from')" :aria-label="t('accounting.statements.mapping.validity_from')"
+                             class="h-8 w-20 px-1.5 border border-neutral-300 rounded-md bg-surface text-xs" data-test="valid-from"
+                             @change="setField(a.account_code, { valid_from_year: parseYear(($event.target as HTMLInputElement).value) })" />
+                      <span class="text-neutral-400">–</span>
+                      <input type="number" min="1900" max="2999" step="1" :value="overrideFor(a.account_code)!.valid_to_year ?? ''" :disabled="!canWrite"
+                             :placeholder="t('accounting.statements.mapping.validity_to')" :aria-label="t('accounting.statements.mapping.validity_to')"
+                             class="h-8 w-20 px-1.5 border border-neutral-300 rounded-md bg-surface text-xs" data-test="valid-to"
+                             @change="setField(a.account_code, { valid_to_year: parseYear(($event.target as HTMLInputElement).value) })" />
+                    </div>
+                    <span v-else-if="inheritedOverride(a.account_code)" class="text-neutral-500 whitespace-nowrap">{{ validityLabel(inheritedOverride(a.account_code)!) }}</span>
                   </td>
                   <td class="px-3 py-1.5 text-right">
                     <button v-if="canWrite && overrideFor(a.account_code)" type="button" data-test="remove"
@@ -628,6 +786,18 @@ onMounted(async () => {
                        :placeholder="t('accounting.statements.mapping.note_placeholder')"
                        class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-xs w-full"
                        @change="setField(a.account_code, { note: ($event.target as HTMLInputElement).value || null })" />
+                <div class="flex items-center gap-1 text-xs">
+                  <span class="text-neutral-500">{{ t('accounting.statements.mapping.col_validity') }}</span>
+                  <input type="number" min="1900" max="2999" step="1" :value="overrideFor(a.account_code)!.valid_from_year ?? ''" :disabled="!canWrite"
+                         :placeholder="t('accounting.statements.mapping.validity_from')" :aria-label="t('accounting.statements.mapping.validity_from')"
+                         class="h-9 w-20 px-1.5 border border-neutral-300 rounded-md bg-surface text-xs"
+                         @change="setField(a.account_code, { valid_from_year: parseYear(($event.target as HTMLInputElement).value) })" />
+                  <span class="text-neutral-400">–</span>
+                  <input type="number" min="1900" max="2999" step="1" :value="overrideFor(a.account_code)!.valid_to_year ?? ''" :disabled="!canWrite"
+                         :placeholder="t('accounting.statements.mapping.validity_to')" :aria-label="t('accounting.statements.mapping.validity_to')"
+                         class="h-9 w-20 px-1.5 border border-neutral-300 rounded-md bg-surface text-xs"
+                         @change="setField(a.account_code, { valid_to_year: parseYear(($event.target as HTMLInputElement).value) })" />
+                </div>
               </template>
             </div>
           </div>
@@ -655,8 +825,51 @@ onMounted(async () => {
                    :placeholder="t('accounting.statements.mapping.note_placeholder')"
                    class="h-8 px-2 border border-neutral-300 rounded-md bg-surface text-xs flex-1 min-w-[12rem]"
                    @change="setField(o.account_prefix, { note: ($event.target as HTMLInputElement).value || null })" />
+            <span class="flex items-center gap-1">
+              <input type="number" min="1900" max="2999" step="1" :value="o.valid_from_year ?? ''" :disabled="!canWrite"
+                     :placeholder="t('accounting.statements.mapping.validity_from')" :aria-label="t('accounting.statements.mapping.validity_from')"
+                     class="h-8 w-20 px-1.5 border border-neutral-300 rounded-md bg-surface text-xs"
+                     @change="setField(o.account_prefix, { valid_from_year: parseYear(($event.target as HTMLInputElement).value) })" />
+              <span class="text-neutral-400">–</span>
+              <input type="number" min="1900" max="2999" step="1" :value="o.valid_to_year ?? ''" :disabled="!canWrite"
+                     :placeholder="t('accounting.statements.mapping.validity_to')" :aria-label="t('accounting.statements.mapping.validity_to')"
+                     class="h-8 w-20 px-1.5 border border-neutral-300 rounded-md bg-surface text-xs"
+                     @change="setField(o.account_prefix, { valid_to_year: parseYear(($event.target as HTMLInputElement).value) })" />
+            </span>
             <button v-if="canWrite" type="button" :class="btnIconSm('danger')" :title="t('accounting.statements.mapping.remove')"
                     :aria-label="t('accounting.statements.mapping.remove')" @click="removeOverride(o.account_prefix)">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            </button>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Výjimky platné v jiných letech než rok editoru -->
+      <div v-if="otherYears.length > 0" class="mt-4 bg-surface border border-neutral-200 rounded-lg shadow-sm" data-test="other-years">
+        <div class="px-4 py-2 bg-neutral-50 border-b border-neutral-200">
+          <p class="text-xs font-medium text-neutral-800">{{ t('accounting.statements.mapping.other_years_title', { year: year ?? '' }) }}</p>
+          <p class="text-[11px] text-neutral-600 mt-0.5">{{ t('accounting.statements.mapping.other_years_hint') }}</p>
+        </div>
+        <ul class="divide-y divide-neutral-100">
+          <li v-for="o in otherYears" :key="keyOf(o)" class="px-4 py-2 text-xs flex flex-wrap items-center gap-2">
+            <span class="min-w-[16rem] flex-1">
+              <span class="font-mono">{{ o.account_prefix }}</span> → {{ rowText(rowsByCode.get(o.row_code), o.row_code) }}
+              <span v-if="o.target === 'correction'" class="text-neutral-500">({{ t('accounting.statements.mapping.target_correction') }})</span>
+              <span v-if="o.note" class="text-neutral-500 italic"> · {{ o.note }}</span>
+            </span>
+            <span class="flex items-center gap-1">
+              <input type="number" min="1900" max="2999" step="1" :value="o.valid_from_year ?? ''" :disabled="!canWrite"
+                     :placeholder="t('accounting.statements.mapping.validity_from')" :aria-label="t('accounting.statements.mapping.validity_from')"
+                     class="h-8 w-20 px-1.5 border border-neutral-300 rounded-md bg-surface text-xs"
+                     @change="setOtherField(o, { valid_from_year: parseYear(($event.target as HTMLInputElement).value) })" />
+              <span class="text-neutral-400">–</span>
+              <input type="number" min="1900" max="2999" step="1" :value="o.valid_to_year ?? ''" :disabled="!canWrite"
+                     :placeholder="t('accounting.statements.mapping.validity_to')" :aria-label="t('accounting.statements.mapping.validity_to')"
+                     class="h-8 w-20 px-1.5 border border-neutral-300 rounded-md bg-surface text-xs"
+                     @change="setOtherField(o, { valid_to_year: parseYear(($event.target as HTMLInputElement).value) })" />
+            </span>
+            <button v-if="canWrite" type="button" :class="btnIconSm('danger')" :title="t('accounting.statements.mapping.remove')"
+                    :aria-label="t('accounting.statements.mapping.remove')" @click="removeOther(o)">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             </button>
           </li>

@@ -87,6 +87,155 @@ final class DimensionAssignmentRepository
     {
         $this->db->pdo()->prepare('DELETE FROM document_dimensions WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?')
             ->execute([$supplierId, $docType, $docId]);
+        $this->db->pdo()->prepare('DELETE FROM document_dimension_splits WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?')
+            ->execute([$supplierId, $docType, $docId]);
+    }
+
+    // ── rozpad mezi více hodnot (document_dimension_splits, journal_entry_line_dimension_splits) ──
+    //
+    // Rozpad = typ => [hodnota => podíl 0–1], součet podílů 1. Pro jeden (řádek, typ)
+    // platí buď jediná hodnota, nebo rozpad — validaci dělá DimensionService::normalizeSplits().
+
+    /** @return array<int,array<int,array<int,float>>> pořadí položky (0 = hlavička) => typ => hodnota => podíl */
+    public function documentSplits(int $supplierId, string $docType, int $docId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT item_no, dimension_type_id, dimension_value_id, share FROM document_dimension_splits
+              WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?
+              ORDER BY item_no, dimension_type_id, dimension_value_id'
+        );
+        $stmt->execute([$supplierId, $docType, $docId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['item_no']][(int) $r['dimension_type_id']][(int) $r['dimension_value_id']] = (float) $r['share'];
+        }
+        return $out;
+    }
+
+    /** @param array<int,array<int,array<int,float>>> $splits pořadí položky => typ => hodnota => podíl */
+    public function replaceDocumentSplits(int $supplierId, string $docType, int $docId, array $splits): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('DELETE FROM document_dimension_splits WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?')
+            ->execute([$supplierId, $docType, $docId]);
+        $rows = [];
+        foreach ($splits as $itemNo => $byType) {
+            foreach ($byType as $typeId => $shares) {
+                foreach ($shares as $valueId => $share) {
+                    array_push($rows, $supplierId, $docType, $docId, (int) $itemNo, (int) $typeId, (int) $valueId, self::share($share));
+                }
+            }
+        }
+        foreach (array_chunk($rows, 7 * 300) as $chunk) {
+            $pdo->prepare(
+                'INSERT INTO document_dimension_splits
+                    (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id, share) VALUES '
+                . implode(',', array_fill(0, intdiv(count($chunk), 7), '(?, ?, ?, ?, ?, ?, ?)'))
+            )->execute($chunk);
+        }
+    }
+
+    /**
+     * @param list<int> $lineIds
+     * @return array<int,array<int,array<int,float>>> řádek => typ => hodnota => podíl
+     */
+    public function lineSplits(int $supplierId, array $lineIds): array
+    {
+        $lineIds = array_values(array_unique(array_map('intval', $lineIds)));
+        $out = [];
+        foreach (array_chunk($lineIds, 1000) as $chunk) {
+            $marks = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT line_id, dimension_type_id, dimension_value_id, share FROM journal_entry_line_dimension_splits
+                  WHERE supplier_id = ? AND line_id IN ({$marks})
+                  ORDER BY line_id, dimension_type_id, dimension_value_id"
+            );
+            $stmt->execute([$supplierId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $out[(int) $r['line_id']][(int) $r['dimension_type_id']][(int) $r['dimension_value_id']] = (float) $r['share'];
+            }
+        }
+        return $out;
+    }
+
+    /** @return array<int,array<int,array<int,float>>> řádek => typ => hodnota => podíl */
+    public function entryLineSplits(int $supplierId, int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT s.line_id, s.dimension_type_id, s.dimension_value_id, s.share
+               FROM journal_entry_lines l
+               STRAIGHT_JOIN journal_entry_line_dimension_splits s ON s.line_id = l.id
+              WHERE l.supplier_id = ? AND l.entry_id = ?
+              ORDER BY s.line_id, s.dimension_type_id, s.dimension_value_id'
+        );
+        $stmt->execute([$supplierId, $entryId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['line_id']][(int) $r['dimension_type_id']][(int) $r['dimension_value_id']] = (float) $r['share'];
+        }
+        return $out;
+    }
+
+    /**
+     * Přepíše rozpad řádku deníku (jen analytika, smí i nad uzavřeným obdobím).
+     *
+     * @param array<int,array<int,float>> $splits typ => hodnota => podíl
+     * @return bool zda se něco změnilo
+     */
+    public function replaceLineSplits(int $supplierId, int $lineId, array $splits): bool
+    {
+        $current = $this->lineSplits($supplierId, [$lineId])[$lineId] ?? [];
+        if (self::sameSplits($current, $splits)) {
+            return false;
+        }
+        $this->db->pdo()->prepare('DELETE FROM journal_entry_line_dimension_splits WHERE supplier_id = ? AND line_id = ?')
+            ->execute([$supplierId, $lineId]);
+        $this->insertLineSplits($supplierId, $lineId, $splits);
+        return true;
+    }
+
+    /** @param array<int,array<int,float>> $splits typ => hodnota => podíl */
+    public function insertLineSplits(int $supplierId, int $lineId, array $splits): void
+    {
+        $rows = [];
+        $params = [];
+        foreach ($splits as $typeId => $shares) {
+            foreach ($shares as $valueId => $share) {
+                $rows[] = '(?, ?, ?, ?, ?)';
+                array_push($params, $lineId, (int) $typeId, (int) $valueId, $supplierId, self::share($share));
+            }
+        }
+        if ($rows === []) {
+            return;
+        }
+        $this->db->pdo()->prepare(
+            'INSERT INTO journal_entry_line_dimension_splits (line_id, dimension_type_id, dimension_value_id, supplier_id, share) VALUES '
+            . implode(',', $rows)
+        )->execute($params);
+    }
+
+    /**
+     * @param array<int,array<int,float>> $a
+     * @param array<int,array<int,float>> $b
+     */
+    public static function sameSplits(array $a, array $b): bool
+    {
+        $norm = static function (array $s): array {
+            $out = [];
+            foreach ($s as $typeId => $shares) {
+                foreach ($shares as $valueId => $share) {
+                    $out[(int) $typeId . ':' . (int) $valueId] = self::share($share);
+                }
+            }
+            ksort($out);
+            return $out;
+        };
+        return $norm($a) === $norm($b);
+    }
+
+    public static function share(float|int|string $share): string
+    {
+        return number_format((float) $share, 10, '.', '');
     }
 
     /**

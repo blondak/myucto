@@ -7,6 +7,11 @@ hloubkový pohled jen na **vydané faktury**. Nahoře je štítek **plátce / ne
 DPH**, který určuje, jestli se obraty počítají **bez DPH** (plátce) nebo **s DPH**
 (neplátce).
 
+Pod fakturačními ukazateli je samostatná karta výsledkového dopadu
+[ostatních pohledávek a závazků](50_Pruvodce_ucetniho.md#ostatni-pohledavky-a-zavazky).
+Výnos se zde počítá jen u položky s výnosovým protiúčtem; rozvahové položky
+ani samotné inkaso tržbu nezvyšují.
+
 ![Tržby — KPI dlaždice, měsíční obrat, top klienti, aging, predikce](img/23_trzby.webp)
 
 ## 12.1 KPI dlaždice

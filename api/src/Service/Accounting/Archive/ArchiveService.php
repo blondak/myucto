@@ -65,6 +65,11 @@ final class ArchiveService
         'tax_loss_applications',
         'tax_advance_schedules',     // zálohy na daň (1044)
         'journal_entry_attachments', // §33a přílohy zápisů (metadata; binárky viz files)
+        'other_items',
+        'other_item_schedules',
+        'other_item_schedule_occurrences',
+        'other_item_installments',
+        'other_item_allocations',
     ];
 
     /**
@@ -438,18 +443,20 @@ final class ArchiveService
             'order' => 'id',
         ];
         $txWhere = '(id IN (SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = ?)'
+            . ' OR id IN (SELECT bank_transaction_id FROM other_item_allocations'
+            . ' WHERE supplier_id = ? AND bank_transaction_id IS NOT NULL)'
             . ' OR matched_invoice_id IN (SELECT id FROM invoices WHERE supplier_id = ?)'
             . ' OR id IN (SELECT last_bank_transaction_id FROM client_bank_accounts'
             . ' WHERE supplier_id = ? AND last_bank_transaction_id IS NOT NULL))';
         $specs['bank_transactions'] = [
             'where' => $txWhere,
-            'params' => [$supplierId, $supplierId, $supplierId],
+            'params' => [$supplierId, $supplierId, $supplierId, $supplierId],
             'pk' => 'id',
             'order' => 'id',
         ];
         $specs['bank_statements'] = [
             'where' => 'id IN (SELECT statement_id FROM bank_transactions WHERE statement_id IS NOT NULL AND ' . $txWhere . ')',
-            'params' => [$supplierId, $supplierId, $supplierId],
+            'params' => [$supplierId, $supplierId, $supplierId, $supplierId],
             'pk' => 'id',
             'order' => 'id',
         ];

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import {
@@ -11,6 +11,7 @@ import {
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
@@ -125,6 +126,20 @@ const COLUMNS: ColumnDef[] = [
   { key: 'ks_d', labelKey: 'accounting.trial_balance.col_ks_d' },
 ]
 const tbl = useTablePrefs('trial_balance', COLUMNS)
+const sortedRows = computed(() => {
+  const rows = report.value?.rows ?? []
+  const sort = tbl.sort.value
+  if (!sort) return rows
+  const key = sort.key === 'account' ? 'account_code' : sort.key
+  return [...rows].sort((a, b) => {
+    const left = a[key as keyof TrialBalanceRow]
+    const right = b[key as keyof TrialBalanceRow]
+    const cmp = typeof left === 'number' && typeof right === 'number'
+      ? left - right
+      : String(left).localeCompare(String(right), undefined, { numeric: true })
+    return (sort.dir === 'asc' ? 1 : -1) * (cmp || a.account_code.localeCompare(b.account_code))
+  })
+})
 
 // Rozpad po analytikách je volba pohledu, ne filtr dat — firma, která analytiky
 // vede, je chce vidět pokaždé. Bez zapamatování předvaha default zobrazí holé
@@ -259,19 +274,14 @@ onMounted(async () => {
         <table class="w-full text-sm" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
-              <th v-if="tbl.isVisible('account')" class="px-3 py-2 text-left font-medium w-24">{{ t('accounting.trial_balance.col_account') }}</th>
-              <th v-if="tbl.isVisible('name')" class="px-3 py-2 text-left font-medium">{{ t('accounting.trial_balance.col_name') }}</th>
-              <th v-if="tbl.isVisible('account_type')" class="px-3 py-2 text-left font-medium w-24">{{ t('accounting.general_ledger.col_type') }}</th>
-              <th v-if="tbl.isVisible('ps_md')" class="px-3 py-2 text-right font-medium">{{ t('accounting.trial_balance.col_ps_md') }}</th>
-              <th v-if="tbl.isVisible('ps_d')" class="px-3 py-2 text-right font-medium">{{ t('accounting.trial_balance.col_ps_d') }}</th>
-              <th v-if="tbl.isVisible('turnover_md')" class="px-3 py-2 text-right font-medium">{{ t('accounting.trial_balance.col_turnover_md') }}</th>
-              <th v-if="tbl.isVisible('turnover_d')" class="px-3 py-2 text-right font-medium">{{ t('accounting.trial_balance.col_turnover_d') }}</th>
-              <th v-if="tbl.isVisible('ks_md')" class="px-3 py-2 text-right font-medium">{{ t('accounting.trial_balance.col_ks_md') }}</th>
-              <th v-if="tbl.isVisible('ks_d')" class="px-3 py-2 text-right font-medium">{{ t('accounting.trial_balance.col_ks_d') }}</th>
+              <SortableTh v-for="c in COLUMNS.filter(c => tbl.isVisible(c.key))" :key="c.key"
+                :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
+                :align="['account', 'name', 'account_type'].includes(c.key) ? 'left' : 'right'"
+                @toggle="tbl.toggleSort" />
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
-            <tr v-for="row in report.rows" :key="row.account_id" class="hover:bg-neutral-50">
+            <tr v-for="row in sortedRows" :key="row.account_id" class="hover:bg-neutral-50">
               <td v-if="tbl.isVisible('account')" class="px-3 py-2">
                 <RouterLink :to="statementLink(row)"
                   class="font-mono text-primary-600 hover:text-primary-700 hover:underline">

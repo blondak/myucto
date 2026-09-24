@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { reportsApi, type DphPriznaniPreview, type DphSettings, type DphTrendRow, type DphDraftsPrediction, type DphVariant, type DphCrossCheckDocument, type DphCrossCheckFinding, type DphCrossCheck343Reason } from '@/api/reports'
 import { vatClearingApi, type VatClearingStatus } from '@/api/vatClearing'
 import { apiErrorMessage } from '@/api/errors'
@@ -15,12 +15,25 @@ import { downloadApiFile } from '@/utils/downloadFile'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
 const now = new Date()
-const year = ref(now.getFullYear())
-const month = ref(now.getMonth() + 1)
+function yearFromQuery(value: unknown): number | null {
+  return typeof value === 'string' && /^(20|21)\d{2}$/.test(value) ? Number(value) : null
+}
+function monthFromQuery(value: unknown): number | null {
+  return typeof value === 'string' && /^(0?[1-9]|1[0-2])$/.test(value) ? Number(value) : null
+}
+const year = ref(yearFromQuery(route.query.year) ?? now.getFullYear())
+const month = ref(monthFromQuery(route.query.month) ?? now.getMonth() + 1)
+watch(() => [route.query.year, route.query.month], ([requestedYear, requestedMonth]) => {
+  const y = yearFromQuery(requestedYear)
+  const m = monthFromQuery(requestedMonth)
+  if (y !== null) year.value = y
+  if (m !== null) month.value = m
+})
 
 const settings = ref<DphSettings | null>(null)
 const preview = ref<DphPriznaniPreview | null>(null)

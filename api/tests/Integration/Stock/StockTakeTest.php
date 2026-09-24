@@ -125,7 +125,11 @@ final class StockTakeTest extends StockTestCase
         $itemId = $this->item($supplierId, 'INV-SURPLUS');
         $take = $this->takes->create($supplierId, $this->takeBody($whId, '2099-03-01'), $this->userId);
         $started = $this->takes->start($supplierId, (int) $take['id'], $this->userId);
-        $line = $this->findLine($started, $itemId);
+        self::assertSame([], $started['lines'], 'Karta, která na skladu nikdy nebyla, řádek nemá.');
+        $added = $this->takes->updateCounts($supplierId, (int) $take['id'], ['add_item_ids' => [$itemId, $itemId]], $this->userId);
+        self::assertCount(1, $added['lines'], 'Nalezenou kartu jde přidat ručně, jednou.');
+        $line = $this->findLine($added, $itemId);
+        self::assertSame('0.000', $line['expected_qty']);
 
         $this->takes->updateCounts($supplierId, (int) $take['id'], [
             'lines' => [['id' => $line['id'], 'counted_qty' => '2.000']],
@@ -143,6 +147,59 @@ final class StockTakeTest extends StockTestCase
         $closed = $this->takes->close($supplierId, (int) $take['id'], $this->userId);
         self::assertSame('37.500000', $closed['receipt_document']['lines'][0]['unit_cost']);
         self::assertSame('75.00', $closed['receipt_document']['lines'][0]['value_total']);
+    }
+
+    public function testTakeListsOnlyItemsOfTheWarehouse(): void
+    {
+        $supplierId = $this->createSupplier();
+        $whId = $this->warehouse($supplierId);
+        $otherWh = $this->warehouse($supplierId, 'OTHER', false);
+        $here = $this->item($supplierId, 'INV-HERE');
+        $soldOut = $this->item($supplierId, 'INV-SOLDOUT');
+        $elsewhere = $this->item($supplierId, 'INV-ELSEWHERE');
+        $never = $this->item($supplierId, 'INV-NEVER');
+        $later = $this->item($supplierId, 'INV-LATER');
+        $this->receiveStock($supplierId, $whId, $here, '3.000', 10.0, '2099-01-01');
+        $this->receiveStock($supplierId, $whId, $soldOut, '1.000', 10.0, '2099-01-01');
+        $issue = $this->documents->create($supplierId, [
+            'doc_type' => 'issue', 'origin' => 'manual', 'warehouse_id' => $whId, 'doc_date' => '2099-01-02',
+            'description' => 'Výdej', 'lines' => [['stock_item_id' => $soldOut, 'qty' => '1.000']],
+        ], $this->userId);
+        $this->documents->post($supplierId, (int) $issue['id'], $this->userId);
+        $this->receiveStock($supplierId, $otherWh, $elsewhere, '4.000', 10.0, '2099-01-01');
+        $this->receiveStock($supplierId, $whId, $later, '2.000', 10.0, '2099-03-01');
+
+        $take = $this->takes->create($supplierId, $this->takeBody($whId, '2099-02-01'), $this->userId);
+        $started = $this->takes->start($supplierId, (int) $take['id'], $this->userId);
+        $items = array_map(static fn (array $l): int => (int) $l['stock_item_id'], $started['lines']);
+        sort($items);
+        self::assertSame([$here, $soldOut], $items,
+            'Jen karty, které se na skladu k datu inventury pohnuly — i vyprodaná; ne cizí sklad, nikdy nenaskladněná ani naskladněná až po datu.');
+        self::assertSame('0.000', $this->findLine($started, $soldOut)['expected_qty']);
+        self::assertNotContains($never, $items);
+    }
+
+    public function testBackgroundPreparationListsOnlyItemsOfTheWarehouse(): void
+    {
+        $supplierId = $this->createSupplier();
+        $whId = $this->warehouse($supplierId);
+        $otherWh = $this->warehouse($supplierId, 'OTHER', false);
+        $here = $this->item($supplierId, 'PREP-HERE');
+        $elsewhere = $this->item($supplierId, 'PREP-ELSEWHERE');
+        $this->item($supplierId, 'PREP-NEVER');
+        $this->receiveStock($supplierId, $whId, $here, '3.000', 10.0, '2099-01-01');
+        $this->receiveStock($supplierId, $otherWh, $elsewhere, '4.000', 10.0, '2099-01-01');
+
+        $take = $this->takes->create($supplierId, $this->takeBody($whId, '2099-02-01'), $this->userId);
+        $this->takes->prepare($supplierId, (int) $take['id'], $this->userId);
+        $jobs = $this->container->get(\MyInvoice\Service\Stock\StockValuationJobService::class);
+        for ($i = 0; $i < 20 && $this->takes->get($supplierId, (int) $take['id'])['status'] === 'preparing'; $i++) {
+            $jobs->tick($supplierId);
+        }
+        $prepared = $this->takes->get($supplierId, (int) $take['id']);
+        self::assertSame('counting', $prepared['status']);
+        self::assertSame([$here], array_map(static fn (array $l): int => (int) $l['stock_item_id'], $prepared['lines']),
+            'Příprava na pozadí má stejné pravidlo jako přímé spuštění.');
     }
 
     /** @return array<string,mixed> */

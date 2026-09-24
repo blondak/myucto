@@ -380,6 +380,109 @@ final class VatLedgerService
         return $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
     }
 
+    /**
+     * Řádky pro výkazy stavěné nad řádky přiznání (DPHDP3, Kniha DPH, vypořádací
+     * koeficient): kanonické řádky {@see rows()} + plnění v režimu OSS jako ř. 24.
+     *
+     * Kontrolní a souhrnné hlášení, účetní kontrola ani křížové kontroly OSS řádky
+     * nepotřebují (do KH ani SH nepatří), proto zůstávají na {@see rows()}.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function returnRows(int $supplierId, string $start, string $end, bool $includeDrafts = false): array
+    {
+        return array_merge(
+            $this->rows($supplierId, $start, $end, $includeDrafts),
+            $this->ossSelectedSupplyRows($supplierId, $start, $end, $includeDrafts),
+        );
+    }
+
+    /**
+     * Plnění přiznaná ve zvláštním režimu jednoho správního místa (OSS) jako ř. 24
+     * přiznání k DPH „Vybraná plnění (§ 110b odst. 2)".
+     *
+     * Pokyny k tiskopisu 25 5401 (MFin 5412 vzor č. 22) i anotace `pln_zaslani` v XSD
+     * DPHDP3: „uvede se hodnota … vybraných plnění s nárokem na odpočet daně, na která
+     * je použit zvláštní režim jednoho správního místa … s výjimkou zdanitelných
+     * vybraných plnění uvedených na ř. 1 a 2" — tedy služby nepovinným osobám s místem
+     * plnění v jiném členském státě i prodej zboží na dálku. {@see fetchSales()} OSS
+     * položky z tuzemské evidence vylučuje (daň z nich jde do OSS přiznání, ne na
+     * ř. 1/2), takže dřív z přiznání zmizely úplně a ř. 24 zůstal prázdný.
+     *
+     * Hodnota je ZÁKLAD bez zahraniční daně v Kč kurzem dokladu, zařazená podle DUZP
+     * jako ostatní uskutečněná plnění; zahraniční daň do přiznání nevstupuje (vat = 0).
+     * Kód `24z` je tentýž, kterým se na ř. 24 vykazují plnění mimo OSS zadaná ručně —
+     * dvojí započtení nehrozí, protože {@see fetchSales()} bere jen `oss_applicable = 0`
+     * a tady se bere jen `oss_applicable = 1`.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function ossSelectedSupplyRows(int $supplierId, string $start, string $end, bool $includeDrafts = false): array
+    {
+        if (!$this->db->hasColumn('invoice_items', 'oss_applicable')) {
+            return [];
+        }
+        $statusFilter = $includeDrafts ? "i.status != 'cancelled'" : "i.status NOT IN ('draft', 'cancelled')";
+        $dicExpr = self::saleCounterpartyDicExpr($this->db, 'i', 'c');
+        $stmt = $this->db->pdo()->prepare("
+            SELECT i.id AS invoice_id, i.varsymbol AS doc_number, i.varsymbol AS vendor_invoice_number,
+                   i.invoice_type AS document_kind, i.status,
+                   i.effective_tax_date AS tax_date, i.issue_date,
+                   i.exchange_rate AS exchange_rate, COALESCE(cur.code, 'CZK') AS currency,
+                   (CASE WHEN i.invoice_type = 'credit_note' AND i.total_with_vat > 0
+                         THEN -1 ELSE 1 END) * i.total_with_vat AS inv_total,
+                   0 AS rc_flag,
+                   c.company_name AS counterparty_name, {$dicExpr} AS counterparty_dic,
+                   co.iso2 AS country_iso2, COALESCE(co.is_eu, 0) AS country_is_eu,
+                   0 AS is_fixed_asset,
+                   '24z' AS code,
+                   0 AS vat_rate,
+                   ii.description AS description,
+                   (CASE WHEN i.invoice_type = 'credit_note' AND i.total_with_vat > 0
+                         THEN -1 ELSE 1 END) * COALESCE(ii.total_without_vat, 0) AS base,
+                   0 AS vat
+              FROM invoices i
+              JOIN clients c ON c.id = i.client_id
+         LEFT JOIN countries co ON co.id = c.country_id
+              JOIN invoice_items ii ON ii.invoice_id = i.id
+         LEFT JOIN currencies cur ON cur.id = i.currency_id
+             WHERE i.supplier_id = ?
+               AND {$statusFilter}
+               AND i.invoice_type NOT IN ('proforma', 'penalty')
+               AND ii.oss_applicable = 1
+               AND i.effective_tax_date BETWEEN ? AND ?
+          ORDER BY i.effective_tax_date, i.id, ii.id
+        ");
+        $stmt->execute([$supplierId, $start, $end]);
+        $raw = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        if ($raw === []) {
+            return [];
+        }
+
+        $map = $this->classificationMap($supplierId);
+        // Kód 24z je v globálním číselníku od migrace 1512; archivovaný nebo chybějící
+        // kód nesmí plnění z ř. 24 tiše vypustit — řádek formuláře je daný zákonem.
+        if (($map['24z']['dphdp3_line'] ?? null) === null) {
+            $map['24z'] = [
+                'label'                 => 'Vybraná plnění v režimu jednoho správního místa (§ 110b odst. 2)',
+                'dphdp3_line'           => '24',
+                'dphdp3_line_secondary' => null,
+                'kh_section'            => null,
+                'vat_rate'              => 0.0,
+                'is_reverse_charge'     => false,
+                'kod_pred_pl'           => null,
+                'kh_regime_code'        => null,
+                'kh_bad_debt'           => null,
+            ];
+        }
+        $bucket = $this->taxConstants->vatBucketThreshold((int) substr($start, 0, 4));
+        $rows = [];
+        foreach ($raw as $r) {
+            $rows[] = $this->normalize($r, 'sale', $map, $bucket);
+        }
+        return $rows;
+    }
+
     /** Povolené rozsahy {@see manualReviewPredicate()} — sdílené s `filter[oss_review]`. */
     public const MANUAL_REVIEW_SCOPE_ANY = 'any';
     public const MANUAL_REVIEW_SCOPE_OSS = 'oss';

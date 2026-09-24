@@ -158,6 +158,7 @@ final class JournalImporter
         $rows = $table !== null ? iterator_to_array($table->rows(), false) : [];
 
         [$groups, $closingRows] = self::groupRows($rows);
+        $ctx->yearEndClosingRows[$year] = $closingRows;
         if ($closingRows > 0) {
             $p->info(self::STEP, 'year_end_closing_skipped', "Rok {$year}: uzávěrkové zápisy z Money ({$closingRows} řádků) se nepřebírají, rok uzavře průvodce uzávěrkou MyÚčta.", ['year' => $year]);
         }
@@ -345,6 +346,18 @@ final class JournalImporter
             $groups[Ms3Journal::groupKey($r)][] = $r;
         }
         return [$groups, $closingRows];
+    }
+
+    /**
+     * První rok, od kterého v Money roky navazují (rok za posledním přerušením řetězu),
+     * nebo null, když navazují všechny. Převod od něj půjde celý uzavřít; doporučuje ho
+     * kontrola před převodem a volí ho dávkový převod s „od roku automaticky".
+     *
+     * @param list<array{year:int,next:int}> $breaks výsledek {@see chainBreaks()}
+     */
+    public static function suggestedFromYear(array $breaks): ?int
+    {
+        return $breaks !== [] ? (int) $breaks[count($breaks) - 1]['next'] : null;
     }
 
     /**

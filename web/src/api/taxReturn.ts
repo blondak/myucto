@@ -266,6 +266,27 @@ export interface ReconcileResult {
   return_status: 'draft' | 'final' | null
 }
 
+// Převzetí podaného přiznání k DPPO (EPO XML) do vstupů přiznání a evidence ztrát.
+export interface FiledImportDiffRow extends ReconcileDiffRow {
+  /** accounting = spočteno z účetnictví, input = ze vstupů přiznání, derived = mezisoučet */
+  kind: 'accounting' | 'input' | 'derived'
+}
+
+export interface FiledImportResult {
+  year: number
+  variant: TaxReturnVariant
+  variant_seq: number
+  filing: Pick<ReconcileFilingInfo, 'dapdpp_forma' | 'verze_pis' | 'zdobd_od' | 'zdobd_do' | 'supplier'>
+  current: { exists: boolean; status: 'draft' | 'final' | null; row_version: number; inputs: Record<string, unknown> }
+  proposed: Record<string, unknown>
+  losses: { year_loss: number; applied: number }
+  diff: Omit<ReconcileDiff, 'rows'> & { rows: FiledImportDiffRow[] }
+  input_mismatches: number
+  notices: string[]
+  blocked: string | null
+  status?: 'created' | 'replaced' | 'kept'
+}
+
 export interface InsuranceSummary {
   year: number
   tax_base_7: number
@@ -406,6 +427,23 @@ export const taxReturnApi = {
     const fd = new FormData()
     fd.append('file', file, file.name)
     return api.post<ReconcileResult>(`/tax-return/po/${year}/reconcile${vsQuery(variant, seq)}`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+
+  // Převzetí podaného přiznání k DPPO: náhled (nic neukládá) a převzetí do vstupů.
+  filedImportPreview: (year: number, file: File, variant?: TaxReturnVariant, seq?: number) => {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    return api.post<FiledImportResult>(`/tax-return/po/${year}/filed-import/preview${vsQuery(variant, seq)}`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+
+  filedImport: (year: number, file: File, variant?: TaxReturnVariant, seq?: number) => {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    return api.post<FiledImportResult>(`/tax-return/po/${year}/filed-import${vsQuery(variant, seq)}`, fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
   },

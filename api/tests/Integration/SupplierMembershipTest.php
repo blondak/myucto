@@ -168,6 +168,39 @@ final class SupplierMembershipTest extends TestCase
         self::assertSame($this->supplierA, $body['id'] ?? null);
     }
 
+    /**
+     * GET /api/locate/{type}/{id}: odkaz na doklad jiné firmy — firmu prozradí jen
+     * uživateli, který do ní smí přepnout; ostatním 404 (neodliší „patří cizí firmě").
+     */
+    public function testLocateRevealsOwnerOnlyWithinMembership(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, statement_date)
+             VALUES (?, ?, ?, "1000000005/0100", "2094-01-31")'
+        )->execute([$this->supplierB, 'locate-test.gpc', hash('sha256', uniqid('locate', true))]);
+        $statementId = (int) $pdo->lastInsertId();
+
+        try {
+            $both = $this->mkUser('accountant');
+            $this->assign($both, [[$this->supplierA, null], [$this->supplierB, null]]);
+            $bothSession = $this->mkSession($both);
+            $res = $this->sessionRequest('GET', '/api/locate/bank_statement/' . $statementId, $bothSession);
+            self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+            self::assertSame($this->supplierB, $this->json($res)['supplier_id'] ?? null);
+
+            $onlyA = $this->mkUser('accountant');
+            $this->assign($onlyA, [[$this->supplierA, null]]);
+            $res = $this->sessionRequest('GET', '/api/locate/bank_statement/' . $statementId, $this->mkSession($onlyA));
+            self::assertSame(404, $res->getStatusCode(), 'Firmu mimo membership neprozradí.');
+
+            $res = $this->sessionRequest('GET', '/api/locate/nonsense/' . $statementId, $bothSession);
+            self::assertSame(404, $res->getStatusCode());
+        } finally {
+            $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$statementId]);
+        }
+    }
+
     public function testMembershipFallbackWithoutHeaderLandsOnAssignedSupplier(): void
     {
         // Membership {B} bez X-Supplier-Id → fallback musí jít na B (přiřazenou),

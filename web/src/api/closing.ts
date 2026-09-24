@@ -569,8 +569,11 @@ export interface TaxBaseDisposalRow {
   disposal_date: string
   disposal_type: string
   disposal_price: number | null
-  tax_residual_value: number
+  /** null = daňová ZC není známa (odpisovaný majetek bez daňové historie) */
+  tax_residual_value: number | null
+  tax_residual_source?: 'tax_entries' | 'by_accounting' | 'non_depreciable' | 'opening' | 'unknown'
   accounting_residual_value: number | null
+  accounting_residual_source?: 'disposal_entry' | 'linked_entry' | 'card'
   deductibility: 'full' | 'none' | 'limited'
   note: string
 }
@@ -609,6 +612,12 @@ export interface AccountingClosingSettings extends ReportingSettings {
   // § 35 vyhl. 500/2002 — řádky VZZ, které firma počítá do čistého obratu nad I. + II.
   net_turnover_extra_rows?: NetTurnoverExtraRows
   net_turnover_extra_row_options?: Record<keyof NetTurnoverExtraRows, NetTurnoverRowOption[]>
+  // Minulé období výkazů s výjimkami mapování platnými v minulém roce (jako uzavřený výkaz).
+  comparative_from_prior_year?: boolean | number
+  // Souhrnné vykázání daňových pohledávek a závazků vůči FÚ (§ 58 odst. 2 vyhl. 500/2002 Sb.).
+  tax_authority_offset?: boolean | number
+  /** Od kterého účetního období se daně vykazují souhrnně; null = všechna. */
+  tax_authority_offset_from_year?: number | null
 }
 
 export interface NetTurnoverExtraRows {

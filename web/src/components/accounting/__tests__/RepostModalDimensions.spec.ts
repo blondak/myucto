@@ -39,6 +39,7 @@ vi.mock('@/api/dimensions', async (importOriginal) => ({
 }))
 vi.mock('@/components/ui/Modal.vue', () => ({ default: { template: '<div><slot /></div>' } }))
 vi.mock('@/components/accounting/PostingOriginRow.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/components/accounting/JournalEntryNotes.vue', () => ({ default: { props: ['entryId'], template: '<div class="notes" />' } }))
 vi.mock('@/components/dimensions/DimensionChips.vue', () => ({ default: { props: ['dimensions'], template: '<span class="chips" />' } }))
 vi.mock('@/components/dimensions/DimensionFields.vue', () => ({
   default: { name: 'DimensionFields', props: ['modelValue', 'disabled', 'teleport'], emits: ['update:modelValue'], template: '<div class="fields" />' },

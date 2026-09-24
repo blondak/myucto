@@ -135,10 +135,15 @@ function deductibilityClass(d: string): string {
                 </td>
                 <td class="px-3 py-2">{{ formatDate(row.disposal_date) }}</td>
                 <td class="px-3 py-2">{{ row.disposal_type }}</td>
-                <td class="px-3 py-2 text-right font-mono">{{ formatMoney(row.tax_residual_value) }}</td>
+                <td class="px-3 py-2 text-right font-mono">
+                  <span v-if="row.tax_residual_value !== null">{{ formatMoney(row.tax_residual_value) }}</span>
+                  <span v-else class="text-warning-600">{{ t('taxReturn.residual_unknown') }}</span>
+                  <div v-if="row.tax_residual_source" class="text-xs text-neutral-500 font-sans">{{ t(`taxReturn.residual_source.${row.tax_residual_source}`) }}</div>
+                </td>
                 <td class="px-3 py-2 text-right font-mono">
                   <span v-if="row.accounting_residual_value !== null">{{ formatMoney(row.accounting_residual_value) }}</span>
                   <span v-else class="text-neutral-400">—</span>
+                  <div v-if="row.accounting_residual_source" class="text-xs text-neutral-500 font-sans">{{ t(`taxReturn.residual_source.${row.accounting_residual_source}`) }}</div>
                 </td>
                 <td class="px-3 py-2" :class="deductibilityClass(row.deductibility)" :title="row.note">
                   {{ deductibilityLabel(row.deductibility) }}

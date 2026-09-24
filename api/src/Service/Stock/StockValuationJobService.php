@@ -176,6 +176,17 @@ final class StockValuationJobService
             FROM stock_valuation_rows r JOIN stock_items i ON i.id = r.stock_item_id AND i.supplier_id = r.supplier_id
             WHERE r.supplier_id = ? AND r.job_id = ? AND r.completed = 1 AND (i.is_active = 1 OR r.qty <> 0)')
             ->execute([$takeId, $supplierId, $jobId]);
+        // Karta, která na skladu k datu nikdy nebyla, do inventury nepatří (stejné pravidlo
+        // jako StockDocumentRepository::itemIdsMovedInWarehouse(), kterým se řídí start()).
+        $pdo->prepare("DELETE t FROM stock_take_lines t
+            WHERE t.supplier_id = ? AND t.stock_take_id = ? AND t.expected_qty = 0
+              AND NOT EXISTS (
+                  SELECT 1 FROM stock_document_lines l
+                    JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
+                   WHERE l.supplier_id = t.supplier_id AND l.stock_item_id = t.stock_item_id
+                     AND d.status IN ('posted','reversed') AND d.doc_date <= ?
+                     AND (d.warehouse_id = ? OR (d.doc_type = 'transfer' AND d.warehouse_to_id = ?)))")
+            ->execute([$supplierId, $takeId, $date, (int) $take['warehouse_id'], (int) $take['warehouse_id']]);
         $costUpdate = $pdo->prepare('UPDATE stock_take_lines SET surplus_unit_cost = ?
             WHERE supplier_id = ? AND stock_take_id = ? AND stock_item_id = ? AND expected_qty = 0');
         $emptyLines = $pdo->prepare('SELECT stock_item_id FROM stock_take_lines WHERE supplier_id = ? AND stock_take_id = ? AND expected_qty = 0');

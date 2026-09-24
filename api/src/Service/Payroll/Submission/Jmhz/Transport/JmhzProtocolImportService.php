@@ -25,9 +25,13 @@ use MyInvoice\Support\PeriodFilter;
  * chodí protokoly ke všem podáním a soubor si uživatel může splést. Uložit
  * protokol cizí firmy pod tenhle tenant je jediný výsledek, který musí být
  * nemožný — proto se ukládá jen protokol, jehož variabilní symbol se shoduje
- * s registračním číslem zaměstnavatele nebo s VS některého pracoviště. Když
- * protokol variabilní symbol vůbec nenese (obálka GovTalk ho nemá), NEUKLÁDÁ
- * se: neověřitelný doklad se nesmí tvářit jako ověřený.
+ * s registračním číslem zaměstnavatele nebo s VS některého pracoviště.
+ *
+ * Dílčí protokol k JMHZ (obálka GovTalk, `JMH-DILCI-PROTOKOL-…`) variabilní
+ * symbol v podepsané části nenese. Ten se uloží jen po ověření pečeti ČSSZ
+ * a shodě VŠECH podepsaných ID PPV s evidencí firmy, viz
+ * {@see JmhzPartialProtocolOwnership}. Ostatní protokol bez variabilního
+ * symbolu se NEUKLÁDÁ: neověřitelný doklad se nesmí tvářit jako ověřený.
  */
 final readonly class JmhzProtocolImportService
 {
@@ -37,6 +41,7 @@ final readonly class JmhzProtocolImportService
     public function __construct(
         private PayrollImportedJmhzProtocolRepository $protocols,
         private JmhzProtocolExplainer $explainer,
+        private JmhzPartialProtocolOwnership $partialOwnership,
         private JmhzProtocolParser $parser = new JmhzProtocolParser(),
     ) {
     }
@@ -65,18 +70,27 @@ final readonly class JmhzProtocolImportService
         // by znamenalo mít v evidenci doklad, o kterém nevíme, co říká.
         $report = $this->parser->parse($xml);
         $variableSymbol = $report->variableSymbol;
-        if ($variableSymbol === null) {
+        $periodMonth = $report->periodMonth;
+        $periodYear = $report->periodYear;
+        if ($variableSymbol === null && $report->kind === JmhzProtocolKind::PartialSubmission) {
+            $partial = $this->partialOwnership->verify($supplierId, $environment, $xml, $filename);
+            $report = $partial['report'];
+            $variableSymbol = $partial['variable_symbol'];
+            $periodMonth = $partial['period_month'];
+            $periodYear = $partial['period_year'];
+        } elseif ($variableSymbol === null) {
             throw new JmhzTransportException(
                 'jmhz_protocol_variable_symbol_missing',
                 'Protokol neobsahuje variabilní symbol, takže nelze ověřit, že'
                     . ' patří této firmě. Načtěte protokol o zpracování,'
                     . ' který ČSSZ doručuje do datové schránky.',
             );
+        } else {
+            JmhzProtocolOwnership::assert(
+                $variableSymbol,
+                $this->protocols->employerVariableSymbols($supplierId),
+            );
         }
-        JmhzProtocolOwnership::assert(
-            $variableSymbol,
-            $this->protocols->employerVariableSymbols($supplierId),
-        );
 
         $errors = $this->explainer->explain($report);
         $stored = $this->protocols->store(
@@ -85,8 +99,8 @@ final readonly class JmhzProtocolImportService
             [
                 'protocol_kind' => self::kindColumn($report),
                 'variable_symbol' => $variableSymbol,
-                'period_month' => $report->periodMonth,
-                'period_year' => $report->periodYear,
+                'period_month' => $periodMonth,
+                'period_year' => $periodYear,
                 'submission_guid' => $report->submissionGuid === null
                     ? null
                     : strtoupper($report->submissionGuid),

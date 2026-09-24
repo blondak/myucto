@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Import;
 
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Oss\OssItemPlanner;
@@ -220,6 +221,10 @@ final class AiIssuedInvoiceExtractor
             'prices_include_vat' => false,
             'language'           => 'cs',
             'varsymbol'          => $varsymbol,
+            'payment_variable_symbol' => VariableSymbolNormalizer::importedPaymentOverride(
+                (string) ($inv['varsymbol'] ?? ''),
+                isset($inv['payment']['variable_symbol']) ? (string) $inv['payment']['variable_symbol'] : null,
+            ),
             'items'              => $this->mapItems((array) ($inv['items'] ?? [])),
         ];
 
@@ -250,8 +255,10 @@ final class AiIssuedInvoiceExtractor
     private function mapAiToDraft(array $data, int $clientId, int $supplierId): array
     {
         $documentKind = strtolower((string) ($data['document_kind'] ?? 'invoice'));
-        // Číslo dokladu z AI = varsymbol vydané faktury (jen když nekoliduje).
-        $varsymbol = $this->sanitizeVarsymbol((string) ($data['vendor_invoice_number'] ?? ($data['payment']['variable_symbol'] ?? '')));
+        // Číslo dokladu z AI = varsymbol vydané faktury (jen když nekoliduje). VS z dokladu
+        // jde zvlášť do payment_variable_symbol, když se od čísla liší (#249).
+        $documentNumber = (string) (($data['vendor_invoice_number'] ?? '') ?: ($data['payment']['variable_symbol'] ?? ''));
+        $varsymbol = $this->sanitizeVarsymbol($documentNumber);
         if ($varsymbol !== null && $this->findByVarsymbol($supplierId, $varsymbol) !== null) {
             $varsymbol = null; // nech vygenerovat při vystavení, ať draft nekoliduje na uq indexu
         }
@@ -267,6 +274,10 @@ final class AiIssuedInvoiceExtractor
             'prices_include_vat' => !empty($data['unit_prices_include_vat']),
             'language'           => 'cs',
             'varsymbol'          => $varsymbol,
+            'payment_variable_symbol' => VariableSymbolNormalizer::importedPaymentOverride(
+                $documentNumber,
+                isset($data['payment']['variable_symbol']) ? (string) $data['payment']['variable_symbol'] : null,
+            ),
             'items'              => $this->mapItems((array) ($data['items'] ?? [])),
         ];
     }

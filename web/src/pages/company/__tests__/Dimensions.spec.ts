@@ -13,6 +13,7 @@ const m = vi.hoisted(() => ({
   patchSupplier: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  commercial: true,
   supplier: { currentSupplierId: 1, currentSupplier: { id: 1, dimensions_enabled: true } as { id: number; dimensions_enabled: boolean } },
 }))
 
@@ -33,7 +34,7 @@ vi.mock('@/api/projects', () => ({ projectsApi: { list: vi.fn().mockResolvedValu
 vi.mock('@/api/accounting', () => ({ accountingApi: { listCostCenters: vi.fn().mockResolvedValue([]) } }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ ...m.supplier, patchSupplier: m.patchSupplier }) }))
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ canRead: () => true, canWrite: () => true, isCompanyAdminRole: true }),
+  useAuthStore: () => ({ canRead: () => true, canWrite: () => true, isCompanyAdminRole: true, get hasCommercialFeatures() { return m.commercial } }),
 }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: m.toastSuccess, error: m.toastError }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
@@ -64,6 +65,7 @@ describe('Dimensions.vue', () => {
   beforeEach(() => {
     for (const fn of [m.overview, m.group, m.setEnabled, m.createValue, m.updateValue, m.createDefaults, m.patchSupplier, m.toastSuccess, m.toastError]) fn.mockReset()
     m.supplier.currentSupplier.dimensions_enabled = true
+    m.commercial = true
     m.overview.mockResolvedValue(overview())
     m.group.mockResolvedValue({ group: null, candidates: [] })
     m.responsibleCandidates.mockResolvedValue([{ id: 3, name: 'Jana Syntetická' }])
@@ -116,5 +118,14 @@ describe('Dimensions.vue', () => {
     await flushPromises()
     expect(m.setEnabled).toHaveBeenCalledWith(true, true)
     expect(m.patchSupplier).toHaveBeenCalledWith(1, { dimensions_enabled: true })
+  })
+
+  it('bez účetní licence nenabídne zapnutí dimenzí', async () => {
+    m.commercial = false
+    m.supplier.currentSupplier.dimensions_enabled = false
+    const wrapper = mount(Dimensions)
+    await flushPromises()
+    expect(wrapper.text()).toContain('dimensions.license_title')
+    expect(m.setEnabled).not.toHaveBeenCalled()
   })
 })

@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Pohoda;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
 use MyInvoice\Service\Migration\Shared\TrialBalanceReconciliation;
 
@@ -105,9 +106,14 @@ final class PohodaReconciler
             'journal_diffs' => $journalDiffs,
             'documents' => $documents,
             'unmapped_accounts' => $unmapped,
+            'negative_net_rows' => $balanceSheet['negative_net_rows'],
         ]]);
         if (!$ok) {
             $p->error(self::STEP, 'reconciliation_failed', "Rok {$year}: převod nesedí, podrobnosti v rekonciliaci.", ['year' => $year]);
+        }
+        $warning = TrialBalanceReconciliation::negativeNetWarning($year, $balanceSheet['negative_net_rows']);
+        if ($warning !== null) {
+            $p->warn(self::STEP, 'negative_net_rows', $warning, ['year' => $year, 'rows' => $balanceSheet['negative_net_rows']]);
         }
         $p->finish(self::STEP);
     }
@@ -182,9 +188,11 @@ final class PohodaReconciler
                               AND " . ($onAccount ? '' : 'NOT ') . $oneSided('k.entry_id', $prefix) . ")
                 AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = '{$kind}' AND m.target_id = d.id)";
 
+        // Doklad převzatý v cizí měně se s deníkem v Kč porovná přepočtený kurzem dokladu.
+        $total = ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
         $spec = [
-            ['purchase_invoices', 'purchase_invoices', 'd.total_with_vat', 'purchase_invoice', 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END"],
-            ['issued_invoices', 'invoices', 'd.total_with_vat', 'invoice', 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
+            ['purchase_invoices', 'purchase_invoices', $total, 'purchase_invoice', 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END"],
+            ['issued_invoices', 'invoices', $total, 'invoice', 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
             ['cash', 'cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", 'cash_document', 'cash', '211', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
         ];
         $out = [];
@@ -299,7 +307,7 @@ final class PohodaReconciler
                       AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = '{$kind}' AND m.target_id = d.id)";
         $stmt = $this->db->pdo()->prepare(
             "SELECT e.document_no,
-                    (SELECT COALESCE(SUM(d.total_with_vat), 0) {$linked}) AS docs,
+                    (SELECT COALESCE(SUM(" . ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate') . "), 0) {$linked}) AS docs,
                     (SELECT COALESCE(SUM({$sign}), 0)
                        FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
                       WHERE l.supplier_id = e.supplier_id AND l.entry_id = e.id AND a.account_code LIKE '{$prefix}%') AS journal

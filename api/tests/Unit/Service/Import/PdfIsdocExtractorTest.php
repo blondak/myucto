@@ -69,6 +69,32 @@ final class PdfIsdocExtractorTest extends TestCase
         self::assertStringContainsString('<ID>SNIFFED</ID>', $result);
     }
 
+    /**
+     * PDF z Fakturoidu (renderer Prince): FileSpec s názvem `invoice.isdoc` leží
+     * v komprimovaném object streamu (`/ObjStm`), takže název ani `/EF` odkaz nejsou
+     * v PDF čitelné, a samotný stream přílohy nemá `/Type /EmbeddedFile` (klíč je
+     * podle specifikace volitelný). Pozná se jen podle `/Params`, který nese jen
+     * vložený soubor. Bez tohohle šel doklad s platným ISDOC zbytečně do AI.
+     */
+    public function testExtractsIsdocFromEmbeddedFileWithoutTypeWhenFileSpecIsInObjectStream(): void
+    {
+        $isdocXml = '<?xml version="1.0" encoding="UTF-8"?>'
+            . '<Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.2"><ID>OBJSTM-1</ID></Invoice>';
+        $objStm = gzcompress('4 0 << /Type /Filespec /F (invoice.isdoc) /UF (invoice.isdoc) /EF << /F 2 0 R >> >>');
+        $file = gzcompress($isdocXml);
+
+        $pdf = "%PDF-1.7\n"
+            . "1 0 obj\n<</Filter/FlateDecode/First 4/Length " . strlen($objStm) . "/N 1/Type/ObjStm>>stream\n"
+            . $objStm . "\nendstream\nendobj\n"
+            . "2 0 obj\n<</Filter/FlateDecode/Length " . strlen($file) . "/Params<</Size " . strlen($isdocXml) . ">>>>stream\n"
+            . $file . "\nendstream\nendobj\n"
+            . "%%EOF\n";
+
+        $result = $this->extractor->extract($pdf);
+        self::assertNotNull($result);
+        self::assertStringContainsString('<ID>OBJSTM-1</ID>', $result);
+    }
+
     public function testIgnoresEmbeddedFileWithoutIsdocContent(): void
     {
         // PDF s embedded file, který NENÍ ISDOC (např. něčí logo, JSON metadata).

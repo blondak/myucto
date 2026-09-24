@@ -8,6 +8,7 @@ import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
+import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import type { FileImportJob } from '@/api/imports'
 import { useSupplierStore } from '@/stores/supplier'
 
@@ -474,5 +475,7 @@ const importProtocol = computed(() => importReport.value ? asProtocol(importRepo
     </section>
     <div data-testid="stereo-actions" class="flex flex-wrap justify-end"><ActionBar :actions="actions" /></div>
     <p v-if="error" class="rounded-lg border border-danger-300 bg-danger-50 p-3 text-sm text-danger-600">{{ error }}</p>
+
+    <CompanyProfileBox variant="migration" />
   </div>
 </template>

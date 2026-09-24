@@ -11,12 +11,15 @@ import {
 } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { formatDate, formatMoney } from '@/composables/useFormat'
+import { formatDate, formatDateTime, formatMoney } from '@/composables/useFormat'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
+import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
@@ -25,6 +28,8 @@ import AutomationBadge from '@/components/automation/AutomationBadge.vue'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 import JournalEntryDetailPanel from '@/components/accounting/JournalEntryDetailPanel.vue'
+import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
+import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
 import { journalSourceLink } from '@/utils/journalSourceLink'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -42,13 +47,14 @@ const dims = useDimensions()
 const entries = ref<JournalEntry[]>([])
 const periods = ref<AccountingPeriod[]>([])
 const loading = ref(false)
+const loadingMore = ref(false)
+const loadMoreTarget = ref<HTMLElement | null>(null)
 
 const page = ref(1)
 const total = ref(0)
 const perPage = ref(50)
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
-const rangeFrom = computed(() => (total.value === 0 ? 0 : (page.value - 1) * perPage.value + 1))
-const rangeTo = computed(() => Math.min(page.value * perPage.value, total.value))
+useScrollLoadMore(loadMoreTarget, () => !loading.value && !loadingMore.value && page.value < totalPages.value, () => load(false))
 
 const filters = reactive({
   document_no: '',
@@ -87,7 +93,7 @@ function accountName(code: string): string {
 }
 
 const SOURCE_TYPES = [
-  'manual', 'invoice', 'purchase_invoice', 'bank', 'gopay', 'cash',
+  'manual', 'invoice', 'purchase_invoice', 'other_item', 'bank', 'gopay', 'cash',
   'depreciation', 'asset', 'asset_disposal',
   'closing', 'opening', 'fx_revaluation', 'stock',
   'offset', 'settlement', 'vat_clearing', 'card_settlement', 'card_writeoff',
@@ -104,8 +110,18 @@ const sourceIdFilter = ref<number | ''>('')
 // jako součást nálezu.
 const entryIdFilter = ref<number | ''>('')
 
-async function load() {
-  loading.value = true
+let loadSeq = 0
+async function load(reset = true) {
+  if (!reset && (loading.value || loadingMore.value || page.value >= totalPages.value)) return
+  const seq = ++loadSeq
+  if (reset) {
+    loading.value = true
+    loadingMore.value = false
+    page.value = 1
+  } else {
+    loadingMore.value = true
+    page.value++
+  }
   try {
     const r = await accountingApi.listJournal({
       page: page.value,
@@ -127,12 +143,23 @@ async function load() {
       integrity: filters.integrity || undefined,
       dimension_value_id: filters.dimension_value_id ?? undefined,
       dimension_descendants: filters.dimension_descendants,
+      sort_key: tbl.sort.value?.key,
+      sort_dir: tbl.sort.value?.dir,
     })
-    entries.value = r.items
+    if (seq !== loadSeq) return
+    entries.value = reset ? r.items : [...entries.value, ...r.items]
     total.value = r.total
     perPage.value = r.per_page
+  } catch (e) {
+    if (seq === loadSeq) {
+      if (!reset) page.value--
+      toast.error(t('common.error'))
+    }
   } finally {
-    loading.value = false
+    if (seq === loadSeq) {
+      loading.value = false
+      loadingMore.value = false
+    }
   }
 }
 
@@ -185,11 +212,6 @@ function onDimensionValue(valueId: number | null) {
 function onDimensionDescendants(value: boolean) {
   filters.dimension_descendants = value
   applyFilters()
-}
-
-function goToPage(p: number) {
-  const np = Math.min(Math.max(1, p), totalPages.value)
-  if (np !== page.value) { page.value = np; load(); collapseAll() }
 }
 
 function buildQuery(): Record<string, string> {
@@ -385,10 +407,23 @@ const COLUMNS: ColumnDef[] = [
   { key: 'status', labelKey: 'accounting.journal.status_col' },
   { key: 'posted_at', labelKey: 'accounting.journal.col_posted_at', defaultHidden: true },
   { key: 'posted_by', labelKey: 'accounting.journal.col_posted_by', defaultHidden: true },
+  { key: 'entry_id', labelKey: 'accounting.journal.col_entry_id', defaultHidden: true },
+  { key: 'created_at', labelKey: 'accounting.journal.created_at', defaultHidden: true },
+  { key: 'updated_at', labelKey: 'accounting.journal.col_updated_at', defaultHidden: true },
 ]
 const tbl = useTablePrefs('journal', COLUMNS)
+function onSortToggle(key: string) {
+  tbl.toggleSort(key)
+  page.value = 1
+  load()
+}
+function clearSort() {
+  tbl.clearSort()
+  page.value = 1
+  load()
+}
 const saved = useSavedFilters('journal', { getQuery: buildQuery, applyQuery: applyQueryToPage })
-const visibleColCount = computed(() => 1 + tbl.columns.filter(c => tbl.isVisible(c.key)).length)
+const visibleColCount = computed(() => 2 + tbl.columns.filter(c => tbl.isVisible(c.key)).length)
 
 /**
  * Řádek pohledů = uložené filtry vytažené z dropdownu do záložek nad seznamem.
@@ -455,6 +490,7 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 onMounted(async () => {
+  await ensurePrefsLoaded()
   try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
   // Osnova jen pro našeptávání filtru — výpadek nesmí zabránit načtení deníku.
   accountingApi.listAccounts().then(v => { accounts.value = v }).catch(() => { accounts.value = [] })
@@ -527,9 +563,13 @@ async function reverse(entry: JournalEntryDetail) {
   }
 }
 
+// Uzamčené datum (po podání přiznání) tlačítko neskrývá — server vrátí varování,
+// které účetní potvrdí ({@link LockedPeriodAckModal}). Zavřené období ano.
+const lockedAck = useLockedPeriodAck()
+
 function canDeleteEntry(entry: JournalEntryDetail): boolean {
-  if (entry.reversed_by) return false
-  if (!['manual', 'invoice', 'purchase_invoice', 'bank', 'depreciation'].includes(entry.source_type)) return false
+  if (entry.reversed_by || entry.reverses_entry_id) return false
+  if (!['manual', 'invoice', 'purchase_invoice', 'bank', 'depreciation', 'vat_clearing'].includes(entry.source_type)) return false
   if (entry.source_type !== 'manual' && !entry.source_id) return false
   return periods.value.find(period => period.id === entry.period_id)?.status === 'open'
 }
@@ -544,7 +584,7 @@ async function deleteEntry(entry: JournalEntryDetail) {
         : 'accounting.journal.delete_confirm'
   if (!confirm(t(confirmKey, { id: entry.id }))) return
   try {
-    await accountingApi.deleteEntry(entry.id)
+    if (await lockedAck.run(ack => accountingApi.deleteEntry(entry.id, ack)) === null) return
     const successKey = entry.source_type === 'depreciation'
       ? 'accounting.journal.depreciation_deleted'
       : entry.source_type === 'bank'
@@ -569,14 +609,14 @@ async function deleteEntry(entry: JournalEntryDetail) {
  */
 function canDeletePair(entry: JournalEntryDetail): boolean {
   if (!entry.reversed_by) return false
-  if (!['manual', 'invoice', 'purchase_invoice', 'bank'].includes(entry.source_type)) return false
+  if (!['manual', 'invoice', 'purchase_invoice', 'bank', 'vat_clearing'].includes(entry.source_type)) return false
   return periods.value.find(period => period.id === entry.period_id)?.status === 'open'
 }
 
 async function deleteEntryPair(entry: JournalEntryDetail) {
   if (!confirm(t('accounting.journal.delete_pair_confirm', { id: entry.id, reversal: entry.reversed_by ?? 0 }))) return
   try {
-    await accountingApi.deleteEntryReversalPair(entry.id)
+    if (await lockedAck.run(ack => accountingApi.deleteEntryReversalPair(entry.id, ack)) === null) return
     toast.success(t('accounting.journal.pair_deleted'))
     collapseAll()
     await load()
@@ -687,6 +727,7 @@ function sourceLabel(type: string): string {
  * dokud žilo jen tady, vedla z opisu účtu proklikem jen faktura.
  */
 function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
+  if (entry.source_type === 'other_item' && !auth.canRead('other_items')) return null
   return journalSourceLink(entry)
 }
 
@@ -915,15 +956,13 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
               <th class="px-3 py-2 w-8"></th>
-              <th v-if="tbl.isVisible('date')" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.journal.entry_date') }}</th>
-              <th v-if="tbl.isVisible('document_no')" class="px-3 py-2 text-left font-medium w-32">{{ t('accounting.journal.document_no') }}</th>
-              <th v-if="tbl.isVisible('document_date')" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.journal.col_document_date') }}</th>
-              <th v-if="tbl.isVisible('description')" class="px-3 py-2 text-left font-medium">{{ t('accounting.journal.description') }}</th>
-              <th v-if="tbl.isVisible('source')" class="px-3 py-2 text-left font-medium w-48">{{ t('accounting.journal.source_col') }}</th>
-              <th v-if="tbl.isVisible('amount')" class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.journal.col_amount') }}</th>
-              <th v-if="tbl.isVisible('status')" class="px-3 py-2 text-center font-medium w-24">{{ t('accounting.journal.status_col') }}</th>
-              <th v-if="tbl.isVisible('posted_at')" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.journal.col_posted_at') }}</th>
-              <th v-if="tbl.isVisible('posted_by')" class="px-3 py-2 text-left font-medium w-36">{{ t('accounting.journal.col_posted_by') }}</th>
+              <SortableTh v-for="c in COLUMNS.filter(c => tbl.isVisible(c.key))" :key="c.key"
+                :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
+                :align="c.key === 'amount' ? 'right' : 'left'" @toggle="onSortToggle" />
+              <th class="px-1 py-2 w-8">
+                <button v-if="tbl.sort.value" type="button" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800"
+                  :title="t('common.reset_sort')" :aria-label="t('common.reset_sort')" @click.stop="clearSort">×</button>
+              </th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
@@ -1000,6 +1039,10 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                 </td>
                 <td v-if="tbl.isVisible('posted_at')" class="px-3 py-2 whitespace-nowrap">{{ e.posted_at ? formatDate(e.posted_at) : '—' }}</td>
                 <td v-if="tbl.isVisible('posted_by')" class="px-3 py-2 truncate max-w-[10rem]">{{ e.posted_by_name || '—' }}</td>
+                <td v-if="tbl.isVisible('entry_id')" class="px-3 py-2 text-right font-mono text-xs">{{ e.id }}</td>
+                <td v-if="tbl.isVisible('created_at')" class="px-3 py-2 whitespace-nowrap text-xs">{{ formatDateTime(e.created_at) }}</td>
+                <td v-if="tbl.isVisible('updated_at')" class="px-3 py-2 whitespace-nowrap text-xs">{{ formatDateTime(e.updated_at) }}</td>
+                <td class="w-8"></td>
               </tr>
               <!-- Detail (rozbalený) -->
               <tr v-if="isExpanded(e.id)">
@@ -1086,19 +1129,20 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       </div>
     </div>
 
-    <nav v-if="!loading && total > perPage" class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
-      <span class="text-neutral-500">{{ t('common.pagination_range', { from: rangeFrom, to: rangeTo, total }) }}</span>
-      <div class="flex items-center gap-1">
-        <button type="button" :disabled="page <= 1" @click="goToPage(page - 1)"
-          class="cursor-pointer h-8 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed">‹</button>
-        <span class="px-2 text-neutral-600">{{ page }} / {{ totalPages }}</span>
-        <button type="button" :disabled="page >= totalPages" @click="goToPage(page + 1)"
-          class="cursor-pointer h-8 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed">›</button>
+    <div v-if="!loading && total > perPage" class="mt-4 text-center text-sm">
+      <span class="text-neutral-500">{{ t('common.loaded_count', { loaded: entries.length, total }) }}</span>
+      <div v-if="page < totalPages" ref="loadMoreTarget" class="mt-2">
+        <button type="button" :disabled="loadingMore" @click="load(false)"
+          :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m0 0l-6-6m6 6l6-6" /></svg>
+          {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
+        </button>
       </div>
-    </nav>
+    </div>
 
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
       @close="sourceDrawerEntryId = null" @focus-entry="onFocusEntry" />
+    <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
 
     <datalist :id="`${pageId}-journal-coa`">
       <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">

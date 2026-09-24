@@ -96,6 +96,49 @@ final class FxPaymentTest extends BankPostingTestCase
         self::assertEqualsWithDelta(1000.00, (float) $saldo['amount_foreign'], 0.001);
     }
 
+    /**
+     * Převzaté účetnictví vede saldokonto na analytice (předpis 311.100) a převod zakládá
+     * doklad v cizí měně. CZK úhrada musí odúčtovat tutéž analytiku jako korunová větev -
+     * jinak předpis na 311.100 zůstane otevřený a úhrada visí na syntetice 311.
+     */
+    public function testCzkPaymentOfForeignDocumentSettlesAnalyticOfItsPredpis(): void
+    {
+        $this->analytic('311.100');
+        $this->analytic('311.200');
+        $inv = $this->fxSaleInvoice('FV-EUR-ANALYTIC', $this->client('EUR na analytice'), 1000.00, 24.50, '311.100');
+        $tx = $this->transaction($this->statement(), 24300.00, ['match_status' => 'manual', 'currency' => 'CZK', 'matched_invoice_id' => $inv]);
+        $this->fxInvoicePayment($inv, $tx, 1000.00);
+        $res = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('posted', $res['action'], (string) ($res['reason'] ?? ''));
+        $byAcc = $this->linesByAccountCode($this->entryIdForBankTx($tx));
+        self::assertEqualsWithDelta(24500.00, $byAcc['311.100']['credit'] ?? 0.0, 0.001, json_encode($byAcc));
+        self::assertArrayNotHasKey('311', $byAcc);
+
+        $this->analytic('321.100');
+        $this->analytic('321.200');
+        $pf = $this->fxPurchaseInvoice('PF-EUR-ANALYTIC', $this->client('EUR dodavatel na analytice'), 500.00, 25.00, '321.100');
+        $out = $this->transaction($this->statement(), -12000.00, ['match_status' => 'manual', 'currency' => 'CZK']);
+        $this->paymentMatch($out, $pf, 12000.00);
+        $res = $this->service->handleTransaction($out, $this->userId);
+        self::assertSame('posted', $res['action'], (string) ($res['reason'] ?? ''));
+        $byAcc = $this->linesByAccountCode($this->entryIdForBankTx($out));
+        self::assertEqualsWithDelta(12500.00, $byAcc['321.100']['debit'] ?? 0.0, 0.001, json_encode($byAcc));
+        self::assertArrayNotHasKey('321', $byAcc);
+    }
+
+    private function analytic(string $code): void
+    {
+        $map = $this->accounts->codeToIdMap($this->supplierId);
+        if (isset($map[$code])) {
+            return;
+        }
+        $parent = $map[substr($code, 0, 3)];
+        $this->db->pdo()->prepare(
+            'INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active)
+             SELECT supplier_id, ?, ?, account_type, normal_side, 0, id, 1 FROM chart_of_accounts WHERE id = ?'
+        )->execute([$code, 'Analytika ' . $code, $parent['id']]);
+    }
+
     // (c) — částečná úhrada FX faktury: poměrná část salda i kurzového rozdílu.
     public function testIncomingPartialPaymentBooksProportionalDifference(): void
     {
@@ -709,7 +752,7 @@ final class FxPaymentTest extends BankPostingTestCase
     }
 
     /** Vydaná faktura v EUR + zaúčtovaný předpis 311/602 s FX stopou na saldokontu (guard H1). */
-    private function fxSaleInvoice(string $vs, int $clientId, float $foreignTotal, float $rate): int
+    private function fxSaleInvoice(string $vs, int $clientId, float $foreignTotal, float $rate, string $receivable = '311'): int
     {
         $issue = self::YEAR . '-06-10';
         $this->db->pdo()->prepare(
@@ -737,7 +780,7 @@ final class FxPaymentTest extends BankPostingTestCase
             'posted_at'   => date('Y-m-d H:i:s'),
             'posted_by'   => $this->userId,
         ], [
-            ['account_id' => $map['311']['id'], 'side' => 'debit', 'amount' => $czk,
+            ['account_id' => $map[$receivable]['id'], 'side' => 'debit', 'amount' => $czk,
              'currency_code' => 'EUR', 'fx_rate' => $rate, 'amount_foreign' => $foreignTotal],
             ['account_id' => $map['602']['id'], 'side' => 'credit', 'amount' => $czk],
         ]);
@@ -745,7 +788,7 @@ final class FxPaymentTest extends BankPostingTestCase
     }
 
     /** Přijatá faktura v EUR + zaúčtovaný předpis 518/321 s FX stopou na saldokontu (guard H1). */
-    private function fxPurchaseInvoice(string $number, int $vendorId, float $foreignTotal, float $rate): int
+    private function fxPurchaseInvoice(string $number, int $vendorId, float $foreignTotal, float $rate, string $payable = '321'): int
     {
         $issue = self::YEAR . '-06-10';
         $snapshot = json_encode(['company_name' => 'EUR Dodavatel'], JSON_UNESCAPED_UNICODE);
@@ -775,7 +818,7 @@ final class FxPaymentTest extends BankPostingTestCase
             'posted_by'   => $this->userId,
         ], [
             ['account_id' => $map['518']['id'], 'side' => 'debit', 'amount' => $czk],
-            ['account_id' => $map['321']['id'], 'side' => 'credit', 'amount' => $czk,
+            ['account_id' => $map[$payable]['id'], 'side' => 'credit', 'amount' => $czk,
              'currency_code' => 'EUR', 'fx_rate' => $rate, 'amount_foreign' => $foreignTotal],
         ]);
         return $pfId;

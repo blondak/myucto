@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { taxReturnApi, type TaxpayerType, type TaxReturnVariant, type TaxReturnState, type InsuranceSummary, type AdvanceSchedule, type AdvanceOverride, type AdvancePeriodicity, type AdvanceKind, type TaxReturnProjection, type TaxReturnAddbackSuggestion, type TaxReturnDeductionSuggestion, type ReconcileResult, type TaxReturnBankAccount, type PreFinalizeCheck } from '@/api/taxReturn'
+import { taxReturnApi, type TaxpayerType, type TaxReturnVariant, type TaxReturnState, type InsuranceSummary, type AdvanceSchedule, type AdvanceOverride, type AdvancePeriodicity, type AdvanceKind, type TaxReturnProjection, type TaxReturnAddbackSuggestion, type TaxReturnDeductionSuggestion, type ReconcileResult, type FiledImportResult, type TaxReturnBankAccount, type PreFinalizeCheck } from '@/api/taxReturn'
 import { apiErrorMessage } from '@/api/errors'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useYearOptions } from '@/composables/useYearOptions'
@@ -14,7 +14,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { taxApi, type TaxProfile, type TaxActivity, type TaxChild, type SpouseClaim, type OsvcMonth } from '@/api/tax'
 import { taxEvidenceApi, type TaxEvidenceClosing, type TaxEvidenceAdjustment } from '@/api/taxEvidence'
 import { downloadApiFile } from '@/utils/downloadFile'
-import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnOutline, btnFilled, ICONS } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
@@ -24,7 +24,14 @@ const supplierStore = useSupplierStore()
 const auth = useAuthStore()
 
 const now = new Date()
-const year = ref(now.getFullYear() - 1)
+function yearFromQuery(value: unknown): number | null {
+  return typeof value === 'string' && /^(20|21)\d{2}$/.test(value) ? Number(value) : null
+}
+const year = ref(yearFromQuery(route.query.year) ?? now.getFullYear() - 1)
+watch(() => route.query.year, requested => {
+  const selected = yearFromQuery(requested)
+  if (selected !== null) year.value = selected
+})
 const yearOptions = useYearOptions('combined', year)
 
 // Účetní období (pro DPPO nabízíme reálná období vč. hospodářského roku, label 2025/2026).
@@ -630,6 +637,64 @@ function extraEntries(extra: Record<string, { value: number; label: string }>): 
   return Object.entries(extra).map(([key, v]) => ({ key, value: v.value, label: v.label }))
 }
 
+// ── Převzetí podaného přiznání (EPO XML) do vstupů přiznání a evidence ztrát ──
+const filedImport = ref<FiledImportResult | null>(null)
+const filedImportLoading = ref(false)
+const filedImportApplying = ref(false)
+const filedImportMsg = ref('')
+async function previewFiledImport() {
+  if (!reconcileFile.value) return
+  filedImportLoading.value = true
+  reconcileError.value = ''
+  filedImportMsg.value = ''
+  try {
+    filedImport.value = await taxReturnApi.filedImportPreview(year.value, reconcileFile.value, variant.value, seqParam())
+  } catch (e) {
+    reconcileError.value = apiErrorMessage(e)
+    filedImport.value = null
+  } finally {
+    filedImportLoading.value = false
+  }
+}
+async function applyFiledImport() {
+  if (!reconcileFile.value || !filedImport.value) return
+  if (filedImport.value.current.exists && !window.confirm(t('taxReturn.filed_import_confirm_replace'))) return
+  filedImportApplying.value = true
+  reconcileError.value = ''
+  try {
+    const res = await taxReturnApi.filedImport(year.value, reconcileFile.value, variant.value, seqParam())
+    filedImport.value = res
+    filedImportMsg.value = t('taxReturn.filed_import_done_' + (res.status ?? 'created'))
+    await load()
+  } catch (e) {
+    reconcileError.value = apiErrorMessage(e)
+  } finally {
+    filedImportApplying.value = false
+  }
+}
+type ProposedItem = { text: string; amount: number; line?: number }
+function proposedItems(key: 'manual_increase_items' | 'manual_decrease_items'): ProposedItem[] {
+  const items = filedImport.value?.proposed[key]
+  return Array.isArray(items) ? (items as ProposedItem[]) : []
+}
+const proposedScalars = computed<Array<{ key: string; value: number }>>(() => {
+  const p = filedImport.value?.proposed ?? {}
+  const labels: Record<string, string> = {
+    loss_carryforward: 'loss_carryforward', rnd_deduction: 'rnd_deduction', education_deduction: 'education_deduction',
+    donations: 'donations', disabled_employees_avg: 'disabled_avg', disabled_employees_severe_avg: 'disabled_severe_avg',
+    stopped_execution_credit: 'stopped_execution_credit', tax_paid_advances: 'tax_paid_advances',
+  }
+  return Object.entries(labels)
+    .filter(([key]) => Number(p[key] ?? 0) > 0)
+    .map(([key, label]) => ({ key: label, value: Number(p[key]) }))
+})
+const INCREASE_ITEM_LINES = [20, 30, 40, 61]
+const DECREASE_ITEM_LINES = [100, 101, 109, 110, 111, 112, 120, 130, 140, 160, 161]
+const filedSource = computed(() => {
+  const src = (inputs as Record<string, unknown>).filed_source
+  return src && typeof src === 'object' ? (src as { forma?: string; imported_at?: string }) : null
+})
+
 // Sledování změn ve vstupech → dirty.
 watch(inputs, () => { if (state.value) dirty.value = true }, { deep: true })
 watch(profile, () => { if (state.value) profileDirty.value = true }, { deep: true })
@@ -637,7 +702,7 @@ watch(profile, () => { if (state.value) profileDirty.value = true }, { deep: tru
 watch(yearSelectOptions, (opts) => {
   if (opts.length > 0 && !opts.some(o => o.value === year.value)) year.value = opts[0].value
 })
-watch([type, year, variant], async () => { insurance.value = null; reconcileResult.value = null; reconcileError.value = ''; await load(); await loadOverridesOverview() })
+watch([type, year, variant], async () => { insurance.value = null; reconcileResult.value = null; reconcileError.value = ''; filedImport.value = null; filedImportMsg.value = ''; await load(); await loadOverridesOverview() })
 onMounted(async () => {
   try { periods.value = await accountingApi.listPeriods() } catch { /* účetní období nemusí být dostupná (tax_evidence) */ }
   await load()
@@ -855,12 +920,20 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
             <div class="text-sm font-semibold mb-2">{{ t('taxReturn.po_disposals') }}</div>
             <table class="w-full text-sm">
               <thead><tr class="text-left text-neutral-500 text-xs">
-                <th class="py-1">{{ t('taxReturn.inv') }}</th><th>{{ t('taxReturn.name') }}</th><th class="text-right">{{ t('taxReturn.tax_residual') }}</th><th>{{ t('taxReturn.deductibility') }}</th>
+                <th class="py-1">{{ t('taxReturn.inv') }}</th><th>{{ t('taxReturn.name') }}</th><th class="text-right">{{ t('taxReturn.book_residual') }}</th><th class="text-right">{{ t('taxReturn.tax_residual') }}</th><th>{{ t('taxReturn.deductibility') }}</th>
               </tr></thead>
               <tbody>
                 <tr v-for="d in (state.podklady.disposals as any[])" :key="d.asset_id" class="border-t border-neutral-100">
                   <td class="py-1">{{ d.inventory_number }}</td><td>{{ d.name }}</td>
-                  <td class="text-right font-mono">{{ formatMoney(d.tax_residual_value, 'CZK') }}</td><td>{{ d.deductibility }}</td>
+                  <td class="text-right font-mono whitespace-nowrap">
+                    {{ d.book_residual_value != null ? formatMoney(d.book_residual_value, 'CZK') : '—' }}
+                    <div v-if="d.book_residual_source" class="text-xs text-neutral-500 font-sans">{{ t(`taxReturn.residual_source.${d.book_residual_source}`) }}</div>
+                  </td>
+                  <td class="text-right font-mono whitespace-nowrap" :class="d.tax_residual_value == null ? 'text-warning-600' : ''">
+                    {{ d.tax_residual_value != null ? formatMoney(d.tax_residual_value, 'CZK') : t('taxReturn.residual_unknown') }}
+                    <div v-if="d.tax_residual_source" class="text-xs text-neutral-500 font-sans">{{ t(`taxReturn.residual_source.${d.tax_residual_source}`) }}</div>
+                  </td>
+                  <td>{{ d.deductibility }}</td>
                 </tr>
               </tbody>
             </table>
@@ -991,9 +1064,15 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                 <span class="text-sm font-semibold">{{ t('taxReturn.manual_increase') }}</span>
                 <button type="button" @click="addItem('manual_increase_items')" class="text-xs text-primary-600">+ {{ t('taxReturn.add_item') }}</button>
               </div>
+              <p v-if="filedSource" class="text-[11px] text-neutral-500 mb-2">{{ t('taxReturn.filed_import_source', { forma: filedSource.forma ?? '?', date: filedSource.imported_at ? formatDate(filedSource.imported_at.slice(0, 10)) : '?' }) }}</p>
               <div v-for="(it, i) in inputs.manual_increase_items" :key="'inc'+i" class="flex flex-wrap items-center gap-2 mb-2">
                 <input v-model="it.text" :placeholder="t('taxReturn.item_text')" class="flex-1 min-w-[12rem] h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                 <input type="number" v-model.number="it.amount" class="w-40 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                <select v-if="type === 'po'" v-model="it.line" :title="t('taxReturn.item_line_hint')" :aria-label="t('taxReturn.item_line')"
+                  class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-xs">
+                  <option :value="undefined">{{ t('taxReturn.item_line_default', { line: 62 }) }}</option>
+                  <option v-for="l in INCREASE_ITEM_LINES" :key="l" :value="l">{{ t('taxReturn.item_line_option', { line: l }) }}</option>
+                </select>
                 <label class="flex items-center gap-1 text-[11px] text-neutral-500 whitespace-nowrap" :title="t('taxReturn.item_flat_rate_travel_hint')">
                   <input type="checkbox" v-model="it.kind" true-value="flat_rate_travel" false-value="" />
                   {{ t('taxReturn.item_flat_rate_travel') }}
@@ -1009,6 +1088,11 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
               <div v-for="(it, i) in inputs.manual_decrease_items" :key="'dec'+i" class="flex flex-wrap items-center gap-2 mb-2">
                 <input v-model="it.text" :placeholder="t('taxReturn.item_text')" class="flex-1 min-w-[12rem] h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                 <input type="number" v-model.number="it.amount" class="w-40 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                <select v-if="type === 'po'" v-model="it.line" :title="t('taxReturn.item_line_hint')" :aria-label="t('taxReturn.item_line')"
+                  class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-xs">
+                  <option :value="undefined">{{ t('taxReturn.item_line_default', { line: 162 }) }}</option>
+                  <option v-for="l in DECREASE_ITEM_LINES" :key="l" :value="l">{{ t('taxReturn.item_line_option', { line: l }) }}</option>
+                </select>
                 <label class="flex items-center gap-1 text-[11px] text-neutral-500 whitespace-nowrap" :title="t('taxReturn.item_flat_rate_travel_hint')">
                   <input type="checkbox" v-model="it.kind" true-value="flat_rate_travel" false-value="" />
                   {{ t('taxReturn.item_flat_rate_travel') }}
@@ -1322,8 +1406,87 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
               class="inline-flex items-center gap-2 h-9 px-4 rounded-md bg-primary-600 text-white text-sm disabled:opacity-50">
               {{ reconcileLoading ? t('taxReturn.reconcile_running') : t('taxReturn.reconcile_run') }}
             </button>
+            <button type="button" @click="previewFiledImport" :disabled="!reconcileFile || filedImportLoading" :class="btnOutline('primary')" data-testid="filed-import-preview">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+              {{ filedImportLoading ? t('taxReturn.filed_import_running') : t('taxReturn.filed_import_preview') }}
+            </button>
           </div>
           <div v-if="reconcileError" class="bg-danger-50 border border-danger-500/40 text-danger-500 rounded-md p-3 text-sm mt-3">{{ reconcileError }}</div>
+
+          <div v-if="filedImport" class="mt-4 border border-neutral-200 dark:border-neutral-700 rounded-lg p-4" data-testid="filed-import">
+            <h4 class="text-sm font-semibold mb-1">{{ t('taxReturn.filed_import_title') }}</h4>
+            <p class="text-xs text-neutral-500 mb-3">{{ t('taxReturn.filed_import_hint') }}</p>
+            <div class="bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 rounded-md p-3 text-sm font-medium flex flex-wrap gap-x-4 gap-y-1">
+              <span>{{ t('taxReturn.reconcile_filing_info', {
+                forma: filedImport.filing.dapdpp_forma, verze: filedImport.filing.verze_pis,
+                od: filedImport.filing.zdobd_od || '?', do: filedImport.filing.zdobd_do || '?' }) }}</span>
+              <span>{{ t('taxReturn.filed_import_losses', {
+                year_loss: formatMoney(filedImport.losses.year_loss, 'CZK'), applied: formatMoney(filedImport.losses.applied, 'CZK') }) }}</span>
+            </div>
+            <div v-if="filedImportMsg" class="bg-success-50 border border-success-500/40 text-success-700 rounded-md p-3 text-sm mt-3">{{ filedImportMsg }}</div>
+            <div v-if="filedImport.blocked" class="bg-danger-50 border border-danger-500/40 text-danger-500 rounded-md p-3 text-sm mt-3">{{ filedImport.blocked }}</div>
+            <div v-else-if="filedImport.current.exists && !filedImport.status" class="bg-warning-50 border border-warning-500/40 text-warning-700 rounded-md p-3 text-sm mt-3">{{ t('taxReturn.filed_import_existing') }}</div>
+            <ul v-if="filedImport.notices.length" class="bg-warning-50 border border-warning-500/40 rounded-md p-3 text-sm text-warning-700 mt-3 list-disc list-inside">
+              <li v-for="n in filedImport.notices" :key="n">{{ n }}</li>
+            </ul>
+
+            <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div v-for="key in (['manual_increase_items', 'manual_decrease_items'] as const)" :key="key">
+                <div class="text-xs font-semibold text-neutral-600 mb-1">{{ t(key === 'manual_increase_items' ? 'taxReturn.filed_import_items_increase' : 'taxReturn.filed_import_items_decrease') }}</div>
+                <ul class="space-y-0.5">
+                  <li v-for="(it, i) in proposedItems(key)" :key="key + i" class="flex justify-between gap-3">
+                    <span><span v-if="it.line" class="font-mono text-neutral-400 mr-1">{{ t('taxReturn.item_line_option', { line: it.line }) }}</span>{{ it.text }}</span>
+                    <span class="font-mono whitespace-nowrap">{{ formatMoney(it.amount, 'CZK') }}</span>
+                  </li>
+                  <li v-if="!proposedItems(key).length" class="text-neutral-400">–</li>
+                </ul>
+              </div>
+            </div>
+            <ul v-if="proposedScalars.length" class="mt-3 text-sm space-y-0.5 border-t border-neutral-100 pt-2">
+              <li v-for="sc in proposedScalars" :key="sc.key" class="flex justify-between gap-3">
+                <span>{{ t('taxReturn.' + sc.key) }}</span>
+                <span class="font-mono whitespace-nowrap">{{ sc.key.startsWith('disabled') ? sc.value : formatMoney(sc.value, 'CZK') }}</span>
+              </li>
+            </ul>
+
+            <div class="mt-3 text-sm font-medium" :class="filedImport.input_mismatches === 0 ? 'text-success-700' : 'text-danger-600'">
+              {{ filedImport.input_mismatches === 0 ? t('taxReturn.filed_import_input_match') : t('taxReturn.filed_import_input_mismatch', { n: filedImport.input_mismatches }) }}
+            </div>
+            <div class="mt-2 overflow-x-auto border border-neutral-200 rounded-lg">
+              <table class="w-full text-sm">
+                <thead><tr class="text-left text-neutral-500 text-xs bg-neutral-50">
+                  <th class="px-3 py-2 w-16">{{ t('taxReturn.reconcile_col_line') }}</th>
+                  <th>{{ t('taxReturn.reconcile_col_label') }}</th>
+                  <th class="px-3 whitespace-nowrap">{{ t('taxReturn.filed_import_col_kind') }}</th>
+                  <th class="px-3 text-right whitespace-nowrap">{{ t('taxReturn.reconcile_col_our') }}</th>
+                  <th class="px-3 text-right whitespace-nowrap">{{ t('taxReturn.reconcile_col_filed') }}</th>
+                  <th class="px-3 text-right whitespace-nowrap">{{ t('taxReturn.reconcile_col_diff') }}</th>
+                </tr></thead>
+                <tbody>
+                  <tr v-for="row in filedImport.diff.rows" :key="row.line" class="border-t border-neutral-100"
+                    :class="row.match ? '' : (row.kind === 'input' ? 'bg-danger-50/60 dark:bg-danger-500/10' : 'bg-warning-50/60 dark:bg-warning-500/10')">
+                    <td class="px-3 py-1.5 text-neutral-500 font-mono">{{ row.code }}</td>
+                    <td>{{ row.label }}</td>
+                    <td class="px-3 text-xs text-neutral-500 whitespace-nowrap">{{ t('taxReturn.filed_import_kind_' + row.kind) }}</td>
+                    <td class="px-3 text-right font-mono whitespace-nowrap">{{ formatMoney(row.our_value, 'CZK') }}</td>
+                    <td class="px-3 text-right font-mono whitespace-nowrap">{{ formatMoney(row.filed_value, 'CZK') }}</td>
+                    <td class="px-3 text-right font-mono whitespace-nowrap" :class="row.match ? 'text-success-600' : 'text-danger-600 font-semibold'">
+                      {{ row.diff >= 0 ? '+' : '' }}{{ formatMoney(row.diff, 'CZK') }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-if="!filedImport.status" class="mt-3 flex flex-wrap items-center gap-2">
+              <button type="button" @click="applyFiledImport" :class="btnFilled('success')" data-testid="filed-import-apply"
+                :disabled="!!filedImport.blocked || filedImportApplying || dirty || !auth.canWrite('reports')"
+                :title="dirty ? t('taxReturn.filed_import_dirty') : undefined">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                {{ filedImportApplying ? t('taxReturn.filed_import_applying') : t('taxReturn.filed_import_apply') }}
+              </button>
+              <span v-if="dirty" class="text-xs text-warning-700">{{ t('taxReturn.filed_import_dirty') }}</span>
+            </div>
+          </div>
 
           <template v-if="reconcileResult">
             <div class="mt-4 bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 rounded-md p-3 text-sm font-medium flex flex-wrap gap-x-4 gap-y-1">

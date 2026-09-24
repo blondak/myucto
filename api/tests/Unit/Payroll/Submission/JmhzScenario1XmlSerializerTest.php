@@ -1446,6 +1446,47 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
     }
 
     /**
+     * Pokyny MPSV k 10276: „Neuvádí se hodiny neodpracované z důvodu dočasné
+     * pracovní neschopnosti." Nemoc s náhradou mzdy je překážkou na straně
+     * zaměstnance (ZP část osmá, hlava I), takže patří do 10471. Pracovní
+     * souhrn ji v placených hodinách nese dál (sleva § 7a ZPSZ), převádí se
+     * až v hlášení.
+     */
+    public function testSicknessWithWageCompensationMovesFromPaidHoursToEmployeeObstacles(): void
+    {
+        $payload = $this->payload();
+        $summary = &$payload['people'][0]['employments'][0]['work_month']['jmhz_work_summary'];
+        $summary['interactions'] = ['IN07' => true, 'IN08' => true];
+        $summary['values'] = array_merge($summary['values'], [
+            'worked_millihours' => 136_000,
+            'unworked_total_millihours' => 48_000,
+            'unworked_paid_millihours' => 48_000,
+            'dpn_with_employer_compensation_millihours' => 24_000,
+            'vacation_millihours' => 16_000,
+            'employee_obstacle_paid_millihours' => 8_000,
+        ]);
+        unset($summary);
+
+        $xml = (string) preg_replace(
+            '/>\s+</',
+            '><',
+            (new JmhzScenario1XmlValidator())->dryRun(
+                $this->resolutionFor($payload),
+                $this->envelope(),
+            )['xml'],
+        );
+
+        self::assertStringContainsString(
+            '<form:neodpracovaneHodiny><form:hodinyNeodpracCelkem>48.000</form:hodinyNeodpracCelkem>'
+                . '<form:hodinyNeodpracNahrada>24.000</form:hodinyNeodpracNahrada>'
+                . '<form:hodinyNeodpracNeschop>24.000</form:hodinyNeodpracNeschop>'
+                . '<form:hodinyNeodpracDovol>16.000</form:hodinyNeodpracDovol></form:neodpracovaneHodiny>'
+                . '<form:prekazkyVPraci><form:prekazkaZamestnanec>32.000</form:prekazkaZamestnanec></form:prekazkyVPraci>',
+            $xml,
+        );
+    }
+
+    /**
      * Uplatněná sleva podle § 7a musí projít až do XML. Bez rozpadu 10372,
      * 10373 a 10374 se podání zastavilo v přípravě, takže zaměstnavatel, který
      * měl na slevu nárok, nemohl měsíční hlášení podat vůbec.

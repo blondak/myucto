@@ -674,6 +674,8 @@ final class Bootstrap
                 $c->get(\MyInvoice\Repository\BankEmailAttachmentIngestRepository::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\BankStatementPdfParserRegistry::class),
                 $c->get(\MyInvoice\Service\Bank\StatementImporter::class),
+                $c->get(\MyInvoice\Service\Bank\CreditCard\CreditCardStatementImportService::class),
+                $c->get(\MyInvoice\Repository\CreditCardAccountRepository::class),
             ),
             \MyInvoice\Service\Bank\StatementImporter::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\StatementImporter(
                 $c->get(Connection::class),
@@ -706,6 +708,7 @@ final class Bootstrap
                 $c->get(Connection::class),
                 $c->get(\MyInvoice\Repository\UserSupplierRepository::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
+                $c->get(\MyInvoice\Service\Tenant\DefaultSupplierService::class),
             ),
             \MyInvoice\Service\Invoice\InvoicePublicLinkService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Invoice\InvoicePublicLinkService(
                 $c->get(Config::class),
@@ -982,6 +985,12 @@ final class Bootstrap
             // (banky bez GPC/ABO exportu). PŘIDÁNÍ NOVÉ BANKY: nová třída implements
             // BankStatementPdfParserInterface a vlož ji do tohoto pole.
             \MyInvoice\Service\Bank\Pdf\BankStatementPdfParserRegistry::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\Pdf\BankStatementPdfParserRegistry([
+                // Výpisy kreditních karet PŘED běžnými účty: parser běžného účtu téže banky
+                // by je jinak přijal (ČSOB je tiskne stejným layoutem) a zaúčtoval na 221.
+                $c->get(\MyInvoice\Service\Bank\Pdf\CreditCard\KbCreditCardStatementPdfParser::class),
+                $c->get(\MyInvoice\Service\Bank\Pdf\CreditCard\RaiffeisenbankCreditCardStatementPdfParser::class),
+                $c->get(\MyInvoice\Service\Bank\Pdf\CreditCard\CsobCreditCardStatementPdfParser::class),
+                $c->get(\MyInvoice\Service\Bank\Pdf\CreditCard\ErsteCreditCardStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CreditasStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CsobStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\KbStatementPdfParser::class),
@@ -989,7 +998,8 @@ final class Bootstrap
             ]),
             \MyInvoice\Service\Bank\Connector\FioBankConnector::class => fn (ContainerInterface $c)
                 => new \MyInvoice\Service\Bank\Connector\FioBankConnector(
-                    $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->create('fio')),
+                    $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->create('fio'),
+                    $c->get(LoggerInterface::class)),
             \MyInvoice\Service\Bank\Connector\RaiffeisenbankPremiumClient::class => fn (ContainerInterface $c)
                 => new \MyInvoice\Service\Bank\Connector\RaiffeisenbankPremiumClient(
                     $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->create('raiffeisenbank', new \GuzzleHttp\Handler\CurlHandler([

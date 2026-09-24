@@ -116,6 +116,8 @@ final class BankStatementAction
         private readonly ManagedModeGuard $managed,
         // Uvolnění pohybu (zrušení párování i smazání výpisu) — jediné místo.
         private readonly BankTransactionReleaseService $release,
+        // Výpis kreditní karty z „Nahrát PDF" jde importem kreditních karet (úvěr 231.x).
+        private readonly \MyInvoice\Service\Bank\CreditCard\CreditCardStatementImportService $creditCards,
         private readonly ?SubsetSumSolver $subsetSolver = null,
     ) {}
 
@@ -336,6 +338,18 @@ final class BankStatementAction
             $parsed = $this->pdfParsers->parse($pdfBytes);
         } catch (\Throwable $e) {
             return Json::error($response, 'parse_failed', 'Nelze parsovat: ' . $e->getMessage(), 400);
+        }
+
+        // Kreditní karta není bankovní účet: úvěrový účet se zaeviduje firmě a účtuje se
+        // na 231.x. Měnový účet (currency_id) se tu nevolí, kreditka v `currencies` není.
+        if (\MyInvoice\Service\Bank\CreditCard\CreditCardStatementImportService::isCreditCardStatement($parsed)) {
+            try {
+                $r = $this->creditCards->importParsed(SupplierGuard::currentId($request), $parsed, $pdfBytes, $name, (int) ($user['id'] ?? 0));
+            } catch (\MyInvoice\Service\Accounting\PostingException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->context);
+            }
+            $this->logger->log('bank.statement_pdf_imported', $user['id'] ?? null, 'bank_statement', $r['statement_id'], $r + ['parser' => $parsed['parser'] ?? null], $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
+            return Json::ok($response, $r);
         }
 
         $accountNumber = (string) ($parsed['header']['account_number'] ?? '');
@@ -1638,6 +1652,12 @@ final class BankStatementAction
             }
         }
 
+        $sort = \MyInvoice\Service\Bank\BankTransactionSort::fromQuery(
+            $qp,
+            ['posted_at', 'amount', 'variable_symbol', 'counterparty', 'invoice', 'status', 'posting'],
+        );
+        $orderBy = \MyInvoice\Service\Bank\BankTransactionSort::orderBySql($sort['key'], $sort['dir'], $sid);
+
         $txCountStmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM bank_transactions bt WHERE $txWhere");
         $txCountStmt->execute($txParams);
         $txTotal = (int) $txCountStmt->fetchColumn();
@@ -1660,7 +1680,7 @@ final class BankStatementAction
           LEFT JOIN purchase_invoices p ON p.id = pm.purchase_invoice_id
           LEFT JOIN clients vc ON vc.id = p.vendor_id
               WHERE ' . $txWhere . '
-           ORDER BY bt.posted_at, bt.id
+           ORDER BY ' . $orderBy . '
               LIMIT ' . $p['per_page'] . ' OFFSET ' . $p['offset']
         );
         $txStmt->execute($txParams);

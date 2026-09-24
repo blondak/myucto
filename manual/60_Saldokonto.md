@@ -21,14 +21,16 @@ historie. Filtr **Účet** nabízí:
 
 | Volba | Otevřené položky |
 |---|---|
-| Vše | 311, 321, 314 a 324; prázdné účty se vynechají |
+| Vše | 311, 321, 314, 324, 315 a 325; prázdné účty se vynechají |
 | 311 | vydané faktury a dobropisy odběratelů |
 | 321 | přijaté faktury a dobropisy dodavatelů |
 | 314 | poskytnuté a dosud nezúčtované zálohy |
 | 324 | přijaté a dosud nezúčtované zálohy |
+| 315 | ostatní pohledávky |
+| 325 | ostatní závazky |
 
 Server podporuje i jiný existující číselný účet a volitelné omezení na
-partnera, běžná obrazovka však nabízí uvedenou čtveřici. Explicitně zvolený
+partnera, běžná obrazovka však nabízí uvedených šest účtů. Explicitně zvolený
 účet se zobrazí i s nulami.
 
 Sestava zvládne 25 000 otevřených položek napříč zvolenými účty. Nad tímto
@@ -55,6 +57,12 @@ Výpočet úhrady respektuje datum platby. Pozdější úhrada nezmění histori
 saldokonto. Plně vyrovnaná položka se vynechá, záporná otevřená položka
 (například dobropis) se zachová a snižuje součet partnera. Částky v cizí měně
 se konfrontují v zaúčtované Kč hodnotě; obrazovka současně ukáže původní měnu.
+
+Ostatní pohledávky a závazky se do sestavy dostanou až po zaúčtování. Sestava
+bere jejich skutečný zápis na účtu a při částečné úhradě odečte jen platby,
+které jsou k rozvahovému dni zaúčtované na stejný saldokontní účet. Storno a
+přeúčtování se projeví od dne příslušného účetního zápisu. Koncepty a
+potvrzené položky v daňové evidenci sem nepatří.
 
 ## 60.3 Zálohy 314 a 324
 

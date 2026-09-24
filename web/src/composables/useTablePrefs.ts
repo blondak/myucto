@@ -106,14 +106,17 @@ export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
   }
 
   const sort = computed<SortPref | null>(() => prefs.value.sort ?? null)
-  // Cyklus asc → desc → výchozí; persistuje do prefs.
+  // Cyklus desc → asc → výchozí; persistuje do prefs.
   function toggleSort(key: string): void {
     const cur = sort.value
     let next: SortPref | null
-    if (!cur || cur.key !== key) next = { key, dir: 'asc' }
-    else if (cur.dir === 'asc') next = { key, dir: 'desc' }
+    if (!cur || cur.key !== key) next = { key, dir: 'desc' }
+    else if (cur.dir === 'desc') next = { key, dir: 'asc' }
     else next = null
     patchPagePrefs(pageKey, { sort: next })
+  }
+  function clearSort(): void {
+    patchPagePrefs(pageKey, { sort: null })
   }
 
   return {
@@ -121,7 +124,7 @@ export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
     isVisible, toggleColumn, resetColumns,
     isDynamicShown, setDynamicShown,
     density, setDensity, densityClass,
-    sort, toggleSort,
+    sort, toggleSort, clearSort,
     flag, setFlag,
     ready,
   }

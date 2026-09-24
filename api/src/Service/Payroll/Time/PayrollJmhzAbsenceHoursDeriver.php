@@ -251,12 +251,16 @@ final class PayrollJmhzAbsenceHoursDeriver
             'minutes' => $buckets,
             'total' => array_sum($buckets),
             /*
-             * 10276 je „počet neodpracovaných hodin s náhradou či nekrácením
-             * mzdy". Patří sem dovolená (§ 222 ZP), náhrada při nemoci v okně
-             * § 192 ZP i obě překážky v práci s náhradou. Nepatří sem nemoc za
-             * oknem (platí ji dávka ČSSZ, ne zaměstnavatel) ani ošetřovné.
-             * Kontrola 23 hlášení vyžaduje 10276 >= 10279, což tenhle součet
-             * drží z definice.
+             * Neodpracované hodiny, za které náleží náhrada mzdy nebo se mzda
+             * nekrátí: dovolená (§ 222 ZP), náhrada při nemoci v okně § 192 ZP
+             * i obě překážky v práci s náhradou. Nepatří sem nemoc za oknem
+             * (platí ji dávka ČSSZ, ne zaměstnavatel) ani ošetřovné. V tomhle
+             * rozsahu je potřebuje sleva zaměstnavatele podle § 7a ZPSZ.
+             *
+             * Atribut 10276 hlášení je užší (bez nemoci) a hodiny nemoci
+             * s náhradou patří do 10471; převod dělá jen serializér, viz
+             * JmhzScenario1XmlSerializer::reportedUnworkedHours(). Kontrola 23
+             * (10276 >= 10279) platí pro oba rozsahy.
              */
             'paid' => $buckets['vacation']
                 + $buckets['dpn_with_employer_compensation']

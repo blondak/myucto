@@ -850,7 +850,34 @@
         "1863_payment_matches_supplier_doc_index.sql",
         "1864_stereo_nx_import.sql",
         "1865_import_jobs_stereo_nx.sql",
-        "1866_journal_red_storno.sql"
+        "1866_vat_classification_purchase_outside_scope.sql",
+        "1867_statement_override_validity.sql",
+        "1868_statement_override_correction_follows.sql",
+        "1869_tax_authority_offset.sql",
+        "1870_tax_authority_offset_from_year.sql",
+        "1871_asset_disposal_entry.sql",
+        "1872_depreciation_tax_override.sql",
+        "1873_asset_account_summary.sql",
+        "1874_migration_batches.sql",
+        "1875_migration_parallel_checks.sql",
+        "1876_dimension_account_rules.sql",
+        "1877_payroll_enforcement_claim_key_unique_restore.sql",
+        "1878_vat_classification_24z_selected_supplies.sql",
+        "1879_users_default_supplier.sql",
+        "1880_invoice_price_level.sql",
+        "1881_credit_card_accounts.sql",
+        "1882_bank_statement_tenant_hash.sql",
+        "1883_other_items.sql",
+        "1884_credit_card_purchase_modes.sql",
+        "1885_document_links_other_item.sql",
+        "1886_other_item_payment_cascade.sql",
+        "1887_other_item_schedules.sql",
+        "1888_other_items_role_permissions.sql",
+        "1889_other_item_payment_ownership.sql",
+        "1890_other_item_allocation_reversal.sql",
+        "1891_other_item_posting_lines.sql",
+        "1892_payroll_takeover_source_jmhz.sql",
+        "1893_journal_red_storno.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -1059,7 +1086,7 @@
                 "number_format": "varchar(40) NULL DEFAULT NULL",
                 "prefix": "varchar(10) NOT NULL",
                 "register_id": "int(10) unsigned NOT NULL DEFAULT 0",
-                "series_code": "enum('closing','opening','fx','transfer','manual','cash_in','cash_out','stock_in','stock_out','stock_transfer','offset','purchase_order') NOT NULL",
+                "series_code": "enum('closing','opening','fx','transfer','manual','cash_in','cash_out','stock_in','stock_out','stock_transfer','offset','purchase_order','other_receivable','other_payable') NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
             },
@@ -1344,6 +1371,7 @@
                 "automation_digest_hour": "tinyint(3) unsigned NOT NULL DEFAULT 7",
                 "automation_level": "enum('off','suggest','assisted','full') NOT NULL DEFAULT 'suggest'",
                 "avg_employees": "smallint(5) unsigned NULL DEFAULT NULL",
+                "comparative_from_prior_year": "tinyint(1) NOT NULL DEFAULT 0",
                 "fuel_account_code": "varchar(10) NULL DEFAULT NULL",
                 "fx_rate_mode": "enum('daily','fixed_monthly','fixed_annual') NOT NULL DEFAULT 'daily'",
                 "fx_reversal_at_open": "tinyint(1) NOT NULL DEFAULT 1",
@@ -1356,6 +1384,8 @@
                 "statement_scope_override": "enum('full','small','micro') NULL DEFAULT NULL",
                 "statutory_audit": "tinyint(1) NOT NULL DEFAULT 0",
                 "supplier_id": "int(10) unsigned NOT NULL",
+                "tax_authority_offset": "tinyint(1) NOT NULL DEFAULT 0",
+                "tax_authority_offset_from_year": "smallint(5) unsigned NULL DEFAULT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "vehicle_repair_account_code": "varchar(10) NULL DEFAULT NULL"
             },
@@ -1750,6 +1780,7 @@
                 "depreciator_note": "varchar(255) NULL DEFAULT NULL",
                 "description": "text NULL DEFAULT NULL",
                 "disposal_date": "date NULL DEFAULT NULL",
+                "disposal_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "disposal_price": "decimal(14,2) NULL DEFAULT NULL",
                 "disposal_type": "enum('sold','liquidated','donated','damaged') NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
@@ -1770,6 +1801,7 @@
                 "put_into_use_date": "date NULL DEFAULT NULL",
                 "sale_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "status": "enum('draft','in_use','disposed') NOT NULL DEFAULT 'draft'",
+                "summary_account_code": "varchar(20) NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_first_year_increase": "enum('none','p10','p15','p20') NOT NULL DEFAULT 'none'",
                 "tax_group": "tinyint(3) unsigned NULL DEFAULT NULL",
@@ -1778,12 +1810,15 @@
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_assets_disposal_entry": "BTREE (disposal_entry_id)",
                 "idx_assets_purchase_invoice": "BTREE (purchase_invoice_id)",
                 "idx_assets_sale_invoice": "BTREE (sale_invoice_id)",
+                "idx_assets_summary_account": "BTREE (supplier_id, summary_account_code)",
                 "idx_assets_supplier_status": "BTREE (supplier_id, status)",
                 "uq_assets_supplier_invno": "UNIQUE BTREE (supplier_id, inventory_number)"
             },
             "foreign_keys": {
+                "fk_assets_disposal_entry": "(disposal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_assets_pi": "(purchase_invoice_id) -> purchase_invoices (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_assets_sale_invoice": "(sale_invoice_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_assets_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
@@ -2647,6 +2682,7 @@
                 "curr_balance": "decimal(14,2) NULL DEFAULT NULL",
                 "currency": "char(3) NULL DEFAULT NULL",
                 "debit_total": "decimal(14,2) NULL DEFAULT NULL",
+                "dedup_scope_supplier_id": "int(10) unsigned NULL DEFAULT NULL STORED GENERATED AS (coalesce(`supplier_id`,0))",
                 "file_content": "mediumblob NULL DEFAULT NULL",
                 "file_hash": "char(64) NOT NULL",
                 "file_name": "varchar(255) NOT NULL",
@@ -2674,7 +2710,8 @@
                 "idx_bs_date": "BTREE (statement_date)",
                 "idx_bs_supplier": "BTREE (supplier_id, statement_date)",
                 "uq_bank_statement_supplier_id": "UNIQUE BTREE (supplier_id, id)",
-                "uq_bs_hash": "UNIQUE BTREE (file_hash)"
+                "uq_bs_scope_hash": "UNIQUE BTREE (dedup_scope_supplier_id, file_hash)",
+                "uq_bs_supplier_hash": "UNIQUE BTREE (supplier_id, file_hash)"
             },
             "foreign_keys": {
                 "fk_bs_user": "(imported_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
@@ -2729,6 +2766,7 @@
                 "matched_at": "timestamp NULL DEFAULT NULL",
                 "matched_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "matched_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "portable_fingerprint": "char(64) NULL DEFAULT NULL",
                 "posted_at": "date NOT NULL",
                 "source": "enum('statement','email_notice','idoklad') NOT NULL DEFAULT 'statement'",
                 "source_ref": "varchar(190) NULL DEFAULT NULL",
@@ -3415,6 +3453,102 @@
             "foreign_keys": [],
             "checks": []
         },
+        "credit_card_accounts": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_number": "varchar(40) NOT NULL",
+                "analytic_suffix": "varchar(6) NULL DEFAULT NULL",
+                "archived_at": "datetime NULL DEFAULT NULL",
+                "bank_account_id": "bigint(20) unsigned NOT NULL",
+                "bank_code": "char(4) NULL DEFAULT NULL",
+                "clearing_suffix": "varchar(6) NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "credit_limit": "decimal(14,2) NULL DEFAULT NULL",
+                "currency": "char(3) NOT NULL DEFAULT 'CZK'",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "is_verified": "tinyint(1) NOT NULL DEFAULT 1",
+                "issuer": "enum('kb','rb','csob','erste','other') NOT NULL DEFAULT 'other'",
+                "label": "varchar(120) NOT NULL",
+                "note": "varchar(500) NULL DEFAULT NULL",
+                "opening_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "purchase_mode": "enum('clearing','direct') NULL DEFAULT NULL",
+                "repayment_account": "varchar(40) NULL DEFAULT NULL",
+                "repayment_bank_code": "char(4) NULL DEFAULT NULL",
+                "repayment_vs": "varchar(20) NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_cca_opening_entry": "BTREE (opening_entry_id)",
+                "idx_cca_supplier": "BTREE (supplier_id, archived_at)",
+                "uq_cca_bank_account": "UNIQUE BTREE (bank_account_id)",
+                "uq_cca_supplier_analytic": "UNIQUE BTREE (supplier_id, analytic_suffix)",
+                "uq_cca_supplier_clearing": "UNIQUE BTREE (supplier_id, clearing_suffix)"
+            },
+            "foreign_keys": {
+                "fk_cca_bank_account": "(bank_account_id) -> supplier_bank_accounts (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_cca_opening_entry": "(opening_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_cca_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_cca_analytic_suffix": "`analytic_suffix` is null or `analytic_suffix` regexp '^[0-9]{1,6}$'",
+                "chk_cca_clearing_suffix": "`clearing_suffix` is null or `clearing_suffix` regexp '^[0-9]{1,6}$'",
+                "chk_cca_currency": "`currency` regexp '^[A-Z]{3}$'",
+                "chk_cca_limit": "`credit_limit` is null or `credit_limit` >= 0"
+            }
+        },
+        "credit_card_settings": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "cash_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "fee_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "interest_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "opening_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "private_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "purchase_mode": "enum('clearing','direct') NOT NULL DEFAULT 'clearing'",
+                "repayment_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "reward_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "writeoff_nontax_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "writeoff_tax_account_id": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id)",
+                "fk_ccst_cash": "BTREE (cash_account_id)",
+                "fk_ccst_fee": "BTREE (fee_account_id)",
+                "fk_ccst_interest": "BTREE (interest_account_id)",
+                "fk_ccst_opening": "BTREE (opening_account_id)",
+                "fk_ccst_private": "BTREE (private_account_id)",
+                "fk_ccst_repayment": "BTREE (repayment_account_id)",
+                "fk_ccst_reward": "BTREE (reward_account_id)",
+                "fk_ccst_user": "BTREE (updated_by)",
+                "fk_ccst_writeoff_nontax": "BTREE (writeoff_nontax_account_id)",
+                "fk_ccst_writeoff_tax": "BTREE (writeoff_tax_account_id)"
+            },
+            "foreign_keys": {
+                "fk_ccst_cash": "(cash_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_fee": "(fee_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_interest": "(interest_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_opening": "(opening_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_private": "(private_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_repayment": "(repayment_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_reward": "(reward_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_ccst_user": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_writeoff_nontax": "(writeoff_nontax_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_ccst_writeoff_tax": "(writeoff_tax_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": []
+        },
         "crm_action_item_dismissals": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -3681,6 +3815,12 @@
                 "is_paused": "tinyint(1) NOT NULL DEFAULT 0",
                 "kind": "enum('tax','accounting') NOT NULL",
                 "months_count": "tinyint(3) unsigned NULL DEFAULT NULL",
+                "override_at": "datetime NULL DEFAULT NULL",
+                "override_by": "int(11) NULL DEFAULT NULL",
+                "override_original_amount": "decimal(14,2) NULL DEFAULT NULL",
+                "override_original_full_amount": "decimal(14,2) NULL DEFAULT NULL",
+                "override_original_residual": "decimal(14,2) NULL DEFAULT NULL",
+                "override_reason": "varchar(500) NULL DEFAULT NULL",
                 "residual_value_end": "decimal(14,2) NOT NULL",
                 "status": "enum('confirmed','posted') NOT NULL DEFAULT 'confirmed'",
                 "supplier_id": "int(10) unsigned NOT NULL",
@@ -3697,6 +3837,43 @@
             },
             "checks": {
                 "detail": "json_valid(`detail`)"
+            }
+        },
+        "dimension_account_rules": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_mask": "varchar(190) NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "default_from_card": "tinyint(1) NOT NULL DEFAULT 0",
+                "default_value_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "dimension_type_id": "bigint(20) unsigned NOT NULL",
+                "enforcement": "enum('error','warning','none') NOT NULL DEFAULT 'error'",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "is_active": "tinyint(1) NOT NULL DEFAULT 1",
+                "note": "varchar(500) NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "valid_from": "date NULL DEFAULT NULL",
+                "valid_to": "date NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_dar_user": "BTREE (created_by)",
+                "idx_dar_supplier": "BTREE (supplier_id, is_active)",
+                "idx_dar_type_value": "BTREE (dimension_type_id, default_value_id)"
+            },
+            "foreign_keys": {
+                "fk_dar_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dar_type": "(dimension_type_id) -> dimension_types (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dar_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_dar_value": "(dimension_type_id, default_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_dar_flags": "`is_active` in (0,1) and `default_from_card` in (0,1)",
+                "chk_dar_validity": "`valid_from` is null or `valid_to` is null or `valid_to` >= `valid_from`"
             }
         },
         "dimension_defaults": {
@@ -3807,6 +3984,32 @@
             "checks": {
                 "chk_dimension_value_active": "`is_active` in (0,1)",
                 "chk_dimension_value_owner": "`supplier_id` is null <> (`supplier_group_id` is null)"
+            }
+        },
+        "document_dimension_splits": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "dimension_type_id": "bigint(20) unsigned NOT NULL",
+                "dimension_value_id": "bigint(20) unsigned NOT NULL",
+                "doc_id": "bigint(20) unsigned NOT NULL",
+                "doc_type": "enum('purchase_invoice','invoice','cash_document','bank_transaction','journal_template') NOT NULL",
+                "item_no": "smallint(5) unsigned NOT NULL DEFAULT 0",
+                "share": "decimal(12,10) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id)",
+                "idx_docdims_type_value": "BTREE (dimension_type_id, dimension_value_id)",
+                "idx_docdims_value": "BTREE (supplier_id, dimension_value_id)"
+            },
+            "foreign_keys": {
+                "fk_docdims_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_docdims_value": "(dimension_type_id, dimension_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_docdims_share": "`share` > 0 and `share` <= 1"
             }
         },
         "document_dimensions": {
@@ -4014,7 +4217,7 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "document_id": "bigint(20) unsigned NOT NULL",
                 "entity_id": "bigint(20) unsigned NOT NULL",
-                "entity_type": "enum('client','invoice','purchase_invoice','project','journal_entry','bank_transaction','cash_document') NOT NULL",
+                "entity_type": "enum('client','invoice','purchase_invoice','project','journal_entry','bank_transaction','cash_document','other_item') NOT NULL",
                 "supplier_id": "bigint(20) unsigned NOT NULL"
             },
             "indexes": {
@@ -4997,7 +5200,7 @@
                 "result_path": "varchar(255) NULL DEFAULT NULL",
                 "result_size": "bigint(20) unsigned NULL DEFAULT NULL",
                 "skipped_count": "int(10) unsigned NOT NULL DEFAULT 0",
-                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import','stereo_nx_import') NOT NULL",
+                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import','stereo_nx_import','money_s3_batch') NOT NULL",
                 "started_at": "timestamp NULL DEFAULT NULL",
                 "status": "enum('queued','running','completed','failed','cancelled','completed_with_warnings') NOT NULL DEFAULT 'queued'",
                 "supplier_id": "int(10) unsigned NOT NULL",
@@ -5676,6 +5879,7 @@
                 "pdf_generated_at": "timestamp NULL DEFAULT NULL",
                 "pdf_path": "varchar(255) NULL DEFAULT NULL",
                 "penalty_covered_through": "date NULL DEFAULT NULL",
+                "price_level_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "prices_include_vat": "tinyint(1) NOT NULL DEFAULT 0",
                 "project_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "public_token": "char(48) NULL DEFAULT NULL",
@@ -5863,7 +6067,7 @@
                 "reversed_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "source_id": "bigint(20) unsigned NULL DEFAULT NULL",
-                "source_type": "enum('invoice','purchase_invoice','bank','cash','asset','manual','closing','opening','depreciation','asset_disposal','fx_revaluation','stock','provision','income_tax','profit_distribution','offset','small_asset_accrual','prepaid_expense_accrual','settlement','deferred_tax','payroll','vat_clearing','payroll_payment','gopay','card_settlement','card_writeoff') NOT NULL DEFAULT 'manual'",
+                "source_type": "enum('invoice','purchase_invoice','bank','cash','asset','manual','closing','opening','depreciation','asset_disposal','fx_revaluation','stock','provision','income_tax','profit_distribution','offset','small_asset_accrual','prepaid_expense_accrual','settlement','deferred_tax','payroll','vat_clearing','payroll_payment','gopay','card_settlement','card_writeoff','other_item') NOT NULL DEFAULT 'manual'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
             },
@@ -5943,6 +6147,31 @@
                 "fk_jedl_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": []
+        },
+        "journal_entry_line_dimension_splits": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "dimension_type_id": "bigint(20) unsigned NOT NULL",
+                "dimension_value_id": "bigint(20) unsigned NOT NULL",
+                "line_id": "bigint(20) unsigned NOT NULL",
+                "share": "decimal(12,10) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (line_id, dimension_type_id, dimension_value_id)",
+                "idx_jelds_supplier_value": "BTREE (supplier_id, dimension_value_id)",
+                "idx_jelds_type_value": "BTREE (dimension_type_id, dimension_value_id)"
+            },
+            "foreign_keys": {
+                "fk_jelds_line": "(line_id) -> journal_entry_lines (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_jelds_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_jelds_value": "(dimension_type_id, dimension_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_jelds_share": "`share` > 0 and `share` <= 1"
+            }
         },
         "journal_entry_line_dimensions": {
             "type": "BASE TABLE",
@@ -6359,6 +6588,79 @@
             },
             "checks": []
         },
+        "migration_batch_items": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "agenda_ico": "varchar(20) NULL DEFAULT NULL",
+                "agenda_name": "varchar(190) NULL DEFAULT NULL",
+                "company_action": "enum('created','existing','skipped') NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "error": "varchar(1000) NULL DEFAULT NULL",
+                "file_name": "varchar(255) NULL DEFAULT NULL",
+                "finished_at": "timestamp NULL DEFAULT NULL",
+                "from_year": "smallint(5) unsigned NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "job_id": "bigint(20) unsigned NOT NULL",
+                "position": "int(10) unsigned NOT NULL",
+                "run_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "source": "varchar(32) NOT NULL",
+                "started_at": "timestamp NULL DEFAULT NULL",
+                "status": "enum('queued','running','completed','completed_with_warnings','failed','skipped','cancelled') NOT NULL DEFAULT 'queued'",
+                "summary": "longtext NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "target_supplier_id": "int(10) unsigned NULL DEFAULT NULL",
+                "token": "varchar(32) NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_migration_batch_items_supplier": "BTREE (supplier_id, job_id)",
+                "ix_migration_batch_items_target": "BTREE (target_supplier_id)",
+                "uq_migration_batch_items_position": "UNIQUE BTREE (job_id, position)"
+            },
+            "foreign_keys": {
+                "fk_migration_batch_items_job": "(job_id) -> import_jobs (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_migration_batch_items_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_migration_batch_items_target": "(target_supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "summary": "`summary` is null or json_valid(`summary`)"
+            }
+        },
+        "migration_parallel_checks": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "classifications": "longtext NULL DEFAULT NULL",
+                "closed_at": "timestamp NULL DEFAULT NULL",
+                "closed_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "cycle_status": "enum('open','closed') NOT NULL DEFAULT 'open'",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "inputs": "longtext NULL DEFAULT NULL",
+                "note": "text NULL DEFAULT NULL",
+                "period_month": "char(7) NOT NULL",
+                "result": "longtext NULL DEFAULT NULL",
+                "source_system": "varchar(20) NOT NULL",
+                "status": "enum('ok','differences','incomplete') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_migration_parallel_checks_month": "BTREE (supplier_id, period_month, id)"
+            },
+            "foreign_keys": {
+                "fk_migration_parallel_checks_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "classifications": "`classifications` is null or json_valid(`classifications`)",
+                "inputs": "`inputs` is null or json_valid(`inputs`)",
+                "result": "`result` is null or json_valid(`result`)"
+            }
+        },
         "migrations": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -6600,6 +6902,212 @@
             },
             "foreign_keys": [],
             "checks": []
+        },
+        "other_item_allocations": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "amount": "decimal(14,2) NOT NULL",
+                "bank_transaction_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "cash_document_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "other_item_id": "bigint(20) unsigned NOT NULL",
+                "payment_on": "date NOT NULL",
+                "reversed_on": "date NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_other_allocation_user": "BTREE (created_by)",
+                "idx_other_allocation_active": "BTREE (supplier_id, other_item_id, reversed_on)",
+                "idx_other_allocation_bank": "BTREE (bank_transaction_id)",
+                "idx_other_allocation_cash": "BTREE (cash_document_id)",
+                "idx_other_allocation_supplier": "BTREE (supplier_id, payment_on)",
+                "uq_other_item_bank": "UNIQUE BTREE (other_item_id, bank_transaction_id)",
+                "uq_other_item_cash": "UNIQUE BTREE (other_item_id, cash_document_id)"
+            },
+            "foreign_keys": {
+                "fk_other_allocation_bank": "(bank_transaction_id) -> bank_transactions (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_allocation_cash": "(cash_document_id) -> cash_documents (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_allocation_item": "(other_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_other_allocation_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_allocation_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_other_allocation_amount": "`amount` > 0",
+                "chk_other_allocation_target": "`bank_transaction_id` is not null <> (`cash_document_id` is not null)"
+            }
+        },
+        "other_item_installments": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "amount": "decimal(14,2) NOT NULL",
+                "due_on": "date NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "other_item_id": "bigint(20) unsigned NOT NULL",
+                "position": "smallint(5) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_other_installment_due": "BTREE (supplier_id, due_on)",
+                "uq_other_installment_position": "UNIQUE BTREE (other_item_id, position)"
+            },
+            "foreign_keys": {
+                "fk_other_installment_item": "(other_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_installment_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_other_installment_amount": "`amount` > 0"
+            }
+        },
+        "other_item_posting_lines": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_code": "varchar(20) NOT NULL",
+                "amount": "decimal(14,2) NOT NULL",
+                "other_item_id": "bigint(20) unsigned NOT NULL",
+                "position": "smallint(5) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, other_item_id, position)",
+                "fk_other_item_posting_item": "BTREE (other_item_id, supplier_id)",
+                "idx_other_item_posting_item": "BTREE (other_item_id)"
+            },
+            "foreign_keys": {
+                "fk_other_item_posting_item": "(other_item_id, supplier_id) -> other_items (id, supplier_id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_other_item_posting_amount": "`amount` > 0"
+            }
+        },
+        "other_item_schedule_occurrences": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "item_id": "bigint(20) unsigned NOT NULL",
+                "occurrence_index": "int(10) unsigned NOT NULL",
+                "schedule_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_other_occurrence_supplier": "BTREE (supplier_id, schedule_id)",
+                "uq_other_occurrence": "UNIQUE BTREE (schedule_id, occurrence_index)",
+                "uq_other_occurrence_item": "UNIQUE BTREE (item_id)"
+            },
+            "foreign_keys": {
+                "fk_other_occurrence_item": "(item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_other_occurrence_schedule": "(schedule_id) -> other_item_schedules (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_occurrence_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "other_item_schedules": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "anchor_on": "date NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "due_days": "smallint(5) unsigned NOT NULL",
+                "ends_on": "date NULL DEFAULT NULL",
+                "frequency": "enum('monthly','quarterly','yearly') NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "next_index": "int(10) unsigned NOT NULL DEFAULT 1",
+                "source_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "status": "enum('active','paused') NOT NULL DEFAULT 'active'",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "template_json": "longtext NOT NULL COLLATE utf8mb4_bin",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_other_schedule_source": "BTREE (source_item_id)",
+                "fk_other_schedule_user": "BTREE (created_by)",
+                "idx_other_item_schedule_due": "BTREE (supplier_id, status, anchor_on)"
+            },
+            "foreign_keys": {
+                "fk_other_schedule_source": "(source_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_other_schedule_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_schedule_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "template_json": "json_valid(`template_json`)"
+            }
+        },
+        "other_items": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_code": "varchar(20) NULL DEFAULT NULL",
+                "accounting_on": "date NULL DEFAULT NULL",
+                "amount": "decimal(14,2) NOT NULL",
+                "amount_czk": "decimal(14,2) NULL DEFAULT NULL",
+                "counter_account_code": "varchar(20) NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "currency": "char(3) NOT NULL DEFAULT 'CZK'",
+                "deleted_at": "datetime NULL DEFAULT NULL",
+                "document_no": "varchar(50) NULL DEFAULT NULL",
+                "due_on": "date NOT NULL",
+                "exchange_rate": "decimal(18,8) NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "issued_on": "date NOT NULL",
+                "journal_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "kind": "varchar(64) NOT NULL DEFAULT 'other'",
+                "note": "text NULL DEFAULT NULL",
+                "partner_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "partner_name": "varchar(190) NULL DEFAULT NULL",
+                "posted_at": "datetime NULL DEFAULT NULL",
+                "reversal_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "side": "enum('receivable','payable') NOT NULL",
+                "status": "enum('draft','confirmed','posted','reversed','cancelled') NOT NULL DEFAULT 'draft'",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "title": "varchar(255) NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "variable_symbol": "varchar(20) NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_other_item_created_by": "BTREE (created_by)",
+                "fk_other_item_entry": "BTREE (journal_entry_id)",
+                "fk_other_item_partner": "BTREE (partner_id)",
+                "fk_other_item_reversal": "BTREE (reversal_entry_id)",
+                "fk_other_item_updated_by": "BTREE (updated_by)",
+                "idx_other_item_open": "BTREE (supplier_id, side, status, due_on)",
+                "idx_other_item_partner": "BTREE (supplier_id, partner_id, status)",
+                "idx_other_item_source": "BTREE (supplier_id, deleted_at, issued_on)",
+                "idx_other_item_tenant_identity": "BTREE (id, supplier_id)",
+                "uq_other_item_doc_no": "UNIQUE BTREE (supplier_id, document_no)"
+            },
+            "foreign_keys": {
+                "fk_other_item_created_by": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_other_item_entry": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_other_item_partner": "(partner_id) -> clients (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_other_item_reversal": "(reversal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_other_item_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_item_updated_by": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_other_item_amount": "`amount` > 0",
+                "chk_other_item_currency": "`currency` regexp '^[A-Z]{3}$'",
+                "chk_other_item_rate": "`exchange_rate` is null or `exchange_rate` > 0"
+            }
         },
         "password_resets": {
             "type": "BASE TABLE",
@@ -9229,6 +9737,7 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "idx_payroll_enforcement_claim_active": "BTREE (supplier_id, case_id, is_active, priority_date)",
                 "idx_payroll_enforcement_claim_first_payer_delivery": "BTREE (supplier_id, case_id, first_payer_delivered_on, id)",
+                "uq_payroll_enforcement_claim_key": "UNIQUE BTREE (supplier_id, claim_key)",
                 "uq_payroll_enforcement_claim_tenant_id": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
@@ -11372,7 +11881,7 @@
                 "relationship_end_date": "date NULL DEFAULT NULL",
                 "relationship_start_date": "date NULL DEFAULT NULL",
                 "social_base_minor": "bigint(20) NOT NULL DEFAULT 0",
-                "source": "enum('pamica','pohoda','money_s3','other') NOT NULL",
+                "source": "enum('pamica','pohoda','money_s3','other','jmhz') NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_bonus_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
@@ -17679,6 +18188,7 @@
                 "balance_condition": "enum('any','debit','credit') NOT NULL DEFAULT 'any'",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "created_by": "int(10) unsigned NULL DEFAULT NULL",
+                "follows_prefix": "varchar(10) NULL DEFAULT NULL",
                 "id": "int(10) unsigned NOT NULL AUTO_INCREMENT",
                 "note": "varchar(255) NULL DEFAULT NULL",
                 "row_code": "varchar(20) NOT NULL",
@@ -17686,12 +18196,14 @@
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "target": "enum('gross','correction') NOT NULL DEFAULT 'gross'",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "valid_from_year": "smallint(5) unsigned NULL DEFAULT NULL",
+                "valid_to_year": "smallint(5) unsigned NULL DEFAULT NULL",
                 "version_id": "smallint(5) unsigned NOT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "ix_stmt_ovr_version": "BTREE (version_id)",
-                "uq_stmt_ovr_supplier_version_prefix": "UNIQUE BTREE (supplier_id, version_id, account_prefix, balance_condition)"
+                "uq_stmt_ovr_supplier_version_prefix_from": "UNIQUE BTREE (supplier_id, version_id, account_prefix, balance_condition, valid_from_year)"
             },
             "foreign_keys": {
                 "fk_stmt_ovr_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
@@ -19778,7 +20290,7 @@
                 "iban": "varchar(34) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
-                "kind": "enum('current','savings','term_deposit') NOT NULL DEFAULT 'current'",
+                "kind": "enum('current','savings','term_deposit','credit_card') NOT NULL DEFAULT 'current'",
                 "label": "varchar(120) NULL DEFAULT NULL",
                 "source": "enum('currencies','statement','manual') NOT NULL DEFAULT 'manual'",
                 "supplier_id": "int(10) unsigned NOT NULL",
@@ -20774,6 +21286,7 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "default_supplier_id": "int(10) unsigned NULL DEFAULT NULL",
                 "email": "varchar(190) NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
@@ -20794,11 +21307,13 @@
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_users_default_supplier": "BTREE (default_supplier_id)",
                 "idx_users_role_id": "BTREE (role_id)",
                 "uq_users_email": "UNIQUE BTREE (email)",
                 "uq_users_webauthn_user_handle": "UNIQUE BTREE (webauthn_user_handle)"
             },
             "foreign_keys": {
+                "fk_users_default_supplier": "(default_supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_users_role": "(role_id) -> roles (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
@@ -21397,6 +21912,8 @@
         "trg_cash_documents_drop_document_links": "AFTER DELETE ON cash_documents #7b69f57f49ff2ac0044ff177d6bc20aafe320838",
         "trg_document_links_cash_document_insert": "BEFORE INSERT ON document_links #dc7f3cea2c49f4e112ff44bc7795ff48e50e00ae",
         "trg_document_links_cash_document_update": "BEFORE UPDATE ON document_links #dc7f3cea2c49f4e112ff44bc7795ff48e50e00ae",
+        "trg_document_links_other_item_insert": "BEFORE INSERT ON document_links #9daa5635da48374abfe48c98b1a15e142b652735",
+        "trg_document_links_other_item_update": "BEFORE UPDATE ON document_links #9daa5635da48374abfe48c98b1a15e142b652735",
         "trg_documents_payroll_enforcement_evidence_update": "BEFORE UPDATE ON documents #11a16e21bddcfe8e04e80c86e85ca5aa28b6eb52",
         "trg_eldp_manual_completion_immutable_delete": "BEFORE DELETE ON payroll_eldp_manual_completions #f7f60a5bca726bee5310d71fb8a3a4b7ce4590b1",
         "trg_eldp_manual_completion_immutable_update": "BEFORE UPDATE ON payroll_eldp_manual_completions #f7f60a5bca726bee5310d71fb8a3a4b7ce4590b1",
@@ -21469,6 +21986,18 @@
         "trg_journal_payroll_immutable_update": "BEFORE UPDATE ON journal_entries #3635d1e00151830cb61416104ed79cfa05bc025f",
         "trg_oss_filing_evidence_no_delete": "BEFORE DELETE ON oss_filing_evidence #4307481f6d74af201895e7a19831c30cc145081f",
         "trg_oss_filing_evidence_no_update": "BEFORE UPDATE ON oss_filing_evidence #6abb792aa68c037daacd2bb6ef980c6181fcd46b",
+        "trg_other_item_allocation_insert": "BEFORE INSERT ON other_item_allocations #4a852e7af4ad9e755b9dcbb5d78c28499a7f3c26",
+        "trg_other_item_bank_update": "BEFORE UPDATE ON bank_transactions #a423862cecb6e3e027cd52381f5ad124ecb4f61b",
+        "trg_other_item_cash_update": "BEFORE UPDATE ON cash_documents #03b465d1bddc7b948de51656d60217133f2293f4",
+        "trg_other_item_invoice_payment_insert": "BEFORE INSERT ON invoice_payments #7aa807fc6ae6c9d2e4526d2ae5837fc481c9a6eb",
+        "trg_other_item_invoice_payment_update": "BEFORE UPDATE ON invoice_payments #5c7a180ec7d009cbab8a23cd7360bb5a48d15cd2",
+        "trg_other_item_payroll_match_insert": "BEFORE INSERT ON payroll_payment_matches #fdd2504718cfe7e493d6d4beec4b7ecf153bd3c8",
+        "trg_other_item_purchase_match_insert": "BEFORE INSERT ON payment_matches #c090b3229efb97a13bb1b6ba819a15420d3e34fa",
+        "trg_other_item_purchase_match_update": "BEFORE UPDATE ON payment_matches #ae05d620d42e9c1c995a3aa767dbb5937019a825",
+        "trg_other_item_tax_advance_insert": "BEFORE INSERT ON tax_advance_schedules #2ffed09911a04ebde2be5ff62a203e262f7541e3",
+        "trg_other_item_tax_advance_update": "BEFORE UPDATE ON tax_advance_schedules #ba4480fcafa191d2aaf854ddb7c144f0568e232b",
+        "trg_other_items_drop_document_links": "AFTER DELETE ON other_items #fcb637555cb30931b209725ec4bde0533095003a",
+        "trg_other_items_soft_delete_document_links": "AFTER UPDATE ON other_items #51be805752edf80075a2935faec29a9de4ebf74c",
         "trg_payment_match_payroll_evidence_insert": "BEFORE INSERT ON payment_matches #2566c5494fa7a0ac61b4851c89cff9a433a9e1ee",
         "trg_payment_match_payroll_evidence_update": "BEFORE UPDATE ON payment_matches #e9832628f0191fbde337feca99f7fbfa43746f37",
         "trg_payroll_agenda_matrix_delete": "BEFORE DELETE ON payroll_agenda_matrix #c281a3c0db68ee78d89824cce465e3a3cd612956",

@@ -225,6 +225,8 @@ export interface Invoice {
   reverse_charge: boolean
   /** § 30 ZDPH — zjednodušený daňový doklad (do 10 000 Kč vč. daně). */
   is_simplified: boolean
+  /** Cenová hladina zvolená na dokladu (přepíše hladinu odběratele); null = hladina odběratele. */
+  price_level_id?: number | null
   /** § 31/31a ZDPH — rozpis plateb kalendáře (prázdné u ostatních typů). */
   payment_schedule?: PaymentScheduleRow[]
   /** Ceny položek zadané včetně DPH (brutto) — DPH se počítá shora koeficientem. */
@@ -407,6 +409,8 @@ export interface ExchangeRateMeta {
 export interface InvoiceListItem {
   id: number
   varsymbol: string | null
+  payment_varsymbol?: string
+  supplier_order_number?: string | null
   invoice_type: InvoiceType
   parent_invoice_id: number | null
   recurring_template_id?: number | null
@@ -449,6 +453,7 @@ export interface InvoiceListItem {
    */
   oss_review_oss?: boolean
   month_bucket: string
+  kh_sections?: string[]
   /** Zámek dokladu (F6) — jediný zdroj pravdy je BE, FE nic nedopočítává. Optional = BC. */
   locked?: DocumentLock
 }
@@ -481,6 +486,8 @@ export interface InvoicePayload {
   reverse_charge?: boolean
   /** § 30 ZDPH; server ověří limit i výjimky § 30 odst. 2. */
   is_simplified?: boolean
+  /** Cenová hladina dokladu; chybějící klíč hodnotu NEMĚNÍ, null ji zruší. */
+  price_level_id?: number | null
   /** § 31/31a ZDPH; chybějící klíč rozpis NEMĚNÍ, prázdné pole ho smaže. */
   payment_schedule?: PaymentScheduleRow[]
   prices_include_vat?: boolean
@@ -543,6 +550,10 @@ export interface InvoicePayload {
 export type OssReviewScope = 'any' | 'oss' | 'domestic'
 
 export interface ListFilters {
+  sort_key?: string
+  sort_dir?: 'asc' | 'desc'
+  group_by_month?: boolean
+  include_kh?: boolean
   status?: string | string[]
   type?: string | string[]
   client_id?: number
@@ -696,6 +707,10 @@ export const invoicesApi = {
     }
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
+    if (filters.sort_key)    params.sort_key               = filters.sort_key
+    if (filters.sort_dir)    params.sort_dir               = filters.sort_dir
+    if (filters.group_by_month === false) params['filter[group_by_month]'] = 0
+    if (filters.include_kh) params['filter[include_kh]'] = 1
     return api.get<{ data: MonthGroup[]; meta: InvoiceListMeta }>('/invoices', { params }).then(r => r.data)
   },
 
@@ -765,9 +780,9 @@ export const invoicesApi = {
    * Vrací `cascade_deleted` = počet navazujících dokladů (storno, dobropis), které byly
    * smazány zároveň přes ON DELETE CASCADE (migrace 0015).
    */
-  delete: (id: number, force = false) =>
+  delete: (id: number, force = false, ackLocked = false) =>
     api.delete<{ ok: boolean; cascade_deleted: number; journal_entries_deleted?: number }>(`/invoices/${id}`, {
-      params: force ? { force: 1 } : undefined,
+      params: force ? { force: 1, ...(ackLocked ? { ack_locked: 1 } : {}) } : undefined,
     }).then(r => r.data),
 
   // Akce nad fakturou

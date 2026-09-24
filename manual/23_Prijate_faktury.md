@@ -14,6 +14,22 @@ odcházejí z firmy. Oproti vystaveným fakturám:
 
 V hlavním menu **Přijaté faktury**.
 
+Seznam lze kliknutím na záhlaví sloupce řadit podle údajů dokladu, dodavatele,
+data či částky. Řazení se uplatní na celý filtrovaný výsledek před stránkováním.
+Přepínač nad tabulkou volí měsíční skupiny nebo souvislý seznam; nastavení se
+ukládá pro přihlášeného uživatele. V měsíčním pohledu zaškrtávací políčko
+v záhlaví označí pouze zobrazené doklady daného měsíce. Nabídka **Sloupce** umožňuje
+doplnit základ daně, DPH, zůstatek k úhradě, zakázku, datum přijetí,
+datum předání k úhradě a oddíl kontrolního hlášení.
+Oddíl KH se načítá z Knihy DPH po zapnutí sloupce.
+Při vzestupném řazení podle DUZP se v měsíčním pohledu zobrazí nejstarší měsíce první.
+První kliknutí na záhlaví sloupce řadí sestupně, druhé vzestupně a třetí vrátí
+výchozí pořadí.
+Křížek v pravém okraji záhlaví tabulky vrátí výchozí řazení.
+Seznam načítá 50 faktur v jedné dávce. Při posunu dolů se u konce seznamu
+automaticky načte další stránka; tlačítko
+**Načíst další** slouží k ručnímu načtení.
+
 V detailu faktury otevřete rozbalovací menu akcí a zvolte **Vytvořit nákladovou
 šablonu**. Otevře se stejný plný editor jako v seznamu šablon. Dodavatel se
 předvyplní a můžete ho změnit. Přepínačem **Vázat pravidlo na dodavatele**
@@ -58,6 +74,7 @@ Do fronty vede několik cest:
 | Nahrání dokladu k **vyžádanému požadavku** | klient, jako odpověď účetní |
 | **Uložit a předat účetní** v editoru přijaté faktury | klient, když se doklad nevytěžil sám |
 | **Nahrát do fronty** přímo na stránce Příchozí doklady | účetní u dokladů, které přišly mimo portál (e-mailem, papírově) |
+| **Nahrát účtenku** u platby kartou bez dokladu, když není AI nebo vytěžení selže | účetní; doklad je rovnou navázaný na platbu kartou |
 
 Účetní tak nemusí čekat na klienta: co dostane e-mailem nebo naskenuje, vloží do
 fronty sama a zpracuje to stejným postupem. Podrobný průchod klientskou stranou je v
@@ -74,10 +91,15 @@ kořene. Fronta ukazuje všechny podání bez ohledu na to, ve které podsložce
 > Dokumentů, odkud ho z disku odstraní až vysypání koše. U dokladu, který si účetní
 > nahrála sama, se zpráva klientovi nevyžaduje — není komu ji psát.
 
-Po zpracování se neměnný originál z Dokumentů připojí k výsledné faktuře. Faktura
-zůstává pro klienta needitovatelná i ve stavu Koncept; účetní ji může dál opravit
-a dokončit běžným stavovým postupem. Pokud účetní výsledný koncept smaže, původní
-podání se bezpečně vrátí do příchozí fronty k novému zpracování.
+Po zpracování se originál přesune do složky **Příchozí doklady / Archiv / rok / měsíc**,
+takže v příchozích zůstává jen to, co na zpracování čeká. Originál se nemaže, je
+auditní stopou toho, co klient předal. Je-li to tentýž soubor jako PDF výsledné
+faktury, k faktuře se znovu nepřipojuje: doklad ho už má jako své PDF. Jiný soubor
+(fotka převedená na PDF, balíček ISDOCX) se k faktuře připojí v panelu **Dokumenty**.
+Faktura zůstává pro klienta needitovatelná i ve stavu Koncept; účetní ji může dál
+opravit a dokončit běžným stavovým postupem. Pokud účetní výsledný koncept smaže,
+původní podání se bezpečně vrátí do příchozí fronty k novému zpracování a originál
+z archivu zpět mezi čekající.
 
 > ⚠️ **Zaúčtování bez DUZP nejde.** Přechod Přijatá → Zaúčtovaná je zablokovaný, dokud
 > doklad nemá vyplněné DUZP (datum uskutečnění zdanitelného plnění) — bez něj by se
@@ -731,6 +753,11 @@ nebo stornuje a zapíše znovu. Přesun nákladu mezi účty téže třídy (nap
 se přepíše na místě i v měsíci zamčeném podaným DPH, dokud rok není v uzávěrce. Celý
 postup i chování v zamčeném období popisuje
 [§ 48.8.2](52_Ucetni_denik.md#5282-preuctovani-z-dokladu-sekce-zauctovani).
+
+Pod kontací každého zápisu je panel **Souvisí** (úhrady, bankovní pohyby a ručně
+navázané doklady s odkazem do deníku, jejich kontací a poznámkami) a **Poznámky**
+zápisu, tytéž jako v deníku
+a u bankovního pohybu ([§ 52.6.3](52_Ucetni_denik.md#5263-poznamky-k-zapisu)).
 
 ## 23.4 Scan inbox — automatický import z adresáře
 

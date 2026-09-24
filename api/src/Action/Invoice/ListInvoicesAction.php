@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Report\InvoiceKhSections;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -18,6 +19,7 @@ final class ListInvoicesAction
         private readonly InvoiceRepository $repo,
         private readonly Config $config,
         private readonly DocumentLockService $locks,
+        private readonly InvoiceKhSections $khSections,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -67,6 +69,9 @@ final class ListInvoicesAction
                 ? (string) $filter['oss_review']
                 : null,
             'supplier_id' => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
+            'group_by_month' => !is_scalar($filter['group_by_month'] ?? null) || (string) $filter['group_by_month'] !== '0',
+            'sort_key' => is_scalar($q['sort_key'] ?? null) ? (string) $q['sort_key'] : '',
+            'sort_dir' => is_scalar($q['sort_dir'] ?? null) ? (string) $q['sort_dir'] : '',
         ];
 
         // Status / type může být čárkou oddělené — split
@@ -101,6 +106,10 @@ final class ListInvoicesAction
                 }
             }
             unset($group, $row);
+        }
+
+        if (($filter['include_kh'] ?? null) === '1') {
+            $this->khSections->addToGroups((int) $filters['supplier_id'], $result['data'], 'issued');
         }
 
         return Json::ok($response, $result);

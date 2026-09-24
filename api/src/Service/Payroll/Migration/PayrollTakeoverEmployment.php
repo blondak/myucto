@@ -30,6 +30,8 @@ final readonly class PayrollTakeoverEmployment
      * @param array{work_place:string,municipality_code:string,country_code:string,regular_workplace:?string}|null $workplace pracoviště JMHZ
      * @param array<string,string> $checklistNotes položka Zákonných termínů => poznámka dokladu
      *        ze zdroje; položka bez dokladu chybí a zůstane otevřená
+     * @param list<array{period:string,minutes:int}> $leaveTaken čerpání dovolené po měsících před
+     *        zahájením vedení mezd v MyÚčtu, pro zdroj, který nenese zůstatek (`$leave`), jen čerpání
      */
     public function __construct(
         public string $personalNumber,
@@ -50,5 +52,6 @@ final readonly class PayrollTakeoverEmployment
         public ?string $oic = null,
         public ?string $idPpv = null,
         public array $checklistNotes = [],
+        public array $leaveTaken = [],
     ) {}
 }

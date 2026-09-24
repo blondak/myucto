@@ -150,7 +150,7 @@ final class FinancialStatementAction
         if ($version !== null) {
             // Táž sloučená mapa jako výkaz (globální + funkce + výjimky firmy) — účet, který
             // firma zařadila výjimkou, přiřazení funkci nepotřebuje.
-            foreach ($this->maps->accountMap($version, $supplierId) as $m) {
+            foreach ($this->maps->accountMap($version, $supplierId, (int) $period['fiscal_year']) as $m) {
                 $prefixes[] = (string) $m['account_prefix'];
             }
         }
@@ -300,14 +300,14 @@ final class FinancialStatementAction
 
     /**
      * @param 'balance_sheet'|'income_statement'|'income_statement_purpose' $type
-     * @param array{period_id:int, as_of:?string, scope:string} $params
+     * @param array{period_id:int, as_of:?string, scope:string, dimension:?\MyInvoice\Service\Accounting\Dimension\DimensionFilter} $params
      */
     private function buildStatement(int $supplierId, string $type, array $params): array
     {
         return match ($type) {
-            'balance_sheet' => $this->statements->balanceSheet($supplierId, $params['period_id'], $params['as_of'], $params['scope']),
+            'balance_sheet' => $this->statements->balanceSheet($supplierId, $params['period_id'], $params['as_of'], $params['scope'], $params['dimension'] ?? null),
             FinancialStatementService::TYPE_PURPOSE => $this->statements
-                ->incomeStatementByFunction($supplierId, $params['period_id'], $params['as_of'], $params['scope']),
+                ->incomeStatementByFunction($supplierId, $params['period_id'], $params['as_of'], $params['scope'], $params['dimension'] ?? null),
             default => $this->statements->incomeStatement($supplierId, $params['period_id'], $params['as_of'], $params['scope'], $params['dimension'] ?? null),
         };
     }
@@ -352,7 +352,8 @@ final class FinancialStatementAction
             return null;
         }
 
-        // Filtr na dimenzi (Firma → Dimenze) — jen druhová výsledovka, rozvaha po dimenzi nedává smysl.
+        // Filtr na dimenzi (Firma → Dimenze): výsledovky i rozvaha. Rozvaha za hodnotu má smysl
+        // u projektu nebo zakázky, jejíž doklady nesou hodnotu na všech řádcích (hlavička dokladu).
         $dimension = $this->dimensionFilterParam($this->dimensions, $request, $response, $supplierId, $err);
         if ($dimension === false) return null;
 

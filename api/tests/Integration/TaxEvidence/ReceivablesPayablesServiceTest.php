@@ -19,7 +19,7 @@ final class ReceivablesPayablesServiceTest extends CashJournalTestCase
 {
     private function service(): ReceivablesPayablesService
     {
-        return new ReceivablesPayablesService(new CrmAggregationService($this->db));
+        return new ReceivablesPayablesService(new CrmAggregationService($this->db), new \MyInvoice\Service\Accounting\Obligations\OtherItemForecastService($this->db));
     }
 
     /** @param array{bucket:string,currency:string} $needle */
@@ -61,6 +61,15 @@ final class ReceivablesPayablesServiceTest extends CashJournalTestCase
             $this->supplierId, $this->vendorId, 'PF-' . random_int(100000, 999999), $snapshot,
             $dueDate, $dueDate, $dueDate, $dueDate, $currencyId, $total, $total, $this->userId,
         ]);
+    }
+
+    private function otherItem(int $supplierId, string $side, string $status, float $amount, string $dueDate, string $currency = 'CZK'): int
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO other_items (supplier_id, side, title, issued_on, due_on, currency, amount, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$supplierId, $side, 'Syntetická položka', $dueDate, $dueDate, $currency, $amount, $status]);
+        return (int) $this->db->pdo()->lastInsertId();
     }
 
     public function testBucketMapping5To3AndNativePerCurrency(): void
@@ -114,5 +123,79 @@ final class ReceivablesPayablesServiceTest extends CashJournalTestCase
         self::assertNotNull($b);
         self::assertSame(2, $b['count']);
         self::assertSame(6500.0, $b['total']);
+    }
+
+    public function testConfirmedOtherItemsContributeOnlyTheirOpenBalances(): void
+    {
+        $today = new \DateTimeImmutable('today');
+        $overdue = $today->modify('-15 days')->format('Y-m-d');
+        $future = $today->modify('+15 days')->format('Y-m-d');
+        $this->receivable($this->currencyId, 200, $overdue);
+        $this->otherItem($this->supplierId, 'receivable', 'confirmed', 1000, $overdue);
+        $partPaidId = $this->otherItem($this->supplierId, 'receivable', 'posted', 500, $overdue);
+        $this->otherItem($this->supplierId, 'receivable', 'draft', 900, $overdue);
+        $this->otherItem($this->supplierId, 'receivable', 'reversed', 800, $overdue);
+        $deletedId = $this->otherItem($this->supplierId, 'receivable', 'confirmed', 700, $overdue);
+        $this->db->pdo()->prepare('UPDATE other_items SET deleted_at = NOW() WHERE id = ?')->execute([$deletedId]);
+        $this->otherItem($this->supplierId, 'payable', 'posted', 700, $future, 'EUR');
+        $fullyPaidId = $this->otherItem($this->supplierId, 'payable', 'confirmed', 400, $future);
+        $foreignSupplier = $this->cloneSupplier('tax_evidence', true);
+        $this->otherItem($foreignSupplier, 'receivable', 'confirmed', 9999, $overdue);
+
+        $statementId = $this->statement($this->supplierId, $this->accountA);
+        $paymentId = $this->bankTx($statementId, 200);
+        $this->db->pdo()->prepare(
+            'INSERT INTO other_item_allocations (supplier_id, other_item_id, bank_transaction_id, amount, payment_on)
+             VALUES (?, ?, ?, ?, ?)'
+        )->execute([$this->supplierId, $partPaidId, $paymentId, 200, $overdue]);
+        $paymentId = $this->bankTx($statementId, 400);
+        $this->db->pdo()->prepare(
+            'INSERT INTO other_item_allocations (supplier_id, other_item_id, bank_transaction_id, amount, payment_on)
+             VALUES (?, ?, ?, ?, ?)'
+        )->execute([$this->supplierId, $fullyPaidId, $paymentId, 400, $overdue]);
+        $paymentId = $this->bankTx($statementId, 100);
+        $this->db->pdo()->prepare(
+            'INSERT INTO other_item_allocations (supplier_id, other_item_id, bank_transaction_id, amount, payment_on, reversed_on)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        )->execute([$this->supplierId, $partPaidId, $paymentId, 100, $overdue, $overdue]);
+
+        $out = $this->service()->build($this->supplierId);
+        $receivables = $this->findRow($out['receivables'], 'CZK', '1-30');
+        self::assertNotNull($receivables);
+        self::assertSame(3, $receivables['count']);
+        self::assertSame(1500.0, $receivables['total']);
+        self::assertCount(1, $out['receivables']);
+        $payables = $this->findRow($out['payables'], 'EUR', 'not_due');
+        self::assertNotNull($payables);
+        self::assertSame(1, $payables['count']);
+        self::assertSame(700.0, $payables['total']);
+        self::assertCount(1, $out['payables']);
+        self::assertSame(['CZK', 'EUR'], $out['currencies']);
+        self::assertSame(0, $out['kpis']['dso']['sample_size']);
+    }
+
+    public function testPaidInstallmentDoesNotMakeFutureInstallmentOverdue(): void
+    {
+        $today = new \DateTimeImmutable('today');
+        $past = $today->modify('-15 days')->format('Y-m-d');
+        $future = $today->modify('+15 days')->format('Y-m-d');
+        $itemId = $this->otherItem($this->supplierId, 'payable', 'confirmed', 1000, $past);
+        $this->db->pdo()->prepare('INSERT INTO other_item_installments
+            (supplier_id, other_item_id, position, due_on, amount) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$this->supplierId, $itemId, 1, $past, 500]);
+        $this->db->pdo()->prepare('INSERT INTO other_item_installments
+            (supplier_id, other_item_id, position, due_on, amount) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$this->supplierId, $itemId, 2, $future, 500]);
+        $statementId = $this->statement($this->supplierId, $this->accountA);
+        $paymentId = $this->bankTx($statementId, 500);
+        $this->db->pdo()->prepare('INSERT INTO other_item_allocations
+            (supplier_id, other_item_id, bank_transaction_id, amount, payment_on) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$this->supplierId, $itemId, $paymentId, 500, $past]);
+
+        $out = $this->service()->build($this->supplierId);
+        self::assertCount(1, $out['payables']);
+        self::assertSame('not_due', $out['payables'][0]['bucket']);
+        self::assertSame(500.0, $out['payables'][0]['total']);
+        self::assertSame(1, $out['payables'][0]['count']);
     }
 }

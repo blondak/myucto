@@ -8,6 +8,8 @@ use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\JournalSourceSummaryService;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -46,6 +48,10 @@ final class JournalSourceAction
         $entry = $this->journal->find($entryId, $supplierId);
         if ($entry === null) {
             return Json::error($response, 'not_found', 'Účetní zápis nenalezen.', 404);
+        }
+        if ($entry['source_type'] === 'other_item'
+            && !RequestAuthorization::allows($request, 'other_items', AccessLevel::READ)) {
+            return Json::error($response, 'forbidden', 'Chybí oprávnění k ostatním položkám.', 403);
         }
 
         return Json::ok($response, array_merge(

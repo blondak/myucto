@@ -16,6 +16,7 @@ import {
   type RegistrationRecord,
   type RegistrationResultStatus,
   type RegistrationSubmissionType,
+  type RegistrationTakeoverStatus,
 } from '@/api/payrollImports'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
@@ -59,8 +60,10 @@ const pairs = ref<RegistrationPairMap>({})
 const evidenceConfirmed = ref(false)
 const applyOpenings = ref(false)
 const applyAverages = ref(false)
+const applyTakeover = ref(false)
 const openingsTouched = ref(false)
 const averagesTouched = ref(false)
+const takeoverTouched = ref(false)
 const autoApproveChanges = ref(true)
 const autoApproveAverages = ref(true)
 const result = ref<RegistrationApplyResult | null>(null)
@@ -79,9 +82,15 @@ const openingBalances = computed(() => preview.value?.opening_balances ?? [])
 const averages = computed(() => preview.value?.averages ?? [])
 const openingsReady = computed(() => hasReadyItem(openingBalances.value))
 const averagesReady = computed(() => hasReadyItem(averages.value))
-const showTakeover = computed(() => openingBalances.value.length > 0 || averages.value.length > 0)
+const takeover = computed(() => preview.value?.takeover ?? null)
+const takeoverMonths = computed(() => takeover.value?.months ?? [])
+const takeoverRelations = computed(() => takeover.value?.relations ?? [])
+const takeoverReady = computed(() => hasReadyItem(takeoverMonths.value) || takeoverRelations.value.length > 0)
+const showTakeoverWages = computed(() => takeoverMonths.value.length > 0 || takeoverRelations.value.length > 0)
+const showTakeover = computed(() => openingBalances.value.length > 0 || averages.value.length > 0 || showTakeoverWages.value)
 const historySelected = computed(() =>
-  (applyOpenings.value && openingsReady.value) || (applyAverages.value && averagesReady.value))
+  (applyOpenings.value && openingsReady.value) || (applyAverages.value && averagesReady.value)
+  || (applyTakeover.value && takeoverReady.value))
 const showAutoApproveChanges = computed(() => selected.value.length > 0)
 
 const summaryItems = computed(() => {
@@ -109,7 +118,9 @@ const resultHasHistory = computed(() => {
   if (!value) return false
   return value.opening_balances.saved > 0 || value.opening_balances.skipped.length > 0
     || value.averages.created > 0 || value.averages.skipped.length > 0
+    || (value.takeover !== null && (value.takeover.saved > 0 || value.takeover.skipped.length > 0))
 })
+const resultTakeoverCounts = computed(() => Object.entries(result.value?.takeover?.counts ?? {}))
 const resultHasChecklist = computed(() => {
   const value = result.value
   if (!value) return false
@@ -125,6 +136,7 @@ watch(fingerprint, value => {
     evidenceConfirmed.value = false
     openingsTouched.value = false
     averagesTouched.value = false
+    takeoverTouched.value = false
     autoApproveChanges.value = true
     autoApproveAverages.value = true
   }
@@ -154,6 +166,8 @@ async function runPreview(options: { keepResult?: boolean; select?: string[] } =
     if (selected.value.length === 0 && !options.keepResult) selected.value = selectableRegistrationKeys(response.records)
     applyOpenings.value = resolveHistoryToggle(applyOpenings.value, openingsTouched.value, hasReadyItem(response.opening_balances ?? []))
     applyAverages.value = resolveHistoryToggle(applyAverages.value, averagesTouched.value, hasReadyItem(response.averages ?? []))
+    applyTakeover.value = resolveHistoryToggle(applyTakeover.value, takeoverTouched.value,
+      hasReadyItem(response.takeover?.months ?? []) || (response.takeover?.relations.length ?? 0) > 0)
   } catch (err) {
     error.value = apiErrorMessage(err, t('payroll_imports.registration.preview_failed'))
   } finally {
@@ -178,11 +192,13 @@ async function runApply() {
       apply_averages: applyAverages.value && averagesReady.value,
       auto_approve_changes: keys.length > 0 && autoApproveChanges.value,
       auto_approve_averages: applyAverages.value && averagesReady.value && autoApproveAverages.value,
+      apply_takeover: applyTakeover.value && takeoverReady.value,
     })
     result.value = response
     const summary = response.summary
     if (keys.length === 0) {
-      toast.success(t('payroll_imports.registration.history_applied', {
+      toast.success(t('payroll_imports.registration.takeover_applied', {
+        months: response.takeover?.saved ?? 0,
         saved: response.opening_balances.saved,
         created: response.averages.created,
       }))
@@ -227,8 +243,24 @@ function onAveragesToggle(value: boolean) {
   averagesTouched.value = true
 }
 
+function onTakeoverToggle(value: boolean) {
+  applyTakeover.value = value
+  takeoverTouched.value = true
+}
+
+function takeoverCountLabel(key: string, count: number): string {
+  const label = `payroll_imports.registration.result_history.takeover_counts.${key}`
+  return te(label) ? t(label, { count }) : `${key}: ${count}`
+}
+
 function isJmhz(record: RegistrationRecord): boolean {
   return record.document_type === 'JMHZ'
+}
+
+/** Kód formuláře ČSSZ zůstává kódem; export zaměstnanců žádný kód nemá, dostane název. */
+function documentTypeLabel(code: string): string {
+  const key = `payroll_imports.registration.document_types.${code}`
+  return te(key) ? t(key) : code
 }
 
 function needsPairSelect(record: RegistrationRecord): boolean {
@@ -289,7 +321,7 @@ function submissionClass(type: RegistrationSubmissionType): string {
   }[type]
 }
 
-function takeoverStatusClass(status: RegistrationOpeningBalanceStatus | RegistrationAverageStatus): string {
+function takeoverStatusClass(status: RegistrationOpeningBalanceStatus | RegistrationAverageStatus | RegistrationTakeoverStatus): string {
   if (status === 'ready') return 'bg-success-50 text-success-700'
   if (status === 'blocked') return 'bg-danger-50 text-danger-600'
   return 'bg-neutral-100 text-neutral-600'
@@ -388,7 +420,7 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <span class="min-w-0 truncate font-medium text-neutral-800" :title="file.name">{{ file.name }}</span>
                 <span class="flex flex-wrap items-center gap-2 text-xs">
-                  <span v-if="file.document_type" class="rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-neutral-700">{{ file.document_type }}</span>
+                  <span v-if="file.document_type" class="rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-700" :class="{ 'font-mono': file.document_type !== 'CSSZ_EXPORT' }">{{ documentTypeLabel(file.document_type) }}</span>
                   <span v-if="file.period" class="whitespace-nowrap text-neutral-700">{{ formatPeriod(file.period) }}</span>
                   <span v-if="file.submission_type" class="whitespace-nowrap rounded-full px-2 py-0.5" :class="submissionClass(file.submission_type)">{{ t(`payroll_imports.registration.submission_types.${file.submission_type}`) }}</span>
                   <span class="text-neutral-500">{{ t('payroll_imports.registration.record_count', { count: file.record_count }) }}</span>
@@ -456,7 +488,7 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                     <p class="text-xs text-neutral-500"><span class="font-mono">{{ record.document_type }}</span></p>
                   </template>
                   <template v-else>
-                    <p class="text-xs text-neutral-500"><span class="font-mono">{{ record.document_type }}</span> · {{ t('payroll_imports.registration.action_code', { code: record.action_code }) }}</p>
+                    <p v-if="record.document_type !== 'CSSZ_EXPORT' && record.document_type !== 'JMHZ_DERIVED'" class="text-xs text-neutral-500"><span class="font-mono">{{ record.document_type }}</span> · {{ t('payroll_imports.registration.action_code', { code: record.action_code }) }}</p>
                     <p class="text-xs text-neutral-500">{{ t('payroll_imports.registration.effective_on', { date: dateText(record.effective_on) }) }}</p>
                   </template>
                   <p class="truncate text-[11px] text-neutral-400" :title="record.file">{{ record.file }} #{{ record.sequence }}</p>
@@ -596,6 +628,118 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
         <div>
           <h3 class="font-semibold text-neutral-900">{{ t('payroll_imports.registration.takeover.title') }}</h3>
           <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll_imports.registration.takeover.hint') }}</p>
+        </div>
+
+        <div v-if="showTakeoverWages" class="space-y-3" data-testid="registration-takeover-wages">
+          <div>
+            <h4 class="text-sm font-medium text-neutral-800">{{ t('payroll_imports.registration.takeover.wages_title') }}</h4>
+            <p class="mt-1 max-w-3xl text-xs text-neutral-500">{{ t('payroll_imports.registration.takeover.wages_hint') }}</p>
+            <p v-if="takeover?.start_period" class="mt-1 text-xs text-neutral-600">{{ t('payroll_imports.registration.takeover.start_period', { period: formatPeriod(takeover.start_period) }) }}</p>
+            <p v-else class="mt-1 text-xs font-medium text-warning-700">{{ t('payroll_imports.registration.takeover.no_start_period') }}</p>
+          </div>
+
+          <div v-if="takeoverMonths.length" class="space-y-2">
+            <h5 class="text-xs font-medium uppercase tracking-wide text-neutral-500">{{ t('payroll_imports.registration.takeover.months_title') }}</h5>
+            <div class="hidden overflow-x-auto rounded-lg border border-neutral-200 md:block">
+              <table class="min-w-full divide-y divide-neutral-200 text-sm">
+                <thead>
+                  <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+                    <th class="px-3 py-2">{{ t('payroll_imports.registration.takeover.wage_columns.period') }}</th>
+                    <th class="px-3 py-2 text-right">{{ t('payroll_imports.registration.takeover.wage_columns.count') }}</th>
+                    <th class="px-3 py-2 text-right">{{ t('payroll_imports.registration.takeover.wage_columns.gross') }}</th>
+                    <th class="px-3 py-2 text-right">{{ t('payroll_imports.registration.takeover.wage_columns.net') }}</th>
+                    <th class="px-3 py-2 text-right">{{ t('payroll_imports.registration.takeover.wage_columns.advance_tax') }}</th>
+                    <th class="px-3 py-2">{{ t('payroll_imports.registration.takeover.wage_columns.status') }}</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-neutral-100">
+                  <tr v-for="month in takeoverMonths" :key="month.period" class="align-top">
+                    <td class="whitespace-nowrap px-3 py-2 font-medium text-neutral-900">{{ formatPeriod(month.period) }}</td>
+                    <td class="px-3 py-2 text-right tabular-nums">{{ month.ready_count }}</td>
+                    <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums">{{ formatMoneyMinor(month.gross_minor) }}</td>
+                    <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums">{{ formatMoneyMinor(month.net_minor) }}</td>
+                    <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums">{{ formatMoneyMinor(month.advance_tax_minor) }}</td>
+                    <td class="px-3 py-2">
+                      <span class="whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium" :class="takeoverStatusClass(month.status)">{{ t(`payroll_imports.registration.takeover.month_status.${month.status}`) }}</span>
+                      <p v-if="month.reason" class="mt-1 max-w-xs text-xs text-neutral-600">{{ month.reason }}</p>
+                      <details v-if="month.blocked.length" class="mt-1 text-xs">
+                        <summary class="cursor-pointer text-warning-700">{{ t('payroll_imports.registration.takeover.blocked_count', { count: month.blocked.length }) }}</summary>
+                        <ul class="mt-1 space-y-0.5 text-neutral-600">
+                          <li v-for="(item, index) in month.blocked" :key="`${month.period}-b-${index}`"><strong class="font-medium">{{ item.label }}</strong>: {{ item.reason }}</li>
+                        </ul>
+                      </details>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="space-y-2 md:hidden">
+              <article v-for="month in takeoverMonths" :key="`m-${month.period}`" class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm">
+                <div class="flex flex-wrap items-start justify-between gap-2">
+                  <p class="font-medium text-neutral-900">{{ formatPeriod(month.period) }} · {{ month.ready_count }}</p>
+                  <span class="whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium" :class="takeoverStatusClass(month.status)">{{ t(`payroll_imports.registration.takeover.month_status.${month.status}`) }}</span>
+                </div>
+                <p class="mt-1 text-xs text-neutral-600">{{ t('payroll_imports.registration.takeover.wage_columns.gross') }}: <strong class="tabular-nums">{{ formatMoneyMinor(month.gross_minor) }}</strong></p>
+                <p class="text-xs text-neutral-600">{{ t('payroll_imports.registration.takeover.wage_columns.advance_tax') }}: <strong class="tabular-nums">{{ formatMoneyMinor(month.advance_tax_minor) }}</strong></p>
+                <p v-if="month.reason" class="mt-1 text-xs text-neutral-600">{{ month.reason }}</p>
+                <ul v-if="month.blocked.length" class="mt-1 space-y-0.5 text-xs text-warning-700">
+                  <li v-for="(item, index) in month.blocked" :key="`mm-${month.period}-${index}`">{{ item.label }}: {{ item.reason }}</li>
+                </ul>
+              </article>
+            </div>
+          </div>
+
+          <div v-if="takeoverRelations.length" class="space-y-2">
+            <h5 class="text-xs font-medium uppercase tracking-wide text-neutral-500">{{ t('payroll_imports.registration.takeover.relations_title') }}</h5>
+            <div class="hidden overflow-x-auto rounded-lg border border-neutral-200 md:block">
+              <table class="min-w-full divide-y divide-neutral-200 text-sm">
+                <thead>
+                  <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+                    <th class="px-3 py-2">{{ t('payroll_imports.registration.takeover.wage_columns.employment') }}</th>
+                    <th class="px-3 py-2">{{ t('payroll_imports.registration.takeover.wage_columns.start') }}</th>
+                    <th class="px-3 py-2">{{ t('payroll_imports.registration.takeover.wage_columns.end') }}</th>
+                    <th class="px-3 py-2 text-right">{{ t('payroll_imports.registration.takeover.wage_columns.monthly_wage') }}</th>
+                    <th class="px-3 py-2">{{ t('payroll_imports.registration.takeover.wage_columns.averages') }}</th>
+                    <th class="px-3 py-2 text-right">{{ t('payroll_imports.registration.takeover.wage_columns.leave') }}</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-neutral-100">
+                  <tr v-for="relation in takeoverRelations" :key="relation.employment_id" class="align-top">
+                    <td class="px-3 py-2">
+                      <RouterLink :to="{ name: 'payroll-person', params: { id: relation.employee_id } }" class="font-medium text-payroll-600 hover:underline">{{ relation.label }}</RouterLink>
+                    </td>
+                    <td class="whitespace-nowrap px-3 py-2">{{ dateText(relation.start_on) }}</td>
+                    <td class="whitespace-nowrap px-3 py-2">{{ dateText(relation.end_on) }}</td>
+                    <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                      {{ relation.monthly_wage_minor === null ? '—' : formatMoneyMinor(relation.monthly_wage_minor) }}
+                      <p v-if="relation.monthly_wage_from" class="text-[11px] font-normal text-neutral-500">{{ t('payroll_imports.registration.takeover.wage_from', { date: dateText(relation.monthly_wage_from) }) }}</p>
+                    </td>
+                    <td class="px-3 py-2 text-xs text-neutral-700">{{ relation.average_quarters.length ? relation.average_quarters.join(', ') : '—' }}</td>
+                    <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums">{{ relation.leave_minutes > 0 ? t('payroll_imports.registration.takeover.leave_hours', { hours: formatHours(minutesToHours(relation.leave_minutes), locale) }) : '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="space-y-2 md:hidden">
+              <article v-for="relation in takeoverRelations" :key="`r-${relation.employment_id}`" class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm">
+                <p class="font-medium text-neutral-900">{{ relation.label }}</p>
+                <p class="mt-1 text-xs text-neutral-600">{{ t('payroll_imports.registration.takeover.wage_columns.start') }}: {{ dateText(relation.start_on) }}<template v-if="relation.end_on"> · {{ t('payroll_imports.registration.takeover.wage_columns.end') }}: {{ dateText(relation.end_on) }}</template></p>
+                <p v-if="relation.monthly_wage_minor !== null" class="text-xs text-neutral-600">{{ t('payroll_imports.registration.takeover.wage_columns.monthly_wage') }}: <strong class="tabular-nums">{{ formatMoneyMinor(relation.monthly_wage_minor) }}</strong></p>
+                <p v-if="relation.average_quarters.length" class="text-xs text-neutral-600">{{ t('payroll_imports.registration.takeover.wage_columns.averages') }}: {{ relation.average_quarters.join(', ') }}</p>
+                <p v-if="relation.leave_minutes > 0" class="text-xs text-neutral-600">{{ t('payroll_imports.registration.takeover.wage_columns.leave') }}: {{ t('payroll_imports.registration.takeover.leave_hours', { hours: formatHours(minutesToHours(relation.leave_minutes), locale) }) }}</p>
+              </article>
+            </div>
+          </div>
+
+          <label class="flex items-start gap-2 text-sm text-neutral-800">
+            <input type="checkbox" data-testid="registration-apply-takeover" class="mt-0.5 rounded border-neutral-300 text-payroll-600"
+              :checked="applyTakeover" :disabled="!canWrite || busy !== null || !takeoverReady"
+              @change="onTakeoverToggle(($event.target as HTMLInputElement).checked)">
+            <span>
+              <span class="font-medium">{{ t('payroll_imports.registration.takeover.apply_wages') }}</span>
+              <span v-if="!takeoverReady" class="mt-0.5 block text-xs text-neutral-500">{{ t('payroll_imports.registration.takeover.nothing_ready') }}</span>
+            </span>
+          </label>
         </div>
 
         <div v-if="openingBalances.length" class="space-y-2">
@@ -779,7 +923,21 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
         <div class="flex flex-wrap gap-2 text-xs">
           <span class="rounded-full bg-success-50 px-2 py-1 font-medium text-success-700">{{ t('payroll_imports.registration.result_history.openings_saved', { count: result.opening_balances.saved }) }}</span>
           <span class="rounded-full bg-success-50 px-2 py-1 font-medium text-success-700">{{ t('payroll_imports.registration.result_history.averages_created', { created: result.averages.created, approved: result.averages.approved }) }}</span>
+          <template v-if="result.takeover">
+            <span class="rounded-full bg-success-50 px-2 py-1 font-medium text-success-700">{{ t('payroll_imports.registration.result_history.takeover_saved', { count: result.takeover.saved }) }}</span>
+            <span class="rounded-full bg-neutral-100 px-2 py-1 font-medium text-neutral-700">{{ t('payroll_imports.registration.result_history.takeover_relations', { count: result.takeover.relations }) }}</span>
+            <span v-for="[key, count] in resultTakeoverCounts" :key="`tc-${key}`" class="rounded-full bg-neutral-100 px-2 py-1 font-medium text-neutral-700">{{ takeoverCountLabel(key, count) }}</span>
+          </template>
         </div>
+        <ul v-if="result.takeover?.skipped.length" class="divide-y divide-neutral-100 rounded-lg border border-neutral-200 text-sm" data-testid="registration-result-takeover">
+          <li v-for="(item, index) in result.takeover.skipped" :key="`t-${index}`" class="flex flex-wrap items-start justify-between gap-2 px-3 py-2">
+            <div class="min-w-0">
+              <p class="font-medium text-neutral-900">{{ item.label }}<template v-if="item.period"> · {{ formatPeriod(item.period) }}</template></p>
+              <p class="text-xs text-neutral-600">{{ item.reason }}</p>
+            </div>
+            <span class="whitespace-nowrap rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">{{ t('payroll_imports.registration.result_history.takeover_skipped') }}</span>
+          </li>
+        </ul>
         <ul v-if="result.opening_balances.skipped.length || result.averages.skipped.length" class="divide-y divide-neutral-100 rounded-lg border border-neutral-200 text-sm">
           <li v-for="item in result.opening_balances.skipped" :key="`o-${item.employee_id}-${item.year}`" class="flex flex-wrap items-start justify-between gap-2 px-3 py-2">
             <div class="min-w-0">

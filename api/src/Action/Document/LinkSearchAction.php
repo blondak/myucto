@@ -17,7 +17,7 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * GET /api/documents/link-search?q=&types=invoice,purchase_invoice,client,project,cash_document
+ * GET /api/documents/link-search?q=&types=invoice,purchase_invoice,client,project,cash_document,other_item
  *
  * Našeptávač pro párování dokumentů s entitami. Hledá napříč vystavenými i
  * přijatými fakturami (číslo dokladu / VS / číslo dodavatele), klienty/dodavateli
@@ -42,7 +42,7 @@ final class LinkSearchAction
 
         $types = isset($params['types']) && $params['types'] !== ''
             ? array_map('trim', explode(',', (string) $params['types']))
-            : ['invoice', 'purchase_invoice', 'client', 'project', 'cash_document'];
+            : ['invoice', 'purchase_invoice', 'client', 'project', 'cash_document', 'other_item'];
 
         if (mb_strlen($q) < 2) {
             return Json::ok($response, ['results' => [], 'query' => $q]);
@@ -116,6 +116,18 @@ final class LinkSearchAction
             }
         }
 
+        if (in_array('other_item', $types, true) && RequestAuthorization::allows($request, 'other_items', AccessLevel::READ)) {
+            foreach ($this->searchOtherItems($q, $sid) as $r) {
+                $results[] = [
+                    'entity_type' => 'other_item',
+                    'entity_id'   => (int) $r['id'],
+                    'label'       => (string) $r['title'],
+                    'sublabel'    => '',
+                    'meta'        => '',
+                ];
+            }
+        }
+
         return Json::ok($response, ['results' => $results, 'query' => $q]);
     }
 
@@ -139,6 +151,23 @@ final class LinkSearchAction
               WHERE ' . implode(' AND ', $where) . '
               ORDER BY issue_date DESC, id DESC
               LIMIT 8'
+        );
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    private function searchOtherItems(string $q, int $sid): array
+    {
+        $toks = $this->tokens($q);
+        if ($toks === []) return [];
+        $where = ['supplier_id = ?', 'deleted_at IS NULL'];
+        $params = [$sid];
+        foreach ($toks as $tk) {
+            $where[] = 'title LIKE ?';
+            $params[] = '%' . addcslashes($tk, '%_\\') . '%';
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, title FROM other_items WHERE ' . implode(' AND ', $where) . ' ORDER BY id DESC LIMIT 8'
         );
         $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];

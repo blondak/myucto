@@ -41,6 +41,7 @@ services:
     environment:
       TZ: Europe/Prague
       MYINVOICE_DATA_DIR: /data
+      MYINVOICE_APP_ENV: ${MYINVOICE_APP_ENV:-}
       # Vestavěný cron v app kontejneru (default 1). Při více replikách app nastav 0,
       # jinak by plánované úlohy běžely v každé replice (duplicitní zálohy, recurring…).
       MYINVOICE_ENABLE_CRON: ${MYINVOICE_ENABLE_CRON:-1}

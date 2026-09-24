@@ -831,12 +831,17 @@ paths:
   /api/v1/invoices:
     get:
       tags: [Invoices]
-      summary: Seznam faktur (grouped by month)
+      summary: Seznam faktur
       description: |
         Vrací faktury aktuálního supplier-a, seskupené po měsících podle
         `COALESCE(tax_date, issue_date)` (DUZP, fallback datum vystavení).
         Filtry se předávají jako `filter[key]=value` (deep object). `status` a `type` mohou
         být čárkou oddělené seznamy (`filter[status]=draft,issued`).
+
+        Výchozí pohled seskupuje faktury po měsících. `filter[group_by_month]=0`
+        vrátí jednu souvislou skupinu s `month: ''`. Řazení se provádí před
+        stránkováním; v měsíčním pohledu uvnitř každého měsíce. Při řazení
+        podle DUZP vzestupně jdou i měsíce od nejstaršího.
 
         Stránkuje se po jednotlivých fakturách (`meta.total` = počet faktur);
         měsíční skupiny se skládají až z aktuální stránky, takže skupina na
@@ -845,7 +850,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - in: query
           name: q
-          description: Fulltextové vyhledávání (varsymbol, klient, popis)
+          description: Fulltextové vyhledávání (číslo dokladu, platební VS včetně odvozeného z čísla dokladu, číslo objednávky, klient, popis položek)
           schema: { type: string }
         - in: query
           name: filter[status]
@@ -935,6 +940,20 @@ paths:
             vybere množinu a `revenue_category_exclude` ji zúží.
           schema: { type: string, example: "12,none" }
         - in: query
+          name: filter[group_by_month]
+          description: "0 = souvislý seznam; výchozí 1 = skupiny po měsících"
+          schema: { type: integer, enum: [0, 1], default: 1 }
+        - in: query
+          name: filter[include_kh]
+          description: "1 = doplnit oddíly KH z Knihy DPH do kh_sections na každém dokladu"
+          schema: { type: integer, enum: [0, 1], default: 0 }
+        - in: query
+          name: sort_key
+          schema: { type: string, enum: [number, client, type, issued, due, amount, status, payment_vs, order_number, paid_at, payment_method, booked_at, exchange_rate, amount_czk, base, vat, total, project, sent_at, paid_total] }
+        - in: query
+          name: sort_dir
+          schema: { type: string, enum: [asc, desc], default: desc }
+        - in: query
           name: page
           schema: { type: integer, minimum: 1, default: 1 }
         - in: query
@@ -951,7 +970,7 @@ paths:
                 properties:
                   data:
                     type: array
-                    description: Měsíční skupiny, řazené od nejnovějšího měsíce.
+                    description: Měsíční skupiny, při vzestupném řazení podle DUZP od nejstaršího měsíce; jinak od nejnovějšího. Souvislý seznam má jedinou skupinu.
                     items: { $ref: '#/components/schemas/InvoiceMonthGroup' }
                   meta: { $ref: '#/components/schemas/ListMeta' }
     post:
@@ -3077,6 +3096,13 @@ paths:
           name: posting_status
           schema: { type: string, enum: [unposted, posted] }
           description: Filtr podle existence aktivního účetního zápisu bankovního pohybu.
+        - in: query
+          name: sort
+          schema: { type: string, enum: [posted_at, amount, variable_symbol, counterparty, invoice, status, posting], default: posted_at }
+          description: Sloupec řazení transakcí (řadí se na serveru přes všechny stránky, druhý klíč je id). Neznámá hodnota = datum.
+        - in: query
+          name: direction
+          schema: { type: string, enum: [asc, desc], default: asc }
       responses:
         '200':
           description: OK
@@ -3897,6 +3923,8 @@ paths:
         - { in: query, name: year, schema: { type: integer } }
         - { in: query, name: q, schema: { type: string }, description: "Fulltext přes protistranu, VS, popis, číslo účtu a částku." }
         - { in: query, name: account, schema: { type: string }, description: Náš zdrojový účet výpisu (account_number). }
+        - { in: query, name: sort, schema: { type: string, enum: [posted_at, amount, variable_symbol, counterparty, invoice, status, posting, account], default: posted_at }, description: "Sloupec řazení (řadí se na serveru přes všechny stránky, druhý klíč je id). Neznámá hodnota = datum." }
+        - { in: query, name: direction, schema: { type: string, enum: [asc, desc], default: desc } }
       responses:
         '200':
           description: OK
@@ -4566,6 +4594,8 @@ paths:
         `pdf_logo_show_name`, `display_name`, `tagline`). Brandingová pole jsou
         původním nastavením dodavatele. Logo se nahrává zvlášť
         (není součástí tohoto endpointu).
+        `dimensions_enabled=true` lze nově nastavit jen během zkušební doby
+        nebo s platnou licencí, která odemyká účetnictví.
       requestBody:
         required: true
         content:
@@ -4580,7 +4610,7 @@ paths:
         '400':
           $ref: '#/components/responses/ValidationFailed'
         '403':
-          description: Uživatel není admin nebo token nemá scope `read_write`
+          description: Uživatel není admin, token nemá scope `read_write` nebo chybí účetní licence pro zapnutí dimenzí
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -5875,11 +5905,14 @@ paths:
   /api/v1/purchase-invoices:
     get:
       tags: [Purchase invoices]
-      summary: Seznam přijatých faktur seskupený po měsících
+      summary: Seznam přijatých faktur
       description: |
-        Vrací přijaté faktury aktuálního tenant (supplier_id), seskupené podle
-        `COALESCE(tax_date, issue_date)` per měsíc. Stejný response tvar jako
-        `/invoices` ale s `vendor_*` poli místo `client_*`.
+        Vrací přijaté faktury aktuálního tenanta (supplier_id), ve výchozím
+        zobrazení seskupené podle měsíce vystavení. `filter[group_by_month]=0`
+        vrátí jedinou souvislou skupinu s `month: ''`. Řazení se provádí před
+        stránkováním, v měsíčním pohledu uvnitř jednotlivých měsíců. Při
+        vzestupném řazení podle DUZP jdou i měsíce od nejstaršího.
+        Odpověď má stejný tvar jako `/invoices`, ale s `vendor_*` poli.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - in: query
@@ -5919,6 +5952,20 @@ paths:
           name: filter[booked]
           description: "Zaúčtování (jen podvojné účetnictví): 1 = zaúčtováno (booked_at není NULL), 0 = nezaúčtováno"
           schema: { type: string, enum: ['1', '0'] }
+        - in: query
+          name: filter[group_by_month]
+          description: "0 = souvislý seznam; výchozí 1 = skupiny po měsících"
+          schema: { type: integer, enum: [0, 1], default: 1 }
+        - in: query
+          name: filter[include_kh]
+          description: "1 = doplnit oddíly KH z Knihy DPH do kh_sections na každém dokladu"
+          schema: { type: integer, enum: [0, 1], default: 0 }
+        - in: query
+          name: sort_key
+          schema: { type: string, enum: [number, vendor, vendor_number, kind, tax_date, due_date, amount, status, paid_at, booked_at, exchange_rate, vat_deduction, expense_category, base, vat, balance, project, received_at, payment_ordered_at] }
+        - in: query
+          name: sort_dir
+          schema: { type: string, enum: [asc, desc], default: desc }
         - in: query
           name: q
           schema: { type: string }
@@ -7377,7 +7424,10 @@ paths:
       tags: [CRM]
       summary: KPI overview (current month + last + YTD + trailing 12m + prev year per currency)
       parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
-      responses: { '200': { description: KPI } }
+      responses:
+        '200':
+          description: KPI a oddělený výsledkový dopad ostatních položek
+          content: { application/json: { schema: { type: object, properties: { other_item_result_impact: { type: array, items: { $ref: '#/components/schemas/OtherItemResultImpact' } } } } } }
 
   /api/v1/crm/monthly:
     get:
@@ -7750,7 +7800,7 @@ paths:
   /api/v1/documents/{id}/links:
     post:
       tags: [Documents]
-      summary: Připojit dokument k entitě (faktura / přijatá faktura / klient / projekt / pokladní doklad)
+      summary: Připojit dokument k entitě včetně ostatní pohledávky nebo závazku
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -7762,7 +7812,7 @@ paths:
               type: object
               required: [entity_type, entity_id]
               properties:
-                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] }
+                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] }
                 entity_id: { type: integer }
       responses:
         '200': { description: Aktuální vazby, content: { application/json: { schema: { type: object, properties: { links: { type: array, items: { $ref: '#/components/schemas/DocumentLink' } } } } } } }
@@ -7779,7 +7829,7 @@ paths:
             schema:
               type: object
               properties:
-                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] }
+                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] }
                 entity_id: { type: integer }
       responses:
         '200': { description: Aktuální vazby, content: { application/json: { schema: { type: object, properties: { links: { type: array, items: { $ref: '#/components/schemas/DocumentLink' } } } } } } }
@@ -7790,7 +7840,7 @@ paths:
       summary: Dokumenty navázané na entitu (oboustranné párování)
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
-        - { name: type, in: path, required: true, schema: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] } }
         - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         '200': { description: Navázané dokumenty, content: { application/json: { schema: { type: object, properties: { documents: { type: array, items: { $ref: '#/components/schemas/Document' } } } } } } }
@@ -8262,7 +8312,9 @@ paths:
         (`purchase_invoices.exchange_rate`) — protějšek téhož pole v `/dashboard/summary`
         a jediné číslo porovnatelné s účetnictvím vedeným v korunách.
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK, včetně odděleného výsledkového dopadu ostatních položek
+          content: { application/json: { schema: { type: object, properties: { other_item_result_impact: { type: array, items: { $ref: '#/components/schemas/OtherItemResultImpact' } } } } } }
 
   # ── Daňový optimalizátor ─────────────────────────────────────────────────
   /api/v1/tax/analysis:
@@ -8587,19 +8639,21 @@ paths:
 
         Skenují se všechny tři osy číslování — dodavatel, klient s vlastní šablonou a kategorie tržby s vlastní šablonou. Doklad patří právě do jedné řady podle priority `klient → kategorie tržby → dodavatel`; skupinu v odpovědi rozlišuje dvojice `client_id` a `revenue_category_id` (0 = osa se neuplatnila).
 
+        Importované doklady mimo současné šablony se mohou zobrazit jako odvozená řada (`series[].inferred=true`). Rozpozná se rok v čísle shodný s rokem vystavení a stejně široký číselný suffix. U těchto řad se hledají jen mezery mezi nejnižším a nejvyšším nalezeným číslem; neznámý začátek importu se nepředpokládá. Nejednoznačný suffix začínající měsícem se vynechá, aby měsíční řada nevytvořila falešné roční mezery.
+
         Výčet `missing` (a `missing_preview`) je v každém období stropovaný na 500 položek, protože jediné chybně zadané číslo posune horní hranici řady o několik řádů. Skutečný počet mezer je vždy v `missing_total` a useknutí hlásí `missing_truncated`; souhrnné `total_missing` sčítá `missing_total`, ne délku výčtu.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: year, schema: { type: integer, minimum: 2000, maximum: 2100 }, description: "Default aktuální rok. Řady s period='none' (bez ročního resetu counteru) se skenují vždy celé bez ohledu na year." }
       responses:
-        '200': { description: "OK {year, series, total_missing}", content: { application/json: { schema: { type: object } } } }
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/InvoiceSeriesCompletenessResult' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
 
   /api/v1/reports/dph-book/preview:
     get:
       tags: [Reports]
       summary: Náhled Knihy DPH (interní VAT žurnál, vždy měsíční)
-      description: Interní pomůcka — NENÍ EPO podání.
+      description: Interní pomůcka; řádky obsahují document_kind pro rozlišení faktury a pokladního dokladu. NENÍ EPO podání.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: year, required: true, schema: { type: integer } }
@@ -9515,6 +9569,8 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: page, schema: { type: integer, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, default: 50, maximum: 200 } }
+        - { in: query, name: sort_key, schema: { type: string, enum: [date, document_date, description, source, status, posted_at, posted_by, document_no, amount, entry_id, created_at, updated_at] } }
+        - { in: query, name: sort_dir, schema: { type: string, enum: [asc, desc], default: desc } }
         - { in: query, name: document_no, description: Částečná shoda čísla dokladu, schema: { type: string, maxLength: 50 } }
         - { in: query, name: period_id, schema: { type: integer } }
         - { in: query, name: date_from, schema: { type: string, format: date } }
@@ -10517,6 +10573,12 @@ paths:
     get:
       tags: [Accounting]
       summary: Rozvaha (vyhl. 500/2002 Sb., brutto/korekce/netto + minulé období)
+      description: |
+        `checks.negative_net_rows` vypisuje řádky aktiv se záporným netto (korekce vyšší
+        než brutto) v běžném (`column: current`) i minulém (`previous`) období; mezisoučet
+        nad záporným podřádkem se neopakuje. Výkaz se kvůli nim nezastaví, jde o varování.
+        `checks.tax_authority_offset` je null, když firma daně vůči finančnímu úřadu nevykazuje
+        souhrnně; jinak nese započtenou částku (`current`, `previous`).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: period_id, required: true, schema: { type: integer } }
@@ -10617,13 +10679,74 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/v1/accounting/reports/dimension-analytics:
+    get:
+      tags: [Accounting]
+      summary: Roční statistika dimenze po měsících, hodnotách a firmách
+      description: |
+        Částky ze zaúčtovaného deníku, stejná metodika jako výsledovka po dimenzi.
+        Firemní typ lze zobrazit jen pro aktuální firmu. Globální typ lze zobrazit
+        pro aktuální firmu, jinou firmu stejné skupiny s účetním přístupem nebo
+        pro součet všech takto přístupných firem (`supplier_id=all`).
+        `monthly` a `previous_monthly` jsou po měsících; `value_monthly` obsahuje
+        měsíční řady za větve nejvyšší úrovně a za řádky bez hodnoty (klíč `""`).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: type_id, required: true, schema: { type: integer } }
+        - { in: query, name: year, required: true, schema: { type: integer, minimum: 2000, maximum: 2100 } }
+        - { in: query, name: supplier_id, schema: { oneOf: [{ type: integer }, { type: string, enum: [all] }] }, description: 'ID přístupné firmy nebo `all` pro skupinu.' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DimensionAnalytics' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/reports/dimension-profit/export:
+    get:
+      tags: [Accounting]
+      summary: Výsledovka po dimenzi jako PDF nebo XLSX
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: type_id, required: true, schema: { type: integer } }
+        - { in: query, name: from, required: true, schema: { type: string, format: date } }
+        - { in: query, name: to, required: true, schema: { type: string, format: date } }
+        - { in: query, name: scope, schema: { type: string, enum: [group] } }
+        - { in: query, name: value_id, schema: { type: integer } }
+        - { in: query, name: responsible_user_id, schema: { type: integer } }
+        - { in: query, name: format, schema: { type: string, enum: [pdf, xlsx], default: xlsx } }
+      responses:
+        '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/reports/dimension-analytics/export:
+    get:
+      tags: [Accounting]
+      summary: Export tabulky statistik dimenzí jako PDF nebo XLSX
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: type_id, required: true, schema: { type: integer } }
+        - { in: query, name: year, required: true, schema: { type: integer, minimum: 2000, maximum: 2100 } }
+        - { in: query, name: supplier_id, schema: { oneOf: [{ type: integer }, { type: string, enum: [all] }] } }
+        - { in: query, name: table, required: true, schema: { type: string, enum: [comparison, companies, monthly] } }
+        - { in: query, name: value_id, schema: { type: string, description: 'ID kořenové hodnoty, total nebo unassigned', default: total } }
+        - { in: query, name: metric, schema: { type: string, enum: [revenue, cost, result], default: result } }
+        - { in: query, name: format, required: true, schema: { type: string, enum: [pdf, xlsx] } }
+      responses:
+        '200': { description: Soubor tabulky, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/reports/saldo:
     get:
       tags: [Accounting]
       summary: Saldokonto — otevřené položky per partner + konfrontace se zůstatkem účtu
       description: |
-        Otevřené (nezaplacené/částečně zaplacené) faktury seskupené per partner na
-        saldokontních účtech (default 311/321/314/324), s automatickou konfrontací
+        Otevřené (nezaplacené/částečně zaplacené) faktury a ostatní pohledávky
+        a závazky seskupené per partner na saldokontních účtech
+        (default 311/321/314/324/315/325), s automatickou konfrontací
         Σ otevřených položek proti zůstatku účtu z hlavní knihy k rozvahovému dni.
         Rozdíl (inventarizační hodnota) odhalí ruční zápisy, storna či zapomenuté
         faktury nepokryté fakturačním zdrojem.
@@ -10934,7 +11057,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { avg_employees: { type: [integer, "null"] }, statement_scope_override: { type: [string, "null"], enum: [full, small, micro, null] }, statutory_audit: { type: boolean }, manual_doc_series: { type: boolean }, fx_reversal_at_open: { type: boolean } } } } } }
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { avg_employees: { type: [integer, "null"] }, statement_scope_override: { type: [string, "null"], enum: [full, small, micro, null] }, statutory_audit: { type: boolean }, manual_doc_series: { type: boolean }, fx_reversal_at_open: { type: boolean }, comparative_from_prior_year: { type: boolean }, tax_authority_offset: { type: boolean }, tax_authority_offset_from_year: { type: [integer, "null"] } } } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
     put:
       tags: [Accounting]
@@ -10957,6 +11080,9 @@ paths:
                 statutory_audit: { type: boolean, description: "Povinný audit §20 ZoÚ → plný rozsah výkazů (§3a vyhl. 500/2002)" }
                 manual_doc_series: { type: boolean, description: "Auto číslo dokladu ID-{rok}-{NNNN} pro ruční zápisy" }
                 fx_reversal_at_open: { type: boolean, description: "Storno přecenění saldokonta k 1. dni nového období (ČÚS 006)" }
+                comparative_from_prior_year: { type: boolean, description: "Minulé období výkazů s výjimkami mapování platnými v minulém roce (jako uzavřený výkaz); false = přepočet podle zařazení běžného roku" }
+                tax_authority_offset: { type: boolean, description: "Rozvaha: souhrnné vykázání daňových pohledávek a závazků vůči FÚ (§ 58 odst. 2 vyhl. 500/2002 Sb.); výchozí false" }
+                tax_authority_offset_from_year: { type: [integer, "null"], minimum: 1900, maximum: 2999, description: "Od kterého účetního období se daně vykazují souhrnně (posílá se spolu s tax_authority_offset); null = všechna" }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -11325,7 +11451,10 @@ paths:
     patch:
       tags: [Accounting]
       summary: Upraví vlastní bankovní účet
-      description: Účetní/admin. Mění klasifikaci a aktivaci účtu; cizí tenant vrací 404.
+      description: >-
+        Účetní/admin. Mění klasifikaci a aktivaci účtu; cizí tenant vrací 404. Úvěrový účet
+        kreditní karty (kind = credit_card) se tudy neupravuje (422) a na kreditní účet nejde
+        účet ani přepnout, to dělá import výpisu nebo převod na stránce Kreditní karty.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
@@ -11393,6 +11522,45 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
       responses:
         '200': { description: "OK (id, varsymbol, vendor, částky, kurz, has_asset)", content: { application/json: { schema: { type: array, items: { type: object } } } } }
+
+  /api/v1/accounting/assets/account-summary:
+    get:
+      tags: [Accounting]
+      summary: Účty neodpisovaného majetku a jejich souhrnné karty
+      description: >-
+        Účty 031/032 (a analytiky) se zůstatkem v deníku nebo se souhrnnou kartou:
+        zůstatek, počet pohybů, počet vlastních karet (`eligible` = účet bez aktivních
+        karet), id a hodnota souhrnné karty.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200': { description: "OK {items: [account_code, name, balance, movements, active_cards, summary_asset_id, summary_value, eligible]}", content: { application/json: { schema: { type: object } } } }
+    post:
+      tags: [Accounting]
+      summary: Založení nebo srovnání souhrnné karty účtu bez karet s deníkem
+      description: >-
+        Účetní/admin. Majetek vedený jen v deníku (portfolio pozemků) dostane jednu kartu:
+        vstupní cena = počáteční stav účtu, pohyby deníku = zvýšení a snížení ceny, karta
+        sedí na zůstatek účtu, nic neúčtuje a neodpisuje se. Opakované volání kartu
+        přepočte z deníku. Účet s vlastními kartami vrací 409 `account_has_cards`.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_code]
+              properties:
+                account_code: { type: string }
+      responses:
+        '200': { description: "Srovnáno {asset, created, improvements, warnings}", content: { application/json: { schema: { type: object } } } }
+        '201': { description: "Založeno {asset, created, improvements, warnings}", content: { application/json: { schema: { type: object } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Účet má vlastní karty majetku, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/assets/depreciations/book:
     post:
@@ -11564,6 +11732,12 @@ paths:
         výnos 641 vznikne vydanou fakturou (R20). Operace blokuje přeskočený
         předchozí rok i potvrzené odpisy pozdějších let. V `warnings` upozorní
         na DPH při darování a na doložení likvidace, manka či škody.
+
+        `book_entry=false`: vyřazení už zaúčtoval deník (převod z jiného programu,
+        ruční zápis 54x proti oprávkám). Karta se vyřadí bez zaúčtování a naváže na
+        zápis vyřazení (`entry_id`, jinak jediný zápis ke dni vyřazení s MD 54x proti
+        účtu karty; `disposal_entry_id` v odpovědi). Nenalezený nebo nejednoznačný
+        zápis ohlásí `warnings` (`disposal_entry_not_found`, `disposal_entry_ambiguous`).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -11578,6 +11752,9 @@ paths:
                 date: { type: string, format: date }
                 type: { type: string, enum: [sold, liquidated, donated, damaged] }
                 price: { type: [number, "null"], description: "Prodejní cena bez DPH, jen type=sold (evidenční)" }
+                sale_invoice_id: { type: [integer, "null"], description: "Vydaná faktura prodeje, jen type=sold (evidenční)" }
+                book_entry: { type: boolean, default: true, description: "false = vyřazení už zaúčtoval deník, karta se vyřadí bez zaúčtování" }
+                entry_id: { type: [integer, "null"], description: "Zápis deníku, který vyřazení zaúčtoval (jen book_entry=false)" }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -11632,6 +11809,51 @@ paths:
         - { in: path, name: year, required: true, schema: { type: integer } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/assets/{id}/depreciation/tax-override:
+    post:
+      tags: [Accounting]
+      summary: Ruční přepis daňového odpisu roku
+      description: >-
+        Účetní/admin. Potvrzený daňový odpis roku dostane zadanou částku (typicky
+        převzetí čísel účetní). Důvod je povinný; řádek si drží původní odpis, kdo
+        a kdy ho přepsal (`override_*` v plánu odpisů), změna jde do protokolu
+        činností. Zůstatková cena roku i potvrzených pozdějších let se posune o rozdíl.
+        Rok se schválenou závěrkou vrací 422 `period_approved`.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fiscal_year, amount, reason]
+              properties:
+                fiscal_year: { type: integer, minimum: 2000, maximum: 2100 }
+                amount: { type: number, minimum: 0 }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: "OK {entry, previous_amount}", content: { application/json: { schema: { type: object } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/assets/{id}/depreciation/tax-override/{year}:
+    delete:
+      tags: [Accounting]
+      summary: Zrušení ručního přepisu daňového odpisu roku
+      description: Účetní/admin. Vrátí původní odpis a zůstatkovou cenu, pozdější potvrzené roky posune zpět.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: year, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: "OK {entry}", content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
@@ -12754,6 +12976,246 @@ paths:
         - { in: query, name: purpose, schema: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] } }
       responses:
         '200': { description: PDF, content: { application/pdf: { schema: { type: string, format: binary } } } }
+
+  /api/v1/accounting/other-items:
+    get:
+      tags: [Accounting]
+      summary: Ostatní pohledávky a závazky včetně převzatých mzdových a daňových předpisů
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: query, name: side, schema: { type: string, enum: [receivable, payable] } }
+        - { in: query, name: status, schema: { type: string, enum: [open, all, draft, confirmed, posted, reversed, cancelled] } }
+        - { in: query, name: kind, schema: { type: string } }
+        - { in: query, name: from, schema: { type: string, format: date } }
+        - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200': { description: Stránkované ruční položky a oddělené převzaté zdroje, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemList' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Accounting]
+      summary: Vytvoří koncept ostatní pohledávky nebo závazku
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemInput' } } }
+      responses:
+        '201': { description: Koncept, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/other-items/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/SupplierIdHeader' }
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    get:
+      tags: [Accounting]
+      summary: Detail ostatní pohledávky nebo závazku
+      responses:
+        '200': { description: Detail, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Accounting]
+      summary: Změní pouze koncept
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemInput' } } }
+      responses:
+        '200': { description: Změněný koncept, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [Accounting]
+      summary: Měkce smaže pouze koncept
+      responses:
+        '200': { description: Smazáno }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/post:
+    post:
+      tags: [Accounting]
+      summary: Potvrdí doklad; v podvojném účetnictví jej zaúčtuje
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Potvrzený nebo zaúčtovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/reverse:
+    post:
+      tags: [Accounting]
+      summary: Stornuje zaúčtovaný nebo zruší potvrzený doklad
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3 }, entry_date: { type: string, format: date } } } } }
+      responses:
+        '200': { description: Stornovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/repost:
+    post:
+      tags: [Accounting]
+      summary: Přeúčtuje potvrzený doklad stornem původního a novým zápisem
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entry_date, reason]
+              properties:
+                account_code: { type: string }
+                counter_account_code: { type: string, description: Původní jednořádková kontace; vynechte při použití posting_lines }
+                posting_lines:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items: { $ref: '#/components/schemas/OtherItemPostingLine' }
+                entry_date: { type: string, format: date }
+                reason: { type: string, minLength: 3 }
+      responses:
+        '200': { description: Přeúčtovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/allocations:
+    get:
+      tags: [Accounting]
+      summary: Spárované úhrady dokladu
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Úhrady, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemAllocation' } } } } } } }
+    post:
+      tags: [Accounting]
+      summary: Spáruje část bankovní nebo pokladní platby
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [amount], properties: { bank_transaction_id: { type: integer }, cash_document_id: { type: integer }, amount: { type: number, exclusiveMinimum: 0 } } } } }
+      responses:
+        '200': { description: Aktualizovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/allocations/{allocation_id}:
+    delete:
+      tags: [Accounting]
+      summary: Odpojí spárovanou úhradu
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: allocation_id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Aktualizovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/payment-candidates:
+    get:
+      tags: [Accounting]
+      summary: Volné bankovní a pokladní platby ve stejné měně a směru
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, maximum: 50 } }
+      responses:
+        '200': { description: Kandidáti, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemPaymentCandidate' } } } } } } }
+
+  /api/v1/accounting/other-items/schedules:
+    get:
+      tags: [Accounting]
+      summary: Rozvrhy opakovaných ostatních položek
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      responses:
+        '200': { description: Rozvrhy, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemSchedule' } } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/schedules/{id}:
+    get:
+      tags: [Accounting]
+      summary: Rozvrh včetně vygenerovaných konceptů
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/schedules/{id}/generate:
+    post:
+      tags: [Accounting]
+      summary: Idempotentně vytvoří koncepty do zadaného data
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [through], properties: { through: { type: string, format: date } } } } }
+      responses:
+        '200': { description: Identifikátory nových konceptů a rozvrh, content: { application/json: { schema: { type: object, properties: { created_ids: { type: array, items: { type: integer } }, schedule: { $ref: '#/components/schemas/OtherItemSchedule' } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/schedules/{id}/status:
+    put:
+      tags: [Accounting]
+      summary: Aktivuje nebo pozastaví opakování
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [active, paused] } } } } }
+      responses:
+        '200': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{item_id}/schedule:
+    post:
+      tags: [Accounting]
+      summary: Založí opakování z existujícího dokladu
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: item_id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [frequency], properties: { frequency: { type: string, enum: [monthly, quarterly, yearly] }, ends_on: { type: [string, 'null'], format: date } } } } }
+      responses:
+        '201': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{item_id}/installments:
+    get:
+      tags: [Accounting]
+      summary: Splátkový kalendář dokladu
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: item_id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Splátky, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemInstallment' } } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Accounting]
+      summary: Nastaví termíny splátek; prázdné pole kalendář zruší
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: item_id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemInstallmentInput' } } } } } }
+      responses:
+        '200': { description: Splátky, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemInstallment' } } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /api/v1/accounting/cash-documents:
     get:
@@ -14747,15 +15209,17 @@ paths:
       tags: [Stock]
       summary: Našeptávač skladových karet (autocomplete)
       description: |
-        Aktivní karty podle SKU, názvu, EAN karty nebo přesného EAN balení. Každý
+        Aktivní karty podle SKU, názvu, EAN karty nebo přesného EAN balení; od 3 znaků
+        i podle sériového čísla, šarže nebo textového parametru. Každý
         výsledek nese i `effective_price` (CZK, dnes, bez odběratele), `default_sale_unit`,
         `units` (balení karty, `StockItemSalesUnit`), `matched_unit` (kód balení, jehož
-        EAN přesně odpovídá `q`, jinak null) a `has_customer_prices`.
+        EAN přesně odpovídá `q`, jinak null), `has_customer_prices` a `search_match`
+        (stejný význam jako v seznamu karet).
       parameters:
         - in: query
           name: q
           schema: { type: string }
-          description: Hledaný text (SKU, název, EAN karty nebo EAN balení).
+          description: Hledaný text (SKU, název, EAN karty nebo EAN balení, sériové číslo, šarže, textový parametr).
         - in: query
           name: limit
           schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
@@ -14770,7 +15234,7 @@ paths:
       description: |
         Jen čte. Jednotka řádku se převede na základní jednotku karty (jen balení,
         neznámá jednotka = základní), cena za základní jednotku vznikne stejně jako
-        `effective_price` (se zákaznickou cenou nebo cenovou hladinou odběratele, akce se stropem
+        `effective_price` (se zákaznickou cenou nebo cenovou hladinou dokladu či odběratele, akce se stropem
         v základních jednotkách) a `unit_price` = cena za základní jednotku × poměr
         na haléře. Karta bez ceny v požadované měně vrací `unit_price`
         i `base_unit_price` null, nikdy 0.
@@ -14815,7 +15279,11 @@ paths:
         name: q
         schema:
           type: string
-        description: Fulltextové hledání (SKU, název, EAN).
+        description: |
+          Fulltextové hledání (SKU, název, EAN). Od 3 znaků hledá i v sériových
+          číslech a šaržích kusů a v textových parametrech karty. Řádek, který vyhověl
+          jen takto, nese `search_match` (`kind` = serial | lot | attribute, `value`,
+          `attribute` = název parametru); jinak je `search_match` null.
       - in: query
         name: only_below_min
         schema:
@@ -15280,6 +15748,14 @@ paths:
       description: |
         Stránkovaný výpis pohybů karty s běžnou bilancí (`balance_after` po každém
         řádku) a počáteční bilancí (`opening_balance`) k dané stránce.
+
+        Pohyb vyvolaný fakturou nebo dobropisem nese `invoice_id`, `invoice_number`,
+        `invoice_type`, prodejní cenu řádku (`sale_unit_price` bez DPH za `sale_unit`
+        v měně `sale_currency`) a odběratele v `partner`. Příjem z přijaté faktury nese
+        `purchase_invoice_id`, `purchase_invoice_number` a dodavatele. `partner` je
+        `{kind: client | vendor | text, id, name}`; jméno je ze snapshotu dokladu,
+        u ručního dokladu volný text bez `id`. Token bez práva ke čtení vydaných,
+        resp. přijatých faktur dostane tyto údaje jako null.
       parameters:
         - in: query
           name: warehouse_id
@@ -16879,6 +17355,63 @@ paths:
           schema: { type: integer }
       responses:
         '200': { description: OK }
+  /api/v1/stock/reports/sales:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Stock]
+      summary: Sestava prodejů skladových karet
+      description: |
+        Řádky vydaných faktur a dobropisů navázané na skladovou kartu: kdo, kdy, co
+        a za kolik koupil. Koncept, stornovaný doklad, proforma a daňový doklad
+        k platbě se nepočítají. Dobropis snižuje tržbu vždy, prodané množství jen
+        o zboží vrácené na sklad (vratka k řádku dobropisu). Filtr `warehouse_id`
+        zahrne i řádky bez skladu, pokud je zvolený sklad výchozí.
+        Období se určuje podle DUZP (bez něj podle data vystavení). Částky jsou
+        v měně dokladu a součty po měnách (`totals.amounts`), bez přepočtu kurzem.
+        Řádek nese `identifiers` = sériová čísla a šarže vydané k řádku faktury
+        (bez stornovaných výdejek).
+        Vyžaduje právo ke skladu i ke čtení vydaných faktur.
+      parameters:
+        - in: query
+          name: date_from
+          schema: { type: string, format: date }
+          description: Výchozí 1. ledna aktuálního roku.
+        - in: query
+          name: date_to
+          schema: { type: string, format: date }
+          description: Výchozí dnešní datum.
+        - in: query
+          name: client_id
+          schema: { type: integer }
+        - in: query
+          name: category_id
+          schema: { type: integer }
+          description: Kategorie karty včetně podkategorií.
+        - in: query
+          name: warehouse_id
+          schema: { type: integer }
+        - in: query
+          name: stock_item_id
+          schema: { type: integer }
+        - in: query
+          name: q
+          schema: { type: string }
+          description: SKU, název karty nebo text řádku; od 3 znaků i prodané sériové číslo nebo šarže a textový parametr karty.
+        - in: query
+          name: group_by
+          schema: { type: string, enum: [none, client, item], default: none }
+          description: Souhrn `groups` po odběratelích nebo kartách (dokladů, řádků, množství, částky po měnách).
+        - in: query
+          name: page
+          schema: { type: integer, default: 1, minimum: 1 }
+        - in: query
+          name: per_page
+          schema: { type: integer, default: 50, minimum: 1, maximum: 500 }
+      responses:
+        '200': { description: OK }
+        '403': { description: Chybí právo ke čtení vydaných faktur. }
+        '422': { description: Neplatný filtr (datum, identifikátor, seskupení). }
   /api/v1/stock/reports/{name}/export:
     parameters:
     - $ref: '#/components/parameters/SupplierIdHeader'
@@ -16890,12 +17423,14 @@ paths:
         enum:
         - status
         - valuation
+        - sales
     get:
       tags:
       - Stock
       summary: Export sestavy (PDF/XLSX)
-      description: Export sestavy `status` nebo `valuation` (stejné filtry jako u dat
-        sestavy).
+      description: Export sestavy `status` nebo `valuation` (PDF i XLSX) a `sales` (jen
+        XLSX, nejvýše 20 000 řádků; vyžaduje i čtení vydaných faktur). Filtry jsou
+        stejné jako u dat sestavy.
       parameters:
       - in: query
         name: format
@@ -20977,6 +21512,150 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    OtherItemSchedule:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        source_item_id: { type: [integer, 'null'], format: int64 }
+        frequency: { type: string, enum: [monthly, quarterly, yearly] }
+        anchor_on: { type: string, format: date }
+        due_days: { type: integer }
+        ends_on: { type: [string, 'null'], format: date }
+        next_index: { type: integer }
+        status: { type: string, enum: [active, paused] }
+        template:
+          type: object
+          properties:
+            side: { type: string, enum: [receivable, payable] }
+            kind: { type: string }
+            title: { type: string }
+            partner_id: { type: [integer, 'null'] }
+            partner_name: { type: [string, 'null'] }
+            currency: { type: string }
+            amount: { type: number }
+            exchange_rate: { type: [number, 'null'] }
+            variable_symbol: { type: [string, 'null'] }
+            account_code: { type: [string, 'null'] }
+            counter_account_code: { type: [string, 'null'] }
+            posting_lines: { type: array, items: { $ref: '#/components/schemas/OtherItemPostingLine' } }
+            note: { type: [string, 'null'] }
+        occurrences: { type: array, items: { type: object, properties: { occurrence_index: { type: integer }, item_id: { type: integer }, issued_on: { type: string, format: date }, status: { type: string } } } }
+    OtherItemInstallmentInput:
+      type: object
+      required: [due_on, amount]
+      properties:
+        due_on: { type: string, format: date }
+        amount: { type: number, exclusiveMinimum: 0 }
+    OtherItemInstallment:
+      allOf:
+        - { $ref: '#/components/schemas/OtherItemInstallmentInput' }
+        - type: object
+          properties:
+            id: { type: integer, format: int64 }
+            position: { type: integer }
+    OtherItemPostingLine:
+      type: object
+      required: [account_code, amount]
+      properties:
+        account_code: { type: string, maxLength: 20 }
+        amount: { type: number, exclusiveMinimum: 0, multipleOf: 0.01 }
+    OtherItemInput:
+      type: object
+      required: [side, title, issued_on, due_on, amount]
+      properties:
+        side: { type: string, enum: [receivable, payable] }
+        kind: { type: string, enum: [other, rent, loan, deposit, insurance, fee, claim], default: other }
+        title: { type: string, maxLength: 255 }
+        partner_id: { type: [integer, 'null'] }
+        partner_name: { type: [string, 'null'] }
+        issued_on: { type: string, format: date }
+        accounting_on: { type: [string, 'null'], format: date }
+        due_on: { type: string, format: date }
+        currency: { type: string, enum: [CZK], default: CZK }
+        amount: { type: number, exclusiveMinimum: 0 }
+        exchange_rate: { type: [number, 'null'], description: Ignorováno, pro tuto agendu je podporována pouze CZK }
+        variable_symbol: { type: [string, 'null'] }
+        account_code: { type: [string, 'null'], description: Rozvahový účet pohledávky nebo závazku }
+        counter_account_code: { type: [string, 'null'], description: Původní jednořádková kontace; při více protiřádcích je null }
+        posting_lines:
+          type: array
+          minItems: 1
+          maxItems: 50
+          description: Protiřádky kontace v CZK; součet musí přesně odpovídat amount_czk. U starých dokladů se jednořádková kontace vrací synteticky.
+          items: { $ref: '#/components/schemas/OtherItemPostingLine' }
+        note: { type: [string, 'null'] }
+    OtherItem:
+      allOf:
+        - { $ref: '#/components/schemas/OtherItemInput' }
+        - type: object
+          required: [id, status, paid_amount, remaining_amount]
+          properties:
+            id: { type: integer, format: int64 }
+            status: { type: string, enum: [draft, confirmed, posted, reversed, cancelled] }
+            document_no: { type: [string, 'null'] }
+            amount_czk: { type: number }
+            paid_amount: { type: number }
+            remaining_amount: { type: number }
+            journal_entry_id: { type: [integer, 'null'], format: int64 }
+            reversal_entry_id: { type: [integer, 'null'], format: int64 }
+            posted_at: { type: [string, 'null'], format: date-time }
+    OtherItemList:
+      type: object
+      required: [items, total, page, per_page, sources]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OtherItem' } }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+        sources:
+          type: array
+          description: Převzaté položky ze mzdového a daňového modulu, pouze ke čtení
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              source_kind: { type: string, enum: [payroll, tax_advance, payroll_forecast, vat_forecast, dppo_forecast] }
+              side: { type: string, enum: [receivable, payable] }
+              title: { type: string }
+              due_on: { type: string, format: date }
+              amount: { type: number }
+              paid_amount: { type: number }
+              remaining_amount: { type: number }
+              certainty: { type: string, enum: [confirmed, scheduled, estimate] }
+              status: { type: string, enum: [open, overdue, partial, paid, forecast] }
+              source_url: { type: string }
+              editable: { type: boolean, const: false }
+    OtherItemResultImpact:
+      type: object
+      description: Výsledkový dopad ostatních položek za rok podle typu protiúčtu; rozvahové položky se vynechají.
+      properties:
+        currency: { type: string }
+        revenue: { type: number }
+        costs: { type: number }
+        profit: { type: number }
+        revenue_czk: { type: number }
+        costs_czk: { type: number }
+        profit_czk: { type: number }
+        posted: { type: number }
+        draft: { type: number }
+    OtherItemAllocation:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        bank_transaction_id: { type: [integer, 'null'], format: int64 }
+        cash_document_id: { type: [integer, 'null'], format: int64 }
+        amount: { type: number }
+        payment_on: { type: string, format: date }
+        reversed_on: { type: [string, 'null'], format: date }
+    OtherItemPaymentCandidate:
+      type: object
+      properties:
+        source: { type: string, enum: [bank, cash] }
+        id: { type: integer, format: int64 }
+        payment_on: { type: string, format: date }
+        amount: { type: number }
+        currency: { type: string }
+        description: { type: string }
     ShoptetFeed:
       type: object
       description: Kořen `SHOP` feedu pro automatický import produktů Shoptetu.
@@ -22215,6 +22894,9 @@ components:
       required: [lines]
       properties:
         client_id: { type: [integer, 'null'] }
+        price_level_id:
+          type: [integer, 'null']
+          description: Cenová hladina dokladu; přepíše hladinu odběratele a platí i bez odběratele. Individuální cena zákazníka má přednost. Neexistující nebo neaktivní hladina = 422 `invalid_price_level`.
         currency: { type: string, minLength: 3, maxLength: 3, default: CZK }
         date: { type: [string, 'null'], format: date, description: Default dnes. }
         lines:
@@ -24566,6 +25248,8 @@ components:
         posted_by: { type: [integer, "null"] }
         reversed_by: { type: [integer, "null"] }
         row_version: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
         amount: { type: number, format: float, description: "Jen v listu. Bez filtru account_from/account_to: Σ MD řádků zápisu. S filtrem: absolutní částka připadající na filtrovaný rozsah účtů v tomto zápisu (viz amount_side)." }
         amount_side:
           type: [string, "null"]
@@ -25003,13 +25687,13 @@ components:
     DocumentLink:
       type: object
       properties:
-        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] }
+        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] }
         entity_id: { type: integer }
         label: { type: string }
     DocumentLinkCandidate:
       type: object
       properties:
-        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] }
+        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] }
         entity_id: { type: integer }
         label: { type: string }
         sublabel: { type: string }
@@ -25059,6 +25743,45 @@ components:
                 type: array
                 items: { type: string }
               example: { name: ["Název zakázky je povinný"], payment_due_days: ["Splatnost musí být 1–365 dní"] }
+
+    InvoiceSeriesCompletenessResult:
+      type: object
+      required: [year, series, total_missing]
+      properties:
+        year: { type: integer }
+        series:
+          type: array
+          items: { $ref: '#/components/schemas/InvoiceSeriesGroup' }
+        total_missing: { type: integer }
+
+    InvoiceSeriesGroup:
+      type: object
+      required: [types, client_id, revenue_category_id, period, template_by_type, buckets]
+      properties:
+        types: { type: array, items: { type: string, enum: [invoice, credit_note] } }
+        inferred: { type: boolean, description: "Přítomno a true, pokud byla řada rozpoznána z čísel importovaných dokladů mimo současné šablony." }
+        client_id: { type: integer }
+        client_name: { type: [string, "null"] }
+        revenue_category_id: { type: integer }
+        revenue_category_name: { type: [string, "null"] }
+        period: { type: string, enum: [year, month, none] }
+        template_by_type: { type: object, additionalProperties: { type: string } }
+        buckets:
+          type: array
+          items: { $ref: '#/components/schemas/InvoiceSeriesBucket' }
+
+    InvoiceSeriesBucket:
+      type: object
+      required: [period_key, used_count, range_from, range_to, missing, missing_total, missing_truncated, missing_preview]
+      properties:
+        period_key: { type: string }
+        used_count: { type: integer }
+        range_from: { type: integer }
+        range_to: { type: integer }
+        missing: { type: array, items: { type: integer } }
+        missing_total: { type: integer }
+        missing_truncated: { type: boolean }
+        missing_preview: { type: array, items: { type: string } }
 
     ListMeta:
       type: object
@@ -25302,6 +26025,40 @@ components:
           type: object
           additionalProperties: { type: integer, format: int64 }
           description: "Výchozí dimenze (Firma → Dimenze): id typu → id hodnoty, nejvýš jedna hodnota za typ."
+
+    DimensionAnalyticsAmounts:
+      type: object
+      required: [revenue, cost, result, tax_deductible_cost, non_deductible_cost, income_tax_cost]
+      properties:
+        revenue: { type: number, description: 'Zaúčtované výnosy (třída 6) bez DPH.' }
+        cost: { type: number, description: 'Zaúčtované náklady (třída 5) bez DPH.' }
+        result: { type: number, description: 'Výnosy mínus náklady.' }
+        tax_deductible_cost: { type: number, description: 'Náklady bez nedaňových položek a daně z příjmů.' }
+        non_deductible_cost: { type: number, description: 'Nedaňové náklady podle stejného pravidla jako podklad DPPO/DPFO.' }
+        income_tax_cost: { type: number, description: 'Náklady na účtech 59x, vykázané zvlášť.' }
+
+    DimensionAnalytics:
+      type: object
+      required: [type, year, supplier_ids, rows, unassigned, totals, value_totals, monthly, previous_monthly, value_monthly, companies, company_value_totals, available_companies, hidden_companies]
+      properties:
+        type: { type: object, description: 'Zvolený typ dimenze.' }
+        year: { type: integer }
+        supplier_ids: { type: array, items: { type: integer } }
+        rows: { type: array, items: { type: object }, description: 'Strom hodnot a součty jako u výsledovky po dimenzi.' }
+        unassigned: { $ref: '#/components/schemas/DimensionAnalyticsAmounts' }
+        totals: { $ref: '#/components/schemas/DimensionAnalyticsAmounts' }
+        value_totals: { type: object, description: 'Součty za kořenové hodnoty ID (nebo prázdný klíč).', additionalProperties: { $ref: '#/components/schemas/DimensionAnalyticsAmounts' } }
+        monthly:
+          type: array
+          items: { allOf: [{ $ref: '#/components/schemas/DimensionAnalyticsAmounts' }, { type: object, properties: { month: { type: string, example: '2026-01' } } }] }
+        previous_monthly:
+          type: array
+          items: { allOf: [{ $ref: '#/components/schemas/DimensionAnalyticsAmounts' }, { type: object, properties: { month: { type: string, example: '2025-01' } } }] }
+        value_monthly: { type: object, additionalProperties: { type: array, items: { type: object } } }
+        companies: { type: array, items: { type: object, properties: { id: { type: integer }, name: { type: string }, revenue: { type: number }, cost: { type: number }, result: { type: number }, tax_deductible_cost: { type: number }, non_deductible_cost: { type: number }, income_tax_cost: { type: number } } } }
+        company_value_totals: { type: object, description: 'Firma ID → kořenová hodnota ID (nebo prázdný klíč) → součty.', additionalProperties: { type: object, additionalProperties: { $ref: '#/components/schemas/DimensionAnalyticsAmounts' } } }
+        available_companies: { type: array, items: { type: object, properties: { id: { type: integer }, company_name: { type: string } } } }
+        hidden_companies: { type: integer }
 
     Client:
       type: object
@@ -25571,6 +26328,7 @@ components:
         reverse_charge: { type: boolean }
         prices_include_vat: { type: boolean, description: "Ceny položek zadané včetně DPH (DPH se počítá shora koeficientem). Per-doklad, migrace 0083." }
         auto_send_reminders: { type: boolean, description: "Per-faktura přepínač automatických upomínek (migrace 0088). False = cron tuto fakturu přeskočí, i když má dodavatel i klient upomínky zapnuté." }
+        price_level_id: { type: [integer, "null"], description: "Cenová hladina zvolená na dokladu (migrace 1866); null = hladina odběratele. Slouží k nacenění skladových řádků, ceny zůstávají uložené na řádcích." }
         client_ic: { type: [string, "null"], description: "Denormalizováno z klienta" }
         client_dic: { type: [string, "null"] }
         revenue_category_id: { type: [integer, "null"], description: "FK do /revenue-categories — kategorie tržby pro CRM/Grafy" }
@@ -25578,6 +26336,10 @@ components:
         revenue_category_code: { type: [string, "null"] }
         revenue_category: { type: [string, "null"], description: "Legacy volný textový tag (nahrazeno revenue_category_id)" }
         vat_classification_code: { type: [string, "null"], description: "Hlavičkový default kódu klasifikace plnění (DPHDP3 / KH)" }
+        kh_sections:
+          type: array
+          description: "Oddíly kontrolního hlášení podle Knihy DPH; dostupné jen v seznamu s filter[include_kh]=1."
+          items: { type: string }
         issue_date: { type: string, format: date }
         due_date: { type: string, format: date }
         tax_date: { type: [string, "null"], format: date, description: "DUZP — null u proforem" }
@@ -25685,7 +26447,7 @@ components:
         z `COALESCE(tax_date, issue_date)`.
       required: [month, count, totals_per_currency, invoices]
       properties:
-        month: { type: string, example: "2026-05", description: "Měsíc ve formátu YYYY-MM" }
+        month: { type: string, example: "2026-05", description: "Měsíc ve formátu YYYY-MM; prázdný řetězec pro souvislý seznam." }
         count: { type: integer, description: "Počet faktur skupiny na aktuální stránce" }
         totals_per_currency:
           type: array
@@ -25760,6 +26522,13 @@ components:
           description: |
             Zjednodušený daňový doklad podle § 30 ZDPH (do 10 000 Kč včetně daně).
             Ukládá se jen na instalacích s migrací 1170 — starší sloupec nemají a pole se ignoruje.
+        price_level_id:
+          type: [integer, "null"]
+          description: |
+            Cenová hladina dokladu (migrace 1866), přepíše hladinu odběratele při nacenění
+            skladových řádků. Musí patřit firmě a být aktivní (neaktivní projde jen, když ji
+            doklad už má), jinak 422 `invalid_price_level`. Null ji zruší, chybějící klíč
+            hodnotu nemění.
         income_tax_exempt:
           type: boolean
           default: false
@@ -26174,6 +26943,9 @@ components:
         is_vat_payer:
           type: boolean
           description: "Plátce DPH? Určuje použitý sloupec obratu (total_without_vat vs total_with_vat)."
+        other_item_result_impact:
+          type: array
+          items: { $ref: '#/components/schemas/OtherItemResultImpact' }
         kpi:
           type: object
           properties:
@@ -26545,8 +27317,13 @@ components:
         bank_code: { type: [string, "null"], pattern: '^[0-9]{4}$' }
         iban: { type: [string, "null"] }
         currency: { type: [string, "null"], minLength: 3, maxLength: 3 }
-        kind: { type: string, enum: [current, savings, term_deposit] }
-        analytic_suffix: { type: [string, "null"], description: 'Analytika účtu 221 (221<suffix>); přiděluje se automaticky každému aktivnímu účtu.' }
+        kind:
+          type: string
+          enum: [current, savings, term_deposit, credit_card]
+          description: >-
+            credit_card = úvěrový účet kreditní karty. Jeho pohyby se účtují na analytiku 231
+            (spravuje ji stránka Kreditní karty), analytic_suffix 221 zůstává prázdný.
+        analytic_suffix: { type: [string, "null"], description: 'Analytika účtu 221 (221<suffix>); přiděluje se automaticky každému aktivnímu účtu kromě úvěrového účtu kreditní karty.' }
         is_active: { type: boolean }
         source: { type: string, enum: [currencies, statement, manual] }
         currency_id: { type: [integer, "null"] }
@@ -26900,6 +27677,15 @@ components:
             note: { type: [string, "null"], description: "payroll_partial_posting označuje neúplné pokrytí částky mzdovými zápisy; status je null a pohyb zůstává ve filtru unposted." }
             journal_entry_id: { type: integer, format: int64, description: "Existující bankovní nebo mzdový účetní zápis úhrady." }
             document_no: { type: [string, "null"] }
+            journal_notes:
+              type: array
+              description: "Živé poznámky zápisu `journal_entry_id` (připnuté první). Poznámka patří zápisu deníku; zakládá a mění se přes /api/accounting/journal/{id}/notes. Jen u pohybu se zápisem."
+              items:
+                type: object
+                properties:
+                  id: { type: integer, format: int64 }
+                  body: { type: string }
+                  pinned: { type: boolean }
             suggestion_source: { type: [string, "null"], enum: [rule, learned, payment_match, transfer, null] }
             transfer: { $ref: '#/components/schemas/BankTransferPostingInfo' }
         dimensions:
@@ -26930,6 +27716,7 @@ components:
         data_box_id: { type: [string, "null"] }
         data_box_type: { type: [string, "null"], enum: [FO, PFO, PO, OVM, null], description: "Druh datové schránky v ISDS; nesouvisí s typem poplatníka." }
         oss_enabled: { type: boolean }
+        dimensions_enabled: { type: boolean, description: "Zapnutí dimenzí vyžaduje platnou licenci účetnictví nebo zkušební dobu. Vypnutí a uložení již zapnuté hodnoty ji nevyžaduje." }
         oss_valid_from: { type: [string, "null"], format: date }
         oss_valid_to: { type: [string, "null"], format: date }
         oss_identification_country: { type: [string, "null"], minLength: 2, maxLength: 2 }
@@ -27005,6 +27792,7 @@ components:
         ic: { type: [string, "null"] }
         dic: { type: [string, "null"] }
         is_vat_payer: { type: boolean, description: "Aktuální stav plátcovství DPH (derivovaná cache dneška); historie změn v `vat_status_history` (tabulka supplier_vat_status_history). Pro rozhodování k datu dokladu/období vždy použij historii, ne tento flag." }
+        dimensions_enabled: { type: boolean, description: "Uložený příznak dimenzí. Dostupnost funkce navíc závisí na platné licenci účetnictví." }
         vat_status_history:
           type: array
           readOnly: true
@@ -27488,6 +28276,8 @@ components:
         tax_date: { type: [string, "null"], format: date, description: "DUZP" }
         due_date: { type: string, format: date }
         received_at: { type: string, format: date }
+        project_name: { type: [string, "null"] }
+        payment_ordered_at: { type: [string, "null"], format: date-time }
         currency_id: { type: integer }
         currency: { type: string }
         total_without_vat: { type: number }
@@ -27509,6 +28299,10 @@ components:
         vendor_company_name: { type: string }
         vendor_ic: { type: [string, "null"] }
         month_bucket: { type: string, example: "2026-05" }
+        kh_sections:
+          type: array
+          description: "Oddíly kontrolního hlášení podle Knihy DPH; dostupné jen s filter[include_kh]=1."
+          items: { type: string }
         has_small_asset:
           type: boolean
           description: "§DM — aspoň jedna položka dokladu má expense_kind='small_asset' (drobný majetek). Jen v seznamu, v detailu se odvozuje z items[]."

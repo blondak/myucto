@@ -158,7 +158,11 @@ final class RbacSourceGuardsTest extends TestCase
         self::assertStringContainsString('capacity->mutateSeats(', $roleAdmin);
         self::assertGreaterThanOrEqual(2, substr_count($userAdmin, 'capacity->mutateSeats('));
         self::assertStringContainsString('capacity->mutateSeats(', $userSuppliers);
-        self::assertStringContainsString('licenseCapacity->createCompany(', $settings);
+        // Firmu zakládá SupplierCreator (aplikace i dávkový převod) — pod kapacitní bránou.
+        $creator = file_get_contents($src . '/Service/Supplier/SupplierCreator.php');
+        self::assertIsString($creator);
+        self::assertStringContainsString('licenseCapacity->createCompany(', $creator);
+        self::assertStringContainsString('supplierCreator->create(', $settings);
         self::assertStringContainsString('countActiveSeats()', $capacityGate);
         self::assertStringContainsString('withActiveCompanies(', $capacityGate);
     }

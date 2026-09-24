@@ -79,6 +79,11 @@ final class ArchiveRestoreService
         'cash_registers',
         'cash_documents',
         'cash_document_vat_lines',
+        'other_items',
+        'other_item_schedules',
+        'other_item_schedule_occurrences',
+        'other_item_installments',
+        'other_item_allocations',
         'invoice_payments',
         'income_tax_returns',
         'tax_losses',
@@ -175,6 +180,8 @@ final class ArchiveRestoreService
         'tax_advance_schedules' => ['source_return_id' => 'income_tax_returns'],
         // Cenová hladina odběratele (1833) — bez FK; bez hladiny v archivu → NULL (Default).
         'clients' => ['price_level_id' => 'stock_price_levels'],
+        // Cenová hladina zvolená na dokladu (1880) — totéž, bez remapu by faktura mířila na hladinu jiné firmy.
+        'invoices' => ['price_level_id' => 'stock_price_levels'],
     ];
 
     /** Tabulky bez sloupce `id` (PK = supplier_id / kompozit) — bez id-mapy. */
@@ -577,6 +584,9 @@ final class ArchiveRestoreService
     private function buildInsert(string $table, array $row, int $target, array $processedSet, array &$warnings): array
     {
         $row = $this->remapStockSnapshots($table, $row);
+        if ($table === 'bank_transactions' && ($row['import_fingerprint'] ?? null) !== null) {
+            $row['portable_fingerprint'] ??= $row['import_fingerprint'];
+        }
         $cols = [];
         $vals = [];
         $defers = [];
@@ -588,6 +598,20 @@ final class ArchiveRestoreService
         $nonFk = self::NONFK_REFS[$table] ?? [];
 
         foreach ($row as $col => $val) {
+            if ($table === 'other_item_schedules' && $col === 'template_json') {
+                $template = json_decode((string) $val, true, 512, JSON_THROW_ON_ERROR);
+                if (!is_array($template)) {
+                    throw new RestoreException('snapshot_reference', 'Neplatná šablona opakovaného dokladu v archivu.');
+                }
+                if (array_key_exists('partner_id', $template) && $template['partner_id'] !== null) {
+                    $oldPartnerId = (int) $template['partner_id'];
+                    $template['partner_id'] = $this->maps['clients'][$oldPartnerId]
+                        ?? throw new RestoreException('snapshot_reference', 'Chybí mapování protistrany opakovaného dokladu.');
+                }
+                $cols[] = $col;
+                $vals[] = json_encode($template, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+                continue;
+            }
             if ($table === 'accounting_closing_steps' && ($row['step_key'] ?? null) === 'provisions' && $col === 'payload' && $val !== null) {
                 $payload = json_decode((string) $val, true, 512, JSON_THROW_ON_ERROR);
                 foreach ($payload['entries'] ?? [] as $index => $entry) {
@@ -626,6 +650,11 @@ final class ArchiveRestoreService
             if ($col === 'supplier_id') {
                 $cols[] = $col;
                 $vals[] = $target;
+                continue;
+            }
+            if ($table === 'bank_transactions' && $col === 'import_fingerprint' && $val !== null) {
+                $cols[] = $col;
+                $vals[] = hash('sha256', 'supplier:' . $target . ':' . $row['portable_fingerprint']);
                 continue;
             }
 
@@ -829,14 +858,8 @@ final class ArchiveRestoreService
     }
 
     /**
-     * `bank_statements` NENÍ tenant tabulka svým obsahem — je to celoinstanční
-     * content-addressed dedup (UNIQUE `file_hash`), stejná sémantika jako
-     * {@see \MyInvoice\Service\Bank\StatementImporter} / BankEmailNoticeRepository
-     * (find-or-create podle hashe). Restore firmy do BĚŽÍCÍ instance, kde originální
-     * (nebo jakákoli jiná) firma už tentýž soubor výpisu má naimportovaný, by na
-     * INSERT jinak spadl na UNIQUE constraint — místo insertu se proto řádek se
-     * shodným file_hash namapuje na existující id (žádná duplicita dat, sdílený
-     * `bank_statements` řádek beztak neobsahuje nic tenant-specifického).
+     * Každá obnova zakládá novou firmu, a proto i její vlastní bankovní výpis.
+     * Stejný hash v jiné firmě nesmí způsobit sdílení hlavičky ani transakcí.
      *
      * @param array<string,mixed> $row
      * @param array<string,bool> $processedSet
@@ -844,15 +867,6 @@ final class ArchiveRestoreService
      */
     private function importBankStatement(array $row, int $target, array $processedSet, array &$warnings): int
     {
-        $hash = (string) ($row['file_hash'] ?? '');
-        if ($hash !== '') {
-            $stmt = $this->db->pdo()->prepare('SELECT id FROM bank_statements WHERE file_hash = ?');
-            $stmt->execute([$hash]);
-            $existing = $stmt->fetchColumn();
-            if ($existing !== false) {
-                return (int) $existing;
-            }
-        }
         [$cols, $vals, $rowDefers] = $this->buildInsert('bank_statements', $row, $target, $processedSet, $warnings);
         if ($rowDefers !== []) {
             // bank_statements nemá tenant/RESTORE_ORDER FK kromě globálního imported_by
@@ -888,6 +902,7 @@ final class ArchiveRestoreService
         $docMap = [
             'invoice' => 'invoices',
             'purchase_invoice' => 'purchase_invoices',
+            'other_item' => 'other_items',
             'provision' => 'invoices',        // opravná položka k pohledávce → invoice id
             'bank' => 'bank_transactions',
             'asset' => 'assets',

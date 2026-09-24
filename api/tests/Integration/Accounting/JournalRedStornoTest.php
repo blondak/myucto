@@ -119,6 +119,20 @@ final class JournalRedStornoTest extends TestCase
         self::assertSame(100.0, $byCode['321']['to_d']);
     }
 
+    public function testDimensionFilteredLedgerKeepsRedStornoSign(): void
+    {
+        $this->entry(100.00, false, 'Syntetický pohyb');
+        $this->entry(10.00, true, 'Syntetická oprava');
+        $this->db->pdo()->prepare("UPDATE journal_entry_lines SET cost_center='SYN' WHERE supplier_id=?")
+            ->execute([$this->supplierId]);
+        $dimension = new \MyInvoice\Service\Accounting\Dimension\DimensionFilter(0, 0, [0], ['SYN']);
+        $rows = $this->ledger->trialBalanceRows($this->supplierId, self::YEAR . '-01-01',
+            self::YEAR . '-12-31', self::YEAR . '-01-01', true, ['dimension' => $dimension]);
+        $byCode = array_column($rows, null, 'account_code');
+        self::assertSame(90.0, $byCode['518']['to_md']);
+        self::assertSame(90.0, $byCode['321']['to_d']);
+    }
+
     public function testBalanceValidationUsesRedStornoSign(): void
     {
         $this->expectException(UnbalancedEntryException::class);

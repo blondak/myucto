@@ -23,6 +23,8 @@ use PDO;
  *
  * Buď projde celá skupina dokladů, nebo se nesmaže nic — jediný zápis v uzavřeném či
  * uzamčeném období vrátí `blocked` a volající pokračuje svou dosavadní cestou.
+ * Uzamčené datum projde, když účetní zásah potvrdil (`$lockedAcknowledged`, viz
+ * {@see JournalEntryDeletionRules::blockPeriod()}); zavřené období nikdy.
  * Běží výhradně v transakci volajícího.
  */
 final class DocumentJournalPurge
@@ -41,12 +43,18 @@ final class DocumentJournalPurge
      * @param array{user_id?:?int, ip?:?string, user_agent?:?string} $meta
      * @return array{
      *   deleted: list<int>,
-     *   blocked: array{source_id:int, entry_id:int, code:string, message:string}|null,
+     *   blocked: array{source_id:int, entry_id:int, code:string, message:string, can_acknowledge?:bool}|null,
      *   attachments: list<array<string,mixed>>
      * }
      */
-    public function purge(int $supplierId, string $sourceType, array $sourceIds, array $meta, string $reason): array
-    {
+    public function purge(
+        int $supplierId,
+        string $sourceType,
+        array $sourceIds,
+        array $meta,
+        string $reason,
+        bool $lockedAcknowledged = false,
+    ): array {
         $pdo = $this->db->pdo();
         if (!$pdo->inTransaction()) {
             throw new \LogicException('DocumentJournalPurge::purge musí běžet v transakci volajícího.');
@@ -73,7 +81,7 @@ final class DocumentJournalPurge
 
             if ($entry['reversed_by'] === null) {
                 $block = in_array($sourceType, JournalEntryDeletionRules::SINGLE_SOURCE_TYPES, true)
-                    ? JournalEntryDeletionRules::blockSingle($entry, $lockedUntil)
+                    ? JournalEntryDeletionRules::blockSingle($entry, $lockedUntil, $lockedAcknowledged)
                     : ['code' => 'entry_delete_not_supported', 'message' => 'Tento typ zápisu se ruší přes své zdrojové workflow.'];
                 if ($block !== null) {
                     return self::blocked($sourceId, (int) $entry['id'], $block);
@@ -100,7 +108,7 @@ final class DocumentJournalPurge
                 ]);
             }
             foreach ([$entry, $reversal] as $row) {
-                if ($block = JournalEntryDeletionRules::blockPeriod($row, $lockedUntil)) {
+                if ($block = JournalEntryDeletionRules::blockPeriod($row, $lockedUntil, $lockedAcknowledged)) {
                     return self::blocked($sourceId, (int) $row['id'], $block);
                 }
             }
@@ -128,6 +136,10 @@ final class DocumentJournalPurge
 
             $original = $group['entries'][count($group['entries']) - 1];
             $isPair = count($group['entries']) === 2;
+            $lockedOverride = false;
+            foreach ($group['entries'] as $row) {
+                $lockedOverride = $lockedOverride || JournalEntryDeletionRules::isDateLocked($row, $lockedUntil);
+            }
             $this->logger->log(
                 $isPair ? 'accounting.reversal_pair_deleted' : 'accounting.entry_deleted',
                 $meta['user_id'] ?? null,
@@ -135,6 +147,7 @@ final class DocumentJournalPurge
                 (int) $original['id'],
                 array_filter([
                     'reason'               => $reason,
+                    'locked_override'      => $lockedOverride ? $lockedUntil : null,
                     'reversal_entry_id'    => $isPair ? (int) $group['entries'][0]['id'] : null,
                     'period_id'            => (int) $original['period_id'],
                     'entry_date'           => (string) $original['entry_date'],
@@ -217,8 +230,8 @@ final class DocumentJournalPurge
     }
 
     /**
-     * @param array{code:string, message:string} $block
-     * @return array{deleted: list<int>, blocked: array{source_id:int, entry_id:int, code:string, message:string}, attachments: list<array<string,mixed>>}
+     * @param array{code:string, message:string, can_acknowledge?:bool} $block
+     * @return array{deleted: list<int>, blocked: array{source_id:int, entry_id:int, code:string, message:string, can_acknowledge?:bool}, attachments: list<array<string,mixed>>}
      */
     private static function blocked(int $sourceId, int $entryId, array $block): array
     {

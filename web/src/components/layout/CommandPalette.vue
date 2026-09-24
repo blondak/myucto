@@ -6,6 +6,8 @@ import { markTipUsed } from '@/composables/useTips'
 import { searchApi, type SearchResults } from '@/api/search'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 import { formatShortcut } from '@/composables/useKeyboardShortcuts'
+import { useSupplierStore } from '@/stores/supplier'
+import { matchSwitchableSuppliers, useSupplierSwitch } from '@/composables/useSupplierSwitch'
 
 /**
  * Paleta příkazů (Ctrl/⌘ + K).
@@ -42,6 +44,8 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const workspaceNavigation = useWorkspaceNavigation()
+const supplierStore = useSupplierStore()
+const supplierSwitch = useSupplierSwitch()
 const paletteShortcutLabel = formatShortcut('ctrl+k')
 
 const open = ref(false)
@@ -55,7 +59,7 @@ const listEl = ref<HTMLElement | null>(null)
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
 let seq = 0
 
-type Group = 'action' | 'nav' | 'client' | 'invoice' | 'purchase'
+type Group = 'action' | 'nav' | 'company' | 'client' | 'invoice' | 'purchase'
 
 interface Option {
   group: Group
@@ -70,6 +74,7 @@ interface Option {
 const GROUP_LABEL: Record<Group, string> = {
   action: 'command.group_actions',
   nav: 'search.group_menu',
+  company: 'search.group_companies',
   client: 'search.group_clients',
   invoice: 'search.group_invoices',
   purchase: 'search.group_purchase',
@@ -78,6 +83,7 @@ const GROUP_LABEL: Record<Group, string> = {
 const ICON_PLUS = 'M12 6v6m0 0v6m0-6h6m-6 0H6'
 const ICON_USER = 'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM12 14a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7z'
 const ICON_DOC = 'M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z'
+const ICON_BUILDING = 'M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5m-4 0h4'
 const ICON_CART = 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-8 2a2 2 0 1 1-4 0 2 2 0 0 1 4 0z'
 
 /**
@@ -170,6 +176,18 @@ const options = computed<Option[]>(() => {
 
   scored.sort((a, b) => b.score - a.score)
   out.push(...scored.slice(0, 12).map(s => s.opt))
+
+  // Víc firem: přepnutí na firmu podle názvu nebo IČ (aktuální se nenabízí).
+  for (const s of matchSwitchableSuppliers(supplierStore.availableSuppliers, supplierStore.currentSupplierId, n, supplierStore.hasMultiple)) {
+    out.push({
+      group: 'company',
+      label: s.company_name,
+      sub: s.ic ? t('search.company_ic', { ic: s.ic }) : t('search.company_switch'),
+      icon: ICON_BUILDING,
+      accent: 'teal',
+      run: () => void supplierSwitch.switchTo(s.id),
+    })
+  }
 
   for (const c of results.value.clients) {
     out.push({ group: 'client', label: c.company_name, sub: c.main_email || '', icon: ICON_USER, accent: 'success', run: () => void workspaceNavigation.navigate(`/clients/${c.id}`) })

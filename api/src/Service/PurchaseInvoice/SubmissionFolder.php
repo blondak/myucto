@@ -13,10 +13,20 @@ final class SubmissionFolder
 {
     public const ROOT = 'Příchozí doklady';
 
+    /** Zpracované originály: „Příchozí doklady / Archiv / rok / měsíc" ({@see SubmissionOriginalFiler}). */
+    public const ARCHIVE = 'Archiv';
+
     /** @return list<string> */
     public static function segments(\DateTimeImmutable $receivedAt): array
     {
         $local = $receivedAt->setTimezone(new \DateTimeZone(date_default_timezone_get()));
         return [self::ROOT, $local->format('Y'), $local->format('m')];
+    }
+
+    /** @return list<string> */
+    public static function archiveSegments(\DateTimeImmutable $receivedAt): array
+    {
+        $local = $receivedAt->setTimezone(new \DateTimeZone(date_default_timezone_get()));
+        return [self::ROOT, self::ARCHIVE, $local->format('Y'), $local->format('m')];
     }
 }

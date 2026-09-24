@@ -176,6 +176,14 @@
     {% endif %}
   </tr>
   {% endif %}
+  {# Doklady z prodejní objednávky a převzaté migrací 1703 nesou číslo i v poznámce
+     („Objednávka: …") — tam ho podruhé netiskneme. #}
+  {% if invoice.supplier_order_number and ('Objednávka: ' ~ invoice.supplier_order_number) not in invoice.note_below_items|default('') %}
+  <tr>
+    <td class="meta-label">{{ t('Objednávka', 'Order no.') }}</td>
+    <td class="meta-value mono" colspan="3">{{ invoice.supplier_order_number }}</td>
+  </tr>
+  {% endif %}
 </table>
 
 {% if invoice.note_above_items %}

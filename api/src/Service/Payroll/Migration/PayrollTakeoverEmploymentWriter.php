@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Migration;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAverageEarningRepository;
+use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentConflictException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
@@ -42,6 +43,7 @@ final class PayrollTakeoverEmploymentWriter
         private readonly PayrollRulesetProvider $rulesets,
         private readonly PayrollRecurringComponentRepository $recurring,
         private readonly PayrollRecurringComponentValidator $recurringValidator,
+        private readonly PayrollComponentRepository $components,
     ) {}
 
     /** Důvod verze podmínek, kterou zapisuje převod ze sjednané mzdy zdroje. */
@@ -80,7 +82,11 @@ final class PayrollTakeoverEmploymentWriter
             }
             $current = $this->employments->currentTerms($supplierId, $employmentId)
                 ?? throw new \DomainException('pracovní vztah nemá verzi sjednaných podmínek.');
-            if ((int) ($current['monthly_gross_minor'] ?? 0) === $minor && (string) $current['effective_from'] >= $wage['from']) {
+            // První mzda se zapisuje opravou verze na místě, takže když ji verze už
+            // nese, není co psát, i když verze začíná dřív než mzda ve zdroji.
+            if ((int) ($current['monthly_gross_minor'] ?? 0) === $minor
+                && ($index === 0 || (string) $current['effective_from'] >= $wage['from'])
+            ) {
                 continue;
             }
             // Verze vztahu se po každém zápisu mění, proto se čte znovu před každou verzí mzdy.
@@ -437,7 +443,7 @@ final class PayrollTakeoverEmploymentWriter
      * Změnové položky (`$changeItems`) dostanou poznámku z `$changeNote`, který se zavolá
      * nejvýš jednou a jen tehdy, když taková položka čeká; `null` z něj položku nechá
      * otevřenou. Položku, kterou nejde odškrtnout, předá `$onFailure` a pokračuje dál
-     * (co se toleruje, řídí {@see PayrollTakeoverPolicy::$checklistToleratesRuntime}).
+     * (co se toleruje, říká {@see self::checklistFailure()}).
      *
      * @param array<string,string> $notes položka => poznámka
      * @param list<string> $changeItems
@@ -477,7 +483,7 @@ final class PayrollTakeoverEmploymentWriter
             try {
                 $this->employments->updateChecklist($supplierId, $employmentId, $key, (int) $item['row_version'], 'completed', $notes[$key], $userId, null, null);
             } catch (\Exception $e) {
-                if (!self::checklistFailure($e, $policy)) {
+                if (!self::checklistFailure($e)) {
                     throw $e;
                 }
                 $onFailure($key, $e);
@@ -501,14 +507,15 @@ final class PayrollTakeoverEmploymentWriter
         return $row === false ? null : $row;
     }
 
-    private static function checklistFailure(\Exception $e, PayrollTakeoverPolicy $policy): bool
+    /**
+     * Očekávané odmítnutí položky: konflikt verze, chybějící vztah nebo položka a zamítnutí
+     * kontrolou (datum nástupu). Chyba databáze ani jiná RuntimeException mezi ně nepatří,
+     * projde výš a převod ji ohlásí, místo aby položka tiše zůstala neodškrtnutá.
+     */
+    private static function checklistFailure(\Exception $e): bool
     {
-        if ($e instanceof PayrollEmploymentConflictException || $e instanceof PayrollEmploymentNotFoundException
-            || $e instanceof \DomainException || $e instanceof \InvalidArgumentException
-        ) {
-            return true;
-        }
-        return $policy->checklistToleratesRuntime && $e instanceof \RuntimeException;
+        return $e instanceof PayrollEmploymentConflictException || $e instanceof PayrollEmploymentNotFoundException
+            || $e instanceof \DomainException || $e instanceof \InvalidArgumentException;
     }
 
     /**
@@ -542,9 +549,16 @@ final class PayrollTakeoverEmploymentWriter
         );
     }
 
-    /** @return array<string,mixed>|null složka základní měsíční mzdy i s platností v číselníku */
+    /**
+     * Složka základní měsíční mzdy i s platností v číselníku. Výchozí číselník se
+     * firmě zakládá až při prvním čtení; převod do firmy, kde ještě nikdo mzdové
+     * složky neotevřel, ho proto založí sám — jinak by předpis mzdy nevznikl.
+     *
+     * @return array<string,mixed>|null
+     */
     private function monthlyWageComponent(int $supplierId): ?array
     {
+        $this->components->ensureDefaults($supplierId);
         $stmt = $this->db->pdo()->prepare(
             "SELECT id, valid_from, valid_to FROM payroll_component_definitions
               WHERE supplier_id = ? AND code = 'MZDA_MESICNI' AND is_active = 1

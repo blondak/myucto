@@ -20,6 +20,7 @@ final class BankDetectorChain
         private readonly BankRuleMatcher $matcher,
         private readonly BankPostingSuggestionRepository $suggestions,
         private readonly AutoPostingPolicyService $policy,
+        private readonly \MyInvoice\Service\Accounting\CreditCard\CreditCardChargeDetector $creditCards,
     ) {}
 
     /** @return DetectionResult|array{action:string,reason?:string,entry_id?:int,suggestion_id?:int}|null */
@@ -49,6 +50,15 @@ final class BankDetectorChain
                 return $detected;
             }
         }
-        return $this->transfers->handle($supplierId, $tx, $userId, $suggestOnly);
+        $transfer = $this->transfers->handle($supplierId, $tx, $userId, $suggestOnly);
+        if ($transfer !== null) {
+            return $transfer;
+        }
+        // Kreditní karta (úrok, poplatek, splátka bez protiúčtu …) až po vlastních převodech:
+        // splátku z vlastního účtu páruje TransferPairService i s druhou nohou.
+        if (!$this->suggestions->hasRejectedDetector($supplierId, (int) $tx['id'], \MyInvoice\Service\Accounting\CreditCard\CreditCardChargeDetector::KEY)) {
+            return $this->creditCards->detect($supplierId, $tx);
+        }
+        return null;
     }
 }

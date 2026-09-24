@@ -31,6 +31,8 @@
             <th class="thl">Datum</th>
             <th class="thl">Doklad</th>
             <th class="thl">Typ</th>
+            <th class="thl">Faktura</th>
+            <th class="thl">Partner</th>
             <th class="thl">Sklad</th>
             <th>Množství</th>
             <th>Cena/MJ</th>
@@ -44,6 +46,8 @@
                 <td>{{ row.doc_date|cz_date }}</td>
                 <td>{{ row.doc_number ?: '—' }}</td>
                 <td>{{ row.doc_type }}</td>
+                <td>{{ row.invoice_number ?: (row.purchase_invoice_number ?: '—') }}</td>
+                <td>{{ row.partner.name ?? '—' }}</td>
                 <td>{{ row.warehouse_code }}</td>
                 <td class="num">{{ row.qty_signed|cz_money }}</td>
                 <td class="num">{{ row.unit_cost|cz_money }}</td>

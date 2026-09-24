@@ -598,6 +598,32 @@ final class CashDocumentServiceTest extends TestCase
         self::assertNotSame(date('Y-m-d'), substr((string) $reversal['entry_date'], 0, 10));
     }
 
+    public function testReverseRejectsCashDocumentAllocatedToOtherItem(): void
+    {
+        $reg = $this->makeRegister();
+        $cash = $this->service->create($this->supplierId, $this->doc([
+            'purpose' => 'other', 'doc_type' => 'in', 'total_amount' => 500.00,
+            'counter_account_code' => '315',
+        ], $reg), $this->userId);
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO other_items (supplier_id, side, kind, title, issued_on, due_on, amount)
+             VALUES (?, 'receivable', 'other', 'Syntetická pohledávka', '2099-06-01', '2099-06-30', 500)"
+        )->execute([$this->supplierId]);
+        $itemId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO other_item_allocations (supplier_id, other_item_id, cash_document_id, amount, payment_on)
+             VALUES (?, ?, ?, 500, '2099-06-15')"
+        )->execute([$this->supplierId, $itemId, $cash['id']]);
+
+        try {
+            $this->service->reverse($this->supplierId, $cash['id'], ['reason' => 'Oprava platby'], $this->userId);
+            self::fail('Nejdříve je nutné zrušit alokaci platby.');
+        } catch (CashException $e) {
+            self::assertSame('payment_allocated', $e->errorCode);
+        }
+    }
+
     public function testReverseWithCleanup(): void
     {
         $reg = $this->makeRegister();

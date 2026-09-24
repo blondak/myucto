@@ -62,6 +62,11 @@ final class JmhzReportFixtures
             'average_minor' => 23_810,
             'irregular' => 0,
             'withholding' => null,
+            'insurance_from' => null,
+            'insurance_to' => null,
+            'standard_fund' => 168_000,
+            'agreed_fund' => 168_000,
+            'unworked' => [],
         ];
         $childCredit = null;
         if ($o['declaration'] && $o['children'] !== []) {
@@ -75,6 +80,8 @@ final class JmhzReportFixtures
         }
 
         return [
+            'insurance_from' => $o['insurance_from'],
+            'insurance_to' => $o['insurance_to'],
             'summary' => [
                 'income_total_czk' => $o['wage'],
                 'exempt_income_czk' => null,
@@ -121,9 +128,9 @@ final class JmhzReportFixtures
                     'jmhz_temporary_assignment_status' => 'no',
                 ],
                 'jmhz_default_interpretations' => null,
-                'work_month' => ['jmhz_work_summary' => ['values' => [
-                    'standard_fund_millihours' => 168_000,
-                    'agreed_fund_millihours' => 168_000,
+                'work_month' => ['jmhz_work_summary' => ['values' => $o['unworked'] + [
+                    'standard_fund_millihours' => $o['standard_fund'],
+                    'agreed_fund_millihours' => $o['agreed_fund'],
                     'weekly_work_centihours' => 4_000,
                     'evidence_days' => 30,
                     'worked_millihours' => $o['worked_millihours'],
@@ -169,7 +176,6 @@ final class JmhzReportFixtures
         ];
         $monthStart = sprintf('%04d-%02d-01', $year, $month);
         $monthEnd = (new \DateTimeImmutable($monthStart))->modify('last day of this month')->format('Y-m-d');
-        $days = (int) substr($monthEnd, 8, 2);
 
         $byPerson = [];
         $formGuids = [];
@@ -177,14 +183,16 @@ final class JmhzReportFixtures
         $bonus = 0;
         foreach ($people as $person) {
             $employment = $person['employment'];
+            $insuranceFrom = $person['insurance_from'] ?? $monthStart;
+            $insuranceTo = $person['insurance_to'] ?? $monthEnd;
             $employment['eldp'] = [
-                'insurance_interval' => ['insurance_from' => $monthStart, 'insurance_to' => $monthEnd],
+                'insurance_interval' => ['insurance_from' => $insuranceFrom, 'insurance_to' => $insuranceTo],
                 'eldp_sections' => [[
                     'ordinal' => 1,
                     'code' => '1++',
-                    'valid_from' => $monthStart,
-                    'valid_to' => $monthEnd,
-                    'insurance_days' => $days,
+                    'valid_from' => $insuranceFrom,
+                    'valid_to' => $insuranceTo,
+                    'insurance_days' => (int) substr($insuranceTo, 8, 2) - (int) substr($insuranceFrom, 8, 2) + 1,
                     'assessment_base_czk' => $employment['social_base']['assessment_base_czk'],
                     'excluded_days' => null,
                 ]],

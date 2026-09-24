@@ -27,17 +27,18 @@ final class ConnectedStatementImporterTest extends TestCase
         $this->pdo->exec('CREATE TABLE supplier_bank_accounts (supplier_id INTEGER, account_number TEXT, iban TEXT, bank_code TEXT, is_active INTEGER)');
         $this->pdo->exec('CREATE TABLE bank_statements (
             id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT, period_kind TEXT DEFAULT \'period\',
-            file_name TEXT, file_hash TEXT UNIQUE, file_content BLOB,
+            file_name TEXT, file_hash TEXT, file_content BLOB,
             pdf_content BLOB, pdf_name TEXT, pdf_hash TEXT, pdf_size_bytes INTEGER, pdf_uploaded_at TEXT,
             supplier_id INTEGER, account_number TEXT, bank_code TEXT, currency TEXT, statement_number TEXT,
             statement_date TEXT, prev_balance NUMERIC, curr_balance NUMERIC, credit_total NUMERIC,
-            debit_total NUMERIC, transaction_count INTEGER, imported_by INTEGER, matched_count INTEGER DEFAULT 0
+            debit_total NUMERIC, transaction_count INTEGER, imported_by INTEGER, matched_count INTEGER DEFAULT 0,
+            UNIQUE (supplier_id, file_hash)
         )');
         $this->pdo->exec("CREATE TABLE bank_transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT, statement_id INTEGER, posted_at TEXT, amount NUMERIC, currency TEXT,
             variable_symbol TEXT, constant_symbol TEXT, specific_symbol TEXT, counterparty_account TEXT,
             counterparty_bank TEXT, counterparty_name TEXT, card_last4 TEXT, description TEXT, bank_ref TEXT,
-            import_fingerprint TEXT UNIQUE, match_status TEXT DEFAULT 'unmatched'
+            import_fingerprint TEXT UNIQUE, portable_fingerprint TEXT, match_status TEXT DEFAULT 'unmatched'
         )");
         $db = $this->createStub(Connection::class);
         $this->pdo->exec('CREATE TABLE bank_transaction_imports (statement_id INTEGER, bank_transaction_id INTEGER, import_fingerprint TEXT, supplier_id INTEGER, original_statement_id INTEGER, PRIMARY KEY (statement_id, bank_transaction_id))');
@@ -231,13 +232,16 @@ final class ConnectedStatementImporterTest extends TestCase
         $this->importer->importConnected($this->gpc(), 'synthetic.gpc', null, 1, 10);
     }
 
-    public function testForeignStatementHashNeverResumesForeignTransactions(): void
+    public function testForeignStatementHashCreatesOwnStatement(): void
     {
         $this->pdo->prepare("INSERT INTO bank_statements (supplier_id, source, file_hash) VALUES (20, 'gpc', ?)")
             ->execute([hash('sha256', $this->gpc())]);
-        $this->matcher->expects(self::never())->method('matchBatch');
-        $this->expectException(\InvalidArgumentException::class);
-        $this->importer->importConnected($this->gpc(), 'synthetic.gpc', null, 1, 10);
+        $foreignId = (int) $this->pdo->lastInsertId();
+        $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
+        $result = $this->importer->importConnected($this->gpc(), 'synthetic.gpc', null, 1, 10);
+        self::assertFalse($result['duplicate']);
+        self::assertNotSame($foreignId, (int) $result['statement_id']);
+        self::assertSame(10, (int) $this->pdo->query('SELECT supplier_id FROM bank_statements WHERE id = ' . (int) $result['statement_id'])->fetchColumn());
     }
 
     public function testMonthlyGpcReusesApiMovementWithPaddedReferenceAndPreservesEvidence(): void
@@ -331,11 +335,37 @@ final class ConnectedStatementImporterTest extends TestCase
         $result = $this->importer->importConnectedParsed($parsed, 'synthetic-confirmed-api', 'synthetic.json', null, 1, 10, 'bank_api', $confirmations);
         self::assertSame(0, $result['transactions']);
         self::assertSame(1, $result['skipped_duplicates']);
+        $identities = (new \ReflectionMethod(StatementImporter::class, 'transactionIdentities'))->invoke(
+            $this->importer, $parsed['transactions'], (string) $parsed['header']['account_number'], '2010', 'EUR', 'EUR', 10,
+        );
+        $this->pdo->prepare('UPDATE bank_transaction_imports SET import_fingerprint = ? WHERE import_fingerprint = ?')
+            ->execute([$identities[0]['candidates'][1], $identities[0]['fingerprint']]);
         $retry = $this->importer->importConnectedParsed($parsed, 'synthetic-overlap-after-confirmation', 'synthetic-overlap.json', null, 1, 10);
         self::assertSame(0, $retry['transactions']);
         self::assertSame(1, $retry['skipped_duplicates']);
         self::assertSame($before, $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC));
         self::assertSame(3, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transaction_imports')->fetchColumn());
+    }
+
+    public function testPdfImportFindsLegacyUnscopedAlias(): void
+    {
+        $content = $this->transferGpc();
+        $parsed = new GpcParser()->parse($content);
+        $parsed['transactions'] = [$parsed['transactions'][0]];
+        $this->matcher->expects(self::atLeastOnce())->method('matchBatch')->willReturn([]);
+        $original = $this->importer->import($content, 'synthetic.gpc', null, 1);
+        $transactionId = (int) $this->pdo->query('SELECT id FROM bank_transactions LIMIT 1')->fetchColumn();
+        $portable = (string) $this->pdo->query('SELECT portable_fingerprint FROM bank_transactions WHERE id = ' . $transactionId)->fetchColumn();
+        $this->pdo->prepare('UPDATE bank_transactions SET import_fingerprint = ? WHERE id = ?')
+            ->execute([hash('sha256', 'synthetic-older-reference'), $transactionId]);
+        $this->pdo->prepare('INSERT INTO bank_transaction_imports (statement_id, bank_transaction_id, import_fingerprint, supplier_id) VALUES (?, ?, ?, ?)')
+            ->execute([$original['statement_id'], $transactionId, $portable, 10]);
+
+        $result = $this->importer->importConnectedParsed($parsed, 'synthetic-pdf-overlap', 'synthetic.pdf', null, 1, 10, 'pdf');
+
+        self::assertSame(0, $result['transactions']);
+        self::assertSame(1, $result['skipped_duplicates']);
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
     }
 
     public function testChangedIncomingIdentityCannotReuseConfirmation(): void

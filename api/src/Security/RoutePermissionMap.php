@@ -43,6 +43,8 @@ final class RoutePermissionMap
         '/api/auth/mfa/offer/dismiss',
         '/api/auth/session/status', '/api/auth/session/activity', '/api/auth/session/lock',
         '/api/auth/session/lock-preference',
+        // Výchozí firma je volba vlastního účtu; přístup k firmě ověřuje akce.
+        '/api/auth/default-supplier',
         '/api/auth/domain-login/authorize',
         '/api/auth/session/unlock/options', '/api/auth/session/unlock/verify',
     ];
@@ -627,6 +629,8 @@ final class RoutePermissionMap
         ['*', '#^/api/accounting/settlements(/|$)#', 'accounting.offsets', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/journal(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/journal(/|$)#', 'accounting.journal.write', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/other-items(/|$)#', 'other_items', AccessLevel::READ],
+        ['*', '#^/api/accounting/other-items(/|$)#', 'other_items', AccessLevel::WRITE],
         ['GET', '#^/api/accounting(?:$|/(?!cash-|assets|bank-posting-))#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting(?:$|/(?!cash-|assets|bank-posting-))#', 'accounting', AccessLevel::WRITE],
 
@@ -640,6 +644,9 @@ final class RoutePermissionMap
         // (nic neukládá/neúčtuje) → jen READ, ne module-fallback WRITE níže. Na této
         // úrovni závisí demo brána; začne-li endpoint data ukládat, musí být WRITE.
         ['POST', '#^/api/tax-return/.*/reconcile$#', 'reports', AccessLevel::READ],
+        // Náhled převzetí podaného přiznání nic neukládá (READ); samotné převzetí
+        // (…/filed-import) zapisuje vstupy a evidenci ztrát a padá na WRITE níže.
+        ['POST', '#^/api/tax-return/.*/filed-import/preview$#', 'reports', AccessLevel::READ],
         ['GET', '#^/api/reports/submissions/settings$#', 'reports.submit', AccessLevel::WRITE],
         ['GET', '#^/api/reports/submissions/[0-9]+/artifacts/[0-9]+/download$#', 'reports.export', AccessLevel::READ],
         ['GET', '#^/api/reports/submissions(/|$)#', 'reports', AccessLevel::READ],
@@ -727,6 +734,16 @@ final class RoutePermissionMap
         // Evidence karet patří k nastavení bankovních účtů firmy.
         ['GET', '#^/api/payment-cards(/|$)#', 'settings.bank_accounts', AccessLevel::READ],
         ['*', '#^/api/payment-cards(/|$)#', 'settings.bank_accounts', AccessLevel::WRITE],
+        // Kreditní karty: výpisy a pohyby jsou bankovní data, načtení výpisu je import banky,
+        // nastavení účtování, analytika 231 a převod účtu jsou zápis do účetnictví, evidence
+        // úvěrového účtu (název, limit, splátka) patří k nastavení bankovních účtů.
+        ['GET', '#^/api/credit-cards(/|$)#', 'bank', AccessLevel::READ],
+        ['POST', '#^/api/credit-cards/import$#', 'bank.import', AccessLevel::WRITE],
+        ['POST', '#^/api/credit-cards/convert$#', 'bank.post', AccessLevel::WRITE],
+        ['PUT', '#^/api/credit-cards/settings$#', 'bank.post', AccessLevel::WRITE],
+        ['PUT', '#^/api/credit-cards/[0-9]+/(analytic|purchase-mode|clearing-analytic)$#', 'bank.post', AccessLevel::WRITE],
+        ['POST', '#^/api/credit-cards/[0-9]+/(post-pending|opening)$#', 'bank.post', AccessLevel::WRITE],
+        ['*', '#^/api/credit-cards(/|$)#', 'settings.bank_accounts', AccessLevel::WRITE],
         ['POST', '#^/api/logbook/.*/import#', 'logbook.import', AccessLevel::WRITE],
         ['DELETE', '#^/api/logbook(/|$)#', 'logbook.delete', AccessLevel::WRITE],
         ['GET', '#^/api/logbook(/|$)#', 'logbook', AccessLevel::READ],
@@ -766,7 +783,7 @@ final class RoutePermissionMap
         ['*', '#^/api/(portfolio|crm)(/|$)#', 'dashboard.portfolio', AccessLevel::WRITE],
         ['GET', '#^/api/(codebooks|expense-categories|revenue-categories|vat-classifications)(/|$)#', 'settings.company', AccessLevel::READ],
         ['*', '#^/api/(codebooks|expense-categories|revenue-categories|vat-classifications)(/|$)#', 'settings.company.write', AccessLevel::WRITE],
-        ['GET', '#^/api/(suppliers|search|slug)(/|$)#', 'profile', AccessLevel::READ],
+        ['GET', '#^/api/(suppliers|search|slug|locate)(/|$)#', 'profile', AccessLevel::READ],
         ['GET', '#^/api/branding-profiles$#', 'profile', AccessLevel::READ],
         ['*', '#^/api/user/(filters|preferences)(/|$)#', 'profile', AccessLevel::WRITE],
         ['GET', '#^/api/portal/purchase-invoice-submissions(/|$)#', 'documents.submit', AccessLevel::READ],
@@ -816,6 +833,10 @@ final class RoutePermissionMap
         // ostatní importy; převod zapisuje deník, proto nahrání i spuštění chce WRITE.
         ['POST',   '#^/api/admin/imports/money-s3/uploads(/chunked|/[a-f0-9]+/(reports|start|chunks|complete))?$#', 'utilities.import', AccessLevel::WRITE],
         ['GET',    '#^/api/admin/imports/money-s3/(uploads/[a-f0-9]+|runs(/[0-9]+)?)$#', 'utilities.import', AccessLevel::READ],
+        // Dávkový převod více záloh Money S3 (MoneyS3BatchAction) - stejná pravidla.
+        ['POST',   '#^/api/admin/imports/money-s3/batch/(uploads/(chunked|[a-f0-9]{16}/(chunks|complete))|filings|start)$#', 'utilities.import', AccessLevel::WRITE],
+        ['DELETE', '#^/api/admin/imports/money-s3/batch/(uploads/[a-f0-9]{16}|filings/[a-f0-9]{40})$#', 'utilities.import', AccessLevel::WRITE],
+        ['GET',    '#^/api/admin/imports/money-s3/batch/(uploads|jobs(/[0-9]+)?)$#', 'utilities.import', AccessLevel::READ],
         // Průvodce „Přechod z POHODA" (PohodaMigrationAction) - stejná pravidla jako Money S3.
         ['POST',   '#^/api/admin/imports/pohoda/uploads(/chunked|/[a-f0-9]+/(start|chunks|complete))$#', 'utilities.import', AccessLevel::WRITE],
         ['GET',    '#^/api/admin/imports/pohoda/(uploads/[a-f0-9]+|runs(/[0-9]+)?|tool(/download)?)$#', 'utilities.import', AccessLevel::READ],

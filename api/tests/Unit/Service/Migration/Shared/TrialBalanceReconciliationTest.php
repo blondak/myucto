@@ -56,6 +56,25 @@ final class TrialBalanceReconciliationTest extends TestCase
         self::assertTrue(TrialBalanceReconciliation::balanceSheet(['checks' => ['balanced' => true]])['check']['ok']);
     }
 
+    public function testNegativeNetRowsAreAWarningNotAFailedCheck(): void
+    {
+        $bs = TrialBalanceReconciliation::balanceSheet(['checks' => [
+            'balanced' => true,
+            'negative_net_rows' => [
+                ['row_code' => 'C.II.2.1.', 'label' => 'Pohledávky z obchodních vztahů', 'column' => 'current', 'gross' => 7000.0, 'correction' => 25000.0, 'net' => -18000.004],
+            ],
+        ]]);
+        self::assertTrue($bs['check']['ok'], 'Záporné netto nerozbije kontrolu rozvahy, je to varování.');
+        self::assertSame([['row_code' => 'C.II.2.1.', 'column' => 'current', 'net' => -18000.0]], $bs['negative_net_rows']);
+
+        $text = TrialBalanceReconciliation::negativeNetWarning(2091, $bs['negative_net_rows']);
+        self::assertNotNull($text);
+        self::assertStringContainsString('Rok 2091', $text);
+        self::assertStringContainsString('C.II.2.1. -18 000,00 Kč', $text);
+        self::assertNull(TrialBalanceReconciliation::negativeNetWarning(2091, []));
+        self::assertSame([], TrialBalanceReconciliation::balanceSheet(['checks' => ['balanced' => true]])['negative_net_rows']);
+    }
+
     public function testDocumentRow(): void
     {
         self::assertSame(

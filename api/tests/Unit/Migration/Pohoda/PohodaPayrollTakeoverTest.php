@@ -66,7 +66,6 @@ final class PohodaPayrollTakeoverTest extends TestCase
         self::assertTrue($policy->strict);
         self::assertTrue($policy->verifyPayoutAccounts);
         self::assertTrue($policy->rewriteOwnOpenings);
-        self::assertFalse($policy->checklistToleratesRuntime);
     }
 
     /** @return array<string,PayrollTakeoverRecord> */

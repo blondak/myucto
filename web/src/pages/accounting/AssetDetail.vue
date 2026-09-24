@@ -210,12 +210,52 @@ async function runUnpause(year: number) {
   } catch (e: any) { apiError(e) }
 }
 
+// ── Ruční přepis daňového odpisu roku (převzetí čísel účetní) ──────────────
+const overrideRow = ref<DepreciationPlanRow | null>(null)
+const overrideForm = ref({ amount: null as number | null, reason: '' })
+const canOverrideTax = computed(() => auth.canWrite('assets.depreciation'))
+
+function openOverride(row: DepreciationPlanRow) {
+  overrideRow.value = row
+  overrideForm.value = { amount: num(row.amount), reason: row.override_reason ?? '' }
+}
+
+async function runOverride() {
+  const row = overrideRow.value
+  if (!row || overrideForm.value.amount === null || overrideForm.value.amount < 0 || !overrideForm.value.reason.trim()) {
+    toast.error(t('accounting.assets.override.err_fields'))
+    return
+  }
+  acting.value = true
+  try {
+    await assetsApi.overrideTax(assetId.value, {
+      fiscal_year: row.fiscal_year,
+      amount: Number(overrideForm.value.amount),
+      reason: overrideForm.value.reason.trim(),
+    })
+    overrideRow.value = null
+    toast.success(t('accounting.assets.override.saved', { year: row.fiscal_year }))
+    await load()
+  } catch (e: any) { apiError(e) } finally { acting.value = false }
+}
+
+async function runClearOverride(row: DepreciationPlanRow) {
+  if (!confirm(t('accounting.assets.override.clear_confirm', { year: row.fiscal_year }))) return
+  acting.value = true
+  try {
+    await assetsApi.clearTaxOverride(assetId.value, row.fiscal_year)
+    toast.success(t('accounting.assets.override.cleared', { year: row.fiscal_year }))
+    await load()
+  } catch (e: any) { apiError(e) } finally { acting.value = false }
+}
+
 // ── Lifecycle: vyřazení ────────────────────────────────────────────────────
 const showDispose = ref(false)
 const disposeForm = ref({
   date: appIsoDate(),
   type: 'sold' as DisposalType,
   price: null as number | null,
+  book_entry: true,
 })
 
 async function runDispose() {
@@ -225,6 +265,7 @@ async function runDispose() {
       date: disposeForm.value.date,
       type: disposeForm.value.type,
       price: disposeForm.value.type === 'sold' ? disposeForm.value.price : undefined,
+      book_entry: disposeForm.value.book_entry,
     })
     showDispose.value = false
     toast.success(t('accounting.assets.lifecycle.disposed'))
@@ -284,6 +325,15 @@ const assetActions = computed<ActionItem[]>(() => {
       show: canWrite && disposed,
       disabled: acting.value,
       run: () => { void runRevertDisposal() },
+    },
+    {
+      key: 'sync_summary',
+      label: t('accounting.assets.account_summary.sync'),
+      icon: 'cycle',
+      tier: 'secondary',
+      show: canWrite && inUse && !!a.summary_account_code,
+      disabled: acting.value,
+      run: () => { void runSyncSummary() },
     },
     {
       key: 'edit',
@@ -353,6 +403,18 @@ async function downloadDepreciationCard() {
   }
 }
 
+async function runSyncSummary() {
+  const code = asset.value?.summary_account_code
+  if (!code) return
+  acting.value = true
+  try {
+    const r = await assetsApi.syncAccountSummary(code)
+    for (const w of r.warnings || []) toast.warning(w.message)
+    toast.success(t('accounting.assets.account_summary.synced', { account: code, count: r.improvements }))
+    await load()
+  } catch (e: any) { apiError(e) } finally { acting.value = false }
+}
+
 async function runRevertDisposal() {
   if (!confirm(t('accounting.assets.lifecycle.revert_confirm'))) return
   acting.value = true
@@ -384,6 +446,9 @@ const yearOptions = computed(() => {
             <h1 class="text-2xl font-semibold">{{ asset.name }}</h1>
             <span class="text-xs px-2 py-0.5 rounded font-medium" :class="STATUS_BADGE[asset.status]">
               {{ t(`accounting.assets.status.${asset.status}`) }}
+            </span>
+            <span v-if="asset.summary_account_code" class="text-xs px-2 py-0.5 rounded font-medium bg-primary-50 text-primary-600">
+              {{ t('accounting.assets.account_summary.badge', { account: asset.summary_account_code }) }}
             </span>
           </div>
           <p class="text-sm text-neutral-500 mt-0.5">
@@ -417,6 +482,13 @@ const yearOptions = computed(() => {
           · {{ t('accounting.assets.fields.disposal_price') }}: {{ formatMoney(num(asset.disposal_price)) }}
           <div class="text-xs text-warning-600 mt-1">{{ t('accounting.assets.hints.sale_invoice_641') }}</div>
         </template>
+        <div v-if="asset.disposal_entry_id" class="mt-1">
+          <RouterLink :to="{ name: 'accounting-journal', query: { entry_id: String(asset.disposal_entry_id) } }"
+            class="inline-flex items-center gap-1.5 text-xs text-primary-600 hover:text-primary-700 hover:underline">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
+            {{ t('accounting.assets.lifecycle.disposal_entry_link') }}
+          </RouterLink>
+        </div>
       </div>
 
       <!-- Souhrn -->
@@ -563,6 +635,9 @@ const yearOptions = computed(() => {
                       class="ml-1 text-xs px-1.5 py-0.5 rounded bg-warning-50 text-warning-600 font-semibold">½</span>
                     <span v-if="row.is_paused" :title="t('accounting.assets.plan.badge_paused')"
                       class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-semibold">⏸</span>
+                    <span v-if="row.override_reason"
+                      :title="t('accounting.assets.override.badge_title', { reason: row.override_reason, original: formatMoney(num(row.override_original_amount)) })"
+                      class="ml-1 text-xs px-1.5 py-0.5 rounded bg-warning-50 text-warning-600 font-semibold">{{ t('accounting.assets.override.badge') }}</span>
                   </td>
                   <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(num(row.residual_start)) }}</td>
                   <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(num(row.full_amount)) }}</td>
@@ -592,6 +667,18 @@ const yearOptions = computed(() => {
                         :title="t('accounting.assets.lifecycle.unpause')" :aria-label="t('accounting.assets.lifecycle.unpause')"
                         :class="btnIconSm('primary')">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
+                      </button>
+                      <button v-if="planTab === 'tax' && row.source === 'confirmed' && !row.is_paused && canOverrideTax"
+                        :disabled="acting" @click.stop="openOverride(row)"
+                        :title="t('accounting.assets.override.action')" :aria-label="t('accounting.assets.override.action')"
+                        :class="btnIconSm('warning')">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                      </button>
+                      <button v-if="planTab === 'tax' && row.override_reason && canOverrideTax"
+                        :disabled="acting" @click.stop="runClearOverride(row)"
+                        :title="t('accounting.assets.override.clear')" :aria-label="t('accounting.assets.override.clear')"
+                        :class="btnIconSm('neutral')">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
                       </button>
                       <button v-if="row.source === 'confirmed' && row.journal_entry_id && row.fiscal_year === latestMaterializedYear && auth.canWrite('assets.write')"
                         :disabled="acting" :class="btnIconSm('danger')"
@@ -691,6 +778,31 @@ const yearOptions = computed(() => {
         </div>
       </Modal>
 
+      <!-- Modal: ruční přepis daňového odpisu roku -->
+      <Modal v-if="overrideRow" :title="t('accounting.assets.override.title', { year: overrideRow.fiscal_year })" widthClass="max-w-md" @close="overrideRow = null">
+        <p class="text-xs text-neutral-500 mb-3">{{ t('accounting.assets.override.hint') }}</p>
+        <div class="space-y-3 mb-4">
+          <div>
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.override.amount') }} *</label>
+            <input v-model.number="overrideForm.amount" type="number" min="0" step="0.01" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <p class="text-xs text-neutral-400 mt-1">
+              {{ t('accounting.assets.override.computed', { amount: formatMoney(num(overrideRow.override_original_amount ?? overrideRow.amount)) }) }}
+            </p>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.override.reason') }} *</label>
+            <textarea v-model="overrideForm.reason" rows="3" maxlength="500" class="w-full px-2 py-1.5 border border-neutral-300 rounded-md text-sm"></textarea>
+          </div>
+        </div>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button @click="overrideRow = null" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
+          <button :disabled="acting || !overrideForm.reason.trim()" @click="runOverride" :class="btnFilled('warning')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('common.save') }}
+          </button>
+        </div>
+      </Modal>
+
       <!-- Modal: vyřazení -->
       <Modal v-if="showDispose" :title="t('accounting.assets.lifecycle.dispose')" widthClass="max-w-md" @close="showDispose = false">
         <div class="space-y-3 mb-4">
@@ -711,6 +823,11 @@ const yearOptions = computed(() => {
             <input v-model.number="disposeForm.price" type="number" min="0" step="0.01" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
             <p class="text-xs text-neutral-400 mt-1">{{ t('accounting.assets.hints.sale_invoice_641') }}</p>
           </div>
+          <label class="inline-flex items-center gap-2 text-sm">
+            <input v-model="disposeForm.book_entry" type="checkbox" class="rounded border-neutral-300" />
+            {{ t('accounting.assets.lifecycle.dispose_book') }}
+          </label>
+          <p v-if="!disposeForm.book_entry" class="text-xs text-warning-600">{{ t('accounting.assets.lifecycle.dispose_no_book_hint') }}</p>
         </div>
         <div class="flex justify-end gap-2">
           <button @click="showDispose = false" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>

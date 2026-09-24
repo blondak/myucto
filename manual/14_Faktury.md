@@ -18,8 +18,18 @@ V hlavním menu **Faktury**.
 
 ![Seznam faktur](img/08_faktury_list.webp)
 
-Seznam je seskupený **po měsících vystavení** (sticky header s názvem měsíce).
-V každé skupině jsou faktury seřazené podle data vystavení (nejnovější nahoře).
+Seznam je standardně seskupený po měsících podle DUZP, u záloh podle data vystavení.
+Přepínačem nad tabulkou lze zvolit souvislý seznam bez měsíčních skupin. Volba se
+ukládá pro přihlášeného uživatele. Kliknutí na záhlaví sloupce seřadí celý
+filtrovaný výsledek před stránkováním; první kliknutí řadí sestupně, druhé
+vzestupně a třetí vrátí výchozí pořadí. V měsíčním
+pohledu se při vzestupném řazení podle DUZP zobrazí nejstarší měsíce první.
+U ostatních sloupců zůstávají měsíce od nejnovějšího a řadí se doklady uvnitř nich.
+Křížek v pravém okraji záhlaví tabulky vrátí výchozí řazení.
+Seznam načítá 50 faktur v jedné dávce. Při posunu dolů se u konce seznamu
+automaticky načte další stránka; tlačítko
+**Načíst další** zůstává k dispozici pro ruční načtení.
+Zaškrtávací políčko v záhlaví tabulky označí pouze zobrazené doklady tohoto měsíce.
 
 | Sloupec | Význam |
 |---|---|
@@ -32,6 +42,13 @@ V každé skupině jsou faktury seřazené podle data vystavení (nejnovější 
 | Částka | Celková částka v měně faktury |
 | Stav | Barevný badge — viz § 14.2 |
 | Akce | PDF, Detail, … |
+
+Tlačítkem **Sloupce** lze zapnout doplňkové sloupce, mimo jiné **Var. symbol**
+(platební VS, který se tiskne na PDF a do QR platby a může se lišit od čísla
+faktury), **Objednávka**, **Zakázka**, **Odesláno dne**, **Uhrazeno celkem**,
+základ daně, DPH, celkovou částku a oddíl kontrolního
+hlášení. Oddíl KH se doplňuje z Knihy DPH až po zapnutí sloupce; doklad bez
+zařazení do KH má prázdnou hodnotu.
 
 ### 14.1.1 Filtry (vlevo)
 
@@ -235,12 +252,15 @@ V horní liště nad seznamem jsou ikony — klik přepne filtr na daný stav:
 
 Pole **Hledat** vlevo nahoře. Hledá v:
 
-- Variabilním symbolu (přesná shoda i prefix)
-- Popisu položek (LIKE)
+- Čísle faktury (začátek čísla)
+- Platebním variabilním symbolu, i když není zadaný zvlášť a odvozuje se
+  z číslic čísla faktury (`20260001` najde fakturu `2026-0001`)
+- Čísle objednávky (kdekoli v textu)
 - Jménu klienta
-- Čísle projektu / smlouvy
+- Popisu položek
 
-Funguje fulltext česky i anglicky.
+Číslo faktury, variabilní symbol i číslo objednávky hledá také společné hledání
+ve spodní liště.
 
 ## 14.6 Tipy
 

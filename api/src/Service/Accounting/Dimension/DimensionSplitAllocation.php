@@ -1,0 +1,85 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Accounting\Dimension;
+
+/**
+ * Rozdělení částky řádku deníku podle rozpadu mezi víc hodnot jednoho typu dimenze
+ * (`journal_entry_line_dimension_splits`). Jediné místo, kde se podíl převádí na
+ * haléře: výsledovka po dimenzi i filtr výkazů na hodnotu z něj berou tatáž čísla,
+ * takže řádek hodnoty ve výsledovce po dimenzi sedí na výkaz filtrovaný na tutéž
+ * hodnotu a součet přes hodnoty sedí na částku řádku.
+ *
+ * Pravidlo je stejné jako {@see DimensionStamper::distributeCents()}: každý podíl se
+ * zaokrouhlí na haléře a zbytek dostane největší podíl (při shodě ta hodnota s nižším
+ * id). Počítá se v SQL nad DECIMAL, tedy přesně, bez binární plovoucí čárky.
+ *
+ * Částka je vždy nezáporná (`journal_entry_lines.amount`); strana zůstává na řádku.
+ * Zaokrouhlení v MariaDB je u přesných čísel od nuly, takže rozdělení kladné
+ * a záporné částky je zrcadlové.
+ */
+final class DimensionSplitAllocation
+{
+    /**
+     * Odvozená tabulka `(line_id, value_id, amount)` s dílem každého řádku s rozpadem
+     * typu `$typeId`. Omezení `$valueIds` vybere jen řádky, jejichž rozpad aspoň jednu
+     * z hodnot obsahuje; díly se ale vždy počítají z CELÉHO rozpadu řádku, jinak by
+     * zbytek po zaokrouhlení padl jinam než ve výsledovce po dimenzi.
+     *
+     * @param list<int>|null $valueIds null = všechny řádky s rozpadem typu
+     * @param int|null $supplierId jen řádky firmy (u globálního typu sdílí hodnoty víc firem)
+     * @return array{0:string,1:list<int>}
+     */
+    public static function partsSql(int $typeId, ?array $valueIds = null, ?int $supplierId = null): array
+    {
+        $params = [$typeId];
+        $restrict = '';
+        if ($supplierId !== null) {
+            $restrict .= ' AND s.supplier_id = ?';
+            $params[] = $supplierId;
+        }
+        if ($valueIds !== null) {
+            if ($valueIds === []) {
+                return ['SELECT NULL AS line_id, NULL AS value_id, 0 AS amount FROM DUAL WHERE 1 = 0', []];
+            }
+            $marks = implode(',', array_fill(0, count($valueIds), '?'));
+            $restrict .= " AND s.line_id IN (SELECT r.line_id FROM journal_entry_line_dimension_splits r
+                                              WHERE r.dimension_type_id = ? AND r.dimension_value_id IN ({$marks}))";
+            array_push($params, $typeId, ...$valueIds);
+        }
+        $sql = "SELECT q.line_id, q.value_id,
+                       q.part + CASE WHEN q.rn = 1
+                                     THEN q.amount - SUM(q.part) OVER (PARTITION BY q.line_id)
+                                     ELSE 0 END AS amount
+                  FROM (SELECT s.line_id, s.dimension_value_id AS value_id, sl.amount,
+                               ROUND(sl.amount * s.share / SUM(s.share) OVER (PARTITION BY s.line_id), 2) AS part,
+                               ROW_NUMBER() OVER (PARTITION BY s.line_id
+                                                  ORDER BY s.share DESC, s.dimension_value_id) AS rn
+                          FROM journal_entry_line_dimension_splits s
+                          JOIN journal_entry_lines sl ON sl.id = s.line_id
+                         WHERE s.dimension_type_id = ?{$restrict}) q";
+        return [$sql, $params];
+    }
+
+    /**
+     * Díl řádků pro množinu hodnot (hodnota a její větev) sečtený po řádku:
+     * `(line_id, amount)`.
+     *
+     * @param list<int> $valueIds
+     * @return array{0:string,1:list<int>}
+     */
+    public static function lineShareSql(int $typeId, array $valueIds, ?int $supplierId = null): array
+    {
+        [$parts, $params] = self::partsSql($typeId, $valueIds, $supplierId);
+        if ($valueIds === []) {
+            return ['SELECT NULL AS line_id, 0 AS amount FROM DUAL WHERE 1 = 0', []];
+        }
+        $marks = implode(',', array_fill(0, count($valueIds), '?'));
+        return [
+            "SELECT p.line_id, SUM(p.amount) AS amount FROM ({$parts}) p
+              WHERE p.value_id IN ({$marks}) GROUP BY p.line_id",
+            [...$params, ...$valueIds],
+        ];
+    }
+}

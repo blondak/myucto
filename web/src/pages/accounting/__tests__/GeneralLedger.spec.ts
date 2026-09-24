@@ -57,6 +57,8 @@ vi.mock('@/composables/useTablePrefs', () => ({
     densityClass: ref(''),
     setFlag: vi.fn(),
     flag: () => false,
+    sort: ref(null),
+    toggleSort: vi.fn(),
   }),
 }))
 vi.mock('@/composables/useSavedFilters', () => ({

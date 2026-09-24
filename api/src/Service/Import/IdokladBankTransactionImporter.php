@@ -196,8 +196,8 @@ final class IdokladBankTransactionImporter
             $ref, 'iDoklad ' . $month, $hash, $supplierId, (string) $account['account_number'],
             self::text($account['bank_code'] ?? null, 4), (string) $account['currency'], $date,
         ]);
-        $s = $pdo->prepare('SELECT id FROM bank_statements WHERE file_hash = ?');
-        $s->execute([$hash]);
+        $s = $pdo->prepare('SELECT id FROM bank_statements WHERE supplier_id = ? AND file_hash = ?');
+        $s->execute([$supplierId, $hash]);
         return (int) $s->fetchColumn();
     }
 

@@ -86,6 +86,47 @@ Na konci kroku převod porovná karty se zůstatky majetkových a oprávkových 
 po syntetikách. Rozdíl, který je už v evidenci Money (majetek účtovaný bez karty),
 protokol označí zvlášť.
 
+### 103.2.2 Mzdy
+
+Zápisy mezd jsou v převedeném deníku a znovu nevznikají. Z mzdových dokladů
+(závazky a interní doklady mzdového modulu Money) převod v kroku **Mzdy** udělá
+tři věci:
+
+- **Návrh kontací mezd.** Z mzdových zápisů posledního převáděného roku odvodí,
+  které účty firma používá pro hrubé mzdy, pojistné, daň a srážky, a uloží je jako
+  návrh v Mzdy → Importy → **Kontace mezd** (viz
+  [§ 108.11](108_Prechod_z_PAMICA.md#10811-kontace-mezd-z-puvodniho-programu)).
+  Nastavení mezd se nemění, dokud návrh nepotvrdíte. Význam zápisu se bere
+  z druhu mzdového dokladu, který Money u novějších dokladů vede (sociální,
+  zdravotní pojištění, daň, srážky…); starší doklady bez druhu se zařadí podle
+  páru účtů. Analytiku účtu 336 pro sociální a zdravotní pojištění pozná převod
+  podle dokladů s druhem, jinak podle názvu účtu. Co zařadit nejde, je v návrhu
+  jen v přehledu.
+- **Kontrolní úhrny po měsících.** Protokol ukáže za každý měsíc mezd součty
+  celé firmy: hrubé mzdy, pojistné zaměstnanců a zaměstnavatele, zálohovou
+  a srážkovou daň, srážky a čistou mzdu k výplatě. Zálohovou daň porovná
+  s měsíčním vyúčtováním daně z příjmů ze závislé činnosti, které Money vede
+  zvlášť (sražené zálohy po přeplatcích z ročního zúčtování); měsíc, kde nesedí,
+  vyznačí. Úhrny jsou kontrola, ne převzaté mzdy jednotlivých zaměstnanců.
+- **Zapnutí modulu Mzdy.** Firmě, která mzdy vede, převod zapne modul Mzdy
+  a nastaví začátek vedení mezd v MyÚčtu na měsíc po posledním mzdovém dokladu.
+  Chybí-li nastavení zaměstnavatele, založí ho s mzdovou účtárnou `MZDY`
+  a výchozími předkontacemi. Variabilní symbol ČSSZ, kód OSSZ a číslo plátce
+  zdravotního pojištění, které firma vede v Nastavení firmy, převezme do Mezd
+  a k variabilnímu symbolu založí registraci účtárny s účinností od začátku
+  vedení mezd (viz [§ 90.8](90_Nastaveni_mezd.md#908-podrobny-pracovni-postup-a-kontroly)).
+  Co v Nastavení firmy není, ani účty institucí převod nevymýšlí; protokol
+  vypíše k doplnění v Mzdy → Nastavení jen to, co opravdu chybí. Zapnutý
+  modul, jeho začátek ani existující nastavení převod nemění. Firmě, jejíž mzdy
+  skončily víc než rok před koncem převáděných dat, se modul nezapíná.
+
+**Zaměstnanci se nepřevádějí.** Novější verze Money vedou osoby a mzdy
+jednotlivých zaměstnanců v šifrované databázi agendy, kterou převod přečíst
+nemůže. Starší čitelné tabulky mzdového modulu v záloze (u agend vedených dlouho
+končí typicky rokem 2020) převod také nepřebírá: historie osob se nepřevádí.
+Zaměstnance i historii jejich mezd převezměte importem přijatých podání JMHZ a registrací
+v Mzdy → Importy, viz [§ 90.9.1](90_Nastaveni_mezd.md#9091-jmhz-registrace-a-mesicni-hlaseni).
+
 **Zaúčtování se nepřepočítává.** Deník je přesná kopie toho, co bylo v Money,
 a doklady se k němu jen připojí. Z dokladu je proto vidět jeho zápis a naopak,
 detail faktury ukazuje úhradu jako zaúčtovanou a automatika už doklad znovu
@@ -127,13 +168,18 @@ spolehlivě neurčuje, převod převezme jako koncept:
 
 - zálohovou fakturu, proformu a daňový doklad k platbě (jiný druh než běžná faktura),
 - dobropis, stornovaný doklad a doklad, který je v Money označený „neúčtovat",
-- doklad v cizí měně (částky se převezmou v Kč, měnu a kurz uvede poznámka dokladu),
 - doklad s členěním DPH mimo tuzemské řádky přiznání: přenesená daňová
   povinnost, plnění z EU a do EU, zvláštní režimy, nebo doklad s daní bez členění.
 
 Koncept nevstoupí do přiznání k DPH, kontrolního hlášení ani do účtování.
-Protokol ho vypíše i s důvodem. Po opravě druhu dokladu, měny nebo klasifikace
-DPH ho potvrďte. Přijatá faktura s členěním „do přiznání nezahrnovat" se
+Protokol ho vypíše i s důvodem. Po opravě druhu dokladu nebo klasifikace
+DPH ho potvrďte.
+
+**Doklad v cizí měně** koncept není. Převezme se v měně a kurzu dokladu,
+když základ a daň po sazbách v měně přepočtené kurzem dávají na haléř koruny,
+které Money vykázalo v přiznání; DPH, kontrolní hlášení i deník tak zůstávají
+v Kč přesně stejné. Jinak (a u samovyměření nebo měny, kterou firma nemá
+v číselníku měn) se převezme v Kč a poznámka dokladu i protokol uvedou důvod. Přijatá faktura s členěním „do přiznání nezahrnovat" se
 převezme bez nároku na odpočet.
 
 Číslo dokladu, které už ve firmě je, dostane příponu roku, například
@@ -145,8 +191,9 @@ bankovních účtech nebo ve dvou pokladnách.
 
 - **Přílohy a elektronický archiv.** Money je drží v šifrovaných souborech,
   které ze zálohy číst nejde. Skeny dokladů se připojují zvlášť.
-- **Mzdy a sklad.** Jejich zápisy jsou v převedeném deníku, evidence
-  (zaměstnanci, zásoby) se zakládá v MyÚčtu.
+- **Zaměstnanci, mzdy osob a sklad.** Zápisy mezd a zásob jsou v převedeném
+  deníku; zaměstnance převezmete z podání JMHZ (viz 103.2.2), zásoby se zakládají
+  v MyÚčtu.
 - **Interní doklady, kniha pohledávek a závazků.** V deníku jsou jako ruční
   zápisy s původním číslem dokladu, samostatný doklad z nich nevzniká.
 - **Číselné řady a řádky DPH pokladních dokladů.** Podaná přiznání k DPH za
@@ -278,7 +325,97 @@ mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změni
 v Money celková částka faktury, protokol ji vypíše jako změněnou v Money
 a ponechanou v MyÚčtu; upravte ji ručně.
 
-## 103.9 Omezení
+Převádíte-li firmu znovu od začátku (firmu smažete a převedete znovu), ztratí
+se s ní i nastavení, které převod nezakládá: výjimky mapování výkazů, volby
+výkazů a uzávěrky, daňový profil, dimenze, předkontace a pravidla banky. Před
+smazáním proto v průvodci (nebo v Nastavení) stáhněte **profil firmy** a po
+ostrém převodu ho nahrajte zpět. Výkazy pak vyjdou stejně jako před smazáním.
+Popis profilu je v [§ 96.18](96_Nastaveni.md#9618-profil-firmy).
+
+## 103.9 Dávkový převod více firem
+
+Účetní kancelář nebo skupina firem převede víc agend najednou v záložce
+**Dávka více firem** nahoře v průvodci. Dávka dělá u každé firmy totéž co
+průvodce jedné firmy (stejný převod, stejný protokol u firmy) a navíc firmu
+najde nebo založí.
+
+- **Zálohy.** Vyberte zálohy `.lz` všech firem najednou. Nahrávají se po jedné,
+  server každou po nahrání přečte a ukáže IČO, název, roky, doporučený rok „od"
+  a firmu v MyÚčtu, do které se převede. Z více záloh téže firmy platí nejnovější
+  podle data zálohy. Nahrané zálohy zůstávají týden; zálohu úspěšně převedené
+  firmy dávka smaže.
+- **Firma podle IČO.** Firma se stejným IČO, ke které máte přístup, se převede
+  (nebo přeskočí, podle volby *Firma už v MyÚčtu je*). Chybějící firmu dávka
+  založí stejně jako zakládání další firmy v aplikaci: název, sídlo a DIČ ze
+  zálohy, co v ní chybí, z posledního podaného přiznání k DPPO a z ARES.
+  Plátcovství DPH ověří registr plátců; bez něj rozhodnou obraty na účtu 343
+  a protokol vyzve k ověření. Zakládat firmy smí jen uživatel s oprávněním
+  zakládat firmy. Firmu, ke které přístup nemáte, dávka nepřevede a vypíše ji
+  jako chybu. E-mail založené firmy doplňte v nastavení firmy.
+- **Rok „od" automaticky.** U každé firmy začne převod prvním rokem, od kterého
+  v Money navazují konečné a počáteční stavy (viz 103.6). Starší roky zůstanou
+  v archivu Money. Volbou *Všechny roky* převedete celou zálohu.
+- **Podaná přiznání k DPPO (volitelné).** Přiložte EPO XML podaných přiznání
+  (DPPDP9). Přiřadí se podle IČO, za každý rok platí poslední podání (dodatečné
+  před opravným před řádným). Zakládaná firma z nich dostane NACE, kategorii
+  účetní jednotky, audit a začátek prvního účetního období u firmy vzniklé
+  během roku. Po ostrém převodu dávka přiznání převezme do Daní a do evidence
+  daňových ztrát stejným převzetím jako `api/bin/tax-return-import.php`; existující
+  rozpracované přiznání nepřepíše a finální nikdy nemění.
+- **Skupina firem.** Firmy lze zařadit do skupiny aktuální firmy nebo do nové
+  skupiny. Zařazení proběhne před převodem, takže zakázky Money se převedou jako
+  globální projekty skupiny (viz 103.2). Volba *Firmy dávky jsou spřízněné osoby*
+  označí partnery s IČO jiné firmy dávky nebo skupiny jako spřízněné osoby; pro
+  nezávislé klienty kanceláře ji nezapínejte.
+
+Zkouška nanečisto založí firmy i celý převod v transakci, která se na konci
+vrátí: nezůstane ani firma, ani protokol u firmy, výsledek je jen v protokolu
+dávky i s podrobným protokolem každé firmy.
+
+Dávka běží jako jeden úkol na pozadí se společným průběhem. Firmy se převádějí
+po jedné a pád jedné firmy ostatní nezastaví. Zrušení platí od další firmy,
+u ostrého převodu i uvnitř právě převáděné firmy.
+
+**Protokol dávky** ukazuje u každé firmy, zda se založila, převedla do
+existující, nebo přeskočila, rok „od", stav, převzatá přiznání, upozornění
+a kontroly:
+
+| Kontrola | Co ověřuje |
+|---|---|
+| K1 | obratová předvaha proti deníku Money (a proti sestavě z Money) na haléř |
+| K2 | obraty MD = D, předvaha = deník, vyrovnané počáteční stavy, žádné koncepty |
+| K3 | rozvaha vychází a žádný účet ve výkazech nechybí |
+| K4 | doklady po knihách proti zápisům na 321, 311, 211 a 221 |
+
+Podrobný protokol ostrého převodu je u firmy v záložce *Jedna firma* (po
+přepnutí do firmy). Předchozí dávky zůstávají v přehledu pod průvodcem.
+
+**Opakování.** Dávku jde spustit znovu se stejnými nebo novějšími zálohami.
+S volbou *Převést znovu* se do existujících firem doplní jen to, co chybí
+(viz 103.8), nic se nezdvojí; firma, která minule selhala, se převede znovu.
+Profil nastavení existující firmy si dávka před převodem odloží a po úspěšném
+převodu ho obnoví, takže ho při opakování není potřeba stahovat ručně.
+
+Správce instalace může dávku spustit i z příkazové řádky nad adresářem
+záloh:
+
+```
+php api/bin/money-s3-batch.php --dir=<adresář se zálohami> --list
+php api/bin/money-s3-batch.php --dir=<adresář se zálohami> --all --dry-run
+php api/bin/money-s3-batch.php --dir=<adresář se zálohami> --all --dppo-dir=<adresář s XML> --report=souhrn.json
+```
+
+Volby odpovídají průvodci (`--from-year=auto|RRRR|all`, `--existing=skip|update`,
+`--group="Název"`, `--related-parties`, `--no-close`, `--no-registry`), na konci
+je souhrn po firmách s K1 až K4.
+
+Účtuje-li firma po převodu ještě nějaký čas i v Money, porovnávejte každý měsíc
+MyÚčto s výstupy Money nebo s novou zálohou agendy na stránce
+`Účetnictví → Souběh se starým systémem` (kapitola
+[Souběh se starým systémem](111_Soubeh_se_starym_systemem.md)). Záloha se tam
+čte bez zápisu do MyÚčta.
+
+## 103.10 Omezení
 
 - Formát dat Money není veřejně dokumentovaný. Čtení je ověřené na verzi
   Money S3 26.600; u jiné verze průvodce upozorní a výsledek je o to důležitější

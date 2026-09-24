@@ -110,6 +110,96 @@ final class ListGroupedByMonthTest extends TestCase
         self::assertEqualsWithDelta(0.0, $may['draft_with_vat'], 0.01, 'Květen bez draftu.');
     }
 
+    public function testInvoiceSortingAcrossPagesAndMonthModes(): void
+    {
+        $client = $this->client('Sorted Customer', true, false);
+        $juneLow = $this->invoice($client, '2001-06-10', '2001-06-10', 100, 21, 121, 'issued');
+        $juneHigh = $this->invoice($client, '2001-06-20', '2001-06-20', 300, 63, 363, 'issued');
+        $mayMiddle = $this->invoice($client, '2001-05-10', '2001-05-10', 200, 42, 242, 'issued');
+        $base = ['supplier_id' => $this->supplierId, 'client_id' => $client, 'sort_key' => 'amount', 'sort_dir' => 'asc'];
+
+        $monthly = $this->invoices->listGroupedByMonth($base, 1, 2);
+        self::assertSame([121.0, 363.0], array_column($monthly['data'][0]['invoices'], 'total_with_vat'));
+        self::assertSame(['2001-06'], array_column($monthly['data'], 'month'));
+        self::assertSame([$juneLow, $juneHigh], array_column($monthly['data'][0]['invoices'], 'id'));
+        self::assertSame(3, $monthly['meta']['total']);
+        self::assertSame([$mayMiddle], array_column($this->invoices->listGroupedByMonth($base, 2, 2)['data'][0]['invoices'], 'id'));
+
+        $continuous = $this->invoices->listGroupedByMonth($base + ['group_by_month' => false], 1, 2);
+        self::assertSame('', $continuous['data'][0]['month']);
+        self::assertSame([$juneLow, $mayMiddle], array_column($continuous['data'][0]['invoices'], 'id'));
+        self::assertSame([$juneHigh], array_column($this->invoices->listGroupedByMonth($base + ['group_by_month' => false], 2, 2)['data'][0]['invoices'], 'id'));
+
+        $byDate = $this->invoices->listGroupedByMonth(array_merge($base, ['sort_key' => 'issued']), 1, 2);
+        self::assertSame(['2001-05', '2001-06'], array_column($byDate['data'], 'month'));
+        self::assertSame([$mayMiddle, $juneLow], array_merge(...array_map(
+            static fn (array $group): array => array_column($group['invoices'], 'id'),
+            $byDate['data'],
+        )));
+        self::assertSame([$juneHigh], array_column($this->invoices->listGroupedByMonth(
+            array_merge($base, ['sort_key' => 'issued']), 2, 2,
+        )['data'][0]['invoices'], 'id'));
+        self::assertSame(['2001-06'], array_column($this->invoices->listGroupedByMonth(
+            array_merge($base, ['sort_key' => 'issued', 'sort_dir' => 'desc']), 1, 2,
+        )['data'], 'month'));
+
+        $this->pdo->prepare('UPDATE invoices SET sent_at = ? WHERE id = ?')->execute(['2001-01-03 12:00:00', $juneLow]);
+        $this->pdo->prepare('UPDATE invoices SET sent_at = ? WHERE id = ?')->execute(['2001-01-01 12:00:00', $juneHigh]);
+        $this->pdo->prepare('UPDATE invoices SET sent_at = ? WHERE id = ?')->execute(['2001-01-02 12:00:00', $mayMiddle]);
+        $sentSort = array_merge($base, ['sort_key' => 'sent_at', 'group_by_month' => false]);
+        self::assertSame([$juneHigh, $mayMiddle], $this->collectIds($this->invoices->listGroupedByMonth($sentSort, 1, 2)['data']));
+        self::assertSame([$juneLow], $this->collectIds($this->invoices->listGroupedByMonth($sentSort, 2, 2)['data']));
+        foreach (['project', 'paid_total'] as $key) {
+            self::assertSame(3, $this->invoices->listGroupedByMonth(array_merge($base, ['sort_key' => $key]), 1, 2)['meta']['total']);
+        }
+
+        $invalid = $this->invoices->listGroupedByMonth(array_merge($base, ['sort_key' => 'id; DROP TABLE invoices']), 1, 2);
+        self::assertSame(3, $invalid['meta']['total']);
+    }
+
+    public function testPurchaseSortingAcrossPagesAndMonthModes(): void
+    {
+        $vendor = $this->client('Sorted Vendor', false, true);
+        $juneLow = $this->purchase($vendor, '2001-06-10', '2001-06-10', 100, 21, 121, 'received');
+        $juneHigh = $this->purchase($vendor, '2001-06-20', '2001-06-20', 300, 63, 363, 'received');
+        $mayMiddle = $this->purchase($vendor, '2001-05-10', '2001-05-10', 200, 42, 242, 'received');
+        $base = ['supplier_id' => $this->supplierId, 'vendor_id' => $vendor, 'sort_key' => 'amount', 'sort_dir' => 'asc'];
+
+        $monthly = $this->purchases->listGroupedByMonth($base, 1, 2);
+        self::assertSame(['2001-06'], array_column($monthly['data'], 'month'));
+        self::assertSame([$juneLow, $juneHigh], array_column($monthly['data'][0]['invoices'], 'id'));
+        self::assertSame(3, $monthly['meta']['total']);
+        self::assertSame([$mayMiddle], array_column($this->purchases->listGroupedByMonth($base, 2, 2)['data'][0]['invoices'], 'id'));
+
+        $continuous = $this->purchases->listGroupedByMonth($base + ['group_by_month' => false], 1, 2);
+        self::assertSame('', $continuous['data'][0]['month']);
+        self::assertSame([$juneLow, $mayMiddle], array_column($continuous['data'][0]['invoices'], 'id'));
+        self::assertSame([$juneHigh], array_column($this->purchases->listGroupedByMonth($base + ['group_by_month' => false], 2, 2)['data'][0]['invoices'], 'id'));
+
+        $byDate = $this->purchases->listGroupedByMonth(array_merge($base, ['sort_key' => 'tax_date']), 1, 2);
+        self::assertSame(['2001-05', '2001-06'], array_column($byDate['data'], 'month'));
+        self::assertSame([$mayMiddle, $juneLow], array_merge(...array_map(
+            static fn (array $group): array => array_column($group['invoices'], 'id'),
+            $byDate['data'],
+        )));
+        self::assertSame([$juneHigh], array_column($this->purchases->listGroupedByMonth(
+            array_merge($base, ['sort_key' => 'tax_date']), 2, 2,
+        )['data'][0]['invoices'], 'id'));
+        self::assertSame(['2001-06'], array_column($this->purchases->listGroupedByMonth(
+            array_merge($base, ['sort_key' => 'tax_date', 'sort_dir' => 'desc']), 1, 2,
+        )['data'], 'month'));
+
+        $this->pdo->prepare('UPDATE purchase_invoices SET received_at = ? WHERE id = ?')->execute(['2001-01-03', $juneLow]);
+        $this->pdo->prepare('UPDATE purchase_invoices SET received_at = ? WHERE id = ?')->execute(['2001-01-01', $juneHigh]);
+        $this->pdo->prepare('UPDATE purchase_invoices SET received_at = ? WHERE id = ?')->execute(['2001-01-02', $mayMiddle]);
+        $receivedSort = array_merge($base, ['sort_key' => 'received_at', 'group_by_month' => false]);
+        self::assertSame([$juneHigh, $mayMiddle], $this->collectIds($this->purchases->listGroupedByMonth($receivedSort, 1, 2)['data']));
+        self::assertSame([$juneLow], $this->collectIds($this->purchases->listGroupedByMonth($receivedSort, 2, 2)['data']));
+        foreach (['project', 'payment_ordered_at'] as $key) {
+            self::assertSame(3, $this->purchases->listGroupedByMonth(array_merge($base, ['sort_key' => $key]), 1, 2)['meta']['total']);
+        }
+    }
+
     /**
      * Dobropis obrat vždy SNIŽUJE (§ 4a ZDPH) — i když je zadaný s kladným součtem.
      *
@@ -208,6 +298,36 @@ final class ListGroupedByMonthTest extends TestCase
         $ids = $this->collectIds($res['data']);
         self::assertSame([$withItem], $ids, 'Vydaná faktura se najde dle textu položky.');
         self::assertSame(1, $res['meta']['total'], 'Count sdílí WHERE s hlavním dotazem — zůstává konzistentní.');
+    }
+
+    /**
+     * Hledání najde doklad i podle čísla objednávky a podle platebního VS — i když VS
+     * není uložený zvlášť, ale odvozuje se z číslic čísla dokladu (2099-0777 → 20990777).
+     */
+    public function testInvoiceSearchMatchesOrderNumberAndDerivedVariableSymbol(): void
+    {
+        $client = $this->client('Odberatel VsSearch', true, false);
+        $derived = $this->invoice($client, '2001-08-10', '2001-08-10', 1000.0, 210.0, 1210.0, 'issued');
+        $explicit = $this->invoice($client, '2001-08-11', '2001-08-11', 500.0, 105.0, 605.0, 'issued');
+        $this->pdo->prepare('UPDATE invoices SET varsymbol = ?, supplier_order_number = ? WHERE id = ?')
+            ->execute(['2099-0777', 'OBJ-QX-4417', $derived]);
+        $this->pdo->prepare('UPDATE invoices SET varsymbol = ?, payment_variable_symbol = ? WHERE id = ?')
+            ->execute(['2099-0778', '5550001', $explicit]);
+
+        $search = fn (string $q): array => $this->collectIds($this->invoices->listGroupedByMonth([
+            'supplier_id' => $this->supplierId, 'client_id' => $client, 'q' => $q,
+        ], 1, 50)['data']);
+
+        self::assertSame([$derived], $search('QX-44'), 'Číslo objednávky se hledá i uprostřed.');
+        self::assertSame([$derived], $search('20990777'), 'VS odvozený z čísla dokladu.');
+        self::assertSame([$explicit], $search('5550001'), 'Samostatný platební VS.');
+        self::assertSame([], $search('20990778'), 'Doklad s vlastním VS se podle číslic čísla dokladu nenajde.');
+
+        $row = $this->invoices->listGroupedByMonth(['supplier_id' => $this->supplierId, 'client_id' => $client])['data'][0]['invoices'];
+        $bySymbol = array_column($row, 'payment_varsymbol', 'id');
+        self::assertSame('20990777', $bySymbol[$derived]);
+        self::assertSame('5550001', $bySymbol[$explicit]);
+        self::assertSame('OBJ-QX-4417', array_column($row, 'supplier_order_number', 'id')[$derived]);
     }
 
     public function testInvoicesBookedFilter(): void

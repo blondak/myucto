@@ -280,10 +280,17 @@ final class EldpExcludedPeriodDeriver
      * nenáleží náhrada příjmu", a za dobu čerpání náhradního volna mzda ani
      * náhrada nepřísluší (§ 114 odst. 1 zákoníku práce; aplikace ho proto
      * mzdově vede jako neplacené).
+     *
+     * Rodičovskou dovolenou jmenují Pokyny MPSV k vyplnění MH 1.4.13 u 10473
+     * výslovně („[např. rodičovská dovolená (doba péče o dítě do 4 let
+     * věku)]"). Že je zároveň náhradní dobou důchodového pojištění podle
+     * § 16 odst. 4 písm. e) zákona č. 155/1995 Sb., na tom nic nemění: to je
+     * vyloučená DOBA pro důchod, tady jde o vyloučené DNY pro nemocenské.
      */
     private const SECTION18_ATTRIBUTES = [
         'unpaid_leave' => 'omluvenaNepritomnost',
         'compensatory_time_off' => 'omluvenaNepritomnost',
+        'parental' => 'omluvenaNepritomnost',
     ];
 
     /**
@@ -470,15 +477,12 @@ final class EldpExcludedPeriodDeriver
      * - `ocr`, `long_term_care`, `paternity`, `ppm` — dny s vyplacenou dávkou
      *   (10475) tvrdí, že dávku ČSSZ opravdu vyplatila. Zaměstnavatel to neví;
      *   ví jen, že o ni bylo požádáno.
-     * - `parental` — rodičovská je omluvená nepřítomnost bez náhrady příjmu,
-     *   ale současně náhradní doba pojištění hodnocená mimo hlášení; doložený
-     *   způsob zápisu do 10473 repozitář nemá.
      * - neznámý druh — fail-closed stejně jako u vyloučených dob.
      *
      * Vynechání je legální: matice povinností JMHZ 1.4.0.2 vede 10366 jako
      * podmíněně nepovinný („nepovinné, pokud je vyplněn 10357 > 0"), a každý
-     * z nederivovatelných druhů kromě `parental` vyloučenou dobu podle
-     * § 16 odst. 4 tvoří, takže 10357 > 0 nastane s ním.
+     * z nederivovatelných druhů vyloučenou dobu podle § 16 odst. 4 tvoří,
+     * takže 10357 > 0 nastane s ním.
      *
      * @param list<array<string,mixed>> $absences absence ze zmrazeného snapshotu
      * @return array{

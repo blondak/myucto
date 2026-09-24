@@ -65,6 +65,13 @@ final class DimensionRepository
         return (int) $stmt->fetchColumn() === 1;
     }
 
+    public function supplierName(int $supplierId): string
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT COALESCE(NULLIF(display_name, ''), company_name) FROM supplier WHERE id = ?");
+        $stmt->execute([$supplierId]);
+        return (string) ($stmt->fetchColumn() ?: '');
+    }
+
     public function setEnabled(int $supplierId, bool $enabled): void
     {
         $this->db->pdo()->prepare('UPDATE supplier SET dimensions_enabled = ? WHERE id = ?')
@@ -170,9 +177,11 @@ final class DimensionRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT EXISTS (SELECT 1 FROM journal_entry_line_dimensions WHERE dimension_type_id = ?)
-                 OR EXISTS (SELECT 1 FROM document_dimensions WHERE dimension_type_id = ?)'
+                 OR EXISTS (SELECT 1 FROM document_dimensions WHERE dimension_type_id = ?)
+                 OR EXISTS (SELECT 1 FROM journal_entry_line_dimension_splits WHERE dimension_type_id = ?)
+                 OR EXISTS (SELECT 1 FROM document_dimension_splits WHERE dimension_type_id = ?)'
         );
-        $stmt->execute([$typeId, $typeId]);
+        $stmt->execute([$typeId, $typeId, $typeId, $typeId]);
         return (bool) $stmt->fetchColumn();
     }
 
@@ -356,9 +365,12 @@ final class DimensionRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT EXISTS (SELECT 1 FROM journal_entry_line_dimensions WHERE dimension_value_id = ?)
                  OR EXISTS (SELECT 1 FROM document_dimensions WHERE dimension_value_id = ?)
-                 OR EXISTS (SELECT 1 FROM dimension_values WHERE parent_id = ?)'
+                 OR EXISTS (SELECT 1 FROM dimension_values WHERE parent_id = ?)
+                 OR EXISTS (SELECT 1 FROM journal_entry_line_dimension_splits WHERE dimension_value_id = ?)
+                 OR EXISTS (SELECT 1 FROM document_dimension_splits WHERE dimension_value_id = ?)
+                 OR EXISTS (SELECT 1 FROM dimension_account_rules WHERE default_value_id = ?)'
         );
-        $stmt->execute([$valueId, $valueId, $valueId]);
+        $stmt->execute([$valueId, $valueId, $valueId, $valueId, $valueId, $valueId]);
         return (bool) $stmt->fetchColumn();
     }
 

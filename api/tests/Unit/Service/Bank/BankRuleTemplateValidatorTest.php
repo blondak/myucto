@@ -48,6 +48,22 @@ final class BankRuleTemplateValidatorTest extends TestCase
         }
     }
 
+    /**
+     * Výchozí šablony (bank_rule_template_defaults) nesou i odvody zaměstnavatele. Validátor
+     * je musí přijmout, jinak takovou šablonu nejde v nastavení upravit ani přenést profilem.
+     */
+    public function testAcceptsEmployerRemittanceTypesOfSeededTemplates(): void
+    {
+        foreach (['bank.remittance.social.employer', 'bank.remittance.health.employer'] as $type) {
+            $result = (new BankRuleTemplateValidator())->normalize($this->valid([
+                'direction' => 'outgoing',
+                'operation_type' => $type,
+                'vs_placeholder' => '{dic_kmen}',
+            ]));
+            self::assertSame($type, $result['operation_type']);
+        }
+    }
+
     public function testRejectsUnknownPlaceholder(): void
     {
         try {

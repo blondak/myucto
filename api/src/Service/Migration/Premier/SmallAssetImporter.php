@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Premier;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\SmallAssetCard;
 use PDO;
 
@@ -138,9 +139,10 @@ final class SmallAssetImporter
             return;
         }
         $pdo = $this->db->pdo();
+        // Cena karty je v Kč - položka dokladu v cizí měně se přepočte kurzem dokladu.
         $stmt = $pdo->prepare(
             "SELECT pi.id, pi.document_kind, pi.vendor_id, pi.varsymbol, COALESCE(pi.tax_date, pi.issue_date) AS acquired,
-                    pii.description, pii.total_without_vat
+                    pii.description, " . ForeignCurrencyTakeover::homeAmountSql('pii.total_without_vat', 'pi.exchange_rate') . " AS total_without_vat
                FROM purchase_invoices pi
                JOIN purchase_invoice_items pii ON pii.purchase_invoice_id = pi.id
               WHERE pi.supplier_id = ? AND pi.status <> 'draft' AND pii.expense_kind IN ('small_asset', 'small_intangible')

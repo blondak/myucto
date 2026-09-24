@@ -72,7 +72,9 @@ final class ShoptetOrderImportTest extends StockTestCase
 
     private function xml(): string
     {
-        return (string) file_get_contents(self::FIXTURES . 'orders.xml');
+        // Windows checkout s core.autocrlf dostane fixture s CRLF, víceřádkové náhrady
+        // v testech jsou ale v PHP zdrojáku (eol=lf) s LF.
+        return str_replace("\r\n", "\n", (string) file_get_contents(self::FIXTURES . 'orders.xml'));
     }
 
     /** @return array<string,mixed> */

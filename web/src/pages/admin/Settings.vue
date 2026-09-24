@@ -16,6 +16,7 @@ import { renderVarsymbolTemplate, hasCounterPlaceholder, templatesCollide } from
 import { DEFAULT_NOTE_MAX_LENGTH } from '@/pages/invoices/invoiceDefaultNote'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import AutomationPolicyBox from '@/components/settings/AutomationPolicyBox.vue'
+import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SupplierDomainsSettings from '@/components/settings/SupplierDomainsSettings.vue'
@@ -1451,13 +1452,14 @@ async function confirmTaxRepDelete() {
       <!-- Firma → Dimenze (migrace 1860) — opt-in; číselník typů a hodnot je v menu Firma. -->
       <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm" data-test="settings-dimensions">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.dimensions_enabled.title') }}</h2>
-        <label class="flex items-start gap-2 cursor-pointer">
-          <input v-model="supplier.dimensions_enabled" type="checkbox" class="mt-0.5 rounded border-neutral-300" />
+        <label class="flex items-start gap-2" :class="auth.hasCommercialFeatures || supplier.dimensions_enabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'">
+          <input v-model="supplier.dimensions_enabled" type="checkbox" :disabled="!auth.hasCommercialFeatures && !supplier.dimensions_enabled" class="mt-0.5 rounded border-neutral-300" />
           <span>
             <span class="font-medium">{{ t('settings.dimensions_enabled.label') }}</span>
             <p class="text-xs text-neutral-500 mt-0.5">{{ t('settings.dimensions_enabled.hint') }}</p>
           </span>
         </label>
+        <p v-if="!auth.hasCommercialFeatures" class="mt-3 text-xs text-warning-700">{{ t('dimensions.license_hint') }}</p>
       </section>
 
       <!-- Sklad (Epic SKLAD) — samostatný box, nezávislé na accounting_mode.
@@ -2189,6 +2191,8 @@ async function confirmTaxRepDelete() {
         </div>
 
       </section>
+
+      <CompanyProfileBox v-if="tab === 'accounting'" />
 
       <!-- Ukázková data — jen pokud nějaká evidovaná existují (issue #162) -->
       <section v-if="tab === 'accounting' && sampleStatus?.has" class="bg-surface border border-warning-500/40 rounded-lg p-5 shadow-sm">

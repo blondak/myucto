@@ -10,6 +10,8 @@ use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
+use MyInvoice\Service\Accounting\Dimension\DimensionRuleAudit;
+use MyInvoice\Service\Accounting\Dimension\DimensionRuleService;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -33,6 +35,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   POST   /api/accounting/dimensions/documents/{doc}/{id}/preview — náhled dimenzí zaúčtovaných řádků
  *   GET|PUT /api/accounting/dimensions/journal/{id}            — dimenze řádků účetního zápisu
  *   GET|POST|PUT|DELETE /api/accounting/dimensions/group       — skupina firem (globální dimenze)
+ *   GET|POST /api/accounting/dimensions/rules, PUT|DELETE …/rules/{id} — pravidla dimenzí podle účtu
+ *   GET    /api/accounting/dimensions/rules/audit              — zaúčtované řádky bez povinné dimenze
+ *   GET    /api/accounting/dimensions/rules/coverage           — pokrytí účtů dimenzemi (návrh pravidel)
  *
  * Čtení = `accounting` READ, zápisy = `accounting` WRITE (RoutePermissionMap i tady),
  * zapnutí sekce a skupina firem = správa firmy.
@@ -56,7 +61,95 @@ final class DimensionAction
         private readonly DimensionRepository $repo,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly DimensionRuleService $rules,
+        private readonly DimensionRuleAudit $ruleAudit,
     ) {}
+
+    // ── pravidla dimenzí podle účtu ─────────────────────────────────────────
+
+    public function listRules(Request $request, Response $response): Response
+    {
+        return Json::ok($response, $this->rules->list($this->currentSupplierId($request)));
+    }
+
+    public function createRule(Request $request, Response $response): Response
+    {
+        return $this->run($request, $response, function (int $supplierId) use ($request): array {
+            $rule = $this->rules->create($supplierId, (array) ($request->getParsedBody() ?? []), $this->userId($request));
+            $this->log($request, 'dimension.rule_created', (int) $rule['id'], self::ruleAudit($rule));
+            return $rule;
+        }, 201);
+    }
+
+    public function updateRule(Request $request, Response $response, array $args): Response
+    {
+        return $this->run($request, $response, function (int $supplierId) use ($request, $args): array {
+            $id = (int) ($args['id'] ?? 0);
+            $rule = $this->rules->update($supplierId, $id, (array) ($request->getParsedBody() ?? []));
+            $this->log($request, 'dimension.rule_updated', $id, self::ruleAudit($rule));
+            return $rule;
+        });
+    }
+
+    public function deleteRule(Request $request, Response $response, array $args): Response
+    {
+        return $this->run($request, $response, function (int $supplierId) use ($request, $args): array {
+            $id = (int) ($args['id'] ?? 0);
+            $this->rules->delete($supplierId, $id);
+            $this->log($request, 'dimension.rule_deleted', $id, []);
+            return ['deleted' => true];
+        });
+    }
+
+    /** GET …/rules/audit?date_from&date_to — zaúčtované řádky bez povinné dimenze. */
+    public function auditRules(Request $request, Response $response): Response
+    {
+        $range = $this->dateRange($request, $response, $err);
+        if ($range === null) return $err;
+        return Json::ok($response, $this->ruleAudit->violations($this->currentSupplierId($request), $range[0], $range[1]));
+    }
+
+    /** GET …/rules/coverage?date_from&date_to — pokrytí účtů dimenzemi (návrh pravidel). */
+    public function ruleCoverage(Request $request, Response $response): Response
+    {
+        $range = $this->dateRange($request, $response, $err);
+        if ($range === null) return $err;
+        return Json::ok($response, $this->ruleAudit->coverage($this->currentSupplierId($request), $range[0], $range[1]));
+    }
+
+    /** @return array{0:string,1:string}|null */
+    private function dateRange(Request $request, Response $response, ?Response &$err): ?array
+    {
+        $q = $request->getQueryParams();
+        $year = (int) date('Y');
+        $from = (string) ($q['date_from'] ?? $year . '-01-01');
+        $to = (string) ($q['date_to'] ?? $year . '-12-31');
+        foreach ([$from, $to] as $d) {
+            $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $d);
+            if ($parsed === false || $parsed->format('Y-m-d') !== $d) {
+                $err = Json::error($response, 'validation_failed', 'date_from a date_to musí být datum (YYYY-MM-DD).', 422);
+                return null;
+            }
+        }
+        if ($to < $from) {
+            $err = Json::error($response, 'validation_failed', 'date_to nesmí být před date_from.', 422);
+            return null;
+        }
+        $err = null;
+        return [$from, $to];
+    }
+
+    /**
+     * @param array<string,mixed> $rule
+     * @return array<string,mixed>
+     */
+    private static function ruleAudit(array $rule): array
+    {
+        return array_intersect_key($rule, array_flip([
+            'dimension_type_id', 'account_mask', 'enforcement', 'default_value_id', 'default_from_card',
+            'valid_from', 'valid_to', 'is_active',
+        ]));
+    }
 
     public function overview(Request $request, Response $response): Response
     {
@@ -155,11 +248,11 @@ final class DimensionAction
     {
         $docType = self::DOCUMENTS[(string) ($args['doc'] ?? '')] ?? '';
         try {
-            return Json::ok($response, $this->dimensions->documentDimensions(
+            return Json::ok($response, self::withSplitObject($this->dimensions->documentDimensions(
                 $this->currentSupplierId($request),
                 $docType,
                 (int) ($args['id'] ?? 0),
-            ));
+            )));
         } catch (DimensionException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
@@ -177,10 +270,39 @@ final class DimensionAction
                 $docId,
                 (array) ($body['header'] ?? []),
                 self::itemsFromBody($body),
+                false,
+                self::splitsFromBody($body),
             );
             $this->logDocument($request, $docId, $docType, $result, 'document');
-            return $result;
+            return self::withSplitObject($result);
         });
+    }
+
+    /**
+     * Rozpad jen tehdy, když ho tělo posílá (`splits` = pořadí položky → typ →
+     * [{value_id, share}]); bez klíče se dosavadní rozpad ponechá.
+     *
+     * @param array<string,mixed> $body
+     * @return array<int|string,mixed>|null
+     */
+    private static function splitsFromBody(array $body): ?array
+    {
+        return array_key_exists('splits', $body) ? (array) $body['splits'] : null;
+    }
+
+    /**
+     * `splits` indexované pořadím položky (0 = hlavička) by JSON zapsal jako pole —
+     * klient čeká objekt.
+     *
+     * @param array<string,mixed> $result
+     * @return array<string,mixed>
+     */
+    private static function withSplitObject(array $result): array
+    {
+        if (array_key_exists('splits', $result)) {
+            $result['splits'] = (object) array_map(static fn (array $byType): object => (object) $byType, $result['splits']);
+        }
+        return $result;
     }
 
     /**
@@ -191,13 +313,14 @@ final class DimensionAction
     {
         return $this->run($request, $response, function (int $supplierId) use ($request, $args): array {
             $body = (array) ($request->getParsedBody() ?? []);
-            return $this->dimensions->previewDocument(
+            return self::withSplitObject($this->dimensions->previewDocument(
                 $supplierId,
                 self::DOCUMENTS[(string) ($args['doc'] ?? '')] ?? '',
                 (int) ($args['id'] ?? 0),
                 (array) ($body['header'] ?? []),
                 self::itemsFromBody($body),
-            );
+                self::splitsFromBody($body),
+            ));
         });
     }
 
@@ -244,9 +367,21 @@ final class DimensionAction
         return $this->run($request, $response, function (int $supplierId) use ($request, $args): array {
             $entryId = (int) ($args['id'] ?? 0);
             $body = (array) ($request->getParsedBody() ?? []);
-            $changed = $this->dimensions->saveEntryLines($supplierId, $entryId, (array) ($body['lines'] ?? []));
-            $this->log($request, 'dimension.journal_lines_updated', $entryId, ['lines' => (array) ($body['lines'] ?? []), 'changed' => $changed]);
-            return ['changed' => $changed, 'lines' => (object) $this->dimensions->entryLineDimensions($supplierId, $entryId)];
+            $splits = array_key_exists('splits', $body) ? (array) $body['splits'] : null;
+            $changed = $this->dimensions->saveEntryLines($supplierId, $entryId, (array) ($body['lines'] ?? []), $splits);
+            $this->log($request, 'dimension.journal_lines_updated', $entryId, [
+                'lines' => (array) ($body['lines'] ?? []),
+                'splits' => $splits,
+                'changed' => $changed,
+            ]);
+            return [
+                'changed' => $changed,
+                'lines' => (object) $this->dimensions->entryLineDimensions($supplierId, $entryId),
+                'splits' => (object) array_map(
+                    static fn (array $byType): object => (object) $byType,
+                    $this->dimensions->entryLineSplits($supplierId, $entryId),
+                ),
+            ];
         });
     }
 

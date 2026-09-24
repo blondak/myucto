@@ -50,6 +50,13 @@ final class EmailPdfStatementIngestor
         private readonly BankEmailAttachmentIngestRepository $log,
         private readonly BankStatementPdfParserRegistry $parsers,
         private readonly StatementImporter $importer,
+        /**
+         * Výpis kreditní karty z e-mailu jde importem kreditních karet, ale jen k úvěrovému
+         * účtu, který firma UŽ eviduje (pravidlo 3 výš: cizí výpis se nesmí naimportovat
+         * pod naši firmu, a nový účet by si e-mail založil sám).
+         */
+        private readonly ?\MyInvoice\Service\Bank\CreditCard\CreditCardStatementImportService $creditCards = null,
+        private readonly ?\MyInvoice\Repository\CreditCardAccountRepository $creditCardAccounts = null,
     ) {}
 
     /**
@@ -176,10 +183,13 @@ final class EmailPdfStatementIngestor
         }
 
         $accountNumber = (string) ($parsed['header']['account_number'] ?? '');
+        if (\MyInvoice\Service\Bank\CreditCard\CreditCardStatementImportService::isCreditCardStatement($parsed)) {
+            return $this->ingestCreditCard($supplierId, $base, $parsed, $attachment->content, $this->safeFilename($attachment->filename), $takenByInvoiceQueue);
+        }
         $currencyId = $this->resolveCurrencyAccount($supplierId, $accountNumber, $parsed);
         if ($currencyId === null) {
             return $takenByInvoiceQueue ? null : $this->record($base, 'skipped_not_statement', sprintf(
-                'Výpis k účtu %s — tenhle účet není mezi bankovními účty firmy, nebo mu odpovídá víc účtů. Doplňte ho v nastavení a spusťte sken znovu.',
+                'Výpis k účtu %s: tenhle účet není mezi bankovními účty firmy, nebo mu odpovídá víc účtů. Doplňte ho v nastavení a spusťte sken znovu.',
                 $accountNumber !== '' ? $accountNumber : 'neuveden',
             ));
         }
@@ -288,6 +298,42 @@ final class EmailPdfStatementIngestor
     }
 
     /** Název pro doklad výpisu; přílohu bez `.pdf` přejmenujeme (magic check už prošel). */
+    /**
+     * Výpis kreditní karty: import jen k úvěrovému účtu, který firma už eviduje.
+     *
+     * @param array<string,mixed> $base
+     * @param array{header:array<string,mixed>, transactions:list<array<string,mixed>>} $parsed
+     * @return array<string,mixed>|null
+     */
+    private function ingestCreditCard(int $supplierId, array $base, array $parsed, string $content, string $filename, bool $takenByInvoiceQueue): ?array
+    {
+        $accountNumber = (string) ($parsed['header']['account_number'] ?? '');
+        $bankCode = isset($parsed['header']['bank_code']) ? (string) $parsed['header']['bank_code'] : null;
+        $registry = $this->creditCardAccounts?->findRegistryRow($supplierId, $accountNumber, $bankCode);
+        if ($this->creditCards === null || $registry === null || (string) $registry['kind'] !== 'credit_card') {
+            return $takenByInvoiceQueue ? null : $this->record($base, 'skipped_not_statement', sprintf(
+                'Výpis kreditní karty k účtu %s: tenhle úvěrový účet firma neeviduje. První výpis načtěte ručně v sekci Kreditní karty.',
+                $accountNumber !== '' ? $accountNumber : 'neuveden',
+            ));
+        }
+        try {
+            $result = $this->creditCards->importParsed($supplierId, $parsed, $content, $filename, null);
+        } catch (\Throwable $e) {
+            return $takenByInvoiceQueue ? null : $this->record($base, 'failed', 'Import výpisu kreditní karty selhal: ' . $e->getMessage());
+        }
+        $statementId = (int) ($result['statement_id'] ?? 0);
+        if (!empty($result['duplicate'])) {
+            return $this->record($base, 'skipped_duplicate', 'Tenhle výpis už v systému je.', statementId: $statementId > 0 ? $statementId : null);
+        }
+        return $this->record(
+            $base,
+            'imported_statement',
+            sprintf('Naimportován výpis kreditní karty k účtu %s: %d pohybů.', $accountNumber, (int) ($result['transactions'] ?? 0)),
+            statementId: $statementId > 0 ? $statementId : null,
+            matchedBy: isset($parsed['parser']) ? (string) $parsed['parser'] : null,
+        );
+    }
+
     private function safeFilename(string $filename): string
     {
         $name = trim(basename(str_replace('\\', '/', $filename)));

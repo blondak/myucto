@@ -21,10 +21,9 @@ namespace MyInvoice\Service\Import;
  *
  * Vrátí XML string nebo null, pokud PDF žádný ISDOC neobsahuje.
  *
- * Omezení: nepodporujeme PDF, kde jsou objekty zabalené v compressed object
- * streams (`/Type /ObjStm`). mPDF (náš generátor) je nepoužívá, většina
- * producentů PDF/A-3 invoice atřaktur taky ne. Pokud na takový PDF narazíme,
- * vrátíme null a uživatel uvidí čitelnou chybu „PDF neobsahuje ISDOC".
+ * Objekty v compressed object streams (`/Type /ObjStm`) nerozbalujeme. Stream
+ * přílohy tam podle specifikace být nemůže, takže ho najdeme i tak; v `/ObjStm`
+ * končí jen FileSpec s názvem souboru (Fakturoid), a pak rozhodne content sniff.
  */
 final class PdfIsdocExtractor
 {
@@ -99,7 +98,10 @@ final class PdfIsdocExtractor
     {
         $result = [];
         $offset = 0;
-        $markerRe = '#/Type\s*/EmbeddedFile\b#';
+        // `/Type /EmbeddedFile` je podle specifikace volitelný. Fakturoid (Prince) ho
+        // vynechává a FileSpec s názvem schová do `/ObjStm`, takže přílohu pozná jen
+        // `/Params`, který nese výhradně vložený soubor. Obsah pak stejně rozhodne sniff.
+        $markerRe = '#/Type\s*/EmbeddedFile\b|/Params\s*<<#';
 
         while (preg_match($markerRe, $pdf, $m, PREG_OFFSET_CAPTURE, $offset)) {
             $markerPos = $m[0][1];

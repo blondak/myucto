@@ -136,7 +136,7 @@ final class VatClassificationMapper
     public function aggregateForDphPriznani(int $supplierId, int $year, int $month, string $period = 'monthly'): array
     {
         [$start, $end] = $this->periodRange($year, $month, $period);
-        return $this->projectDphLines($this->ledger->rows($supplierId, $start, $end, includeDrafts: false));
+        return $this->projectDphLines($this->ledger->returnRows($supplierId, $start, $end, includeDrafts: false));
     }
 
     /**
@@ -150,7 +150,7 @@ final class VatClassificationMapper
     {
         [$start, $end] = $this->periodRange($year, $month, $period);
         return VatLedgerService::missingExchangeRateRows(
-            $this->ledger->rows($supplierId, $start, $end, includeDrafts: false)
+            $this->ledger->returnRows($supplierId, $start, $end, includeDrafts: false)
         );
     }
 
@@ -165,7 +165,7 @@ final class VatClassificationMapper
     {
         $start = sprintf('%04d-01-01', $year);
         $end   = sprintf('%04d-12-31', $year);
-        return $this->projectDphLines($this->ledger->rows($supplierId, $start, $end, includeDrafts: false));
+        return $this->projectDphLines($this->ledger->returnRows($supplierId, $start, $end, includeDrafts: false));
     }
 
     /**
@@ -180,6 +180,7 @@ final class VatClassificationMapper
     {
         $byLine = [];
         $invoiceLineSeen = []; // per document identity × line → distinct count
+        $mirrorParts = [];     // zrcadlový odpočet ř. 43/44 rozpadlý podle primárního ř. 3–13
         foreach ($rows as $r) {
             $primary = $r['dphdp3_line'];
             if ($r['code'] === null || $primary === null) continue; // bez řádku DPHDP3 → přeskoč
@@ -202,15 +203,20 @@ final class VatClassificationMapper
                 $secondaryVat = in_array($secondary, ['51', '51b'], true)
                     ? 0.0
                     : (float) ($r['deduction_vat_czk'] ?? $vatCzk);
+                $secondaryBase = (float) ($r['deduction_base_czk'] ?? $baseCzk);
                 $this->addLine(
                     $byLine,
                     $secondary,
-                    (float) ($r['deduction_base_czk'] ?? $baseCzk),
+                    $secondaryBase,
                     $secondaryVat,
                     $documentKey,
                     $invoiceLineSeen,
                     $label,
                 );
+                if (isset(self::SELF_ASSESSMENT_MIRROR_LINES[$secondary])) {
+                    $mirrorParts[$secondary][$primary]['base'] = ($mirrorParts[$secondary][$primary]['base'] ?? 0.0) + $secondaryBase;
+                    $mirrorParts[$secondary][$primary]['vat']  = ($mirrorParts[$secondary][$primary]['vat'] ?? 0.0) + $secondaryVat;
+                }
             }
 
             // ř.47 — hodnota pořízeného majetku (doplňující údaj k ř.40-45).
@@ -230,8 +236,32 @@ final class VatClassificationMapper
             }
         }
 
+        // Ř. 43/44 (odpočet ze samovyměření) je v přiznání protějškem ř. 3–13 a EPO ho
+        // kontroluje proti součtu TĚCH řádků, jak jsou vyplněné — tedy už zaokrouhlených
+        // na celé Kč (chyba č. 90). Součet haléřových částek zaokrouhlený až na konci se
+        // rozejde: ř. 5 = 50 646,20 a ř. 12 = 539,33 dávají ve formuláři 50 646 + 539
+        // = 51 185, ale round(51 185,53) = 51 186. Proto se zrcadlový řádek skládá ze
+        // zaokrouhlených podílů jednotlivých primárních řádků — stejně jako se ř. 46
+        // skládá z řádků 40–45.
+        foreach ($mirrorParts as $mirrorLine => $parts) {
+            $base = 0.0;
+            $vat = 0.0;
+            foreach ($parts as $part) {
+                $base += round($part['base']);
+                $vat  += round($part['vat']);
+            }
+            $byLine[$mirrorLine]['base'] = $base;
+            $byLine[$mirrorLine]['vat']  = $vat;
+        }
+
         return $byLine;
     }
+
+    /**
+     * Zrcadlové řádky odpočtu ze samovyměření (ř. 43/44 plná i krácená výše), které
+     * {@see projectDphLines()} skládá ze zaokrouhlených podílů primárních ř. 3–13.
+     */
+    private const SELF_ASSESSMENT_MIRROR_LINES = ['43' => true, '44' => true, '43k' => true, '44k' => true];
 
     /**
      * @param array<string, array{base:float, vat:float, count:int, label:string}> $byLine by-ref

@@ -11,6 +11,7 @@ use MyInvoice\Service\Accounting\Assets\AssetException;
 use MyInvoice\Service\Accounting\Assets\AssetService;
 use MyInvoice\Service\Migration\MoneyS3\AccountCode;
 use MyInvoice\Service\Migration\Shared\MigratedDepreciation;
+use MyInvoice\Service\Migration\Shared\MigratedDisposal;
 
 /**
  * Karty dlouhodobého majetku PREMIER s daňovými odpisy po letech, účetním plánem po měsících
@@ -50,6 +51,7 @@ final class AssetImporter
         private readonly PremierImportRepository $map,
         private readonly AssetService $assets,
         private readonly DepreciationEntryRepository $entries,
+        private readonly MigratedDisposal $disposals,
     ) {}
 
     public function import(PremierContext $ctx): void
@@ -126,6 +128,9 @@ final class AssetImporter
         if (isset($existing[$key])) {
             $this->confirmYear($ctx, $existing[$key], $tax[$inter] ?? [], $movements[$inter] ?? [], $number);
             $p->count(self::STEP, 'existing');
+            if ($disposal !== null && $disposal <= $end && $this->status($ctx, $existing[$key]) === 'in_use') {
+                $this->disposeMigrated($ctx, $existing[$key], $disposal, $number);
+            }
             return;
         }
 
@@ -193,8 +198,14 @@ final class AssetImporter
         if (!isset($card['asset_account_code'])) {
             $review[] = 'karta nemá majetkový účet';
         }
-        if ($disposal !== null) {
+        // Vyřazení v převáděném roce zaúčtoval převedený deník: karta se vyřadí bez zaúčtování
+        // (disposeMigrated). Ke kontrole zůstává jen vyřazení po převáděném roce.
+        $disposedInYear = $disposal !== null && $disposal <= $end;
+        if ($disposal !== null && !$disposedInYear) {
             $review[] = 'majetek je v PREMIER vyřazený ' . $disposal . ', vyřazení proveďte v MyÚčtu';
+        }
+        if ($review !== [] && $disposedInYear) {
+            $review[] = 'majetek je v PREMIER vyřazený ' . $disposal . ' a vyřazení je v převedeném deníku: po kontrole kartu zařaďte a vyřaďte bez zaúčtování';
         }
         if ($review !== []) {
             $card['status'] = 'draft';
@@ -213,7 +224,39 @@ final class AssetImporter
             $p->warn(self::STEP, 'asset_review', "Karta majetku {$number} převzata jako koncept ke kontrole: " . implode('; ', $review) . '.', ['document_no' => $number]);
         } else {
             $this->confirmYear($ctx, $assetId, $taxRows, $movements[$inter] ?? [], $number);
+            if ($disposedInYear) {
+                $this->disposeMigrated($ctx, $assetId, $disposal, $number);
+            }
         }
+    }
+
+    /**
+     * Karta vyřazená v převáděném roce: vyřazení zaúčtoval převedený deník, karta se proto
+     * vyřadí bez zaúčtování a naváže na zápis vyřazení ({@see MigratedDisposal}). Nejde-li
+     * to, zůstane koncept ke kontrole.
+     */
+    private function disposeMigrated(PremierContext $ctx, int $assetId, string $disposal, string $number): void
+    {
+        $result = $this->disposals->dispose($ctx->supplierId, $assetId, $disposal, null, $ctx->userOrNull());
+        if ($result['disposed']) {
+            $ctx->protocol->count(self::STEP, 'disposed_from_journal');
+            if ($result['entry_id'] !== null) {
+                $ctx->protocol->count(self::STEP, 'disposal_entry_linked');
+            }
+            return;
+        }
+        $note = 'majetek je v PREMIER vyřazený ' . $disposal . ' a vyřazení je v převedeném deníku, kartu se ale nepodařilo vyřadit ('
+            . $result['message'] . '): vyřaďte ji bez zaúčtování';
+        $this->disposals->toReview($ctx->supplierId, $assetId, 'Převod z PREMIER - ke kontrole: ' . $note . '.');
+        $ctx->protocol->warn(self::STEP, 'asset_review', "Karta majetku {$number} převzata jako koncept ke kontrole: {$note}.", ['document_no' => $number]);
+    }
+
+    private function status(PremierContext $ctx, int $assetId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT status FROM assets WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$assetId, $ctx->supplierId]);
+        $status = $stmt->fetchColumn();
+        return $status === false ? null : (string) $status;
     }
 
     /**

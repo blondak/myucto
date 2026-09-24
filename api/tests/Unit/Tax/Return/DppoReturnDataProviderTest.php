@@ -86,6 +86,77 @@ final class DppoReturnDataProviderTest extends TestCase
     }
 
     /**
+     * EP-1: majetek vyřazený mimo modul majetku (převzatý deník, ruční zápis 541/08x) nemá
+     * zápis `asset_disposal`. Účetní ZC se vezme z karty a zkontroluje proti deníku; můstek
+     * vznikne stejně jako u vyřazení v modulu.
+     */
+    public function testDisposalWithoutModuleEntryTakesBookResidualFromCard(): void
+    {
+        $this->disposalFixture();
+        // vstupní cena 100 000, oprávky 60 000 počáteční + 39 000 odpisy = ZC 1 000; daňová ZC 600
+        $this->migratedAsset(1, 'PREVZATY', 'sold', 'straight', 100000, 60000, 39000, 600.0, '082');
+        $this->ledgerEntry(10, '2025-06-30', '541', '082', 1000);
+
+        $result = $this->provider->gather(1, 2025);
+        self::assertSame(400.0, $result['disposal_tax_increase'], 'Účetní ZC 1 000 − daňová 600.');
+        self::assertSame(0.0, $result['disposal_tax_decrease']);
+        $row = $result['disposals'][0];
+        self::assertSame([1000.0, 'card', 1000.0], [$row['book_residual_value'], $row['book_residual_source'], $row['journal_residual_value']]);
+        self::assertSame([], $this->residualWarnings($result['warnings']), 'Karta sedí na deník, varování žádné.');
+    }
+
+    public function testDisposalCardResidualDifferentFromLedgerWarnsWithBothAmounts(): void
+    {
+        $this->disposalFixture();
+        $this->migratedAsset(1, 'PREVZATY', 'liquidated', 'straight', 100000, 60000, 39000, 600.0, '082');
+        $this->ledgerEntry(10, '2025-06-30', '541', '082', 1500);
+
+        $result = $this->provider->gather(1, 2025);
+        self::assertSame(400.0, $result['disposal_tax_increase'], 'Přiznání jede ze ZC podle karty.');
+        $warnings = implode("\n", $result['warnings']);
+        self::assertStringContainsString('podle karty 1 000,00 Kč', $warnings);
+        self::assertStringContainsString('v deníku (MD 54x proti účtu 082) 1 500,00 Kč', $warnings);
+    }
+
+    /**
+     * Ochrana: odpisovaný majetek bez daňové historie má daňovou ZC neznámou. Dosadit
+     * vstupní cenu by u plně odepsaného softwaru za 1 mil. Kč vyrobilo odpočet 1 mil. Kč.
+     */
+    public function testDepreciableCardWithoutTaxHistoryNeverDeductsInputPrice(): void
+    {
+        $this->disposalFixture();
+        $this->migratedAsset(1, 'SOFTWARE', 'liquidated', 'none', 1000000, 1000000, 0, null, '073', 'intangible');
+
+        $result = $this->provider->gather(1, 2025);
+        self::assertSame(0.0, $result['disposal_tax_decrease'], 'Žádný fiktivní odpočet vstupní ceny.');
+        self::assertSame(0.0, $result['disposal_tax_increase']);
+        $row = $result['disposals'][0];
+        self::assertSame([0.0, null, 'unknown'], [$row['book_residual_value'], $row['tax_residual_value'], $row['tax_residual_source']]);
+        self::assertStringContainsString('SOFTWARE', implode("\n", $result['warnings']));
+        self::assertStringContainsString('není známa daňová zůstatková cena', implode("\n", $result['warnings']));
+    }
+
+    public function testNonDepreciableLandAndByAccountingCardsGiveNoBridge(): void
+    {
+        $this->disposalFixture();
+        $this->migratedAsset(1, 'POZEMEK', 'sold', 'none', 32112, 0, 0, null, null);
+        $this->ledgerEntry(10, '2025-06-30', '541', '031', 32112);
+        $this->migratedAsset(2, 'LICENCE', 'liquidated', 'by_accounting', 50000, 45000, 0, null, '073', 'intangible');
+        $this->ledgerEntry(11, '2025-06-30', '541', '073', 5000);
+
+        $result = $this->provider->gather(1, 2025);
+        self::assertSame([0.0, 0.0], [$result['disposal_tax_increase'], $result['disposal_tax_decrease']]);
+        $byNumber = array_column($result['disposals'], null, 'inventory_number');
+        self::assertSame([32112.0, 32112.0, 'non_depreciable'], [
+            $byNumber['POZEMEK']['book_residual_value'], $byNumber['POZEMEK']['tax_residual_value'], $byNumber['POZEMEK']['tax_residual_source'],
+        ]);
+        self::assertSame([5000.0, 5000.0, 'by_accounting'], [
+            $byNumber['LICENCE']['book_residual_value'], $byNumber['LICENCE']['tax_residual_value'], $byNumber['LICENCE']['tax_residual_source'],
+        ]);
+        self::assertSame([], $this->residualWarnings($result['warnings']));
+    }
+
+    /**
      * #13 (hranice období): VH se počítá STRIKTNĚ za zdaňovací období vybraného roku —
      * záznamy jiných let (i sousedních period téže firmy) se do součtu NESMÍ přimíchat.
      * Regrese k záměně roku v náhledu (5 685 370 = správný FY2024, chybně zobrazený místo 2025).
@@ -231,7 +302,9 @@ final class DppoReturnDataProviderTest extends TestCase
     private function asset(int $id, string $number, string $type, float $bookResidual, float $taxResidual, int $expenseAccount): void
     {
         $stmt = $this->pdo->prepare(
-            "INSERT INTO assets VALUES (?,1,?,?,'tangible',NULL,'2025-06-30',?,100000,0,'disposed')"
+            "INSERT INTO assets (id, supplier_id, inventory_number, name, kind, disposal_date, disposal_type, input_price,
+                                 opening_tax_amount, status, tax_method, asset_account_code, accumulated_account_code)
+             VALUES (?,1,?,?,'tangible','2025-06-30',?,100000,0,'disposed','straight','022','082')"
         );
         $stmt->execute([$id, $number, $number, $type]);
         $this->pdo->prepare("INSERT INTO depreciation_entries VALUES (?,1,?,'tax',2025,0,?)")
@@ -246,6 +319,64 @@ final class DppoReturnDataProviderTest extends TestCase
             ->execute([$id * 2, $id, 5, $bookResidual]);
     }
 
+    private function disposalFixture(): void
+    {
+        $this->pdo->exec("INSERT INTO accounting_periods (id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at, row_version) VALUES (1,1,2025,'2025-01-01','2025-12-31','open',NULL,'2025-01-01',1)");
+        $this->pdo->exec("INSERT INTO chart_of_accounts VALUES
+            (1,'541','expense','deductible','ZC prodaného majetku'),(2,'082','asset','deductible','Oprávky'),
+            (3,'031','asset','deductible','Pozemky'),(4,'073','asset','deductible','Oprávky k software'),
+            (5,'551','expense','deductible','Odpisy')");
+    }
+
+    /** Karta převedená z jiného systému: vyřazená bez zápisu `asset_disposal`. */
+    private function migratedAsset(
+        int $id,
+        string $number,
+        string $type,
+        string $taxMethod,
+        float $inputPrice,
+        float $openingAcc,
+        float $accountingTotal,
+        ?float $taxResidual,
+        ?string $accumulated,
+        string $kind = 'tangible',
+    ): void {
+        $this->pdo->prepare(
+            "INSERT INTO assets (id, supplier_id, inventory_number, name, kind, disposal_date, disposal_type, input_price,
+                                 opening_acc_amount, status, tax_method, asset_account_code, accumulated_account_code)
+             VALUES (?,1,?,?,?,'2025-06-30',?,?,?,'disposed',?,?,?)"
+        )->execute([$id, $number, $number, $kind, $type, $inputPrice, $openingAcc, $taxMethod,
+            $accumulated === null ? '031' : ($kind === 'intangible' ? '013' : '022'), $accumulated]);
+        if ($accountingTotal > 0) {
+            $this->pdo->prepare("INSERT INTO depreciation_entries (supplier_id, asset_id, kind, fiscal_year, amount, residual_value_end) VALUES (1,?,'accounting',2025,?,?)")
+                ->execute([$id, $accountingTotal, max(0.0, $inputPrice - $openingAcc - $accountingTotal)]);
+        }
+        if ($taxResidual !== null) {
+            $this->pdo->prepare("INSERT INTO depreciation_entries (supplier_id, asset_id, kind, fiscal_year, amount, residual_value_end) VALUES (1,?,'tax',2025,0,?)")
+                ->execute([$id, $taxResidual]);
+        }
+    }
+
+    /** Ruční (převzatý) zápis MD $debit / D $credit — účty podle kódu z disposalFixture(). */
+    private function ledgerEntry(int $id, string $date, string $debit, string $credit, float $amount): void
+    {
+        $account = fn (string $code): int => (int) $this->pdo->query("SELECT id FROM chart_of_accounts WHERE account_code = '{$code}'")->fetchColumn();
+        $this->pdo->prepare("INSERT INTO journal_entries VALUES (?,1,?,'manual',NULL,?,NULL)")->execute([$id, $date, $date]);
+        $this->pdo->prepare("INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, side, amount) VALUES (1,?,?,'debit',?)")
+            ->execute([$id, $account($debit), $amount]);
+        $this->pdo->prepare("INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, side, amount) VALUES (1,?,?,'credit',?)")
+            ->execute([$id, $account($credit), $amount]);
+    }
+
+    /**
+     * @param list<string> $warnings
+     * @return list<string>
+     */
+    private function residualWarnings(array $warnings): array
+    {
+        return array_values(array_filter($warnings, static fn (string $w): bool => str_contains($w, 'ZC') || str_contains($w, 'zůstatková')));
+    }
+
     private function createSchema(): void
     {
         $this->pdo->exec('CREATE TABLE accounting_periods (id INTEGER, supplier_id INTEGER, fiscal_year INTEGER, starts_on TEXT, ends_on TEXT, status TEXT, closed_at TEXT, created_at TEXT, row_version INTEGER, closed_by INTEGER, approved_at TEXT, approved_by INTEGER, reviewed_at TEXT, reviewed_by INTEGER, approval_body TEXT, approval_decision_ref TEXT, approval_document_hash TEXT, created_reason TEXT)');
@@ -253,8 +384,11 @@ final class DppoReturnDataProviderTest extends TestCase
         $this->pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_date TEXT, source_type TEXT, source_id INTEGER, posted_at TEXT, reversed_by INTEGER)');
         $this->pdo->exec('CREATE TABLE journal_entry_lines (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_id INTEGER, account_id INTEGER, side TEXT, amount REAL, is_red_storno INTEGER GENERATED ALWAYS AS (0) VIRTUAL, signed_amount REAL GENERATED ALWAYS AS (amount) VIRTUAL)');
         $this->pdo->exec('CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, tax_deductible INTEGER, vendor_id INTEGER, status TEXT, document_kind TEXT, effective_cost_date TEXT, total_without_vat REAL)');
-        $this->pdo->exec('CREATE TABLE assets (id INTEGER PRIMARY KEY, supplier_id INTEGER, inventory_number TEXT, name TEXT, kind TEXT, tax_group INTEGER, disposal_date TEXT, disposal_type TEXT, input_price REAL, opening_tax_amount REAL, status TEXT)');
-        $this->pdo->exec('CREATE TABLE asset_improvements (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, amount REAL)');
+        $this->pdo->exec('CREATE TABLE assets (id INTEGER PRIMARY KEY, supplier_id INTEGER, inventory_number TEXT, name TEXT, kind TEXT, tax_group INTEGER,
+            disposal_date TEXT, disposal_type TEXT, disposal_price REAL, input_price REAL, opening_tax_years INTEGER DEFAULT 0, opening_tax_amount REAL DEFAULT 0,
+            opening_acc_amount REAL DEFAULT 0, tax_method TEXT, asset_account_code TEXT, accumulated_account_code TEXT, status TEXT,
+            disposal_entry_id INTEGER)');
+        $this->pdo->exec('CREATE TABLE asset_improvements (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, completed_on TEXT, amount REAL)');
         $this->pdo->exec('CREATE TABLE depreciation_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, kind TEXT, fiscal_year INTEGER, amount REAL, residual_value_end REAL)');
         // Podklady pro VetaD/spoj_zahr (relatedPartyCountryFlag) a VetaNP (bankAccount) —
         // v téhle testovací třídě prázdné, gather() je ale pořád volá, tabulky musí existovat.

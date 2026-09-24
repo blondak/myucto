@@ -11,14 +11,28 @@ namespace MyInvoice\Service\Payroll\Import\Registration;
  *
  * Adresy mají tvar
  * `{street:?string,house_number:?string,orientation_number:?string,postal_code:?string,city:?string,country_code:?string}`.
+ *
+ * Věta exportu zaměstnanců z ePortálu ČSSZ (`CSSZ_EXPORT`) nese jen identitu,
+ * identifikátory, druh činnosti a VS zaměstnavatele. Datum nástupu v exportu
+ * není; dosadí ho {@see withDerivedStart()} z měsíčního hlášení téže dávky.
+ *
+ * Věta `JMHZ_DERIVED` v žádném souboru není: sestaví ji import z řady měsíčních
+ * hlášení ({@see \MyInvoice\Service\Payroll\Import\Jmhz\JmhzDerivedRegistrations}) —
+ * přihlášení vztahu, který dávka dokládá (akce 1).
  */
 final readonly class RegistrationRecord
 {
+    public const CSSZ_EXPORT = 'CSSZ_EXPORT';
+    public const JMHZ_DERIVED = 'JMHZ_DERIVED';
+
     private const DPP_ACTIVITY_CODES = ['T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'ZA', 'ZB', 'ZC'];
 
     /**
      * @param array<string,?string>|null $permanentAddress
      * @param array<string,?string>|null $contactAddress
+     * @param array{on:string,source:string,period:string,earliest_period:string}|null $derivedStart
+     *        nástup odvozený z měsíčního hlášení; `source` je `start_date` (datum nástupu
+     *        z identifikace formuláře) nebo `insurance_from` (začátek pojištění v měsíci)
      */
     public function __construct(
         public string $documentType,
@@ -54,7 +68,29 @@ final readonly class RegistrationRecord
         public ?string $positionName = null,
         public ?string $healthInsurerCode = null,
         public ?string $highestEducationCode = null,
+        public ?string $employerVariableSymbol = null,
+        public ?array $derivedStart = null,
+        /** Úvazek nového vztahu, `{workload_basis_points:int, weekly_hours:string}`. */
+        public ?array $workload = null,
+        /** Poznámky k odvození věty z hlášení (co je odhad, co zkontrolovat). */
+        public array $notes = [],
     ) {}
+
+    public function isCsszExport(): bool
+    {
+        return $this->documentType === self::CSSZ_EXPORT;
+    }
+
+    public function isJmhzDerived(): bool
+    {
+        return $this->documentType === self::JMHZ_DERIVED;
+    }
+
+    /** @param array{on:string,source:string,period:string,earliest_period:string} $start */
+    public function withDerivedStart(array $start): self
+    {
+        return clone($this, ['startOn' => $start['on'], 'derivedStart' => $start]);
+    }
 
     public function fullName(): ?string
     {
@@ -91,6 +127,7 @@ final readonly class RegistrationRecord
     {
         return match (true) {
             $this->documentType === 'PREZEC26' => $this->expectedStartOn ?? $this->preparedOn,
+            $this->isCsszExport() => $this->startOn ?? $this->preparedOn,
             $this->actionCode === 1 => $this->startOn ?? $this->preparedOn,
             $this->actionCode === 2 => $this->endOn ?? $this->preparedOn,
             default => $this->effectiveOn ?? $this->preparedOn,

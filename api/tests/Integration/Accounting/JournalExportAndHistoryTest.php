@@ -114,6 +114,33 @@ final class JournalExportAndHistoryTest extends TestCase
         self::assertEqualsWithDelta(1234.56, (float) $row['amount'], 0.001, 'amount = Σ MD řádků zápisu.');
     }
 
+    public function testListSortsBeforePagination(): void
+    {
+        $low = $this->manualEntry('Low', self::YEAR . '-06-20', 100.0);
+        $high = $this->manualEntry('High', self::YEAR . '-06-10', 300.0);
+        $middle = $this->manualEntry('Middle', self::YEAR . '-05-10', 200.0);
+
+        $filters = ['sort_key' => 'amount', 'sort_dir' => 'asc'];
+        $first = $this->journalRepo->paginate($this->supplierId, $filters, 2, 0);
+        $second = $this->journalRepo->paginate($this->supplierId, $filters, 2, 2);
+        self::assertSame(3, $first['total']);
+        self::assertSame([$low, $middle], array_column($first['items'], 'id'));
+        self::assertSame([$high], array_column($second['items'], 'id'));
+
+        self::assertSame([$middle, $high], array_column($this->journalRepo->paginate(
+            $this->supplierId, ['sort_key' => 'entry_id', 'sort_dir' => 'desc'], 2, 0
+        )['items'], 'id'));
+        foreach (['document_no', 'posted_by', 'status', 'created_at', 'updated_at'] as $key) {
+            self::assertSame(3, $this->journalRepo->paginate($this->supplierId, ['sort_key' => $key], 2, 0)['total']);
+        }
+        self::assertSame([$low, $middle], array_column($this->journalRepo->paginate(
+            $this->supplierId, $filters + ['account_from' => '211', 'account_to' => '211'], 2, 0
+        )['items'], 'id'));
+
+        $invalid = $this->journalRepo->paginate($this->supplierId, ['sort_key' => 'id; DROP TABLE journal_entries'], 2, 0);
+        self::assertSame([$low, $high], array_column($invalid['items'], 'id'));
+    }
+
     /**
      * Regresní test na nález „ČÁSTKA u filtru na účet": zápis s nohou nákladu i nohou
      * zúčtování zálohy na RŮZNÝCH účtech — filtr na jeden z nich musí ukázat částku

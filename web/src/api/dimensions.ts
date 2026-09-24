@@ -66,10 +66,106 @@ export interface DimensionGroupInfo {
 /** typ → hodnota; `null` = typ bez hodnoty (při ukládání se vypustí). */
 export type DimensionMap = Record<number, number | null>
 
+/** Podíl hodnoty v rozpadu (0–1). */
+export interface DimensionSplitShare {
+  value_id: number
+  share: number
+}
+
+/** Rozpad mezi víc hodnot: typ → seznam podílů (součet 1). */
+export type DimensionSplits = Record<number, DimensionSplitShare[]>
+
 export interface DocumentDimensions {
   header: DimensionMap
   /** pořadí položky od 1 → mapa typ → hodnota */
   items: Record<number, DimensionMap>
+  /** pořadí položky (0 = hlavička) → rozpad */
+  splits?: Record<number, DimensionSplits>
+}
+
+export type DimensionRuleEnforcement = 'error' | 'warning' | 'none'
+
+export interface DimensionRule {
+  id: number
+  dimension_type_id: number
+  type_name: string
+  type_code: string
+  type_kind: DimensionKind
+  type_active: boolean
+  account_mask: string
+  enforcement: DimensionRuleEnforcement
+  default_value_id: number | null
+  default_value_code: string | null
+  default_value_name: string | null
+  default_value_active: boolean | null
+  default_from_card: boolean
+  valid_from: string | null
+  valid_to: string | null
+  is_active: boolean
+  note: string | null
+}
+
+export interface DimensionRulePayload {
+  dimension_type_id: number
+  account_mask: string
+  enforcement: DimensionRuleEnforcement
+  default_value_id: number | null
+  default_from_card: boolean
+  valid_from: string | null
+  valid_to: string | null
+  is_active: boolean
+  note: string | null
+}
+
+export interface DimensionRuleWarning {
+  account_code: string
+  account_name: string
+  type_id: number
+  type_name: string
+  message: string
+}
+
+export interface DimensionRuleAuditRow {
+  line_id: number
+  entry_id: number
+  entry_date: string
+  document_no: string | null
+  source_type: string
+  source_id: number | null
+  account_code: string
+  account_name: string
+  side: 'debit' | 'credit'
+  amount: number
+  type_id: number
+  type_name: string
+  enforcement: 'error' | 'warning'
+}
+
+export interface DimensionRuleAuditSummary {
+  type_id: number
+  type_name: string
+  synthetic: string
+  enforcement: 'error' | 'warning'
+  source_type: string
+  lines: number
+  amount: number
+}
+
+export interface DimensionRuleAudit {
+  rows: DimensionRuleAuditRow[]
+  summary: DimensionRuleAuditSummary[]
+  total: number
+  truncated: boolean
+}
+
+export interface DimensionCoverageRow {
+  type_id: number
+  type_name: string
+  synthetic: string
+  lines: number
+  covered: number
+  ratio: number
+  suggested: boolean
 }
 
 export interface DocumentDimensionsSaveResult extends DocumentDimensions {
@@ -98,15 +194,18 @@ export interface DocumentDimensionsPayload {
   header: DimensionMap
   /** Bez položek zůstanou dimenze položek dokladu beze změny. */
   items?: Record<number, DimensionMap>
+  /** Bez rozpadů zůstane rozpad dokladu beze změny (jen typ s novou jedinou hodnotou ho ztratí). */
+  splits?: Record<number, DimensionSplits>
 }
 
-/** Tělo pro uložení i náhled; `items` jen tehdy, když je volající opravdu posílá. */
+/** Tělo pro uložení i náhled; `items` a `splits` jen tehdy, když je volající opravdu posílá. */
 export function documentDimensionsBody(payload: DocumentDimensionsPayload) {
   return {
     header: compactDimensions(payload.header),
     ...(payload.items === undefined ? {} : {
       items: Object.fromEntries(Object.entries(payload.items).map(([no, map]) => [no, compactDimensions(map)])),
     }),
+    ...(payload.splits === undefined ? {} : { splits: payload.splits }),
   }
 }
 
@@ -170,6 +269,16 @@ export interface DimensionProfitRow {
   has_children: boolean
   own: DimensionProfitAmounts
   total: DimensionProfitAmounts
+  responsible_user_id?: number | null
+  responsible_user_name?: string | null
+}
+
+/** Rozpad po syntetických účtech: řádky = účty, sloupce = kořeny sestavy (+ bez hodnoty). */
+export interface DimensionProfitMatrix {
+  columns: { key: string; value_id: number | null; code: string; name: string | null }[]
+  rows: { code: string; name: string; account_type: 'revenue' | 'expense'; cells: number[]; total: number }[]
+  results: number[]
+  total_result: number
 }
 
 export interface DimensionProfitReport {
@@ -178,9 +287,89 @@ export interface DimensionProfitReport {
   to: string
   supplier_ids: number[]
   hidden_companies: number
+  value_id?: number | null
+  responsible_user_id?: number | null
+  /** Omezeno na větev nebo odpovědnou osobu — řádek „bez hodnoty" se nevykazuje. */
+  restricted?: boolean
   rows: DimensionProfitRow[]
   unassigned: DimensionProfitAmounts
   totals: DimensionProfitAmounts
+  matrix?: DimensionProfitMatrix
+}
+
+export interface DimensionProfitParams {
+  type_id: number
+  from: string
+  to: string
+  scope?: 'group'
+  value_id?: number
+  responsible_user_id?: number
+  accounts?: 1
+}
+
+export interface DimensionAnalyticsAmounts extends DimensionProfitAmounts {
+  tax_deductible_cost: number
+  non_deductible_cost: number
+  income_tax_cost: number
+}
+
+export interface DimensionAnalyticsMonth extends DimensionAnalyticsAmounts {
+  month: string
+}
+
+export interface DimensionAnalyticsReport {
+  type: DimensionType
+  year: number
+  supplier_ids: number[]
+  rows: DimensionProfitRow[]
+  unassigned: DimensionAnalyticsAmounts
+  totals: DimensionAnalyticsAmounts
+  value_totals: Record<string, DimensionAnalyticsAmounts>
+  monthly: DimensionAnalyticsMonth[]
+  previous_monthly: DimensionAnalyticsMonth[]
+  value_monthly: Record<string, DimensionAnalyticsMonth[]>
+  companies: Array<{ id: number; name: string } & DimensionAnalyticsAmounts>
+  company_value_totals: Record<string, Record<string, DimensionAnalyticsAmounts>>
+  available_companies: SupplierGroupMember[]
+  hidden_companies: number
+}
+
+export interface DimensionCashFlowAccount {
+  account_code: string
+  name: string
+  amount: number
+}
+
+export interface DimensionCashFlowGroup {
+  total: number
+  accounts: DimensionCashFlowAccount[]
+}
+
+/** Peněžní tok nepřímou metodou (celá firma nebo hodnota dimenze). */
+export interface DimensionCashFlowReport {
+  from: string
+  to: string
+  supplier_ids: number[]
+  hidden_companies: number
+  dimension: { type_id: number; value_id: number; value_ids: number[]; label: string | null } | null
+  profit: number
+  non_cash: DimensionCashFlowGroup
+  working_capital: DimensionCashFlowGroup
+  operating: number
+  investing: DimensionCashFlowGroup
+  financing: DimensionCashFlowGroup
+  net_cash_flow: number
+  cash_movement: number
+  untagged_cash: number
+  reconciles: boolean
+}
+
+export interface DimensionCashFlowParams {
+  from: string
+  to: string
+  dimension_value_id?: number
+  dimension_descendants?: 0 | 1
+  scope?: 'group'
 }
 
 /** Vyhodí z mapy prázdné typy — server bere jen vyplněné dvojice. */
@@ -236,10 +425,26 @@ export const dimensionsApi = {
 
   getJournal: (entryId: number) =>
     api.get<Record<number, Record<number, number>>>(`/accounting/dimensions/journal/${entryId}`).then(r => r.data),
-  saveJournal: (entryId: number, lines: Record<number, DimensionMap>) =>
-    api.put<{ changed: number; lines: Record<number, Record<number, number>> }>(`/accounting/dimensions/journal/${entryId}`, {
+  /** `splits` = id řádku → rozpad; bez nich zůstanou rozpady řádků beze změny. */
+  saveJournal: (entryId: number, lines: Record<number, DimensionMap>, splits?: Record<number, DimensionSplits>) =>
+    api.put<{ changed: number; lines: Record<number, Record<number, number>>; splits: Record<number, DimensionSplits> }>(`/accounting/dimensions/journal/${entryId}`, {
       lines: Object.fromEntries(Object.entries(lines).map(([id, map]) => [id, compactDimensions(map)])),
+      ...(splits === undefined ? {} : { splits }),
     }).then(r => r.data),
+
+  listRules: () => api.get<DimensionRule[]>('/accounting/dimensions/rules').then(r => r.data),
+  createRule: (payload: DimensionRulePayload) =>
+    api.post<DimensionRule>('/accounting/dimensions/rules', payload).then(r => r.data),
+  updateRule: (id: number, payload: DimensionRulePayload) =>
+    api.put<DimensionRule>(`/accounting/dimensions/rules/${id}`, payload).then(r => r.data),
+  deleteRule: (id: number) =>
+    api.delete<{ deleted: boolean }>(`/accounting/dimensions/rules/${id}`).then(r => r.data),
+  /** Zaúčtované řádky, kterým podle pravidel chybí dimenze. */
+  auditRules: (params: { date_from: string; date_to: string }) =>
+    api.get<DimensionRuleAudit>('/accounting/dimensions/rules/audit', { params }).then(r => r.data),
+  /** Pokrytí syntetických účtů dimenzemi — podklad pro návrh pravidel. */
+  ruleCoverage: (params: { date_from: string; date_to: string }) =>
+    api.get<DimensionCoverageRow[]>('/accounting/dimensions/rules/coverage', { params }).then(r => r.data),
 
   group: () => api.get<DimensionGroupInfo>('/accounting/dimensions/group').then(r => r.data),
   createGroup: (name: string) => api.post<DimensionGroupInfo>('/accounting/dimensions/group', { name }).then(r => r.data),
@@ -247,6 +452,16 @@ export const dimensionsApi = {
   renameGroup: (name: string) => api.put<DimensionGroupInfo>('/accounting/dimensions/group', { name }).then(r => r.data),
   leaveGroup: () => api.delete<DimensionGroupInfo>('/accounting/dimensions/group').then(r => r.data),
 
-  profit: (params: { type_id: number; from: string; to: string; scope?: 'group' }) =>
+  profit: (params: DimensionProfitParams) =>
     api.get<DimensionProfitReport>('/accounting/reports/dimension-profit', { params }).then(r => r.data),
+  analytics: (params: { type_id: number; year: number; supplier_id?: number | 'all' }) =>
+    api.get<DimensionAnalyticsReport>('/accounting/reports/dimension-analytics', { params }).then(r => r.data),
+  exportProfit: (params: DimensionProfitParams, format: 'xlsx' | 'pdf' = 'xlsx') =>
+    api.get<Blob>('/accounting/reports/dimension-profit/export', { params: { ...params, format }, responseType: 'blob' }).then(r => r.data),
+  exportAnalytics: (params: { type_id: number; year: number; supplier_id?: number | 'all'; table: 'comparison' | 'companies' | 'monthly'; value_id?: number | 'total' | 'unassigned'; metric?: 'revenue' | 'cost' | 'result'; format: 'xlsx' | 'pdf' }) =>
+    api.get<Blob>('/accounting/reports/dimension-analytics/export', { params, responseType: 'blob' }).then(r => r.data),
+  cashFlow: (params: DimensionCashFlowParams) =>
+    api.get<DimensionCashFlowReport>('/accounting/reports/dimension-cash-flow', { params }).then(r => r.data),
+  exportCashFlow: (params: DimensionCashFlowParams) =>
+    api.get<Blob>('/accounting/reports/dimension-cash-flow/export', { params, responseType: 'blob' }).then(r => r.data),
 }

@@ -84,6 +84,8 @@ final class BankPostingSuggestionAction
                 'year' => isset($q['year']) && (int) $q['year'] > 0 ? (int) $q['year'] : null,
                 'q' => isset($q['q']) ? mb_substr(trim((string) $q['q']), 0, 100) : null,
                 'account' => isset($q['account']) && $q['account'] !== '' ? (string) $q['account'] : null,
+                'sort' => isset($q['sort']) && is_string($q['sort']) ? $q['sort'] : null,
+                'direction' => isset($q['direction']) && is_string($q['direction']) ? $q['direction'] : null,
             ],
         );
         // Stav zaúčtování počítáme STEJNOU logikou jako detail výpisu (posted i suggested,

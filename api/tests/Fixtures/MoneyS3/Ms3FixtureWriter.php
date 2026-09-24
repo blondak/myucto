@@ -69,6 +69,7 @@ final class Ms3FixtureWriter
             'E' => self::ext80((float) $value),
             'B', 'V' => chr((int) $value & 0xFF),
             'D' => pack('v', self::days((string) $value)),
+            'W', 'I' => pack('v', (int) $value & 0xFFFF),
             default => throw new \InvalidArgumentException("Typ pole {$type} zapisovač nezná."),
         };
     }
@@ -116,7 +117,7 @@ final class Ms3FixtureWriter
             'L', 'O' => 4,
             'E' => 10,
             'B', 'V' => 1,
-            'D' => 2,
+            'D', 'W', 'I' => 2,
             default => throw new \InvalidArgumentException("Typ pole {$type} zapisovač nezná."),
         };
     }

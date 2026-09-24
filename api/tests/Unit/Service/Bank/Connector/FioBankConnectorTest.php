@@ -18,6 +18,7 @@ use MyInvoice\Service\Bank\Connector\FioBankConnector;
 use MyInvoice\Service\Payment\AboPaymentOrderWriter;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
 
 final class FioBankConnectorTest extends TestCase
 {
@@ -100,6 +101,29 @@ final class FioBankConnectorTest extends TestCase
 
         $this->expectException(BankConnectorException::class);
         $this->expectExceptionMessage('neplatný formát GPC');
+        $connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31');
+    }
+
+    public function testLogsOnlyStructuralReasonForInvalidStatementResponse(): void
+    {
+        $raw = '<html>synthetic private response</html>';
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('warning')->with(
+            'fio_statement_failed',
+            self::callback(static function (array $context) use ($raw): bool {
+                $serialized = json_encode($context);
+                return $context['stage'] === 'gpc'
+                    && $context['reason'] === 'line_ending_invalid'
+                    && $context['http_status'] === 200
+                    && $context['response_bytes'] === strlen($raw)
+                    && !str_contains($serialized, $raw)
+                    && !str_contains($serialized, self::TOKEN);
+            }),
+        );
+        $http = new Client(['handler' => new MockHandler([new Response(200, [], $raw)])]);
+        $connector = new FioBankConnector($http, $logger);
+
+        $this->expectException(BankConnectorException::class);
         $connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31');
     }
 

@@ -106,6 +106,8 @@ final class StatementMatcherVarsymbolTest extends TestCase
         // Smaž testovací výpisy (cascade smaže i jejich transakce) a faktury podle markeru.
         $pdo->prepare("DELETE FROM bank_statements WHERE file_name LIKE ?")
             ->execute(['%' . self::FILE_MARKER . '%']);
+        $pdo->prepare('DELETE FROM other_items WHERE supplier_id = ? AND title = ?')
+            ->execute([$this->supplierId, self::FILE_MARKER]);
         $placeholders = implode(',', array_fill(0, count(self::TEST_VARSYMBOLS), '?'));
         // Nejdřív finály (parent_invoice_id != NULL), pak zbytek — kvůli FK na parent.
         $pdo->prepare("DELETE FROM invoices WHERE supplier_id = ? AND varsymbol IN ($placeholders) AND parent_invoice_id IS NOT NULL")
@@ -165,6 +167,49 @@ final class StatementMatcherVarsymbolTest extends TestCase
 
         $status = $this->db->pdo()->query("SELECT status FROM invoices WHERE id = {$this->invoiceId}")->fetchColumn();
         self::assertSame('paid', $status, 'Spárovaná faktura má být označená jako zaplacená.');
+    }
+
+    public function testAllocatedOtherItemPaymentCannotAlsoPayInvoiceInSingleOrBatchMatch(): void
+    {
+        $this->seed('2099000099', '2099000099', 500.00);
+        $this->allocateOtherItemPayment(500.00);
+
+        $single = $this->matcher->match($this->transactionId);
+        $batch = $this->matcher->matchBatch([$this->transactionId])[$this->transactionId];
+
+        self::assertSame('other_item_allocated', $single['reason'] ?? null);
+        self::assertSame('other_item_allocated', $batch['reason'] ?? null);
+        self::assertSame('unmatched', $single['status'] ?? null);
+        self::assertSame('unmatched', $batch['status'] ?? null);
+        self::assertSame('issued', $this->db->pdo()->query('SELECT status FROM invoices WHERE id = ' . $this->invoiceId)->fetchColumn());
+        self::assertSame(0, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM invoice_payments WHERE bank_transaction_id = ' . $this->transactionId)->fetchColumn());
+    }
+
+    public function testLockedTransactionClaimRejectsOtherItemAllocation(): void
+    {
+        $this->seed('2099000099', '2099000099', 500.00);
+        $this->allocateOtherItemPayment(500.00);
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            self::assertFalse((new \ReflectionMethod($this->matcher, 'claimTransaction'))
+                ->invoke($this->matcher, $pdo, $this->transactionId));
+        } finally {
+            $pdo->rollBack();
+        }
+    }
+
+    private function allocateOtherItemPayment(float $amount): void
+    {
+        $pdo = $this->db->pdo();
+        $day = $this->date->format('Y-m-d');
+        $pdo->prepare('INSERT INTO other_items (supplier_id, side, title, issued_on, due_on, amount, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)')
+            ->execute([$this->supplierId, 'receivable', self::FILE_MARKER, $day, $day, $amount, 'confirmed']);
+        $itemId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO other_item_allocations (supplier_id, other_item_id, bank_transaction_id, amount, payment_on)
+            VALUES (?, ?, ?, ?, ?)')
+            ->execute([$this->supplierId, $itemId, $this->transactionId, $amount, $day]);
     }
 
     public function testLeadingZeroVsStillMatches(): void

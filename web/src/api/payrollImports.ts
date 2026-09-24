@@ -10,7 +10,11 @@ export interface ImportFilePayload {
 // ─── Registrace JMHZ ──────────────────────────────────────────────────────────
 
 export type RegistrationEnvironment = 'production' | 'test'
-export type RegistrationDocumentType = 'REGZEC25' | 'PREZEC26' | 'JMHZ'
+/**
+ * `CSSZ_EXPORT` = export zaměstnanců z ePortálu ČSSZ (bez data nástupu),
+ * `JMHZ_DERIVED` = přihlášení vztahu, který dokládá řada měsíčních hlášení (v žádném souboru není).
+ */
+export type RegistrationDocumentType = 'REGZEC25' | 'PREZEC26' | 'CSSZ_EXPORT' | 'JMHZ' | 'JMHZ_DERIVED'
 export type RegistrationRelationType =
   | 'employment'
   | 'small_scale_employment'
@@ -18,7 +22,7 @@ export type RegistrationRelationType =
   | 'dpp'
   | 'statutory_body'
 export type RegistrationMatchStatus = 'new' | 'matched' | 'ambiguous' | 'not_found'
-export type RegistrationMatchedBy = 'birth_number' | 'oic' | 'id_ppv' | 'manual'
+export type RegistrationMatchedBy = 'birth_number' | 'oic' | 'id_ppv' | 'name_birth_date' | 'manual'
 export type RegistrationOperation =
   | 'create_person'
   | 'create_employment'
@@ -32,6 +36,8 @@ export type RegistrationOperation =
 export type RegistrationSubmissionType = 'R' | 'O' | 'S'
 export type RegistrationOpeningBalanceStatus = 'ready' | 'blocked' | 'unchanged'
 export type RegistrationAverageStatus = 'ready' | 'blocked' | 'exists'
+/** Převzetí měsíce z hlášení: převezme se / nejde / měsíc už počítá MyÚčto. */
+export type RegistrationTakeoverStatus = 'ready' | 'blocked' | 'computed'
 
 export interface RegistrationFileInfo {
   name: string
@@ -101,6 +107,37 @@ export interface RegistrationAverage {
   reported_hourly_minor: number | null
   status: RegistrationAverageStatus
   reason: string | null
+}
+
+export interface RegistrationTakeoverMonth {
+  period: string
+  status: RegistrationTakeoverStatus
+  reason: string | null
+  ready_count: number
+  gross_minor: number
+  net_minor: number
+  advance_tax_minor: number
+  blocked: { label: string; reason: string | null }[]
+}
+
+export interface RegistrationTakeoverRelation {
+  employee_id: number
+  employment_id: number
+  label: string
+  start_on: string | null
+  end_on: string | null
+  monthly_wage_minor: number | null
+  monthly_wage_from: string | null
+  /** Čtvrtletí s průměrem, se kterým počítal předchozí program (`Q/RRRR`). */
+  average_quarters: string[]
+  leave_minutes: number
+}
+
+/** Převzetí historie mezd z hlášení (společná vrstva převzatých mezd). */
+export interface RegistrationTakeover {
+  start_period: string | null
+  months: RegistrationTakeoverMonth[]
+  relations: RegistrationTakeoverRelation[]
 }
 
 export interface RegistrationCandidate {
@@ -177,6 +214,8 @@ export interface RegistrationPreview {
   employment_options: RegistrationEmploymentOption[]
   opening_balances: RegistrationOpeningBalance[]
   averages: RegistrationAverage[]
+  /** `null`, když dávka nemá měsíční hlášení. */
+  takeover: RegistrationTakeover | null
 }
 
 export interface RegistrationPreviewPayload {
@@ -195,6 +234,7 @@ export interface RegistrationApplyPayload extends RegistrationPreviewPayload {
   apply_averages: boolean
   auto_approve_changes: boolean
   auto_approve_averages: boolean
+  apply_takeover: boolean
 }
 
 export type RegistrationResultStatus = 'applied' | 'failed' | 'skipped'
@@ -207,6 +247,7 @@ export type RegistrationResultOperation =
   | 'activated'
   | 'identifiers'
   | 'terminated'
+  | 'start_corrected'
   | 'no_show'
   | 'health_insurer'
   | 'tax_declaration'
@@ -233,6 +274,13 @@ export interface RegistrationApplyResult {
     approved: number
     skipped: { employment_id: number; label: string; year: number; quarter: number; reason: string }[]
   }
+  takeover: {
+    saved: number
+    periods: string[]
+    relations: number
+    counts: Record<string, number>
+    skipped: { period: string | null; label: string; reason: string }[]
+  } | null
   change_checklist: {
     completed: number
     failed: { employment_id: number; item_key: string; message: string }[]

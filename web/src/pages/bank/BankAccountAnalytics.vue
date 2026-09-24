@@ -7,6 +7,7 @@
  */
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import { bankPostingApi, type SupplierBankAccount, type BankAccountKind } from '@/api/bankPosting'
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
@@ -93,12 +94,16 @@ async function saveAll() {
         toast.error(t('bank.analytics.suffix_taken', { suffix: BANK_PREFIX + d.analytic_suffix, account: accountLabel(clash) }))
         return
       }
-      await bankPostingApi.updateAccount(a.id, {
-        kind: d.kind,
-        label: d.label.trim() || null,
-        analytic_suffix: d.analytic_suffix.trim() || null,
-        is_active: d.is_active,
-      })
+      // Úvěrový účet kreditní karty: druh, analytiku (231) i archivaci spravuje stránka
+      // Kreditní karty; vypnout ho tu nejde (pohyby by spadly na 221).
+      await bankPostingApi.updateAccount(a.id, a.kind === 'credit_card'
+        ? { label: d.label.trim() || null }
+        : {
+            kind: d.kind,
+            label: d.label.trim() || null,
+            analytic_suffix: d.analytic_suffix.trim() || null,
+            is_active: d.is_active,
+          })
     }
     toast.success(t('bank.analytics.saved'))
     await load()
@@ -162,13 +167,17 @@ onMounted(load)
                          class="w-44 h-8 px-2 border border-neutral-300 rounded-md text-xs bg-surface disabled:bg-neutral-50" />
                 </td>
                 <td class="px-3 py-2">
-                  <select v-model="drafts[a.id].kind" :disabled="!canWrite"
+                  <span v-if="a.kind === 'credit_card'" class="whitespace-nowrap">{{ t('bank.analytics.kinds.credit_card') }}</span>
+                  <select v-else v-model="drafts[a.id].kind" :disabled="!canWrite"
                           class="h-8 px-2 border border-neutral-300 rounded-md text-xs bg-surface disabled:bg-neutral-50">
                     <option v-for="k in KINDS" :key="k" :value="k">{{ t(`bank.analytics.kinds.${k}`) }}</option>
                   </select>
                 </td>
                 <td class="px-3 py-2">
-                  <div class="flex items-center gap-2 font-mono">
+                  <RouterLink v-if="a.kind === 'credit_card'" :to="{ name: 'credit-cards' }" class="text-primary-700 hover:underline whitespace-nowrap">
+                    {{ t('bank.analytics.credit_card_managed') }}
+                  </RouterLink>
+                  <div v-else class="flex items-center gap-2 font-mono">
                     <div class="flex items-center gap-1">
                       <span class="text-neutral-400">{{ BANK_PREFIX }}</span>
                       <input v-model="drafts[a.id].analytic_suffix" type="text" maxlength="6" :disabled="!canWrite"
@@ -181,7 +190,7 @@ onMounted(load)
                   </div>
                 </td>
                 <td class="px-3 py-2 text-center">
-                  <input v-model="drafts[a.id].is_active" type="checkbox" :disabled="!canWrite"
+                  <input v-model="drafts[a.id].is_active" type="checkbox" :disabled="!canWrite || a.kind === 'credit_card'"
                          class="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500" />
                 </td>
               </tr>

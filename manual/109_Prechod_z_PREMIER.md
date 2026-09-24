@@ -79,9 +79,15 @@ Další rok převedete i později zopakováním postupu (§ 109.4).
 | ruční úpravy základu daně z přiznání k DPPO | položky rozpracovaného přiznání k DPPO |
 | uzavřený rok | uzávěrka roku v MyÚčtu (702/710) a navazující počáteční stavy |
 
-**Částky v Kč.** Faktura v cizí měně se převede v Kč podle zaúčtování
-v deníku, stejně jako z deníku počítá přiznání PREMIER. Položky faktury se
-přepočtou kurzem dokladu a haléřový rozdíl dorovná největší položka.
+**Faktura v cizí měně.** Převezme se v měně a kurzu dokladu, když částky
+položek v měně přepočtené kurzem dávají na haléř koruny ze zaúčtování
+v deníku (z nich PREMIER počítá přiznání). DPH, kontrolní hlášení i deník
+tak zůstávají v Kč přesně stejné a platbu v měně jde spárovat s fakturou
+včetně kurzového rozdílu. Když přepočet na haléř nesedí (položka složená
+z deníku, haléřový rozdíl kurzu dorovnaný na největší položku), u samovyměření,
+u částečně uhrazené vydané faktury nebo když firma nemá měnu v číselníku měn,
+se faktura převede v Kč podle zaúčtování a poznámka dokladu i protokol uvedou
+důvod.
 
 **Klasifikace DPH.** PREMIER vede u každé položky dokladu kód DPH a jeho
 definici v číselníku kódů: řádky přiznání a oddíl kontrolního hlášení. Převod
@@ -130,10 +136,18 @@ potvrďte.
 
 ### 109.2.1 Zaměstnanci a mzdy
 
-Mzdy převod přenese jen firmě, která má zapnutý modul Mzdy a v Mzdy →
-Nastavení nastavenou výchozí mzdovou účtárnu. Bez toho převede účetnictví,
-mzdy přeskočí a protokol to řekne; po nastavení mezd převod roku zopakujte
-a mzdy se doplní.
+Firmě, která mzdy v MyÚčtu ještě nemá, převod modul Mzdy zapne. Začátek
+vedení mezd v MyÚčtu nastaví na měsíc po poslední mzdě zpracované v PREMIERu
+a chybí-li nastavení zaměstnavatele, založí ho s mzdovou účtárnou `MZDY`
+a výchozími předkontacemi. Variabilní symbol ČSSZ, kód OSSZ a číslo plátce
+zdravotního pojištění, které firma vede v Nastavení firmy, převezme do Mezd
+a k variabilnímu symbolu založí registraci účtárny s účinností od začátku vedení
+mezd (viz [§ 90.8](90_Nastaveni_mezd.md#908-podrobny-pracovni-postup-a-kontroly)).
+Co v Nastavení firmy není, ani účty institucí převod nevymýšlí; protokol
+vypíše k doplnění v Mzdy → Nastavení jen to, co opravdu chybí. Zapnutý
+modul, jeho začátek ani existující nastavení převod nemění. Když modul zapnout
+nejde (licence bez mzdového doplňku), převede účetnictví, mzdy přeskočí
+a protokol to řekne; po zakoupení doplňku převod roku zopakujte a mzdy se doplní.
 
 - **Zaměstnanci.** Každý pracovní vztah z PREMIERu se založí jako osoba
   a pracovní vztah s osobním číslem z PREMIERu: jméno, rodné číslo, datum
@@ -174,9 +188,9 @@ a mzdy se doplní.
 - **Počáteční stavy ročních kumulací.** Za měsíce roku, ve kterém začíná
   vedení mezd v MyÚčtu, před jeho prvním měsícem převod zapíše počáteční
   stavy kumulací (roční zúčtování daně a potvrzení o zdanitelných příjmech
-  na ně navážou). Začátek vedení mezd nastavte v Mzdy → Nastavení ještě před
-  převodem posledního roku; když chybí, protokol navrhne měsíc po poslední
-  mzdě z PREMIERu.
+  na ně navážou). Začátek vedení mezd, který firma nemá, nastaví převod na
+  měsíc po poslední mzdě z PREMIERu; jiný začátek nastavte v Mzdy → Nastavení
+  ještě před převodem posledního roku.
 
 Zkontrolujte po převodu:
 
@@ -310,6 +324,9 @@ Převod si pamatuje, co z které zálohy už vzniklo. Opakovaný převod téže 
 novější zálohy založí jen to, co ještě chybí, a nic nezdvojí. Převod
 přerušený chybou tak stačí po opravě spustit znovu. Takhle se převádí i další
 rok: ve stejné záloze zaškrtněte další rok v pořadí.
+
+Před převodem firmy znovu od začátku stáhněte v průvodci **profil firmy** a po
+ostrém převodu ho nahrajte zpět, viz [§ 96.18](96_Nastaveni.md#9618-profil-firmy).
 
 ## 109.8 Omezení
 

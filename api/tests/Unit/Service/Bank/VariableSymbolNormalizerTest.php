@@ -63,6 +63,27 @@ final class VariableSymbolNormalizerTest extends TestCase
         self::assertSame('', VariableSymbolNormalizer::digits('abc'));
     }
 
+    /** @return array<string, array{string, ?string, ?string}> */
+    public static function importedPaymentOverrideCases(): array
+    {
+        return [
+            'VS proformy u daňového dokladu' => ['20940012', '120940077', '120940077'],
+            'VS shodný s číslem se neukládá' => ['20940012', '20940012', null],
+            'VS shodný s číslicemi čísla se neukládá' => ['2094-0012', '20940012', null],
+            'VS s mezerami se normalizuje' => ['20940012', '1209 40077', '120940077'],
+            'bez VS nic' => ['20940012', null, null],
+            'prázdný VS nic' => ['20940012', '', null],
+            'VS delší než 10 číslic se neukládá' => ['20940012', '12345678901', null],
+            'číslo bez číslic, VS se uloží' => ['FV-A', '12345', '12345'],
+        ];
+    }
+
+    #[DataProvider('importedPaymentOverrideCases')]
+    public function testImportedPaymentOverride(string $number, ?string $vs, ?string $expected): void
+    {
+        self::assertSame($expected, VariableSymbolNormalizer::importedPaymentOverride($number, $vs));
+    }
+
     public function testDashedAndNumericShareMatchingKey(): void
     {
         // Jádro #58: faktura uložená jako „2026-00001" a banka hlásí „202600001" —

@@ -239,6 +239,58 @@ final class PayrollEmployerSettingsRepository
     }
 
     /**
+     * Doplní kód OSSZ jen tam, kde v nastavení zaměstnavatele chybí.
+     *
+     * Podmínka je v samotném UPDATE, takže souběžně vyplněnou hodnotu nepřepíše,
+     * a zvýšená `row_version` shodí rozpracovaný formulář na konflikt místo toho,
+     * aby jeho uložení doplněný kód tiše vrátilo na prázdno.
+     */
+    public function fillEmptySocialSecurityOfficeCode(int $supplierId, string $code): bool
+    {
+        $update = $this->db->pdo()->prepare(
+            "UPDATE payroll_employer_settings
+                SET social_security_office_code = ?, row_version = row_version + 1
+              WHERE supplier_id = ?
+                AND (social_security_office_code IS NULL OR TRIM(social_security_office_code) = '')"
+        );
+        $update->execute([$code, $supplierId]);
+
+        return $update->rowCount() === 1;
+    }
+
+    /**
+     * Doplní VS ČSSZ výchozí účtárně, která ho nemá a nemá ani historii registrace.
+     *
+     * Sloupec je jinak jen poslední hodnotou historie registrace
+     * ({@see PayrollOfficeRegistrationRepository}); účtárnu s historií proto
+     * nechává být. Účinnost se nevymýšlí, historie zůstává prázdná a přidáním
+     * první registrace se sloupec srovná podle ní.
+     */
+    public function fillEmptyDefaultOfficeSocialSecuritySymbol(int $supplierId, string $symbol): bool
+    {
+        $update = $this->db->pdo()->prepare(
+            "UPDATE payroll_offices office
+               JOIN payroll_employer_settings settings
+                 ON settings.supplier_id = office.supplier_id
+                AND settings.default_office_id = office.id
+                SET office.social_security_variable_symbol = ?,
+                    office.row_version = office.row_version + 1
+              WHERE office.supplier_id = ?
+                AND (office.social_security_variable_symbol IS NULL
+                     OR office.social_security_variable_symbol = '')
+                AND NOT EXISTS (
+                    SELECT 1
+                      FROM payroll_office_registration_versions version
+                     WHERE version.supplier_id = office.supplier_id
+                       AND version.office_id = office.id
+                )"
+        );
+        $update->execute([$symbol, $supplierId]);
+
+        return $update->rowCount() === 1;
+    }
+
+    /**
      * Testovací VS účtáren podle id, jen vyplněné a platné. Testovací prostředí
      * ČSSZ má vlastní přidělený VS, jiný než ostrý.
      *

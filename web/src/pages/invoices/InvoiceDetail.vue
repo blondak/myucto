@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { eshopApi } from '@/api/eshop'
 import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
@@ -21,6 +22,7 @@ import { formatMoney, formatHourlyRate, formatDate, formatPercent, statusLabel, 
 import { durationTotal, formatDuration, isTimeItem, itemQuantity, workRowTotal } from '@/utils/timeBilling'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
+import { pdfFileName, savePdfToCompanyFolder } from '@/composables/useCompanyPdfSave'
 import { useHotkey } from '@/composables/useHotkey'
 import { useToast } from '@/composables/useToast'
 import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
@@ -30,6 +32,8 @@ import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
+import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
+import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import { accountingApi } from '@/api/accounting'
@@ -63,6 +67,17 @@ const route = useRoute()
 const router = useRouter()
 
 const invoice = ref<Invoice | null>(null)
+
+// Cenová hladina dokladu (např. urgentní objednávka): jméno z číselníku, bez práva
+// k číselníku nebo u smazané hladiny aspoň id.
+const priceLevelName = ref<string | null>(null)
+watch(() => invoice.value?.price_level_id ?? null, async (id) => {
+  priceLevelName.value = null
+  if (id == null || !stockEnabled.value) return
+  try {
+    priceLevelName.value = (await eshopApi.listPriceLevels()).find(l => l.id === id)?.name ?? `#${id}`
+  } catch { priceLevelName.value = `#${id}` }
+}, { immediate: true })
 const postingPanelRef = ref<InstanceType<typeof DocumentPostingPanel> | null>(null)
 // Zámek dokladu (F6) — čte se VÝHRADNĚ z BE pole `locked`, FE ze status/booked_at
 // nic neodvozuje. Blokuje mutace jen roli client; staff UI zůstává (autorita je BE).
@@ -699,6 +714,10 @@ function payloadText(payload: any): string {
     .join(' · ')
 }
 
+// Zaúčtovaná faktura v uzamčeném období: server vrátí varování, po potvrzení účetním
+// smaže zápis v deníku i fakturu naráz ({@link LockedPeriodAckModal}).
+const lockedAck = useLockedPeriodAck()
+
 async function deleteInvoice() {
   if (!invoice.value) return
   // Pro cancellation doklad: smaž PARENT (cascade pak odstraní i tento storno),
@@ -728,7 +747,9 @@ async function deleteInvoice() {
   if (!confirm(t(confirmKey, { varsymbol: vs }))) return
   busy.value = 'delete'
   try {
-    const res = await invoicesApi.delete(invoice.value.id, status !== 'draft')
+    const invoiceId = invoice.value.id
+    const res = await lockedAck.run(ack => invoicesApi.delete(invoiceId, status !== 'draft', ack))
+    if (res === null) return
     if (res?.cascade_deleted && res.cascade_deleted > 0) {
       toast.success(t('invoice.deleted_with_cascade', { n: res.cascade_deleted }))
     }
@@ -752,7 +773,8 @@ async function deleteCancellationParent() {
   if (!confirm(t('invoice.delete_cancelled_confirm', { varsymbol: parentVs }))) return
   busy.value = 'delete'
   try {
-    const res = await invoicesApi.delete(parentId, true)
+    const res = await lockedAck.run(ack => invoicesApi.delete(parentId, true, ack))
+    if (res === null) return
     if (res?.cascade_deleted && res.cascade_deleted > 0) {
       toast.success(t('invoice.deleted_with_cascade', { n: res.cascade_deleted }))
     }
@@ -1101,9 +1123,24 @@ function editIssued() {
   router.push(`/invoices/${invoice.value.id}/edit?force=1`)
 }
 
-function downloadPdf() {
+// Chrome/Edge: dialog Uložit jako ve složce, kam se naposledy ukládalo PDF této firmy
+// (#104). Jinde (a když dialog nejde otevřít) PDF otevře v nové záložce jako dřív.
+async function downloadPdf() {
   if (!invoice.value) return
-  window.open(invoicesApi.pdfUrl(invoice.value.id, false), '_blank')
+  const inv = invoice.value
+  try {
+    const result = await savePdfToCompanyFolder(
+      invoicesApi.pdfUrl(inv.id, true),
+      pdfFileName(inv.varsymbol, `faktura-${inv.id}`),
+      supplierStore.currentSupplierId,
+    )
+    if (result === 'saved') toast.success(t('common.pdf_saved_to_folder'))
+    if (result !== 'unsupported') return
+  } catch {
+    toast.error(t('common.pdf_save_failed'))
+    return
+  }
+  window.open(invoicesApi.pdfUrl(inv.id, false), '_blank')
 }
 
 async function sendTest() {
@@ -2560,6 +2597,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
               <span v-else class="text-neutral-400">{{ t('invoice.classification.no_vat_class') }}</span>
             </dd>
           </div>
+          <div v-if="stockEnabled && invoice.price_level_id != null" class="flex justify-between gap-3">
+            <dt class="text-neutral-500">{{ t('invoice.price_level.label') }}</dt>
+            <dd class="font-medium text-right">{{ priceLevelName ?? '…' }}</dd>
+          </div>
           <div class="flex justify-between gap-3">
             <dt class="text-neutral-500">{{ t('invoice.simplified_document') }}</dt>
             <dd class="font-medium text-right">{{ invoice.is_simplified ? t('common.yes') : t('common.no') }}</dd>
@@ -3195,5 +3236,6 @@ const invoiceActions = computed<ActionItem[]>(() => {
         :prefill="{ name: invoice.client_company_name || invoice.varsymbol || '', direction: invoice.total_with_vat < 0 ? 'outgoing' : 'incoming', applies_currency: invoice.currency, variable_symbol: invoice.payment_varsymbol || invoice.varsymbol || null }"
         @close="postingRuleOpen = false" @saved="postingRuleOpen = false" />
     </Teleport>
+    <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
   </div>
 </template>

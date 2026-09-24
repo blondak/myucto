@@ -1,6 +1,6 @@
 import { api } from './client'
 import { apiErrorMessage } from './errors'
-import type { BankTransaction, BankAccountOption } from './bank'
+import type { BankTransaction, BankAccountOption, BankTransactionSortKey } from './bank'
 
 export type RuleDirection = 'incoming' | 'outgoing'
 export type RuleMode = 'suggest' | 'auto'
@@ -199,6 +199,7 @@ export const bankPostingApi = {
   // scope='all' → záložka „Všechny pohyby" (i zaúčtované, napříč účty a roky).
   listUnposted: (params: {
     page?: number; per_page?: number; year?: number; q?: string; scope?: 'unposted' | 'all'; account?: string
+    sort?: BankTransactionSortKey; direction?: 'asc' | 'desc'
   } = {}) =>
     api.get<{
       items: UnpostedBankTransaction[]; total: number; page: number; per_page: number
@@ -245,7 +246,8 @@ export const bankPostingApi = {
 }
 
 // ── Vlastní bankovní účty (kontace 221.xxx) ─────────────────────────────────
-export type BankAccountKind = 'current' | 'savings' | 'term_deposit'
+/** `credit_card` = úvěrový účet kreditní karty (231.xxx); spravuje ho stránka Kreditní karty. */
+export type BankAccountKind = 'current' | 'savings' | 'term_deposit' | 'credit_card'
 
 export interface SupplierBankAccount {
   id: number

@@ -16,6 +16,7 @@ vi.mock('@/stores/supplier', async () => {
   return { useSupplierStore: () => m.supplierStore }
 })
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: m.toastError }) }))
+vi.mock('@/components/settings/CompanyProfileBox.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({
   t: (key: string) => key, te: () => true, tm: () => ['Synthetic backup instruction'],
   rt: (value: string) => value, locale: { value: 'cs' },

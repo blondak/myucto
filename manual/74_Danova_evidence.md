@@ -233,6 +233,9 @@ posledních 12 měsíců:
 Obě tabulky (Pohledávky / Závazky) mají shodnou strukturu — řádek na měnu, sloupce
 podle stáří po splatnosti:
 
+Kliknutím na záhlaví lze měny seřadit podle vybraného pásma nebo celkové částky.
+Opakované kliknutí obrátí směr řazení v obou tabulkách.
+
 | Sloupec | Rozsah |
 |---|---|
 | Do splatnosti | Faktury, kterým ještě neuplynula splatnost |
@@ -433,6 +436,12 @@ dostupná.
 > zanést do daňového přiznání samostatně.
 
 ## 74.11 Omezení a tipy
+
+V agendě **Daňová evidence → Ostatní pohledávky a závazky** lze sledovat i jiné
+neuhrazené případy než faktury. Potvrzení položky v daňové evidenci nevytvoří
+podvojný účetní zápis ani samo o sobě nezakládá daňový příjem či výdaj.
+Přiřazená bankovní nebo pokladní úhrada sníží otevřený zůstatek; daňové
+zařazení platby se dál řídí pravidly peněžního deníku.
 
 - Sestavy jsou z většiny **read-only** — v peněžním deníku ani v přehledu
   pohledávek a závazků needituješ částky ani doklady; opravu zařazení uděláš na

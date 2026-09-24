@@ -180,6 +180,7 @@ k původnímu MDB. Mzdy se nadále převádějí samostatným průvodcem
 | adresář | klienti, párování podle IČO |
 | předkontace | pravidla zaúčtování se zkratkou z POHODY |
 | přijaté a vydané faktury | doklady se stavem zaúčtováno nebo uhrazeno; doklad nejisté daňové povahy jako koncept k ruční kontrole |
+| ostatní pohledávky a závazky bez DPH | otevřené položky s jednoznačným již převedeným účetním zápisem na 315 nebo 325 |
 | vydané doklady v režimu OSS (členění mimo přiznání, daň, stát MOSS) | plnění v režimu OSS včetně země spotřeby, typu sazby a typu plnění |
 | interní daňové doklady | daňové doklady k platbě a samovyměření DPH u přijatých faktur |
 | pokladny a pokladní doklady | pokladny a zaúčtované pokladní doklady |
@@ -281,8 +282,11 @@ U dokladů, které vypadaly na OSS a nerozhodlo se o nich, důvod rovnou říká
 doplnit; hromadně je pak dorovná akce
 [Nastavit OSS](14_Faktury.md#1432-hromadne-nastaveni-oss) v seznamu faktur.
 
-Pohledávky, závazky a interní doklady mimo přiznání k DPH zůstanou jen jako
-zápisy v deníku, samostatný doklad z nich nevzniká.
+Otevřené ostatní pohledávky a závazky bez DPH vzniknou jako samostatné položky,
+jen když se shodují s jediným již převedeným zápisem v deníku na účtu 315 nebo
+325. Účetní zápis se použije znovu a nevzniká druhý náklad ani výnos. Doklady
+s likvidací, zálohou, cizí měnou nebo nejednoznačnou kontací zůstanou k ruční
+kontrole. Interní doklady mimo přiznání k DPH zůstávají v deníku.
 
 Číslo dokladu, které už ve firmě je, dostane příponu roku, například
 `FV-0001/2026`.
@@ -297,7 +301,12 @@ zápisy v deníku, samostatný doklad z nich nevzniká.
   v `Dokumenty → Skeny k dokladům`.
 - **Číselné řady a podaná přiznání.** Přiznání k DPH a kontrolní hlášení za
   převáděný rok zůstávají v POHODĚ.
-- **Cizí měny.** Doklady v cizí měně se převezmou v Kč.
+- **Cizí měny.** Doklad v cizí měně se převezme v měně a kurzu dokladu, když
+  částky položek v měně přepočtené kurzem dávají na haléř koruny z POHODY
+  (DPH, kontrolní hlášení i deník tak zůstávají v Kč přesně stejné). Jinak se
+  převezme v Kč a poznámka dokladu i protokol uvedou důvod: samovyměření,
+  odpočet nedaňové zálohy, částečná úhrada vydaného dokladu, položky jen
+  z rekapitulace, nesedící přepočet nebo měna mimo číselník měn firmy.
 
 ## 107.4 Postup
 
@@ -455,6 +464,9 @@ Už převedené doklady ani zápisy deníku opakovaný převod nepřepisuje, pro
 mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změnila-li se
 v POHODĚ celková částka faktury, protokol ji vypíše jako změněnou v POHODĚ
 a ponechanou v MyÚčtu; upravte ji ručně.
+
+Před převodem firmy znovu od začátku stáhněte v průvodci **profil firmy** a po
+ostrém převodu ho nahrajte zpět, viz [§ 96.18](96_Nastaveni.md#9618-profil-firmy).
 
 ## 107.8 Omezení
 

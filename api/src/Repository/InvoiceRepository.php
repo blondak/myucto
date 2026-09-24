@@ -80,6 +80,26 @@ final class InvoiceRepository
         return $this->hasSimplified;
     }
 
+    /**
+     * Cache existence sloupce price_level_id (migrace 1880, cenová hladina dokladu). Bez
+     * sloupce se doklad uloží bez hladiny; ceny řádků jsou uložené samostatně, hladina
+     * je jen pomůcka pro nacenění v editoru.
+     */
+    private ?bool $hasPriceLevel = null;
+
+    private function supportsPriceLevel(): bool
+    {
+        if ($this->hasPriceLevel === null) {
+            $this->hasPriceLevel = $this->db->hasColumn('invoices', 'price_level_id');
+        }
+        return $this->hasPriceLevel;
+    }
+
+    private static function normalizePriceLevelId(mixed $value): ?int
+    {
+        return is_numeric($value) && (int) $value > 0 ? (int) $value : null;
+    }
+
     private ?bool $hasOssItemColumns = null;
 
     private function supportsOssItemColumns(): bool
@@ -622,11 +642,11 @@ final class InvoiceRepository
                JOIN clients c ON c.id = i.client_id
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
-                AND i.varsymbol LIKE ?
+                AND (i.varsymbol LIKE ? OR i.payment_variable_symbol LIKE ? OR i.supplier_order_number LIKE ?)
               ORDER BY i.issue_date DESC, i.id DESC
               LIMIT " . (int) $limit
         );
-        $stmt->execute([$supplierId, '%' . $esc . '%']);
+        $stmt->execute([$supplierId, '%' . $esc . '%', $esc . '%', '%' . $esc . '%']);
         return array_map(static fn (array $r) => [
             'id'             => (int) $r['id'],
             'varsymbol'      => $r['varsymbol'] !== null ? (string) $r['varsymbol'] : null,
@@ -909,13 +929,22 @@ final class InvoiceRepository
             // Hledá i v TEXTU POLOŽEK faktury (EXISTS, ne JOIN — JOIN by fakturu znásobil na
             // počet položek a rozbil COUNT i stránkování). $whereSql je sdílený mezi count
             // i hlavním dotazem, takže stačí doplnit tady jednou.
-            $where[] = '(i.varsymbol LIKE ? OR i.payment_variable_symbol LIKE ? OR c.company_name LIKE ?'
-                . ' OR EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.id'
-                . ' AND ii.description LIKE ?))';
-            $params[] = $q . '%';
-            $params[] = $q . '%';
-            $params[] = '%' . $q . '%';
-            $params[] = '%' . $q . '%';
+            $or = [
+                'i.varsymbol LIKE ?',
+                'i.payment_variable_symbol LIKE ?',
+                'c.company_name LIKE ?',
+                'i.supplier_order_number LIKE ?',
+                'EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.id AND ii.description LIKE ?)',
+            ];
+            array_push($params, $q . '%', $q . '%', '%' . $q . '%', '%' . $q . '%', '%' . $q . '%');
+            // Platební VS bez vlastního payment_variable_symbol = číslice z čísla dokladu
+            // (VariableSymbolNormalizer::forInvoicePayment) — „20260001" najde „2026-0001".
+            $rawQ = trim((string) $filters['q']);
+            if (ctype_digit($rawQ)) {
+                $or[] = "(i.payment_variable_symbol IS NULL AND REGEXP_REPLACE(i.varsymbol, '[^0-9]', '') LIKE ?)";
+                $params[] = $rawQ . '%';
+            }
+            $where[] = '(' . implode(' OR ', $or) . ')';
         }
 
         $whereSql = implode(' AND ', $where);
@@ -952,8 +981,31 @@ final class InvoiceRepository
                 . ' AND ' . $flaggedOss . ') AS oss_review_oss,';
         }
 
+        $sortColumns = [
+            'number' => 'i.varsymbol', 'client' => 'c.company_name', 'type' => 'i.invoice_type',
+            'issued' => 'COALESCE(i.tax_date, i.issue_date)', 'due' => 'i.due_date', 'amount' => 'i.amount_to_pay',
+            'status' => 'i.status', 'payment_vs' => "COALESCE(NULLIF(LEFT(REGEXP_REPLACE(i.payment_variable_symbol, '[^0-9]', ''), 10), ''), LEFT(REGEXP_REPLACE(i.varsymbol, '[^0-9]', ''), 10))",
+            'order_number' => 'i.supplier_order_number', 'paid_at' => 'i.paid_at',
+            'payment_method' => 'i.payment_method', 'booked_at' => 'i.booked_at',
+            'exchange_rate' => 'i.exchange_rate',
+            'amount_czk' => "CASE WHEN cur.code = 'CZK' THEN i.total_with_vat ELSE i.total_with_vat * i.exchange_rate END",
+            'base' => 'i.total_without_vat', 'vat' => 'i.total_vat', 'total' => 'i.total_with_vat',
+            'project' => 'p.name', 'sent_at' => 'i.sent_at', 'paid_total' => 'i.paid_total',
+        ];
+        $sortKey = (string) ($filters['sort_key'] ?? '');
+        $sortDir = strtolower((string) ($filters['sort_dir'] ?? '')) === 'asc' ? 'ASC' : 'DESC';
+        $groupByMonth = ($filters['group_by_month'] ?? true) !== false;
+        $sortSql = isset($sortColumns[$sortKey])
+            ? $sortColumns[$sortKey] . ' ' . $sortDir . ', i.id DESC'
+            : 'i.effective_tax_date DESC, i.id DESC';
+        if ($groupByMonth && isset($sortColumns[$sortKey])) {
+            $monthDir = $sortKey === 'issued' ? $sortDir : 'DESC';
+            $sortSql = "DATE_FORMAT(i.effective_tax_date, '%Y-%m') {$monthDir}, " . $sortSql;
+        }
+
         $sql = "SELECT $ossReviewSelect
-                       i.id, i.varsymbol, i.invoice_type, i.parent_invoice_id, i.recurring_template_id,
+                       i.id, i.varsymbol, i.payment_variable_symbol, i.supplier_order_number,
+                       i.invoice_type, i.parent_invoice_id, i.recurring_template_id,
                        i.client_id, i.project_id, i.supplier_id,
                        i.issue_date, i.tax_date, i.due_date,
                        i.currency_id, cur.code AS currency, cur.symbol AS currency_symbol, cur.decimals AS currency_decimals,
@@ -972,7 +1024,7 @@ final class InvoiceRepository
              LEFT JOIN projects p ON p.id = i.project_id
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE $whereSql
-                 ORDER BY i.effective_tax_date DESC, i.id DESC";
+                 ORDER BY $sortSql";
 
         if ($perPage > 0) {
             $offset = max(0, ($page - 1) * $perPage);
@@ -996,7 +1048,8 @@ final class InvoiceRepository
         $grouped = [];
         foreach ($rows as $row) {
             $row = $this->castInvoice($row);
-            $month = (string) $row['month_bucket'];
+            $row['payment_varsymbol'] = VariableSymbolNormalizer::forInvoicePayment($row);
+            $month = $groupByMonth ? (string) $row['month_bucket'] : '';
             if (!isset($grouped[$month])) {
                 $grouped[$month] = [
                     'month' => $month,
@@ -1133,6 +1186,7 @@ final class InvoiceRepository
         $hasExempt = $this->supportsIncomeTaxExempt();
         $hasReminders = $this->supportsAutoSendReminders();
         $hasSimplified = $this->supportsSimplified();
+        $hasPriceLevel = $this->supportsPriceLevel() && array_key_exists('price_level_id', $data);
         $sql = 'INSERT INTO invoices
             (invoice_type, parent_invoice_id, client_id, project_id, supplier_id, branding_profile_id,
              issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language,
@@ -1142,11 +1196,13 @@ final class InvoiceRepository
             . ($hasExempt ? ' income_tax_exempt, income_tax_exempt_reason,' : '')
             . ($hasReminders ? ' auto_send_reminders,' : '')
             . ($hasSimplified ? ' is_simplified,' : '')
+            . ($hasPriceLevel ? ' price_level_id,' : '')
             . ' created_by)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?,'
             . ($hasExempt ? ' ?, ?,' : '')
             . ($hasReminders ? ' ?,' : '')
             . ($hasSimplified ? ' ?,' : '')
+            . ($hasPriceLevel ? ' ?,' : '')
             . ' ?)';
 
         $params = [
@@ -1184,6 +1240,9 @@ final class InvoiceRepository
         }
         if ($hasSimplified) {
             $params[] = !empty($data['is_simplified']) ? 1 : 0;
+        }
+        if ($hasPriceLevel) {
+            $params[] = self::normalizePriceLevelId($data['price_level_id']);
         }
         $params[] = $userId;
 
@@ -1239,6 +1298,9 @@ final class InvoiceRepository
         // payloadu JE. Příznak nastavuje editor faktury, ale doklad ukládají i jiné cesty
         // (import, opakovaná fakturace) — ty by ho bez tohoto rozlišení tiše shodily na 0.
         $hasSimplified = $this->supportsSimplified() && array_key_exists('is_simplified', $data);
+        // Stejně jako `is_simplified`: jen když klíč v payloadu je, jinak by ho ostatní cesty
+        // ukládající doklad (import, opakovaná fakturace) tiše smazaly.
+        $hasPriceLevel = $this->supportsPriceLevel() && array_key_exists('price_level_id', $data);
         $currentStmt = $this->db->pdo()->prepare('SELECT supplier_id, branding_profile_id FROM invoices WHERE id = ?');
         $currentStmt->execute([$id]);
         $current = $currentStmt->fetch(PDO::FETCH_ASSOC);
@@ -1259,6 +1321,7 @@ final class InvoiceRepository
               . ($hasExempt ? ', income_tax_exempt = ?, income_tax_exempt_reason = ?' : '')
               . ($hasReminders ? ', auto_send_reminders = ?' : '')
               . ($hasSimplified ? ', is_simplified = ?' : '')
+              . ($hasPriceLevel ? ', price_level_id = ?' : '')
               . ($hasVarsymbol ? ', varsymbol = ?' : '')
               . ($hasPaymentVs ? ', payment_variable_symbol = ?' : '')
               . ($hasPaymentMethod ? ', payment_method = ?' : '')
@@ -1294,6 +1357,7 @@ final class InvoiceRepository
             $params[] = array_key_exists('auto_send_reminders', $data) ? ((int) (bool) $data['auto_send_reminders']) : 1;
         }
         if ($hasSimplified) $params[] = !empty($data['is_simplified']) ? 1 : 0;
+        if ($hasPriceLevel) $params[] = self::normalizePriceLevelId($data['price_level_id']);
         if ($hasVarsymbol) $params[] = $manualVarsymbol;
         if ($hasPaymentVs) $params[] = $paymentVs;
         if ($hasPaymentMethod) $params[] = $paymentMethod;
@@ -2020,6 +2084,7 @@ final class InvoiceRepository
         // Vždy klíč vrátit, i na instalaci bez migrace 1170 — editor by jinak checkbox
         // po načtení dokladu tiše zrušil (undefined → false → uložení jako běžný doklad).
         $row['is_simplified']       = isset($row['is_simplified']) ? (bool) $row['is_simplified'] : false;
+        $row['price_level_id']      = isset($row['price_level_id']) ? (int) $row['price_level_id'] : null;
         $row['prices_include_vat']  = isset($row['prices_include_vat']) ? (bool) $row['prices_include_vat'] : false;
         if (array_key_exists('income_tax_exempt', $row)) {
             $row['income_tax_exempt'] = (bool) $row['income_tax_exempt'];

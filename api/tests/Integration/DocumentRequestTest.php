@@ -23,6 +23,7 @@ use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionCompletionService
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionProcessingService;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionUploadService;
+use MyInvoice\Service\PurchaseInvoice\SubmissionOriginalFiler;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -61,6 +62,7 @@ final class DocumentRequestTest extends TestCase
     private DocumentStorage $storage;
     private ActivityLogger $activity;
     private IpMatcher $ipMatcher;
+    private SubmissionOriginalFiler $filer;
 
     private int $supplierA = 0;
     private int $supplierB = 0;
@@ -86,6 +88,7 @@ final class DocumentRequestTest extends TestCase
             $this->documents     = $container->get(DocumentRepository::class);
             $this->purchaseRepo  = $container->get(PurchaseInvoiceRepository::class);
             $this->submissions   = $container->get(PurchaseInvoiceSubmissionRepository::class);
+            $this->filer         = $container->get(SubmissionOriginalFiler::class);
             $this->upload        = $container->get(PurchaseInvoiceSubmissionUploadService::class);
             $this->completion    = $container->get(PurchaseInvoiceSubmissionCompletionService::class);
             $this->processing    = $container->get(PurchaseInvoiceSubmissionProcessingService::class);
@@ -260,6 +263,76 @@ final class DocumentRequestTest extends TestCase
         );
         $link->execute([(int) $done['document_id'], $invoiceId]);
         self::assertNotFalse($link->fetchColumn(), 'Neměnný DMS originál musí zůstat připojený k výsledné faktuře.');
+    }
+
+    /**
+     * Originál, který je byte po bytu PDF výsledné faktury, se k faktuře nepřipojí (detail by
+     * ho ukázal podruhé vedle vlastního PDF dokladu) a ze „Příchozí doklady / rok / měsíc"
+     * se přesune do archivu. Po smazání faktury se s podáním vrátí zpátky mezi čekající.
+     */
+    public function testIdenticalPdfOriginalIsNotLinkedAndMovesToArchive(): void
+    {
+        $requestId = $this->repo->create($this->supplierA, [
+            'description' => 'Faktura v PDF', 'amount' => null,
+            'context_date' => null, 'deadline' => null, 'bank_transaction_id' => null,
+        ], $this->userId);
+        $response = $this->buildPortalAction()->upload(
+            $this->uploadRequest(
+                $this->supplierA,
+                $requestId,
+                'faktura.pdf',
+                "%PDF-1.4\nsynthetic-" . bin2hex(random_bytes(16)) . "\n%%EOF\n",
+            ),
+            (new ResponseFactory())->createResponse(),
+            ['id' => (string) $requestId],
+        );
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $submissionId = (int) ($this->repo->find($requestId, $this->supplierA)['submission_id'] ?? 0);
+        $submission = $this->submissions->find($submissionId, $this->supplierA);
+        self::assertNotNull($submission);
+        $this->trackSubmissionFile($submission);
+        $documentId = (int) $submission['document_id'];
+        self::assertSame(['Příchozí doklady', date('Y'), date('m')], $this->folderPath($documentId));
+
+        $invoiceId = $this->createPurchaseInvoiceDraft($this->supplierA, 'DOCREQ-PDF-1');
+        self::assertTrue($this->submissions->claimForManual($submissionId, $this->supplierA));
+        $this->completion->complete($submissionId, $this->supplierA, $invoiceId, $this->userId, 'manual');
+
+        $pdfHash = $this->db->pdo()->prepare('SELECT pdf_hash FROM purchase_invoices WHERE id = ?');
+        $pdfHash->execute([$invoiceId]);
+        self::assertSame((string) $submission['document_sha256'], (string) $pdfHash->fetchColumn(),
+            'Předpoklad: PDF faktury je tentýž soubor jako originál.');
+        $link = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM document_links WHERE document_id = ? AND entity_type = 'purchase_invoice' AND entity_id = ?"
+        );
+        $link->execute([$documentId, $invoiceId]);
+        self::assertSame(0, (int) $link->fetchColumn(), 'Shodný originál se k faktuře podruhé nepřipojuje.');
+        self::assertSame(['Příchozí doklady', 'Archiv', date('Y'), date('m')], $this->folderPath($documentId));
+
+        $reopened = $this->submissions->reopenForDeletedInvoice($this->supplierA, $invoiceId);
+        self::assertSame([$submissionId], $reopened);
+        $this->filer->restore($this->supplierA, $reopened);
+        self::assertSame(['Příchozí doklady', date('Y'), date('m')], $this->folderPath($documentId),
+            'Podání vrácené do fronty má originál zase mezi čekajícími.');
+    }
+
+    /** @return list<string> názvy složek od kořene k dokumentu */
+    private function folderPath(int $documentId): array
+    {
+        $pdo = $this->db->pdo();
+        $doc = $pdo->prepare('SELECT folder_id FROM documents WHERE id = ?');
+        $doc->execute([$documentId]);
+        $folderId = $doc->fetchColumn();
+        $folder = $pdo->prepare('SELECT parent_id, name FROM document_folders WHERE id = ?');
+        $path = [];
+        while ($folderId !== false && $folderId !== null) {
+            $folder->execute([(int) $folderId]);
+            $row = $folder->fetch(\PDO::FETCH_ASSOC);
+            if ($row === false) break;
+            array_unshift($path, (string) $row['name']);
+            $folderId = $row['parent_id'];
+        }
+        return $path;
     }
 
     public function testExactDedupIsPerTenantAndUnchangedReplacementIsRejected(): void

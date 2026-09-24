@@ -153,6 +153,27 @@ bez DPH), doklad automaticky daňově připraví:
 
 Detail daňové logiky viz [§ 23.2.7](23_Prijate_faktury.md#2327-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba).
 
+### 25.1.11 Hromadný import, typ dokladu a poslední import
+
+Na stránce **Nákup → AI import** lze vybrat nebo přetáhnout víc souborů naráz.
+Vznikne z nich dávka, která se zpracuje postupně po jednom. Po zpracování zůstane
+na stránce tabulka výsledků: soubor, stav, dodavatel, částka, **typ dokladu**
+a odkaz **Otevřít** na vytvořený koncept.
+
+**Typ dokladu** jde změnit přímo v tabulce, bez otevírání editoru. Typicky jde
+o účtenku placenou kartou, kterou AI zařadí jako *Účtenka / paragon* a účetní ji
+chce vést jako *Faktura*. Stejná volba je i u jednotlivě importovaného dokladu.
+Změna se týká jen zařazení, částky ani DPH se nepřepočítávají. Záloha se tu
+měnit nedá (má vazby na vyúčtování), přepni ji v editoru dokladu.
+
+Po dokončení dávky ukáže souhrn počet úspěšných a chybných dokladů a tlačítko
+**Zobrazit v přijatých fakturách**, které otevře seznam vyfiltrovaný na tuto
+dávku. Tam lze vybraným dokladům změnit typ hromadně akcí **Nastavit typ**.
+
+Nahoře na stránce je vždy vidět **poslední import** (datum a počet dokladů)
+s odkazem do seznamu. Starší importy najdeš v seznamu přijatých faktur ve filtru
+**Import (dávka)**.
+
 ## 25.2 Multi-provider AI brána (výběr poskytovatele)
 
 AI extrakce neběží natvrdo nad jedním modelem — MyÚčto.cz nabízí **AI bránu** se

@@ -21,13 +21,14 @@ final class AssetRepository
         'asset_account_code', 'accumulated_account_code', 'acquisition_account_code',
         'purchase_invoice_id', 'purchase_invoice_item_id',
         'input_price', 'acquisition_date', 'put_into_use_date',
-        'disposal_date', 'disposal_type', 'disposal_price', 'sale_invoice_id', 'status',
+        'disposal_date', 'disposal_type', 'disposal_price', 'sale_invoice_id', 'disposal_entry_id', 'status',
         'tax_method', 'tax_group', 'tax_first_year_increase',
         'is_first_owner', 'is_m1_vehicle', 'm1_limit_exception', 'is_zero_emission',
         // § 28 ZDP — právní důvod odpisování (+ podíl a doložení, které z něj plynou).
         'depreciator_ground', 'co_ownership_share', 'depreciator_note',
         'opening_tax_years', 'opening_tax_amount', 'opening_acc_months', 'opening_acc_amount',
         'acc_useful_life_months', 'acc_method', 'acc_residual_value', 'created_by',
+        'summary_account_code',
     ];
 
     /**
@@ -327,6 +328,7 @@ final class AssetRepository
         $r['input_price'] = (float) $r['input_price'];
         $r['disposal_price'] = $r['disposal_price'] === null ? null : (float) $r['disposal_price'];
         $r['sale_invoice_id'] = ($r['sale_invoice_id'] ?? null) === null ? null : (int) $r['sale_invoice_id'];
+        $r['disposal_entry_id'] = ($r['disposal_entry_id'] ?? null) === null ? null : (int) $r['disposal_entry_id'];
         $r['tax_group'] = $r['tax_group'] === null ? null : (int) $r['tax_group'];
         $r['is_first_owner'] = (bool) $r['is_first_owner'];
         $r['is_m1_vehicle'] = (bool) $r['is_m1_vehicle'];

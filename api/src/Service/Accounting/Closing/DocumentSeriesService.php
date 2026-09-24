@@ -44,6 +44,8 @@ final class DocumentSeriesService
         // doklad (§ 11 ZoÚ), řadu ale sdílí — číslo musí být unikátní a bez
         // souběhových děr stejně jako u dokladů.
         'purchase_order' => 'OBJ',
+        'other_receivable' => 'OP',
+        'other_payable' => 'OZ',
     ];
 
     /**

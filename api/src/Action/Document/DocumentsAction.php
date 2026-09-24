@@ -112,7 +112,7 @@ final class DocumentsAction
             return Json::error($response, 'not_found', 'Dokument nenalezen.', 404);
         }
         $doc['tags']        = $this->tags->tagsForDocument($id);
-        $doc['links']       = $this->links->linksForDocument($id, $sid, self::redactedLinkTypes($request));
+        $doc['links']       = $this->links->linksForDocument($id, $sid, self::redactedLinkTypes($request), self::hiddenLinkTypes($request));
         $doc['attachments'] = $this->documents->listChildren($id, $sid, $viewer);
         $doc['breadcrumb']  = $this->breadcrumb($sid, $doc['folder_id']);
         if ($doc['doc_type'] === 'zfo') {
@@ -259,6 +259,14 @@ final class DocumentsAction
         if (!in_array($type, DocumentLinkRepository::ENTITY_TYPES, true)) {
             return Json::error($response, 'bad_entity', 'Neplatný typ entity.', 400);
         }
+        if ($type === 'other_item') {
+            if (!RequestAuthorization::allows($request, 'other_items', AccessLevel::READ)) {
+                return Json::error($response, 'forbidden', 'Chybí oprávnění k ostatním položkám.', 403);
+            }
+            if (!$this->links->entityBelongsToSupplier($type, $eid, $sid)) {
+                return Json::error($response, 'not_found', 'Propojená entita nenalezena.', 404);
+            }
+        }
         return Json::ok($response, ['documents' => $this->documents->listByEntity($sid, $type, $eid, $this->viewer($request))]);
     }
 
@@ -282,13 +290,16 @@ final class DocumentsAction
         if (!in_array($type, DocumentLinkRepository::ENTITY_TYPES, true) || $eid <= 0) {
             return Json::error($response, 'bad_entity', 'Neplatná vazba.', 400);
         }
+        if ($type === 'other_item' && !RequestAuthorization::allows($request, 'other_items', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Chybí oprávnění k ostatním položkám.', 403);
+        }
         // Ověř, že cílová entita patří aktuálnímu dodavateli — jinak by vznikla
         // dangling/cizí vazba (read-back je sice scoped, ale nezakládáme smetí).
         if (!$this->links->entityBelongsToSupplier($type, $eid, $sid)) {
             return Json::error($response, 'not_found', 'Propojená entita nenalezena.', 404);
         }
         $this->links->attach($sid, $id, $type, $eid);
-        return Json::ok($response, ['links' => $this->links->linksForDocument($id, $sid, self::redactedLinkTypes($request))]);
+        return Json::ok($response, ['links' => $this->links->linksForDocument($id, $sid, self::redactedLinkTypes($request), self::hiddenLinkTypes($request))]);
     }
 
     /** DELETE /api/documents/{id}/links {entity_type, entity_id} */
@@ -303,8 +314,11 @@ final class DocumentsAction
         $q = $request->getQueryParams();
         $type = (string) ($body['entity_type'] ?? $q['entity_type'] ?? '');
         $eid = (int) ($body['entity_id'] ?? $q['entity_id'] ?? 0);
+        if ($type === 'other_item' && !RequestAuthorization::allows($request, 'other_items', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Chybí oprávnění k ostatním položkám.', 403);
+        }
         $this->links->detach($sid, $id, $type, $eid);
-        return Json::ok($response, ['links' => $this->links->linksForDocument($id, $sid, self::redactedLinkTypes($request))]);
+        return Json::ok($response, ['links' => $this->links->linksForDocument($id, $sid, self::redactedLinkTypes($request), self::hiddenLinkTypes($request))]);
     }
 
     /**
@@ -316,6 +330,12 @@ final class DocumentsAction
     private static function redactedLinkTypes(Request $request): array
     {
         return RequestAuthorization::allows($request, 'cash', AccessLevel::READ) ? [] : ['cash_document'];
+    }
+
+    /** Ostatní položky bez práva čtení neodhalují ani existenci vazby. */
+    private static function hiddenLinkTypes(Request $request): array
+    {
+        return RequestAuthorization::allows($request, 'other_items', AccessLevel::READ) ? [] : ['other_item'];
     }
 
     /** GET /api/documents/trash */

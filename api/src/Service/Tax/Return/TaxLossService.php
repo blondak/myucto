@@ -173,6 +173,22 @@ final class TaxLossService
         }
     }
 
+    /**
+     * Ztráta roku, za který přiznání v systému není (vznikla před převzetím účetnictví):
+     * jen výše vzniklé ztráty, bez zásahu do uplatnění. Uplatnění v dalších letech
+     * zapíše {@see reconcileFinalize()} přiznání roku uplatnění.
+     */
+    public function registerOpeningLoss(int $supplierId, string $type, int $originYear, float $amount): void
+    {
+        $amount = round(max(0.0, $amount), 2);
+        $this->assertLossAmountCanBeSet($supplierId, $type, $originYear, $amount);
+        $this->db->pdo()->prepare(
+            'INSERT INTO tax_losses (supplier_id, taxpayer_type, origin_year, amount, source_return_id)
+             VALUES (?, ?, ?, ?, NULL)
+             ON DUPLICATE KEY UPDATE amount = VALUES(amount)'
+        )->execute([$supplierId, $type, $originYear, $amount]);
+    }
+
     public function assertLossAmountCanBeSet(int $supplierId, string $type, int $year, float $yearLoss): void
     {
         $stmt = $this->db->pdo()->prepare(

@@ -207,6 +207,10 @@ const actions = computed<ActionItem[]>(() => [
     show: canManageLifecycle.value && item.value?.lifecycle_status !== 'ready', run: () => void changeLifecycle('ready'),
   },
   {
+    key: 'sales', label: t('stock.item_detail.sales'), icon: 'chart', tier: 'secondary', variant: 'neutral',
+    show: auth.canRead('invoices'), to: { path: '/stock/reports', query: { tab: 'sales', stock_item_id: id.value } },
+  },
+  {
     key: 'export-pdf', label: t('stock.item_detail.export_pdf'), icon: 'download', tier: 'secondary', variant: 'neutral',
     run: () => exportFile('pdf'),
   },
@@ -369,8 +373,10 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
               <tr>
                 <th class="px-3 py-2 text-left font-medium">{{ t('stock.item_detail.col_date') }}</th>
                 <th class="px-3 py-2 text-left font-medium">{{ t('stock.item_detail.col_doc') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('stock.item_detail.col_partner') }}</th>
                 <th class="px-3 py-2 text-left font-medium">{{ t('stock.item_detail.col_warehouse') }}</th>
                 <th class="px-3 py-2 text-right font-medium">{{ t('stock.item_detail.col_qty') }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('stock.item_detail.col_sale_price') }}</th>
                 <th class="px-3 py-2 text-right font-medium">{{ t('stock.item_detail.col_unit_cost') }}</th>
                 <th class="px-3 py-2 text-right font-medium">{{ t('stock.item_detail.col_value') }}</th>
                 <th class="px-3 py-2 text-right font-medium">{{ t('stock.item_detail.col_balance') }}</th>
@@ -385,9 +391,32 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
                   </RouterLink>
                   <span class="text-xs text-neutral-400 ml-1">{{ t(`stock.doc_type.${m.doc_type}`) }}</span>
                 </td>
+                <!-- Faktura a protistrana, která pohyb vyvolala, s proklikem rovnou na doklad. -->
+                <td class="px-3 py-2 min-w-[10rem]">
+                  <div v-if="m.invoice_id || m.purchase_invoice_id" class="flex flex-wrap items-center gap-1">
+                    <RouterLink v-if="m.invoice_id" :to="`/invoices/${m.invoice_id}`" class="font-mono text-xs text-primary-600 hover:text-primary-700">
+                      {{ m.invoice_number || `#${m.invoice_id}` }}
+                    </RouterLink>
+                    <RouterLink v-else :to="`/purchase-invoices/${m.purchase_invoice_id}`" class="font-mono text-xs text-primary-600 hover:text-primary-700">
+                      {{ m.purchase_invoice_number || `#${m.purchase_invoice_id}` }}
+                    </RouterLink>
+                    <span v-if="m.invoice_type === 'credit_note'" class="text-xs px-1.5 py-0.5 rounded bg-warning-50 text-warning-700">{{ t('stock.item_detail.credit_note') }}</span>
+                  </div>
+                  <template v-if="m.partner">
+                    <RouterLink v-if="m.partner.id" :to="`/clients/${m.partner.id}`" class="block truncate text-xs text-neutral-600 hover:text-primary-700">{{ m.partner.name }}</RouterLink>
+                    <span v-else class="block truncate text-xs text-neutral-600">{{ m.partner.name }}</span>
+                  </template>
+                  <span v-if="!m.invoice_id && !m.purchase_invoice_id && !m.partner" class="text-neutral-400">—</span>
+                </td>
                 <td class="px-3 py-2">{{ m.warehouse_code }}</td>
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap" :class="num(m.qty_signed) < 0 ? 'text-danger-500' : 'text-success-600'">
                   {{ num(m.qty_signed) > 0 ? '+' : '' }}{{ m.qty_signed }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono whitespace-nowrap">
+                  <template v-if="m.sale_unit_price !== null">
+                    {{ formatMoney(Number(m.sale_unit_price), m.sale_currency || 'CZK') }}<span v-if="m.sale_unit" class="text-xs text-neutral-400"> / {{ m.sale_unit }}</span>
+                  </template>
+                  <span v-else class="text-neutral-400">—</span>
                 </td>
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(Number(m.unit_cost)) }}</td>
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(Number(m.value_total)) }}</td>

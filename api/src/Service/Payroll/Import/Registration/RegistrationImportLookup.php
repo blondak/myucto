@@ -180,6 +180,66 @@ final class RegistrationImportLookup
     }
 
     /**
+     * Všechny variabilní symboly ČSSZ, které firma u svých mzdových účtáren
+     * vede: aktuální ostrý, testovací i historické verze registrace.
+     *
+     * @return list<string>
+     */
+    public function variableSymbols(int $supplierId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT social_security_variable_symbol AS vs FROM payroll_offices
+              WHERE supplier_id = ? AND social_security_variable_symbol IS NOT NULL
+             UNION
+             SELECT test_social_security_variable_symbol FROM payroll_offices
+              WHERE supplier_id = ? AND test_social_security_variable_symbol IS NOT NULL
+             UNION
+             SELECT social_security_variable_symbol FROM payroll_office_registration_versions
+              WHERE supplier_id = ?'
+        );
+        $statement->execute([$supplierId, $supplierId, $supplierId]);
+        $symbols = [];
+        foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $value) {
+            $normalized = self::variableSymbol((string) $value);
+            if ($normalized !== null) {
+                $symbols[$normalized] = true;
+            }
+        }
+
+        return array_map(strval(...), array_keys($symbols));
+    }
+
+    /**
+     * Osoby se shodným jménem, příjmením a datem narození v kterékoli verzi identity.
+     * Slouží jen tam, kde věta žádný identifikátor nenese (formulář hlášení větve B).
+     *
+     * @return list<int>
+     */
+    public function employeesByNameAndBirthDate(
+        int $supplierId,
+        string $firstName,
+        string $lastName,
+        string $birthDate,
+    ): array {
+        return $this->ids(
+            'SELECT DISTINCT employee_id
+               FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND birth_date = ?
+                AND LOWER(first_name) = LOWER(?) AND LOWER(last_name) = LOWER(?)
+              ORDER BY employee_id',
+            [$supplierId, $birthDate, $firstName, $lastName],
+        );
+    }
+
+    /** VS bez oddělovačů a úvodních nul; `null`, když v něm žádná číslice není. */
+    public static function variableSymbol(string $value): ?string
+    {
+        $digits = ltrim((string) preg_replace('/\D/', '', $value), '0');
+
+        return $digits === '' ? null : $digits;
+    }
+
+    /**
      * @param list<mixed> $params
      * @return list<int>
      */

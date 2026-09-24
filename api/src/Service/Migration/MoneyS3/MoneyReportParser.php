@@ -92,7 +92,7 @@ final class MoneyReportParser
     }
 
     /** „1 234,56", „-1234.56", „1 234,56-" → float; text → null. */
-    private static function number(string $cell): ?float
+    public static function number(string $cell): ?float
     {
         $s = str_replace(["\u{00A0}", "\u{202F}", ' '], '', $cell);
         if ($s === '') {

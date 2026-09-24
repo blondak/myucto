@@ -30,6 +30,7 @@ import {
 import Modal from '../ui/Modal.vue'
 import JournalLinesEditor, { type EditorLine } from './JournalLinesEditor.vue'
 import PostingOriginRow from './PostingOriginRow.vue'
+import JournalEntryNotes from './JournalEntryNotes.vue'
 import DimensionFields from '../dimensions/DimensionFields.vue'
 import DimensionChips from '../dimensions/DimensionChips.vue'
 import { btnOutline, btnFilled, ICONS } from '../ui/buttonStyles'
@@ -198,16 +199,45 @@ function applyProposal(): void {
   proposalApplied.value = true
 }
 
-const canSubmit = computed(() =>
-  !!plan.value && !blocked.value && !loading.value && !saving.value
-  && (editorRef.value?.valid ?? false)
-  && (!plan.value.date_shifted || confirmShift.value || plan.value.tax_neutral_available))
+/** Změnila se kontace nebo popis zápisu? Beze změny není co přeúčtovat. */
+const postingChanged = computed(() => {
+  if (!plan.value) return false
+  if (description.value.trim() !== (plan.value.description ?? '').trim()) return true
+  const key = (ls: Array<{ account_code: string | null; side: string; amount: number | string | null }>) =>
+    ls.map(l => `${l.side}|${(l.account_code ?? '').trim()}|${Math.round(Number(l.amount ?? 0) * 100)}`).sort().join(';')
+  return key(lines.value) !== key(plan.value.lines)
+})
+
+const notesRef = ref<InstanceType<typeof JournalEntryNotes> | null>(null)
+const notesPending = computed(() => notesRef.value?.hasPending ?? false)
+/**
+ * Mění se jen poznámka: hlavní tlačítko ji uloží bez přeúčtování. Poznámka je analytika
+ * mimo zápis, proto jde vždy — i v uzavřeném roce, kde je samotné přeúčtování zablokované.
+ */
+const notesOnly = computed(() => notesPending.value && !postingChanged.value && !dimsDirty.value)
+
+const canSubmit = computed(() => notesOnly.value
+  ? !loading.value && !saving.value
+  : !!plan.value && !blocked.value && !loading.value && !saving.value
+    && (editorRef.value?.valid ?? false)
+    && (!plan.value.date_shifted || confirmShift.value || plan.value.tax_neutral_available))
 
 async function submit(): Promise<void> {
   if (!canSubmit.value) return
+  if (notesOnly.value) {
+    saving.value = true
+    try {
+      await notesRef.value?.savePending()
+      emit('close')
+    } finally {
+      saving.value = false
+    }
+    return
+  }
   saving.value = true
   error.value = ''
   try {
+    if (notesPending.value) await notesRef.value?.savePending()
     await accountingApi.repost(props.source, props.docId, {
       lines: lines.value.map(l => ({
         account_code: l.account_code,
@@ -348,6 +378,11 @@ async function submit(): Promise<void> {
 
           <p class="text-xs text-neutral-500">{{ t('accounting.repost.hint') }}</p>
         </template>
+
+        <!-- Poznámky zápisu — tatáž komponenta jako v deníku a u bankovního pohybu.
+             Ukládají se hned a nezávisle na přeúčtování (jdou psát i u zablokovaného);
+             přeúčtování stornem je přenese na nový zápis. -->
+        <JournalEntryNotes ref="notesRef" :entry-id="plan.entry_id" data-test="repost-notes" />
       </template>
 
       <div class="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-neutral-200">
@@ -359,8 +394,8 @@ async function submit(): Promise<void> {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.tag" /></svg>
           {{ dimSaving ? t('common.saving') : t('accounting.repost.save_dimensions_only') }}
         </button>
-        <button type="button" :class="btnFilled('warning')" :disabled="!canSubmit" @click="submit">
-          {{ saving ? t('common.saving') : t('accounting.repost.confirm') }}
+        <button type="button" :class="btnFilled(notesOnly ? 'primary' : 'warning')" :disabled="!canSubmit" data-test="repost-submit" @click="submit">
+          {{ saving ? t('common.saving') : (notesOnly ? t('accounting.repost.save_note') : t('accounting.repost.confirm')) }}
         </button>
       </div>
     </div>

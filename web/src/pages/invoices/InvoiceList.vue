@@ -24,8 +24,11 @@ import { useListKeyboard } from '@/composables/useListKeyboard'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
+import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
@@ -65,6 +68,8 @@ const page = ref(1)
 const pages = ref(1)
 const loading = ref(false)
 const loadingMore = ref(false)
+const loadMoreTarget = ref<HTMLElement | null>(null)
+useScrollLoadMore(loadMoreTarget, () => !loading.value && !loadingMore.value && page.value < pages.value, () => load(false))
 const search = ref('')
 const statusFilter = ref<string>('')
 const typeFilter = ref<string>('')
@@ -835,14 +840,18 @@ function mergeGroups(existing: MonthGroup[], incoming: MonthGroup[]): MonthGroup
       }
     }
   }
-  return Array.from(byMonth.values()).sort((a, b) => b.month.localeCompare(a.month))
+  return Array.from(byMonth.values())
 }
 
+let loadSeq = 0
 async function load(reset = true) {
+  if (!reset && (loading.value || loadingMore.value || page.value >= pages.value)) return
+  const seq = ++loadSeq
   if (reset) {
     if (searchTimeout) clearTimeout(searchTimeout)
     searchTimeout = null
     loading.value = true
+    loadingMore.value = false
     page.value = 1
   } else {
     loadingMore.value = true
@@ -869,7 +878,13 @@ async function load(reset = true) {
       revenue_category_exclude: revenueCategoryMode.value === 'exclude' && revenueCategoryIds.value.length
         ? revenueCategoryIds.value : undefined,
       page: page.value,
+      per_page: 50,
+      sort_key: tbl.sort.value?.key,
+      sort_dir: tbl.sort.value?.dir,
+      group_by_month: groupByMonth.value,
+      include_kh: tbl.isVisible('kh'),
     })
+    if (seq !== loadSeq) return
     if (reset) {
       groups.value = result.data
     } else {
@@ -877,14 +892,21 @@ async function load(reset = true) {
     }
     total.value = result.meta.total
     pages.value = result.meta.pages ?? 1
+  } catch (e) {
+    if (seq === loadSeq) {
+      if (!reset) page.value--
+      toast.error(t('common.error'))
+    }
   } finally {
-    loading.value = false
-    loadingMore.value = false
-    flashedIds.value = consumeFlashedRows('invoice')
-    // Po první dávce dat je stagger odbytý — další načtení (filtr, stránkování,
-    // „načíst další") už musí být okamžité.
-    if (staggerRows.value) {
-      window.setTimeout(() => { staggerRows.value = false }, 600)
+    if (seq === loadSeq) {
+      loading.value = false
+      loadingMore.value = false
+      flashedIds.value = consumeFlashedRows('invoice')
+      // Po první dávce dat je stagger odbytý — další načtení (filtr, stránkování,
+      // „načíst další") už musí být okamžité.
+      if (staggerRows.value) {
+        window.setTimeout(() => { staggerRows.value = false }, 600)
+      }
     }
   }
 }
@@ -894,7 +916,7 @@ async function load(reset = true) {
 const DEFAULT_YEAR = new Date().getFullYear()
 
 const COLUMNS: ColumnDef[] = [
-  { key: 'number', labelKey: 'invoice.varsymbol', required: true },
+  { key: 'number', labelKey: 'invoice.varsymbol_label', required: true },
   { key: 'client', labelKey: 'invoice.client_project' },
   { key: 'type', labelKey: 'invoice.type' },
   { key: 'issued', labelKey: 'invoice.tax_date' },
@@ -902,14 +924,37 @@ const COLUMNS: ColumnDef[] = [
   { key: 'amount', labelKey: 'invoice.amount_to_pay', required: true },
   { key: 'status', labelKey: 'invoice.status_label' },
   // Doplňkové sloupce — defaultně skryté, uživatel si je zapne přes ColumnPicker.
+  { key: 'payment_vs', labelKey: 'invoice.varsymbol', defaultHidden: true },
+  { key: 'order_number', labelKey: 'invoice.col_order_number', defaultHidden: true },
   { key: 'paid_at', labelKey: 'invoice.col_paid_at', defaultHidden: true },
   { key: 'payment_method', labelKey: 'payment_method.label', defaultHidden: true },
   { key: 'booked_at', labelKey: 'invoice.col_booked_at', defaultHidden: true },
   { key: 'exchange_rate', labelKey: 'invoice.col_exchange_rate', defaultHidden: true },
   { key: 'amount_czk', labelKey: 'invoice.col_amount_czk', defaultHidden: true },
+  { key: 'base', labelKey: 'invoice.col_base', defaultHidden: true },
+  { key: 'vat', labelKey: 'invoice.col_vat', defaultHidden: true },
+  { key: 'total', labelKey: 'invoice.col_total', defaultHidden: true },
+  { key: 'project', labelKey: 'invoice.col_project', defaultHidden: true },
+  { key: 'sent_at', labelKey: 'invoice.col_sent_at', defaultHidden: true },
+  { key: 'paid_total', labelKey: 'invoice.col_paid_total', defaultHidden: true },
+  { key: 'kh', labelKey: 'invoice.col_kh', defaultHidden: true, sortable: false },
   { key: 'locked', labelKey: 'lock.column' },
 ]
 const tbl = useTablePrefs('invoices', COLUMNS)
+watch(() => tbl.isVisible('kh'), () => { if (groups.value.length) load() })
+const groupByMonth = computed(() => tbl.flag('group_by_month', true))
+function toggleGrouping() {
+  tbl.setFlag('group_by_month', !groupByMonth.value)
+  load()
+}
+function onSortToggle(key: string) {
+  tbl.toggleSort(key)
+  load()
+}
+function clearSort() {
+  tbl.clearSort()
+  load()
+}
 
 // Kurz do tabulky — 3 desetinná místa (ČNB konvence), lokalizovaný zápis.
 function formatRate(rate: number): string {
@@ -940,6 +985,7 @@ function onViewClick(f: SavedFilter) {
 }
 
 onMounted(async () => {
+  await ensurePrefsLoaded()
   // Načti seznam klientů + měn pro select (paralelně s prvním load)
   clientsApi.list({ archived: false, per_page: 200, role: 'customers' }).then(r => { clients.value = r.data }).catch(() => {})
   codebooksApi.currencies().then(r => {
@@ -1333,6 +1379,10 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         </select>
       <template #actions>
         <SavedFiltersMenu :ctrl="saved" />
+        <button type="button" :class="btnOutline('neutral')" @click="toggleGrouping">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+          {{ groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly') }}
+        </button>
         <ColumnPicker class="hidden md:block" :ctrl="tbl" />
         <DensityToggle class="hidden md:block" :ctrl="tbl" />
       </template>
@@ -1354,7 +1404,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
 
     <div v-else>
       <div class="text-xs text-neutral-500 mb-3 flex items-center justify-between">
-        <span>{{ t('invoice.summary_count', { n: total, m: groups.length }) }}</span>
+        <span>{{ groupByMonth ? t('invoice.summary_count', { n: total, m: groups.length }) : t('invoice.summary_continuous', { n: total }) }}</span>
         <span v-if="total > loadedCount">{{ t('common.loaded_count', { loaded: loadedCount, total }) }}</span>
       </div>
 
@@ -1363,7 +1413,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         <!-- Měsíční rozdělovník ve stylu účetní knihy: název měsíce vlevo, součet
              v mono vpravo, mezi tím vzduch. Sticky, protože při dvaceti řádcích
              na obrazovce je „ve kterém měsíci jsem" ta nejčastější otázka. -->
-        <header class="sticky top-16 z-[5] flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-neutral-50/92 backdrop-blur-md border border-neutral-200 rounded-t-lg px-4 py-2.5 mb-0">
+        <header v-if="groupByMonth" class="sticky top-16 z-[5] flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-neutral-50/92 backdrop-blur-md border border-neutral-200 rounded-t-lg px-4 py-2.5 mb-0">
           <div class="flex items-baseline gap-2.5 shrink-0">
             <h2 class="text-[13px] font-semibold uppercase tracking-[0.16em] text-neutral-800">{{ formatMonth(g.month) }}</h2>
             <span class="text-[11px] text-neutral-500 tabular-nums">{{ g.count }} {{ g.count === 1 ? t('invoice.doc_1') : (g.count < 5 ? t('invoice.doc_2_4') : t('invoice.doc_5plus')) }}</span>
@@ -1385,7 +1435,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         </header>
 
         <!-- Desktop: tabulka -->
-        <div class="hidden md:block bg-surface border border-t-0 border-neutral-200 rounded-b-lg overflow-hidden">
+        <div class="hidden md:block bg-surface border border-neutral-200 overflow-hidden" :class="groupByMonth ? 'border-t-0 rounded-b-lg' : 'rounded-lg'">
           <div class="overflow-x-auto">
           <table class="w-full text-sm table-sticky-first" :class="tbl.densityClass.value">
             <thead class="bg-neutral-50/70 text-neutral-500 text-[11px] uppercase tracking-[0.11em] border-b border-neutral-200">
@@ -1396,28 +1446,23 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                     :checked="isGroupSelected(g)"
                     :indeterminate="isGroupSelectionPartial(g)"
                     @change="toggleGroupSelected(g)"
-                    :aria-label="t('invoice.select_month', { month: formatMonth(g.month) })"
-                    :title="t('invoice.select_month', { month: formatMonth(g.month) })"
+                    :aria-label="groupByMonth ? t('invoice.select_month', { month: formatMonth(g.month) }) : t('common.select_all')"
+                    :title="groupByMonth ? t('invoice.select_month', { month: formatMonth(g.month) }) : t('common.select_all')"
                     class="w-5 h-5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
                   />
                 </th>
-                <th v-if="tbl.isVisible('number')" class="text-left px-4 py-2 font-medium w-32">Var. symbol</th>
-                <th v-if="tbl.isVisible('client')" class="text-left px-4 py-2 font-medium">{{ t('invoice.client_project') }}</th>
-                <th v-if="tbl.isVisible('type')" class="text-center px-4 py-2 font-medium">Typ</th>
-                <th v-if="tbl.isVisible('issued')" class="text-center px-4 py-2 font-medium">DUZP / Vystaveno</th>
-                <th v-if="tbl.isVisible('due')" class="text-center px-4 py-2 font-medium">Splatnost</th>
-                <th v-if="tbl.isVisible('amount')" class="text-right px-4 py-2 font-medium">{{ t('invoice.amount_to_pay') }}</th>
-                <th v-if="tbl.isVisible('status')" class="text-center px-4 py-2 font-medium">Stav</th>
-                <th v-if="tbl.isVisible('paid_at')" class="text-center px-4 py-2 font-medium">{{ t('invoice.col_paid_at') }}</th>
-                <th v-if="tbl.isVisible('payment_method')" class="text-center px-4 py-2 font-medium">{{ t('payment_method.label') }}</th>
-                <th v-if="tbl.isVisible('booked_at')" class="text-center px-4 py-2 font-medium">{{ t('invoice.col_booked_at') }}</th>
-                <th v-if="tbl.isVisible('exchange_rate')" class="text-right px-4 py-2 font-medium">{{ t('invoice.col_exchange_rate') }}</th>
-                <th v-if="tbl.isVisible('amount_czk')" class="text-right px-4 py-2 font-medium">{{ t('invoice.col_amount_czk') }}</th>
+                <SortableTh v-for="c in COLUMNS.filter(c => c.key !== 'locked' && c.sortable !== false && tbl.isVisible(c.key))" :key="c.key"
+                  :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
+                  :align="['amount', 'amount_czk', 'exchange_rate', 'base', 'vat', 'total', 'paid_total'].includes(c.key) ? 'right' : 'left'"
+                  @toggle="onSortToggle" />
+                <th v-if="tbl.isVisible('kh')" class="text-left px-4 py-2 font-medium">{{ t('invoice.col_kh') }}</th>
                 <th v-if="tbl.isVisible('locked')" class="text-center px-2 py-2 font-medium w-8">
                   <span class="sr-only">{{ t('lock.column') }}</span>
                 </th>
                 <th class="px-1 py-2 w-8">
-                  <span class="sr-only">{{ t('common.expand_items') }}</span>
+                  <button v-if="tbl.sort.value" type="button" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800"
+                    :title="t('common.reset_sort')" :aria-label="t('common.reset_sort')" @click.stop="clearSort">×</button>
+                  <span v-else class="sr-only">{{ t('common.expand_items') }}</span>
                 </th>
               </tr>
             </thead>
@@ -1495,6 +1540,14 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                   <span v-if="inv.reminder_count > 0" class="ml-1 text-xs px-1 py-0.5 rounded bg-warning-50 text-warning-600 font-semibold"
                     :title="t('invoice.reminder_at', { count: inv.reminder_count, date: formatDate(inv.last_reminder_at) })">⚠ {{ inv.reminder_count }}</span>
                 </td>
+                <td v-if="tbl.isVisible('payment_vs')" class="px-4 py-2.5 font-mono text-xs text-neutral-600">
+                  <span v-if="inv.payment_varsymbol">{{ inv.payment_varsymbol }}</span>
+                  <span v-else class="text-neutral-300">—</span>
+                </td>
+                <td v-if="tbl.isVisible('order_number')" class="px-4 py-2.5 font-mono text-xs text-neutral-600">
+                  <span v-if="inv.supplier_order_number">{{ inv.supplier_order_number }}</span>
+                  <span v-else class="text-neutral-300">—</span>
+                </td>
                 <td v-if="tbl.isVisible('paid_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
                   <span v-if="inv.paid_at">{{ formatDate(inv.paid_at) }}</span>
                   <span v-else class="text-neutral-300">—</span>
@@ -1516,6 +1569,13 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                   <span v-else-if="inv.exchange_rate">{{ formatMoney(inv.total_with_vat * inv.exchange_rate, 'CZK') }}</span>
                   <span v-else class="text-neutral-300">—</span>
                 </td>
+                <td v-if="tbl.isVisible('base')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_without_vat, inv.currency) }}</td>
+                <td v-if="tbl.isVisible('vat')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_vat, inv.currency) }}</td>
+                <td v-if="tbl.isVisible('total')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_with_vat, inv.currency) }}</td>
+                <td v-if="tbl.isVisible('project')" class="px-4 py-2.5 text-xs text-neutral-600">{{ inv.project_name || '—' }}</td>
+                <td v-if="tbl.isVisible('sent_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ inv.sent_at ? formatDate(inv.sent_at) : '—' }}</td>
+                <td v-if="tbl.isVisible('paid_total')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.paid_total ?? 0, inv.currency) }}</td>
+                <td v-if="tbl.isVisible('kh')" class="px-4 py-2.5 font-mono text-xs">{{ inv.kh_sections?.join(', ') || '—' }}</td>
                 <td v-if="tbl.isVisible('locked')" class="px-2 py-2.5 text-center">
                   <PostingBadge v-if="inv.locked?.journal_entry_id"
                     :booked-at="inv.booked_at" :journal-entry-id="inv.locked.journal_entry_id" />
@@ -1656,7 +1716,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         </div>
       </section>
 
-      <div v-if="page < pages" class="text-center mt-3">
+      <div v-if="page < pages" ref="loadMoreTarget" class="text-center mt-3">
         <button @click="load(false)" :disabled="loadingMore"
           class="cursor-pointer h-10 px-5 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium disabled:opacity-50 rounded-md inline-flex items-center gap-2 shadow-sm">
           {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}

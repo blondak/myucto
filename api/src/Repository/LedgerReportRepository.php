@@ -46,7 +46,8 @@ final class LedgerReportRepository
     public function trialBalanceRows(int $supplierId, string $from, string $to, string $periodStart, bool $analytics = false, array $filters = [], bool $excludeClosing = false, bool $excludeAllOpenings = false): array
     {
         $anchor = $this->openingAnchor($supplierId, $from);
-        [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e', 'l');
+        [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e');
+        [$linesSql, $linesParams] = $this->lineSource($supplierId, $filters['dimension'] ?? null);
         // Inventarizace/rozvaha k rozvahovému dni potřebuje zůstatky PŘED uzavřením knih —
         // close_books zápis (source_type='closing', source_id = period_id < STOCK_SLOT_BASE, UZ)
         // převádí rozvahové účty na 702/710 a jinak by je vynuloval. Otevírací
@@ -80,7 +81,7 @@ final class LedgerReportRepository
                               AND l.side = 'debit'  THEN l.signed_amount ELSE 0 END) AS to_md,
                     SUM(CASE WHEN e.entry_date >= ? AND {$turnoverOpeningSql}
                               AND l.side = 'credit' THEN l.signed_amount ELSE 0 END) AS to_d
-                FROM journal_entry_lines l
+                FROM {$linesSql}
                 JOIN journal_entries e   ON e.id = l.entry_id
                 " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
                 JOIN chart_of_accounts a ON a.id = l.account_id
@@ -101,6 +102,7 @@ final class LedgerReportRepository
             $from, $from, $periodStart, $anchor, $anchor,
             $from, ...$turnoverOpeningParams,
             $from, ...$turnoverOpeningParams,
+            ...$linesParams,
             $supplierId, $to,
             ...$filterParams,
             ...$closingParams,
@@ -140,7 +142,8 @@ final class LedgerReportRepository
      */
     public function monthlyTurnovers(int $supplierId, string $from, string $to, bool $analytics, array $filters = [], bool $excludeClosing = false, bool $excludeAllOpenings = false): array
     {
-        [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e', 'l');
+        [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e');
+        [$linesSql, $linesParams] = $this->lineSource($supplierId, $filters['dimension'] ?? null);
         $closingSql = $excludeClosing ? " AND " . JournalTaxOrigin::includedSql() : '';
         $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
         $openingSql = $excludeAllOpenings
@@ -152,7 +155,7 @@ final class LedgerReportRepository
                     DATE_FORMAT(e.entry_date, '%Y-%m') AS ym,
                     SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END) AS md,
                     SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END) AS d
-               FROM journal_entry_lines l
+               FROM {$linesSql}
                JOIN journal_entries e   ON e.id = l.entry_id
                " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
                JOIN chart_of_accounts a ON a.id = l.account_id
@@ -160,7 +163,7 @@ final class LedgerReportRepository
                 {$openingSql}{$filterSql}{$closingSql}
               GROUP BY acc_id, ym"
         );
-        $stmt->execute([$analytics ? 1 : 0, $supplierId, $from, $to, ...$openingParams, ...$filterParams, ...$closingParams]);
+        $stmt->execute([$analytics ? 1 : 0, ...$linesParams, $supplierId, $from, $to, ...$openingParams, ...$filterParams, ...$closingParams]);
         return array_map(static fn (array $r): array => [
             'account_id' => (int) $r['acc_id'],
             'month'      => (string) $r['ym'],
@@ -374,17 +377,17 @@ final class LedgerReportRepository
     {
         $closingSql = $excludeClosing ? " AND " . JournalTaxOrigin::includedSql() : '';
         $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
-        [$dimSql, $dimParams] = $dimension !== null ? $dimension->sql('l') : ['', []];
+        [$linesSql, $linesParams] = $this->lineSource($supplierId, $dimension);
         $stmt = $this->db->pdo()->prepare(
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END), 0) AS md,
                     COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END), 0) AS d
-               FROM journal_entry_lines l
+               FROM {$linesSql}
                JOIN journal_entries e ON e.id = l.entry_id
               " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?
-                AND NOT (e.entry_date = ? AND e.source_type = 'opening'){$dimSql}{$closingSql}"
+                AND NOT (e.entry_date = ? AND e.source_type = 'opening'){$closingSql}"
         );
-        $stmt->execute([$supplierId, $from, $to, $from, ...$dimParams, ...$closingParams]);
+        $stmt->execute([...$linesParams, $supplierId, $from, $to, $from, ...$closingParams]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return [
             'md' => round((float) ($row['md'] ?? 0), 2),
@@ -433,8 +436,8 @@ final class LedgerReportRepository
     {
         $anchor = $this->openingAnchor($supplierId, $asOf);
         $plCond = '';
-        [$dimSql, $dimParams] = $dimension !== null ? $dimension->sql('l') : ['', []];
-        $params = [$supplierId, ...$dimParams, ClosingSourceId::STOCK_SLOT_BASE, $asOf];
+        [$linesSql, $linesParams] = $this->lineSource($supplierId, $dimension);
+        $params = [...$linesParams, $supplierId, ClosingSourceId::STOCK_SLOT_BASE, $asOf];
         if ($plFrom !== null) {
             $plCond = " AND (a.account_type NOT IN ('revenue','expense') OR e.entry_date >= ?)";
             $params[] = $plFrom;
@@ -463,12 +466,12 @@ final class LedgerReportRepository
                     a.name AS leaf_name,
                     SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END) AS md,
                     SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END) AS d
-               FROM journal_entry_lines l
+               FROM {$linesSql}
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
                JOIN chart_of_accounts a ON a.id = l.account_id
                LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
-              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL{$dimSql}
+              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND a.account_type NOT IN ('offbalance','closing')
                 AND " . JournalTaxOrigin::includedSql() . "
                 AND e.entry_date <= ?{$plCond}
@@ -642,21 +645,17 @@ final class LedgerReportRepository
      * zároveň) — vrátí prázdný výsledek, což je akceptovatelné (dvě různá pole, typicky
      * se plní jen jedno).
      *
-     * `dimension` ({@see DimensionFilter}) na rozdíl od ostatních filtruje ŘÁDKY — sestava
-     * po dimenzi má obsahovat jen řádky dané hodnoty, ne protistranu zápisu.
+     * `dimension` ({@see DimensionFilter}) se tu neřeší: filtruje ŘÁDKY a u řádku s rozpadem
+     * i jeho částku, takže nahrazuje celý zdroj řádků ({@see lineSource()}).
      *
      * @param array{vendor?:string, client?:string, item?:string, dimension?:DimensionFilter} $filters
      * @param string $alias alias `journal_entries` v dotazu (vždy `e`)
-     * @param string $lineAlias alias `journal_entry_lines` v dotazu
      * @return array{0:string, 1:list<mixed>} SQL fragment (s vedoucím ' AND ...') + params
      */
-    private function counterpartyFilter(array $filters, string $alias, string $lineAlias = 'l'): array
+    private function counterpartyFilter(array $filters, string $alias): array
     {
         $sql = '';
         $params = [];
-        if (($filters['dimension'] ?? null) instanceof DimensionFilter) {
-            [$sql, $params] = $filters['dimension']->sql($lineAlias);
-        }
         if (!empty($filters['vendor'])) {
             $needle = '%' . self::escapeLike((string) $filters['vendor']) . '%';
             $sql .= " AND ({$alias}.source_type = 'purchase_invoice' AND EXISTS (
@@ -698,6 +697,17 @@ final class LedgerReportRepository
             $params[] = $needle;
         }
         return [$sql, $params];
+    }
+
+    /**
+     * Zdroj řádků deníku pod aliasem `l`: bez filtru tabulka sama, s filtrem na dimenzi
+     * řádky dané hodnoty včetně poměrného dílu řádků s rozpadem ({@see DimensionFilter::lineSource()}).
+     *
+     * @return array{0:string, 1:list<int|string>}
+     */
+    private function lineSource(int $supplierId, ?DimensionFilter $dimension): array
+    {
+        return $dimension !== null ? $dimension->lineSource($supplierId, 'l') : ['journal_entry_lines l', []];
     }
 
     private static function escapeLike(string $value): string

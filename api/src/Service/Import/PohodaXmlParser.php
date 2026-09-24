@@ -47,6 +47,7 @@ use MyInvoice\Service\Invoice\TimeBilling;
  *                                  vat_rate_level, prices_included_vat], ...],
  *     'items_source'          => 'detail'|'summary_recap',
  *     'vat_recap'             => ['21.00' => ['base' => float, 'vat' => float], ...],
+ *     'advance_deduction'     => ['gross' => float, 'vat' => float]|null, // odpočet zálohy
  *     'file_issues'           => list<string>,
  *   ]
  *
@@ -422,6 +423,7 @@ final class PohodaXmlParser
             $items[] = $this->parseItem($xpath, $itemEl, $currency !== 'CZK', $buckets);
         }
         $recap = self::recapFromBuckets($buckets);
+        $advanceDeduction = $this->advanceDeduction($xpath, $invEl, $currency !== 'CZK');
 
         // Doklad bez rozpisu položek, ale s vyplněnou rekapitulací — viz
         // {@see self::itemsFromSummary()}. `items_source` říká volajícímu, že řádky
@@ -463,6 +465,9 @@ final class PohodaXmlParser
             'items_source'          => $itemsSource,
             // Rekapitulace DPH po sazbách z <invoiceSummary> — pro seed override.
             'vat_recap'             => $recap,
+            // Odpočet zálohy (`<inv:invoiceAdvancePaymentItem>`) — není mezi položkami,
+            // viz {@see self::advanceDeduction()}.
+            'advance_deduction'     => $advanceDeduction,
             // Rozpory MEZI položkami a rekapitulací TÉHOŽ souboru (§ G2). U dopočtených
             // řádků se kontrola vynechává — položky Z rekapitulace jí odpovídají z definice,
             // takže by neověřila nic a jen předstírala kontrolu.
@@ -1119,6 +1124,32 @@ final class PohodaXmlParser
      * @param  array<string,array{base:float,vat:float,rate:?float,stated:?float}> $buckets
      * @return array<string,mixed>
      */
+    /**
+     * Odpočet zálohy konečné faktury. Pohoda (i export z Fakturoidu) ho nese jako
+     * `<inv:invoiceAdvancePaymentItem>` se zápornou částkou; do položek dokladu nepatří —
+     * tržbu i DPH určují řádky, odpočet jen snižuje částku k úhradě (u nezdaněné zálohy,
+     * proformy) nebo i daň (u zálohy zdaněné daňovým dokladem k platbě).
+     *
+     * @return array{gross:float, vat:float}|null kladné absolutní částky, null = bez odpočtu
+     */
+    private function advanceDeduction(\DOMXPath $xpath, \DOMElement $invEl, bool $foreign): ?array
+    {
+        $blockName = $foreign ? 'inv:foreignCurrency' : 'inv:homeCurrency';
+        $gross = 0.0;
+        $vat = 0.0;
+        $found = false;
+        foreach ($xpath->query('inv:invoiceDetail/inv:invoiceAdvancePaymentItem', $invEl) ?: [] as $el) {
+            if (!$el instanceof \DOMElement) continue;
+            $found = true;
+            $gross += (float) ($this->text($xpath, "$blockName/typ:priceSum", $el) ?: '0');
+            $vat += (float) ($this->text($xpath, "$blockName/typ:priceVAT", $el) ?: '0');
+        }
+        if (!$found || abs($gross) < 0.005) {
+            return null;
+        }
+        return ['gross' => round(abs($gross), 2), 'vat' => round(abs($vat), 2)];
+    }
+
     private function parseItem(\DOMXPath $xpath, \DOMElement $itemEl, bool $foreign, array $buckets): array
     {
         $blockName = $foreign ? 'inv:foreignCurrency' : 'inv:homeCurrency';

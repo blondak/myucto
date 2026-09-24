@@ -51,6 +51,12 @@ final class CycleCountService
             $id = (int) $pdo->lastInsertId();
             $membership = $pdo->prepare("INSERT INTO stock_cycle_count_documents (supplier_id, cycle_count_id, stock_document_id) SELECT ?, ?, d.id FROM stock_documents d WHERE d.supplier_id = ? AND d.status IN ('posted','reversed') AND (d.warehouse_id = ? OR (d.doc_type = 'transfer' AND d.warehouse_to_id = ?))");
             $membership->execute([$supplierId, $id, $supplierId, $warehouseId, $warehouseId]);
+            if (!isset($body['item_ids'])) {
+                // Celý sklad = jen karty, které se na něm někdy pohnuly; výslovně vybrané karty zůstávají.
+                $moved = $pdo->prepare('SELECT DISTINCT l.stock_item_id FROM stock_document_lines l JOIN stock_cycle_count_documents ccd ON ccd.supplier_id = l.supplier_id AND ccd.cycle_count_id = ? AND ccd.stock_document_id = l.document_id WHERE l.supplier_id = ?');
+                $moved->execute([$id, $supplierId]);
+                $itemIds = array_values(array_intersect($itemIds, array_map('intval', $moved->fetchAll(PDO::FETCH_COLUMN))));
+            }
             $jobId = $this->jobs->enqueue($supplierId, 'stock_cycle_prepare', [
                 'cycle_count_id' => $id, 'warehouse_id' => $warehouseId, 'location_id' => $locationId,
                 'item_ids' => $itemIds, 'cutoff_document_line_id' => $cutoffLine, 'cutoff_allocation_id' => $cutoffAllocation,

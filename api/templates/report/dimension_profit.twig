@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<style>
+body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131d; }
+h1 { font-size: 15pt; margin-bottom: 2mm; }
+h2 { font-size: 11pt; margin-top: 7mm; }
+.meta { color: #555; margin-bottom: 5mm; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: right; color: #555; border-bottom: 0.5pt solid #999; padding: 1.5mm; }
+th:first-child, th:nth-child(2), th:nth-child(3) { text-align: left; }
+td { border-bottom: 0.2pt solid #ddd; padding: 1.3mm 1.5mm; vertical-align: top; }
+.num { text-align: right; }
+.total td { font-weight: bold; border-top: 0.5pt solid #333; }
+.positive { color: #16703f; }
+.negative { color: #b42318; }
+</style>
+</head>
+<body>
+<h1>Výsledovka po dimenzi: {{ type.name }}</h1>
+<div class="meta">{{ from|cz_date }} – {{ to|cz_date }} · {{ entity.name|default('') }}{% if supplier_ids|length > 1 %} · {{ supplier_ids|length }} firem skupiny{% endif %}</div>
+<table>
+<thead><tr><th>Kód</th><th>{{ type.name }}</th><th>Odpovědná osoba</th><th>Výnosy</th><th>Náklady</th><th>Zisk / ztráta</th></tr></thead>
+<tbody>
+{% for row in rows %}
+<tr>
+<td>{{ row.code }}</td>
+<td style="padding-left:{{ 1.5 + row.depth * 3 }}mm">{{ row.name }}</td>
+<td>{{ row.responsible_user_name|default('') }}</td>
+<td class="num">{{ row.total.revenue|cz_money }}</td>
+<td class="num">{{ row.total.cost|cz_money }}</td>
+<td class="num {{ row.total.result > 0 ? 'positive' : (row.total.result < 0 ? 'negative' : '') }}">{{ row.total.result|cz_money }}</td>
+</tr>
+{% endfor %}
+{% if not restricted %}<tr><td></td><td>Bez hodnoty</td><td></td><td class="num">{{ unassigned.revenue|cz_money }}</td><td class="num">{{ unassigned.cost|cz_money }}</td><td class="num">{{ unassigned.result|cz_money }}</td></tr>{% endif %}
+<tr class="total"><td></td><td>Celkem</td><td></td><td class="num">{{ totals.revenue|cz_money }}</td><td class="num">{{ totals.cost|cz_money }}</td><td class="num {{ totals.result > 0 ? 'positive' : (totals.result < 0 ? 'negative' : '') }}">{{ totals.result|cz_money }}</td></tr>
+</tbody>
+</table>
+{% if matrix is defined and matrix %}
+<h2>Rozpad po účtech</h2>
+<table>
+<thead><tr><th>Účet</th><th>Název</th><th>Hodnota dimenze</th><th>Částka</th></tr></thead>
+<tbody>
+{% for account in matrix.rows %}
+{% for amount in account.cells %}
+{% if amount != 0 %}
+<tr><td>{{ account.code }}</td><td>{{ account.name }}</td><td>{% set column = matrix.columns[loop.index0] %}{{ column.value_id is null ? 'Bez hodnoty' : column.code ~ ' ' ~ column.name }}</td><td class="num">{{ amount|cz_money }}</td></tr>
+{% endif %}
+{% endfor %}
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+</body>
+</html>

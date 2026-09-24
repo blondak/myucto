@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\Premier;
 
 use MyInvoice\Repository\PremierImportRepository;
 use MyInvoice\Repository\TaxReturnRepository;
+use MyInvoice\Service\Migration\Shared\FiledDppoInputs;
 use MyInvoice\Service\Tax\Return\DppoReturnCalculator;
 use MyInvoice\Service\Tax\Return\DppoReturnDataProvider;
 
@@ -18,8 +19,10 @@ use MyInvoice\Service\Tax\Return\DppoReturnDataProvider;
  * ručně (paušál na dopravu, příjmy osvobozené, ztráta minulých let…). Ty se převedou jako
  * ruční položky přiznání s textem, ze kterého řádku PREMIER pocházejí:
  *
- * - zvyšující: ř. 20, 30, 61, 62 a část ř. 40, kterou nedaňové účty osnovy nepokryjí;
- * - snižující: ř. 100-162 kromě ř. 150 (rozdíl odpisů spočte MyÚčto z karet majetku);
+ * - zvyšující: ř. 20, 30, 61, 62 a část ř. 40, kterou nedaňové účty osnovy a můstek ZC
+ *   vyřazeného majetku nepokryjí;
+ * - snižující: ř. 100-162 kromě ř. 150 (rozdíl odpisů spočte MyÚčto z karet majetku),
+ *   z ř. 160 jen část nad rozdíl ZC vyřazeného majetku z karet;
  *   ř. 112 PREMIER používá pro paušální výdaj na dopravu (§ 24 odst. 2 písm. zt), takže se
  *   položka i s odpovídajícím vrácením PHM na ř. 40 označí jako paušál na dopravu;
  * - odečet ztráty (ř. 230) a zaplacené zálohy.
@@ -30,12 +33,19 @@ final class TaxReturnImporter
 {
     public const STEP = 'tax_return';
 
-    private const INCREASES = ['II_20_HODN' => '20', 'II_30_CAST' => '30', 'II_61_UPRA' => '61', 'II_62_OST2' => '62'];
-    private const DECREASES = [
-        'II_100_PRI' => '100', 'II_101_PRI' => '101', 'II_110_PRI' => '110', 'II_111_SNI' => '111', 'II_112_LZE' => '112',
-        'II_120_PRI' => '120', 'II_130_PRI' => '130', 'II_140_PRI' => '140', 'II_160_UHR' => '160', 'II_161_UPR' => '161', 'II_162_OS2' => '162',
+    /** Sloupce `D_PO2` → řádek II. oddílu přiznání. */
+    private const COLUMNS = [
+        'II_20_HODN' => 20, 'II_30_CAST' => 30, 'II_61_UPRA' => 61, 'II_62_OST2' => 62, 'II_40_VYDA' => 40,
+        'II_100_PRI' => 100, 'II_101_PRI' => 101, 'II_110_PRI' => 110, 'II_111_SNI' => 111, 'II_112_LZE' => 112,
+        'II_120_PRI' => 120, 'II_130_PRI' => 130, 'II_140_PRI' => 140, 'II_160_UHR' => 160, 'II_161_UPR' => 161, 'II_162_OS2' => 162,
+        'II_230_ODE' => 230,
     ];
-    private const FLAT_RATE_TRAVEL_LINE = '112';
+    private const TEXTS = [
+        'line' => 'Úprava základu z přiznání v PREMIER (ř. %s)',
+        'line40' => 'Nedaňové výdaje z přiznání v PREMIER (ř. 40)',
+        'line40_travel' => 'Vrácení PHM do základu u paušálu na dopravu (ř. 40 z PREMIER)',
+        'travel' => 'Paušální výdaj na dopravu (§ 24 odst. 2 písm. zt), ř. 112 z PREMIER',
+    ];
 
     public function __construct(
         private readonly TaxReturnRepository $returns,
@@ -58,55 +68,18 @@ final class TaxReturnImporter
             $p->finish(self::STEP);
             return;
         }
-        $travel = (float) ($values['II_112_LZE'] ?? 0) > 0.0;
-        $increase = [];
-        $decrease = [];
-        foreach (self::INCREASES as $column => $line) {
-            $amount = round((float) ($values[$column] ?? 0), 2);
-            if ($amount > 0.0) {
-                $increase[] = ['text' => "Úprava základu z přiznání v PREMIER (ř. {$line})", 'amount' => $amount];
-            }
-        }
         $data = $this->data->gather($ctx->supplierId, $ctx->year, []);
-        $computed = round((float) ($data['non_deductible_costs'] ?? 0) + (float) ($data['disposal_nondeductible_residual'] ?? 0), 2);
-        $line40 = round((float) ($values['II_40_VYDA'] ?? 0) - $computed, 2);
-        if ($line40 > 0.0) {
-            $item = ['text' => $travel ? 'Vrácení PHM do základu u paušálu na dopravu (ř. 40 z PREMIER)' : 'Nedaňové výdaje z přiznání v PREMIER (ř. 40)', 'amount' => $line40];
-            if ($travel) {
-                $item['kind'] = DppoReturnCalculator::KIND_FLAT_RATE_TRAVEL;
-            }
-            $increase[] = $item;
-        } elseif ($line40 < 0.0) {
+        $built = self::inputsFromPremier($values, DppoReturnCalculator::accountingAdjustments($data));
+        $inputs = $built['inputs'];
+        $increase = $built['increase'];
+        $decrease = $built['decrease'];
+        if (isset($built['shortfalls'][40])) {
             $p->warn(self::STEP, 'line40_higher', sprintf('Nedaňové náklady podle osnovy (%s Kč) jsou vyšší než ř. 40 přiznání v PREMIER (%s Kč). Zkontrolujte daňovou uznatelnost účtů.',
-                number_format($computed, 2, ',', ' '), number_format((float) ($values['II_40_VYDA'] ?? 0), 2, ',', ' ')));
+                number_format($built['shortfalls'][40]['computed'], 2, ',', ' '), number_format($built['shortfalls'][40]['filed'], 2, ',', ' ')));
         }
-        foreach (self::DECREASES as $column => $line) {
-            $amount = round((float) ($values[$column] ?? 0), 2);
-            if ($amount <= 0.0) {
-                continue;
-            }
-            $item = ['text' => $line === self::FLAT_RATE_TRAVEL_LINE
-                ? 'Paušální výdaj na dopravu (§ 24 odst. 2 písm. zt), ř. 112 z PREMIER'
-                : "Úprava základu z přiznání v PREMIER (ř. {$line})", 'amount' => $amount];
-            if ($line === self::FLAT_RATE_TRAVEL_LINE) {
-                $item['kind'] = DppoReturnCalculator::KIND_FLAT_RATE_TRAVEL;
-            }
-            $decrease[] = $item;
-        }
-        $inputs = [];
-        if ($increase !== []) {
-            $inputs['manual_increase_items'] = $increase;
-        }
-        if ($decrease !== []) {
-            $inputs['manual_decrease_items'] = $decrease;
-        }
-        $loss = round((float) ($values['II_230_ODE'] ?? 0), 2);
-        if ($loss > 0.0) {
-            $inputs['loss_carryforward'] = $loss;
-        }
-        $advances = round((float) ($values['V_1_NA_ZAL'] ?? 0), 2);
-        if ($advances > 0.0) {
-            $inputs['tax_paid_advances'] = $advances;
+        if (isset($built['shortfalls'][160])) {
+            $p->warn(self::STEP, 'line160_higher', sprintf('Rozdíl zůstatkových cen vyřazeného majetku podle karet (%s Kč) je vyšší než ř. 160 přiznání v PREMIER (%s Kč). Zkontrolujte vyřazení majetku.',
+                number_format($built['shortfalls'][160]['computed'], 2, ',', ' '), number_format($built['shortfalls'][160]['filed'], 2, ',', ' ')));
         }
         foreach (['II_240_ODE' => '240', 'II_242_ODE' => '242', 'II_300_SLE' => '300'] as $column => $line) {
             if ((float) ($values[$column] ?? 0) > 0.0) {
@@ -124,6 +97,24 @@ final class TaxReturnImporter
         $p->info(self::STEP, 'return_created', "Rozpracované přiznání k DPPO {$ctx->year} dostalo ruční úpravy základu z PREMIER: "
             . implode('; ', array_map(static fn (array $i): string => $i['text'] . ' ' . number_format($i['amount'], 0, ',', ' ') . ' Kč', array_merge($increase, $decrease))) . '.');
         $p->finish(self::STEP);
+    }
+
+    /**
+     * Ruční vstupy přiznání z hodnot `D_PO2` podle sdíleného pravidla {@see FiledDppoInputs}.
+     *
+     * @param array<string,mixed> $values
+     * @param array{40?:float,160?:float} $computed část ř. 40 a 160 spočtená z účetnictví
+     * @return array{inputs:array<string,mixed>,increase:list<array<string,mixed>>,decrease:list<array<string,mixed>>,shortfalls:array<int,array{computed:float,filed:float}>}
+     */
+    public static function inputsFromPremier(array $values, array $computed): array
+    {
+        $filed = [];
+        foreach (self::COLUMNS as $column => $line) {
+            if (array_key_exists($column, $values)) {
+                $filed[$line] = (float) $values[$column];
+            }
+        }
+        return FiledDppoInputs::build($filed, $computed, true, self::TEXTS, (float) ($values['V_1_NA_ZAL'] ?? 0));
     }
 
     /**

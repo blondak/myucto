@@ -11,6 +11,7 @@ function setup() {
   const code = ts.transpileModule(source.slice(start, end), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   const context = {
     route: { params: { id: '7' } }, statusFilter: ref('unmatched'), postingFilter: ref(''),
+    txSort: { sort: ref(null), params: ref({}) },
     txPage: ref(3), txTotal: ref(120), txPages: ref(3), loading: ref(false), loadingMore: ref(false),
     loadGeneration: 0, refreshing: ref(false), pendingLoadMore: null,
     statement: ref({ transactions: [{ id: 99 }], matched_count: 0 }),

@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\TaxEvidence;
 
+use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
 use MyInvoice\Service\Crm\CrmAggregationService;
 
 /**
- * Pohledávky a závazky daňové evidence (Epic DE, A3) — tenký orchestrátor nad
- * {@see CrmAggregationService} (R13, reuse aging SQL beze změny).
+ * Pohledávky a závazky daňové evidence (Epic DE, A3).
  *
- * Přidává jen:
+ * Sestava zahrnuje:
  *  - mapper 5→3+ kbelíky: CRM vrací {not_due, overdue_30, overdue_60, overdue_90,
  *    overdue_90_plus}; DE prezentuje {not_due, 1-30, 31-90, 90+}. `not_due` zůstává
  *    vlastní kbelík (je PŘED splatností), overdue_60 + overdue_90 se slévají do 31-90.
@@ -18,7 +18,8 @@ use MyInvoice\Service\Crm\CrmAggregationService;
  *    (currency, cílový kbelík).
  *  - KPI (DSO/DPO/punktualita) přebrané z CRM beze změny.
  *
- * Vše supplier-scoped (predikáty jsou v CrmAggregationService). READ-ONLY.
+ * Faktury pocházejí z CRM aging SQL, ostatní položky z vlastní evidence.
+ * Vše supplier-scoped a READ-ONLY.
  */
 final class ReceivablesPayablesService
 {
@@ -34,7 +35,10 @@ final class ReceivablesPayablesService
     /** Kanonické pořadí cílových kbelíků pro prezentaci. */
     public const BUCKET_ORDER = ['not_due', '1-30', '31-90', '90+'];
 
-    public function __construct(private readonly CrmAggregationService $crm) {}
+    public function __construct(
+        private readonly CrmAggregationService $crm,
+        private readonly OtherItemForecastService $otherItemForecast,
+    ) {}
 
     /**
      * @return array{
@@ -46,8 +50,9 @@ final class ReceivablesPayablesService
      */
     public function build(int $supplierId): array
     {
-        $receivables = $this->mapBuckets($this->crm->agingReceivables($supplierId));
-        $payables    = $this->mapBuckets($this->crm->agingPayables($supplierId));
+        $other = $this->otherItems($supplierId);
+        $receivables = $this->mapBuckets(array_merge($this->crm->agingReceivables($supplierId), $other['receivable']));
+        $payables    = $this->mapBuckets(array_merge($this->crm->agingPayables($supplierId), $other['payable']));
 
         $currencies = array_values(array_unique(array_merge(
             array_column($receivables, 'currency'),
@@ -64,6 +69,32 @@ final class ReceivablesPayablesService
                 'dpo'          => $this->crm->daysPayableOutstanding($supplierId),
                 'punctuality'  => $this->crm->paymentPunctuality($supplierId),
             ],
+        ];
+    }
+
+    /**
+     * @return array{receivable:list<array{bucket:string,currency:string,count:int,total:float}>,payable:list<array{bucket:string,currency:string,count:int,total:float}>}
+     */
+    private function otherItems(int $supplierId): array
+    {
+        $today = (new \DateTimeImmutable())->format('Y-m-d');
+        $groups = ['receivable' => [], 'payable' => []];
+        foreach ($this->otherItemForecast->dueBetween($supplierId, '1000-01-01', '9999-12-31') as $row) {
+            if (!in_array($row['status'], ['confirmed', 'posted'], true)) continue;
+            $days = (new \DateTimeImmutable($row['due_on']))->diff(new \DateTimeImmutable($today))->days;
+            $bucket = $row['due_on'] > $today ? 'not_due'
+                : ($days <= 30 ? 'overdue_30' : ($days <= 60 ? 'overdue_60'
+                    : ($days <= 90 ? 'overdue_90' : 'overdue_90_plus')));
+            $key = $bucket . '|' . $row['currency'];
+            $groups[$row['side']][$key] ??= [
+                'bucket' => $bucket, 'currency' => $row['currency'], 'count' => 0, 'total' => 0.0,
+            ];
+            $groups[$row['side']][$key]['count']++;
+            $groups[$row['side']][$key]['total'] += $row['remaining'];
+        }
+        return [
+            'receivable' => array_values($groups['receivable']),
+            'payable' => array_values($groups['payable']),
         ];
     }
 

@@ -116,6 +116,8 @@ final class JournalAction
         $offset = ($page - 1) * $perPage;
 
         $filters = $this->parseFilters($q, $supplierId);
+        $filters['sort_key'] = is_scalar($q['sort_key'] ?? null) ? (string) $q['sort_key'] : '';
+        $filters['sort_dir'] = is_scalar($q['sort_dir'] ?? null) ? (string) $q['sort_dir'] : '';
         if (!$this->applyDimensionFilter($request, $response, $supplierId, $filters, $err)) return $err;
         $result = $this->journal->paginate($supplierId, $filters, $perPage, $offset);
         $provenance = $this->automationProvenance->forJournalEntries(
@@ -314,11 +316,13 @@ final class JournalAction
         $accMap = $this->accounts->idToAccountMap($supplierId);
         // Dimenze řádků (Firma → Dimenze) — jen id hodnot, názvy má klient v číselníku.
         $lineDims = $this->dimensions->entryLineDimensions($supplierId, $id);
-        $entry['lines'] = array_map(static function (array $line) use ($accMap, $lineDims): array {
+        $lineSplits = $this->dimensions->entryLineSplits($supplierId, $id);
+        $entry['lines'] = array_map(static function (array $line) use ($accMap, $lineDims, $lineSplits): array {
             $acc = $accMap[(int) $line['account_id']] ?? null;
             $line['account_code'] = $acc['code'] ?? null;
             $line['account_name'] = $acc['name'] ?? null;
             $line['dimensions'] = (object) ($lineDims[(int) $line['id']] ?? []);
+            $line['dimension_splits'] = (object) ($lineSplits[(int) $line['id']] ?? []);
             return $line;
         }, $entry['lines']);
         $entry['automation'] = $this->automationProvenance->forJournalEntries($supplierId, [$id])[$id] ?? null;
@@ -374,6 +378,20 @@ final class JournalAction
                     $line['dimensions'] = $this->dimensions->normalize($supplierId, $l['dimensions']);
                 } catch (DimensionException $e) {
                     return Json::error($response, $e->errorCode, "Řádek #{$i}: " . $e->getMessage(), $e->httpStatus);
+                }
+            }
+            // Rozpad řádku mezi víc hodnot typu: typ => [{value_id, share}], součet 100 %.
+            if (!empty($l['dimension_splits']) && is_array($l['dimension_splits'])) {
+                try {
+                    $splits = $this->dimensions->normalizeSplits($supplierId, $l['dimension_splits']);
+                } catch (DimensionException $e) {
+                    return Json::error($response, $e->errorCode, "Řádek #{$i}: " . $e->getMessage(), $e->httpStatus);
+                }
+                if ($splits !== []) {
+                    $line['dimension_splits'] = $splits;
+                    if (isset($line['dimensions'])) {
+                        $line['dimensions'] = array_diff_key($line['dimensions'], $splits);
+                    }
                 }
             }
             $lines[] = $line;
@@ -445,6 +463,9 @@ final class JournalAction
 
         $created = $this->journal->find($entryId, $supplierId);
         $created['links'] = $this->links->documentLinks($supplierId, $entryId);
+        if ($this->posting->dimensionWarnings() !== []) {
+            $created['dimension_warnings'] = $this->posting->dimensionWarnings();
+        }
 
         return Json::ok($response, $created, 201);
     }
@@ -993,6 +1014,7 @@ final class JournalAction
                 'description' => $this->nullableString($body['description'] ?? null),
             ]);
             $entryId = $this->posting->postDocument($supplierId, $sourceType, $docId, $lines, $meta);
+            $dimensionWarnings = $this->posting->dimensionWarnings();
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
         }
@@ -1013,6 +1035,9 @@ final class JournalAction
         $entry = $this->journal->find($entryId, $supplierId);
         if ($entryDate !== null && substr($effectiveEntryDate, 0, 4) !== substr($docDate, 0, 4)) {
             $entry['_warnings'] = ['entry_date_outside_document_year'];
+        }
+        if ($dimensionWarnings !== []) {
+            $entry['dimension_warnings'] = $dimensionWarnings;
         }
         return Json::ok($response, $entry);
     }
@@ -1113,6 +1138,10 @@ final class JournalAction
 
         // Zdroj zápisu si přečti PŘED reversem — kvůli odemknutí dokladu níže (§4.7).
         $original = $this->journal->find($id, $supplierId);
+        if (($original['source_type'] ?? null) === 'other_item') {
+            return Json::error($response, 'other_item_use_detail',
+                'Účetní zápis ostatní položky stornujte v jejím detailu, aby se aktualizoval i stav položky.', 409);
+        }
 
         $body = (array) ($request->getParsedBody() ?? []);
         $entryDate = $this->nullableString($body['entry_date'] ?? null);
@@ -1194,10 +1223,12 @@ final class JournalAction
             $lock->execute([$supplierId]);
             $lockedUntil = $lock->fetchColumn();
             $lockedUntil = ($lockedUntil === false || $lockedUntil === null) ? null : (string) $lockedUntil;
-            if ($block = JournalEntryDeletionRules::blockSingle($entry, $lockedUntil)) {
+            $lockedAck = $this->lockedAcknowledged($request);
+            if ($block = JournalEntryDeletionRules::blockSingle($entry, $lockedUntil, $lockedAck)) {
                 if ($ownTx) $pdo->rollBack();
-                return Json::error($response, $block['code'], $block['message'], 409);
+                return self::blockedResponse($response, $block);
             }
+            $lockedOverride = JournalEntryDeletionRules::isDateLocked($entry, $lockedUntil);
 
             $sourceType = (string) $entry['source_type'];
             $sourceId = $entry['source_id'] === null ? null : (int) $entry['source_id'];
@@ -1351,6 +1382,7 @@ final class JournalAction
                     'asset_id' => $assetId,
                     'fiscal_year' => $fiscalYear,
                     'pause_preserved' => $pausePreserved,
+                    'locked_override' => $lockedOverride ? $lockedUntil : null,
                     'depreciation_entries' => array_map(static fn (array $row): array => [
                         'id' => (int) $row['id'],
                         'kind' => (string) $row['kind'],
@@ -1403,6 +1435,24 @@ final class JournalAction
             'fiscal_year' => $fiscalYear,
             'pause_preserved' => $sourceType === 'depreciation' ? $pausePreserved : null,
         ], static fn ($value): bool => $value !== null));
+    }
+
+    /** Účetní vědomě potvrdil zásah do uzamčeného období ({@see JournalEntryDeletionRules::blockPeriod()}). */
+    private function lockedAcknowledged(Request $request): bool
+    {
+        return ($request->getQueryParams()[JournalEntryDeletionRules::ACK_LOCKED_PARAM] ?? '') === '1';
+    }
+
+    /** @param array{code:string, message:string, can_acknowledge?:bool} $block */
+    private static function blockedResponse(Response $response, array $block): Response
+    {
+        return Json::error(
+            $response,
+            $block['code'],
+            $block['message'],
+            409,
+            !empty($block['can_acknowledge']) ? ['can_acknowledge' => true] : [],
+        );
     }
 
     /**
@@ -1503,11 +1553,14 @@ final class JournalAction
             $lock->execute([$supplierId]);
             $lockedUntil = $lock->fetchColumn();
             $lockedUntil = ($lockedUntil === false || $lockedUntil === null) ? null : (string) $lockedUntil;
+            $lockedAck = $this->lockedAcknowledged($request);
+            $lockedOverride = false;
             foreach ([$original, $reversal] as $row) {
-                if ($block = JournalEntryDeletionRules::blockPeriod($row, $lockedUntil)) {
+                if ($block = JournalEntryDeletionRules::blockPeriod($row, $lockedUntil, $lockedAck)) {
                     if ($ownTx) $pdo->rollBack();
-                    return Json::error($response, $block['code'], $block['message'], 409);
+                    return self::blockedResponse($response, $block);
                 }
+                $lockedOverride = $lockedOverride || JournalEntryDeletionRules::isDateLocked($row, $lockedUntil);
             }
 
             $sourceType = (string) $original['source_type'];
@@ -1577,6 +1630,7 @@ final class JournalAction
                 (int) $original['id'],
                 [
                     'reversal_entry_id' => $reversalId,
+                    'locked_override' => $lockedOverride ? $lockedUntil : null,
                     'period_id' => (int) $original['period_id'],
                     'entry_date' => (string) $original['entry_date'],
                     'document_no' => $original['document_no'],

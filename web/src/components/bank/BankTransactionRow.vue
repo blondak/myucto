@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { formatAccountNumber } from '@/utils/bankAccount'
-import type { BankTransaction } from '@/api/bank'
+import type { BankTransaction, BankTransactionJournalNote } from '@/api/bank'
+import type { JournalNote } from '@/api/accounting'
+import BankTransactionNoteModal from './BankTransactionNoteModal.vue'
 import type { AutomationProvenance } from '@/api/automation'
 import type { BankPostingRule, BankPostingRulePayload, PostResult, RuleCreateResult } from '@/api/bankPosting'
 import PostingRowActions from './PostingRowActions.vue'
@@ -81,6 +83,21 @@ onMounted(() => { dims.load().catch(() => { /* bez číselníku se dimenze jen n
 function toggleDimensions() {
   dimensionsOpen.value = !dimensionsOpen.value
 }
+// Poznámka pohybu = poznámka jeho zápisu v deníku (jediná pravda, žádné vlastní
+// úložiště). Bez zápisu ji není kam uložit, proto akce jen s vysvětlením zakázaná.
+const journalEntryId = computed(() => props.tx.posting?.journal_entry_id ?? null)
+const canWriteNote = computed(() => props.isDoubleEntry && auth.canWrite('accounting'))
+const noteOpen = ref(false)
+const savedNotes = ref<BankTransactionJournalNote[] | null>(null)
+const journalNotes = computed(() => savedNotes.value ?? props.tx.posting?.journal_notes ?? [])
+watch(() => props.tx, () => { savedNotes.value = null })
+function openNote() {
+  if (journalEntryId.value && canWriteNote.value) noteOpen.value = true
+}
+function onNotesChanged(notes: JournalNote[]) {
+  savedNotes.value = notes.map(n => ({ id: n.id, body: n.body, pinned: n.pinned }))
+}
+
 const payrollMatched = computed(() => props.tx.posting?.payroll_matched === true)
 // Vlastní převod fakturu nečeká: jeho protějškem je druhá noha na jiném vlastním účtu.
 const ownTransfer = computed(() => props.tx.match_status === 'unmatched' && props.tx.posting?.transfer != null)
@@ -271,6 +288,13 @@ function matchActions(tx: BankTransaction): RowAction[] {
      * podobách (tabulka a karta) a dvě instance dialogu by si přebíjely stav.
      */
     {
+      key: 'note', label: t('bank.note.action'), icon: 'doc', variant: 'primary',
+      run: openNote,
+      show: canWriteNote.value,
+      disabled: !journalEntryId.value,
+      disabledReason: journalEntryId.value ? undefined : t('bank.note.no_entry'),
+    },
+    {
       key: 'repost', label: t('accounting.repost.action'), icon: 'edit', variant: 'warning',
       run: () => { repostProposal.value = null; repostTx.value = tx },
       show: !tx.posting?.payroll_posting_blocked && props.isDoubleEntry && tx.posting?.status === 'posted' && auth.canWrite('accounting'),
@@ -317,6 +341,13 @@ function candidateReject() {
         </div>
         <div v-if="tx.match_status === 'ignored' && tx.ignore_note" class="text-neutral-600 whitespace-pre-wrap break-words max-w-xs">{{ t('bank.ignore_note_label') }}: {{ tx.ignore_note }}</div>
         <div v-if="tx.description" class="text-neutral-500 truncate max-w-xs">{{ tx.description }}</div>
+        <button v-for="n in journalNotes" :key="n.id" type="button" data-test="tx-journal-note"
+          class="mt-1 flex max-w-xs items-start gap-1 text-left cursor-pointer disabled:cursor-default"
+          :class="n.pinned ? 'text-warning-600' : 'text-neutral-700'"
+          :title="t('bank.note.from_journal')" :disabled="!canWriteNote" @click="openNote">
+          <svg class="mt-0.5 h-3 w-3 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+          <span class="whitespace-pre-wrap break-words line-clamp-3">{{ n.body }}</span>
+        </button>
         <button v-if="dimensionsAvailable && hasDimensions" type="button"
           class="cursor-pointer mt-1 flex text-left" :title="t('bank.dimensions_action')" data-test="tx-dimensions"
           @click="toggleDimensions">
@@ -474,6 +505,13 @@ function candidateReject() {
       </div>
       <div v-if="tx.match_status === 'ignored' && tx.ignore_note" class="text-neutral-600 whitespace-pre-wrap break-words max-w-xs">{{ t('bank.ignore_note_label') }}: {{ tx.ignore_note }}</div>
         <div v-if="tx.description" class="text-neutral-500 truncate">{{ tx.description }}</div>
+      <button v-for="n in journalNotes" :key="n.id" type="button"
+        class="mt-1 flex items-start gap-1 text-left cursor-pointer disabled:cursor-default"
+        :class="n.pinned ? 'text-warning-600' : 'text-neutral-700'"
+        :title="t('bank.note.from_journal')" :disabled="!canWriteNote" @click="openNote">
+        <svg class="mt-0.5 h-3 w-3 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+        <span class="whitespace-pre-wrap break-words line-clamp-3">{{ n.body }}</span>
+      </button>
       <button v-if="dimensionsAvailable && hasDimensions" type="button"
         class="cursor-pointer mt-1 flex text-left" :title="t('bank.dimensions_action')" @click="toggleDimensions">
         <DimensionChips :dimensions="txDimensions" />
@@ -545,6 +583,8 @@ function candidateReject() {
       :proposed-accounts="repostProposal"
       @close="closeRepost" @reposted="closeRepost(); emit('changed')"
       @dimensions-saved="closeRepost(); emit('changed')" />
+    <BankTransactionNoteModal v-if="noteOpen && journalEntryId" :entry-id="journalEntryId"
+      :document-no="tx.posting?.document_no" @changed="onNotesChanged" @close="noteOpen = false" />
     <RuleFormModal v-if="ruleTemplateOpen" :prefill="rulePrefill" :base-amount="Math.abs(tx.amount)"
       :source-transaction-id="tx.id"
       @saved="onRuleSaved" @close="ruleTemplateOpen = false" />

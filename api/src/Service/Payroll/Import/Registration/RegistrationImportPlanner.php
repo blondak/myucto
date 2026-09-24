@@ -30,6 +30,8 @@ final class RegistrationImportPlanner
 {
     private const OPEN_STATUSES = ['planned', 'preregistered', 'active', 'suspended'];
     private const NOT_STARTED_STATUSES = ['planned', 'preregistered'];
+    private const EXPORT_LABEL = 'Export zaměstnanců ČSSZ';
+    private const DERIVED_LABEL = 'Vztah doložený měsíčními hlášeními JMHZ';
 
     public function __construct(
         private readonly RegistrationImportLookup $lookup,
@@ -58,7 +60,11 @@ final class RegistrationImportPlanner
             'sequence' => $record->sequence,
             'document_type' => $record->documentType,
             'action_code' => $record->actionCode,
-            'action_label' => PayrollRegistrationFieldVocabulary::action($record->documentType, $record->actionCode),
+            'action_label' => match (true) {
+                $record->isCsszExport() => self::EXPORT_LABEL,
+                $record->isJmhzDerived() => self::DERIVED_LABEL,
+                default => PayrollRegistrationFieldVocabulary::action($record->documentType, $record->actionCode),
+            },
             'prepared_on' => $record->preparedOn,
             'effective_on' => $record->decisiveDate(),
             'person' => [
@@ -105,6 +111,7 @@ final class RegistrationImportPlanner
                 'health_insurer' => null,
                 'activate_on' => null,
                 'terminate' => null,
+                'correct_start' => null,
                 'identifiers' => ['person' => null, 'employment' => null],
             ],
         ];
@@ -112,10 +119,15 @@ final class RegistrationImportPlanner
             $plan['warnings'][] = 'Číslo pojištěnce ve větě není platné rodné číslo, osoba se hledá '
                 . 'jako evidenční číslo pojištěnce (EČP).';
         }
+        foreach ($record->notes as $note) {
+            $plan['warnings'][] = $note;
+        }
 
         $supported = match ($record->documentType) {
             'REGZEC25' => in_array($record->actionCode, [1, 2, 3, 4, 8], true),
             'PREZEC26' => in_array($record->actionCode, [9, 10], true),
+            RegistrationRecord::CSSZ_EXPORT => true,
+            RegistrationRecord::JMHZ_DERIVED => $record->actionCode === 1,
             default => false,
         };
         if (!$supported) {
@@ -123,6 +135,12 @@ final class RegistrationImportPlanner
 
             return $this->finish($plan, $plan['action_label'] . ' import neumí zapsat automaticky. '
                 . 'Zpracujte oznámení ručně na kartě pracovního vztahu.');
+        }
+        if ($record->isCsszExport() || $record->isJmhzDerived()) {
+            $foreign = $this->foreignEmployerBlocker($supplierId, $record);
+            if ($foreign !== null) {
+                return $this->finish($plan, $foreign);
+            }
         }
 
         $person = $this->matchPerson($supplierId, $environment, $record, $birthNumber, $ecp);
@@ -155,6 +173,14 @@ final class RegistrationImportPlanner
             return $this->finish($plan, $employment['blocker']);
         }
         $row = $employment['row'];
+        // Odvozená věta nese ID PPV, které evidence nezná. Vztah osoby, který
+        // už má JINÉ ID PPV, je jiný vztah (souběh) — k němu věta nepatří.
+        if ($row !== null && $record->isJmhzDerived() && $record->employmentIdentifier !== null
+            && $person['id_ppv_employment_id'] === null
+            && $this->registrations->activeExternalId($supplierId, (int) $row['id'], $environment, 'id_ppv') !== null
+        ) {
+            $row = null;
+        }
         if ($row !== null) {
             $plan['_employment_id'] = $row['id'];
             $plan['match']['employment_id'] = $row['id'];
@@ -186,7 +212,9 @@ final class RegistrationImportPlanner
         ?string $birthDate,
     ): array {
         $creates = ($record->documentType === 'REGZEC25' && $record->actionCode === 1)
-            || ($record->documentType === 'PREZEC26' && $record->actionCode === 9);
+            || ($record->documentType === 'PREZEC26' && $record->actionCode === 9)
+            || ($record->isJmhzDerived() && $record->actionCode === 1)
+            || $record->isCsszExport();
         if (!$creates) {
             $plan['operation'] = $record->actionCode === 2 ? 'terminate' : 'update';
 
@@ -202,10 +230,19 @@ final class RegistrationImportPlanner
                 . 'Založte ji ručně na přehledu osob.');
         }
         if ($start === null) {
+            if ($record->isCsszExport()) {
+                return $this->finish($plan, self::exportWithoutStartBlocker('Osoba v evidenci není a export'));
+            }
+
             return $this->finish($plan, 'Věta nemá datum nástupu, takže z ní vztah založit nejde. '
                 . 'Založte osobu ručně na přehledu osob.');
         }
         if ($relationType === null) {
+            if ($record->isJmhzDerived() && $record->activityCode === null) {
+                return $this->finish($plan, 'Z hlášení nejde určit druh pracovního vztahu (vztah nemá ELDP ani '
+                    . 'druh činnosti). Založte vztah ručně na kartě osoby a formuláře hlášení k němu přiřaďte.');
+            }
+
             return $this->finish($plan, 'Druh činnosti „' . ($record->activityCode ?? '—')
                 . '“ import neumí přiřadit k druhu pracovního vztahu. Založte osobu ručně.');
         }
@@ -213,6 +250,7 @@ final class RegistrationImportPlanner
             $plan['warnings'][] = 'Částečné přihlášení druh vztahu neuvádí — osoba se založí s pracovním '
                 . 'poměrem. Jde-li o dohodu, změňte druh vztahu na kartě.';
         }
+        $this->derivedStartWarnings($plan, $record);
 
         $insurer = $this->insurer($plan, $record->healthInsurerCode);
         $plan['_steps']['create_person'] = [
@@ -224,7 +262,11 @@ final class RegistrationImportPlanner
             'health_insurer_code' => $insurer,
             'relation_type' => $relationType,
             'planned_start_on' => $start,
+            'workload' => $record->workload,
         ];
+        if ($record->workload !== null) {
+            $this->change($plan, 'weekly_hours', 'Týdenní pracovní doba', null, $record->workload['weekly_hours']);
+        }
         $this->change($plan, 'full_name', 'Jméno a příjmení', null, $record->fullName());
         $this->change($plan, 'birth_date', 'Datum narození', null, $birthDate);
         $this->change($plan, 'relation_type', 'Druh pracovního vztahu', null, $relationType);
@@ -244,18 +286,8 @@ final class RegistrationImportPlanner
             $plan['_steps']['addresses'][$type] = $address;
             $this->change($plan, $type . '_address', $this->addressLabel($type), null, $this->addressText($address));
         }
-        if ($record->documentType === 'REGZEC25') {
-            $terms = $this->importedTerms($plan, $record, $relationType, null);
-            [$defaultActivity, $defaultDetail] = PayrollEmploymentJmhzActivityFamily::firstRelationDefaults($relationType);
-            if (($terms['activity_code'] ?? $defaultActivity) === $defaultActivity
-                && ($terms['jmhz_relationship_detail_code'] ?? $defaultDetail) === $defaultDetail
-            ) {
-                unset($terms['activity_code'], $terms['jmhz_relationship_detail_code']);
-            }
-            foreach ($terms as $field => $value) {
-                $this->change($plan, $field, $this->termLabel($field), null, $value);
-            }
-            $plan['_steps']['terms'] = $terms;
+        if ($record->documentType === 'REGZEC25' || $record->isCsszExport() || $record->isJmhzDerived()) {
+            $this->newEmploymentTerms($plan, $record, $relationType);
             if ($start <= date('Y-m-d')) {
                 $plan['_steps']['activate_on'] = $start;
                 $this->change($plan, 'status', 'Stav vztahu', null, 'active');
@@ -286,7 +318,9 @@ final class RegistrationImportPlanner
         $employeeId = (int) $plan['_employee_id'];
         $decisive = $record->decisiveDate() ?? date('Y-m-d');
         $registers = ($record->documentType === 'REGZEC25' && $record->actionCode === 1)
-            || ($record->documentType === 'PREZEC26' && $record->actionCode === 9);
+            || ($record->documentType === 'PREZEC26' && $record->actionCode === 9)
+            || ($record->isJmhzDerived() && $record->actionCode === 1)
+            || $record->isCsszExport();
 
         if ($row === null) {
             if (!$registers) {
@@ -294,6 +328,13 @@ final class RegistrationImportPlanner
                     . 'údaje osoby. Údaje vztahu (pracoviště, CZ-ISCO) doplňte na kartě vztahu.';
             } else {
                 $start = $plan['employment']['start_on'];
+                if ($record->isCsszExport() && $start === null) {
+                    $plan['operation'] = 'create_employment';
+
+                    return $this->finish($plan, self::exportWithoutStartBlocker(
+                        'Osoba v evidenci je, ale otevřený pracovní vztah, ke kterému věta patří, se nenašel. Export',
+                    ));
+                }
                 if ($start === null || $relationType === null) {
                     $plan['operation'] = 'create_employment';
 
@@ -303,6 +344,7 @@ final class RegistrationImportPlanner
                 $plan['_steps']['create_employment'] = [
                     'relation_type' => $relationType,
                     'planned_start_on' => $start,
+                    'workload' => $record->workload,
                 ];
                 $this->change($plan, 'relation_type', 'Nový pracovní vztah', null, $relationType);
                 $this->change($plan, 'start_on', 'Nástup', null, $start);
@@ -310,10 +352,67 @@ final class RegistrationImportPlanner
                     $plan['warnings'][] = 'Částečné přihlášení druh vztahu neuvádí — vztah se založí jako '
                         . 'pracovní poměr. Jde-li o dohodu, změňte ho na kartě.';
                 }
+                $this->derivedStartWarnings($plan, $record);
             }
         }
 
         $this->planPersonFacts($supplierId, $plan, $record, $employeeId, $decisive);
+
+        if ($record->isCsszExport()) {
+            if ($row !== null) {
+                $this->verifyExportActivity($supplierId, $plan, $record, $row, $relationType);
+                // ID PPV v exportu dokládá, že ČSSZ vztah přihlášený má: jen
+                // naplánovaný vztah se aktivuje stejně jako u přihlášky A1.
+                if (in_array($row['status'], self::NOT_STARTED_STATUSES, true)) {
+                    $start = $row['start_date'] ?? $record->startOn;
+                    if ($row['start_date'] === null) {
+                        $this->derivedStartWarnings($plan, $record);
+                    }
+                    if (is_string($start) && $start <= date('Y-m-d')) {
+                        $plan['_steps']['activate_on'] = $start;
+                        $this->change($plan, 'status', 'Stav vztahu', (string) $row['status'], 'active');
+                    }
+                }
+            } elseif ($plan['_steps']['create_employment'] !== null && $relationType !== null) {
+                $this->newEmploymentTerms($plan, $record, $relationType);
+                $start = $plan['employment']['start_on'];
+                if (is_string($start) && $start <= date('Y-m-d')) {
+                    $plan['_steps']['activate_on'] = $start;
+                    $this->change($plan, 'status', 'Stav vztahu', null, 'active');
+                }
+            }
+        }
+
+        if (($record->isJmhzDerived() || $record->isCsszExport()) && $row !== null) {
+            $current = $row['actual_start_date'] ?? $row['start_date'];
+            // Podání dokládají dřívější nástup, než eviduje vztah (typicky vztah
+            // založený z pozdějších hlášení, ke kterým přibyla starší): nástup se
+            // posune na doložený den. Pozdější nástup import nikdy nezapisuje.
+            if (is_string($current) && $record->startOn !== null && $record->startOn < $current) {
+                if (in_array($row['status'], ['active', 'suspended', 'ended'], true)) {
+                    $plan['_steps']['correct_start'] = ['from' => $current, 'to' => $record->startOn];
+                    $this->change($plan, 'start_on', 'Nástup', $current, $record->startOn);
+                }
+            }
+        }
+        if ($record->isJmhzDerived()) {
+            if ($row !== null) {
+                if (in_array($row['status'], self::NOT_STARTED_STATUSES, true)) {
+                    $start = $row['start_date'] ?? $record->startOn;
+                    if (is_string($start) && $start <= date('Y-m-d')) {
+                        $plan['_steps']['activate_on'] = $start;
+                        $this->change($plan, 'status', 'Stav vztahu', (string) $row['status'], 'active');
+                    }
+                }
+            } elseif ($plan['_steps']['create_employment'] !== null && $relationType !== null) {
+                $this->newEmploymentTerms($plan, $record, $relationType);
+                $start = $plan['employment']['start_on'];
+                if (is_string($start) && $start <= date('Y-m-d')) {
+                    $plan['_steps']['activate_on'] = $start;
+                    $this->change($plan, 'status', 'Stav vztahu', null, 'active');
+                }
+            }
+        }
 
         if ($record->documentType === 'REGZEC25') {
             $this->planInsurer($supplierId, $plan, $record, $employeeId, $decisive);
@@ -321,17 +420,7 @@ final class RegistrationImportPlanner
             if ($row !== null) {
                 $this->planTerms($supplierId, $plan, $record, $row, $decisive);
             } elseif ($plan['_steps']['create_employment'] !== null && $relationType !== null) {
-                $terms = $this->importedTerms($plan, $record, $relationType, null);
-                [$defaultActivity, $defaultDetail] = PayrollEmploymentJmhzActivityFamily::firstRelationDefaults($relationType);
-                if (($terms['activity_code'] ?? $defaultActivity) === $defaultActivity
-                    && ($terms['jmhz_relationship_detail_code'] ?? $defaultDetail) === $defaultDetail
-                ) {
-                    unset($terms['activity_code'], $terms['jmhz_relationship_detail_code']);
-                }
-                foreach ($terms as $field => $value) {
-                    $this->change($plan, $field, $this->termLabel($field), null, $value);
-                }
-                $plan['_steps']['terms'] = $terms;
+                $this->newEmploymentTerms($plan, $record, $relationType);
             }
             if ($record->actionCode === 1) {
                 $start = $row['start_date'] ?? $plan['employment']['start_on'];
@@ -348,6 +437,7 @@ final class RegistrationImportPlanner
 
         $steps = $plan['_steps'];
         $hasWork = $steps['create_employment'] !== null
+            || $steps['correct_start'] !== null
             || $steps['terms'] !== []
             || $steps['identity_facts'] !== []
             || $steps['birth_surname'] !== null
@@ -803,6 +893,21 @@ final class RegistrationImportPlanner
                 $found[$hit['employee_id']] ??= 'id_ppv';
             }
         }
+        // Odvozená věta z formuláře větve B žádný identifikátor nenese; bez
+        // párování podle jména by se osoba při každém importu založila znovu.
+        if ($found === [] && $record->isJmhzDerived() && $record->personIdentifier === null
+            && $record->employmentIdentifier === null && $record->firstName !== null
+            && $record->lastName !== null && $record->birthDate !== null
+        ) {
+            foreach ($this->lookup->employeesByNameAndBirthDate(
+                $supplierId,
+                $record->firstName,
+                $record->lastName,
+                $record->birthDate,
+            ) as $id) {
+                $found[$id] ??= 'name_birth_date';
+            }
+        }
 
         if (count($found) > 1) {
             $candidates = [];
@@ -874,6 +979,14 @@ final class RegistrationImportPlanner
             static fn (array $row): bool => in_array($row['status'], $statuses, true)
                 && ($relationType === null || $row['relation_type'] === $relationType),
         ));
+        // Export vztah jen ověřuje: druh vztahu, který v evidenci nesedí, je
+        // důvod k varování, ne k založení druhého vztahu vedle existujícího.
+        if ($open === [] && $record->isCsszExport()) {
+            $open = array_values(array_filter(
+                $rows,
+                static fn (array $row): bool => in_array($row['status'], $statuses, true),
+            ));
+        }
         if ($open === [] && $record->actionCode === 2 && $record->endOn !== null) {
             $open = array_values(array_filter(
                 $rows,
@@ -888,7 +1001,7 @@ final class RegistrationImportPlanner
             return ['row' => null, 'blocker' => null, 'candidates' => [], 'warnings' => []];
         }
         $warnings = [];
-        if ($start !== null && $open[0]['start_date'] !== $start) {
+        if ($start !== null && $open[0]['start_date'] !== $start && !$record->isCsszExport()) {
             $warnings[] = "Nástup ve vztahu {$open[0]['code']} ({$open[0]['start_date']}) se liší od věty ({$start}). "
                 . 'Datum nástupu import nemění — zkontrolujte ho na kartě vztahu.';
         }
@@ -918,6 +1031,105 @@ final class RegistrationImportPlanner
             'candidates' => $candidates,
             'warnings' => [],
         ];
+    }
+
+    /**
+     * Podmínky nového vztahu z věty. Výchozí druh činnosti druhu vztahu se
+     * nezapisuje — založení vztahu ho nastaví samo.
+     *
+     * @param array<string,mixed> $plan
+     */
+    private function newEmploymentTerms(array &$plan, RegistrationRecord $record, string $relationType): void
+    {
+        $terms = $this->importedTerms($plan, $record, $relationType, null);
+        [$defaultActivity, $defaultDetail] = PayrollEmploymentJmhzActivityFamily::firstRelationDefaults($relationType);
+        if (($terms['activity_code'] ?? $defaultActivity) === $defaultActivity
+            && ($terms['jmhz_relationship_detail_code'] ?? $defaultDetail) === $defaultDetail
+        ) {
+            unset($terms['activity_code'], $terms['jmhz_relationship_detail_code']);
+        }
+        foreach ($terms as $field => $value) {
+            $this->change($plan, $field, $this->termLabel($field), null, $value);
+        }
+        $plan['_steps']['terms'] = $terms;
+    }
+
+    /**
+     * Export zaměstnanců ČSSZ druh činnosti existujícího vztahu jen ověří:
+     * nesoulad je varování, podmínky vztahu import nemění.
+     *
+     * @param array<string,mixed> $plan
+     * @param array<string,mixed> $row
+     */
+    private function verifyExportActivity(
+        int $supplierId,
+        array &$plan,
+        RegistrationRecord $record,
+        array $row,
+        ?string $relationType,
+    ): void {
+        if ($relationType !== null && $row['relation_type'] !== $relationType) {
+            $plan['warnings'][] = "Druh vztahu {$row['code']} v evidenci ({$row['relation_type']}) neodpovídá "
+                . "exportu ČSSZ ({$relationType}"
+                . ($record->smallScale ? ', zaměstnání malého rozsahu' : '')
+                . '). Import ho nemění — zkontrolujte vztah a případně podejte opravu u ČSSZ.';
+        }
+        if ($record->activityCode === null) {
+            return;
+        }
+        $current = self::text($this->employments->currentTerms($supplierId, (int) $row['id'])['activity_code'] ?? null);
+        if ($current !== null && $current !== $record->activityCode) {
+            $plan['warnings'][] = "Druh činnosti ve vztahu {$row['code']} ({$current}) se liší od exportu ČSSZ "
+                . "({$record->activityCode}). Import ho nemění — zkontrolujte, který je správný.";
+        }
+    }
+
+    /** @param array<string,mixed> $plan */
+    private function derivedStartWarnings(array &$plan, RegistrationRecord $record): void
+    {
+        $start = $record->derivedStart;
+        if (!$record->isCsszExport() || $start === null) {
+            return;
+        }
+        if ($start['source'] === CsszExportStartResolver::SOURCE_START_DATE) {
+            $plan['warnings'][] = "Export ČSSZ datum nástupu nenese; převzalo se z měsíčního hlášení za {$start['period']}.";
+
+            return;
+        }
+        $plan['warnings'][] = "Export ČSSZ datum nástupu nenese; jako nástup se použil začátek pojištění "
+            . "{$start['on']} z měsíčního hlášení za {$start['period']}.";
+        if (CsszExportStartResolver::needsCheck($start)) {
+            $plan['warnings'][] = 'Začátek pojištění vyšel na první den nejstaršího hlášeného měsíce, takže '
+                . 'pojištění mohlo trvat už dřív. Skutečný nástup zkontrolujte (pracovní smlouva, přihláška) '
+                . 'a případně ho opravte na kartě vztahu.';
+        }
+    }
+
+    /**
+     * VS zaměstnavatele ve větě exportu musí patřit některé mzdové účtárně
+     * firmy. Když firma žádný VS nevede, kontrola se přeskočí.
+     */
+    private function foreignEmployerBlocker(int $supplierId, RegistrationRecord $record): ?string
+    {
+        if ($record->employerVariableSymbol === null) {
+            return null;
+        }
+        $known = $this->lookup->variableSymbols($supplierId);
+        $symbol = RegistrationImportLookup::variableSymbol($record->employerVariableSymbol);
+        if ($known === [] || $symbol === null || in_array($symbol, $known, true)) {
+            return null;
+        }
+
+        return "Věta nese variabilní symbol zaměstnavatele {$record->employerVariableSymbol}, který nepatří žádné "
+            . 'mzdové účtárně této firmy. Soubor je nejspíš jiného zaměstnavatele — nahrajte soubor stažený '
+            . 'pod správným VS, nebo VS doplňte v nastavení mzdové účtárny.';
+    }
+
+    private static function exportWithoutStartBlocker(string $prefix): string
+    {
+        return $prefix . ' zaměstnanců ČSSZ datum nástupu nenese a v dávce není měsíční hlášení JMHZ '
+            . 's formulářem se stejným ID PPV, ze kterého by šel nástup odvodit. Nahrajte spolu s exportem '
+            . 'i měsíční hlášení (nebo přihlášku REGZEC) a obnovte náhled.';
     }
 
     /** @return array{0:?string,1:?string} [rodné číslo v kanonickém tvaru, EČP] */

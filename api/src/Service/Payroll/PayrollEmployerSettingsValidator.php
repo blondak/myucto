@@ -55,6 +55,12 @@ final class PayrollEmployerSettingsValidator
 
     public function __construct(private readonly ChartOfAccountsRepository $accounts) {}
 
+    /** Kód OSSZ po ořezání mezer; totéž pravidlo platí pro převzetí z Nastavení firmy. */
+    public static function isValidSocialSecurityOfficeCode(string $code): bool
+    {
+        return preg_match(self::SOCIAL_SECURITY_OFFICE_CODE_PATTERN, $code) === 1;
+    }
+
     /**
      * @param array<string,mixed> $input
      * @return array{
@@ -91,10 +97,7 @@ final class PayrollEmployerSettingsValidator
             throw new \InvalidArgumentException('E-mailový kontakt mzdové účtárny není platný.');
         }
         if ($normalized['social_security_office_code'] !== null
-            && preg_match(
-                self::SOCIAL_SECURITY_OFFICE_CODE_PATTERN,
-                $normalized['social_security_office_code'],
-            ) !== 1) {
+            && !self::isValidSocialSecurityOfficeCode($normalized['social_security_office_code'])) {
             throw new \InvalidArgumentException(
                 'Kód správy sociálního zabezpečení musí být trojmístné číslo, '
                 . 'například 110 pro Prahu 10. Kód najdete na potvrzení o '

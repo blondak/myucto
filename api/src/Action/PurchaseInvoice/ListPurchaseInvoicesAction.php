@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Report\InvoiceKhSections;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -26,6 +27,7 @@ final class ListPurchaseInvoicesAction
         private readonly PurchaseInvoiceRepository $repo,
         private readonly Config $config,
         private readonly DocumentLockService $locks,
+        private readonly InvoiceKhSections $khSections,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -62,6 +64,9 @@ final class ListPurchaseInvoicesAction
             'booked'        => $filter['booked'] ?? null,
             'import_batch_id' => $filter['import_batch_id'] ?? null,
             'supplier_id'   => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
+            'group_by_month' => !is_scalar($filter['group_by_month'] ?? null) || (string) $filter['group_by_month'] !== '0',
+            'sort_key' => is_scalar($q['sort_key'] ?? null) ? (string) $q['sort_key'] : '',
+            'sort_dir' => is_scalar($q['sort_dir'] ?? null) ? (string) $q['sort_dir'] : '',
         ];
 
         // CSV split pro multi-select
@@ -96,6 +101,10 @@ final class ListPurchaseInvoicesAction
                 }
             }
             unset($group, $row);
+        }
+
+        if (($filter['include_kh'] ?? null) === '1') {
+            $this->khSections->addToGroups((int) $filters['supplier_id'], $result['data'], 'received');
         }
 
         return Json::ok($response, $result);

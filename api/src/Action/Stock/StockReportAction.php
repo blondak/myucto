@@ -13,6 +13,7 @@ use MyInvoice\Service\Pdf\StockStatusPdfRenderer;
 use MyInvoice\Service\Pdf\StockValuationPdfRenderer;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockReportService;
+use MyInvoice\Service\Stock\StockSalesReportService;
 use MyInvoice\Service\Stock\StockReportXlsxExporter;
 use MyInvoice\Service\Stock\StockValuationJobService;
 use MyInvoice\Service\Eshop\CatalogJobService;
@@ -20,18 +21,19 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * Skladové sestavy (Epic SKLAD §6, §8.1) — Stav zásob · Ocenění k datu.
+ * Skladové sestavy (Epic SKLAD §6, §8.1) — Stav zásob · Ocenění k datu · Prodeje.
  *
  *   GET /api/stock/reports/status              — data (filtry warehouse_id, item_type, below_min, active, q)
  *   GET /api/stock/reports/valuation?date=      — data k historickému datu (B8 limit-guard)
- *   GET /api/stock/reports/{name}/export        — PDF/XLSX (?format=pdf|xlsx), name = status|valuation
+ *   GET /api/stock/reports/sales                — prodeje karet z řádků FV a dobropisů (právo i na vydané faktury)
+ *   GET /api/stock/reports/{name}/export        — PDF/XLSX (?format=pdf|xlsx), name = status|valuation; sales jen XLSX
  */
 final class StockReportAction
 {
     use AccountingActionSupport;
     use GuardsStockEnabled;
 
-    private const REPORTS = ['status', 'valuation'];
+    private const REPORTS = ['status', 'valuation', 'sales'];
 
     public function __construct(
         private readonly Connection $db,
@@ -43,6 +45,7 @@ final class StockReportAction
         private readonly IpMatcher $ipMatcher,
         private readonly StockValuationJobService $valuationJobs,
         private readonly CatalogJobService $jobs,
+        private readonly StockSalesReportService $sales,
     ) {}
 
     public function status(Request $request, Response $response): Response
@@ -72,6 +75,33 @@ final class StockReportAction
         }
         try {
             return Json::ok($response, $this->service->valuation($supplierId, $date, $filters));
+        } catch (\Throwable $e) {
+            return $this->mapStockError($response, $e);
+        }
+    }
+
+    /**
+     * Prodeje skladových karet. Ukazuje odběratele a prodejní ceny, proto kromě
+     * práva ke skladu (route map) vyžaduje i čtení vydaných faktur.
+     */
+    public function sales(Request $request, Response $response): Response
+    {
+        if (!$this->requirePermission($request, $response, 'invoices', \MyInvoice\Security\AccessLevel::READ, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $q = $request->getQueryParams();
+        $page = filter_var($q['page'] ?? 1, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $perPage = filter_var($q['per_page'] ?? 50, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 500]]);
+        if ($page === false || $perPage === false) {
+            return Json::error($response, 'validation_failed', 'Neplatné stránkování.', 422);
+        }
+        try {
+            $filters = StockSalesReportService::normalizeFilters($q);
+            return Json::ok($response, $this->sales->report($supplierId, $filters, $page, $perPage));
         } catch (\Throwable $e) {
             return $this->mapStockError($response, $e);
         }
@@ -169,8 +199,19 @@ final class StockReportAction
             return Json::error($response, 'validation_failed', "format musí být 'pdf' nebo 'xlsx'.", 422);
         }
 
+        if ($name === 'sales') {
+            if (!$this->requirePermission($request, $response, 'invoices', \MyInvoice\Security\AccessLevel::READ, $err)) {
+                return $err;
+            }
+            if ($format !== 'xlsx') {
+                return Json::error($response, 'validation_failed', "Sestavu prodejů lze exportovat jen do XLSX.", 422);
+            }
+        }
+
         try {
-            if ($name === 'status') {
+            if ($name === 'sales') {
+                $out = $this->xlsx->sales($this->sales->export($supplierId, StockSalesReportService::normalizeFilters($request->getQueryParams())));
+            } elseif ($name === 'status') {
                 $data = $this->service->status($supplierId, $this->statusFilters($request));
                 $out = $format === 'pdf'
                     ? ['bytes' => $this->statusPdf->render($data), 'filename' => 'stav-zasob.pdf', 'mime' => 'application/pdf']

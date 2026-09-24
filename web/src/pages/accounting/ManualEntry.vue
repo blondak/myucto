@@ -195,6 +195,9 @@ async function save(andNew = false) {
       ...(payloadLinks.length ? { links: payloadLinks } : {}),
     })
     toast.success(t('accounting.manual.saved', { id: entry.id }))
+    for (const w of entry.dimension_warnings ?? []) {
+      toast.warning(t('dimensions.rules.posting_warning', { message: w.message }))
+    }
     if (andNew) {
       form.document_no = ''
       lines.value = [emptyLine('debit'), emptyLine('credit')]

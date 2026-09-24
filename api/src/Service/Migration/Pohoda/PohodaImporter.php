@@ -40,6 +40,7 @@ final class PohodaImporter
         private readonly AccountingUnitSwitch $unit,
         private readonly PartnerImporter $partners,
         private readonly InvoiceImporter $invoices,
+        private readonly OtherItemImporter $otherItems,
         private readonly CashBankImporter $cashBank,
         private readonly DocumentLinker $linker,
         private readonly PohodaReconciler $reconciler,
@@ -62,6 +63,7 @@ final class PohodaImporter
             InvoiceImporter::STEP_PURCHASE,
             InvoiceImporter::STEP_ISSUED,
             InvoiceImporter::STEP_INTERNAL,
+            OtherItemImporter::STEP,
             CashBankImporter::STEP_CASH,
             CashBankImporter::STEP_BANK,
             DocumentLinker::STEP_LINK,
@@ -272,6 +274,7 @@ final class PohodaImporter
             InvoiceImporter::STEP_PURCHASE => fn () => $this->invoices->importPurchases($ctx),
             InvoiceImporter::STEP_ISSUED => fn () => $this->invoices->importIssued($ctx),
             InvoiceImporter::STEP_INTERNAL => fn () => $this->invoices->importInternalTaxDocuments($ctx),
+            OtherItemImporter::STEP => fn () => $this->otherItems->run($ctx),
             CashBankImporter::STEP_CASH => fn () => $this->cashBank->importCash($ctx),
             CashBankImporter::STEP_BANK => fn () => $this->cashBank->importBank($ctx),
             DocumentLinker::STEP_LINK => function () use ($ctx): void {

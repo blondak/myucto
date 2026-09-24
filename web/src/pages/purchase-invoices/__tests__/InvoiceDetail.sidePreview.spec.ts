@@ -159,7 +159,6 @@ const stubs = {
   WhyChip: true,
   PdfDropzone: true,
   LinkedDocumentsPanel: true,
-  PurchaseDmsDocumentsPanel: true,
   StockReceiptModal: true,
 }
 
