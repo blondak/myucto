@@ -26927,6 +26927,7 @@
         "activated": "Employment activated",
         "identifiers": "ČSSZ identifiers",
         "terminated": "Employment terminated",
+        "start_corrected": "Start moved per filings",
         "health_insurer": "Health insurer",
         "tax_declaration": "Taxpayer declaration",
         "tax_credit_claims": "Tax credits",

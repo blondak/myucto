@@ -333,6 +333,15 @@ JMHZ**, která osobu i s vztahem založí:
 Vyberte větu spolu s formuláři hlášení; při zápisu se formuláře k nově
 založenému vztahu spárují samy.
 
+**Dřívější nástup z pozdější dávky.** Když nahrajete hlášení za starší měsíce,
+než ze kterých vztah vznikl (nebo export zaměstnanců, ke kterému dávka taková
+hlášení nese), náhled u vztahu nabídne změnu **Nástup** na doložený den.
+Import nástup posune všude, kde na něm evidence stojí: ve vztahu, v první
+verzi podmínek, v datu aktivace, u identifikátorů ČSSZ i u nejstarších údajů
+osoby (identita, adresy, pojišťovna), které začínaly původním nástupem.
+Nástup se posouvá jen dřív, nikdy později, a jen když v posunutém období není
+zaúčtovaná ani vyplacená mzda.
+
 **Převzaté mzdy a údaje vztahů.** Z hlášení za měsíce před zahájením vedení
 mezd v MyÚčtu import převezme historii mezd stejnou cestou jako převod
 z PAMICA nebo PREMIER:

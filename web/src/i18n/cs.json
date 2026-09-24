@@ -26927,6 +26927,7 @@
         "activated": "Vztah aktivován",
         "identifiers": "Identifikátory ČSSZ",
         "terminated": "Vztah ukončen",
+        "start_corrected": "Nástup posunut podle podání",
         "health_insurer": "Zdravotní pojišťovna",
         "tax_declaration": "Prohlášení poplatníka",
         "tax_credit_claims": "Slevy na dani",

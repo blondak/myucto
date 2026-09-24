@@ -80,9 +80,7 @@ final class RegistrationImportService
             $registrationPlans[] = $plan;
             // Odvozená věta vztahu, který evidence už vede beze změny, by náhled
             // jen zahltila — zůstane, jen když má co zapsat nebo na co upozornit.
-            if ($item['record']->isJmhzDerived() && $plan['operation'] === 'none' && $plan['blocker'] === null
-                && ($plan['_notice'] ?? false) !== true
-            ) {
+            if ($item['record']->isJmhzDerived() && $plan['operation'] === 'none' && $plan['blocker'] === null) {
                 continue;
             }
             $records[$this->order($item['file_index'], $item['record']->position)] = self::publicPlan($plan);

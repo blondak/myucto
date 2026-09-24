@@ -111,6 +111,7 @@ final class RegistrationImportPlanner
                 'health_insurer' => null,
                 'activate_on' => null,
                 'terminate' => null,
+                'correct_start' => null,
                 'identifiers' => ['person' => null, 'employment' => null],
             ],
         ];
@@ -384,10 +385,14 @@ final class RegistrationImportPlanner
 
         if (($record->isJmhzDerived() || $record->isCsszExport()) && $row !== null) {
             $current = $row['actual_start_date'] ?? $row['start_date'];
+            // Podání dokládají dřívější nástup, než eviduje vztah (typicky vztah
+            // založený z pozdějších hlášení, ke kterým přibyla starší): nástup se
+            // posune na doložený den. Pozdější nástup import nikdy nezapisuje.
             if (is_string($current) && $record->startOn !== null && $record->startOn < $current) {
-                $plan['warnings'][] = "Hlášení dokládají vztah {$row['code']} už od {$record->startOn}, evidence "
-                    . "má nástup {$current}. Import datum nástupu nemění — opravte ho na kartě vztahu.";
-                $plan['_notice'] = true;
+                if (in_array($row['status'], ['active', 'suspended', 'ended'], true)) {
+                    $plan['_steps']['correct_start'] = ['from' => $current, 'to' => $record->startOn];
+                    $this->change($plan, 'start_on', 'Nástup', $current, $record->startOn);
+                }
             }
         }
         if ($record->isJmhzDerived()) {
@@ -432,6 +437,7 @@ final class RegistrationImportPlanner
 
         $steps = $plan['_steps'];
         $hasWork = $steps['create_employment'] !== null
+            || $steps['correct_start'] !== null
             || $steps['terms'] !== []
             || $steps['identity_facts'] !== []
             || $steps['birth_surname'] !== null

@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Payroll\Import\Registration;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzDerivedRegistrations;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportService;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -34,6 +35,7 @@ final class JmhzTakeoverImportTest extends TestCase
     private Connection $db;
     private RegistrationImportService $imports;
     private PayrollSensitiveData $sensitive;
+    private PayrollEmploymentRepository $employments;
     private int $supplierId;
     private int $userId;
 
@@ -46,6 +48,7 @@ final class JmhzTakeoverImportTest extends TestCase
         $this->db = $container->get(Connection::class);
         $this->imports = $container->get(RegistrationImportService::class);
         $this->sensitive = $container->get(PayrollSensitiveData::class);
+        $this->employments = $container->get(PayrollEmploymentRepository::class);
         if (!$this->db->hasTable('payroll_migration_reference_totals')) {
             self::markTestSkipped('Tabulky převzatých mezd v testovací DB nejsou.');
         }
@@ -150,6 +153,68 @@ final class JmhzTakeoverImportTest extends TestCase
         self::assertSame(5, $this->rowCount('payroll_migration_reference_totals'));
         self::assertSame(1, $this->rowCount('payroll_leave_ledger', "entry_type = 'taken'"));
         self::assertSame(1, $second['takeover']['counts']['leave_taken_existing'] ?? null, $this->dump($second['takeover']));
+        self::assertArrayNotHasKey('monthly_wage', $second['takeover']['counts'], 'Mzdu, kterou vztah už nese, převzetí nepřepisuje.');
+    }
+
+    /**
+     * Vztah založený z pozdějšího hlášení: dávka se staršími měsíci nástup posune
+     * dřív — vztah, podmínky, událost aktivace, identifikátory i identita osoby.
+     */
+    public function testOlderReportsMoveTheStartOfAnEmploymentCreatedFromLaterOnes(): void
+    {
+        $files = $this->reports();
+        $march = [$files[2]];
+        $first = $this->imports->preview($this->supplierId, 'test', $march);
+        $this->apply($march, $this->selectable($first));
+        $employment = $this->employmentByPpv(self::PPV_A);
+        self::assertSame('2026-03-01', $this->scalar('SELECT start_date FROM payroll_employments WHERE id = ?', [$employment]));
+
+        $preview = $this->imports->preview($this->supplierId, 'test', $files);
+        $derived = array_values(array_filter(
+            $preview['records'],
+            static fn (array $record): bool => $record['document_type'] === 'JMHZ_DERIVED'
+                && $record['match']['employment_id'] === $employment,
+        ));
+        self::assertCount(1, $derived, $this->dump($preview['records']));
+        self::assertSame('update', $derived[0]['operation']);
+        self::assertContains(
+            ['field' => 'start_on', 'label' => 'Nástup', 'current' => '2026-03-01', 'imported' => '2026-01-01'],
+            $derived[0]['changes'],
+        );
+
+        $result = $this->apply($files, $this->selectable($preview));
+
+        self::assertSame(0, $result['summary']['failed'], $this->dump($result['results']));
+        $params = [$employment];
+        self::assertSame('2026-01-01', $this->scalar('SELECT start_date FROM payroll_employments WHERE id = ?', $params));
+        self::assertSame('2026-01-01', $this->scalar('SELECT actual_start_date FROM payroll_employments WHERE id = ?', $params));
+        self::assertSame('2026-01-01', $this->scalar('SELECT MIN(effective_from) FROM payroll_employment_terms WHERE employment_id = ?', $params));
+        self::assertSame('2026-01-01', $this->scalar(
+            "SELECT effective_on FROM payroll_employment_events WHERE employment_id = ? AND event_type = 'status_changed' AND to_status = 'active'",
+            $params,
+        ));
+        self::assertSame('2026-01-01', $this->scalar('SELECT MIN(valid_from) FROM payroll_employment_external_ids WHERE employment_id = ?', $params));
+        self::assertSame('2026-01-01', $this->scalar(
+            'SELECT MIN(h.effective_from) FROM payroll_person_identity_history h
+               JOIN payroll_employments e ON e.employee_id = h.employee_id WHERE e.id = ?',
+            $params,
+        ));
+        self::assertSame(3, $this->rowCount('payroll_migration_reference_totals', 'employment_id = ' . $employment));
+        self::assertSame(1, $this->rowCount('payroll_employees', 'id IN (SELECT employee_id FROM payroll_employments WHERE id = ' . $employment . ')'));
+
+        // Pozdější nástup se nikdy nezapisuje.
+        try {
+            $this->employments->correctStartEarlier($this->supplierId, $employment, '2026-02-01', null, 'test', $this->userId, null, null);
+            self::fail('Posun nástupu na pozdější den musí selhat.');
+        } catch (\DomainException $e) {
+            self::assertStringContainsString('dřívější', $e->getMessage());
+        }
+
+        // Znovu nic neposouvá.
+        $again = $this->imports->preview($this->supplierId, 'test', $files);
+        foreach ($again['records'] as $record) {
+            self::assertNotContains('start_on', array_column($record['changes'], 'field'), $this->dump($record));
+        }
     }
 
     public function testReportOfAnotherEmployerIsRejected(): void
@@ -185,8 +250,9 @@ final class JmhzTakeoverImportTest extends TestCase
         ]);
         $files = [];
         foreach ([
-            1 => [$a(['standard_fund' => 168_000, 'agreed_fund' => 168_000, 'unworked' => $full]), $b([])],
-            2 => [$a(['standard_fund' => 160_000, 'agreed_fund' => 160_000, 'unworked' => $vacation]), $b(['insurance_to' => '2026-02-15'])],
+            // Mzda je doložená od února (v lednu dovolená), vztah trvá od ledna.
+            1 => [$a(['standard_fund' => 168_000, 'agreed_fund' => 168_000, 'unworked' => $vacation]), $b([])],
+            2 => [$a(['standard_fund' => 160_000, 'agreed_fund' => 160_000, 'unworked' => $full]), $b(['insurance_to' => '2026-02-15'])],
             3 => [$a(['standard_fund' => 176_000, 'agreed_fund' => 176_000, 'unworked' => $full])],
         ] as $month => $people) {
             $files[] = $this->file("jmhz-{$month}.xml", JmhzReportFixtures::report($people, 2026, $month, ['guid_seed' => 40 + $month]));
@@ -219,6 +285,18 @@ final class JmhzTakeoverImportTest extends TestCase
             false,
             true,
         );
+    }
+
+    /**
+     * @param array<string,mixed> $preview
+     * @return list<string>
+     */
+    private function selectable(array $preview): array
+    {
+        return array_values(array_map(
+            static fn (array $record): string => $record['key'],
+            array_filter($preview['records'], static fn (array $record): bool => $record['selectable']),
+        ));
     }
 
     private function employmentByPpv(string $idPpv): int

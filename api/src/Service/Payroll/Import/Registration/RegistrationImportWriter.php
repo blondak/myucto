@@ -130,6 +130,24 @@ final class RegistrationImportWriter
             $employmentId = $employmentId === null ? null : (int) $employmentId;
             $decisive = $record->decisiveDate() ?? date('Y-m-d');
 
+            // Nástup jde první: identifikátory i podmínky se pak zapisují už
+            // k posunutému začátku vztahu.
+            if (is_array($steps['correct_start'] ?? null) && $employmentId !== null) {
+                $this->employments->correctStartEarlier(
+                    $supplierId,
+                    $employmentId,
+                    (string) $steps['correct_start']['to'],
+                    null,
+                    $record->isCsszExport()
+                        ? 'Nástup podle exportu zaměstnanců ČSSZ a měsíčních hlášení v téže dávce.'
+                        : 'Nástup podle importovaných měsíčních hlášení JMHZ.',
+                    $userId,
+                    $ip,
+                    $userAgent,
+                );
+                $operations[] = 'start_corrected';
+            }
+
             if ($steps['terms'] !== [] && $employmentId !== null) {
                 $this->optional('Podmínky vztahu', $notes, $operations, 'terms', fn () => $this->writeTerms(
                     $supplierId,

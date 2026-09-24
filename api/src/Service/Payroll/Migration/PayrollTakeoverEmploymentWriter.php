@@ -82,7 +82,11 @@ final class PayrollTakeoverEmploymentWriter
             }
             $current = $this->employments->currentTerms($supplierId, $employmentId)
                 ?? throw new \DomainException('pracovní vztah nemá verzi sjednaných podmínek.');
-            if ((int) ($current['monthly_gross_minor'] ?? 0) === $minor && (string) $current['effective_from'] >= $wage['from']) {
+            // První mzda se zapisuje opravou verze na místě, takže když ji verze už
+            // nese, není co psát, i když verze začíná dřív než mzda ve zdroji.
+            if ((int) ($current['monthly_gross_minor'] ?? 0) === $minor
+                && ($index === 0 || (string) $current['effective_from'] >= $wage['from'])
+            ) {
                 continue;
             }
             // Verze vztahu se po každém zápisu mění, proto se čte znovu před každou verzí mzdy.

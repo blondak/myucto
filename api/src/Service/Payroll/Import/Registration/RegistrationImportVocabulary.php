@@ -38,6 +38,7 @@ final class RegistrationImportVocabulary
         'activated',
         'identifiers',
         'terminated',
+        'start_corrected',
         'no_show',
         'health_insurer',
         'tax_declaration',
