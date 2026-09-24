@@ -68,6 +68,7 @@ final class BankHttpClientFactory
                             'http_status' => $status,
                             'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
                         ] + $this->transportDiagnostic($transport)
+                            + ($context['provider'] === 'fio' && $status >= 400 ? $this->fioErrorDiagnostic($response) : [])
                             + ($context['provider'] === 'raiffeisenbank' && $status >= 400 ? $this->rbErrorDiagnostic($response) : [])
                             + (str_starts_with($context['provider'], 'kb_plus') && $status >= 400 ? $this->kbPlusErrorDiagnostic($response) : []));
                         return $response;
@@ -76,6 +77,36 @@ final class BankHttpClientFactory
             }, 'bank_diagnostics');
         }
         return new Client(['handler' => $stack]);
+    }
+
+    private function fioErrorDiagnostic(ResponseInterface $response): array
+    {
+        $result = [];
+        $type = strtolower(trim(explode(';', $response->getHeaderLine('Content-Type'), 2)[0]));
+        if (preg_match('~^[a-z0-9.+-]+/[a-z0-9.+-]+$~D', $type) === 1) {
+            $result['response_content_type'] = $type;
+        }
+        $body = $response->getBody();
+        if ($body->getSize() !== null) {
+            $result['response_body_bytes'] = $body->getSize();
+        }
+        if (!$body->isSeekable()) return $result;
+        try {
+            $position = $body->tell();
+            try {
+                $body->rewind();
+                $sample = strtolower(ltrim($body->read(4096)));
+            } finally {
+                $body->seek($position);
+            }
+        } catch (\Throwable) {
+            return $result;
+        }
+        $result['response_body_format'] = str_starts_with($sample, '<!doctype html') || str_starts_with($sample, '<html')
+            ? 'html'
+            : (str_starts_with($sample, '<?xml') ? 'xml'
+                : (str_starts_with($sample, '{') || str_starts_with($sample, '[') ? 'json' : 'other'));
+        return $result;
     }
 
     private function rbErrorDiagnostic(ResponseInterface $response): array

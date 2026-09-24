@@ -345,6 +345,16 @@ nastavené `MYINVOICE_DATA_DIR`, log je v jeho podsložce `log`. Záznam Fio uv�
 fázi `request`, `read` nebo `gpc`, kód chyby a případně důvod odmítnutí struktury
 GPC, HTTP stav a délku odpovědi. Neobsahuje token, číslo účtu ani obsah výpisu.
 V Dockeru se aplikační souborový log nemusí objevit ve výstupu `docker logs`.
+Při výchozím Docker Compose nastavení zkopíruješ log na svůj počítač příkazem
+`docker compose cp app:/data/log/app-YYYY-MM-DD.log .` (datum nahraď dnem pokusu).
+
+Na soukromé testovací instalaci lze dočasně vložit `MYINVOICE_APP_ENV=development`
+do souboru `.env` vedle Docker Compose konfigurace a aplikaci znovu vytvořit
+příkazem `docker compose up -d app`. Po dalším pokusu pak log obsahuje také
+`bank_http_completed` s HTTP stavem, dobou požadavku a síťovou diagnostikou.
+U chybové odpovědi Fio přidává typ obsahu, délku a rozpoznaný formát těla
+(HTML, XML, JSON nebo jiný). Tělo odpovědi ani token se nezapisují. Pro běžný
+provoz vrať prostředí na `production`.
 
 Pro tento typ chyby nezapínej na veřejně dostupném serveru `app.debug`.
 Konektor chybu zachytí a vrátí řízenou odpověď, takže přepnutí debug režimu
