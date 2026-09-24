@@ -51,7 +51,11 @@ export function useSupplierSwitch() {
   const auth = useAuthStore()
   const switching = ref(false)
 
-  async function switchTo(id: number): Promise<void> {
+  /**
+   * `destination` = kam po přepnutí (odkaz na doklad jiné firmy, viz
+   * `router/supplierDeepLink.ts`); bez něj se detail vrací na seznam.
+   */
+  async function switchTo(id: number, destination?: string): Promise<void> {
     if (id === supplierStore.currentSupplierId || switching.value) return
     switching.value = true
     auth.clearPermissions()
@@ -67,9 +71,9 @@ export function useSupplierSwitch() {
       return
     }
 
-    const destination = supplierSwitchDestination(window.location.pathname)
-    if (destination) {
-      window.location.href = destination
+    const target = destination ?? supplierSwitchDestination(window.location.pathname)
+    if (target) {
+      window.location.href = target
     } else {
       window.location.reload()
     }

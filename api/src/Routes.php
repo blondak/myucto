@@ -514,6 +514,8 @@ final class Routes
 
         // Globální vyhledávač pro sidebar (klienti/dodavatelé + vydané/přijaté faktury)
         $app->get('/api/search', \MyInvoice\Action\Search\GlobalSearchAction::class);
+        // Ke které firmě doklad patří — frontend podle toho přepne firmu u odkazu na doklad jiné firmy.
+        $app->get('/api/locate/{type}/{id:[0-9]+}', \MyInvoice\Action\Search\LocateEntityAction::class);
         $app->get('/api/branding-profiles', [BrandingProfilesAction::class, 'publicList']);
 
         // Codebooks

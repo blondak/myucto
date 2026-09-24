@@ -12,6 +12,7 @@ import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import type { AccessLevel, PermissionKey } from '@/security/permissions'
 import { ensureNamespaces, namespacesForRoute } from '@/i18n'
 import { createWorkspaceRoutes } from './workspaceRoutes'
+import { switchSupplierForDeepLink } from './supplierDeepLink'
 import {
   clientDomainCanonicalHandoffPath,
   clientDomainRedirect,
@@ -461,6 +462,14 @@ export async function authorizationGuard(
   // ta závislost vyrobila smyčku home → setup-mfa → home (#5).
   if (auth.isAuthenticated && !mustSetupMfa && !auth.shouldOfferMfa && mfaSetupRoute) {
     return { name: 'home' }
+  }
+
+  // Odkaz na doklad jiné firmy, do které uživatel smí: přepnout firmu dřív, než
+  // kontroly níž (režim účetnictví, sklad…) posoudí cíl podle špatné firmy.
+  // Přepnutí přenačte stránku, v panelu pracovní plochy se nepřepíná.
+  if (requiresAuth && auth.isAuthenticated && options.allowGlobalSideEffects !== false
+    && await switchSupplierForDeepLink(to)) {
+    return false
   }
 
   const superadminOnly = to.matched.some((r) => r.meta.superadminOnly)
