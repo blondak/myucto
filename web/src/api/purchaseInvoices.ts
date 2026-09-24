@@ -520,6 +520,7 @@ export interface PurchaseInvoiceListItem {
   vendor_company_name: string
   vendor_ic: string | null
   month_bucket: string
+  kh_sections?: string[]
   /** §DM — aspoň jedna položka je drobný majetek (EXISTS v list SELECTu) → ikonka v seznamu. */
   has_small_asset?: boolean
   extraction_warning: string | null
@@ -620,6 +621,10 @@ export interface PurchaseInvoicePayload {
 }
 
 export interface PurchaseListFilters {
+  sort_key?: string
+  sort_dir?: 'asc' | 'desc'
+  group_by_month?: boolean
+  include_kh?: boolean
   status?: PurchaseInvoiceStatus | PurchaseInvoiceStatus[]
   document_kind?: PurchaseDocumentKind | PurchaseDocumentKind[]
   vendor_id?: number
@@ -717,6 +722,10 @@ export const purchaseInvoicesApi = {
     if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
+    if (filters.sort_key)    params.sort_key               = filters.sort_key
+    if (filters.sort_dir)    params.sort_dir               = filters.sort_dir
+    if (filters.group_by_month === false) params['filter[group_by_month]'] = 0
+    if (filters.include_kh) params['filter[include_kh]'] = 1
     return api.get<{ data: PurchaseMonthGroup[]; meta: PurchaseListMeta }>(
       '/purchase-invoices',
       { params },

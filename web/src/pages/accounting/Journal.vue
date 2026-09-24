@@ -15,8 +15,10 @@ import { formatDate, formatMoney } from '@/composables/useFormat'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
@@ -129,6 +131,8 @@ async function load() {
       integrity: filters.integrity || undefined,
       dimension_value_id: filters.dimension_value_id ?? undefined,
       dimension_descendants: filters.dimension_descendants,
+      sort_key: tbl.sort.value?.key,
+      sort_dir: tbl.sort.value?.dir,
     })
     entries.value = r.items
     total.value = r.total
@@ -389,6 +393,11 @@ const COLUMNS: ColumnDef[] = [
   { key: 'posted_by', labelKey: 'accounting.journal.col_posted_by', defaultHidden: true },
 ]
 const tbl = useTablePrefs('journal', COLUMNS)
+function onSortToggle(key: string) {
+  tbl.toggleSort(key)
+  page.value = 1
+  load()
+}
 const saved = useSavedFilters('journal', { getQuery: buildQuery, applyQuery: applyQueryToPage })
 const visibleColCount = computed(() => 1 + tbl.columns.filter(c => tbl.isVisible(c.key)).length)
 
@@ -457,6 +466,7 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 onMounted(async () => {
+  await ensurePrefsLoaded()
   try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
   // Osnova jen pro našeptávání filtru — výpadek nesmí zabránit načtení deníku.
   accountingApi.listAccounts().then(v => { accounts.value = v }).catch(() => { accounts.value = [] })
@@ -922,15 +932,9 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
               <th class="px-3 py-2 w-8"></th>
-              <th v-if="tbl.isVisible('date')" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.journal.entry_date') }}</th>
-              <th v-if="tbl.isVisible('document_no')" class="px-3 py-2 text-left font-medium w-32">{{ t('accounting.journal.document_no') }}</th>
-              <th v-if="tbl.isVisible('document_date')" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.journal.col_document_date') }}</th>
-              <th v-if="tbl.isVisible('description')" class="px-3 py-2 text-left font-medium">{{ t('accounting.journal.description') }}</th>
-              <th v-if="tbl.isVisible('source')" class="px-3 py-2 text-left font-medium w-48">{{ t('accounting.journal.source_col') }}</th>
-              <th v-if="tbl.isVisible('amount')" class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.journal.col_amount') }}</th>
-              <th v-if="tbl.isVisible('status')" class="px-3 py-2 text-center font-medium w-24">{{ t('accounting.journal.status_col') }}</th>
-              <th v-if="tbl.isVisible('posted_at')" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.journal.col_posted_at') }}</th>
-              <th v-if="tbl.isVisible('posted_by')" class="px-3 py-2 text-left font-medium w-36">{{ t('accounting.journal.col_posted_by') }}</th>
+              <SortableTh v-for="c in COLUMNS.filter(c => tbl.isVisible(c.key))" :key="c.key"
+                :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
+                :align="c.key === 'amount' ? 'right' : 'left'" @toggle="onSortToggle" />
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">

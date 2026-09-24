@@ -14,6 +14,14 @@ odcházejí z firmy. Oproti vystaveným fakturám:
 
 V hlavním menu **Přijaté faktury**.
 
+Seznam lze kliknutím na záhlaví sloupce řadit podle údajů dokladu, dodavatele,
+data či částky. Řazení se uplatní na celý filtrovaný výsledek před stránkováním.
+Přepínač nad tabulkou volí měsíční skupiny nebo souvislý seznam; nastavení se
+ukládá pro přihlášeného uživatele. V měsíčním pohledu zaškrtávací políčko
+v záhlaví označí pouze zobrazené doklady daného měsíce. Nabídka **Sloupce** umožňuje
+doplnit základ daně, DPH, zůstatek k úhradě a oddíl kontrolního hlášení.
+Oddíl KH se načítá z Knihy DPH po zapnutí sloupce.
+
 V detailu faktury otevřete rozbalovací menu akcí a zvolte **Vytvořit nákladovou
 šablonu**. Otevře se stejný plný editor jako v seznamu šablon. Dodavatel se
 předvyplní a můžete ho změnit. Přepínačem **Vázat pravidlo na dodavatele**

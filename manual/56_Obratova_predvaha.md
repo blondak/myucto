@@ -51,7 +51,8 @@ správné mapování účtů do výkazů.
 ## 56.4 Detail a export
 
 Kód účtu vede do opisu za stejné období `Od / Do`. Přes **Sloupce** a
-**Hustotu** lze upravit tabulku bez změny dat.
+**Hustotu** lze upravit tabulku bez změny dat. Kliknutím na záhlaví sloupce
+lze seřadit zobrazené řádky; další kliknutí obrátí směr.
 
 PDF i XLSX se vytvářejí ze stejných filtrů jako obrazovka a obsahují řádky,
 součty i kontrolní vazby. Před sestavením [Rozvahy](57_Rozvaha.md) nebo

@@ -37,13 +37,18 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ query: m.routeQuery }),
   useRouter: () => ({ replace: m.replace }),
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
+vi.mock('vue-i18n', async importOriginal => ({
+  ...await importOriginal<typeof import('vue-i18n')>(),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
+}))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true, isDemo: false }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
+vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('@/composables/useTablePrefs', () => ({
   useTablePrefs: (_key: string, columns: unknown[]) => ({
     columns, isVisible: () => true, densityClass: ref(''), setFlag: vi.fn(), flag: () => false,
+    sort: ref(null), toggleSort: vi.fn(),
   }),
 }))
 vi.mock('@/composables/useSavedFilters', () => ({

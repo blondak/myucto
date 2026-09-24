@@ -14,6 +14,7 @@ import { formatDate, formatMoney } from '@/composables/useFormat'
 import { journalSourceLink, journalEntryLink } from '@/utils/journalSourceLink'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
@@ -158,6 +159,7 @@ const ledgerGroups = computed<LedgerGroup[]>(() => {
     const delta = g.opening_md - g.opening_d + g.turnover_md - g.turnover_d
     return {
       ...g,
+      accounts: [...g.accounts].sort(compareLedger),
       opening_md: g.opening_md / 100,
       opening_d: g.opening_d / 100,
       turnover_md: g.turnover_md / 100,
@@ -165,7 +167,7 @@ const ledgerGroups = computed<LedgerGroup[]>(() => {
       closing_md: (delta > 0 ? delta : 0) / 100,
       closing_d: (delta > 0 ? 0 : -delta) / 100,
     }
-  }).sort((a, b) => a.code.localeCompare(b.code))
+  }).sort(compareLedger)
 })
 
 /** Syntetika s jedinou vlastní analytikou = obyčejný řádek, mezisoučet by nic nepřidal. */
@@ -209,7 +211,7 @@ const displayRows = computed<LedgerRow[]>(() => {
   const r = report.value
   if (!r) return []
   if (!r.analytics) {
-    return r.accounts.map(a => ({ type: 'account' as const, key: `a${a.account_id}`, account: a, nested: false }))
+    return [...r.accounts].sort(compareLedger).map(a => ({ type: 'account' as const, key: `a${a.account_id}`, account: a, nested: false }))
   }
   const rows: LedgerRow[] = []
   for (const g of ledgerGroups.value) {
@@ -400,6 +402,24 @@ const COLUMNS: ColumnDef[] = [
   { key: 'closing_d', labelKey: 'accounting.general_ledger.col_ks_d' },
 ]
 const tbl = useTablePrefs('general_ledger', COLUMNS)
+function compareLedger(a: LedgerGroup | GeneralLedgerAccount, b: LedgerGroup | GeneralLedgerAccount): number {
+  const code = (row: LedgerGroup | GeneralLedgerAccount) => 'code' in row ? row.code : row.account_code
+  const value = (row: LedgerGroup | GeneralLedgerAccount, key: string): string | number => {
+    if (key === 'account') return code(row)
+    if (key === 'account_type') return 'accounts' in row ? (row.accounts[0]?.account_type ?? '') : row.account_type
+    if (key === 'synthetic') return 'accounts' in row ? row.code : (row.parent_code ?? row.account_code.slice(0, 3))
+    if (key in row) return row[key as keyof typeof row] as string | number
+    return ''
+  }
+  const sort = tbl.sort.value
+  if (!sort) return code(a).localeCompare(code(b), undefined, { numeric: true })
+  const left = value(a, sort.key)
+  const right = value(b, sort.key)
+  const cmp = typeof left === 'number' && typeof right === 'number'
+    ? left - right
+    : String(left).localeCompare(String(right), undefined, { numeric: true })
+  return (sort.dir === 'asc' ? 1 : -1) * (cmp || code(a).localeCompare(code(b), undefined, { numeric: true }))
+}
 const saved = useSavedFilters('general_ledger', { getQuery: buildQuery, applyQuery: applyQueryToPage })
 const visibleColCount = computed(() => 1 + tbl.columns.filter(c => tbl.isVisible(c.key)).length)
 
@@ -620,16 +640,10 @@ onMounted(async () => {
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
               <th class="px-3 py-2 w-8"></th>
-              <th v-if="tbl.isVisible('account')" class="px-3 py-2 text-left font-medium w-24">{{ t('accounting.general_ledger.col_account') }}</th>
-              <th v-if="tbl.isVisible('name')" class="px-3 py-2 text-left font-medium">{{ t('accounting.general_ledger.col_name') }}</th>
-              <th v-if="tbl.isVisible('account_type')" class="px-3 py-2 text-left font-medium w-24">{{ t('accounting.general_ledger.col_type') }}</th>
-              <th v-if="tbl.isVisible('synthetic')" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.general_ledger.col_synthetic') }}</th>
-              <th v-if="tbl.isVisible('opening_md')" class="px-3 py-2 text-right font-medium">{{ t('accounting.general_ledger.col_ps_md') }}</th>
-              <th v-if="tbl.isVisible('opening_d')" class="px-3 py-2 text-right font-medium">{{ t('accounting.general_ledger.col_ps_d') }}</th>
-              <th v-if="tbl.isVisible('turnover_md')" class="px-3 py-2 text-right font-medium">{{ t('accounting.general_ledger.col_turnover_md') }}</th>
-              <th v-if="tbl.isVisible('turnover_d')" class="px-3 py-2 text-right font-medium">{{ t('accounting.general_ledger.col_turnover_d') }}</th>
-              <th v-if="tbl.isVisible('closing_md')" class="px-3 py-2 text-right font-medium">{{ t('accounting.general_ledger.col_ks_md') }}</th>
-              <th v-if="tbl.isVisible('closing_d')" class="px-3 py-2 text-right font-medium">{{ t('accounting.general_ledger.col_ks_d') }}</th>
+              <SortableTh v-for="c in COLUMNS.filter(c => tbl.isVisible(c.key))" :key="c.key"
+                :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
+                :align="['account', 'name', 'account_type', 'synthetic'].includes(c.key) ? 'left' : 'right'"
+                @toggle="tbl.toggleSort" />
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">

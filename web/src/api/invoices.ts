@@ -453,6 +453,7 @@ export interface InvoiceListItem {
    */
   oss_review_oss?: boolean
   month_bucket: string
+  kh_sections?: string[]
   /** Zámek dokladu (F6) — jediný zdroj pravdy je BE, FE nic nedopočítává. Optional = BC. */
   locked?: DocumentLock
 }
@@ -549,6 +550,10 @@ export interface InvoicePayload {
 export type OssReviewScope = 'any' | 'oss' | 'domestic'
 
 export interface ListFilters {
+  sort_key?: string
+  sort_dir?: 'asc' | 'desc'
+  group_by_month?: boolean
+  include_kh?: boolean
   status?: string | string[]
   type?: string | string[]
   client_id?: number
@@ -702,6 +707,10 @@ export const invoicesApi = {
     }
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
+    if (filters.sort_key)    params.sort_key               = filters.sort_key
+    if (filters.sort_dir)    params.sort_dir               = filters.sort_dir
+    if (filters.group_by_month === false) params['filter[group_by_month]'] = 0
+    if (filters.include_kh) params['filter[include_kh]'] = 1
     return api.get<{ data: MonthGroup[]; meta: InvoiceListMeta }>('/invoices', { params }).then(r => r.data)
   },
 

@@ -110,6 +110,50 @@ final class ListGroupedByMonthTest extends TestCase
         self::assertEqualsWithDelta(0.0, $may['draft_with_vat'], 0.01, 'Květen bez draftu.');
     }
 
+    public function testInvoiceSortingAcrossPagesAndMonthModes(): void
+    {
+        $client = $this->client('Sorted Customer', true, false);
+        $juneLow = $this->invoice($client, '2001-06-10', '2001-06-10', 100, 21, 121, 'issued');
+        $juneHigh = $this->invoice($client, '2001-06-20', '2001-06-20', 300, 63, 363, 'issued');
+        $mayMiddle = $this->invoice($client, '2001-05-10', '2001-05-10', 200, 42, 242, 'issued');
+        $base = ['supplier_id' => $this->supplierId, 'client_id' => $client, 'sort_key' => 'amount', 'sort_dir' => 'asc'];
+
+        $monthly = $this->invoices->listGroupedByMonth($base, 1, 2);
+        self::assertSame([121.0, 363.0], array_column($monthly['data'][0]['invoices'], 'total_with_vat'));
+        self::assertSame(['2001-06'], array_column($monthly['data'], 'month'));
+        self::assertSame([$juneLow, $juneHigh], array_column($monthly['data'][0]['invoices'], 'id'));
+        self::assertSame(3, $monthly['meta']['total']);
+        self::assertSame([$mayMiddle], array_column($this->invoices->listGroupedByMonth($base, 2, 2)['data'][0]['invoices'], 'id'));
+
+        $continuous = $this->invoices->listGroupedByMonth($base + ['group_by_month' => false], 1, 2);
+        self::assertSame('', $continuous['data'][0]['month']);
+        self::assertSame([$juneLow, $mayMiddle], array_column($continuous['data'][0]['invoices'], 'id'));
+        self::assertSame([$juneHigh], array_column($this->invoices->listGroupedByMonth($base + ['group_by_month' => false], 2, 2)['data'][0]['invoices'], 'id'));
+
+        $invalid = $this->invoices->listGroupedByMonth(array_merge($base, ['sort_key' => 'id; DROP TABLE invoices']), 1, 2);
+        self::assertSame(3, $invalid['meta']['total']);
+    }
+
+    public function testPurchaseSortingAcrossPagesAndMonthModes(): void
+    {
+        $vendor = $this->client('Sorted Vendor', false, true);
+        $juneLow = $this->purchase($vendor, '2001-06-10', '2001-06-10', 100, 21, 121, 'received');
+        $juneHigh = $this->purchase($vendor, '2001-06-20', '2001-06-20', 300, 63, 363, 'received');
+        $mayMiddle = $this->purchase($vendor, '2001-05-10', '2001-05-10', 200, 42, 242, 'received');
+        $base = ['supplier_id' => $this->supplierId, 'vendor_id' => $vendor, 'sort_key' => 'amount', 'sort_dir' => 'asc'];
+
+        $monthly = $this->purchases->listGroupedByMonth($base, 1, 2);
+        self::assertSame(['2001-06'], array_column($monthly['data'], 'month'));
+        self::assertSame([$juneLow, $juneHigh], array_column($monthly['data'][0]['invoices'], 'id'));
+        self::assertSame(3, $monthly['meta']['total']);
+        self::assertSame([$mayMiddle], array_column($this->purchases->listGroupedByMonth($base, 2, 2)['data'][0]['invoices'], 'id'));
+
+        $continuous = $this->purchases->listGroupedByMonth($base + ['group_by_month' => false], 1, 2);
+        self::assertSame('', $continuous['data'][0]['month']);
+        self::assertSame([$juneLow, $mayMiddle], array_column($continuous['data'][0]['invoices'], 'id'));
+        self::assertSame([$juneHigh], array_column($this->purchases->listGroupedByMonth($base + ['group_by_month' => false], 2, 2)['data'][0]['invoices'], 'id'));
+    }
+
     /**
      * Dobropis obrat vždy SNIŽUJE (§ 4a ZDPH) — i když je zadaný s kladným součtem.
      *

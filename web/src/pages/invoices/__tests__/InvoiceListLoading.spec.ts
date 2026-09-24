@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { nextTick } from 'vue'
+import { nextTick, ref } from 'vue'
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
@@ -17,7 +17,10 @@ vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({}) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn() }) }))
 vi.mock('@/composables/useYearOptions', () => ({ useYearOptions: () => [] }))
 vi.mock('@/composables/useListKeyboard', () => ({ useListKeyboard: () => ({ activeIndex: -1 }) }))
-vi.mock('@/composables/useTablePrefs', () => ({ useTablePrefs: () => ({}) }))
+vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('@/composables/useTablePrefs', () => ({ useTablePrefs: () => ({
+  sort: ref(null), flag: () => true, isVisible: () => false,
+}) }))
 vi.mock('@/composables/useSavedFilters', () => ({
   useSavedFilters: (_page: string, opts: { applyQuery: (query: Record<string, string>) => void }) => {
     mocks.apply = opts.applyQuery

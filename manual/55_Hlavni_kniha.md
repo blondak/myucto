@@ -44,6 +44,10 @@ lze uložit jako vlastní sestavu a případně ji nastavit jako výchozí. Volb
 skrývá či zobrazuje sloupce tabulky a **Hustota** mění řádkování; obě volby
 mění jen zobrazení.
 
+Kliknutím na záhlaví sloupce lze řadit účty podle kódu, názvu i částek.
+Při rozpadu po analytikách zůstávají analytické účty pod svou syntetikou
+a řadí se uvnitř její skupiny.
+
 ## 55.3 Výpočet PS, obratů a KS
 
 Každý řádek účtu obsahuje:

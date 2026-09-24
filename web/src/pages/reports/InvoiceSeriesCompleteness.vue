@@ -35,6 +35,11 @@ function typeLabel(type: string): string {
 
 function groupLabel(g: InvoiceSeriesGroup): string {
   const types = g.types.map(typeLabel).join(' + ')
+  if (g.inferred) {
+    return t('reports.series_completeness.series_inferred', {
+      pattern: Object.values(g.template_by_type)[0] || '', types,
+    })
+  }
   let scope: string
   if (g.client_id !== 0) {
     scope = t('reports.series_completeness.series_client', { name: g.client_name || `#${g.client_id}` })
@@ -102,6 +107,9 @@ onMounted(load)
       <div v-for="(group, gi) in result.series" :key="gi" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <div class="px-4 py-3 border-b border-neutral-200 bg-neutral-50">
           <div class="font-medium text-neutral-800">{{ groupLabel(group) }}</div>
+          <div v-if="group.inferred" class="text-xs text-neutral-500 mt-0.5">
+            {{ t('reports.series_completeness.inferred_note') }}
+          </div>
           <div v-if="group.types.length > 1" class="text-xs text-neutral-400 mt-0.5">
             {{ t('reports.series_completeness.shared_note') }}
           </div>

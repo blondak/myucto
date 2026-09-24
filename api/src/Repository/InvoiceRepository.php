@@ -981,6 +981,26 @@ final class InvoiceRepository
                 . ' AND ' . $flaggedOss . ') AS oss_review_oss,';
         }
 
+        $sortColumns = [
+            'number' => 'i.varsymbol', 'client' => 'c.company_name', 'type' => 'i.invoice_type',
+            'issued' => 'COALESCE(i.tax_date, i.issue_date)', 'due' => 'i.due_date', 'amount' => 'i.amount_to_pay',
+            'status' => 'i.status', 'payment_vs' => "COALESCE(NULLIF(LEFT(REGEXP_REPLACE(i.payment_variable_symbol, '[^0-9]', ''), 10), ''), LEFT(REGEXP_REPLACE(i.varsymbol, '[^0-9]', ''), 10))",
+            'order_number' => 'i.supplier_order_number', 'paid_at' => 'i.paid_at',
+            'payment_method' => 'i.payment_method', 'booked_at' => 'i.booked_at',
+            'exchange_rate' => 'i.exchange_rate',
+            'amount_czk' => "CASE WHEN cur.code = 'CZK' THEN i.total_with_vat ELSE i.total_with_vat * i.exchange_rate END",
+            'base' => 'i.total_without_vat', 'vat' => 'i.total_vat', 'total' => 'i.total_with_vat',
+        ];
+        $sortKey = (string) ($filters['sort_key'] ?? '');
+        $sortDir = strtolower((string) ($filters['sort_dir'] ?? '')) === 'asc' ? 'ASC' : 'DESC';
+        $groupByMonth = ($filters['group_by_month'] ?? true) !== false;
+        $sortSql = isset($sortColumns[$sortKey])
+            ? $sortColumns[$sortKey] . ' ' . $sortDir . ', i.id DESC'
+            : 'i.effective_tax_date DESC, i.id DESC';
+        if ($groupByMonth && isset($sortColumns[$sortKey])) {
+            $sortSql = "DATE_FORMAT(i.effective_tax_date, '%Y-%m') DESC, " . $sortSql;
+        }
+
         $sql = "SELECT $ossReviewSelect
                        i.id, i.varsymbol, i.payment_variable_symbol, i.supplier_order_number,
                        i.invoice_type, i.parent_invoice_id, i.recurring_template_id,
@@ -1002,7 +1022,7 @@ final class InvoiceRepository
              LEFT JOIN projects p ON p.id = i.project_id
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE $whereSql
-                 ORDER BY i.effective_tax_date DESC, i.id DESC";
+                 ORDER BY $sortSql";
 
         if ($perPage > 0) {
             $offset = max(0, ($page - 1) * $perPage);
@@ -1027,7 +1047,7 @@ final class InvoiceRepository
         foreach ($rows as $row) {
             $row = $this->castInvoice($row);
             $row['payment_varsymbol'] = VariableSymbolNormalizer::forInvoicePayment($row);
-            $month = (string) $row['month_bucket'];
+            $month = $groupByMonth ? (string) $row['month_bucket'] : '';
             if (!isset($grouped[$month])) {
                 $grouped[$month] = [
                     'month' => $month,

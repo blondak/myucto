@@ -18,8 +18,12 @@ V hlavním menu **Faktury**.
 
 ![Seznam faktur](img/08_faktury_list.webp)
 
-Seznam je seskupený **po měsících vystavení** (sticky header s názvem měsíce).
-V každé skupině jsou faktury seřazené podle data vystavení (nejnovější nahoře).
+Seznam je standardně seskupený po měsících podle DUZP, u záloh podle data vystavení.
+Přepínačem nad tabulkou lze zvolit souvislý seznam bez měsíčních skupin. Volba se
+ukládá pro přihlášeného uživatele. Kliknutí na záhlaví sloupce seřadí celý
+filtrovaný výsledek před stránkováním; další kliknutí obrátí směr. V měsíčním
+pohledu zůstanou měsíce od nejnovějšího a řadí se doklady uvnitř každého měsíce.
+Zaškrtávací políčko v záhlaví tabulky označí pouze zobrazené doklady tohoto měsíce.
 
 | Sloupec | Význam |
 |---|---|
@@ -35,7 +39,9 @@ V každé skupině jsou faktury seřazené podle data vystavení (nejnovější 
 
 Tlačítkem **Sloupce** lze zapnout doplňkové sloupce, mimo jiné **Var. symbol**
 (platební VS, který se tiskne na PDF a do QR platby a může se lišit od čísla
-faktury) a **Objednávka** (číslo objednávky zadané na faktuře).
+faktury), **Objednávka**, základ daně, DPH, celkovou částku a oddíl kontrolního
+hlášení. Oddíl KH se doplňuje z Knihy DPH až po zapnutí sloupce; doklad bez
+zařazení do KH má prázdnou hodnotu.
 
 ### 14.1.1 Filtry (vlevo)
 

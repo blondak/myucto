@@ -600,6 +600,24 @@ final class JournalEntryRepository
             $selectParams = [];
         }
 
+        $sortColumns = [
+            'date' => 'je.entry_date', 'document_date' => 'je.document_date',
+            'description' => 'je.description', 'source' => 'je.source_type',
+            'status' => "CASE WHEN je.reversed_by IS NOT NULL THEN 'reversed' WHEN je.posted_at IS NULL THEN 'draft' ELSE 'posted' END",
+            'posted_at' => 'je.posted_at',
+            'posted_by' => '(SELECT u.name FROM users u WHERE u.id = je.posted_by)',
+            'document_no' => "COALESCE(je.document_no,
+                (SELECT i.varsymbol FROM invoices i WHERE je.source_type = 'invoice' AND i.id = je.source_id AND i.supplier_id = je.supplier_id),
+                (SELECT pi.vendor_invoice_number FROM purchase_invoices pi WHERE je.source_type = 'purchase_invoice' AND pi.id = je.source_id AND pi.supplier_id = je.supplier_id),
+                (SELECT pi.varsymbol FROM purchase_invoices pi WHERE je.source_type = 'purchase_invoice' AND pi.id = je.source_id AND pi.supplier_id = je.supplier_id))",
+            'amount' => $accountFiltered ? 'ABS(' . self::FILTERED_NET_AMOUNT_SUBQUERY . ')' : self::AMOUNT_SUBQUERY,
+        ];
+        $sortKey = (string) ($filters['sort_key'] ?? '');
+        $sortDir = strtolower((string) ($filters['sort_dir'] ?? '')) === 'asc' ? 'ASC' : 'DESC';
+        $sortExpression = $sortColumns[$sortKey] ?? 'je.entry_date';
+        $sortDir = isset($sortColumns[$sortKey]) ? $sortDir : 'DESC';
+        $sortParams = $sortKey === 'amount' && $accountFiltered ? $selectParams : [];
+
         // Majetek — čitelný label u source_type 'asset'/'asset_disposal' (source_id = ID
         // karty majetku) i 'depreciation' (source_id = ID řádku depreciation_entries, proto
         // se ID karty dohledává přes mezi-JOIN na dep — viz FEATURA C, audit 2026-07 follow-up).
@@ -636,10 +654,10 @@ final class JournalEntryRepository
                        -- i cesta zpět na stornovaný zápis, takže ze storna nevede nikam nic.
                        rev_src.id AS reverses_entry_id,
                        COALESCE(je.source_id, rev_src.source_id) AS source_link_id
-                  FROM (SELECT je.id
+                  FROM (SELECT je.id, {$sortExpression} AS sort_value
                           FROM journal_entries je
                          WHERE {$whereSql}
-                         ORDER BY je.entry_date DESC, je.id DESC
+                         ORDER BY sort_value {$sortDir}, je.id DESC
                          LIMIT {$limit} OFFSET {$offset}) AS pick
                   JOIN journal_entries je ON je.id = pick.id
              LEFT JOIN users u ON u.id = je.posted_by
@@ -665,9 +683,9 @@ final class JournalEntryRepository
                         WHEN je.source_type = 'depreciation' THEN dep.asset_id
                         ELSE NULL
                     END
-                 ORDER BY je.entry_date DESC, je.id DESC";
+                 ORDER BY pick.sort_value {$sortDir}, je.id DESC";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([...$selectParams, ...$params]);
+        $stmt->execute([...$selectParams, ...$sortParams, ...$params]);
         $items = array_map(fn (array $r): array => $this->castListRow($r, $accountFiltered), $stmt->fetchAll(PDO::FETCH_ASSOC));
 
         return ['items' => $items, 'total' => $total];

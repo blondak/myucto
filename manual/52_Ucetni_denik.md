@@ -7,6 +7,11 @@
 — firmy na [daňové evidenci](74_Danova_evidence.md) vedou místo něj jednodušší
 [Peněžní deník](74_Danova_evidence.md) bez podvojných zápisů.
 
+V seznamu lze kliknutím na záhlaví sloupce řadit zápisy podle data, dokladu,
+zdroje, stavu, částky a dalších zobrazených údajů. Řazení platí pro celý
+filtrovaný výsledek před stránkováním. Další kliknutí na stejný sloupec obrátí
+směr řazení.
+
 > [!NOTE]
 > Deník je jen **evidence toho, co se stalo** — nepředkontovává sám o sobě. Kterým
 > účtům (MD/Dal) se má konkrétní doklad zaúčtovat, řeší **předkontace** — viz

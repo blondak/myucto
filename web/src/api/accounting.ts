@@ -506,6 +506,8 @@ export interface JournalHistoryResponse {
 }
 
 export interface JournalFilters {
+  sort_key?: string
+  sort_dir?: 'asc' | 'desc'
   document_no?: string
   period_id?: number
   date_from?: string
@@ -1770,6 +1772,8 @@ export const accountingApi = {
   // Deník
   listJournal: (filters?: JournalFilters) => {
     const params: Record<string, string | number> = {}
+    if (filters?.sort_key) params.sort_key = filters.sort_key
+    if (filters?.sort_dir) params.sort_dir = filters.sort_dir
     if (filters?.document_no) params.document_no = filters.document_no
     if (filters?.period_id) params.period_id = filters.period_id
     if (filters?.date_from) params.date_from = filters.date_from

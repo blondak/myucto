@@ -233,6 +233,9 @@ posledních 12 měsíců:
 Obě tabulky (Pohledávky / Závazky) mají shodnou strukturu — řádek na měnu, sloupce
 podle stáří po splatnosti:
 
+Kliknutím na záhlaví lze měny seřadit podle vybraného pásma nebo celkové částky.
+Opakované kliknutí obrátí směr řazení v obou tabulkách.
+
 | Sloupec | Rozsah |
 |---|---|
 | Do splatnosti | Faktury, kterým ještě neuplynula splatnost |

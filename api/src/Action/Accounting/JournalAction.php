@@ -116,6 +116,8 @@ final class JournalAction
         $offset = ($page - 1) * $perPage;
 
         $filters = $this->parseFilters($q, $supplierId);
+        $filters['sort_key'] = is_scalar($q['sort_key'] ?? null) ? (string) $q['sort_key'] : '';
+        $filters['sort_dir'] = is_scalar($q['sort_dir'] ?? null) ? (string) $q['sort_dir'] : '';
         if (!$this->applyDimensionFilter($request, $response, $supplierId, $filters, $err)) return $err;
         $result = $this->journal->paginate($supplierId, $filters, $perPage, $offset);
         $provenance = $this->automationProvenance->forJournalEntries(

@@ -342,6 +342,7 @@ final class DphBookBuilder
         return [
             'invoice_id'              => (int) $g['invoice_id'],
             'direction'               => $g['source'] === 'sale' ? 'issued' : 'received',
+            'document_kind'           => $g['document_kind'] ?? null,
             'doc_number'              => $g['doc_number'],
             'original_doc_number'     => $g['source'] === 'purchase' ? $g['vendor_invoice_number'] : null,
             'tax_date'                => $g['tax_date'],

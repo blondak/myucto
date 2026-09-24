@@ -433,6 +433,8 @@ export interface InvoiceSeriesBucket {
 
 export interface InvoiceSeriesGroup {
   types: ('invoice' | 'credit_note')[]
+  /** Řada rozpoznaná z čísel importovaných dokladů mimo nastavené šablony. */
+  inferred?: boolean
   client_id: number
   client_name: string | null
   /** Řada kategorie tržby; 0 = řada není vázaná na kategorii. */

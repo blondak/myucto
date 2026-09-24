@@ -966,6 +966,26 @@ final class PurchaseInvoiceRepository
         // mezi count a paginated select, žádný duplicate WHERE / JOIN parsing.
         $selectTotal = $perPage > 0 ? ', COUNT(*) OVER() AS total_rows' : '';
 
+        $sortColumns = [
+            'number' => 'pi.varsymbol', 'vendor' => 'c.company_name',
+            'vendor_number' => 'pi.vendor_invoice_number', 'kind' => 'pi.document_kind',
+            'tax_date' => 'COALESCE(pi.tax_date, pi.issue_date)', 'due_date' => 'pi.due_date',
+            'amount' => 'pi.total_with_vat', 'status' => 'pi.status',
+            'paid_at' => 'pi.paid_at', 'booked_at' => 'pi.booked_at',
+            'exchange_rate' => 'pi.exchange_rate', 'vat_deduction' => 'pi.vat_deduction',
+            'expense_category' => 'ec.label', 'base' => 'pi.total_without_vat',
+            'vat' => 'pi.total_vat', 'balance' => 'pi.amount_to_pay',
+        ];
+        $sortKey = (string) ($filters['sort_key'] ?? '');
+        $sortDir = strtolower((string) ($filters['sort_dir'] ?? '')) === 'asc' ? 'ASC' : 'DESC';
+        $groupByMonth = ($filters['group_by_month'] ?? true) !== false;
+        $sortSql = isset($sortColumns[$sortKey])
+            ? $sortColumns[$sortKey] . ' ' . $sortDir . ', pi.id DESC'
+            : 'pi.issue_date DESC, pi.id DESC';
+        if ($groupByMonth && isset($sortColumns[$sortKey])) {
+            $sortSql = "DATE_FORMAT(pi.issue_date, '%Y-%m') DESC, " . $sortSql;
+        }
+
         $sql = "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind,
                        pi.vendor_id, pi.supplier_id,
                        pi.issue_date, pi.tax_date, pi.due_date, pi.received_at,
@@ -995,7 +1015,7 @@ final class PurchaseInvoiceRepository
              LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id AND ec.supplier_id = pi.supplier_id
              LEFT JOIN projects prj ON prj.id = pi.project_id
                  WHERE $whereSql
-                 ORDER BY pi.issue_date DESC, pi.id DESC";
+                 ORDER BY $sortSql";
 
         $offset = 0;
         if ($perPage > 0) {
@@ -1029,7 +1049,7 @@ final class PurchaseInvoiceRepository
                 && (int) ($row['is_settled_advance'] ?? 0) === 1;
             unset($row['is_settled_advance']);
             $row = $this->castInvoice($row);
-            $month = (string) $row['month_bucket'];
+            $month = $groupByMonth ? (string) $row['month_bucket'] : '';
             if (!isset($grouped[$month])) {
                 $grouped[$month] = [
                     'month' => $month,
