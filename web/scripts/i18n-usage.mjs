@@ -10,12 +10,15 @@
  * Sdílí ho generátor mapy i test, který hlídá, že mapa nezastarala.
  */
 import { readFileSync, statSync } from 'node:fs'
-import { dirname, resolve, join } from 'node:path'
+import { dirname, resolve, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const SRC = fileURLToPath(new URL('../src/', import.meta.url))
 
 const EXTENSIONS = ['', '.ts', '.vue', '.js', '/index.ts', '/index.vue', '/index.js']
+
+/** Soubory s definicí rout; jejich `import()` vede na každou stránku aplikace. */
+const ROUTER_FILES = new Set([join(SRC, 'router/index.ts'), join(SRC, 'router/workspaceRoutes.ts')])
 
 /** `@/foo` i relativní `./foo` na skutečný soubor v src/. */
 function resolveImport(spec, fromFile) {
@@ -148,7 +151,9 @@ export function analyze(entry, messages, cache = new Map(), followDynamic = true
 
     for (const ns of info.namespaces) namespaces.add(ns)
     queue.push(...info.imports.static)
-    if (followDynamic) queue.push(...info.imports.dynamic)
+    // Router nikdy: stránka, která si ho staticky importuje (Login kvůli
+    // redirectům), by přes jeho `import()` každé stránky spolkla celý cs.json.
+    if (followDynamic && !ROUTER_FILES.has(normalize(file))) queue.push(...info.imports.dynamic)
   }
 
   return { namespaces, files }
