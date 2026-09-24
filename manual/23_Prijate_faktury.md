@@ -75,10 +75,15 @@ kořene. Fronta ukazuje všechny podání bez ohledu na to, ve které podsložce
 > Dokumentů, odkud ho z disku odstraní až vysypání koše. U dokladu, který si účetní
 > nahrála sama, se zpráva klientovi nevyžaduje — není komu ji psát.
 
-Po zpracování se neměnný originál z Dokumentů připojí k výsledné faktuře. Faktura
-zůstává pro klienta needitovatelná i ve stavu Koncept; účetní ji může dál opravit
-a dokončit běžným stavovým postupem. Pokud účetní výsledný koncept smaže, původní
-podání se bezpečně vrátí do příchozí fronty k novému zpracování.
+Po zpracování se originál přesune do složky **Příchozí doklady / Archiv / rok / měsíc**,
+takže v příchozích zůstává jen to, co na zpracování čeká. Originál se nemaže, je
+auditní stopou toho, co klient předal. Je-li to tentýž soubor jako PDF výsledné
+faktury, k faktuře se znovu nepřipojuje: doklad ho už má jako své PDF. Jiný soubor
+(fotka převedená na PDF, balíček ISDOCX) se k faktuře připojí v panelu **Dokumenty**.
+Faktura zůstává pro klienta needitovatelná i ve stavu Koncept; účetní ji může dál
+opravit a dokončit běžným stavovým postupem. Pokud účetní výsledný koncept smaže,
+původní podání se bezpečně vrátí do příchozí fronty k novému zpracování a originál
+z archivu zpět mezi čekající.
 
 > ⚠️ **Zaúčtování bez DUZP nejde.** Přechod Přijatá → Zaúčtovaná je zablokovaný, dokud
 > doklad nemá vyplněné DUZP (datum uskutečnění zdanitelného plnění) — bez něj by se

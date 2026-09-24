@@ -18,6 +18,7 @@ use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\SubmissionOriginalFiler;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -40,6 +41,7 @@ final class DeletePurchaseInvoiceAction
         private readonly Connection $db,
         private readonly DocumentJournalSync $journalSync,
         private readonly PurchaseInvoiceSubmissionRepository $submissions,
+        private readonly SubmissionOriginalFiler $filer,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -101,6 +103,8 @@ final class DeletePurchaseInvoiceAction
                 'user_agent' => $request->getHeaderLine('User-Agent'),
             ]);
             $reopenedSubmissionIds = $this->submissions->reopenForDeletedInvoice($supplierId, $id);
+            // Podání je zpátky ve frontě — jeho originál patří z archivu zpět mezi čekající.
+            $this->filer->restore($supplierId, $reopenedSubmissionIds);
             $this->repo->delete($id, $supplierId);
             if ($ownTx) {
                 $pdo->commit();

@@ -3,7 +3,6 @@ import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vue'
 import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
-import PurchaseDmsDocumentsPanel from '@/components/purchase/PurchaseDmsDocumentsPanel.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import PurchaseItemMeta from '@/components/purchase/PurchaseItemMeta.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
@@ -1717,9 +1716,6 @@ const purchaseActions = computed<ActionItem[]>(() => {
         @mark-paid="p => transition('paid', p.date)" />
 
       <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="purchase_invoice" :entity-id="invoice.id" />
-
-      <!-- Přílohy: link/unlink DMS dokumentů (Epic F7) -->
-      <PurchaseDmsDocumentsPanel v-if="invoice" class="mt-4 block" :invoice-id="invoice.id" />
 
       <section v-if="invoice && stockIntegrationVisible"
         class="mt-4 overflow-hidden rounded-lg border border-neutral-200 bg-surface shadow-sm">

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\PurchaseInvoice;
 
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\DocumentLinkRepository;
 use MyInvoice\Repository\DocumentRequestRepository;
 use MyInvoice\Repository\PurchaseInvoiceSubmissionRepository;
@@ -23,6 +24,8 @@ final class PurchaseInvoiceSubmissionCompletionService
         private readonly PurchaseInvoicePdfArchiver $archiver,
         private readonly ImageToPdfConverter $images,
         private readonly InvoiceExtractionRouter $router,
+        private readonly SubmissionOriginalFiler $filer,
+        private readonly Connection $db,
     ) {}
 
     public function complete(
@@ -55,9 +58,22 @@ final class PurchaseInvoiceSubmissionCompletionService
         }
 
         $documentId = (int) $submission['document_id'];
-        $this->links->attach($supplierId, $documentId, 'purchase_invoice', $purchaseInvoiceId);
         $this->requests->markProcessedBySubmission($submissionId, $supplierId, $purchaseInvoiceId);
         $this->archiveOrigin($submission, $supplierId, $purchaseInvoiceId);
+        // Originál shodný s PDF faktury se k faktuře neváže: detail by ho ukázal podruhé
+        // vedle vlastního PDF dokladu. Jiný soubor (fotka převedená na PDF, ISDOCX) ano.
+        if (!$this->isInvoicePdf($supplierId, $purchaseInvoiceId, (string) $submission['document_sha256'])) {
+            $this->links->attach($supplierId, $documentId, 'purchase_invoice', $purchaseInvoiceId);
+        }
+        $this->filer->archive($supplierId, $submission);
+    }
+
+    private function isInvoicePdf(int $supplierId, int $purchaseInvoiceId, string $sha256): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT pdf_hash FROM purchase_invoices WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$purchaseInvoiceId, $supplierId]);
+        $hash = $stmt->fetchColumn();
+        return is_string($hash) && $hash !== '' && hash_equals($hash, $sha256);
     }
 
     /** @param array<string,mixed> $submission */
