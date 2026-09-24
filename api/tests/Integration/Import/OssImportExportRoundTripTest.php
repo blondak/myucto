@@ -574,7 +574,7 @@ final class OssImportExportRoundTripTest extends TestCase
     {
         $numeric = (string) preg_replace('/\D+/', '', $varsymbol);
         $xml = (string) preg_replace(
-            '~(<inv:number>\s*<typ:numberRequested>)[^<]*(</typ:numberRequested>)~',
+            '~(<inv:number[^>]*>\s*<typ:numberRequested[^>]*>)[^<]*(</typ:numberRequested>)~',
             '${1}' . $varsymbol . '${2}',
             $xml,
         );

@@ -9,6 +9,7 @@ use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\ProjectRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Accounting\AccountingPeriodProvisioner;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
@@ -34,6 +35,8 @@ use ZipArchive;
  *       b) napříč balíkem má klient >1 odlišných emailů → per-(client, email) projekt s názvem
  *          "{company_name} – {email}", projekt se přiřadí podle emailu faktury.
  *       c) jinak project_id = NULL.
+ *   - Číslo dokladu: doklad se ukládá pod číslem ze souboru, odlišný VS jde do
+ *     `payment_variable_symbol` ({@see VariableSymbolNormalizer::importedPaymentOverride()}).
  *   - Duplicity: pokud (supplier_id, varsymbol) existuje u dokladu TÉHOŽ druhu → skip
  *     s reportem. Existuje-li u dokladu JINÉHO druhu (opravný daňový doklad nese symbol
  *     opravované faktury), jde o kolizi, ne o duplicitu — symbol se odvodí z čísla dokladu
@@ -1078,6 +1081,25 @@ final class InvoiceImportService
         $vsOriginal = trim((string) ($inv['varsymbol_original'] ?? ''));
         $docNumber = trim((string) ($inv['document_number'] ?? ''));
         $notes = [];
+
+        // Číslo dokladu a platební VS jsou dvě věci (#249). Pohoda nese číslo v `inv:number`
+        // a VS v `inv:symVar`; parser vrací ve `varsymbol` VS a číslo jen jako náhradu. Doklad
+        // se proto uloží pod SVÝM ČÍSLEM a odlišný VS (daňový doklad k proformě nese VS
+        // proformy) jde do `payment_variable_symbol`. ISDOC má číslo ve `varsymbol` už teď,
+        // VS nese v platebních údajích.
+        //
+        // `$legacyVarsymbol` je symbol, pod kterým tentýž doklad uložil import před touto
+        // změnou — podle něj se pozná duplicita při opakovaném nahrání starého souboru.
+        $legacyVarsymbol = null;
+        $sourceVs = (string) ($inv['payment']['variable_symbol'] ?? '');
+        if ($vsSource === 'symVar' && $docNumber !== '' && $docNumber !== $varsymbol
+            && PohodaXmlParser::isAcceptableVarsymbol($docNumber)
+        ) {
+            $legacyVarsymbol = $varsymbol;
+            $sourceVs = $varsymbol;
+            $varsymbol = $docNumber;
+        }
+        $paymentVs = VariableSymbolNormalizer::importedPaymentOverride($varsymbol, $sourceVs);
         if ($vsSubstituted) {
             // Riziko kolize nese KAŽDÁ náhrada, ne jen sanitizovaný tvar: číslo dokladu
             // z jednoho systému se běžně shoduje s variabilním symbolem z jiného.
@@ -1094,7 +1116,7 @@ final class InvoiceImportService
         // Symbol tak, jak ho nesl SOUBOR (po případné náhradě GUIDu, ale PŘED náhradou
         // kvůli kolizi druhů dokladu níž). Pod ním se hledá opravovaný doklad —
         // viz {@see resolveCorrectedInvoiceId()}.
-        $fileVarsymbol = $varsymbol;
+        $fileVarsymbol = $legacyVarsymbol ?? $varsymbol;
 
         // Doklad BEZ JEDINÉ POLOŽKY se nezakládá — a to u KAŽDÉHO druhu vydaného dokladu.
         //
@@ -1136,6 +1158,15 @@ final class InvoiceImportService
         // důkazem duplicity — pod stejným symbolem může být uložený úplně jiný doklad,
         // a ten by se tichým „již existuje" schoval mezi stovky legitimních přeskočení.
         $existing = $this->findInvoiceByVarsymbol($supplierId, $varsymbol);
+        if ($existing === null && $legacyVarsymbol !== null) {
+            // Týž doklad naimportovaný dřív pod VS (viz výš). Jen doklad TÉHOŽ druhu —
+            // pod VS ze souboru může ležet i opravovaná faktura dobropisu.
+            $legacy = $this->findInvoiceByVarsymbol($supplierId, $legacyVarsymbol);
+            if ($legacy !== null && $legacy['invoice_type'] === $invoiceType) {
+                $existing = $legacy;
+                $varsymbol = $legacyVarsymbol;
+            }
+        }
 
         // KOLIZE DRUHŮ DOKLADU (§ D). Opravný daňový doklad běžně nese TÝŽ variabilní symbol
         // jako opravovaná faktura, aby vratka došla na stejný symbol. To NENÍ duplicita —
@@ -1343,16 +1374,17 @@ final class InvoiceImportService
         // Insert invoice
         $pdo = $this->db->pdo();
         $sql = 'INSERT INTO invoices
-            (supplier_id, varsymbol, invoice_type, parent_invoice_id, client_id, project_id,
+            (supplier_id, varsymbol, payment_variable_symbol, invoice_type, parent_invoice_id, client_id, project_id,
              issue_date, tax_date, due_date, currency_id, exchange_rate, exchange_rate_date,
              reverse_charge, language,
              total_without_vat, total_vat, total_with_vat,
              status, sent_at, paid_at, revenue_category_id, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?)';
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?)';
 
         $pdo->prepare($sql)->execute([
             $supplierId,
             $varsymbol,
+            $paymentVs,
             $invoiceType,
             $parentInvoiceId,
             $clientId,
@@ -1521,12 +1553,12 @@ final class InvoiceImportService
 
         $stmt = $this->db->pdo()->prepare(
             "SELECT id FROM invoices
-              WHERE supplier_id = ? AND client_id = ? AND varsymbol = ?
+              WHERE supplier_id = ? AND client_id = ? AND (varsymbol = ? OR payment_variable_symbol = ?)
                 AND invoice_type IN ('invoice', 'tax_document')
            ORDER BY id LIMIT 1"
         );
         foreach ($refs as $ref) {
-            $stmt->execute([$supplierId, $clientId, $ref]);
+            $stmt->execute([$supplierId, $clientId, $ref, $ref]);
             $id = $stmt->fetchColumn();
             if ($id !== false) {
                 return (int) $id;

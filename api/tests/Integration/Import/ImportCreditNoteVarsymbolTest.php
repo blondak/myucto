@@ -99,12 +99,15 @@ final class ImportCreditNoteVarsymbolTest extends TestCase
     }
 
     /**
-     * JÁDRO NÁLEZU — dobropis se symbolem opravované faktury se naimportuje pod symbolem
-     * ODVOZENÝM z čísla dokladu, a report o té náhradě mluví.
+     * JÁDRO NÁLEZU — dobropis se symbolem opravované faktury se naimportuje pod SVÝM
+     * ČÍSLEM a sdílený variabilní symbol si ponese jako platební VS.
      *
-     * Před opravou se doklad zahodil jako duplicita: `skipped` + „již existuje".
+     * Před opravou § 6 D se doklad zahodil jako duplicita: `skipped` + „již existuje".
+     * Mezitím import symbol odvozoval z čísla dokladu jako náhradu; od rozlišení čísla
+     * dokladu a platebního VS (#249) leží každý doklad pod svým číslem a ke kolizi
+     * symbolů vůbec nedojde.
      */
-    public function testCreditNoteSharingTheInvoiceVarsymbolIsImportedUnderADerivedSymbol(): void
+    public function testCreditNoteSharingTheInvoiceVarsymbolIsImportedUnderItsOwnNumber(): void
     {
         $invoice = $this->importOne('faktura.xml', $this->pohodaInvoice('2094100010', symVar: '9410000010'));
         self::assertSame('created', $invoice['status'], (string) ($invoice['reason'] ?? ''));
@@ -118,24 +121,16 @@ final class ImportCreditNoteVarsymbolTest extends TestCase
         self::assertSame('created', $credit['status'],
             'Dobropis se symbolem opravované faktury se zahodil jako duplicita — přesně nález § 6 D. '
                 . 'Důvod: ' . (string) ($credit['reason'] ?? ''));
-        self::assertTrue($credit['varsymbol_substituted'],
-            'Náhrada symbolu se musí propsat i do souhrnu za běh (`varsymbol_substituted`).');
-        self::assertSame('D2094100003', (string) $credit['varsymbol'],
-            'Symbol se odvozuje z ČÍSLA DOKLADU — týmž mechanismem jako náhrada GUIDu ze SuperFaktury.');
+        self::assertFalse($credit['varsymbol_substituted'],
+            'Doklad leží pod číslem ze souboru, nic se nedosazovalo.');
+        self::assertSame('D2094100003', (string) $credit['varsymbol']);
 
-        // Report nesmí mlčet: doklad má v systému jiný symbol, než měl v souboru.
-        $notes = implode("\n", $credit['notes']);
-        self::assertStringContainsString('9410000010', $notes, 'Hláška musí uvést symbol ze souboru.');
-        self::assertStringContainsString('D2094100003', $notes, 'i symbol, pod kterým doklad v systému leží');
-        self::assertStringContainsString('nedohledáte', $notes,
-            'Uživatel musí vědět, že pod symbolem ze souboru doklad nenajde.');
-        self::assertStringContainsString('dobropis', $notes,
-            'a proč se to stalo — kolize s dokladem jiného druhu, ne duplicita');
-
-        // Obojí je v databázi a původní faktura si svůj symbol podržela.
-        self::assertSame(1, $this->storedCount('9410000010'), 'Faktura musí zůstat pod svým symbolem.');
+        self::assertSame(1, $this->storedCount('2094100010'), 'Faktura leží pod svým číslem.');
         self::assertSame(1, $this->storedCount('D2094100003'));
         self::assertSame('credit_note', $this->invoiceColumn((int) $credit['invoice_id'], 'invoice_type'));
+        // Oba doklady nesou VS ze souboru — vratka dojde na týž symbol jako platba faktury.
+        self::assertSame('9410000010', $this->invoiceColumn((int) $invoice['invoice_id'], 'payment_variable_symbol'));
+        self::assertSame('9410000010', $this->invoiceColumn((int) $credit['invoice_id'], 'payment_variable_symbol'));
     }
 
     /**
@@ -156,7 +151,7 @@ final class ImportCreditNoteVarsymbolTest extends TestCase
         self::assertFalse($again['varsymbol_substituted'],
             'U skutečné duplicity se nesmí nic odvozovat — jinak by se každé opakované nahrání '
                 . 'souboru zapsalo znovu pod jiným symbolem.');
-        self::assertSame(1, $this->storedCount('9410000020'));
+        self::assertSame(1, $this->storedCount('2094100020'));
 
         // A totéž pro dobropis: druhý týž dobropis je duplicita, ne kolize druhů.
         $creditXml = $this->pohodaCreditNote('D2094100020', symVar: '9410000020', correctedNumber: '2094100020');
@@ -168,6 +163,52 @@ final class ImportCreditNoteVarsymbolTest extends TestCase
             'Druhý týž dobropis se potkává s dobropisem STEJNÉHO druhu — to je duplicita.');
         self::assertStringContainsString('již existuje', (string) $creditAgain['reason']);
         self::assertSame(1, $this->storedCount('D2094100020'));
+    }
+
+    /**
+     * Daňový doklad k proformě nese VS proformy, ne své číslo. Doklad se musí uložit pod
+     * SVÝM číslem a VS proformy do platebního VS — dřív se uložil pod VS, takže nesl
+     * číslo, které na dokladu vůbec není.
+     */
+    public function testDocumentNumberIsStoredSeparatelyFromDifferentVariableSymbol(): void
+    {
+        $result = $this->importOne('faktura.xml', $this->pohodaInvoice('20940034', symVar: '120940044'));
+
+        self::assertSame('created', $result['status'], (string) ($result['reason'] ?? ''));
+        self::assertSame('20940034', (string) $result['varsymbol']);
+        self::assertSame('20940034', $this->invoiceColumn((int) $result['invoice_id'], 'varsymbol'));
+        self::assertSame('120940044', $this->invoiceColumn((int) $result['invoice_id'], 'payment_variable_symbol'));
+        self::assertSame(0, $this->storedCount('120940044'), 'Pod VS doklad ležet nesmí.');
+    }
+
+    /** Stejný VS jako číslo se neukládá zvlášť — odvodí se z čísla. */
+    public function testSameVariableSymbolIsNotStoredTwice(): void
+    {
+        $result = $this->importOne('faktura.xml', $this->pohodaInvoice('2094-0035', symVar: '20940035'));
+
+        self::assertSame('created', $result['status'], (string) ($result['reason'] ?? ''));
+        self::assertSame('2094-0035', $this->invoiceColumn((int) $result['invoice_id'], 'varsymbol'));
+        self::assertNull($this->invoiceColumn((int) $result['invoice_id'], 'payment_variable_symbol'));
+    }
+
+    /**
+     * Doklad naimportovaný před rozlišením čísla a VS leží pod VS. Opakované nahrání
+     * téhož souboru ho musí poznat jako duplicitu, ne založit podruhé pod číslem.
+     */
+    public function testDocumentImportedEarlierUnderItsVariableSymbolIsRecognisedAsDuplicate(): void
+    {
+        $xml = $this->pohodaInvoice('20940036', symVar: '120940046');
+        $first = $this->importOne('faktura.xml', $xml);
+        self::assertSame('created', $first['status'], (string) ($first['reason'] ?? ''));
+        // Stav po starém importu: doklad pod VS, bez platebního VS.
+        $this->db->pdo()->prepare('UPDATE invoices SET varsymbol = ?, payment_variable_symbol = NULL WHERE id = ?')
+            ->execute(['120940046', (int) $first['invoice_id']]);
+
+        $again = $this->importOne('faktura-znovu.xml', $xml);
+
+        self::assertSame('skipped', $again['status'], (string) ($again['reason'] ?? ''));
+        self::assertSame((int) $first['invoice_id'], (int) $again['invoice_id']);
+        self::assertSame(0, $this->storedCount('20940036'));
     }
 
     /**

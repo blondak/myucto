@@ -227,6 +227,10 @@ DŮLEŽITÉ k `vendor.dic` a `vendor.vat_dic` (doklad může nést DVĚ RŮZNÁ 
 
 DŮLEŽITÉ k poli `vendor_invoice_number`:
 - Číslo dokladu tak jak je vytištěné. Účtenka nemusí mít číslo → null. NEVYMÝŠLEJ.
+- Je to VLASTNÍ číslo dokladu u nadpisu („Faktura 20940012", „Faktura č."), NIKDY číslo
+  dokladu, na který se odkazuje („Daňový doklad k proformě 1-20940077", „k záloze č.",
+  „k objednávce č."). Odkaz na proformu/zálohu patří do `advance_reference`.
+- NEPŘEBÍREJ číslo z variabilního symbolu — VS se od čísla dokladu může lišit.
 - U DOBROPISU (`credit_note`) sem dej VLASTNÍ číslo opravného dokladu („Opravný daňový
   doklad č.", „Dobropis č.", „Doklad č."), NIKDY číslo opravované faktury z odkazu
   („k faktuře č.", „Opravovaný/Původní doklad č.") — to patří do `corrected_invoice_number`.
@@ -237,7 +241,8 @@ DŮLEŽITÉ k poli `corrected_invoice_number` (JEN u dobropisu):
 
 DŮLEŽITÉ k poli `payment` (platební údaje DODAVATELE = příjemce platby):
 - `bank_account` = číslo účtu v českém formátu "[předčíslí-]číslo/kód_banky" jak je na dokladu.
-- `iban` = IBAN dodavatele; `variable_symbol` = VS platby (typicky číslo faktury).
+- `iban` = IBAN dodavatele; `variable_symbol` = VS platby opsaný z pole „Variabilní symbol".
+  Nedoplňuj ho z čísla dokladu — u dokladu k proformě nese VS proformy.
 - VŽDY účet DODAVATELE, NIKDY odběratele. Pokud údaj NENÍ → null.
 
 DŮLEŽITÉ k dobropisu (document_kind="credit_note"):
@@ -404,7 +409,8 @@ Z PDF faktury vrátíš JEN platební údaje DODAVATELE (příjemce platby) ve f
 Schema: {"bank_account": string|null, "iban": string|null, "variable_symbol": string|null}
 - `bank_account` = číslo účtu dodavatele v českém formátu "[předčíslí-]číslo/kód_banky" jak je na dokladu.
 - `iban` = IBAN dodavatele pokud je uveden.
-- `variable_symbol` = variabilní symbol platby (VS), typicky shodný s číslem faktury.
+- `variable_symbol` = variabilní symbol platby (VS) opsaný z pole „Variabilní symbol".
+  Nedoplňuj ho z čísla dokladu — u dokladu k proformě nese VS proformy.
 - VŽDY jde o účet PŘÍJEMCE PLATBY = DODAVATELE, NIKDY odběratele.
 - Pokud údaj na dokladu NENÍ → null. NEVYMÝŠLEJ.
 EOT;
