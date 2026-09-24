@@ -557,6 +557,7 @@ async function fetchPage(reset: boolean) {
       import_batch_id: importBatchFilter.value || undefined,
       q:             search.value       || undefined,
       page: page.value,
+      per_page: 50,
       sort_key: tbl.sort.value?.key,
       sort_dir: tbl.sort.value?.dir,
       group_by_month: groupByMonth.value,

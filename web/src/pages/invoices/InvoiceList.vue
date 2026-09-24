@@ -878,6 +878,7 @@ async function load(reset = true) {
       revenue_category_exclude: revenueCategoryMode.value === 'exclude' && revenueCategoryIds.value.length
         ? revenueCategoryIds.value : undefined,
       page: page.value,
+      per_page: 50,
       sort_key: tbl.sort.value?.key,
       sort_dir: tbl.sort.value?.dir,
       group_by_month: groupByMonth.value,

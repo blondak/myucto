@@ -26,7 +26,8 @@ Při vzestupném řazení podle DUZP se v měsíčním pohledu zobrazí nejstar�
 První kliknutí na záhlaví sloupce řadí sestupně, druhé vzestupně a třetí vrátí
 výchozí pořadí.
 Křížek v pravém okraji záhlaví tabulky vrátí výchozí řazení.
-Při posunu dolů se u konce seznamu automaticky načte další stránka; tlačítko
+Seznam načítá 50 faktur v jedné dávce. Při posunu dolů se u konce seznamu
+automaticky načte další stránka; tlačítko
 **Načíst další** slouží k ručnímu načtení.
 
 V detailu faktury otevřete rozbalovací menu akcí a zvolte **Vytvořit nákladovou

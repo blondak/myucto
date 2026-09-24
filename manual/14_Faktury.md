@@ -26,7 +26,8 @@ vzestupně a třetí vrátí výchozí pořadí. V měsíčním
 pohledu se při vzestupném řazení podle DUZP zobrazí nejstarší měsíce první.
 U ostatních sloupců zůstávají měsíce od nejnovějšího a řadí se doklady uvnitř nich.
 Křížek v pravém okraji záhlaví tabulky vrátí výchozí řazení.
-Při posunu dolů se u konce seznamu automaticky načte další stránka; tlačítko
+Seznam načítá 50 faktur v jedné dávce. Při posunu dolů se u konce seznamu
+automaticky načte další stránka; tlačítko
 **Načíst další** zůstává k dispozici pro ruční načtení.
 Zaškrtávací políčko v záhlaví tabulky označí pouze zobrazené doklady tohoto měsíce.
 
