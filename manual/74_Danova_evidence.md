@@ -434,7 +434,7 @@ dostupná.
 
 ## 74.11 Omezení a tipy
 
-V agendě **Peníze → Ostatní pohledávky a závazky** lze sledovat i jiné
+V agendě **Daňová evidence → Ostatní pohledávky a závazky** lze sledovat i jiné
 neuhrazené případy než faktury. Potvrzení položky v daňové evidenci nevytvoří
 podvojný účetní zápis ani samo o sobě nezakládá daňový příjem či výdaj.
 Přiřazená bankovní nebo pokladní úhrada sníží otevřený zůstatek; daňové

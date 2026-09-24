@@ -136,6 +136,54 @@ D 231.x, přeplatek obráceně.
 - Protiúčet smí být z tříd 3 a 4. Stav k začátku účetního roku patří do
   počátečních zůstatků (účet 701), ne sem.
 
+### 112.2.3 Nákupy bez dokladu
+
+Sekce **Nákupy bez dokladu** v detailu kreditní karty ukazuje nákupy úvěrového
+účtu zaúčtované na mezičlen, ke kterým zatím není přijatý doklad. Nahoře je název
+účtu, počet plateb a jejich součet. Pod obchodníkem je vedle popisu z výpisu
+(datum transakce, zúčtovaná částka a měna, místo) uvedena analytika mezičlenu,
+na které nákup čeká, například **Mezičlen 378.101**. Každý úvěrový účet má svou
+analytiku, takže zůstatek mezičlenu se rovná součtu nákupů v této sekci.
+Sekce se zobrazuje jen v podvojném účetnictví s režimem nákupů přes mezičlen.
+Odkaz **Detail kreditní karty** u názvu účtu vede na tentýž detail.
+
+U každého nákupu jsou tyto akce:
+
+- **Nahrát účtenku**: vyberete PDF nebo fotografii (do 32 MB). S nastavenou AI
+  se účtenka vytěží do konceptu přijatého dokladu s formou úhrady karta; otevřete
+  ho z oznámení, zkontrolujte a potvrďte. Vložené ISDOC má přednost před AI,
+  fotografie se převede na PDF a stejný soubor se podruhé nezaloží. Bez AI nebo
+  při neúspěšném vytěžení se účtenka uloží do **Příchozích dokladů** (složka
+  Příchozí doklady / rok / měsíc) s vazbou na platbu a doklad založíte tam.
+  Samotné nahrání nic nezaúčtuje.
+- **Spárovat**: po potvrzení dokladu spustí párování nákupu znovu. Výpisy
+  kreditních karet často neuvádějí koncovku karty, takže doklad se k nákupu
+  přiřadí až tímto tlačítkem. Spárováním vznikne vypořádání MD 321 / D 378.x
+  (s kurzovým či haléřovým rozdílem). Podobný doklad se nabídne jako návrh
+  k potvrzení v detailu výpisu.
+- **Bez dokladu, nedaňově**: nákup, ke kterému doklad nebude, uzavře do
+  nedaňového nákladu: MD 548 (analytika z nastavení kreditní karty, jinak
+  platebních karet) / D 378.x.
+- **Bez dokladu, daňově**: uzavře nákup do daňového nákladu, výchozí MD 518 /
+  D 378.x, bez odpočtu DPH. Jen tam, kde výdaj prokážete jiným průkazným
+  dokladem než přijatou fakturou.
+- **K tíži držitele**: soukromý nákup kartou firmy: MD 335 (případně 355 nebo
+  378) / D 378.x. Vznikne pohledávka za držitelem v účetnictví, žádný doklad
+  ani srážka ze mzdy.
+- **Výpis**: otevře výpis kreditní karty rovnou na tomto pohybu.
+
+Tři uzavírací akce vyžadují oprávnění zaúčtovat bankovní pohyby. Dialog ukáže
+datum, obchodníka a částku a dovolí vybrat jiný účet z osnovy. Zápis dostane
+číslo **KARTA-**číslo pohybu a datum nákupu (v uzavřeném období první otevřený
+den); vratka se zaúčtuje s opačnými stranami. Uzavřený nákup ze sekce zmizí.
+Když k němu později dorazí doklad a spáruje se, uzavření se samo stornuje.
+Omylem uzavřený nákup vrátíte stornem zápisu KARTA-… v účetním deníku.
+
+**Splátka kreditní karty** mezičlen nepoužívá. Splátka z vlastního běžného účtu
+se spáruje jako vlastní převod: na úvěrovém účtu MD 231.x / D 261, na běžném
+účtu MD 261 / D 221.x. Splátka bez protiúčtu ve výpisu se zaúčtuje MD 231.x /
+D 261 (nastavitelné 261 nebo 395).
+
 ## 112.3 Účtování
 
 Každý úvěrový účet má vlastní analytiku **231.101, 231.102 …**, přidělovanou

@@ -94,19 +94,46 @@ koncovku karty: řeší se v detailu kreditní karty, sekce Nákupy bez dokladu
 
 U každé platby jsou akce:
 
-- **Nahrát účtenku** — nahrajete PDF nebo fotografii účtenky. Doklad se vytěží
+- **Nahrát účtenku**: nahrajete PDF nebo fotografii účtenky. Doklad se vytěží
   stejně jako při AI importu přijaté faktury, dostane formu úhrady „karta"
   a koncovku karty z platby. Otevřete ho, zkontrolujte a potvrďte. Bez AI (nebo
   když vytěžení selže) se účtenka neztratí: uloží se do [Příchozích dokladů](23_Prijate_faktury.md)
   (v Dokumentech složka Příchozí doklady / rok / měsíc), navázaná na platbu
   kartou, a doklad z ní založíte tam.
-- **Spárovat** — po potvrzení dokladu spustí párování platby znovu. Spárovaná
-  platba se hned zaúčtuje i s vypořádáním (viz Účtování plateb kartou).
-- **Uzavřít bez dokladu** a **K tíži držitele** — jen u platby zaúčtované přes
-  mezičlen karty, ke které doklad nebude (viz níže). Dialog ukáže platbu a nabídne
-  účet: výchozí podle nastavení účtování, nebo jiný účet z osnovy (u uzavření
-  náklad třídy 5, u držitele 335, 355 nebo 378).
-- **Výpis** — otevře bankovní výpis s platbou.
+- **Spárovat**: spustí párování platby znovu, typicky po potvrzení dokladu
+  z účtenky. Hledá mezi přijatými doklady (ne mezi soubory v Dokumentech):
+  podle variabilního symbolu, podle koncovky karty a data (doklad s formou úhrady
+  karta, datem zdanitelného plnění nebo vystavení 7 dní před až 2 dny po
+  zaúčtování platby) a nakonec podle částky a podobného názvu dodavatele. Najde-li
+  jeden doklad, platba se hned spáruje a zaúčtuje i s vypořádáním (viz Účtování
+  plateb kartou). Podobný doklad nabídne jen jako návrh, který potvrdíte v detailu
+  výpisu. Když nic nenajde, platba zůstane v přehledu.
+- **Bez dokladu, nedaňově**: platbu, ke které doklad nebude, uzavře do
+  nedaňového nákladu (výchozí analytika účtu 548 z nastavení účtování). Použijte
+  pro výdaje, které nejdou uplatnit (chybí průkazný doklad, pokuta, výdaj bez
+  souvislosti s podnikáním).
+- **Bez dokladu, daňově**: uzavře platbu do daňového nákladu (výchozí 518) bez
+  odpočtu DPH. Použijte jen tam, kde výdaj prokážete jinak než přijatým dokladem
+  (smlouva, potvrzení objednávky, výpis služby). Daňovou uznatelnost určuje
+  vybraný účet v účtové osnově.
+- **K tíži držitele**: soukromý nákup kartou firmy. Platba se přeúčtuje na
+  pohledávku za držitelem karty (výchozí 335, na výběr i 355 u společníka nebo
+  378). Vznikne jen účetní zápis, žádný doklad ani srážka ze mzdy; vrácení peněz
+  držitelem zaúčtujete běžně z banky nebo pokladny proti stejnému účtu.
+- **Výpis**: otevře bankovní výpis rovnou na této platbě.
+
+Tři akce Bez dokladu a K tíži držitele se nabízejí jen u platby zaúčtované přes
+mezičlen karty (podvojné účetnictví) a s oprávněním zaúčtovat bankovní pohyby.
+Dialog ukáže datum, obchodníka a částku a nabídne účet: výchozí podle nastavení
+účtování, nebo jiný účet z osnovy (u uzavření náklad třídy 5, u držitele 335,
+355 nebo 378). DPH se u uzavření bez dokladu neodpočítává. Zápis dostane číslo
+**KARTA-**číslo pohybu a datum platby; spadá-li platba do uzavřeného období,
+zapíše se k prvnímu dni otevřeného období.
+
+Uzavření bez dokladu není konečné. Když k platbě později dorazí doklad a platba
+se s ním spáruje, uzavření se samo stornuje a zaúčtuje se vypořádání s dokladem.
+Omylem uzavřenou platbu vrátíte stornem zápisu KARTA-… v účetním deníku; platba
+se pak v přehledu znovu objeví.
 
 U platby zaúčtované přes mezičlen se pod obchodníkem zobrazí analytika karty,
 na které platba čeká na doklad (například „Mezičlen 378.101"). Uzavřená platba
@@ -160,7 +187,8 @@ chybí.
 | Kurzový rozdíl | ve vypořádání, když se platba v Kč liší od předpisu dokladu v cizí měně | MD 563 nebo D 663 |
 | Haléřový rozdíl | ve vypořádání, když se platba liší od dokladu do 1 Kč | MD 548 nebo D 648 |
 | Vratka na kartu | při zaúčtování příjmu kartou a jeho spárování s dobropisem | MD 221 / D 378.x, pak MD 378.x / D 321 |
-| Uzavření bez dokladu | akce Uzavřít bez dokladu | MD 548 (nedaňová analytika) / D 378.x |
+| Uzavření bez dokladu nedaňově | akce Bez dokladu, nedaňově | MD 548 (nedaňová analytika) / D 378.x |
+| Uzavření bez dokladu daňově | akce Bez dokladu, daňově | MD 518 / D 378.x |
 | K tíži držitele karty | akce K tíži držitele | MD 335 / D 378.x |
 | Poplatek za kartu | beze změny, pravidlem bankovního poplatku | MD 568 / D 221 |
 | Výběr hotovosti kartou | beze změny, převodem přes peníze na cestě | MD 261 / D 221, MD 211 / D 261 |

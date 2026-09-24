@@ -1068,75 +1068,192 @@ se sestavy ani výkazy nezmění. Opakované spuštění už nic nepřepíše.
 
 ## 52.13 Ostatní pohledávky a závazky
 
-**Peníze → Ostatní pohledávky a závazky** slouží pro peněžní nároky a dluhy,
-které nepatří do vydaných či přijatých faktur ani do specializovaného mzdového
-a daňového modulu. Příkladem je nájemné podle smlouvy, vratná kauce nebo jiná
-samostatná pohledávka. Zdanitelné plnění se zadává fakturační cestou, aby jeho
-řádky správně vstoupily do knihy DPH a výkazů.
+Agenda **Ostatní pohledávky a závazky** slouží pro peněžní nároky a dluhy, které
+nepatří do vydaných ani přijatých faktur ani do mzdového a daňového modulu:
+nájemné podle smlouvy, vratná kauce, půjčka a její splátky, pojistné, poplatek
+nebo nárok na náhradu škody. V podvojném účetnictví ji najdete v menu
+**Účetnictví → Ostatní pohledávky a závazky**, v daňové evidenci v menu
+**Daňová evidence → Ostatní pohledávky a závazky**. Zdanitelné plnění se sem
+nezadává; patří do faktur, aby jeho řádky vstoupily do knihy DPH a výkazů.
 
-V konceptu zadej důvod, protistranu, datum vzniku, splatnost a částku v CZK.
-Názvy druhů se mění podle směru, aby například nárok na vrácení kauce nezněl
-jako přijatá kauce. Při změně směru se druh a účetní předkontace vymažou.
-Protistranu můžeš vybrat z adresáře nebo zadat ručně. Přehled nabízí u každého
-ručního dokladu přímý vstup do detailu; rozpracovaný koncept lze z přehledu také
-upravit nebo odstranit. Seznam lze filtrovat podle směru, stavu, zdroje,
-textu a rozmezí splatnosti. Text hledá název, protistranu, číslo dokladu a
-variabilní symbol.
-V podvojném účetnictví vyber bilanční účet a protiúčet podle skutečného
-účetního případu. Účty lze hledat podle kódu i názvu včetně analytiky.
-Pro běžnou pohledávku se nabízí účet 315, pro závazek 325.
-Účet 5xx na druhé straně znamená náklad, účet 6xx výnos; rozvahový protiúčet
-nemění zisk. Stejný účet na obou stranách není platnou předkontací. Potvrzením
-se dokladu přidělí číslo a vznikne zápis v deníku. V daňové evidenci potvrzení
-založí otevřenou evidenční položku bez účetního zápisu. Daňovou povahu
-skutečné bankovní nebo pokladní platby je v daňové evidenci potřeba správně
-zařadit v peněžním deníku; druh pohledávky či závazku to neurčuje sám.
+### 52.13.1 Přehled
 
-V účetním deníku lze u zápisu otevřít náhled ostatní položky a přejít na její
-detail. Náhled ukazuje směr, druh, splatnost, částku, úhradu, kontaci,
-poznámku a připojené dokumenty. Rozbalený zápis ukazuje poznámku a dokumenty
-zdrojové položky vedle vlastních poznámek a příloh zápisu. Z detailu ostatní
-položky lze otevřít zápis a zobrazit také jeho samostatné poznámky a přílohy.
-Originály zůstávají ve skladu dokumentů, vazba je nekopíruje.
+Seznam ukazuje ruční položky a pod nimi položky z jiných modulů. U ruční položky
+vidíte název se směrem a druhem, protistranu, splatnost, zdroj s počtem
+připojených dokumentů, částku, **zbývá uhradit** a stav. Z řádku otevřete detail;
+rozpracovaný koncept lze také upravit nebo smazat.
 
-Na detailu můžeš propojit jednu či více smluv, skenů nebo jiných podkladů se
-skladem dokumentů. Nově nahraný sken se ve skladu zařadí do složky
-**Ostatní pohledávky a závazky / rok / měsíc** podle data vzniku položky.
-Originál zůstává ve skladu a stejná smlouva může být
-podkladem několika období. K platbě se přiřazuje existující bankovní pohyb
-nebo pokladní doklad; jedna položka může mít více dílčích úhrad. Párování
-znovu nezaúčtuje banku ani pokladnu. U cizí měny je potřeba nejprve vyřešit
-kurzové vypořádání.
+Filtry:
 
-V podvojném účetnictví můžeš kontaci rozdělit mezi více protiúčtů. Účet
-pohledávky nebo závazku zůstává jeden v celé částce kvůli saldu a párování
-úhrad; součet protiúčtů musí být přesně stejný jako částka položky. Rozpis lze
-změnit při přeúčtování, které původní zápis stornuje a vytvoří nový.
+- **Směr**: vše, pohledávky, nebo závazky.
+- **Stav**: výchozí **Otevřené** ukazuje koncepty, potvrzené a zaúčtované
+  položky, u kterých ještě zbývá něco uhradit; **Vše** ukáže i uhrazené,
+  stornované a zrušené.
+- **Zdroj**: ručně zadané, mzdy, nebo daně.
+- **Hledat**: název, protistrana, číslo dokladu a variabilní symbol.
+- **Splatnost od / do**: bez zadaného rozmezí se ukáží položky se splatností
+  rok zpět až rok dopředu.
 
-V detailu v části **Opakování položky** nastavíš měsíční, čtvrtletní nebo roční
-opakování a případné datum konce. Denní úloha připravuje samostatné koncepty
-až 90 dní dopředu, aby se ukázaly v predikci. Můžeš je vytvořit také ručně
-tlačítkem **Vytvořit koncepty**. Vzniklé doklady se automaticky nezaúčtují.
-Pod rozvrhem se zobrazí až další vytvořené položky s datem a stavem; zdrojová
-položka se v seznamu znovu nevypisuje.
-Stornování zdrojové položky pozastaví opakování. Denní úloha ani ruční akce
-pak z tohoto zdroje nevytvoří další koncepty a rozvrh nelze znovu aktivovat.
-Již vytvořené koncepty zůstávají samostatnými položkami k posouzení.
-Podklady zdrojové položky se připojí i k novým konceptům. Vedle lze nastavit
-splátky jedné pohledávky nebo závazku, které rozloží očekávané platby bez
-dalšího účetního nákladu či výnosu.
-Uložený splátkový kalendář nebrání změně názvu, poznámky nebo jiných údajů
-konceptu, pokud částka nadále odpovídá součtu splátek a datum vzniku není
-pozdější než první splátka. Před změnou částky je potřeba kalendář zrušit.
+Tlačítko **Nová ostatní položka** založí koncept se směrem podle aktuálního filtru.
 
-Chybný zaúčtovaný doklad opravíš přeúčtováním: zadáš důvod, datum a nové účty.
-Původní zápis se stornuje a vytvoří se nový se stejným číslem dokladu. Doklad
-s již přiřazenou úhradou nejprve odpoj od platby. Otevřené položky na účtech
-315 a 325 lze kontrolovat v [Saldokontu](60_Saldokonto.md) i zpětně k
-rozvahovému dni.
+### 52.13.2 Založení položky
 
-Přehled ukazuje také mzdové předpisy, daňové zálohy a označené odhady mezd,
-DPH a DPPO z jejich vlastních agend. Tyto položky se zde ručně nezakládají.
-Odhad se nepovažuje za potvrzený dluh. Budoucí peněžní dopad se zobrazuje ve
-výhledu cash-flow, zatímco tržby, náklady a zisk se řídí výsledkovým účtem
-a účetním obdobím.
+V konceptu vyplníte:
+
+| Pole | Význam |
+|---|---|
+| Směr | pohledávka (vám někdo dluží) nebo závazek (dlužíte vy) |
+| Druh | nájemné, kauce, půjčka nebo splátka, pojistné, poplatek, náhrada, jiné |
+| Položka | stručný název, například „Nájemné kancelář říjen" |
+| Protistrana | výběr z adresáře (u závazku dodavatelé, u pohledávky odběratelé), nebo ruční text |
+| Datum vzniku | den, kdy nárok nebo dluh vznikl; výchozí dnešek |
+| Datum zaúčtování | jen v podvojném účetnictví; výchozí datum vzniku |
+| Splatnost | kdy se má platit; řídí přehled, filtr a výhled cash-flow |
+| Částka | kladná částka v Kč; jiná měna zatím není podporovaná |
+| Variabilní symbol | jen číslice; usnadní dohledání platby |
+| Poznámka | volný text k položce |
+
+Názvy druhů se mění podle směru, aby například kauce k vrácení nezněla jako
+přijatá kauce. Druh je jen popisný: neurčuje účty ani daňovou povahu. Změnou směru
+se druh a zadané účty vymažou. Dokumenty připojíte až po uložení položky v jejím
+detailu. Upravovat lze jen koncept.
+
+### 52.13.3 Účtování v podvojném účetnictví
+
+V části **Účtování** zvolíte:
+
+- **Účet pohledávky nebo závazku**: u pohledávky se nabízejí aktivní účty,
+  u závazku pasivní. Nevyberete-li žádný, při zaúčtování se použije 315
+  (pohledávka) nebo 325 (závazek).
+- **Protiúčet**: skutečný účetní případ. Účet 5xx znamená náklad, 6xx výnos;
+  rozvahový protiúčet (například kauce nebo jistina půjčky) zisk nemění.
+
+Tlačítkem **Rozdělit kontaci** rozdělíte protiúčet až na 50 řádků, například
+nájemné na nájem a zálohy na služby. Součet řádků musí přesně odpovídat částce
+položky. Účet pohledávky nebo závazku zůstává jeden v celé částce kvůli saldu
+a párování úhrad; protiúčet nesmí být shodný s ním ani začínat 315 nebo 325.
+
+**Zaúčtovat** přidělí položce číslo z řady OP (pohledávky) nebo OZ (závazky)
+podle roku data vzniku a vytvoří zápis k datu zaúčtování:
+
+| Směr | Zápis |
+|---|---|
+| Pohledávka | MD účet pohledávky (315) / D protiúčet |
+| Závazek | MD protiúčet / D účet závazku (325) |
+
+Zaúčtování vyžaduje oprávnění zaúčtovat v deníku. Zápis nejde stornovat přímo
+v deníku; storno i opravy dělejte v detailu položky.
+
+### 52.13.4 Daňová evidence
+
+V daňové evidenci se položka **potvrdí** (dostane číslo, stav Potvrzeno) a žádný
+účetní zápis nevzniká. Potvrzení samo nezakládá daňový příjem ani výdaj. Daňovou
+povahu skutečné bankovní nebo pokladní platby zařadíte v peněžním deníku; detail
+na to upozorní a odkáže do něj. Potvrzené položky se ukážou v přehledu pohledávek
+a závazků daňové evidence rozdělené podle stáří.
+
+### 52.13.5 Úhrady
+
+K potvrzené nebo zaúčtované položce přiřadíte existující platbu tlačítkem
+**Hledat volnou platbu** (hledá podle variabilního symbolu, protistrany a popisu):
+
+- **bankovní pohyb** ve správném směru (příchozí u pohledávky, odchozí u závazku),
+  v Kč, zatím nespárovaný s fakturou, mzdou ani daňovou zálohou,
+- **pokladní doklad** zaúčtovaný s účelem Ostatní, ve správném směru.
+
+V podvojném účetnictví musí být platba nejdřív zaúčtovaná proti stejnému účtu
+pohledávky nebo závazku (u pohledávky na straně D, u závazku MD); jinak ji
+aplikace odmítne s výzvou platbu nejdřív takto zaúčtovat. Přiřazení samo nic
+znovu nezaúčtuje.
+
+Nabídnutá částka je menší z volné části platby a zbývajícího dluhu. Jedna
+položka může mít více dílčích úhrad a jedna platba se může rozdělit mezi více
+položek. Jakmile zbývá uhradit nula, položka z filtru Otevřené zmizí.
+Přiřazení zrušíte tlačítkem **Odpojit úhradu**. Stornovaný bankovní zápis
+přiřazení označí jako stornované; pokladní doklad přiřazený k položce stornovat
+nejde, nejdřív ho odpojte.
+
+### 52.13.6 Storno a přeúčtování
+
+**Stornovat** (v daňové evidenci **Zrušit**) jde u zaúčtované nebo potvrzené
+položky bez přiřazených úhrad; úhrady nejdřív odpojte. Zadáte důvod a v podvojném
+účetnictví datum storna. Vznikne protizápis „Storno číslo: důvod" a položka
+přejde do stavu Stornováno. Storno zároveň pozastaví opakování položky.
+
+**Přeúčtovat** (jen podvojné účetnictví, zaúčtovaná položka bez úhrad) opraví
+chybné účty. Dialog ukáže dosavadní kontaci; zadáte nový účet pohledávky nebo
+závazku, protiúčet nebo rozdělenou kontaci, datum a důvod. Aspoň jeden účet se
+musí změnit. Původní zápis se stornuje a vznikne nový se **stejným číslem
+dokladu** k datu přeúčtování.
+
+Koncept se maže tlačítkem **Smazat**. Koncept vytvořený opakováním se místo
+smazání zruší, aby v rozvrhu zůstalo vidět, že termín byl vyřešen. Zdrojový
+koncept opakování smazat nejde.
+
+### 52.13.7 Opakování a splátkový kalendář
+
+V detailu v části **Opakování položky** nastavíte měsíční, čtvrtletní nebo roční
+opakování a případně datum konce. Každá kopie dostane datum vzniku posunuté
+o dané období (u kratšího měsíce na jeho poslední den) a stejný odstup splatnosti
+jako zdrojová položka. Přebírá směr, druh, název, protistranu, částku,
+variabilní symbol, účty včetně rozdělené kontace, poznámku i připojené dokumenty.
+
+Denní úloha připravuje koncepty až 90 dní dopředu, aby se ukázaly v predikci.
+Ručně je vytvoříte tlačítkem **Vytvořit koncepty** s datem, do kdy je chcete
+(nejvýš 120 najednou). Vzniklé koncepty se nikdy nezaúčtují samy. Pod rozvrhem
+se vypisují vytvořené položky s datem a stavem. Opakování lze **Pozastavit**
+a **Obnovit**; po stornu zdrojové položky se pozastaví natrvalo a už vytvořené
+koncepty zůstávají samostatnými položkami k posouzení.
+
+**Splátkový kalendář** rozloží jednu pohledávku nebo závazek na 2 až 120 splátek
+s rostoucími daty (ne dřívějšími než datum vzniku). Součet splátek musí odpovídat
+částce položky. Kalendář nevytváří žádné účetní zápisy, jen rozloží očekávané
+platby v cash-flow; úhrady se započítávají od nejstarší splátky. Po přiřazení
+první úhrady už kalendář měnit nejde. Koncept se splátkovým kalendářem lze dál
+upravovat, dokud částka odpovídá součtu splátek a datum vzniku není pozdější než
+první splátka; před změnou částky kalendář zrušte tlačítkem **Zrušit kalendář**.
+
+### 52.13.8 Dokumenty a vazba na deník
+
+Panel **Dokumenty** v detailu připojí smlouvy, skeny a další podklady ze skladu
+dokumentů. Nově nahraný sken se uloží do složky **Ostatní pohledávky a závazky /
+rok / měsíc** podle data vzniku. Originál zůstává ve skladu a stejná smlouva
+může být podkladem více položek či období.
+
+U zaúčtované položky ukazuje část **Účtování** účty a rozdělenou kontaci
+a tlačítkem **Otevřít účetní zápis** přejde na zápis v deníku, včetně jeho
+vlastních poznámek a příloh. Obráceně v deníku otevřete náhled položky (směr,
+druh, protistrana, data, částka, uhrazeno, zbývá, variabilní symbol, účty
+a poznámka) i s jejími dokumenty a přejdete na detail.
+
+### 52.13.9 Mzdy, daně a predikce
+
+Pod ručními položkami se ukazují **položky z jiných modulů**, jen ke čtení
+a s odkazem do jejich agendy:
+
+- **Daňové zálohy**: zálohy na daň z příjmů a na sociální a zdravotní pojištění,
+- **Mzdy**: mzdové závazky a vratky za období (bez údajů o zaměstnancích),
+- **Odhady** označené štítkem Odhad: odhad mzdové platby podle posledních mezd,
+  odhad DPH k odvodu nebo vratky a odhad doplatku DPPO. Ukazují se na 90 dní
+  dopředu a zmizí, jakmile existuje skutečný doklad (mzdy za období, zaúčtované
+  zúčtování DPH).
+
+Tyto řádky vidí jen uživatelé s přístupem k přehledům daní, respektive k mzdovým
+platbám. Upravují se ve svém zdrojovém modulu.
+
+Otevřené ostatní položky vstupují do **výhledu cash-flow** podle splatnosti,
+u splátkového kalendáře podle termínů splátek. Karta **Ostatní položky ve
+výsledku hospodaření** na přehledech ukazuje výnosy, náklady a dopad na zisk
+podle protiúčtů třídy 5 a 6, zvlášť zaúčtované a koncepty; rozvahové protiúčty
+se do výsledku nepočítají. Odhad není potvrzený dluh. Zaúčtované položky na
+účtu pohledávky nebo závazku zkontrolujete v [Saldokontu](60_Saldokonto.md)
+i zpětně k rozvahovému dni.
+
+### 52.13.10 Oprávnění
+
+Agendu vidí uživatelé s oprávněním **Ostatní pohledávky a závazky** (čtení);
+zakládání, úpravy a úhrady vyžadují zápis. Zaúčtování a storno v podvojném
+účetnictví a každé přeúčtování potřebují navíc oprávnění zaúčtovat v deníku.
+Přiřazení bankovní platby vyžaduje přístup k bance a párování, přiřazení
+pokladního dokladu přístup k pokladně. Připojené dokumenty vidí uživatel
+s přístupem k dokumentům.
