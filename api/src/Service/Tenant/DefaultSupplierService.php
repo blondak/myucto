@@ -47,9 +47,9 @@ final class DefaultSupplierService
      * Výchozí firma uživatele mezi přístupnými firmami; bez uložené volby ji
      * zvolí a uloží. 0 = uživatel nemá žádnou přístupnou firmu.
      *
-     * @param list<int>|null $membershipIds přístupné firmy; null = všechny (superadmin).
-     *        U superadmina se seznam firem načte, jen když se volí — uložená
-     *        volba vždy existuje díky cizímu klíči s ON DELETE SET NULL.
+     * @param list<int>|null $membershipIds přístupné firmy; null = všechny existující
+     *        (superadmin). Uložená volba se i u superadmina ověřuje proti existujícím
+     *        firmám: cizí klíč neochrání účet přenesený s jinou databází.
      */
     public function resolve(int $userId, ?array $membershipIds): int
     {
@@ -69,11 +69,14 @@ final class DefaultSupplierService
             return $this->lowest($accessibleIds);
         }
         $stored = $stored !== null ? (int) $stored : null;
-        if ($stored !== null && ($accessibleIds === null || in_array($stored, $accessibleIds, true))) {
+        // Globální admin (bez membershipu) smí do každé firmy, ale jen do EXISTUJÍCÍ.
+        // Uložená firma, která v databázi není (přepnutá nebo obnovená databáze,
+        // smazaná firma), by jinak shodila celou aplikaci na „Supplier nenalezen".
+        $accessibleIds ??= $this->allSupplierIds();
+        if ($stored !== null && in_array($stored, $accessibleIds, true)) {
             return $stored;
         }
 
-        $accessibleIds ??= $this->allSupplierIds();
         if ($accessibleIds === []) {
             return 0;
         }

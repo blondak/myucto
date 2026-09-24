@@ -167,6 +167,46 @@ final class DefaultSupplierSelectionTest extends TestCase
         self::assertSame($b, $this->resolveWithoutHeader($userId), 'Volba uživatele má přednost před počtem dokladů.');
     }
 
+    /**
+     * Globální admin s uloženou firmou, která v databázi není (dev přepnutý na jinou
+     * databázi, obnovená záloha): dřív se vrátila tahle neexistující firma a celá
+     * aplikace skončila na „Supplier nenalezen". Totéž pro firmu z X-Supplier-Id.
+     */
+    public function testSuperadminWithMissingStoredCompanyFallsBackToExistingOne(): void
+    {
+        $existing = $this->supplier('__TEST VYCHOZI existujici');
+        $this->documents($existing, 3, 0);
+        $missing = (int) $this->db->pdo()->query('SELECT COALESCE(MAX(id), 0) + 1000 FROM supplier')->fetchColumn();
+
+        $userId = $this->user();
+        $pdo = $this->db->pdo();
+        $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+            $pdo->prepare('UPDATE users SET default_supplier_id = ? WHERE id = ?')->execute([$missing, $userId]);
+        } finally {
+            $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+        }
+
+        $superadmin = fn (): \Psr\Http\Message\ServerRequestInterface => (new ServerRequestFactory())
+            ->createServerRequest('GET', '/api/auth/me')
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $userId, 'role_id' => 0, 'is_superadmin' => true]);
+
+        $withoutHeader = $this->resolver()->resolve($superadmin());
+        self::assertFalse($withoutHeader->denied);
+        self::assertNotSame($missing, $withoutHeader->supplierId);
+        self::assertSame(1, (int) $pdo->query('SELECT COUNT(*) FROM supplier WHERE id = ' . $withoutHeader->supplierId)->fetchColumn(),
+            'Výchozí firma musí existovat.');
+        self::assertSame($withoutHeader->supplierId, $this->storedDefault($userId), 'Neplatná uložená volba se přepíše.');
+
+        $withStaleHeader = $this->resolver()->resolve(
+            $superadmin()->withHeader(SupplierScopeMiddleware::HEADER_NAME, (string) $missing)
+        );
+        self::assertFalse($withStaleHeader->denied);
+        self::assertSame($withoutHeader->supplierId, $withStaleHeader->supplierId,
+            'Firma z hlavičky, která neexistuje, padá na výchozí firmu.');
+    }
+
     private function resolveWithoutHeader(int $userId): int
     {
         $access = $this->resolver()->resolve($this->request($userId));
