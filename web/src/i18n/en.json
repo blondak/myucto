@@ -20662,7 +20662,11 @@
       "login_otp": "Sign-in verification code",
       "email_profile_test": "Sending profile test",
       "work_report_link": "Work report tracking link",
-      "work_report_access_code": "Verification code for work report preview"
+      "work_report_access_code": "Verification code for work report preview",
+      "document_request_reminder": "Missing document reminder",
+      "user_invite": "New user invitation",
+      "payroll_document_secure_link": "Secure link to payroll document",
+      "payroll_document_access_code": "Verification code for payroll document"
     },
     "self_delete_warning": "Cannot delete your own account."
   },

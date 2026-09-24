@@ -20662,7 +20662,11 @@
       "login_otp": "Ověřovací kód pro přihlášení",
       "email_profile_test": "Test odesílacího profilu",
       "work_report_link": "Odkaz na sledování výkazu práce",
-      "work_report_access_code": "Ověřovací kód pro náhled výkazu práce"
+      "work_report_access_code": "Ověřovací kód pro náhled výkazu práce",
+      "document_request_reminder": "Připomínka chybějícího dokladu",
+      "user_invite": "Pozvánka nového uživatele",
+      "payroll_document_secure_link": "Zabezpečený odkaz na mzdový dokument",
+      "payroll_document_access_code": "Ověřovací kód pro mzdový dokument"
     },
     "self_delete_warning": "Nelze smazat vlastní účet."
   },
