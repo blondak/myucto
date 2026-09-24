@@ -217,6 +217,39 @@ final class JmhzTakeoverImportTest extends TestCase
         }
     }
 
+    /**
+     * Osoba se dvěma vztahy (souběh): formulář druhého vztahu nese OIČ osoby,
+     * ale jiné ID PPV. Nesmí se přes OIČ přilepit k prvnímu vztahu — dva
+     * formuláře na jednom vztahu by import zablokoval jako konflikt.
+     */
+    public function testConcurrentEmploymentOfTheSamePersonIsNotPairedByPersonIdentifier(): void
+    {
+        $oic = RegistrationXmlFixtures::oic(31);
+        $first = JmhzReportFixtures::report([JmhzReportFixtures::person([
+            'employment_id' => 301, 'id_ppv' => '200000000000000000301', 'oic' => $oic, 'children' => [],
+        ])], 2026, 1, ['guid_seed' => 71]);
+        $files = [$this->file('jmhz-1.xml', $first)];
+        $this->apply($files, $this->selectable($this->imports->preview($this->supplierId, 'test', $files)));
+
+        $second = JmhzReportFixtures::report([
+            JmhzReportFixtures::person(['employment_id' => 301, 'id_ppv' => '200000000000000000301', 'oic' => $oic, 'children' => []]),
+            JmhzReportFixtures::person([
+                'employment_id' => 302, 'id_ppv' => '200000000000000000302', 'oic' => $oic, 'children' => [],
+                'primary' => false, 'wage' => 5_000, 'taxable' => 5_000, 'social_base' => 5_000,
+            ]),
+        ], 2026, 2, ['guid_seed' => 72]);
+        $files[] = $this->file('jmhz-2.xml', $second);
+
+        $preview = $this->imports->preview($this->supplierId, 'test', $files);
+        $blocked = array_values(array_filter($preview['records'], static fn (array $record): bool => $record['blocker'] !== null));
+        self::assertSame([], $blocked, $this->dump($blocked));
+
+        $result = $this->apply($files, $this->selectable($preview));
+        self::assertSame(0, $result['summary']['failed'], $this->dump($result['results']));
+        self::assertSame(2, $this->rowCount('payroll_employments'));
+        self::assertSame(3, $this->rowCount('payroll_migration_reference_totals'));
+    }
+
     public function testReportOfAnotherEmployerIsRejected(): void
     {
         $xml = str_replace(

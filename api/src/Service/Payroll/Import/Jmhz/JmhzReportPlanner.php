@@ -243,9 +243,13 @@ final class JmhzReportPlanner
             $auto = $this->lookup->employment($supplierId, (int) $hit['employment_id']);
             $matchedBy = 'id_ppv';
         } elseif (count($oicEmployees) === 1) {
+            // Formulář s ID PPV, které evidence nezná, patří jinému vztahu osoby
+            // (souběh) než vztah, který už ID PPV má — ten mu nepatří.
             $rows = array_values(array_filter(
                 $this->lookup->employments($supplierId, $oicEmployees[0]),
-                fn (array $row): bool => $this->activeIn($row, $item->file),
+                fn (array $row): bool => $this->activeIn($row, $item->file)
+                    && ($form->employmentIdentifier === null
+                        || $this->registrations->activeExternalId($supplierId, (int) $row['id'], $environment, 'id_ppv') === null),
             ));
             if (count($rows) === 1) {
                 $auto = $rows[0];
