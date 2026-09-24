@@ -181,6 +181,38 @@ final class ImportCreditNoteVarsymbolTest extends TestCase
         self::assertSame(0, $this->storedCount('120940044'), 'Pod VS doklad ležet nesmí.');
     }
 
+    /**
+     * Konečná faktura k zaplacené proformě tak, jak ji vyváží Fakturoid do Pohoda XML: VS
+     * proformy v `symVar` a odpočet nezdaněné zálohy v `<inv:invoiceAdvancePaymentItem>`.
+     * Dřív se odpočet zahodil a doklad visel v pohledávkách v plné výši jako odeslaný.
+     */
+    public function testFinalInvoiceWithUntaxedAdvanceDeductionIsPaid(): void
+    {
+        $xml = $this->withAdvanceItem($this->pohodaInvoice('20940041', symVar: '120940051'), '-1210', '0');
+
+        $result = $this->importOne('faktura.xml', $xml);
+
+        self::assertSame('created', $result['status'], (string) ($result['reason'] ?? ''));
+        $id = (int) $result['invoice_id'];
+        self::assertSame('20940041', $this->invoiceColumn($id, 'varsymbol'));
+        self::assertSame('120940051', $this->invoiceColumn($id, 'payment_variable_symbol'));
+        self::assertEqualsWithDelta(1210.0, (float) $this->invoiceColumn($id, 'total_with_vat'), 0.001,
+            'Tržba i DPH zůstávají z řádků.');
+        self::assertEqualsWithDelta(0.0, (float) $this->invoiceColumn($id, 'amount_to_pay'), 0.001);
+        self::assertSame('paid', $this->invoiceColumn($id, 'status'));
+    }
+
+    public function testTaxedAdvanceDeductionKeepsDocumentAsDraft(): void
+    {
+        $xml = $this->withAdvanceItem($this->pohodaInvoice('20940042', symVar: '20940042'), '-1210', '-210');
+
+        $result = $this->importOne('faktura.xml', $xml);
+
+        self::assertSame('created', $result['status'], (string) ($result['reason'] ?? ''));
+        self::assertSame('draft', $this->invoiceColumn((int) $result['invoice_id'], 'status'));
+        self::assertStringContainsString('zdaněnou zálohu', implode(' ', $result['warnings']));
+    }
+
     /** Stejný VS jako číslo se neukládá zvlášť — odvodí se z čísla. */
     public function testSameVariableSymbolIsNotStoredTwice(): void
     {
@@ -360,6 +392,19 @@ final class ImportCreditNoteVarsymbolTest extends TestCase
     }
 
     /** Běžná tuzemská faktura v Kč se sazbou 21 %. */
+    /** Odpočet zálohy tak, jak ho do Pohoda XML píše Fakturoid (záporná částka mimo položky). */
+    private function withAdvanceItem(string $xml, string $priceSum, string $priceVat): string
+    {
+        return str_replace(
+            '</inv:invoiceDetail>',
+            "<inv:invoiceAdvancePaymentItem><inv:text>Záloha</inv:text><inv:quantity>1</inv:quantity>"
+                . "<inv:homeCurrency><typ:unitPrice>{$priceSum}</typ:unitPrice><typ:price>{$priceSum}</typ:price>"
+                . "<typ:priceVAT>{$priceVat}</typ:priceVAT><typ:priceSum>{$priceSum}</typ:priceSum></inv:homeCurrency>"
+                . '</inv:invoiceAdvancePaymentItem></inv:invoiceDetail>',
+            $xml,
+        );
+    }
+
     private function pohodaInvoice(string $number, string $symVar, bool $withItems = true): string
     {
         return $this->pohodaDocument('issuedInvoice', $number, $symVar, '', $withItems, 1, '1000', '210');

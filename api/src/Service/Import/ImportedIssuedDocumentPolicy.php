@@ -28,8 +28,11 @@ use PDO;
  * zákazník zaplatil. Tolerance je v měně dokladu; haléřové zaokrouhlení dokladu
  * (`PayableRoundingAmount`) se do ní vejde.
  *
- * Pohoda XML odpočet zálohy nese jako řádek dokladu, takže tam kontrola nemá co hlídat
- * a parser tyto údaje neposílá (klíč `monetary` chybí → kontrola se přeskočí).
+ * Pohoda XML (i export z Fakturoidu) nese odpočet zálohy jako `<inv:invoiceAdvancePaymentItem>`
+ * mimo položky dokladu (klíč `advance_deduction`). Odpočet NEZDANĚNÉ zálohy (proformy, DPH 0)
+ * tržbu ani daň nemění, jen snižuje částku k úhradě: doklad se uloží s `advance_paid_amount`
+ * ({@see self::settleAdvanceDeduction()}). Odpočet ZDANĚNÉ zálohy snižuje i daň, kterou už
+ * přiznal daňový doklad k platbě — ten doklad zůstane konceptem jako u ISDOC výše.
  *
  * ── Daňový doklad k přijaté platbě je zaplacený ─────────────────────────────────────
  * DDPP (§ 28 odst. 2 ZDPH) dokumentuje úplatu, která už přišla. Aplikace ho proto zakládá
@@ -56,6 +59,18 @@ final class ImportedIssuedDocumentPolicy
      */
     public static function assess(array $inv, float $linesTotal): array
     {
+        $advance = self::advanceDeduction($inv);
+        if ($advance !== null && $advance['vat'] > self::CENT) {
+            return ['review' => [sprintf(
+                'Doklad odečítá zdaněnou zálohu %s (z toho DPH %s). Odpočet snižuje i daň, kterou už '
+                    . 'přiznal daňový doklad k záloze, takže by se úplata zdanila podruhé. Doklad jsme '
+                    . 'uložili jako koncept (nejde do DPH ani do pohledávek): zkontrolujte ho a navažte '
+                    . 'daňový doklad k záloze ručně.',
+                self::money($advance['gross']),
+                self::money($advance['vat']),
+            )], 'notes' => []];
+        }
+
         $monetary = $inv['monetary'] ?? null;
         if (!is_array($monetary)) {
             return ['review' => [], 'notes' => []];
@@ -137,6 +152,42 @@ final class ImportedIssuedDocumentPolicy
             "UPDATE invoices SET advance_paid_amount = total_with_vat
               WHERE id = ? AND invoice_type = 'tax_document'"
         )->execute([$invoiceId]);
+    }
+
+    /**
+     * Odpočet nezdaněné zálohy (proformy) ze souboru: sníží částku k úhradě. Vrací zbývající
+     * částku k úhradě po odpočtu, nebo null, když doklad odpočet nemá. Volá se po přepočtu
+     * dokladu a jen pro doklad, který {@see self::assess()} nepustil do konceptu.
+     *
+     * @param array<string,mixed> $inv
+     */
+    public static function settleAdvanceDeduction(PDO $pdo, int $invoiceId, array $inv): ?float
+    {
+        $advance = self::advanceDeduction($inv);
+        if ($advance === null || $advance['vat'] > self::CENT || (string) ($inv['invoice_type'] ?? 'invoice') !== 'invoice') {
+            return null;
+        }
+        $pdo->prepare(
+            "UPDATE invoices SET advance_paid_amount = LEAST(total_with_vat, ?)
+              WHERE id = ? AND invoice_type = 'invoice'"
+        )->execute([$advance['gross'], $invoiceId]);
+        $left = $pdo->prepare('SELECT amount_to_pay FROM invoices WHERE id = ?');
+        $left->execute([$invoiceId]);
+
+        return (float) $left->fetchColumn();
+    }
+
+    /**
+     * @param array<string,mixed> $inv
+     * @return array{gross:float, vat:float}|null
+     */
+    private static function advanceDeduction(array $inv): ?array
+    {
+        $advance = $inv['advance_deduction'] ?? null;
+        if (!is_array($advance) || (self::amount($advance['gross'] ?? null) ?? 0.0) <= self::CENT) {
+            return null;
+        }
+        return ['gross' => (float) $advance['gross'], 'vat' => (float) (self::amount($advance['vat'] ?? null) ?? 0.0)];
     }
 
     private static function amount(mixed $value): ?float

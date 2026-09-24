@@ -1429,6 +1429,16 @@ final class InvoiceImportService
         if (ImportedIssuedDocumentPolicy::isPaidByNature($invoiceType)) {
             ImportedIssuedDocumentPolicy::settleTaxDocument($pdo, $invoiceId);
         }
+        // Odpočet nezdaněné zálohy (proformy): doklad zaplacený zálohou nesmí zůstat
+        // v pohledávkách v plné výši. Tržba i DPH zůstávají z řádků.
+        if ($assessment['review'] === []) {
+            $leftToPay = ImportedIssuedDocumentPolicy::settleAdvanceDeduction($pdo, $invoiceId, $inv);
+            if ($leftToPay !== null && $leftToPay <= ImportedIssuedDocumentPolicy::TOTAL_TOLERANCE) {
+                $status = 'paid';
+                $paidAt = $taxDate ?? $issueDate;
+                $notes[] = 'Doklad je uhrazený odečtenou zálohou, k úhradě nezbývá nic.';
+            }
+        }
 
         // Snapshoty z aktuálního supplier/client/bank; plátcovství DPH firmy k datu
         // importovaného dokladu (zpětně datovaná faktura dostane stav k svému datu).
