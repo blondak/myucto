@@ -10,6 +10,7 @@ use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\LicenseMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
 use MyInvoice\Security\AccessLevel;
@@ -246,6 +247,7 @@ final class SettingsAction
         if ($this->membershipDenies($request, $id)) {
             return Json::error($response, 'not_found', 'Supplier nenalezen.', 404);
         }
+
         return $this->respondSupplier($response, $id);
     }
 
@@ -368,6 +370,15 @@ final class SettingsAction
 
         if ($this->membershipDenies($request, $id)) {
             return Json::error($response, 'not_found', 'Supplier nenalezen.', 404);
+        }
+
+        if (!empty($body['dimensions_enabled']) && LicenseMiddleware::state($request)?->hasCommercialFeatures() === false) {
+            $current = $this->db->pdo()->prepare('SELECT dimensions_enabled FROM supplier WHERE id = ?');
+            $current->execute([$id]);
+            if ((int) $current->fetchColumn() !== 1) {
+                return Json::error($response, 'license_commercial_feature_unavailable',
+                    'Zapnutí dimenzí vyžaduje aktivní licenci účetnictví.', 403);
+            }
         }
 
         $badReferences = (new \MyInvoice\Http\TenantReferenceGuard($this->db))->violations(

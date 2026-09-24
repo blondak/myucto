@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<style>
+body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131d; }
+h1 { font-size: 15pt; margin-bottom: 2mm; }
+.meta { color: #555; margin-bottom: 5mm; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: right; color: #555; border-bottom: 0.5pt solid #999; padding: 1.5mm; }
+th:first-child { text-align: left; }
+td { border-bottom: 0.2pt solid #ddd; padding: 1.3mm 1.5mm; vertical-align: top; }
+.num { text-align: right; }
+.total td { font-weight: bold; border-top: 0.5pt solid #333; }
+.positive { color: #16703f; }
+.negative { color: #b42318; }
+</style>
+</head>
+<body>
+<h1>{{ title }}</h1>
+<div class="meta">{{ subtitle }}</div>
+<table>
+<thead><tr>{% for header in headers %}<th>{{ header }}</th>{% endfor %}</tr></thead>
+<tbody>
+{% for row in rows %}<tr>{% for value in row %}{% set result = headers[loop.index0] == 'Zisk / ztráta' %}<td class="{{ loop.first ? '' : 'num' }} {{ result and value > 0 ? 'positive' : (result and value < 0 ? 'negative' : '') }}">{{ loop.first or value == '-' ? value : (headers[loop.index0] == 'Zisková marže (%)' ? (value|cz_money) ~ ' %' : (value|cz_money)) }}</td>{% endfor %}</tr>{% endfor %}
+<tr class="total">{% for value in totals %}{% set result = headers[loop.index0] == 'Zisk / ztráta' %}<td class="{{ loop.first ? '' : 'num' }} {{ result and value > 0 ? 'positive' : (result and value < 0 ? 'negative' : '') }}">{{ loop.first or value == '-' ? value : (headers[loop.index0] == 'Zisková marže (%)' ? (value|cz_money) ~ ' %' : (value|cz_money)) }}</td>{% endfor %}</tr>
+</tbody>
+</table>
+</body>
+</html>

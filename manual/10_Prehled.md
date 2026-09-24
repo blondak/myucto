@@ -119,7 +119,7 @@ Aktuální hlavní struktura menu je:
 
 | Sekce | Důležité samostatné body |
 |---|---|
-| **Grafy** | Akce pro tebe, Přehled firmy, Zisk, Tržby, Náklady |
+| **Grafy** | Akce pro tebe, Přehled firmy, Zisk, Tržby, Náklady, při zapnutých dimenzích také Dimenze |
 | **Prodej** | Vydané a pravidelné faktury, klienti, zakázky, AI import, export a import |
 | **Nákup** | Přijaté faktury, AI import, dodavatelé, platební příkazy, drobný majetek, export a import |
 | **Peníze** | Bankovní účty a Pokladna |

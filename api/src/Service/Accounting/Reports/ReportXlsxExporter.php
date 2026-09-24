@@ -1201,6 +1201,33 @@ final class ReportXlsxExporter
         $sheet->getStyle('A4')->getFont()->setSize(9)->setItalic(true);
     }
 
+    /** @return array{bytes:string, filename:string, mime:string} */
+    public function dimensionAnalyticsTable(array $table): array
+    {
+        $ss = new Spreadsheet();
+        $sheet = $ss->getActiveSheet();
+        $sheet->setTitle(mb_substr($table['title'], 0, 31));
+        $sheet->setCellValueExplicit('A1', $table['title'], DataType::TYPE_STRING);
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+        $sheet->setCellValueExplicit('A2', $table['subtitle'], DataType::TYPE_STRING);
+        $head = 4;
+        $this->headerRow($sheet, $head, $table['headers']);
+        $r = $head + 1;
+        foreach ([...$table['rows'], $table['totals']] as $row) {
+            foreach ($row as $column => $value) {
+                if (is_string($value)) {
+                    $sheet->setCellValueExplicit([$column + 1, $r], (string) $value, DataType::TYPE_STRING);
+                } else {
+                    $sheet->setCellValue([$column + 1, $r], (float) $value);
+                }
+            }
+            $r++;
+        }
+        $this->boldRow($sheet, $r - 1, count($table['headers']));
+        $this->finishTable($sheet, $head, $r - 1, count($table['headers']), 2);
+        return $this->out($ss, $table['filename'] . '.xlsx');
+    }
+
     /**
      * Výsledovka po dimenzi: strom hodnot (výnosy, náklady, výsledek) a na druhém listu
      * rozpad po syntetických účtech (řádky = účty, sloupce = kořeny sestavy).

@@ -9,6 +9,7 @@ use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\Dimension\DimensionSplitAllocation;
 use MyInvoice\Service\Tax\Return\JournalTaxOrigin;
+use MyInvoice\Service\Tax\Return\NonDeductibleCostsService;
 use PDO;
 
 /**
@@ -159,6 +160,101 @@ final class DimensionProfitService
     }
 
     /**
+     * Roční grafy používají stejné zaúčtované řádky a rozdělení haléřů jako výsledovka.
+     * @param list<array{id:int,company_name:string}> $companies
+     * @return array<string,mixed>
+     */
+    public function analytics(int $supplierId, int $typeId, int $year, array $companies): array
+    {
+        $from = sprintf('%04d-01-01', $year);
+        $to = sprintf('%04d-12-31', $year);
+        $ids = array_column($companies, 'id');
+        $report = $this->build($supplierId, $typeId, $from, $to, $ids);
+        $values = $this->dimensions->listValues($supplierId, $typeId);
+        $byId = array_column($values, null, 'id');
+        $roots = [];
+        foreach ($values as $value) {
+            $id = (int) $value['id'];
+            $parent = $value['parent_id'];
+            $seen = [$id => true];
+            while ($parent !== null && isset($byId[$parent]) && !isset($seen[$parent])) {
+                $id = (int) $parent;
+                $seen[$id] = true;
+                $parent = $byId[$id]['parent_id'];
+            }
+            $roots[$value['id']] = (string) $id;
+        }
+
+        $monthly = [];
+        $previous = [];
+        $companyTotals = [];
+        $companyValueTotals = [];
+        $valueMonths = [];
+        $valueTotals = [];
+        $yearTotals = [];
+        for ($month = 1; $month <= 12; $month++) {
+            $key = sprintf('%04d-%02d', $year, $month);
+            $monthly[$key] = ['revenue' => 0, 'cost' => 0];
+            $previous[sprintf('%04d-%02d', $year - 1, $month)] = ['revenue' => 0, 'cost' => 0];
+        }
+        foreach ($companies as $company) {
+            $sid = $company['id'];
+            $companyTotals[$sid] = ['id' => $sid, 'name' => $company['company_name'], 'revenue' => 0, 'cost' => 0];
+            foreach ($this->sums($sid, $typeId, sprintf('%04d-01-01', $year - 1), $to, true) as $row) {
+                $key = $row['month_key'];
+                if (isset($monthly[$key])) {
+                    self::addAnalyticsAmount($monthly[$key], $row);
+                    self::addAnalyticsAmount($yearTotals, $row);
+                    self::addAnalyticsAmount($companyTotals[$sid], $row);
+                    $root = $roots[(int) $row['value_key']] ?? '';
+                    $valueMonths[$root][$key] ??= [];
+                    $valueTotals[$root] ??= [];
+                    $companyValueTotals[$sid][$root] ??= [];
+                    self::addAnalyticsAmount($valueMonths[$root][$key], $row);
+                    self::addAnalyticsAmount($valueTotals[$root], $row);
+                    self::addAnalyticsAmount($companyValueTotals[$sid][$root], $row);
+                } elseif (isset($previous[$key])) {
+                    self::addAnalyticsAmount($previous[$key], $row);
+                }
+            }
+        }
+
+        $toMoney = static fn (string $key, array $sum): array => ['month' => $key] + self::analyticsMoney($sum);
+        $series = [];
+        foreach ($valueMonths as $valueId => $months) {
+            $series[(string) $valueId] = array_map(
+                static fn (string $key): array => $toMoney($key, $months[$key] ?? ['revenue' => 0, 'cost' => 0]),
+                array_keys($monthly),
+            );
+        }
+        $companyValues = [];
+        foreach ($companyValueTotals as $sid => $values) {
+            foreach ($values as $valueId => $sum) {
+                $companyValues[$sid][(string) $valueId] = self::analyticsMoney($sum);
+            }
+            $companyValues[$sid] = (object) $companyValues[$sid];
+        }
+
+        return [
+            'type' => $report['type'],
+            'year' => $year,
+            'supplier_ids' => $ids,
+            'rows' => $report['rows'],
+            'unassigned' => self::analyticsMoney($valueTotals[''] ?? []),
+            'totals' => self::analyticsMoney($yearTotals),
+            'value_totals' => (object) array_map([self::class, 'analyticsMoney'], $valueTotals),
+            'monthly' => array_map($toMoney, array_keys($monthly), array_values($monthly)),
+            'previous_monthly' => array_map($toMoney, array_keys($previous), array_values($previous)),
+            'value_monthly' => (object) $series,
+            'companies' => array_map(static fn (array $company): array => [
+                'id' => $company['id'],
+                'name' => $company['name'],
+            ] + self::analyticsMoney($company), array_values($companyTotals)),
+            'company_value_totals' => (object) $companyValues,
+        ];
+    }
+
+    /**
      * Hodnoty s odpovědnou osobou, které neleží ve větvi jiné takové hodnoty.
      *
      * @param list<array<string,mixed>> $values
@@ -264,21 +360,31 @@ final class DimensionProfitService
      *
      * @return list<array{value_key:string, code:string, name:string, account_type:string, revenue:int, cost:int}>
      */
-    private function sums(int $supplierId, int $typeId, string $from, string $to): array
+    private function sums(int $supplierId, int $typeId, string $from, string $to, bool $monthly = false): array
     {
+        $monthSelect = $monthly ? "DATE_FORMAT(e.entry_date, '%Y-%m') AS month_key, " : '';
+        $monthGroup = $monthly ? "DATE_FORMAT(e.entry_date, '%Y-%m'), " : '';
+        $nonDeductible = NonDeductibleCostsService::predicate();
         $stmt = $this->db->pdo()->prepare(
             'WITH RECURSIVE ' . JournalTaxOrigin::cte($supplierId) . "
-            SELECT COALESCE(jd.dimension_value_id, ccv.id) AS value_id,
+            SELECT {$monthSelect}COALESCE(jd.dimension_value_id, ccv.id) AS value_id,
                    COALESCE(p.account_code, a.account_code) AS code,
                    COALESCE(p.name, a.name) AS name,
                    a.account_type,
                    SUM(CASE WHEN a.account_type = 'revenue'
                             THEN CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END ELSE 0 END) AS revenue,
                    SUM(CASE WHEN a.account_type = 'expense'
-                            THEN CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END ELSE 0 END) AS cost
+                            THEN CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END ELSE 0 END) AS cost,
+                   SUM(CASE WHEN a.account_type = 'expense' AND {$nonDeductible}
+                            THEN CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END ELSE 0 END) AS non_deductible_cost,
+                   SUM(CASE WHEN a.account_type = 'expense' AND a.account_code LIKE '59%'
+                            THEN CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END ELSE 0 END) AS income_tax_cost
               FROM journal_entry_lines l
               JOIN journal_entries e ON e.id = l.entry_id
               " . JournalTaxOrigin::join() . "
+         LEFT JOIN purchase_invoices pi ON " . JournalTaxOrigin::sourceTypeSql() . " = 'purchase_invoice'
+                                       AND pi.id = " . JournalTaxOrigin::sourceIdSql() . "
+                                       AND pi.supplier_id = e.supplier_id
               JOIN chart_of_accounts a ON a.id = l.account_id
          LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
          LEFT JOIN journal_entry_line_dimensions jd
@@ -293,7 +399,7 @@ final class DimensionProfitService
                AND NOT EXISTS (SELECT 1 FROM journal_entry_line_dimension_splits s
                                 WHERE s.line_id = l.id AND s.dimension_type_id = ?)
                AND " . JournalTaxOrigin::includedSql() . '
-             GROUP BY COALESCE(jd.dimension_value_id, ccv.id), COALESCE(p.account_code, a.account_code),
+             GROUP BY ' . $monthGroup . 'COALESCE(jd.dimension_value_id, ccv.id), COALESCE(p.account_code, a.account_code),
                       COALESCE(p.name, a.name), a.account_type'
         );
         $stmt->execute([$typeId, $typeId, $supplierId, $from, $to, $typeId, ClosingSourceId::STOCK_SLOT_BASE]);
@@ -301,7 +407,7 @@ final class DimensionProfitService
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $out[] = self::sumRow($r);
         }
-        return [...$out, ...$this->splitSums($supplierId, $typeId, $from, $to)];
+        return [...$out, ...$this->splitSums($supplierId, $typeId, $from, $to, $monthly)];
     }
 
     /**
@@ -311,30 +417,40 @@ final class DimensionProfitService
      *
      * @return list<array{value_key:string, code:string, name:string, account_type:string, revenue:int, cost:int}>
      */
-    private function splitSums(int $supplierId, int $typeId, string $from, string $to): array
+    private function splitSums(int $supplierId, int $typeId, string $from, string $to, bool $monthly = false): array
     {
+        $monthSelect = $monthly ? "DATE_FORMAT(e.entry_date, '%Y-%m') AS month_key, " : '';
+        $monthGroup = $monthly ? "DATE_FORMAT(e.entry_date, '%Y-%m'), " : '';
+        $nonDeductible = NonDeductibleCostsService::predicate();
         [$partsSql, $partsParams] = DimensionSplitAllocation::partsSql($typeId, null, $supplierId);
         $stmt = $this->db->pdo()->prepare(
             'WITH RECURSIVE ' . JournalTaxOrigin::cte($supplierId) . "
-            SELECT sp.value_id,
+            SELECT {$monthSelect}sp.value_id,
                    COALESCE(p.account_code, a.account_code) AS code,
                    COALESCE(p.name, a.name) AS name,
                    a.account_type,
                    SUM(CASE WHEN a.account_type = 'revenue'
                             THEN CASE WHEN l.side = 'credit' THEN sp.amount ELSE -sp.amount END ELSE 0 END) AS revenue,
                    SUM(CASE WHEN a.account_type = 'expense'
-                            THEN CASE WHEN l.side = 'debit' THEN sp.amount ELSE -sp.amount END ELSE 0 END) AS cost
+                            THEN CASE WHEN l.side = 'debit' THEN sp.amount ELSE -sp.amount END ELSE 0 END) AS cost,
+                   SUM(CASE WHEN a.account_type = 'expense' AND {$nonDeductible}
+                            THEN CASE WHEN l.side = 'debit' THEN sp.amount ELSE -sp.amount END ELSE 0 END) AS non_deductible_cost,
+                   SUM(CASE WHEN a.account_type = 'expense' AND a.account_code LIKE '59%'
+                            THEN CASE WHEN l.side = 'debit' THEN sp.amount ELSE -sp.amount END ELSE 0 END) AS income_tax_cost
               FROM ({$partsSql}) sp
               JOIN journal_entry_lines l ON l.id = sp.line_id
               JOIN journal_entries e ON e.id = l.entry_id
               " . JournalTaxOrigin::join() . "
+         LEFT JOIN purchase_invoices pi ON " . JournalTaxOrigin::sourceTypeSql() . " = 'purchase_invoice'
+                                       AND pi.id = " . JournalTaxOrigin::sourceIdSql() . "
+                                       AND pi.supplier_id = e.supplier_id
               JOIN chart_of_accounts a ON a.id = l.account_id
          LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                AND e.entry_date BETWEEN ? AND ?
                AND a.account_type IN ('revenue', 'expense')
                AND " . JournalTaxOrigin::includedSql() . '
-             GROUP BY sp.value_id, COALESCE(p.account_code, a.account_code), COALESCE(p.name, a.name), a.account_type'
+             GROUP BY ' . $monthGroup . 'sp.value_id, COALESCE(p.account_code, a.account_code), COALESCE(p.name, a.name), a.account_type'
         );
         $stmt->execute([...$partsParams, $supplierId, $from, $to, ClosingSourceId::STOCK_SLOT_BASE]);
         return array_map([self::class, 'sumRow'], $stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -348,11 +464,14 @@ final class DimensionProfitService
     {
         return [
             'value_key' => $r['value_id'] === null ? '' : (string) (int) $r['value_id'],
+            'month_key' => (string) ($r['month_key'] ?? ''),
             'code' => (string) $r['code'],
             'name' => (string) $r['name'],
             'account_type' => (string) $r['account_type'],
             'revenue' => (int) round(((float) $r['revenue']) * 100),
             'cost' => (int) round(((float) $r['cost']) * 100),
+            'non_deductible_cost' => (int) round(((float) $r['non_deductible_cost']) * 100),
+            'income_tax_cost' => (int) round(((float) $r['income_tax_cost']) * 100),
         ];
     }
 
@@ -394,6 +513,31 @@ final class DimensionProfitService
             'revenue' => $cents['revenue'] / 100,
             'cost' => $cents['cost'] / 100,
             'result' => ($cents['revenue'] - $cents['cost']) / 100,
+        ];
+    }
+
+    /** @param array<string,mixed> $row */
+    private static function addAnalyticsAmount(array &$sum, array $row): void
+    {
+        foreach (['revenue', 'cost', 'non_deductible_cost', 'income_tax_cost'] as $key) {
+            $sum[$key] = ($sum[$key] ?? 0) + ($row[$key] ?? 0);
+        }
+    }
+
+    /** @param array<string,mixed> $cents */
+    private static function analyticsMoney(array $cents): array
+    {
+        $revenue = (int) ($cents['revenue'] ?? 0);
+        $cost = (int) ($cents['cost'] ?? 0);
+        $nonDeductible = (int) ($cents['non_deductible_cost'] ?? 0);
+        $incomeTax = (int) ($cents['income_tax_cost'] ?? 0);
+        return [
+            'revenue' => $revenue / 100,
+            'cost' => $cost / 100,
+            'result' => ($revenue - $cost) / 100,
+            'tax_deductible_cost' => ($cost - $nonDeductible - $incomeTax) / 100,
+            'non_deductible_cost' => $nonDeductible / 100,
+            'income_tax_cost' => $incomeTax / 100,
         ];
     }
 }

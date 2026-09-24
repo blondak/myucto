@@ -13,7 +13,7 @@ vi.mock('@/api/dimensions', async (importOriginal) => ({
 }))
 
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => m.supplier }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: () => true, canWrite: () => true }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: () => true, canWrite: () => true, hasCommercialFeatures: true }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
 import DimensionPicker from '@/components/dimensions/DimensionPicker.vue'

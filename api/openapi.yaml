@@ -4594,6 +4594,8 @@ paths:
         `pdf_logo_show_name`, `display_name`, `tagline`). Brandingová pole jsou
         původním nastavením dodavatele. Logo se nahrává zvlášť
         (není součástí tohoto endpointu).
+        `dimensions_enabled=true` lze nově nastavit jen během zkušební doby
+        nebo s platnou licencí, která odemyká účetnictví.
       requestBody:
         required: true
         content:
@@ -4608,7 +4610,7 @@ paths:
         '400':
           $ref: '#/components/responses/ValidationFailed'
         '403':
-          description: Uživatel není admin nebo token nemá scope `read_write`
+          description: Uživatel není admin, token nemá scope `read_write` nebo chybí účetní licence pro zapnutí dimenzí
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -10673,6 +10675,66 @@ paths:
           schema: { type: string, enum: [group] }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/reports/dimension-analytics:
+    get:
+      tags: [Accounting]
+      summary: Roční statistika dimenze po měsících, hodnotách a firmách
+      description: |
+        Částky ze zaúčtovaného deníku, stejná metodika jako výsledovka po dimenzi.
+        Firemní typ lze zobrazit jen pro aktuální firmu. Globální typ lze zobrazit
+        pro aktuální firmu, jinou firmu stejné skupiny s účetním přístupem nebo
+        pro součet všech takto přístupných firem (`supplier_id=all`).
+        `monthly` a `previous_monthly` jsou po měsících; `value_monthly` obsahuje
+        měsíční řady za větve nejvyšší úrovně a za řádky bez hodnoty (klíč `""`).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: type_id, required: true, schema: { type: integer } }
+        - { in: query, name: year, required: true, schema: { type: integer, minimum: 2000, maximum: 2100 } }
+        - { in: query, name: supplier_id, schema: { oneOf: [{ type: integer }, { type: string, enum: [all] }] }, description: 'ID přístupné firmy nebo `all` pro skupinu.' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DimensionAnalytics' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/reports/dimension-profit/export:
+    get:
+      tags: [Accounting]
+      summary: Výsledovka po dimenzi jako PDF nebo XLSX
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: type_id, required: true, schema: { type: integer } }
+        - { in: query, name: from, required: true, schema: { type: string, format: date } }
+        - { in: query, name: to, required: true, schema: { type: string, format: date } }
+        - { in: query, name: scope, schema: { type: string, enum: [group] } }
+        - { in: query, name: value_id, schema: { type: integer } }
+        - { in: query, name: responsible_user_id, schema: { type: integer } }
+        - { in: query, name: format, schema: { type: string, enum: [pdf, xlsx], default: xlsx } }
+      responses:
+        '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/reports/dimension-analytics/export:
+    get:
+      tags: [Accounting]
+      summary: Export tabulky statistik dimenzí jako PDF nebo XLSX
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: type_id, required: true, schema: { type: integer } }
+        - { in: query, name: year, required: true, schema: { type: integer, minimum: 2000, maximum: 2100 } }
+        - { in: query, name: supplier_id, schema: { oneOf: [{ type: integer }, { type: string, enum: [all] }] } }
+        - { in: query, name: table, required: true, schema: { type: string, enum: [comparison, companies, monthly] } }
+        - { in: query, name: value_id, schema: { type: string, description: 'ID kořenové hodnoty, total nebo unassigned', default: total } }
+        - { in: query, name: metric, schema: { type: string, enum: [revenue, cost, result], default: result } }
+        - { in: query, name: format, required: true, schema: { type: string, enum: [pdf, xlsx] } }
+      responses:
+        '200': { description: Soubor tabulky, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
@@ -25961,6 +26023,40 @@ components:
           additionalProperties: { type: integer, format: int64 }
           description: "Výchozí dimenze (Firma → Dimenze): id typu → id hodnoty, nejvýš jedna hodnota za typ."
 
+    DimensionAnalyticsAmounts:
+      type: object
+      required: [revenue, cost, result, tax_deductible_cost, non_deductible_cost, income_tax_cost]
+      properties:
+        revenue: { type: number, description: 'Zaúčtované výnosy (třída 6) bez DPH.' }
+        cost: { type: number, description: 'Zaúčtované náklady (třída 5) bez DPH.' }
+        result: { type: number, description: 'Výnosy mínus náklady.' }
+        tax_deductible_cost: { type: number, description: 'Náklady bez nedaňových položek a daně z příjmů.' }
+        non_deductible_cost: { type: number, description: 'Nedaňové náklady podle stejného pravidla jako podklad DPPO/DPFO.' }
+        income_tax_cost: { type: number, description: 'Náklady na účtech 59x, vykázané zvlášť.' }
+
+    DimensionAnalytics:
+      type: object
+      required: [type, year, supplier_ids, rows, unassigned, totals, value_totals, monthly, previous_monthly, value_monthly, companies, company_value_totals, available_companies, hidden_companies]
+      properties:
+        type: { type: object, description: 'Zvolený typ dimenze.' }
+        year: { type: integer }
+        supplier_ids: { type: array, items: { type: integer } }
+        rows: { type: array, items: { type: object }, description: 'Strom hodnot a součty jako u výsledovky po dimenzi.' }
+        unassigned: { $ref: '#/components/schemas/DimensionAnalyticsAmounts' }
+        totals: { $ref: '#/components/schemas/DimensionAnalyticsAmounts' }
+        value_totals: { type: object, description: 'Součty za kořenové hodnoty ID (nebo prázdný klíč).', additionalProperties: { $ref: '#/components/schemas/DimensionAnalyticsAmounts' } }
+        monthly:
+          type: array
+          items: { allOf: [{ $ref: '#/components/schemas/DimensionAnalyticsAmounts' }, { type: object, properties: { month: { type: string, example: '2026-01' } } }] }
+        previous_monthly:
+          type: array
+          items: { allOf: [{ $ref: '#/components/schemas/DimensionAnalyticsAmounts' }, { type: object, properties: { month: { type: string, example: '2025-01' } } }] }
+        value_monthly: { type: object, additionalProperties: { type: array, items: { type: object } } }
+        companies: { type: array, items: { type: object, properties: { id: { type: integer }, name: { type: string }, revenue: { type: number }, cost: { type: number }, result: { type: number }, tax_deductible_cost: { type: number }, non_deductible_cost: { type: number }, income_tax_cost: { type: number } } } }
+        company_value_totals: { type: object, description: 'Firma ID → kořenová hodnota ID (nebo prázdný klíč) → součty.', additionalProperties: { type: object, additionalProperties: { $ref: '#/components/schemas/DimensionAnalyticsAmounts' } } }
+        available_companies: { type: array, items: { type: object, properties: { id: { type: integer }, company_name: { type: string } } } }
+        hidden_companies: { type: integer }
+
     Client:
       type: object
       description: |
@@ -27617,6 +27713,7 @@ components:
         data_box_id: { type: [string, "null"] }
         data_box_type: { type: [string, "null"], enum: [FO, PFO, PO, OVM, null], description: "Druh datové schránky v ISDS; nesouvisí s typem poplatníka." }
         oss_enabled: { type: boolean }
+        dimensions_enabled: { type: boolean, description: "Zapnutí dimenzí vyžaduje platnou licenci účetnictví nebo zkušební dobu. Vypnutí a uložení již zapnuté hodnoty ji nevyžaduje." }
         oss_valid_from: { type: [string, "null"], format: date }
         oss_valid_to: { type: [string, "null"], format: date }
         oss_identification_country: { type: [string, "null"], minLength: 2, maxLength: 2 }
@@ -27692,6 +27789,7 @@ components:
         ic: { type: [string, "null"] }
         dic: { type: [string, "null"] }
         is_vat_payer: { type: boolean, description: "Aktuální stav plátcovství DPH (derivovaná cache dneška); historie změn v `vat_status_history` (tabulka supplier_vat_status_history). Pro rozhodování k datu dokladu/období vždy použij historii, ne tento flag." }
+        dimensions_enabled: { type: boolean, description: "Uložený příznak dimenzí. Dostupnost funkce navíc závisí na platné licenci účetnictví." }
         vat_status_history:
           type: array
           readOnly: true

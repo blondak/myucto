@@ -307,6 +307,33 @@ export interface DimensionProfitParams {
   accounts?: 1
 }
 
+export interface DimensionAnalyticsAmounts extends DimensionProfitAmounts {
+  tax_deductible_cost: number
+  non_deductible_cost: number
+  income_tax_cost: number
+}
+
+export interface DimensionAnalyticsMonth extends DimensionAnalyticsAmounts {
+  month: string
+}
+
+export interface DimensionAnalyticsReport {
+  type: DimensionType
+  year: number
+  supplier_ids: number[]
+  rows: DimensionProfitRow[]
+  unassigned: DimensionAnalyticsAmounts
+  totals: DimensionAnalyticsAmounts
+  value_totals: Record<string, DimensionAnalyticsAmounts>
+  monthly: DimensionAnalyticsMonth[]
+  previous_monthly: DimensionAnalyticsMonth[]
+  value_monthly: Record<string, DimensionAnalyticsMonth[]>
+  companies: Array<{ id: number; name: string } & DimensionAnalyticsAmounts>
+  company_value_totals: Record<string, Record<string, DimensionAnalyticsAmounts>>
+  available_companies: SupplierGroupMember[]
+  hidden_companies: number
+}
+
 export interface DimensionCashFlowAccount {
   account_code: string
   name: string
@@ -427,8 +454,12 @@ export const dimensionsApi = {
 
   profit: (params: DimensionProfitParams) =>
     api.get<DimensionProfitReport>('/accounting/reports/dimension-profit', { params }).then(r => r.data),
-  exportProfit: (params: DimensionProfitParams) =>
-    api.get<Blob>('/accounting/reports/dimension-profit/export', { params, responseType: 'blob' }).then(r => r.data),
+  analytics: (params: { type_id: number; year: number; supplier_id?: number | 'all' }) =>
+    api.get<DimensionAnalyticsReport>('/accounting/reports/dimension-analytics', { params }).then(r => r.data),
+  exportProfit: (params: DimensionProfitParams, format: 'xlsx' | 'pdf' = 'xlsx') =>
+    api.get<Blob>('/accounting/reports/dimension-profit/export', { params: { ...params, format }, responseType: 'blob' }).then(r => r.data),
+  exportAnalytics: (params: { type_id: number; year: number; supplier_id?: number | 'all'; table: 'comparison' | 'companies' | 'monthly'; value_id?: number | 'total' | 'unassigned'; metric?: 'revenue' | 'cost' | 'result'; format: 'xlsx' | 'pdf' }) =>
+    api.get<Blob>('/accounting/reports/dimension-analytics/export', { params, responseType: 'blob' }).then(r => r.data),
   cashFlow: (params: DimensionCashFlowParams) =>
     api.get<DimensionCashFlowReport>('/accounting/reports/dimension-cash-flow', { params }).then(r => r.data),
   exportCashFlow: (params: DimensionCashFlowParams) =>

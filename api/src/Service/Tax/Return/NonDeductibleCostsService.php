@@ -27,6 +27,11 @@ final class NonDeductibleCostsService
 {
     public function __construct(private readonly Connection $db) {}
 
+    public static function predicate(): string
+    {
+        return "(a.account_code NOT LIKE '59%' AND (a.tax_deductibility = 'non_deductible' OR COALESCE(pi.tax_deductible, 1) = 0))";
+    }
+
     public function sum(int $supplierId, string $startsOn, string $endsOn): float
     {
         $stmt = $this->db->pdo()->prepare(
@@ -42,8 +47,7 @@ final class NonDeductibleCostsService
                 AND e.entry_date BETWEEN ? AND ?
                 AND " . JournalTaxOrigin::includedSql() . "
                 AND a.account_type = 'expense'
-                AND a.account_code NOT LIKE '59%'
-                AND (a.tax_deductibility = 'non_deductible' OR COALESCE(pi.tax_deductible, 1) = 0)"
+                AND " . self::predicate()
         );
         $stmt->execute([$supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE]);
         return round((float) $stmt->fetchColumn(), 2);

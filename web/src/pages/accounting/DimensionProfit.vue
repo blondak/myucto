@@ -126,7 +126,7 @@ async function load() {
   }
 }
 
-async function exportXlsx() {
+async function exportFile(format: 'xlsx' | 'pdf') {
   exporting.value = true
   try {
     let blob: Blob
@@ -134,8 +134,8 @@ async function exportXlsx() {
     if (tab.value === 'profit') {
       const params = profitParams()
       if (!params) return
-      blob = await dimensionsApi.exportProfit(params)
-      name = `vysledovka-po-dimenzi-${from.value}.xlsx`
+      blob = await dimensionsApi.exportProfit(params, format)
+      name = `vysledovka-po-dimenzi-${from.value}.${format}`
     } else {
       blob = await dimensionsApi.exportCashFlow(cashFlowParams())
       name = `penezni-tok-po-dimenzi-${from.value}.xlsx`
@@ -205,11 +205,18 @@ function money(v: number) {
         <h1 class="text-2xl font-semibold">{{ t('dimensions.reports_title') }}</h1>
         <p class="text-sm text-neutral-500 mt-1 max-w-3xl">{{ t('dimensions.reports_subtitle') }}</p>
       </div>
-      <button v-if="dims.enabled.value" type="button" :disabled="!report || exporting || loading" :class="btnOutline('primary')" class="whitespace-nowrap"
-              data-test="dimension-export" @click="exportXlsx">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
-        {{ t('dimensions.export_xlsx') }}
-      </button>
+      <div v-if="dims.enabled.value" class="flex flex-wrap gap-2">
+        <button type="button" :disabled="!report || exporting || loading" :class="btnOutline('primary')" class="whitespace-nowrap"
+                data-test="dimension-export" @click="exportFile('xlsx')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+          {{ t('dimensions.export_xlsx') }}
+        </button>
+        <button v-if="tab === 'profit'" type="button" :disabled="!report || exporting || loading" :class="btnOutline('primary')" class="whitespace-nowrap"
+                data-test="dimension-export-pdf" @click="exportFile('pdf')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+          {{ t('dimensions.export_pdf') }}
+        </button>
+      </div>
     </div>
 
     <EmptyState v-if="!dims.enabled.value" boxed icon="tag" :title="t('dimensions.disabled_title')" :message="t('dimensions.disabled_hint')" />

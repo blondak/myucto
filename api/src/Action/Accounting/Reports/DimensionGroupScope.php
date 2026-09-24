@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Accounting\Reports;
 
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Automation\AutomationFeedService;
+use MyInvoice\Service\Tenant\TenantDomainContext;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
@@ -34,6 +37,9 @@ trait DimensionGroupScope
             return [$supplierIds, 0];
         }
         $members = array_column($dimensions->groupMembers((int) $type['supplier_group_id']), 'id');
+        if (self::isSupplierBoundRequest($request)) {
+            return [[$supplierId], count(array_diff($members, [$supplierId]))];
+        }
         $allowed = $feed->allowedSupplierIds((int) ($this->userId($request) ?? 0), RequestAuthorization::isSuperadmin($request));
         foreach ($members as $member) {
             if ($member === $supplierId) {
@@ -46,6 +52,16 @@ trait DimensionGroupScope
             }
         }
         return [$supplierIds, $hidden];
+    }
+
+    protected static function isSupplierBoundRequest(Request $request): bool
+    {
+        $token = $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN);
+        if (is_array($token) && ($token['supplier_id'] ?? null) !== null) {
+            return true;
+        }
+        $domain = $request->getAttribute(TenantDomainMiddleware::ATTR_CONTEXT);
+        return $domain instanceof TenantDomainContext && $domain->locksSupplier();
     }
 
     private static function isReportDate(string $v): bool

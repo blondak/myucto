@@ -878,6 +878,9 @@
       "other_items",
       "purchase_invoice"
     ],
+    "dimension-stats": [
+      "dimensions"
+    ],
     "bank-statements": [
       "activation",
       "automation",
@@ -936,6 +939,7 @@
       "activation",
       "automation",
       "company_profile",
+      "dimensions",
       "domains",
       "invoice_default_note",
       "settings",

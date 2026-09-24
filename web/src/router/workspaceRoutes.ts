@@ -318,6 +318,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'logbook',                name: 'logbook',          component: () => import('@/pages/logbook/LogbookPage.vue') },
       { path: 'stats',                  name: 'stats',           component: () => import('@/pages/Stats.vue') },
       { path: 'purchase-stats',         name: 'purchase-stats',  component: () => import('@/pages/PurchaseStats.vue') },
+      { path: 'dimension-stats',         name: 'dimension-stats', component: () => import('@/pages/DimensionStats.vue'), meta: { requiresDoubleEntry: true } },
       // Sjednocená stránka „Bankovní účty" (Finance): výpisy + měny/účty + stavy + avíza.
       // Pravidla účtování (bank posting rules) se přesunula pod Šablony (záložka „Pravidla
       // účtování"), vedle Pravidel nákladů — jednotné místo pro všechna pravidla/šablony.

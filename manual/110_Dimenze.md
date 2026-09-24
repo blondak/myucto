@@ -248,8 +248,26 @@ projektu nechá pohledávku projektu v rozvaze otevřenou.
 
 ### Výkazy po dimenzi
 
+V menu **Grafy → Dimenze** je roční statistika za zvolený typ dimenze. Ukazuje
+zaúčtované výnosy, náklady, zisk nebo ztrátu, ziskovou marži, podíl částek
+přiřazených k hodnotě a částky bez hodnoty. Graf sleduje měsíční vývoj a
+srovnává celý typ s minulým rokem; další graf porovnává kumulovaný zisk.
+Tabulka porovnává hodnoty dimenze mezi sebou. Kliknutím na hodnotu vyfiltrujete
+karty, měsíční vývoj a spodní tabulku. Nulové hodnoty se v tabulkách nevypisují.
+Každá tabulka končí řádkem **Celkem** a má vlastní export do XLSX a PDF.
+Export porovnání hodnot zahrnuje všechny nenulové hodnoty, export po firmách a
+měsících respektuje právě zvolenou hodnotu dimenze.
+U globální dimenze se jako výchozí zobrazí součet všech firem, ke kterým má
+uživatel účetní přístup; lze vybrat i konkrétní firmu skupiny. Součet za skupinu
+obsahuje také tabulku po firmách, která se řídí zvolenou hodnotou dimenze.
+Čísla vycházejí ze zaúčtovaného deníku a používají stejná pravidla jako
+výsledovka po dimenzi, včetně poměrného rozdělení řádků. Pokud jsou evidované
+nedaňové náklady, sestava je oddělí od daňově uznatelných podle pravidla
+podkladů DPPO/DPFO: nedaňový účet nebo nedaňová přijatá faktura. Daň z příjmů
+na účtech 59x se vykazuje zvlášť, aby se nemíchala s oběma skupinami nákladů.
+
 Menu **Účetnictví → Výkazy po dimenzi** má dvě záložky. Tlačítko **Export XLSX**
-stáhne aktivní záložku.
+stáhne aktivní záložku. Výsledovku lze stáhnout také jako PDF.
 
 **Výsledovka** ukáže pro hodnoty jednoho typu výnosy, náklady a výsledek.
 Nadřízená hodnota sčítá celou větev, řádek **Bez hodnoty** doplní součet do
@@ -292,6 +310,11 @@ všechny firmy skupiny**. Sečtou se firmy skupiny, ke kterým máte účetní p
 Firmy, ke kterým přístup nemáte, se nesečtou a sestava uvede jen jejich počet.
 
 ## Oprávnění
+
+Dimenze jsou součástí licencovaného účetnictví. Lze je zapnout a používat během
+zkušební doby nebo s platnou licencí, která odemyká účetní modul. Po jejím
+skončení zůstane nastavení firmy uložené, ale dimenze se nezobrazí a nelze s nimi
+pracovat, dokud nebude licence znovu platná.
 
 Číselník dimenzí a výběry na dokladech vidí uživatel s právem číst účetnictví,
 měnit je smí uživatel s právem zápisu do účetnictví. Zapnutí dimenzí patří

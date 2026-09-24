@@ -47,7 +47,7 @@ const expanded = ref<Set<number>>(new Set())
 
 const canWrite = computed(() => auth.canWrite('accounting'))
 const canManageCompany = computed(() => auth.canWrite('settings.company.write') && auth.isCompanyAdminRole)
-const enabled = computed(() => supplierStore.currentSupplier?.dimensions_enabled === true)
+const enabled = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.dimensions_enabled === true)
 const group = computed(() => dims.overview.value?.group ?? null)
 const typesOfLevel = computed(() => dims.types.value.filter(ty => ty.level === level.value))
 const selectedType = computed(() => dims.types.value.find(ty => ty.id === selectedTypeId.value) ?? null)
@@ -391,9 +391,10 @@ function valueCount(typeId: number) {
     </div>
 
     <EmptyState v-if="!enabled" boxed icon="tag"
-      :title="t('dimensions.disabled_title')"
-      :message="t('dimensions.disabled_hint')"
-      :cta="canManageCompany ? t('dimensions.enable') : undefined"
+      :title="t(auth.hasCommercialFeatures ? 'dimensions.disabled_title' : 'dimensions.license_title')"
+      :message="t(auth.hasCommercialFeatures ? 'dimensions.disabled_hint' : 'dimensions.license_hint')"
+      :cta="!auth.hasCommercialFeatures ? t('dimensions.license_cta') : canManageCompany ? t('dimensions.enable') : undefined"
+      :to="!auth.hasCommercialFeatures ? '/activation/purchase' : undefined"
       @action="enable" />
 
     <template v-else>

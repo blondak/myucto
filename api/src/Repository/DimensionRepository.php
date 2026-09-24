@@ -65,6 +65,13 @@ final class DimensionRepository
         return (int) $stmt->fetchColumn() === 1;
     }
 
+    public function supplierName(int $supplierId): string
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT COALESCE(NULLIF(display_name, ''), company_name) FROM supplier WHERE id = ?");
+        $stmt->execute([$supplierId]);
+        return (string) ($stmt->fetchColumn() ?: '');
+    }
+
     public function setEnabled(int $supplierId, bool $enabled): void
     {
         $this->db->pdo()->prepare('UPDATE supplier SET dimensions_enabled = ? WHERE id = ?')

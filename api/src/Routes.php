@@ -2326,6 +2326,8 @@ final class Routes
             $g->put   ('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'update']);
             $g->delete('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'delete']);
             $g->get('/reports/dimension-profit',                  \MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class);
+            $g->get('/reports/dimension-analytics',               [\MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class, 'analytics']);
+            $g->get('/reports/dimension-analytics/export',        [\MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class, 'exportAnalytics']);
             $g->get('/reports/dimension-profit/export',           [\MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class, 'export']);
             $g->get('/reports/dimension-cash-flow',               \MyInvoice\Action\Accounting\Reports\DimensionCashFlowAction::class);
             $g->get('/reports/dimension-cash-flow/export',        [\MyInvoice\Action\Accounting\Reports\DimensionCashFlowAction::class, 'export']);
