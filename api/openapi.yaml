@@ -10673,8 +10673,12 @@ paths:
           name: scope
           description: '`group` u globálního typu sečte firmy skupiny, ke kterým má uživatel účetní přístup.'
           schema: { type: string, enum: [group] }
+        - { in: query, name: value_id, schema: { type: integer }, description: 'Omezí sestavu na větev hodnoty dimenze.' }
+        - { in: query, name: responsible_user_id, schema: { type: integer } }
+        - { in: query, name: accounts, schema: { type: integer, enum: [1] }, description: 'Přidá rozpad po účtech.' }
+        - { in: query, name: companies, schema: { type: integer, enum: [1] }, description: 'Přidá rozpad součtu po přístupných firmách.' }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object } } } }
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DimensionProfitReport' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
@@ -10712,6 +10716,7 @@ paths:
         - { in: query, name: scope, schema: { type: string, enum: [group] } }
         - { in: query, name: value_id, schema: { type: integer } }
         - { in: query, name: responsible_user_id, schema: { type: integer } }
+        - { in: query, name: companies, schema: { type: integer, enum: [1] }, description: 'Přidá list Po firmách do XLSX a tabulku do PDF.' }
         - { in: query, name: format, schema: { type: string, enum: [pdf, xlsx], default: xlsx } }
       responses:
         '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
@@ -26022,6 +26027,42 @@ components:
           type: object
           additionalProperties: { type: integer, format: int64 }
           description: "Výchozí dimenze (Firma → Dimenze): id typu → id hodnoty, nejvýš jedna hodnota za typ."
+
+    DimensionProfitAmounts:
+      type: object
+      required: [revenue, cost, result]
+      properties:
+        revenue: { type: number }
+        cost: { type: number }
+        result: { type: number }
+
+    DimensionProfitCompany:
+      type: object
+      required: [id, name, revenue, cost, result]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        revenue: { type: number }
+        cost: { type: number }
+        result: { type: number }
+
+    DimensionProfitReport:
+      type: object
+      required: [type, from, to, supplier_ids, rows, unassigned, totals]
+      properties:
+        type: { type: object, description: 'Zvolený typ dimenze.' }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        supplier_ids: { type: array, items: { type: integer } }
+        hidden_companies: { type: integer }
+        value_id: { type: [integer, 'null'] }
+        responsible_user_id: { type: [integer, 'null'] }
+        restricted: { type: boolean }
+        rows: { type: array, items: { type: object }, description: 'Strom hodnot s vlastními a souhrnnými částkami.' }
+        unassigned: { $ref: '#/components/schemas/DimensionProfitAmounts' }
+        totals: { $ref: '#/components/schemas/DimensionProfitAmounts' }
+        matrix: { type: object, description: 'Rozpad po účtech při accounts=1.' }
+        companies: { type: array, items: { $ref: '#/components/schemas/DimensionProfitCompany' }, description: 'Součty po přístupných firmách při companies=1.' }
 
     DimensionAnalyticsAmounts:
       type: object

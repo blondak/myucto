@@ -1320,6 +1320,30 @@ final class ReportXlsxExporter
             $this->finishTable($ms, $mh, $r, $cols, 3);
         }
 
+        if (!empty($data['companies'])) {
+            $cs = $ss->createSheet();
+            $cs->setTitle('Po firmách');
+            $cs->setCellValue('A1', 'VÝSLEDOVKA PO FIRMÁCH ' . $typeName . ' za ' . $this->czDate($from) . ' – ' . $this->czDate($to));
+            $cs->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+            $head = 3;
+            $this->headerRow($cs, $head, ['Firma', 'Výnosy', 'Náklady', 'Výsledek']);
+            $r = $head + 1;
+            foreach ($data['companies'] as $company) {
+                if (abs((float) $company['revenue']) < 0.005 && abs((float) $company['cost']) < 0.005) continue;
+                $cs->setCellValueExplicit([1, $r], (string) $company['name'], DataType::TYPE_STRING);
+                $cs->setCellValue([2, $r], (float) $company['revenue']);
+                $cs->setCellValue([3, $r], (float) $company['cost']);
+                $cs->setCellValue([4, $r], (float) $company['result']);
+                $r++;
+            }
+            $cs->setCellValue([1, $r], 'Celkem');
+            $cs->setCellValue([2, $r], (float) $data['totals']['revenue']);
+            $cs->setCellValue([3, $r], (float) $data['totals']['cost']);
+            $cs->setCellValue([4, $r], (float) $data['totals']['result']);
+            $this->boldRow($cs, $r, 4);
+            $this->finishTable($cs, $head, $r, 4, 2);
+        }
+
         return $this->out($ss, 'vysledovka-po-dimenzi-' . $from . '.xlsx');
     }
 

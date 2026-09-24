@@ -294,6 +294,7 @@ export interface DimensionProfitReport {
   rows: DimensionProfitRow[]
   unassigned: DimensionProfitAmounts
   totals: DimensionProfitAmounts
+  companies?: (DimensionProfitAmounts & { id: number; name: string })[]
   matrix?: DimensionProfitMatrix
 }
 
@@ -305,6 +306,7 @@ export interface DimensionProfitParams {
   value_id?: number
   responsible_user_id?: number
   accounts?: 1
+  companies?: 1
 }
 
 export interface DimensionAnalyticsAmounts extends DimensionProfitAmounts {

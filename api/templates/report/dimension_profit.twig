@@ -10,6 +10,7 @@ h2 { font-size: 11pt; margin-top: 7mm; }
 table { width: 100%; border-collapse: collapse; }
 th { text-align: right; color: #555; border-bottom: 0.5pt solid #999; padding: 1.5mm; }
 th:first-child, th:nth-child(2), th:nth-child(3) { text-align: left; }
+.companies th:not(:first-child) { text-align: right; }
 td { border-bottom: 0.2pt solid #ddd; padding: 1.3mm 1.5mm; vertical-align: top; }
 .num { text-align: right; }
 .total td { font-weight: bold; border-top: 0.5pt solid #333; }
@@ -37,6 +38,20 @@ td { border-bottom: 0.2pt solid #ddd; padding: 1.3mm 1.5mm; vertical-align: top;
 <tr class="total"><td></td><td>Celkem</td><td></td><td class="num">{{ totals.revenue|cz_money }}</td><td class="num">{{ totals.cost|cz_money }}</td><td class="num {{ totals.result > 0 ? 'positive' : (totals.result < 0 ? 'negative' : '') }}">{{ totals.result|cz_money }}</td></tr>
 </tbody>
 </table>
+{% if companies is defined and companies %}
+<h2>Rozpad po firmách</h2>
+<table class="companies">
+<thead><tr><th>Firma</th><th>Výnosy</th><th>Náklady</th><th>Zisk / ztráta</th></tr></thead>
+<tbody>
+{% for company in companies %}
+{% if company.revenue != 0 or company.cost != 0 %}
+<tr><td>{{ company.name }}</td><td class="num">{{ company.revenue|cz_money }}</td><td class="num">{{ company.cost|cz_money }}</td><td class="num {{ company.result > 0 ? 'positive' : (company.result < 0 ? 'negative' : '') }}">{{ company.result|cz_money }}</td></tr>
+{% endif %}
+{% endfor %}
+<tr class="total"><td>Celkem</td><td class="num">{{ totals.revenue|cz_money }}</td><td class="num">{{ totals.cost|cz_money }}</td><td class="num {{ totals.result > 0 ? 'positive' : (totals.result < 0 ? 'negative' : '') }}">{{ totals.result|cz_money }}</td></tr>
+</tbody>
+</table>
+{% endif %}
 {% if matrix is defined and matrix %}
 <h2>Rozpad po účtech</h2>
 <table>

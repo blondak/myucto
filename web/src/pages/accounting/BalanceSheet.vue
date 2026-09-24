@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   accountingApi,
   type AccountingPeriod,
@@ -18,8 +18,11 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportLinks from '@/components/dimensions/DimensionReportLinks.vue'
 
 const { t, locale } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const toast = useToast()
 
 // Klientský přepínač Kč / tis. Kč (F4 R17) — jen formátování při renderu, data beze změny.
@@ -35,6 +38,7 @@ const periods = ref<AccountingPeriod[]>([])
 const report = ref<BalanceSheetReport | null>(null)
 const category = ref<EntityCategory | null>(null)
 const loading = ref(false)
+const rangeAdjusted = ref(false)
 
 const filters = reactive({
   period_id: '' as number | '',
@@ -43,6 +47,7 @@ const filters = reactive({
   dimension_value_id: null as number | null,
   dimension_descendants: true,
 })
+const selectedPeriod = computed(() => findAccountingPeriod(periods.value, filters.period_id))
 
 function queryParams() {
   return {
@@ -80,6 +85,16 @@ async function load() {
     } else {
       category.value = null
     }
+    void router.replace({ query: {
+      period_id: String(filters.period_id),
+      from: selectedPeriod.value?.starts_on ?? '',
+      to: filters.as_of || selectedPeriod.value?.ends_on || '',
+      ...(filters.scope !== 'auto' ? { scope: filters.scope } : {}),
+      ...(filters.dimension_value_id ? {
+        dimension_value_id: String(filters.dimension_value_id),
+        dimension_descendants: filters.dimension_descendants ? '1' : '0',
+      } : {}),
+    } })
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
     report.value = null
@@ -89,6 +104,7 @@ async function load() {
 }
 
 function onPeriodChange() {
+  rangeAdjusted.value = false
   const period = findAccountingPeriod(periods.value, filters.period_id)
   if (!period) return
   filters.as_of = period.ends_on
@@ -138,8 +154,23 @@ onMounted(async () => {
   const def = open.length
     ? open.reduce((a, b) => (b.fiscal_year > a.fiscal_year ? b : a))
     : periods.value[0]
-  if (def) {
-    filters.period_id = def.id
+  const q = route.query
+  const fromQuery = typeof q.from === 'string' ? q.from : ''
+  const toQuery = typeof q.to === 'string' ? q.to : ''
+  const queryPeriod = periods.value.find(p => p.starts_on <= fromQuery && p.ends_on >= toQuery)
+  const explicitPeriod = periods.value.find(p => p.id === Number(q.period_id))
+  const selectedPeriod = explicitPeriod ?? queryPeriod
+    ?? periods.value.find(p => p.starts_on <= toQuery && p.ends_on >= toQuery)
+    ?? periods.value.find(p => p.starts_on <= fromQuery && p.ends_on >= fromQuery)
+    ?? def
+  if (selectedPeriod) {
+    rangeAdjusted.value = !!fromQuery && !!toQuery && !queryPeriod
+    filters.period_id = selectedPeriod.id
+    if (typeof q.scope === 'string' && ['auto', 'full', 'small', 'micro'].includes(q.scope)) filters.scope = q.scope as StatementScope
+    if (toQuery && toQuery >= selectedPeriod.starts_on && toQuery <= selectedPeriod.ends_on) filters.as_of = toQuery
+    const valueId = Number(q.dimension_value_id)
+    if (Number.isSafeInteger(valueId) && valueId > 0) filters.dimension_value_id = valueId
+    filters.dimension_descendants = q.dimension_descendants !== '0'
     await load()
   }
 })
@@ -187,7 +218,7 @@ onMounted(async () => {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.balance_sheet.filter_as_of') }}</label>
-          <DateInput v-model="filters.as_of" @change="load"
+          <DateInput v-model="filters.as_of" @change="rangeAdjusted = false; load()"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
@@ -210,6 +241,9 @@ onMounted(async () => {
         :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
         @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
     </div>
+    <DimensionReportLinks current="balance" :from="selectedPeriod?.starts_on ?? ''" :to="filters.as_of || selectedPeriod?.ends_on || ''"
+      :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants" />
+    <p v-if="rangeAdjusted" class="mb-3 rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs text-warning-700" data-test="balance-range-adjusted">{{ t('dimensions.balance_range_adjusted') }}</p>
     <p v-if="report?.dimension" class="mb-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800" data-test="balance-dimension-note">
       {{ t('dimensions.balance_filter_note') }}
     </p>
