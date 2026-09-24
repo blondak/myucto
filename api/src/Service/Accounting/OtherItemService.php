@@ -38,7 +38,17 @@ final class OtherItemService
     public function create(int $supplierId, array $input, ?int $userId): array
     {
         $data = $this->normalize($supplierId, $input);
-        $id = $this->items->insert($supplierId, $data, $userId);
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            $id = $this->items->insert($supplierId, $data, $userId);
+            $this->items->replacePostingLines($supplierId, $id, $data['posting_lines']);
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
         return $this->get($supplierId, $id);
     }
 
@@ -65,6 +75,7 @@ final class OtherItemService
                 throw new OtherItemException('installment_date', 'Datum vzniku musí předcházet první splátce.', 409);
             }
             $this->items->updateDraft($supplierId, $id, $data, $userId);
+            $this->items->replacePostingLines($supplierId, $id, $data['posting_lines']);
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -122,21 +133,20 @@ final class OtherItemService
             );
             $entryId = null;
             if ($doubleEntry) {
-                $counter = trim((string) ($item['counter_account_code'] ?? ''));
-                if ($counter === '') {
+                $postingLines = $item['posting_lines'];
+                if ($postingLines === []) {
                     throw new OtherItemException('counter_account_required', 'Před zaúčtováním vyberte protiúčet.');
                 }
                 $account = (string) ($item['account_code'] ?: ($item['side'] === 'receivable' ? '315' : '325'));
-                if ($account === $counter) {
-                    throw new OtherItemException('same_accounts', 'Účet pohledávky nebo závazku a protiúčet musí být různé.');
-                }
+                $this->assertPostingAccounts($account, $postingLines);
                 $this->assertBalanceAccount($supplierId, $account, (string) $item['side']);
                 $amount = (float) $item['amount_czk'];
                 $receivable = $item['side'] === 'receivable';
-                $lines = [
-                    ['account_code' => $account, 'side' => $receivable ? 'debit' : 'credit', 'amount' => $amount],
-                    ['account_code' => $counter, 'side' => $receivable ? 'credit' : 'debit', 'amount' => $amount],
-                ];
+                $lines = [['account_code' => $account, 'side' => $receivable ? 'debit' : 'credit', 'amount' => $amount]];
+                foreach ($postingLines as $line) {
+                    $lines[] = ['account_code' => $line['account_code'],
+                        'side' => $receivable ? 'credit' : 'debit', 'amount' => $line['amount']];
+                }
                 $entryId = $this->posting->postDocument($supplierId, 'other_item', $id, $lines, [
                     'entry_date' => (string) ($item['accounting_on'] ?: $item['issued_on']),
                     'document_date' => (string) $item['issued_on'],
@@ -205,7 +215,7 @@ final class OtherItemService
             throw new OtherItemException('reason_required', 'Uveďte důvod přeúčtování (alespoň 3 znaky).');
         }
         self::assertDate($date, 'entry_date');
-        if ($counter === '' || strlen($counter) > 20 || strlen($account) > 20) {
+        if (strlen($counter) > 20 || strlen($account) > 20) {
             throw new OtherItemException('invalid_account', 'Vyberte platný účet a protiúčet.');
         }
         $pdo = $this->db->pdo();
@@ -221,12 +231,17 @@ final class OtherItemService
                 throw new OtherItemException('has_payments', 'Doklad má spárované úhrady. Nejprve je odpojte.', 409);
             }
             $account = $account ?: (string) ($item['account_code'] ?: ($item['side'] === 'receivable' ? '315' : '325'));
-            if ($account === $counter) {
-                throw new OtherItemException('same_accounts', 'Účet pohledávky nebo závazku a protiúčet musí být různé.');
+            $postingLines = array_key_exists('posting_lines', $input)
+                ? $this->normalizePostingLines($input['posting_lines'], (float) $item['amount_czk'])
+                : ($counter !== '' ? [['account_code' => $counter, 'amount' => (float) $item['amount_czk']]]
+                    : $item['posting_lines']);
+            if ($postingLines === []) {
+                throw new OtherItemException('counter_account_required', 'Před přeúčtováním vyberte protiúčet.');
             }
+            $this->assertPostingAccounts($account, $postingLines);
             $this->assertBalanceAccount($supplierId, $account, (string) $item['side']);
             if ($account === (string) ($item['account_code'] ?: ($item['side'] === 'receivable' ? '315' : '325'))
-                && $counter === (string) $item['counter_account_code']) {
+                && $postingLines === $item['posting_lines']) {
                 throw new OtherItemException('unchanged_accounts', 'Změňte alespoň jeden účet.');
             }
             $reversalId = $this->posting->reverse($supplierId, (int) $item['journal_entry_id'], [
@@ -235,15 +250,20 @@ final class OtherItemService
             ]);
             $receivable = $item['side'] === 'receivable';
             $amount = (float) $item['amount_czk'];
-            $entryId = $this->posting->postDocument($supplierId, 'other_item', $id, [
-                ['account_code' => $account, 'side' => $receivable ? 'debit' : 'credit', 'amount' => $amount],
-                ['account_code' => $counter, 'side' => $receivable ? 'credit' : 'debit', 'amount' => $amount],
-            ], [
+            $lines = [['account_code' => $account, 'side' => $receivable ? 'debit' : 'credit', 'amount' => $amount]];
+            foreach ($postingLines as $line) {
+                $lines[] = ['account_code' => $line['account_code'],
+                    'side' => $receivable ? 'credit' : 'debit', 'amount' => $line['amount']];
+            }
+            $entryId = $this->posting->postDocument($supplierId, 'other_item', $id, $lines, [
                 'entry_date' => $date, 'document_date' => (string) $item['issued_on'],
                 'document_no' => (string) $item['document_no'], 'description' => (string) $item['title'],
                 'posted' => true, 'user_id' => $userId, 'posted_by' => $userId,
             ]);
-            $this->items->setReposted($supplierId, $id, $account, $counter, $date, $entryId, $reversalId, $userId);
+            $this->items->setReposted($supplierId, $id, $account,
+                count($postingLines) === 1 ? $postingLines[0]['account_code'] : null,
+                $date, $entryId, $reversalId, $userId);
+            $this->items->replacePostingLines($supplierId, $id, $postingLines);
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -607,6 +627,42 @@ final class OtherItemService
         }
     }
 
+    private function assertPostingAccounts(string $settlementAccount, array $postingLines): void
+    {
+        foreach ($postingLines as $line) {
+            $code = $line['account_code'];
+            if ($code === $settlementAccount || preg_match('/^(315|325)(?:$|[.\-])/', $code)) {
+                throw new OtherItemException('same_accounts', 'Saldokontní účet smí být pouze na straně pohledávky nebo závazku.');
+            }
+        }
+    }
+
+    private function normalizePostingLines(mixed $raw, float $total): array
+    {
+        if (!is_array($raw) || !array_is_list($raw) || count($raw) < 1 || count($raw) > 50) {
+            throw new OtherItemException('invalid_posting_lines', 'Zadejte 1 až 50 protiřádků.');
+        }
+        $lines = [];
+        $sum = 0;
+        foreach ($raw as $row) {
+            if (!is_array($row)) {
+                throw new OtherItemException('invalid_posting_lines', 'Neplatný řádek kontace.');
+            }
+            $code = trim((string) ($row['account_code'] ?? ''));
+            $amount = filter_var($row['amount'] ?? null, FILTER_VALIDATE_FLOAT);
+            if ($code === '' || strlen($code) > 20 || $amount === false || !is_finite((float) $amount)
+                || $amount <= 0 || round((float) $amount, 2) !== (float) $amount) {
+                throw new OtherItemException('invalid_posting_lines', 'Každý protiřádek potřebuje účet a kladnou částku na haléře.');
+            }
+            $sum += (int) round((float) $amount * 100);
+            $lines[] = ['account_code' => $code, 'amount' => round((float) $amount, 2)];
+        }
+        if ($sum !== (int) round($total * 100)) {
+            throw new OtherItemException('posting_lines_total', 'Součet protiřádků musí odpovídat celé částce dokladu.');
+        }
+        return $lines;
+    }
+
     private function normalize(int $supplierId, array $input): array
     {
         $side = (string) ($input['side'] ?? '');
@@ -656,6 +712,12 @@ final class OtherItemService
         if (strlen($account) > 20 || strlen($counter) > 20) {
             throw new OtherItemException('invalid_account', 'Neplatný kód účtu.');
         }
+        $postingLines = array_key_exists('posting_lines', $input)
+            ? $this->normalizePostingLines($input['posting_lines'], round((float) $amount * $rate, 2))
+            : [];
+        if ($postingLines !== []) {
+            $counter = count($postingLines) === 1 ? $postingLines[0]['account_code'] : '';
+        }
         return [
             'side' => $side, 'kind' => $kind, 'title' => $title,
             'partner_id' => $partnerId,
@@ -666,6 +728,7 @@ final class OtherItemService
             'variable_symbol' => $vs === '' ? null : $vs,
             'account_code' => $account === '' ? null : $account,
             'counter_account_code' => $counter === '' ? null : $counter,
+            'posting_lines' => $postingLines,
             'note' => self::optional($input['note'] ?? null, 10000),
         ];
     }

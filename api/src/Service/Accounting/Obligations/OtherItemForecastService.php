@@ -75,10 +75,14 @@ final class OtherItemForecastService
     public function resultImpact(int $supplierId, string $from, string $toExclusive): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT oi.currency, oi.side, oi.amount, oi.amount_czk, a.account_type
+            'SELECT oi.currency, oi.side,
+                    COALESCE(line.amount, oi.amount) amount,
+                    COALESCE(line.amount, oi.amount_czk) amount_czk, a.account_type
                FROM other_items oi
+          LEFT JOIN other_item_posting_lines line ON line.supplier_id = oi.supplier_id
+                AND line.other_item_id = oi.id
                JOIN chart_of_accounts a ON a.supplier_id = oi.supplier_id
-                AND a.account_code = oi.counter_account_code AND a.is_active = 1
+                AND a.account_code = COALESCE(line.account_code, oi.counter_account_code) AND a.is_active = 1
               WHERE oi.supplier_id = ? AND oi.deleted_at IS NULL AND oi.status = \'draft\'
                 AND oi.accounting_on >= ? AND oi.accounting_on < ?
                 AND a.account_type IN (\'revenue\',\'expense\')'

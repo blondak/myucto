@@ -73,6 +73,25 @@ final class OtherItemScheduleServiceTest extends TestCase
         self::assertSame(3, (int) $stmt->fetchColumn());
     }
 
+    public function testRecurringDraftCopiesSplitPostingLinesWithoutPosting(): void
+    {
+        $first = $this->items->create($this->supplierId, $this->input([
+            'counter_account_code' => null,
+            'posting_lines' => [
+                ['account_code' => '518', 'amount' => 700],
+                ['account_code' => '378', 'amount' => 500],
+            ],
+        ]), null);
+        $schedule = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        $created = $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-02-28', null)['created_ids'];
+        self::assertCount(1, $created);
+        $next = $this->items->get($this->supplierId, $created[0]);
+        self::assertSame('draft', $next['status']);
+        self::assertNull($next['counter_account_code']);
+        self::assertSame($first['posting_lines'], $next['posting_lines']);
+        self::assertNull($next['journal_entry_id']);
+    }
+
     public function testTenantBoundaryAndPauseBlockGeneration(): void
     {
         $first = $this->items->create($this->supplierId, $this->input(), null);

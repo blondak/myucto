@@ -75,6 +75,97 @@ final class OtherItemServiceTest extends TestCase
         self::assertSame(['325:debit:1200.00', '518:credit:1200.00'], $this->lines((int) $reversed['reversal_entry_id']));
     }
 
+    public function testSplitPostingKeepsOneSettlementAccountAndForecastsOnlyExpenseLines(): void
+    {
+        $draft = $this->service->create($this->supplierId, $this->input([
+            'counter_account_code' => null,
+            'posting_lines' => [
+                ['account_code' => '518', 'amount' => 700.25],
+                ['account_code' => '378', 'amount' => 499.75],
+            ],
+        ]), null);
+        self::assertNull($draft['counter_account_code']);
+        self::assertCount(2, $draft['posting_lines']);
+        $forecast = (new OtherItemForecastService($this->db))->resultImpact($this->supplierId, '2099-01-01', '2100-01-01');
+        self::assertSame(700.25, $forecast[0]['costs']);
+
+        $posted = $this->service->post($this->supplierId, (int) $draft['id'], null);
+        self::assertSame(['325:credit:1200.00', '518:debit:700.25', '378:debit:499.75'],
+            $this->lines((int) $posted['journal_entry_id']));
+    }
+
+    public function testSplitRepostReversesOriginalLinesAndPreservesDocumentNumber(): void
+    {
+        $draft = $this->service->create($this->supplierId, $this->input([
+            'posting_lines' => [
+                ['account_code' => '518', 'amount' => 700],
+                ['account_code' => '378', 'amount' => 500],
+            ],
+        ]), null);
+        $posted = $this->service->post($this->supplierId, (int) $draft['id'], null);
+        $changed = $this->service->repost($this->supplierId, (int) $draft['id'], [
+            'entry_date' => '2099-01-02', 'reason' => 'Oprava rozdělení částek',
+            'posting_lines' => [
+                ['account_code' => '518', 'amount' => 600],
+                ['account_code' => '511', 'amount' => 600],
+            ],
+        ], null);
+        self::assertSame($posted['document_no'], $changed['document_no']);
+        self::assertSame(['325:credit:1200.00', '518:debit:600.00', '511:debit:600.00'],
+            $this->lines((int) $changed['journal_entry_id']));
+        self::assertSame(['325:debit:1200.00', '518:credit:700.00', '378:credit:500.00'],
+            $this->lines((int) $changed['reversal_entry_id']));
+        self::assertSame(2, count($changed['posting_lines']));
+        self::assertNull($changed['counter_account_code']);
+    }
+
+    public function testSplitPostingRejectsMismatchedCentsAndAdditionalSettlementAccount(): void
+    {
+        try {
+            $this->service->create($this->supplierId, $this->input([
+                'posting_lines' => [
+                    ['account_code' => '518', 'amount' => 700],
+                    ['account_code' => '378', 'amount' => 499.99],
+                ],
+            ]), null);
+            self::fail('Rozdíl jednoho haléře se nesmí zaokrouhlit.');
+        } catch (OtherItemException $e) {
+            self::assertSame('posting_lines_total', $e->errorCode);
+        }
+        $draft = $this->service->create($this->supplierId, $this->input([
+            'posting_lines' => [['account_code' => '315', 'amount' => 1200]],
+        ]), null);
+        try {
+            $this->service->post($this->supplierId, (int) $draft['id'], null);
+            self::fail('Druhý saldokontní účet by vytvořil paralelní závazek.');
+        } catch (OtherItemException $e) {
+            self::assertSame('same_accounts', $e->errorCode);
+        }
+    }
+
+    public function testDraftUpdateReplacesSplitLinesAndLegacyItemHasSyntheticLine(): void
+    {
+        $legacy = $this->service->create($this->supplierId, $this->input(), null);
+        self::assertSame([['account_code' => '518', 'amount' => 1200.0]], $legacy['posting_lines']);
+
+        $changed = $this->service->update($this->supplierId, (int) $legacy['id'], $this->input([
+            'posting_lines' => [
+                ['account_code' => '518', 'amount' => 800],
+                ['account_code' => '378', 'amount' => 400],
+            ],
+        ]), null);
+        self::assertNull($changed['counter_account_code']);
+        self::assertSame([
+            ['account_code' => '518', 'amount' => 800.0],
+            ['account_code' => '378', 'amount' => 400.0],
+        ], $changed['posting_lines']);
+        $oneLine = $this->service->update($this->supplierId, (int) $legacy['id'], $this->input([
+            'counter_account_code' => '511',
+        ]), null);
+        self::assertSame('511', $oneLine['counter_account_code']);
+        self::assertSame([['account_code' => '511', 'amount' => 1200.0]], $oneLine['posting_lines']);
+    }
+
     public function testTaxEvidenceConfirmsWithoutJournal(): void
     {
         $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")
