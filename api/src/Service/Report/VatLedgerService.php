@@ -727,6 +727,15 @@ final class VatLedgerService
         // Sdílený výraz → WHERE (BETWEEN) i ORDER BY jsou vždy konzistentní.
         $periodExpr = self::purchaseClaimDateExpr();
 
+        // Předfiltr odvozené tabulky položek. Období odpočtu je vždy jedno z dat DUZP,
+        // vystavení nebo doručení (viz purchaseClaimDateExpr), takže doklad, kterému
+        // do období ± 1 den nespadá žádné z nich, vnější BETWEEN stejně vyřadí. Bez
+        // předfiltru se materializovaly položky celé historie firmy na každé období.
+        $claimWindow = '(own.tax_date BETWEEN ? AND ? OR own.issue_date BETWEEN ? AND ? OR own.received_at BETWEEN ? AND ?)';
+        $windowFrom = (new \DateTimeImmutable((string) $start))->modify('-1 day')->format('Y-m-d');
+        $windowTo = (new \DateTimeImmutable((string) $end))->modify('+1 day')->format('Y-m-d');
+        $window = [$windowFrom, $windowTo, $windowFrom, $windowTo, $windowFrom, $windowTo];
+
         $stmt = $this->db->pdo()->prepare("
             SELECT pi.id AS invoice_id, pi.varsymbol AS doc_number, pi.vendor_invoice_number,
                    pi.document_kind, pi.status,
@@ -814,7 +823,8 @@ final class VatLedgerService
                       -- Omezení na firmu uvnitř odvozené tabulky: MariaDB ji materializuje
                       -- celou, bez něj tedy položky VŠECH firem instalace na každé volání.
                       JOIN purchase_invoices own ON own.id = i.purchase_invoice_id AND own.supplier_id = ?
-                     WHERE NOT EXISTS (
+                     WHERE {$claimWindow}
+                       AND NOT EXISTS (
                                SELECT 1 FROM purchase_invoice_vat_allocations a
                                 WHERE a.purchase_invoice_id = i.purchase_invoice_id
                            )
@@ -825,6 +835,7 @@ final class VatLedgerService
                            a.vat_deduction_percent
                       FROM purchase_invoice_vat_allocations a
                       JOIN purchase_invoices own ON own.id = a.purchase_invoice_id AND own.supplier_id = ?
+                     WHERE {$claimWindow}
                    ) pii ON pii.purchase_invoice_id = pi.id
          LEFT JOIN currencies cur ON cur.id = pi.currency_id
              WHERE pi.supplier_id = ?
@@ -862,7 +873,7 @@ final class VatLedgerService
                AND {$periodExpr} BETWEEN ? AND ?
           ORDER BY {$periodExpr}, pi.id, pii.id
         ");
-        $stmt->execute([$standardRate, $supplierId, $supplierId, $supplierId, $start, $end]);
+        $stmt->execute([$standardRate, $supplierId, ...$window, $supplierId, ...$window, $supplierId, $start, $end]);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
