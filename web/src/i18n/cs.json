@@ -22286,6 +22286,7 @@
       "duplicate": "duplicita",
       "kind_changed": "Typ dokladu změněn.",
       "batch_summary": "Naimportováno {ok} dokladů, {failed} s chybou.",
+      "last_import": "Poslední import: {date} · {n} dokladů",
       "show_in_list": "Zobrazit v přijatých fakturách",
       "coming_hint": "—"
     },

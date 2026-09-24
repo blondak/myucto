@@ -22286,6 +22286,7 @@
       "duplicate": "duplicate",
       "kind_changed": "Document type changed.",
       "batch_summary": "Imported {ok} documents, {failed} with errors.",
+      "last_import": "Last import: {date} · {n} documents",
       "show_in_list": "Show in purchase invoices",
       "coming_hint": "—"
     },

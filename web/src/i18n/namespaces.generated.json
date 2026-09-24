@@ -463,7 +463,8 @@
     ],
     "purchase-invoice-ai-import": [
       "aiGateway",
-      "integrations"
+      "integrations",
+      "purchase_invoice"
     ],
     "purchase-invoice-new": [
       "automation",
