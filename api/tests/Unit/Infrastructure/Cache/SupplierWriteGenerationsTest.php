@@ -72,6 +72,11 @@ final class SupplierWriteGenerationsTest extends TestCase
             'INSERT INTO rate_limit_counters (k) VALUES (1)',
             'INSERT INTO cron_runs (job) VALUES (1)',
             'UPDATE user_preferences SET v = 1',
+            'DELETE FROM crm_action_item_dismissals WHERE supplier_id = ? AND until_at < NOW()',
+            'UPDATE integration_outbox SET status = ?',
+            'DELETE e FROM integration_inbox e WHERE e.id = ?',
+            'UPDATE catalog_jobs SET locked_at = NULL',
+            'INSERT INTO cron_heartbeat (id) VALUES (1)',
             'SELECT * FROM journal_entries',
         ] as $sql) {
             SupplierWriteGenerations::noteStatement($sql);

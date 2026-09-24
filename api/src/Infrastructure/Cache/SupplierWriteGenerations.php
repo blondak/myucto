@@ -25,8 +25,14 @@ final class SupplierWriteGenerations
 {
     public const KEY_PREFIX = 'swg:';
 
-    /** Tabulky, do kterých se zapisuje i při čtení nebo mimo účetní data. */
-    private const IGNORED_TABLES = '/^(?:sessions|rate_limit_counters|login_attempts|user_preferences|user_filters|api_tokens|api_request_log\w*|cron_\w+|instance_storage_usage|telemetry\w*|backup_\w+|smtp_log\w*|migrations)$/i';
+    /**
+     * Tabulky, do kterých se zapisuje i při čtení nebo mimo účetní data.
+     * `crm_action_item_dismissals` uklízí prošlá skrytí úkolů při každém GET
+     * `/api/crm/action-items`, takže by každé otevření přehledu zahodilo cache.
+     * Fronty integrací a úloh přepisuje cron každou minutu; změny dat, které
+     * z nich vzniknou, jdou do datových tabulek a generaci zvednou samy.
+     */
+    private const IGNORED_TABLES = '/^(?:sessions|rate_limit_counters|login_attempts|user_preferences|user_filters|api_tokens|api_request_log\w*|cron_\w+|instance_storage_usage|telemetry\w*|backup_\w+|smtp_log\w*|migrations|crm_action_item_dismissals|integration_(?:inbox|outbox)|catalog_jobs)$/i';
 
     private const WRITE_TABLE = '/^\s*(?:INSERT(?:\s+IGNORE)?\s+INTO|REPLACE(?:\s+INTO)?|UPDATE(?:\s+IGNORE)?|DELETE(?:\s+\w+)?\s+FROM|TRUNCATE(?:\s+TABLE)?)\s+`?(\w+)`?/i';
 
