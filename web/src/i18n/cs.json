@@ -16661,6 +16661,8 @@
     "entry": "zápis"
   },
   "common": {
+    "pdf_saved_to_folder": "PDF uloženo do zvolené složky.",
+    "pdf_save_failed": "PDF se nepodařilo uložit.",
     "environmentSwitch": {
       "legend": "Prostředí",
       "production": "Ostrý provoz",

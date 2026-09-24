@@ -22,6 +22,7 @@ import { formatMoney, formatHourlyRate, formatDate, formatPercent, statusLabel, 
 import { durationTotal, formatDuration, isTimeItem, itemQuantity, workRowTotal } from '@/utils/timeBilling'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
+import { pdfFileName, savePdfToCompanyFolder } from '@/composables/useCompanyPdfSave'
 import { useHotkey } from '@/composables/useHotkey'
 import { useToast } from '@/composables/useToast'
 import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
@@ -1122,9 +1123,24 @@ function editIssued() {
   router.push(`/invoices/${invoice.value.id}/edit?force=1`)
 }
 
-function downloadPdf() {
+// Chrome/Edge: dialog Uložit jako ve složce, kam se naposledy ukládalo PDF této firmy
+// (#104). Jinde (a když dialog nejde otevřít) PDF otevře v nové záložce jako dřív.
+async function downloadPdf() {
   if (!invoice.value) return
-  window.open(invoicesApi.pdfUrl(invoice.value.id, false), '_blank')
+  const inv = invoice.value
+  try {
+    const result = await savePdfToCompanyFolder(
+      invoicesApi.pdfUrl(inv.id, true),
+      pdfFileName(inv.varsymbol, `faktura-${inv.id}`),
+      supplierStore.currentSupplierId,
+    )
+    if (result === 'saved') toast.success(t('common.pdf_saved_to_folder'))
+    if (result !== 'unsupported') return
+  } catch {
+    toast.error(t('common.pdf_save_failed'))
+    return
+  }
+  window.open(invoicesApi.pdfUrl(inv.id, false), '_blank')
 }
 
 async function sendTest() {

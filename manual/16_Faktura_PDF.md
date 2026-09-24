@@ -41,6 +41,12 @@ Závisí na stavu faktury:
 > 💡 **Test odeslání / Test upomínky** — pošle e-mail jen na **tvůj** e-mail
 > (ne klientovi). Užitečné pro vyzkoušení šablony nebo SMTP konfigurace.
 
+> 💾 **Stáhnout PDF do složky firmy.** V Chrome a Edge otevře Stáhnout PDF dialog
+> Uložit jako. Prohlížeč si pamatuje poslední složku zvlášť pro každou firmu: poprvé
+> zvolíte složku, kam PDF dané firmy ukládáte, a příště se dialog otevře rovnou tam.
+> Totéž platí pro tlačítko Stáhnout PDF u přijaté faktury. Firefox a Safari tento
+> dialog nepodporují, tam se PDF otevře nebo stáhne do výchozí složky prohlížeče.
+
 ### 16.1.2 Platby a částečné úhrady
 
 Každá faktura i zálohová faktura může mít **více evidovaných plateb** (splátky,

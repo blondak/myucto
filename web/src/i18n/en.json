@@ -16661,6 +16661,8 @@
     "entry": "entry"
   },
   "common": {
+    "pdf_saved_to_folder": "PDF saved to the selected folder.",
+    "pdf_save_failed": "The PDF could not be saved.",
     "environmentSwitch": {
       "legend": "Environment",
       "production": "Production",

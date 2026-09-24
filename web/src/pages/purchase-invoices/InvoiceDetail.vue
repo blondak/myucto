@@ -16,6 +16,7 @@ import { useToast } from '@/composables/useToast'
 import { accountingApi } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
+import { canSaveToCompanyFolder, pdfFileName, savePdfToCompanyFolder } from '@/composables/useCompanyPdfSave'
 import { apiErrorMessage } from '@/api/errors'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
@@ -39,6 +40,24 @@ const router = useRouter()
 const toast = useToast()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
+
+// Chrome/Edge: dialog Uložit jako ve složce, kam se naposledy ukládalo PDF této firmy
+// (#104). Jinde odkaz stáhne PDF jako dřív.
+async function downloadPdfToCompanyFolder(event: MouseEvent, id: number, number: string | null | undefined) {
+  if (!canSaveToCompanyFolder()) return
+  event.preventDefault()
+  try {
+    const result = await savePdfToCompanyFolder(
+      purchaseInvoicesApi.pdfUrl(id),
+      pdfFileName(number, `doklad-${id}`),
+      supplierStore.currentSupplierId,
+    )
+    if (result === 'saved') toast.success(t('common.pdf_saved_to_folder'))
+    if (result === 'unsupported') window.open(purchaseInvoicesApi.pdfUrl(id), '_blank')
+  } catch {
+    toast.error(t('common.pdf_save_failed'))
+  }
+}
 // Podvojné účetnictví zpřístupňuje účtování a související akce deníku.
 const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
 const stockEnabled = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.stock_enabled === true)
@@ -1621,6 +1640,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
               {{ pdfPreviewOpen ? t('purchase_invoice.pdf.hide') : t('purchase_invoice.pdf.show') }}
             </button>
             <a :href="purchaseInvoicesApi.pdfUrl(invoice.id)" target="_blank"
+               @click="downloadPdfToCompanyFolder($event, invoice.id, invoice.vendor_invoice_number)"
                class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
               <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               {{ t('purchase_invoice.pdf.download') }}
