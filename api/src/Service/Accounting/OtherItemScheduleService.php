@@ -49,7 +49,9 @@ final class OtherItemScheduleService
             }
             $template = [];
             foreach (['side', 'kind', 'title', 'partner_id', 'partner_name', 'currency', 'amount',
-                      'exchange_rate', 'variable_symbol', 'account_code', 'counter_account_code', 'note'] as $field) {
+                      'exchange_rate', 'variable_symbol', 'account_code', 'counter_account_code',
+                      'posting_lines', 'note'] as $field) {
+                if ($field === 'posting_lines' && $item[$field] === []) continue;
                 $template[$field] = $item[$field];
             }
             $stmt = $pdo->prepare('INSERT INTO other_item_schedules

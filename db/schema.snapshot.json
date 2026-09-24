@@ -874,7 +874,8 @@
         "1887_other_item_schedules.sql",
         "1888_other_items_role_permissions.sql",
         "1889_other_item_payment_ownership.sql",
-        "1890_other_item_allocation_reversal.sql"
+        "1890_other_item_allocation_reversal.sql",
+        "1891_other_item_posting_lines.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -6959,6 +6960,29 @@
                 "chk_other_installment_amount": "`amount` > 0"
             }
         },
+        "other_item_posting_lines": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_code": "varchar(20) NOT NULL",
+                "amount": "decimal(14,2) NOT NULL",
+                "other_item_id": "bigint(20) unsigned NOT NULL",
+                "position": "smallint(5) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, other_item_id, position)",
+                "fk_other_item_posting_item": "BTREE (other_item_id, supplier_id)",
+                "idx_other_item_posting_item": "BTREE (other_item_id)"
+            },
+            "foreign_keys": {
+                "fk_other_item_posting_item": "(other_item_id, supplier_id) -> other_items (id, supplier_id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_other_item_posting_amount": "`amount` > 0"
+            }
+        },
         "other_item_schedule_occurrences": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -7062,6 +7086,7 @@
                 "idx_other_item_open": "BTREE (supplier_id, side, status, due_on)",
                 "idx_other_item_partner": "BTREE (supplier_id, partner_id, status)",
                 "idx_other_item_source": "BTREE (supplier_id, deleted_at, issued_on)",
+                "idx_other_item_tenant_identity": "BTREE (id, supplier_id)",
                 "uq_other_item_doc_no": "UNIQUE BTREE (supplier_id, document_no)"
             },
             "foreign_keys": {

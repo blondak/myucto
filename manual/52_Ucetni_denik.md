@@ -1100,6 +1100,11 @@ nebo pokladní doklad; jedna položka může mít více dílčích úhrad. Páro
 znovu nezaúčtuje banku ani pokladnu. U cizí měny je potřeba nejprve vyřešit
 kurzové vypořádání.
 
+V podvojném účetnictví můžeš kontaci rozdělit mezi více protiúčtů. Účet
+pohledávky nebo závazku zůstává jeden v celé částce kvůli saldu a párování
+úhrad; součet protiúčtů musí být přesně stejný jako částka položky. Rozpis lze
+změnit při přeúčtování, které původní zápis stornuje a vytvoří nový.
+
 V detailu v části **Opakování položky** nastavíš měsíční, čtvrtletní nebo roční
 opakování a případné datum konce. Denní úloha připravuje samostatné koncepty
 až 90 dní dopředu, aby se ukázaly v predikci. Můžeš je vytvořit také ručně

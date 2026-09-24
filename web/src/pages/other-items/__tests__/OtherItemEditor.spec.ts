@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
 }))
 
 vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: m.listAccounts } }))
+vi.mock('@/composables/useFormat', () => ({ formatMoney: (value: number) => String(value) }))
 
 vi.mock('@/api/otherItems', () => ({
   otherItemsApi: { get: m.get, update: m.update, create: vi.fn() },
@@ -141,5 +142,33 @@ describe('OtherItemEditor partner', () => {
     expect(pickers).toHaveLength(2)
     expect(pickers[0]!.props('accounts').map((account: { account_code: string }) => account.account_code)).toEqual(['325.100'])
     expect(pickers[1]!.props('accounts')).toHaveLength(3)
+  })
+
+  it('při úpravě zachová rozdělenou kontaci a odešle oba protiřádky', async () => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.listAccounts.mockResolvedValue([
+      { id: 1, account_code: '325', name: 'Závazky', account_type: 'liability', is_active: true },
+      { id: 2, account_code: '518', name: 'Náklady', account_type: 'expense', is_active: true },
+      { id: 3, account_code: '378', name: 'Jiné pohledávky', account_type: 'asset', is_active: true },
+    ])
+    m.get.mockResolvedValue({
+      id: 42, status: 'draft', side: 'payable', kind: 'rent', title: 'Syntetický nájem',
+      partner_id: null, partner_name: null, issued_on: '2099-01-01', accounting_on: '2099-01-01',
+      due_on: '2099-01-20', currency: 'CZK', amount: 1200, variable_symbol: null,
+      account_code: '325', counter_account_code: null, note: null,
+      posting_lines: [{ account_code: '518', amount: 700 }, { account_code: '378', amount: 500 }],
+    })
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    const lines = wrapper.getComponent({ name: 'OtherItemPostingLines' })
+    expect(lines.props('modelValue')).toEqual([
+      { account_code: '518', amount: 700 }, { account_code: '378', amount: 500 },
+    ])
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(m.update).toHaveBeenCalledWith(42, expect.objectContaining({
+      counter_account_code: null,
+      posting_lines: [{ account_code: '518', amount: 700 }, { account_code: '378', amount: 500 }],
+    }))
   })
 })

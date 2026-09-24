@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import type { Client } from '@/api/clients'
-import { otherItemsApi, type OtherItemPayload, type OtherItemSide } from '@/api/otherItems'
+import { otherItemsApi, type OtherItemPayload, type OtherItemPostingLine, type OtherItemSide } from '@/api/otherItems'
 import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { appIsoDate } from '@/utils/date'
@@ -12,6 +12,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
+import OtherItemPostingLines from '@/components/accounting/OtherItemPostingLines.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -23,6 +24,8 @@ const isEdit = computed(() => editId.value > 0)
 const isDoubleEntry = computed(() => supplier.currentSupplier?.accounting_mode === 'double_entry')
 const loading = ref(false)
 const saving = ref(false)
+const splitPosting = ref(false)
+const postingLines = ref<OtherItemPostingLine[]>([])
 const accounts = ref<ChartAccount[]>([])
 const today = appIsoDate()
 const form = reactive({
@@ -50,6 +53,20 @@ function onSideChange() {
   form.kind = 'other'
   form.account_code = ''
   form.counter_account_code = ''
+  splitPosting.value = false
+  postingLines.value = []
+}
+function startSplitPosting() {
+  postingLines.value = [
+    { account_code: form.counter_account_code, amount: Number(form.amount || 0) },
+    { account_code: '', amount: 0 },
+  ]
+  splitPosting.value = true
+}
+function stopSplitPosting() {
+  form.counter_account_code = postingLines.value[0]?.account_code || ''
+  postingLines.value = []
+  splitPosting.value = false
 }
 function onPartnerNameInput() {
   form.partner_id = null
@@ -80,6 +97,10 @@ async function load() {
       form.variable_symbol = item.variable_symbol || ''
       form.account_code = item.account_code || ''
       form.counter_account_code = item.counter_account_code || ''
+      const lines = item.posting_lines || []
+      splitPosting.value = lines.length > 1
+      postingLines.value = splitPosting.value ? lines.map(line => ({ account_code: line.account_code, amount: Number(line.amount) })) : []
+      if (!splitPosting.value && lines.length === 1) form.counter_account_code = lines[0].account_code
       form.note = item.note || ''
     }))
     await Promise.all(requests)
@@ -96,6 +117,11 @@ async function save() {
     toast.error(t('other_items.validation_required'))
     return
   }
+  if (splitPosting.value && (postingLines.value.some(line => !line.account_code || !Number.isFinite(line.amount) || line.amount <= 0)
+    || postingLines.value.reduce((sum, line) => sum + Math.round(line.amount * 100), 0) !== Math.round(Number(form.amount) * 100))) {
+    toast.error(t('other_items.posting_lines_invalid'))
+    return
+  }
   const payload: OtherItemPayload = {
     side: form.side,
     kind: form.kind,
@@ -110,7 +136,8 @@ async function save() {
     amount: Number(form.amount),
     variable_symbol: form.variable_symbol.trim() || null,
     account_code: isDoubleEntry.value ? form.account_code || null : null,
-    counter_account_code: isDoubleEntry.value ? form.counter_account_code || null : null,
+    counter_account_code: isDoubleEntry.value && !splitPosting.value ? form.counter_account_code || null : null,
+    ...(isDoubleEntry.value && splitPosting.value ? { posting_lines: postingLines.value } : {}),
     note: form.note.trim() || null,
   }
   saving.value = true
@@ -190,10 +217,21 @@ onMounted(load)
           <label class="text-sm font-medium">{{ t('other_items.account_code') }}
             <ChartAccountSelect v-model="form.account_code" :accounts="balanceAccountChoices" :placeholder="t('other_items.choose_account')" class="mt-1 block" />
           </label>
-          <label class="text-sm font-medium">{{ t('other_items.counter_account_code') }}
+          <label v-if="!splitPosting" class="text-sm font-medium">{{ t('other_items.counter_account_code') }}
             <ChartAccountSelect v-model="form.counter_account_code" :accounts="accountChoices" :placeholder="t('other_items.choose_account')" class="mt-1 block" />
           </label>
         </div>
+        <div v-if="splitPosting" class="mt-4">
+          <OtherItemPostingLines v-model="postingLines" :accounts="accountChoices" :total="Number(form.amount || 0)" />
+        </div>
+        <button v-if="!splitPosting" type="button" :class="[btnOutline('neutral'), 'mt-4 whitespace-nowrap']" @click="startSplitPosting">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+          {{ t('other_items.split_posting') }}
+        </button>
+        <button v-else type="button" :class="[btnOutline('neutral'), 'mt-3 whitespace-nowrap']" @click="stopSplitPosting">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+          {{ t('other_items.single_posting') }}
+        </button>
       </section>
       <section class="rounded-lg border border-neutral-200 bg-surface p-4">
         <label class="text-sm font-medium">{{ t('other_items.note') }}

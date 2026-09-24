@@ -3,6 +3,11 @@ import { api } from './client'
 export type OtherItemSide = 'receivable' | 'payable'
 export type OtherItemStatus = 'draft' | 'posted' | 'reversed' | 'confirmed' | 'cancelled' | 'paid' | 'partial' | 'forecast'
 
+export interface OtherItemPostingLine {
+  account_code: string
+  amount: number
+}
+
 export interface OtherItem {
   id: string | number
   source_kind: string
@@ -29,6 +34,7 @@ export interface OtherItem {
   variable_symbol?: string | null
   account_code?: string | null
   counter_account_code?: string | null
+  posting_lines?: OtherItemPostingLine[]
   note?: string | null
   journal_entry_id?: number | null
 }
@@ -48,6 +54,7 @@ export interface OtherItemPayload {
   variable_symbol: string | null
   account_code: string | null
   counter_account_code: string | null
+  posting_lines?: OtherItemPostingLine[]
   note: string | null
 }
 
@@ -86,7 +93,8 @@ export interface OtherItemPaymentCandidate {
 
 export interface OtherItemRepostPayload {
   account_code?: string
-  counter_account_code: string
+  counter_account_code?: string
+  posting_lines?: OtherItemPostingLine[]
   entry_date: string
   reason: string
 }

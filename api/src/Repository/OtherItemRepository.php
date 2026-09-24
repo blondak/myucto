@@ -24,7 +24,37 @@ final class OtherItemRepository
         );
         $stmt->execute([$supplierId, $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row === false ? null : $row;
+        if ($row === false) return null;
+        $row['posting_lines'] = $this->postingLines($supplierId, $id);
+        if ($row['posting_lines'] === [] && $row['counter_account_code'] !== null) {
+            $row['posting_lines'] = [[
+                'account_code' => (string) $row['counter_account_code'],
+                'amount' => (float) $row['amount_czk'],
+            ]];
+        }
+        return $row;
+    }
+
+    public function postingLines(int $supplierId, int $id): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT account_code, amount FROM other_item_posting_lines
+            WHERE supplier_id = ? AND other_item_id = ? ORDER BY position');
+        $stmt->execute([$supplierId, $id]);
+        return array_map(static fn (array $row): array => [
+            'account_code' => (string) $row['account_code'], 'amount' => (float) $row['amount'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    public function replacePostingLines(int $supplierId, int $id, array $lines): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('DELETE FROM other_item_posting_lines WHERE supplier_id = ? AND other_item_id = ?')
+            ->execute([$supplierId, $id]);
+        $stmt = $pdo->prepare('INSERT INTO other_item_posting_lines
+            (supplier_id, other_item_id, position, account_code, amount) VALUES (?,?,?,?,?)');
+        foreach ($lines as $position => $line) {
+            $stmt->execute([$supplierId, $id, $position + 1, $line['account_code'], $line['amount']]);
+        }
     }
 
     public function list(int $supplierId, array $filters, int $page, int $perPage): array
@@ -151,7 +181,7 @@ final class OtherItemRepository
         $stmt->execute([$status, $entryId, $id, $supplierId]);
     }
 
-    public function setReposted(int $supplierId, int $id, string $accountCode, string $counterCode,
+    public function setReposted(int $supplierId, int $id, string $accountCode, ?string $counterCode,
         string $accountingOn, int $entryId, int $reversalId, ?int $userId): void
     {
         $stmt = $this->db->pdo()->prepare(

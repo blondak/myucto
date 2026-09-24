@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { otherItemsApi, type OtherItem, type OtherItemAllocation, type OtherItemPaymentCandidate } from '@/api/otherItems'
+import { otherItemsApi, type OtherItem, type OtherItemAllocation, type OtherItemPaymentCandidate, type OtherItemPostingLine } from '@/api/otherItems'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -15,6 +15,7 @@ import OtherItemJournalContext from '@/components/accounting/OtherItemJournalCon
 import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
+import OtherItemPostingLines from '@/components/accounting/OtherItemPostingLines.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
 
@@ -37,6 +38,8 @@ const repostLoading = ref(false)
 const repostAccounts = ref<ChartAccount[]>([])
 const repostAccountCode = ref('')
 const repostCounterAccountCode = ref('')
+const repostSplit = ref(false)
+const repostLines = ref<OtherItemPostingLine[]>([])
 const repostDate = ref(appIsoDate())
 const repostReason = ref('')
 const isDoubleEntry = computed(() => supplier.currentSupplier?.accounting_mode === 'double_entry')
@@ -188,6 +191,10 @@ async function openRepost() {
     repostAccounts.value = await accountingApi.listAccounts()
     repostAccountCode.value = item.value.account_code || (item.value.side === 'receivable' ? '315' : '325')
     repostCounterAccountCode.value = item.value.counter_account_code || ''
+    const lines = item.value.posting_lines || []
+    repostSplit.value = lines.length > 1
+    repostLines.value = repostSplit.value ? lines.map(line => ({ account_code: line.account_code, amount: Number(line.amount) })) : []
+    if (!repostSplit.value && lines.length === 1) repostCounterAccountCode.value = lines[0].account_code
     repostDate.value = appIsoDate()
     repostReason.value = ''
     repostOpen.value = true
@@ -198,14 +205,38 @@ async function openRepost() {
   }
 }
 
+function startRepostSplit() {
+  repostLines.value = [
+    { account_code: repostCounterAccountCode.value, amount: Number(item.value?.amount || 0) },
+    { account_code: '', amount: 0 },
+  ]
+  repostSplit.value = true
+}
+
+function stopRepostSplit() {
+  repostCounterAccountCode.value = repostLines.value[0]?.account_code || ''
+  repostLines.value = []
+  repostSplit.value = false
+}
+
 async function repost() {
   if (!canRepost.value || !item.value || busy.value) return
-  if (!repostAccountCode.value || !repostCounterAccountCode.value || !repostDate.value || repostReason.value.trim().length < 3) {
+  if (!repostAccountCode.value || (!repostSplit.value && !repostCounterAccountCode.value)
+    || !repostDate.value || repostReason.value.trim().length < 3) {
     toast.error(t('other_items.repost_required'))
     return
   }
+  if (repostSplit.value && (repostLines.value.some(line => !line.account_code || !Number.isFinite(line.amount) || line.amount <= 0)
+    || repostLines.value.reduce((sum, line) => sum + Math.round(line.amount * 100), 0) !== Math.round(Number(item.value.amount) * 100))) {
+    toast.error(t('other_items.posting_lines_invalid'))
+    return
+  }
+  const currentLines = item.value.posting_lines || (item.value.counter_account_code
+    ? [{ account_code: item.value.counter_account_code, amount: Number(item.value.amount) }] : [])
+  const nextLines = repostSplit.value ? repostLines.value : [{ account_code: repostCounterAccountCode.value, amount: Number(item.value.amount) }]
   if (repostAccountCode.value === (item.value.account_code || (item.value.side === 'receivable' ? '315' : '325'))
-    && repostCounterAccountCode.value === item.value.counter_account_code) {
+    && JSON.stringify(nextLines.map(line => [line.account_code, Math.round(line.amount * 100)]))
+      === JSON.stringify(currentLines.map(line => [line.account_code, Math.round(Number(line.amount) * 100)]))) {
     toast.error(t('other_items.repost_unchanged'))
     return
   }
@@ -213,7 +244,7 @@ async function repost() {
   try {
     await otherItemsApi.repost(id.value, {
       account_code: repostAccountCode.value,
-      counter_account_code: repostCounterAccountCode.value,
+      ...(repostSplit.value ? { posting_lines: repostLines.value } : { counter_account_code: repostCounterAccountCode.value }),
       entry_date: repostDate.value,
       reason: repostReason.value.trim(),
     })
@@ -318,7 +349,10 @@ onMounted(load)
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 class="font-semibold">{{ t('other_items.accounting') }}</h2>
-            <p class="mt-1 text-sm text-neutral-500">{{ item.account_code || '–' }} / {{ item.counter_account_code || '–' }} · {{ item.accounting_on ? formatDate(item.accounting_on) : '–' }}</p>
+            <p class="mt-1 text-sm text-neutral-500">{{ item.account_code || '–' }} / {{ item.posting_lines?.length && item.posting_lines.length > 1 ? t('other_items.posting_line_count', { count: item.posting_lines.length }) : item.counter_account_code || item.posting_lines?.[0]?.account_code || '–' }} · {{ item.accounting_on ? formatDate(item.accounting_on) : '–' }}</p>
+            <ul v-if="item.posting_lines && item.posting_lines.length > 1" class="mt-2 space-y-1 text-sm">
+              <li v-for="(line, index) in item.posting_lines" :key="index" class="flex justify-between gap-3"><span>{{ line.account_code }}</span><span class="tabular-nums">{{ formatMoney(line.amount, item.currency) }}</span></li>
+            </ul>
             <RouterLink :to="{ name: 'accounting-journal', query: { entry_id: String(item.journal_entry_id) } }" :class="[btnOutline('primary'), 'mt-3']">
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
               {{ t('other_items.open_journal') }}
@@ -410,14 +444,26 @@ onMounted(load)
         <p class="text-sm text-neutral-600">{{ t('other_items.repost_hint') }}</p>
         <div class="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm">
           <div class="text-xs font-medium text-neutral-500">{{ t('other_items.repost_current') }}</div>
-          <div class="mt-1 font-medium">{{ item?.account_code || '–' }} / {{ item?.counter_account_code || '–' }} · {{ item ? formatMoney(item.amount, item.currency) : '' }}</div>
+          <div class="mt-1 font-medium">{{ item?.account_code || '–' }} / {{ item?.posting_lines?.length && item.posting_lines.length > 1 ? t('other_items.posting_line_count', { count: item.posting_lines.length }) : item?.counter_account_code || item?.posting_lines?.[0]?.account_code || '–' }} · {{ item ? formatMoney(item.amount, item.currency) : '' }}</div>
+          <ul v-if="item?.posting_lines && item.posting_lines.length > 1" class="mt-2 space-y-1">
+            <li v-for="(line, index) in item.posting_lines" :key="index" class="flex justify-between gap-3"><span>{{ line.account_code }}</span><span class="tabular-nums">{{ formatMoney(line.amount, item.currency) }}</span></li>
+          </ul>
         </div>
         <label class="block text-sm font-medium">{{ t('other_items.account_code') }}
           <ChartAccountSelect v-model="repostAccountCode" :accounts="repostBalanceAccounts" :placeholder="t('other_items.choose_account')" class="mt-1 block" />
         </label>
-        <label class="block text-sm font-medium">{{ t('other_items.counter_account_code') }}
+        <label v-if="!repostSplit" class="block text-sm font-medium">{{ t('other_items.counter_account_code') }}
           <ChartAccountSelect v-model="repostCounterAccountCode" :accounts="repostAccountChoices" :placeholder="t('other_items.choose_account')" class="mt-1 block" />
         </label>
+        <OtherItemPostingLines v-else v-model="repostLines" :accounts="repostAccountChoices" :total="Number(item?.amount || 0)" />
+        <button v-if="!repostSplit" type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="startRepostSplit">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+          {{ t('other_items.split_posting') }}
+        </button>
+        <button v-else type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="stopRepostSplit">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+          {{ t('other_items.single_posting') }}
+        </button>
         <label class="block text-sm font-medium">{{ t('other_items.repost_date') }}
           <DateInput v-model="repostDate" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 px-2" />
         </label>
