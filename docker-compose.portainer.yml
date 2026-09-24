@@ -97,6 +97,9 @@ services:
       MYINVOICE_REDIS_AUTH: ${MYINVOICE_REDIS_AUTH:-}
       MYINVOICE_REDIS_DB: ${MYINVOICE_REDIS_DB:-0}
       MYINVOICE_REDIS_PREFIX: ${MYINVOICE_REDIS_PREFIX:-myinvoice:}
+      # Workery php-fpm (image default 8, každý ~30-60 MB). Na silnějším stroji zvyš,
+      # aby souběžní uživatelé nečekali ve frontě; prázdné = default image.
+      PHP_FPM_MAX_CHILDREN: ${PHP_FPM_MAX_CHILDREN:-}
 
   db:
     image: mariadb:11.8

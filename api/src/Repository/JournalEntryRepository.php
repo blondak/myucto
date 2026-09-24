@@ -662,7 +662,11 @@ final class JournalEntryRepository
                          LIMIT {$limit} OFFSET {$offset}) AS pick
                   JOIN journal_entries je ON je.id = pick.id
              LEFT JOIN users u ON u.id = je.posted_by
-             LEFT JOIN journal_entries rev_src ON rev_src.supplier_id = je.supplier_id
+             -- FORCE INDEX: `reversed_by` je skoro všude NULL, optimizér pak odhaduje tisíce
+             -- řádků na lookup a volí BNL přes celou tabulku (0,2 s na stránku u 100 tis. zápisů, roste
+             -- s počtem zápisů). S indexem 1 ms.
+             LEFT JOIN journal_entries rev_src FORCE INDEX (idx_je_supplier_reversed_by)
+                    ON rev_src.supplier_id = je.supplier_id
                     AND rev_src.reversed_by = je.id
              LEFT JOIN bank_transactions rev_bt ON rev_src.source_type = 'bank' AND rev_bt.id = rev_src.source_id
              LEFT JOIN cash_documents rev_cd ON rev_src.source_type = 'cash' AND rev_cd.id = rev_src.source_id

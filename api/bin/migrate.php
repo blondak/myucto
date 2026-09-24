@@ -15,6 +15,7 @@ declare(strict_types=1);
  *   php api/bin/migrate.php                # migrace + auto-backfill
  *   php api/bin/migrate.php --status       # jen stav, žádná akce
  *   php api/bin/migrate.php --no-backfills # migrace BEZ auto-backfillu
+ *   php api/bin/migrate.php --no-analyze   # bez přepočtu statistik optimizeru
  *   php api/bin/migrate.php --until=1073_x.sql # aplikovat nejvýše zadanou migraci
  *   php api/bin/migrate.php --below=1000       # jen migrace s číselnou předponou < 1000
  *   php api/bin/migrate.php --only=1000_user_suppliers.sql,1121_price_list_items.sql
@@ -230,6 +231,15 @@ try {
 // kterou migrace přinesla. Provádí se i když nebyly žádné pending migrace: cesta je
 // levná a stav po `migrate.php` má být vždy konzistentní.
 $connection->invalidateSchemaCache();
+
+// Statistiky optimizeru účetních tabulek. Importéry si je přepočítají samy (TableStatistics),
+// ale ruční obnova dumpu nebo přenos instance je obejde a optimizer pak volí plné průchody:
+// na produkci po přenosu dat seznam přijatých faktur 1,4 s místo 5 ms. Na 240 MB DB trvá < 1 s.
+if (!in_array('--no-analyze', $argv, true)) {
+    $analyzeStart = microtime(true);
+    \MyInvoice\Infrastructure\Database\TableStatistics::analyze($db, \MyInvoice\Infrastructure\Database\TableStatistics::IMPORTED_ACCOUNTING_TABLES);
+    echo 'Statistiky optimizeru přepočítány (' . (int) round((microtime(true) - $analyzeStart) * 1000) . " ms).\n";
+}
 
 // Auto-backfill po migracích — detekuje stale data a spouští příslušné skripty
 // s --apply. Skip pokud user dal --no-backfills (CI / read-only deploy).
