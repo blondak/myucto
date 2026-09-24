@@ -123,7 +123,10 @@ final class JournalExportAndHistoryTest extends TestCase
         self::assertSame([$low, $middle], array_column($first['items'], 'id'));
         self::assertSame([$high], array_column($second['items'], 'id'));
 
-        foreach (['document_no', 'posted_by', 'status'] as $key) {
+        self::assertSame([$middle, $high], array_column($this->journalRepo->paginate(
+            $this->supplierId, ['sort_key' => 'entry_id', 'sort_dir' => 'desc'], 2, 0
+        )['items'], 'id'));
+        foreach (['document_no', 'posted_by', 'status', 'created_at', 'updated_at'] as $key) {
             self::assertSame(3, $this->journalRepo->paginate($this->supplierId, ['sort_key' => $key], 2, 0)['total']);
         }
         self::assertSame([$low, $middle], array_column($this->journalRepo->paginate(

@@ -975,6 +975,8 @@ final class PurchaseInvoiceRepository
             'exchange_rate' => 'pi.exchange_rate', 'vat_deduction' => 'pi.vat_deduction',
             'expense_category' => 'ec.label', 'base' => 'pi.total_without_vat',
             'vat' => 'pi.total_vat', 'balance' => 'pi.amount_to_pay',
+            'project' => 'prj.name', 'received_at' => 'pi.received_at',
+            'payment_ordered_at' => 'pi.payment_ordered_at',
         ];
         $sortKey = (string) ($filters['sort_key'] ?? '');
         $sortDir = strtolower((string) ($filters['sort_dir'] ?? '')) === 'asc' ? 'ASC' : 'DESC';
@@ -983,7 +985,8 @@ final class PurchaseInvoiceRepository
             ? $sortColumns[$sortKey] . ' ' . $sortDir . ', pi.id DESC'
             : 'pi.issue_date DESC, pi.id DESC';
         if ($groupByMonth && isset($sortColumns[$sortKey])) {
-            $sortSql = "DATE_FORMAT(pi.issue_date, '%Y-%m') DESC, " . $sortSql;
+            $monthDir = $sortKey === 'tax_date' ? $sortDir : 'DESC';
+            $sortSql = "DATE_FORMAT(pi.issue_date, '%Y-%m') {$monthDir}, " . $sortSql;
         }
 
         $sql = "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind,

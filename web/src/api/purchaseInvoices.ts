@@ -520,6 +520,7 @@ export interface PurchaseInvoiceListItem {
   vendor_company_name: string
   vendor_ic: string | null
   month_bucket: string
+  project_name?: string | null
   kh_sections?: string[]
   /** §DM — aspoň jedna položka je drobný majetek (EXISTS v list SELECTu) → ikonka v seznamu. */
   has_small_asset?: boolean

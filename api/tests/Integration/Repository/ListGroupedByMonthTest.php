@@ -130,6 +130,29 @@ final class ListGroupedByMonthTest extends TestCase
         self::assertSame([$juneLow, $mayMiddle], array_column($continuous['data'][0]['invoices'], 'id'));
         self::assertSame([$juneHigh], array_column($this->invoices->listGroupedByMonth($base + ['group_by_month' => false], 2, 2)['data'][0]['invoices'], 'id'));
 
+        $byDate = $this->invoices->listGroupedByMonth(array_merge($base, ['sort_key' => 'issued']), 1, 2);
+        self::assertSame(['2001-05', '2001-06'], array_column($byDate['data'], 'month'));
+        self::assertSame([$mayMiddle, $juneLow], array_merge(...array_map(
+            static fn (array $group): array => array_column($group['invoices'], 'id'),
+            $byDate['data'],
+        )));
+        self::assertSame([$juneHigh], array_column($this->invoices->listGroupedByMonth(
+            array_merge($base, ['sort_key' => 'issued']), 2, 2,
+        )['data'][0]['invoices'], 'id'));
+        self::assertSame(['2001-06'], array_column($this->invoices->listGroupedByMonth(
+            array_merge($base, ['sort_key' => 'issued', 'sort_dir' => 'desc']), 1, 2,
+        )['data'], 'month'));
+
+        $this->pdo->prepare('UPDATE invoices SET sent_at = ? WHERE id = ?')->execute(['2001-01-03 12:00:00', $juneLow]);
+        $this->pdo->prepare('UPDATE invoices SET sent_at = ? WHERE id = ?')->execute(['2001-01-01 12:00:00', $juneHigh]);
+        $this->pdo->prepare('UPDATE invoices SET sent_at = ? WHERE id = ?')->execute(['2001-01-02 12:00:00', $mayMiddle]);
+        $sentSort = array_merge($base, ['sort_key' => 'sent_at', 'group_by_month' => false]);
+        self::assertSame([$juneHigh, $mayMiddle], $this->collectIds($this->invoices->listGroupedByMonth($sentSort, 1, 2)['data']));
+        self::assertSame([$juneLow], $this->collectIds($this->invoices->listGroupedByMonth($sentSort, 2, 2)['data']));
+        foreach (['project', 'paid_total'] as $key) {
+            self::assertSame(3, $this->invoices->listGroupedByMonth(array_merge($base, ['sort_key' => $key]), 1, 2)['meta']['total']);
+        }
+
         $invalid = $this->invoices->listGroupedByMonth(array_merge($base, ['sort_key' => 'id; DROP TABLE invoices']), 1, 2);
         self::assertSame(3, $invalid['meta']['total']);
     }
@@ -152,6 +175,29 @@ final class ListGroupedByMonthTest extends TestCase
         self::assertSame('', $continuous['data'][0]['month']);
         self::assertSame([$juneLow, $mayMiddle], array_column($continuous['data'][0]['invoices'], 'id'));
         self::assertSame([$juneHigh], array_column($this->purchases->listGroupedByMonth($base + ['group_by_month' => false], 2, 2)['data'][0]['invoices'], 'id'));
+
+        $byDate = $this->purchases->listGroupedByMonth(array_merge($base, ['sort_key' => 'tax_date']), 1, 2);
+        self::assertSame(['2001-05', '2001-06'], array_column($byDate['data'], 'month'));
+        self::assertSame([$mayMiddle, $juneLow], array_merge(...array_map(
+            static fn (array $group): array => array_column($group['invoices'], 'id'),
+            $byDate['data'],
+        )));
+        self::assertSame([$juneHigh], array_column($this->purchases->listGroupedByMonth(
+            array_merge($base, ['sort_key' => 'tax_date']), 2, 2,
+        )['data'][0]['invoices'], 'id'));
+        self::assertSame(['2001-06'], array_column($this->purchases->listGroupedByMonth(
+            array_merge($base, ['sort_key' => 'tax_date', 'sort_dir' => 'desc']), 1, 2,
+        )['data'], 'month'));
+
+        $this->pdo->prepare('UPDATE purchase_invoices SET received_at = ? WHERE id = ?')->execute(['2001-01-03', $juneLow]);
+        $this->pdo->prepare('UPDATE purchase_invoices SET received_at = ? WHERE id = ?')->execute(['2001-01-01', $juneHigh]);
+        $this->pdo->prepare('UPDATE purchase_invoices SET received_at = ? WHERE id = ?')->execute(['2001-01-02', $mayMiddle]);
+        $receivedSort = array_merge($base, ['sort_key' => 'received_at', 'group_by_month' => false]);
+        self::assertSame([$juneHigh, $mayMiddle], $this->collectIds($this->purchases->listGroupedByMonth($receivedSort, 1, 2)['data']));
+        self::assertSame([$juneLow], $this->collectIds($this->purchases->listGroupedByMonth($receivedSort, 2, 2)['data']));
+        foreach (['project', 'payment_ordered_at'] as $key) {
+            self::assertSame(3, $this->purchases->listGroupedByMonth(array_merge($base, ['sort_key' => $key]), 1, 2)['meta']['total']);
+        }
     }
 
     /**

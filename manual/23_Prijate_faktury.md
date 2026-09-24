@@ -19,8 +19,15 @@ data či částky. Řazení se uplatní na celý filtrovaný výsledek před str
 Přepínač nad tabulkou volí měsíční skupiny nebo souvislý seznam; nastavení se
 ukládá pro přihlášeného uživatele. V měsíčním pohledu zaškrtávací políčko
 v záhlaví označí pouze zobrazené doklady daného měsíce. Nabídka **Sloupce** umožňuje
-doplnit základ daně, DPH, zůstatek k úhradě a oddíl kontrolního hlášení.
+doplnit základ daně, DPH, zůstatek k úhradě, zakázku, datum přijetí,
+datum předání k úhradě a oddíl kontrolního hlášení.
 Oddíl KH se načítá z Knihy DPH po zapnutí sloupce.
+Při vzestupném řazení podle DUZP se v měsíčním pohledu zobrazí nejstarší měsíce první.
+První kliknutí na záhlaví sloupce řadí sestupně, druhé vzestupně a třetí vrátí
+výchozí pořadí.
+Křížek v pravém okraji záhlaví tabulky vrátí výchozí řazení.
+Při posunu dolů se u konce seznamu automaticky načte další stránka; tlačítko
+**Načíst další** slouží k ručnímu načtení.
 
 V detailu faktury otevřete rozbalovací menu akcí a zvolte **Vytvořit nákladovou
 šablonu**. Otevře se stejný plný editor jako v seznamu šablon. Dodavatel se

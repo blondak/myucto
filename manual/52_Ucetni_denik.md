@@ -9,8 +9,9 @@
 
 V seznamu lze kliknutím na záhlaví sloupce řadit zápisy podle data, dokladu,
 zdroje, stavu, částky a dalších zobrazených údajů. Řazení platí pro celý
-filtrovaný výsledek před stránkováním. Další kliknutí na stejný sloupec obrátí
-směr řazení.
+filtrovaný výsledek před stránkováním. První kliknutí řadí sestupně, druhé
+vzestupně a třetí vrátí výchozí pořadí.
+Křížek na pravém okraji záhlaví tabulky vrátí výchozí pořadí.
 
 > [!NOTE]
 > Deník je jen **evidence toho, co se stalo** — nepředkontovává sám o sobě. Kterým
@@ -127,8 +128,8 @@ Pravidla, která přitom platí:
 
 ## 52.2 Seznam zápisů
 
-Stránka **Účetní deník** zobrazuje stránkovaný seznam zápisů (50 na stránku,
-navigace stránek dole; zápisy jsou seřazené od nejnovějších — nejdřív podle data
+Stránka **Účetní deník** zobrazuje postupně načítaný seznam zápisů (50 na dávku,
+další se načte při posunu dolů nebo tlačítkem **Načíst další**; zápisy jsou seřazené od nejnovějších — nejdřív podle data
 zápisu, při shodném datu podle pořadí vzniku) se sloupci:
 
 - **Datum** — datum účetního případu (`entry_date`),
@@ -145,7 +146,8 @@ zápisu, při shodném datu podle pořadí vzniku) se sloupci:
   za částkou — u zápisu s víc nohama na různých účtech (např. náklad + zúčtování
   zálohy) by jinak sloupec ukazoval součet celého zápisu, ne částku vybraného účtu,
 - **Stav** — badge **Zaúčtováno** (zeleně) nebo **Koncept** (šedě),
-- **Zaúčtováno dne** a **Zaúčtoval** *(skryto ve výchozím zobrazení)*.
+- **Zaúčtováno dne**, **Zaúčtoval**, **ID zápisu**, **Vytvořeno** a **Změněno**
+  *(skryto ve výchozím zobrazení)*.
 
 Přes ikonu ozubeného kola (**ColumnPicker**) si zobrazené sloupce přizpůsobíš, přepínačem
 hustoty řádků (**DensityToggle**) zvolíš kompaktnější nebo prostornější tabulku. Nastavené

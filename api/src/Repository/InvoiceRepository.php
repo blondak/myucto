@@ -990,6 +990,7 @@ final class InvoiceRepository
             'exchange_rate' => 'i.exchange_rate',
             'amount_czk' => "CASE WHEN cur.code = 'CZK' THEN i.total_with_vat ELSE i.total_with_vat * i.exchange_rate END",
             'base' => 'i.total_without_vat', 'vat' => 'i.total_vat', 'total' => 'i.total_with_vat',
+            'project' => 'p.name', 'sent_at' => 'i.sent_at', 'paid_total' => 'i.paid_total',
         ];
         $sortKey = (string) ($filters['sort_key'] ?? '');
         $sortDir = strtolower((string) ($filters['sort_dir'] ?? '')) === 'asc' ? 'ASC' : 'DESC';
@@ -998,7 +999,8 @@ final class InvoiceRepository
             ? $sortColumns[$sortKey] . ' ' . $sortDir . ', i.id DESC'
             : 'i.effective_tax_date DESC, i.id DESC';
         if ($groupByMonth && isset($sortColumns[$sortKey])) {
-            $sortSql = "DATE_FORMAT(i.effective_tax_date, '%Y-%m') DESC, " . $sortSql;
+            $monthDir = $sortKey === 'issued' ? $sortDir : 'DESC';
+            $sortSql = "DATE_FORMAT(i.effective_tax_date, '%Y-%m') {$monthDir}, " . $sortSql;
         }
 
         $sql = "SELECT $ossReviewSelect

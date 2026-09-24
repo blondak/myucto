@@ -12855,6 +12855,8 @@
       "col_document_date": "Document date",
       "col_posted_at": "Posted on",
       "col_posted_by": "Posted by",
+      "col_entry_id": "Entry ID",
+      "col_updated_at": "Updated",
       "reversal_entry": "Reversal entry",
       "copy_as_new": "Copy as new",
       "reverse": "Reverse",
@@ -15550,6 +15552,8 @@
       "reduced": "Coefficient-reduced (§76)"
     },
     "col_vat_deduction": "VAT deduction",
+    "col_received_at": "Received on",
+    "col_payment_ordered_at": "Sent for payment",
     "vat_deduction_short": {
       "full": "full",
       "none": "not claimed",
@@ -16663,6 +16667,7 @@
     "entry": "entry"
   },
   "common": {
+    "reset_sort": "Restore default order",
     "pdf_saved_to_folder": "PDF saved to the selected folder.",
     "pdf_save_failed": "The PDF could not be saved.",
     "environmentSwitch": {
@@ -16951,6 +16956,9 @@
     "col_base": "VAT base",
     "col_vat": "VAT",
     "col_total": "Total incl. VAT",
+    "col_project": "Project",
+    "col_sent_at": "Sent on",
+    "col_paid_total": "Total paid",
     "col_kh": "VAT statement section",
     "view_continuous": "Continuous list",
     "view_monthly": "By month",

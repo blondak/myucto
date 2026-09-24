@@ -21,8 +21,13 @@ V hlavním menu **Faktury**.
 Seznam je standardně seskupený po měsících podle DUZP, u záloh podle data vystavení.
 Přepínačem nad tabulkou lze zvolit souvislý seznam bez měsíčních skupin. Volba se
 ukládá pro přihlášeného uživatele. Kliknutí na záhlaví sloupce seřadí celý
-filtrovaný výsledek před stránkováním; další kliknutí obrátí směr. V měsíčním
-pohledu zůstanou měsíce od nejnovějšího a řadí se doklady uvnitř každého měsíce.
+filtrovaný výsledek před stránkováním; první kliknutí řadí sestupně, druhé
+vzestupně a třetí vrátí výchozí pořadí. V měsíčním
+pohledu se při vzestupném řazení podle DUZP zobrazí nejstarší měsíce první.
+U ostatních sloupců zůstávají měsíce od nejnovějšího a řadí se doklady uvnitř nich.
+Křížek v pravém okraji záhlaví tabulky vrátí výchozí řazení.
+Při posunu dolů se u konce seznamu automaticky načte další stránka; tlačítko
+**Načíst další** zůstává k dispozici pro ruční načtení.
 Zaškrtávací políčko v záhlaví tabulky označí pouze zobrazené doklady tohoto měsíce.
 
 | Sloupec | Význam |
@@ -39,7 +44,8 @@ Zaškrtávací políčko v záhlaví tabulky označí pouze zobrazené doklady t
 
 Tlačítkem **Sloupce** lze zapnout doplňkové sloupce, mimo jiné **Var. symbol**
 (platební VS, který se tiskne na PDF a do QR platby a může se lišit od čísla
-faktury), **Objednávka**, základ daně, DPH, celkovou částku a oddíl kontrolního
+faktury), **Objednávka**, **Zakázka**, **Odesláno dne**, **Uhrazeno celkem**,
+základ daně, DPH, celkovou částku a oddíl kontrolního
 hlášení. Oddíl KH se doplňuje z Knihy DPH až po zapnutí sloupce; doklad bez
 zařazení do KH má prázdnou hodnotu.
 

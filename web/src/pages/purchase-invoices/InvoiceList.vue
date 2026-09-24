@@ -32,6 +32,7 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
@@ -57,6 +58,8 @@ const page = ref(1)
 const pages = ref(1)
 const loading = ref(true)
 const loadingMore = ref(false)
+const loadMoreTarget = ref<HTMLElement | null>(null)
+useScrollLoadMore(loadMoreTarget, () => !loading.value && !loadingMore.value && page.value < pages.value, () => load(false))
 const error = ref('')
 /**
  * Řádky k probliknutí po hromadné akci. Značku zapisují bulk handlery přes
@@ -294,6 +297,9 @@ const COLUMNS: ColumnDef[] = [
   { key: 'base', labelKey: 'invoice.col_base', defaultHidden: true },
   { key: 'vat', labelKey: 'invoice.col_vat', defaultHidden: true },
   { key: 'balance', labelKey: 'invoice.amount_to_pay', defaultHidden: true },
+  { key: 'project', labelKey: 'invoice.col_project', defaultHidden: true },
+  { key: 'received_at', labelKey: 'purchase_invoice.col_received_at', defaultHidden: true },
+  { key: 'payment_ordered_at', labelKey: 'purchase_invoice.col_payment_ordered_at', defaultHidden: true },
   { key: 'kh', labelKey: 'invoice.col_kh', defaultHidden: true, sortable: false },
   { key: 'locked', labelKey: 'lock.column' },
 ]
@@ -306,6 +312,10 @@ function toggleGrouping() {
 }
 function onSortToggle(key: string) {
   tbl.toggleSort(key)
+  load()
+}
+function clearSort() {
+  tbl.clearSort()
   load()
 }
 
@@ -492,7 +502,7 @@ function mergeGroups(existing: PurchaseMonthGroup[], incoming: PurchaseMonthGrou
       }
     }
   }
-  return Array.from(byMonth.values()).sort((a, b) => b.month.localeCompare(a.month))
+  return Array.from(byMonth.values())
 }
 
 /**
@@ -562,7 +572,12 @@ async function fetchPage(reset: boolean) {
     pages.value = res.meta.pages ?? 1
   } catch (e) {
     if (seq !== loadSeq) return
-    error.value = apiErrorMessage(e)
+    if (reset) {
+      error.value = apiErrorMessage(e)
+    } else {
+      page.value--
+      toast.error(apiErrorMessage(e))
+    }
   } finally {
     if (seq === loadSeq) {
       loading.value = false
@@ -1179,7 +1194,9 @@ async function bulkSetKind() {
                     <span class="sr-only">{{ t('lock.column') }}</span>
                   </th>
                   <th class="px-1 py-2 w-8">
-                    <span class="sr-only">{{ t('common.expand_items') }}</span>
+                    <button v-if="tbl.sort.value" type="button" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800"
+                      :title="t('common.reset_sort')" :aria-label="t('common.reset_sort')" @click.stop="clearSort">×</button>
+                    <span v-else class="sr-only">{{ t('common.expand_items') }}</span>
                   </th>
                 </tr>
               </thead>
@@ -1292,6 +1309,9 @@ async function bulkSetKind() {
                   <td v-if="tbl.isVisible('base')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_without_vat, inv.currency) }}</td>
                   <td v-if="tbl.isVisible('vat')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_vat, inv.currency) }}</td>
                   <td v-if="tbl.isVisible('balance')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.amount_to_pay, inv.currency) }}</td>
+                  <td v-if="tbl.isVisible('project')" class="px-4 py-2.5 text-xs text-neutral-600">{{ inv.project_name || '—' }}</td>
+                  <td v-if="tbl.isVisible('received_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ inv.received_at ? formatDate(inv.received_at) : '—' }}</td>
+                  <td v-if="tbl.isVisible('payment_ordered_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ inv.payment_ordered_at ? formatDate(inv.payment_ordered_at) : '—' }}</td>
                   <td v-if="tbl.isVisible('kh')" class="px-4 py-2.5 font-mono text-xs">{{ inv.kh_sections?.join(', ') || '—' }}</td>
                   <td v-if="tbl.isVisible('locked')" class="px-2 py-2.5 text-center">
                     <PostingBadge v-if="inv.locked?.journal_entry_id"
@@ -1437,7 +1457,7 @@ async function bulkSetKind() {
         </div>
       </section>
 
-      <div v-if="page < pages" class="text-center mt-3">
+      <div v-if="page < pages" ref="loadMoreTarget" class="text-center mt-3">
         <button @click="load(false)" :disabled="loadingMore"
           class="cursor-pointer h-10 px-5 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium disabled:opacity-50 rounded-md inline-flex items-center gap-2 shadow-sm">
           {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}

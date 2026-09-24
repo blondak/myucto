@@ -606,6 +606,7 @@ final class JournalEntryRepository
             'status' => "CASE WHEN je.reversed_by IS NOT NULL THEN 'reversed' WHEN je.posted_at IS NULL THEN 'draft' ELSE 'posted' END",
             'posted_at' => 'je.posted_at',
             'posted_by' => '(SELECT u.name FROM users u WHERE u.id = je.posted_by)',
+            'entry_id' => 'je.id', 'created_at' => 'je.created_at', 'updated_at' => 'je.updated_at',
             'document_no' => "COALESCE(je.document_no,
                 (SELECT i.varsymbol FROM invoices i WHERE je.source_type = 'invoice' AND i.id = je.source_id AND i.supplier_id = je.supplier_id),
                 (SELECT pi.vendor_invoice_number FROM purchase_invoices pi WHERE je.source_type = 'purchase_invoice' AND pi.id = je.source_id AND pi.supplier_id = je.supplier_id),

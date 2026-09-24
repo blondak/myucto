@@ -27,6 +27,7 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import type { SavedFilter } from '@/api/preferences'
@@ -67,6 +68,8 @@ const page = ref(1)
 const pages = ref(1)
 const loading = ref(false)
 const loadingMore = ref(false)
+const loadMoreTarget = ref<HTMLElement | null>(null)
+useScrollLoadMore(loadMoreTarget, () => !loading.value && !loadingMore.value && page.value < pages.value, () => load(false))
 const search = ref('')
 const statusFilter = ref<string>('')
 const typeFilter = ref<string>('')
@@ -837,14 +840,18 @@ function mergeGroups(existing: MonthGroup[], incoming: MonthGroup[]): MonthGroup
       }
     }
   }
-  return Array.from(byMonth.values()).sort((a, b) => b.month.localeCompare(a.month))
+  return Array.from(byMonth.values())
 }
 
+let loadSeq = 0
 async function load(reset = true) {
+  if (!reset && (loading.value || loadingMore.value || page.value >= pages.value)) return
+  const seq = ++loadSeq
   if (reset) {
     if (searchTimeout) clearTimeout(searchTimeout)
     searchTimeout = null
     loading.value = true
+    loadingMore.value = false
     page.value = 1
   } else {
     loadingMore.value = true
@@ -876,6 +883,7 @@ async function load(reset = true) {
       group_by_month: groupByMonth.value,
       include_kh: tbl.isVisible('kh'),
     })
+    if (seq !== loadSeq) return
     if (reset) {
       groups.value = result.data
     } else {
@@ -883,14 +891,21 @@ async function load(reset = true) {
     }
     total.value = result.meta.total
     pages.value = result.meta.pages ?? 1
+  } catch (e) {
+    if (seq === loadSeq) {
+      if (!reset) page.value--
+      toast.error(t('common.error'))
+    }
   } finally {
-    loading.value = false
-    loadingMore.value = false
-    flashedIds.value = consumeFlashedRows('invoice')
-    // Po první dávce dat je stagger odbytý — další načtení (filtr, stránkování,
-    // „načíst další") už musí být okamžité.
-    if (staggerRows.value) {
-      window.setTimeout(() => { staggerRows.value = false }, 600)
+    if (seq === loadSeq) {
+      loading.value = false
+      loadingMore.value = false
+      flashedIds.value = consumeFlashedRows('invoice')
+      // Po první dávce dat je stagger odbytý — další načtení (filtr, stránkování,
+      // „načíst další") už musí být okamžité.
+      if (staggerRows.value) {
+        window.setTimeout(() => { staggerRows.value = false }, 600)
+      }
     }
   }
 }
@@ -918,6 +933,9 @@ const COLUMNS: ColumnDef[] = [
   { key: 'base', labelKey: 'invoice.col_base', defaultHidden: true },
   { key: 'vat', labelKey: 'invoice.col_vat', defaultHidden: true },
   { key: 'total', labelKey: 'invoice.col_total', defaultHidden: true },
+  { key: 'project', labelKey: 'invoice.col_project', defaultHidden: true },
+  { key: 'sent_at', labelKey: 'invoice.col_sent_at', defaultHidden: true },
+  { key: 'paid_total', labelKey: 'invoice.col_paid_total', defaultHidden: true },
   { key: 'kh', labelKey: 'invoice.col_kh', defaultHidden: true, sortable: false },
   { key: 'locked', labelKey: 'lock.column' },
 ]
@@ -930,6 +948,10 @@ function toggleGrouping() {
 }
 function onSortToggle(key: string) {
   tbl.toggleSort(key)
+  load()
+}
+function clearSort() {
+  tbl.clearSort()
   load()
 }
 
@@ -1430,14 +1452,16 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                 </th>
                 <SortableTh v-for="c in COLUMNS.filter(c => c.key !== 'locked' && c.sortable !== false && tbl.isVisible(c.key))" :key="c.key"
                   :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
-                  :align="['amount', 'amount_czk', 'exchange_rate', 'base', 'vat', 'total'].includes(c.key) ? 'right' : 'left'"
+                  :align="['amount', 'amount_czk', 'exchange_rate', 'base', 'vat', 'total', 'paid_total'].includes(c.key) ? 'right' : 'left'"
                   @toggle="onSortToggle" />
                 <th v-if="tbl.isVisible('kh')" class="text-left px-4 py-2 font-medium">{{ t('invoice.col_kh') }}</th>
                 <th v-if="tbl.isVisible('locked')" class="text-center px-2 py-2 font-medium w-8">
                   <span class="sr-only">{{ t('lock.column') }}</span>
                 </th>
                 <th class="px-1 py-2 w-8">
-                  <span class="sr-only">{{ t('common.expand_items') }}</span>
+                  <button v-if="tbl.sort.value" type="button" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800"
+                    :title="t('common.reset_sort')" :aria-label="t('common.reset_sort')" @click.stop="clearSort">×</button>
+                  <span v-else class="sr-only">{{ t('common.expand_items') }}</span>
                 </th>
               </tr>
             </thead>
@@ -1547,6 +1571,9 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                 <td v-if="tbl.isVisible('base')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_without_vat, inv.currency) }}</td>
                 <td v-if="tbl.isVisible('vat')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_vat, inv.currency) }}</td>
                 <td v-if="tbl.isVisible('total')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_with_vat, inv.currency) }}</td>
+                <td v-if="tbl.isVisible('project')" class="px-4 py-2.5 text-xs text-neutral-600">{{ inv.project_name || '—' }}</td>
+                <td v-if="tbl.isVisible('sent_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ inv.sent_at ? formatDate(inv.sent_at) : '—' }}</td>
+                <td v-if="tbl.isVisible('paid_total')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.paid_total ?? 0, inv.currency) }}</td>
                 <td v-if="tbl.isVisible('kh')" class="px-4 py-2.5 font-mono text-xs">{{ inv.kh_sections?.join(', ') || '—' }}</td>
                 <td v-if="tbl.isVisible('locked')" class="px-2 py-2.5 text-center">
                   <PostingBadge v-if="inv.locked?.journal_entry_id"
@@ -1688,7 +1715,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         </div>
       </section>
 
-      <div v-if="page < pages" class="text-center mt-3">
+      <div v-if="page < pages" ref="loadMoreTarget" class="text-center mt-3">
         <button @click="load(false)" :disabled="loadingMore"
           class="cursor-pointer h-10 px-5 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium disabled:opacity-50 rounded-md inline-flex items-center gap-2 shadow-sm">
           {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
