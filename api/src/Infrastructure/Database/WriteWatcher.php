@@ -46,6 +46,11 @@ final class WriteWatcher
      */
     public static function noteStatement(string $sql): void
     {
+        try {
+            \MyInvoice\Infrastructure\Cache\SupplierWriteGenerations::noteStatement($sql);
+        } catch (Throwable) {
+        }
+
         $cache = self::$cache;
         if ($cache === null) {
             return;

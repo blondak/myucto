@@ -504,6 +504,9 @@ final class Bootstrap
                     $c->get(Config::class),
                 );
                 \MyInvoice\Infrastructure\Database\WriteWatcher::attach($cache);
+                if (!defined('PHPUNIT_COMPOSER_INSTALL')) {
+                    \MyInvoice\Infrastructure\Cache\SupplierWriteGenerations::bind($c->get(RedisFactory::class));
+                }
 
                 return $cache;
             },
