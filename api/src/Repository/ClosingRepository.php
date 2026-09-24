@@ -305,6 +305,58 @@ final class ClosingRepository
     }
 
     /**
+     * @param list<string> $accountCodes
+     * @return array<int|string,float>
+     */
+    public function accountBalances(int $supplierId, array $accountCodes, string $asOf): array
+    {
+        $accountCodes = array_values(array_unique($accountCodes));
+        if ($accountCodes === []) {
+            return [];
+        }
+
+        $balances = array_fill_keys($accountCodes, 0.0);
+        $requested = implode(' UNION ALL ', array_fill(0, count($accountCodes), 'SELECT ? AS code'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT requested.code, a.id
+               FROM ({$requested}) requested
+               JOIN chart_of_accounts a ON a.supplier_id = ?
+               LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
+              WHERE a.account_code LIKE CONCAT(requested.code, '%')
+                 OR COALESCE(p.account_code, a.account_code) LIKE CONCAT(requested.code, '%')"
+        );
+        $stmt->execute([...$accountCodes, $supplierId]);
+
+        $codesByAccount = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $codesByAccount[(int) $row['id']][] = (string) $row['code'];
+        }
+        if ($codesByAccount === []) {
+            return $balances;
+        }
+
+        $ids = array_keys($codesByAccount);
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT l.account_id,
+                    SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS balance
+               FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id
+              WHERE l.supplier_id = ? AND l.account_id IN ({$placeholders})
+                AND e.posted_at IS NOT NULL AND e.entry_date <= ?
+              GROUP BY l.account_id"
+        );
+        $stmt->execute([$supplierId, ...$ids, $asOf]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            foreach ($codesByAccount[(int) $row['account_id']] as $code) {
+                $balances[$code] += (float) $row['balance'];
+            }
+        }
+
+        return array_map(static fn (float $balance): float => round($balance, 2), $balances);
+    }
+
+    /**
      * Účty se zůstatkem na neobvyklé straně dle normal_side k datu (audit 2026-07,
      * D8 — inventarizační kontrola: pohledávka v kreditu, závazek v debetu apod.
      * signalizuje přeplatek/chybu). Saldní účty (normal_side IS NULL, např. 343)

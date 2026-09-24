@@ -3905,6 +3905,22 @@ final class ClosingService
             ? $this->buildErrorChecks($supplierId, $period)
             : [];
 
+        $balanceCodes = [];
+        foreach ([
+            'transit_261_open' => ['261'],
+            'internal_395_open' => ['395'],
+            'acquisition_04x_open' => ['041', '042'],
+            'procurement_111_131_open' => ['111', '131'],
+            'deposits_314_324_open' => ['314', '324'],
+            'estimates_balances' => ['388', '389'],
+            'deferrals_balances' => ['381', '382', '383', '384', '385'],
+        ] as $key => $codes) {
+            if ($wants($key)) {
+                array_push($balanceCodes, ...$codes);
+            }
+        }
+        $balances = $this->closing->accountBalances($supplierId, $balanceCodes, $rangeTo);
+
         if ($wants('unposted_invoices')) {
             $unpostedInvoices = $this->closing->unpostedInvoices($supplierId, $rangeFrom, $rangeTo);
             $checks[] = [
@@ -3926,7 +3942,7 @@ final class ClosingService
         }
 
         if ($wants('transit_261_open')) {
-            $checks[] = $this->checkTransit261($supplierId, $rangeTo);
+            $checks[] = $this->checkTransit261($supplierId, $rangeTo, $balances['261']);
         }
         foreach ([
             'internal_395_open' => '395',
@@ -3934,13 +3950,13 @@ final class ClosingService
             if (!$wants($key)) {
                 continue;
             }
-            $bal = round($this->closing->accountBalance($supplierId, $code, $rangeTo)
+            $bal = round($balances[$code]
                 - $this->cardClearing->clearingBalanceUnder($supplierId, $code, $rangeTo), 2);
             $checks[] = ['key' => $key, 'severity' => 'warning', 'ok' => abs($bal) < 0.005, 'value' => ['account' => $code, 'balance' => $bal]];
         }
         if ($wants('acquisition_04x_open')) {
-            $bal041 = round($this->closing->accountBalance($supplierId, '041', $rangeTo), 2);
-            $bal042 = round($this->closing->accountBalance($supplierId, '042', $rangeTo), 2);
+            $bal041 = $balances['041'];
+            $bal042 = $balances['042'];
             $checks[] = [
                 'key' => 'acquisition_04x_open',
                 'severity' => 'warning',
@@ -3952,8 +3968,8 @@ final class ClosingService
         // Nedočerpané zálohy na pořízení materiálu/zboží (audit 2026-07 D8 — auditor
         // uváděl 111/131 mezi kontrolami F4, ve skutečnosti chyběly úplně).
         if ($wants('procurement_111_131_open')) {
-            $bal111 = round($this->closing->accountBalance($supplierId, '111', $rangeTo), 2);
-            $bal131 = round($this->closing->accountBalance($supplierId, '131', $rangeTo), 2);
+            $bal111 = $balances['111'];
+            $bal131 = $balances['131'];
             $checks[] = [
                 'key' => 'procurement_111_131_open',
                 'severity' => 'warning',
@@ -3969,8 +3985,8 @@ final class ClosingService
         // ne o zapomenutý průběžný zůstatek. Účty jsou saldokontní (per partner),
         // takže drobný haléřový zbytek po vypořádání není chyba.
         if ($wants('deposits_314_324_open')) {
-            $bal314 = round($this->closing->accountBalance($supplierId, '314', $rangeTo), 2);
-            $bal324 = round($this->closing->accountBalance($supplierId, '324', $rangeTo), 2);
+            $bal314 = $balances['314'];
+            $bal324 = $balances['324'];
             $checks[] = [
                 'key' => 'deposits_314_324_open',
                 'severity' => 'warning',
@@ -4112,8 +4128,8 @@ final class ClosingService
                 'severity' => 'info',
                 'ok' => true,
                 'value' => [
-                    '388' => round($this->closing->accountBalance($supplierId, '388', $rangeTo), 2),
-                    '389' => round($this->closing->accountBalance($supplierId, '389', $rangeTo), 2),
+                    '388' => $balances['388'],
+                    '389' => $balances['389'],
                 ],
             ];
 
@@ -4159,7 +4175,7 @@ final class ClosingService
         if ($wants('deferrals_balances')) {
             $deferrals = [];
             foreach (['381', '382', '383', '384', '385'] as $code) {
-                $deferrals[$code] = round($this->closing->accountBalance($supplierId, $code, $rangeTo), 2);
+                $deferrals[$code] = $balances[$code];
             }
             $checks[] = ['key' => 'deferrals_balances', 'severity' => 'info', 'ok' => true, 'value' => $deferrals];
         }
@@ -4510,10 +4526,10 @@ final class ClosingService
     }
 
     /** @return array{key:string,severity:string,ok:bool,value:array<string,mixed>} */
-    private function checkTransit261(int $supplierId, string $asOf): array
+    private function checkTransit261(int $supplierId, string $asOf, float $accountBalance): array
     {
         // Analytiky mezičlenu karet pod 261 hlídá kontrola card_clearing_open.
-        $balance = round($this->closing->accountBalance($supplierId, '261', $asOf)
+        $balance = round($accountBalance
             - $this->cardClearing->clearingBalanceUnder($supplierId, '261', $asOf), 2);
         if (abs($balance) < 0.005) {
             return [
@@ -4604,12 +4620,16 @@ final class ClosingService
     {
         $rows = $this->assets->listDepreciableForCheck($supplierId);
         $byPair = [];
+        $accountCodes = [];
         foreach ($rows as $r) {
             $key = $r['asset_account_code'] . '|' . $r['accumulated_account_code'];
             $byPair[$key]['asset_account_code'] ??= $r['asset_account_code'];
             $byPair[$key]['accumulated_account_code'] ??= $r['accumulated_account_code'];
             $byPair[$key]['assets'][] = $r;
+            $accountCodes[] = $r['asset_account_code'];
+            $accountCodes[] = $r['accumulated_account_code'];
         }
+        $balances = $this->closing->accountBalances($supplierId, $accountCodes, $asOf);
 
         // Nález = KARTA majetku, ne dvojice účtů. Dřív se vracely skupiny (`groups`) a
         // frontend si je rozbaloval na karty — kontrola tedy hlásila „1 nález" a v tabulce
@@ -4617,11 +4637,11 @@ final class ClosingService
         // kartách, ne po dvojicích účtů, takže seznam karet je i věcně to, co potřebuje.
         $flagged = [];
         foreach ($byPair as $pair) {
-            $assetBal = $this->closing->accountBalance($supplierId, $pair['asset_account_code'], $asOf);
+            $assetBal = $balances[$pair['asset_account_code']];
             if (abs($assetBal) < 0.005) {
                 continue; // karty bez zůstatku na účtu (např. teprve pořizované) nekontrolujeme
             }
-            $accBal = $this->closing->accountBalance($supplierId, $pair['accumulated_account_code'], $asOf);
+            $accBal = $balances[$pair['accumulated_account_code']];
             if (abs($accBal) >= 0.005) {
                 continue;
             }
