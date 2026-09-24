@@ -16932,6 +16932,7 @@
   },
   "invoice": {
     "title": "Issued invoices",
+    "col_order_number": "Order no.",
     "col_paid_at": "Paid on",
     "col_booked_at": "Booked",
     "col_exchange_rate": "Rate",
@@ -17150,7 +17151,7 @@
     "bulk_post_partial": "Posted {ok}, errors: {err}",
     "bulk_post_failed": "Bulk posting failed",
     "csv_export_failed": "CSV export failed",
-    "search_placeholder": "Search by var. symbol or client…",
+    "search_placeholder": "Search by number, VS, order no. or client…",
     "search_short": "Search…",
     "all_statuses": "All statuses",
     "all_types": "All types",
@@ -22285,8 +22286,8 @@
       "failed_short": "Error",
       "duplicate": "duplicate",
       "kind_changed": "Document type changed.",
-      "batch_summary": "Imported {ok} documents, {failed} with errors.",
       "last_import": "Last import: {date} · {n} documents",
+      "batch_summary": "Imported {ok} documents, {failed} with errors.",
       "show_in_list": "Show in purchase invoices",
       "coming_hint": "—"
     },

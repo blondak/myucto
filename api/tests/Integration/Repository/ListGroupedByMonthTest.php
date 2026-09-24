@@ -210,6 +210,36 @@ final class ListGroupedByMonthTest extends TestCase
         self::assertSame(1, $res['meta']['total'], 'Count sdílí WHERE s hlavním dotazem — zůstává konzistentní.');
     }
 
+    /**
+     * Hledání najde doklad i podle čísla objednávky a podle platebního VS — i když VS
+     * není uložený zvlášť, ale odvozuje se z číslic čísla dokladu (2099-0777 → 20990777).
+     */
+    public function testInvoiceSearchMatchesOrderNumberAndDerivedVariableSymbol(): void
+    {
+        $client = $this->client('Odberatel VsSearch', true, false);
+        $derived = $this->invoice($client, '2001-08-10', '2001-08-10', 1000.0, 210.0, 1210.0, 'issued');
+        $explicit = $this->invoice($client, '2001-08-11', '2001-08-11', 500.0, 105.0, 605.0, 'issued');
+        $this->pdo->prepare('UPDATE invoices SET varsymbol = ?, supplier_order_number = ? WHERE id = ?')
+            ->execute(['2099-0777', 'OBJ-QX-4417', $derived]);
+        $this->pdo->prepare('UPDATE invoices SET varsymbol = ?, payment_variable_symbol = ? WHERE id = ?')
+            ->execute(['2099-0778', '5550001', $explicit]);
+
+        $search = fn (string $q): array => $this->collectIds($this->invoices->listGroupedByMonth([
+            'supplier_id' => $this->supplierId, 'client_id' => $client, 'q' => $q,
+        ], 1, 50)['data']);
+
+        self::assertSame([$derived], $search('QX-44'), 'Číslo objednávky se hledá i uprostřed.');
+        self::assertSame([$derived], $search('20990777'), 'VS odvozený z čísla dokladu.');
+        self::assertSame([$explicit], $search('5550001'), 'Samostatný platební VS.');
+        self::assertSame([], $search('20990778'), 'Doklad s vlastním VS se podle číslic čísla dokladu nenajde.');
+
+        $row = $this->invoices->listGroupedByMonth(['supplier_id' => $this->supplierId, 'client_id' => $client])['data'][0]['invoices'];
+        $bySymbol = array_column($row, 'payment_varsymbol', 'id');
+        self::assertSame('20990777', $bySymbol[$derived]);
+        self::assertSame('5550001', $bySymbol[$explicit]);
+        self::assertSame('OBJ-QX-4417', array_column($row, 'supplier_order_number', 'id')[$derived]);
+    }
+
     public function testInvoicesBookedFilter(): void
     {
         $client = $this->client('Booked Klient', true, false);

@@ -642,11 +642,11 @@ final class InvoiceRepository
                JOIN clients c ON c.id = i.client_id
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
-                AND i.varsymbol LIKE ?
+                AND (i.varsymbol LIKE ? OR i.payment_variable_symbol LIKE ? OR i.supplier_order_number LIKE ?)
               ORDER BY i.issue_date DESC, i.id DESC
               LIMIT " . (int) $limit
         );
-        $stmt->execute([$supplierId, '%' . $esc . '%']);
+        $stmt->execute([$supplierId, '%' . $esc . '%', $esc . '%', '%' . $esc . '%']);
         return array_map(static fn (array $r) => [
             'id'             => (int) $r['id'],
             'varsymbol'      => $r['varsymbol'] !== null ? (string) $r['varsymbol'] : null,
@@ -929,13 +929,22 @@ final class InvoiceRepository
             // Hledá i v TEXTU POLOŽEK faktury (EXISTS, ne JOIN — JOIN by fakturu znásobil na
             // počet položek a rozbil COUNT i stránkování). $whereSql je sdílený mezi count
             // i hlavním dotazem, takže stačí doplnit tady jednou.
-            $where[] = '(i.varsymbol LIKE ? OR i.payment_variable_symbol LIKE ? OR c.company_name LIKE ?'
-                . ' OR EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.id'
-                . ' AND ii.description LIKE ?))';
-            $params[] = $q . '%';
-            $params[] = $q . '%';
-            $params[] = '%' . $q . '%';
-            $params[] = '%' . $q . '%';
+            $or = [
+                'i.varsymbol LIKE ?',
+                'i.payment_variable_symbol LIKE ?',
+                'c.company_name LIKE ?',
+                'i.supplier_order_number LIKE ?',
+                'EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.id AND ii.description LIKE ?)',
+            ];
+            array_push($params, $q . '%', $q . '%', '%' . $q . '%', '%' . $q . '%', '%' . $q . '%');
+            // Platební VS bez vlastního payment_variable_symbol = číslice z čísla dokladu
+            // (VariableSymbolNormalizer::forInvoicePayment) — „20260001" najde „2026-0001".
+            $rawQ = trim((string) $filters['q']);
+            if (ctype_digit($rawQ)) {
+                $or[] = "(i.payment_variable_symbol IS NULL AND REGEXP_REPLACE(i.varsymbol, '[^0-9]', '') LIKE ?)";
+                $params[] = $rawQ . '%';
+            }
+            $where[] = '(' . implode(' OR ', $or) . ')';
         }
 
         $whereSql = implode(' AND ', $where);
@@ -973,7 +982,8 @@ final class InvoiceRepository
         }
 
         $sql = "SELECT $ossReviewSelect
-                       i.id, i.varsymbol, i.invoice_type, i.parent_invoice_id, i.recurring_template_id,
+                       i.id, i.varsymbol, i.payment_variable_symbol, i.supplier_order_number,
+                       i.invoice_type, i.parent_invoice_id, i.recurring_template_id,
                        i.client_id, i.project_id, i.supplier_id,
                        i.issue_date, i.tax_date, i.due_date,
                        i.currency_id, cur.code AS currency, cur.symbol AS currency_symbol, cur.decimals AS currency_decimals,
@@ -1016,6 +1026,7 @@ final class InvoiceRepository
         $grouped = [];
         foreach ($rows as $row) {
             $row = $this->castInvoice($row);
+            $row['payment_varsymbol'] = VariableSymbolNormalizer::forInvoicePayment($row);
             $month = (string) $row['month_bucket'];
             if (!isset($grouped[$month])) {
                 $grouped[$month] = [

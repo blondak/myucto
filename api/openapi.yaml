@@ -845,7 +845,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - in: query
           name: q
-          description: Fulltextové vyhledávání (varsymbol, klient, popis)
+          description: Fulltextové vyhledávání (číslo dokladu, platební VS včetně odvozeného z čísla dokladu, číslo objednávky, klient, popis položek)
           schema: { type: string }
         - in: query
           name: filter[status]

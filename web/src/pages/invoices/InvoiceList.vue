@@ -894,7 +894,7 @@ async function load(reset = true) {
 const DEFAULT_YEAR = new Date().getFullYear()
 
 const COLUMNS: ColumnDef[] = [
-  { key: 'number', labelKey: 'invoice.varsymbol', required: true },
+  { key: 'number', labelKey: 'invoice.varsymbol_label', required: true },
   { key: 'client', labelKey: 'invoice.client_project' },
   { key: 'type', labelKey: 'invoice.type' },
   { key: 'issued', labelKey: 'invoice.tax_date' },
@@ -902,6 +902,8 @@ const COLUMNS: ColumnDef[] = [
   { key: 'amount', labelKey: 'invoice.amount_to_pay', required: true },
   { key: 'status', labelKey: 'invoice.status_label' },
   // Doplňkové sloupce — defaultně skryté, uživatel si je zapne přes ColumnPicker.
+  { key: 'payment_vs', labelKey: 'invoice.varsymbol', defaultHidden: true },
+  { key: 'order_number', labelKey: 'invoice.col_order_number', defaultHidden: true },
   { key: 'paid_at', labelKey: 'invoice.col_paid_at', defaultHidden: true },
   { key: 'payment_method', labelKey: 'payment_method.label', defaultHidden: true },
   { key: 'booked_at', labelKey: 'invoice.col_booked_at', defaultHidden: true },
@@ -1401,13 +1403,15 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                     class="w-5 h-5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
                   />
                 </th>
-                <th v-if="tbl.isVisible('number')" class="text-left px-4 py-2 font-medium w-32">Var. symbol</th>
+                <th v-if="tbl.isVisible('number')" class="text-left px-4 py-2 font-medium w-32">{{ t('invoice.varsymbol_label') }}</th>
                 <th v-if="tbl.isVisible('client')" class="text-left px-4 py-2 font-medium">{{ t('invoice.client_project') }}</th>
                 <th v-if="tbl.isVisible('type')" class="text-center px-4 py-2 font-medium">Typ</th>
                 <th v-if="tbl.isVisible('issued')" class="text-center px-4 py-2 font-medium">DUZP / Vystaveno</th>
                 <th v-if="tbl.isVisible('due')" class="text-center px-4 py-2 font-medium">Splatnost</th>
                 <th v-if="tbl.isVisible('amount')" class="text-right px-4 py-2 font-medium">{{ t('invoice.amount_to_pay') }}</th>
                 <th v-if="tbl.isVisible('status')" class="text-center px-4 py-2 font-medium">Stav</th>
+                <th v-if="tbl.isVisible('payment_vs')" class="text-left px-4 py-2 font-medium">{{ t('invoice.varsymbol') }}</th>
+                <th v-if="tbl.isVisible('order_number')" class="text-left px-4 py-2 font-medium">{{ t('invoice.col_order_number') }}</th>
                 <th v-if="tbl.isVisible('paid_at')" class="text-center px-4 py-2 font-medium">{{ t('invoice.col_paid_at') }}</th>
                 <th v-if="tbl.isVisible('payment_method')" class="text-center px-4 py-2 font-medium">{{ t('payment_method.label') }}</th>
                 <th v-if="tbl.isVisible('booked_at')" class="text-center px-4 py-2 font-medium">{{ t('invoice.col_booked_at') }}</th>
@@ -1494,6 +1498,14 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                     :title="t('invoice.sent_at', { date: formatDate(inv.sent_at) })">✉</span>
                   <span v-if="inv.reminder_count > 0" class="ml-1 text-xs px-1 py-0.5 rounded bg-warning-50 text-warning-600 font-semibold"
                     :title="t('invoice.reminder_at', { count: inv.reminder_count, date: formatDate(inv.last_reminder_at) })">⚠ {{ inv.reminder_count }}</span>
+                </td>
+                <td v-if="tbl.isVisible('payment_vs')" class="px-4 py-2.5 font-mono text-xs text-neutral-600">
+                  <span v-if="inv.payment_varsymbol">{{ inv.payment_varsymbol }}</span>
+                  <span v-else class="text-neutral-300">—</span>
+                </td>
+                <td v-if="tbl.isVisible('order_number')" class="px-4 py-2.5 font-mono text-xs text-neutral-600">
+                  <span v-if="inv.supplier_order_number">{{ inv.supplier_order_number }}</span>
+                  <span v-else class="text-neutral-300">—</span>
                 </td>
                 <td v-if="tbl.isVisible('paid_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
                   <span v-if="inv.paid_at">{{ formatDate(inv.paid_at) }}</span>

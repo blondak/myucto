@@ -409,6 +409,8 @@ export interface ExchangeRateMeta {
 export interface InvoiceListItem {
   id: number
   varsymbol: string | null
+  payment_varsymbol?: string
+  supplier_order_number?: string | null
   invoice_type: InvoiceType
   parent_invoice_id: number | null
   recurring_template_id?: number | null
