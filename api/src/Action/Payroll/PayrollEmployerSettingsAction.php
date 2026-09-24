@@ -12,6 +12,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\PayrollEmployerLegacyIdentifierCarryOver;
 use MyInvoice\Service\Payroll\PayrollEmployerSettingsValidator;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -27,6 +28,7 @@ final class PayrollEmployerSettingsAction
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollEmployerLegacyIdentifierCarryOver $legacyIdentifiers,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -83,6 +85,11 @@ final class PayrollEmployerSettingsAction
             return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
                 'current_row_version' => $e->currentVersion,
             ]);
+        }
+        // Identifikátory, které firma dosud vedla v Nastavení firmy, se doplní do
+        // prázdných míst až teď, kdy nastavení zaměstnavatele existuje.
+        if ($this->legacyIdentifiers->settle($supplierId, $this->userId($request))['carried'] !== []) {
+            $settings = $this->settings->get($supplierId);
         }
 
         $this->logger->log(

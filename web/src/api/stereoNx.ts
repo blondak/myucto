@@ -31,6 +31,7 @@ export interface StereoUpload {
 
 export interface StereoReport {
   ok: boolean
+  reconciliation?: MoneyS3ProtocolData['reconciliation']
   partial?: boolean
   not_transferred?: Array<{ table: string; count: number }>
   preflight?: Array<{ level: string; code: string; message: string }>

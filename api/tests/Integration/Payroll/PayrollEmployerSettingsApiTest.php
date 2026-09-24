@@ -449,6 +449,33 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         ];
     }
 
+    /**
+     * Firma, která Mzdy zapnula dřív, než měla nastavení zaměstnavatele, má VS ČSSZ
+     * a kód OSSZ dál v Nastavení firmy. První uložení nastavení zaměstnavatele je
+     * převezme do prázdných míst; co účetní vyplnila, zůstává.
+     */
+    public function testFirstSaveTakesOverIdentifiersFromCompanySettings(): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE supplier
+                SET taxpayer_type = 'po', cssz_vsdp = '0012345678', cssz_ossz_code = '301'
+              WHERE id = ?"
+        )->execute([$this->supplierId]);
+        $payload = $this->payload('VZOROV', 'Vzorová účtárna');
+        $payload['social_security_office_code'] = null;
+
+        $response = $this->put($this->supplierId, $payload);
+
+        self::assertSame(200, $response->getStatusCode());
+        $settings = $this->json($response)['settings'];
+        self::assertSame('301', $settings['social_security_office_code']);
+        self::assertSame('0012345678', $settings['offices'][0]['social_security_variable_symbol']);
+        self::assertSame(2, $settings['row_version'], 'Odpověď nese verzi po převzetí, jinak by další uložení spadlo na konflikt.');
+        $legacy = $this->db->pdo()->prepare('SELECT cssz_vsdp, cssz_ossz_code FROM supplier WHERE id = ?');
+        $legacy->execute([$this->supplierId]);
+        self::assertSame(['cssz_vsdp' => null, 'cssz_ossz_code' => null], $legacy->fetch(\PDO::FETCH_ASSOC));
+    }
+
     /** @param array<string,mixed> $payload */
     private function put(int $supplierId, array $payload): Response
     {

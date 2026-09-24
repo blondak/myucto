@@ -10,6 +10,7 @@ import Drawer from '@/components/ui/Drawer.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import SourceBlockRenderer from '@/components/accounting/SourceBlockRenderer.vue'
 import JournalRelatedPanel from '@/components/accounting/JournalRelatedPanel.vue'
+import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 
 /**
  * Náhled zdrojového dokladu účetního zápisu.
@@ -141,8 +142,15 @@ function label(key: string): string {
   return v === key ? key.split('.').pop() || key : v
 }
 
-function fmt(value: unknown, format: SourceFieldFormat): string {
+function fmt(value: unknown, format: SourceFieldFormat, key?: string): string {
   if (value === null || value === undefined || value === '') return '—'
+  if (summary.value?.source_type === 'other_item' && key === 'side') {
+    return t(`other_items.side.${String(value)}`)
+  }
+  if (summary.value?.source_type === 'other_item' && key === 'kind') {
+    const side = summary.value.fields.find(field => field.key === 'side')?.value
+    return t(`other_items.kind_by_side.${String(side)}.${String(value)}`)
+  }
   const currency = summary.value?.currency || 'CZK'
   switch (format) {
     case 'currency': return formatMoney(Number(value), currency)
@@ -187,9 +195,12 @@ function fmt(value: unknown, format: SourceFieldFormat): string {
           <div v-for="f in summary.fields" :key="f.key"
                class="flex items-baseline justify-between gap-3 border-b border-neutral-200 py-2 text-sm">
             <dt class="shrink-0 text-neutral-500">{{ label(f.label_key) }}</dt>
-            <dd class="min-w-0 truncate text-right font-medium"
-                :class="f.format === 'currency' || f.format === 'number' ? 'font-mono' : ''">
-              {{ fmt(f.value, f.format) }}
+            <dd class="min-w-0 font-medium"
+                :class="[
+                  f.key === 'note' ? 'whitespace-pre-wrap break-words text-left' : 'truncate text-right',
+                  f.format === 'currency' || f.format === 'number' ? 'font-mono' : '',
+                ]">
+              {{ fmt(f.value, f.format, f.key) }}
             </dd>
           </div>
         </dl>
@@ -199,6 +210,12 @@ function fmt(value: unknown, format: SourceFieldFormat): string {
           :key="b.key"
           :block="b"
           :fallback-currency="summary.currency"
+        />
+        <LinkedDocumentsPanel
+          v-if="summary.source_type === 'other_item' && summary.source_id && auth.canRead('other_items') && auth.canRead('documents')"
+          :key="summary.source_id"
+          entity-type="other_item" :entity-id="summary.source_id" readonly collapsible
+          :title="t('accounting.journal.source_drawer.source_documents')"
         />
       </template>
 

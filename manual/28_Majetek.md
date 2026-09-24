@@ -37,6 +37,8 @@ Nad tabulkou najdeš tlačítka:
   [§ 28.7](#287-import-a-export-excelem).
 - **Zaúčtovat odpisy** — hromadné roční zaúčtování, viz
   [§ 28.6](#286-hromadne-zauctovani-odpisu-roku).
+- **Souhrnná karta z účtu**: jedna karta pro majetek vedený jen v deníku, viz
+  [§ 28.1.2](#2812-souhrnna-karta-z-uctu-bez-karet).
 - **Z přijaté faktury** — založení nové karty z přijaté faktury označené jako
   dlouhodobý majetek.
 - **Nový majetek** — ruční založení karty.
@@ -52,6 +54,30 @@ u dokladu není nárok na odpočet), **datem pořízení** (DUZP, případně da
 vystavení) a **názvem** (popis položky nebo dodavatel + číslo dokladu).
 Karta zůstává provázaná s fakturou — v editoru i detailu je odkaz zpět na
 přijatou fakturu.
+
+### 28.1.2 Souhrnná karta z účtu bez karet
+
+Některý majetek bývá veden jen na účtu, bez inventárních karet, typicky
+portfolio pozemků na účtu 031, převzaté z jiného programu. Aby se objevil
+v evidenci i inventarizaci majetku, založ mu **souhrnnou kartu**. Tlačítko
+**Souhrnná karta z účtu** ukáže účty neodpisovaného majetku (031, 032 a jejich
+analytiky) se **zůstatkem v deníku**, počtem pohybů a hodnotou souhrnné karty,
+pokud už existuje.
+
+Tlačítko **Založit kartu** vytvoří jednu kartu pro celý účet: **vstupní cena**
+je počáteční stav účtu (první otevírací zápis v deníku), každý další zápis
+deníku na účtu je **zvýšení nebo snížení ceny** s datem a dokladem zápisu
+(v detailu karty v tabulce zhodnocení). Karta tak sedí na zůstatek účtu. Je
+v užívání, nic neúčtuje a neodpisuje se. Pokud otevírací stav některého roku
+nenavazuje na pohyby předchozích let, karta rozdíl nese jako samostatný pohyb
+a systém na to upozorní.
+
+Po dalších pohybech účtu kartu srovnej s deníkem tlačítkem **Srovnat
+s deníkem** (v přehledu účtů nebo v detailu karty, kde karta nese štítek
+„Souhrnná karta účtu"). Karta se přepočítá z aktuálního deníku, druhá karta
+nevznikne. Účet, na kterém už jsou vlastní karty majetku, souhrnnou kartu
+nedostane: pohyby deníku nejde rozdělit mezi karty a majetek by se započetl
+dvakrát.
 
 ## 28.2 Založení a úprava karty
 
@@ -258,12 +284,35 @@ roky vrátit, případně chybějící předchozí rok zaúčtovat nebo přeruš
 > způsobu vyřazení a případné vyrovnání či úpravu odpočtu (§77 a §78e ZDPH).
 > Karta sama interní daňový doklad nevytváří.
 
+#### Vyřazení, které už je v deníku
+
+Pokud vyřazení už zaúčtoval deník (převod z jiného programu nebo ruční zápis
+zůstatkové ceny 54x proti oprávkám), vypni v dialogu vyřazení volbu
+**Zaúčtovat vyřazení**. Karta se vyřadí **bez zaúčtování**: zůstatková cena
+ani vyřazení z evidence se znovu neúčtují, jinak by byly v deníku dvakrát.
+Daňový odpis roku vyřazení se potvrdí stejně jako při běžném vyřazení; účetní
+odpisy roku musí být v deníku. Karta se naváže na zápis, který vyřazení
+zaúčtoval (jediný zápis ke dni vyřazení s MD 54x proti oprávkám karty,
+u neodpisovaného majetku proti majetkovému účtu). V detailu je na něj odkaz
+**Zápis vyřazení v deníku** a přiznání k dani z příjmů z něj bere účetní
+zůstatkovou cenu pro rozdíl účetní a daňové zůstatkové ceny. Nenajde-li se
+zápis, nebo je jich víc, systém upozorní a účetní zůstatková cena se vezme
+z karty.
+
+Převody z Money S3, POHODY a PREMIER vyřazení v převáděném období zaznamenají
+takto samy. Typ vyřazení berou ze zdroje, a když ho zdroj neuvádí, rozhodne
+deník: tržba z prodeje majetku (účet 641) ke dni vyřazení znamená prodej,
+jinak likvidace. Kartu, kterou převod vyřadit nedokáže, ponechá jako koncept
+s pokynem vyřadit ji bez zaúčtování.
+
 Vyřazenou kartu lze **Vrátit vyřazení** — dostupné, jen dokud je **účetní
 období data vyřazení stále otevřené** (§35 zákona o účetnictví). Vrácení
 stornuje vyřazovací zápis i účetní odpis roku vyřazení, smaže jím vytvořené
 řádky roku vyřazení a vrátí kartu do stavu V užívání. Dříve zvolená pauza
 daňového odpisu podle §26 odst. 8 zůstává zachována; vrácení se potvrzuje
 přes dialogové okno, protože jde o nevratnou operaci v rámci daného běhu.
+U vyřazení bez zaúčtování vrácení v deníku nic nestornuje, jen vrátí kartu
+do užívání a zruší daňový odpis roku, který k vyřazení dopočetl systém.
 
 ## 28.5 Přerušení daňového odpisu
 
@@ -282,6 +331,27 @@ přerušený rok označí značkou **⏸**; tlačítkem **Zrušit přerušení**
 > systém přerušení odmítne a je potřeba nejdřív vrátit potvrzení pozdějších let, teprve
 > pak přerušit rok dřívější.
 
+### 28.5.1 Ruční přepis daňového odpisu roku
+
+Potvrzený daňový odpis roku lze nastavit ručně, typicky když přebíráš čísla
+účetní, která odpisy počítala mimo program (jiná vstupní cena, zaokrouhlení).
+V plánu odpisů na záložce **Daňové** otevře ikona tužky u potvrzeného roku
+dialog s **částkou odpisu** a povinným **důvodem**; dialog ukazuje i spočtený
+nebo převzatý odpis. Po uložení:
+
+- stanovený i uplatněný odpis roku je zadaná částka a daňová zůstatková cena
+  roku se posune o rozdíl, stejně jako zůstatková cena potvrzených pozdějších
+  let (jejich částky se nemění),
+- řádek nese štítek **ručně** a v bublině důvod a původní odpis,
+- odpis se promítne do přiznání k dani z příjmů (rozdíl účetních a daňových
+  odpisů a tabulka odpisů podle skupin v příloze),
+- změnu zapíše protokol činností (kdo, kdy, původní a nová částka, důvod).
+
+Hromadné zaúčtování odpisů, vyřazení ani opakovaný převod ručně přepsaný odpis
+nemění. Ikonou šipky zpět u řádku přepis zrušíš a vrátí se spočtený odpis.
+Odpis nesmí převýšit daňovou zůstatkovou cenu na začátku roku a v roce se
+schválenou účetní závěrkou ho už měnit nejde.
+
 ## 28.6 Hromadné zaúčtování odpisů roku
 
 Tlačítko **Zaúčtovat odpisy** na seznamu majetku otevře dialog s výběrem
@@ -297,8 +367,8 @@ V užívání** (i vyřazené v daném roce) a pro každou:
 - potvrdí **daňový odpis roku** (bez zápisu do deníku — daňový odpis je čistě
   evidenční údaj pro přiznání k dani z příjmů).
 
-Roky s aktivním přerušením §26/8 se u daňové části přeskočí (existující
-pauza zůstává zachována). Operace je **hromadná a idempotentní** — opakované
+Roky s aktivním přerušením §26/8 a ručně přepsaným daňovým odpisem se
+u daňové části přeskočí (pauza i přepis zůstávají zachované). Operace je **hromadná a idempotentní** — opakované
 spuštění pro stejný rok přepíše zápisy in-place, dokud je dané účetní období
 otevřené. Po doběhnutí dialog ukáže počet **zaúčtovaných** a **přeskočených**
 karet; pokud u některé karty zaúčtování selže (např. kvůli uzavřenému

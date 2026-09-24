@@ -58,6 +58,7 @@ Do fronty vede několik cest:
 | Nahrání dokladu k **vyžádanému požadavku** | klient, jako odpověď účetní |
 | **Uložit a předat účetní** v editoru přijaté faktury | klient, když se doklad nevytěžil sám |
 | **Nahrát do fronty** přímo na stránce Příchozí doklady | účetní u dokladů, které přišly mimo portál (e-mailem, papírově) |
+| **Nahrát účtenku** u platby kartou bez dokladu, když není AI nebo vytěžení selže | účetní; doklad je rovnou navázaný na platbu kartou |
 
 Účetní tak nemusí čekat na klienta: co dostane e-mailem nebo naskenuje, vloží do
 fronty sama a zpracuje to stejným postupem. Podrobný průchod klientskou stranou je v
@@ -74,10 +75,15 @@ kořene. Fronta ukazuje všechny podání bez ohledu na to, ve které podsložce
 > Dokumentů, odkud ho z disku odstraní až vysypání koše. U dokladu, který si účetní
 > nahrála sama, se zpráva klientovi nevyžaduje — není komu ji psát.
 
-Po zpracování se neměnný originál z Dokumentů připojí k výsledné faktuře. Faktura
-zůstává pro klienta needitovatelná i ve stavu Koncept; účetní ji může dál opravit
-a dokončit běžným stavovým postupem. Pokud účetní výsledný koncept smaže, původní
-podání se bezpečně vrátí do příchozí fronty k novému zpracování.
+Po zpracování se originál přesune do složky **Příchozí doklady / Archiv / rok / měsíc**,
+takže v příchozích zůstává jen to, co na zpracování čeká. Originál se nemaže, je
+auditní stopou toho, co klient předal. Je-li to tentýž soubor jako PDF výsledné
+faktury, k faktuře se znovu nepřipojuje: doklad ho už má jako své PDF. Jiný soubor
+(fotka převedená na PDF, balíček ISDOCX) se k faktuře připojí v panelu **Dokumenty**.
+Faktura zůstává pro klienta needitovatelná i ve stavu Koncept; účetní ji může dál
+opravit a dokončit běžným stavovým postupem. Pokud účetní výsledný koncept smaže,
+původní podání se bezpečně vrátí do příchozí fronty k novému zpracování a originál
+z archivu zpět mezi čekající.
 
 > ⚠️ **Zaúčtování bez DUZP nejde.** Přechod Přijatá → Zaúčtovaná je zablokovaný, dokud
 > doklad nemá vyplněné DUZP (datum uskutečnění zdanitelného plnění) — bez něj by se
@@ -731,6 +737,11 @@ nebo stornuje a zapíše znovu. Přesun nákladu mezi účty téže třídy (nap
 se přepíše na místě i v měsíci zamčeném podaným DPH, dokud rok není v uzávěrce. Celý
 postup i chování v zamčeném období popisuje
 [§ 48.8.2](52_Ucetni_denik.md#5282-preuctovani-z-dokladu-sekce-zauctovani).
+
+Pod kontací každého zápisu je panel **Souvisí** (úhrady, bankovní pohyby a ručně
+navázané doklady s odkazem do deníku, jejich kontací a poznámkami) a **Poznámky**
+zápisu, tytéž jako v deníku
+a u bankovního pohybu ([§ 52.6.3](52_Ucetni_denik.md#5263-poznamky-k-zapisu)).
 
 ## 23.4 Scan inbox — automatický import z adresáře
 

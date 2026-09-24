@@ -92,6 +92,37 @@ final class StatementMapResolverTest extends TestCase
         self::assertEqualsWithDelta(1_000.0, $mapped['C.II.2.4.']['gross'], 0.001, 'Debetní zůstatek jde dál do aktiv.');
     }
 
+    public function testValidInKeepsOnlyOverridesValidInTheYear(): void
+    {
+        $overrides = [
+            self::override('365.100', 'P.C.II.8.1.', 'any', ['valid_to_year' => 2023]),
+            self::override('365.100', 'P.C.I.9.1.', 'any', ['valid_from_year' => 2024]),
+            self::override('365.200', 'P.C.I.9.1.'),
+        ];
+
+        self::assertSame(['P.C.II.8.1.', 'P.C.I.9.1.'], array_column(StatementMapResolver::validIn($overrides, 2023), 'row_code'));
+        self::assertSame(['P.C.I.9.1.', 'P.C.I.9.1.'], array_column(StatementMapResolver::validIn($overrides, 2024), 'row_code'));
+        self::assertSame($overrides, StatementMapResolver::validIn($overrides, null), 'Bez roku se platnost nekontroluje.');
+    }
+
+    public function testCorrectionFollowsTheRowOfItsReceivable(): void
+    {
+        $global = [...self::globalMap(),
+            ['row_code' => 'C.II.2.1.', 'account_prefix' => '391', 'target' => 'correction', 'balance_condition' => 'any', 'sign' => 1, 'source' => 'global'],
+            ['row_code' => 'C.II.2.2.', 'account_prefix' => '351', 'target' => 'gross', 'balance_condition' => 'any', 'sign' => 1, 'source' => 'global'],
+        ];
+        $follower = self::override('391.100', 'C.II.2.1.', 'any', ['target' => 'correction', 'follows_prefix' => '351.100']);
+
+        $withoutReceivableOverride = StatementMapResolver::applyOverrides($global, [$follower]);
+        $entry = (new StatementMapper())->entriesFor($withoutReceivableOverride, '391.100', -500)[0];
+        self::assertSame('C.II.2.2.', $entry['row_code'], 'Pohledávka podle globální mapy, korekce za ní.');
+
+        $moved = StatementMapResolver::applyOverrides($global, [$follower, self::override('351.100', 'C.II.1.5.4.')]);
+        $entry = (new StatementMapper())->entriesFor($moved, '391.100', -500)[0];
+        self::assertSame('C.II.1.5.4.', $entry['row_code'], 'Po přeřazení pohledávky jde korekce s ní.');
+        self::assertSame('correction', $entry['target']);
+    }
+
     public function testLongerGlobalPrefixStillBeatsShorterOverride(): void
     {
         $global = [...self::globalMap(),

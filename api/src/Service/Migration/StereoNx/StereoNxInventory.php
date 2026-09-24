@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\StereoNx;
 
-use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Repository\StockItemRepository;
-use MyInvoice\Repository\WarehouseRepository;
-use PDO;
+use MyInvoice\Service\Migration\Shared\MigratedInventoryException;
+use MyInvoice\Service\Migration\Shared\MigratedInventoryWriter;
 
 /** Skladové karty a vozidla; stav skladu ani číselník opakovaných tras se nedomýšlí. */
 final class StereoNxInventory
@@ -17,10 +15,8 @@ final class StereoNxInventory
     private const KIND_CAR = 'logbook_car';
 
     public function __construct(
-        private readonly Connection $db,
         private readonly StereoNxImportMap $map,
-        private readonly WarehouseRepository $warehouses,
-        private readonly StockItemRepository $items,
+        private readonly MigratedInventoryWriter $writer,
     ) {}
 
     /** @return array<string,mixed> `records` jsou interní a nesmějí se vracet v protokolu. */
@@ -223,144 +219,83 @@ final class StereoNxInventory
             'stock_items_existing' => 0, 'cars_created' => 0, 'cars_existing' => 0,
             'route_templates_skipped' => (int) ($plan['counts']['route_templates_skipped'] ?? 0)];
         $warnings = [];
-        $stockEnabled = $this->stockEnabled($supplierId);
-        if (!$stockEnabled && (($records['warehouses'] ?? []) !== [] || ($records['items'] ?? []) !== [])) {
-            $counts['warehouses_skipped'] = count($records['warehouses'] ?? []);
-            $counts['stock_items_skipped'] = count($records['items'] ?? []);
-            self::warning($warnings, 'stock_module_missing', 'Firma nemá zapnutý modul Sklad; sklady a skladové karty se nepřevedly.');
-        } else {
-            foreach ($records['warehouses'] ?? [] as $record) {
-                $this->writeWarehouse($record, $supplierId, $ico, $companyIndex, $counts);
+        try {
+            $stockEnabled = $this->writer->stockEnabled($supplierId);
+            if (!$stockEnabled && (($records['warehouses'] ?? []) !== [] || ($records['items'] ?? []) !== [])) {
+                $counts['warehouses_skipped'] = count($records['warehouses'] ?? []);
+                $counts['stock_items_skipped'] = count($records['items'] ?? []);
+                self::warning($warnings, 'stock_module_missing', 'Firma nemá zapnutý modul Sklad; sklady a skladové karty se nepřevedly.');
+            } else {
+                foreach ($records['warehouses'] ?? [] as $record) {
+                    $this->writeWarehouse($record, $supplierId, $ico, $companyIndex, $counts);
+                }
+                foreach ($records['items'] ?? [] as $record) {
+                    $this->writeItem($record, $supplierId, $ico, $companyIndex, $counts);
+                }
             }
-            foreach ($records['items'] ?? [] as $record) {
-                $this->writeItem($record, $supplierId, $ico, $companyIndex, $counts);
+            foreach ($records['cars'] ?? [] as $record) {
+                $this->writeCar($record, $supplierId, $userId, $ico, $companyIndex, $counts);
             }
-        }
-        foreach ($records['cars'] ?? [] as $record) {
-            $this->writeCar($record, $supplierId, $userId, $ico, $companyIndex, $counts);
+        } catch (MigratedInventoryException $e) {
+            throw new StereoNxException($e->reason, $e->getMessage());
         }
         return ['counts' => $counts, 'warnings' => array_values($warnings)];
     }
 
-    /** @param array<string,mixed> $r @param array<string,int> $counts */
-    private function writeWarehouse(array $r, int $supplierId, string $ico, int $index, array &$counts): void
+    /** @param array<string,mixed> $record @param array<string,int> $counts */
+    private function writeWarehouse(array $record, int $supplierId, string $ico, int $index, array &$counts): void
     {
-        $mapped = $this->mapped($supplierId, $ico, $index, self::KIND_WAREHOUSE, $r);
-        if ($mapped !== null) { $this->assertWarehouse($supplierId, $mapped, $r); $counts['warehouses_existing']++; return; }
-        $existing = $this->warehouses->findByCode($supplierId, (string) $r['code']);
-        if ($existing !== null && (string) $existing['name'] !== $r['name']) {
-            throw new StereoNxException('warehouse_target_conflict', 'Cílový sklad se stejným kódem má jiný název.');
+        $mapped = $this->mapped($supplierId, $ico, $index, self::KIND_WAREHOUSE, $record);
+        if ($mapped !== null) {
+            $this->writer->verifyWarehouse($supplierId, $mapped, $record);
+            $counts['warehouses_existing']++;
+            return;
         }
-        $id = $existing === null ? $this->warehouses->insert($supplierId,
-            ['code' => $r['code'], 'name' => $r['name'], 'is_default' => false, 'is_active' => true, 'is_sellable' => true]) : (int) $existing['id'];
-        $counts[$existing === null ? 'warehouses_created' : 'warehouses_existing']++;
-        $this->map->put($supplierId, $ico, $index, self::KIND_WAREHOUSE, (string) $r['source_key'], (string) $r['source_hash'], $id);
+        $result = $this->writer->warehouse($supplierId, $record);
+        $counts[$result['created'] ? 'warehouses_created' : 'warehouses_existing']++;
+        $this->map->put($supplierId, $ico, $index, self::KIND_WAREHOUSE,
+            (string) $record['source_key'], (string) $record['source_hash'], $result['id']);
     }
 
-    /** @param array<string,mixed> $r @param array<string,int> $counts */
-    private function writeItem(array $r, int $supplierId, string $ico, int $index, array &$counts): void
+    /** @param array<string,mixed> $record @param array<string,int> $counts */
+    private function writeItem(array $record, int $supplierId, string $ico, int $index, array &$counts): void
     {
-        $mapped = $this->mapped($supplierId, $ico, $index, self::KIND_ITEM, $r);
-        if ($mapped !== null) { $this->assertItem($supplierId, $mapped, $r); $counts['stock_items_existing']++; return; }
-        $existing = $this->items->findBySku($supplierId, (string) $r['sku']);
-        if ($existing !== null) {
-            $this->assertItem($supplierId, (int) $existing['id'], $r);
-            $id = (int) $existing['id']; $counts['stock_items_existing']++;
-        } else {
-            $id = $this->items->insert($supplierId, [
-                'sku' => $r['sku'], 'name' => $r['name'], 'item_type' => $r['item_type'], 'unit' => $r['unit'],
-                'tracking_mode' => $r['tracking_mode'], 'ean' => $r['ean'], 'vat_rate_id' => null,
-                'sale_price_without_vat' => $r['sale_price_without_vat'], 'min_qty' => $r['min_qty'],
-                'intrastat_cn8_code' => $r['intrastat_cn8_code'],
-                'intrastat_net_mass_kg' => $r['intrastat_net_mass_kg'],
-                'intrastat_supplementary_unit' => $r['intrastat_supplementary_unit'],
-                'intrastat_supplementary_unit_coefficient' => $r['intrastat_supplementary_unit_coefficient'],
-                'is_active' => $r['is_active'], 'note' => $r['note'],
-            ]);
-            if ($r['weight_g'] !== null) {
-                $this->items->updateEshopFieldsVersioned($supplierId, $id, 1, ['weight_g' => $r['weight_g']]);
-            }
-            $counts['stock_items_created']++;
+        $mapped = $this->mapped($supplierId, $ico, $index, self::KIND_ITEM, $record);
+        if ($mapped !== null) {
+            $this->writer->verifyItem($supplierId, $mapped, $record);
+            $counts['stock_items_existing']++;
+            return;
         }
-        $this->map->put($supplierId, $ico, $index, self::KIND_ITEM, (string) $r['source_key'], (string) $r['source_hash'], $id);
+        $result = $this->writer->item($supplierId, $record);
+        $counts[$result['created'] ? 'stock_items_created' : 'stock_items_existing']++;
+        $this->map->put($supplierId, $ico, $index, self::KIND_ITEM,
+            (string) $record['source_key'], (string) $record['source_hash'], $result['id']);
     }
 
-    /** CarRepository otevírá vlastní transakci; import už běží v nadřazené transakci, proto stejný validovaný INSERT zapisujeme zde. */
-    private function writeCar(array $r, int $supplierId, ?int $userId, string $ico, int $index, array &$counts): void
+    /** @param array<string,mixed> $record @param array<string,int> $counts */
+    private function writeCar(array $record, int $supplierId, ?int $userId, string $ico, int $index, array &$counts): void
     {
-        $mapped = $this->mapped($supplierId, $ico, $index, self::KIND_CAR, $r);
-        if ($mapped !== null) { $this->assertCar($supplierId, $mapped, $r); $counts['cars_existing']++; return; }
-        $stmt = $this->db->pdo()->prepare('SELECT id FROM cars WHERE supplier_id = ? AND registration = ?');
-        $stmt->execute([$supplierId, $r['registration']]);
-        $existing = $stmt->fetchColumn();
-        if ($existing !== false) {
-            $id = (int) $existing; $this->assertCar($supplierId, $id, $r); $counts['cars_existing']++;
-        } else {
-            $this->db->pdo()->prepare('INSERT INTO cars
-                (supplier_id, registration, name, brand, model, vin, fuel_type, odometer_start, odometer_start_date,
-                 is_default, is_archived, note, created_by) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, NULL, 0, ?, ?, ?)')
-                ->execute([$supplierId, $r['registration'], $r['name'], $r['vin'], $r['fuel_type'], $r['odometer_start'],
-                    (int) $r['is_archived'], $r['note'], $userId !== null && $userId > 0 ? $userId : null]);
-            $id = (int) $this->db->pdo()->lastInsertId(); $counts['cars_created']++;
+        $mapped = $this->mapped($supplierId, $ico, $index, self::KIND_CAR, $record);
+        if ($mapped !== null) {
+            $this->writer->verifyCar($supplierId, $mapped, $record);
+            $counts['cars_existing']++;
+            return;
         }
-        $this->map->put($supplierId, $ico, $index, self::KIND_CAR, (string) $r['source_key'], (string) $r['source_hash'], $id);
+        $result = $this->writer->car($supplierId, $record, $userId !== null && $userId > 0 ? $userId : null);
+        $counts[$result['created'] ? 'cars_created' : 'cars_existing']++;
+        $this->map->put($supplierId, $ico, $index, self::KIND_CAR,
+            (string) $record['source_key'], (string) $record['source_hash'], $result['id']);
     }
 
-    /** @param array<string,mixed> $r */
-    private function mapped(int $supplierId, string $ico, int $index, string $kind, array $r): ?int
+    /** @param array<string,mixed> $record */
+    private function mapped(int $supplierId, string $ico, int $index, string $kind, array $record): ?int
     {
-        $map = $this->map->get($supplierId, $ico, $index, $kind, (string) ($r['source_key'] ?? ''));
+        $map = $this->map->get($supplierId, $ico, $index, $kind, (string) ($record['source_key'] ?? ''));
         if ($map === null) return null;
-        if ($map['source_hash'] !== ($r['source_hash'] ?? null)) throw new StereoNxException('inventory_source_changed', 'Zdrojový záznam se od předchozího převodu změnil.');
+        if ($map['source_hash'] !== ($record['source_hash'] ?? null)) {
+            throw new StereoNxException('inventory_source_changed', 'Zdrojový záznam se od předchozího převodu změnil.');
+        }
         return $map['target_id'];
-    }
-
-    /** @param array<string,mixed> $r */
-    private function assertWarehouse(int $supplierId, int $id, array $r): void
-    {
-        $row = $this->warehouses->find($supplierId, $id);
-        if ($row === null || $row['code'] !== $r['code'] || $row['name'] !== $r['name']
-            || $row['is_active'] !== true || $row['is_sellable'] !== true) {
-            throw new StereoNxException('inventory_target_changed', 'Cílový sklad chybí nebo se změnil.');
-        }
-    }
-
-    /** @param array<string,mixed> $r */
-    private function assertItem(int $supplierId, int $id, array $r): void
-    {
-        $row = $this->items->find($supplierId, $id);
-        if ($row === null) throw new StereoNxException('inventory_target_changed', 'Cílová skladová karta chybí nebo se změnila.');
-        foreach (['sku', 'name', 'item_type', 'unit', 'tracking_mode', 'ean', 'sale_price_without_vat', 'min_qty',
-                     'note', 'intrastat_cn8_code', 'intrastat_net_mass_kg', 'intrastat_supplementary_unit',
-                     'intrastat_supplementary_unit_coefficient'] as $f) {
-            if (($row[$f] === null ? null : (string) $row[$f]) !== ($r[$f] === null ? null : (string) $r[$f])) {
-                throw new StereoNxException('inventory_target_changed', 'Cílová skladová karta chybí nebo se změnila.');
-            }
-        }
-        if ((bool) $row['is_active'] !== $r['is_active'] || ($row['weight_g'] === null ? null : (int) $row['weight_g']) !== $r['weight_g']) {
-            throw new StereoNxException('inventory_target_changed', 'Cílová skladová karta chybí nebo se změnila.');
-        }
-    }
-
-    /** @param array<string,mixed> $r */
-    private function assertCar(int $supplierId, int $id, array $r): void
-    {
-        $stmt = $this->db->pdo()->prepare('SELECT registration, name, vin, fuel_type, odometer_start, is_archived, note FROM cars WHERE supplier_id = ? AND id = ?');
-        $stmt->execute([$supplierId, $id]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row === false || (string) $row['registration'] !== $r['registration'] || ($row['name'] ?? null) !== $r['name']
-            || ($row['vin'] ?? null) !== $r['vin'] || ($row['fuel_type'] ?? null) !== $r['fuel_type']
-            || ($row['odometer_start'] === null ? null : (int) $row['odometer_start']) !== $r['odometer_start']
-            || (bool) $row['is_archived'] !== $r['is_archived'] || ($row['note'] ?? null) !== $r['note']) {
-            throw new StereoNxException('inventory_target_changed', 'Cílové vozidlo chybí nebo se změnilo.');
-        }
-    }
-
-    private function stockEnabled(int $supplierId): bool
-    {
-        $stmt = $this->db->pdo()->prepare('SELECT stock_enabled FROM supplier WHERE id = ?');
-        $stmt->execute([$supplierId]);
-        return (bool) $stmt->fetchColumn();
     }
 
     /** @param list<array<string,mixed>> $rows @return array<string,bool> */

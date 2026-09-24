@@ -33,6 +33,10 @@ V každé skupině jsou faktury seřazené podle data vystavení (nejnovější 
 | Stav | Barevný badge — viz § 14.2 |
 | Akce | PDF, Detail, … |
 
+Tlačítkem **Sloupce** lze zapnout doplňkové sloupce, mimo jiné **Var. symbol**
+(platební VS, který se tiskne na PDF a do QR platby a může se lišit od čísla
+faktury) a **Objednávka** (číslo objednávky zadané na faktuře).
+
 ### 14.1.1 Filtry (vlevo)
 
 | Filtr | Hodnoty |
@@ -235,12 +239,15 @@ V horní liště nad seznamem jsou ikony — klik přepne filtr na daný stav:
 
 Pole **Hledat** vlevo nahoře. Hledá v:
 
-- Variabilním symbolu (přesná shoda i prefix)
-- Popisu položek (LIKE)
+- Čísle faktury (začátek čísla)
+- Platebním variabilním symbolu, i když není zadaný zvlášť a odvozuje se
+  z číslic čísla faktury (`20260001` najde fakturu `2026-0001`)
+- Čísle objednávky (kdekoli v textu)
 - Jménu klienta
-- Čísle projektu / smlouvy
+- Popisu položek
 
-Funguje fulltext česky i anglicky.
+Číslo faktury, variabilní symbol i číslo objednávky hledá také společné hledání
+ve spodní liště.
 
 ## 14.6 Tipy
 

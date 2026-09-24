@@ -410,6 +410,10 @@ export const authApi = {
   dismissMfaOffer: () =>
     api.post<{ dismissed: boolean }>('/auth/mfa/offer/dismiss').then(r => r.data),
 
+  /** Uloží výchozí firmu účtu — otevře se i v jiném prohlížeči nebo zařízení. */
+  setDefaultSupplier: (supplierId: number) =>
+    api.put<{ default_supplier_id: number }>('/auth/default-supplier', { supplier_id: supplierId }).then(r => r.data),
+
   recoveryCodeStatus: () =>
     api.get<RecoveryCodeStatus>('/auth/mfa/recovery-codes').then(r => r.data),
   /** Vrátí kódy v plaintextu — jediná a poslední příležitost, kdy je lze zobrazit. */

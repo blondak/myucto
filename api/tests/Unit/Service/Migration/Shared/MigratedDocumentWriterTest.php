@@ -197,4 +197,19 @@ final class MigratedDocumentWriterTest extends TestCase
         self::assertFalse($item->isFixedAsset);
         self::assertNull($item->expenseKind);
     }
+
+    /**
+     * Aplikace drží expense_kind='fixed_asset' ⇔ is_fixed_asset=1 (PurchaseInvoiceRepository,
+     * migrace 1092). Převzatá položka s příznakem majetku bez druhu by se prvním uložením
+     * nebo automatickou klasifikací rozešla a příznak pro ř. 47 by zmizel.
+     */
+    public function testFixedAssetItemGetsFixedAssetExpenseKind(): void
+    {
+        $item = MigratedDocumentItem::purchase('Stroj', 1.0, 'ks', 100000.0, 1, 21.0, 100000.0, 21000.0, 121000.0, '40', true);
+        self::assertTrue($item->isFixedAsset);
+        self::assertSame('fixed_asset', $item->expenseKind);
+
+        $explicit = MigratedDocumentItem::purchase('Monitor', 1.0, 'ks', 5000.0, 1, 21.0, 5000.0, 1050.0, 6050.0, '40', true, 'small_asset');
+        self::assertSame('small_asset', $explicit->expenseKind, 'Druh daný zdrojem (účet položky) se nepřepisuje.');
+    }
 }

@@ -189,4 +189,30 @@ final class CycleCountTest extends StockTestCase
         $closed = $cycles->get($supplierId, (int) $cycle['id']);
         self::assertSame('0.000', $closed['lines'][0]['counted_qty']);
     }
+
+    public function testWholeWarehouseCountSkipsItemsThatWereNeverInTheWarehouse(): void
+    {
+        $supplierId = $this->createSupplier();
+        $warehouseId = $this->warehouse($supplierId);
+        $otherWarehouse = $this->warehouse($supplierId, 'OTHER', false);
+        $here = $this->item($supplierId, 'CYCLE-HERE');
+        $elsewhere = $this->item($supplierId, 'CYCLE-ELSEWHERE');
+        $never = $this->item($supplierId, 'CYCLE-NEVER');
+        $this->receiveStock($supplierId, $warehouseId, $here, '2.000', 10.0, '2099-09-01');
+        $this->receiveStock($supplierId, $otherWarehouse, $elsewhere, '2.000', 10.0, '2099-09-01');
+        $cycles = $this->container->get(CycleCountService::class);
+
+        $cycle = $cycles->create($supplierId, ['warehouse_id' => $warehouseId, 'take_date' => '2099-09-02'], $this->userId);
+        $cycles->tick($supplierId);
+        $cycle = $cycles->get($supplierId, (int) $cycle['id']);
+        self::assertSame('counting', $cycle['status']);
+        self::assertSame([$here], array_map(static fn (array $l): int => (int) $l['stock_item_id'], $cycle['lines']),
+            'Celý sklad = karty, které na něm byly; ne karta cizího skladu ani nikdy nenaskladněná.');
+
+        $explicit = $cycles->create($supplierId, [
+            'warehouse_id' => $otherWarehouse, 'take_date' => '2099-09-02', 'item_ids' => [$never],
+        ], $this->userId);
+        $cycles->tick($supplierId);
+        self::assertCount(1, $cycles->get($supplierId, (int) $explicit['id'])['lines'], 'Výslovně vybraná karta řádek dostane.');
+    }
 }

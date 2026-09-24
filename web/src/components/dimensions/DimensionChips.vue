@@ -1,28 +1,51 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useDimensions } from '@/composables/useDimensions'
+import type { DimensionSplits } from '@/api/dimensions'
 
-/** Dimenze řádku deníku / dokladu jako štítky „Typ: hodnota". */
+/**
+ * Dimenze řádku deníku / dokladu jako štítky „Typ: hodnota". Rozpad mezi víc
+ * hodnot typu je jeden štítek „Typ: A 60 %, B 40 %".
+ */
 const props = defineProps<{
   dimensions: Record<number, number | null> | null | undefined
+  splits?: DimensionSplits | null
 }>()
 
 const dims = useDimensions()
 onMounted(() => { void dims.load() })
 
-const chips = computed(() => Object.entries(props.dimensions ?? {})
-  .filter(([, valueId]) => !!valueId)
-  .map(([typeId, valueId]) => {
-    const type = dims.typeById.value.get(Number(typeId))
-    const value = dims.valueById.value.get(Number(valueId))
-    return {
-      key: `${typeId}-${valueId}`,
-      type: type?.name ?? '',
-      label: dims.valueLabel(Number(valueId)),
-      closed: value ? !value.is_active : false,
-      path: value ? dims.pathOf(value).join(' › ') : '',
-    }
-  }))
+function percent(share: number): string {
+  return `${Math.round(share * 10000) / 100} %`
+}
+
+const chips = computed(() => [
+  ...Object.entries(props.dimensions ?? {})
+    .filter(([, valueId]) => !!valueId)
+    .map(([typeId, valueId]) => {
+      const type = dims.typeById.value.get(Number(typeId))
+      const value = dims.valueById.value.get(Number(valueId))
+      return {
+        key: `${typeId}-${valueId}`,
+        type: type?.name ?? '',
+        label: dims.valueLabel(Number(valueId)),
+        closed: value ? !value.is_active : false,
+        path: value ? dims.pathOf(value).join(' › ') : '',
+      }
+    }),
+  ...Object.entries(props.splits ?? {})
+    .filter(([, shares]) => (shares?.length ?? 0) > 0)
+    .map(([typeId, shares]) => {
+      const label = shares.map(s => `${dims.valueLabel(s.value_id)} ${percent(s.share)}`).join(', ')
+      return {
+        key: `${typeId}-split`,
+        type: dims.typeById.value.get(Number(typeId))?.name ?? '',
+        label,
+        closed: false,
+        path: '',
+      }
+    }),
+])
 </script>
 
 <template>

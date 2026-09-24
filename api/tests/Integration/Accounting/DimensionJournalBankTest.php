@@ -13,6 +13,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\PostingService;
@@ -52,6 +53,7 @@ final class DimensionJournalBankTest extends TestCase
     private PostingService $posting;
     private DimensionService $dimensions;
     private DimensionAssignmentRepository $assignments;
+    private BankPostingService $bankPosting;
 
     private int $supplierId = 0;
     private int $userId = 0;
@@ -74,6 +76,7 @@ final class DimensionJournalBankTest extends TestCase
             $this->posting = $container->get(PostingService::class);
             $this->dimensions = $container->get(DimensionService::class);
             $this->assignments = $container->get(DimensionAssignmentRepository::class);
+            $this->bankPosting = $container->get(BankPostingService::class);
             $periods = $container->get(AccountingPeriodRepository::class);
             $seeder = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
@@ -215,6 +218,75 @@ final class DimensionJournalBankTest extends TestCase
         self::assertSame([(string) $this->projectType => $moved], $tx['dimensions'], 'Detail výpisu vrací dimenze pohybu pro štítky v řádku.');
     }
 
+    public function testPaymentFollowsLaterDimensionChangeOfPaidInvoice(): void
+    {
+        $first = $this->value($this->centerType, 'U-FIRST');
+        $moved = $this->value($this->centerType, 'U-MOVED');
+        $purchase = $this->advancePurchase('U-PF', 1_000.00);
+        $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $purchase, [$this->centerType => $first], []);
+        [, $txId] = $this->accountOwnedTransaction(-1_000.00);
+        $this->match($txId, [$purchase => 1_000.00]);
+        $entryId = $this->postPayment($txId, [1_000.00]);
+        self::assertSame([$first], $this->centersOf($entryId), 'Úhrada převezme středisko placené faktury.');
+
+        $saved = $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $purchase, [$this->centerType => $moved], []);
+        self::assertSame([$moved], $this->centersOf($entryId), 'Změna střediska faktury se promítne i do zaúčtované úhrady.');
+        self::assertSame(2, $saved['restamp']['lines']);
+    }
+
+    public function testRematchToOtherInvoiceWithSameAmountRestampsPayment(): void
+    {
+        $first = $this->value($this->centerType, 'R-FIRST');
+        $other = $this->value($this->centerType, 'R-OTHER');
+        $a = $this->advancePurchase('R-PF-A', 800.00);
+        $b = $this->advancePurchase('R-PF-B', 800.00);
+        $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $a, [$this->centerType => $first], []);
+        $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $b, [$this->centerType => $other], []);
+        [, $txId] = $this->accountOwnedTransaction(-800.00);
+        $this->match($txId, [$a => 800.00]);
+        $this->db->pdo()->prepare(
+            "INSERT INTO auto_posting_policy (supplier_id, operation_type, level, updated_by)
+             VALUES (?, 'bank.payment.matched', 'auto', ?)
+             ON DUPLICATE KEY UPDATE level = 'auto'"
+        )->execute([$this->supplierId, $this->userId]);
+        $entryId = (int) $this->bankPosting->postMatched($this->supplierId, $txId, $this->userId);
+        self::assertGreaterThan(0, $entryId);
+        self::assertSame([$first], $this->centersOf($entryId));
+
+        $this->db->pdo()->prepare('DELETE FROM payment_matches WHERE bank_transaction_id = ?')->execute([$txId]);
+        $this->match($txId, [$b => 800.00]);
+        self::assertSame($entryId, (int) $this->bankPosting->postMatched($this->supplierId, $txId, $this->userId), 'Stejné účty a částka = tentýž zápis.');
+        self::assertSame([$other], $this->centersOf($entryId), 'Přepárování na jinou fakturu přenese její středisko.');
+    }
+
+    public function testPaymentOfSeveralInvoicesCarriesEachInvoiceDimension(): void
+    {
+        $project = $this->value($this->projectType, 'M-PRJ');
+        $a = $this->value($this->centerType, 'M-A');
+        $b = $this->value($this->centerType, 'M-B');
+        $c = $this->value($this->centerType, 'M-C');
+        $pfA = $this->advancePurchase('M-PF-A', 600.00);
+        $pfB = $this->advancePurchase('M-PF-B', 400.00);
+        $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $pfA, [$this->centerType => $a, $this->projectType => $project], []);
+        $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $pfB, [$this->centerType => $b, $this->projectType => $project], []);
+        [, $txId] = $this->accountOwnedTransaction(-1_000.00);
+        $this->match($txId, [$pfA => 600.00, $pfB => 400.00]);
+        $entryId = $this->postPayment($txId, [600.00, 400.00]);
+
+        $lines = $this->linesByAmount($entryId);
+        self::assertEquals([$this->projectType => $project, $this->centerType => $a], $lines['debit|600.00']['dims']);
+        self::assertEquals([$this->projectType => $project, $this->centerType => $b], $lines['debit|400.00']['dims']);
+        self::assertSame([$this->projectType => $project], $lines['credit|1000.00']['dims'], 'Společný projekt nese i banka.');
+        self::assertEqualsWithDelta([$a => 0.6, $b => 0.4], $lines['credit|1000.00']['splits'][$this->centerType] ?? [], 1e-9,
+            'Banka nese středisko jako rozpad v poměru alokací.');
+
+        $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $pfA, [$this->centerType => $c, $this->projectType => $project], []);
+        $lines = $this->linesByAmount($entryId);
+        self::assertEquals([$this->projectType => $project, $this->centerType => $c], $lines['debit|600.00']['dims']);
+        self::assertEquals([$this->projectType => $project, $this->centerType => $b], $lines['debit|400.00']['dims']);
+        self::assertEqualsWithDelta([$c => 0.6, $b => 0.4], $lines['credit|1000.00']['splits'][$this->centerType] ?? [], 1e-9);
+    }
+
     public function testStatementDetailOmitsDimensionsWhenDisabled(): void
     {
         [$statementId, $txId] = $this->accountOwnedTransaction(500.00);
@@ -269,6 +341,79 @@ final class DimensionJournalBankTest extends TestCase
              VALUES (?, ?, ?, 'CZK', 'Pohyb s dimenzí')"
         )->execute([$statementId, self::YEAR . '-05-05', $amount]);
         return [$statementId, (int) $pdo->lastInsertId()];
+    }
+
+    /** Zálohová přijatá faktura: úhrada jde na 314 bez zaúčtovaného předpisu. */
+    private function advancePurchase(string $number, float $total): int
+    {
+        $pdo = $this->db->pdo();
+        $currencyId = (int) $pdo->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn();
+        $countryId = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn();
+        $pdo->prepare(
+            'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, dic, main_email,
+                                  language, currency_default_id, is_customer, is_vendor)
+             VALUES (?, ?, "Test 1", "Praha", "11000", ?, "CZ12345678", "dodavatel@example.invalid", "cs", ?, 0, 1)'
+        )->execute([$this->supplierId, 'Dodavatel ' . $number, $countryId, $currencyId]);
+        $vendorId = (int) $pdo->lastInsertId();
+        $date = self::YEAR . '-05-01';
+        $pdo->prepare(
+            'INSERT INTO purchase_invoices
+                (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date, due_date,
+                 received_at, currency_id, reverse_charge, vendor_snapshot, total_without_vat, total_vat,
+                 total_with_vat, status, created_by)
+             VALUES (?, ?, ?, "advance", ?, ?, ?, ?, ?, 0, "{}", ?, 0, ?, "received", ?)'
+        )->execute([$this->supplierId, $vendorId, $number, $date, $date, $date, $date, $currencyId, $total, $total, $this->userId]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    /** @param array<int,float> $allocations přijatá faktura => částka */
+    private function match(int $txId, array $allocations): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "INSERT INTO payment_matches (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type)
+             VALUES (?, ?, ?, ?, 'manual')"
+        );
+        foreach ($allocations as $purchaseId => $amount) {
+            $stmt->execute([$this->supplierId, $txId, $purchaseId, $amount]);
+        }
+        $this->db->pdo()->prepare("UPDATE bank_transactions SET match_status = 'manual' WHERE id = ?")->execute([$txId]);
+    }
+
+    /** @param list<float> $allocations řádky 314 MD, banka D za součet */
+    private function postPayment(int $txId, array $allocations): int
+    {
+        $lines = array_map(static fn (float $a): array => ['account_code' => '314', 'side' => 'debit', 'amount' => $a], $allocations);
+        $lines[] = ['account_code' => '221', 'side' => 'credit', 'amount' => array_sum($allocations)];
+        return (int) $this->posting->postDocument($this->supplierId, 'bank', $txId, $lines,
+            ['entry_date' => self::YEAR . '-05-05', 'posted_by' => $this->userId]);
+    }
+
+    /** @return list<int> hodnoty střediska na řádcích zápisu (unikátní) */
+    private function centersOf(int $entryId): array
+    {
+        $dims = $this->assignments->entryLineDimensions($this->supplierId, $entryId);
+        $out = [];
+        foreach ($this->journal->linesForEntry($entryId, $this->supplierId) as $line) {
+            $out[] = $dims[$line['id']][$this->centerType] ?? null;
+        }
+        return array_values(array_unique($out, SORT_REGULAR));
+    }
+
+    /** @return array<string,array{dims:array<int,int>, splits:array<int,array<int,float>>}> strana|částka => dimenze */
+    private function linesByAmount(int $entryId): array
+    {
+        $dims = $this->assignments->entryLineDimensions($this->supplierId, $entryId);
+        $splits = $this->assignments->entryLineSplits($this->supplierId, $entryId);
+        $out = [];
+        foreach ($this->journal->linesForEntry($entryId, $this->supplierId) as $line) {
+            $d = $dims[$line['id']] ?? [];
+            ksort($d);
+            $out[$line['side'] . '|' . number_format((float) $line['amount'], 2, '.', '')] = [
+                'dims' => $d,
+                'splits' => $splits[$line['id']] ?? [],
+            ];
+        }
+        return $out;
     }
 
     /**

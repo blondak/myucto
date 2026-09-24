@@ -125,6 +125,40 @@ final class RegistrationXmlFixtures
             XML;
     }
 
+    /**
+     * Export zaměstnanců z ePortálu ČSSZ (kořen `ExportZamestnancu` bez jmenného
+     * prostoru, s BOM jako originál). Hodnota `null` element vynechá.
+     *
+     * @param list<array<string,string|null>> $employees
+     */
+    public static function csszExport(array $employees, string $generatedAt = '2026-09-20T10:15:00.123Z'): string
+    {
+        $rows = '';
+        foreach ($employees as $employee) {
+            $e = $employee + [
+                'RodneCislo' => null,
+                'Prijmeni' => null,
+                'Jmeno' => null,
+                'VariabilniSymbol' => '1234567890',
+                'KodDruhuCinnosti' => '1',
+                'NazevDruhuCinnosti' => 'Pracovní poměr',
+                'ZMR' => 'N',
+                'IdZamestnani' => null,
+                'OIC' => null,
+            ];
+            $rows .= "    <Zamestnanec>\n";
+            foreach ($e as $element => $value) {
+                if ($value !== null) {
+                    $rows .= "      <{$element}>" . htmlspecialchars($value, ENT_XML1) . "</{$element}>\n";
+                }
+            }
+            $rows .= "    </Zamestnanec>\n";
+        }
+
+        return "\xEF\xBB\xBF<ExportZamestnancu>\n  <DatumGenerovani>{$generatedAt}</DatumGenerovani>\n"
+            . "  <Zamestnanci>\n{$rows}  </Zamestnanci>\n</ExportZamestnancu>\n";
+    }
+
     /** Syntetické rodné číslo (bez lomítka), které projde kontrolou modulo 11. */
     public static function birthNumber(string $birthDate, string $sex, int $sequence): string
     {

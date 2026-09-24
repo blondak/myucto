@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Dimension;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\DimensionDefaultRepository;
 use MyInvoice\Repository\DimensionRepository;
@@ -48,8 +49,8 @@ final class DimensionDefaults
      *   • přijatá faktura: zakázka > dodavatel (vendor_id)
      *   • pokladní doklad: zakázka dokladu > dimenze placené (přijaté) faktury,
      *     včetně jejích výchozích
-     *   • bankovní pohyb: dimenze spárované vystavené (jinak přijaté) faktury, včetně
-     *     jejích výchozích
+     *   • bankovní pohyb: dimenze hrazených faktur (vystavených i přijatých) včetně
+     *     jejich výchozích; u více faktur jen hodnoty společné všem
      *
      * @return array<int,int> typ => hodnota
      */
@@ -109,27 +110,95 @@ final class DimensionDefaults
         return self::fill($own, $linked);
     }
 
-    /** @return array<int,int> */
+    /**
+     * Hlavička společná všem dokladům, které pohyb hradí. Hradí-li doklady s různou
+     * hodnotou typu, typ tu chybí — rozdělí ho {@see DimensionStamper} po řádcích.
+     *
+     * @return array<int,int>
+     */
     private function forBank(int $supplierId, int $transactionId): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT bt.matched_invoice_id,
-                    (SELECT pm.purchase_invoice_id FROM payment_matches pm
-                      WHERE pm.bank_transaction_id = bt.id AND pm.supplier_id = bs.supplier_id
-                        AND pm.purchase_invoice_id IS NOT NULL
-                      ORDER BY pm.id LIMIT 1) AS matched_purchase_invoice_id
+        $documents = $this->bankDocuments($supplierId, $transactionId)['documents'];
+        if ($documents === []) {
+            return [];
+        }
+        $common = array_shift($documents)['header'];
+        foreach ($documents as $doc) {
+            $common = array_intersect_assoc($common, $doc['header']);
+        }
+        return $common;
+    }
+
+    /**
+     * Doklady, které bankovní pohyb hradí, s částkou alokace a efektivní hlavičkou.
+     * Stejné zdroje jako úhrada v BankPostingService: vystavené faktury z invoice_payments
+     * (bez nich z párování, jinak matched_invoice_id), přijaté faktury z párování.
+     * Více alokací na tentýž doklad se sečte.
+     *
+     * @return array{incoming:bool, documents:list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>}>}
+     */
+    public function bankDocuments(int $supplierId, int $transactionId): array
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'SELECT bt.amount, bt.matched_invoice_id
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
-              WHERE bt.id = ? AND bs.supplier_id = ?'
+              WHERE bt.id = ? AND ' . BankStatementOwnershipResolver::sql()
         );
-        $stmt->execute([$transactionId, $supplierId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return match (true) {
-            $row === false => [],
-            $row['matched_invoice_id'] !== null => $this->effectiveHeader($supplierId, 'invoice', (int) $row['matched_invoice_id']),
-            $row['matched_purchase_invoice_id'] !== null => $this->effectiveHeader($supplierId, 'purchase_invoice', (int) $row['matched_purchase_invoice_id']),
-            default => [],
-        };
+        $stmt->execute([$transactionId, ...BankStatementOwnershipResolver::params($supplierId)]);
+        $tx = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($tx === false) {
+            return ['incoming' => false, 'documents' => []];
+        }
+        $payments = $pdo->prepare(
+            'SELECT ip.invoice_id, SUM(ip.amount) AS amount
+               FROM invoice_payments ip
+               JOIN invoices i ON i.id = ip.invoice_id AND i.supplier_id = ?
+              WHERE ip.bank_transaction_id = ?
+           GROUP BY ip.invoice_id
+           ORDER BY MIN(ip.id)'
+        );
+        $payments->execute([$supplierId, $transactionId]);
+        $invoices = [];
+        foreach ($payments->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $invoices[(int) $r['invoice_id']] = (float) $r['amount'];
+        }
+        $matches = $pdo->prepare(
+            'SELECT invoice_id, purchase_invoice_id, SUM(amount) AS amount
+               FROM payment_matches
+              WHERE bank_transaction_id = ? AND supplier_id = ?
+           GROUP BY invoice_id, purchase_invoice_id
+           ORDER BY MIN(id)'
+        );
+        $matches->execute([$transactionId, $supplierId]);
+        $matchedInvoices = [];
+        $purchases = [];
+        foreach ($matches->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            if ($r['purchase_invoice_id'] !== null) {
+                $purchases[(int) $r['purchase_invoice_id']] = (float) $r['amount'];
+            } elseif ($r['invoice_id'] !== null) {
+                $matchedInvoices[(int) $r['invoice_id']] = (float) $r['amount'];
+            }
+        }
+        if ($invoices === []) {
+            $invoices = $matchedInvoices;
+        }
+        if ($invoices === [] && $tx['matched_invoice_id'] !== null) {
+            $invoices[(int) $tx['matched_invoice_id']] = abs((float) $tx['amount']);
+        }
+        $documents = [];
+        foreach (['invoice' => $invoices, 'purchase_invoice' => $purchases] as $docType => $ids) {
+            foreach ($ids as $docId => $amount) {
+                $documents[] = [
+                    'doc_type' => $docType,
+                    'doc_id' => $docId,
+                    'amount' => round(abs($amount), 2),
+                    'header' => $this->effectiveHeader($supplierId, $docType, $docId),
+                ];
+            }
+        }
+        return ['incoming' => (float) $tx['amount'] > 0, 'documents' => $documents];
     }
 
     /**

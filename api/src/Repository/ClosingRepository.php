@@ -27,6 +27,16 @@ final class ClosingRepository
      */
     private const ESTIMATE_TOLERANCE = 0.50;
 
+    /**
+     * Vypne pro jeden dotaz rozklad agregačního CTE na LATERAL DERIVED (optimalizace
+     * `split_materialized`). U K3 salda ho MariaDB volí pro CTE úhrad napojené přes
+     * LEFT JOIN na doklad a pak VNOŘENÉ CTE (`alloc`) materializuje znovu za každý
+     * řádek dokladu: nad 8 tisíci přijatých faktur 130 mil. přečtených řádků a 31 s na
+     * produkci. S jedinou materializací CTE je výsledek shodný a dotaz trvá 0,4 s.
+     * Jen pro dotaz, ne pro spojení: jinde (saldo, výkazy) rozklad naopak pomáhá.
+     */
+    private const NO_LATERAL_SPLIT = "SET STATEMENT optimizer_switch='split_materialized=off' FOR ";
+
     public function __construct(private readonly Connection $db) {}
 
     public function provisionSourceId(int $supplierId, int $periodId, int $invoiceId): int
@@ -1049,13 +1059,14 @@ final class ClosingRepository
      * neplatí tu „spočítá se jednou"). Proto se `bank_credit` čte jen z jediného
      * místa: mapa transakce → doklad se staví napřed v `bank_target` (dvě disjunktní
      * větve) a teprve ta se joinuje na `bank_credit`. Nový odkaz na `bank_credit`
-     * nebo `booked` = další plný průchod deníkem.
+     * nebo `booked` = další plný průchod deníkem. K rozkladu na LATERAL DERIVED viz
+     * {@see self::NO_LATERAL_SPLIT}.
      *
      * @return list<array{id:int, doc_no:string, partner_name:string, booked:float, settled:float, saldo:float}>
      */
     public function paidInvoicesOpenSaldo(int $supplierId, string $asOf): array
     {
-        $sql =
+        $sql = self::NO_LATERAL_SPLIT .
             "WITH booked AS (
                 SELECT e.source_id AS invoice_id,
                        SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS booked
@@ -1267,11 +1278,14 @@ final class ClosingRepository
      * ani pokladna) — typicky ruční „označit jako uhrazené" po zápočtu. To není totéž
      * jako „úhrada nesedí" a účetní to potřebuje v seznamu rozlišit.
      *
+     * Výkon viz {@see self::NO_LATERAL_SPLIT}: bez něj tu MariaDB přepočítávala `alloc`
+     * za každou přijatou fakturu zvlášť (ZENERGO 17 s, s ním 0,4 s).
+     *
      * @return list<array{id:int, doc_no:string, partner_name:string, booked:float, settled:float, saldo:float, note:?string}>
      */
     public function paidPurchasesOpenSaldo(int $supplierId, string $asOf): array
     {
-        $sql =
+        $sql = self::NO_LATERAL_SPLIT .
             "WITH booked AS (
                 SELECT e.source_id AS purchase_invoice_id,
                        SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS booked
@@ -1910,7 +1924,7 @@ final class ClosingRepository
      */
     private function realizedFxIssuedUnbooked(int $supplierId, string $asOf): array
     {
-        $sql =
+        $sql = self::NO_LATERAL_SPLIT .
             "WITH booked AS (
                 SELECT e.source_id AS invoice_id,
                        SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS booked,
@@ -2039,7 +2053,7 @@ final class ClosingRepository
      */
     private function realizedFxReceivedUnbooked(int $supplierId, string $asOf): array
     {
-        $sql =
+        $sql = self::NO_LATERAL_SPLIT .
             "WITH booked AS (
                 SELECT e.source_id AS purchase_invoice_id,
                        SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS booked,

@@ -6,11 +6,16 @@ namespace MyInvoice\Service\Migration\StereoNx;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
+use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Service\Payroll\CzechBirthNumber;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEvidencePeriod;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmployment;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPerson;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPersonWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPolicy;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRecord;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRunState;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
 use PDO;
 
@@ -27,6 +32,8 @@ final class StereoNxEmployees
         private readonly PayrollPersonCreateService $people,
         private readonly PayrollEmploymentRepository $employments,
         private readonly PayrollTakeoverPersonWriter $personWriter,
+        private readonly PayrollTakeoverEmploymentWriter $employmentWriter,
+        private readonly PayrollComponentRepository $components,
     ) {}
 
     /** @return array<string,mixed> Interní plán obsahuje osobní údaje a nesmí se vracet v protokolu. */
@@ -204,6 +211,7 @@ final class StereoNxEmployees
                 'end' => $end,
                 'weekly_hours' => $weeklyHours,
                 'monthly_gross' => $monthlyGross,
+                'hourly_wage' => $hourly > 0.0,
                 'relation_type' => 'employment',
                 'identity_details' => $identityDetails,
                 'birth_surname' => $birthSurname,
@@ -274,6 +282,8 @@ final class StereoNxEmployees
             return ['counts' => $counts, 'warnings' => array_values($warnings)];
         }
 
+        if ($records !== []) $this->components->ensureDefaults($supplierId);
+
         foreach ($records as $record) {
             if (!is_array($record)) {
                 throw new StereoNxException('employee_plan_invalid', 'Plán převodu zaměstnanců není platný.');
@@ -292,7 +302,9 @@ final class StereoNxEmployees
                 if (!$this->mappedPairExists($supplierId, $employeeMap['target_id'], $employmentMap['target_id'])) {
                     throw new StereoNxException('employee_target_missing', 'Dříve převedená zaměstnanecká karta už v cílové firmě neexistuje.');
                 }
-                $this->writePersonDetails($supplierId, $employeeMap['target_id'], $record, $userId, $counts, $warnings);
+                $takeover = self::toTakeoverRecord($record);
+                $this->writePersonDetails($supplierId, $employeeMap['target_id'], $takeover->person, $record, $userId, $counts, $warnings);
+                $this->writeEmploymentDetails($supplierId, $employmentMap['target_id'], $takeover->employment, $userId, $counts);
                 $counts['employees_existing']++;
                 continue;
             }
@@ -321,8 +333,10 @@ final class StereoNxEmployees
                 [$employeeId, $employmentId] = $pair;
                 $counts['employees_matched']++;
             }
-            $this->writePersonDetails($supplierId, $employeeId, $record, $userId, $counts, $warnings);
-            $this->applyLifecycle($supplierId, $employmentId, $record, $userId);
+            $takeover = self::toTakeoverRecord($record);
+            $this->writePersonDetails($supplierId, $employeeId, $takeover->person, $record, $userId, $counts, $warnings);
+            $this->writeEmploymentDetails($supplierId, $employmentId, $takeover->employment, $userId, $counts);
+            $this->applyLifecycle($supplierId, $employmentId, $takeover->employment, $userId, $counts);
             $this->map->put($supplierId, $ico, $companyIndex, self::KIND_EMPLOYEE, $key, $hash, $employeeId);
             $this->map->put($supplierId, $ico, $companyIndex, self::KIND_EMPLOYMENT, $key, $hash, $employmentId);
         }
@@ -330,7 +344,24 @@ final class StereoNxEmployees
     }
 
     /** @param array<string,mixed> $record @param array<string,int> $counts @param array<string,array{level:string,code:string,message:string}> $warnings */
-    private function writePersonDetails(int $supplierId, int $employeeId, array $record, ?int $userId, array &$counts, array &$warnings): void
+    private function writePersonDetails(int $supplierId, int $employeeId, PayrollTakeoverPerson $person, array $record, ?int $userId, array &$counts, array &$warnings): void
+    {
+        $policy = self::takeoverPolicy();
+        self::mergeCounts($counts, $this->personWriter->identity($supplierId, $employeeId, $person, $policy));
+        self::mergeCounts($counts, $this->personWriter->personCard(
+            $supplierId, $employeeId, $person, (string) $record['start'], $userId, $policy,
+        ));
+        self::mergeCounts($counts, $this->personWriter->statutoryEvidence(
+            $supplierId, $employeeId, $person, date('Y-m-d'), $userId, $policy,
+            static function (string $section) use (&$warnings): void {
+                self::warning($warnings, 'employee_statutory_evidence_unmapped',
+                    'Některý údaj zákonné evidence zaměstnance vyžaduje ruční ověření (' . $section . ').');
+            },
+        ));
+    }
+
+    /** @param array<string,mixed> $record */
+    public static function toTakeoverRecord(array $record): PayrollTakeoverRecord
     {
         $person = new PayrollTakeoverPerson(
             key: (string) $record['source_key'],
@@ -351,17 +382,14 @@ final class StereoNxEmployees
                 (array) ($record['tax_declarations'] ?? []),
             ),
         );
-        $policy = self::takeoverPolicy();
-        self::mergeCounts($counts, $this->personWriter->identity($supplierId, $employeeId, $person, $policy));
-        self::mergeCounts($counts, $this->personWriter->personCard(
-            $supplierId, $employeeId, $person, (string) $record['start'], $userId, $policy,
-        ));
-        self::mergeCounts($counts, $this->personWriter->statutoryEvidence(
-            $supplierId, $employeeId, $person, date('Y-m-d'), $userId, $policy,
-            static function (string $section) use (&$warnings): void {
-                self::warning($warnings, 'employee_statutory_evidence_unmapped',
-                    'Některý údaj zákonné evidence zaměstnance vyžaduje ruční ověření (' . $section . ').');
-            },
+        return new PayrollTakeoverRecord($person, new PayrollTakeoverEmployment(
+            personalNumber: (string) $record['source_key'], relationKey: (string) $record['source_key'],
+            start: (string) $record['start'], end: $record['end'],
+            monthlyWages: $record['monthly_gross'] === null ? [] : [[
+                'from' => (string) $record['start'], 'amount' => (float) $record['monthly_gross'], 'prorated' => false,
+            ]],
+            hourlyWage: (bool) ($record['hourly_wage'] ?? false),
+            transferStart: substr((string) $record['start'], 0, 7),
         ));
     }
 
@@ -372,7 +400,6 @@ final class StereoNxEmployees
             addressesPerType: true, birthSurnameOnCurrentVersion: false,
             verifyPayoutAccounts: false, countPlannedTermination: false,
             ignoreEndBeforeStart: false, rewriteOwnOpenings: true,
-            checklistToleratesRuntime: false,
         );
     }
 
@@ -380,6 +407,16 @@ final class StereoNxEmployees
     private static function mergeCounts(array &$target, array $incoming): void
     {
         foreach ($incoming as $key => $value) $target[$key] = ($target[$key] ?? 0) + $value;
+    }
+
+    /** @param array<string,int> $counts */
+    private function writeEmploymentDetails(int $supplierId, int $employmentId, PayrollTakeoverEmployment $employment, ?int $userId, array &$counts): void
+    {
+        $policy = self::takeoverPolicy();
+        self::mergeCounts($counts, $this->employmentWriter->monthlyWage($supplierId, $employmentId, $employment, $userId, $policy));
+        self::mergeCounts($counts, $this->employmentWriter->recurringWage(
+            $supplierId, $employmentId, $employment, $userId, $policy, new PayrollTakeoverRunState(),
+        ));
     }
 
     private function prerequisite(int $supplierId): ?string
@@ -416,21 +453,19 @@ final class StereoNxEmployees
         return [(int) $row['employee_id'], (int) $row['id']];
     }
 
-    /** @param array<string,mixed> $record */
-    private function applyLifecycle(int $supplierId, int $employmentId, array $record, ?int $userId): void
+    /** @param array<string,int> $counts */
+    private function applyLifecycle(int $supplierId, int $employmentId, PayrollTakeoverEmployment $employment, ?int $userId, array &$counts): void
     {
         $today = date('Y-m-d');
-        $row = $this->employmentRow($supplierId, $employmentId);
+        $row = $this->employmentWriter->employmentById($supplierId, $employmentId);
         if ($row === null) throw new StereoNxException('employee_target_missing', 'Pracovní vztah nebyl po založení nalezen.');
-        if ($row['status'] === 'planned' && (string) $record['start'] <= $today) {
+        if ($row['status'] === 'planned' && (string) $employment->start <= $today) {
             $this->employments->transition($supplierId, $employmentId, 'active', (int) $row['row_version'],
-                (string) $record['start'], self::NOTE, $userId, null, null);
-            $row = $this->employmentRow($supplierId, $employmentId);
+                (string) $employment->start, self::NOTE, $userId, null, null);
         }
-        if (is_string($record['end'] ?? null) && $record['end'] <= $today && ($row['status'] ?? null) === 'active') {
-            $this->employments->transition($supplierId, $employmentId, 'ended', (int) $row['row_version'],
-                $record['end'], self::NOTE, $userId, null, null);
-        }
+        self::mergeCounts($counts, $this->employmentWriter->termination(
+            $supplierId, $employmentId, $employment, $today, null, $userId, self::takeoverPolicy(),
+        ));
     }
 
     private function mappedPairExists(int $supplierId, int $employeeId, int $employmentId): bool
@@ -447,15 +482,6 @@ final class StereoNxEmployees
         $id = (int) $stmt->fetchColumn();
         if ($id <= 0) throw new StereoNxException('employee_target_missing', 'Nový pracovní vztah nebyl nalezen.');
         return $id;
-    }
-
-    /** @return array{status:string,row_version:int}|null */
-    private function employmentRow(int $supplierId, int $employmentId): ?array
-    {
-        $stmt = $this->db->pdo()->prepare('SELECT status, row_version FROM payroll_employments WHERE supplier_id = ? AND id = ?');
-        $stmt->execute([$supplierId, $employmentId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row === false ? null : ['status' => (string) $row['status'], 'row_version' => (int) $row['row_version']];
     }
 
     private function codeAvailable(int $supplierId, mixed $code): bool

@@ -50,6 +50,7 @@ final class ReportXlsxExporter
             $sheet->setCellValue('A3', 'V rozsahu je ' . (int) $data['draft_count'] . ' nezaúčtovaných konceptů — nejsou zahrnuty.');
             $sheet->getStyle('A3')->getFont()->setItalic(true);
         }
+        $this->dimensionLine($sheet, 'A4', $data);
 
         $months = array_values($data['months'] ?? []);
         $headers = ['Účet', 'Název', 'PS MD', 'PS D'];
@@ -120,6 +121,7 @@ final class ReportXlsxExporter
         $sheet->setCellValue('A1', 'Obratová předvaha — fiskální rok ' . $fy);
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
         $sheet->setCellValue('A2', 'Období: ' . $this->czDate((string) ($data['from'] ?? '')) . ' – ' . $this->czDate((string) ($data['to'] ?? '')));
+        $this->dimensionLine($sheet, 'A3', $data);
 
         $headers = ['Účet', 'Název', 'PS MD', 'PS D', 'Obrat MD', 'Obrat D', 'KS MD', 'KS D'];
         $cols = count($headers);
@@ -355,6 +357,7 @@ final class ReportXlsxExporter
             . ($thousands ? ' (v celých tisících Kč)' : ' (v Kč)'));
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
         $this->entityHeader($sheet, $data);
+        $this->dimensionLine($sheet, 'A5', $data);
 
         $head = 6;
         $headers = ['Označení', 'Položka', 'Brutto', 'Korekce', 'Netto', 'Minulé obd.'];
@@ -565,6 +568,7 @@ final class ReportXlsxExporter
             . ($thousands ? ' (v celých tisících Kč)' : ' (v Kč)'));
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
         $this->entityHeader($sheet, $data);
+        $this->dimensionLine($sheet, 'A5', $data);
 
         $head = 6;
         $headers = ['Označení', 'Položka', 'Běžné obd.', 'Minulé obd.'];
@@ -1197,6 +1201,173 @@ final class ReportXlsxExporter
         $sheet->setCellValue('A4', 'Okamžik sestavení: ' . (string) ($entity['prepared_at'] ?? '')
             . ' · verze výkazu: ' . (string) ($data['version_code'] ?? ''));
         $sheet->getStyle('A4')->getFont()->setSize(9)->setItalic(true);
+    }
+
+    /**
+     * Výsledovka po dimenzi: strom hodnot (výnosy, náklady, výsledek) a na druhém listu
+     * rozpad po syntetických účtech (řádky = účty, sloupce = kořeny sestavy).
+     *
+     * @param array<string,mixed> $data výstup DimensionProfitService::build() s `matrix` + `entity`
+     * @return array{bytes:string, filename:string, mime:string}
+     */
+    public function dimensionProfit(array $data): array
+    {
+        $ss = new Spreadsheet();
+        $sheet = $ss->getActiveSheet();
+        $from = (string) ($data['from'] ?? '');
+        $to = (string) ($data['to'] ?? '');
+        $typeName = (string) ($data['type']['name'] ?? '');
+        $sheet->setTitle('Výsledovka po dimenzi');
+        $sheet->setCellValue('A1', 'VÝSLEDOVKA PO DIMENZI ' . $typeName . ' za ' . $this->czDate($from) . ' – ' . $this->czDate($to) . ' (v Kč)');
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+        $this->entityHeader($sheet, $data);
+        $companies = count($data['supplier_ids'] ?? []);
+        if ($companies > 1) {
+            $sheet->setCellValue('A5', 'Součet za ' . $companies . ' firem skupiny');
+        }
+
+        $head = 6;
+        $this->headerRow($sheet, $head, ['Kód', $typeName !== '' ? $typeName : 'Hodnota', 'Odpovědná osoba', 'Výnosy', 'Náklady', 'Výsledek']);
+        $r = $head + 1;
+        foreach ($data['rows'] ?? [] as $row) {
+            $sheet->setCellValueExplicit([1, $r], (string) $row['code'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([2, $r], str_repeat('    ', (int) $row['depth']) . (string) $row['name'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([3, $r], (string) ($row['responsible_user_name'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValue([4, $r], (float) $row['total']['revenue']);
+            $sheet->setCellValue([5, $r], (float) $row['total']['cost']);
+            $sheet->setCellValue([6, $r], (float) $row['total']['result']);
+            if (!empty($row['has_children'])) {
+                $this->boldRow($sheet, $r, 6);
+            }
+            $r++;
+        }
+        if (empty($data['restricted'])) {
+            $sheet->setCellValue([2, $r], 'Bez hodnoty');
+            $sheet->setCellValue([4, $r], (float) ($data['unassigned']['revenue'] ?? 0));
+            $sheet->setCellValue([5, $r], (float) ($data['unassigned']['cost'] ?? 0));
+            $sheet->setCellValue([6, $r], (float) ($data['unassigned']['result'] ?? 0));
+            $r++;
+        }
+        $sheet->setCellValue([2, $r], 'Celkem');
+        $sheet->setCellValue([4, $r], (float) ($data['totals']['revenue'] ?? 0));
+        $sheet->setCellValue([5, $r], (float) ($data['totals']['cost'] ?? 0));
+        $sheet->setCellValue([6, $r], (float) ($data['totals']['result'] ?? 0));
+        $this->boldRow($sheet, $r, 6);
+        $this->finishTable($sheet, $head, $r, 6, 4);
+
+        $matrix = $data['matrix'] ?? null;
+        if (is_array($matrix)) {
+            $ms = $ss->createSheet();
+            $ms->setTitle('Po účtech');
+            $ms->setCellValue('A1', 'Rozpad po účtech — ' . $typeName . ', ' . $this->czDate($from) . ' – ' . $this->czDate($to));
+            $ms->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+            $headers = ['Účet', 'Název'];
+            foreach ($matrix['columns'] ?? [] as $col) {
+                $headers[] = $col['value_id'] === null ? 'Bez hodnoty' : trim((string) $col['code'] . ' ' . (string) $col['name']);
+            }
+            $headers[] = 'Celkem';
+            $cols = count($headers);
+            $mh = 3;
+            $this->headerRow($ms, $mh, $headers);
+            $r = $mh + 1;
+            $section = null;
+            foreach ($matrix['rows'] ?? [] as $row) {
+                if ($row['account_type'] !== $section) {
+                    $section = $row['account_type'];
+                    $ms->setCellValue([2, $r], $section === 'revenue' ? 'Výnosy' : 'Náklady');
+                    $this->boldRow($ms, $r, $cols);
+                    $r++;
+                }
+                $ms->setCellValueExplicit([1, $r], (string) $row['code'], DataType::TYPE_STRING);
+                $ms->setCellValueExplicit([2, $r], (string) $row['name'], DataType::TYPE_STRING);
+                foreach ($row['cells'] as $i => $v) {
+                    $ms->setCellValue([3 + $i, $r], (float) $v);
+                }
+                $ms->setCellValue([$cols, $r], (float) $row['total']);
+                $r++;
+            }
+            $ms->setCellValue([2, $r], 'Výsledek');
+            foreach ($matrix['results'] ?? [] as $i => $v) {
+                $ms->setCellValue([3 + $i, $r], (float) $v);
+            }
+            $ms->setCellValue([$cols, $r], (float) ($matrix['total_result'] ?? 0));
+            $this->boldRow($ms, $r, $cols);
+            $this->finishTable($ms, $mh, $r, $cols, 3);
+        }
+
+        return $this->out($ss, 'vysledovka-po-dimenzi-' . $from . '.xlsx');
+    }
+
+    /**
+     * Peněžní tok po dimenzi nepřímou metodou (manažerská sestava).
+     *
+     * @param array<string,mixed> $data výstup DimensionCashFlowService::build() + `dimension`, `entity`
+     * @return array{bytes:string, filename:string, mime:string}
+     */
+    public function dimensionCashFlow(array $data): array
+    {
+        $ss = new Spreadsheet();
+        $sheet = $ss->getActiveSheet();
+        $from = (string) ($data['from'] ?? '');
+        $to = (string) ($data['to'] ?? '');
+        $sheet->setTitle('Peněžní tok po dimenzi');
+        $sheet->setCellValue('A1', 'PENĚŽNÍ TOK (NEPŘÍMÁ METODA) za ' . $this->czDate($from) . ' – ' . $this->czDate($to) . ' (v Kč)');
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+        $this->entityHeader($sheet, $data);
+        $label = (string) ($data['dimension']['label'] ?? '');
+        $companies = count($data['supplier_ids'] ?? []);
+        $sheet->setCellValueExplicit('A5', ($label !== '' ? 'Dimenze: ' . $label : 'Celá firma')
+            . ($companies > 1 ? ' · součet za ' . $companies . ' firem skupiny' : ''), DataType::TYPE_STRING);
+
+        $head = 6;
+        $this->headerRow($sheet, $head, ['Účet', 'Položka', 'Částka']);
+        $r = $head + 1;
+        $line = function (string $code, string $label, float $amount, bool $strong) use ($sheet, &$r): void {
+            $sheet->setCellValueExplicit([1, $r], $code, DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([2, $r], $label, DataType::TYPE_STRING);
+            $sheet->setCellValue([3, $r], $amount);
+            if ($strong) {
+                $this->boldRow($sheet, $r, 3);
+            }
+            $r++;
+        };
+        $accounts = function (array $group) use ($line): void {
+            foreach ($group['accounts'] ?? [] as $a) {
+                $line((string) $a['account_code'], '    ' . (string) $a['name'], (float) $a['amount'], false);
+            }
+        };
+        $line('', 'Výsledek hospodaření', (float) ($data['profit'] ?? 0), false);
+        $line('', 'Úpravy o nepeněžní operace', (float) ($data['non_cash']['total'] ?? 0), false);
+        $accounts($data['non_cash'] ?? []);
+        $line('', 'Změna pracovního kapitálu', (float) ($data['working_capital']['total'] ?? 0), false);
+        $accounts($data['working_capital'] ?? []);
+        $line('', 'A. Peněžní tok z provozní činnosti', (float) ($data['operating'] ?? 0), true);
+        $line('', 'B. Peněžní tok z investiční činnosti', (float) ($data['investing']['total'] ?? 0), true);
+        $accounts($data['investing'] ?? []);
+        $line('', 'C. Peněžní tok z finanční činnosti', (float) ($data['financing']['total'] ?? 0), true);
+        $accounts($data['financing'] ?? []);
+        $line('', 'Čistý peněžní tok (A + B + C)', (float) ($data['net_cash_flow'] ?? 0), true);
+        $line('', 'Pohyb na peněžních účtech ve výběru', (float) ($data['cash_movement'] ?? 0), false);
+        $line('', 'Rozdíl: peníze bez hodnoty dimenze', (float) ($data['untagged_cash'] ?? 0), false);
+        $this->finishTable($sheet, $head, $r - 1, 3, 3);
+
+        return $this->out($ss, 'penezni-tok-po-dimenzi-' . $from . '.xlsx');
+    }
+
+    /**
+     * Řádek „Dimenze: …" u sestavy filtrované na hodnotu dimenze — bez něj by výkaz
+     * za jeden projekt v sešitu vypadal jako výkaz celé firmy.
+     *
+     * @param array<string,mixed> $data
+     */
+    private function dimensionLine(Worksheet $sheet, string $cell, array $data): void
+    {
+        $label = (string) ($data['dimension']['label'] ?? '');
+        if ($label === '') {
+            return;
+        }
+        $sheet->setCellValueExplicit($cell, 'Dimenze: ' . $label . ' (jen řádky s touto hodnotou, rozpad poměrem)', DataType::TYPE_STRING);
+        $sheet->getStyle($cell)->getFont()->setBold(true);
     }
 
     /**

@@ -77,7 +77,7 @@ final class StatementOverrideService
         $ctx = $this->context($supplierId, $periodId, $type);
         $version = $ctx['version'];
         $versionId = (int) $version['id'];
-        $map = $this->maps->accountMap($version, $supplierId);
+        $map = $this->maps->accountMap($version, $supplierId, (int) $ctx['period']['fiscal_year']);
 
         return [
             'statement_type' => $type,
@@ -124,9 +124,14 @@ final class StatementOverrideService
     {
         $existing = $this->overrides->forVersion($supplierId, $this->versionOrFail($versionId)['id']);
         $saved = $this->save($supplierId, $versionId, [...$existing, $item], $userId);
-        $key = self::key(trim((string) ($item['account_prefix'] ?? '')), (string) ($item['balance_condition'] ?? 'any'));
+        $from = $item['valid_from_year'] ?? null;
+        $key = self::key(
+            rtrim(trim((string) ($item['account_prefix'] ?? '')), '*'),
+            (string) ($item['balance_condition'] ?? 'any'),
+            $from === null || $from === '' ? null : (int) $from,
+        );
         foreach ($saved as $o) {
-            if (self::key($o['account_prefix'], $o['balance_condition']) === $key) {
+            if (self::key($o['account_prefix'], $o['balance_condition'], $o['valid_from_year']) === $key) {
                 return $o;
             }
         }
@@ -226,27 +231,46 @@ final class StatementOverrideService
         }
 
         $out = [];
-        $sides = [];
+        $byPrefix = [];
         foreach (array_values($items) as $i => $item) {
             $n = $this->normalizeItem((array) $item, $rows, $i + 1);
             $prefix = $n['account_prefix'];
-            $taken = $sides[$prefix] ?? [];
             $mine = $n['balance_condition'] === 'any' ? ['debit', 'credit'] : [$n['balance_condition']];
-            if (array_intersect($taken, $mine) !== []) {
-                throw new ReportException('validation_failed', sprintf(
-                    'Účet %s má víc výjimek pro stejnou stranu zůstatku — ponechte jednu.',
-                    $prefix,
-                ), 422);
+            // Víc výjimek pro týž účet a stranu zůstatku smí být jen v nepřekrývajících se
+            // letech platnosti (jedna do 2023, druhá od 2024).
+            foreach ($byPrefix[$prefix] ?? [] as $other) {
+                if (array_intersect($other['sides'], $mine) !== []
+                    && self::yearsOverlap($other['from'], $other['to'], $n['valid_from_year'], $n['valid_to_year'])) {
+                    throw new ReportException('validation_failed', sprintf(
+                        'Účet %s má víc výjimek pro stejnou stranu zůstatku se stejnou platností — ponechte jednu, nebo jim rozdělte roky platnosti.',
+                        $prefix,
+                    ), 422);
+                }
             }
-            $sides[$prefix] = [...$taken, ...$mine];
+            $byPrefix[$prefix][] = ['sides' => $mine, 'from' => $n['valid_from_year'], 'to' => $n['valid_to_year']];
             $out[] = $n;
+        }
+
+        // Strany zůstatku pokryté výjimkami v každém roce platnosti: pro každou výjimku
+        // sjednocení stran výjimek téhož účtu, jejichž platnost se s ní překrývá.
+        $sides = [];
+        foreach ($byPrefix as $prefix => $variants) {
+            foreach ($variants as $v) {
+                $covered = [];
+                foreach ($variants as $w) {
+                    if (self::yearsOverlap($v['from'], $v['to'], $w['from'], $w['to'])) {
+                        $covered = [...$covered, ...$w['sides']];
+                    }
+                }
+                $sides[] = ['prefix' => (string) $prefix, 'taken' => array_values(array_unique($covered))];
+            }
         }
 
         // Výjimka jen pro jednu stranu saldového účtu potřebuje, aby druhá strana měla kam
         // jít: převezme se z mapy bez výjimky (StatementMapResolver::applyOverrides). Když
         // tam není, výkaz by se kvůli nepárovému saldovému prefixu nesestavil vůbec.
         $base = null;
-        foreach ($sides as $prefix => $taken) {
+        foreach ($sides as ['prefix' => $prefix, 'taken' => $taken]) {
             $missing = array_values(array_diff(['debit', 'credit'], $taken));
             if ($missing === []) {
                 continue;
@@ -271,6 +295,34 @@ final class StatementOverrideService
                         . 'Doplňte výjimku i pro druhou stranu, nebo zvolte „jakýkoli zůstatek".',
                         (string) $prefix,
                         $side === 'debit' ? 'debetní' : 'kreditní',
+                    ), 422);
+                }
+            }
+        }
+
+        // Korekce, která následuje pohledávku, musí skončit v řádku aktiv: účet pohledávky
+        // zařazený do pasiv (nebo do výsledovky) by z ní udělal nesmysl.
+        foreach ($out as $n) {
+            if ($n['follows_prefix'] === null) {
+                continue;
+            }
+            $base ??= $this->maps->simulate(
+                $supplierId,
+                (int) $version['id'],
+                [],
+                fn (): array => $this->maps->accountMap($version, $supplierId),
+            );
+            $resolved = StatementMapResolver::applyOverrides(
+                $base,
+                StatementMapResolver::validIn($out, $n['valid_from_year'] ?? $n['valid_to_year']),
+            );
+            foreach ($resolved as $m) {
+                if ((string) $m['account_prefix'] === $n['account_prefix'] && ($m['follows_prefix'] ?? null) === $n['follows_prefix']
+                    && (string) ($rows[(string) $m['row_code']]['section'] ?? '') !== 'assets') {
+                    throw new ReportException('validation_failed', sprintf(
+                        'Výjimka pro účet %s: účet pohledávky %s výkaz nezařazuje do aktiv, korekce ho následovat nemůže.',
+                        $n['account_prefix'],
+                        $n['follows_prefix'],
                     ), 422);
                 }
             }
@@ -326,20 +378,78 @@ final class StatementOverrideService
         if (mb_strlen($note) > 255) {
             throw new ReportException('validation_failed', sprintf('Výjimka pro účet %s: poznámka je delší než 255 znaků.', $prefix), 422);
         }
+        $follows = rtrim(trim((string) ($item['follows_prefix'] ?? '')), '*');
+        if ($follows !== '') {
+            if (preg_match('/^\d{3}[0-9A-Za-z.]{0,7}$/', $follows) !== 1) {
+                throw new ReportException('validation_failed', sprintf(
+                    'Výjimka pro účet %s: účet pohledávky musí být kód syntetiky nebo analytiky, nejvýš 10 znaků.',
+                    $prefix,
+                ), 422);
+            }
+            if ($target !== 'correction') {
+                throw new ReportException('validation_failed', sprintf(
+                    'Výjimka pro účet %s: vazbu na pohledávku může mít jen korekce.',
+                    $prefix,
+                ), 422);
+            }
+            if ($follows === $prefix) {
+                throw new ReportException('validation_failed', sprintf(
+                    'Výjimka pro účet %s: korekce nemůže následovat sama sebe.',
+                    $prefix,
+                ), 422);
+            }
+        }
+        $from = self::year($item['valid_from_year'] ?? null, $prefix);
+        $to = self::year($item['valid_to_year'] ?? null, $prefix);
+        if ($from !== null && $to !== null && $from > $to) {
+            throw new ReportException('validation_failed', sprintf(
+                'Výjimka pro účet %s: platnost od roku %d je pozdější než do roku %d.',
+                $prefix,
+                $from,
+                $to,
+            ), 422);
+        }
 
         $out = [
             'account_prefix'    => $prefix,
             'row_code'          => $rowCode,
             'target'            => $target,
+            'follows_prefix'    => $follows === '' ? null : $follows,
             'balance_condition' => $condition,
             'sign'              => $sign,
             'note'              => $note === '' ? null : $note,
+            'valid_from_year'   => $from,
+            'valid_to_year'     => $to,
         ];
         if (isset($item['id']) && (int) $item['id'] > 0) {
             $out['id'] = (int) $item['id'];
         }
 
         return $out;
+    }
+
+    /** Rok platnosti výjimky: prázdné = bez omezení, jinak celý rok 1900–2999. */
+    private static function year(mixed $value, string $prefix): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_int($value) && !(is_string($value) && ctype_digit(trim($value)))) {
+            throw new ReportException('validation_failed', sprintf('Výjimka pro účet %s: rok platnosti musí být celé číslo.', $prefix), 422);
+        }
+        $year = (int) $value;
+        if ($year < 1900 || $year > 2999) {
+            throw new ReportException('validation_failed', sprintf('Výjimka pro účet %s: rok platnosti %d je mimo rozsah.', $prefix, $year), 422);
+        }
+
+        return $year;
+    }
+
+    /** Překrývají se dvě období platnosti (NULL = bez omezení)? */
+    private static function yearsOverlap(?int $fromA, ?int $toA, ?int $fromB, ?int $toB): bool
+    {
+        return ($fromA === null || $toB === null || $fromA <= $toB)
+            && ($fromB === null || $toA === null || $fromB <= $toA);
     }
 
     /** @return array<string,mixed> */
@@ -522,16 +632,19 @@ final class StatementOverrideService
             'account_prefix'    => (string) ($o['account_prefix'] ?? ''),
             'row_code'          => (string) ($o['row_code'] ?? ''),
             'target'            => (string) ($o['target'] ?? 'gross'),
+            'follows_prefix'    => isset($o['follows_prefix']) && $o['follows_prefix'] !== '' ? (string) $o['follows_prefix'] : null,
             'balance_condition' => (string) ($o['balance_condition'] ?? 'any'),
             'sign'              => (int) ($o['sign'] ?? 1),
             'note'              => $o['note'] ?? null,
+            'valid_from_year'   => isset($o['valid_from_year']) ? (int) $o['valid_from_year'] : null,
+            'valid_to_year'     => isset($o['valid_to_year']) ? (int) $o['valid_to_year'] : null,
             'updated_at'        => $o['updated_at'] ?? null,
         ];
     }
 
-    private static function key(string $prefix, string $condition): string
+    private static function key(string $prefix, string $condition, ?int $validFrom): string
     {
-        return $prefix . '|' . $condition;
+        return $prefix . '|' . $condition . '|' . ($validFrom ?? '');
     }
 
     private static function cents(float|int|string|null $amount): int

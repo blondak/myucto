@@ -28,6 +28,9 @@ vi.mock('@/components/accounting/JournalLinesTable.vue', () => ({
 vi.mock('@/components/accounting/JournalRelatedPanel.vue', () => ({
   default: { name: 'JournalRelatedPanel', props: ['entryId', 'showPreview'], template: '<div class="related" />' },
 }))
+vi.mock('@/components/accounting/JournalEntryNotes.vue', () => ({
+  default: { name: 'JournalEntryNotes', props: ['entryId', 'defaultOpen'], template: '<div class="notes" />' },
+}))
 vi.mock('@/components/accounting/PostingOriginRow.vue', () => ({
   default: { name: 'PostingOriginRow', props: ['source', 'docId'], template: '<div class="origin" />' },
 }))
@@ -169,6 +172,22 @@ describe('DocumentPostingPanel', () => {
     } finally {
       canWriteMock.mockReturnValue(true)
     }
+  })
+
+  /**
+   * Poznámky zápisu (tytéž jako v deníku a u bankovního pohybu) patří ke každému
+   * zaúčtování dokladu — detail faktury je dřív neukazoval vůbec.
+   */
+  it('ke každému zápisu ukáže poznámky deníku', async () => {
+    journalForDocumentMock.mockResolvedValueOnce([
+      entry(64157, { reversed_by: 64160 }),
+      entry(64160, { document_no: 'ST-64160', source_id: null }),
+    ])
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const notes = wrapper.findAllComponents({ name: 'JournalEntryNotes' })
+    expect(notes.map(n => n.props('entryId'))).toEqual([64157, 64160])
   })
 
   it('protizápis se označí jako storno', async () => {

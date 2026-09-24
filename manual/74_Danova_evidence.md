@@ -434,6 +434,12 @@ dostupná.
 
 ## 74.11 Omezení a tipy
 
+V agendě **Daňová evidence → Ostatní pohledávky a závazky** lze sledovat i jiné
+neuhrazené případy než faktury. Potvrzení položky v daňové evidenci nevytvoří
+podvojný účetní zápis ani samo o sobě nezakládá daňový příjem či výdaj.
+Přiřazená bankovní nebo pokladní úhrada sníží otevřený zůstatek; daňové
+zařazení platby se dál řídí pravidly peněžního deníku.
+
 - Sestavy jsou z většiny **read-only** — v peněžním deníku ani v přehledu
   pohledávek a závazků needituješ částky ani doklady; opravu zařazení uděláš na
   zdrojovém dokladu (účel pokladního dokladu, příznak uznatelnosti/osvobození

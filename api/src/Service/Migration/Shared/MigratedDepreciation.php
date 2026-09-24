@@ -34,7 +34,7 @@ final class MigratedDepreciation
     public const OVERWRITE_OWN = 'own';
 
     /** Klíč původu daňového řádku v `detail` (hodnota {@see DepreciationEntryRepository::MIGRATED_JOURNAL}). */
-    public const TAX_SOURCE = 'source';
+    public const TAX_SOURCE = DepreciationEntryRepository::MIGRATED_TAX_SOURCE;
 
     public const KEPT_CLOSED = 'closed_period';
     public const KEPT_NOT_MIGRATED = 'not_migrated';
@@ -53,8 +53,7 @@ final class MigratedDepreciation
         if (($entry['kind'] ?? 'accounting') === 'accounting') {
             return DepreciationEntryRepository::isBookedByMigratedJournal($entry);
         }
-        $detail = is_string($entry['detail'] ?? null) ? json_decode((string) $entry['detail'], true) : ($entry['detail'] ?? null);
-        return is_array($detail) && ($detail[self::TAX_SOURCE] ?? null) === DepreciationEntryRepository::MIGRATED_JOURNAL;
+        return DepreciationEntryRepository::isConfirmedByMigration($entry);
     }
 
     /**

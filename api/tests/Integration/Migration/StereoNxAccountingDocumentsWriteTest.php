@@ -98,7 +98,9 @@ final class StereoNxAccountingDocumentsWriteTest extends TestCase
         $line = $tables['Svfp'][0];
         $header['Mena'] = 'EUR'; $header['Kurz'] = 25.1; $header['KurzMn'] = 1;
         $header['Celkem'] = -10.0; $header['TypDokladu'] = 'D'; $header['CenySDPH'] = false;
+        $header['CelkemVlastni'] = -251.0;
         $line['Klic'] = -2147483647; $line['Mnozstvi'] = 2.0; $line['JednCenaC'] = -5.0;
+        $line['ZakladDPH'] = -251.0; $line['CelkemDPH'] = 0.0;
         $tables['Svfh'] = [$header]; $tables['Svfp'] = [$line];
         $tables['SPFH'] = []; $tables['Spfp'] = [];
         $plan = StereoNxSourcePlan::fromTables($tables, SyntheticStereoNxTables::identity(), true, true);
@@ -118,6 +120,37 @@ final class StereoNxAccountingDocumentsWriteTest extends TestCase
         self::assertSame('EUR', $row['code']);
         self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ?'));
         self::assertGreaterThan(0, $result['review_documents'][0]['target_id']);
+
+        $changed = $plan;
+        $changed['issued'][0]['foreign_home_total'] = -252.0;
+        try {
+            $this->importer->writeAccountingDocuments($changed, $this->supplierId, $this->userId);
+            self::fail('Změněný korunový důkaz musí změnit otisk zdroje.');
+        } catch (\MyInvoice\Service\Migration\StereoNx\StereoNxException $e) {
+            self::assertSame('source_changed', $e->errorCode);
+        }
+    }
+
+    public function testForeignDocumentWithoutHomeTotalIsBlockedBeforeWrite(): void
+    {
+        $tables = SyntheticStereoNxTables::tables();
+        $tables['Svfh'][0]['Mena'] = 'EUR';
+        $tables['Svfh'][0]['Kurz'] = 25.1;
+        $tables['Svfh'][0]['Celkem'] = 10.0;
+        $tables['Svfp'][0]['Mnozstvi'] = 2.0;
+        $tables['Svfp'][0]['JednCenaC'] = 5.0;
+        $tables['SPFH'] = []; $tables['Spfp'] = [];
+        $plan = StereoNxSourcePlan::fromTables($tables, SyntheticStereoNxTables::identity(), true, true);
+        $plan['source_company_index'] = 1;
+        $this->importer->writeAccountingPartners($plan['clients'], $plan['identity'], 1, $this->supplierId);
+
+        try {
+            $this->importer->writeAccountingDocuments($plan, $this->supplierId, $this->userId);
+            self::fail('Doklad bez ověřeného korunového celku nesmí být zapsán.');
+        } catch (\MyInvoice\Service\Migration\StereoNx\StereoNxException $e) {
+            self::assertSame('document_foreign_unverified', $e->errorCode);
+            self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM invoices WHERE supplier_id = ?'));
+        }
     }
 
     public function testCreditNoteAndProformaKeepTypesAndOnlyCreditNoteEntersVatLedger(): void
@@ -225,7 +258,9 @@ final class StereoNxAccountingDocumentsWriteTest extends TestCase
         $line = $tables['Svfp'][0];
         $header['Mena'] = 'EUR'; $header['Kurz'] = 25.1; $header['KurzMn'] = 1;
         $header['Celkem'] = 10.0; $header['CenySDPH'] = false;
+        $header['CelkemVlastni'] = 251.0;
         $line['Mnozstvi'] = 2.0; $line['JednCenaC'] = 5.0;
+        $line['ZakladDPH'] = 251.0; $line['CelkemDPH'] = 0.0;
         $tables['Svfh'] = [$header]; $tables['Svfp'] = [$line];
         $tables['SPFH'] = []; $tables['Spfp'] = [];
         $plan = StereoNxSourcePlan::fromTables($tables, SyntheticStereoNxTables::identity(), true, true);

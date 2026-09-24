@@ -170,6 +170,7 @@ export interface PurchaseSummary {
   due_buckets: DueBucket[]
   aging_report: AgingReportRow[]
   costs_forecast: CostsForecast[]
+  other_item_result_impact: import('./dashboard').OtherItemResultImpact[]
   expense_breakdown_12m: ExpenseCategoryRow[]
   invoice_size_histogram: InvoiceSizeHistogram
   costs_last_30d: Costs30d[]

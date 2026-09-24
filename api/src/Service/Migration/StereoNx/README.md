@@ -135,6 +135,13 @@ srážka není karta exekuce; počáteční kumulace se touto cestou nezakládaj
 Zdrojové klíče a otisky brání změně již převzaté mzdy i dvojímu převodu;
 cílová osoba a pracovní vztah musejí patřit vybrané firmě.
 
+Návrh mzdových předkontací vzniká pouze z řádků `Cdenik` v účetní řadě
+`MPARZPR.DoklRadaU`, jejichž text i dvojice účtů souhlasí s pojmenovanou
+zaměstnaneckou kontací `MPARUCT` (`TypPar=1`). Rozlišují se hrubá mzda,
+pojistné obou stran, zálohová a srážková daň a doložené exekuce a ostatní
+srážky. Neznámé texty a rozporné kontace nevytvářejí doporučení. Návrh musí
+potvrdit účetní; opakovaný převod již potvrzený návrh Stereo nepřepíše.
+
 Výklad prázdné země jako ČR je explicitní volbou průvodce. Označení EU bez
 konkrétního státu zůstává neurčené. Kvůli povinnému cílovému `country_id`
 mají takové protistrany technický zástupný stát CZ, poznámku a všechny
@@ -191,3 +198,40 @@ Cizoměnové koncepty rozlišují neshodu korunového celku s kurzem a neshodu
 korunového daňového základu s přepočteným celkem. Diagnostika nemění
 kurz ani daňové částky. Zemi označenou pouze `I` bez dalšího doložení
 nepovažuje automaticky za Itálii.
+
+## Společná infrastruktura a vědomé rozdíly
+
+Stereo adaptér dekóduje a ověřuje zdroj, zapisovače cílových evidencí sdílí
+s ostatními převody. Doklady používají `MigratedDocumentWriter` a kanonické
+DTO, `MigrationVatRateLookup`, `VatReturnLineClassifier`,
+`PartnerIdentityMatcher` a `ForeignCurrencyTakeover`. Banka a pokladna
+využívají `BankAccountRegistrar`, `BankStatementImportWriter`, `BankSymbols`,
+`MigratedCashNumber` a `MigratedPaymentWriter`; vazby spravuje
+`JournalEntryLinker`. Neověřená měnová vazba úhrady se neodhaduje.
+
+Osnova a období používají `ChartAccountCreator`, `MigrationPeriods` a
+`MigrationHomeCurrency`. Výslovný typ účtu a strana ze Stereo jsou volbami
+společného zapisovače, nikoli druhou implementací pravidel. Předvahu proti
+zdrojovému deníku porovnávají `TrialBalanceReconciliation` a
+`ReconciliationCriteria`. Karty majetku používají společné služby majetku,
+`SmallAssetCard` a `MigratedDepreciation`; neověřené vyřazení zůstává
+konceptem, nepředává se jako doložené `MigratedDisposal`.
+
+Mzdy používají `PayrollTakeoverRecord`, personální DTO, společné personální
+a pracovněprávní zapisovače a `PayrollMigrationReferenceTotalsWriter`.
+`PayrollMigrationModuleSetup` plánuje a doplňuje chybějící nastavení modulu;
+zkouška vrací i jeho změny. `StereoNxPayrollPostingMap` implementuje
+`PayrollLegacyPostingSource` jen pro kontace doložené současně MPARUCT,
+MPARZPR a Cdenik. `PayrollPostingMapProposalService` ukládá návrh s volbou
+zachovat potvrzený výsledek; výchozí chování ostatních převodů se nemění.
+
+Karty skladů, zásob a vozidel zapisuje obecný `MigratedInventoryWriter` přes
+repozitáře příslušných evidencí, bez tvorby skladových pohybů nebo jízd.
+Firemní kontakty využívají `MigrationCompanyIdentity` a výběrové převzetí
+v `CompanyProfileCarryOver`. Stereo převádí do existující firmy: nezakládá
+novou firmu podle ARES a nepřepisuje plátcovství z příznaku v záloze.
+
+Job dědí `AbstractImportJobService`; `ChunkedUploadStore` zachovává formát
+již nahraných záloh přes explicitní konfiguraci. Zdrojová mapa nadále nese
+IČO, index firmy, klíč a otisk kvůli více firmám v jedné záloze. Její zápis
+je pouze evidence původu, nikoli samostatný zapisovač účetních objektů.

@@ -40,6 +40,7 @@ final class DocumentSeriesFormatTest extends TestCase
                 // Epic SKLAD „na cestě": objednávka není účetní doklad, ale číslo
                 // z řady dostává — musí být unikátní a bez souběhových děr.
                 'purchase_order' => 'OBJ',
+                'other_receivable' => 'OP', 'other_payable' => 'OZ',
             ],
             DocumentSeriesService::DEFAULT_PREFIXES,
             'Výchozí prefixy řad dle R13 + pokladní řady (#14) + skladové řady (#16) + zápočty (audit 2026-07 Fáze F) + objednávky dodavatelům.',

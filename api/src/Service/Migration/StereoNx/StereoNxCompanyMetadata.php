@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\StereoNx;
 
+use MyInvoice\Service\Migration\Shared\MigrationCompanyIdentity;
+
 /**
  * Ověřený tvar firma.bin: TPF0, verze 251, popis polí a jeden řádek.
  * Typové značky: https://docwiki.embarcadero.com/Libraries/Athens/en/System.Classes.TValueType
@@ -79,13 +81,21 @@ final class StereoNxCompanyMetadata
         $street = array_filter([$profile['Ulice'] ?? null, $number], static fn (?string $v): bool => $v !== null && $v !== '');
         $optional = static fn (?string $value): ?string => $value === null || $value === '' ? null : $value;
         $country = mb_strtoupper($profile['Stat'] ?? '', 'UTF-8');
-        return ['ico' => trim($identity['ICO']), 'dic' => trim($identity['DIC']),
-            'name' => trim($identity['Nazev']), 'vat_payer' => $identity['PlatDPH'],
+        // Existující cílová firma: source_backup je údaj pro porovnání, nikoli
+        // důvod měnit registraci DPH. ARES ani zakládání nové firmy sem nepatří.
+        $company = new MigrationCompanyIdentity(
+            ico: trim($identity['ICO']), name: trim($identity['Nazev']), dic: trim($identity['DIC']),
+            address: ['street' => implode(' ', $street), 'city' => $profile['Misto'] ?? '', 'zip' => $profile['PSC'] ?? ''],
+            vatPayer: $identity['PlatDPH'], vatSource: 'source_backup', taxpayerType: null,
+            nace: null, category: null, audit: null, firstPeriodStart: null, notes: [],
+        );
+        return ['ico' => $company->ico, 'dic' => $company->dic,
+            'name' => $company->name, 'vat_payer' => $company->vatPayer,
             'company_profile' => [
                 'company_name' => $optional($profile['ObchJmeno'] ?? null) ?? $optional(trim($identity['Nazev'])),
-                'street' => $optional(implode(' ', $street)),
-                'city' => $optional($profile['Misto'] ?? null),
-                'zip' => $optional($profile['PSC'] ?? null),
+                'street' => $optional($company->address['street']),
+                'city' => $optional($company->address['city']),
+                'zip' => $optional($company->address['zip']),
                 'email' => $optional($profile['Email'] ?? null),
                 'phone' => $optional($profile['Telefon'] ?? null),
                 'web' => $optional($profile['WWW'] ?? null),

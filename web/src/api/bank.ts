@@ -57,6 +57,17 @@ export interface BankStatement {
 export type MatchStatus = 'unmatched' | 'auto_exact' | 'auto_partial' | 'manual' | 'ignored'
 export type PostingFilter = 'unposted' | 'posted'
 
+/** Sloupce, podle kterých server řadí pohyby (whitelist BankTransactionSort). */
+export type BankTransactionSortKey =
+  | 'posted_at' | 'amount' | 'variable_symbol' | 'counterparty' | 'invoice' | 'status' | 'posting' | 'account'
+
+/** Zkrácená poznámka účetního zápisu v řádku pohybu (plná verze = JournalNote). */
+export interface BankTransactionJournalNote {
+  id: number
+  body: string
+  pinned: boolean
+}
+
 export interface BankTransaction {
   id: number
   /** 'statement' = z nahraného výpisu, 'email_notice' = z e-mailového avíza, 'idoklad' = z pohybu importovaného z iDokladu. */
@@ -113,6 +124,8 @@ export interface BankTransaction {
     payroll_posting_blocked?: boolean
     journal_entry_id?: number
     document_no?: string
+    /** Poznámky zápisu `journal_entry_id` (připnuté první) — žijí v deníku, pohyb je jen ukazuje. */
+    journal_notes?: BankTransactionJournalNote[]
     automated?: boolean
     automation_source?: 'rule' | 'learned' | 'payment_match' | 'transfer' | 'detector' | 'schedule' | 'knn' | 'llm'
     suggestion_id?: number
@@ -267,6 +280,8 @@ export interface BankTransactionsParams {
   per_page?: number
   status?: MatchStatus | ''
   posting_status?: PostingFilter | ''
+  sort?: BankTransactionSortKey
+  direction?: 'asc' | 'desc'
 }
 
 /**
@@ -411,6 +426,7 @@ export const bankApi = {
       ...(params.per_page ? { per_page: params.per_page } : {}),
       ...(params.status ? { status: params.status } : {}),
       ...(params.posting_status ? { posting_status: params.posting_status } : {}),
+      ...(params.sort ? { sort: params.sort, direction: params.direction ?? 'asc' } : {}),
     } }).then(r => r.data),
   /** Přehled zůstatků na účtech dle GPC výpisů (tabulka + měsíční vývoj + CZK součet). */
   accountBalances: () =>

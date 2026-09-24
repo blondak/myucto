@@ -134,14 +134,51 @@ final class DimensionStamperTest extends TestCase
         self::assertSame([-50, -50], DimensionStamper::distributeCents(-100, [1.0, 1.0]));
     }
 
-    public function testFilterSqlCountsCostCentreTextOnlyWithoutDimension(): void
+    public function testFilterLineSourceCountsCostCentreTextOnlyWithoutDimensionAndSplitsByShare(): void
     {
         $filter = new DimensionFilter(5, 11, [11, 12], ['REZ']);
-        [$sql, $params] = $filter->sql('l');
-        self::assertStringContainsString('dim_f.dimension_value_id IN (?,?)', $sql);
-        self::assertStringContainsString('l.cost_center IN (?)', $sql);
-        self::assertStringContainsString('NOT EXISTS', $sql, 'Řádek s dimenzí téhož typu rozhoduje dimenzí, ne textem.');
-        self::assertSame([5, 11, 12, 'REZ', 5], $params);
+        [$sql, $params] = $filter->lineSource(7, 'l');
+        self::assertStringContainsString('fd.dimension_value_id IN (?,?)', $sql);
+        self::assertStringContainsString('fl.cost_center IN (?)', $sql);
+        self::assertStringContainsString('journal_entry_line_dimension_splits dim_cs', $sql, 'Řádek s rozpadem téhož typu nerozhoduje textem.');
+        self::assertStringContainsString('ROUND(sl.amount * s.share', $sql, 'Řádek s rozpadem jen svým dílem.');
+        self::assertStringEndsWith(') l', $sql);
+        self::assertSame([5, 11, 12, 7, 7, 'REZ', 5, 5, 5, 7, 5, 11, 12, 11, 12, 7], $params);
+    }
+
+    public function testPaymentOfSeveralDocumentsTagsCounterLinesAndSplitsTheRest(): void
+    {
+        $lines = [
+            ['account_id' => 3, 'side' => 'debit', 'amount' => 600.00],
+            ['account_id' => 3, 'side' => 'debit', 'amount' => 400.00],
+            ['account_id' => 4, 'side' => 'credit', 'amount' => 1000.00],
+        ];
+        $documents = [
+            ['amount' => 600.0, 'header' => [self::CENTER => 21, self::PROJECT => 100]],
+            ['amount' => 400.0, 'header' => [self::CENTER => 22, self::PROJECT => 100]],
+        ];
+        $out = DimensionStamper::allocateDocuments($lines, $documents, 'debit', []);
+        self::assertSame([self::PROJECT => 100, self::CENTER => 21], $out[0]['dimensions']);
+        self::assertSame([self::PROJECT => 100, self::CENTER => 22], $out[1]['dimensions']);
+        self::assertArrayNotHasKey('dimensions', $out[2], 'Společnou hodnotu doplní hlavička, ne řádek.');
+        self::assertSame([self::CENTER => [21 => 0.6, 22 => 0.4]], $out[2]['dimension_splits'], 'Banka se rozdělí v poměru alokací.');
+    }
+
+    public function testTypeMissingOnOneDocumentAndTypeGivenOnTransactionAreNotSplit(): void
+    {
+        $lines = [
+            ['account_id' => 3, 'side' => 'debit', 'amount' => 700.00],
+            ['account_id' => 3, 'side' => 'debit', 'amount' => 300.00],
+            ['account_id' => 4, 'side' => 'credit', 'amount' => 1000.00],
+        ];
+        $documents = [
+            ['amount' => 700.0, 'header' => [self::CENTER => 21, self::PROJECT => 100]],
+            ['amount' => 300.0, 'header' => [self::PROJECT => 101]],
+        ];
+        $out = DimensionStamper::allocateDocuments($lines, $documents, 'debit', [self::PROJECT => 999]);
+        self::assertSame([self::CENTER => 21], $out[0]['dimensions'], 'Typ zadaný na pohybu se z dokladu nebere.');
+        self::assertArrayNotHasKey('dimensions', $out[1]);
+        self::assertArrayNotHasKey('dimension_splits', $out[2], 'Středisko jen na části plateb se nerozpočítává.');
     }
 
     /** @return list<array<string,mixed>> 518 MD / 343 MD / 321 D */

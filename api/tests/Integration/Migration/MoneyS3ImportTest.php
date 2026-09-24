@@ -426,6 +426,28 @@ final class MoneyS3ImportTest extends TestCase
         self::assertSame(0, $this->rowCount('journal_entries', $supplierId, "description = 'Účetní závěrka roku 2024'"));
         $journal = array_column($protocol->toArray()['steps'], null, 'key')['journal'];
         self::assertContains('year_end_closing_skipped', array_column($journal['messages'], 'code'));
+        $closing = array_column($protocol->toArray()['steps'], null, 'key')['closing'];
+        self::assertNotContains('closed_without_money_closing', array_column($closing['messages'], 'code'));
+    }
+
+    /**
+     * Money otevře další rok i bez uzávěrky (XZ). Rok, jehož PS navazují, převod uzavře
+     * dál (reálné agendy nemají XZ u většiny podaných let), ale upozorní, že uzávěrka
+     * v Money neproběhla.
+     */
+    public function testYearClosedWithoutMoneyYearEndClosingIsReported(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/noxz.lz', SyntheticAgenda::filesWithoutYearEndClosing());
+        $backup = Ms3Backup::extract($this->tmp . '/noxz.lz', $this->tmp . '/noxz');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertSame('closed', array_column($protocol->get('closing'), null, 'year')[2024]['status']);
+        $closing = array_column($protocol->toArray()['steps'], null, 'key')['closing'];
+        $warning = array_column($closing['messages'], null, 'code')['closed_without_money_closing'] ?? null;
+        self::assertNotNull($warning, $this->explain($protocol));
+        self::assertSame([2024], $warning['context']['years']);
     }
 
     /**
@@ -614,6 +636,11 @@ final class MoneyS3ImportTest extends TestCase
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
 
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'DF-2025-010' AND is_fixed_asset = 1"));
+        // Aplikace drží expense_kind='fixed_asset' ⇔ is_fixed_asset=1 i na položkách.
+        self::assertGreaterThan(0, $this->rowCount('purchase_invoices', $supplierId,
+            'id IN (SELECT purchase_invoice_id FROM purchase_invoice_items WHERE is_fixed_asset = 1)'));
+        self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId,
+            "id IN (SELECT purchase_invoice_id FROM purchase_invoice_items WHERE (is_fixed_asset = 1) <> (expense_kind <=> 'fixed_asset'))"));
         $dph = $this->container(DphPriznaniBuilder::class);
         $march = $dph->build($supplierId, 2025, 3, 'monthly')['summary']['lines'];
         self::assertEqualsWithDelta(1000.0, (float) ($march['47']['base'] ?? 0), 0.005, json_encode($march, JSON_UNESCAPED_UNICODE) ?: '');
@@ -622,6 +649,35 @@ final class MoneyS3ImportTest extends TestCase
         self::assertEqualsWithDelta(100.0, (float) ($june['47']['base'] ?? 0), 0.005, json_encode($june, JSON_UNESCAPED_UNICODE) ?: '');
         // Daň a odpočet se nemění: ř. 47 je jen doplňující údaj k ř. 40.
         self::assertEqualsWithDelta(315.0, (float) ($march['40']['vat'] ?? 0), 0.005, 'FP25002 210 + DZ25001 210 - DP25001 105 jako bez příznaku.');
+    }
+
+    /**
+     * Faktura se samovyměřením z interního dokladu nese příznak přenesené povinnosti na
+     * hlavičce (účtování 343 na obě strany, zobrazení dokladu). Rozdíl proti základu
+     * samovyměření (jiný kurz) je položka mimo předmět daně - přiznání i KH A.2 zůstávají
+     * přesně ze základu interního dokladu, jako je vykázalo Money.
+     */
+    public function testSelfAssessedPurchaseIsFlaggedAndRateDifferenceStaysOutsideTheReturn(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/rc.lz', SyntheticAgenda::filesWithSelfAssessmentRateDifference());
+        $backup = Ms3Backup::extract($this->tmp . '/rc.lz', $this->tmp . '/rc');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $july = $this->container(DphPriznaniBuilder::class)->build($supplierId, 2025, 7, 'monthly')['summary']['lines'];
+        self::assertEqualsWithDelta(1000.0, (float) ($july['5']['base'] ?? 0), 0.005, json_encode($july, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertEqualsWithDelta(210.0, (float) ($july['5']['vat'] ?? 0), 0.005, json_encode($july, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertEqualsWithDelta(210.0, (float) ($july['43k']['vat'] ?? 0), 0.005, json_encode($july, JSON_UNESCAPED_UNICODE) ?: '');
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT p.reverse_charge, p.total_with_vat, it.total_without_vat, it.vat_classification_code
+               FROM purchase_invoices p JOIN purchase_invoice_items it ON it.purchase_invoice_id = p.id
+              WHERE p.supplier_id = ? AND p.varsymbol = 'FP25005' ORDER BY it.order_index"
+        );
+        $stmt->execute([$supplierId]);
+        self::assertSame([[1, '1030.00', '1000.00', '24e'], [1, '1030.00', '30.00', 'mimo']],
+            array_map(static fn (array $r): array => [(int) $r[0], (string) $r[1], (string) $r[2], $r[3]], $stmt->fetchAll(PDO::FETCH_NUM)));
     }
 
     /** Vydaná faktura v tuzemském přenesení (19Ř25_S) nese příznak na hlavičce; daň se nemění. */
@@ -959,6 +1015,27 @@ final class MoneyS3ImportTest extends TestCase
         $car = $this->assetsByInventory($supplierId)['DM-005'];
         self::assertSame(['accounting' => [2024 => 27000.0]], $this->entries((int) $car['id']), 'V roce vyřazení bez daňového odpisu.');
         self::assertSame(22000.0, (float) $car['opening_tax_amount']);
+    }
+
+    /** Odpis zůstatku u karty, která zůstala v užívání, rekonciliace majetku ohlásí. */
+    public function testResidualWriteOffOnCardInUseIsReported(): void
+    {
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', SyntheticAgenda::filesWithAssetTaxCases(true));
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(),
+            new ImportOptions(ImportOptions::MODE_IMPORT, true, null, [], []));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $found = [];
+        foreach ($protocol->toArray()['steps'] as $step) {
+            foreach ($step['messages'] as $m) {
+                if ($m['code'] === 'residual_writeoff_in_use') {
+                    $found[] = [$m['level'], $m['context']['document_no'] ?? null];
+                }
+            }
+        }
+        self::assertSame([['warning', '8']], $found, $this->explain($protocol));
+        self::assertSame('in_use', $this->assetsByInventory($supplierId)['DM-008']['status']);
     }
 
     /** @return array<string,array<string,mixed>> */
@@ -1416,6 +1493,64 @@ final class MoneyS3ImportTest extends TestCase
         self::assertTrue($protocol->failed());
         self::assertContains('journal_not_empty', array_column($protocol->get('preflight'), 'code'));
         self::assertSame(1, $this->rowCount('journal_entries', $supplierId));
+    }
+
+    /**
+     * Doklad v cizí měně FP25004 (100 + 21 EUR, kurz 25 = 2 500 + 525 Kč z Money) se ve firmě
+     * s eurem v číselníku měn převezme v EUR; firma bez eura ho převezme v Kč jako dřív.
+     * Přiznání DPH, KH, rekonciliace i deník obou firem se musí shodovat na haléř.
+     */
+    public function testForeignCurrencyDocumentIsTakenOverInItsCurrencyWithIdenticalReturn(): void
+    {
+        $foreign = $this->supplier();
+        $this->db->pdo()->prepare(
+            "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default) VALUES (?, 'EUR', 'EUR', '€', 'Euro', 'Euro', 2, 1, 0)"
+        )->execute([$foreign]);
+        $protocol = $this->import($foreign);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        foreach ($protocol->get('reconciliation') as $year) {
+            self::assertTrue($year['ok'], json_encode($year, JSON_UNESCAPED_UNICODE) ?: '');
+        }
+        $home = $this->supplier();
+        $inCrowns = $this->import($home);
+        self::assertFalse($inCrowns->hasErrors(), $this->explain($inCrowns));
+
+        $doc = static fn (Connection $db, int $supplierId): array => (function () use ($db, $supplierId): array {
+            $stmt = $db->pdo()->prepare("SELECT c.code, d.exchange_rate, d.total_without_vat, d.total_vat, d.total_with_vat, d.note_below_items
+                FROM purchase_invoices d JOIN currencies c ON c.id = d.currency_id WHERE d.supplier_id = ? AND d.vendor_invoice_number = 'EU-2025-001'");
+            $stmt->execute([$supplierId]);
+            return $stmt->fetch(PDO::FETCH_NUM) ?: [];
+        })();
+        $eur = $doc($this->db, $foreign);
+        self::assertSame(['EUR', '25.000000', '100.00', '21.00', '121.00'], array_slice($eur, 0, 5));
+        self::assertStringContainsString('doklad v EUR, převzat v měně dokladu kurzem 25 Kč', (string) $eur[5]);
+        $czk = $doc($this->db, $home);
+        self::assertSame(['CZK', null, '2500.00', '525.00', '3025.00'], array_slice($czk, 0, 5));
+        self::assertStringContainsString('doklad v EUR, převzat v Kč (měna EUR není v číselníku měn firmy)', (string) $czk[5]);
+
+        $dph = $this->container(DphPriznaniBuilder::class);
+        $kh = $this->container(\MyInvoice\Service\Report\KontrolniHlaseniBuilder::class);
+        foreach ([4] as $month) {
+            self::assertSame($dph->build($home, 2025, $month, 'monthly')['summary']['lines'], $dph->build($foreign, 2025, $month, 'monthly')['summary']['lines']);
+            $khHome = $kh->build($home, 2025, $month);
+            $khForeign = $kh->build($foreign, 2025, $month);
+            self::assertSame($khHome['summary'], $khForeign['summary']);
+            $sections = static fn (string $xml): array => preg_match_all('~<Veta[ABC][^>]*/>~', $xml, $m) > 0 ? $m[0] : [];
+            self::assertNotSame([], $sections($khHome['xml']));
+            self::assertSame($sections($khHome['xml']), $sections($khForeign['xml']));
+        }
+        $journal = $this->db->pdo()->prepare(
+            "SELECT a.account_code, SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id WHERE l.supplier_id = ? GROUP BY a.account_code ORDER BY a.account_code"
+        );
+        $journal->execute([$home]);
+        $homeJournal = $journal->fetchAll(PDO::FETCH_KEY_PAIR);
+        $journal->execute([$foreign]);
+        self::assertSame($homeJournal, $journal->fetchAll(PDO::FETCH_KEY_PAIR));
+
+        // Opakovaný převod porovná doklad v EUR s Money v Kč - změna to není.
+        $again = $this->import($foreign);
+        self::assertNotContains('changed_in_money', array_column(array_merge(...array_map(static fn (array $s): array => $s['messages'] ?? [], $again->toArray()['steps'])), 'code'));
     }
 
     // ── pomocníci ─────────────────────────────────────────────────────────────

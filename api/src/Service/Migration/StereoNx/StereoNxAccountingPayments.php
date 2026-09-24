@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\StereoNx;
 
+use MyInvoice\Service\Migration\Shared\BankSymbols;
+
 /** Fyzická banka a pokladna účetní firmy; účetní deník se převádí samostatně. */
 final class StereoNxAccountingPayments
 {
@@ -101,7 +103,11 @@ final class StereoNxAccountingPayments
                 continue;
             }
             $key = self::movementKey($row, true);
-            $movement = self::movement($row, $key) + [
+            $movement = self::movement($row, $key);
+            [$movement['variable_symbol'], $movement['description']] = BankSymbols::variableSymbolAndDescription(
+                $movement['variable_symbol'], $movement['description'], false,
+            );
+            $movement += [
                 'statement_key' => $statementKey,
                 'counterparty_account' => trim((string) ($row['BaUcet'] ?? '')),
                 'counterparty_bank' => trim((string) ($row['KodBanky'] ?? '')),

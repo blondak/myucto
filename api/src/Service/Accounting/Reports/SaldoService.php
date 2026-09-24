@@ -37,7 +37,7 @@ use PDO;
 final class SaldoService
 {
     /** Výchozí saldokontní účty (odběratelé/dodavatelé/poskytnuté a přijaté zálohy). */
-    public const DEFAULT_ACCOUNTS = ['311', '321', '314', '324'];
+    public const DEFAULT_ACCOUNTS = ['311', '321', '314', '324', '315', '325'];
 
     /**
      * Strop otevřených položek na JEDNU sestavu (přes všechny účty dohromady). Nad ním

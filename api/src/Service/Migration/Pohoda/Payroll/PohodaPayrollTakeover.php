@@ -42,7 +42,6 @@ final class PohodaPayrollTakeover
             countPlannedTermination: true,
             ignoreEndBeforeStart: false,
             rewriteOwnOpenings: true,
-            checklistToleratesRuntime: false,
         );
     }
 

@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { formatDate } from '@/composables/useFormat'
 import type { JournalEntryDetail } from '@/api/accounting'
+import type { DimensionSplits } from '@/api/dimensions'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import JournalLinesTable from './JournalLinesTable.vue'
 import JournalRelatedPanel from './JournalRelatedPanel.vue'
@@ -12,6 +13,7 @@ import WhyPanel from '@/components/automation/WhyPanel.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
 import JournalLineDimensionsEditor from '@/components/dimensions/JournalLineDimensionsEditor.vue'
+import OtherItemSourceContext from './OtherItemSourceContext.vue'
 
 /**
  * Obsah rozbaleného zápisu deníku (rozpad na účty, Souvisí, přílohy, akce).
@@ -53,9 +55,10 @@ const documentCount = ref(0)
 const extrasTotal = computed(() => extrasCount.value + documentCount.value)
 
 // Uložené dimenze řádků se propíšou do načteného detailu, ať štítky v rozpadu sedí.
-function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>) {
+function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>, splits: Record<number, DimensionSplits> = {}) {
   for (const line of props.detail.lines) {
     line.dimensions = { ...(byLine[line.id] ?? {}) }
+    line.dimension_splits = { ...(splits[line.id] ?? {}) }
   }
 }
 </script>
@@ -72,6 +75,8 @@ function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>) {
       :key="`related-${detail.id}-${relatedKey}`"
       :entry-id="detail.id" show-preview
       @preview="id => emit('preview', id)" @focus-entry="id => emit('focus-entry', id)" />
+    <OtherItemSourceContext v-if="detail.source_type === 'other_item' && detail.source_id"
+      :key="detail.id" :entry-id="detail.id" />
     <WhyPanel v-if="detail.automation" class="mt-3" :provenance="detail.automation" />
     <!-- Epic F7: inline editace description (§35) + přílohy §33a -->
     <CollapsibleSection class="mt-4" :title="t('accounting.journal.extras_title')"
@@ -92,7 +97,8 @@ function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>) {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
           <span class="whitespace-nowrap">{{ t('accounting.journal.copy_as_new') }}</span>
         </RouterLink>
-        <button v-if="canWrite && !detail.reversed_by" @click="emit('reverse', detail)" :class="btnOutline('danger')">
+        <!-- Zúčtování DPH se nestornuje, přepočítává se a maže na místě (VatClearingService). -->
+        <button v-if="canWrite && !detail.reversed_by && detail.source_type !== 'vat_clearing'" @click="emit('reverse', detail)" :class="btnOutline('danger')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
           {{ t('accounting.journal.reverse') }}
         </button>

@@ -162,10 +162,16 @@ final class StereoNxPayrollMonths
         if ($records !== []) {
             self::warning($warnings, 'employer_amounts_reconstructed');
             self::warning($warnings, 'historical_deductions_not_openings');
+            self::warning($warnings, 'payroll_institution_accounts_unverified');
         }
+        $lastSourcePeriod = $periods === [] ? null : max(array_map(
+            static fn (string $key): string => substr($key, strpos($key, "\0") + 1),
+            array_keys($periods),
+        ));
         return [
             'source_ico' => $ico,
             'source_company_index' => $companyIndex,
+            'last_source_period' => $lastSourcePeriod,
             'counts' => [
                 'historical_payroll_source' => count($tables['MMzdy']),
                 'historical_payroll_ready' => count($records),
@@ -353,6 +359,7 @@ final class StereoNxPayrollMonths
             'message' => match ($code) {
                 'employer_amounts_reconstructed' => 'Pojistné zaměstnavatele bylo rekonstruováno z historických sazeb Stereo NX; nejde o nový výpočet mzdy.',
                 'historical_deductions_not_openings' => 'Historické srážky nejsou exekuční karty ani počáteční kumulace.',
+                'payroll_institution_accounts_unverified' => 'Účty příjemců pojistného nejsou v převáděných tabulkách jednoznačně doložené a nepřevedou se.',
                 'monthly_employee_orphan' => 'Mzda nemá odpovídající kartu zaměstnance.',
                 'monthly_period_invalid', 'monthly_period_conflict' => 'Mzdové období v záznamu chybí nebo si časová pole odporují.',
                 'employment_type_unsupported' => 'Pracovní vztah není ověřený standardní HPP.',

@@ -306,8 +306,11 @@ final class DppoReturnDataProviderNewFieldsTest extends TestCase
         $this->pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_date TEXT, source_type TEXT, source_id INTEGER, posted_at TEXT, reversed_by INTEGER)');
         $this->pdo->exec('CREATE TABLE journal_entry_lines (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_id INTEGER, account_id INTEGER, side TEXT, amount REAL, is_red_storno INTEGER GENERATED ALWAYS AS (0) VIRTUAL, signed_amount REAL GENERATED ALWAYS AS (amount) VIRTUAL)');
         $this->pdo->exec('CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, vendor_id INTEGER, status TEXT, document_kind TEXT, effective_cost_date TEXT, total_without_vat REAL, tax_deductible INTEGER)');
-        $this->pdo->exec('CREATE TABLE assets (id INTEGER PRIMARY KEY, supplier_id INTEGER, inventory_number TEXT, name TEXT, kind TEXT, tax_group INTEGER, disposal_date TEXT, disposal_type TEXT, input_price REAL, opening_tax_amount REAL, status TEXT)');
-        $this->pdo->exec('CREATE TABLE asset_improvements (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, amount REAL)');
+        $this->pdo->exec('CREATE TABLE assets (id INTEGER PRIMARY KEY, supplier_id INTEGER, inventory_number TEXT, name TEXT, kind TEXT, tax_group INTEGER,
+            disposal_date TEXT, disposal_type TEXT, disposal_price REAL, input_price REAL, opening_tax_years INTEGER DEFAULT 0, opening_tax_amount REAL DEFAULT 0,
+            opening_acc_amount REAL DEFAULT 0, tax_method TEXT, asset_account_code TEXT, accumulated_account_code TEXT, status TEXT,
+            disposal_entry_id INTEGER)');
+        $this->pdo->exec('CREATE TABLE asset_improvements (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, completed_on TEXT, amount REAL)');
         $this->pdo->exec('CREATE TABLE depreciation_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, kind TEXT, fiscal_year INTEGER, amount REAL, residual_value_end REAL)');
         $this->pdo->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, client_id INTEGER, status TEXT, invoice_type TEXT, effective_tax_date TEXT, total_without_vat REAL)');
         $this->pdo->exec('CREATE TABLE clients (id INTEGER PRIMARY KEY, supplier_id INTEGER, country_id INTEGER, related_party INTEGER, company_name TEXT, ic TEXT)');

@@ -102,6 +102,32 @@ XML;
         self::assertSame('Základ daně před odečtem ztráty a darů (ř. 220)', $parsed['extra']['kc_ii_220']['label']);
     }
 
+    /** Údaje pro převzetí podání do vstupů: zálohy, tabulka H, zvláštní přílohy, jiné „staré" číslo řádku. */
+    public function testParsesAdvancesCreditsAppendixAndLineAliases(): void
+    {
+        $xml = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<Pisemnost nazevSW="EPO MF ČR" verzeSW="1.0">
+<DPPDP9 verzePis="09.01">
+<VetaD dokument="DP9" k_uladis="DPP" dapdpp_forma="B" typ_zo="A" zdobd_od="01.01.2025" zdobd_do="31.12.2025" kc_v_1="42000" />
+<VetaP zkrobchjm="Firma s.r.o." rod_c="12345678" dic="12345678" />
+<VetaO kc_ii10_10="1000000" kc_ii_110="300000" kc_ii40_30="1200" kc_ii200_200="701200" />
+<VetaM kc_dpp_f1="18000" kc_dpp_f3="5000" kc_dpp_f4="23000" />
+<VetaR c_radku="30" kod_sekce="2" poradi="1" t_prilohy="Nepeněžní plnění" />
+<VetaR c_radku="30" kod_sekce="2" poradi="2" t_prilohy="Manko nad limit" />
+</DPPDP9>
+</Pisemnost>
+XML;
+        $parsed = (new DppoEpoXmlParser())->parse($xml);
+
+        self::assertSame(300000.0, $parsed['lines'][110], 'kc_ii_110 je ř. 110 podle druhého čísla');
+        self::assertSame(1200.0, $parsed['lines'][30]);
+        self::assertArrayNotHasKey('kc_ii_110', $parsed['extra']);
+        self::assertSame(42000.0, $parsed['advances_paid']);
+        self::assertSame(['kc_dpp_f1' => 18000.0, 'kc_dpp_f2' => null, 'kc_dpp_f3' => 5000.0], $parsed['credits']);
+        self::assertSame([30 => ['Nepeněžní plnění', 'Manko nad limit']], $parsed['appendix']);
+    }
+
     public function testParsesAmendmentBlock(): void
     {
         $xml = <<<XML

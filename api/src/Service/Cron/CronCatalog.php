@@ -287,6 +287,15 @@ final class CronCatalog
                 'critical' => true,
             ],
             [
+                'script' => 'cron-generate-other-items',
+                'recommended' => 'daily_0630',
+                'linux_cron' => '35 6 * * *',
+                'windows_schtasks' => '/sc daily /st 06:35',
+                'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 // Frontový worker, ne kalendářová úloha: minuta tu není perioda
                 // práce, ale STROP LATENCE. Uživatel klikne „vygenerovat pásky",
                 // dávka spadne do fronty a nikdo jiný ji nespustí — tenhle tick

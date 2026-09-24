@@ -8,6 +8,10 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Accounting\Activation\PendingBackfillCounter;
+use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
+use MyInvoice\Service\Accounting\Obligations\ExistingObligationSourceService;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Support\Sql\CzkAmountExpr;
 use MyInvoice\Support\Sql\PayablePredicate;
@@ -38,6 +42,7 @@ final class SummaryAction
         private readonly \MyInvoice\Service\TaxEvidence\CashJournalService $cashJournal,
         private readonly PendingBackfillCounter $pendingBackfill,
         private readonly OverduePolicy $overduePolicy,
+        private readonly ExistingObligationSourceService $obligationSources,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -52,6 +57,16 @@ final class SummaryAction
         $revenueByYear = $this->revenueByYear($pdo, $sid, $isVatPayer);
         $purchaseExists = $pdo->prepare('SELECT EXISTS (SELECT 1 FROM purchase_invoices WHERE supplier_id = ?)');
         $purchaseExists->execute([$sid]);
+        $derived = [];
+        $forecastFrom = $today->format('Y-m-d');
+        $forecastTo = $today->modify('+90 days')->format('Y-m-d');
+        if (RequestAuthorization::allows($request, 'payroll.payments', AccessLevel::READ)) {
+            $derived = $this->obligationSources->payrollLiabilities($sid, $forecastFrom, $forecastTo);
+            array_push($derived, ...$this->obligationSources->payrollForecasts($sid, $forecastFrom, $forecastTo));
+        }
+        if (RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
+            array_push($derived, ...$this->obligationSources->taxForecasts($sid, $forecastFrom, $forecastTo));
+        }
 
         return Json::ok($response, [
             'has_purchase_invoices'  => (bool) $purchaseExists->fetchColumn(),
@@ -70,10 +85,15 @@ final class SummaryAction
             'cashflow_ytd'           => $this->cashflowYtd($pdo, $year, $prevYear, $sid),
             'payment_days_histogram' => $this->paymentDaysHistogram($pdo, $sid),
             'vat_breakdown_12m'      => $isVatPayer ? $this->vatBreakdown12m($pdo, $sid) : [],
-            'cashflow_forecast'      => $this->cashflowForecast($pdo, $sid),
+            'cashflow_forecast'      => OtherItemForecastService::mergeSourceCumulative(
+                (new OtherItemForecastService($this->db))->mergeCumulative(
+                    $this->cashflowForecast($pdo, $sid), $sid, 'receivable', 'in'),
+                $derived, 'receivable', 'in'),
             'due_buckets'            => $this->dueBuckets($pdo, $sid),
             'aging_report'           => $this->agingReport($pdo, $sid),
             'revenue_forecast'       => $this->revenueForecast($pdo, $year, $prevYear, $sid, $isVatPayer, $revenueByYear),
+            'other_item_result_impact' => (new OtherItemForecastService($this->db))->resultImpact(
+                $sid, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)),
             'invoice_size_histogram' => $this->invoiceSizeHistogram($pdo, $sid, $isVatPayer),
             'revenue_last_30d'       => $this->revenueLast30d($pdo, $sid, $isVatPayer),
             'active_recurring_count' => $this->activeRecurringCount($pdo, $sid),

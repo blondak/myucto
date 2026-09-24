@@ -36,7 +36,96 @@ final class CardClearingAccounts
         private readonly Connection $db,
         private readonly PaymentCardRepository $cards,
         private readonly ChartOfAccountsRepository $chart,
+        /**
+         * Úvěrový účet kreditní karty má vlastní analytiku mezičlenu ve stejné řadě jako
+         * platební karty (kreditní účet JE karta, koncovku jeho výpis nenese). Suffixy obou
+         * druhů se proto přidělují, hlídají a sčítají společně - tady, na jednom místě.
+         */
+        private readonly \MyInvoice\Repository\CreditCardAccountRepository $creditCards,
     ) {}
+
+    /** Název analytiky mezičlenu úvěrového účtu v osnově: „Kreditní karta <název>". */
+    public static function creditCardAccountName(array $account): string
+    {
+        $label = trim((string) ($account['label'] ?? ''));
+        return 'Kreditní karta ' . ($label !== '' ? $label : (string) ($account['account_number'] ?? ''));
+    }
+
+    /**
+     * Suffixy mezičlenu, které už někdo drží: platební karta nebo úvěrový účet.
+     *
+     * @return array<string, array{card_id:?int, credit_card_account_id:?int}>
+     */
+    private function takenSuffixes(int $supplierId): array
+    {
+        $out = [];
+        foreach ($this->cards->usedSuffixes($supplierId) as $suffix => $cardId) {
+            $out[(string) $suffix] = ['card_id' => (int) $cardId, 'credit_card_account_id' => null];
+        }
+        foreach ($this->creditCards->usedClearingSuffixes($supplierId) as $suffix => $accountId) {
+            $out[(string) $suffix] ??= ['card_id' => null, 'credit_card_account_id' => (int) $accountId];
+        }
+        return $out;
+    }
+
+    /**
+     * Kdo drží suffix mezičlenu (platební karta, nebo úvěrový účet), null = nikdo.
+     *
+     * @return array{card_id:?int, credit_card_account_id:?int}|null
+     */
+    public function suffixOwner(int $supplierId, string $suffix): ?array
+    {
+        return $this->takenSuffixes($supplierId)[$suffix] ?? null;
+    }
+
+    /** @return list<string> všechny držené suffixy mezičlenu (karty i úvěrové účty) */
+    public function takenSuffixList(int $supplierId): array
+    {
+        return array_map('strval', array_keys($this->takenSuffixes($supplierId)));
+    }
+
+    /**
+     * Mezičlen nákupu kreditní kartou: analytika úvěrového účtu pod syntetikou mezičlenu.
+     * S $create = false nic nezapisuje (náhled), stejně jako {@see resolveForTransaction()}.
+     *
+     * @param array<string,mixed> $account řádek z CreditCardAccountRepository
+     * @param array<string,mixed> $settings výstup CardClearingSettingsRepository::find()
+     * @return array{code:string, card_id:null, credit_card_account_id:int, resolved:bool, pending?:?string}|null
+     */
+    public function resolveForCreditCard(int $supplierId, array $account, array $settings, bool $create = true): ?array
+    {
+        $synthetic = (string) $settings['clearing_synthetic'];
+        if (!$this->chartHas($supplierId, $synthetic)) {
+            return null;
+        }
+        $base = ['card_id' => null, 'credit_card_account_id' => (int) $account['id']];
+        $suffix = $account['clearing_suffix'] ?? null;
+        if (!$create) {
+            if (!is_string($suffix) || $suffix === '') {
+                $suffix = $this->nextFreeSuffix($supplierId, $synthetic);
+                if ($suffix === null) {
+                    return null;
+                }
+            }
+            $code = self::codeFor($synthetic, $suffix);
+            $exists = $this->chartHas($supplierId, $code);
+            return ['code' => $code, 'resolved' => $exists, 'pending' => $exists ? null : 'new_analytic'] + $base;
+        }
+        if (!is_string($suffix) || $suffix === '') {
+            $suffix = $this->nextFreeSuffix($supplierId, $synthetic);
+            if ($suffix === null) {
+                return null;
+            }
+            if (!$this->creditCards->assignClearingSuffixIfEmpty($supplierId, (int) $account['id'], $suffix)) {
+                $fresh = $this->creditCards->find($supplierId, (int) $account['id']);
+                $suffix = $fresh['clearing_suffix'] ?? null;
+                if (!is_string($suffix) || $suffix === '') {
+                    return null;
+                }
+            }
+        }
+        return ['code' => $this->ensureChartAccount($supplierId, $synthetic, $suffix, self::creditCardAccountName($account)), 'resolved' => true] + $base;
+    }
 
     public static function codeFor(string $synthetic, string $suffix): string
     {
@@ -184,7 +273,7 @@ final class CardClearingAccounts
      */
     public function allClearingCodes(int $supplierId): array
     {
-        $suffixes = array_keys($this->cards->usedSuffixes($supplierId));
+        $suffixes = array_keys($this->takenSuffixes($supplierId));
         $suffixes[] = self::FALLBACK_SUFFIX;
         $out = [];
         foreach (\MyInvoice\Repository\CardClearingSettingsRepository::SYNTHETICS as $synthetic) {
@@ -198,11 +287,11 @@ final class CardClearingAccounts
     /**
      * Existující analytiky mezičlenu v osnově (nabídka ručního výběru v detailu karty).
      *
-     * @return list<array{id:int, account_code:string, name:string, card_id:?int}>
+     * @return list<array{id:int, account_code:string, name:string, card_id:?int, credit_card_account_id:?int}>
      */
     public function analyticOptions(int $supplierId, string $synthetic): array
     {
-        $used = $this->cards->usedSuffixes($supplierId);
+        $used = $this->takenSuffixes($supplierId);
         $stmt = $this->db->pdo()->prepare(
             "SELECT id, account_code, name FROM chart_of_accounts
               WHERE supplier_id = ? AND is_active = 1 AND account_code LIKE CONCAT(?, '.%')
@@ -219,7 +308,8 @@ final class CardClearingAccounts
                 'id'           => (int) $r['id'],
                 'account_code' => (string) $r['account_code'],
                 'name'         => (string) $r['name'],
-                'card_id'      => $used[$suffix] ?? null,
+                'card_id'                => $used[$suffix]['card_id'] ?? null,
+                'credit_card_account_id' => $used[$suffix]['credit_card_account_id'] ?? null,
             ];
         }
         return $out;
@@ -248,7 +338,7 @@ final class CardClearingAccounts
     /** První volný suffix pro syntetiku, nebo null. */
     public function nextFreeSuffix(int $supplierId, string $synthetic): ?string
     {
-        $taken = $this->cards->usedSuffixes($supplierId);
+        $taken = $this->takenSuffixes($supplierId);
         $state = $this->chartState($supplierId, $synthetic);
         foreach (self::candidateSuffixes() as $suffix) {
             if (isset($taken[$suffix])) {

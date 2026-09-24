@@ -69,6 +69,27 @@ final class MigrationPeriodsAndChartTest extends SharedMigrationDbTestCase
         self::assertSame(['account' => '604', 'type_from' => '601'], $messages[0]['context']);
     }
 
+    public function testSourceTypeAndNormalSideOverrideSiblingDefaults(): void
+    {
+        $supplier = $this->supplier();
+        $accounts = new ChartOfAccountsRepository($this->db);
+        $parentId = $accounts->insert($supplier, ['account_code' => '221', 'name' => 'Banky',
+            'account_type' => 'asset', 'normal_side' => 'debit', 'is_synthetic' => true]);
+        $creator = new ChartAccountCreator($accounts);
+        $protocol = new ImportProtocol('stereo_nx');
+
+        $closing = $creator->createSynthetic($supplier, '701', 'Počáteční účet', $protocol, 'chart',
+            false, 'closing', null, true);
+        self::assertNotNull($closing);
+        $closingRow = $accounts->findById($supplier, $closing['id']);
+        self::assertSame('closing', $closingRow['account_type']);
+        self::assertNull($closingRow['normal_side']);
+
+        $analyticId = $creator->createAnalytic($supplier, '221kb', 'Banka',
+            $accounts->findById($supplier, $parentId), null, true);
+        self::assertNull($accounts->findById($supplier, $analyticId)['normal_side']);
+    }
+
     /** @return array<string,mixed> */
     private static function step(ImportProtocol $p, string $key): array
     {

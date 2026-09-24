@@ -155,6 +155,16 @@ final class PaymentCardAction
             return Json::error($response, 'card_overlap',
                 'Ve stejném období už platí karta se stejnou koncovkou (' . $conflict['label'] . '). Upravte platnost od–do.', 409);
         }
+        // Nová karta s koncovkou, kterou nesou jen výpisy kreditní karty: to není platební karta.
+        if ($exceptId === null) {
+            $credit = $this->cards->creditCardOwningLast4($supplierId, (string) $data['last4']);
+            if ($credit !== null) {
+                return Json::error($response, 'credit_card_last4',
+                    'Koncovka •••• ' . $data['last4'] . ' patří kreditní kartě „' . $credit['label']
+                    . '". Kreditní karty se vedou v sekci Kreditní karty, ne mezi platebními kartami.',
+                    422, ['credit_card_account_id' => $credit['id']]);
+            }
+        }
         return null;
     }
 

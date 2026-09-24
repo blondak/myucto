@@ -101,11 +101,40 @@ final class StereoNxAccountingPaymentsOrchestrationTest extends TestCase
         self::assertSame($after, $this->snapshot());
     }
 
+    public function testReconciliationDetectsBalancedChangeToImportedJournal(): void
+    {
+        $backup = $this->backup(self::tables());
+        $result = $this->importer->run($backup, $this->supplierId, $this->userId, false, true);
+        self::assertTrue($result['ok'], json_encode($result['errors']));
+        self::assertTrue($result['reconciliation'][0]['ok']);
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE journal_entry_lines l JOIN journal_entries e ON e.id=l.entry_id
+            SET l.amount=l.amount+1 WHERE e.supplier_id=? AND e.source_type<>'opening'")
+            ->execute([$this->supplierId]);
+        $container = Bootstrap::buildApp()->getContainer();
+        $plan = $container->get(\MyInvoice\Service\Migration\StereoNx\StereoNxAccountingWriter::class)->prepare($backup);
+        $checked = $container->get(\MyInvoice\Service\Migration\StereoNx\StereoNxReconciler::class)
+            ->run($this->supplierId, $plan['accounting_plan']);
+        self::assertFalse($checked['reconciliation'][0]['ok']);
+        self::assertNotEmpty($checked['reconciliation'][0]['journal_diffs']);
+        self::assertFalse($checked['criteria']['total']['K1']);
+    }
+
     public function testHistoricalPayrollSharesDryRunTransactionAndDoesNotPostAgain(): void
+    {
+        $this->assertHistoricalPayroll(false);
+    }
+
+    public function testHistoricalPayrollInitializesMissingStartAndRollsItBackInDryRun(): void
+    {
+        $this->assertHistoricalPayroll(true);
+    }
+
+    private function assertHistoricalPayroll(bool $missingStart): void
     {
         $pdo = $this->db->pdo();
         $pdo->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')->execute([$this->supplierId]);
-        $pdo->prepare('INSERT INTO payroll_module_state (supplier_id, status, start_period, activated_by, activated_at)
+        if (!$missingStart) $pdo->prepare('INSERT INTO payroll_module_state (supplier_id, status, start_period, activated_by, activated_at)
             VALUES (?, "setup", "2026-02-01", ?, NOW())')->execute([$this->supplierId, $this->userId]);
         $pdo->prepare('INSERT INTO payroll_offices (supplier_id, code, name, social_security_variable_symbol, is_active)
             VALUES (?, "SYN", "Syntetická účtárna", "1234567890", 1)')->execute([$this->supplierId]);
@@ -130,10 +159,17 @@ final class StereoNxAccountingPaymentsOrchestrationTest extends TestCase
         $dry = $this->importer->run($backup, $this->supplierId, $this->userId, true, true);
         self::assertTrue($dry['ok'], json_encode($dry['errors']));
         self::assertSame(1, $dry['written']['historical_payroll_created']);
+        if ($missingStart) {
+            self::assertSame('2026-02', $dry['payroll_setup']['start_period']);
+            self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_module_state WHERE supplier_id=?'));
+        }
         self::assertSame($before, $this->snapshot());
         $actual = $this->importer->run($backup, $this->supplierId, $this->userId, false, true);
         self::assertTrue($actual['ok'], json_encode($actual['errors']));
         self::assertSame(1, $actual['written']['historical_payroll_created']);
+        $startQuery = $pdo->prepare('SELECT start_period FROM payroll_module_state WHERE supplier_id=?');
+        $startQuery->execute([$this->supplierId]);
+        self::assertSame('2026-02-01', $startQuery->fetchColumn());
         self::assertSame(0, $actual['written']['historical_payroll_skipped']);
         self::assertNotContains('historical_payroll_skipped', array_column($actual['warnings'], 'code'));
         self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_runs WHERE supplier_id=?'));

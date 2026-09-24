@@ -104,10 +104,7 @@ final class StereoNxJournalLinks
 
     private function assertDocumentTarget(int $supplierId, string $sourceType, int $targetId): void
     {
-        $table = $sourceType === 'invoice' ? 'invoices' : 'purchase_invoices';
-        $stmt = $this->db->pdo()->prepare("SELECT 1 FROM {$table} WHERE id = ? AND supplier_id = ?");
-        $stmt->execute([$targetId, $supplierId]);
-        if ($stmt->fetchColumn() === false) {
+        if (!(new JournalEntryLinker($this->db, 'Stereo NX', true))->hasDocument($supplierId, $sourceType, $targetId)) {
             throw new StereoNxException('mapped_target_changed', 'Převedený účetní doklad byl změněn nebo odstraněn.');
         }
     }
@@ -120,16 +117,9 @@ final class StereoNxJournalLinks
         int $documentId,
     ): void
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT entry_date, source_type, source_id, reversed_by FROM journal_entries WHERE id = ? AND supplier_id = ?'
-        );
-        $stmt->execute([$targetId, $supplierId]);
-        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-        $sourceIsExpected = $row !== false && (
-            ((string) $row['source_type'] === 'manual' && $row['source_id'] === null)
-            || ((string) $row['source_type'] === $documentType && (int) $row['source_id'] === $documentId)
-        );
-        if ($row === false || (string) $row['entry_date'] !== $date || $row['reversed_by'] !== null || !$sourceIsExpected) {
+        if (!(new JournalEntryLinker($this->db, 'Stereo NX', true))->hasLinkableEntry(
+            $supplierId, $targetId, $date, $documentType, $documentId,
+        )) {
             throw new StereoNxException('mapped_target_changed', 'Převedený účetní zápis byl změněn nebo odstraněn.');
         }
     }

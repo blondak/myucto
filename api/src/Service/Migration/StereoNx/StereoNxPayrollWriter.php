@@ -9,8 +9,9 @@ use MyInvoice\Repository\Payroll\PayrollMigrationReconciliationRepository;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationTakeoverFacts;
+use MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalService;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
-use PDO;
 
 /** Převzaté měsíční úhrny; nepočítá mzdu, nezakládá běh ani účetní zápis. */
 final class StereoNxPayrollWriter
@@ -24,7 +25,24 @@ final class StereoNxPayrollWriter
         private readonly PayrollMigrationReferenceTotalsWriter $referenceTotals,
         private readonly PayrollHistoricalPeriodService $historical,
         private readonly PayrollMigrationReconciliationRepository $reconciliation,
+        private readonly PayrollTakeoverEmploymentWriter $employmentWriter,
+        private readonly PayrollPostingMapProposalService $postingMapProposals,
     ) {}
+
+    /** Uloží pouze návrh nastavení; převedený deník zůstává účetní pravdou. */
+    public function refreshPostingProposal(StereoNxBackup $backup, int $supplierId): ?array
+    {
+        $tables = $backup->tableNames();
+        if (!in_array('MPARUCT', $tables, true) || !in_array('MPARZPR', $tables, true)
+            || !in_array('Cdenik', $tables, true)) return null;
+        $source = StereoNxPayrollPostingMap::fromTables(
+            iterator_to_array($backup->rows('MPARUCT'), false),
+            iterator_to_array($backup->rows('MPARZPR'), false),
+            iterator_to_array($backup->rows('Cdenik'), false),
+        );
+        if ($source->postingRows() === []) return null;
+        return $this->postingMapProposals->refresh($supplierId, $source, $source->year, 'Stereo NX', true);
+    }
 
     /** Volající vlastní transakci včetně zápisu osob a vztahů.
      * @param array<string,mixed> $plan */
@@ -108,10 +126,7 @@ final class StereoNxPayrollWriter
                 $period, $reference, $reference, $employeeId, $employmentId, $record['amounts'], $facts,
             );
             $this->referenceTotals->store($supplierId, self::SOURCE, [$total], 'Stereo NX: ' . $ico . '/' . $company);
-            $id = $pdo->prepare('SELECT id FROM payroll_migration_reference_totals
-                WHERE supplier_id = ? AND source = ? AND period_start = ? AND external_relationship_ref = ?');
-            $id->execute([$supplierId, self::SOURCE, $period . '-01', $reference]);
-            $targetId = (int) $id->fetchColumn();
+            $targetId = $this->reconciliation->takeoverId($supplierId, self::SOURCE, $period, $reference) ?? 0;
             if ($targetId <= 0) throw new StereoNxException('payroll_target_missing', 'Převzatá mzda nebyla po zápisu nalezena.');
             $this->map->put($supplierId, $ico, $company, self::KIND, $sourceKey, $hash, $targetId);
             $counts['historical_payroll_created']++;
@@ -121,22 +136,15 @@ final class StereoNxPayrollWriter
 
     private function assertPair(int $supplierId, int $employeeId, int $employmentId): void
     {
-        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM payroll_employments e
-            JOIN payroll_employees p ON p.id = e.employee_id AND p.supplier_id = e.supplier_id
-            WHERE e.supplier_id = ? AND e.id = ? AND p.id = ?');
-        $stmt->execute([$supplierId, $employmentId, $employeeId]);
-        if ($stmt->fetchColumn() === false) {
+        $employment = $this->employmentWriter->employmentById($supplierId, $employmentId);
+        if ($employment === null || (int) $employment['employee_id'] !== $employeeId) {
             throw new StereoNxException('payroll_target_mismatch', 'Pracovní vztah nepatří zaměstnanci nebo cílové firmě.');
         }
     }
 
     private function assertNoCollision(int $supplierId, int $employeeId, int $employmentId, string $period, string $reference): void
     {
-        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM payroll_migration_reference_totals
-            WHERE supplier_id = ? AND period_start = ?
-              AND (employment_id = ? OR (source = ? AND external_relationship_ref = ?)) LIMIT 1');
-        $stmt->execute([$supplierId, $period . '-01', $employmentId, self::SOURCE, $reference]);
-        if ($stmt->fetchColumn() !== false
+        if ($this->reconciliation->hasTakeoverCollision($supplierId, $employmentId, self::SOURCE, $period, $reference)
             || in_array($period, $this->reconciliation->calculatedPeriods($supplierId, (int) substr($period, 0, 4), $employeeId), true)) {
             throw new StereoNxException('payroll_period_collision', 'Období už obsahuje jinou převzatou nebo vypočtenou mzdu.');
         }
@@ -144,11 +152,8 @@ final class StereoNxPayrollWriter
 
     private function assertMappedMonth(int $supplierId, int $targetId, int $employeeId, int $employmentId, string $period, string $reference): void
     {
-        $stmt = $this->db->pdo()->prepare('SELECT employee_id, employment_id, period_start, external_relationship_ref,
-                external_person_ref FROM payroll_migration_reference_totals WHERE supplier_id = ? AND id = ? AND source = ?');
-        $stmt->execute([$supplierId, $targetId, self::SOURCE]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row === false || (int) $row['employee_id'] !== $employeeId || (int) $row['employment_id'] !== $employmentId
+        $row = $this->reconciliation->takeoverById($supplierId, $targetId, self::SOURCE);
+        if ($row === null || (int) $row['employee_id'] !== $employeeId || (int) $row['employment_id'] !== $employmentId
             || $row['period_start'] !== $period . '-01' || $row['external_relationship_ref'] !== $reference
             || $row['external_person_ref'] !== $reference) {
             throw new StereoNxException('payroll_target_changed', 'Dříve převedená mzda byla změněna nebo odstraněna.');

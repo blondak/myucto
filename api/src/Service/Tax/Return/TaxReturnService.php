@@ -190,6 +190,36 @@ final class TaxReturnService
     }
 
     /**
+     * Výpočet pro peněžní predikci bez zakládání draftu a bez automatického párování záloh.
+     * U rozpracovaného DPPO zahrnuje také dosud nezaúčtované závěrkové projekce.
+     * @return array{balance_due:float,filing_deadline_input:string,status:string}|null
+     */
+    public function balanceDueReadOnly(int $supplierId, int $year, string $type): ?array
+    {
+        $this->assertType($type);
+        $this->assertSupplierType($supplierId, $type);
+        $row = $this->returns->find($supplierId, $year, $type, 'radne', 1);
+        if ($row === null) {
+            return null;
+        }
+        $result = $row['status'] === 'final'
+            ? (array) ($row['computed']['computed'] ?? [])
+            : $this->compute($supplierId, $year, $type, (array) $row['inputs'], 'radne')['result'];
+        $balanceDue = (float) ($result['balance_due'] ?? 0);
+        $projection = $result['projection'] ?? null;
+        if ($type === 'po' && $row['status'] === 'draft' && is_array($projection)
+            && ($projection['is_projection'] ?? false) === true) {
+            $balanceDue = (float) ($projection['projected_tax'] ?? 0)
+                - (float) ($result['advances_paid'] ?? 0);
+        }
+        return [
+            'balance_due' => round($balanceDue, 2),
+            'filing_deadline_input' => trim((string) ($row['inputs']['filing_deadline'] ?? '')),
+            'status' => (string) $row['status'],
+        ];
+    }
+
+    /**
      * Uloží ruční vstupy (draft, CAS na row_version). Vrací aktualizovaný stav.
      *
      * @param array<string,mixed> $inputs
@@ -1734,8 +1764,8 @@ final class TaxReturnService
         $out['notes'] = $this->text($inputs['notes'] ?? '', 2000);
 
         if ($type === 'po') {
-            $out['manual_increase_items'] = $this->items($inputs['manual_increase_items'] ?? []);
-            $out['manual_decrease_items'] = $this->items($inputs['manual_decrease_items'] ?? []);
+            $out['manual_increase_items'] = $this->items($inputs['manual_increase_items'] ?? [], DppoReturnCalculator::INCREASE_ITEM_LINES);
+            $out['manual_decrease_items'] = $this->items($inputs['manual_decrease_items'] ?? [], DppoReturnCalculator::DECREASE_ITEM_LINES);
             $out['loss_carryforward'] = $this->money($inputs['loss_carryforward'] ?? 0);
             $out['donations'] = $this->money($inputs['donations'] ?? 0);
             // Položkové dary §20/8 (min. 2 000 Kč/dar) — preferováno před agregátem `donations`.
@@ -1763,6 +1793,17 @@ final class TaxReturnService
             // výchozí ANO (rozhodnutí zadavatele 31. 8. 2026, viz DppoXmlBuilder::buildVetaUZ),
             // ruční vstup umožňuje vypnout.
             $out['puz_to_registry'] = filter_var($inputs['puz_to_registry'] ?? true, FILTER_VALIDATE_BOOLEAN);
+            // Evidence, že vstupy vznikly převzetím podaného přiznání (FiledDppoImporter).
+            $source = $inputs['filed_source'] ?? null;
+            if (is_array($source) && $this->text($source['forma'] ?? '', 1) !== '') {
+                $out['filed_source'] = [
+                    'forma' => $this->text($source['forma'] ?? '', 1),
+                    'verze_pis' => $this->text($source['verze_pis'] ?? '', 10),
+                    'period_to' => $this->date($source['period_to'] ?? ''),
+                    'file_sha1' => $this->text($source['file_sha1'] ?? '', 40),
+                    'imported_at' => $this->text($source['imported_at'] ?? '', 25),
+                ];
+            }
         } else {
             // DPFO — sekce §6/§8/§9/§10 (typované) + zálohy pojistného (pro přehledy DP4).
             $s6 = (array) ($inputs['s6_employment'] ?? []);
@@ -1836,10 +1877,14 @@ final class TaxReturnService
      * označí, což ale nešlo natrvalo udělat. Propouští se jen ZNÁMÝ druh: neznámý řetězec
      * by heuristiku vypnul, aniž by ji cokoli nahradilo.
      *
+     * `line` je řádek přiznání, na který položka patří (u DPPO položek převzatých
+     * z podaného přiznání); propouští se jen řádek z `$lines`.
+     *
      * @param mixed $items
-     * @return list<array{text:string,amount:float,kind?:string}>
+     * @param list<int> $lines
+     * @return list<array{text:string,amount:float,kind?:string,line?:int}>
      */
-    private function items(mixed $items): array
+    private function items(mixed $items, array $lines = []): array
     {
         if (!is_array($items)) {
             return [];
@@ -1857,6 +1902,10 @@ final class TaxReturnService
             $row = ['text' => $text, 'amount' => $amount];
             if ($this->text($item['kind'] ?? '', 30) === DppoReturnCalculator::KIND_FLAT_RATE_TRAVEL) {
                 $row['kind'] = DppoReturnCalculator::KIND_FLAT_RATE_TRAVEL;
+            }
+            $line = $item['line'] ?? null;
+            if (is_numeric($line) && in_array((int) $line, $lines, true)) {
+                $row['line'] = (int) $line;
             }
             $out[] = $row;
         }

@@ -434,6 +434,31 @@ final class StockDocumentRepository
         return $out;
     }
 
+    /**
+     * Karty, které se na skladu k datu někdy pohnuly (příjem, výdej, převod ze skladu
+     * i na něj; zaúčtované i stornované doklady). Inventura podle nich pozná karty
+     * skladu: karta, která na skladu nikdy nebyla, do ní nepatří.
+     *
+     * @return array<int,true> stock_item_id => true
+     */
+    public function itemIdsMovedInWarehouse(int $supplierId, int $warehouseId, ?string $date = null): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT DISTINCT l.stock_item_id
+               FROM stock_document_lines l
+               JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND d.status IN ('posted','reversed')
+                AND (d.warehouse_id = ? OR (d.doc_type = 'transfer' AND d.warehouse_to_id = ?))"
+            . ($date !== null ? ' AND d.doc_date <= ?' : '')
+        );
+        $stmt->execute($date !== null ? [$supplierId, $warehouseId, $warehouseId, $date] : [$supplierId, $warehouseId, $warehouseId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $itemId) {
+            $out[(int) $itemId] = true;
+        }
+        return $out;
+    }
+
     public function lastKnownUnitCost(int $supplierId, int $warehouseId, int $stockItemId, string $date): ?string
     {
         $stmt = $this->db->pdo()->prepare("SELECT l.value_total / NULLIF(l.qty, 0)

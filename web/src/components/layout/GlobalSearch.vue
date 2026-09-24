@@ -3,6 +3,8 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { searchApi, type SearchResults } from '@/api/search'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
+import { useSupplierStore } from '@/stores/supplier'
+import { matchSwitchableSuppliers, useSupplierSwitch } from '@/composables/useSupplierSwitch'
 
 interface MenuItem { to: string; label: string; icon: string; external?: boolean }
 const props = withDefaults(defineProps<{
@@ -18,6 +20,8 @@ const emit = defineEmits<{ navigated: [] }>()
 
 const { t } = useI18n()
 const workspaceNavigation = useWorkspaceNavigation()
+const supplierStore = useSupplierStore()
+const supplierSwitch = useSupplierSwitch()
 
 const q = ref('')
 const open = ref(false)
@@ -29,10 +33,11 @@ const inputEl = ref<HTMLInputElement | null>(null)
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
 let seq = 0
 
-interface Option { kind: 'menu' | 'client' | 'invoice' | 'purchase'; label: string; sub: string; run: () => void }
+interface Option { kind: 'menu' | 'company' | 'client' | 'invoice' | 'purchase'; label: string; sub: string; run: () => void }
 
 const GROUP_LABEL: Record<Option['kind'], string> = {
   menu:     'search.group_menu',
+  company:  'search.group_companies',
   client:   'search.group_clients',
   invoice:  'search.group_invoices',
   purchase: 'search.group_purchase',
@@ -49,6 +54,11 @@ const options = computed<Option[]>(() => {
   for (const m of menuMatches.value) {
     out.push({ kind: 'menu', label: m.label, sub: '',
       run: () => { m.external ? workspaceNavigation.openExternal(m.to) : void workspaceNavigation.navigate(m.to) } })
+  }
+  // Víc firem: přepnutí na firmu podle názvu nebo IČ (aktuální se nenabízí).
+  for (const s of matchSwitchableSuppliers(supplierStore.availableSuppliers, supplierStore.currentSupplierId, q.value, supplierStore.hasMultiple, 5)) {
+    out.push({ kind: 'company', label: s.company_name, sub: s.ic ? t('search.company_ic', { ic: s.ic }) : t('search.company_switch'),
+      run: () => void supplierSwitch.switchTo(s.id) })
   }
   for (const c of results.value.clients) {
     out.push({ kind: 'client', label: c.company_name, sub: c.main_email || '',

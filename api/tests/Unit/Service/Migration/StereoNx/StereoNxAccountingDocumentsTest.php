@@ -43,6 +43,8 @@ final class StereoNxAccountingDocumentsTest extends TestCase
         self::assertSame(10.0, $plan['issued'][0]['source_total_with_vat']);
         self::assertTrue($plan['issued'][0]['requires_draft']);
         self::assertContains('foreign_currency_vat_unverified', $plan['issued'][0]['review_codes']);
+        self::assertSame('zdroj neobsahuje ověřený korunový celkem dokladu',
+            $plan['issued'][0]['foreign_takeover_blocked']);
     }
 
     public function testForeignVatBaseMismatchIsExposedInDocumentReview(): void
@@ -68,6 +70,25 @@ final class StereoNxAccountingDocumentsTest extends TestCase
 
         self::assertContains('foreign_currency_vat_base_mismatch', $plan['issued'][0]['review_codes']);
         self::assertTrue($plan['issued'][0]['requires_draft']);
+        self::assertNotNull($plan['issued'][0]['foreign_takeover_blocked']);
+    }
+
+    public function testVerifiedForeignHomeAmountsPassSharedCurrencyCheck(): void
+    {
+        $tables = SyntheticStereoNxTables::tables();
+        $tables['Svfh'][0]['Mena'] = 'EUR';
+        $tables['Svfh'][0]['Kurz'] = 25.1;
+        $tables['Svfh'][0]['Celkem'] = 10.0;
+        $tables['Svfh'][0]['CelkemVlastni'] = 251.0;
+        $tables['Svfp'][0]['Mnozstvi'] = 2.0;
+        $tables['Svfp'][0]['JednCenaC'] = 5.0;
+        $tables['Svfp'][0]['ZakladDPH'] = 251.0;
+        $tables['Svfp'][0]['CelkemDPH'] = 0.0;
+        $tables['SPFH'] = []; $tables['Spfp'] = [];
+
+        $plan = StereoNxSourcePlan::fromTables($tables, SyntheticStereoNxTables::identity(), true, true);
+        self::assertNull($plan['issued'][0]['foreign_takeover_blocked']);
+        self::assertSame(251.0, $plan['issued'][0]['foreign_home_total']);
     }
 
     public function testForeignRateMismatchIsExposedInDocumentReview(): void
@@ -93,6 +114,7 @@ final class StereoNxAccountingDocumentsTest extends TestCase
 
         self::assertContains('foreign_currency_rate_mismatch', $plan['issued'][0]['review_codes']);
         self::assertTrue($plan['issued'][0]['requires_draft']);
+        self::assertNotNull($plan['issued'][0]['foreign_takeover_blocked']);
     }
 
     public function testVerifiedPurchaseSourceLinesPreserveItemsWithoutReview(): void
@@ -273,7 +295,6 @@ final class StereoNxAccountingDocumentsTest extends TestCase
         $tables['Svfh'][0]['Celkem'] = 10.0;
         $tables['Svfp'][0]['Mnozstvi'] = 2.0;
         $tables['Svfp'][0]['JednCenaC'] = 5.0;
-        $tables['SPFH'] = []; $tables['Spfp'] = [];
         $path = sys_get_temp_dir() . '/stereo-foreign-ledger-' . bin2hex(random_bytes(6)) . '.zip';
         SyntheticNx1Archive::write($path, $tables, SyntheticStereoNxTables::identity());
         try {
@@ -288,5 +309,9 @@ final class StereoNxAccountingDocumentsTest extends TestCase
             static fn (array $w): bool => $w['code'] === 'foreign_document_ledger_currency_unavailable'));
         self::assertCount(1, $warning);
         self::assertSame(1, $warning[0]['count']);
+        self::assertSame(1, $plan['counts']['skipped_foreign_documents']);
+        self::assertSame(0, $plan['counts']['issued']);
+        self::assertNotEmpty($plan['records']['purchases']);
+        self::assertContains('foreign_document_unverified', array_column($plan['warnings'], 'code'));
     }
 }

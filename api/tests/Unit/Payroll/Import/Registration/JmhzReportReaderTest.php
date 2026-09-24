@@ -69,6 +69,14 @@ final class JmhzReportReaderTest extends TestCase
         self::assertSame(40_000, $form->wage);
         self::assertSame(0, $form->irregularBonuses);
         self::assertSame(23_810, $form->averageHourlyMinor());
+        self::assertSame('2026-02-01', $form->insuranceFrom);
+    }
+
+    public function testInsuranceStartInsideMonthIsRead(): void
+    {
+        $xml = JmhzReportFixtures::report([JmhzReportFixtures::person(['insurance_from' => '2026-03-16'])], 2026, 3);
+
+        self::assertSame('2026-03-16', $this->reader->read($xml)->forms[0]->insuranceFrom);
     }
 
     public function testErrorsOnlyInsideUnreadBlocksAreAcceptedWithWarning(): void

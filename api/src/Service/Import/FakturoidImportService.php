@@ -10,6 +10,7 @@ use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
@@ -301,9 +302,15 @@ final class FakturoidImportService
             'currency_id'    => $this->resolveCurrencyId((string) ($i['currency'] ?? 'CZK'), $supplierId, isActive: true),
             'reverse_charge' => !empty($i['transferred_tax_liability']),
             'language'       => 'cs',
-            'varsymbol'      => $this->uniqueVarsymbol((string) ($i['variable_symbol'] ?? $i['number'] ?? ''), $supplierId),
+            // Číslo dokladu z `number`, VS z `variable_symbol` zvlášť (#249) — daňový doklad
+            // k proformě nese VS proformy a pod ním by se doklad uložil s cizím číslem.
+            'varsymbol'      => $this->uniqueVarsymbol((string) (($i['number'] ?? '') ?: ($i['variable_symbol'] ?? '')), $supplierId),
             'payment_method' => 'bank_transfer',
         ];
+        $payload['payment_variable_symbol'] = VariableSymbolNormalizer::importedPaymentOverride(
+            (string) $payload['varsymbol'],
+            isset($i['variable_symbol']) ? (string) $i['variable_symbol'] : null,
+        );
         $lines = [];
         foreach (($i['lines'] ?? []) as $idx => $line) {
             $lines[] = [

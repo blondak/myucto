@@ -101,6 +101,18 @@ describe('DocumentDetail', () => {
     expect(wrapper.get('h1').classes()).toContain('break-all')
   })
 
+  it('otevře navázanou ostatní položku z detailu dokumentu', async () => {
+    m.get.mockResolvedValueOnce({
+      ...document(2605, 'Syntetická smlouva'),
+      links: [{ entity_type: 'other_item', entity_id: 77, label: 'Syntetický nájem' }],
+    })
+    const wrapper = shallowMount(DocumentDetail)
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === 'Syntetický nájem')?.trigger('click')
+    expect(m.routerPush).toHaveBeenCalledWith({ name: 'other-item-detail', params: { id: 77 } })
+  })
+
   it('zobrazí ZFO metadata a všechny přílohy se bezpečným preview a stažením', async () => {
     m.get.mockResolvedValueOnce({
       ...document(2605, 'datova-zprava-1752953337.zfo'),

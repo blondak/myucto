@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Migration;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\CarRepository;
 use MyInvoice\Service\Migration\StereoNx\StereoNxException;
 use MyInvoice\Service\Migration\StereoNx\StereoNxInventory;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -123,6 +124,18 @@ final class StereoNxInventoryImportTest extends TestCase
         self::assertSame(0, $this->rows('stock_items', $supplierId));
         self::assertSame(1, $this->rows('cars', $supplierId));
         self::assertSame(1, $this->rows('stereo_nx_import_map', $supplierId));
+    }
+
+    public function testCanonicalVehicleRepositoryJoinsCallerTransaction(): void
+    {
+        $supplierId = $this->supplier(false);
+        $carId = (new CarRepository($this->db))->create($supplierId, [
+            'registration' => 'SYN-02', 'name' => 'Syntetické vozidlo',
+            'is_default' => false, 'is_archived' => false,
+        ], $this->userId ?: null);
+
+        self::assertTrue($this->db->pdo()->inTransaction());
+        self::assertSame('SYN-02', (new CarRepository($this->db))->find($carId, $supplierId)['registration']);
     }
 
     private function supplier(bool $stockEnabled): int

@@ -8,6 +8,7 @@ use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Accounting\Assets\AssetException;
 use MyInvoice\Service\Accounting\Assets\AssetService;
 use MyInvoice\Service\Migration\MoneyS3\AccountCode;
+use MyInvoice\Service\Migration\Shared\MigratedDisposal;
 
 /**
  * Karty dlouhodobého majetku z `90_majetek.xml` (tabulky POHODY, které exportní nástroj
@@ -29,6 +30,7 @@ final class AssetImporter
     public function __construct(
         private readonly PohodaImportRepository $map,
         private readonly AssetService $assets,
+        private readonly MigratedDisposal $disposals,
     ) {}
 
     public function import(PohodaContext $ctx): void
@@ -70,7 +72,10 @@ final class AssetImporter
             $plan = PohodaAssetPlan::build($row, $taxRows[$id] ?? [], $ownPlan[$id] ?? $spreadPlan[$id] ?? [], $year, $booked['last'] ?? $defaultLastBooked, $movements[$id] ?? []);
             $card = $plan['card'];
             $review = $plan['review'];
-            if ($disposal !== null) {
+            // Vyřazení v převáděných letech zaúčtoval převedený deník: karta se vyřadí bez
+            // zaúčtování (MigratedDisposal). Ke kontrole zůstává jen vyřazení mimo ně.
+            $disposedInJournal = $disposal !== null && $disposal <= ($ctx->lastPeriodEnd() ?? $disposal) && !$ctx->skipsDate($disposal);
+            if ($disposal !== null && !$disposedInJournal) {
                 $review[] = 'majetek je v POHODĚ vyřazený ' . $disposal . ', vyřazení proveďte v MyÚčtu';
                 $card['status'] = 'draft';
             }
@@ -96,6 +101,9 @@ final class AssetImporter
             if ($review !== [] && $card['status'] !== 'draft') {
                 $card['status'] = 'draft';
             }
+            if ($review !== [] && $disposedInJournal) {
+                $review[] = 'majetek je v POHODĚ vyřazený ' . $disposal . ' a vyřazení je v převedeném deníku: po kontrole kartu zařaďte a vyřaďte bez zaúčtování';
+            }
             $card['description'] = $review === [] ? null : 'Převod z POHODY - ke kontrole: ' . implode('; ', $review) . '.';
 
             try {
@@ -108,8 +116,31 @@ final class AssetImporter
             $p->count(self::STEP, $card['status'] === 'draft' ? 'drafts' : 'created');
             if ($review !== []) {
                 $p->warn(self::STEP, 'asset_review', "Karta majetku {$number} převzata jako koncept ke kontrole: " . implode('; ', $review) . '.', ['document_no' => $number]);
+            } elseif ($disposedInJournal) {
+                $this->disposeMigrated($ctx, (int) $created['asset']['id'], (string) $disposal, $number);
             }
         }
+    }
+
+    /**
+     * Karta vyřazená v převáděných letech: vyřazení zaúčtoval převedený deník, karta se
+     * proto vyřadí bez zaúčtování a naváže na zápis vyřazení ({@see MigratedDisposal}).
+     * Nejde-li to, zůstane koncept ke kontrole.
+     */
+    private function disposeMigrated(PohodaContext $ctx, int $assetId, string $disposal, string $number): void
+    {
+        $result = $this->disposals->dispose($ctx->supplierId, $assetId, $disposal, null, $ctx->userOrNull());
+        if ($result['disposed']) {
+            $ctx->protocol->count(self::STEP, 'disposed_from_journal');
+            if ($result['entry_id'] !== null) {
+                $ctx->protocol->count(self::STEP, 'disposal_entry_linked');
+            }
+            return;
+        }
+        $note = 'majetek je v POHODĚ vyřazený ' . $disposal . ' a vyřazení je v převedeném deníku, kartu se ale nepodařilo vyřadit ('
+            . $result['message'] . '): vyřaďte ji bez zaúčtování';
+        $this->disposals->toReview($ctx->supplierId, $assetId, 'Převod z POHODY - ke kontrole: ' . $note . '.');
+        $ctx->protocol->warn(self::STEP, 'asset_review', "Karta majetku {$number} převzata jako koncept ke kontrole: {$note}.", ['document_no' => $number]);
     }
 
     /**

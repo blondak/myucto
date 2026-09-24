@@ -42,6 +42,8 @@ final class SyntheticPremierBackup
 
     public const RC_MONTH = 4;
     public const OSS_DOCUMENT = '250003';
+    /** Vydaná faktura v EUR, jejíž koruny v deníku vycházejí přesně kurzem (flag `eur_exact`). */
+    public const EUR_DOCUMENT = '250008';
     public const OSS_COUNTRY = 'SK';
     public const OSS_RATE = 23.0;
 
@@ -128,6 +130,8 @@ final class SyntheticPremierBackup
      *                           plánem `MAJ_H_OU` a pohyby `MAJ_H_PO`
      *   `maj_h_unbooked`        s `maj_h`: pohyby bez „zaúčtován odpis" - převod neví, že odpisy
      *                           2025 jsou v deníku, a uzávěrka by je účtovala znovu
+     *   `maj_h_disposed`        s `maj_h`: server vyřazený 31. 12. 2025, deník nese zůstatkovou cenu
+     *                           100 000 (541/082) i vyřazení z evidence (082/022)
      *   `dppo`                  podané přiznání k DPPO za 2025 (`D_PO1` + `D_PO2` bez úprav)
      *   `periody` / `periody_11` zamčení období 2025 (`PERIODY`): všech 12 / jen 11 měsíců
      *   `payroll`               zaměstnanci a mzdy (`PERSONAL`, `PER_MAIN`, `PERSON2`, `MZDY`, `MZDY_POL`…)
@@ -141,6 +145,9 @@ final class SyntheticPremierBackup
      *                           VF 250007 uhrazená zápočtem 321/311 (ID 5); EUR účet (řada BE, 221002)
      *                           s vkladem 1 000 EUR a kurzovým přeceněním s částkou v měně 0
      *   `reduced_deduction`     tuzemský kód odpočtu je krácený (§ 76, `IS_KRACENY`)
+     *   `oss_eur`               s `$oss`: VF 250003 v EUR (40 EUR + 9,20 EUR daň, kurz 25 = deník 1 000 + 230 Kč)
+     *   `eur_exact`             VF 250008 v EUR (100 + 21 a 40 + 8,40 EUR, kurz 25,12 = deník 3 516,80 + 738,53 Kč)
+     *   `rc_uncoded_line`       služba z EU PF 250002 má navíc položku 200 Kč bez kódu DPH (poplatek mimo přiznání)
      *   `cash_duplicate`        další dva pokladní doklady PP 1 z 2. 1. 2025 (jiný sborník), tedy tři
      *                           doklady se stejnou řadou i číslem a dva i se stejným datem
      *
@@ -333,11 +340,19 @@ final class SyntheticPremierBackup
                 self::row(71, '2025-03-01', 'ID', '1', 'Nepeněžitý vklad serveru', 120000, '042100', '411000'),
                 self::row(72, '2025-12-31', 'ID', '2', 'Účetní odpisy 2025', 20000, '551000', '082100'),
             );
+            if (!empty($flags['maj_h_disposed'])) {
+                // Server vyřazený 31. 12. 2025: PREMIER zaúčtoval ZC 100 000 na 541 a vyřazení z evidence.
+                $chart[] = ['541', '000', 'Zůstatková cena prodaného majetku'];
+                array_push($tables['PUB_UCTO'][1],
+                    self::row(73, '2025-12-31', 'ID', '3', 'Vyřazení serveru - zůstatková cena', 100000, '541000', '082100'),
+                    self::row(74, '2025-12-31', 'ID', '3', 'Vyřazení serveru z evidence', 120000, '082100', '022100'),
+                );
+            }
             $tables['MAJ_H'] = [self::cardFields(), [[
                 'INTER' => 7, 'ID' => $id, 'DOKLAD' => 'HM', 'CISLO' => 'HM-001', 'POPIS' => 'Server', 'DATUM' => '2025-03-01', 'DATUM_P' => '2025-03-01',
                 'DATUM_UO' => '2025-03-01', 'KUSY' => 1, 'CENA' => 120000, 'D_CENA' => 120000, 'ZPUSOB' => 1, 'SKUPINA' => 2,
                 'PMD' => '022100', 'PDAL' => '042100', 'UMD' => '551000', 'UDAL' => '082100',
-            ]]];
+            ] + (!empty($flags['maj_h_disposed']) ? ['DATUM_V' => '2025-12-31'] : [])]];
             $tables['MAJ_H_OD'] = [
                 [['ID_MAJ_H', 'C', 10], ['O_DATUM', 'D'], ['O_ODPIS', 'N', 15, 2], ['O_ZUST2', 'N', 15, 2]],
                 [
@@ -384,6 +399,40 @@ final class SyntheticPremierBackup
                 }
             }
             unset($code);
+        }
+        if (!empty($flags['oss_eur'])) {
+            foreach ($tables['FA_OUT'][1] as &$header) {
+                if ($header['INTER'] === 3) {
+                    $header = ['MENA' => 'EUR', 'KURS' => 25, 'M_KURS' => 1] + $header;
+                }
+            }
+            unset($header);
+            foreach ($tables['POLOZKY'][1] as &$item) {
+                if ($item['FAKTURA'] === 3) {
+                    $item = ['CENA' => 40.0, 'CENA_DPH' => 9.2] + $item;
+                }
+            }
+            unset($item);
+        }
+        if (!empty($flags['eur_exact'])) {
+            // VF 250008 v EUR, kurz 25,12: 100 + 21 EUR a 40 + 8,40 EUR = v Kč přesně 2 512 + 527,52
+            // a 1 004,80 + 211,01; deník 3 516,80 + 738,53 Kč, neuhrazená.
+            $customer = ['CISLO_ODB' => '1', 'NAZEV_ODB' => 'Odběratel Fiktivní s.r.o.', 'ICO_ODB' => self::CUSTOMER_ICO, 'DIC_ODB' => 'CZ' . self::CUSTOMER_ICO, 'ID_PAR' => 'P1'];
+            array_push($tables['PUB_UCTO'][1],
+                self::row(92, '2025-10-15', 'VF', self::EUR_DOCUMENT, 'Služby v EUR', 3516.80, '311000', '602100', self::vat(self::CODE_SALE, 'P', 'VF', 9) + $customer),
+                self::row(93, '2025-10-15', 'VF', self::EUR_DOCUMENT, 'DPH', 738.53, '311000', '343021', self::vat(self::CODE_SALE, 'D', 'VF', 9) + $customer),
+            );
+            $tables['FA_OUT'][1][] = self::header(9, 'VF', self::EUR_DOCUMENT, '2025-10-15', 'Služby v EUR',
+                ['VS' => self::EUR_DOCUMENT, 'FORMA' => 'převodem', 'MENA' => 'EUR', 'KURS' => 25.12, 'M_KURS' => 1] + $customer);
+            array_push($tables['POLOZKY'][1],
+                self::item(9, 1, 'Konzultace', 2, 'hod', 100.00, 21.00, 21, self::CODE_SALE),
+                self::item(9, 2, 'Licence', 1, 'ks', 40.00, 8.40, 21, self::CODE_SALE),
+            );
+        }
+        if (!empty($flags['rc_uncoded_line'])) {
+            $euVendor = ['CISLO_ODB' => '3', 'NAZEV_ODB' => 'Fiktiv Software GmbH', 'DIC_ODB' => self::EU_VENDOR_DIC, 'STAT_ODB' => 'Německo', 'ID_PAR' => 'P3'];
+            $tables['PUB_UCTO'][1][] = self::row(70, '2025-04-10', 'PF', '250002', 'Poplatek mimo DPH', 200, '518100', '321000', ['SB_KOD' => 'PF', 'SBORNIK' => 102] + $euVendor);
+            $tables['POLOZ_IN'][1][] = self::item(102, 2, 'Poplatek mimo DPH', 1, 'ks', 200, 0, 0, '');
         }
         if (!empty($flags['cash_duplicate'])) {
             array_push($tables['PUB_UCTO'][1],

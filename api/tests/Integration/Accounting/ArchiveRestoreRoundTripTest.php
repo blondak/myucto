@@ -16,6 +16,10 @@ use MyInvoice\Service\Accounting\Cash\CashDocumentService;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Bank\EmailNoticeReconciler;
+use MyInvoice\Service\Bank\GpcParser;
+use MyInvoice\Service\Bank\StatementImporter;
+use MyInvoice\Service\Bank\StatementMatcher;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -54,6 +58,92 @@ final class ArchiveRestoreRoundTripTest extends TestCase
     private array $tempFiles = [];
     /** @var list<int> */
     private array $cleanupSuppliers = [];
+
+    public function testOtherItemScheduleAndInstallmentsSurviveArchiveRoundTrip(): void
+    {
+        $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $container = Bootstrap::buildApp()->getContainer();
+        $items = $container->get(\MyInvoice\Service\Accounting\OtherItemService::class);
+        $plans = $container->get(\MyInvoice\Service\Accounting\OtherItemScheduleService::class);
+        $partnerId = $this->client();
+        $source = $items->create($this->supplierId, [
+            'side' => 'payable', 'kind' => 'rent', 'title' => 'Syntetický archivní nájem',
+            'issued_on' => '2097-01-01', 'due_on' => '2097-01-20',
+            'currency' => 'CZK', 'amount' => 1200, 'counter_account_code' => '518',
+            'partner_id' => $partnerId,
+        ], $this->userId);
+        $posted = $items->post($this->supplierId, (int) $source['id'], $this->userId);
+        $plans->setInstallments($this->supplierId, (int) $source['id'], [
+            ['due_on' => '2097-01-20', 'amount' => 500],
+            ['due_on' => '2097-02-20', 'amount' => 700],
+        ]);
+        $schedule = $plans->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly'], $this->userId);
+        self::assertCount(2, $plans->generate($this->supplierId, (int) $schedule['id'], '2097-03-01', $this->userId)['created_ids']);
+
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, statement_date, currency)
+            VALUES (?, ?, ?, ?, ?, ?)')->execute([
+            $this->supplierId, 'synteticky-archivni-vypis', hash('sha256', uniqid('', true)),
+            '1000000005/0100', '2097-01-20', 'CZK',
+        ]);
+        $statementId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO bank_transactions (statement_id, posted_at, amount, currency)
+            VALUES (?, ?, ?, ?)')->execute([$statementId, '2097-01-20', -500, 'CZK']);
+        $transactionId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO other_item_allocations
+            (supplier_id, other_item_id, bank_transaction_id, amount, payment_on)
+            VALUES (?,?,?,?,?)')->execute([$this->supplierId, $source['id'], $transactionId, 500, '2097-01-20']);
+
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $path = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $path;
+        $report = $this->restore->restore($path);
+        $newSid = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+        foreach (['other_items' => 3, 'other_item_schedules' => 1,
+                  'other_item_schedule_occurrences' => 3, 'other_item_installments' => 2,
+                  'other_item_allocations' => 1] as $table => $expected) {
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE supplier_id = ?");
+            $stmt->execute([$newSid]);
+            self::assertSame($expected, (int) $stmt->fetchColumn(), $table);
+        }
+        $stmt = $pdo->prepare("SELECT oi.id, oi.journal_entry_id, je.source_id
+            FROM other_items oi JOIN journal_entries je ON je.id = oi.journal_entry_id
+            WHERE oi.supplier_id = ? AND oi.status = 'posted'");
+        $stmt->execute([$newSid]);
+        $restored = $stmt->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($restored);
+        self::assertNotEquals($source['id'], $restored['id']);
+        self::assertNotEquals($posted['journal_entry_id'], $restored['journal_entry_id']);
+        self::assertSame((int) $restored['id'], (int) $restored['source_id']);
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM other_item_schedule_occurrences o
+            JOIN other_item_schedules s ON s.id = o.schedule_id AND s.supplier_id = o.supplier_id
+            JOIN other_items i ON i.id = o.item_id AND i.supplier_id = o.supplier_id
+            WHERE o.supplier_id = ?');
+        $stmt->execute([$newSid]);
+        self::assertSame(3, (int) $stmt->fetchColumn());
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM bank_statements WHERE supplier_id = ?');
+        $stmt->execute([$newSid]);
+        self::assertSame(1, (int) $stmt->fetchColumn(), 'bank_statements');
+        $stmt = $pdo->prepare('SELECT bank_transaction_id FROM other_item_allocations WHERE supplier_id = ?');
+        $stmt->execute([$newSid]);
+        self::assertGreaterThan(0, (int) $stmt->fetchColumn(), 'bank_transaction_id');
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM other_item_allocations a
+            JOIN other_items i ON i.id = a.other_item_id AND i.supplier_id = a.supplier_id
+            JOIN bank_transactions bt ON bt.id = a.bank_transaction_id
+            JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = a.supplier_id
+            WHERE a.supplier_id = ?');
+        $stmt->execute([$newSid]);
+        self::assertSame(1, (int) $stmt->fetchColumn());
+        $restoredSchedule = (int) $pdo->query('SELECT id FROM other_item_schedules WHERE supplier_id = ' . $newSid)->fetchColumn();
+        $restoredPartner = (int) $pdo->query('SELECT id FROM clients WHERE supplier_id = ' . $newSid)->fetchColumn();
+        self::assertNotSame($partnerId, $restoredPartner);
+        $generated = $plans->generate($newSid, $restoredSchedule, '2097-04-01', $this->userId);
+        self::assertCount(1, $generated['created_ids']);
+        $item = $items->get($newSid, (int) $generated['created_ids'][0]);
+        self::assertSame($restoredPartner, (int) $item['partner_id']);
+    }
 
     protected function setUp(): void
     {
@@ -351,6 +441,10 @@ final class ArchiveRestoreRoundTripTest extends TestCase
             "INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email, language, currency_default_id, price_level_id)
              VALUES (?, 'Odběratel Gold', 'Test 1', 'Praha', '11000', ?, 'gold@example.test', 'cs', ?, ?)"
         )->execute([$sid, $czId, $this->currencyId, $level]);
+        $clientId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO invoices (supplier_id, client_id, invoice_type, issue_date, due_date, currency_id, created_by, status, note_above_items, price_level_id)
+                       VALUES (?, ?, 'invoice', '2099-06-01', '2099-06-15', ?, ?, 'draft', 'Doklad s hladinou', ?)")
+            ->execute([$sid, $clientId, $this->currencyId, $this->userId, $level]);
 
         $meta = $this->archive->export($sid, $this->userId);
         $path = $this->archive->filePath($sid, $meta);
@@ -367,6 +461,11 @@ final class ArchiveRestoreRoundTripTest extends TestCase
             $newLevel,
             $idOf("SELECT price_level_id FROM clients WHERE supplier_id = {$newSid} AND company_name = 'Odběratel Gold'"),
             'Odběratel míří na hladinu OBNOVENÉ firmy.',
+        );
+        self::assertSame(
+            $newLevel,
+            $idOf("SELECT price_level_id FROM invoices WHERE supplier_id = {$newSid} AND note_above_items = 'Doklad s hladinou'"),
+            'Hladina zvolená na dokladu míří na hladinu OBNOVENÉ firmy.',
         );
         $rules = $pdo->query("SELECT match_type, match_id, price_level_id FROM stock_price_level_rules WHERE supplier_id = {$newSid} ORDER BY id")
             ->fetchAll(PDO::FETCH_ASSOC);
@@ -419,10 +518,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         // Majetek: zařazení do užívání (source_type='asset') + roční odpis (source_type='depreciation')
         $assetSeeded = $this->seedAsset();
 
-        // Banka: bank_statements/bank_transactions NEMAJÍ supplier_id (jsou tenant jen
-        // tranzitivně, přes payment_matches / matched_invoice_id) — přesně případ, který
-        // adversariální review (2026-07) označilo za kriticky nebezpečný (tichý cross-tenant
-        // odkaz při chybějícím remapu).
+        // Bankovní výpis má přímého vlastníka, transakce ho dědí přes statement_id.
         $bankHash = bin2hex(random_bytes(32));
         $bankInvoiceId = $this->saleInvoice('FV-2097-2', $clientId, 5000.00);
         $oldStatementId = $this->bankStatement($bankHash);
@@ -442,15 +538,6 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $zipPath = $this->archive->filePath($sid, $meta);
         $this->tempFiles[] = $zipPath;
         self::assertFileExists($zipPath);
-
-        // Originální bank_statements řádek smaž PO exportu (cascade smaže i
-        // bank_transactions/payment_matches originálu) — jinak by find-or-create dedup
-        // (stejný file_hash, cíleně přidaný proti UNIQUE kolizi, viz importBankStatement)
-        // vždy „úspěšně" namapoval na PŮVODNÍ (dosud existující) řádek i BEZ opraveného
-        // remapu, a test by tak neodlišil opravený kód od chybného (oba by dali stejné
-        // číslo). Smazáním se vynutí, že restore MUSÍ vložit genuinně NOVÝ řádek — pokud
-        // by byl FK ponechán na starém (smazaném) id, INSERT by tvrdě spadl na FK constraint.
-        $this->db->pdo()->exec('DELETE FROM bank_statements WHERE id = ' . $oldStatementId);
 
         $report = $this->restore->restore($zipPath);
         $newSid = (int) $report['new_supplier_id'];
@@ -513,10 +600,8 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $newSup = $this->db->pdo()->query("SELECT company_name, ic FROM supplier WHERE id = {$newSid}")->fetch(PDO::FETCH_ASSOC);
         self::assertSame('12345678', (string) $newSup['ic']);
 
-        // 8) KRITICKÉ (adversariální review): bank_transactions/bank_statements nemají
-        // supplier_id — musí se přesto remapovat na NOVÁ id (jinak by po obnově do běžící
-        // instance tiše ukazovaly na bankovní data PŮVODNÍ firmy; ON DELETE CASCADE by pak
-        // smazání výpisu originálu smazalo i "obnovenou" transakci/párování).
+        // 8) Výpis i pohyb obnovené firmy musí dostat vlastní id a výpis nového vlastníka.
+        // Sdílení by při smazání originálu zrušilo i obnovené párování.
         $newMatch = $this->db->pdo()->query(
             "SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = {$newSid}"
         )->fetch(PDO::FETCH_ASSOC);
@@ -530,6 +615,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         self::assertNotFalse($newBt, 'Nová bankovní transakce existuje.');
         $newStatementId = (int) $newBt['statement_id'];
         self::assertNotSame($oldStatementId, $newStatementId, 'bank_transactions.statement_id po obnově NEukazuje na starý (cizí) výpis.');
+        self::assertSame($newSid, (int) $this->db->pdo()->query('SELECT supplier_id FROM bank_statements WHERE id = ' . $newStatementId)->fetchColumn());
 
         $stStmt = $this->db->pdo()->prepare('SELECT file_hash FROM bank_statements WHERE id = ?');
         $stStmt->execute([$newStatementId]);
@@ -540,11 +626,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         )->fetchColumn();
         self::assertSame($newBankInvoiceId, (int) $newBt['matched_invoice_id'], 'bank_transactions.matched_invoice_id ukazuje na fakturu NOVÉ firmy.');
 
-        // 9) Dedup pojistka: bank_statements je celoinstanční content-addressed tabulka
-        // (UNIQUE file_hash) — restore STEJNÉHO archivu podruhé (simulace obnovy do běžící
-        // instance, kde stejný výpis díky prvnímu restoru z kroku 8 už existuje) nesmí
-        // spadnout na UNIQUE constraint a musí sdílet TENTÝŽ řádek (find-or-create), ne
-        // selhat celou transakcí.
+        // 9) Každá další obnova vytváří novou firmu a vlastní výpis se stejným obsahem.
         $hashStmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM bank_statements WHERE file_hash = ?');
         $hashStmt->execute([$bankHash]);
         $countBefore = (int) $hashStmt->fetchColumn();
@@ -556,7 +638,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
 
         $hashStmt->execute([$bankHash]);
         $countAfter = (int) $hashStmt->fetchColumn();
-        self::assertSame($countBefore, $countAfter, 'Druhá obnova sdílí existující bank_statements řádek (dedup dle file_hash), nevytváří duplicitu.');
+        self::assertSame($countBefore + 1, $countAfter, 'Další firma má vlastní výpis stejného souboru.');
 
         $match2 = $this->db->pdo()->query(
             "SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = {$newSid2}"
@@ -565,7 +647,83 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $bt2 = $this->db->pdo()->query(
             'SELECT statement_id FROM bank_transactions WHERE id = ' . (int) $match2['bank_transaction_id']
         )->fetch(PDO::FETCH_ASSOC);
-        self::assertSame($newStatementId, (int) $bt2['statement_id'], 'Třetí firma sdílí stejný dedupovaný bank_statements řádek jako druhá.');
+        self::assertNotSame($newStatementId, (int) $bt2['statement_id'], 'Třetí firma nemá sdílet výpis druhé firmy.');
+        self::assertSame($newSid2, (int) $this->db->pdo()->query('SELECT supplier_id FROM bank_statements WHERE id = ' . (int) $bt2['statement_id'])->fetchColumn());
+    }
+
+    public function testRestoredPdfMovementIsRecognizedInOverlappingImport(): void
+    {
+        $this->assertRestoredPdfMovementIsRecognized(false);
+    }
+
+    public function testLegacyArchiveWithoutPortableFingerprintRecognizesOverlappingImport(): void
+    {
+        $this->assertRestoredPdfMovementIsRecognized(true);
+    }
+
+    private function assertRestoredPdfMovementIsRecognized(bool $legacyArchive): void
+    {
+        $this->db->pdo()->prepare('UPDATE currencies SET account_number = ?, bank_code = ? WHERE id = ?')
+            ->execute(['1000000005', '0100', $this->currencyId]);
+        $matcher = $this->createStub(StatementMatcher::class);
+        $matcher->method('matchBatch')->willReturn([]);
+        $importer = new StatementImporter(
+            $this->db,
+            new GpcParser(),
+            $matcher,
+            $this->createStub(EmailNoticeReconciler::class),
+        );
+        $parsed = [
+            'header' => [
+                'account_number' => '1000000005', 'statement_number' => '001',
+                'statement_date' => self::YEAR . '-06-18', 'prev_balance' => 0,
+                'curr_balance' => 5000, 'credit_total' => 5000, 'debit_total' => 0,
+            ],
+            'transactions' => [[
+                'posted_at' => self::YEAR . '-06-18', 'amount' => 5000,
+                'currency' => 'CZK', 'variable_symbol' => '20970002',
+                'constant_symbol' => null, 'specific_symbol' => null,
+                'counterparty_account' => null, 'counterparty_bank' => null,
+                'counterparty_name' => 'Synthetic payer',
+                'description' => 'Synthetic receipt', 'bank_ref' => 'SYNTHETIC-ARCHIVE-1',
+            ]],
+        ];
+        $first = $importer->importParsedPdf($parsed, 'synthetic-pdf-first', 'first.pdf', $this->userId, $this->currencyId);
+        self::assertSame(1, $first['transactions']);
+        $tx = (int) $this->db->pdo()->query('SELECT id FROM bank_transactions WHERE statement_id = ' . (int) $first['statement_id'])->fetchColumn();
+        $invoice = $this->saleInvoice('FV-2097-PDF', $this->client(), 5000);
+        $this->db->pdo()->prepare('UPDATE bank_transactions SET matched_invoice_id = ? WHERE id = ?')->execute([$invoice, $tx]);
+        $this->paymentMatch($tx, $invoice, 5000);
+
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $zip = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $zip;
+        if ($legacyArchive) {
+            $archive = new \ZipArchive();
+            self::assertTrue($archive->open($zip) === true);
+            $rows = array_filter(explode("\n", (string) $archive->getFromName('bank_transactions.jsonl')));
+            self::assertCount(1, $rows);
+            $row = json_decode((string) reset($rows), true, 512, JSON_THROW_ON_ERROR);
+            $row['import_fingerprint'] = $row['portable_fingerprint'];
+            unset($row['portable_fingerprint']);
+            $jsonl = json_encode($row, JSON_THROW_ON_ERROR) . "\n";
+            $manifest = json_decode((string) $archive->getFromName('manifest.json'), true, 512, JSON_THROW_ON_ERROR);
+            $manifest['schema_version'] = '1881_credit_card_accounts.sql';
+            $manifest['tables']['bank_transactions']['sha256'] = hash('sha256', $jsonl);
+            self::assertTrue($archive->addFromString('bank_transactions.jsonl', $jsonl));
+            self::assertTrue($archive->addFromString('manifest.json', json_encode($manifest, JSON_THROW_ON_ERROR)));
+            self::assertTrue($archive->close());
+        }
+        $newSupplier = (int) $this->restore->restore($zip)['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSupplier;
+        $currency = (int) $this->db->pdo()->query('SELECT default_currency_id FROM supplier WHERE id = ' . $newSupplier)->fetchColumn();
+        $restored = (int) $this->db->pdo()->query('SELECT COUNT(*) FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bs.supplier_id = ' . $newSupplier)->fetchColumn();
+        self::assertSame(1, $restored);
+
+        $overlap = $importer->importParsedPdf($parsed, 'synthetic-pdf-overlap', 'overlap.pdf', $this->userId, $currency);
+        self::assertSame(0, $overlap['transactions']);
+        self::assertSame(1, $overlap['skipped_duplicates']);
+        self::assertSame(1, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bs.supplier_id = ' . $newSupplier)->fetchColumn());
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -632,11 +790,11 @@ final class ArchiveRestoreRoundTripTest extends TestCase
     {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO bank_statements
-                (file_name, file_hash, account_number, bank_code, currency, statement_date,
+                (supplier_id, file_name, file_hash, account_number, bank_code, currency, statement_date,
                  prev_balance, curr_balance, credit_total, debit_total, transaction_count)
-             VALUES (?, ?, "1234567890/0100", "0100", "CZK", ?, 0, 5000, 5000, 0, 1)'
+             VALUES (?, ?, ?, "1234567890/0100", "0100", "CZK", ?, 0, 5000, 5000, 0, 1)'
         );
-        $stmt->execute(['vypis-' . $hash . '.gpc', $hash, self::YEAR . '-06-18']);
+        $stmt->execute([$this->supplierId, 'vypis-' . $hash . '.gpc', $hash, self::YEAR . '-06-18']);
         return (int) $this->db->pdo()->lastInsertId();
     }
 

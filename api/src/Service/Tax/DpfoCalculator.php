@@ -234,6 +234,10 @@ final class DpfoCalculator
      * původní TaxOptimizer::computeRegular. Struktura výstupu zachována kvůli
      * regresním testům optimalizátoru.
      *
+     * Úpravy § 5 a § 23 (ř. 105/106) sem záměrně nevstupují: optimalizátor je poradní
+     * projekce z fakturace v průběhu roku a úpravy vznikají až roční uzávěrkou daňové
+     * evidence. Přiznání a přehledy skládají § 7 přes {@see \MyInvoice\Service\Tax\Return\DpfoReturnCalculator::section7}.
+     *
      * @param array<string,mixed> $profile
      * @param array<string,mixed> $c
      * @return array<string,mixed>

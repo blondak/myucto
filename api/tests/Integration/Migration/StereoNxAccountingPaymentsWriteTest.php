@@ -10,6 +10,7 @@ use MyInvoice\Service\Migration\StereoNx\StereoNxAccountingPayments;
 use MyInvoice\Service\Migration\StereoNx\StereoNxBackup;
 use MyInvoice\Service\Migration\StereoNx\StereoNxImporter;
 use MyInvoice\Service\Migration\StereoNx\StereoNxSourcePlan;
+use MyInvoice\Service\Migration\Shared\MigratedPaymentWriter;
 use MyInvoice\Tests\Fixtures\StereoNx\SyntheticNx1Archive;
 use MyInvoice\Tests\Fixtures\StereoNx\SyntheticStereoNxTables;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -85,6 +86,9 @@ final class StereoNxAccountingPaymentsWriteTest extends TestCase
         self::assertSame(1, $this->scalar("SELECT COUNT(*) FROM cash_documents WHERE supplier_id=? AND status='draft' AND journal_entry_id IS NULL"));
         self::assertSame(3, $this->scalar('SELECT COUNT(*) FROM payment_matches WHERE supplier_id=?'));
         self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM invoice_payments WHERE supplier_id=?'));
+        self::assertSame(3, $this->scalar("SELECT COUNT(*) FROM payment_matches pm
+            JOIN bank_transactions bt ON bt.id=pm.bank_transaction_id
+            WHERE pm.supplier_id=? AND bt.match_status='manual' AND bt.match_reason='migration_review'"));
         self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM journal_entries WHERE supplier_id=?'));
         self::assertGreaterThan(0, $first['review_movements'][0]['target_id']);
 
@@ -135,6 +139,38 @@ final class StereoNxAccountingPaymentsWriteTest extends TestCase
         }
         self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payment_matches WHERE supplier_id=?'));
         self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM invoice_payments WHERE supplier_id=?'));
+    }
+
+    public function testSharedPaymentWriterRejectsForeignDocumentBeforeWritingCzkPayment(): void
+    {
+        $documents = StereoNxSourcePlan::fromTables(self::tables(), SyntheticStereoNxTables::identity(), true, true);
+        $documents['source_company_index'] = 0;
+        $this->importer->writeAccountingPartners($documents['clients'], $documents['identity'], 0, $this->supplierId);
+        $this->importer->writeAccountingDocuments($documents, $this->supplierId, $this->userId);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO currencies (supplier_id,code,label,symbol,name_cs,name_en,decimals,is_active,is_default)
+            VALUES (?,"EUR","EUR","€","EUR","EUR",2,1,0)')->execute([$this->supplierId]);
+        $eurId = (int) $pdo->lastInsertId();
+        $invoiceId = (int) $pdo->query('SELECT id FROM invoices WHERE supplier_id=' . $this->supplierId . ' LIMIT 1')->fetchColumn();
+        $pdo->prepare('UPDATE invoices SET currency_id=?, exchange_rate=25.1 WHERE id=? AND supplier_id=?')
+            ->execute([$eurId, $invoiceId, $this->supplierId]);
+
+        $writer = new MigratedPaymentWriter($this->db);
+        try {
+            $writer->attach($this->supplierId, $this->userId,
+                'issued', 'bank', $invoiceId, 1, 100.0);
+            self::fail('Korunová úhrada nesmí být uložena jako částka cizoměnového dokladu.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertSame('payment_currency_unverified', $e->getMessage());
+        }
+        self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM invoice_payments WHERE supplier_id=?'));
+        self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payment_matches WHERE supplier_id=?'));
+        try {
+            $writer->refreshBalances($this->supplierId, [$invoiceId], [], []);
+            self::fail('Korunové součty nesmí přepsat cizoměnový zůstatek dokladu.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertSame('payment_currency_unverified', $e->getMessage());
+        }
     }
 
     /** @return array<string,list<array<string,mixed>>> */

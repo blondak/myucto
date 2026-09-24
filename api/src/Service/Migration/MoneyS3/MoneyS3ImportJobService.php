@@ -33,7 +33,8 @@ final class MoneyS3ImportJobService extends AbstractImportJobService
     protected const UPLOADED_EVENT = 'import.money_s3_uploaded';
     protected const PREPARE_STEPS = ['Kontrolní součet zálohy', 'Rozbaluji zálohu agendy', 'Čtu údaje agendy'];
 
-    protected const STEP_LABELS = [
+    /** Veřejné: tytéž kroky hlásí i dávkový převod ({@see MoneyS3BatchJobService}). */
+    public const STEP_LABELS = [
         'chart' => 'Účtová osnova',
         'journal' => 'Účetní období a deník',
         'accounting_mode' => 'Režim účetní jednotky',

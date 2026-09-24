@@ -58,7 +58,7 @@ abstract class AbstractImportJobService
 
     public function __construct(
         protected readonly ImportJobRepository $jobs,
-        protected readonly AbstractMigrationImportRepository $runs,
+        protected readonly ?AbstractMigrationImportRepository $runs,
         protected readonly ActivityLogger $logger,
     ) {}
 
@@ -76,18 +76,42 @@ abstract class AbstractImportJobService
         }
         $supplierId = (int) $job['supplier_id'];
         if (static::isPrepareJob($job)) {
+            if (!$this->supportsPrepareJob()) {
+                $this->jobs->markFailed($jobId, 'Tento převod nepodporuje zpracování zálohy jako samostatný job.');
+                return;
+            }
             $this->prepare($jobId, $job, $supplierId);
             return;
         }
-        if (!$this->runs->acquireLock($supplierId)) {
+        if (!$this->acquireCompanyLock($supplierId)) {
             $this->jobs->markFailed($jobId, 'Převod této firmy už běží v jiném procesu, druhý se nespouští.');
             return;
         }
         try {
             $this->runLocked($jobId, $job, $supplierId);
         } finally {
-            $this->runs->releaseLock($supplierId);
+            $this->releaseCompanyLock($supplierId);
         }
+    }
+
+    protected function supportsPrepareJob(): bool
+    {
+        return true;
+    }
+
+    protected function acquireCompanyLock(int $supplierId): bool
+    {
+        return $this->runRepository()->acquireLock($supplierId);
+    }
+
+    protected function releaseCompanyLock(int $supplierId): void
+    {
+        $this->runRepository()->releaseLock($supplierId);
+    }
+
+    private function runRepository(): AbstractMigrationImportRepository
+    {
+        return $this->runs ?? throw new \LogicException('Zdroj bez evidence běhů musí dodat vlastní zámek firmy.');
     }
 
     /** Úložiště nahraných souborů zdroje. */
@@ -287,7 +311,7 @@ abstract class AbstractImportJobService
             }
             $cancelled = $result['failure'] === 'cancelled';
             $status = $cancelled ? 'cancelled' : $protocol->status();
-            $this->runs->finishRun($runId, $supplierId, $status, $result);
+            $this->runRepository()->finishRun($runId, $supplierId, $status, $result);
 
             $byStep = array_column($result['steps'], null, 'key');
             $journal = isset($started['journal']) ? ($started['journal'])($byStep) : ($byStep['journal']['counts'] ?? []);
@@ -312,7 +336,7 @@ abstract class AbstractImportJobService
         } catch (\Throwable $e) {
             $message = $this->failureMessage($e, sprintf('převod %s %s firmy %d, rok %d selhal', static::UPLOAD_NOUN, $token, $supplierId, $year), static::RUN_FAILED);
             if ($runId !== null) {
-                $this->runs->finishRun($runId, $supplierId, 'failed', ['mode' => $mode, 'status' => 'failed', 'failure' => 'unexpected', 'error' => $message, 'steps' => []]);
+                $this->runRepository()->finishRun($runId, $supplierId, 'failed', ['mode' => $mode, 'status' => 'failed', 'failure' => 'unexpected', 'error' => $message, 'steps' => []]);
             }
             $this->jobs->appendLog($jobId, "{$label}: {$message}");
             return ['status' => 'failed', 'year' => $year, 'run_id' => $runId, 'error' => $message];
@@ -337,7 +361,7 @@ abstract class AbstractImportJobService
     /** Uzavře běhy, které po sobě nechal spadlý worker, a zapíše to do logu jobu. */
     protected function closeInterruptedRuns(int $jobId, int $supplierId): void
     {
-        $interrupted = $this->runs->closeInterruptedRuns($supplierId);
+        $interrupted = $this->runRepository()->closeInterruptedRuns($supplierId);
         if ($interrupted > 0) {
             $this->jobs->appendLog($jobId, "Uzavřeno {$interrupted} přerušených běhů převodu.");
         }

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\StereoNx;
 
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
+use MyInvoice\Service\Migration\Shared\BankSymbols;
+
 /** Jediný čitelný zdrojový plán pro zápis daňové evidence a zkoušku nanečisto. */
 final class StereoNxSourcePlan
 {
@@ -465,6 +468,9 @@ final class StereoNxSourcePlan
                     'document_kind' => $documentKey === null ? null : $documents[$documentKey],
                     'bucket' => $j['bucket'], 'source_column' => $j['source_column']];
                 if ($type === 'bank') {
+                    [$movement['variable_symbol'], $movement['description']] = BankSymbols::variableSymbolAndDescription(
+                        $movement['variable_symbol'], $movement['description'], false,
+                    );
                     $statementKey = $statementsByBareKey[self::physicalKey($row, false)] ?? null;
                     if ($statementKey === null || !isset($statements[$statementKey])) throw new StereoNxException('bank_statement_missing', 'Bankovní pohyb nemá výpis.');
                     $accountKey = $statements[$statementKey]['account_key'];
@@ -589,6 +595,8 @@ final class StereoNxSourcePlan
         }
         $total = round((float) $total, 2);
         $lineTotal = 0.0;
+        $takeoverItems = [];
+        $blocked = null;
         foreach ($sourceLines as $line) {
             $quantity = $line['Mnozstvi'] ?? null;
             $unit = $line['JednCenaC'] ?? null;
@@ -596,9 +604,27 @@ final class StereoNxSourcePlan
                 throw new StereoNxException('document_foreign_line_invalid', 'Cizoměnová položka nemá platné množství nebo cenu.');
             }
             $lineTotal += (float) $quantity * (float) $unit;
+            $base = $line['ZakladDPH'] ?? null;
+            $lineVat = $line['CelkemDPH'] ?? null;
+            if ((!is_int($base) && !is_float($base)) || (!is_int($lineVat) && !is_float($lineVat))
+                || !is_finite((float) $base) || !is_finite((float) $lineVat) || abs((float) $lineVat) >= 0.005) {
+                $blocked = 'zdroj nemá ověřené korunové položky bez DPH';
+            } else {
+                $takeoverItems[] = ['base' => (float) $base, 'vat' => 0.0,
+                    'foreign_base' => round((float) $quantity * (float) $unit, 2), 'foreign_vat' => 0.0];
+            }
         }
         if ($sourceLines === [] || abs(round($lineTotal, 2) - $total) > 0.011) {
             throw new StereoNxException('document_foreign_total_mismatch', 'Cizoměnové položky nesouhlasí s celkem dokladu.');
+        }
+        $homeTotal = $header['CelkemVlastni'] ?? null;
+        if ((!is_int($homeTotal) && !is_float($homeTotal)) || !is_finite((float) $homeTotal)) {
+            $blocked = 'zdroj neobsahuje ověřený korunový celkem dokladu';
+        }
+        $normalizedRate = ForeignCurrencyTakeover::rate((float) $rate, (float) $units);
+        if ($normalizedRate === null) $blocked = 'zdroj nemá platný kurz';
+        if ($blocked === null) {
+            $blocked = ForeignCurrencyTakeover::check($normalizedRate, $takeoverItems, (float) $homeTotal);
         }
         $description = trim((string) ($header['Text'] ?? '')) ?: 'Cizoměnový doklad Stereo NX';
         return [
@@ -610,7 +636,10 @@ final class StereoNxSourcePlan
             ]],
             'prices_include_vat' => is_bool($header['CenySDPH'] ?? null) ? $header['CenySDPH'] : false,
             'reverse_charge' => false,
-            'exchange_rate' => round((float) $rate / (float) $units, 8),
+            'exchange_rate' => $normalizedRate,
+            'foreign_takeover_items' => $takeoverItems,
+            'foreign_home_total' => is_int($homeTotal) || is_float($homeTotal) ? (float) $homeTotal : null,
+            'foreign_takeover_blocked' => $blocked,
             'review_codes' => array_merge(['foreign_currency_vat_unverified'],
                 StereoNxForeignCurrencyCheck::reviewCodes($header, $sourceLines, $vat)),
             'requires_draft' => true,

@@ -55,6 +55,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
+import { canSaveToCompanyFolder, pdfFileName, savePdfToCompanyFolder } from '@/composables/useCompanyPdfSave'
 import { appIsoDate } from '@/utils/date'
 import { useSidePreviewWide } from '@/composables/useSidePreviewWide'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -72,6 +73,24 @@ const paneDom = usePaneDom()
 const { blockDemoMutation } = useDemoMode()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
+
+// Chrome/Edge: dialog Uložit jako ve složce, kam se naposledy ukládalo PDF této firmy
+// (#104). Jinde odkaz stáhne PDF jako dřív.
+async function downloadPdfToCompanyFolder(event: MouseEvent, id: number, number: string | null | undefined) {
+  if (!canSaveToCompanyFolder()) return
+  event.preventDefault()
+  try {
+    const result = await savePdfToCompanyFolder(
+      purchaseInvoicesApi.pdfUrl(id),
+      pdfFileName(number, `doklad-${id}`),
+      supplierStore.currentSupplierId,
+    )
+    if (result === 'saved') toast.success(t('common.pdf_saved_to_folder'))
+    if (result === 'unsupported') window.open(purchaseInvoicesApi.pdfUrl(id), '_blank')
+  } catch {
+    toast.error(t('common.pdf_save_failed'))
+  }
+}
 
 /** Volby formy úhrady — pořadí a doména ze sdíleného API typu (migrace 1128). */
 const paymentMethodOptions = PAYMENT_METHODS
@@ -1645,6 +1664,7 @@ function fieldErr(key: string): string | null {
               v-if="invoiceId"
               :href="purchaseInvoicesApi.pdfUrl(invoiceId)"
               target="_blank"
+              @click="downloadPdfToCompanyFolder($event, invoiceId, form.vendor_invoice_number)"
               class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5"
             >
               <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>

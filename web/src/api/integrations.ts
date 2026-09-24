@@ -173,7 +173,7 @@ export interface AiExtractResult {
   purchase_invoice_id?: number
   vendor_id?: number
   vendor_name?: string
-  document_kind?: 'invoice' | 'receipt' | 'credit_note' | 'advance'
+  document_kind?: 'invoice' | 'receipt' | 'credit_note' | 'advance' | 'tax_document'
   total_with_vat?: number | null
   currency?: string
   source: 'isdocx' | 'isdoc_embedded' | 'ai' | 'duplicate' | 'ai_failed' | 'ai_invalid' | 'wrong_tenant' | 'no_vendor' | 'create_failed'

@@ -191,6 +191,18 @@ export interface DraftInvoiceItem {
   total_with_vat: number
 }
 
+export interface OtherItemResultImpact {
+  currency: string
+  revenue: number
+  costs: number
+  profit: number
+  revenue_czk: number
+  costs_czk: number
+  profit_czk: number
+  posted: number
+  draft: number
+}
+
 export interface DashboardSummary {
   has_purchase_invoices?: boolean
   kpi: DashboardKpi
@@ -212,6 +224,7 @@ export interface DashboardSummary {
   due_buckets: DueBucket[]
   aging_report: AgingReportRow[]
   revenue_forecast: RevenueForecast[]
+  other_item_result_impact: OtherItemResultImpact[]
   invoice_size_histogram: InvoiceSizeHistogram
   revenue_last_30d: Revenue30d[]
   active_recurring_count: number

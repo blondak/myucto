@@ -10,6 +10,9 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
+use MyInvoice\Service\Migration\Shared\ChartAccountCreator;
+use MyInvoice\Service\Migration\Shared\MigrationPeriods;
 use PDO;
 
 /**
@@ -280,7 +283,9 @@ final class StereoNxAccountingWriter
     private function createAccount(array $source, int $supplierId, array $ids): array
     {
         $code = (string) $source['code'];
-        $parent = null;
+        $name = (string) ($source['name'] !== '' ? $source['name'] : 'Účet ' . $code);
+        $normalSide = self::normalSide((string) $source['source_type']);
+        $creator = new ChartAccountCreator($this->accounts);
         if (strlen($code) > 3) {
             $parentCode = substr($code, 0, 3);
             $parentId = $ids[$parentCode] ?? null;
@@ -288,50 +293,23 @@ final class StereoNxAccountingWriter
             if ($parent === null) {
                 throw new StereoNxException('chart_parent_missing', "Účet {$code} nemá v cílové osnově syntetický účet {$parentCode}.");
             }
+            $id = $creator->createAnalytic($supplierId, $code, $name, $parent, $normalSide, true);
+        } else {
+            $explicitType = match ($source['source_type']) {
+                'N' => 'expense', 'V' => 'revenue', 'O' => 'offbalance', 'Z' => 'closing', default => null,
+            };
+            $created = $creator->createSynthetic($supplierId, $code, $name,
+                new ImportProtocol('stereo_nx'), 'chart', false, $explicitType, $normalSide, true);
+            if ($created === null) {
+                throw new StereoNxException('chart_account_type_unresolved', "Typ účtu {$code} nelze bezpečně určit.");
+            }
+            $id = $created['id'];
         }
-
-        $prototype = $parent ?? $this->accountPrototype($supplierId, $code, (string) $source['source_type']);
-        if ($prototype === null) {
-            throw new StereoNxException('chart_account_type_unresolved', "Typ účtu {$code} nelze bezpečně určit.");
-        }
-        $id = $this->accounts->insert($supplierId, [
-            'account_code' => $code,
-            'name' => mb_substr((string) ($source['name'] !== '' ? $source['name'] : 'Účet ' . $code), 0, 190),
-            'account_type' => (string) $prototype['account_type'],
-            'normal_side' => self::normalSide((string) $source['source_type']),
-            'is_synthetic' => $parent === null,
-            'parent_id' => $parent !== null ? (int) $parent['id'] : null,
-            'is_active' => true,
-        ]);
-        $created = $this->accounts->findById($supplierId, $id);
-        if ($created === null) {
+        $account = $this->accounts->findById($supplierId, $id);
+        if ($account === null) {
             throw new StereoNxException('chart_account_create_failed', "Účet {$code} se nepodařilo vytvořit.");
         }
-        return $created;
-    }
-
-    /** @return array<string,mixed>|null */
-    private function accountPrototype(int $supplierId, string $code, string $sourceType): ?array
-    {
-        // ChartAccountCreator řeší obecné převody přes ImportProtocol. Stereo navíc
-        // nese ověřený TypUctu pro výsledkové, závěrkové a podrozvahové účty; tam je
-        // tento zdroj přesnější než odhad ze sourozence. U rozvahových účtů používáme
-        // stejný postup sourozenec ve skupině → sourozenec ve třídě.
-        $explicitType = match ($sourceType) {
-            'N' => 'expense', 'V' => 'revenue', 'O' => 'offbalance', 'Z' => 'closing', default => null,
-        };
-        if ($explicitType !== null) {
-            return ['account_type' => $explicitType];
-        }
-        foreach ([2, 1] as $prefixLength) {
-            $prefix = substr($code, 0, $prefixLength);
-            foreach ($this->accounts->listForTenant($supplierId, true) as $row) {
-                if (!empty($row['is_synthetic']) && str_starts_with((string) $row['account_code'], $prefix)) {
-                    return $row;
-                }
-            }
-        }
-        return null;
+        return $account;
     }
 
     private static function normalSide(string $sourceType): ?string
@@ -390,8 +368,7 @@ final class StereoNxAccountingWriter
             return;
         }
         $value = !empty($source['tax_deductible']) ? 'deductible' : 'non_deductible';
-        $this->db->pdo()->prepare('UPDATE chart_of_accounts SET tax_deductibility = ? WHERE id = ? AND supplier_id = ?')
-            ->execute([$value, $accountId, $supplierId]);
+        $this->accounts->setTaxDeductibility($supplierId, $accountId, $value);
     }
 
     /**
@@ -415,9 +392,11 @@ final class StereoNxAccountingWriter
                 if ($this->periods->overlapping($supplierId, $starts, $ends) !== null) {
                     throw new StereoNxException('accounting_period_overlap', "Rok {$year} se překrývá s existujícím účetním obdobím.");
                 }
-                $id = $this->periods->create($supplierId, $year, $starts, $ends, 'import');
-                $period = $this->periods->findById($supplierId, $id);
-                $stats['periods_created']++;
+                $ensured = (new MigrationPeriods($this->periods))->ensure(
+                    $supplierId, $year, $starts, $ends, new ImportProtocol('stereo_nx'), 'journal',
+                    static function (int $id) use (&$stats): void { $stats['periods_created']++; },
+                );
+                $period = $this->periods->findById($supplierId, $ensured['id']);
             }
             if ($period === null || (string) $period['status'] !== 'open') {
                 throw new StereoNxException('accounting_period_locked', "Účetní období {$year} není otevřené.");

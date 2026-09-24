@@ -2,11 +2,16 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DimensionFields from './DimensionFields.vue'
-import { dimensionsApi, compactDimensions, type DimensionDocType, type DimensionMap, type DimensionPrefillParams } from '@/api/dimensions'
+import DimensionChips from './DimensionChips.vue'
+import DimensionSplitEditor from './DimensionSplitEditor.vue'
+import {
+  dimensionsApi, compactDimensions,
+  type DimensionDocType, type DimensionMap, type DimensionPrefillParams, type DimensionSplitShare, type DimensionSplits,
+} from '@/api/dimensions'
 import { useDimensions } from '@/composables/useDimensions'
 import { applyPrefill } from '@/composables/useDocumentDimensions'
 import { useToast } from '@/composables/useToast'
-import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
 
 /**
  * Dimenze hlavičky dokladu na jeho detailu (bankovní pohyb, pokladní doklad, faktura).
@@ -38,7 +43,28 @@ const saving = ref(false)
 const needsRepost = ref(false)
 const autoFilled = ref<Record<number, number>>({})
 
-const dirty = computed(() => JSON.stringify(compactDimensions(header.value)) !== saved.value)
+/** Rozpady dokladu podle pořadí položky (0 = hlavička); panel upravuje jen hlavičku. */
+const splits = ref<Record<number, DimensionSplits>>({})
+const savedSplits = ref<string>('{}')
+const splitOpen = ref(false)
+const headerSplits = computed<DimensionSplits>(() => splits.value[0] ?? {})
+/** Typ s rozpadem hlavičky nemá jedinou hodnotu — ve výběru se nenabízí. */
+const singleTypes = computed(() => dims.documentTypes.value.filter(ty => !(headerSplits.value[ty.id]?.length)))
+
+function applySplit(typeId: number, shares: DimensionSplitShare[] | null) {
+  const current = { ...headerSplits.value }
+  if (shares === null) {
+    delete current[typeId]
+  } else {
+    current[typeId] = shares
+    header.value = { ...header.value, [typeId]: null }
+  }
+  splits.value = { ...splits.value, 0: current }
+  splitOpen.value = false
+}
+
+const dirty = computed(() => JSON.stringify(compactDimensions(header.value)) !== saved.value
+  || JSON.stringify(splits.value) !== savedSplits.value)
 const editable = computed(() => !props.readonly && dims.canEdit.value)
 const hasAutoFilled = computed(() =>
   Object.entries(autoFilled.value).some(([typeId, valueId]) => header.value[Number(typeId)] === valueId))
@@ -51,6 +77,8 @@ async function load() {
     const data = await dimensionsApi.getDocument(props.docType, props.docId)
     header.value = { ...data.header }
     saved.value = JSON.stringify(compactDimensions(data.header))
+    splits.value = { ...(data.splits ?? {}) }
+    savedSplits.value = JSON.stringify(splits.value)
     autoFilled.value = {}
   } catch {
     header.value = {}
@@ -82,8 +110,10 @@ async function applyPrefillParams() {
 async function save() {
   saving.value = true
   try {
-    const result = await dimensionsApi.saveDocument(props.docType, props.docId, { header: header.value })
+    const result = await dimensionsApi.saveDocument(props.docType, props.docId, { header: header.value, splits: splits.value })
     saved.value = JSON.stringify(compactDimensions(result.header))
+    splits.value = { ...(result.splits ?? {}) }
+    savedSplits.value = JSON.stringify(splits.value)
     autoFilled.value = {}
     needsRepost.value = result.restamp.needs_repost
     toast.success(result.restamp.lines > 0
@@ -114,7 +144,24 @@ watch(() => JSON.stringify(props.prefill ?? {}), () => { if (!loading.value) voi
       </button>
     </div>
     <div v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
-    <DimensionFields v-else v-model="header" :disabled="!editable" />
+    <template v-else>
+      <DimensionFields v-model="header" :types="singleTypes" :disabled="!editable" />
+      <div class="mt-2 flex flex-wrap items-center gap-2">
+        <DimensionChips :dimensions="{}" :splits="headerSplits" class="flex" data-test="document-splits" />
+        <button v-if="editable" type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" data-test="document-split" @click="splitOpen = true">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
+          {{ t('dimensions.split.open') }}
+        </button>
+      </div>
+    </template>
+    <DimensionSplitEditor
+      v-if="splitOpen"
+      :types="dims.documentTypes.value"
+      :current="headerSplits"
+      :title="t('dimensions.split.title_document')"
+      @close="splitOpen = false"
+      @save="applySplit"
+    />
     <p v-if="!loading && hasAutoFilled" class="mt-2 text-xs text-neutral-500" data-test="dimension-autofilled">{{ t('dimensions.defaults.autofilled') }}</p>
     <p v-if="needsRepost" class="mt-3 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-800">
       {{ t('dimensions.needs_repost') }}

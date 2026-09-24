@@ -22,6 +22,7 @@ final class StereoNxPayrollMonthsTest extends TestCase
     public function testConvertsVerifiedMonthWithHistoricalRatesAndFacts(): void
     {
         $plan = $this->plan(SyntheticStereoNxPayrollTables::tables());
+        self::assertSame('2026-01', $plan['last_source_period']);
         self::assertSame(1, $plan['counts']['historical_payroll_ready']);
         $record = $plan['records'][0];
         self::assertSame('7', $record['source_key']);

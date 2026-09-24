@@ -46,7 +46,9 @@
     "cash_settlement",
     "checks",
     "codebookTransfer",
+    "company_profile",
     "costs",
+    "credit_cards",
     "creditas_bank",
     "cron_jobs",
     "dashboard",
@@ -81,7 +83,9 @@
     "money_s3",
     "monthly_report",
     "oss_rates",
+    "other_items",
     "pamica",
+    "parallelRun",
     "payment_method",
     "payment_order",
     "payroll",
@@ -147,7 +151,9 @@
       "cash_settlement",
       "checks",
       "codebookTransfer",
+      "company_profile",
       "costs",
+      "credit_cards",
       "creditas_bank",
       "cron_jobs",
       "dashboard",
@@ -182,7 +188,9 @@
       "money_s3",
       "monthly_report",
       "oss_rates",
+      "other_items",
       "pamica",
+      "parallelRun",
       "payment_method",
       "payment_order",
       "payroll",
@@ -417,37 +425,46 @@
       "purchase_invoice"
     ],
     "imports-money-s3": [
+      "company_profile",
       "imports",
       "money_s3"
     ],
     "imports-pohoda": [
+      "company_profile",
       "imports",
       "pamica",
       "pohoda"
     ],
     "imports-pamica": [
+      "company_profile",
       "imports",
       "pamica",
       "pohoda"
     ],
     "imports-premier": [
+      "company_profile",
       "imports",
       "premier"
     ],
     "imports-stereo-nx": [
+      "company_profile",
       "imports",
       "stereo_nx"
     ],
     "purchase-invoices-payment-orders": [
       "bank_connection",
       "dimensions",
+      "documents",
+      "linked_documents",
+      "other_items",
       "payment_method",
       "payment_order",
       "purchase_invoice"
     ],
     "purchase-invoice-ai-import": [
       "aiGateway",
-      "integrations"
+      "integrations",
+      "purchase_invoice"
     ],
     "purchase-invoice-new": [
       "automation",
@@ -501,6 +518,20 @@
     ],
     "document-detail": [
       "documents"
+    ],
+    "other-items": [
+      "other_items"
+    ],
+    "other-item-new": [
+      "other_items"
+    ],
+    "other-item-detail": [
+      "documents",
+      "linked_documents",
+      "other_items"
+    ],
+    "other-item-edit": [
+      "other_items"
     ],
     "document-requests": [
       "document_requests"
@@ -592,21 +623,28 @@
       "users"
     ],
     "accounting-account-detail": [
-      "dimensions"
+      "dimensions",
+      "documents",
+      "linked_documents",
+      "other_items"
     ],
     "accounting-journal": [
       "activation",
       "automation",
       "dimensions",
       "documents",
-      "linked_documents"
+      "linked_documents",
+      "other_items"
     ],
     "accounting-journal-new": [
       "dimensions"
     ],
     "accounting-setup-assistant": [
       "dimensions",
-      "imports"
+      "documents",
+      "imports",
+      "linked_documents",
+      "other_items"
     ],
     "accounting-general-ledger": [
       "activation",
@@ -617,10 +655,14 @@
       "dimensions"
     ],
     "accounting-account-statement": [
-      "dimensions"
+      "dimensions",
+      "documents",
+      "linked_documents",
+      "other_items"
     ],
     "accounting-balance-sheet": [
       "activation",
+      "dimensions",
       "reports"
     ],
     "accounting-income-statement": [
@@ -643,8 +685,14 @@
     "accounting-section18-statements": [
       "activation"
     ],
+    "accounting-parallel-run": [
+      "parallelRun"
+    ],
     "accounting-monthly-check": [
       "checks"
+    ],
+    "accounting-tax-base-adjustments": [
+      "taxReturn"
     ],
     "manual-posting-queue": [
       "manualQueue"
@@ -819,6 +867,7 @@
     "stats": [
       "dashboard",
       "errors",
+      "other_items",
       "project",
       "stats"
     ],
@@ -826,6 +875,7 @@
       "costs",
       "dashboard",
       "errors",
+      "other_items",
       "purchase_invoice"
     ],
     "bank-statements": [
@@ -885,6 +935,7 @@
     "admin-settings": [
       "activation",
       "automation",
+      "company_profile",
       "domains",
       "invoice_default_note",
       "settings",
@@ -898,6 +949,12 @@
     ],
     "admin-suppliers": [
       "settings"
+    ],
+    "credit-cards": [
+      "credit_cards"
+    ],
+    "credit-card-detail": [
+      "credit_cards"
     ],
     "admin-codebooks": [
       "expense_categories",
@@ -955,6 +1012,9 @@
       "aiGateway",
       "automation",
       "integrations"
+    ],
+    "crm-dashboard": [
+      "other_items"
     ],
     "portfolio-overview": [
       "portfolio"

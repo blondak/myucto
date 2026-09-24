@@ -8,3 +8,9 @@ SET NAMES utf8mb4;
 
 ALTER TABLE payroll_migration_reference_totals
   MODIFY COLUMN source ENUM('pamica','pohoda','money_s3','other','stereo_nx') NOT NULL;
+
+ALTER TABLE payroll_posting_map_proposals
+  MODIFY COLUMN source ENUM('pamica','pohoda','money_s3','other','stereo_nx') NOT NULL;
+
+-- Původní číslo této větve mezitím obsadila jiná migrace v masteru.
+DELETE FROM migrations WHERE filename = '1867_payroll_migration_stereo_nx_source.sql';

@@ -36,6 +36,8 @@ final class ChartAccountUsage
         'accounting_balance_inventory_items' => ['account_code'],
         'accounting_supplier_settings'     => ['fuel_account_code', 'vehicle_repair_account_code'],
         'purchase_invoice_vat_allocations' => ['account_code'],
+        'other_items'                      => ['account_code', 'counter_account_code'],
+        'other_item_posting_lines'        => ['account_code'],
         'payroll_dimensions'               => ['default_account_code'],
         'payroll_employees'                => ['net_settlement_account_code'],
         'payroll_employee_profiles'        => ['partner_settlement_account_code'],
@@ -153,6 +155,8 @@ final class ChartAccountUsage
             'accounting_balance_inventory_items' => 'inventura zůstatků',
             'accounting_supplier_settings' => 'nastavení účetnictví',
             'purchase_invoice_vat_allocations' => 'rozpad DPH přijatých faktur',
+            'other_items'                 => 'ostatní pohledávky a závazky',
+            'other_item_posting_lines'    => 'kontace ostatních pohledávek a závazků',
             default                        => $table,
         };
     }

@@ -12,6 +12,56 @@ Pokud vedeš **daňovou evidenci** místo podvojného účetnictví, sekce menu
 ([§ 51](74_Danova_evidence.md): peněžní deník, pohledávky a závazky). Tahle
 kapitola je pro režim **podvojné účetnictví** (`double_entry`).
 
+## Ostatní pohledávky a závazky
+
+V menu **Peníze → Ostatní pohledávky a závazky** založíš pohledávku nebo závazek,
+který není vydanou ani přijatou fakturou. Zadej titul, protistranu, částku
+v CZK, datum vzniku a splatnosti. Cizoměnové položky tato agenda zatím
+nepřijímá, protože by vyžadovaly kurzové přecenění při uzávěrce.
+V podvojném účetnictví vyber účet
+pohledávky nebo závazku a protiúčet podle skutečného případu. Před potvrzením
+je položka konceptem. Tlačítko **Zaúčtovat** vytvoří jediný zápis v deníku a
+přidělí číslo řady OP nebo OZ. Storno vytvoří opravný zápis; položku s
+přiřazenou úhradou je třeba nejprve od úhrady odpojit.
+Pokud se má změnit kontace již zaúčtované položky, použij **Přeúčtovat**.
+Zadáš nový účet, protiúčet, datum a důvod. Systém v jedné operaci stornuje
+původní zápis a vytvoří nový, doklad si zachová ID a číslo. Datum musí
+spadat do otevřeného období.
+
+Na detailu lze připojit originály ze [skladu dokumentů](34_Dokumenty.md) a
+přiřadit volnou bankovní či pokladní úhradu. Částečná úhrada sníží zbývající
+částku. U zaúčtované položky musí být bankovní nebo pokladní zápis veden
+proti stejnému účtu pohledávky či závazku. Cizoměnové úhrady vyžadují
+samostatné kurzové vypořádání a v této agendě se automaticky nepárují.
+Storno účetního zápisu platby znovu otevře zůstatek. Pokud stejnou platbu
+zaúčtuješ znovu, přiřaď ji k položce znovu ve stejné částce. Původní
+úhrada tak zůstane správně započtená v historickém saldu před stornem.
+
+Na detailu můžeš založit **opakování** z aktuální položky. Zvol měsíční,
+čtvrtletní nebo roční četnost a případné koncové datum. Denní plánovač
+vytváří termíny na 90 dní dopředu jako samostatné koncepty, které účetní před zaúčtováním
+zkontroluje; nikdy je sám nezaúčtuje. Koncepty lze vytvořit i ručně do
+zvoleného data. Opakované spuštění stejný termín nevytvoří znovu. Rozvrh lze
+pozastavit a obnovit. Každý vygenerovaný doklad má vlastní přílohy a úhrady.
+Přílohy zdrojového dokladu, například smlouva, se při vytvoření konceptu
+automaticky propojí i s novým dokladem; soubor zůstane jediný ve skladu
+dokumentů. Zdrojový doklad rozvrhu nelze smazat.
+Vygenerovaný koncept lze zrušit; zůstane v rozvrhu jako zrušený termín,
+takže jej další spuštění nevytvoří znovu.
+
+**Splátkový kalendář** rozděluje splatnost jedné položky do 2 až 120 termínů.
+Součet splátek musí být přesně roven částce dokladu. V předpovědi cash-flow
+se každá splátka objeví ve svém termínu, přijaté úhrady se odečítají od
+nejstarší splátky. V účetním deníku zůstává jediný zápis za celý doklad.
+Po přiřazení první úhrady už nelze kalendář změnit.
+
+Mzdy a daňové zálohy se v přehledu zobrazují ze svých modulů. Jejich částku
+ani úhradu zde neupravuj; použij odkaz na zdroj. Mzdy, DPH a daň z příjmů
+se zde ručně nezakládají. Přehled budoucích plateb vstupuje do předpovědi
+cash-flow. Na stránkách Tržby, Náklady a Zisk je zvlášť uveden výsledkový
+dopad ostatních položek podle výnosového či nákladového protiúčtu. Rozvahové
+položky, například kauce a jistina úvěru, tento dopad nemají.
+
 ## 50.1 Než začneš — co je „zaúčtováno" a proč na tom všechno stojí
 
 Vydaná i přijatá faktura, bankovní/pokladní pohyb i majetkový doklad mohou
@@ -488,6 +538,7 @@ kontace se rovněž nikdy neporovnávají přes firmy.
 | Rozvaha | [Rozvaha](57_Rozvaha.md) |
 | Výsledovka | [Druhová](58_Vysledovka_druhova.md) a [účelová](59_Vysledovka_ucelova.md) |
 | Otevřené pohledávky a závazky | [Saldokonto](60_Saldokonto.md) |
+| Jiné pohledávky a závazky bez faktury | [Ostatní pohledávky a závazky](52_Ucetni_denik.md#5213-ostatni-pohledavky-a-zavazky) |
 | Měsíční kontroly, úplnost dokladů, K1–K10 a inventarizace | [Účetní kontroly a inventarizace](46_Ucetni_kontroly_a_inventarizace.md) |
 | Mzdová rekapitulace, kontace a mzdový list | [Mzdy](64_Mzdy.md) |
 | Úplný mzdový modul a měsíční mzdový běh | [Úplné mzdy](75_Uplne_mzdy.md) |

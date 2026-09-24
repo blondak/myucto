@@ -6,6 +6,10 @@ namespace MyInvoice\Action\Dashboard;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
+use MyInvoice\Service\Accounting\Obligations\ExistingObligationSourceService;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Support\Sql\CzkAmountExpr;
 use MyInvoice\Support\Sql\PayablePredicate;
@@ -38,7 +42,10 @@ final class PurchaseSummaryAction
     /** Stavy nezaplacených závazků (čeká na úhradu dodavateli). */
     private const UNPAID_STATUSES = "('received', 'booked')";
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly ExistingObligationSourceService $obligationSources,
+    ) {}
 
     public function __invoke(Request $request, Response $response): Response
     {
@@ -48,6 +55,18 @@ final class PurchaseSummaryAction
         $prevYear = $year - 1;
         $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         $isVatPayer = $this->fetchIsVatPayer($pdo, $sid);
+        $sources = $this->obligationSources;
+        $derived = [];
+        $forecastFrom = $today->format('Y-m-d');
+        $forecastTo = $today->modify('+90 days')->format('Y-m-d');
+        if (RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
+            $derived = $sources->taxAdvances($sid, $forecastFrom, $forecastTo);
+            array_push($derived, ...$sources->taxForecasts($sid, $forecastFrom, $forecastTo));
+        }
+        if (RequestAuthorization::allows($request, 'payroll.payments', AccessLevel::READ)) {
+            array_push($derived, ...$sources->payrollLiabilities($sid, $forecastFrom, $forecastTo));
+            array_push($derived, ...$sources->payrollForecasts($sid, $forecastFrom, $forecastTo));
+        }
 
         return Json::ok($response, [
             'kpi'                    => $this->kpi($pdo, $year, $prevYear, $sid, $isVatPayer),
@@ -62,10 +81,15 @@ final class PurchaseSummaryAction
             'cashflow_out_ytd'       => $this->cashflowOutYtd($pdo, $year, $prevYear, $sid),
             'payment_days_histogram' => $this->paymentDaysHistogram($pdo, $sid),
             'vat_breakdown_12m'      => $isVatPayer ? $this->vatInputBreakdown12m($pdo, $sid) : [],
-            'cashflow_forecast'      => $this->cashflowOutForecast($pdo, $sid),
+            'cashflow_forecast'      => OtherItemForecastService::mergeSourceCumulative(
+                (new OtherItemForecastService($this->db))->mergeCumulative(
+                    $this->cashflowOutForecast($pdo, $sid), $sid, 'payable', 'out'),
+                $derived, 'payable', 'out'),
             'due_buckets'            => $this->dueBuckets($pdo, $sid),
             'aging_report'           => $this->agingReport($pdo, $sid),
             'costs_forecast'         => $this->costsForecast($pdo, $year, $prevYear, $sid, $isVatPayer),
+            'other_item_result_impact' => (new OtherItemForecastService($this->db))->resultImpact(
+                $sid, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)),
             'expense_breakdown_12m'  => $this->expenseBreakdown12m($pdo, $sid, $isVatPayer),
             'invoice_size_histogram' => $this->invoiceSizeHistogram($pdo, $sid, $isVatPayer),
             'costs_last_30d'         => $this->costsLast30d($pdo, $sid, $isVatPayer),

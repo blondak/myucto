@@ -285,11 +285,104 @@ final class DimensionService
         return $out;
     }
 
-    /** @return array{header:array<int,int>, items:array<int,array<int,int>>} */
+    /**
+     * Ověří rozpad řádku nebo dokladu mezi víc hodnot typu. Vstup je typ => seznam
+     * `{value_id, share}` (nebo typ => hodnota => podíl); podíl 0–1, aspoň dvě hodnoty,
+     * součet 1 (tolerance miliontiny kvůli převodu částky na podíl). Prázdný typ se vypustí.
+     *
+     * @param array<int|string,mixed> $raw
+     * @param list<int> $current dosavadní hodnoty (smí zůstat i uzavřené)
+     * @return array<int,array<int,float>> typ => hodnota => podíl
+     */
+    public function normalizeSplits(int $supplierId, array $raw, array $current = []): array
+    {
+        $types = [];
+        foreach ($this->repo->listTypes($supplierId) as $t) {
+            $types[$t['id']] = $t;
+        }
+        $out = [];
+        foreach ($raw as $typeId => $entries) {
+            $typeId = (int) $typeId;
+            if (!is_array($entries) || $entries === []) {
+                continue;
+            }
+            if (!isset($types[$typeId])) {
+                throw new DimensionException('invalid_dimension', 'Neplatný typ dimenze #' . $typeId . ' v rozpadu.', 400);
+            }
+            $shares = [];
+            foreach ($entries as $key => $entry) {
+                [$valueId, $share] = is_array($entry)
+                    ? [(int) ($entry['value_id'] ?? 0), (float) ($entry['share'] ?? 0)]
+                    : [(int) $key, (float) $entry];
+                if ($valueId <= 0) {
+                    continue;
+                }
+                if (isset($shares[$valueId])) {
+                    throw new DimensionException('invalid_split', 'Hodnota se v rozpadu opakuje.', 400);
+                }
+                if ($share <= 0 || $share > 1) {
+                    throw new DimensionException('invalid_split', 'Podíl v rozpadu musí být větší než 0 % a nejvýš 100 %.', 422);
+                }
+                $shares[$valueId] = round($share, 10);
+            }
+            if ($shares === []) {
+                continue;
+            }
+            $values = $this->repo->valuesByIds($supplierId, array_keys($shares));
+            foreach (array_keys($shares) as $valueId) {
+                $value = $values[$valueId] ?? null;
+                if ($value === null || $value['type_id'] !== $typeId) {
+                    throw new DimensionException('invalid_dimension', 'Neplatná hodnota dimenze #' . $valueId . ' v rozpadu.', 400);
+                }
+                if (!$value['is_active'] && !in_array($valueId, $current, true)) {
+                    throw new DimensionException('dimension_closed', 'Hodnota dimenze „' . $value['name'] . '" je uzavřená.', 422);
+                }
+            }
+            if (count($shares) < 2) {
+                throw new DimensionException('invalid_split', 'Rozpad typu „' . $types[$typeId]['name'] . '" potřebuje aspoň dvě hodnoty.', 422);
+            }
+            if (abs(array_sum($shares) - 1.0) > 0.000001) {
+                throw new DimensionException(
+                    'invalid_split',
+                    'Rozpad typu „' . $types[$typeId]['name'] . '" musí dát dohromady 100 % (je '
+                        . number_format(array_sum($shares) * 100, 2, ',', ' ') . ' %).',
+                    422,
+                );
+            }
+            ksort($shares);
+            $out[$typeId] = $shares;
+        }
+        ksort($out);
+        return $out;
+    }
+
+    /**
+     * Rozpad pro API: typ => seznam `{value_id, share}` (JSON objekt podle typu).
+     *
+     * @param array<int,array<int,float>> $splits typ => hodnota => podíl
+     * @return array<int,list<array{value_id:int, share:float}>>
+     */
+    public static function splitsForApi(array $splits): array
+    {
+        $out = [];
+        foreach ($splits as $typeId => $shares) {
+            foreach ($shares as $valueId => $share) {
+                $out[(int) $typeId][] = ['value_id' => (int) $valueId, 'share' => (float) $share];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * `splits` = pořadí položky (0 = hlavička) => typ => seznam `{value_id, share}`.
+     *
+     * @return array{header:array<int,int>, items:array<int,array<int,int>>, splits:array<int,array<int,list<array{value_id:int, share:float}>>>}
+     */
     public function documentDimensions(int $supplierId, string $docType, int $docId): array
     {
         $this->requireDocument($supplierId, $docType, $docId);
-        return $this->assignments->documentDimensions($supplierId, $docType, $docId);
+        return $this->assignments->documentDimensions($supplierId, $docType, $docId)
+            + ['splits' => array_map([self::class, 'splitsForApi'], $this->assignments->documentSplits($supplierId, $docType, $docId))];
     }
 
     /**
@@ -305,16 +398,21 @@ final class DimensionService
      * zkreslil a přeúčtování, které by to spravilo, tam vede přes storno.
      * `$forRepost` = volá přeúčtování, které řádky hned potom zapíše znovu a rozdělí.
      *
+     * `$splits` = rozpad hlavičky (0) a položek (pořadí od 1) mezi víc hodnot typu,
+     * pořadí => typ => seznam `{value_id, share}`; null = ponechat dosavadní. Typ
+     * s rozpadem nemá jedinou hodnotu a naopak — novější volba vyhrává.
+     *
      * @param array<int|string,mixed> $header
      * @param array<int|string,mixed>|null $items pořadí položky => mapa typ => hodnota; null = ponechat
-     * @return array{header:array<int,int>, items:array<int,array<int,int>>, restamp:array{lines:int,needs_repost:bool,locked:bool}}
+     * @param array<int|string,mixed>|null $splits
+     * @return array{header:array<int,int>, items:array<int,array<int,int>>, splits:array<int,array<int,list<array{value_id:int, share:float}>>>, restamp:array{lines:int,needs_repost:bool,locked:bool}}
      */
-    public function saveDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items, bool $forRepost = false): array
+    public function saveDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items, bool $forRepost = false, ?array $splits = null): array
     {
         $this->requireEnabled($supplierId);
         $this->requireDocument($supplierId, $docType, $docId);
-        return $this->atomically(function () use ($supplierId, $docType, $docId, $header, $items, $forRepost): array {
-            $result = $this->applyDocument($supplierId, $docType, $docId, $header, $items);
+        return $this->atomically(function () use ($supplierId, $docType, $docId, $header, $items, $forRepost, $splits): array {
+            $result = $this->applyDocument($supplierId, $docType, $docId, $header, $items, $splits);
             if (!$forRepost && $result['restamp']['needs_repost'] && $result['restamp']['locked']) {
                 throw new DimensionException('split_in_locked_period', self::SPLIT_LOCKED_MESSAGE, 409);
             }
@@ -334,16 +432,17 @@ final class DimensionService
      *
      * @param array<int|string,mixed> $header
      * @param array<int|string,mixed>|null $items
+     * @param array<int|string,mixed>|null $splits
      * @return array{header:array<int,int>, items:array<int,array<int,int>>,
      *               restamp:array{lines:int,needs_repost:bool,locked:bool}, refused:bool,
      *               lines:list<array{id:int, entry_id:int, account_code:?string, account_name:?string, side:string, amount:float, dimensions:array<int,int>}>}
      */
-    public function previewDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items): array
+    public function previewDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items, ?array $splits = null): array
     {
         $this->requireEnabled($supplierId);
         $this->requireDocument($supplierId, $docType, $docId);
-        return $this->atomically(function () use ($supplierId, $docType, $docId, $header, $items): array {
-            $result = $this->applyDocument($supplierId, $docType, $docId, $header, $items);
+        return $this->atomically(function () use ($supplierId, $docType, $docId, $header, $items, $splits): array {
+            $result = $this->applyDocument($supplierId, $docType, $docId, $header, $items, $splits);
             $result['refused'] = $result['restamp']['needs_repost'] && $result['restamp']['locked'];
             $result['lines'] = $this->postedLines($supplierId, self::DOCUMENTS[$docType][1], $docId);
             return $result;
@@ -353,14 +452,21 @@ final class DimensionService
     /**
      * @param array<int|string,mixed> $header
      * @param array<int|string,mixed>|null $items
-     * @return array{header:array<int,int>, items:array<int,array<int,int>>, restamp:array{lines:int,needs_repost:bool,locked:bool}}
+     * @param array<int|string,mixed>|null $splits
+     * @return array{header:array<int,int>, items:array<int,array<int,int>>, splits:array<int,array<int,list<array{value_id:int, share:float}>>>, restamp:array{lines:int,needs_repost:bool,locked:bool}}
      */
-    private function applyDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items): array
+    private function applyDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items, ?array $splits = null): array
     {
         $current = $this->assignments->documentDimensions($supplierId, $docType, $docId);
+        $currentSplits = $this->assignments->documentSplits($supplierId, $docType, $docId);
         $currentIds = array_values($current['header']);
         foreach ($current['items'] as $dims) {
             array_push($currentIds, ...array_values($dims));
+        }
+        foreach ($currentSplits as $byType) {
+            foreach ($byType as $shares) {
+                array_push($currentIds, ...array_keys($shares));
+            }
         }
         $normHeader = $this->normalize($supplierId, $header, $currentIds);
         $normItems = $items === null ? $current['items'] : [];
@@ -373,13 +479,91 @@ final class DimensionService
                 $normItems[(int) $itemNo] = $norm;
             }
         }
+        if ($splits === null) {
+            // Rozpad se ponechá, jen typ, kterému teď volba dala jedinou hodnotu, ho ztratí.
+            $normSplits = $currentSplits;
+            foreach ($normSplits as $itemNo => $byType) {
+                $single = $itemNo === 0 ? $normHeader : ($normItems[$itemNo] ?? []);
+                $normSplits[$itemNo] = array_diff_key($byType, $single);
+            }
+        } else {
+            $normSplits = [];
+            foreach ($splits as $itemNo => $byType) {
+                if ((int) $itemNo < 0 || !is_array($byType)) {
+                    continue;
+                }
+                $norm = $this->normalizeSplits($supplierId, $byType, $currentIds);
+                if ($norm !== []) {
+                    $normSplits[(int) $itemNo] = $norm;
+                }
+            }
+            foreach ($normSplits as $itemNo => $byType) {
+                if ($itemNo === 0) {
+                    $normHeader = array_diff_key($normHeader, $byType);
+                } elseif (isset($normItems[$itemNo])) {
+                    $normItems[$itemNo] = array_diff_key($normItems[$itemNo], $byType);
+                }
+            }
+        }
+        $normSplits = array_filter($normSplits, static fn (array $byType): bool => $byType !== []);
+        ksort($normSplits);
         $this->assignments->replaceDocumentDimensions($supplierId, $docType, $docId, $normHeader, $normItems);
+        if ($normSplits !== [] || $currentSplits !== []) {
+            $this->assignments->replaceDocumentSplits($supplierId, $docType, $docId, $normSplits);
+        }
         $sourceType = self::DOCUMENTS[$docType][1];
         $restamp = $sourceType !== null
             ? $this->posting->restampDimensions($supplierId, $sourceType, $docId)
             : ['lines' => 0, 'needs_repost' => false];
         $restamp['locked'] = $sourceType !== null && $this->postedOutsideOpenPeriod($supplierId, $sourceType, $docId);
-        return ['header' => $normHeader, 'items' => $normItems, 'restamp' => $restamp];
+        if ($sourceType === 'invoice' || $sourceType === 'purchase_invoice') {
+            $restamp['lines'] += $this->restampPayments($supplierId, $sourceType, $docId);
+        }
+        return [
+            'header' => $normHeader,
+            'items' => $normItems,
+            'splits' => array_map([self::class, 'splitsForApi'], $normSplits),
+            'restamp' => $restamp,
+        ];
+    }
+
+    /**
+     * Úhrady (bankovní pohyby, pokladní doklady) přebírají dimenze placené faktury
+     * při zaúčtování. Změna dimenzí faktury se proto promítne i do jejich zápisů,
+     * jinak by saldo po dimenzi zůstalo rozjeté.
+     */
+    private function restampPayments(int $supplierId, string $sourceType, int $docId): int
+    {
+        $pdo = $this->db->pdo();
+        if ($sourceType === 'invoice') {
+            $bank = $pdo->prepare(
+                'SELECT ip.bank_transaction_id FROM invoice_payments ip
+                   JOIN invoices i ON i.id = ip.invoice_id AND i.supplier_id = ?
+                  WHERE ip.invoice_id = ? AND ip.bank_transaction_id IS NOT NULL
+                 UNION
+                 SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = ? AND invoice_id = ?
+                 UNION
+                 SELECT bt.id FROM bank_transactions bt
+                   JOIN bank_statements bs ON bs.id = bt.statement_id
+                  WHERE bt.matched_invoice_id = ? AND ' . BankStatementOwnershipResolver::sql()
+            );
+            $bank->execute([$supplierId, $docId, $supplierId, $docId, $docId, ...BankStatementOwnershipResolver::params($supplierId)]);
+            $cashColumn = 'invoice_id';
+        } else {
+            $bank = $pdo->prepare('SELECT DISTINCT bank_transaction_id FROM payment_matches WHERE supplier_id = ? AND purchase_invoice_id = ?');
+            $bank->execute([$supplierId, $docId]);
+            $cashColumn = 'purchase_invoice_id';
+        }
+        $cash = $pdo->prepare("SELECT id FROM cash_documents WHERE supplier_id = ? AND {$cashColumn} = ?");
+        $cash->execute([$supplierId, $docId]);
+        $lines = 0;
+        foreach ($bank->fetchAll(PDO::FETCH_COLUMN) as $txId) {
+            $lines += $this->posting->restampDimensions($supplierId, 'bank', (int) $txId)['lines'];
+        }
+        foreach ($cash->fetchAll(PDO::FETCH_COLUMN) as $cashId) {
+            $lines += $this->posting->restampDimensions($supplierId, 'cash', (int) $cashId)['lines'];
+        }
+        return $lines;
     }
 
     /**
@@ -493,31 +677,117 @@ final class DimensionService
      * Ruční změna dimenzí řádků zápisu (i zaúčtovaného a v uzavřeném období — mění
      * se jen analytika).
      *
+     * `$splits` = id řádku => typ => seznam `{value_id, share}` (rozpad řádku mezi víc
+     * hodnot typu); null = rozpady ponechat. Typ s rozpadem jedinou hodnotu nemá
+     * a naopak: jediná hodnota zvolená teď rozpad téhož typu zruší. Povinnou dimenzi
+     * pravidla s vynucením `error` z řádku odebrat nejde (DimensionRuleService).
+     *
      * @param array<int|string,mixed> $lines id řádku => mapa typ => hodnota
+     * @param array<int|string,mixed>|null $splits
      * @return int počet změněných řádků
      */
-    public function saveEntryLines(int $supplierId, int $entryId, array $lines): int
+    public function saveEntryLines(int $supplierId, int $entryId, array $lines, ?array $splits = null): int
     {
         $this->requireEnabled($supplierId);
-        $stmt = $this->db->pdo()->prepare('SELECT id FROM journal_entry_lines WHERE supplier_id = ? AND entry_id = ?');
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'SELECT l.id, l.account_id, l.side, l.amount, je.source_type, je.entry_date
+               FROM journal_entry_lines l
+               JOIN journal_entries je ON je.id = l.entry_id AND je.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND l.entry_id = ?
+              ORDER BY l.line_no, l.id'
+        );
         $stmt->execute([$supplierId, $entryId]);
-        $lineIds = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
-        if ($lineIds === []) {
+        $rows = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $rows[(int) $r['id']] = $r;
+        }
+        if ($rows === []) {
             throw new DimensionException('not_found', 'Účetní zápis nenalezen.', 404);
         }
         $current = $this->assignments->entryLineDimensions($supplierId, $entryId);
-        $changed = 0;
+        $currentSplits = $this->assignments->entryLineSplits($supplierId, $entryId);
+        $newDims = $current;
+        $newSplits = $currentSplits;
         foreach ($lines as $lineId => $dims) {
             $lineId = (int) $lineId;
-            if (!in_array($lineId, $lineIds, true) || !is_array($dims)) {
+            if (!isset($rows[$lineId]) || !is_array($dims)) {
                 throw new DimensionException('invalid_line', 'Řádek #' . $lineId . ' do zápisu nepatří.', 400);
             }
-            $norm = $this->normalize($supplierId, $dims, array_values($current[$lineId] ?? []));
-            if ($this->assignments->replaceLineDimensions($supplierId, $lineId, $norm)) {
+            $newDims[$lineId] = $this->normalize($supplierId, $dims, array_values($current[$lineId] ?? []));
+            if ($splits === null && isset($newSplits[$lineId])) {
+                $newSplits[$lineId] = array_diff_key($newSplits[$lineId], $newDims[$lineId]);
+            }
+        }
+        foreach ($splits ?? [] as $lineId => $byType) {
+            $lineId = (int) $lineId;
+            if (!isset($rows[$lineId]) || !is_array($byType)) {
+                throw new DimensionException('invalid_line', 'Řádek #' . $lineId . ' do zápisu nepatří.', 400);
+            }
+            $currentIds = [];
+            foreach ($currentSplits[$lineId] ?? [] as $shares) {
+                array_push($currentIds, ...array_keys($shares));
+            }
+            $newSplits[$lineId] = $this->normalizeSplits($supplierId, $byType, $currentIds);
+            $newDims[$lineId] = array_diff_key($newDims[$lineId] ?? [], $newSplits[$lineId]);
+        }
+
+        // Kontrolují se jen upravované řádky — starší řádek bez povinné dimenze
+        // (převzatá historie) nesmí zablokovat opravu jiného řádku téhož zápisu.
+        $first = reset($rows);
+        $touched = array_filter($rows, static function (array $r) use ($current, $newDims, $currentSplits, $newSplits): bool {
+            $id = (int) $r['id'];
+            $before = $current[$id] ?? [];
+            $after = $newDims[$id] ?? [];
+            ksort($before);
+            ksort($after);
+            return $before !== $after
+                || !DimensionAssignmentRepository::sameSplits($currentSplits[$id] ?? [], $newSplits[$id] ?? []);
+        });
+        $this->ruleService()->assertLines(
+            $supplierId,
+            (string) $first['source_type'],
+            array_map(static fn (array $r): array => [
+                'account_id' => (int) $r['account_id'],
+                'side' => (string) $r['side'],
+                'amount' => (float) $r['amount'],
+                'dimensions' => $newDims[(int) $r['id']] ?? [],
+                'dimension_splits' => $newSplits[(int) $r['id']] ?? [],
+            ], array_values($touched)),
+            (string) $first['entry_date'],
+        );
+
+        $changed = 0;
+        foreach (array_keys($rows) as $lineId) {
+            $dimsChanged = isset($newDims[$lineId])
+                && $this->assignments->replaceLineDimensions($supplierId, $lineId, $newDims[$lineId]);
+            $splitsChanged = ($splits !== null || isset($currentSplits[$lineId]))
+                && $this->assignments->replaceLineSplits($supplierId, $lineId, $newSplits[$lineId] ?? []);
+            if ($dimsChanged || $splitsChanged) {
                 $changed++;
             }
         }
         return $changed;
+    }
+
+    /** @return array<int,array<int,list<array{value_id:int, share:float}>>> řádek => typ => rozpad */
+    public function entryLineSplits(int $supplierId, int $entryId): array
+    {
+        return array_map([self::class, 'splitsForApi'], $this->assignments->entryLineSplits($supplierId, $entryId));
+    }
+
+    /**
+     * @param list<int> $lineIds
+     * @return array<int,array<int,list<array{value_id:int, share:float}>>> řádek => typ => rozpad
+     */
+    public function lineSplits(int $supplierId, array $lineIds): array
+    {
+        return array_map([self::class, 'splitsForApi'], $this->assignments->lineSplits($supplierId, $lineIds));
+    }
+
+    private function ruleService(): DimensionRuleService
+    {
+        return new DimensionRuleService($this->db);
     }
 
     // ── výchozí dimenze klienta a zakázky ─────────────────────────────────────
@@ -583,11 +853,14 @@ final class DimensionService
     {
         $value = $this->requireValue($supplierId, $valueId);
         $ids = $withDescendants ? $this->repo->descendantIds($supplierId, $valueId) : [$valueId];
+        $type = $this->repo->findType($supplierId, (int) $value['type_id']);
         return new DimensionFilter(
             $value['type_id'],
             $valueId,
             $ids,
             array_values($this->repo->costCenterCodes($supplierId, $ids)),
+            trim(($type !== null ? $type['name'] . ': ' : '') . $value['code'] . ' ' . $value['name'])
+                . ($withDescendants && count($ids) > 1 ? ' (vč. podřízených)' : ''),
         );
     }
 

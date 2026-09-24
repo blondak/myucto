@@ -12,7 +12,7 @@ use PDO;
  * Identita partnera při převodu z cizího programu: normalizace IČO a DIČ a párování na
  * kontakt, který už ve firmě je.
  *
- * Společné jádro převodů (Money S3, Pohoda, PREMIER, Stereo NX):
+ * Společné jádro převodů externích účetních programů:
  *   - IČO v kanonickém tvaru (8 číslic) - cizí programy vedou tentýž subjekt jednou
  *     s vodicí nulou a jednou bez ní,
  *   - DIČ jen tehdy, když má tvar DIČ (kód státu a aspoň jedna číslice); do pole DIČ se
@@ -134,5 +134,26 @@ final class PartnerIdentityMatcher
             $clientId,
             $supplierId,
         ]);
+    }
+
+    /**
+     * Nový kontakt ze zdrojového adresáře; volající rozhoduje o ověřené zemi a DPH.
+     * @param array{name:string,ico:string,dic:string,street:string,city:string,zip:string,email:string,phone:string,
+     *     country_id:int,currency_id:int,is_vat_payer:bool,note:string} $client
+     */
+    public function insertImportedClient(int $supplierId, array $client): int
+    {
+        $this->db->pdo()->prepare('INSERT INTO clients
+            (supplier_id, company_name, ic, dic, street, city, zip, country_id, main_email, phone,
+             currency_default_id, is_customer, is_vendor, is_vat_payer, note, auto_send_reminders)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, 0)')->execute([
+            $supplierId, mb_substr($client['name'], 0, 190), $client['ico'] !== '' ? $client['ico'] : null,
+            self::vatId($client['dic']) ?: null,
+            mb_substr($client['street'], 0, 190), mb_substr($client['city'], 0, 120),
+            mb_substr($client['zip'], 0, 10), $client['country_id'],
+            mb_substr($client['email'], 0, 190) ?: null, mb_substr($client['phone'], 0, 40) ?: null,
+            $client['currency_id'], $client['is_vat_payer'] ? 1 : 0, $client['note'],
+        ]);
+        return (int) $this->db->pdo()->lastInsertId();
     }
 }

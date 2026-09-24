@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver;
+use MyInvoice\Service\Payroll\Time\PayrollJmhzEvidenceStateDays;
 use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
 
 final class JmhzEldpEvidenceBuilder
@@ -92,11 +93,14 @@ final class JmhzEldpEvidenceBuilder
     ];
 
     /**
-     * Neodpracované hodiny, za které platí náhradu ZAMĚSTNAVATEL (10276).
+     * Neodpracované hodiny, za které platí náhradu ZAMĚSTNAVATEL
+     * (`unworked_paid_millihours` pracovního souhrnu).
      *
      * Dovolená (§ 222 ZP) a nemoc uvnitř okna § 192 ZP. Nemoc za oknem platí
      * dávka ČSSZ a ošetřovné taky, proto tam nepatří — stejná definice, jakou
      * počítá {@see \MyInvoice\Service\Payroll\Time\PayrollJmhzAbsenceHoursDeriver}.
+     * Atribut 10276 je užší o nemoc, kterou hlášení vede v 10471; převádí
+     * ji serializér ({@see JmhzScenario1XmlSerializer::reportedUnworkedHours()}).
      */
     private const PAID_UNWORKED_FIELDS = [
         'vacation_millihours',
@@ -401,6 +405,8 @@ final class JmhzEldpEvidenceBuilder
             $excluded,
             $insured ? $days : $inclusiveDays,
             $summaryVersion,
+            $insuranceFrom,
+            $insuranceTo,
         );
         $code = $confirmation['code'] ?? null;
         $confirmedBase = $confirmation['assessment_base_czk'] ?? null;
@@ -706,6 +712,8 @@ final class JmhzEldpEvidenceBuilder
         array $excluded,
         int $expectedRelationshipDays,
         string $summaryVersion,
+        string $intervalFrom,
+        string $intervalTo,
     ): void
     {
         $values = $this->object($workSummary['values'] ?? null, 'work_summary.values');
@@ -716,12 +724,24 @@ final class JmhzEldpEvidenceBuilder
          * DPČ pod rozhodnou částkou). Porovnávat 10265 s počtem dnů pojištění
          * proto jde jen u účastného vztahu; u neúčastného se očekává délka
          * trvání vztahu. U DPČ a DPP zůstává 0 (viz `evidenceInterval`).
+         *
+         * Pracovní poměr navíc není v evidenčním stavu po dny mateřské,
+         * rodičovské a otcovské (PayrollJmhzEvidenceStateDays). Souhrn
+         * potvrzený dřív, než se ty dny odečítaly, nese celé trvání vztahu;
+         * ten se přijme tak, jak byl potvrzen, aby se kvůli statistickému
+         * údaji nemusel znovu otevírat měsíc se schváleným během. Nový souhrn
+         * hodnotu nepřebírá od účetní, ale z náhledu, takže jinou než
+         * sníženou mít nemůže.
          */
         $expectedEvidenceDays = in_array($relationType, ['dpc', 'dpp'], true)
-            ? 0
-            : $expectedRelationshipDays;
+            ? [0]
+            : array_values(array_unique([
+                $expectedRelationshipDays
+                    - PayrollJmhzEvidenceStateDays::outsideDays($relationType, $intervalFrom, $intervalTo, $absences),
+                $expectedRelationshipDays,
+            ]));
         if (($workSummary['conditional_blocks_confirmed'] ?? null) !== true
-            || ($values['evidence_days'] ?? null) !== $expectedEvidenceDays
+            || !in_array($values['evidence_days'] ?? null, $expectedEvidenceDays, true)
         ) {
             $this->invalid('jmhz_eldp_work_summary_mismatch', 'Pracovní souhrn nepotvrzuje běžný bezabsenční ELDP interval.');
         }

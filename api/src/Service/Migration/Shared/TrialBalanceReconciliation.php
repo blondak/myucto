@@ -92,8 +92,12 @@ final class TrialBalanceReconciliation
      * Rozvaha musí vyjít: účet, který mapa výkazů nezná (syntetika ze zdrojové osnovy
      * mimo šablonu), by ve výkazech chyběl, i když předvaha sedí na haléř.
      *
+     * Řádky aktiv se záporným netto jdou do protokolu jako varování, ne jako neúspěšná
+     * kontrola: převod je v pořádku, jde o zařazení do výkazu (výjimky mapování), které
+     * na uzávěrku převzatého roku nemá vliv.
+     *
      * @param array<string,mixed> $balanceSheet výsledek FinancialStatementService::balanceSheet()
-     * @return array{check:array{key:string,ok:bool},unmapped:list<array{account:string,name:string,balance:float}>}
+     * @return array{check:array{key:string,ok:bool},unmapped:list<array{account:string,name:string,balance:float}>,negative_net_rows:list<array{row_code:string,column:string,net:float}>}
      */
     public static function balanceSheet(array $balanceSheet): array
     {
@@ -101,10 +105,42 @@ final class TrialBalanceReconciliation
             static fn (array $u): array => ['account' => (string) $u['account_code'], 'name' => (string) $u['name'], 'balance' => round((float) $u['balance'], 2)],
             (array) ($balanceSheet['checks']['unmapped_accounts'] ?? [])
         );
+        $negative = array_map(
+            static fn (array $r): array => ['row_code' => (string) $r['row_code'], 'column' => (string) $r['column'], 'net' => round((float) $r['net'], 2)],
+            (array) ($balanceSheet['checks']['negative_net_rows'] ?? [])
+        );
         return [
             'check' => ['key' => 'balance_sheet_balanced', 'ok' => (bool) ($balanceSheet['checks']['balanced'] ?? false) && $unmapped === []],
             'unmapped' => $unmapped,
+            'negative_net_rows' => $negative,
         ];
+    }
+
+    /**
+     * Text varování protokolu k řádkům aktiv se záporným netto, null když žádný není.
+     *
+     * @param list<array{row_code:string,column:string,net:float}> $rows výsledek {@see balanceSheet()}
+     */
+    public static function negativeNetWarning(int $year, array $rows): ?string
+    {
+        if ($rows === []) {
+            return null;
+        }
+        $parts = array_map(
+            static fn (array $r): string => sprintf(
+                '%s %s Kč%s',
+                $r['row_code'],
+                number_format((float) $r['net'], 2, ',', ' '),
+                $r['column'] === 'previous' ? ' (minulé období)' : '',
+            ),
+            $rows,
+        );
+
+        return sprintf(
+            'Rok %d: rozvaha má řádek aktiv se záporným netto (%s). Opravná položka je nejspíš zařazená jinam než pohledávka, ke které patří; upravte výjimky mapování výkazů.',
+            $year,
+            implode('; ', $parts),
+        );
     }
 
     /** @param list<array{ok:bool}> $checks */

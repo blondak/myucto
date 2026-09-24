@@ -337,6 +337,20 @@ Multi-supplier ochrana — výpis musí být z účtu, který je v **Systém →
 Číselníky → Měny** aktuálního dodavatele. Pokud chceš nahrát výpis pro jiného
 dodavatele, **přepni na něj** přes přepínač v horní liště.
 
+### 999.4.8 Přímé načítání Fio skončí chybou 502
+
+Zkontroluj v aplikačním logu `log/app-YYYY-MM-DD.log` záznam
+`fio_statement_failed` a následný `bank_connection_operation_failed`. Je-li
+nastavené `MYINVOICE_DATA_DIR`, log je v jeho podsložce `log`. Záznam Fio uvádí
+fázi `request`, `read` nebo `gpc`, kód chyby a případně důvod odmítnutí struktury
+GPC, HTTP stav a délku odpovědi. Neobsahuje token, číslo účtu ani obsah výpisu.
+V Dockeru se aplikační souborový log nemusí objevit ve výstupu `docker logs`.
+
+Pro tento typ chyby nezapínej na veřejně dostupném serveru `app.debug`.
+Konektor chybu zachytí a vrátí řízenou odpověď, takže přepnutí debug režimu
+nepřidá podrobnosti o bankovním formátu. K nahlášení stačí anonymizovaný
+diagnostický řádek, čas pokusu a období výpisu. Token ani výpis neposílej.
+
 ## 999.5 Exporty
 
 ### 999.5.1 ISDOC import do Pohody hodí chybu

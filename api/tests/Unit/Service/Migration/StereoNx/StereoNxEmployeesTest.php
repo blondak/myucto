@@ -10,6 +10,32 @@ use PHPUnit\Framework\TestCase;
 
 final class StereoNxEmployeesTest extends TestCase
 {
+    public function testVerifiedHppIsAdaptedToSharedTakeoverRecord(): void
+    {
+        $tables = $this->tables();
+        $tables['MZAMEST'][0]['MesTarif'] = 28_000.0;
+        $plan = StereoNxEmployees::fromTables($tables, ['ico' => '12345679'], 1);
+
+        $takeover = StereoNxEmployees::toTakeoverRecord($plan['records'][0]);
+        self::assertSame('TEST-1', $takeover->person->key);
+        self::assertSame('111', $takeover->person->healthCoverage?->status);
+        self::assertSame('TEST-1', $takeover->employment->relationKey);
+        self::assertFalse($takeover->employment->hourlyWage);
+        self::assertSame('employment', $plan['records'][0]['relation_type']);
+        self::assertSame([['from' => $plan['records'][0]['start'], 'amount' => 28_000.0, 'prorated' => false],
+        ], $takeover->employment->monthlyWages);
+    }
+
+    public function testHourlyTariffPreventsRecurringMonthlyWage(): void
+    {
+        $tables = $this->tables();
+        $tables['MZAMEST'][0]['MesTarif'] = 28_000.0;
+        $tables['MZAMEST'][0]['HodTarif'] = 215.0;
+        $plan = StereoNxEmployees::fromTables($tables, ['ico' => '12345679'], 1);
+
+        self::assertTrue(StereoNxEmployees::toTakeoverRecord($plan['records'][0])->employment->hourlyWage);
+    }
+
     public function testPreparesOnlyVerifiedEmploymentFieldsAndMarksHistoricalPayrollSkipped(): void
     {
         $tables = $this->tables();

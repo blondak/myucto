@@ -164,6 +164,7 @@ final class StatementNotesService
         private readonly EntityCategoryService $categories,
         private readonly AccountingSupplierSettingsRepository $settings,
         private readonly AccountingPeriodRepository $periods,
+        private readonly FinancialStatementService $statements,
     ) {}
 
     /**
@@ -191,6 +192,7 @@ final class StatementNotesService
             $stored[$key] = $row['content'];
         }
         $auto = $this->autoValues($supplierId, $fiscalYear, $category);
+        $offsetText = $this->taxAuthorityOffsetText($supplierId, $periodId);
 
         $sections = [];
         $missing = [];
@@ -209,7 +211,9 @@ final class StatementNotesService
                 'key'     => $key,
                 'label'   => $def['label'],
                 'legal'   => $def['legal'],
-                'hint'    => $def['hint'] ?? null,
+                'hint'    => $key === 'accounting_principles' && $offsetText !== null
+                    ? 'Rozvaha vykazuje daňové pohledávky a závazky vůči finančnímu úřadu souhrnně, v příloze to uveďte: „' . $offsetText . '"'
+                    : ($def['hint'] ?? null),
                 'scope'   => $def['scope'],
                 'auto'    => $def['auto'],
                 'content' => $content,
@@ -446,6 +450,36 @@ final class StatementNotesService
         }
 
         return $out;
+    }
+
+    /**
+     * Věta do přílohy o souhrnném vykázání daní vůči finančnímu úřadu (§ 58 odst. 2 vyhl.
+     * 500/2002 Sb. ukládá souhrnné vykázání uvést v příloze), s částkami z rozvahy.
+     * Null, když firma tuto možnost nepoužívá.
+     */
+    private function taxAuthorityOffsetText(int $supplierId, int $periodId): ?string
+    {
+        $period = $this->periods->findById($supplierId, $periodId);
+        if ($period === null || !$this->settings->taxAuthorityOffsetAppliesIn($supplierId, (int) $period['fiscal_year'])) {
+            return null;
+        }
+        $amounts = ['current' => 0.0, 'previous' => 0.0];
+        try {
+            // Příloha patří k závěrce, částky proto k rozvahovému dni (konci období).
+            $sheet = $this->statements->balanceSheet($supplierId, $periodId, (string) $period['ends_on'], 'full');
+            $amounts = (array) ($sheet['checks']['tax_authority_offset'] ?? $amounts) + $amounts;
+        } catch (ReportException) {
+            // Bez výkazu zůstane věta bez částek — příloha se kvůli tomu nezastaví.
+        }
+        $fmt = static fn (float $v): string => number_format($v, 2, ',', ' ') . ' Kč';
+
+        return sprintf(
+            'Pohledávky a závazky vůči finančnímu úřadu (daň z příjmů, daň z přidané hodnoty a ostatní daně) '
+            . 'se splatností do jednoho roku jsou v rozvaze vykázány souhrnně podle § 58 odst. 2 vyhlášky '
+            . 'č. 500/2002 Sb. Souhrnně vykázaná částka činí %s v běžném a %s v minulém účetním období.',
+            $fmt((float) $amounts['current']),
+            $fmt((float) $amounts['previous']),
+        );
     }
 
     private function categoryFor(int $supplierId, int $periodId): string

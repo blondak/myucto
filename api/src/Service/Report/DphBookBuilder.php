@@ -316,7 +316,7 @@ final class DphBookBuilder
     private function groupLedgerRows(int $supplierId, string $start, string $end): array
     {
         $grouped = [];
-        foreach ($this->ledger->rows($supplierId, $start, $end, includeDrafts: true) as $r) {
+        foreach ($this->ledger->returnRows($supplierId, $start, $end, includeDrafts: true) as $r) {
             $key = VatLedgerService::documentIdentity($r) . ':' . ($r['code'] ?? '') . ':' . $r['vat_rate'];
             if (!isset($grouped[$key])) {
                 $grouped[$key] = $r;

@@ -10,7 +10,9 @@ use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
 use MyInvoice\Repository\Payroll\PayrollAverageEarningRepository;
 use MyInvoice\Repository\Payroll\PayrollLeaveRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
+use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
 use MyInvoice\Service\Payroll\PayrollAbsenceValidator;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 
 /**
  * Zápis převzatých nepřítomností a zůstatku dovolené ({@see PayrollTakeoverEmployment}),
@@ -55,6 +57,7 @@ final class PayrollTakeoverAbsenceWriter
         private readonly PayrollAverageEarningRepository $averages,
         private readonly PayrollTimeRepository $time,
         private readonly PayrollLeaveRepository $leave,
+        private readonly PayrollRulesetProvider $rulesets,
     ) {}
 
     /**
@@ -81,20 +84,19 @@ final class PayrollTakeoverAbsenceWriter
         if ($absences === []) {
             return $counts;
         }
-        if (!$policy->absencesPerRecord) {
-            $existing = $this->db->pdo()->prepare('SELECT COUNT(*) FROM payroll_absences WHERE supplier_id = ? AND employment_id = ?');
-            $existing->execute([$supplierId, $employmentId]);
-            if ((int) $existing->fetchColumn() > 0) {
-                return $counts + ['absences_existing' => 1];
-            }
-        }
+        // Doplňuje se po záznamech: převody běží po letech a každý rok přináší další
+        // nepřítomnosti téhož vztahu. Přeskočí se jen ta, která už je zapsaná se stejným
+        // druhem a daty (opakovaný převod nic nezdvojí); jiná nepřítomnost v týchž dnech
+        // (ruční, z jiného kroku) se nezapíše a protokol ji hlásí jako překryv.
         $written = 0;
         $overlaps = 0;
         $approved = 0;
         $fromImport = 0;
         $already = 0;
-        foreach (self::mergedAbsences($absences, $overlaps) as $absence) {
-            if ($policy->absencesPerRecord && $this->recorded($supplierId, $employmentId, $absence)) {
+        $rejected = 0;
+        $continued = 0;
+        foreach (self::splitAtQuarters(self::mergedAbsences($absences, $overlaps)) as $absence) {
+            if ($this->recorded($supplierId, $employmentId, $absence)) {
                 $already++;
                 continue;
             }
@@ -127,10 +129,16 @@ final class PayrollTakeoverAbsenceWriter
                 $overlaps++;
                 continue;
             } catch (\DomainException|\InvalidArgumentException) {
-                // Nepřípustné datum nebo uzavřený rok: nechá se na účetní.
+                // Nepřípustné datum nebo uzavřený rok: nechá se na účetní, protokol ji spočítá.
+                $rejected++;
                 continue;
             }
             $written++;
+            $carried = $this->continuedWindowDays($supplierId, $employmentId, $absence, (int) $created['id'], $policy);
+            if ($carried > 0) {
+                $created = $this->absences->setSicknessWindowCarriedDays($supplierId, (int) $created['id'], $carried);
+                $continued++;
+            }
             // Schvaluje se vše, co schválení pustí: druhy bez náhrady z průměru rovnou,
             // ostatní tehdy, když čtvrtletí už má schválený průměr. Nerozhodnutá
             // nepřítomnost jinak blokuje schválení pracovního měsíce.
@@ -149,6 +157,13 @@ final class PayrollTakeoverAbsenceWriter
             $state->absenceOverlaps[$number] = $overlaps;
             $counts['absences_overlap'] = $overlaps;
         }
+        if ($rejected > 0) {
+            $state->absencesRejected[$number] = ($state->absencesRejected[$number] ?? 0) + $rejected;
+            $counts['absences_rejected'] = $rejected;
+        }
+        if ($continued > 0) {
+            $counts['sickness_window_continued'] = $continued;
+        }
         if ($approved > 0) {
             $counts['absences_approved'] = $approved;
         }
@@ -162,8 +177,49 @@ final class PayrollTakeoverAbsenceWriter
     }
 
     /**
+     * Dny okna náhrady mzdy podle § 192 ZP, které neschopnost vyčerpala ještě před touto
+     * nepřítomností, pokud je pokračováním převzaté neschopnosti téhož vztahu.
+     *
+     * Převod po letech (PREMIER) rozdělí neschopnost přes konec roku na dvě nepřítomnosti:
+     * jedna končí 31. 12., druhá začíná 1. 1. MyÚčto počítá okno od `date_from` každé
+     * nepřítomnosti zvlášť, takže by druhá dostala celých čtrnáct dnů náhrady znovu.
+     * Prodloužit první nepřítomnost evidence neumí (mění se jen stornem), proto se druhá
+     * naváže tak, jak evidence pokračování případu vede: počtem vyčerpaných dnů okna
+     * (`sickness_window_carried_days`, stejná cesta jako rozpracovaný případ z PAMICA).
+     *
+     * Navazuje se jen na nepřítomnost, kterou zapsal převod téhož zdroje a která končí den
+     * před začátkem této; ručně zapsaná sousední neschopnost může být nový případ.
+     * Řetěz více navazujících nepřítomností se sečte přes vyčerpané dny předchůdce.
+     *
+     * @param array<string,mixed> $absence
+     */
+    private function continuedWindowDays(int $supplierId, int $employmentId, array $absence, int $createdId, PayrollTakeoverPolicy $policy): int
+    {
+        if (!PayrollAbsenceRepository::isSickness(['absence_type' => $absence['type']])) {
+            return 0;
+        }
+        $from = (string) $absence['from'];
+        $previousTo = (new \DateTimeImmutable($from))->modify('-1 day')->format('Y-m-d');
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT date_from, sickness_window_carried_days FROM payroll_absences
+              WHERE supplier_id = ? AND employment_id = ? AND absence_type = ? AND date_to = ? AND id <> ?
+                AND status NOT IN ('cancelled', 'rejected') AND note LIKE ?
+              ORDER BY date_from LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $employmentId, (string) $absence['type'], $previousTo, $createdId,
+            str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $policy->note('')) . '%']);
+        $previous = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($previous === false) {
+            return 0;
+        }
+        $window = AbsenceRuleset::forDate($this->rulesets, (string) $previous['date_from'])->sicknessWindowCalendarDays();
+        $elapsed = (int) (new \DateTimeImmutable((string) $previous['date_from']))->diff(new \DateTimeImmutable($from))->format('%a');
+        return min($window, PayrollAbsenceRepository::carriedWindowDays($previous) + $elapsed);
+    }
+
+    /**
      * Je tatáž nepřítomnost (druh a data) u vztahu už zapsaná? Zrušená ani zamítnutá se
-     * nepočítá. Jen pro doplňování po záznamech ({@see PayrollTakeoverPolicy::$absencesPerRecord}).
+     * nepočítá.
      *
      * @param array<string,mixed> $absence
      */
@@ -270,6 +326,40 @@ final class PayrollTakeoverAbsenceWriter
         }
 
         return true;
+    }
+
+    /**
+     * Nepřítomnost s náhradou z průměru, která přechází přes konec kalendářního čtvrtletí
+     * (typicky dovolená rozepsaná po měsících a spojená {@see self::mergedAbsences()}),
+     * se rozdělí na hranici čtvrtletí. Náhrada se počítá z průměru zjištěného k prvnímu dni
+     * čtvrtletí (§ 354 odst. 1 ZP), evidence proto celou nepřijme
+     * ({@see PayrollAbsenceValidator::TYPES_WITHIN_QUARTER}) a bez rozdělení by se nezapsala.
+     *
+     * @param list<array<string,mixed>> $absences
+     * @return list<array<string,mixed>>
+     */
+    private static function splitAtQuarters(array $absences): array
+    {
+        $out = [];
+        foreach ($absences as $absence) {
+            if (!in_array($absence['type'], PayrollAbsenceValidator::TYPES_WITHIN_QUARTER, true)) {
+                $out[] = $absence;
+                continue;
+            }
+            $from = new \DateTimeImmutable((string) $absence['from']);
+            $to = (string) $absence['to'];
+            while (true) {
+                $month = (int) $from->format('n');
+                $quarterEnd = $from->setDate((int) $from->format('Y'), intdiv($month - 1, 3) * 3 + 3, 1)->modify('last day of this month')->format('Y-m-d');
+                if ($quarterEnd >= $to) {
+                    $out[] = ['from' => $from->format('Y-m-d')] + $absence;
+                    break;
+                }
+                $out[] = ['from' => $from->format('Y-m-d'), 'to' => $quarterEnd] + $absence;
+                $from = (new \DateTimeImmutable($quarterEnd))->modify('+1 day');
+            }
+        }
+        return $out;
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Service\Payroll\CzechBirthNumber;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 
 /**
  * Vykonávací implementace kontrol katalogu ČSSZ nad prvním profilem měsíčního
@@ -205,15 +206,15 @@ final class JmhzScenario1ControlEvaluator
     public function implementedControlIds(): array
     {
         return [
-            1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 29, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
+            1, 3, 4, 8, 9, 10, 11, 12, 13, 20, 23, 29, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
             60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
-            103, 109, 110, 112, 113, 114, 118, 121, 124, 127, 128, 129, 131, 132, 134, 135, 137, 138, 144, 145, 152,
+            103, 109, 110, 112, 113, 114, 118, 121, 124, 127, 128, 129, 131, 132, 134, 135, 137, 138, 142, 144, 145, 152,
             150, 151, 153, 154, 155, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
             204, 207, 208, 209, 213, 215,
             191, 192, 193, 211, 216, 227, 229, 232, 233, 235,
             236, 237, 240, 244, 248, 251,
-            253, 255, 260, 265, 267, 270, 271, 272, 273, 275, 282, 283, 284, 286,
-            296, 297, 299, 300, 301, 303, 304, 306, 307, 309, 310, 315, 328, 329, 330, 332,
+            253, 255, 260, 265, 267, 269, 270, 271, 272, 273, 275, 282, 283, 284, 286,
+            296, 297, 298, 299, 300, 301, 303, 304, 306, 307, 309, 310, 315, 328, 329, 330, 332,
             335, 341, 342, 343, 354, 355,
         ];
     }
@@ -353,7 +354,9 @@ final class JmhzScenario1ControlEvaluator
             310 => $this->annualResultForbiddenWhenNotPerformed($projection),
             207 => $this->employerDiscountBaseMatchesForms($projection),
             8 => $this->employerInsuranceRate($projection, '10024', '10023', 'source_row_3'),
-            10 => $this->employerInsuranceRate($projection, '10026', '10025', 'source_row_4'),
+            9 => $this->employerPartialBaseMatchesForms($projection, '10025', '10479'),
+            142 => $this->employerPartialBaseMatchesForms($projection, '10483', '10480'),
+            10 =>$this->employerInsuranceRate($projection, '10026', '10025', 'source_row_4'),
             11 => $this->employerInsuranceTotal($projection),
             12 => $this->employeeInsuranceMatchesForms($projection),
             13 => $this->insuranceTotal($projection),
@@ -409,6 +412,18 @@ final class JmhzScenario1ControlEvaluator
                 '10545',
                 '10544',
                 'source_row_7',
+            ),
+            269 => $this->employeeDiscountBaseMatchesForms(
+                $projection,
+                '10544',
+                '10546',
+                'v ovocnářství a pěstování zeleniny',
+            ),
+            298 => $this->employeeDiscountHeadcountWithinForms(
+                $projection,
+                '10543',
+                '10546',
+                'v ovocnářství a pěstování zeleniny',
             ),
             271 => $this->orchardDiscountAgainstAverageWage($projection),
             272 => $this->onlyWithFlag($projection, '10547', '10546'),
@@ -1320,11 +1335,7 @@ final class JmhzScenario1ControlEvaluator
             if (preg_match('/^\d{10}$/D', $value) !== 1) {
                 return "IK MPSV {$value} nemá deset číslic.";
             }
-            $body = (int) substr($value, 0, 9);
-            // Zbytek 10 se do jedné kontrolní číslice nevejde; stejně jako
-            // u rodného čísla se zapisuje nulou.
-            $expected = $body % 11 % 10;
-            if ((int) $value[9] !== $expected) {
+            if (!PayrollRegistrationIdentityService::oicChecksumValid($value)) {
                 return "IK MPSV {$value} nesplňuje kontrolní číslici modulo 11.";
             }
 
@@ -3295,16 +3306,22 @@ final class JmhzScenario1ControlEvaluator
      * součástí, které mají 10490 = ANO. Stejná konstrukce jako kontrola 207
      * u slevy zaměstnavatele.
      *
+     * Kontrola 269 je totéž pro slevu v ovocnářství a pěstování zeleniny:
+     * 10544 = Σ 10477 součástí s 10546 = ANO.
+     *
      * @return list<JmhzControlVerdict>
      */
     private function employeeDiscountBaseMatchesForms(
         JmhzAttributeProjection $projection,
+        string $totalId = '10486',
+        string $flagId = '10490',
+        string $discountLabel = 'pracujícího důchodce',
     ): array {
-        $total = $projection->pvpoj()->integer('10486');
+        $total = $projection->pvpoj()->integer($totalId);
         $sum = 0;
         $claimed = 0;
         foreach ($projection->forms() as $form) {
-            if ($form->boolean('10490') !== true) {
+            if ($form->boolean($flagId) !== true) {
                 continue;
             }
             ++$claimed;
@@ -3317,7 +3334,7 @@ final class JmhzScenario1ControlEvaluator
             return [JmhzControlVerdict::failed(
                 JmhzAttributeProjection::PART_PVPOJ,
                 null,
-                "Slevu pracujícího důchodce vykazuje {$claimed} součástí, ale pojistná"
+                "Slevu {$discountLabel} vykazuje {$claimed} součástí, ale pojistná"
                     . ' část úhrn jejich vyměřovacích základů neuvádí.',
             )];
         }
@@ -3325,8 +3342,8 @@ final class JmhzScenario1ControlEvaluator
             return [JmhzControlVerdict::failed(
                 JmhzAttributeProjection::PART_PVPOJ,
                 null,
-                "Úhrn vyměřovacích základů zaměstnanců se slevou {$total} Kč neodpovídá"
-                    . " součtu za součásti se slevou {$sum} Kč.",
+                "Úhrn vyměřovacích základů zaměstnanců se slevou {$discountLabel}"
+                    . " ({$totalId}) {$total} Kč neodpovídá součtu za součásti se slevou {$sum} Kč.",
             )];
         }
 
@@ -3339,18 +3356,24 @@ final class JmhzScenario1ControlEvaluator
      * ne rovnost: osoba se počítá jednou, i kdyby slevu uplatňovala z víc
      * zaměstnání.
      *
+     * Kontrola 298 je totéž pro slevu v ovocnářství a pěstování zeleniny:
+     * 10543 ≤ počet součástí s 10546 = ANO.
+     *
      * @return list<JmhzControlVerdict>
      */
     private function employeeDiscountHeadcountWithinForms(
         JmhzAttributeProjection $projection,
+        string $headcountId = '10485',
+        string $flagId = '10490',
+        string $discountLabel = 'pracujícího důchodce',
     ): array {
-        $headcount = $projection->pvpoj()->integer('10485');
+        $headcount = $projection->pvpoj()->integer($headcountId);
         if ($headcount === null) {
             return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
         }
         $claimed = 0;
         foreach ($projection->forms() as $form) {
-            if ($form->boolean('10490') === true) {
+            if ($form->boolean($flagId) === true) {
                 ++$claimed;
             }
         }
@@ -3358,8 +3381,53 @@ final class JmhzScenario1ControlEvaluator
             return [JmhzControlVerdict::failed(
                 JmhzAttributeProjection::PART_PVPOJ,
                 null,
-                "Počet zaměstnanců se slevou pracujícího důchodce {$headcount} je vyšší"
+                "Počet zaměstnanců se slevou {$discountLabel} {$headcount} je vyšší"
                     . " než počet součástí, které slevu uplatňují ({$claimed}).",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_PVPOJ)];
+    }
+
+    /**
+     * Kontroly 9 a 142 — úhrn dílčích vyměřovacích základů zaměstnavatele
+     * v pojistné části se rovná součtu týchž dílčích základů zaměstnanců:
+     * 10025 = Σ 10479 (§ 5a odst. 1 písm. b) ZPSZ, záchranáři a HZS podniku)
+     * a 10483 = Σ 10480 (písm. c), rizikové zaměstnání).
+     *
+     * Stejná konstrukce jako kontrola 209: neuvedený úhrn i neuvedený dílčí
+     * základ součásti jsou nula (XSD je vede `minOccurs="0"` a pojistná část je
+     * nese jen tehdy, když takový základ vznikl). Kontrola se nevyhodnocuje,
+     * když v podání není ani úhrn, ani jediný dílčí základ.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function employerPartialBaseMatchesForms(
+        JmhzAttributeProjection $projection,
+        string $totalId,
+        string $partId,
+    ): array {
+        $total = $projection->pvpoj()->integer($totalId);
+        $sum = 0;
+        $seen = 0;
+        foreach ($projection->forms() as $form) {
+            $part = $form->integer($partId);
+            if ($part === null) {
+                continue;
+            }
+            ++$seen;
+            $sum += $part;
+        }
+        if ($total === null && $seen === 0) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
+        }
+        $reported = $total ?? 0;
+        if ($reported !== $sum) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                "Úhrn vyměřovacích základů {$totalId} = {$reported} Kč neodpovídá součtu"
+                    . " základů {$partId} za součásti {$sum} Kč.",
             )];
         }
 

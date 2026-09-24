@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\StereoNx;
 
 use MyInvoice\Repository\ImportJobRepository;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Migration\Shared\AbstractImportJobService;
+use MyInvoice\Service\Migration\Shared\ChunkedUploadStore;
+use MyInvoice\Service\Migration\Shared\MigrationCompanyLock;
 use MyInvoice\Service\Auth\SecretEncryption;
 use Psr\Log\LoggerInterface;
 
@@ -24,18 +28,27 @@ use Psr\Log\LoggerInterface;
  * Heslo zálohy (když ho uživatel zadal) jde do parametrů jobu zašifrované a vázané
  * na firmu a zálohu; job ho po přečtení z řádku odebere.
  */
-final class StereoNxImportJobService
+final class StereoNxImportJobService extends AbstractImportJobService
 {
     public const SOURCE = 'stereo_nx_import';
     public const FAILED = 'Převod se nepodařilo dokončit; zkontrolujte stav dat.';
 
+    protected const LOG_PREFIX = 'Stereo NX';
+    protected const UPLOAD_NOUN = 'zálohy';
+    protected const EXCEPTION_CLASS = StereoNxException::class;
+    protected const RUN_FAILED = self::FAILED;
+
     public function __construct(
-        private readonly ImportJobRepository $jobs,
+        ImportJobRepository $jobs,
         private readonly StereoNxImporter $importer,
         private readonly StereoNxAccountingImporter $accountingImporter,
         private readonly SecretEncryption $secrets,
         private readonly LoggerInterface $log,
-    ) {}
+        ActivityLogger $logger,
+        private readonly MigrationCompanyLock $companyLock,
+    ) {
+        parent::__construct($jobs, null, $logger);
+    }
 
     /** Kontext šifrování hesla v parametrech jobu: heslo nejde použít s jinou zálohou ani firmou. */
     public static function passwordContext(int $supplierId, string $token): string
@@ -43,13 +56,39 @@ final class StereoNxImportJobService
         return 'stereo-nx-backup:' . $supplierId . ':' . $token;
     }
 
-    public function run(int $jobId): void
+    protected function uploads(): ChunkedUploadStore
     {
-        $job = $this->jobs->findById($jobId);
-        if ($job === null || !$this->jobs->markRunning($jobId)) {
-            return;
-        }
-        $supplierId = (int) $job['supplier_id'];
+        return StereoNxUploads::store();
+    }
+
+    protected function supportsPrepareJob(): bool
+    {
+        return false;
+    }
+
+    protected function extractUpload(string $part, int $supplierId, string $token): mixed
+    {
+        throw new \LogicException('Stereo NX zpracovává nahranou zálohu v průvodci.');
+    }
+
+    protected function describeUpload(mixed $extracted, int $supplierId, string $token): array
+    {
+        throw new \LogicException('Stereo NX zpracovává nahranou zálohu v průvodci.');
+    }
+
+    protected function acquireCompanyLock(int $supplierId): bool
+    {
+        return $this->companyLock->acquire(self::SOURCE, $supplierId);
+    }
+
+    protected function releaseCompanyLock(int $supplierId): void
+    {
+        $this->companyLock->release(self::SOURCE, $supplierId);
+    }
+
+    /** @param array<string,mixed> $job */
+    protected function runLocked(int $jobId, array $job, int $supplierId): void
+    {
         $userId = (int) ($job['created_by'] ?? 0);
         $params = is_array($job['params'] ?? null) ? $job['params'] : [];
         $token = (string) ($params['token'] ?? '');

@@ -57,6 +57,7 @@ final class PendingBackfillCounter
                       FROM bank_transactions bt
                       JOIN bank_statements bs ON bs.id = bt.statement_id
                      WHERE bt.source = 'statement' AND bt.match_status <> 'ignored'{$bankFrom}
+                       AND " . \MyInvoice\Service\Bank\BankTransactionPostingScope::noMigrationReviewSql('bt') . "
                        AND NOT EXISTS (SELECT 1 FROM journal_entries je
                                         WHERE je.supplier_id = ? AND je.source_type = 'bank'
                                           AND je.source_id = bt.id AND je.reversed_by IS NULL)

@@ -26,6 +26,7 @@ use MyInvoice\Service\Accounting\Learning\CorrectionRecorder;
 use MyInvoice\Service\Accounting\Learning\RulePromotionService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
@@ -255,6 +256,9 @@ final class BankPostingService
             if ((string) $tx['match_status'] === 'ignored') {
                 return ['action' => 'skipped', 'reason' => 'ignored'];
             }
+            if (BankTransactionPostingScope::requiresMigrationReview($tx)) {
+                return ['action' => 'skipped', 'reason' => 'migration_review'];
+            }
             // 4b) pohyb spotřebovaný mzdovou platbou účtuje mzdová strana.
             if ($this->skipPayrollPayment($supplierId, $txId)) {
                 return ['action' => 'skipped', 'reason' => 'payroll_payment'];
@@ -343,6 +347,9 @@ final class BankPostingService
     private function matchedOutcome(int $supplierId, array $tx, ?int $userId, bool $activationBackfill = false): array
     {
         $txId = (int) $tx['id'];
+        if (BankTransactionPostingScope::requiresMigrationReview($tx)) {
+            return ['action' => 'skipped', 'reason' => 'migration_review'];
+        }
         if ($this->skipPayrollPayment($supplierId, $txId)) {
             return ['action' => 'skipped', 'reason' => 'payroll_payment'];
         }
@@ -419,6 +426,9 @@ final class BankPostingService
             // 'posted' (ne 'skipped') — volající se ptá „ať je tahle tx zaúčtovaná takhle",
             // a ona je. postMatched() jinak vrátí null, což SampleDataGenerator bere jako
             // chybu, a FE by ukázal matoucí toast „spárováno, ale nezaúčtováno".
+            // Podpis zápisu dimenze nezná: přepárování na jinou fakturu se stejnou částkou
+            // nechá zápis být, dimenze nové faktury se proto dorovnají zvlášť.
+            $this->posting->restampDimensions($supplierId, 'bank', $txId);
             $this->afterCardBankPosted($supplierId, $txId, $userId);
             return ['action' => 'posted', 'reason' => 'already_posted', 'entry_id' => $liveEntryId];
         }
@@ -700,7 +710,7 @@ final class BankPostingService
         $lines = [
             $this->line($bankAcc, 'debit', $bankCzk),
             $this->withFxTrace(
-                $this->line($receivable, 'credit', $predpisCzk),
+                $this->line($this->predpisSaldoCode($supplierId, (int) $entry['id'], $receivable), 'credit', $predpisCzk),
                 (string) $invoice['currency'],
                 $rate,
                 $foreign,
@@ -880,7 +890,7 @@ final class BankPostingService
                 'exchange_rate' => $allocation['purchase_exchange_rate'] ?? null,
             ]);
             $lines[] = $this->withFxTrace(
-                $this->line($payable, 'debit', FxPaymentSettlement::expectedLocalAmount($foreign, $rate)),
+                $this->line($this->predpisSaldoCode($supplierId, (int) $entry['id'], $payable), 'debit', FxPaymentSettlement::expectedLocalAmount($foreign, $rate)),
                 $currency,
                 $rate,
                 $foreign,
@@ -925,7 +935,7 @@ final class BankPostingService
 
         $lines = [
             $this->withFxTrace(
-                $this->line($payable, 'debit', $predpisCzk),
+                $this->line($this->predpisSaldoCode($supplierId, (int) $entry['id'], $payable), 'debit', $predpisCzk),
                 (string) $purchase['currency'],
                 $rate,
                 $foreign,
@@ -1016,8 +1026,10 @@ final class BankPostingService
      * a úhrada visí na syntetice. Jen když předpis má pod syntetikou právě jednu analytiku;
      * předpis na syntetice (běžná firma) nebo víc analytik = kód z pravidla beze změny.
      *
-     * Cizoměnové větve a vratky dobropisů zůstávají u kódu z pravidla - převzaté účetnictví
-     * je vede v Kč a kurzové rozdíly se na analytiky nerozpadají.
+     * Platí i pro cizoměnové větve: převod z cizího programu zakládá doklad v cizí měně
+     * s předpisem na analytice ze zdroje ({@see \MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover}).
+     * Kurzový rozdíl jde na 563/663, saldokonto se odúčtuje na účtu předpisu. Vratky
+     * dobropisů zůstávají u kódu z pravidla.
      */
     private function predpisSaldoCode(int $supplierId, int $entryId, string $code): string
     {
@@ -1617,9 +1629,12 @@ final class BankPostingService
      */
     private function cardClearingFor(int $supplierId, array $tx, bool $create = false): ?array
     {
-        if ($this->cardRegime === null
-            || (string) ($tx['source'] ?? 'statement') !== 'statement'
-            || !\MyInvoice\Service\Bank\Card\CardNumberMask::isValidLast4((string) ($tx['card_last4'] ?? ''))) {
+        if ($this->cardRegime === null || (string) ($tx['source'] ?? 'statement') !== 'statement') {
+            return null;
+        }
+        // Kreditní karta: režim určuje úvěrový účet výpisu, koncovka nerozhoduje.
+        $creditCard = $this->cardRegime->creditCardAccountFor($supplierId, $tx);
+        if ($creditCard === null && !\MyInvoice\Service\Bank\Card\CardNumberMask::isValidLast4((string) ($tx['card_last4'] ?? ''))) {
             return null;
         }
         $liveCodes = $this->liveBankEntryCodes($supplierId, (int) $tx['id']);
@@ -1630,6 +1645,9 @@ final class BankPostingService
                 }
             }
             return null;
+        }
+        if ($creditCard !== null) {
+            return $this->cardRegime->creditCardClearingFor($supplierId, $tx, $creditCard, $create);
         }
         if (!$this->cardRegime->isActiveOn($supplierId, (string) $tx['posted_at'])
             || $this->isCardCashOrFee($supplierId, $tx)) {
@@ -4511,6 +4529,22 @@ final class BankPostingService
                 'pair' => $pair,
             ];
             $out[$txId]['suggestion_source'] = 'transfer';
+        }
+
+        // Poznámky žijí u zápisu deníku (jediná pravda) — pohyb je jen zobrazuje
+        // a edituje přes /accounting/journal/{id}/notes.
+        $entryIds = [];
+        foreach ($out as $txId => $posting) {
+            if (isset($posting['journal_entry_id'])) {
+                $entryIds[$txId] = (int) $posting['journal_entry_id'];
+            }
+        }
+        if ($entryIds !== []) {
+            $notes = (new \MyInvoice\Repository\JournalEntryNoteRepository($this->db))
+                ->briefForEntries(array_values($entryIds), $supplierId);
+            foreach ($entryIds as $txId => $entryId) {
+                $out[$txId]['journal_notes'] = $notes[$entryId] ?? [];
+            }
         }
 
         return $out;

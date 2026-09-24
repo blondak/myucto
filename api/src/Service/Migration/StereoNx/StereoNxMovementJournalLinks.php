@@ -6,7 +6,7 @@ namespace MyInvoice\Service\Migration\StereoNx;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Migration\Shared\JournalEntryLinker;
-use PDO;
+use MyInvoice\Service\Bank\BankTransactionPostingScope;
 
 /** Fyzické pohyby používají původní kontace; bez doložené vazby se nesmějí automaticky doúčtovat. */
 final class StereoNxMovementJournalLinks
@@ -77,16 +77,8 @@ final class StereoNxMovementJournalLinks
                     throw new StereoNxException('cash_posting_unverified', 'Samostatný pokladní pohyb nemá ověřenou kontaci.');
                 }
                 if ($matched === []) {
-                    if ($kind === 'bank') {
-                        $pdo->prepare("UPDATE bank_transactions t JOIN bank_statements s ON s.id=t.statement_id
-                            SET t.match_status='ignored', t.match_reason='stereo_nx_review',
-                                t.ignore_note='Před obnovením automatického účtování ověřte vazbu na převzatý deník Stereo NX.'
-                            WHERE t.id=? AND s.supplier_id=? AND t.match_status <> 'ignored'")
-                            ->execute([$id, $supplier]);
-                    } else {
-                        $pdo->prepare("UPDATE cash_documents SET status='draft' WHERE id=? AND supplier_id=? AND status <> 'draft'")
-                            ->execute([$id, $supplier]);
-                    }
+                    $linker->markUnverifiedMovement($supplier, $kind, $id, BankTransactionPostingScope::MIGRATION_REVIEW_REASON,
+                        'Před obnovením automatického účtování ověřte vazbu na převzatý deník Stereo NX.');
                     $reviews[] = ['kind' => $kind, 'source_key' => $key,
                         'document_no' => (string) ($movement['document_no'] ?? ''),
                         'review_codes' => ['movement_journal_unverified'], 'target_id' => $id,
@@ -100,12 +92,7 @@ final class StereoNxMovementJournalLinks
                     if ($mapped === null || !hash_equals($mapped['source_hash'], $entry['source_hash'])) {
                         throw new StereoNxException('source_changed', 'Zdrojová kontace pohybu se změnila nebo nebyla převedena.');
                     }
-                    $query = $pdo->prepare('SELECT source_type, source_id, entry_date, reversed_by FROM journal_entries WHERE id=? AND supplier_id=?');
-                    $query->execute([$mapped['target_id'], $supplier]);
-                    $target = $query->fetch(PDO::FETCH_ASSOC);
-                    if (!$target || $target['reversed_by'] !== null || $target['entry_date'] !== $entry['date']
-                        || !(($target['source_type'] === 'manual' && $target['source_id'] === null)
-                            || ($target['source_type'] === $kind && (int) $target['source_id'] === $id))) {
+                    if (!$linker->hasLinkableEntry($supplier, $mapped['target_id'], $entry['date'], $kind, $id)) {
                         throw new StereoNxException('mapped_target_changed', 'Převzatá kontace pohybu byla změněna.');
                     }
                     $mapKind = 'accounting_' . $kind . '_link';

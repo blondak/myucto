@@ -51,6 +51,21 @@ final class StereoNxAccountingPaymentsTest extends TestCase
         self::assertContains('bank_currency_unresolved', array_column($plan['warnings'], 'code'));
     }
 
+    public function testInvalidBankVariableSymbolIsPreservedAsReference(): void
+    {
+        $tables = self::tables();
+        $tables['CBankap'][0]['VarSym'] = 'CARD-1234567890123';
+        $path = $this->archive($tables);
+        try {
+            $module = (new \ReflectionClass(StereoNxAccountingPayments::class))->newInstanceWithoutConstructor();
+            $plan = $module->prepare(StereoNxBackup::open($path, 0));
+        } finally {
+            @unlink($path);
+        }
+        self::assertNull($plan['records']['bank_transactions'][0]['variable_symbol']);
+        self::assertStringContainsString('CARD-1234567890123', $plan['records']['bank_transactions'][0]['description']);
+    }
+
     public function testPostsOnlyExplicitNonVatCashWithMatchingCashSideAndAmount(): void
     {
         $tables = self::tables();

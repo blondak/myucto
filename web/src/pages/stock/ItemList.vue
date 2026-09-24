@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch, onBeforeUnmount } from 'vue'
+import StockSearchMatchHint from '@/components/stock/StockSearchMatchHint.vue'
+import { indentedCategoryLabel } from '@/utils/categoryLabel'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { stockApi, type StockItem, type StockItemType, type Warehouse, type StockItemAttributeFilter, type StockItemListFilters, type StockItemNeighborsOptions } from '@/api/stock'
@@ -81,9 +83,7 @@ let attributeOptionVersion = 0
 
 const selectedAttribute = computed(() => attributes.value.find(a => a.id === filters.attribute_id))
 const selectedAttributeOptions = computed(() => filters.attribute_id === '' ? [] : (attributeOptions.value[filters.attribute_id] ?? []))
-function categoryLabel(category: Category): string {
-  return `${'\u00a0\u00a0'.repeat(category.depth)}${category.name}`
-}
+const categoryLabel = indentedCategoryLabel
 const attributeFilters = computed<StockItemAttributeFilter[]>(() => {
   const attribute = selectedAttribute.value
   if (!attribute || filters.attribute_value === '') return []
@@ -680,7 +680,7 @@ onBeforeUnmount(() => {
                   </button>
                 </div>
               </td>
-              <td v-if="tbl.isVisible('name')" class="px-3 py-2">{{ i.name }}</td>
+              <td v-if="tbl.isVisible('name')" class="px-3 py-2">{{ i.name }}<StockSearchMatchHint :match="i.search_match" /></td>
               <td v-if="tbl.isVisible('type')" class="px-3 py-2">
                 <span class="text-xs px-2 py-0.5 rounded font-medium" :class="TYPE_BADGE[i.item_type]">{{ t(`stock.item_type.${i.item_type}`) }}</span>
               </td>
@@ -722,6 +722,7 @@ onBeforeUnmount(() => {
           <span class="text-xs px-2 py-0.5 rounded font-medium" :class="TYPE_BADGE[i.item_type]">{{ t(`stock.item_type.${i.item_type}`) }}</span>
         </div>
         <div class="font-medium mt-0.5">{{ i.name }}</div>
+        <StockSearchMatchHint :match="i.search_match" />
         <div class="flex items-center justify-between mt-1.5 text-sm">
           <span :class="belowMin(i) ? 'text-danger-500 font-semibold' : 'text-neutral-600'">{{ qty(i) }} {{ i.unit }}</span>
           <span class="font-mono text-neutral-700">{{ formatMoney(value(i)) }}</span>

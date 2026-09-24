@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Migration;
 use MyInvoice\Action\Admin\Import\StereoNxMigrationAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\ImportJobRepository;
@@ -17,6 +18,7 @@ use MyInvoice\Service\Migration\StereoNx\StereoNxImportJobService;
 use MyInvoice\Service\Migration\StereoNx\StereoNxImportMap;
 use MyInvoice\Service\Migration\StereoNx\StereoNxSourcePlan;
 use MyInvoice\Service\Migration\StereoNx\StereoNxUploads;
+use MyInvoice\Service\Migration\Shared\MigrationCompanyLock;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Service\TaxEvidence\CashJournalService;
 use MyInvoice\Tests\Fixtures\StereoNx\SyntheticNx1Archive;
@@ -120,6 +122,27 @@ final class StereoNxImportTest extends TestCase
         self::assertSame($after, $this->snapshot());
         self::assertSame('tax_evidence', $this->scalar('SELECT accounting_mode FROM supplier WHERE id = ?', [$this->supplierId]));
         self::assertSame(0, $after['journal_entries']);
+    }
+
+    public function testJobRefusesSecondImportWhileCompanyLockIsHeld(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $jobs = $container->get(ImportJobRepository::class);
+        $jobId = $jobs->create($this->supplierId, StereoNxImportJobService::SOURCE,
+            ['mode' => 'dry_run', 'token' => str_repeat('a', 32)], $this->userId);
+        $lockDb = Connection::withoutSharedTestConnection(
+            static fn (): Connection => new Connection($container->get(Config::class)));
+        $lock = new MigrationCompanyLock($lockDb);
+        try {
+            self::assertTrue($lock->acquire(StereoNxImportJobService::SOURCE, $this->supplierId));
+            $container->get(StereoNxImportJobService::class)->run($jobId);
+            $job = $jobs->find($jobId, $this->supplierId);
+            self::assertSame('failed', $job['status']);
+            self::assertStringContainsString('už běží', (string) $job['last_error']);
+        } finally {
+            $lock->release(StereoNxImportJobService::SOURCE, $this->supplierId);
+            $lockDb->close();
+        }
     }
 
     public function testDifferentCompanyAndDoubleEntryAreRefusedWithoutWrites(): void
@@ -348,6 +371,31 @@ final class StereoNxImportTest extends TestCase
         $again = $this->importer->run($backup, $this->supplierId, $this->userId, false);
         self::assertTrue($again['ok'], json_encode($again));
         self::assertSame($before, $this->snapshot());
+    }
+
+    /** Pokladní číslo delší než sloupec (30) a dvojí číslo ve zdroji neshodí převod. */
+    public function testLongAndDuplicateCashNumbersGetUniqueNumbersWithinColumnLimit(): void
+    {
+        $tables = SyntheticStereoNxTables::tables();
+        $long = 'P-' . str_repeat('7', 38);
+        $tables['CPokl'][0]['Doklad'] = $long;
+        $second = $tables['CPokl'][0];
+        $second['DoklCislo'] = 2;
+        $second['Castka'] = 5.0;
+        $tables['CPokl'][] = $second;
+        $journal = array_values(array_filter($tables['Cdenik'], static fn (array $row): bool => $row['Agenda'] === 'P'))[0];
+        $journal['DoklCislo'] = 2;
+        $journal['Celkem'] = 5.0;
+        $tables['Cdenik'][] = $journal;
+
+        $report = $this->importer->run($this->backup($tables), $this->supplierId, $this->userId, false);
+        self::assertTrue($report['ok'], json_encode($report, JSON_UNESCAPED_UNICODE));
+        $stmt = $this->db->pdo()->prepare('SELECT doc_number FROM cash_documents WHERE supplier_id = ? ORDER BY id');
+        $stmt->execute([$this->supplierId]);
+        $numbers = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+        $truncated = mb_substr($long, 0, 30);
+        self::assertSame([$truncated, mb_substr($truncated, 0, 28) . '-2'], $numbers);
+        self::assertContains('cash_number_duplicate', array_column($report['warnings'], 'code'));
     }
 
     public function testRepeatPreservesUserClassificationAndDisabledBankAccount(): void

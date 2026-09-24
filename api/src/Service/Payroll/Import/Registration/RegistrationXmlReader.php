@@ -21,11 +21,27 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationXmlExce
  * vypnutá a obsah se ověří proti připnutému schématu dřív, než se z něj
  * cokoli převezme. Soubor, který schématu neodpovídá, se nepřebírá ani
  * zčásti — napůl přečtená věta by do evidence zapsala napůl pravdu.
+ *
+ * Umí i „Export zaměstnanců" z ePortálu ČSSZ (kořen `ExportZamestnancu` bez
+ * jmenného prostoru). Ten schéma nemá, takže se tvar hodnot kontroluje ručně
+ * ({@see validateExport()}) se stejným pravidlem: vadná věta odmítne celý soubor.
  */
 final class RegistrationXmlReader
 {
     public const NAMESPACE_REGZEC = 'http://schemas.cssz.cz/REGZEC/2025';
     public const NAMESPACE_PREZEC = 'http://schemas.cssz.cz/PREZEC/2026';
+
+    /** Element věty exportu => [vzor hodnoty po normalizaci, název do chybové hlášky]. */
+    private const EXPORT_FORMATS = [
+        'RodneCislo' => ['/^[0-9]{9,10}$/D', 'rodné číslo'],
+        'OIC' => ['/^[0-9]{10}$/D', 'OIČ'],
+        'IdZamestnani' => ['/^[0-9]{1,22}$/D', 'ID PPV (IdZamestnani)'],
+        'KodDruhuCinnosti' => ['/^[0-9A-Z]{1,2}$/D', 'kód druhu činnosti'],
+        'ZMR' => ['/^[AN]$/D', 'příznak zaměstnání malého rozsahu (ZMR)'],
+        'VariabilniSymbol' => ['/^[0-9]{1,10}$/D', 'variabilní symbol zaměstnavatele'],
+        'Jmeno' => ['/^.{1,100}$/Dsu', 'jméno'],
+        'Prijmeni' => ['/^.{1,100}$/Dsu', 'příjmení'],
+    ];
 
     public function __construct(
         private readonly PayrollRegistrationSchemaCatalog $schemas,
@@ -86,12 +102,14 @@ final class RegistrationXmlReader
         $type = match (true) {
             $root->localName === 'REGZEC' && $root->namespaceURI === self::NAMESPACE_REGZEC => 'REGZEC25',
             $root->localName === 'PREZEC' && $root->namespaceURI === self::NAMESPACE_PREZEC => 'PREZEC26',
+            $root->localName === 'ExportZamestnancu' && $root->namespaceURI === null => RegistrationRecord::CSSZ_EXPORT,
             default => null,
         };
         if ($type === null) {
             throw new RegistrationImportFileException(
-                'Soubor není registrace zaměstnance ČSSZ (REGZEC25 ani PREZEC26) ani měsíční hlášení JMHZ. '
-                . 'Import registrací přijímá jen tyto formuláře; ostatní soubory vynechte.',
+                'Soubor není registrace zaměstnance ČSSZ (REGZEC25 ani PREZEC26), export zaměstnanců '
+                . 'z ePortálu ČSSZ ani měsíční hlášení JMHZ. Import registrací přijímá jen tyto soubory; '
+                . 'ostatní vynechte.',
             );
         }
 
@@ -100,6 +118,11 @@ final class RegistrationXmlReader
 
     private function validate(DOMDocument $document, string $documentType): void
     {
+        if ($documentType === RegistrationRecord::CSSZ_EXPORT) {
+            $this->validateExport($document);
+
+            return;
+        }
         try {
             $schema = $this->schemas->schemaFor($documentType);
         } catch (PayrollRegistrationXmlException $e) {
@@ -114,9 +137,141 @@ final class RegistrationXmlReader
         }
     }
 
+    /**
+     * Export zaměstnanců z ePortálu ČSSZ nemá zveřejněné schéma, takže se
+     * kontroluje ručně: tvar každé převzaté hodnoty a aspoň jeden identifikátor
+     * osoby. Jediná vadná věta odmítne celý soubor, stejně jako u XSD.
+     */
+    private function validateExport(DOMDocument $document): void
+    {
+        $root = $document->documentElement;
+        $list = $root === null ? null : $this->plainChild($root, 'Zamestnanci');
+        if ($list === null) {
+            throw new RegistrationImportFileException(
+                'Export zaměstnanců ČSSZ nemá seznam zaměstnanců (element Zamestnanci). '
+                . 'Nahrajte soubor přesně tak, jak ho stáhl ePortál ČSSZ.',
+            );
+        }
+        $generated = $this->plainText($root, 'DatumGenerovani');
+        if ($generated !== null && $this->date($generated) === null) {
+            throw new RegistrationImportFileException("Datum vytvoření exportu „{$generated}“ není platné datum.");
+        }
+        $position = 0;
+        foreach ($list->childNodes as $employee) {
+            if (!$employee instanceof DOMElement || $employee->localName !== 'Zamestnanec') {
+                continue;
+            }
+            $position++;
+            foreach (self::EXPORT_FORMATS as $element => [$pattern, $label]) {
+                $node = $this->plainChild($employee, $element);
+                if ($node === null) {
+                    continue;
+                }
+                foreach ($node->childNodes as $inner) {
+                    if ($inner instanceof DOMElement) {
+                        throw new RegistrationImportFileException(
+                            "Věta {$position} exportu zaměstnanců má v elementu {$element} vnořené prvky. "
+                            . 'Soubor se nepřebírá ani zčásti.',
+                        );
+                    }
+                }
+                $value = $this->exportValue($element, trim($node->textContent));
+                if ($value !== null && preg_match($pattern, $value) !== 1) {
+                    throw new RegistrationImportFileException(
+                        "Věta {$position} exportu zaměstnanců má neplatný {$label}. Soubor se nepřebírá ani zčásti.",
+                    );
+                }
+            }
+            if ($this->plainText($employee, 'RodneCislo') === null
+                && $this->plainText($employee, 'OIC') === null
+                && $this->plainText($employee, 'IdZamestnani') === null
+            ) {
+                throw new RegistrationImportFileException(
+                    "Věta {$position} exportu zaměstnanců nemá rodné číslo, OIČ ani ID PPV, takže ji nejde "
+                    . 'přiřadit k žádné osobě. Soubor se nepřebírá ani zčásti.',
+                );
+            }
+        }
+    }
+
+    /** @return list<RegistrationRecord> */
+    private function exportRecords(DOMDocument $document): array
+    {
+        $root = $document->documentElement;
+        $list = $root === null ? null : $this->plainChild($root, 'Zamestnanci');
+        if ($root === null || $list === null) {
+            return [];
+        }
+        $preparedOn = $this->date($this->plainText($root, 'DatumGenerovani'));
+        $records = [];
+        $position = 0;
+        foreach ($list->childNodes as $employee) {
+            if (!$employee instanceof DOMElement || $employee->localName !== 'Zamestnanec') {
+                continue;
+            }
+            $position++;
+            $value = fn (string $element): ?string => $this->exportValue($element, $this->plainText($employee, $element));
+            $records[] = new RegistrationRecord(
+                documentType: RegistrationRecord::CSSZ_EXPORT,
+                position: $position,
+                sequence: $position,
+                actionCode: 0,
+                preparedOn: $preparedOn,
+                birthNumber: $value('RodneCislo'),
+                personIdentifier: $value('OIC'),
+                firstName: $value('Jmeno'),
+                lastName: $value('Prijmeni'),
+                employmentIdentifier: $value('IdZamestnani'),
+                activityCode: $value('KodDruhuCinnosti'),
+                smallScale: $value('ZMR') === 'A',
+                employerVariableSymbol: $value('VariabilniSymbol'),
+            );
+        }
+
+        return $records;
+    }
+
+    private function exportValue(string $element, ?string $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return match ($element) {
+            'RodneCislo' => str_replace('/', '', $value),
+            'KodDruhuCinnosti', 'ZMR' => strtoupper($value),
+            default => $value,
+        };
+    }
+
+    private function plainChild(DOMElement $parent, string $name): ?DOMElement
+    {
+        foreach ($parent->childNodes as $child) {
+            if ($child instanceof DOMElement && $child->localName === $name && $child->namespaceURI === null) {
+                return $child;
+            }
+        }
+
+        return null;
+    }
+
+    private function plainText(DOMElement $parent, string $name): ?string
+    {
+        $node = $this->plainChild($parent, $name);
+        if ($node === null) {
+            return null;
+        }
+        $value = trim($node->textContent);
+
+        return $value === '' ? null : $value;
+    }
+
     /** @return list<RegistrationRecord> */
     private function records(DOMDocument $document, string $documentType): array
     {
+        if ($documentType === RegistrationRecord::CSSZ_EXPORT) {
+            return $this->exportRecords($document);
+        }
         $xpath = new DOMXPath($document);
         $xpath->registerNamespace(
             'r',

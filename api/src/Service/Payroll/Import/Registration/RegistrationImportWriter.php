@@ -171,7 +171,9 @@ final class RegistrationImportWriter
                     $employmentId,
                     'active',
                     $steps['activate_on'],
-                    'Nástup podle importované registrace ČSSZ.',
+                    $record->isCsszExport()
+                        ? 'Nástup podle exportu zaměstnanců ČSSZ a měsíčního hlášení v téže dávce.'
+                        : 'Nástup podle importované registrace ČSSZ.',
                     $userId,
                     $ip,
                     $userAgent,

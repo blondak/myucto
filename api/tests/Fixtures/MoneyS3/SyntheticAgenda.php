@@ -68,6 +68,7 @@ final class SyntheticAgenda
         ['DPH_1', 'E', 10], ['DPH_2', 'E', 10],
         ['CelkemSDPH', 'E', 10], ['Uhrazeno', 'D', 2], ['UDoklad', 'C', 10], ['Popis', 'C', 50], ['BarCode', 'C', 20],
         ['Mena', 'C', 3], ['PocetJedn', 'L', 4], ['Kurs', 'E', 10], ['Neuctovat', 'B', 1], ['FlagDel', 'B', 1],
+        ['ValutyZak0', 'E', 10], ['ValutyZak1', 'E', 10], ['ValutyZak2', 'E', 10], ['ValutyDPH1', 'E', 10], ['ValutyDPH2', 'E', 10],
     ];
     private const ISSUED_FIELDS = [
         ['Doklad', 'C', 10], ['Storno', 'B', 1], ['VarSymbol', 'C', 10], ['O_ICO', 'C', 12], ['O_DIC', 'C', 14], ['O_Nazev', 'C', 60],
@@ -328,8 +329,10 @@ final class SyntheticAgenda
                     'Zaklad_2' => -500.0, 'DPH_2' => -105.0, 'CelkemSDPH' => -605.0, 'Popis' => 'Dobropis služeb'] + $purchaseDates('2025-03-20') + $vendor,
                 ['KodDPH' => self::KOD_DPH_REVERSE_CHARGE, 'Doklad' => 'FP25003', 'PrijatDokl' => 'RC-2025-001', 'VarSymbol' => '2025012',
                     'Zaklad_2' => 2000.0, 'DPH_2' => 0.0, 'CelkemSDPH' => 2000.0, 'Popis' => 'Stavební práce'] + $purchaseDates('2025-04-05') + $vendor,
+                // V měně dokladu 100 + 21 EUR (`ValutyZak2`, `ValutyDPH2`) - kurzem 25 přesně Kč z Money.
                 ['Mena' => 'EUR', 'PocetJedn' => 1, 'Kurs' => 25.0, 'Doklad' => 'FP25004', 'PrijatDokl' => 'EU-2025-001', 'VarSymbol' => '2025013',
-                    'Zaklad_2' => 2500.0, 'DPH_2' => 525.0, 'CelkemSDPH' => 3025.0, 'Popis' => 'Licence v cizí měně'] + $purchaseDates('2025-04-15') + $vendor,
+                    'Zaklad_2' => 2500.0, 'DPH_2' => 525.0, 'CelkemSDPH' => 3025.0, 'ValutyZak2' => 100.0, 'ValutyDPH2' => 21.0,
+                    'Popis' => 'Licence v cizí měně'] + $purchaseDates('2025-04-15') + $vendor,
                 // Money čísluje řadu každý rok od začátku: FP24001 je i v roce 2024.
                 // Licence z EU: faktura mimo přiznání, DPH samovyměřuje interní doklad ICH25001.
                 ['KodDPH' => '19Ř00P', 'Doklad' => 'FP25005', 'PrijatDokl' => 'DE-2025-001', 'VarSymbol' => '2025014',
@@ -395,6 +398,42 @@ final class SyntheticAgenda
         // Indexy a šifrovaný archiv jsou v každé záloze; převod je nesmí potřebovat.
         $files['ROK.001/UcDenik.MDT'] = str_repeat("\x5A", 64);
         $files['Dokumenty.s3db'] = str_repeat("\xA5", 128);
+        return $files;
+    }
+
+    /**
+     * Tatáž agenda jako agenda jiné firmy (dávkový převod více firem): jiné IČO, název
+     * a sídlo v `AgendaInfo.ini` i v „Údajích o firmě".
+     *
+     * @param array<string,string> $files
+     * @return array<string,string>
+     */
+    public static function forCompany(array $files, string $ico, string $name, string $street = 'Účetní 12', string $city = 'Brno', string $zip = '602 00'): array
+    {
+        $files['AgendaInfo.ini'] = (string) iconv('UTF-8', 'CP1250', "[Agenda]\r\nNázev=" . $name . "\r\nIČO=" . $ico
+            . "\r\nVersion=" . self::VERSION . "\r\nDatum=10.01.2026 08:15\r\n");
+        $files['Agenda.DAT'] = Ms3FixtureWriter::table([['Section1', 'C', 30], ['Variable', 'C', 20], ['Value', 'C', 60]], [
+            ['Section1' => 'Údaje o firmě', 'Variable' => 'Název', 'Value' => $name],
+            ['Section1' => 'Údaje o firmě', 'Variable' => 'Ulice', 'Value' => $street],
+            ['Section1' => 'Údaje o firmě', 'Variable' => 'Místo', 'Value' => $city],
+            ['Section1' => 'Údaje o firmě', 'Variable' => 'PSČ', 'Value' => $zip],
+            ['Section1' => 'Údaje o firmě', 'Variable' => 'IČO', 'Value' => $ico],
+            ['Section1' => 'Údaje o firmě', 'Variable' => 'DIČ', 'Value' => 'CZ' . $ico],
+        ], 7);
+        return $files;
+    }
+
+    /**
+     * Agenda, ve které Money otevřelo rok 2025 bez uzávěrky roku 2024 (deník 2024 bez XZ).
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithoutYearEndClosing(): array
+    {
+        $files = self::files();
+        $rows = iterator_to_array(Ms3Table::fromString($files['ROK.001/UcDenik.DAT'], 'UCDENIK')->rows(), false);
+        $rows = array_values(array_filter($rows, static fn (array $r): bool => $r['Zdroj'] !== 'XZ'));
+        $files['ROK.001/UcDenik.DAT'] = Ms3FixtureWriter::table(self::JOURNAL_FIELDS, $rows);
         return $files;
     }
 
@@ -549,10 +588,12 @@ final class SyntheticAgenda
      *   - 9 elektromobil 1 mil. Kč zařazený 10. 3. 2024 (`FL_LGMajSk` 5, mimořádně §30a),
      *   - 10 FVE 120 000 Kč s daňovým odpisem rovným účetnímu (`UcRovnyDan`), první měsíc
      *     účetně poloviční.
+     * `$residualWriteOffInUse`: stroji 8 Money 30. 6. 2025 odepíše zůstatek 120 Kč
+     * (`OdpZustCen`), karta přitom zůstane v užívání.
      *
      * @return array<string,string>
      */
-    public static function filesWithAssetTaxCases(): array
+    public static function filesWithAssetTaxCases(bool $residualWriteOffInUse = false): array
     {
         $files = self::filesWithAssets();
         $append = static function (string $path, array $fields, array $rows) use (&$files): void {
@@ -608,6 +649,10 @@ final class SyntheticAgenda
         $monthly(9, '2024-04-30', '2025-12-31', 10000.0, 1000000.0);
         $moves[] = ['CisloMajet' => 10, 'Cislo' => 1, 'Datum' => '2024-05-31', 'Typ' => 'Z', 'Castka' => 120000.0, 'ZustCena' => 120000.0];
         $monthly(10, '2024-06-30', '2025-12-31', 1000.0, 120000.0, ['2024-06' => 500.0]);
+        if ($residualWriteOffInUse) {
+            $moves[] = ['CisloMajet' => 8, 'Cislo' => 300, 'Datum' => '2025-06-15', 'Typ' => 'U', 'Castka' => 120.0, 'ZustCena' => 214880.0,
+                'OdpZustCen' => 1, 'PrUcOpr' => '082100'];
+        }
         $append('MjInvPoh.DAT', self::ASSET_MOVE_FIELDS, $moves);
         return $files;
     }
@@ -741,6 +786,128 @@ final class SyntheticAgenda
             'Vystaveno' => '2025-08-04', 'DatUcPr' => '2025-08-04', 'PlnenoDPH' => '2025-08-04', 'Splatno' => '2025-08-18',
             'Zaklad_2' => 1000.0, 'DPH_2' => 0.0, 'CelkemSDPH' => 1000.0, 'Popis' => 'Stavební práce',
         ]]);
+        return $files;
+    }
+
+    /**
+     * Agenda, ve které licence z EU FP25005 zní na 1 030 Kč (kurz faktury), ale samovyměření
+     * ICH25001 má základ 1 000 Kč (kurz ke dni plnění). Rozdíl 30 Kč je jen kurzový.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithSelfAssessmentRateDifference(): array
+    {
+        $files = self::files();
+        $patch = static function (string $path, array $fields, callable $change) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $rows = array_map($change, iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false));
+            $files[$path] = Ms3FixtureWriter::table($fields, $rows);
+        };
+        $patch('ROK.002/PFaktury.DAT', self::PURCHASE_FIELDS, static fn (array $r): array => trim((string) $r['Doklad']) === 'FP25005'
+            ? ['Zaklad_0' => 1030.0, 'CelkemSDPH' => 1030.0] + $r : $r);
+        $patch('ROK.002/UcDenik.DAT', self::JOURNAL_FIELDS, static fn (array $r): array => trim((string) $r['Doklad']) === 'FP25005'
+            ? ['Castka' => 1030.0] + $r : $r);
+        return $files;
+    }
+
+    /**
+     * Agenda se mzdami v roce 2025, jak je nese mzdový modul Money: mzdové doklady
+     * (`KnihZav`, `IntDokl` s `MZTyp`, `MZRok`, `MZMesic`, `MZDI_Zauct`) za leden až březen
+     * a jejich řádky v deníku, měsíční úhrn daně (`VYUCDPFO`) a zbytek čitelných mezd
+     * osob (`MZDY`) končící 10/2020.
+     *
+     * Měsíc: hrubé mzdy 30 000 Kč na dvě střediska (druh 3), sociální pojištění 2 130 +
+     * 7 440 (druh 7, analytika 336200), zdravotní 1 350 + 2 700 (druh 10, 336100), záloha
+     * na daň 3 810 (druh 5), závazek čisté mzdy 331/331 na témž účtu (druh 1). V únoru navíc
+     * exekuce 1 000 Kč (druh 14), v lednu zákonné pojištění odpovědnosti (druh 15, jen do
+     * přehledu). Doklady bez druhu (starší způsob): odměna 5 000 Kč 521/331 a doplatek
+     * pojistného 331/336100 - analytika 336 se pozná podle dokladů s druhem, ne podle
+     * názvu (názvy analytik 336 jsou záměrně neutrální). Odvod zálohové daně za březen
+     * ve vyúčtování Money nesedí na doklady (3 000 Kč).
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithPayroll(): array
+    {
+        $files = self::files();
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        $append('ROK.002/UcOsnova.DAT', self::CHART_FIELDS, [
+            ['Ucet' => '331000', 'Nazev' => 'Zaměstnanci'],
+            ['Ucet' => '336100', 'Nazev' => 'Zúčtování s institucemi 1'],
+            ['Ucet' => '336200', 'Nazev' => 'Zúčtování s institucemi 2'],
+            ['Ucet' => '342100', 'Nazev' => 'Záloha na daň ze závislé činnosti'],
+            ['Ucet' => '379000', 'Nazev' => 'Jiné závazky'],
+            ['Ucet' => '379100', 'Nazev' => 'Pojištění odpovědnosti'],
+            ['Ucet' => '521000', 'Nazev' => 'Mzdové náklady'],
+            ['Ucet' => '524100', 'Nazev' => 'Zákonné sociální pojištění'],
+            ['Ucet' => '524200', 'Nazev' => 'Zákonné zdravotní pojištění'],
+            ['Ucet' => '548000', 'Nazev' => 'Ostatní provozní náklady'],
+        ]);
+        $journal = [];
+        $liabilities = [];
+        $internal = [];
+        $no = 100;
+        foreach ([1, 2, 3] as $month) {
+            $date = (new \DateTimeImmutable(sprintf('2025-%02d-01', $month)))->format('Y-m-t');
+            $doc = static fn (string $prefix, int $n): string => sprintf('%s25%02d%d', $prefix, $month, $n);
+            $mz = ['MZTyp' => 1, 'MZRok' => 2025, 'MZMesic' => $month];
+            $internal[] = ['Cislo' => 10 + $month, 'Doklad' => $doc('IDM', 1), 'Popis' => 'Předpis mezd', 'DatUcPr' => $date, 'MZDI_Zauct' => 3] + $mz;
+            $journal[] = ['Cislo' => ++$no, 'Zdroj' => 'ID', 'Doklad' => $doc('IDM', 1), 'Datum' => $date, 'Popis' => 'Hrubé mzdy', 'UcMD' => '521000', 'UcD' => '331000', 'Castka' => 20000.0, 'Stred' => 'REZIE'];
+            $journal[] = ['Cislo' => ++$no, 'Zdroj' => 'ID', 'Doklad' => $doc('IDM', 1), 'Datum' => $date, 'Popis' => 'Hrubé mzdy', 'UcMD' => '521000', 'UcD' => '331000', 'Castka' => 10000.0, 'Stred' => 'VYROBA'];
+            $net = 22710.0;
+            $entries = [
+                [7, 'Odvod ČSSZ', [['331000', '336200', 2130.0], ['524100', '336200', 7440.0]]],
+                [10, 'Odvod ZP', [['331000', '336100', 1350.0], ['524200', '336100', 2700.0]]],
+                [5, 'Odvod daně', [['331000', '342100', 3810.0]]],
+            ];
+            if ($month === 2) {
+                $entries[] = [14, 'Exekuce', [['331000', '379000', 1000.0]]];
+                $net -= 1000.0;
+            }
+            if ($month === 1) {
+                $entries[] = [15, 'Pojištění odpovědnosti', [['548000', '379100', 150.0]]];
+            }
+            // Závazek čisté mzdy vede Money na témž účtu (zaměstnance rozliší párový symbol).
+            $entries[] = [1, 'Čistá mzda', [['331000', '331000', $net]]];
+            foreach ($entries as $i => [$kind, $text, $lines]) {
+                $number = $doc('ZA', $i + 1);
+                $liabilities[] = ['Cislo' => 100 * $month + $i, 'Doklad' => $number, 'Popis' => $text, 'MZDI_Zauct' => $kind, 'AdCislo' => 0] + $mz;
+                foreach ($lines as [$md, $d, $amount]) {
+                    $journal[] = ['Cislo' => ++$no, 'Zdroj' => 'KZ', 'Doklad' => $number, 'Datum' => $date, 'Popis' => $text, 'UcMD' => $md, 'UcD' => $d, 'Castka' => $amount];
+                }
+            }
+        }
+        // Doklady bez druhu i bez příznaku mzdového dokladu (starší způsob účtování mezd).
+        $internal[] = ['Cislo' => 90, 'Doklad' => 'IDM25090', 'Popis' => 'Odměna', 'DatUcPr' => '2025-01-20'];
+        $journal[] = ['Cislo' => ++$no, 'Zdroj' => 'ID', 'Doklad' => 'IDM25090', 'Datum' => '2025-01-20', 'Popis' => 'Odměna', 'UcMD' => '521000', 'UcD' => '331000', 'Castka' => 5000.0];
+        $liabilities[] = ['Cislo' => 90, 'Doklad' => 'ZA25090', 'Popis' => 'Doplatek pojistného', 'MZTyp' => 0];
+        $journal[] = ['Cislo' => ++$no, 'Zdroj' => 'KZ', 'Doklad' => 'ZA25090', 'Datum' => '2025-01-20', 'Popis' => 'Doplatek pojistného', 'UcMD' => '331000', 'UcD' => '336100', 'Castka' => 100.0];
+        $append('ROK.002/UcDenik.DAT', self::JOURNAL_FIELDS, $journal);
+
+        $mzFields = [['MZTyp', 'V', 1], ['MZRok', 'W', 2], ['MZMesic', 'V', 1], ['MZDI_Zauct', 'V', 1]];
+        $files['ROK.002/KnihZav.DAT'] = Ms3FixtureWriter::table(
+            array_merge([['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['AdCislo', 'L', 4]], $mzFields),
+            $liabilities,
+        );
+        $append('ROK.002/IntDokl.DAT', array_merge([
+            ['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['DatUcPr', 'D', 2], ['DatUplDPH', 'D', 2],
+            ['Cleneni', 'C', 12], ['ZaklZS', 'E', 10], ['DPHZS', 'E', 10],
+        ], $mzFields), $internal);
+        // Únor: sražené zálohy 4 810 Kč, z toho 1 000 Kč přeplatek z ročního zúčtování, odvod 3 810 Kč.
+        $files['VYUCDPFO.DAT'] = Ms3FixtureWriter::table([['Mesic', 'V', 1], ['Rok', 'W', 2], ['Preplatek', 'E', 10], ['DPFO', 'E', 10], ['Odvod', 'E', 10]], [
+            ['Mesic' => 255, 'Rok' => 65535],
+            ['Mesic' => 1, 'Rok' => 2025, 'DPFO' => 3810.0, 'Odvod' => 3810.0],
+            ['Mesic' => 2, 'Rok' => 2025, 'Preplatek' => 1000.0, 'DPFO' => 4810.0, 'Odvod' => 3810.0],
+            ['Mesic' => 3, 'Rok' => 2025, 'DPFO' => 3000.0, 'Odvod' => 3000.0],
+        ]);
+        $files['MZDY.DAT'] = Ms3FixtureWriter::table([['OsCislo', 'C', 10], ['Rok', 'W', 2], ['Mesic', 'V', 1], ['HRUBA', 'E', 10]], [
+            ['OsCislo' => '1', 'Rok' => 2020, 'Mesic' => 9, 'HRUBA' => 25000.0],
+            ['OsCislo' => '1', 'Rok' => 2020, 'Mesic' => 10, 'HRUBA' => 25000.0],
+        ]);
         return $files;
     }
 

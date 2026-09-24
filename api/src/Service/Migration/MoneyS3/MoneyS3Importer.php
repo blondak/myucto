@@ -15,7 +15,7 @@ use PDO;
  *
  * Pořadí: osnova → období a deník → režim účetní jednotky → adresář a předkontace →
  * faktury → pokladna a banka → vazby dokladů na deník a úhrady → uzávěrka historických
- * let → rekonciliace. Automatika účtování je po celou dobu vypnutá
+ * let → mzdy (návrh kontací, kontrolní úhrny, zapnutí modulu) → rekonciliace. Automatika účtování je po celou dobu vypnutá
  * ({@see AccountingUnitSwitch}).
  *
  * **Zkouška nanečisto** běží stejným kódem v jedné transakci, která se na konci vrátí —
@@ -50,6 +50,7 @@ final class MoneyS3Importer
         private readonly HistoricalYearCloser $closer,
         private readonly MoneyS3Reconciler $reconciler,
         private readonly TableStatistics $statistics,
+        private readonly PayrollImporter $payroll,
     ) {}
 
     /** @return list<string> klíče kroků v pořadí, v jakém běží */
@@ -72,6 +73,7 @@ final class MoneyS3Importer
             AssetImporter::STEP_SMALL,
             VatCoefficientSeeder::STEP,
             HistoricalYearCloser::STEP,
+            PayrollImporter::STEP,
             MoneyS3Reconciler::STEP,
         ];
     }
@@ -133,8 +135,8 @@ final class MoneyS3Importer
                 $b['year'], $b['next'], count($b['accounts']), $code, number_format($b['accounts'][$code], 2, ',', ' ')
             ), ['year' => $b['year'], 'next' => $b['next'], 'accounts' => array_slice($b['accounts'], 0, 20, true)]);
         }
-        if ($breaks !== []) {
-            $suggested = $breaks[count($breaks) - 1]['next'];
+        $suggested = JournalImporter::suggestedFromYear($breaks);
+        if ($suggested !== null) {
             $add('info', 'suggested_from_year', "Roky od {$suggested} v Money navazují — převod od roku {$suggested} (volba „Převést od roku“) půjde celý uzavřít. Starší roky zůstanou v archivu Money.", ['from_year' => $suggested]);
         }
         foreach ($plan as $item) {
@@ -303,6 +305,7 @@ final class MoneyS3Importer
             AssetImporter::STEP_SMALL => fn () => $this->assets->importSmall($ctx),
             VatCoefficientSeeder::STEP => fn () => $this->coefficients->run($ctx),
             HistoricalYearCloser::STEP => fn () => $this->closer->run($ctx),
+            PayrollImporter::STEP => fn () => $this->payroll->run($ctx),
             MoneyS3Reconciler::STEP => fn () => $this->reconciler->run($ctx),
         ];
     }

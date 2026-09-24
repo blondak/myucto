@@ -36,6 +36,16 @@ final class PriceLevelResolver
     }
 
     /**
+     * Hladina zvolená na dokladu (migrace 1880), přepisuje hladinu odběratele.
+     *
+     * @return array{id:int, code:string, name:string, default_discount_pct:string}|null
+     */
+    public function activeLevel(int $supplierId, int $levelId): ?array
+    {
+        return $levelId > 0 ? $this->levels->activeLevel($supplierId, $levelId) : null;
+    }
+
+    /**
      * Základ ceny podle hladiny — jen pro karty, u kterých hladina něco určuje.
      *
      * @param array{id:int, code:string, name:string, default_discount_pct:string} $level

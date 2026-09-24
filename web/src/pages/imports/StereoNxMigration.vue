@@ -9,6 +9,7 @@ import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
+import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import type { FileImportJob } from '@/api/imports'
 import { useSupplierStore } from '@/stores/supplier'
 
@@ -419,7 +420,7 @@ function asProtocol(report: StereoReport, mode: 'dry_run' | 'import'): StereoPro
     agenda_name: reportCompany.value?.name ?? null,
     agenda_ico: reportCompany.value?.ico ?? null,
     agenda_year: null, created_at: null,
-    protocol: { mode, status, failure: null, steps },
+    protocol: { mode, status, failure: null, steps, reconciliation: report.reconciliation },
   }
 }
 
@@ -582,5 +583,7 @@ const importProtocol = computed(() => importReport.value ? asProtocol(importRepo
     </section>
     <div data-testid="stereo-actions" class="flex flex-wrap justify-end"><ActionBar :actions="actions" /></div>
     <p v-if="error" class="rounded-lg border border-danger-300 bg-danger-50 p-3 text-sm text-danger-600">{{ error }}</p>
+
+    <CompanyProfileBox variant="migration" />
   </div>
 </template>

@@ -123,6 +123,60 @@ final class Ms3Backup
         return $backup;
     }
 
+    /**
+     * Identita agendy bez rozbalení celé zálohy: jen `AgendaInfo.ini` a `Agenda.DAT`
+     * z kořene archivu do dočasného adresáře. Dávka podle ní přiřadí zálohy firmám
+     * (a z více záloh téže firmy vybere nejnovější) dřív, než rozbalí gigabajty dat.
+     *
+     * @return array{name:string,ico:string,version:string,backup_at:string}
+     */
+    public static function peekIdentity(string $lzPath, string $tempDir): array
+    {
+        $zip = new \ZipArchive();
+        if (!is_file($lzPath) || $zip->open($lzPath) !== true) {
+            throw new MoneyS3Exception('backup_not_zip', 'Soubor není záloha agendy Money S3 (očekává se .lz, tedy ZIP).');
+        }
+        if (!is_dir($tempDir) && !@mkdir($tempDir, 0755, true) && !is_dir($tempDir)) {
+            $zip->close();
+            throw new MoneyS3Exception('storage_not_writable', 'Úložiště pro rozbalení zálohy není zapisovatelné.', [], 500);
+        }
+        try {
+            for ($i = 0; $i < min($zip->numFiles, self::MAX_ARCHIVE_ENTRIES); $i++) {
+                $name = (string) $zip->getNameIndex($i);
+                $target = self::entryTarget($name);
+                if ($target === null || $target[0] !== '' || !in_array(strtolower($target[1]), ['agendainfo.ini', 'agenda.dat'], true)) {
+                    continue;
+                }
+                $in = $zip->getStream($name);
+                $out = @fopen($tempDir . DIRECTORY_SEPARATOR . $target[1], 'wb');
+                if ($in !== false && $out !== false) {
+                    stream_copy_to_stream($in, $out, 64 * 1024 * 1024);
+                }
+                if (is_resource($in)) {
+                    fclose($in);
+                }
+                if (is_resource($out)) {
+                    fclose($out);
+                }
+            }
+        } finally {
+            $zip->close();
+        }
+        $backup = new self($tempDir);
+        $info = $backup->agendaInfoIni();
+        $company = $backup->agendaCompany();
+        foreach (glob($tempDir . DIRECTORY_SEPARATOR . '*') ?: [] as $file) {
+            @unlink($file);
+        }
+        @rmdir($tempDir);
+        return [
+            'name' => $company['name'] !== '' ? $company['name'] : $info['name'],
+            'ico' => $company['ico'] !== '' ? $company['ico'] : $info['ico'],
+            'version' => $info['version'],
+            'backup_at' => $info['backup_at'],
+        ];
+    }
+
     public static function open(string $dir): self
     {
         if (!is_dir($dir)) {

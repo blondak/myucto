@@ -6,6 +6,22 @@ namespace MyInvoice\Service\Bank;
 
 final class BankTransactionPostingScope
 {
+    public const MIGRATION_REVIEW_REASON = 'migration_review';
+
+    public static function requiresMigrationReview(array $transaction): bool
+    {
+        return ($transaction['match_reason'] ?? null) === self::MIGRATION_REVIEW_REASON;
+    }
+
+    public static function noMigrationReviewSql(string $transactionAlias): string
+    {
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/D', $transactionAlias)) {
+            throw new \InvalidArgumentException('Neplatný alias bankovního pohybu.');
+        }
+        return "({$transactionAlias}.match_reason IS NULL OR {$transactionAlias}.match_reason <> '"
+            . self::MIGRATION_REVIEW_REASON . "')";
+    }
+
     public static function existsSql(int|string $supplierId, string $transactionIdSql): string
     {
         if ((!is_int($supplierId) && !preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*$/D', $supplierId))

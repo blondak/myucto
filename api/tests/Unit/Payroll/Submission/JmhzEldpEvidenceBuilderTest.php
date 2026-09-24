@@ -662,8 +662,9 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
 
     /**
      * Rodičovská ve formě celého měsíce bez příjmu je týž případ § 11
-     * odst. 2. Rozpad § 18 se pro ni z podkladů odvodit nedá, takže zůstává
-     * neuvedený (viz EldpExcludedPeriodDeriver::deriveSection18()).
+     * odst. 2. Její dny jsou vyloučenými dny § 18 odst. 7 v 10473 (Pokyny
+     * MPSV k vyplnění MH 1.4.13 ji tam jmenují výslovně), stejně jako celý
+     * měsíc neplaceného volna výš.
      */
     public function testWholeMonthOfParentalLeaveIsReportedAsZeroInsuranceDays(): void
     {
@@ -685,7 +686,39 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         self::assertSame(0, $section['insurance_days']);
         self::assertSame('1++', $section['code']);
         self::assertSame(0, $section['assessment_base_czk']);
-        self::assertNull($section['section18_days_total']);
+        self::assertSame(31, $section['section18_days_total']);
+        self::assertSame(31, $section['section18_days']['omluvenaNepritomnost']);
+    }
+
+    /**
+     * Na rodičovské není zaměstnanec v evidenčním stavu (10265), souhrn proto
+     * nese nulu. Souhrn potvrzený dřív s celým trváním vztahu (31) projde
+     * tak, jak byl potvrzen; jiný počet dní ne.
+     */
+    public function testEvidenceDaysOfParentalLeaveMonthExcludeTheLeave(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $build = function (int $evidenceDays) use ($builder): void {
+            $source = $this->withZeroAssessmentBase($this->absenceSource(
+                'parental',
+                '2026-07-01',
+                '2026-07-31',
+                ['parental_millihours' => 160_000],
+            ));
+            $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+            self::assertIsArray($input);
+            $input['people'][0]['employments'][0]['time_month']['jmhz_work_summary']
+                ['values']['evidence_days'] = $evidenceDays;
+            $source = $this->withInput($source, $input);
+            $builder->build(7, 101, $source, $builder->deriveOrdinaryConfirmation(7, 101, $source));
+        };
+
+        $build(0);
+        $build(31);
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('Pracovní souhrn');
+        $build(15);
     }
 
     /**

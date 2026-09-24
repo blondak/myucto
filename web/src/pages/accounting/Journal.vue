@@ -25,6 +25,8 @@ import AutomationBadge from '@/components/automation/AutomationBadge.vue'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 import JournalEntryDetailPanel from '@/components/accounting/JournalEntryDetailPanel.vue'
+import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
+import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
 import { journalSourceLink } from '@/utils/journalSourceLink'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -87,7 +89,7 @@ function accountName(code: string): string {
 }
 
 const SOURCE_TYPES = [
-  'manual', 'invoice', 'purchase_invoice', 'bank', 'gopay', 'cash',
+  'manual', 'invoice', 'purchase_invoice', 'other_item', 'bank', 'gopay', 'cash',
   'depreciation', 'asset', 'asset_disposal',
   'closing', 'opening', 'fx_revaluation', 'stock',
   'offset', 'settlement', 'vat_clearing', 'card_settlement', 'card_writeoff',
@@ -527,9 +529,13 @@ async function reverse(entry: JournalEntryDetail) {
   }
 }
 
+// Uzamčené datum (po podání přiznání) tlačítko neskrývá — server vrátí varování,
+// které účetní potvrdí ({@link LockedPeriodAckModal}). Zavřené období ano.
+const lockedAck = useLockedPeriodAck()
+
 function canDeleteEntry(entry: JournalEntryDetail): boolean {
-  if (entry.reversed_by) return false
-  if (!['manual', 'invoice', 'purchase_invoice', 'bank', 'depreciation'].includes(entry.source_type)) return false
+  if (entry.reversed_by || entry.reverses_entry_id) return false
+  if (!['manual', 'invoice', 'purchase_invoice', 'bank', 'depreciation', 'vat_clearing'].includes(entry.source_type)) return false
   if (entry.source_type !== 'manual' && !entry.source_id) return false
   return periods.value.find(period => period.id === entry.period_id)?.status === 'open'
 }
@@ -544,7 +550,7 @@ async function deleteEntry(entry: JournalEntryDetail) {
         : 'accounting.journal.delete_confirm'
   if (!confirm(t(confirmKey, { id: entry.id }))) return
   try {
-    await accountingApi.deleteEntry(entry.id)
+    if (await lockedAck.run(ack => accountingApi.deleteEntry(entry.id, ack)) === null) return
     const successKey = entry.source_type === 'depreciation'
       ? 'accounting.journal.depreciation_deleted'
       : entry.source_type === 'bank'
@@ -569,14 +575,14 @@ async function deleteEntry(entry: JournalEntryDetail) {
  */
 function canDeletePair(entry: JournalEntryDetail): boolean {
   if (!entry.reversed_by) return false
-  if (!['manual', 'invoice', 'purchase_invoice', 'bank'].includes(entry.source_type)) return false
+  if (!['manual', 'invoice', 'purchase_invoice', 'bank', 'vat_clearing'].includes(entry.source_type)) return false
   return periods.value.find(period => period.id === entry.period_id)?.status === 'open'
 }
 
 async function deleteEntryPair(entry: JournalEntryDetail) {
   if (!confirm(t('accounting.journal.delete_pair_confirm', { id: entry.id, reversal: entry.reversed_by ?? 0 }))) return
   try {
-    await accountingApi.deleteEntryReversalPair(entry.id)
+    if (await lockedAck.run(ack => accountingApi.deleteEntryReversalPair(entry.id, ack)) === null) return
     toast.success(t('accounting.journal.pair_deleted'))
     collapseAll()
     await load()
@@ -687,6 +693,7 @@ function sourceLabel(type: string): string {
  * dokud žilo jen tady, vedla z opisu účtu proklikem jen faktura.
  */
 function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
+  if (entry.source_type === 'other_item' && !auth.canRead('other_items')) return null
   return journalSourceLink(entry)
 }
 
@@ -1099,6 +1106,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
 
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
       @close="sourceDrawerEntryId = null" @focus-entry="onFocusEntry" />
+    <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
 
     <datalist :id="`${pageId}-journal-coa`">
       <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">

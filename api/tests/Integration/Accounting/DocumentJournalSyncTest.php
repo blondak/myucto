@@ -218,7 +218,10 @@ final class DocumentJournalSyncTest extends TestCase
         $client    = $this->client('Odběratel s.r.o.', true, false);
         $invoiceId = $this->sale('FV-2099-R1', $client, '1', 1000.00, 210.00, 21.00);
         $this->postInvoiceEntry($invoiceId);
-        $this->lockUntil(self::YEAR . '-12-31');
+        // Zavřené období: zápis nejde smazat ani s potvrzením zásahu, takže zbývá retenční
+        // brána. (Uzamčené datum by místo ní vrátilo varování k potvrzení — viz
+        // InvoiceUncancelAndJournalPurgeTest.)
+        $this->periods->setStatus($this->periodId, $this->supplierId, 'closed');
 
         $res = $this->invoke($this->deleteInvoice, 'admin', ['id' => (string) $invoiceId], [], ['force' => '1']);
 
@@ -236,7 +239,7 @@ final class DocumentJournalSyncTest extends TestCase
             "UPDATE invoices SET parent_invoice_id = ?, invoice_type = 'credit_note' WHERE id = ?"
         )->execute([$parentId, $childId]);
         $this->postInvoiceEntry($childId);
-        $this->lockUntil(self::YEAR . '-12-31');
+        $this->periods->setStatus($this->periodId, $this->supplierId, 'closed');
 
         $res = $this->invoke($this->deleteInvoice, 'admin', ['id' => (string) $parentId], [], ['force' => '1']);
 
@@ -357,14 +360,6 @@ final class DocumentJournalSyncTest extends TestCase
         $resp->getBody()->rewind();
         $decoded = json_decode((string) $resp->getBody(), true);
         return ['status' => $resp->getStatusCode(), 'body' => is_array($decoded) ? $decoded : []];
-    }
-
-    private function lockUntil(string $date): void
-    {
-        $this->db->pdo()->prepare(
-            'INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?)
-             ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)'
-        )->execute([$this->supplierId, $date]);
     }
 
     private function postInvoiceEntry(int $invoiceId): int

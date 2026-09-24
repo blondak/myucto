@@ -715,12 +715,15 @@ sražené částky a dobírka. Odvody zaměstnavatele se rekonstruují podle
 historických sazeb přiložených v záloze a protokol na to upozorní.
 Převod nevytváří nový mzdový výpočet ani další účetní zápisy.
 
-V cílové firmě musí být nastaven začátek vedení mezd. Převzít lze pouze
-měsíce před tímto začátkem; měsíce od tohoto data patří výpočtům MyÚčta.
-Převod datum sám nemění. Chybějící sazby, neúplné údaje nebo nepodporované
+Převod přes společné nastavení mezd doplní chybějící modul, účtárnu a začátek
+vedení mezd na měsíc po posledních zdrojových mzdách, pokud to licence
+a podporované období dovolují. Existující nastavení ani datum nepřepíše.
+Historické mzdy patří před tento začátek; měsíce od něj zpracovává MyÚčto. Chybějící sazby, neúplné údaje nebo nepodporované
 varianty mezd se označí v protokolu a nepřevezmou jako úplné historické mzdy.
 Převzatá srážka je částka již sražená v daném měsíci, nezakládá exekuci ani
-dohodu pro budoucí výpočty. Počáteční roční kumulace se zatím nedoplňují.
+dohodu pro budoucí výpočty. Počáteční roční kumulace se zatím nedoplňují. Z ověřených mzdových kontací
+a parametrů zálohy vzniká návrh předkontací v **Mzdy → Importy**; použije se
+a nastavení teprve po potvrzení účetní. Již potvrzený návrh převod nepřepisuje.
 
 Neúplné údaje dětí, mzdové daňové údaje,
 dovolené a průměry se bez ověřeného významu a období nepřebírají.
@@ -746,6 +749,11 @@ tři nahrané zálohy. Odstranění zálohy nemaže již importované doklady.
 Dočasné uploady podléhají úklidu po sedmi dnech.
 Čtení archivu má limit 20 000 položek, nejvýše 64 MiB na soubor a 1 GiB
 celkového rozbaleného obsahu.
+
+Cizoměnový doklad se převádí jen při shodě položek v měně, zdrojového kurzu
+a korunových částek. Neověřené doklady se vypíšou jako nepřevedené; jejich
+zdrojové kontace zůstávají v účetním deníku. Neověřené měnové vazby úhrad
+se automaticky nepárují.
 
 ### Technická kontrola zdroje
 

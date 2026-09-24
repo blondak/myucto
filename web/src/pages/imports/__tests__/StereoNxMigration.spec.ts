@@ -16,6 +16,7 @@ vi.mock('@/stores/supplier', async () => {
   return { useSupplierStore: () => m.supplierStore }
 })
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: m.toastError }) }))
+vi.mock('@/components/settings/CompanyProfileBox.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({
   t: (key: string) => key, te: () => true, tm: () => ['Synthetic backup instruction'],
   rt: (value: string) => value, locale: { value: 'cs' },
@@ -170,6 +171,21 @@ describe('Stereo NX migration wizard', () => {
     await reachDryRun(wrapper)
     expect(wrapper.get('[data-testid="stereo-dry-report"]').text()).not.toContain('Specific draft warning')
     expect(wrapper.get('[data-testid="stereo-dry-report"]').text()).toContain('stereo_nx.review_document')
+    wrapper.unmount()
+  })
+
+  it('shows shared reconciliation checks and differences in the transfer protocol', async () => {
+    m.run.mockResolvedValue({ ...dryReport, ok: false, reconciliation: [{
+      year: 2030, period_id: 1, ok: false,
+      checks: [{ key: 'stereo_nx_journal', ok: false }],
+      journal_diffs: [{ account: '518', myucto: [0, 120, 120], money: [0, 100, 100] }],
+      money_report: null, documents: [],
+    }] })
+    const wrapper = await mountPage()
+    await reachDryRun(wrapper)
+    const report = wrapper.get('[data-testid="stereo-dry-report"]')
+    expect(report.text()).toContain('stereo_nx.checks.stereo_nx_journal')
+    expect(report.text()).toContain('518')
     wrapper.unmount()
   })
 

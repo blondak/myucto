@@ -143,9 +143,10 @@ final class StockTakeService
     }
 
     /**
-     * draft → counting: snapshot VŠECH aktivních karet s aktuálním stavem na daném
-     * skladu (expected_qty/expected_value) do stock_take_lines (replaceLines).
-     * Karty bez pohybu (bez řádku stock_levels) dostanou expected 0/0.
+     * draft → counting: snapshot aktivních karet skladu s aktuálním stavem
+     * (expected_qty/expected_value) do stock_take_lines (replaceLines). Karta skladu =
+     * na skladu se k datu inventury někdy pohnula; vyprodaná dostane expected 0/0,
+     * karta, která na skladu nikdy nebyla, řádek nedostane.
      *
      * @return array<string,mixed>
      */
@@ -174,9 +175,12 @@ final class StockTakeService
                 (string) $take['take_date'],
             );
 
+            $moved = $this->documentRepository->itemIdsMovedInWarehouse($supplierId, $warehouseId, (string) $take['take_date']);
             $itemIds = [];
             foreach ($activeItems as $item) {
-                $itemIds[(int) $item['id']] = true;
+                if (isset($moved[(int) $item['id']])) {
+                    $itemIds[(int) $item['id']] = true;
+                }
             }
             foreach ($byItem as $itemId => $item) {
                 if (StockValuation::qtyToT((string) $item['qty']) !== 0) {
@@ -276,7 +280,37 @@ final class StockTakeService
         }
 
         $rawLines = is_array($body['lines'] ?? null) ? $body['lines'] : [];
-        return $this->runInTransaction(function () use ($supplierId, $id, $rawLines): array {
+        $addItemIds = is_array($body['add_item_ids'] ?? null) ? array_values(array_unique(array_map('intval', $body['add_item_ids']))) : [];
+        return $this->runInTransaction(function () use ($supplierId, $id, $take, $rawLines, $addItemIds): array {
+            // Karta, která na skladu nikdy nebyla, v inventuře řádek nemá. Když ji na skladu
+            // najdou, přidá se ručně: k datu inventury má na skladu nulový stav, přebytek
+            // se pak zapíše jako u kterékoli jiné karty.
+            if ($addItemIds !== []) {
+                $present = [];
+                foreach ($this->takes->lines($supplierId, $id) as $line) {
+                    $present[(int) $line['stock_item_id']] = true;
+                }
+                foreach ($addItemIds as $itemId) {
+                    if ($itemId <= 0 || isset($present[$itemId])) {
+                        continue;
+                    }
+                    if ($this->items->find($supplierId, $itemId) === null) {
+                        throw new StockException('invalid_document', 'Skladová karta nenalezena.', 422);
+                    }
+                    $this->takes->insertLine($supplierId, $id, [
+                        'stock_item_id' => $itemId,
+                        'expected_qty' => '0.000',
+                        'expected_value' => '0.00',
+                        'surplus_unit_cost' => $this->documentRepository->lastKnownUnitCost(
+                            $supplierId,
+                            (int) $take['warehouse_id'],
+                            $itemId,
+                            (string) $take['take_date'],
+                        ),
+                    ]);
+                    $present[$itemId] = true;
+                }
+            }
             foreach ($rawLines as $rl) {
                 if (!is_array($rl)) {
                     continue;

@@ -17,6 +17,7 @@ import ActivationBanner from '@/components/settings/activation/ActivationBanner.
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
+import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -39,6 +40,8 @@ const filters = reactive({
   period_id: '' as number | '',
   as_of: '',
   scope: 'auto' as StatementScope,
+  dimension_value_id: null as number | null,
+  dimension_descendants: true,
 })
 
 function queryParams() {
@@ -46,7 +49,20 @@ function queryParams() {
     period_id: Number(filters.period_id),
     as_of: filters.as_of || undefined,
     scope: filters.scope,
+    ...(filters.dimension_value_id
+      ? { dimension_value_id: filters.dimension_value_id, dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
+      : {}),
   }
+}
+
+function onDimensionValue(valueId: number | null) {
+  filters.dimension_value_id = valueId
+  void load()
+}
+
+function onDimensionDescendants(value: boolean) {
+  filters.dimension_descendants = value
+  void load()
 }
 
 async function load() {
@@ -190,7 +206,13 @@ onMounted(async () => {
           </span>
         </div>
       </div>
+      <DimensionReportFilter class="mt-3"
+        :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
+        @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
     </div>
+    <p v-if="report?.dimension" class="mb-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800" data-test="balance-dimension-note">
+      {{ t('dimensions.balance_filter_note') }}
+    </p>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
@@ -202,6 +224,23 @@ onMounted(async () => {
         · {{ t('accounting.balance_sheet.prepared_at') }}: {{ report.entity.prepared_at }}
         · {{ t('accounting.balance_sheet.version') }}: {{ report.version_code }}
         <template v-if="unit === 'thousands'"> · {{ t('reports.unit_thousands_note') }}</template>
+      </div>
+
+      <div v-if="report.checks.negative_net_rows?.length"
+        class="bg-warning-50 border border-warning-200 rounded-lg p-3 mb-4 text-sm" data-test="negative-net-warning">
+        <div class="font-semibold text-warning-800">{{ t('accounting.balance_sheet.negative_net_title') }}</div>
+        <p class="text-warning-800 mt-1">{{ t('accounting.balance_sheet.negative_net_hint') }}</p>
+        <ul class="mt-2 space-y-0.5 text-warning-900">
+          <li v-for="r in report.checks.negative_net_rows" :key="`${r.column}-${r.row_code}`">
+            <span class="font-mono">{{ r.row_code }}</span> {{ r.label }}:
+            <span class="font-mono">{{ fm(r.net) }}</span>
+            ({{ r.column === 'previous' ? t('accounting.balance_sheet.negative_net_previous') : t('accounting.balance_sheet.negative_net_current') }})
+          </li>
+        </ul>
+        <RouterLink :to="{ name: 'accounting-statement-mapping', query: { period_id: String(filters.period_id) } }"
+          class="inline-block mt-2 text-primary-600 hover:text-primary-700 hover:underline">
+          {{ t('accounting.balance_sheet.negative_net_link') }}
+        </RouterLink>
       </div>
 
       <!-- AKTIVA -->
@@ -251,7 +290,7 @@ onMounted(async () => {
                       <tbody class="divide-y divide-neutral-200">
                         <tr v-for="acc in row.accounts" :key="`${acc.account_id}-${acc.target}`">
                           <td class="px-2 py-1">
-                            <RouterLink :to="accountLink(acc)"
+                            <RouterLink v-if="acc.account_id > 0" :to="accountLink(acc)"
                               class="font-mono text-primary-600 hover:text-primary-700 hover:underline">
                               {{ acc.account_code }}
                             </RouterLink>
@@ -316,7 +355,7 @@ onMounted(async () => {
                       <tbody class="divide-y divide-neutral-200">
                         <tr v-for="acc in row.accounts" :key="`${acc.account_id}-${acc.target}`">
                           <td class="px-2 py-1">
-                            <RouterLink :to="accountLink(acc)"
+                            <RouterLink v-if="acc.account_id > 0" :to="accountLink(acc)"
                               class="font-mono text-primary-600 hover:text-primary-700 hover:underline">
                               {{ acc.account_code }}
                             </RouterLink>

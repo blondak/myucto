@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Migration\StereoNx;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter;
+use MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup;
+use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use PDO;
 use Psr\Log\LoggerInterface;
 use Throwable;
@@ -25,6 +27,8 @@ final class StereoNxAccountingImporter
         private readonly StereoNxJournalLinks $journalLinks,
         private readonly StereoNxImporter $documents,
         private readonly LoggerInterface $log,
+        private readonly PayrollMigrationModuleSetup $payrollSetup,
+        private readonly StereoNxReconciler $reconciler,
     ) {}
 
     public function run(StereoNxBackup $backup, int $supplierId, int $userId, bool $dryRun, bool $blankCountryIsCz = false): array
@@ -83,6 +87,11 @@ final class StereoNxAccountingImporter
                 array_push($report['errors'], ...($plan['errors'] ?? []));
             }
             $report['not_transferred'] = [];
+            if (($plans['documents']['counts']['skipped_foreign_documents'] ?? 0) > 0) {
+                $report['not_transferred'][] = ['table' => 'SfaktV/SfaktP',
+                    'count' => $plans['documents']['counts']['skipped_foreign_documents'],
+                    'reason' => 'foreign_document_unverified'];
+            }
             foreach ([
                 'ZAZPVDPH' => 'Kontrolní evidence DPH',
                 'CIntdokl' => 'Interní doklady jako samostatné doklady',
@@ -129,6 +138,11 @@ final class StereoNxAccountingImporter
                 $report['date_bounds'] = ['from' => min($dates), 'to' => max($dates)];
             }
 
+            $lastPayroll = $plans['payroll']['last_source_period'] ?? null;
+            $lastData = isset($report['date_bounds']['to']) ? substr($report['date_bounds']['to'], 0, 7) : null;
+            if ($lastPayroll !== null) {
+                $report['payroll_setup'] = $this->payrollSetup->plan($supplierId, $lastPayroll, $lastData);
+            }
             if ($report['errors'] !== []) return $report;
             $pdo = $this->db->pdo();
             $nested = $pdo->inTransaction();
@@ -146,6 +160,18 @@ final class StereoNxAccountingImporter
                 }
                 $this->assertDocumentPeriodsEmpty($supplierId, $report['date_bounds'], $identity['ico'], $backup->companyIndex());
                 $this->assertDocumentDatesOpen($supplierId, $targetDates);
+                if ($lastPayroll !== null) {
+                    // Stejný zápis jako při převodu; zkouška vrátí i nastavení modulu.
+                    $setup = $this->payrollSetup->ensure($supplierId, $userId, $lastPayroll, $lastData);
+                    $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import');
+                    PayrollMigrationModuleSetup::report($protocol, 'payroll', $setup, 'Stereo NX');
+                    foreach ($protocol->toArray()['steps'] as $step) {
+                        foreach ($step['messages'] as $message) {
+                            $report['warnings'][] = ['level' => $message['level'], 'code' => $message['code'], 'message' => $message['text']];
+                        }
+                    }
+                    $report['payroll_setup_result'] = $setup;
+                }
                 $report['written'] = $this->documents->writeAccountingPartners($partners, $identity, $backup->companyIndex(), $supplierId);
                 foreach (['journal' => $this->journal, 'assets' => $this->assets, 'employees' => $this->employees,
                     'payroll' => $this->payroll,
@@ -160,6 +186,21 @@ final class StereoNxAccountingImporter
                     array_push($report['review_movements'], ...($result['review_movements'] ?? []));
                 }
                 $report['written'] += $this->journalLinks->write($plans['journal'], $plans['documents'], $supplierId, $userId);
+                $proposal = $this->payroll->refreshPostingProposal($backup, $supplierId);
+                if ($proposal !== null) {
+                    $report['written']['payroll_posting_proposals'] = 1;
+                    $report['warnings'][] = ['level' => 'info', 'code' => 'payroll_posting_proposal',
+                        'message' => 'Z ověřených mzdových kontací vznikl návrh předkontací. Zkontrolujte jej v Mzdy → Importy; nastavení se automaticky nepřepsalo.'];
+                }
+                elseif ($lastPayroll !== null) {
+                    $report['warnings'][] = ['level' => 'warning', 'code' => 'payroll_posting_unverified',
+                        'message' => 'Ve zdroji nebyly doloženy jednoznačné dvojice mzdových účtů; návrh předkontací nevznikl.'];
+                }
+                $report += $this->reconciler->run($supplierId, $plans['journal']['accounting_plan']);
+                foreach ($report['reconciliation'] as $year) {
+                    if (!$year['ok']) throw new StereoNxException('reconciliation_failed',
+                        'Předvaha po převodu nesouhlasí se zdrojovým deníkem. Převod byl vrácen; podrobnosti jsou v kontrole převodu.');
+                }
                 $report['counts']['requires_draft'] = count($report['review_documents']);
                 foreach ($report['review_documents'] as &$review) {
                     if ($dryRun) $review['target_id'] = null;

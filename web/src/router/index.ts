@@ -12,6 +12,7 @@ import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import type { AccessLevel, PermissionKey } from '@/security/permissions'
 import { ensureNamespaces, namespacesForRoute } from '@/i18n'
 import { createWorkspaceRoutes } from './workspaceRoutes'
+import { switchSupplierForDeepLink } from './supplierDeepLink'
 import {
   clientDomainCanonicalHandoffPath,
   clientDomainRedirect,
@@ -31,6 +32,7 @@ declare module 'vue-router' {
     requiresDoubleEntry?: boolean
     requiresTaxEvidence?: boolean
     requiresCashMode?: boolean
+    requiresAccountingMode?: boolean
     requiresStock?: boolean
     requiresPayroll?: boolean
     commercialOnly?: boolean
@@ -98,6 +100,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // AiExtractPdfAction; readonly/client roli položka nesvítí a route ji nepustí.
   'purchase-invoice-ai-import': ['purchase_invoices.scan', 'write'],
   documents: ['documents'], 'document-detail': ['documents'], 'document-requests': ['documents.requests'],
+  'other-items': ['other_items'], 'other-item-new': ['other_items', 'write'], 'other-item-detail': ['other_items'], 'other-item-edit': ['other_items', 'write'],
   'scan-attach': ['documents.upload', 'write'],
   'accounting-accounts': ['accounting'], 'accounting-account-detail': ['accounting'],
   'accounting-journal': ['accounting'], 'accounting-journal-new': ['accounting.journal.write', 'write'],
@@ -148,7 +151,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'accounting-balance-inventory': ['accounting'],
   'accounting-section18-statements': ['accounting'],
   'accounting-periods': ['accounting'],
-  'accounting-monthly-check': ['accounting'], 'accounting-monthly-report': ['accounting'], 'accounting-offsets': ['accounting.offsets'],
+  'accounting-monthly-check': ['accounting'], 'accounting-parallel-run': ['accounting'], 'accounting-monthly-report': ['accounting'], 'accounting-offsets': ['accounting.offsets'],
   'accounting-tax-base-adjustments': ['accounting'],
   'manual-posting-queue': ['accounting'],
   'accounting-assets': ['assets'], 'accounting-asset-new': ['assets.write', 'write'], 'accounting-asset-detail': ['assets'], 'accounting-asset-edit': ['assets.write', 'write'],
@@ -176,6 +179,8 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'admin-settings': ['settings.company.write', 'write'], 'admin-branding': ['settings.branding', 'write'], 'admin-integrations': ['settings.company.write', 'write'], 'admin-codebooks': ['settings.company'], 'admin-bank-rule-templates': ['bank.rules'], 'admin-approvals': ['invoices.approval'], 'admin-support': ['profile'],
   'accounting-activation': ['accounting.periods.manage', 'write'],
   'payment-cards': ['settings.bank_accounts'], 'payment-card-new': ['settings.bank_accounts', 'write'], 'payment-card-detail': ['settings.bank_accounts'],
+  // Kreditní karty čte RoutePermissionMap jako bankovní data (`bank`).
+  'credit-cards': ['bank'], 'credit-card-detail': ['bank'],
   'reports-dph': ['reports'], 'reports-kh': ['reports'], 'reports-dph-book': ['reports'], 'reports-s74b': ['reports'], 'reports-related-parties': ['reports'], 'reports-vat-coefficient': ['reports'], 'reports-s46': ['reports'], 'reports-vat-corrections': ['reports'], 'reports-shv': ['reports'], 'reports-oss': ['reports'],
   'reports-income-tax': ['reports'], 'reports-cnb-rate-audit': ['reports'], 'reports-invoice-series-completeness': ['reports'], 'reports-foreign-income': ['reports'], 'reports-submissions': ['reports'], 'reports-monthly-export': ['reports.export'], 'tax-optimizer': ['reports'], recurring: ['recurring'], 'recurring-new': ['recurring.create', 'write'],
   'recurring-detail': ['recurring'], 'recurring-edit': ['recurring', 'write'], 'profile-api-tokens': ['profile.tokens'], 'profile-mcp-server': ['profile.tokens'], 'profile-shortcuts': ['profile', 'write'],
@@ -459,6 +464,14 @@ export async function authorizationGuard(
     return { name: 'home' }
   }
 
+  // Odkaz na doklad jiné firmy, do které uživatel smí: přepnout firmu dřív, než
+  // kontroly níž (režim účetnictví, sklad…) posoudí cíl podle špatné firmy.
+  // Přepnutí přenačte stránku, v panelu pracovní plochy se nepřepíná.
+  if (requiresAuth && auth.isAuthenticated && options.allowGlobalSideEffects !== false
+    && await switchSupplierForDeepLink(to)) {
+    return false
+  }
+
   const superadminOnly = to.matched.some((r) => r.meta.superadminOnly)
   if (superadminOnly && !auth.isSuperadmin) {
     return denyFallback(to.name, auth)
@@ -533,6 +546,12 @@ export async function authorizationGuard(
     if (mode !== 'double_entry' && mode !== 'tax_evidence') {
       return { name: 'home' }
     }
+  }
+
+  const requiresAccountingMode = to.matched.some((r) => r.meta.requiresAccountingMode)
+  if (requiresAccountingMode) {
+    const mode = useSupplierStore().currentSupplier?.accounting_mode
+    if (mode !== 'double_entry' && mode !== 'tax_evidence') return { name: 'home' }
   }
 
   // Sklad (Epic SKLAD) je dostupný jen firmám s zapnutou skladovou evidencí.

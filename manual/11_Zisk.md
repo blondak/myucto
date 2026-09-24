@@ -6,6 +6,12 @@ Stránka **Zisk** je BI/analytický pohled nad tržbami, náklady a klienty — 
 náklady vedle sebe, výsledný zisk, zdraví firmy a rizika. Je to jediný pohled v
 sekci Grafy, který spojuje příjmovou i nákladovou stranu do jednoho čísla.
 
+Samostatná karta **Ostatní položky ve výsledku hospodaření** ukazuje za
+aktuální rok výnosy, náklady a dopad na zisk z ostatních pohledávek a závazků.
+Vychází z vybraného výsledkového protiúčtu a rozlišuje zaúčtované položky a
+koncepty. Nejde o součást fakturačních KPI a historických grafů této stránky.
+Kauce, jistina a jiné rozvahové případy se do karty nezapočítávají.
+
 ![Zisk — KPI, monthly trend, aging, DSO, concentration risk](img/23_crm.webp)
 
 ## 11.1 Co stránka zobrazuje

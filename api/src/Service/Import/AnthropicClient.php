@@ -413,6 +413,10 @@ DŮLEŽITÉ k polím `vendor.dic` a `vendor.vat_dic` (doklad může nést DVĚ R
 DŮLEŽITÉ k poli `vendor_invoice_number` (číslo dokladu):
 - Vrať číslo dokladu/faktury/účtenky tak, jak je vytištěné (např. "3266011131",
   "2025/0042", u paragonu pořadové číslo účtenky / číslo dokladu pokud existuje).
+- Je to VLASTNÍ číslo dokladu u nadpisu („Faktura 20940012", „Faktura č."), NIKDY číslo
+  dokladu, na který se odkazuje („Daňový doklad k proformě 1-20940077", „k záloze č.",
+  „k objednávce č."). Odkaz na proformu/zálohu patří do `advance_reference`.
+- NEPŘEBÍREJ číslo z variabilního symbolu — VS se od čísla dokladu může lišit.
 - Účtenka / paragon NEMUSÍ mít žádné jednoznačné číslo dokladu. Pokud na dokladu
   ŽÁDNÉ použitelné číslo NENÍ → vrať `null`. NEVYMÝŠLEJ ho a NEPOUŽÍVEJ náhražky
   jako číslo pokladny, IČO, DIČ, datum nebo telefon — to číslo dokladu není.
@@ -433,7 +437,8 @@ DŮLEŽITÉ k poli `payment` (platební údaje DODAVATELE pro QR platbu):
   „19-2000145399/0800"). Hledej u textu „Bankovní spojení", „Číslo účtu", „Účet",
   „Account", „Bank account".
 - `iban` = IBAN dodavatele pokud je uveden (např. „CZ65 0800 0000 1920 0014 5399").
-- `variable_symbol` = variabilní symbol platby (VS), typicky shodný s číslem faktury.
+- `variable_symbol` = variabilní symbol platby (VS) opsaný z pole „Variabilní symbol".
+  Nedoplňuj ho z čísla dokladu — u dokladu k proformě nese VS proformy.
 - VŽDY jde o účet PŘÍJEMCE PLATBY = DODAVATELE (vendor), NIKDY odběratele/tenanta.
 - Pokud údaj na dokladu NENÍ → null. Nevymýšlej.
 
@@ -894,7 +899,8 @@ Schema: {"bank_account": string|null, "iban": string|null, "variable_symbol": st
   TAK JAK JE NA DOKLADU (např. „2900123456/2010", „19-2000145399/0800"). Hledej
   u textu „Bankovní spojení", „Číslo účtu", „Účet", „Account".
 - `iban` = IBAN dodavatele pokud je uveden (např. „CZ6508000000192000145399").
-- `variable_symbol` = variabilní symbol platby (VS), typicky shodný s číslem faktury.
+- `variable_symbol` = variabilní symbol platby (VS) opsaný z pole „Variabilní symbol".
+  Nedoplňuj ho z čísla dokladu — u dokladu k proformě nese VS proformy.
 - VŽDY jde o účet PŘÍJEMCE PLATBY = DODAVATELE, NIKDY odběratele.
 - Pokud údaj na dokladu NENÍ → null. NEVYMÝŠLEJ.
 EOT;

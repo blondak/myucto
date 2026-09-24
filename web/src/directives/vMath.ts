@@ -1,4 +1,5 @@
 import type { Directive } from 'vue'
+import { selectOnFocus } from './vSelectOnFocus'
 
 /**
  * Safe math expression evaluator (CSP-safe, žádný new Function()).
@@ -175,6 +176,9 @@ export const vMath: Directive<HTMLInputElement> = {
       if (!/[+\-*/]/.test(el.value)) return
       timeout = setTimeout(evaluate, 800)
     })
+
+    // 4) Vstup do pole označí celou hodnotu, napsané číslo ji přepíše.
+    selectOnFocus(el)
 
     ;(el as any).__mathHandler = evaluate
   },

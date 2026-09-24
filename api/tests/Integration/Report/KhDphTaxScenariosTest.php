@@ -2158,6 +2158,146 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertCount(0, $kh->DPHKH1->VetaA2, 'KH A.2 prázdná');
     }
 
+    /**
+     * Ř. 24 „Vybraná plnění (§ 110b odst. 2)" = hodnota plnění, na která je použit režim
+     * OSS (pokyny k tiskopisu 25 5401, MFin 5412; anotace `pln_zaslani` v dphdp3.xsd).
+     * OSS řádky jsou z tuzemské evidence vyřazené, takže dřív z přiznání zmizely úplně
+     * a ř. 24 zůstal prázdný. Základ bez zahraniční daně v Kč kurzem dokladu, dobropis
+     * ho snižuje, zahraniční daň nesmí nikam do přiznání a OSS nesmí do KH ani SH.
+     */
+    public function testOssSuppliesAreReportedOnLine24Only(): void
+    {
+        $plId = $this->countryId('PL');
+        if ($plId === 0) {
+            $this->markTestSkipped('Země PL není v číselníku countries.');
+        }
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $eur = $this->eurCurrencyId();
+        $consumer = $this->client('PL spotřebitel', $plId, null, customer: true);
+        $cz = $this->client('Tuzemský odběratel OSS', $this->czId, 'CZ12345679', customer: true);
+
+        $this->sale('2099062401', $consumer, null, false, $d(5), $d(5), [[1000, 230, 23]], $eur, 25.0);
+        $ossInvoice = end($this->invoiceIds);
+        $this->sale('2099062402', $consumer, null, false, $d(18), $d(18), [[-200, -46, 23]], $eur, 25.0);
+        $ossCredit = end($this->invoiceIds);
+        $this->sale('2099062403', $cz, '1', false, $d(20), $d(20), [[10000, 2100, 21]]);
+
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE invoices SET invoice_type = 'credit_note' WHERE id = ?")->execute([$ossCredit]);
+        $pdo->prepare(
+            "UPDATE invoice_items SET oss_applicable = 1, oss_consumer_country = 'PL' WHERE invoice_id IN (?, ?)"
+        )->execute([$ossInvoice, $ossCredit]);
+
+        $res = $this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly');
+        $this->assertXmlValidatesAgainstXsd($res['xml'], 'dphdp3.xsd');
+        $dp = (new \SimpleXMLElement($res['xml']))->DPHDP3;
+        $this->assertSame('20000', (string) $dp->Veta2['pln_zaslani'],
+            'ř. 24 = (1000 − 200) EUR × 25 Kč, základ bez zahraniční daně');
+        $this->assertSame('10000', (string) $dp->Veta1['obrat23'], 'OSS plnění nesmí na ř. 1');
+        $this->assertSame('2100', (string) $dp->Veta1['dan23'], 'polská daň nesmí do tuzemské daně');
+        $this->assertSame('2100', (string) $dp->Veta6['dan_zocelk'], 'ř. 24 nevstupuje do ř. 62');
+        $this->assertSame('A', (string) $dp->VetaD['trans']);
+
+        $kh = (new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHKH1;
+        $this->assertSame('10000.00', (string) $kh->VetaC['obrat23'], 'OSS plnění nepatří do KH');
+        $sh = new \SimpleXMLElement($this->shv->build($this->supplierId, self::YEAR, self::MONTH)['xml']);
+        $this->assertCount(0, $sh->DPHSHV->VetaR, 'OSS plnění nepatří do souhrnného hlášení');
+    }
+
+    /**
+     * Ř. 43 (odpočet ze samovyměření) EPO kontroluje proti součtu ř. 3–13 TAK, JAK JSOU
+     * VYPLNĚNÉ, tedy zaokrouhlených na celé Kč (propustná chyba č. 90). Hlášený případ:
+     * ř. 5 = 50 646 a ř. 12 = 539, ale ř. 43 = round(51 185,53) = 51 186.
+     */
+    public function testSelfAssessmentDeductionEqualsSumOfRoundedOutputLines(): void
+    {
+        $usId = $this->countryId('US');
+        if ($usId === 0) {
+            $this->markTestSkipped('US není v číselníku countries.');
+        }
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $de = $this->client('DE služba zaokrouhlení', $this->deId, 'DE123456789', vendor: true);
+        $us = $this->client('US služba zaokrouhlení', $usId, null, vendor: true);
+        // 241 172,38 × 21 % = 50 646,20 · 2 568,24 × 21 % = 539,33 → součet 51 185,53.
+        $this->purchase('P-2099-4301', $de, '24e', false, 'invoice', $d(10), $d(10), [[241172.38, 0, 21]]);
+        $this->purchase('P-2099-4302', $us, '24', false, 'invoice', $d(10), $d(10), [[2568.24, 0, 21]]);
+
+        $res = $this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly');
+        $this->assertXmlValidatesAgainstXsd($res['xml'], 'dphdp3.xsd');
+        $dp = (new \SimpleXMLElement($res['xml']))->DPHDP3;
+        $this->assertSame('50646', (string) $dp->Veta1['dan_psl23_e']);
+        $this->assertSame('539', (string) $dp->Veta1['dan_psl23_z']);
+        $this->assertSame('51185', (string) $dp->Veta4['od_zdp23'], 'ř. 43 = ř. 5 + ř. 12 ve formuláři');
+        $this->assertSame(
+            (int) $dp->Veta1['p_sl23_e'] + (int) $dp->Veta1['p_sl23_z'],
+            (int) $dp->Veta4['nar_zdp23'],
+            'základ ř. 43 = základ ř. 5 + ř. 12 ve formuláři',
+        );
+        $this->assertSame('51185', (string) $dp->Veta4['odp_sum_nar'], 'ř. 46 = ř. 43');
+        $this->assertSame((string) $dp->Veta6['dan_zocelk'], (string) $dp->Veta6['odp_zocelk'],
+            'samovyměření se musí vyrušit (ř. 62 = ř. 63)');
+        $this->assertFalse(isset($dp->Veta6['dano_da']), 'žádná vlastní daň z pouhého samovyměření');
+    }
+
+    /**
+     * Souhrnné hlášení: `c_vat` je DIČ BEZ kódu státu, `k_stat` stát, který DIČ přidělil
+     * (dphshv.xsd). Karta kontaktu ukládá DIČ s prefixem; když adresa a prefix nesouhlasí,
+     * strhával se jen prefix země adresy a do SH šlo `k_stat="PL" c_vat="PL…"`. Francouzské
+     * DIČ bez prefixu naopak dostalo `k_stat` z prvních dvou písmen národní části.
+     */
+    public function testShStripsPrefixOfIssuingStateNotAddress(): void
+    {
+        $frId = $this->countryId('FR');
+        if ($frId === 0) {
+            $this->markTestSkipped('Země FR není v číselníku countries.');
+        }
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $plRegistered = $this->client('Odběratel s adresou v DE a polským DIČ', $this->deId, 'PL1234567890', customer: true);
+        $frNoPrefix = $this->client('FR odběratel bez prefixu', $frId, 'AB123456789', customer: true);
+        $this->sale('2099063301', $plRegistered, '22', false, $d(10), $d(10), [[15000, 0, 0]]);
+        $this->sale('2099063302', $frNoPrefix, '22', false, $d(11), $d(11), [[8000, 0, 0]]);
+
+        $res = $this->shv->build($this->supplierId, self::YEAR, self::MONTH);
+        $this->assertXmlValidatesAgainstXsd($res['xml'], 'dphshv.xsd');
+        $rows = [];
+        foreach ((new \SimpleXMLElement($res['xml']))->DPHSHV->VetaR as $v) {
+            $rows[(string) $v['k_stat']] = (string) $v['c_vat'];
+        }
+        $this->assertSame(['PL' => '1234567890', 'FR' => 'AB123456789'], $rows);
+    }
+
+    /**
+     * KH A.2: totéž pravidlo jako SH — `k_stat` je stát registrace a `vatid_dod` číslo bez
+     * JEHO prefixu. Dodavatel se sídlem v DE registrovaný v AT šel jako DE + „ATU…".
+     */
+    public function testKhA2UsesIssuingStateOfVatIdForEuSeatedSupplier(): void
+    {
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $vend = $this->client('DE sídlo, AT registrace', $this->deId, 'ATU12345678', vendor: true);
+        $this->purchase('P-2099-3303', $vend, '24e', false, 'invoice', $d(12), $d(12), [[4000, 0, 21]]);
+
+        $xml = $this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml'];
+        $this->assertKhXmlValidatesAgainstXsd($xml);
+        $a2 = (new \SimpleXMLElement($xml))->DPHKH1->VetaA2;
+        $this->assertCount(1, $a2);
+        $this->assertSame('AT', (string) $a2[0]['k_stat']);
+        $this->assertSame('U12345678', (string) $a2[0]['vatid_dod']);
+    }
+
+    private function assertXmlValidatesAgainstXsd(string $xml, string $xsdFile): void
+    {
+        $xsd = dirname(__DIR__, 3) . '/xsd/' . $xsdFile;
+        $this->assertFileExists($xsd);
+        $doc = new \DOMDocument();
+        $doc->loadXML($xml);
+        $prev = libxml_use_internal_errors(true);
+        $valid = $doc->schemaValidate($xsd);
+        $errors = array_map(static fn ($e): string => trim($e->message), libxml_get_errors());
+        libxml_clear_errors();
+        libxml_use_internal_errors($prev);
+        $this->assertTrue($valid, "XML neprošlo {$xsdFile}: " . implode(' | ', $errors));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private function countryId(string $iso2): int

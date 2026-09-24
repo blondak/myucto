@@ -447,6 +447,8 @@ final class Routes
             $g->post  ('/session/lock',                       [SessionAction::class, 'lock']);
             $g->get   ('/session/lock-preference',            [SessionAction::class, 'lockPreference']);
             $g->put   ('/session/lock-preference',            [SessionAction::class, 'updateLockPreference']);
+            // Výchozí firma uživatele (přepínač firem) — viz DefaultSupplierService.
+            $g->put   ('/default-supplier',                   \MyInvoice\Action\Auth\DefaultSupplierAction::class);
             $g->post  ('/session/unlock/options',             [SessionAction::class, 'unlockOptions']);
             $g->post  ('/session/unlock/verify',              [SessionAction::class, 'unlockVerify']);
             // API tokeny (Personal Access Tokens) — správa jen ze session auth
@@ -512,6 +514,8 @@ final class Routes
 
         // Globální vyhledávač pro sidebar (klienti/dodavatelé + vydané/přijaté faktury)
         $app->get('/api/search', \MyInvoice\Action\Search\GlobalSearchAction::class);
+        // Ke které firmě doklad patří — frontend podle toho přepne firmu u odkazu na doklad jiné firmy.
+        $app->get('/api/locate/{type}/{id:[0-9]+}', \MyInvoice\Action\Search\LocateEntityAction::class);
         $app->get('/api/branding-profiles', [BrandingProfilesAction::class, 'publicList']);
 
         // Codebooks
@@ -2239,6 +2243,12 @@ final class Routes
             $g->get   ('/dimensions',                                    [\MyInvoice\Action\Accounting\DimensionAction::class, 'overview']);
             $g->put   ('/dimensions/settings',                           [\MyInvoice\Action\Accounting\DimensionAction::class, 'settings']);
             $g->post  ('/dimensions/defaults',                           [\MyInvoice\Action\Accounting\DimensionAction::class, 'defaults']);
+            $g->get   ('/dimensions/rules',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'listRules']);
+            $g->post  ('/dimensions/rules',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'createRule']);
+            $g->get   ('/dimensions/rules/audit',                        [\MyInvoice\Action\Accounting\DimensionAction::class, 'auditRules']);
+            $g->get   ('/dimensions/rules/coverage',                     [\MyInvoice\Action\Accounting\DimensionAction::class, 'ruleCoverage']);
+            $g->put   ('/dimensions/rules/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\DimensionAction::class, 'updateRule']);
+            $g->delete('/dimensions/rules/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\DimensionAction::class, 'deleteRule']);
             $g->post  ('/dimensions/types',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'createType']);
             $g->patch ('/dimensions/types/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\DimensionAction::class, 'updateType']);
             $g->delete('/dimensions/types/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\DimensionAction::class, 'deleteType']);
@@ -2316,8 +2326,22 @@ final class Routes
             $g->put   ('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'update']);
             $g->delete('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'delete']);
             $g->get('/reports/dimension-profit',                  \MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class);
+            $g->get('/reports/dimension-profit/export',           [\MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class, 'export']);
+            $g->get('/reports/dimension-cash-flow',               \MyInvoice\Action\Accounting\Reports\DimensionCashFlowAction::class);
+            $g->get('/reports/dimension-cash-flow/export',        [\MyInvoice\Action\Accounting\Reports\DimensionCashFlowAction::class, 'export']);
             $g->get('/reports/saldo',                             [SaldoAction::class, 'get']);
             $g->get('/reports/saldo/export',                      [SaldoAction::class, 'export']);
+            // Kontrola souběhu se starým účetním programem (měsíční rekonciliace K1, K5–K13).
+            $g->get   ('/parallel-run/sources',                            [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'sources']);
+            $g->get   ('/parallel-run/backups',                            [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'backups']);
+            $g->get   ('/parallel-run/checks',                             [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'list']);
+            $g->post  ('/parallel-run/checks',                             [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'create']);
+            $g->get   ('/parallel-run/checks/{id:[0-9]+}',                 [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'get']);
+            $g->get   ('/parallel-run/checks/{id:[0-9]+}/export',          [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'export']);
+            $g->put   ('/parallel-run/checks/{id:[0-9]+}/classification',  [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'classify']);
+            $g->post  ('/parallel-run/checks/{id:[0-9]+}/close',           [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'close']);
+            $g->post  ('/parallel-run/checks/{id:[0-9]+}/reopen',          [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'reopen']);
+            $g->delete('/parallel-run/checks/{id:[0-9]+}',                 [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'delete']);
             // Kontrola úplnosti dokladů proti bance (REAL_data_followup_UX.md E) — read-only
             // report: bankovní pohyby bez dokladu po prahu X dní (§24/1) + doklady po splatnosti.
             $g->get('/reports/document-completeness',             [\MyInvoice\Action\Accounting\Reports\DocumentCompletenessAction::class, 'get']);
@@ -2404,6 +2428,8 @@ final class Routes
             $g->post  ('/assets',                                   [AssetAction::class, 'create']);
             $g->get   ('/assets/purchase-candidates',               [AssetAction::class, 'purchaseCandidates']);
             $g->post  ('/assets/depreciations/book',                [DepreciationAction::class, 'bookYear']);
+            $g->get   ('/assets/account-summary',                   [\MyInvoice\Action\Accounting\Assets\AssetAccountSummaryAction::class, 'candidates']);
+            $g->post  ('/assets/account-summary',                   [\MyInvoice\Action\Accounting\Assets\AssetAccountSummaryAction::class, 'sync']);
             $g->get   ('/assets/{id:[0-9]+}',                       [AssetAction::class, 'get']);
             $g->put   ('/assets/{id:[0-9]+}',                       [AssetAction::class, 'update']);
             $g->delete('/assets/{id:[0-9]+}',                       [AssetAction::class, 'delete']);
@@ -2416,6 +2442,8 @@ final class Routes
             $g->post  ('/assets/{id:[0-9]+}/dispose/revert',        [AssetLifecycleAction::class, 'revertDisposal']);
             $g->post  ('/assets/{id:[0-9]+}/depreciation/pause',    [DepreciationAction::class, 'pause']);
             $g->delete('/assets/{id:[0-9]+}/depreciation/pause/{year:[0-9]+}', [DepreciationAction::class, 'unpause']);
+            $g->post  ('/assets/{id:[0-9]+}/depreciation/tax-override', [DepreciationAction::class, 'overrideTax']);
+            $g->delete('/assets/{id:[0-9]+}/depreciation/tax-override/{year:[0-9]+}', [DepreciationAction::class, 'clearTaxOverride']);
             // Uzávěrka období (Epic F4). Segmenty se s /periods/{id}/status nekryjí;
             // celá rodina closing/close/open-next/revert běží na právu accounting.periods.close
             // (RoutePermissionMap + Action requireClose), /status na accounting.periods.manage.
@@ -2470,6 +2498,25 @@ final class Routes
             $g->get   ('/cash-registers/{id:[0-9]+}/book',     [\MyInvoice\Action\Accounting\Cash\CashBookAction::class, 'get']);
             $g->get   ('/cash-registers/{id:[0-9]+}/book/pdf', [\MyInvoice\Action\Accounting\Cash\CashBookAction::class, 'pdf']);
             $g->get   ('/cash-documents',                      [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'list']);
+            $g->get   ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'list']);
+            $g->post  ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'create']);
+            $g->get   ('/other-items/schedules',               [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'list']);
+            $g->get   ('/other-items/schedules/{id:[0-9]+}',   [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'get']);
+            $g->post  ('/other-items/schedules/{id:[0-9]+}/generate', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'generate']);
+            $g->put   ('/other-items/schedules/{id:[0-9]+}/status', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'status']);
+            $g->post  ('/other-items/{item_id:[0-9]+}/schedule', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'create']);
+            $g->get   ('/other-items/{item_id:[0-9]+}/installments', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'installments']);
+            $g->put   ('/other-items/{item_id:[0-9]+}/installments', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'setInstallments']);
+            $g->get   ('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'get']);
+            $g->put   ('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'update']);
+            $g->delete('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'delete']);
+            $g->post  ('/other-items/{id:[0-9]+}/post',        [\MyInvoice\Action\Accounting\OtherItemAction::class, 'post']);
+            $g->post  ('/other-items/{id:[0-9]+}/reverse',     [\MyInvoice\Action\Accounting\OtherItemAction::class, 'reverse']);
+            $g->post  ('/other-items/{id:[0-9]+}/repost',      [\MyInvoice\Action\Accounting\OtherItemAction::class, 'repost']);
+            $g->get   ('/other-items/{id:[0-9]+}/allocations', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'allocations']);
+            $g->get   ('/other-items/{id:[0-9]+}/payment-candidates', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'paymentCandidates']);
+            $g->post  ('/other-items/{id:[0-9]+}/allocations', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'allocate']);
+            $g->delete('/other-items/{id:[0-9]+}/allocations/{allocation_id:[0-9]+}', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'unallocate']);
             $g->post  ('/cash-documents',                      [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'create']);
             $g->get   ('/cash-documents/unpaid',               [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'unpaid']);
             $g->get   ('/cash-documents/rule-presets',         [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'rulePresets']);
@@ -2561,6 +2608,17 @@ final class Routes
         $app->get    ('/api/admin/imports/money-s3/runs', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'runs']);
         $app->get    ('/api/admin/imports/money-s3/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'run']);
         $app->delete ('/api/admin/imports/money-s3/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'deleteRun']);
+        // Dávkový převod více záloh Money S3 (účetní kancelář) - zálohy, podaná DPPO, spuštění, protokol dávky.
+        $app->get    ('/api/admin/imports/money-s3/batch/uploads', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'listUploads']);
+        $app->post   ('/api/admin/imports/money-s3/batch/uploads/chunked', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'initChunked']);
+        $app->post   ('/api/admin/imports/money-s3/batch/uploads/{token:[a-f0-9]{16}}/chunks', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'chunk']);
+        $app->post   ('/api/admin/imports/money-s3/batch/uploads/{token:[a-f0-9]{16}}/complete', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'complete']);
+        $app->delete ('/api/admin/imports/money-s3/batch/uploads/{token:[a-f0-9]{16}}', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'deleteUpload']);
+        $app->post   ('/api/admin/imports/money-s3/batch/filings', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'uploadFiling']);
+        $app->delete ('/api/admin/imports/money-s3/batch/filings/{id:[a-f0-9]{40}}', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'deleteFiling']);
+        $app->post   ('/api/admin/imports/money-s3/batch/start', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'start']);
+        $app->get    ('/api/admin/imports/money-s3/batch/jobs', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'jobs']);
+        $app->get    ('/api/admin/imports/money-s3/batch/jobs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\MoneyS3BatchAction::class, 'job']);
         // Průvodce „Přechod z POHODA" - XML export (ZIP), náhled, zkouška nanečisto, převod, protokoly, exportní nástroj.
         $app->post   ('/api/admin/imports/pohoda/uploads/chunked', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'initChunked']);
         $app->post   ('/api/admin/imports/pohoda/uploads/{token:[a-f0-9]{16}}/chunks', [\MyInvoice\Action\Admin\Import\PohodaMigrationAction::class, 'chunk']);
@@ -2885,6 +2943,9 @@ final class Routes
         $app->get ('/api/settings/ai-assist',               [\MyInvoice\Action\Settings\AiAssistSettingsAction::class, 'get']);
         $app->put ('/api/settings/ai-assist',               [\MyInvoice\Action\Settings\AiAssistSettingsAction::class, 'put']);
         $app->get ('/api/settings/mode-switch-preview',     [SettingsAction::class, 'modeSwitchPreview']);
+        // Profil firmy — export/nahrání ručně vybudovaného nastavení (přežije nový převod firmy).
+        $app->get ('/api/settings/company-profile',         [\MyInvoice\Action\Settings\CompanyProfileAction::class, 'export']);
+        $app->post('/api/settings/company-profile/import',  [\MyInvoice\Action\Settings\CompanyProfileAction::class, 'import']);
         // Ciselnik CINNOSTI (CZ-NACE) - read-only referencni data pro c_okec.
         $app->get ('/api/settings/nace-codes',              \MyInvoice\Action\Settings\NaceCodesAction::class);
         $app->get ('/api/settings/accounting-activation/status', [AccountingActivationAction::class, 'status']);
@@ -3269,6 +3330,22 @@ final class Routes
         $app->post  ('/api/payment-cards/{id:[0-9]+}/archive',                      [\MyInvoice\Action\Bank\PaymentCardAction::class, 'archive']);
         $app->post  ('/api/payment-cards/{id:[0-9]+}/restore',                      [\MyInvoice\Action\Bank\PaymentCardAction::class, 'restore']);
 
+        // Kreditní karty: úvěrové účty ke kartě (231.x). Specifické cesty PŘED /{id}.
+        $app->get   ('/api/credit-cards',                          [\MyInvoice\Action\Bank\CreditCardAction::class, 'list']);
+        $app->post  ('/api/credit-cards/import',                   [\MyInvoice\Action\Bank\CreditCardAction::class, 'import']);
+        $app->post  ('/api/credit-cards/convert',                  [\MyInvoice\Action\Bank\CreditCardAction::class, 'convert']);
+        $app->get   ('/api/credit-cards/settings',                 [\MyInvoice\Action\Bank\CreditCardAction::class, 'getSettings']);
+        $app->put   ('/api/credit-cards/settings',                 [\MyInvoice\Action\Bank\CreditCardAction::class, 'saveSettings']);
+        $app->get   ('/api/credit-cards/{id:[0-9]+}',              [\MyInvoice\Action\Bank\CreditCardAction::class, 'get']);
+        $app->put   ('/api/credit-cards/{id:[0-9]+}',              [\MyInvoice\Action\Bank\CreditCardAction::class, 'update']);
+        $app->put   ('/api/credit-cards/{id:[0-9]+}/analytic',     [\MyInvoice\Action\Bank\CreditCardAction::class, 'setAnalytic']);
+        $app->put   ('/api/credit-cards/{id:[0-9]+}/purchase-mode', [\MyInvoice\Action\Bank\CreditCardAction::class, 'setPurchaseMode']);
+        $app->put   ('/api/credit-cards/{id:[0-9]+}/clearing-analytic', [\MyInvoice\Action\Bank\CreditCardAction::class, 'setClearingAnalytic']);
+        $app->post  ('/api/credit-cards/{id:[0-9]+}/post-pending', [\MyInvoice\Action\Bank\CreditCardAction::class, 'postPending']);
+        $app->post  ('/api/credit-cards/{id:[0-9]+}/opening',      [\MyInvoice\Action\Bank\CreditCardAction::class, 'postOpening']);
+        $app->post  ('/api/credit-cards/{id:[0-9]+}/archive',      [\MyInvoice\Action\Bank\CreditCardAction::class, 'archive']);
+        $app->post  ('/api/credit-cards/{id:[0-9]+}/restore',      [\MyInvoice\Action\Bank\CreditCardAction::class, 'restore']);
+
         $app->get   ('/api/logbook/trip-categories',              [\MyInvoice\Action\Logbook\TripCategoriesAction::class, 'list']);
         $app->post  ('/api/logbook/trip-categories',              [\MyInvoice\Action\Logbook\TripCategoriesAction::class, 'create']);
         $app->put   ('/api/logbook/trip-categories/{id:[0-9]+}',  [\MyInvoice\Action\Logbook\TripCategoriesAction::class, 'update']);
@@ -3474,6 +3551,7 @@ final class Routes
             $g->post('/assemblies/{id:[0-9]+}/reverse', [\MyInvoice\Action\Stock\ProductAssemblyAction::class, 'reverse']);
             $g->get   ('/reports/status',                [\MyInvoice\Action\Stock\StockReportAction::class, 'status']);
             $g->get   ('/reports/valuation',              [\MyInvoice\Action\Stock\StockReportAction::class, 'valuation']);
+            $g->get   ('/reports/sales',                  [\MyInvoice\Action\Stock\StockReportAction::class, 'sales']);
             $g->post  ('/reports/valuation-jobs',         [\MyInvoice\Action\Stock\StockReportAction::class, 'createValuationJob']);
             $g->get   ('/reports/valuation-jobs/{id:[0-9]+}', [\MyInvoice\Action\Stock\StockReportAction::class, 'valuationJobResult']);
             $g->get   ('/reports/valuation-jobs/{id:[0-9]+}/status', [\MyInvoice\Action\Stock\StockReportAction::class, 'valuationJobStatus']);
@@ -3705,6 +3783,9 @@ final class Routes
             $g->get('/{type}/{year:[0-9]+}/pdf',       [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'pdf']);
             // Featura A — rekonciliace proti PODANÉMU přiznání (upload EPO XML DPPDP9 od účetní).
             $g->post('/{type}/{year:[0-9]+}/reconcile', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'reconcile']);
+            // Převzetí podaného přiznání (EPO XML) do vstupů přiznání a evidence ztrát.
+            $g->post('/{type}/{year:[0-9]+}/filed-import/preview', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'filedImportPreview']);
+            $g->post('/{type}/{year:[0-9]+}/filed-import', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'filedImportApply']);
             $g->get('/{type}/{year:[0-9]+}/insurance/pdf', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'insurancePdf']);
             // E11 (audit 2026-07): PDF Přehled OSVČ pro zdravotní pojišťovnu.
             $g->get('/{type}/{year:[0-9]+}/insurance/pdf/health', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'healthPdf']);

@@ -216,6 +216,7 @@ final class BankPostingBackfill
                   JOIN bank_statements bs ON bs.id = bt.statement_id
                  WHERE bt.source = 'statement'
                    AND bt.match_status <> 'ignored'
+                   AND " . \MyInvoice\Service\Bank\BankTransactionPostingScope::noMigrationReviewSql('bt') . "
                    AND (
                        " . \MyInvoice\Repository\BankStatementOwnershipResolver::sql() . "
                        OR EXISTS (SELECT 1 FROM invoice_payments ip

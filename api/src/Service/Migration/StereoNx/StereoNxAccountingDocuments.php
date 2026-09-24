@@ -25,14 +25,24 @@ final class StereoNxAccountingDocuments
         $source['source_company_index'] = $backup->companyIndex();
         $warnings = [];
         $foreignDocuments = 0;
+        $skippedForeignDocuments = 0;
         foreach (['issued', 'purchases'] as $part) {
-            foreach ($source[$part] ?? [] as $document) {
+            foreach ($source[$part] ?? [] as $key => $document) {
                 if (($document['currency_code'] ?? 'CZK') !== 'CZK') $foreignDocuments++;
                 foreach (array_unique(array_map('strval', $document['review_codes'] ?? [])) as $code) {
                     $warnings[] = ['level' => 'warning', 'code' => $code,
                         'document_no' => (string) ($document['document_no'] ?? ''),
                         'message' => 'Doklad ' . (string) ($document['document_no'] ?? '') . ' vyžaduje kontrolu: '
                             . StereoNxImporter::reviewLabel($code) . '.'];
+                }
+                if (($document['currency_code'] ?? 'CZK') !== 'CZK'
+                    && ($document['foreign_takeover_blocked'] ?? null) !== null) {
+                    $skippedForeignDocuments++;
+                    $warnings[] = ['level' => 'warning', 'code' => 'foreign_document_unverified',
+                        'document_no' => (string) ($document['document_no'] ?? ''),
+                        'message' => 'Doklad ' . (string) ($document['document_no'] ?? '')
+                            . ' nebyl převzat: ' . $document['foreign_takeover_blocked'] . '.'];
+                    unset($source[$part][$key]);
                 }
             }
         }
@@ -45,6 +55,7 @@ final class StereoNxAccountingDocuments
             'identity' => $source['identity'],
             'source_company_index' => $backup->companyIndex(),
             'counts' => ['issued' => count($source['issued'] ?? []), 'purchases' => count($source['purchases'] ?? []),
+                'skipped_foreign_documents' => $skippedForeignDocuments,
                 'requires_draft' => count(array_filter([...(array) ($source['issued'] ?? []), ...(array) ($source['purchases'] ?? [])],
                     static fn (array $d): bool => ($d['requires_draft'] ?? false) === true))],
             'warnings' => $warnings, 'errors' => [],

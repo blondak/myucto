@@ -10,7 +10,7 @@ final class AuthoritativeTransactionReconciler
 {
     public function __construct(private readonly PDO $pdo) {}
 
-    public function candidates(array $transactions, int $supplierId, string $account, string $bank, string $currency, string $source, array $confirmations = [], array $fingerprints = []): array
+    public function candidates(array $transactions, int $supplierId, string $account, string $bank, string $currency, string $source, array $confirmations = [], array $fingerprints = [], array $fingerprintCandidates = []): array
     {
         if ($transactions === [] || $supplierId <= 0 || !in_array($source, ['gpc', 'bank_api'], true)) return [];
         $accountKey = self::account($account, $bank);
@@ -40,10 +40,16 @@ final class AuthoritativeTransactionReconciler
                  WHERE link.import_fingerprint = ? AND imported.supplier_id = ? AND imported.source = ?'
             );
             foreach ($fingerprints as $index => $fingerprint) {
-                $alias->execute([$fingerprint, $supplierId, $source]);
-                $ids = array_values(array_filter(array_map('intval', $alias->fetchAll(PDO::FETCH_COLUMN)), static fn (int $id): bool => isset($byId[$id])));
+                $ids = [];
+                foreach ($fingerprintCandidates[$index] ?? [$fingerprint] as $candidate) {
+                    $alias->execute([$candidate, $supplierId, $source]);
+                    foreach ($alias->fetchAll(PDO::FETCH_COLUMN) as $id) {
+                        $id = (int) $id;
+                        if (isset($byId[$id])) $ids[$id] = true;
+                    }
+                }
                 if (count($ids) > 1) throw new StatementReconciliationException();
-                if ($ids !== []) $known[$index] = $ids[0];
+                if ($ids !== []) $known[$index] = (int) array_key_first($ids);
             }
         }
         $matches = [];

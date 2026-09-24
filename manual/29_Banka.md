@@ -513,6 +513,24 @@ transakce aktuální stav zaúčtování a tlačítko podle situace — **Zaúč
 Nad transakcemi lze filtrovat **všechny / nezaúčtované / zaúčtované** pohyby;
 filtr se kombinuje s filtrem stavu párování.
 
+**Řazení pohybů.** V detailu výpisu i na záložkách **Všechny pohyby** a
+**K zaúčtování** seřadíš pohyby klikem na hlavičku sloupce (datum, částka, náš účet,
+VS, protistrana, faktura, stav). První klik řadí vzestupně, druhý sestupně, třetí
+vrátí výchozí pořadí. Řadí se celý seznam, ne jen načtená stránka. Pohyby bez
+hodnoty (bez VS, bez faktury) jsou vždy na konci. Na mobilu je místo hlaviček
+výběr **Řadit podle**.
+
+**Poznámka k pohybu.** Poznámka se neukládá k pohybu, ale k jeho zápisu v
+[Účetním deníku](52_Ucetni_denik.md) (sekce **Poznámky** u rozbaleného zápisu).
+Zaúčtovaný pohyb ji ukazuje přímo v řádku pod protistranou, připnuté poznámky jsou
+zvýrazněné. Novou poznámku přidáš v nabídce **…** u pohybu volbou **Poznámka**
+(admin/účetní), která otevře tytéž poznámky jako deník: jde je přidat, upravit,
+připnout i smazat. Co napíšeš u pohybu, uvidíš v deníku i v sekci **Zaúčtování**
+spárované faktury a naopak. Nezaúčtovaný pohyb zápis nemá, proto je volba
+**Poznámka** u něj neaktivní s vysvětlením. Poznámku ale můžeš napsat rovnou při
+ručním zaúčtování pohybu (pole **Poznámka** pod popisem v dialogu **Zaúčtovat**)
+a v dialogu **Přeúčtovat**; uloží se k zápisu v deníku stejně.
+
 **Přeúčtovat vs. Zrušit zaúčtování.** Obojí míří na už zaúčtovaný pohyb, ale dělá
 něco jiného:
 

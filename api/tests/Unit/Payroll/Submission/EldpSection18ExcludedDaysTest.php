@@ -98,11 +98,11 @@ final class EldpSection18ExcludedDaysTest extends TestCase
     }
 
     /**
-     * Rodičovská je omluvená nepřítomnost bez náhrady příjmu, ale současně
-     * náhradní doba pojištění hodnocená mimo hlášení; doložený způsob zápisu
-     * do 10473 repozitář nemá, takže se fail-closed mlčí.
+     * Rodičovskou dovolenou jmenují Pokyny MPSV k vyplnění MH 1.4.13 u 10473
+     * výslovně jako omluvenou nepřítomnost bez náhrady příjmu. Bez vyloučených
+     * dnů by ČSSZ počítala nemocenskou po návratu i z měsíců rodičovské.
      */
-    public function testParentalLeaveMakesTheBreakdownUnderivable(): void
+    public function testParentalLeaveBecomesExcusedAbsenceDays(): void
     {
         $derived = (new EldpExcludedPeriodDeriver())->deriveSection18(
             [$this->absence(1, 'parental', '2026-08-01', '2026-08-31')],
@@ -110,8 +110,36 @@ final class EldpSection18ExcludedDaysTest extends TestCase
             '2026-08-31',
         );
 
-        self::assertFalse($derived['derivable']);
-        self::assertSame(['parental'], $derived['undecidable_types']);
+        self::assertTrue($derived['derivable']);
+        self::assertSame(31, $derived['total']);
+        self::assertSame(
+            [
+                'omluvenaNepritomnost' => 31,
+                'pracovniNeschopnost' => 0,
+                'vyplaceniDavek' => 0,
+            ],
+            $derived['components'],
+        );
+    }
+
+    /**
+     * Návrat z rodičovské uprostřed měsíce: vyloučené jsou jen dny rodičovské
+     * uvnitř měsíce, sečtené s ostatní omluvenou nepřítomností bez náhrady.
+     */
+    public function testParentalLeaveInPartOfTheMonthCountsOnlyItsDays(): void
+    {
+        $derived = (new EldpExcludedPeriodDeriver())->deriveSection18(
+            [
+                $this->absence(1, 'parental', '2026-06-15', '2026-08-16'),
+                $this->absence(2, 'unpaid_leave', '2026-08-24', '2026-08-25'),
+            ],
+            '2026-08-01',
+            '2026-08-31',
+        );
+
+        self::assertTrue($derived['derivable']);
+        self::assertSame(18, $derived['total']);
+        self::assertSame(18, $derived['components']['omluvenaNepritomnost']);
     }
 
     /** @return array<string,mixed> */

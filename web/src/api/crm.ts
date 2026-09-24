@@ -34,6 +34,7 @@ export interface CrmOverview {
   prev_year_ytd: CrmKpi[]
   /** Dopředné tržby aktuálního měsíce (koncepty + nespárované proformy), per měna. */
   current_month_pipeline: CrmPipelineRow[]
+  other_item_result_impact: import('./dashboard').OtherItemResultImpact[]
   currencies: string[]
 }
 

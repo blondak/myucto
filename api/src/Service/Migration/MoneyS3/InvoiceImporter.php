@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyDecision;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
@@ -34,9 +36,11 @@ use MyInvoice\Service\Stats\StatsRecomputer;
  * daňovou povinnost vykázat jako tuzemské plnění.
  *
  * **Doklad v cizí měně koncept není**: Money drží základ i daň po sazbách v Kč (kurzem,
- * kterým doklad zaúčtovalo a vykázalo v přiznání), převezme se tedy jako daňový doklad
- * v Kč bez kurzu. Částky DPH jsou tak přesně ty, které Money vykázalo; přepočet
- * z cizí měny by je jen rozházel o zaokrouhlení kurzu.
+ * kterým doklad zaúčtovalo a vykázalo v přiznání) i v měně dokladu (`ValutyZakN`,
+ * `ValutyDPHN`, kurz `Kurs` za `PocetJedn`). V měně a kurzu dokladu se převezme jen tehdy,
+ * když částky v měně kurzem dají přesně Kč z Money ({@see ForeignCurrencyTakeover}) -
+ * částky DPH jsou pak pořád přesně ty, které Money vykázalo. Jinak (a u samovyměření)
+ * se převezme v Kč bez kurzu jako dřív, s důvodem v poznámce.
  */
 final class InvoiceImporter
 {
@@ -54,6 +58,8 @@ final class InvoiceImporter
 
     private readonly MigrationVatRateLookup $rates;
 
+    private readonly ForeignCurrencyTakeover $foreignCurrency;
+
     public function __construct(
         private readonly Connection $db,
         private readonly MoneyS3ImportRepository $map,
@@ -63,6 +69,7 @@ final class InvoiceImporter
         private readonly MigrationHomeCurrency $homeCurrency,
     ) {
         $this->rates = new MigrationVatRateLookup($db);
+        $this->foreignCurrency = new ForeignCurrencyTakeover($db);
     }
 
     public function importPurchases(ImportContext $ctx): void
@@ -125,6 +132,7 @@ final class InvoiceImporter
             }
             $taxDate = self::date($r, ['PlnenoDPH']) ?? $issue;
             $selfAssessment = $review ? null : self::pickSelfAssessment($selfAssessed, $docNo, $year);
+            $reverseCharge = false;
             if ($selfAssessment !== null) {
                 $usedSelfAssessments[$selfAssessment['key']] = true;
                 if ($selfAssessment['error'] !== null) {
@@ -133,6 +141,7 @@ final class InvoiceImporter
                     // Samovyměření se vykazuje ke dni z interního dokladu (datum uplatnění DPH).
                     $taxDate = $selfAssessment['date'] ?? $taxDate;
                     [$amounts, $class] = $this->applySelfAssessment($selfAssessment, $amounts, $class, $taxDate);
+                    $reverseCharge = true;
                     $p->count(self::STEP_PURCHASE, 'self_assessed');
                 }
             }
@@ -147,7 +156,9 @@ final class InvoiceImporter
             if ($duplicate->fetchColumn() !== false) {
                 $vendorNumber = mb_substr($vendorNumber . ' (' . $docNo . ')', 0, 50);
             }
-            $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], $item['rate'], $item['vat'], $item['code'] ?? null), $amounts['items']);
+            $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], $item['rate'], $item['vat'],
+                ($item['code'] ?? null) === VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE ? null : ($item['code'] ?? null)), $amounts['items']);
+            $fx = $this->takeOverCurrency($ctx, $r, $amounts, ForeignCurrencyTakeover::purchaseBlock($reverseCharge, $class['vat_deduction']));
             try {
                 $id = $this->writer->insertPurchase(new MigratedPurchaseDocument(
                     supplierId: $ctx->supplierId,
@@ -161,14 +172,13 @@ final class InvoiceImporter
                     dueDate: self::date($r, ['Splatno']) ?? $issue,
                     receivedAt: $claimDate ?? (self::date($r, ['Doruceno', 'DatUcPr']) ?? $issue),
                     receivedAtSource: $claimDate !== null ? 'manual' : 'import',
-                    currencyId: $currencyId,
-                    // Money drží základ i daň v Kč i u dokladu v cizí měně (viz classify()).
-                    exchangeRate: null,
+                    currencyId: $fx->currencyId ?? $currencyId,
+                    exchangeRate: $fx->rate,
                     // Položky vznikají ze základů po sazbách - ceny jsou vždy bez DPH.
                     pricesIncludeVat: false,
-                    // Příznak přenesené povinnosti převod z Money nezapisuje: samovyměření nese
-                    // kód zařazení položek, neznámé členění jde do konceptu k ruční kontrole.
-                    reverseCharge: false,
+                    // Samovyměření z interního dokladu (applySelfAssessment()) - jako u POHODY
+                    // a PREMIER. Neznámé členění přenesené povinnosti jde do konceptu.
+                    reverseCharge: $reverseCharge,
                     vendorSnapshot: self::snapshotJson($snapshot),
                     totalWithoutVat: $amounts['base'],
                     totalVat: $amounts['vat'],
@@ -177,7 +187,7 @@ final class InvoiceImporter
                     status: $review ? 'draft' : ($paidAt !== null ? 'paid' : ($unbooked ? 'received' : 'booked')),
                     vatDeduction: $class['vat_deduction'],
                     noteAboveItems: mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
-                    noteBelowItems: self::note($docNo, $class['reasons']),
+                    noteBelowItems: self::note($docNo, $class['reasons'], $fx),
                     createdBy: $ctx->userId,
                     paymentVariableSymbol: mb_substr(trim((string) ($r['VarSymbol'] ?? '')), 0, 20) ?: null,
                     paymentMethod: self::paymentMethod((string) ($r['Uhrada'] ?? '')),
@@ -207,6 +217,7 @@ final class InvoiceImporter
                 );
             }
             $this->writer->insertPurchaseItems($id, $items);
+            ForeignCurrencyTakeover::report($p, self::STEP_PURCHASE, $docNo, $fx);
             if ($claimDate !== null) {
                 $p->count(self::STEP_PURCHASE, 'claim_shifted');
             }
@@ -284,6 +295,8 @@ final class InvoiceImporter
             // Zálohovou fakturu Money neúčtuje — v MyÚčtu je vystavená, ne zaúčtovaná.
             $unbooked = $review || $class['kind'] === 'proforma';
             $paidAt = self::date($r, ['Uhrazeno']);
+            // Money vede úhradu jen jako datum (celá, nebo žádná) - částečná úhrada doklad neblokuje.
+            $fx = $this->takeOverCurrency($ctx, $r, $amounts, null);
             try {
                 $id = $this->writer->insertIssued(new MigratedIssuedDocument(
                     supplierId: $ctx->supplierId,
@@ -293,16 +306,15 @@ final class InvoiceImporter
                     issueDate: $issue,
                     taxDate: self::date($r, ['PlnenoDPH']) ?? $issue,
                     dueDate: self::date($r, ['Splatno']) ?? $issue,
-                    currencyId: $currencyId,
-                    // Money drží základ i daň v Kč i u dokladu v cizí měně (viz classify()).
-                    exchangeRate: null,
+                    currencyId: $fx->currencyId ?? $currencyId,
+                    exchangeRate: $fx->rate,
                     // Položky vznikají ze základů po sazbách - ceny jsou vždy bez DPH.
                     pricesIncludeVat: false,
                     // Tuzemské přenesení daňové povinnosti (19Ř25, 19Ř25_S) nese kód zařazení
                     // i příznak hlavičky; jiné členění přenesené povinnosti jde do konceptu (classify()).
                     reverseCharge: VatReturnLineClassifier::isDomesticReverseSale([$class['code']]),
                     noteAboveItems: mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
-                    noteBelowItems: self::note($docNo, $class['reasons']),
+                    noteBelowItems: self::note($docNo, $class['reasons'], $fx),
                     clientSnapshot: self::snapshotJson($snapshot),
                     totalWithoutVat: $amounts['base'],
                     totalVat: $amounts['vat'],
@@ -329,6 +341,7 @@ final class InvoiceImporter
                 $items[$i] = self::issuedItem($r, $item['base'], $item['vat'], $item['rate_id'], $item['rate'], $class['code']);
             }
             $this->writer->insertIssuedItems($id, $items);
+            ForeignCurrencyTakeover::report($p, self::STEP_ISSUED, $docNo, $fx);
             $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
             $ctx->issuedInvoices[$key] = $id;
             $p->count(self::STEP_ISSUED, 'created');
@@ -673,8 +686,10 @@ final class InvoiceImporter
      * Položky faktury se samovyměřením = řádky interního dokladu (základ, sazba a kód
      * zařazení podle výstupního řádku), nárok na odpočet podle zrcadlového řádku. Money
      * samovyměřuje kurzem ke dni plnění, takže základ se od částky faktury může lišit —
-     * rozdíl zůstane jako položka bez DPH a bez kódu, aby doklad seděl na závazek.
-     * Hlavička kód nenese: položka rozdílu by jinak zdědila kód přenesené povinnosti.
+     * rozdíl zůstane jako položka bez DPH s kódem mimo předmět daně, aby doklad seděl na
+     * závazek. Bez kódu by ji evidence DPH podle příznaku samovyměření na hlavičce
+     * zdanila ({@see VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE}). Hlavička kód
+     * nenese: položka rozdílu by jinak zdědila kód přenesené povinnosti.
      *
      * @param array<string,mixed> $sa
      * @param array{items:list<array<string,mixed>>,base:float,vat:float,total:float,rounding:float} $amounts
@@ -692,7 +707,8 @@ final class InvoiceImporter
         }
         $diff = round($amounts['total'] - $base, 2);
         if (abs($diff) >= 0.01) {
-            $items[] = ['base' => $diff, 'rate' => 0.0, 'vat' => 0.0, 'rate_id' => $this->rateId(0.0, $taxDate), 'code' => null];
+            $items[] = ['base' => $diff, 'rate' => 0.0, 'vat' => 0.0, 'rate_id' => $this->rateId(0.0, $taxDate),
+                'code' => VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE];
         }
         $amounts['items'] = $items;
         $amounts['base'] = $amounts['total'];
@@ -770,7 +786,8 @@ final class InvoiceImporter
         if (!array_key_exists('CelkemSDPH', $r)) {
             return;
         }
-        $stmt = $this->db->pdo()->prepare("SELECT total_with_vat FROM {$table} WHERE id = ? AND supplier_id = ?");
+        // Doklad převzatý v cizí měně se porovná v Kč přepočtený kurzem dokladu.
+        $stmt = $this->db->pdo()->prepare('SELECT ' . ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate') . " FROM {$table} WHERE id = ? AND supplier_id = ?");
         $stmt->execute([$id, $ctx->supplierId]);
         $stored = $stmt->fetchColumn();
         $money = self::expectedTotal($r);
@@ -813,10 +830,34 @@ final class InvoiceImporter
     }
 
     /** @param list<string> $reasons */
-    private static function note(string $docNo, array $reasons): string
+    private static function note(string $docNo, array $reasons, ForeignCurrencyDecision $fx): string
     {
         $note = 'Převzato z Money S3, doklad ' . $docNo;
+        if ($fx->note() !== null) {
+            $note .= '; ' . $fx->note();
+        }
         return $reasons === [] ? $note : $note . '. K ruční kontrole: ' . implode('; ', $reasons) . '.';
+    }
+
+    /**
+     * Doklad v cizí měně (`Mena`, `Kurs` za `PocetJedn`) v jeho měně, když základ a daň
+     * po sazbách v měně (`ValutyZakN`, `ValutyDPHN`) kurzem dají přesně Kč z Money
+     * ({@see ForeignCurrencyTakeover}). `$amounts` se pak přepíše na částky v měně.
+     *
+     * @param array<string,mixed> $r
+     * @param array{items:list<array<string,mixed>>,base:float,vat:float,total:float,rounding:float} $amounts MĚNÍ SE
+     */
+    private function takeOverCurrency(ImportContext $ctx, array $r, array &$amounts, ?string $blocked): ForeignCurrencyDecision
+    {
+        $units = (float) ($r['PocetJedn'] ?? 0);
+        $fx = $this->foreignCurrency->decide($ctx->supplierId, self::currency($r), (float) ($r['Kurs'] ?? 0), $units > 0.0 ? $units : 1.0,
+            $amounts['items'], $amounts['total'], $blocked);
+        if ($fx->inForeignCurrency()) {
+            $amounts['items'] = ForeignCurrencyTakeover::foreignItems($amounts['items']);
+            $totals = ForeignCurrencyTakeover::totals($amounts['items']);
+            $amounts = ['items' => $amounts['items'], 'base' => $totals['base'], 'vat' => $totals['vat'], 'total' => $totals['total'], 'rounding' => 0.0];
+        }
+        return $fx;
     }
 
     /**
@@ -832,7 +873,8 @@ final class InvoiceImporter
     {
         $items = [];
         foreach (self::rateLines($r) as $line) {
-            $items[] = ['base' => $line['base'], 'rate' => $line['rate'], 'vat' => $line['vat'], 'rate_id' => $this->rateId($line['rate'], $taxDate)];
+            $items[] = ['base' => $line['base'], 'rate' => $line['rate'], 'vat' => $line['vat'], 'rate_id' => $this->rateId($line['rate'], $taxDate)]
+                + array_intersect_key($line, ['foreign_base' => true, 'foreign_vat' => true]);
         }
         $sumBase = round(array_sum(array_column($items, 'base')), 2);
         $sumVat = round(array_sum(array_column($items, 'vat')), 2);
@@ -868,12 +910,12 @@ final class InvoiceImporter
      */
     private static function rateLines(array $r): array
     {
-        $slots = [['Zaklad_0', null, []]];
+        $slots = [['Zaklad_0', null, [], 0]];
         for ($i = 1; $i <= self::RATE_SLOTS; $i++) {
-            $slots[] = ['Zaklad_' . $i, 'SazbaDPH' . $i, ['DPH_' . $i, 'DPH' . $i]];
+            $slots[] = ['Zaklad_' . $i, 'SazbaDPH' . $i, ['DPH_' . $i, 'DPH' . $i], $i];
         }
         $lines = [];
-        foreach ($slots as [$baseField, $rateField, $vatFields]) {
+        foreach ($slots as [$baseField, $rateField, $vatFields, $slot]) {
             $base = round((float) ($r[$baseField] ?? 0), 2);
             if ($base === 0.0) {
                 continue;
@@ -886,9 +928,34 @@ final class InvoiceImporter
                     break;
                 }
             }
-            $lines[] = ['base' => $base, 'rate' => $rate, 'vat' => $vat ?? round($base * $rate / 100, 2)];
+            $lines[] = ['base' => $base, 'rate' => $rate, 'vat' => $vat ?? round($base * $rate / 100, 2)] + self::foreignLine($r, $slot);
         }
         return $lines;
+    }
+
+    /**
+     * Základ a daň sazby v měně dokladu (`ValutyZakN`, `ValutyDPHN`), je-li doklad v cizí
+     * měně - čte je jen převzetí dokladu v měně ({@see ForeignCurrencyTakeover}).
+     *
+     * @param array<string,mixed> $r
+     * @return array{foreign_base?:float,foreign_vat?:float}
+     */
+    private static function foreignLine(array $r, int $slot): array
+    {
+        if (self::currency($r) === '' || !is_numeric($r['ValutyZak' . $slot] ?? null) || ($slot > 0 && !is_numeric($r['ValutyDPH' . $slot] ?? null))) {
+            return [];
+        }
+        return [
+            'foreign_base' => round((float) $r['ValutyZak' . $slot], 2),
+            'foreign_vat' => $slot > 0 ? round((float) $r['ValutyDPH' . $slot], 2) : 0.0,
+        ];
+    }
+
+    /** Cizí měna dokladu Money (`Mena`), prázdné = Kč. @param array<string,mixed> $r */
+    private static function currency(array $r): string
+    {
+        $currency = strtoupper(trim((string) ($r['Mena'] ?? '')));
+        return in_array($currency, ['', 'CZK', 'KČ', 'KC'], true) ? '' : $currency;
     }
 
     private function rateId(float $rate, string $date): int

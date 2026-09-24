@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Bank;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Service\Bank\EmailNoticeReconciler;
 use MyInvoice\Service\Bank\GpcParser;
 use MyInvoice\Service\Bank\StatementImporter;
@@ -36,6 +37,9 @@ final class StatementImporterDuplicateTest extends TestCase
     private Connection $db;
     private StatementImporter $importer;
     private int $supplierId = 0;
+
+    /** @var int[] */
+    private array $otherSupplierIds = [];
 
     /** @var int[] */
     private array $statementIds = [];
@@ -88,8 +92,12 @@ final class StatementImporterDuplicateTest extends TestCase
             $pdo->prepare('DELETE FROM bank_transactions WHERE statement_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
         }
+        $this->cleanupLeftovers();
         foreach ($this->currencyIds as $id) {
             $pdo->prepare('DELETE FROM currencies WHERE id = ?')->execute([$id]);
+        }
+        foreach ($this->otherSupplierIds as $id) {
+            $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$id]);
         }
         $this->db->close();
     }
@@ -330,6 +338,124 @@ final class StatementImporterDuplicateTest extends TestCase
         self::assertSame($first['statement_id'], $second['statement_id']);
     }
 
+    public function testUniquelyOwnedLegacyStatementIsClaimedBeforeDeduplication(): void
+    {
+        $account = '9990562354';
+        $currencyId = $this->registerCurrency($account, '2010');
+        $content = $this->gpc($account, ['26033'], stmtNo: '029');
+        $first = $this->import($content, $currencyId);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE bank_statements SET supplier_id = NULL WHERE id = ?')->execute([$first['statement_id']]);
+        $pdo->prepare('UPDATE bank_transactions SET import_fingerprint = portable_fingerprint, portable_fingerprint = NULL WHERE statement_id = ?')
+            ->execute([$first['statement_id']]);
+        self::assertTrue((new BankStatementOwnershipResolver($this->db))->statementOwned($first['statement_id'], $this->supplierId));
+
+        $again = $this->importer->import($content, self::FILE_NAME, null, $currencyId);
+        self::assertTrue($again['duplicate']);
+        self::assertSame($first['statement_id'], $again['statement_id']);
+        self::assertSame($this->supplierId, (int) $pdo->query('SELECT supplier_id FROM bank_statements WHERE id = ' . $first['statement_id'])->fetchColumn());
+
+        $overlap = $this->import($this->gpc($account, ['26033'], stmtNo: '030'), $currencyId);
+        self::assertSame(0, $overlap['transactions']);
+        self::assertSame(1, $overlap['skipped_duplicates']);
+        self::assertSame(1, $this->transactionCount($account));
+    }
+
+    public function testOverlappingImportClaimsUniquelyOwnedLegacyStatement(): void
+    {
+        $account = '9990562354';
+        $currencyId = $this->registerCurrency($account, '2010');
+        $first = $this->import($this->gpc($account, ['26035'], stmtNo: '032'), $currencyId);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE bank_statements SET supplier_id = NULL WHERE id = ?')->execute([$first['statement_id']]);
+        $pdo->prepare('UPDATE bank_transactions SET import_fingerprint = portable_fingerprint, portable_fingerprint = NULL WHERE statement_id = ?')
+            ->execute([$first['statement_id']]);
+
+        $overlap = $this->import($this->gpc($account, ['26035'], stmtNo: '033'), $currencyId);
+
+        self::assertSame(0, $overlap['transactions']);
+        self::assertSame(1, $overlap['skipped_duplicates']);
+        self::assertSame(1, $this->transactionCount($account));
+        self::assertSame($this->supplierId, (int) $pdo->query('SELECT supplier_id FROM bank_statements WHERE id = ' . $first['statement_id'])->fetchColumn());
+    }
+
+    public function testAmbiguousLegacyStatementIsNeverClaimed(): void
+    {
+        $account = '9990562354';
+        $currencyId = $this->registerCurrency($account, '2010');
+        $content = $this->gpc($account, ['26034'], stmtNo: '031');
+        $first = $this->import($content, $currencyId);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE bank_statements SET supplier_id = NULL WHERE id = ?')->execute([$first['statement_id']]);
+        $pdo->prepare('UPDATE bank_transactions SET import_fingerprint = portable_fingerprint, portable_fingerprint = NULL WHERE statement_id = ?')
+            ->execute([$first['statement_id']]);
+        $pdo->prepare(
+            'INSERT INTO supplier (company_name, street, city, zip, country_id, email, default_currency_id, default_vat_rate_id)
+             SELECT ?, street, city, zip, country_id, ?, default_currency_id, default_vat_rate_id
+               FROM supplier WHERE id = ?'
+        )->execute(['Synthetic ambiguous owner', 'ambiguous-owner@invalid.example', $this->supplierId]);
+        $otherSupplier = (int) $pdo->lastInsertId();
+        $this->otherSupplierIds[] = $otherSupplier;
+        $this->registerCurrency($account, '2010', $otherSupplier);
+        self::assertFalse((new BankStatementOwnershipResolver($this->db))->statementOwned($first['statement_id'], $this->supplierId));
+
+        $second = $this->import($content, $currencyId);
+
+        self::assertNotSame($first['statement_id'], $second['statement_id']);
+        self::assertNull($pdo->query('SELECT supplier_id FROM bank_statements WHERE id = ' . $first['statement_id'])->fetchColumn());
+        self::assertSame($this->supplierId, (int) $pdo->query('SELECT supplier_id FROM bank_statements WHERE id = ' . $second['statement_id'])->fetchColumn());
+    }
+
+    public function testSameFileIsImportedSeparatelyForTwoSuppliers(): void
+    {
+        $account = '9990562355';
+        $firstCurrency = $this->registerCurrency($account, '2010');
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO supplier (company_name, street, city, zip, country_id, email, default_currency_id, default_vat_rate_id)
+             SELECT ?, street, city, zip, country_id, ?, default_currency_id, default_vat_rate_id
+               FROM supplier WHERE id = ?'
+        )->execute(['Synthetic duplicate owner', 'statement-owner@invalid.example', $this->supplierId]);
+        $otherSupplier = (int) $pdo->lastInsertId();
+        $this->otherSupplierIds[] = $otherSupplier;
+        $secondCurrency = $this->registerCurrency($account, '2010', $otherSupplier);
+        $content = $this->gpc($account, ['26041'], stmtNo: '028');
+
+        $first = $this->import($content, $firstCurrency);
+        $second = $this->import($content, $secondCurrency);
+        $secondAgain = $this->importer->import($content, self::FILE_NAME, null, $secondCurrency);
+
+        self::assertNotSame($first['statement_id'], $second['statement_id']);
+        self::assertTrue($secondAgain['duplicate']);
+        self::assertSame($second['statement_id'], $secondAgain['statement_id']);
+        $owners = $pdo->prepare('SELECT supplier_id FROM bank_statements WHERE id = ?');
+        $owners->execute([$first['statement_id']]);
+        self::assertSame($this->supplierId, (int) $owners->fetchColumn());
+        $owners->execute([$second['statement_id']]);
+        self::assertSame($otherSupplier, (int) $owners->fetchColumn());
+    }
+
+    public function testUnownedHashRemainsUniqueWithoutBlockingOwnedStatement(): void
+    {
+        $pdo = $this->db->pdo();
+        $hash = hash('sha256', 'synthetic-unowned-' . bin2hex(random_bytes(8)));
+        $insert = $pdo->prepare(
+            'INSERT INTO bank_statements (supplier_id, source, file_name, file_hash, account_number, statement_date)
+             VALUES (?, "gpc", ?, ?, "9990562356", "2099-01-31")'
+        );
+        $insert->execute([null, self::FILE_NAME, $hash]);
+        $this->statementIds[] = (int) $pdo->lastInsertId();
+        $insert->execute([$this->supplierId, self::FILE_NAME, $hash]);
+        $this->statementIds[] = (int) $pdo->lastInsertId();
+
+        try {
+            $insert->execute([null, self::FILE_NAME, $hash]);
+            self::fail('Druhý neidentifikovaný výpis se stejným hashem se nesmí založit.');
+        } catch (\PDOException $e) {
+            self::assertSame('23000', $e->errorInfo[0] ?? null);
+        }
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     public function testImportLockExcludesSecondConnectionUntilMatchingFinishes(): void
@@ -390,14 +516,14 @@ final class StatementImporterDuplicateTest extends TestCase
         return (int) $stmt->fetchColumn();
     }
 
-    private function registerCurrency(string $account, string $bankCode): int
+    private function registerCurrency(string $account, string $bankCode, ?int $supplierId = null): int
     {
         $this->db->pdo()->prepare(
             'INSERT INTO currencies
                 (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default,
                  account_number, bank_code)
              VALUES (?, "CZK", ?, "CZK", "CZK", "CZK", 2, 0, 0, ?, ?)'
-        )->execute([$this->supplierId, 'TEST BUG0 /' . $bankCode . ' ' . $account, $account, $bankCode]);
+        )->execute([$supplierId ?? $this->supplierId, 'TEST BUG0 /' . $bankCode . ' ' . $account, $account, $bankCode]);
         $id = (int) $this->db->pdo()->lastInsertId();
         $this->currencyIds[] = $id;
         return $id;

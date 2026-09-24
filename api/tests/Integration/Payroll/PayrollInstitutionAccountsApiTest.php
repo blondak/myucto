@@ -384,6 +384,38 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
         self::assertSame(422, $this->create($this->supplierId, $payload)->getStatusCode());
     }
 
+    /**
+     * Účet výchozí pojišťovny založený bez VS převezme číslo plátce, které firma
+     * vedla v Nastavení firmy; na firmě se pak smaže, protože ho drží Mzdy.
+     */
+    public function testNewDefaultInsurerAccountTakesOverPayerNumberFromCompanySettings(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "UPDATE supplier SET taxpayer_type = 'po', health_insurance_number = '555666777' WHERE id = ?"
+        )->execute([$this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_offices (supplier_id, code, name, is_active) VALUES (?, "MZDY", "Syntetická účtárna", 1)'
+        )->execute([$this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_employer_settings (supplier_id, default_office_id, default_health_insurer_code)
+             VALUES (?, ?, "111")'
+        )->execute([$this->supplierId, (int) $pdo->lastInsertId()]);
+        $payload = $this->payload();
+        $payload['institution_code'] = '111';
+        $payload['variable_symbol'] = null;
+
+        $response = $this->create($this->supplierId, $payload);
+
+        self::assertSame(201, $response->getStatusCode());
+        $account = $this->json($response)['account'];
+        self::assertSame('555666777', $account['variable_symbol']);
+        self::assertSame(2, $account['row_version']);
+        $legacy = $pdo->prepare('SELECT health_insurance_number FROM supplier WHERE id = ?');
+        $legacy->execute([$this->supplierId]);
+        self::assertNull($legacy->fetchColumn());
+    }
+
     /** @return array<string,mixed> */
     private function payload(): array
     {

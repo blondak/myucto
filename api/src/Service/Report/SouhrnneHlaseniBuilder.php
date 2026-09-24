@@ -528,19 +528,16 @@ final class SouhrnneHlaseniBuilder
             if ($code === null || !isset(self::VAT_CODE_TO_SH_TYPE[$code])) continue;
             if (!$r['country_is_eu'] || $r['country_iso2'] === 'CZ' || $r['country_iso2'] === null) continue;
 
-            // c_vat = DIČ BEZ prefixu země (strhne jen prefix odpovídající zemi, ne
-            // libovolná 2 písmena — FR má alfanumerickou vnitrostátní část; GR→EL).
-            // Používáme sdílenou (a proti VIES ověřenou) normalizaci z KH. Issue #238.
+            // k_stat = stát, který DIČ přidělil (prefix DIČ má přednost před zemí adresy),
+            // c_vat = DIČ BEZ TOHOTO prefixu (XSD: „bez kódu státu"). Obojí určuje jedna
+            // sdílená funkce — dřív se k_stat bral z prefixu, ale strhával se jen prefix
+            // země ADRESY, takže při rozdílu šlo `k_stat="PL" c_vat="PL…"`. Řecko EL/GR,
+            // alfanumerická francouzská národní část a DIČ bez prefixu viz euVatRegistration().
             $rawDic = trim((string) ($r['counterparty_dic'] ?? ''));
-            // Stát, který DIČ přidělil: prefix DIČ má přednost před zemí adresy.
             $addressStat = KontrolniHlaseniBuilder::khCountryCode((string) $r['country_iso2']);
-            $prefix = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $rawDic) ?? '', 0, 2));
-            // Prefix se překládá stejně jako země adresy: Řecko má ISO „GR", ale pro DPH/VIES
-            // se používá „EL" — a to platí i tehdy, když je DIČ v kartě zapsané s GR.
-            $kStat = preg_match('/^[A-Z]{2}$/', $prefix) === 1
-                ? KontrolniHlaseniBuilder::khCountryCode($prefix)
-                : $addressStat;
-            $vatId = KontrolniHlaseniBuilder::cleanEuVatId($rawDic, (string) $r['country_iso2']);
+            $registration = KontrolniHlaseniBuilder::euVatRegistration($rawDic, (string) $r['country_iso2']);
+            $kStat = $registration['k_stat'];
+            $vatId = $registration['vat_id'];
             if ($vatId === '') {
                 // Dřív se takový řádek tiše vypustil: dodávka zmizela ze souhrnného hlášení,
                 // ale na ř. 20/21 přiznání zůstala — rozdíl, na který nic neupozornilo.

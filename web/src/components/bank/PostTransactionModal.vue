@@ -66,6 +66,7 @@ let applyingPreview = false
 watch(debit, () => { if (!applyingPreview) debitEdited.value = true }, { flush: 'sync' })
 watch(credit, () => { if (!applyingPreview) creditEdited.value = true }, { flush: 'sync' })
 const description = ref(props.tx.description ?? props.tx.counterparty_name ?? '')
+const note = ref('')
 const aiOpen = ref(false)
 const aiQuery = ref('')
 const aiLoading = ref(false)
@@ -327,6 +328,14 @@ async function submit() {
         }
     const res = await bankPostingApi.postTransaction(props.tx.id, payload)
     toast.success(t('bank.posting.posted_done'))
+    if (note.value.trim() !== '' && res.journal_entry_id) {
+      // Zápis už existuje; nepovedená poznámka ho nesmí shodit, jen se ohlásí.
+      try {
+        await accountingApi.createJournalNote(res.journal_entry_id, note.value.trim())
+      } catch (e: any) {
+        toast.error(e?.response?.data?.error?.message || t('bank.note.save_failed'))
+      }
+    }
     const primary = splitMode.value
       ? {
           debit: splitLines.value.find(l => l.side === 'debit')?.account_code ?? '',
@@ -529,6 +538,15 @@ onMounted(async () => {
       <div class="mt-3">
         <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.manual.description') }}</label>
         <input v-model="description" type="text" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+      </div>
+
+      <!-- Poznámka se uloží k zápisu v deníku hned po zaúčtování — je pak vidět
+           u pohybu, v deníku i u hrazeného dokladu (panel Souvisí). -->
+      <div class="mt-3">
+        <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.note.field') }}</label>
+        <textarea v-model="note" rows="2" maxlength="5000" data-test="post-note"
+          :placeholder="t('bank.note.field_placeholder')"
+          class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm resize-y" />
       </div>
 
       <section v-if="aiAvailable" class="mt-3 min-w-0 max-w-full whitespace-normal break-words rounded-md border border-neutral-200">

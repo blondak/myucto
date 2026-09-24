@@ -10,10 +10,11 @@ const m = vi.hoisted(() => ({
   aiAvailability: vi.fn(),
   postTransaction: vi.fn(),
   createRule: vi.fn(),
+  createJournalNote: vi.fn(),
 }))
 
 vi.mock('@/api/accounting', () => ({
-  accountingApi: { listAccounts: m.listAccounts },
+  accountingApi: { listAccounts: m.listAccounts, createJournalNote: m.createJournalNote },
 }))
 
 vi.mock('@/api/bankPosting', () => ({
@@ -171,6 +172,27 @@ describe('PostTransactionModal — našeptávač účtů', () => {
     expect(submit.attributes('disabled')).toBeUndefined()
     await submit.trigger('click')
     expect(m.postTransaction).toHaveBeenCalledWith(1, expect.objectContaining({ debit_account_code: '221', credit_account_code: '518' }))
+  })
+
+  it('uloží poznámku k novému zápisu až po zaúčtování, prázdnou neposílá', async () => {
+    m.previewTransaction.mockResolvedValue({ bank_account_code: null, matched: false, lines: [], resolved: false, reason: null })
+    m.postTransaction.mockResolvedValue({ journal_entry_id: 29216, document_no: 'TEST' })
+    m.createJournalNote.mockReset().mockResolvedValue({})
+    const wrapper = await open(10)
+    await wrapper.get('[data-test="posting-debit"]').setValue('221')
+    await wrapper.get('[data-test="posting-credit"]').setValue('518')
+    await wrapper.get('[data-test="post-note"]').setValue('  test  ')
+    await wrapper.findAll('button').find(b => b.text() === 'bank.posting.action_post')!.trigger('click')
+    await flushPromises()
+    expect(m.createJournalNote).toHaveBeenCalledWith(29216, 'test')
+
+    m.createJournalNote.mockClear()
+    const empty = await open(10)
+    await empty.get('[data-test="posting-debit"]').setValue('221')
+    await empty.get('[data-test="posting-credit"]').setValue('518')
+    await empty.findAll('button').find(b => b.text() === 'bank.posting.action_post')!.trigger('click')
+    await flushPromises()
+    expect(m.createJournalNote).not.toHaveBeenCalled()
   })
 
   it('retains explicit existing posting accounts', async () => {

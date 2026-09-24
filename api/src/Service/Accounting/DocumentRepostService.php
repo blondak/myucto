@@ -309,6 +309,9 @@ final class DocumentRepostService
                 $postMeta['tax_neutral_rewrite'] = true;
             }
             $entryId = $this->posting->postDocument($supplierId, $sourceType, $docId, $lines, $postMeta);
+            // Přeúčtování stornem vytvoří nový zápis — poznámky případu jdou s ním.
+            (new \MyInvoice\Repository\JournalEntryNoteRepository($this->db))
+                ->copyToEntry((int) $plan['entry_id'], $entryId, $supplierId);
 
             $itemsSynced = $sourceType === 'purchase_invoice'
                 ? $this->syncPurchaseItemAccounts($supplierId, $docId, $plan['lines'], $lines)

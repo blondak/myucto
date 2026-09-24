@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\TrialBalanceReconciliation;
 
 /**
@@ -79,9 +80,14 @@ final class PremierReconciler
             'journal_diffs' => $journalDiffs,
             'documents' => $documents,
             'unmapped_accounts' => $unmapped,
+            'negative_net_rows' => $balanceSheet['negative_net_rows'],
         ]]);
         if (!$ok) {
             $p->error(self::STEP, 'reconciliation_failed', "Rok {$ctx->year}: převod nesedí, podrobnosti v rekonciliaci.", ['year' => $ctx->year]);
+        }
+        $warning = TrialBalanceReconciliation::negativeNetWarning($ctx->year, $balanceSheet['negative_net_rows']);
+        if ($warning !== null) {
+            $p->warn(self::STEP, 'negative_net_rows', $warning, ['year' => $ctx->year, 'rows' => $balanceSheet['negative_net_rows']]);
         }
         $p->finish(self::STEP);
     }
@@ -154,9 +160,11 @@ final class PremierReconciler
                               AND " . ($onAccount ? '' : 'NOT ') . str_replace('l.supplier_id', 'k.supplier_id', $oneSided('k.entry_id', $prefix)) . ')
                 AND ' . $mapped('d', $kinds);
 
+        // Doklad převzatý v cizí měně se s deníkem v Kč porovná přepočtený kurzem dokladu.
+        $total = ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
         $spec = [
-            ['purchase_invoices', 'purchase_invoices', 'd.total_with_vat', "'purchase_invoice'", 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END"],
-            ['issued_invoices', 'invoices', 'd.total_with_vat', "'invoice'", 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
+            ['purchase_invoices', 'purchase_invoices', $total, "'purchase_invoice'", 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END"],
+            ['issued_invoices', 'invoices', $total, "'invoice'", 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
             ['cash', 'cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", "'cash_document'", 'cash', '211', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
         ];
         $out = [];

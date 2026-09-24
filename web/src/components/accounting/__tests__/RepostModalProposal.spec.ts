@@ -19,6 +19,7 @@ vi.mock('@/api/accounting', () => ({
 }))
 vi.mock('@/components/ui/Modal.vue', () => ({ default: { template: '<div><slot /></div>' } }))
 vi.mock('@/components/accounting/PostingOriginRow.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/components/accounting/JournalEntryNotes.vue', () => ({ default: { props: ['entryId'], template: '<div class="notes" />' } }))
 vi.mock('@/components/accounting/JournalLinesEditor.vue', () => ({
   default: { name: 'JournalLinesEditor', props: ['modelValue', 'accounts', 'listId'], setup: () => ({ valid: true }), template: '<div />' },
 }))

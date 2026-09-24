@@ -1,5 +1,6 @@
 import { api } from './client'
 import type { AutomationProvenance } from './automation'
+import type { DimensionRuleWarning, DimensionSplits } from './dimensions'
 
 /**
  * Podvojné účetnictví (Epic F1) — typovaný klient pro /api/accounting.
@@ -117,6 +118,8 @@ export interface JournalLine {
   line_no: number
   /** Dimenze řádku (Firma → Dimenze): typ → hodnota; chodí v detailu zápisu. */
   dimensions?: Record<number, number>
+  /** Rozpad řádku mezi víc hodnot typu: typ → [{value_id, share}]; chodí v detailu zápisu. */
+  dimension_splits?: DimensionSplits
   /** Obohaceno v detailu (GET /journal/{id}). */
   account_code?: string | null
   account_name?: string | null
@@ -234,6 +237,8 @@ export interface JournalEntryDetail extends JournalEntry {
   lines: JournalLine[]
   /** Měkké vazby na doklady (migrace 1514); chodí s detailem zápisu. */
   links?: JournalDocumentLink[]
+  /** Varování pravidel dimenzí (vynucení „varovat") po zaúčtování. */
+  dimension_warnings?: DimensionRuleWarning[]
 }
 
 // ── Měkká vazba zápisu na doklad (migrace 1514) ────────────────────────────
@@ -540,6 +545,8 @@ export interface ManualLinePayload {
   cost_center?: string
   /** Dimenze řádku: typ → hodnota. */
   dimensions?: Record<number, number>
+  /** Rozpad řádku mezi víc hodnot typu: typ → [{value_id, share}], součet 100 %. */
+  dimension_splits?: DimensionSplits
 }
 
 /** Tělo zaúčtování dokladu. `lines` = kontace upravená v popupu; bez nich staví server. */
@@ -915,6 +922,7 @@ export interface ReportDimensionFilter {
   type_id: number
   value_id: number
   value_ids: number[]
+  label?: string | null
 }
 
 export interface GeneralLedgerReport {
@@ -1159,7 +1167,7 @@ export interface StatementParams {
   period_id: number
   as_of?: string
   scope?: StatementScope
-  /** Filtr druhové výsledovky na hodnotu dimenze (rozvaha ho ignoruje). */
+  /** Filtr výsledovky i rozvahy na hodnotu dimenze (řádek s rozpadem jen svým dílem). */
   dimension_value_id?: number
   dimension_descendants?: 0 | 1
 }
@@ -1211,6 +1219,7 @@ export interface BalanceSheetReport {
   version_code: string
   as_of: string
   scope: EffectiveScope
+  dimension?: ReportDimensionFilter | null
   entity: StatementEntity
   period: ReportPeriod
   prev_period: ReportPeriod | null
@@ -1220,7 +1229,18 @@ export interface BalanceSheetReport {
     assets_net: number
     liabilities_total: number
     balanced: boolean
+    negative_net_rows?: BalanceSheetNegativeNetRow[]
   }
+}
+
+/** Řádek aktiv se záporným netto (korekce vyšší než brutto) v běžném nebo minulém období. */
+export interface BalanceSheetNegativeNetRow {
+  row_code: string
+  label: string
+  column: 'current' | 'previous'
+  gross: number
+  correction: number
+  net: number
 }
 
 // ── Účelové členění VZZ (vyhl. 500/2002 Sb., př. 2 část II, § 39b) ─────────
@@ -1261,6 +1281,11 @@ export interface StatementOverride {
   balance_condition: StatementBalanceCondition
   sign?: number
   note: string | null
+  /** Korekce: účet pohledávky, jejíž řádek výkazu korekce přebírá. */
+  follows_prefix?: string | null
+  /** Účetní období, od kterého / do kterého výjimka platí; null = bez omezení. */
+  valid_from_year?: number | null
+  valid_to_year?: number | null
   updated_at?: string | null
 }
 
@@ -1347,6 +1372,8 @@ export interface StatementOverrideSuggestion {
   to_is_subtotal: boolean
   balance_condition: StatementBalanceCondition
   target: 'gross' | 'correction'
+  /** Korekce navázaná na pohledávku, kterou návrh přesouvá do stejného řádku. */
+  follows_prefix?: string | null
   sign: number
   reason: string
   ambiguous: boolean
@@ -1373,6 +1400,8 @@ export interface StatementOverrideSuggestions {
   suggestions: StatementOverrideSuggestion[]
   differences: StatementOverrideDifference[]
   source: { type: 'filed_return' | 'upload'; submission_id?: number; status?: string; submitted_at?: string | null }
+  /** Návrhy pro sloupec minulého období (výjimky platné do minulého roku); null = podání ho nenese. */
+  prior_period?: { period_id: number; year: number; suggestions: StatementOverrideSuggestion[]; differences: StatementOverrideDifference[] } | null
 }
 
 export interface IncomeStatementReport {
@@ -1405,7 +1434,7 @@ export interface SaldoParams {
 }
 
 export interface SaldoItem {
-  doc_type: 'invoice' | 'purchase_invoice'
+  doc_type: 'invoice' | 'purchase_invoice' | 'other_item'
   doc_id: number
   doc_no: string
   issue_date: string
@@ -1807,12 +1836,16 @@ export const accountingApi = {
     api.get<PostingOrigin>(`/accounting/journal/posting-origin/${source}/${id}`).then(r => r.data),
   reverseEntry: (id: number) =>
     api.post<JournalEntryDetail>(`/accounting/journal/${id}/reverse`).then(r => r.data),
-  deleteEntry: (id: number) =>
-    api.delete<{ ok: boolean }>(`/accounting/journal/${id}`).then(r => r.data),
+  /** `ackLocked` = účetní potvrdil zásah do uzamčeného období (odpověď 409 `date_locked` s `can_acknowledge`). */
+  deleteEntry: (id: number, ackLocked = false) =>
+    api.delete<{ ok: boolean }>(`/accounting/journal/${id}`, {
+      params: ackLocked ? { ack_locked: 1 } : undefined,
+    }).then(r => r.data),
   /** Smaže celou storno dvojici (zápis i jeho protizápis) v otevřeném období. */
-  deleteEntryReversalPair: (id: number) =>
-    api.delete<{ ok: boolean; deleted_entry_ids: number[] }>(`/accounting/journal/${id}/reversal-pair`)
-      .then(r => r.data),
+  deleteEntryReversalPair: (id: number, ackLocked = false) =>
+    api.delete<{ ok: boolean; deleted_entry_ids: number[] }>(`/accounting/journal/${id}/reversal-pair`, {
+      params: ackLocked ? { ack_locked: 1 } : undefined,
+    }).then(r => r.data),
   // Auditní historie (SYSTEM VERSIONING timeline, audit 2026-07)
   getJournalHistory: (id: number) =>
     api.get<JournalHistoryResponse>(`/accounting/journal/${id}/history`).then(r => r.data),

@@ -47,6 +47,11 @@ final class SupplierBankAccountAction
             return Json::error($response, 'not_found', 'Bankovní účet nenalezen.', 404);
         }
         $body = (array) ($request->getParsedBody() ?? []);
+        // Úvěrový účet kreditní karty má analytiku 231 a spravuje ho stránka Kreditní karty;
+        // přepnutím druhu nebo analytiky 221 tady by se jeho pohyby začaly účtovat na banku.
+        if (($current['kind'] ?? null) === 'credit_card' && array_intersect(array_keys($body), ['kind', 'analytic_suffix']) !== []) {
+            return Json::error($response, 'validation_failed', 'Úvěrový účet kreditní karty se upravuje na stránce Kreditní karty.', 422);
+        }
         $patch = [];
         if (array_key_exists('kind', $body)) {
             $kind = (string) $body['kind'];
@@ -99,6 +104,10 @@ final class SupplierBankAccountAction
         if (array_key_exists('is_active', $body)) {
             if (!is_bool($body['is_active'])) {
                 return Json::error($response, 'validation_failed', 'is_active musí být boolean.', 422);
+            }
+            if ($body['is_active'] === false && ($current['kind'] ?? null) === BankAnalyticAssigner::CREDIT_CARD_KIND) {
+                return Json::error($response, 'validation_failed',
+                    'Úvěrový účet kreditní karty se nevypíná — jeho pohyby se účtují na 231. Kartu archivujte v Kreditních kartách.', 422);
             }
             $patch['is_active'] = $body['is_active'];
         }

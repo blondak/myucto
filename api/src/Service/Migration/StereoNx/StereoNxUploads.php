@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Migration\StereoNx;
 
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Service\Migration\Shared\MigrationUploadLimits;
+use MyInvoice\Service\Migration\Shared\ChunkedUploadStore;
+use MyInvoice\Service\Migration\Shared\ChunkedUploadMessages;
 use Psr\Http\Message\StreamInterface;
 
 /** Přechodné šifrované archivy jsou oddělené podle cílové firmy a náhodného tokenu. */
@@ -16,23 +18,18 @@ final class StereoNxUploads
     private const MAX_ACTIVE = MigrationUploadLimits::MAX_ACTIVE_UPLOADS;
     private const RESULT_PATTERN = '/^result-[1-9]\d*\.json(\.tmp)?$/D';
 
-    public static function token(): string
+    /** Zachovává rozložení už nahraných záloh; zápis částí spravuje společné úložiště. */
+    public static function store(): ChunkedUploadStore
     {
-        return bin2hex(random_bytes(16));
+        return new ChunkedUploadStore('stereo-nx', 'backup.zip', 'data',
+            static fn (string $code, string $message): StereoNxException => new StereoNxException(
+                match ($code) { 'chunk_exceeds_size' => 'chunk_too_large', 'upload_not_uploading' => 'upload_finished', default => $code }, $message),
+            ChunkedUploadMessages::backup(), ['result-*.json'], 16, 'state.json', 'lock');
     }
 
-    public static function dir(int $supplierId, string $token): string
-    {
-        if ($supplierId < 1 || preg_match('/^[a-f0-9]{32}$/D', $token) !== 1) {
-            throw new StereoNxException('upload_not_found', 'Nahraná záloha nebyla nalezena.');
-        }
-        return RuntimePaths::storage('stereo-nx/' . $supplierId . '/' . $token);
-    }
-
-    public static function archive(int $supplierId, string $token): string
-    {
-        return self::dir($supplierId, $token) . '/backup.zip';
-    }
+    public static function token(): string { return self::store()->newToken(); }
+    public static function dir(int $supplierId, string $token): string { return self::store()->dir($supplierId, $token); }
+    public static function archive(int $supplierId, string $token): string { return self::store()->partPath($supplierId, $token); }
 
     /** @return list<array{token:string,filename:string,size:int,received:int,complete:bool,created_at:int}> */
     public static function listForUser(int $supplierId, int $userId): array
@@ -143,85 +140,24 @@ final class StereoNxUploads
     /** @return array<string,mixed> */
     public static function state(int $supplierId, string $token): array
     {
-        $path = self::dir($supplierId, $token) . '/state.json';
-        if (!is_file($path)) {
-            throw new StereoNxException('upload_not_found', 'Nahraná záloha nebyla nalezena.');
-        }
-        $state = json_decode((string) file_get_contents($path), true);
-        if (!is_array($state)) {
-            throw new StereoNxException('upload_corrupt', 'Stav zálohy nelze načíst.');
-        }
-        return $state;
+        return self::store()->state($supplierId, $token)
+            ?? throw new StereoNxException('upload_not_found', 'Nahraná záloha nebyla nalezena.');
     }
 
-    /** @param array<string,mixed> $state */
     public static function save(int $supplierId, string $token, array $state): void
     {
-        $path = self::dir($supplierId, $token) . '/state.json';
-        $temp = $path . '.tmp';
-        if (file_put_contents($temp, json_encode($state, JSON_THROW_ON_ERROR), LOCK_EX) === false || !rename($temp, $path)) {
-            throw new StereoNxException('storage_error', 'Stav zálohy nelze uložit.');
-        }
+        self::store()->writeState($supplierId, $token, $state);
     }
 
     /** @template T @param callable(array<string,mixed>):T $callback @return T */
     public static function locked(int $supplierId, string $token, callable $callback): mixed
     {
-        $handle = @fopen(self::dir($supplierId, $token) . '/lock', 'c');
-        if ($handle === false) {
-            throw new StereoNxException('upload_not_found', 'Nahraná záloha nebyla nalezena.');
-        }
-        try {
-            flock($handle, LOCK_EX);
-            return $callback(self::state($supplierId, $token));
-        } finally {
-            flock($handle, LOCK_UN);
-            fclose($handle);
-        }
+        return self::store()->withUploadLock($supplierId, $token,
+            static fn () => $callback(self::state($supplierId, $token)));
     }
 
     public static function append(int $supplierId, string $token, int $offset, StreamInterface $stream): int
     {
-        return self::locked($supplierId, $token, static function (array $state) use ($supplierId, $token, $offset, $stream): int {
-            if (($state['status'] ?? '') !== 'uploading') {
-                throw new StereoNxException('upload_finished', 'Záloha už byla nahrána.');
-            }
-            $path = self::archive($supplierId, $token);
-            clearstatcache(true, $path);
-            $current = is_file($path) ? (int) filesize($path) : 0;
-            if ($offset !== $current) {
-                throw new StereoNxException('chunk_offset_mismatch', 'Část zálohy nenavazuje na nahraná data.');
-            }
-            $out = @fopen($path, 'ab');
-            if ($out === false) {
-                throw new StereoNxException('storage_error', 'Zálohu nelze uložit.');
-            }
-            $written = 0;
-            try {
-                if ($stream->isSeekable()) $stream->rewind();
-                while (!$stream->eof()) {
-                    $part = $stream->read(65536);
-                    if ($part === '') break;
-                    $length = strlen($part);
-                    if ($written + $length > self::CHUNK_BYTES || $current + $written + $length > (int) $state['size']) {
-                        throw new StereoNxException('chunk_too_large', 'Část zálohy překračuje povolenou velikost.');
-                    }
-                    if (fwrite($out, $part) !== $length) {
-                        throw new StereoNxException('storage_error', 'Zálohu nelze uložit.');
-                    }
-                    $written += $length;
-                }
-                if ($written === 0) throw new StereoNxException('chunk_empty', 'Část zálohy je prázdná.');
-                fflush($out);
-            } catch (\Throwable $e) {
-                ftruncate($out, $current);
-                throw $e;
-            } finally {
-                fclose($out);
-            }
-            $state['received'] = $current + $written;
-            self::save($supplierId, $token, $state);
-            return $state['received'];
-        });
+        return self::store()->appendChunk($supplierId, $token, $offset, $stream, self::CHUNK_BYTES);
     }
 }

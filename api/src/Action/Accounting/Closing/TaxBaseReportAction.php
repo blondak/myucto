@@ -9,6 +9,7 @@ use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\Assets\DisposalResiduals;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Log\LoggerInterface;
@@ -103,75 +104,37 @@ final class TaxBaseReportAction
     }
 
     /**
-     * (b) Majetek vyřazený v období: daňová ZC (poslední daňový odpisový řádek,
-     * fallback vstupní cena + TZ − opening), účetní ZC z deníku (debetní 5xx řádky
-     * zápisu asset_disposal) a klasifikace daňové uznatelnosti ZC dle ZDP.
+     * (b) Majetek vyřazený v období: účetní a daňová ZC ze {@see DisposalResiduals}
+     * (stejné hodnoty, se kterými počítá přiznání DPPO; daňová ZC může být neznámá = null)
+     * a klasifikace daňové uznatelnosti ZC dle ZDP.
      *
      * @return list<array<string,mixed>>
      */
     private function disposals(int $supplierId, array $period): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT a.id, a.inventory_number, a.name, a.disposal_date, a.disposal_type, a.disposal_price,
-                    a.input_price, a.opening_tax_amount,
-                    (SELECT COALESCE(SUM(ai.amount), 0) FROM asset_improvements ai
-                      WHERE ai.supplier_id = a.supplier_id AND ai.asset_id = a.id) AS improvements_total,
-                    (SELECT de.residual_value_end FROM depreciation_entries de
-                      WHERE de.supplier_id = a.supplier_id AND de.asset_id = a.id AND de.kind = \'tax\'
-                      ORDER BY de.fiscal_year DESC LIMIT 1) AS tax_residual,
-                    (SELECT de.residual_value_end FROM depreciation_entries de
-                      WHERE de.supplier_id = a.supplier_id AND de.asset_id = a.id AND de.kind = \'accounting\'
-                      ORDER BY de.fiscal_year DESC LIMIT 1) AS acc_residual
-               FROM assets a
-              WHERE a.supplier_id = ? AND a.status = \'disposed\'
-                AND a.disposal_date BETWEEN ? AND ?
-              ORDER BY a.disposal_date, a.inventory_number'
-        );
-        $stmt->execute([$supplierId, (string) $period['starts_on'], (string) $period['ends_on']]);
+        $residuals = (new DisposalResiduals($this->db))
+            ->forPeriod($supplierId, (string) $period['starts_on'], (string) $period['ends_on']);
 
         $out = [];
-        foreach ($stmt->fetchAll() as $row) {
-            $taxResidual = $row['tax_residual'] !== null
-                ? (float) $row['tax_residual']
-                : max(0.0, (float) $row['input_price'] + (float) $row['improvements_total'] - (float) $row['opening_tax_amount']);
-            $accResidual = $this->accountingResidualFromJournal($supplierId, (int) $row['id']);
-            if ($accResidual === null) {
-                $accResidual = $row['acc_residual'] !== null ? (float) $row['acc_residual'] : null;
-            }
-            [$deductibility, $note] = $this->classifyDisposal((string) $row['disposal_type']);
+        foreach ($residuals['rows'] as $row) {
+            [$deductibility, $note] = $this->classifyDisposal($row['disposal_type']);
 
             $out[] = [
-                'asset_id'                  => (int) $row['id'],
-                'inventory_number'          => (string) $row['inventory_number'],
-                'name'                      => (string) $row['name'],
-                'disposal_date'             => (string) $row['disposal_date'],
-                'disposal_type'             => (string) $row['disposal_type'],
-                'disposal_price'            => $row['disposal_price'] !== null ? (float) $row['disposal_price'] : null,
-                'tax_residual_value'        => round($taxResidual, 2),
-                'accounting_residual_value' => $accResidual !== null ? round($accResidual, 2) : null,
+                'asset_id'                  => $row['asset_id'],
+                'inventory_number'          => $row['inventory_number'],
+                'name'                      => $row['name'],
+                'disposal_date'             => $row['disposal_date'],
+                'disposal_type'             => $row['disposal_type'],
+                'disposal_price'            => $row['disposal_price'],
+                'tax_residual_value'        => $row['tax_residual_value'],
+                'tax_residual_source'       => $row['tax_residual_source'],
+                'accounting_residual_value' => $row['book_residual_value'],
+                'accounting_residual_source' => $row['book_residual_source'],
                 'deductibility'             => $deductibility,
                 'note'                      => $note,
             ];
         }
         return $out;
-    }
-
-    /** Účetní ZC z deníku = Σ debetních řádků na 5xx v posted zápisu vyřazení. */
-    private function accountingResidualFromJournal(int $supplierId, int $assetId): ?float
-    {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT SUM(l.signed_amount) AS zc
-               FROM journal_entry_lines l
-               JOIN journal_entries e ON e.id = l.entry_id
-               JOIN chart_of_accounts ca ON ca.id = l.account_id
-              WHERE l.supplier_id = ? AND e.supplier_id = ?
-                AND e.source_type = \'asset_disposal\' AND e.source_id = ?
-                AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
-                AND l.side = \'debit\' AND ca.account_code LIKE \'5%\''
-        );
-        $stmt->execute([$supplierId, $supplierId, $assetId]);
-        $zc = $stmt->fetchColumn();
-        return $zc === null || $zc === false ? null : (float) $zc;
     }
 
     /**

@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\StereoNx;
 
-use MyInvoice\Service\Migration\Pohoda\PartnerImporter;
+use MyInvoice\Service\Migration\Shared\PartnerIdentityMatcher;
+use MyInvoice\Service\Migration\Shared\CompanyProfileCarryOver;
 
 /** Výběr běžných kontaktních údajů; účetní a daňové volby se nepřebírají. */
 final class StereoNxCompanyProfile
@@ -13,8 +14,8 @@ final class StereoNxCompanyProfile
 
     public static function matchesCompany(array $identity, array $target): bool
     {
-        $source = PartnerImporter::ico((string) ($identity['ico'] ?? ''));
-        return $source !== '' && $source === PartnerImporter::ico((string) ($target['ic'] ?? ''));
+        $source = PartnerIdentityMatcher::ico((string) ($identity['ico'] ?? ''));
+        return $source !== '' && $source === PartnerIdentityMatcher::ico((string) ($target['ic'] ?? ''));
     }
 
     /** @return array<string,string> */
@@ -24,31 +25,14 @@ final class StereoNxCompanyProfile
         $source = (array) ($identity['company_profile'] ?? []);
         $source['company_name'] = $source['company_name'] ?? $identity['name'] ?? '';
         $source['dic'] = $identity['dic'] ?? '';
-        $out = [];
-        foreach (self::FIELDS as $field) {
-            $value = $source[$field] ?? null;
-            if (is_string($value) && trim($value) !== '' && trim((string) ($target[$field] ?? '')) !== trim($value)) {
-                $out[$field] = trim($value);
-            }
-        }
-        return $out;
+        return CompanyProfileCarryOver::suggestions($source, $target, self::FIELDS);
     }
 
     /** @return array<string,string> */
     public static function selected(array $identity, array $target, array $fields, array $expected): array
     {
-        $suggestions = self::suggestions($identity, $target);
-        $out = [];
-        foreach ($fields as $field) {
-            if (!is_string($field) || !in_array($field, self::FIELDS, true)
-                || !array_key_exists($field, $expected) || !is_string($expected[$field])) {
-                throw new StereoNxException('company_profile_selection', 'Vyberte konkrétní údaje firmy k převzetí.');
-            }
-            if (trim((string) ($target[$field] ?? '')) !== $expected[$field]) {
-                throw new StereoNxException('company_profile_changed', 'Údaje firmy se od zobrazení náhledu změnily. Načtěte náhled znovu a zkontrolujte výběr.');
-            }
-            if (isset($suggestions[$field])) $out[$field] = $suggestions[$field];
-        }
-        return $out;
+        return CompanyProfileCarryOver::selected(self::suggestions($identity, $target), $target,
+            $fields, $expected, self::FIELDS,
+            static fn (string $code, string $message): StereoNxException => new StereoNxException($code, $message));
     }
 }

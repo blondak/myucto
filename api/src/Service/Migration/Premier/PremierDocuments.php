@@ -362,7 +362,11 @@ final class PremierDocuments
                     // Položka z rozpisu nese vlastní účet (i prázdný - odpočet zálohy na 314),
                     // účet dokladu z deníku dostane jen položka složená z deníku.
                     'account' => (string) ($it['account'] ?? ($b['account'] ?? '')),
-                ];
+                ] + (isset($it['foreign_base'], $it['foreign_vat'])
+                    // Základ a daň v měně dokladu, jak jsou na položce - čte je OSS větev vydaného
+                    // dokladu ({@see \MyInvoice\Service\Migration\OssMigrationPolicy::returnAmounts()})
+                    // a převzetí dokladu v měně ({@see \MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover}).
+                    ? ['foreign_base' => $it['foreign_base'], 'foreign_vat' => $it['foreign_vat']] : []);
             }
         }
         $doc['items_source'] = $source;
@@ -465,6 +469,7 @@ final class PremierDocuments
     {
         $out = [];
         foreach ($items as $it) {
+            $foreign = [round((float) ($it['CENA'] ?? 0), 2), round((float) ($it['CENA_DPH'] ?? 0), 2)];
             $base = round((float) ($it['CENA'] ?? 0) * $factor, 2);
             $vat = round((float) ($it['CENA_DPH'] ?? 0) * $factor, 2);
             $text = trim(trim((string) ($it['TEXT'] ?? '')) . ' ' . trim((string) ($it['TEXT_2'] ?? '')));
@@ -479,7 +484,7 @@ final class PremierDocuments
                 'code' => trim((string) ($it['KOD_DPH'] ?? '')),
                 // Účet položky: syntetika + analytika (`UC_S` + `UC_SA`, vydaná `UC_D` + `UC_DA`).
                 'account' => self::itemAccount($it),
-            ];
+            ] + ($factor !== 1.0 ? ['foreign_base' => $foreign[0], 'foreign_vat' => $foreign[1]] : []);
         }
         return $out;
     }

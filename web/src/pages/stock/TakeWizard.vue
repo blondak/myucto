@@ -2,7 +2,8 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { stockApi, type StockTake, type Warehouse, type WarehouseLocation, type StockCycleCount } from '@/api/stock'
+import { stockApi, type StockTake, type Warehouse, type WarehouseLocation, type StockCycleCount, type StockItemSearchResult } from '@/api/stock'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
@@ -184,6 +185,43 @@ async function saveProgress() {
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally { savingLines.value = false }
+}
+
+// Karta, která na skladu nikdy nebyla, v inventuře řádek nemá — když ji na skladu najdou, přidá se ručně.
+const addItemPick = ref<number | null>(null)
+const addItemResults = ref<StockItemSearchResult[]>([])
+const addItemLoading = ref(false)
+const addingItem = ref(false)
+let addItemSearchSeq = 0
+const addItemOptions = computed(() => {
+  const present = new Set((take.value?.lines ?? []).map(l => l.stock_item_id))
+  return addItemResults.value
+    .filter(i => !present.has(i.id))
+    .map(i => ({ value: i.id, label: `${i.sku} ${i.name}` }))
+})
+async function searchAddItem(query: string) {
+  const seq = ++addItemSearchSeq
+  addItemLoading.value = true
+  try {
+    const found = await stockApi.searchItems(query, 30)
+    if (seq === addItemSearchSeq) addItemResults.value = found
+  } catch {
+    if (seq === addItemSearchSeq) addItemResults.value = []
+  } finally {
+    if (seq === addItemSearchSeq) addItemLoading.value = false
+  }
+}
+async function addItem(itemId: number | null) {
+  if (!id.value || !take.value?.lines || itemId == null) return
+  addingItem.value = true
+  try {
+    take.value = await stockApi.updateTake(id.value, take.value.lines.map(l => ({ id: l.id, counted_qty: l.counted_qty, surplus_unit_cost: l.surplus_unit_cost })), [itemId])
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    addingItem.value = false
+    addItemPick.value = null
+  }
 }
 
 const diffLines = computed(() => (take.value?.lines ?? []).filter(l => l.diff_qty != null && Number(l.diff_qty) !== 0))
@@ -447,6 +485,15 @@ const STATUS_BADGE: Record<string, string> = {
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <div v-if="auth.canWrite('stock.take')" class="px-5 py-3 border-t border-neutral-200" data-test="take-add-item">
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.takes.add_item') }}</label>
+              <div class="max-w-md">
+                <SearchableSelect :model-value="addItemPick" remote :options="addItemOptions" :loading="addItemLoading || addingItem"
+                  :placeholder="t('stock.takes.add_item_placeholder')" :no-results-label="t('common.no_results')" teleport
+                  @search="searchAddItem" @update:model-value="addItem" />
+              </div>
+              <p class="text-xs text-neutral-500 mt-1">{{ t('stock.takes.add_item_hint') }}</p>
             </div>
             <div v-if="auth.canWrite('stock.take')" class="px-5 py-3 border-t border-neutral-200 flex flex-wrap justify-end gap-2">
               <button @click="saveProgress" :disabled="savingLines" :class="btnOutline('primary')">

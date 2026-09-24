@@ -16,6 +16,7 @@ use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentJournalPurge;
 use MyInvoice\Service\Accounting\DocumentJournalSync;
 use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Accounting\JournalEntryDeletionRules;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\RetentionGuard;
 use MyInvoice\Service\Accounting\RetentionViolationException;
@@ -162,11 +163,28 @@ final class DeleteInvoiceAction
             // dvojice) smazat v deníku, smažou se nejdřív a faktura pak odchází jako
             // nezaúčtovaná. Nejde-li to u kteréhokoli dokladu skupiny, nesmaže se nic
             // a platí dosavadní cesta — protizápis a retenční brána.
+            //
+            // Zápis v uzamčeném období (po podání přiznání k DPH) se nepřeskakuje tichým
+            // stornem: bez potvrzení vrátí varování, s ním se smaže zápis i faktura naráz.
             if ($forceDelete && !$allUnposted) {
-                $purge = $this->journalPurge->purge($supplierId, 'invoice', $deleteIds, $reverseMeta, 'invoice_force_delete');
+                $lockedAck = ($request->getQueryParams()[JournalEntryDeletionRules::ACK_LOCKED_PARAM] ?? '') === '1';
+                $purge = $this->journalPurge->purge(
+                    $supplierId, 'invoice', $deleteIds, $reverseMeta, 'invoice_force_delete', $lockedAck,
+                );
                 if ($purge['blocked'] === null && $purge['deleted'] !== []) {
                     $journalPurge = $purge;
                     $allUnposted = !$this->hasPostingTrace($supplierId, $deleteIds);
+                } elseif (!empty($purge['blocked']['can_acknowledge'])) {
+                    if ($ownTx && $pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    return Json::error(
+                        $response,
+                        (string) $purge['blocked']['code'],
+                        (string) $purge['blocked']['message'],
+                        409,
+                        ['can_acknowledge' => true],
+                    );
                 }
             }
 

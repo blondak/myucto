@@ -106,6 +106,17 @@ final class PohodaPersonnelReaderTest extends TestCase
         }
     }
 
+    public function testOicWithRemainderTenHasCheckDigitZero(): void
+    {
+        // 100000009 mod 11 = 10: kontrolní číslice je 0, stejně jako u rodného čísla.
+        self::assertSame('1000000090', PayrollRegistrationIdentityService::oic('1000000090'));
+        self::assertTrue(PayrollRegistrationIdentityService::oicChecksumValid('1000000090'));
+        self::assertFalse(PayrollRegistrationIdentityService::oicChecksumValid('1000000091'));
+        self::assertFalse(PayrollRegistrationIdentityService::oicChecksumValid('100000009'));
+        $this->expectException(\InvalidArgumentException::class);
+        PayrollRegistrationIdentityService::oic('1000000091');
+    }
+
     public function testChoosesEmploymentValidTodayThenLatest(): void
     {
         $employment = static fn (int $id, string $status, ?string $start, ?string $end, bool $primary = false): array => [

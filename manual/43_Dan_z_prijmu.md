@@ -111,6 +111,13 @@ i odpovídající add-back PHM) se vykáže na **ř. 40**, resp. **112/170** mí
 základ daně se tím nemění, jde jen o zařazení na správný řádek. Bez zaškrtnutí se systém pokusí
 paušál rozpoznat z textu položky, a když si není jistý, upozorní na to.
 
+#### Řádek přiznání u ručních položek (DPPO)
+
+Každé volné položce § 23 lze vybrat **řádek přiznání**, na kterém se vykáže: zvyšující ř. 20, 30,
+40 nebo 61, snižující ř. 100, 101, 109 až 112, 120, 130, 140, 160 nebo 161. Bez volby jde položka
+na obecný ř. 62, resp. 162. Základ daně se volbou nemění, mění se jen řádek v přiznání a v XML.
+U ř. 20, 30, 109 až 112 a 140 se text položky přenese i do zvláštní přílohy k řádku.
+
 #### Daňové ztráty (§ 34)
 
 Na kartě **Úpravy a odpočty** je přehled **Daňové ztráty**: každá ztráta z minulých let
@@ -193,6 +200,9 @@ společnosti — tedy příspěvek snížený o částky připadající na měs�
 pro maximální státní příspěvek; systém dál pracuje jen s touto (již sníženou) hodnotou.
 Dary musí splnit spodní hranici a souhrnný procentní strop. Základ po odpočtech se zaokrouhlí
 dolů na celé stokoruny, daň v pásmech 15/23 % se zaokrouhlí nahoru na celé Kč.
+Řádky přiznání i příloh jsou v celých korunách a součtové řádky (úhrn dílčích základů,
+základ daně, úhrn odpočtů, dílčí základ v příloze č. 1) se sčítají z už zaokrouhlených
+řádků, jak je kontroluje EPO.
 
 Sleva na poplatníka je roční. Manžel/manželka, invalidita, ZTP/P a děti se posuzují
 podle zadaných měsíců a podmínek; ZTP/P zdvojnásobuje příslušný nárok. U dětí záleží
@@ -218,8 +228,27 @@ podkladů s úhrnem na řádku 105 nebo 106 se hlásí samostatně.
 Výchozí řádek 10 je výsledek hospodaření z účtů 6xx minus 5xx bez daně z příjmů a bez
 technických uzávěrkových zápisů. Základ upravují nedaňové náklady, ruční položky § 23,
 rozdíl daňových a účetních odpisů a rozdíl zůstatkových cen vyřazeného majetku.
-Následují ztráty, dary a slevy. Základ se před sazbou zaokrouhluje dolů na celé tisíce
+Následují ztráty, dary a slevy.
+
+Rozdíl zůstatkových cen prodaného nebo zlikvidovaného majetku jde podle pokynů
+k přiznání na dva řádky: účetní ZC vyšší než daňová zvyšuje základ na **ř. 40**,
+daňová ZC vyšší než účetní ho snižuje na **ř. 160** (se zvláštní přílohou podle účtové
+skupiny nákladů). Účetní ZC se bere ze zápisu vyřazení v modulu majetku. Majetek
+vyřazený mimo modul, třeba převzatý z jiného účetního programu, kde vyřazení
+zaúčtoval převzatý deník, má účetní ZC z karty (vstupní cena po zhodnocení minus
+oprávky) a aplikace ji porovná s deníkem (MD 54x proti oprávkám karty ke dni
+vyřazení). Když nesedí, podklady ukážou obě čísla. Daňová ZC se bere z daňových
+odpisů karty. Karta bez nich má daňovou ZC rovnou účetní (nehmotný majetek „daňový
+= účetní"), vstupní ceně (neodpisovaný majetek, třeba pozemek), nebo vstupní ceně
+minus počáteční daňový stav. U odpisovaného majetku bez jakékoli daňové historie je
+daňová ZC **neznámá**: přiznání rozdíl nedopočítá, podklady na to upozorní a rozdíl
+zadáte ruční položkou. Základ se před sazbou zaokrouhluje dolů na celé tisíce
 Kč; jednotlivé zálohy na další období se zaokrouhlují nahoru na celé stokoruny.
+
+Každý řádek přiznání se vyplňuje v celých korunách. Částka z účetnictví se zaokrouhlí
+matematicky a součtové řádky (70, 170, 200 a navazující) jsou součtem už
+zaokrouhlených řádků, protože přesně tak je kontroluje EPO. Strop odečtu darů se
+zaokrouhluje dolů, aby odečet nepřekročil zákonné procento.
 
 Výsledkové zápisy skladové uzávěrky se do výpočtu zahrnují. Technický zápis
 uzavření knih se vylučuje, aby převod na uzávěrkové účty nevynuloval výsledek.
@@ -391,6 +420,46 @@ formulářové řádky s aktuálním výpočtem. Zobrazí shody, rozdíly a hodn
 v podaném souboru. Jde o read-only kontrolu: nahrání nic nezaúčtuje, nepřepíše přiznání
 a soubor samo neoznačí jako přijatý finanční správou. Importní rekonciliace
 skutečně podaného DPFO, DPHDP3 a KH není k dispozici.
+
+### 43.8.2 Převzetí podaného DPPO do vstupů přiznání
+
+Firma převedená z jiného programu nebo od účetní kanceláře má podaná přiznání za minulé roky,
+ale v MyÚčtu jen účetnictví. Tlačítko **Náhled převzetí do vstupů** ve stejném bloku převezme
+z podaného XML údaje, které z účetnictví neplynou:
+
+- úpravy základu na jejich řádcích (ř. 20, 30, 61, 62, 100 až 162 kromě ř. 150), texty ze
+  zvláštní přílohy podání, když ji podání má;
+- z ř. 40 a ř. 160 jen část nad to, co MyÚčto spočte samo (nedaňové účty, rozdíl zůstatkových
+  cen vyřazeného majetku);
+- odečet ztráty (ř. 230), odečty § 34 odst. 4 (ř. 242, 243), dary (ř. 260), slevy § 35 z tabulky H
+  a zaplacené zálohy.
+
+Výsledek hospodaření, odpisy a nedaňové účty spočte MyÚčto z účetnictví jako u každého
+přiznání. Náhled nic neukládá: ukáže navržené vstupy a porovnání přiznání s nimi proti podání.
+U každého řádku je vidět, zda je spočtený z účetnictví, ze vstupů, nebo jde o mezisoučet.
+Po převzetí mají řádky ze vstupů sedět; rozdíl na řádcích z účetnictví je skutečný rozdíl mezi
+účetnictvím a podáním a převzetí ho nezakrývá.
+
+Tlačítko **Převzít do vstupů přiznání** vstupy uloží. U existujícího rozpracovaného přiznání se
+po potvrzení přepíšou jen ruční položky, ztráta, odečty, dary a slevy; lhůta, účet pro přeplatek
+a poznámky zůstanou. Finální přiznání převzetí nezmění. Převzít lze jen přiznání stejné firmy
+(IČO) a roku, který je na obrazovce vybraný.
+
+Převzetí zároveň zapíše do evidence **daňových ztrát** ztrátu vzniklou v roce podání a ztrátu
+uplatněnou na ř. 230, takže ztráty navazují mezi převzatými roky. Přebírejte proto roky od
+nejstaršího. Když podání uplatňuje ztrátu, jejíž rok vzniku v evidenci chybí, aplikace na to
+upozorní.
+
+Pro převod více let najednou slouží příkaz
+
+```
+php api/bin/tax-return-import.php --ico=<IČO> --filed=<soubor nebo adresář s XML> [--dry-run]
+```
+
+který z adresáře vybere za každý rok poslední podání firmy (dodatečné má přednost před
+opravným a řádným) a roky zpracuje vzestupně. Volba `--replace-draft` přepíše existující
+rozpracovaná přiznání, `--loss=RRRR:ČÁSTKA` doplní ztrátu roku, za který podání není,
+a `--dry-run` jen vypíše náhled.
 
 ## 43.9 Roční uzávěrka daňové evidence a snapshot DPFO
 

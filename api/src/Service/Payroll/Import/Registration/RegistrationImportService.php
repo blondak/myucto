@@ -17,11 +17,13 @@ use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportReader;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportWriter;
 
 /**
- * Import registrací ČSSZ (REGZEC25, PREZEC26) a měsíčních hlášení JMHZ
- * jiného mzdového programu do mzdové evidence: náhled a použití vybraných vět.
+ * Import registrací ČSSZ (REGZEC25, PREZEC26), exportu zaměstnanců z ePortálu
+ * ČSSZ a měsíčních hlášení JMHZ jiného mzdového programu do mzdové evidence:
+ * náhled a použití vybraných vět.
  *
  * Soubor se rozpozná podle kořenového elementu; v jedné dávce mohou být
- * registrace i hlášení za víc měsíců.
+ * registrace i hlášení za víc měsíců. Export zaměstnanců datum nástupu nenese,
+ * dosadí se z hlášení téže dávky ({@see CsszExportStartResolver}).
  *
  * Náhled nic nezapisuje. Použití si soubory přečte a každou vybranou větu či
  * formulář naplánuje znovu nad AKTUÁLNÍM stavem evidence těsně před zápisem —
@@ -57,16 +59,20 @@ final class RegistrationImportService
         $pairMap = $this->pairs($pairs);
         $read = $this->read($files);
         $records = [];
+        $registrationPlans = [];
         foreach ($read['registrations'] as $item) {
-            $records[$this->order($item['file_index'], $item['record']->position)] = self::publicPlan($this->planner->plan(
+            $plan = $this->planner->plan(
                 $supplierId,
                 $environment,
                 $item['record'],
                 $item['file'],
                 $item['sha256'],
-            ));
+            );
+            $registrationPlans[] = $plan;
+            $records[$this->order($item['file_index'], $item['record']->position)] = self::publicPlan($plan);
         }
         $jmhzPlans = $this->planJmhz($supplierId, $environment, $read['batch'], $pairMap);
+        $this->hintExportPairing($jmhzPlans, $registrationPlans);
         foreach ($jmhzPlans as $plan) {
             /** @var JmhzBatchItem $item */
             $item = $plan['_item'];
@@ -430,12 +436,55 @@ final class RegistrationImportService
             }
         }
 
+        $batch = JmhzBatch::build($jmhzItems, $stornos);
+        foreach ($records as $index => $item) {
+            $record = $item['record'];
+            if ($record->isCsszExport() && $record->startOn === null && $record->employmentIdentifier !== null) {
+                $start = CsszExportStartResolver::resolve($batch, $record->employmentIdentifier);
+                if ($start !== null) {
+                    $records[$index]['record'] = $record->withDerivedStart($start);
+                }
+            }
+        }
+
         return [
             'files' => $fileRows,
             'registrations' => $records,
-            'batch' => JmhzBatch::build($jmhzItems, $stornos),
+            'batch' => $batch,
             'has_jmhz' => $hasJmhz,
         ];
+    }
+
+    /**
+     * Formulář hlášení osoby, kterou teprve založí věta exportu zaměstnanců
+     * v téže dávce, se v náhledu ještě nemá s čím spárovat. Při použití se
+     * export zapíše dřív a formulář se spáruje podle ID PPV sám.
+     *
+     * @param array<string,array<string,mixed>> $jmhzPlans
+     * @param list<array<string,mixed>> $registrationPlans
+     */
+    private function hintExportPairing(array &$jmhzPlans, array $registrationPlans): void
+    {
+        $created = [];
+        foreach ($registrationPlans as $plan) {
+            /** @var RegistrationRecord $record */
+            $record = $plan['_record'];
+            if ($record->isCsszExport() && $plan['selectable'] && $record->employmentIdentifier !== null
+                && in_array($plan['operation'], ['create_person', 'create_employment'], true)
+            ) {
+                $created[$record->employmentIdentifier] = $plan['person']['full_name'];
+            }
+        }
+        foreach ($jmhzPlans as $key => $plan) {
+            /** @var JmhzBatchItem $item */
+            $item = $plan['_item'];
+            $idPpv = $item->form->employmentIdentifier;
+            if ($plan['operation'] === 'pair_required' && $idPpv !== null && isset($created[$idPpv])) {
+                $jmhzPlans[$key]['warnings'][] = 'Pracovní vztah založí věta exportu zaměstnanců ČSSZ ('
+                    . $created[$idPpv] . '). Vyberte ji spolu s formulářem — při zápisu se formulář spáruje '
+                    . 'podle ID PPV sám.';
+            }
+        }
     }
 
     /**
