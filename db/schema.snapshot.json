@@ -875,7 +875,8 @@
         "1888_other_items_role_permissions.sql",
         "1889_other_item_payment_ownership.sql",
         "1890_other_item_allocation_reversal.sql",
-        "1891_other_item_posting_lines.sql"
+        "1891_other_item_posting_lines.sql",
+        "1892_payroll_takeover_source_jmhz.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -11875,7 +11876,7 @@
                 "relationship_end_date": "date NULL DEFAULT NULL",
                 "relationship_start_date": "date NULL DEFAULT NULL",
                 "social_base_minor": "bigint(20) NOT NULL DEFAULT 0",
-                "source": "enum('pamica','pohoda','money_s3','other') NOT NULL",
+                "source": "enum('pamica','pohoda','money_s3','other','jmhz') NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_bonus_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",

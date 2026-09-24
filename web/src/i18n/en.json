@@ -1902,7 +1902,8 @@
         "pamica": "PAMICA",
         "pohoda": "POHODA Payroll",
         "money_s3": "Money S3",
-        "other": "Other payroll system"
+        "other": "Other payroll system",
+        "jmhz": "JMHZ reports"
       },
       "takeover": {
         "title": "Taken-over payroll for the year",
@@ -26749,7 +26750,8 @@
       "applied_with_errors": "Applied {applied} records, {failed} failed and {skipped} skipped. See the result below the table for details.",
       "record_count": "records: {count}",
       "document_types": {
-        "CSSZ_EXPORT": "ČSSZ employee export"
+        "CSSZ_EXPORT": "ČSSZ employee export",
+        "JMHZ_DERIVED": "Derived from JMHZ reports"
       },
       "summary": {
         "total": "Records total",
@@ -26791,6 +26793,7 @@
         "birth_number": "by birth number",
         "oic": "by OIČ",
         "id_ppv": "by ID PPV",
+        "name_birth_date": "by name and date of birth",
         "manual": "assigned manually"
       },
       "manual_pair": "Assigned manually",
@@ -26851,7 +26854,36 @@
         "apply_averages": "Create average earnings (for approval)",
         "auto_approve_averages": "Approve averages right away",
         "auto_approve_averages_hint": "Without this, created averages wait for approval in Absences.",
-        "nothing_ready": "Nothing to take over."
+        "nothing_ready": "Nothing to take over.",
+        "wages_title": "Taken-over wages and employment details",
+        "wages_hint": "Totals of months before payroll started in MyÚčto are written to taken-over wages, just like a PAMICA or PREMIER migration: the migration reconciliation, the taken-over run, the payroll record and the taxable income certificate read them. Each employment also gets what the series of reports proves: the agreed monthly wage with its recurring entry, the average earnings the previous program used, leave taken, workplace and termination.",
+        "start_period": "Payroll in MyÚčto from {period}",
+        "no_start_period": "The company has no period set from which MyÚčto runs payroll, so taken-over wages are not written.",
+        "months_title": "Taken-over months",
+        "relations_title": "Employment details proven by the reports",
+        "wage_columns": {
+          "period": "Month",
+          "count": "Employments",
+          "gross": "Gross income",
+          "net": "Net wage",
+          "advance_tax": "Tax advance",
+          "status": "Status",
+          "employment": "Employment",
+          "start": "Start",
+          "end": "End",
+          "monthly_wage": "Monthly wage",
+          "averages": "Quarterly average",
+          "leave": "Leave taken"
+        },
+        "month_status": {
+          "ready": "Will be taken over",
+          "blocked": "Cannot take over",
+          "computed": "Calculated by MyÚčto"
+        },
+        "blocked_count": "Cannot take over: {count}",
+        "wage_from": "from {date}",
+        "leave_hours": "{hours} h",
+        "apply_wages": "Take over wages and employment details"
       },
       "operations": {
         "create_person": "Create person",
@@ -26871,6 +26903,7 @@
       "apply": "Apply selected ({count})",
       "apply_history_only": "Take over history",
       "history_applied": "History taken over: {saved} opening balances saved, {created} averages created.",
+      "takeover_applied": "History taken over: {months} employment months, {saved} opening balances, {created} averages.",
       "reason": {
         "no_files": "Choose the registration or report XML files first.",
         "no_preview": "Load the preview first.",
@@ -26905,7 +26938,21 @@
         "openings_saved": "Opening balances saved: {count}",
         "averages_created": "Averages created: {created}, of which approved {approved}",
         "opening_skipped": "Opening balance skipped",
-        "average_skipped": "Average skipped"
+        "average_skipped": "Average skipped",
+        "takeover_saved": "Employment months taken over: {count}",
+        "takeover_relations": "Employments: {count}",
+        "takeover_skipped": "Not taken over",
+        "takeover_counts": {
+          "monthly_wage": "Agreed wage: {count}",
+          "recurring_wage": "Recurring monthly wage: {count}",
+          "averages": "Average earnings: {count}",
+          "averages_default_period": "Averages with default reference period: {count}",
+          "workplace": "JMHZ workplace: {count}",
+          "leave_taken": "Months of leave taken: {count}",
+          "leave_taken_existing": "Leave already in the ledger: {count}",
+          "ended": "Terminated employments: {count}",
+          "monthly_wage_ended": "Wage not carried to ended employments: {count}"
+        }
       },
       "result_checklist": {
         "title": "Change obligations",

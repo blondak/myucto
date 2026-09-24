@@ -95,10 +95,16 @@ final class RegistrationImportWriter
             &$notes,
         ): void {
             if (is_array($steps['create_person'])) {
+                $input = $steps['create_person'];
+                $workload = $input['workload'] ?? null;
+                unset($input['workload']);
+                if (is_array($workload)) {
+                    $input['weekly_hours'] = $workload['weekly_hours'];
+                }
                 $person = $this->license->mutatePayrollEmployees(
                     fn (): array => $this->people->create(
                         $supplierId,
-                        $steps['create_person'] + ['office_id' => $officeId],
+                        $input + ['office_id' => $officeId],
                         $userId,
                         $ip,
                         $userAgent,
@@ -171,9 +177,11 @@ final class RegistrationImportWriter
                     $employmentId,
                     'active',
                     $steps['activate_on'],
-                    $record->isCsszExport()
-                        ? 'Nástup podle exportu zaměstnanců ČSSZ a měsíčního hlášení v téže dávce.'
-                        : 'Nástup podle importované registrace ČSSZ.',
+                    match (true) {
+                        $record->isCsszExport() => 'Nástup podle exportu zaměstnanců ČSSZ a měsíčního hlášení v téže dávce.',
+                        $record->isJmhzDerived() => 'Nástup podle importovaných měsíčních hlášení JMHZ.',
+                        default => 'Nástup podle importované registrace ČSSZ.',
+                    },
                     $userId,
                     $ip,
                     $userAgent,
@@ -219,7 +227,7 @@ final class RegistrationImportWriter
         ];
     }
 
-    /** @param array{relation_type:string,planned_start_on:string} $input */
+    /** @param array{relation_type:string,planned_start_on:string,workload?:?array{workload_basis_points:int,weekly_hours:string}} $input */
     private function createEmployment(
         int $supplierId,
         int $employeeId,
@@ -250,8 +258,8 @@ final class RegistrationImportWriter
                     'contract_signed_on' => null,
                     'actual_start_on' => null,
                     'fixed_term_end_on' => null,
-                    'weekly_hours' => '40.00',
-                    'workload_basis_points' => 10_000,
+                    'weekly_hours' => $input['workload']['weekly_hours'] ?? '40.00',
+                    'workload_basis_points' => $input['workload']['workload_basis_points'] ?? 10_000,
                     'work_place' => null,
                     'regular_workplace' => null,
                     'jmhz_workplace_municipality_code' => null,

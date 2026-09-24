@@ -10,11 +10,16 @@ use MyInvoice\Service\Payroll\Import\ImportFiles;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzAveragePlanner;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzBatch;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzBatchItem;
+use MyInvoice\Service\Payroll\Import\Jmhz\JmhzDerivedRegistrations;
+use MyInvoice\Service\Payroll\Import\Jmhz\JmhzEmploymentHistory;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzOpeningBalancePlanner;
+use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportFile;
+use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportForm;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportLookup;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportPlanner;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportReader;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportWriter;
+use MyInvoice\Service\Payroll\Import\Jmhz\JmhzTakeoverPlanner;
 
 /**
  * Import registrací ČSSZ (REGZEC25, PREZEC26), exportu zaměstnanců z ePortálu
@@ -38,6 +43,8 @@ final class RegistrationImportService
     private const ENVIRONMENTS = ['production', 'test'];
     private const KEY_PATTERN = '/^[0-9a-f]{16}:[0-9]{1,5}$/D';
     private const AUTO_CHANGE_NOTE = 'Odškrtnuto importem: změnu už vykázalo importované podání.';
+    /** Pořadí vět odvozených z hlášení v náhledu: za všemi nahranými soubory. */
+    private const DERIVED_FILE_INDEX = 99_999;
 
     public function __construct(
         private readonly RegistrationXmlReader $reader,
@@ -48,8 +55,10 @@ final class RegistrationImportService
         private readonly JmhzReportWriter $jmhzWriter,
         private readonly JmhzOpeningBalancePlanner $openingPlanner,
         private readonly JmhzAveragePlanner $averagePlanner,
+        private readonly JmhzTakeoverPlanner $takeoverPlanner,
         private readonly JmhzReportLookup $jmhzLookup,
         private readonly PayrollEmploymentRepository $employments,
+        private readonly RegistrationImportLookup $lookup,
     ) {}
 
     /** @return array<string,mixed> */
@@ -57,7 +66,7 @@ final class RegistrationImportService
     {
         $this->environment($environment);
         $pairMap = $this->pairs($pairs);
-        $read = $this->read($files);
+        $read = $this->read($supplierId, $files);
         $records = [];
         $registrationPlans = [];
         foreach ($read['registrations'] as $item) {
@@ -69,6 +78,13 @@ final class RegistrationImportService
                 $item['sha256'],
             );
             $registrationPlans[] = $plan;
+            // Odvozená věta vztahu, který evidence už vede beze změny, by náhled
+            // jen zahltila — zůstane, jen když má co zapsat nebo na co upozornit.
+            if ($item['record']->isJmhzDerived() && $plan['operation'] === 'none' && $plan['blocker'] === null
+                && ($plan['_notice'] ?? false) !== true
+            ) {
+                continue;
+            }
             $records[$this->order($item['file_index'], $item['record']->position)] = self::publicPlan($plan);
         }
         $jmhzPlans = $this->planJmhz($supplierId, $environment, $read['batch'], $pairMap);
@@ -93,6 +109,9 @@ final class RegistrationImportService
             'averages' => $read['has_jmhz']
                 ? $this->averagePlanner->preview($supplierId, array_values($jmhzPlans))
                 : [],
+            'takeover' => $read['has_jmhz']
+                ? $this->takeoverPlanner->preview($supplierId, array_values($jmhzPlans), $read['batch'])
+                : null,
         ];
     }
 
@@ -103,6 +122,7 @@ final class RegistrationImportService
      *   summary:array{applied:int,failed:int,skipped:int},
      *   opening_balances:array{saved:int,skipped:list<array<string,mixed>>},
      *   averages:array{created:int,approved:int,skipped:list<array<string,mixed>>},
+     *   takeover:?array<string,mixed>,
      *   change_checklist:array{completed:int,failed:list<array{employment_id:int,item_key:string,message:string}>}
      * }
      */
@@ -121,6 +141,7 @@ final class RegistrationImportService
         bool $applyAverages = false,
         bool $autoApproveChanges = false,
         bool $autoApproveAverages = false,
+        bool $applyTakeover = false,
     ): array {
         $this->environment($environment);
         if (!$evidenceConfirmed) {
@@ -132,7 +153,7 @@ final class RegistrationImportService
         if (!is_array($keys) || !array_is_list($keys)) {
             throw new \InvalidArgumentException('Vyberte aspoň jednu větu, která se má zapsat.');
         }
-        if ($keys === [] && !$applyOpeningBalances && !$applyAverages) {
+        if ($keys === [] && !$applyOpeningBalances && !$applyAverages && !$applyTakeover) {
             throw new \InvalidArgumentException('Vyberte aspoň jednu větu, která se má zapsat.');
         }
         $selected = [];
@@ -147,7 +168,7 @@ final class RegistrationImportService
             throw new \InvalidArgumentException('Mzdová účtárna není platná.');
         }
 
-        $read = $this->read($files);
+        $read = $this->read($supplierId, $files);
         $byKey = [];
         foreach ($read['registrations'] as $item) {
             $byKey[RegistrationImportPlanner::key($item['sha256'], $item['record']->position)] = $item;
@@ -181,31 +202,8 @@ final class RegistrationImportService
             }
         }
         foreach ($ordered as $item) {
-            $plan = $this->planner->plan(
-                $supplierId,
-                $environment,
-                $item['record'],
-                $item['file'],
-                $item['sha256'],
-            );
-            $key = (string) $plan['key'];
-            if ($plan['blocker'] !== null) {
-                $results[$key] = $this->result($key, 'skipped', (string) $plan['blocker'], $plan);
-                continue;
-            }
-            if (!$plan['selectable']) {
-                $results[$key] = $this->result($key, 'skipped', 'Věta nemá co zapsat — evidence už odpovídá.', $plan);
-                continue;
-            }
-            try {
-                $applied = $this->writer->apply($supplierId, $environment, $plan, $officeId, $userId, $ip, $userAgent);
-                $results[$key] = ['key' => $key] + $applied;
-            } catch (LicensePayrollLimitExceeded) {
-                $results[$key] = $this->result($key, 'failed', 'Dalšího aktivního zaměstnance lze přidat až po '
-                    . 'rozšíření mzdového doplňku.', $plan);
-            } catch (\Exception $e) {
-                $results[$key] = $this->result($key, 'failed', $e->getMessage(), $plan);
-            }
+            $result = $this->applyRegistration($supplierId, $environment, $item, $officeId, $userId, $ip, $userAgent);
+            $results[(string) $result['key']] = $result;
         }
 
         $batch = $read['batch'];
@@ -265,8 +263,15 @@ final class RegistrationImportService
 
         $openings = ['saved' => 0, 'skipped' => []];
         $averages = ['created' => 0, 'approved' => 0, 'skipped' => []];
-        if (($applyOpeningBalances || $applyAverages) && $batch->items() !== []) {
+        $takeover = null;
+        if (($applyOpeningBalances || $applyAverages || $applyTakeover) && $batch->items() !== []) {
             $fresh = array_values($this->planJmhz($supplierId, $environment, $batch, $pairMap));
+            // Převzetí historie jde první: schválí průměry, se kterými počítal předchozí
+            // program, a návrh průměru z hlášení pak za tatáž čtvrtletí už nevzniká.
+            if ($applyTakeover) {
+                $takeover = $this->takeoverPlanner->apply($supplierId, $fresh, $batch, $userId);
+                $fresh = array_values($this->planJmhz($supplierId, $environment, $batch, $pairMap));
+            }
             if ($applyOpeningBalances) {
                 $openings = $this->openingPlanner->apply($supplierId, $fresh, $batch, $userId);
             }
@@ -280,8 +285,42 @@ final class RegistrationImportService
             'summary' => $summary,
             'opening_balances' => $openings,
             'averages' => $averages,
+            'takeover' => $takeover,
             'change_checklist' => $checklist,
         ];
+    }
+
+    /**
+     * Naplánuje větu registrace nad aktuální evidencí a zapíše ji.
+     *
+     * @param array{record:RegistrationRecord,file:string,sha256:string,file_index:int} $item
+     * @return array<string,mixed>
+     */
+    private function applyRegistration(
+        int $supplierId,
+        string $environment,
+        array $item,
+        ?int $officeId,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        $plan = $this->planner->plan($supplierId, $environment, $item['record'], $item['file'], $item['sha256']);
+        $key = (string) $plan['key'];
+        if ($plan['blocker'] !== null) {
+            return $this->result($key, 'skipped', (string) $plan['blocker'], $plan);
+        }
+        if (!$plan['selectable']) {
+            return $this->result($key, 'skipped', 'Věta nemá co zapsat — evidence už odpovídá.', $plan);
+        }
+        try {
+            return ['key' => $key] + $this->writer->apply($supplierId, $environment, $plan, $officeId, $userId, $ip, $userAgent);
+        } catch (LicensePayrollLimitExceeded) {
+            return $this->result($key, 'failed', 'Dalšího aktivního zaměstnance lze přidat až po '
+                . 'rozšíření mzdového doplňku.', $plan);
+        } catch (\Exception $e) {
+            return $this->result($key, 'failed', $e->getMessage(), $plan);
+        }
     }
 
     /**
@@ -379,53 +418,35 @@ final class RegistrationImportService
      *   files:list<array<string,mixed>>,
      *   registrations:list<array{record:RegistrationRecord,file:string,sha256:string,file_index:int}>,
      *   batch:JmhzBatch,
+     *   history:JmhzEmploymentHistory,
      *   has_jmhz:bool
      * }
      */
-    private function read(mixed $files): array
+    private function read(int $supplierId, mixed $files): array
     {
         $fileRows = [];
         $records = [];
         $jmhzItems = [];
         $stornos = [];
         $hasJmhz = false;
+        $reports = [];
         foreach (ImportFiles::fromRequest($files, ['xml']) as $index => $file) {
             if (JmhzReportReader::isJmhz($file['content'])) {
                 $hasJmhz = true;
                 try {
-                    $report = $this->jmhzReader->read($file['content']);
+                    $reports[] = ['file' => $file, 'index' => $index, 'report' => $this->jmhzReader->read($file['content'])];
                 } catch (RegistrationImportFileException $e) {
-                    $fileRows[] = $this->fileRow($file, 'JMHZ', 0, $e->getMessage());
-                    continue;
-                }
-                $warnings = $report->warnings;
-                if ($report->submissionType === 'S' && $report->forms === []) {
-                    $stornos[] = ['file' => $report, 'name' => $file['name']];
-                    $warnings[] = 'Stornující podání za ' . $report->period() . ' — z hlášení, které ruší, se nic nepřebírá.';
-                } else {
-                    $warnings[] = 'ELDP a zdravotní pojištění z hlášení import nepřebírá: evidence pro ně počáteční '
-                        . 'stavy nevede. Údaje ukazuje jen náhled.';
-                }
-                $fileRows[] = $this->fileRow($file, 'JMHZ', count($report->forms), null, $warnings, $report->period(), $report->submissionType);
-                foreach ($report->forms as $form) {
-                    $jmhzItems[] = new JmhzBatchItem(
-                        RegistrationImportPlanner::key($file['sha256'], $form->position),
-                        $report,
-                        $form,
-                        $file['name'],
-                        $file['sha256'],
-                        $index,
-                    );
+                    $fileRows[$index] = $this->fileRow($file, 'JMHZ', 0, $e->getMessage());
                 }
                 continue;
             }
             try {
                 $read = $this->reader->read($file['content']);
             } catch (RegistrationImportFileException $e) {
-                $fileRows[] = $this->fileRow($file, null, 0, $e->getMessage());
+                $fileRows[$index] = $this->fileRow($file, null, 0, $e->getMessage());
                 continue;
             }
-            $fileRows[] = $this->fileRow($file, $read['document_type'], count($read['records']), null);
+            $fileRows[$index] = $this->fileRow($file, $read['document_type'], count($read['records']), null);
             foreach ($read['records'] as $record) {
                 $records[] = [
                     'record' => $record,
@@ -435,6 +456,31 @@ final class RegistrationImportService
                 ];
             }
         }
+
+        $foreign = $this->foreignReports($supplierId, $reports);
+        foreach ($reports as ['file' => $file, 'index' => $index, 'report' => $report]) {
+            if (isset($foreign['errors'][$index])) {
+                $fileRows[$index] = $this->fileRow($file, 'JMHZ', count($report->forms), $foreign['errors'][$index], [], $report->period(), $report->submissionType);
+                continue;
+            }
+            $warnings = [...$report->warnings, ...$foreign['warnings']];
+            if ($report->submissionType === 'S' && $report->forms === []) {
+                $stornos[] = ['file' => $report, 'name' => $file['name']];
+                $warnings[] = 'Stornující podání za ' . $report->period() . ' — z hlášení, které ruší, se nic nepřebírá.';
+            }
+            $fileRows[$index] = $this->fileRow($file, 'JMHZ', count($report->forms), null, $warnings, $report->period(), $report->submissionType);
+            foreach ($report->forms as $form) {
+                $jmhzItems[] = new JmhzBatchItem(
+                    RegistrationImportPlanner::key($file['sha256'], $form->position),
+                    $report,
+                    $form,
+                    $file['name'],
+                    $file['sha256'],
+                    $index,
+                );
+            }
+        }
+        ksort($fileRows);
 
         $batch = JmhzBatch::build($jmhzItems, $stornos);
         foreach ($records as $index => $item) {
@@ -446,13 +492,75 @@ final class RegistrationImportService
                 }
             }
         }
+        $history = $batch->history();
+        if ($jmhzItems !== []) {
+            $derived = JmhzDerivedRegistrations::build(
+                $batch,
+                $history,
+                array_map(static fn (array $item): RegistrationRecord => $item['record'], $records),
+            );
+            foreach ($derived['records'] as $record) {
+                $records[] = [
+                    'record' => $record,
+                    'file' => JmhzDerivedRegistrations::FILE_NAME,
+                    'sha256' => $derived['sha256'],
+                    'file_index' => self::DERIVED_FILE_INDEX,
+                ];
+            }
+        }
 
         return [
-            'files' => $fileRows,
+            'files' => array_values($fileRows),
             'registrations' => $records,
             'batch' => $batch,
+            'history' => $history,
             'has_jmhz' => $hasJmhz,
         ];
+    }
+
+    /**
+     * Hlášení jiného zaměstnavatele se nepřebírá: formuláře nesou jen OIČ a ID
+     * PPV, takže by se osoba cizí firmy spárovala nebo založila tady.
+     * Rozhoduje VS zaměstnavatele (10002) proti VS mzdových účtáren firmy.
+     * Firma bez VS se ověřit nedá — projde jen dávka jediného zaměstnavatele.
+     *
+     * @param list<array{file:array<string,mixed>,index:int,report:JmhzReportFile}> $reports
+     * @return array{errors:array<int,string>,warnings:list<string>}
+     */
+    private function foreignReports(int $supplierId, array $reports): array
+    {
+        $known = $this->lookup->variableSymbols($supplierId);
+        $errors = [];
+        $symbols = [];
+        foreach ($reports as ['index' => $index, 'report' => $report]) {
+            $symbol = $report->variableSymbol === null ? null : RegistrationImportLookup::variableSymbol($report->variableSymbol);
+            if ($symbol === null) {
+                continue;
+            }
+            $symbols[$symbol] = true;
+            if ($known !== [] && !in_array($symbol, $known, true)) {
+                $errors[$index] = "Hlášení podal zaměstnavatel s variabilním symbolem {$report->variableSymbol}, který "
+                    . 'nepatří žádné mzdové účtárně této firmy. Nejspíš jde o hlášení jiné firmy; pokud ne, '
+                    . 'doplňte VS v nastavení mzdové účtárny.';
+            }
+        }
+        if ($known !== [] || $symbols === []) {
+            return ['errors' => $errors, 'warnings' => []];
+        }
+        if (count($symbols) > 1) {
+            foreach ($reports as ['index' => $index]) {
+                $errors[$index] = 'Dávka obsahuje hlášení několika zaměstnavatelů (různé variabilní symboly) a firma '
+                    . 'nemá VS mzdové účtárny, podle kterého by šlo poznat, které jsou její. Doplňte VS v nastavení '
+                    . 'mzdové účtárny, nebo nahrajte hlášení jen jednoho zaměstnavatele.';
+            }
+
+            return ['errors' => $errors, 'warnings' => []];
+        }
+
+        return ['errors' => [], 'warnings' => [
+            'Firma nemá vyplněný VS mzdové účtárny, takže nejde ověřit, že hlášení (VS ' . array_key_first($symbols)
+                . ') patří jí. Doplňte VS v nastavení mzdové účtárny.',
+        ]];
     }
 
     /**
@@ -469,20 +577,32 @@ final class RegistrationImportService
         foreach ($registrationPlans as $plan) {
             /** @var RegistrationRecord $record */
             $record = $plan['_record'];
-            if ($record->isCsszExport() && $plan['selectable'] && $record->employmentIdentifier !== null
+            if (($record->isCsszExport() || ($record->isJmhzDerived() && $record->actionCode === 1))
+                && $plan['selectable']
                 && in_array($plan['operation'], ['create_person', 'create_employment'], true)
             ) {
-                $created[$record->employmentIdentifier] = $plan['person']['full_name'];
+                $relation = JmhzReportForm::relationKeyOf(
+                    $record->employmentIdentifier,
+                    $record->lastName,
+                    $record->firstName,
+                    $record->birthDate,
+                );
+                if ($relation !== null) {
+                    $created[$relation] = [
+                        'name' => $plan['person']['full_name'],
+                        'source' => $record->isCsszExport() ? 'věta exportu zaměstnanců ČSSZ' : 'věta odvozená z hlášení',
+                    ];
+                }
             }
         }
         foreach ($jmhzPlans as $key => $plan) {
             /** @var JmhzBatchItem $item */
             $item = $plan['_item'];
-            $idPpv = $item->form->employmentIdentifier;
-            if ($plan['operation'] === 'pair_required' && $idPpv !== null && isset($created[$idPpv])) {
-                $jmhzPlans[$key]['warnings'][] = 'Pracovní vztah založí věta exportu zaměstnanců ČSSZ ('
-                    . $created[$idPpv] . '). Vyberte ji spolu s formulářem — při zápisu se formulář spáruje '
-                    . 'podle ID PPV sám.';
+            $relation = $item->form->relationKey();
+            if ($plan['operation'] === 'pair_required' && $relation !== null && isset($created[$relation])) {
+                $jmhzPlans[$key]['warnings'][] = 'Pracovní vztah založí ' . $created[$relation]['source'] . ' ('
+                    . $created[$relation]['name'] . '). Vyberte ji spolu s formulářem — při zápisu se formulář '
+                    . 'spáruje sám.';
             }
         }
     }

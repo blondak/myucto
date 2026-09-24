@@ -1902,7 +1902,8 @@
         "pamica": "PAMICA",
         "pohoda": "POHODA Mzdy",
         "money_s3": "Money S3",
-        "other": "Jiný mzdový systém"
+        "other": "Jiný mzdový systém",
+        "jmhz": "Hlášení JMHZ"
       },
       "takeover": {
         "title": "Převzaté mzdy za rok",
@@ -26749,7 +26750,8 @@
       "applied_with_errors": "Použito {applied} vět, {failed} selhalo a {skipped} přeskočeno. Podrobnosti najdete ve výsledku pod tabulkou.",
       "record_count": "vět: {count}",
       "document_types": {
-        "CSSZ_EXPORT": "Export zaměstnanců ČSSZ"
+        "CSSZ_EXPORT": "Export zaměstnanců ČSSZ",
+        "JMHZ_DERIVED": "Odvozeno z hlášení JMHZ"
       },
       "summary": {
         "total": "Vět celkem",
@@ -26791,6 +26793,7 @@
         "birth_number": "podle rodného čísla",
         "oic": "podle OIČ",
         "id_ppv": "podle ID PPV",
+        "name_birth_date": "podle jména a data narození",
         "manual": "ručně přiřazeno"
       },
       "manual_pair": "Ručně přiřazeno",
@@ -26851,7 +26854,36 @@
         "apply_averages": "Založit průměrné výdělky (ke schválení)",
         "auto_approve_averages": "Průměry rovnou schválit",
         "auto_approve_averages_hint": "Bez této volby čekají založené průměry na schválení v Nepřítomnostech.",
-        "nothing_ready": "Není co převzít."
+        "nothing_ready": "Není co převzít.",
+        "wages_title": "Převzaté mzdy a údaje vztahů",
+        "wages_hint": "Úhrny měsíců před zahájením vedení mezd v MyÚčtu se zapíšou do převzatých mezd stejně jako při převodu z PAMICA nebo PREMIER: čte z nich kontrolní sestava převodu, převzatý běh, mzdový list i potvrzení o zdanitelných příjmech. Ke každému vztahu se zapíše i to, co řada hlášení dokládá: sjednaná měsíční mzda s předpisem, průměrný výdělek, se kterým počítal předchozí program, čerpání dovolené, pracoviště a skončení vztahu.",
+        "start_period": "Mzdy v MyÚčtu od {period}",
+        "no_start_period": "Firma nemá nastavené období, od kterého vede mzdy v MyÚčtu, převzaté mzdy se proto nezapíšou.",
+        "months_title": "Převzaté měsíce",
+        "relations_title": "Údaje vztahů doložené hlášeními",
+        "wage_columns": {
+          "period": "Měsíc",
+          "count": "Vztahů",
+          "gross": "Hrubé příjmy",
+          "net": "Čistá mzda",
+          "advance_tax": "Záloha na daň",
+          "status": "Stav",
+          "employment": "Vztah",
+          "start": "Nástup",
+          "end": "Skončení",
+          "monthly_wage": "Měsíční mzda",
+          "averages": "Průměr za čtvrtletí",
+          "leave": "Čerpaná dovolená"
+        },
+        "month_status": {
+          "ready": "Převezme se",
+          "blocked": "Nelze převzít",
+          "computed": "Počítá MyÚčto"
+        },
+        "blocked_count": "Nelze převzít: {count}",
+        "wage_from": "od {date}",
+        "leave_hours": "{hours} h",
+        "apply_wages": "Převzít mzdy a údaje vztahů"
       },
       "operations": {
         "create_person": "Založit osobu",
@@ -26871,6 +26903,7 @@
       "apply": "Použít vybrané ({count})",
       "apply_history_only": "Převzít historii",
       "history_applied": "Historie převzata: uloženo počátečních stavů {saved}, založeno průměrů {created}.",
+      "takeover_applied": "Historie převzata: převzatých měsíců vztahů {months}, počátečních stavů {saved}, průměrů {created}.",
       "reason": {
         "no_files": "Nejdřív vyberte XML soubory registrací nebo hlášení.",
         "no_preview": "Nejdřív načtěte náhled.",
@@ -26905,7 +26938,21 @@
         "openings_saved": "Uloženo počátečních stavů: {count}",
         "averages_created": "Založeno průměrů: {created}, z toho schváleno {approved}",
         "opening_skipped": "Počáteční stav přeskočen",
-        "average_skipped": "Průměr přeskočen"
+        "average_skipped": "Průměr přeskočen",
+        "takeover_saved": "Převzatých měsíců vztahů: {count}",
+        "takeover_relations": "Vztahů: {count}",
+        "takeover_skipped": "Nepřevzato",
+        "takeover_counts": {
+          "monthly_wage": "Sjednaná mzda: {count}",
+          "recurring_wage": "Předpis měsíční mzdy: {count}",
+          "averages": "Průměrné výdělky: {count}",
+          "averages_default_period": "Průměry s doplněným rozhodným obdobím: {count}",
+          "workplace": "Pracoviště JMHZ: {count}",
+          "leave_taken": "Měsíce čerpání dovolené: {count}",
+          "leave_taken_existing": "Čerpání dovolené už v knize: {count}",
+          "ended": "Ukončené vztahy: {count}",
+          "monthly_wage_ended": "Mzda u ukončených vztahů nepřenesena: {count}"
+        }
       },
       "result_checklist": {
         "title": "Povinnosti ke změnám",

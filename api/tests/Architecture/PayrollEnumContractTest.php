@@ -143,6 +143,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::OPENING_BALANCE_STATUSES',
         'payrollImports.ts::RegistrationAverageStatus'
             => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::AVERAGE_STATUSES',
+        'payrollImports.ts::RegistrationTakeoverStatus'
+            => 'const:MyInvoice\Service\Payroll\Import\Registration\RegistrationImportVocabulary::TAKEOVER_STATUSES',
         'payrollImports.ts::AttendanceUnit'
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::UNITS',
         'payrollImports.ts::AttendanceMeaning'

@@ -41,6 +41,7 @@ final class JmhzBatch
     private array $notes = [];
     /** @var array<string,array{count:?int,ordinals:array<int,true>}> */
     private array $packages = [];
+    private ?JmhzEmploymentHistory $history = null;
 
     /**
      * @param list<JmhzBatchItem> $items
@@ -123,8 +124,15 @@ final class JmhzBatch
         return $batch;
     }
 
+    /** Průběh vztahů nad platnými formuláři dávky (spočítá se jednou, konflikt ho zneplatní). */
+    public function history(): JmhzEmploymentHistory
+    {
+        return $this->history ??= JmhzEmploymentHistory::fromBatch($this);
+    }
+
     public function markConflict(string $key): void
     {
+        $this->history = null;
         $this->states[$key] = self::CONFLICT;
         $this->notes[$key] = 'Za stejný měsíc je v dávce víc různých formulářů pro tentýž pracovní vztah. '
             . 'Nahrajte jen hlášení, které ČSSZ přijala; z těchto formulářů se nic nepřebírá.';

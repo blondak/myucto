@@ -29,6 +29,8 @@ final readonly class JmhzReportFile
         public bool $lenient,
         public array $warnings,
         public array $forms,
+        /** VS zaměstnavatele u ČSSZ (10002) — účtárna, za kterou se hlásí. */
+        public ?string $variableSymbol = null,
     ) {}
 
     public function period(): string

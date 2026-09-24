@@ -542,6 +542,11 @@ final class TakeoverTabularImportService
         if (!in_array($normalized, PayrollMigrationReferenceTotalsWriter::SOURCES, true)) {
             throw new \InvalidArgumentException('Neznámý zdroj převzatých mezd.');
         }
+        // Úhrny z hlášení JMHZ zapisuje jen import hlášení; tabulka pod tímhle
+        // zdrojem by se tvářila jako opis přijatého podání.
+        if ($normalized === PayrollMigrationReferenceTotalsWriter::SOURCE_JMHZ) {
+            throw new \InvalidArgumentException('Převzaté mzdy z hlášení JMHZ se nahrávají importem hlášení, ne tabulkou.');
+        }
 
         return $normalized;
     }
