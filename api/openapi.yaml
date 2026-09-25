@@ -21645,6 +21645,12 @@ components:
         account_code: { type: string }
         account_name: { type: string }
         is_reversed: { type: boolean }
+        source_statement_id: { type: [integer, 'null'], format: int64 }
+        source_doc_number: { type: [string, 'null'] }
+        source_register_id: { type: [integer, 'null'], format: int64 }
+        source_asset_id: { type: [integer, 'null'], format: int64 }
+        source_settlement_doc_type: { type: [string, 'null'] }
+        source_settlement_doc_id: { type: [integer, 'null'], format: int64 }
         counter_accounts: { type: [string, 'null'] }
         partner: { type: [string, 'null'] }
         variable_symbol: { type: [string, 'null'] }

@@ -292,7 +292,7 @@ final class ReportXlsxExporter
         $sheet->setCellValue('A2', 'Období: ' . $this->czDate($from) . ' – ' . $this->czDate($to));
         $sheet->setCellValue('A3', 'Počáteční zůstatek: ' . $this->czMoney((float) ($data['opening_balance'] ?? 0)));
 
-        $headers = ['Datum', 'Doklad', 'Popis', 'MD', 'D', 'Zůstatek'];
+        $headers = ['Datum', 'Doklad', 'Popis', 'Partner', 'VS', 'Protiúčet', 'MD', 'D', 'Zůstatek', 'Okruh'];
         $cols = count($headers);
         $head = 5;
         $this->headerRow($sheet, $head, $headers);
@@ -302,22 +302,28 @@ final class ReportXlsxExporter
             $sheet->setCellValue([1, $r], $this->czDate((string) $item['entry_date']));
             $sheet->setCellValueExplicit([2, $r], (string) $item['document_no'], DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([3, $r], (string) $item['description'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([4, $r], (string) ($item['partner'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([5, $r], (string) ($item['variable_symbol'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([6, $r], (string) ($item['counter_accounts'] ?? ''), DataType::TYPE_STRING);
             if (($item['side'] ?? '') === 'debit') {
-                $sheet->setCellValue([4, $r], (float) $item['amount']);
+                $sheet->setCellValue([7, $r], (float) $item['amount']);
             } else {
-                $sheet->setCellValue([5, $r], (float) $item['amount']);
+                $sheet->setCellValue([8, $r], (float) $item['amount']);
             }
-            $sheet->setCellValue([6, $r], (float) $item['balance']);
+            $sheet->setCellValue([9, $r], (float) $item['balance']);
+            if (!empty($item['pairing_id'])) {
+                $sheet->setCellValueExplicit([10, $r], '#' . $item['pairing_id'], DataType::TYPE_STRING);
+            }
             $r++;
         }
 
         $sheet->setCellValue([1, $r], 'Obraty / konečný zůstatek');
-        $sheet->setCellValue([4, $r], (float) ($data['turnover_md'] ?? 0));
-        $sheet->setCellValue([5, $r], (float) ($data['turnover_d'] ?? 0));
-        $sheet->setCellValue([6, $r], (float) ($data['closing_balance'] ?? 0));
+        $sheet->setCellValue([7, $r], (float) ($data['turnover_md'] ?? 0));
+        $sheet->setCellValue([8, $r], (float) ($data['turnover_d'] ?? 0));
+        $sheet->setCellValue([9, $r], (float) ($data['closing_balance'] ?? 0));
         $this->boldRow($sheet, $r, $cols);
 
-        $this->finishTable($sheet, $head, $r, $cols, 4);
+        $this->finishTable($sheet, $head, $r, $cols, 7);
 
         return $this->out($ss, 'opis-uctu-' . $code . '-' . $from . '-' . $to . '.xlsx');
     }

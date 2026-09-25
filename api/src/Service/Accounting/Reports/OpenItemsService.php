@@ -71,6 +71,12 @@ final class OpenItemsService
                 'account_code'    => $codes[$r['account_id']]['code'] ?? '',
                 'account_name'    => $codes[$r['account_id']]['name'] ?? '',
                 'is_reversed'     => $r['reversed_by'] !== null,
+                'source_statement_id'        => $r['source_statement_id'],
+                'source_doc_number'          => $r['source_doc_number'],
+                'source_register_id'         => $r['source_register_id'],
+                'source_asset_id'            => $r['source_asset_id'],
+                'source_settlement_doc_type' => $r['source_settlement_doc_type'],
+                'source_settlement_doc_id'   => $r['source_settlement_doc_id'],
                 'currency_code'   => $r['currency_code'],
                 'amount_foreign'  => $r['amount_foreign'],
             ];

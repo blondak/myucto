@@ -292,16 +292,39 @@ final class JournalLinePairingRepository
         $limit = max(1, $limit);
         $offset = max(0, $offset);
         [$sql, $params] = $this->openItemsCte($supplierId, $accountId, $asOf, $periodStart, $anchor);
+        // Drill-down na prvotní doklad: stejná sada sloupců jako opis účtu
+        // (LedgerReportRepository::accountLines), dotažená jen pro řádky stránky.
         $stmt = $this->db->pdo()->prepare(
-            $sql . " SELECT * FROM opened
-                      WHERE (? = 0 OR open_amount <> 0)
-                      ORDER BY entry_date, entry_id, line_no
-                      LIMIT {$limit} OFFSET {$offset}"
+            $sql . " SELECT pg.*,
+                            bt.statement_id AS source_statement_id,
+                            cd.doc_number AS source_doc_number,
+                            cd.register_id AS source_register_id,
+                            ast.id AS source_asset_id,
+                            stl.doc_type AS source_settlement_doc_type,
+                            stl.doc_id AS source_settlement_doc_id
+                       FROM (SELECT * FROM opened
+                              WHERE (? = 0 OR open_amount <> 0)
+                              ORDER BY entry_date, entry_id, line_no
+                              LIMIT {$limit} OFFSET {$offset}) pg
+                  LEFT JOIN bank_transactions bt ON pg.source_type = 'bank' AND bt.id = pg.source_id
+                  LEFT JOIN cash_documents cd ON pg.source_type = 'cash' AND cd.id = pg.source_id AND cd.supplier_id = ?
+                  LEFT JOIN invoice_settlements stl ON pg.source_type = 'settlement' AND stl.id = pg.source_id AND stl.supplier_id = ?
+                  LEFT JOIN depreciation_entries dep ON pg.source_type = 'depreciation' AND dep.id = pg.source_id AND dep.supplier_id = ?
+                  LEFT JOIN assets ast ON ast.supplier_id = ?
+                         AND ast.id = CASE
+                             WHEN pg.source_type IN ('asset', 'asset_disposal') THEN pg.source_id
+                             WHEN pg.source_type = 'depreciation' THEN dep.asset_id
+                             ELSE NULL
+                         END
+                   ORDER BY pg.entry_date, pg.entry_id, pg.line_no"
         );
-        $stmt->execute([...$params, $onlyOpen ? 1 : 0]);
+        $stmt->execute([...$params, $onlyOpen ? 1 : 0, $supplierId, $supplierId, $supplierId, $supplierId]);
         return array_map(static function (array $r): array {
             foreach (['line_id', 'entry_id', 'line_no', 'account_id'] as $k) {
                 $r[$k] = (int) $r[$k];
+            }
+            foreach (['source_statement_id', 'source_register_id', 'source_asset_id', 'source_settlement_doc_id'] as $k) {
+                $r[$k] = $r[$k] === null ? null : (int) $r[$k];
             }
             $r['source_id'] = $r['source_id'] === null ? null : (int) $r['source_id'];
             $r['pairing_id'] = $r['pairing_id'] === null ? null : (int) $r['pairing_id'];
