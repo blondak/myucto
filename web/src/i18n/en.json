@@ -15342,7 +15342,8 @@
       "reposted": "The document was re-posted with the new expense kind.",
       "readonly_cancelled": "A cancelled document cannot be edited.",
       "readonly_locked": "The document is locked (closed period or filed return). Fix the expense kind in the editor.",
-      "readonly_client": "The document is no longer a draft; your accountant will set the expense kind."
+      "readonly_client": "The document is no longer a draft; your accountant will set the expense kind.",
+      "confirm_paid": "Confirm and mark as paid"
     },
     "advance_link": {
       "title": "Advance invoice",

@@ -4,7 +4,7 @@ import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import Modal from '@/components/ui/Modal.vue'
 import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
-import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE } from '@/components/ui/buttonStyles'
+import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE } from '@/components/ui/buttonStyles'
 import {
   purchaseInvoicesApi,
   type ExpenseKind,
@@ -131,6 +131,28 @@ async function save(): Promise<void> {
   }
 }
 
+// Podle PDF zaplacený doklad zůstal po importu konceptem (aby šel upravit) — úhradu
+// potvrdí uživatel: koncept → přijato → uhrazeno přes běžné přechody stavu.
+const canConfirmPaid = computed(() => invoice.value?.status === 'draft'
+  && !!invoice.value?.extraction_review?.paid_per_document && !readOnlyReason.value)
+const confirmingPaid = ref(false)
+async function confirmPaid(): Promise<void> {
+  const inv = invoice.value
+  if (!inv || confirmingPaid.value) return
+  confirmingPaid.value = true
+  try {
+    await purchaseInvoicesApi.transition(inv.id, 'received')
+    const updated = await purchaseInvoicesApi.transition(inv.id, 'paid', inv.issue_date ?? undefined)
+    queue.value[index.value] = updated
+    emit('updated', updated)
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+    queue.value[index.value] = await purchaseInvoicesApi.get(inv.id).catch(() => inv)
+  } finally {
+    confirmingPaid.value = false
+  }
+}
+
 const resolving = ref(false)
 async function resolveSection(section: string): Promise<void> {
   const inv = invoice.value
@@ -196,6 +218,10 @@ onMounted(async () => {
       <!-- Ostatní části hlášení (sekce o druhu nákladu je níž jako seznam) -->
       <div v-if="otherWarning" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700">
         <ExtractionWarningText :warning="otherWarning" :dismissible="!readOnlyReason" :busy="resolving" @dismiss="resolveSection" />
+        <button v-if="canConfirmPaid" type="button" :class="btnFilledSm('success')" class="mt-2" :disabled="confirmingPaid" @click="confirmPaid">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+          {{ t('purchase_invoice.extraction_review.confirm_paid') }}
+        </button>
       </div>
 
       <!-- Druh nákladu po položkách -->

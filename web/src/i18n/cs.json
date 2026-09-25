@@ -15342,7 +15342,8 @@
       "reposted": "Doklad byl přeúčtován podle nového druhu nákladu.",
       "readonly_cancelled": "Stornovaný doklad nelze upravit.",
       "readonly_locked": "Doklad je zamčený (uzavřené období nebo podané přiznání). Druh nákladu opravte v editoru.",
-      "readonly_client": "Doklad už není koncept, druh nákladu doplní vaše účetní."
+      "readonly_client": "Doklad už není koncept, druh nákladu doplní vaše účetní.",
+      "confirm_paid": "Potvrdit a označit jako uhrazenou"
     },
     "advance_link": {
       "title": "Zálohová faktura",

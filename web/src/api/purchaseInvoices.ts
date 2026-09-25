@@ -71,6 +71,8 @@ export interface ExtractionExpenseKindProposal {
 /** Strukturované podklady ke kontrole AI extrakce (migrace 1893). */
 export interface ExtractionReview {
   expense_kinds?: ExtractionExpenseKindProposal[]
+  /** Podle PDF už uhrazeno — import nechal koncept, úhradu potvrdí uživatel. */
+  paid_per_document?: boolean
 }
 
 /** Odkud návrh přišel: pravidlo tenanta / klíčové slovo / práh §26/2 ZDP / AI. */

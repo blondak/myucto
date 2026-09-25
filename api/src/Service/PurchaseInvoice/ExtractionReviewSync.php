@@ -6,6 +6,7 @@ namespace MyInvoice\Service\PurchaseInvoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Import\AiExpenseKindProposal;
+use MyInvoice\Service\Import\AiPdfExtractor;
 use PDO;
 
 /**
@@ -89,6 +90,9 @@ final class ExtractionReviewSync
                 $found = true;
                 if (self::isExpenseKindSection($s)) {
                     unset($review['expense_kinds']);
+                }
+                if (self::normalize($s) === self::normalize(AiPdfExtractor::PAID_PER_DOCUMENT_WARNING)) {
+                    unset($review['paid_per_document']);
                 }
                 continue;
             }

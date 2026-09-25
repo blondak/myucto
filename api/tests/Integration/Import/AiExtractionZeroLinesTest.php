@@ -63,6 +63,24 @@ final class AiExtractionZeroLinesTest extends StockTestCase
         }
     }
 
+    /**
+     * Trello MCUAD: „zaplaceno" na dokladu přepnulo import rovnou na Uhrazená a editor
+     * pak doklad zamkl. Vytěžený doklad zůstává konceptem, úhradu nabídne kontrola.
+     */
+    public function testPaidPerDocumentStaysDraftWithHint(): void
+    {
+        $id = $this->createDraft([
+            ['description' => 'Team (Monthly)', 'quantity' => 1, 'unit_price_without_vat' => 1000, 'vat_rate' => 21],
+        ], 1000.0, ['already_paid' => true, 'payment' => ['method' => 'transfer', 'method_confidence' => 0.9]]);
+
+        $row = $this->db->pdo()->query('SELECT status, paid_at, extraction_warning, extraction_review FROM purchase_invoices WHERE id = ' . $id)
+            ->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame('draft', $row['status']);
+        self::assertNull($row['paid_at']);
+        self::assertStringContainsString(AiPdfExtractor::PAID_PER_DOCUMENT_WARNING, (string) $row['extraction_warning']);
+        self::assertTrue(json_decode((string) $row['extraction_review'], true)['paid_per_document'] ?? false);
+    }
+
     public function testDocumentWithOnlyZeroLinesKeepsThem(): void
     {
         $id = $this->createDraft([
@@ -82,8 +100,11 @@ final class AiExtractionZeroLinesTest extends StockTestCase
         self::assertFalse(AiPdfExtractor::isZeroAmountLine(['quantity' => 1, 'unit_price_without_vat' => 0, 'line_total_without_vat' => 250]));
     }
 
-    /** @param list<array<string,mixed>> $items */
-    private function createDraft(array $items, float $total): int
+    /**
+     * @param list<array<string,mixed>> $items
+     * @param array<string,mixed>       $extra
+     */
+    private function createDraft(array $items, float $total, array $extra = []): int
     {
         $sid = $this->createSupplier();
         $vendor = $this->client($sid, 'Fixture SaaS vendor');
@@ -93,7 +114,7 @@ final class AiExtractionZeroLinesTest extends StockTestCase
             'currency' => 'CZK', 'issue_date' => '2026-08-31', 'tax_date' => '2026-08-31', 'due_date' => '2026-09-15',
             'items' => $items,
             'total_without_vat' => $total, 'total_with_vat' => round($total * 1.21, 2), 'unit_prices_include_vat' => false,
-        ], $sid, $this->userId, $vendor, true);
+        ] + $extra, $sid, $this->userId, $vendor, true);
     }
 
     /** @return list<array<string,mixed>> */

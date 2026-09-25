@@ -1030,9 +1030,18 @@ final class AiPdfExtractor
         $this->applyRoundingFromPdfTotal($id, $supplierId, $data, $isCredit);
         // Pro non-CZK currency: auto-apply ČNB kurz k tax_date (nebo issue_date).
         $this->applyCnbRate($id, $supplierId, $data);
-        // Pokud AI detekovala "NEPLAŤTE, JIŽ UHRAZENO" / "PAID" → mark as paid.
+        // „NEPLAŤTE, JIŽ UHRAZENO" / „PAID": vytěžený doklad zůstává KONCEPT, aby šel po
+        // importu volně upravit (uhrazená faktura editor zamyká). Údaj se uloží do podkladů
+        // ke kontrole a úhradu nabídne kontrolní okno. Výjimka je účtenka zaplacená kartou
+        // při zapnutém kartovém vypořádání — ta se dál hned uhradí, spáruje s pohybem karty
+        // a zaúčtuje (plná automatizace plateb kartou).
+        $paidPerDocument = false;
         if (!empty($data['already_paid'])) {
-            $this->markAlreadyPaid($id, $supplierId);
+            if ($this->isCardSettledReceipt($supplierId, $data)) {
+                $this->markAlreadyPaid($id, $supplierId);
+            } else {
+                $paidPerDocument = true;
+            }
         }
         // Forma úhrady z dokladu (migrace 1128) — hlavně INKASO: takovou fakturu nesmíme
         // nabídnout do platebního příkazu, jinak zaplatíme podruhé.
@@ -1118,14 +1127,27 @@ final class AiPdfExtractor
         }
         // §DM „AI import": návrhy druhu nákladu. Append (ne set) ze stejného důvodu jako výš —
         // ostatní hlášky ho nesmí přepsat. Doklad je bez nich uložený správně (neurčeno = 518).
+        $review = [];
+        if ($paidPerDocument) {
+            try {
+                $this->repo->appendExtractionWarning($id, $supplierId, self::PAID_PER_DOCUMENT_WARNING);
+                $review['paid_per_document'] = true;
+            } catch (\Throwable) {
+                // Varování je „nice to have" — faktura už je vytvořená správně.
+            }
+        }
         if ($expenseKindWarning !== null) {
             try {
                 $this->repo->appendExtractionWarning($id, $supplierId, $expenseKindWarning);
-                $this->repo->setExtractionReview($id, $supplierId, [
-                    'expense_kinds' => AiExpenseKindProposal::reviewPayload($kindProposals),
-                ]);
+                $review['expense_kinds'] = AiExpenseKindProposal::reviewPayload($kindProposals);
             } catch (\Throwable) {
                 // Varování je „nice to have" — faktura už je vytvořená správně.
+            }
+        }
+        if ($review !== []) {
+            try {
+                $this->repo->setExtractionReview($id, $supplierId, $review);
+            } catch (\Throwable) {
             }
         }
         return $id;
@@ -1789,6 +1811,29 @@ final class AiPdfExtractor
                 'error'               => $e->getMessage(),
             ]);
         }
+    }
+
+    /** Sekce hlášení u dokladu, který je podle PDF uhrazený, ale zůstal konceptem. */
+    public const PAID_PER_DOCUMENT_WARNING = 'Podle dokladu je faktura už uhrazená. Import ji nechal jako koncept, '
+        . 'abyste ji mohli upravit; po kontrole ji označte jako uhrazenou.';
+
+    /**
+     * Účtenka zaplacená kartou, kterou si hned převezme kartové vypořádání: firma ho má
+     * zapnuté a doklad nese kartu (forma úhrady s dostatečnou jistotou nebo koncovka karty).
+     *
+     * @param array<string,mixed> $data
+     */
+    private function isCardSettledReceipt(int $supplierId, array $data): bool
+    {
+        if ($this->cardAutomation === null || !$this->cardAutomation->enabledFor($supplierId)) {
+            return false;
+        }
+        $payment = is_array($data['payment'] ?? null) ? $data['payment'] : [];
+        $confidence = $payment['method_confidence'] ?? null;
+        $byMethod = PaymentMethods::normalizeNullable($payment['method'] ?? null) === 'card'
+            && !(is_numeric($confidence) && (float) $confidence < 0.7);
+        $byCard = preg_match('/\d{4}\s*$/', (string) ($data['card_last4'] ?? '')) === 1;
+        return $byMethod || $byCard;
     }
 
     private function markAlreadyPaid(int $id, int $supplierId): void

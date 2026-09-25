@@ -201,8 +201,14 @@ nemá, okno jen oznámí, že není co kontrolovat.
   vyřešených řádků z hlášení zmizí, nevyřešené body zůstanou.
   **Přeskočit** nechá doklad beze změny.
 
-Druh nákladu jde v okně změnit i u dokladu, který import rovnou označil jako
-zaplacený, bez vynucené úpravy v editoru. Klient z portálu ho mění jen
+Doklad, na kterém je napsáno „zaplaceno", import zakládá jako **koncept**, aby šel
+po vytěžení volně upravit. Hlášení na to upozorní a tlačítko **Potvrdit a označit
+jako uhrazenou** doklad přijme a uhradí k datu vystavení. Výjimkou je účtenka
+zaplacená kartou, když má firma zapnuté vypořádání plateb kartou: ta se dál hned
+uhradí, spáruje s pohybem karty a zaúčtuje.
+
+Druh nákladu jde v okně změnit i u dokladu, který už koncept není, bez vynucené
+úpravy v editoru. Klient z portálu ho mění jen
 u konceptu. Zaúčtovaný doklad v otevřeném období se po změně
 přeúčtuje. Doklad v uzavřeném období nebo stornovaný okno jen zobrazí; opravu
 je potřeba udělat v editoru.
