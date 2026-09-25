@@ -556,6 +556,33 @@ final class InvoiceSettlementServiceTest extends TestCase
         self::assertNull($this->purchasePaidRatioOrNull($pfId, self::YEAR . '-06-30'));
     }
 
+    /**
+     * USD faktura zaplacená z eurového účtu: kurz mezi měnami aplikace nezná, banka ji
+     * automaticky nezaúčtuje a účetní ji zaúčtuje ručně celou. Syrová eurová částka
+     * se nesmí sčítat jako dolary — vyrobila by „uhrazenou fakturu s nedoplatkem",
+     * který v deníku není (reálný případ při ověření na datech).
+     */
+    public function testForeignPaymentInOtherForeignCurrencyCountsAsFullSettlement(): void
+    {
+        // Testovací DB USD mít nemusí — izolovaný dodavatel si ho založí v rámci transakce.
+        $this->db->pdo()->prepare(
+            "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals)
+             VALUES (?, 'USD', 'USD', '$', 'americký dolar', 'US dollar', 2)"
+        )->execute([$this->supplierId]);
+        $usdId = (int) $this->db->pdo()->lastInsertId();
+        $vendor = $this->client('Dodavatel USD', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-716', $vendor, 400.00, $usdId, 22.5);
+        $this->postPurchasePredpis($pfId, 9000.00, 'USD', 22.5, 400.00);
+        $this->bankMatch($pfId, 361.35, 'EUR');
+        $this->markPaid($pfId, self::YEAR . '-06-20');
+
+        $remaining = (float) $this->scalar(
+            'SELECT ' . \MyInvoice\Support\Sql\PurchaseSettledExpr::remaining('p') . ' FROM purchase_invoices p WHERE p.id = ' . $pfId
+        );
+        self::assertEqualsWithDelta(0.0, $remaining, 0.001);
+        self::assertNull($this->purchasePaidRatioOrNull($pfId, self::YEAR . '-06-30'));
+    }
+
     // ── Helpery ───────────────────────────────────────────────────────────────
 
     private function currencyIdFor(string $code): int

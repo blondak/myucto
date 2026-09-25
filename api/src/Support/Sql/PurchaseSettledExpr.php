@@ -94,9 +94,11 @@ final class PurchaseSettledExpr
      *     tak ho zaúčtuje banka: 321 jde ven v nominálu kurzem předpisu a rozdíl je kurzový
      *     (`BankPostingService::buildOutgoingCzkCardFx`). Mimo toleranci se přepočte kurzem
      *     dokladu — pak jde o skutečnou částečnou úhradu.
-     *   - Jiná kombinace (cizí měna pohybu × jiná měna dokladu) se převést neumí; zůstává
-     *     částka párování. Banka ji ani automaticky nezaúčtuje (`cross_currency`), účetní ji
-     *     řeší ručně.
+     *   - Jiná kombinace (cizí měna pohybu × jiná měna dokladu, třeba USD faktura placená
+     *     z eurového účtu) se převést neumí. Banka ji automaticky nezaúčtuje
+     *     (`cross_currency`), účetní ji zaúčtuje ručně celou i s kurzovým rozdílem — proto
+     *     se bere jako úhrada celého nominálu. Syrová částka párování v cizí měně by se
+     *     sčítala jako by byla v měně dokladu a vyrobila by nedoplatek, který v deníku není.
      *
      * Veřejné, protože totéž potřebuje saldo k rozvahovému dni, které si banku skládá
      * vlastní agregací s datem zaúčtování.
@@ -121,7 +123,7 @@ final class PurchaseSettledExpr
                               OR ABS(%3\$s.amount - %6\$s) <= ABS(%6\$s) * %8\$s
                             THEN %5\$samount_to_pay
                             ELSE ROUND(%3\$s.amount / %5\$sexchange_rate, 2) END
-                  ELSE %3\$s.amount END",
+                  ELSE %5\$samount_to_pay END",
             $txCurrency,
             $docCurrency,
             $pm,
