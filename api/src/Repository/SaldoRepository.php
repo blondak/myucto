@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Support\Sql\CreditNoteRefundExpr;
+use MyInvoice\Support\Sql\LinkedManualSettlementSql;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
@@ -960,14 +961,23 @@ final class SaldoRepository
         // ho uzavřít. Zrcadlí zkratku `d.status='paid'` z fetchOpenPurchases().
         // SSOT predikátu: {@see CreditNoteRefundExpr}.
         $refundedExpr = CreditNoteRefundExpr::refundedAsOfSql('d');
-        $ratio = "CASE WHEN {$refundedExpr} THEN 1 ELSE " . self::paidRatioSql(
+        $manualExpr = 'ROUND(COALESCE(man.settled, 0), 2)';
+        $ratio = self::withManualSettlementSql("CASE WHEN {$refundedExpr} THEN 1 ELSE " . self::paidRatioSql(
             "{$paidExpr} + {$advanceExpr}",
             "{$toPayExpr} + {$advanceExpr}",
-        ) . ' END';
+        ) . ' END', $manualExpr, $bookedExpr);
+        $manualCte = LinkedManualSettlementSql::sql(
+            'invoice',
+            'credit',
+            LinkedManualSettlementSql::accountIdPredicate($accountId),
+            (string) $supplierId,
+        );
 
         $sql =
             "WITH bank_settle AS (
                 " . self::bankSettleCte($supplierId) . "
+            ), man AS (
+                {$manualCte}
             ), paid AS (
                 SELECT ip.invoice_id, SUM(ip.amount) AS paid_sum
                   FROM invoice_payments ip
@@ -987,6 +997,7 @@ final class SaldoRepository
                    {$toPayExpr} AS amount_to_pay,
                    {$paidExpr} AS paid_as_of,
                    {$advanceExpr} AS advance_on_account,
+                   {$manualExpr} AS manual_settled,
                    {$bookedExpr} AS booked_signed,
                    {$foreignExpr} AS foreign_signed
               FROM journal_entries e
@@ -998,6 +1009,7 @@ final class SaldoRepository
               JOIN currencies cur  ON cur.id = d.currency_id
               LEFT JOIN paid       ON paid.invoice_id = d.id
               LEFT JOIN advances adv ON adv.advance_id = d.parent_invoice_id
+              LEFT JOIN man        ON man.doc_id = d.id
              WHERE e.supplier_id = {$supplierId} AND e.source_type = 'invoice'
                AND e.posted_at IS NOT NULL
                AND e.entry_date <= ?
@@ -1008,7 +1020,7 @@ final class SaldoRepository
                " . self::partnerSql($partnerId) . self::dueBeforeSql('d', $dueBefore) . $invoiceFilter . "
              GROUP BY d.id, doc_no, d.issue_date, d.due_date, d.status, d.invoice_type, d.paid_at,
                       cl.id, cl.company_name, cur.code, d.amount_to_pay,
-                      paid.paid_sum, adv.advance_sum
+                      paid.paid_sum, adv.advance_sum, man.settled
             HAVING " . self::openFilterSql($bookedExpr, $ratio) . "
              " . ($stream ? ' ORDER BY cl.id, d.due_date, d.id' : self::orderSql('d', $orderByDue));
 
@@ -1037,20 +1049,46 @@ final class SaldoRepository
                     // Stejnoměnný poměr k asOf; invoice_payments pokrývá bankovní,
                     // hotovostní i ruční platby jednotně. Dobropis tam ale nikdy
                     // nepřistane — jeho proplacení nese stav dokladu (CreditNoteRefundExpr).
-                    'paid_ratio'     => $this->paidRatio(
-                        CreditNoteRefundExpr::isRefundedAsOf(
-                            (string) $r['invoice_type'],
-                            (string) $r['status'],
-                            $r['paid_at'] === null ? null : (string) $r['paid_at'],
-                            $asOf,
+                    'paid_ratio'     => self::withManualSettlement(
+                        $this->paidRatio(
+                            CreditNoteRefundExpr::isRefundedAsOf(
+                                (string) $r['invoice_type'],
+                                (string) $r['status'],
+                                $r['paid_at'] === null ? null : (string) $r['paid_at'],
+                                $asOf,
+                            ),
+                            (float) $r['paid_as_of'] + $advance,
+                            (float) $r['amount_to_pay'] + $advance,
                         ),
-                        (float) $r['paid_as_of'] + $advance,
-                        (float) $r['amount_to_pay'] + $advance,
+                        (float) $r['manual_settled'],
+                        round((float) $r['booked_signed'], 2),
                     ),
                 ];
             },
             $limit,
         );
+    }
+
+    /**
+     * Poměr uhrazení rozšířený o ruční zápis navázaný na doklad ({@see LinkedManualSettlementSql}).
+     * Ruční vyrovnání (kurzový rozdíl, odpis) žije jen v CZK na saldokontním účtu, takže
+     * se k poměru z úhrad přičítá jako podíl zaúčtované částky, ne jako úhrada v měně
+     * dokladu. `$manual` i `$bookedOriented` jsou orientované na normální stranu dokladu
+     * (kladné = snižuje saldo, resp. předpis), takže dobropis vychází se správným znaménkem.
+     */
+    private static function withManualSettlement(float $ratio, float $manual, float $bookedOriented): float
+    {
+        if (abs($manual) < 0.005 || abs($bookedOriented) < 0.005) {
+            return $ratio;
+        }
+        return max(0.0, min(1.0, $ratio + $manual / $bookedOriented));
+    }
+
+    /** SQL protějšek {@see withManualSettlement}; výrazy se vkládají doslova (HAVING). */
+    private static function withManualSettlementSql(string $ratio, string $manual, string $bookedOriented): string
+    {
+        return "CASE WHEN ABS({$manual}) < 0.005 OR ABS({$bookedOriented}) < 0.005 THEN ({$ratio})
+                     ELSE LEAST(1, GREATEST(0, ({$ratio}) + {$manual} / ({$bookedOriented}))) END";
     }
 
     /**
@@ -1201,6 +1239,13 @@ final class SaldoRepository
                                    AND ABS({$bookedExpr} * (1 - ({$signalRatio}))) > {$shortfallThreshold})
                      THEN 1 ELSE {$signalRatio} END";
         };
+        $manualExpr = 'ROUND(COALESCE(man.settled, 0), 2)';
+        $manualCte = LinkedManualSettlementSql::sql(
+            'purchase_invoice',
+            'debit',
+            LinkedManualSettlementSql::accountIdPredicate($accountId),
+            (string) $supplierId,
+        );
 
         $sql =
             "WITH bank_settle AS (
@@ -1231,6 +1276,8 @@ final class SaldoRepository
                  GROUP BY cd.purchase_invoice_id
             ), advances AS (
                 {$advanceCte}
+            ), man AS (
+                {$manualCte}
             )
             SELECT d.id AS doc_id,
                    COALESCE(NULLIF(d.varsymbol, ''), CONCAT('#', d.id)) AS doc_no,
@@ -1243,6 +1290,7 @@ final class SaldoRepository
                    {$afterExpr} AS matches_after_as_of,
                    {$offsets} AS settled_by_offsets,
                    {$advanceExpr} AS advance_on_account,
+                   {$manualExpr} AS manual_settled,
                    {$bookedExpr} AS booked_signed,
                    {$foreignExpr} AS foreign_signed
               FROM journal_entries e
@@ -1255,6 +1303,7 @@ final class SaldoRepository
               LEFT JOIN matches m      ON m.doc_id = d.id
               LEFT JOIN cash ch        ON ch.doc_id = d.id
               LEFT JOIN advances adv   ON adv.advance_id = d.advance_purchase_invoice_id
+              LEFT JOIN man            ON man.doc_id = d.id
              WHERE e.supplier_id = {$supplierId} AND e.source_type = 'purchase_invoice'
                AND e.posted_at IS NOT NULL
                AND e.entry_date <= ?
@@ -1265,8 +1314,12 @@ final class SaldoRepository
                " . self::partnerSql($partnerId) . self::dueBeforeSql('d', $dueBefore) . "
              GROUP BY d.id, d.supplier_id, doc_no, d.issue_date, d.due_date, d.status, d.paid_at,
                       cl.id, cl.company_name, cur.code, d.amount_to_pay,
-                      m.matched_sum, m.matched_after, ch.cash_sum, adv.advance_sum
-            HAVING " . self::openFilterSql($bookedExpr, $ratioFor(PurchaseSettledExpr::offsetSettledAsOf('d'))) . "
+                      m.matched_sum, m.matched_after, ch.cash_sum, adv.advance_sum, man.settled
+            HAVING " . self::openFilterSql($bookedExpr, self::withManualSettlementSql(
+                $ratioFor(PurchaseSettledExpr::offsetSettledAsOf('d')),
+                $manualExpr,
+                "-({$bookedExpr})",
+            )) . "
              " . self::orderSql('d', $orderByDue);
 
         return $this->fetchDefinitiveOpenRows(
@@ -1313,7 +1366,11 @@ final class SaldoRepository
                     // (payment_matches převedené do měny dokladu), pokladna a oba zápočty
                     // ({@see PurchaseSettledExpr::offsetSettledAsOf}). Zálohová PF uhrazená přímo
                     // na 321 (bez 314) vstupuje do poměru zrcadlově k vydané větvi.
-                    'paid_ratio'     => $this->paidRatio($paidByStatusAsOf && !$shortfall, $signal, $toPay),
+                    'paid_ratio'     => self::withManualSettlement(
+                        $this->paidRatio($paidByStatusAsOf && !$shortfall, $signal, $toPay),
+                        (float) $r['manual_settled'],
+                        -$booked,
+                    ),
                 ];
             },
             $limit,

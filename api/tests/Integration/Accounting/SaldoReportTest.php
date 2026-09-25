@@ -516,6 +516,68 @@ final class SaldoReportTest extends TestCase
     }
 
     /**
+     * Ruční zápis výslovně navázaný na doklad (journal_entry_document_links) vyrovnává
+     * saldokonto: kurzový rozdíl 563/311 u vydané faktury, odpis 321/365 u přijaté.
+     * Hlavní kniha je po něm na nule, saldokonto i K3 musí souhlasit, a to časově
+     * (před datem ručního zápisu je doklad otevřený). Zápis navázaný na dva doklady
+     * se nepočítá nikomu, vazba nenese rozpad částky.
+     */
+    public function testLinkedManualEntrySettlesReceivableAndPayable(): void
+    {
+        $client = $this->client('Kurzový rozdíl s.r.o.');
+        $vendor = $this->client('Odpis závazku s.r.o.');
+        $pdo = $this->db->pdo();
+        $links = new \MyInvoice\Repository\JournalEntryDocumentLinkRepository($this->db);
+
+        $invoice = $this->invoice($client, 1000.00, self::YEAR . '-03-10', self::YEAR . '-03-24');
+        $pdo->prepare("UPDATE invoices SET status = 'paid', paid_at = ? WHERE id = ?")
+            ->execute([self::YEAR . '-03-24', $invoice]);
+        $this->postInvoice($invoice, [
+            self::l('311', 'debit', 1000.00),
+            self::l('602', 'credit', 1000.00),
+        ], self::YEAR . '-03-10');
+        $fx = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            self::l('563', 'debit', 1000.00),
+            self::l('311', 'credit', 1000.00),
+        ], ['entry_date' => self::YEAR . '-04-30', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        $links->add($fx, $this->supplierId, 'invoice', $invoice, null, $this->userId);
+
+        $purchase = $this->purchaseInvoice($vendor, 1210.00, self::YEAR . '-03-12', self::YEAR . '-03-26');
+        $this->postPurchase($purchase, [
+            self::l('518', 'debit', 1210.00),
+            self::l('321', 'credit', 1210.00),
+        ], self::YEAR . '-03-12');
+        $writeOff = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            self::l('321', 'debit', 1210.00),
+            self::l('365', 'credit', 1210.00),
+        ], ['entry_date' => self::YEAR . '-04-30', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        $links->add($writeOff, $this->supplierId, 'purchase_invoice', $purchase, null, $this->userId);
+
+        foreach ([self::YEAR . '-04-29' => [1000.00, -1210.00], self::YEAR . '-04-30' => [0.00, 0.00]] as $asOf => [$receivable, $payable]) {
+            foreach (['311' => $receivable, '321' => $payable] as $code => $balance) {
+                $acc = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, $asOf, (string) $code), (string) $code);
+                self::assertNotNull($acc, "{$code} k {$asOf}");
+                self::assertSame(self::cents(abs($balance)), self::cents($acc['gl_balance']), "HK {$code} k {$asOf}");
+                self::assertSame(self::cents(abs($balance)), self::cents($acc['open_items_total']), "Σ položek {$code} k {$asOf}");
+            }
+        }
+
+        $pdo->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?")
+            ->execute([self::YEAR . '-03-26', $purchase]);
+        $closing = new ClosingRepository($this->db);
+        $ids = static fn (array $rows): array => array_map(static fn (array $r): int => (int) $r['id'], $rows);
+        self::assertContains($invoice, $ids($closing->paidInvoicesOpenSaldo($this->supplierId, self::YEAR . '-04-29')));
+        self::assertNotContains($invoice, $ids($closing->paidInvoicesOpenSaldo($this->supplierId, self::YEAR . '-04-30')));
+        self::assertContains($purchase, $ids($closing->paidPurchasesOpenSaldo($this->supplierId, self::YEAR . '-04-29')));
+        self::assertNotContains($purchase, $ids($closing->paidPurchasesOpenSaldo($this->supplierId, self::YEAR . '-04-30')));
+
+        // Tentýž zápis navázaný i na druhou fakturu: rozpad neznámý → nepočítá se.
+        $other = $this->invoice($client, 500.00, self::YEAR . '-03-11', self::YEAR . '-03-25');
+        $links->add($fx, $this->supplierId, 'invoice', $other, null, $this->userId);
+        self::assertContains($invoice, $ids($closing->paidInvoicesOpenSaldo($this->supplierId, self::YEAR . '-04-30')));
+    }
+
+    /**
      * Protějšek předchozího testu s výchozími předkontacemi: inkaso 221/324, DDKP 324/343,
      * zúčtování zálohy v konečné faktuře 324/311. Záloha čeká na 324, 311 zůstává čisté
      * a položka přijaté zálohy se na 311 objevit nesmí.

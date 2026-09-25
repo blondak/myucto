@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
+use MyInvoice\Support\Sql\LinkedManualSettlementSql;
 use PDO;
 
 /**
@@ -1096,9 +1097,11 @@ final class ClosingRepository
      *   saldo   = booked − settled.
      *
      * Úhrada bez vazby na deník (mark_paid / ruční platba bez dokladu) settled
-     * nezvýší → doklad se objeví v nálezu. Zápočty (source_type='offset') a ruční
-     * zápisy na 311 vazbu na doklad nenesou — projeví se jako otevřené saldo,
-     * což je pro inventarizační kontrolu žádoucí (člověk ověří). Tolerance
+     * nezvýší → doklad se objeví v nálezu. Zápočty (source_type='offset') vazbu na
+     * doklad nenesou — projeví se jako otevřené saldo, což je pro inventarizační
+     * kontrolu žádoucí (člověk ověří). Ruční zápis na 311 se jako vyrovnání počítá
+     * jen tehdy, když ho účetní na doklad výslovně navázala
+     * ({@see linkedManualSettledSql}). Tolerance
      * |saldo| > 0,50 Kč (haléřová/kurzová zaokrouhlení nehlásíme).
      *
      * Placeholdery jsou v každém CTE zvlášť (žádné `params` CTE): MariaDB 11.8
@@ -1260,6 +1263,8 @@ final class ClosingRepository
                    AND (e.reversed_by IS NULL OR rev.entry_date > ?)
                    AND (ca.account_code LIKE '311%' OR COALESCE(pa.account_code, '') LIKE '311%')
                  GROUP BY COALESCE(gm.invoice_id, gm.credit_note_id)
+            ), settled_manual AS (
+                " . self::linkedManualSettledSql('invoice', '311', 'credit') . "
             ), doc AS (
                 -- Doklad + jeho peněžní vyrovnání; dobropis patří do skupiny svého RODIČE.
                 -- Zdůvodnění skupiny viz {@see paidPurchasesOpenSaldo} — na výnosové straně
@@ -1280,13 +1285,15 @@ final class ClosingRepository
                             ELSE i.id END AS group_id,
                        b.booked,
                        COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0)
-                         + COALESCE(so.settled, 0) + COALESCE(sg.settled, 0) AS settled
+                         + COALESCE(so.settled, 0) + COALESCE(sg.settled, 0)
+                         + COALESCE(sm.settled, 0) AS settled
                   FROM booked b
                   JOIN invoices i ON i.id = b.invoice_id AND i.supplier_id = ?
                   LEFT JOIN settled_bank sb ON sb.invoice_id = i.id
                   LEFT JOIN settled_cash sc ON sc.invoice_id = i.id
                   LEFT JOIN settled_offset so ON so.invoice_id = i.id
                   LEFT JOIN settled_gopay sg ON sg.invoice_id = i.id
+                  LEFT JOIN settled_manual sm ON sm.doc_id = i.id
             ), grp AS (
                 SELECT group_id, SUM(booked) AS booked, SUM(settled) AS settled
                   FROM doc
@@ -1320,10 +1327,21 @@ final class ClosingRepository
             $supplierId, $asOf, $asOf,          // settled_cash
             $supplierId, $asOf, $asOf,          // settled_offset
             $supplierId, $asOf, $asOf,          // settled_gopay
+            $supplierId, $asOf, $asOf,          // settled_manual
             $supplierId,                        // doc
             $supplierId, $asOf,                 // final SELECT
         ]);
         return array_map(static fn (array $r): array => self::castPaidSaldoRow($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** Vyrovnání ručním zápisem navázaným na doklad — viz {@see LinkedManualSettlementSql}. */
+    private static function linkedManualSettledSql(string $docType, string $accountPrefix, string $settleSide): string
+    {
+        return LinkedManualSettlementSql::sql(
+            $docType,
+            $settleSide,
+            LinkedManualSettlementSql::accountPrefixPredicate($accountPrefix),
+        );
     }
 
     /**
@@ -1495,6 +1513,8 @@ final class ClosingRepository
                           AND (ea.reversed_by IS NULL OR reva.entry_date > ?)
                           AND (caa.account_code LIKE '321%' OR COALESCE(paa.account_code, '') LIKE '321%')
                    )
+            ), settled_manual AS (
+                " . self::linkedManualSettledSql('purchase_invoice', '321', 'debit') . "
             ), doc AS (
                 -- Doklad = předpis + jeho vlastní peněžní vyrovnání. Dobropis se přiřadí
                 -- ke skupině svého RODIČE: opravný doklad nese na 321 opačné znaménko,
@@ -1518,7 +1538,8 @@ final class ClosingRepository
                             ELSE pi.id END AS group_id,
                        b.booked,
                        COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0) + COALESCE(so.settled, 0)
-                       + COALESCE(sg.settled, 0) + COALESCE(sa.settled, 0) AS settled
+                       + COALESCE(sg.settled, 0) + COALESCE(sa.settled, 0)
+                       + COALESCE(sm.settled, 0) AS settled
                   FROM booked b
                   JOIN purchase_invoices pi ON pi.id = b.purchase_invoice_id AND pi.supplier_id = ?
                   LEFT JOIN settled_bank sb ON sb.purchase_invoice_id = pi.id
@@ -1526,6 +1547,7 @@ final class ClosingRepository
                   LEFT JOIN settled_offset so ON so.purchase_invoice_id = pi.id
                   LEFT JOIN settled_agreement sg ON sg.purchase_invoice_id = pi.id
                   LEFT JOIN settled_advance sa ON sa.purchase_invoice_id = pi.id
+                  LEFT JOIN settled_manual sm ON sm.doc_id = pi.id
             ), grp AS (
                 SELECT group_id, SUM(booked) AS booked, SUM(settled) AS settled
                   FROM doc
@@ -1567,6 +1589,7 @@ final class ClosingRepository
             $supplierId,                        // agreement_alloc
             $supplierId,                        // settled_agreement
             $supplierId, $supplierId, $asOf, $asOf, // settled_advance (+ guard nad deníkem)
+            $supplierId, $asOf, $asOf,          // settled_manual
             $supplierId,                        // doc
             $supplierId, $asOf,                 // final SELECT
         ]);
