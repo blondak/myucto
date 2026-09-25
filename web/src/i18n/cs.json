@@ -13170,6 +13170,7 @@
       "empty_entry": "Doklad nemá žádné řádky k zaúčtování.",
       "advance_settlement_ambiguous": "K záloze existuje víc daňových dokladů k platbě a nelze jednoznačně určit, kterou zálohovou DPH odečíst. Zkontroluj vazby zálohy a daňových dokladů k platbě.",
       "advance_tax_document_unposted": "Daňový doklad k přijaté platbě k této záloze není zaúčtovaný. Zaúčtuj ho před vyúčtovací fakturou, jinak by se záloha zúčtovala z daně, která ještě neleží na účtu.",
+      "advance_tax_document_oss": "Daňový doklad k přijaté platbě nese jen daň OSS a samostatně se neúčtuje (v režimu OSS se daňový doklad k záloze nevydává). Stornuj ho a vyúčtování vystav bez něj, nebo zúčtuj zálohu ručním zápisem.",
       "ddkp_reverse_charge_unsupported": "Daňový doklad k platbě v režimu přenesené daňové povinnosti (reverse charge) se automaticky neúčtuje — zaúčtuj DPH ručním zápisem.",
       "date_locked": "Datum zápisu spadá do uzamčené části účetnictví. Zámek posuň v nastavení účetnictví (jen admin).",
       "repost_date_shift_confirmation_required": "Původní datum je uzavřené nebo zamčené — potvrď, že storno i oprava padnou na jiné datum."
