@@ -344,6 +344,8 @@ export interface PurchaseInvoice {
   /** Uhrazeno / zbývá uhradit v měně dokladu (banka, pokladna, zápočty). */
   paid_amount?: number
   remaining_amount?: number
+  /** Uhrazeno s rozdílem: stav paid, ale zbytek po úhradách je vyšší než 1 Kč. */
+  paid_shortfall?: boolean
   // Multi-currency platba (USD faktura placená z CZK účtu)
   payment_currency_id: number | null
   payment_currency: string | null
@@ -526,9 +528,11 @@ export interface PurchaseInvoiceListItem {
   total_with_vat: number
   advance_paid_amount: number
   amount_to_pay: number
-  /** Uhrazeno / zbývá uhradit v měně dokladu; kladný zbytek u stavu paid = nedoplatek. */
+  /** Uhrazeno / zbývá uhradit v měně dokladu. */
   paid_amount?: number
   remaining_amount?: number
+  /** Uhrazeno s rozdílem: stav paid, ale zbytek po úhradách je vyšší než 1 Kč. */
+  paid_shortfall?: boolean
   status: PurchaseInvoiceStatus
   booked_at: string | null
   paid_at: string | null

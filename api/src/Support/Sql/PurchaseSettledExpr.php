@@ -238,8 +238,11 @@ final class PurchaseSettledExpr
         $a = $alias === '' ? '' : $alias . '.';
         $settled = self::settled($alias);
 
-        return "CASE WHEN {$a}status = 'paid' AND ABS({$settled}) < 0.005
-                     THEN {$a}amount_to_pay ELSE {$settled} END";
+        // DDKP (§ 28 ZDPH) nic nedluží: peníze odešly na zálohové faktuře a jeho
+        // `amount_to_pay` je jen generované brutto zálohy ({@see PayablePredicate}).
+        return "CASE WHEN {$a}document_kind = '" . PayablePredicate::NON_PAYABLE_DOCUMENT_KIND . "' THEN {$a}amount_to_pay
+                     WHEN {$a}status = 'paid' AND ABS({$settled}) < 0.005 THEN {$a}amount_to_pay
+                     ELSE {$settled} END";
     }
 
     /** Zbývá uhradit podle {@see paidAmount()} — v měně dokladu. */
@@ -248,6 +251,24 @@ final class PurchaseSettledExpr
         $a = $alias === '' ? '' : $alias . '.';
 
         return "{$a}amount_to_pay - (" . self::paidAmount($alias) . ')';
+    }
+
+    /**
+     * „Uhrazeno s rozdílem": doklad `paid`, jehož zbytek po evidovaných úhradách je
+     * v korunách vyšší než tolerance dorovnání. Hranice je v KORUNÁCH (zbytek × kurz
+     * dokladu), stejně jako saldo (`SaldoRepository::SHORTFALL_TOLERANCE_CZK`)
+     * a uzávěrková kontrola `paid_purchases_open_saldo` — haléřové zbytky, které banka
+     * dorovnává, štítek nedostanou, eurový nedoplatek o pár eur ano.
+     *
+     * @param string $currencyCode SQL výraz s kódem měny dokladu (typicky `cur.code`)
+     */
+    public static function paidShortfallCondition(string $alias, string $currencyCode): string
+    {
+        $a = $alias === '' ? '' : $alias . '.';
+
+        return "({$a}status = 'paid' AND (" . self::remainingAmount($alias) . ")
+                 * (CASE WHEN UPPER({$currencyCode}) = 'CZK' THEN 1 ELSE COALESCE(NULLIF({$a}exchange_rate, 0), 1) END)
+                 > " . self::sqlNumber(FxPaymentSettlement::AMOUNT_TOLERANCE) . ')';
     }
 
     private static function sqlNumber(float $value): string

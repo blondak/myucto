@@ -370,8 +370,7 @@ const showPaymentSummary = computed(() =>
   !!invoice.value && invoice.value.status !== 'draft' && invoice.value.status !== 'cancelled'
   && invoice.value.remaining_amount !== undefined)
 // Uhrazený doklad, který evidované úhrady nepokrývají, zbytek visí na saldokontě.
-const hasPaidShortfall = computed(() =>
-  invoice.value?.status === 'paid' && (invoice.value.remaining_amount ?? 0) > 0.005)
+const hasPaidShortfall = computed(() => !!invoice.value?.paid_shortfall)
 // „Vyrovnat zbytek": existuje úhrada a po ní zbytek. Zápočet proti účtu je účetní
 // operace (podvojné účetnictví, právo na účetnictví); bez jakékoli úhrady jde o běžné
 // „Označit jako uhrazené".
@@ -1463,7 +1462,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
             <template v-if="showPaymentSummary">
               <div class="flex justify-between text-neutral-600" data-testid="pi-paid-amount"><dt>{{ t('purchase_invoice.payment_summary.paid') }}</dt><dd class="font-mono">{{ formatMoney(invoice.paid_amount ?? 0, invoice.currency) }}</dd></div>
               <div class="flex justify-between font-semibold" data-testid="pi-remaining-amount"
-                :class="hasPaidShortfall ? 'text-warning-700' : ((invoice.remaining_amount ?? 0) > 0.005 ? 'text-neutral-900' : 'text-neutral-500')">
+                :class="hasPaidShortfall ? 'text-warning-700' : (invoice.status !== 'paid' && (invoice.remaining_amount ?? 0) > 0.005 ? 'text-neutral-900' : 'text-neutral-500')">
                 <dt>{{ t('purchase_invoice.payment_summary.remaining') }}</dt>
                 <dd class="font-mono">{{ formatMoney(invoice.remaining_amount ?? 0, invoice.currency) }}</dd>
               </div>

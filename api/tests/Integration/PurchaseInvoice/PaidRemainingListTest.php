@@ -89,6 +89,11 @@ final class PaidRemainingListTest extends TestCase
         $this->settle($shortfall, 950.00);
         $markedPaid = $this->purchase('PF-2099-903', 800.00, 'paid');
         $open = $this->purchase('PF-2099-904', 300.00, 'received');
+        // Haléřový zbytek do koruny dorovnává banka — ukáže se, ale štítek nedostane.
+        $rounding = $this->purchase('PF-2099-905', 1000.40, 'paid');
+        $this->settle($rounding, 1000.00);
+        // DDKP nic nedluží (peníze odešly na zálohové faktuře).
+        $taxDocument = $this->purchase('PF-2099-906', 500.00, 'received', 'tax_document');
 
         $rows = $this->purchaseRows([]);
 
@@ -100,12 +105,17 @@ final class PaidRemainingListTest extends TestCase
         self::assertEqualsWithDelta(0.00, $rows[$markedPaid]['remaining_amount'], 0.001);
         self::assertEqualsWithDelta(0.00, $rows[$open]['paid_amount'], 0.001);
         self::assertEqualsWithDelta(300.00, $rows[$open]['remaining_amount'], 0.001);
+        self::assertEqualsWithDelta(0.40, $rows[$rounding]['remaining_amount'], 0.001);
+        self::assertEqualsWithDelta(0.00, $rows[$taxDocument]['remaining_amount'], 0.001);
+        self::assertTrue($rows[$shortfall]['paid_shortfall']);
+        self::assertFalse($rows[$rounding]['paid_shortfall'], 'Zbytek do 1 Kč není nedoplatek.');
+        self::assertFalse($rows[$partial]['paid_shortfall'], 'Neuhrazený doklad je částečně uhrazený, ne s rozdílem.');
 
         $onlyShortfall = $this->purchaseRows(['paid_shortfall' => true]);
         self::assertSame([$shortfall], array_keys($onlyShortfall));
 
         $sorted = $this->purchaseRows(['sort_key' => 'remaining_amount', 'sort_dir' => 'desc', 'group_by_month' => false]);
-        self::assertSame([$partial, $open, $shortfall, $markedPaid], array_keys($sorted));
+        self::assertSame([$partial, $open, $shortfall, $rounding], array_slice(array_keys($sorted), 0, 4));
     }
 
     public function testIssuedListReturnsRemaining(): void
@@ -140,7 +150,7 @@ final class PaidRemainingListTest extends TestCase
         return $rows;
     }
 
-    private function purchase(string $number, float $total, string $status): int
+    private function purchase(string $number, float $total, string $status, string $kind = 'invoice'): int
     {
         $issue = '2099-06-10';
         $this->db->pdo()->prepare(
@@ -149,9 +159,9 @@ final class PaidRemainingListTest extends TestCase
                  due_date, received_at, currency_id, reverse_charge, vendor_snapshot,
                  total_without_vat, total_vat, total_with_vat, status, paid_at, vat_classification_code,
                  vat_deduction, created_by)
-             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, 0, "{}", ?, 0, ?, ?, ?, "40", "full", ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, "{}", ?, 0, ?, ?, ?, "40", "full", ?)'
         )->execute([
-            $this->supplierId, $this->vendorId, $number, $issue, $issue, $issue, $issue,
+            $this->supplierId, $this->vendorId, $number, $kind, $issue, $issue, $issue, $issue,
             $this->czkId, $total, $total, $status, $status === 'paid' ? '2099-06-20' : null, $this->userId,
         ]);
         return (int) $this->db->pdo()->lastInsertId();

@@ -390,14 +390,15 @@ function showsPayment(inv: PurchaseInvoiceListItem): boolean {
 }
 
 // „Uhrazeno s rozdílem": doklad je uhrazený, ale evidované úhrady ho nepokrývají.
+// Hranici (víc než koruna) drží BE, stejnou jako saldo a uzávěrková kontrola.
 function hasPaidShortfall(inv: PurchaseInvoiceListItem): boolean {
-  return inv.status === 'paid' && (inv.remaining_amount ?? 0) > 0.005
+  return !!inv.paid_shortfall
 }
 
 function remainingClass(inv: PurchaseInvoiceListItem): string {
   if (!showsPayment(inv)) return ''
   if (hasPaidShortfall(inv)) return 'text-warning-700 font-semibold'
-  return (inv.remaining_amount ?? 0) > 0.005 ? 'text-neutral-900' : 'text-neutral-400'
+  return inv.status !== 'paid' && (inv.remaining_amount ?? 0) > 0.005 ? 'text-neutral-900' : 'text-neutral-400'
 }
 
 // Kurz do tabulky — 3 desetinná místa (ČNB konvence), lokalizovaný zápis.

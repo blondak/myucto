@@ -21,9 +21,11 @@ Sloupce **Uhrazeno** a **Zbývá uhradit** ukazují, kolik je z faktury zaplacen
 a kolik zbývá, vždy v měně faktury. Počítají se ze všech úhrad dohromady: banka,
 pokladna, vzájemný zápočet i zápočet proti účtu. Korunová platba cizoměnové
 faktury se přepočte do měny faktury. Faktura označená jako uhrazená bez jakékoli
-evidované úhrady se bere jako uhrazená celá. Uhrazená faktura, kterou evidované
-úhrady nepokrývají, má u stavu štítek **uhrazeno s rozdílem** a zbytek zvýrazněný;
-všechny takové faktury najdete filtrem **Uhrazeno s rozdílem**. Na mobilu se
+evidované úhrady se bere jako uhrazená celá, daňový doklad k platbě (DDKP) nic
+nedluží. Uhrazená faktura, kterou evidované úhrady nepokrývají o víc než 1 Kč
+(u cizí měny přepočteno kurzem faktury), má u stavu štítek **uhrazeno s rozdílem**
+a zbytek zvýrazněný; všechny takové faktury najdete filtrem **Uhrazeno s rozdílem**.
+Haléřový zbytek do 1 Kč dorovnává banka, štítek nedostane. Na mobilu se
 u částečně uhrazené faktury zobrazí obě částky přímo v kartě.
 Přepínač nad tabulkou volí měsíční skupiny nebo souvislý seznam; nastavení se
 ukládá pro přihlášeného uživatele. V měsíčním pohledu zaškrtávací políčko

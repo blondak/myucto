@@ -6011,7 +6011,7 @@ paths:
           schema: { type: string, format: date, example: "2026-06-30" }
         - in: query
           name: filter[paid_shortfall]
-          description: "1 = jen doklady ve stavu uhrazeno, které evidované úhrady nepokrývají (remaining_amount > 0)"
+          description: "1 = jen doklady ve stavu uhrazeno, které evidované úhrady nepokrývají o víc než 1 Kč (paid_shortfall)"
           schema: { type: integer, enum: [0, 1], default: 0 }
         - in: query
           name: filter[booked]
@@ -28429,7 +28429,8 @@ components:
         advance_paid_amount: { type: number }
         amount_to_pay: { type: number, description: "Generated column = total_with_vat - advance_paid_amount" }
         paid_amount: { type: number, description: "Uhrazeno v měně dokladu — banka, pokladna, vzájemný zápočet i zápočet proti účtu. Doklad ve stavu paid bez evidované úhrady se bere jako uhrazený celý." }
-        remaining_amount: { type: number, description: "Zbývá uhradit v měně dokladu = amount_to_pay − paid_amount. Kladný zbytek u stavu paid znamená nedoplatek (uhrazeno s rozdílem)." }
+        remaining_amount: { type: number, description: "Zbývá uhradit v měně dokladu = amount_to_pay − paid_amount. DDKP (tax_document) nic nedluží, zbytek 0." }
+        paid_shortfall: { type: boolean, description: "Uhrazeno s rozdílem: stav paid, ale zbytek po evidovaných úhradách je v korunách (zbytek × kurz dokladu) vyšší než 1 Kč." }
         exchange_rate: { type: [number, "null"] }
         exchange_rate_date: { type: [string, "null"], format: date }
         status: { type: string, enum: [draft, received, booked, paid, cancelled] }
@@ -28811,6 +28812,7 @@ components:
         amount_to_pay: { type: number }
         paid_amount: { type: number, description: "Uhrazeno v měně dokladu (banka, pokladna, oba zápočty); stav paid bez evidované úhrady = celá částka." }
         remaining_amount: { type: number, description: "Zbývá uhradit v měně dokladu = amount_to_pay − paid_amount." }
+        paid_shortfall: { type: boolean, description: "Uhrazeno s rozdílem: stav paid, ale zbytek po evidovaných úhradách je vyšší než 1 Kč." }
         payment_currency_id: { type: [integer, "null"] }
         payment_exchange_rate: { type: [number, "null"] }
         paid_amount_payment_ccy: { type: [number, "null"] }

@@ -63,7 +63,8 @@ final class PurchaseInvoiceRepository
                     ec.label AS expense_category_label, ec.code AS expense_category_code,
                     prj.name AS project_name, prj.project_number AS project_number,
                     (' . PurchaseSettledExpr::paidAmount('pi') . ') AS paid_amount,
-                    (' . PurchaseSettledExpr::remainingAmount('pi') . ') AS remaining_amount
+                    (' . PurchaseSettledExpr::remainingAmount('pi') . ') AS remaining_amount,
+                    ' . PurchaseSettledExpr::paidShortfallCondition('pi', 'cur.code') . ' AS paid_shortfall
                FROM purchase_invoices pi
                JOIN clients c        ON c.id   = pi.vendor_id
                JOIN currencies cur   ON cur.id = pi.currency_id
@@ -937,7 +938,7 @@ final class PurchaseInvoiceRepository
         // (typicky ručně spárovaná nižší platba z doby, kdy párování uzavíralo doklad bez
         // ohledu na částku). Zbytek se dá vyrovnat z detailu dokladu.
         if (!empty($filters['paid_shortfall'])) {
-            $where[] = "pi.status = 'paid' AND (" . PurchaseSettledExpr::remainingAmount('pi') . ') > 0.005';
+            $where[] = PurchaseSettledExpr::paidShortfallCondition('pi', 'cur.code');
         }
         if (!empty($filters['import_batch_id'])) {
             $where[] = 'pi.import_batch_id = ?';
@@ -1022,6 +1023,7 @@ final class PurchaseInvoiceRepository
                        pi.advance_paid_amount, pi.amount_to_pay,
                        (" . PurchaseSettledExpr::paidAmount('pi') . ") AS paid_amount,
                        (" . PurchaseSettledExpr::remainingAmount('pi') . ") AS remaining_amount,
+                       " . PurchaseSettledExpr::paidShortfallCondition('pi', 'cur.code') . " AS paid_shortfall,
                        pi.payment_ordered_at,
                        pi.status, pi.booked_at, pi.paid_at, pi.cancelled_at,
                        pi.extraction_warning, pi.vat_deduction, pi.vat_deduction_percent, pi.tax_deductible,
@@ -3417,6 +3419,9 @@ final class PurchaseInvoiceRepository
         }
         foreach (['paid_amount', 'remaining_amount'] as $f) {
             if (array_key_exists($f, $row) && $row[$f] !== null) $row[$f] = round((float) $row[$f], 2);
+        }
+        if (array_key_exists('paid_shortfall', $row)) {
+            $row['paid_shortfall'] = (bool) $row['paid_shortfall'];
         }
         // Decode JSON snapshots (DB column je longtext, ne JSON type)
         foreach (['vendor_snapshot', 'own_snapshot'] as $f) {
