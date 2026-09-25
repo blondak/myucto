@@ -4,6 +4,7 @@ import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vu
 import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vue'
 import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
+import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
 import PurchaseItemMeta from '@/components/purchase/PurchaseItemMeta.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -792,7 +793,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
         </svg>
         <div class="text-sm flex-1 min-w-0">
           <div class="font-medium text-warning-700">{{ t('purchase_invoice.extraction.warning_title') }}</div>
-          <div class="text-warning-700/90 mt-1">{{ invoice.extraction_warning }}</div>
+          <ExtractionWarningText :warning="invoice.extraction_warning" class="text-warning-700/90 mt-1" />
         </div>
         <button
           type="button"

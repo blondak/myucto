@@ -44,6 +44,7 @@ import { apiErrorMessage } from '@/api/errors'
 import StockDescriptionField from '@/components/ui/StockDescriptionField.vue'
 import { rowKey } from '@/utils/rowKey'
 import ExpenseKindSuggestionHint from '@/components/purchase/ExpenseKindSuggestionHint.vue'
+import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
 import VendorPicker from '@/components/purchase/VendorPicker.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import { clientsApi, type Client } from '@/api/clients'
@@ -1483,7 +1484,7 @@ function fieldErr(key: string): string | null {
       </svg>
       <div class="text-sm flex-1 min-w-0">
         <div class="font-medium text-warning-700">{{ t('purchase_invoice.extraction.warning_title') }}</div>
-        <div class="text-warning-700/90 mt-1">{{ extractionWarning }}</div>
+        <ExtractionWarningText :warning="extractionWarning" class="text-warning-700/90 mt-1" />
       </div>
       <button
         type="button"
