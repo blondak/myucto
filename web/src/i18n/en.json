@@ -13706,7 +13706,8 @@
     },
     "statement_accounts": {
       "tab_statement": "Statement",
-      "tab_accounts": "By account",
+      "tab_accounts_balance": "Account 702 (by accounts)",
+      "tab_accounts_income": "Account 710 (by accounts)",
       "note_before_closing": "Account balances before closing the books, without the closing entry. Click an account to open its statement.",
       "closed_note": "The year is closed; balances match the content of accounts 702 and 710.",
       "show_analytics": "Show analytical accounts",

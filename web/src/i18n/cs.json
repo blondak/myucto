@@ -13706,7 +13706,8 @@
     },
     "statement_accounts": {
       "tab_statement": "Výkaz",
-      "tab_accounts": "Po účtech",
+      "tab_accounts_balance": "Účet 702 (po účtech)",
+      "tab_accounts_income": "Účet 710 (po účtech)",
       "note_before_closing": "Zůstatky účtů před uzavřením účetních knih, bez uzávěrkového zápisu. Kliknutím na účet otevřete jeho opis.",
       "closed_note": "Rok je uzavřený, zůstatky odpovídají obsahu účtů 702 a 710.",
       "show_analytics": "Zobrazit analytiky",

@@ -218,7 +218,7 @@ onMounted(async () => {
               class="px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap"
               :class="view === 'accounts' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'"
               @click="switchView('accounts')">
-        {{ t('accounting.statement_accounts.tab_accounts') }}
+        {{ t('accounting.statement_accounts.tab_accounts_income') }}
       </button>
     </div>
 
