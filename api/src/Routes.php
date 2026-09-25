@@ -2311,6 +2311,8 @@ final class Routes
             $g->get('/reports/balance-sheet/export',              [FinancialStatementAction::class, 'exportBalanceSheet']);
             $g->get('/reports/income-statement',                  [FinancialStatementAction::class, 'incomeStatement']);
             $g->get('/reports/income-statement/export',           [FinancialStatementAction::class, 'exportIncomeStatement']);
+            $g->get('/reports/statement-accounts',                [FinancialStatementAction::class, 'accountView']);
+            $g->get('/reports/statement-accounts/export',         [FinancialStatementAction::class, 'exportAccountView']);
             // VZZ v účelovém členění (vyhl. 500/2002 Sb., př. 2 část II, § 39b) — jiný výkaz
             // s jinými řádky, proto vlastní adresa, ne `?variant=` nad druhovým.
             $g->get('/reports/income-statement-by-function',        [FinancialStatementAction::class, 'incomeStatementByFunction']);

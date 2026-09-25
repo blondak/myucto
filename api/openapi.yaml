@@ -10713,6 +10713,48 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/v1/accounting/reports/statement-accounts:
+    get:
+      tags: [Accounting]
+      summary: Rozvaha a výsledovka po účtech s hospodářským výsledkem
+      description: |
+        Konečné zůstatky účtů k `as_of` (default min(konec období, dnešek)) bez uzávěrkového
+        zápisu, takže jsou stejné před uzavřením knih i po něm. `balance` = rozvahové účty
+        tříd 0–4 po třídách, syntetiky s analytikami (`analytics`), MD a D bez kompenzace
+        analytik; `balance.profit` = Σ MD − Σ D. `profit_loss.sections` dělí výsledkové účty
+        podle mapy druhové VZZ na `operating`, `financial`, `unassigned` (účty mimo mapu),
+        `tax` a `transfer`, s mezisoučty provozního a finančního VH, VH před a po zdanění
+        a VH za účetní období. `checks.profit_matches` = VH z rozvahových účtů se shoduje
+        s VH z výsledkových účtů.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - $ref: '#/components/parameters/DimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
+        - { in: query, name: period_id, required: true, schema: { type: integer } }
+        - { in: query, name: as_of, schema: { type: string, format: date } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/StatementAccountsReport' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/reports/statement-accounts/export:
+    get:
+      tags: [Accounting]
+      summary: Export rozvahy nebo výsledovky po účtech (PDF / XLSX)
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - $ref: '#/components/parameters/DimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
+        - { in: query, name: period_id, required: true, schema: { type: integer } }
+        - { in: query, name: as_of, schema: { type: string, format: date } }
+        - { in: query, name: part, schema: { type: string, enum: [balance, profit_loss], default: balance } }
+        - { in: query, name: format, required: true, schema: { type: string, enum: [pdf, xlsx] } }
+        - { in: query, name: unit, schema: { type: string, enum: [czk, thousands], default: czk } }
+      responses:
+        '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/dimensions:
     get:
       tags: [Accounting]
@@ -26134,6 +26176,87 @@ components:
         totals: { $ref: '#/components/schemas/DimensionProfitAmounts' }
         matrix: { type: object, description: 'Rozpad po účtech při accounts=1.' }
         companies: { type: array, items: { $ref: '#/components/schemas/DimensionProfitCompany' }, description: 'Součty po přístupných firmách při companies=1.' }
+
+    StatementAccountLine:
+      type: object
+      required: [account_id, account_code, name, md, d]
+      properties:
+        account_id: { type: integer }
+        account_code: { type: string }
+        name: { type: string }
+        account_type: { type: string, enum: [asset, liability, equity, revenue, expense] }
+        md: { type: number, description: 'Zůstatek na straně MD.' }
+        d: { type: number, description: 'Zůstatek na straně D.' }
+        analytics:
+          type: array
+          description: 'Analytické účty pod syntetikou; prázdné, když syntetika analytiky nemá.'
+          items:
+            type: object
+            required: [account_id, account_code, name, md, d]
+            properties:
+              account_id: { type: integer }
+              account_code: { type: string }
+              name: { type: string }
+              md: { type: number }
+              d: { type: number }
+
+    StatementAccountsReport:
+      type: object
+      required: [version_code, as_of, entity, period, closed, balance, profit_loss, checks]
+      properties:
+        version_code: { type: string, description: 'Verze mapy druhové VZZ, podle které se dělí výsledkové účty.' }
+        as_of: { type: string, format: date }
+        entity: { type: object }
+        period: { type: object }
+        closed: { type: boolean, description: 'Období je uzavřené; zůstatky jsou i tak před uzávěrkovým zápisem.' }
+        dimension: { type: [object, 'null'] }
+        balance:
+          type: object
+          required: [classes, md, d, profit]
+          properties:
+            classes:
+              type: array
+              items:
+                type: object
+                required: [class, accounts, md, d]
+                properties:
+                  class: { type: string, description: 'Účtová třída 0–4.' }
+                  accounts: { type: array, items: { $ref: '#/components/schemas/StatementAccountLine' } }
+                  md: { type: number }
+                  d: { type: number }
+            md: { type: number }
+            d: { type: number }
+            profit: { type: number, description: 'VH = Σ MD − Σ D rozvahových účtů.' }
+        profit_loss:
+          type: object
+          required: [sections, operating_profit, financial_profit, profit_before_tax, profit_after_tax, profit]
+          properties:
+            sections:
+              type: array
+              items:
+                type: object
+                required: [key, expenses, revenues, expense_total, revenue_total, result]
+                properties:
+                  key: { type: string, enum: [operating, financial, unassigned, tax, transfer] }
+                  expenses: { type: array, items: { $ref: '#/components/schemas/StatementAccountLine' } }
+                  revenues: { type: array, items: { $ref: '#/components/schemas/StatementAccountLine' } }
+                  expense_total: { type: number }
+                  revenue_total: { type: number }
+                  result: { type: number }
+            operating_profit: { type: number }
+            financial_profit: { type: number }
+            profit_before_tax: { type: number }
+            profit_after_tax: { type: number }
+            profit: { type: number, description: 'VH za účetní období.' }
+        checks:
+          type: object
+          required: [profit_balance, profit_loss, profit_matches, technical_residual, unassigned_count]
+          properties:
+            profit_balance: { type: number }
+            profit_loss: { type: number }
+            profit_matches: { type: boolean }
+            technical_residual: { type: number, description: 'Zůstatek závěrkových účtů (701) mimo uzávěrku; nenulový vysvětluje rozdíl VH.' }
+            unassigned_count: { type: integer, description: 'Počet výsledkových účtů mimo mapu výkazu; VZZ je nemá.' }
 
     DimensionAnalyticsAmounts:
       type: object
