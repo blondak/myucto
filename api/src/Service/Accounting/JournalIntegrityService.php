@@ -269,7 +269,7 @@ final class JournalIntegrityService
      */
     private function checkOrphanEntries(int $supplierId): array
     {
-        // Bankovní zápisy mají source_id =
+        // Bankovní zápisy (i vypořádání a uzavření platby kartou) mají source_id =
         // bank_transactions.id bez cizího klíče — smazaný výpis po sobě nechal zápis,
         // který nic nehlídalo. Výpis nese tenanta; legacy výpis bez supplier_id tenanta
         // neprozradí, takže se bere jako existující (nález musí být jistý).

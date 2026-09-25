@@ -37,6 +37,8 @@ final class CreditCardRoutePermissionTest extends TestCase
         yield 'převod účtu' => ['POST', '/api/credit-cards/convert', 'bank.post', AccessLevel::WRITE];
         yield 'nastavení zápis' => ['PUT', '/api/credit-cards/settings', 'bank.post', AccessLevel::WRITE];
         yield 'analytika' => ['PUT', '/api/credit-cards/7/analytic', 'bank.post', AccessLevel::WRITE];
+        yield 'režim nákupů' => ['PUT', '/api/credit-cards/7/purchase-mode', 'bank.post', AccessLevel::WRITE];
+        yield 'analytika mezičlenu' => ['PUT', '/api/credit-cards/7/clearing-analytic', 'bank.post', AccessLevel::WRITE];
         yield 'zaúčtovat čekající' => ['POST', '/api/credit-cards/7/post-pending', 'bank.post', AccessLevel::WRITE];
         yield 'počáteční dluh' => ['POST', '/api/credit-cards/7/opening', 'bank.post', AccessLevel::WRITE];
         yield 'úprava účtu' =>['PUT', '/api/credit-cards/7', 'settings.bank_accounts', AccessLevel::WRITE];

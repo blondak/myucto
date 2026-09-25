@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Reports;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Card\CardClearingAccounts;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Tax\Return\JournalTaxOrigin;
@@ -45,6 +46,7 @@ final class DimensionCashFlowService
 
     public function __construct(
         private readonly Connection $db,
+        private readonly CardClearingAccounts $cardAccounts,
     ) {}
 
     /**
@@ -58,6 +60,7 @@ final class DimensionCashFlowService
         /** @var array<string,array<string,array{code:string,name:string,amount:int}>> $groups */
         $groups = ['non_cash' => [], 'working_capital' => [], 'investing' => [], 'financing' => []];
         foreach ($filters as $supplierId => $filter) {
+            $cardCodes = array_flip($this->cardAccounts->allClearingCodes((int) $supplierId));
             foreach ($this->balances((int) $supplierId, $from, $to, $filter) as $row) {
                 $delta = (int) round(((float) $row['delta']) * 100);
                 if ($delta === 0) {
@@ -72,7 +75,7 @@ final class DimensionCashFlowService
                     continue;
                 }
                 $leaf = (string) $row['leaf_code'];
-                if (self::isCash($leaf)) {
+                if (self::isCash($leaf) && !isset($cardCodes[$leaf])) {
                     $cash += $delta;
                     continue;
                 }

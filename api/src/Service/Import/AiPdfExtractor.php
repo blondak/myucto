@@ -61,6 +61,9 @@ final class AiPdfExtractor
         // Uložení vytěžení zdrojového PDF pro kontrolu dokladů proti přílohám. Nullable
         // jen kvůli unit testům čistých helperů, které import nespouštějí.
         private readonly ?\MyInvoice\Service\Document\AttachmentCheck\ImportedPdfExtractionRecorder $extractionRecorder,
+        // Účtenka zaplacená kartou: po založení dokladu ho spáruje s pohybem karty
+        // a zaúčtuje vypořádání. Nullable jen kvůli unit testům čistých helperů.
+        private readonly ?\MyInvoice\Service\Accounting\Card\CardPaymentAutomation $cardAutomation,
         ?LoggerInterface $logger = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
@@ -332,6 +335,9 @@ final class AiPdfExtractor
             // Attach PDF — uložit do archive a updatnout pdf_path/hash/size na faktuře
             $this->attachPdf($invoiceId, $supplierId, $pdfBytes, $originalFilename);
             $this->tagImportBatch($invoiceId, $supplierId, $importBatchId);
+            // Koncept čeká na kontrolu; doklad, který import rovnou uzavřel (účtenka
+            // „uhrazeno kartou"), se hned spáruje s pohybem karty a vypořádá.
+            $this->cardAutomation?->afterPurchaseReady($supplierId, $invoiceId, $userId > 0 ? $userId : null);
             $this->extractionRecorder?->record(
                 $supplierId,
                 $invoiceId,
@@ -1026,8 +1032,17 @@ final class AiPdfExtractor
         $this->applyCnbRate($id, $supplierId, $data);
         // „NEPLAŤTE, JIŽ UHRAZENO" / „PAID": vytěžený doklad zůstává KONCEPT, aby šel po
         // importu volně upravit (uhrazená faktura editor zamyká). Údaj se uloží do podkladů
-        // ke kontrole a úhradu nabídne kontrolní okno.
-        $paidPerDocument = !empty($data['already_paid']);
+        // ke kontrole a úhradu nabídne kontrolní okno. Výjimka je účtenka zaplacená kartou
+        // při zapnutém kartovém vypořádání — ta se dál hned uhradí, spáruje s pohybem karty
+        // a zaúčtuje (plná automatizace plateb kartou).
+        $paidPerDocument = false;
+        if (!empty($data['already_paid'])) {
+            if ($this->isCardSettledReceipt($supplierId, $data)) {
+                $this->markAlreadyPaid($id, $supplierId);
+            } else {
+                $paidPerDocument = true;
+            }
+        }
         // Forma úhrady z dokladu (migrace 1128) — hlavně INKASO: takovou fakturu nesmíme
         // nabídnout do platebního příkazu, jinak zaplatíme podruhé.
         $this->applyPaymentMethod($id, $supplierId, $data);
@@ -1801,6 +1816,60 @@ final class AiPdfExtractor
     /** Sekce hlášení u dokladu, který je podle PDF uhrazený, ale zůstal konceptem. */
     public const PAID_PER_DOCUMENT_WARNING = 'Podle dokladu je faktura už uhrazená. Import ji nechal jako koncept, '
         . 'abyste ji mohli upravit; po kontrole ji označte jako uhrazenou.';
+
+    /**
+     * Účtenka zaplacená kartou, kterou si hned převezme kartové vypořádání: firma ho má
+     * zapnuté a doklad nese kartu (forma úhrady s dostatečnou jistotou nebo koncovka karty).
+     *
+     * @param array<string,mixed> $data
+     */
+    private function isCardSettledReceipt(int $supplierId, array $data): bool
+    {
+        if ($this->cardAutomation === null || !$this->cardAutomation->enabledFor($supplierId)) {
+            return false;
+        }
+        $payment = is_array($data['payment'] ?? null) ? $data['payment'] : [];
+        $confidence = $payment['method_confidence'] ?? null;
+        $byMethod = PaymentMethods::normalizeNullable($payment['method'] ?? null) === 'card'
+            && !(is_numeric($confidence) && (float) $confidence < 0.7);
+        $byCard = preg_match('/\d{4}\s*$/', (string) ($data['card_last4'] ?? '')) === 1;
+        return $byMethod || $byCard;
+    }
+
+    private function markAlreadyPaid(int $id, int $supplierId): void
+    {
+        try {
+            // Při přechodu z draft musí faktura získat varsymbol (interní číslo dokladu) —
+            // ručně se to děje v TransitionPurchaseInvoiceStatusAction přes ensureVarsymbol().
+            // Tady přímým UPDATE varsymbol nevygenerujeme, takže zavoláme repo metodu napřed.
+            $this->repo->ensureVarsymbol($id, $supplierId);
+            // Draft → paid přímý update (skip 'received' intermediate — faktura už existuje
+            // v hotové stavu). UPDATE jen pokud aktuálně draft.
+            $stmt = $this->db->pdo()->prepare(
+                "UPDATE purchase_invoices SET status = 'paid', paid_at = COALESCE(paid_at, CURDATE())
+                  WHERE id = ? AND supplier_id = ? AND status = 'draft'"
+            );
+            $stmt->execute([$id, $supplierId]);
+            if ($stmt->rowCount() === 0) {
+                $this->logger->warning('AI extractor: already_paid marking — UPDATE neaktualizoval žádný řádek (status už není draft?)', [
+                    'invoice_id' => $id,
+                    'supplier_id' => $supplierId,
+                ]);
+            } else {
+                $this->logger->info('AI extractor: faktura označena jako paid podle PDF indikátoru', [
+                    'invoice_id' => $id,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            // Logujeme (ne silently) — pokud markAlreadyPaid selže, faktura zůstane jako
+            // draft a uživatel ručně označí jako uhrazenou. To je správné fallback,
+            // ale chceme vědět proč to selhalo (varsymbol konflikt, DB constraint atd).
+            $this->logger->error('AI extractor: markAlreadyPaid selhal — faktura zůstane jako draft', [
+                'invoice_id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
 
     /**
      * Auto-apply ČNB kurz pro non-CZK přijatou fakturu.

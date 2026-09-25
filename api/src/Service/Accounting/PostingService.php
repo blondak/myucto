@@ -2475,12 +2475,27 @@ final class PostingService
      * náhledu „Doplnit podle osnovy" ({@see PostingRuleChartAlignmentService}). Obě místa
      * volají tuhle jedinou definici, ať se náhled s enginem nerozejdou.
      *
+     *  - analytika mezičlenu platební karty (378.101 …): přesměr by na ni poslal cizí zápisy
+     *    na 378 a zůstatek karty by přestal odpovídat nevypořádaným platbám,
+     *  - záchranná analytika neevidovaných karet (378/261/395 .199),
      *  - analytika úvěrového účtu kreditní karty (231.101 …): holé 231 z jiného zápisu
-     *    (bankovní úvěr) by jinak skončilo na dluhu kreditky.
+     *    (bankovní úvěr) by jinak skončilo na dluhu kreditky,
+     *  - analytika mezičlenu úvěrového účtu kreditní karty (378.1xx, stejná řada jako karty).
      */
     public static function dedicatedAnalyticSql(string $child, string $parent): string
     {
         return "(EXISTS (
+                    SELECT 1 FROM payment_cards pc
+                     WHERE pc.supplier_id = {$child}.supplier_id AND pc.analytic_suffix IS NOT NULL
+                       AND {$child}.account_code = CONCAT({$parent}.account_code, '.', pc.analytic_suffix)
+                )
+                OR ({$parent}.account_code IN ('378', '261', '395') AND EXISTS (
+                    SELECT 1 FROM credit_card_accounts ccc
+                     WHERE ccc.supplier_id = {$child}.supplier_id AND ccc.clearing_suffix IS NOT NULL
+                       AND {$child}.account_code = CONCAT({$parent}.account_code, '.', ccc.clearing_suffix)
+                ))
+                OR ({$parent}.account_code IN ('378', '261', '395') AND {$child}.account_code = CONCAT({$parent}.account_code, '.199'))
+                OR EXISTS (
                     SELECT 1 FROM credit_card_accounts cca
                      WHERE cca.supplier_id = {$child}.supplier_id AND cca.analytic_suffix IS NOT NULL
                        AND {$child}.account_code = CONCAT('231.', cca.analytic_suffix)

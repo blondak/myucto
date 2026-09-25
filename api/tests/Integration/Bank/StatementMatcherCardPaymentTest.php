@@ -135,6 +135,17 @@ final class StatementMatcherCardPaymentTest extends TestCase
         self::assertSame([$doc], $this->matchedPurchases($tx));
     }
 
+    public function testLateCardDocumentDoesNotUseOtherItemPayment(): void
+    {
+        $doc = $this->seedPurchase(812.50, '2093-06-13', '4321');
+        $tx = $this->seedTransaction($this->seedStatement(), -812.50, self::DAY, '4321');
+        $this->allocateOtherItemPayment($tx, 812.50);
+
+        self::assertNull($this->matcher->matchCardDocument($this->supplierId, $doc));
+        self::assertSame('received', $this->purchaseStatus($doc));
+        self::assertSame(0, $this->matchCount($tx));
+    }
+
     public function testLockedCardBranchRejectsOtherItemPayment(): void
     {
         $doc = $this->seedPurchase(410.00, '2093-06-14', '4321');

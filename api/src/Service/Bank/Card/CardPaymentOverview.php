@@ -23,6 +23,7 @@ final class CardPaymentOverview
     public function __construct(
         private readonly Connection $db,
         private readonly PaymentCardRepository $cards,
+        private readonly \MyInvoice\Service\Accounting\Card\CardClearingAccounts $clearingAccounts,
     ) {}
 
     /**
@@ -64,6 +65,12 @@ final class CardPaymentOverview
                     SELECT 1 FROM payment_matches pm
                      WHERE pm.bank_transaction_id = bt.id AND pm.supplier_id = ?
                 )
+                -- Platba uzavřená bez dokladu (548/335 proti mezičlenu karty) už doklad nečeká.
+                AND NOT EXISTS (
+                    SELECT 1 FROM journal_entries w
+                     WHERE w.supplier_id = ? AND w.source_type = 'card_writeoff'
+                       AND w.source_id = bt.id AND w.reversed_by IS NULL
+                )
                 AND " . BankStatementOwnershipResolver::sql('bs') . "
               ORDER BY bt.posted_at DESC, bt.id DESC
               LIMIT " . (self::MAX_ROWS + 1)
@@ -71,7 +78,7 @@ final class CardPaymentOverview
         $stmt->execute(array_merge(
             [$supplierId],
             $creditCardAccountId === null ? [] : [$creditCardAccountId],
-            [$from, $to, $supplierId],
+            [$from, $to, $supplierId, $supplierId],
             BankStatementOwnershipResolver::params($supplierId),
         ));
         // Z kreditky jen nákupy: úrok, poplatek a výběr doklad nečekají.
@@ -87,6 +94,7 @@ final class CardPaymentOverview
         $rows = array_slice($rows, 0, self::MAX_ROWS);
 
         $cardByTx = $this->cards->resolveForTransactions($supplierId, $rows);
+        $clearingByTx = $this->clearingCodes($supplierId, array_map(static fn (array $r): int => (int) $r['id'], $rows));
         $groups = [];
         foreach ($rows as $row) {
             $txId = (int) $row['id'];
@@ -119,6 +127,8 @@ final class CardPaymentOverview
                 'description'       => $row['description'] !== null ? (string) $row['description'] : null,
                 'card_last4'        => $row['card_last4'] !== null ? (string) $row['card_last4'] : null,
                 'credit_card'       => $creditId !== null,
+                // Analytika mezičlenu, na které platba čeká na doklad (null = účtováno bez mezičlenu).
+                'clearing_account'  => $clearingByTx[$txId] ?? null,
             ];
         }
 
@@ -140,6 +150,36 @@ final class CardPaymentOverview
             'truncated' => $truncated,
             'groups'    => $groups,
         ];
+    }
+
+    /**
+     * Analytika mezičlenu karty v živém bankovním zápisu pohybů (jedním dotazem).
+     *
+     * @param list<int> $txIds
+     * @return array<int,string> id pohybu => kód analytiky
+     */
+    private function clearingCodes(int $supplierId, array $txIds): array
+    {
+        $codes = $this->clearingAccounts->allClearingCodes($supplierId);
+        if ($txIds === [] || $codes === []) {
+            return [];
+        }
+        $txPh = implode(',', array_fill(0, count($txIds), '?'));
+        $codePh = implode(',', array_fill(0, count($codes), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT je.source_id, c.account_code
+               FROM journal_entries je
+               JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.supplier_id = je.supplier_id
+               JOIN chart_of_accounts c ON c.id = jel.account_id AND c.supplier_id = je.supplier_id
+              WHERE je.supplier_id = ? AND je.source_type = 'bank' AND je.reversed_by IS NULL
+                AND je.source_id IN ($txPh) AND c.account_code IN ($codePh)"
+        );
+        $stmt->execute([$supplierId, ...$txIds, ...$codes]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $out[(int) $r['source_id']] = (string) $r['account_code'];
+        }
+        return $out;
     }
 
     /**

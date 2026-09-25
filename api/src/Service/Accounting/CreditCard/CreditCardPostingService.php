@@ -6,10 +6,13 @@ namespace MyInvoice\Service\Accounting\CreditCard;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\CardClearingSettingsRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\CreditCardAccountRepository;
 use MyInvoice\Repository\CreditCardSettingsRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
+use MyInvoice\Service\Accounting\Card\CardClearingAccounts;
+use MyInvoice\Service\Accounting\Card\CardClearingRegime;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -18,12 +21,13 @@ use PDO;
 /**
  * Účetní akce nad úvěrovým účtem kreditní karty (detail na stránce Kreditní karty):
  *
+ *  - režim nákupů účtu (mezičlen 378.x, nebo bez mezičlenu) a ruční výběr analytiky mezičlenu,
  *  - „Zaúčtovat čekající pohyby": každý nezaúčtovaný pohyb výpisů účtu projde stejnou
  *    automatikou jako při importu ({@see BankPostingService::handleTransaction()}),
  *  - počáteční dluh z prvního výpisu: zůstatek, který výpis převzal z doby před evidencí.
  *
- * Nic z toho nemá vlastní účtovací logiku - zápis pohybu staví bankovní engine, zápis
- * počátečního dluhu {@see PostingService}.
+ * Nic z toho nemá vlastní účtovací logiku - zápis pohybu staví bankovní engine, mezičlen
+ * {@see CardClearingRegime}, zápis počátečního dluhu {@see PostingService}.
  */
 final class CreditCardPostingService
 {
@@ -31,6 +35,9 @@ final class CreditCardPostingService
         private readonly Connection $db,
         private readonly CreditCardAccountRepository $accounts,
         private readonly CreditCardSettingsRepository $settings,
+        private readonly CardClearingRegime $regime,
+        private readonly CardClearingAccounts $clearingAccounts,
+        private readonly CardClearingSettingsRepository $cardSettings,
         private readonly BankPostingService $bankPosting,
         private readonly PostingService $posting,
         private readonly AccountingPeriodRepository $periods,
@@ -46,6 +53,87 @@ final class CreditCardPostingService
             throw new PostingException('not_found', 'Úvěrový účet nenalezen.', 404);
         }
         return $account;
+    }
+
+    /**
+     * Režim nákupů účtu. Platí pro pohyby, které ještě nejsou zaúčtované; zaúčtované
+     * zůstávají, jak jsou (historie se nepřeúčtovává).
+     */
+    public function setPurchaseMode(int $supplierId, int $id, ?string $mode): void
+    {
+        $this->account($supplierId, $id);
+        if ($mode !== null && !in_array($mode, CreditCardSettingsRepository::MODES, true)) {
+            throw new PostingException('invalid_mode', 'Neplatný režim účtování nákupů.', 422, ['field' => 'purchase_mode']);
+        }
+        $this->accounts->setPurchaseMode($supplierId, $id, $mode);
+        $this->regime->forget($supplierId);
+    }
+
+    /**
+     * Mezičlen úvěrového účtu pro detail: účinný režim, kód analytiky (existující nebo ten,
+     * který vznikne u prvního nákupu), zůstatek a nabídka ručního výběru.
+     *
+     * @param array<string,mixed> $account
+     * @return array<string,mixed>
+     */
+    public function clearingInfo(int $supplierId, array $account): array
+    {
+        $synthetic = (string) $this->cardSettings->find($supplierId)['clearing_synthetic'];
+        $suffix = $account['clearing_suffix'] ?? null;
+        $code = is_string($suffix) && $suffix !== '' ? CardClearingAccounts::codeFor($synthetic, $suffix) : null;
+        return [
+            'mode'           => $this->regime->creditCardMode($supplierId, $account),
+            'account_mode'   => $account['purchase_mode'],
+            'default_mode'   => $this->settings->find($supplierId)['purchase_mode'],
+            'synthetic'      => $synthetic,
+            'account_code'   => $code,
+            'balance'        => $code !== null && $this->clearingAccounts->chartHas($supplierId, $code)
+                ? $this->clearingAccounts->balance($supplierId, $code) : 0.0,
+            'options'        => array_values(array_filter(
+                $this->clearingAccounts->analyticOptions($supplierId, $synthetic),
+                static fn (array $o): bool => $o['card_id'] === null
+                    && ($o['credit_card_account_id'] === null || $o['credit_card_account_id'] === (int) $account['id']),
+            )),
+        ];
+    }
+
+    /**
+     * Ruční výběr analytiky mezičlenu úvěrového účtu (`null` = automatické přidělení u dalšího
+     * nákupu). Analytika se zůstatkem se nemění bez potvrzení - zůstatek na ní zůstane.
+     */
+    public function setClearingAnalytic(int $supplierId, int $id, ?string $code, bool $confirm): void
+    {
+        $account = $this->account($supplierId, $id);
+        $synthetic = (string) $this->cardSettings->find($supplierId)['clearing_synthetic'];
+        $suffix = null;
+        if ($code !== null && $code !== '') {
+            $prefix = $synthetic . '.';
+            $suffix = str_starts_with($code, $prefix) ? substr($code, strlen($prefix)) : '';
+            if ($suffix === '' || preg_match('/^[0-9]{1,6}$/', $suffix) !== 1 || $suffix === CardClearingAccounts::FALLBACK_SUFFIX) {
+                throw new PostingException('invalid_analytic', 'Analytika musí být analytikou mezičlenu ' . $synthetic . '.', 422, ['field' => 'account_code']);
+            }
+            if (!$this->clearingAccounts->chartHas($supplierId, $code)) {
+                throw new PostingException('invalid_analytic', 'Účet ' . $code . ' v osnově firmy není.', 422, ['field' => 'account_code']);
+            }
+            $owner = $this->clearingAccounts->suffixOwner($supplierId, $suffix);
+            if ($owner !== null && $owner['credit_card_account_id'] !== $id) {
+                throw new PostingException('analytic_taken', 'Analytiku ' . $code . ' už používá jiná karta.', 409, ['field' => 'account_code']);
+            }
+        }
+        $old = $account['clearing_suffix'];
+        if (is_string($old) && $old !== '' && $old !== $suffix && !$confirm) {
+            $oldCode = CardClearingAccounts::codeFor($synthetic, $old);
+            $balance = $this->clearingAccounts->balance($supplierId, $oldCode);
+            if (abs($balance) >= 0.005) {
+                throw new PostingException('confirm_required', sprintf(
+                    'Analytika %s má zůstatek %s Kč. Zůstane tam - nová analytika platí jen pro nové nákupy.',
+                    $oldCode,
+                    number_format($balance, 2, ',', ' '),
+                ), 409, ['balance' => $balance, 'account_code' => $oldCode]);
+            }
+        }
+        $this->accounts->setClearingSuffix($supplierId, $id, $suffix);
+        $this->regime->forget($supplierId);
     }
 
     /**
@@ -73,7 +161,7 @@ final class CreditCardPostingService
     }
 
     /**
-     * Dohnání výpisu po změně nastavení: každý čekající pohyb projde automatikou
+     * Dohnání výpisu po změně režimu nebo nastavení: každý čekající pohyb projde automatikou
      * znovu. Co automatika zaúčtovat nesmí (politika, uzavřené období), skončí jako návrh.
      *
      * @return array{total:int, posted:int, suggested:int, skipped:int, reasons:array<string,int>}
@@ -84,6 +172,7 @@ final class CreditCardPostingService
         if (!$this->isDoubleEntry($supplierId)) {
             throw new PostingException('not_double_entry', 'Zaúčtování pohybů je jen pro podvojné účetnictví.', 422);
         }
+        $this->regime->forget($supplierId);
         $out = ['total' => 0, 'posted' => 0, 'suggested' => 0, 'skipped' => 0, 'reasons' => []];
         foreach ($this->pendingTransactionIds($supplierId, $account) as $txId) {
             $out['total']++;
@@ -276,7 +365,7 @@ final class CreditCardPostingService
         }
         // Účty třídy 7 (701 Počáteční účet rozvažný) smí jen uzávěrka a otevření roku -
         // počáteční stav k začátku roku patří do otevíracího zápisu, ne sem.
-        if ($code === $creditCode || preg_match('/^[34]/', $code) !== 1) {
+        if ($code === $creditCode || preg_match('/^[34]/', $code) !== 1 || $this->regime->isClearingCode($supplierId, $code)) {
             throw new PostingException('invalid_account', 'Protiúčet ' . $code . ' se pro počáteční dluh nehodí (povolené jsou účty tříd 3 a 4 mimo úvěr karty).', 422, ['field' => 'contra_account_code']);
         }
     }

@@ -21,8 +21,11 @@ use PDO;
  * Po opětovném importu se táž úhrada spárovala a zaúčtovala podruhé. Proto výpis
  * před smazáním každý navázaný pohyb uvolní stejně jako ruční zrušení párování.
  *
- * V deníku oba režimy (`unmatch`, `delete`) stornují bankovní zápis pohybu
- * ({@see BankPostingService::unpost()}), liší se jen popisem storna.
+ * Režimy se liší jen v deníku:
+ *   - `unmatch` — {@see BankPostingService::releaseMatch()}: platba kartou přes
+ *     mezičlen si bankovní zápis 378.x/221 ponechá (platba proběhla, chybí jen doklad);
+ *   - `delete`  — {@see BankPostingService::unpost()}: pohyb přestane existovat,
+ *     takže se stornuje i bankovní zápis včetně vypořádání karty.
  *
  * Běží v transakci volajícího; storno v uzavřeném nebo zamčeném období vyhodí
  * {@see BankTransactionReleaseException} a volající musí celou operaci vrátit.
@@ -33,7 +36,7 @@ final class BankTransactionReleaseService
     public const MODE_DELETE = 'delete';
 
     /** Zápisy deníku, jejichž `source_id` je id bankovního pohybu. */
-    public const TRANSACTION_SOURCE_TYPES = ['bank'];
+    public const TRANSACTION_SOURCE_TYPES = ['bank', 'card_settlement', 'card_writeoff'];
 
     private const MATCHED_STATUSES = "('auto_exact', 'auto_partial', 'manual')";
 
@@ -227,15 +230,19 @@ final class BankTransactionReleaseService
         ];
     }
 
-    /** @return string reversed | none */
+    /** @return string reversed | released | none */
     private function releaseJournal(int $supplierId, int $txId, string $mode, ?int $userId): string
     {
         $meta = ['user_id' => $userId, 'reason' => $mode];
         try {
-            $this->bankPosting->unpost($supplierId, $txId, $mode === self::MODE_DELETE
-                ? $meta + ['description' => 'Storno bankovního zápisu — smazání výpisu']
-                : $meta);
-            return 'reversed';
+            if ($mode === self::MODE_DELETE) {
+                $this->bankPosting->unpost($supplierId, $txId, $meta + [
+                    'description' => 'Storno bankovního zápisu — smazání výpisu',
+                ]);
+                return 'reversed';
+            }
+            $this->bankPosting->releaseMatch($supplierId, $txId, $meta);
+            return 'released';
         } catch (PostingException $e) {
             if ($e->errorCode === 'not_found') {
                 return 'none';

@@ -6,9 +6,13 @@ import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { BTN_BASE, OUTLINE, ICONS } from '@/components/ui/buttonStyles'
 import {
-  paymentCardsApi, type CardPaymentGroup, type CardPaymentRow, type UnmatchedCardPayments,
+  paymentCardsApi, type CardPaymentGroup, type CardPaymentRow, type CardWriteOffTarget, type UnmatchedCardPayments,
 } from '@/api/paymentCards'
 import { apiErrorMessage } from '@/api/errors'
+import { accountingApi, type ChartAccount } from '@/api/accounting'
+import { accountPickerOptions } from '@/utils/chartAccountOptions'
+import Modal from '@/components/ui/Modal.vue'
+import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 
@@ -37,6 +41,47 @@ const uploadTarget = ref<CardPaymentRow | null>(null)
 const canUpload = computed(() => auth.canWrite('purchase_invoices.scan'))
 const canMatch = computed(() => auth.canWrite('bank.match'))
 const canManageCards = computed(() => auth.canWrite('settings.bank_accounts'))
+const canPost = computed(() => auth.canWrite('bank.post'))
+
+/**
+ * Uzavření platby bez dokladu: nedaňový / daňový náklad, nebo k tíži držitele karty.
+ * Účet je výchozí z nastavení, dialog ale dovolí zvolit jiný (backend ho ověří: náklad
+ * třídy 5, u držitele 335/355/378, nikdy samotný mezičlen).
+ */
+const TARGET_PREFIXES: Record<CardWriteOffTarget, string[]> = {
+  expense: ['5'], expense_tax: ['5'], holder: ['335', '355', '378'],
+}
+const writeOffDialog = ref<{ tx: CardPaymentRow; target: CardWriteOffTarget; accountId: number | null } | null>(null)
+const accounts = ref<ChartAccount[]>([])
+const writeOffOptions = computed(() => {
+  const d = writeOffDialog.value
+  if (!d) return []
+  return accountPickerOptions(accounts.value, a => !a.is_synthetic || !accounts.value.some(c => c.parent_id === a.id))
+    .filter(a => TARGET_PREFIXES[d.target].some(p => a.account_code.startsWith(p)) && a.account_code !== d.tx.clearing_account)
+})
+
+async function openWriteOff(tx: CardPaymentRow, target: CardWriteOffTarget) {
+  writeOffDialog.value = { tx, target, accountId: null }
+  if (accounts.value.length === 0) {
+    try { accounts.value = await accountingApi.listAccounts() } catch { /* zůstane jen výchozí účet */ }
+  }
+}
+
+async function confirmWriteOff() {
+  const d = writeOffDialog.value
+  if (!d) return
+  busyTx.value = d.tx.id
+  try {
+    const r = await paymentCardsApi.writeOff(d.tx.id, d.target, d.accountId)
+    toast.success(t('payment_cards.unmatched.written_off', { account: r.account_code }))
+    writeOffDialog.value = null
+    await load()
+  } catch (err) {
+    toast.error(apiErrorMessage(err, t('payment_cards.unmatched.write_off_failed')))
+  } finally {
+    busyTx.value = null
+  }
+}
 
 async function load() {
   loading.value = true
@@ -201,6 +246,9 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
                   <div v-if="tx.description" class="text-neutral-500 truncate max-w-md">{{ tx.description }}</div>
                   <div v-if="tx.vehicle_hint" class="mt-0.5" :class="tx.vehicle_hint.reason === 'ok' ? 'text-primary-700' : 'text-warning-700'"
                     :title="t('payment_cards.unmatched.vehicle_hint_title')" data-testid="vehicle-hint">{{ vehicleHint(tx) }}</div>
+                  <div v-if="tx.clearing_account" class="mt-0.5 font-mono text-neutral-500" data-testid="clearing-account">
+                    {{ t('payment_cards.unmatched.clearing', { code: tx.clearing_account }) }}
+                  </div>
                 </td>
                 <td class="px-3 py-2">
                   <div class="flex flex-wrap justify-end gap-2">
@@ -218,6 +266,29 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
                       </svg>
                       {{ t('payment_cards.unmatched.rematch') }}
                     </button>
+                    <template v-if="canPost && tx.clearing_account">
+                      <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
+                        :disabled="busyTx !== null" data-testid="write-off-expense" @click="openWriteOff(tx, 'expense')">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
+                        </svg>
+                        {{ t('payment_cards.unmatched.write_off_expense') }}
+                      </button>
+                      <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
+                        :disabled="busyTx !== null" data-testid="write-off-expense-tax" @click="openWriteOff(tx, 'expense_tax')">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
+                        </svg>
+                        {{ t('payment_cards.unmatched.write_off_expense_tax') }}
+                      </button>
+                      <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
+                        :disabled="busyTx !== null" @click="openWriteOff(tx, 'holder')">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.user" />
+                        </svg>
+                        {{ t('payment_cards.unmatched.write_off_holder') }}
+                      </button>
+                    </template>
                     <RouterLink :to="{ name: 'bank-detail', params: { id: tx.statement_id }, query: { tx: String(tx.id) } }"
                       :class="[BTN_BASE, OUTLINE.neutral]" class="whitespace-nowrap">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -256,11 +327,63 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
                 </svg>
                 {{ t('payment_cards.unmatched.rematch') }}
               </button>
+              <template v-if="canPost && tx.clearing_account">
+                <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
+                  :disabled="busyTx !== null" @click="openWriteOff(tx, 'expense')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
+                  </svg>
+                  {{ t('payment_cards.unmatched.write_off_expense') }}
+                </button>
+                <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
+                  :disabled="busyTx !== null" @click="openWriteOff(tx, 'expense_tax')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
+                  </svg>
+                  {{ t('payment_cards.unmatched.write_off_expense_tax') }}
+                </button>
+                <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
+                  :disabled="busyTx !== null" @click="openWriteOff(tx, 'holder')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.user" />
+                  </svg>
+                  {{ t('payment_cards.unmatched.write_off_holder') }}
+                </button>
+              </template>
             </div>
           </div>
         </div>
       </section>
     </template>
 
+    <Modal v-if="writeOffDialog" :title="t(`payment_cards.unmatched.write_off_${writeOffDialog.target}`)" width-class="max-w-lg"
+      data-testid="write-off-dialog" @close="writeOffDialog = null">
+      <div class="space-y-3 text-sm">
+        <p class="text-neutral-700">{{ t(`payment_cards.unmatched.write_off_confirm_${writeOffDialog.target}`) }}</p>
+        <p class="text-neutral-600">
+          {{ formatDate(writeOffDialog.tx.posted_at) }} · {{ writeOffDialog.tx.counterparty_name || '—' }} ·
+          <span class="font-medium">{{ formatMoney(writeOffDialog.tx.amount, writeOffDialog.tx.currency) }}</span>
+        </p>
+        <label class="block">
+          <span class="block text-neutral-700 mb-1">{{ t('payment_cards.unmatched.write_off_account') }}</span>
+          <select v-model="writeOffDialog.accountId" :class="INPUT" class="w-full" data-testid="write-off-account">
+            <option :value="null">{{ t('payment_cards.unmatched.write_off_account_default') }}</option>
+            <option v-for="a in writeOffOptions" :key="a.id" :value="a.id">{{ a.account_code }} - {{ a.name }}</option>
+          </select>
+        </label>
+      </div>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="writeOffDialog = null">{{ t('common.cancel') }}</button>
+          <button type="button" :class="btnFilled('warning')" class="whitespace-nowrap" :disabled="busyTx !== null"
+            data-testid="write-off-confirm" @click="confirmWriteOff">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="writeOffDialog.target === 'holder' ? ICONS.user : ICONS.archive" />
+            </svg>
+            {{ busyTx !== null ? t('common.saving') : t(`payment_cards.unmatched.write_off_${writeOffDialog.target}`) }}
+          </button>
+        </div>
+      </template>
+    </Modal>
   </div>
 </template>

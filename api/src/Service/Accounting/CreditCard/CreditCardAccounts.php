@@ -20,7 +20,8 @@ use PDO;
  * pro účty druhu `credit_card` - pravidla, párování i detektory dál pracují s `221` jako
  * „účtem výpisu", takže se pro kreditní karty nic z bankovní automatiky neduplikuje.
  *
- * Přidělování postupně od 101, analytiku s cizí historií (řádky v deníku) si účet nepřivlastní - na 231
+ * Přidělování jako u analytik platebních karet ({@see \MyInvoice\Service\Accounting\Card\CardClearingAccounts}):
+ * postupně od 101, analytiku s cizí historií (řádky v deníku) si účet nepřivlastní - na 231
  * typicky už leží bankovní úvěry. Ruční výběr analytiky v detailu úvěrového účtu má přednost.
  */
 final class CreditCardAccounts

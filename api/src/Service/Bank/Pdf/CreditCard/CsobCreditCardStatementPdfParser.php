@@ -21,7 +21,8 @@ use MyInvoice\Service\Bank\Pdf\CsobStatementPdfParser;
  * platební kartou". Tenhle parser musí být v registru PŘED parserem běžného účtu, jinak by
  * se kreditní výpis naimportoval jako běžný účet (na 221).
  *
- * ČSOB v kreditním výpisu koncovku karty netiskne - nákupy jdou bez ní a účtují se proti 231.x.
+ * ČSOB v kreditním výpisu koncovku karty netiskne - nákupy jdou bez ní (mezičlen platebních
+ * karet se proto neuplatní, účtují se přímo proti 231.x).
  */
 final class CsobCreditCardStatementPdfParser implements BankStatementPdfParserInterface
 {

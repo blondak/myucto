@@ -21,6 +21,8 @@ export function statementLink(statementId: number, txId?: number | null): RouteL
 export const STATE_CLASS: Record<CreditCardTransactionState, string> = {
   unposted: 'bg-warning-50 text-warning-700 ring-warning-600/20',
   suggested: 'bg-primary-50 text-primary-700 ring-primary-600/20',
+  clearing_open: 'bg-warning-50 text-warning-700 ring-warning-600/20',
+  settled: 'bg-success-50 text-success-700 ring-success-600/20',
   posted: 'bg-success-50 text-success-700 ring-success-600/20',
   ignored: 'bg-neutral-100 text-neutral-600 ring-neutral-500/20',
 }

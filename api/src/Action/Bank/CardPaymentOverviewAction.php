@@ -172,8 +172,8 @@ final class CardPaymentOverviewAction
             return Json::error($response, 'not_found', 'Platba kartou nenalezena.', 404);
         }
         $result = $this->matcher->matchBatch([$tx['id']])[$tx['id']] ?? ['status' => 'unmatched'];
-        // Spárování ze seznamu plateb kartou vede na totéž zaúčtování jako import a ruční
-        // párování (úhrada přímo 321/221).
+        // Spárování ze seznamu plateb kartou vede na totéž zaúčtování a vypořádání jako
+        // import a ruční párování (platba 378.x/221, vypořádání 321/378.x).
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $posting = $this->bankPosting->handleTransaction($tx['id'], ((int) ($user['id'] ?? 0)) ?: null);
         return Json::ok($response, ['bank_transaction_id' => $tx['id'], 'result' => $result, 'posting' => $posting]);
