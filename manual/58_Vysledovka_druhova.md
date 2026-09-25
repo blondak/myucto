@@ -114,7 +114,7 @@ celkový výsledek, ale jinou strukturu provozních nákladů.
 
 ## 58.6 Výsledovka po účtech
 
-Záložka **Po účtech** ukáže nákladové a výnosové účty se zůstatkem od začátku
+Záložka **Účet 710 (po účtech)** ukáže nákladové a výnosové účty se zůstatkem od začátku
 období do data sestavení, rozdělené do skupin **Provozní činnost**,
 **Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku
 hospodaření společníkům**. Skupinu určuje stejná mapa jako výkaz (včetně
@@ -136,3 +136,26 @@ tabulkou upozorní a účet je třeba zařadit výjimkou mapování
 
 Kliknutím na účet se otevře jeho opis. Export PDF a XLSX z této záložky
 vytvoří výsledovku po účtech v jednotce zvolené přepínačem **Kč / tis. Kč**.
+
+### Odhad do konce roku (nezaúčtováno)
+
+U právnické osoby v roce, který ještě není uzavřený a nemá zaúčtovanou daň
+z příjmů (účet 591), je pod tabulkou blok **Odhad do konce roku
+(nezaúčtováno)**. Nic z něj není v účetnictví a po zaúčtování daně z příjmů
+zmizí. Načítá se samostatně až po tabulce, protože přepočítává náhled
+přiznání k DPPO. Aplikace v něm nic nového nepočítá, jen skládá čísla, která
+už ukazují jiné stránky:
+
+| Řádek | Odkud je |
+|---|---|
+| Výsledek hospodaření průběžně (zaúčtováno) | ř. 10 náhledu DPPO; shoduje se s řádkem Výsledek hospodaření před zdaněním výše (k poslednímu dni období) |
+| Nezaúčtované operace uzávěrky (časové rozlišení drobného majetku a nákladů příštích období, kurzové rozdíly, rozpuštění rozlišení z minulého roku) | projekce uzávěrky v náhledu DPPO, odkaz vede na uzávěrku období ([kap. 72](72_Uzaverka.md)) |
+| Opravné položky a dohadné položky | tatáž projekce; jde o návrhy, které účetní teprve potvrdí, proto jsou šedě a do odhadu se nesčítají |
+| Odpisy roku podle odpisového plánu (nezaúčtované) | karty majetku ([kap. 28](28_Majetek.md)); šedě a mimo součty, protože náhled DPPO odpisy zahrne až po jejich zaúčtování |
+| Odhad výsledku hospodaření před zdaněním, připočitatelné a odčitatelné položky (ř. 70 a ř. 170), základ daně, odhad daně | náhled DPPO ([§ 43.3](43_Dan_z_prijmu.md)) včetně ručních úprav základu, ztráty, darů a slev |
+| Zaplacené zálohy na daň a odhad doplatku nebo přeplatku | zálohy zadané v přiznání, jinak jistě spárované zálohy z evidence ([§ 43.4](43_Dan_z_prijmu.md)) |
+| Odhad výsledku hospodaření po zdanění | odhad výsledku před zdaněním minus odhad daně |
+
+U každého řádku je odkaz na stránku, ze které číslo pochází. Blok se
+nezobrazí u fyzické osoby, v uzavřeném roce, při filtru dimenze ani
+uživateli bez práva na přiznání k dani z příjmů.

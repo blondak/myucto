@@ -1576,7 +1576,46 @@ export interface StatementAccountsReport {
   }
 }
 
-// ── Saldokonto (audit 2026-07, D6/1) ───────────────────────────────────────
+/** Nezaúčtovaná uzávěrková operace z projekce náhledu DPPO (ClosingProjectionCalculator). */
+export interface YearEndClosingItem {
+  key: string
+  label_key: string
+  amount: number
+  sign: 1 | -1
+  /** Návrh k potvrzení účetní (opravné položky, dohady) — zobrazuje se, nesčítá. */
+  optional: boolean
+}
+
+export interface YearEndTaxEstimate {
+  applicable: boolean
+  reason: 'period_closed' | 'taxpayer_fo' | 'income_tax_posted' | 'tax_unavailable' | null
+  message?: string
+  period: { id: number; fiscal_year: number; starts_on: string; ends_on: string; status: string }
+  return_status?: 'none' | 'draft' | 'final'
+  vh_posted?: number
+  closing_items?: YearEndClosingItem[]
+  is_projection?: boolean
+  vh_before_tax?: number
+  increases?: number
+  decreases?: number
+  tax_base?: number
+  tax?: number
+  advances_paid?: number
+  advances_source?: 'return' | 'schedules' | 'none'
+  balance_due?: number
+  vh_after_tax?: number
+  depreciation?: {
+    assets: number
+    planned_accounting: number
+    posted_accounting: number
+    pending_accounting: number
+    planned_tax: number
+    confirmed_tax: number
+    pending_tax: number
+  } | null
+}
+
+// ── Saldokonto (audit 2026-07, D6/1)───────────────────────────────────────
 export interface SaldoParams {
   period_id: number
   as_of?: string
@@ -2209,6 +2248,9 @@ export const accountingApi = {
   /** Rozvaha a výsledovka po účtech s hospodářským výsledkem (zůstatky před uzávěrkou). */
   getStatementAccounts: (params: Omit<StatementParams, 'scope'>) =>
     api.get<StatementAccountsReport>('/accounting/reports/statement-accounts', { params }).then(r => r.data),
+  /** Odhad do konce otevřeného roku (náhled DPPO, uzávěrka, odpisy, zálohy) — samostatný request. */
+  getYearEndTaxEstimate: (periodId: number) =>
+    api.get<YearEndTaxEstimate>('/accounting/reports/statement-accounts/tax-estimate', { params: { period_id: periodId } }).then(r => r.data),
   /**
    * VZZ v ÚČELOVÉM členění. Bez úplné mapy funkcí backend výkaz NESESTAVÍ a vrátí
    * `function_map_incomplete` s výčtem nepřiřazených účtů — nepřiřazený náklad by z výkazu

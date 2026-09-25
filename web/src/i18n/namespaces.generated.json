@@ -571,7 +571,8 @@
     "accounting-income-statement": [
       "activation",
       "dimensions",
-      "reports"
+      "reports",
+      "taxReturn"
     ],
     "accounting-dimension-profit": [
       "dimensions"

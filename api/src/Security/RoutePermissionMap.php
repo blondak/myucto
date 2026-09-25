@@ -628,6 +628,9 @@ final class RoutePermissionMap
         // Zápočet faktury proti účtu — stejné právo jako vzájemné zápočty.
         ['GET', '#^/api/accounting/settlements(/|$)#', 'accounting.offsets', AccessLevel::READ],
         ['*', '#^/api/accounting/settlements(/|$)#', 'accounting.offsets', AccessLevel::WRITE],
+        // Odhad daně do konce roku k výsledovce po účtech — čísla náhledu DPPO, proto
+        // stejné právo jako přiznání (`reports`), ne obecné `accounting`.
+        ['GET', '#^/api/accounting/reports/statement-accounts/tax-estimate$#', 'reports', AccessLevel::READ],
         ['GET', '#^/api/accounting/journal(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/journal(/|$)#', 'accounting.journal.write', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/other-items(/|$)#', 'other_items', AccessLevel::READ],

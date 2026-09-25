@@ -13,6 +13,7 @@ import {
   type StatementParams,
 } from '@/api/accounting'
 import StatementAccountsTable from '@/components/accounting/StatementAccountsTable.vue'
+import YearEndTaxEstimate from '@/components/accounting/YearEndTaxEstimate.vue'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
@@ -273,6 +274,7 @@ onMounted(async () => {
         <template v-if="unit === 'thousands'"> · {{ t('reports.unit_thousands_note') }}</template>
       </div>
       <StatementAccountsTable :report="accountsReport" part="profit_loss" :format="fm" />
+      <YearEndTaxEstimate v-if="!accountsReport.closed && !accountsReport.dimension" :period-id="accountsReport.period.id" :format="fm" />
     </template>
 
     <template v-else-if="report">
