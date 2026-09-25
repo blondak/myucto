@@ -197,6 +197,7 @@ final class LedgerReportRepository
                        ca.id AS line_account_id, ca.account_code, ca.name AS line_account_name,
                        l.side, l.amount, l.line_no,
                        bt.statement_id AS source_statement_id,
+                       bt.bank_ref AS source_bank_ref,
                        cd.doc_number AS source_doc_number,
                        cd.register_id AS source_register_id,
                        ast.id AS source_asset_id,

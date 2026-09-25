@@ -647,6 +647,7 @@ final class JournalEntryRepository
                        u.name AS posted_by_name,
                        {$amountSelect}
                        COALESCE(bt.statement_id, rev_bt.statement_id) AS source_statement_id,
+                       COALESCE(bt.bank_ref, rev_bt.bank_ref) AS source_bank_ref,
                        COALESCE(cd.doc_number, rev_cd.doc_number) AS source_doc_number,
                        COALESCE(cd.register_id, rev_cd.register_id) AS source_register_id,
                        ast.id AS source_asset_id,
@@ -698,6 +699,15 @@ final class JournalEntryRepository
 
         return ['items' => $items, 'total' => $total];
     }
+
+    /**
+     * Bankovní zápis nese číslo v řadě účtu (BCR-08), ID pohybu z banky zůstává na pohybu.
+     * Vyhledávání podle čísla dokladu ho proto hledá i tam. Jeden placeholder (LIKE).
+     */
+    private const BANK_REF_MATCH = "(je.source_type = 'bank' AND EXISTS(
+                    SELECT 1 FROM bank_transactions bt_ref
+                     WHERE bt_ref.id = je.source_id AND bt_ref.bank_ref LIKE ? ESCAPE '='
+                ))";
 
     /** Korelovaný subselect s celkovou částkou zápisu (Σ MD = Σ Dal u vyváženého zápisu). */
     private const AMOUNT_SUBQUERY =
@@ -931,8 +941,9 @@ final class JournalEntryRepository
                     SELECT 1 FROM purchase_invoices pi
                      WHERE pi.id = je.source_id AND pi.supplier_id = je.supplier_id
                        AND (pi.vendor_invoice_number LIKE ? ESCAPE '=' OR pi.varsymbol LIKE ? ESCAPE '=')
-                )))";
-            array_push($params, $needle, $needle, $needle, $needle);
+                ))
+                OR " . self::BANK_REF_MATCH . ")";
+            array_push($params, $needle, $needle, $needle, $needle, $needle);
         }
         // Fulltext `q` — jedno vyhledávací pole napříč description + čísly dokladů
         // (Featura D, audit 2026-07 follow-up). ORuje se přes stejné zdroje jako
@@ -950,8 +961,9 @@ final class JournalEntryRepository
                     SELECT 1 FROM purchase_invoices pi
                      WHERE pi.id = je.source_id AND pi.supplier_id = je.supplier_id
                        AND (pi.vendor_invoice_number LIKE ? ESCAPE '=' OR pi.varsymbol LIKE ? ESCAPE '=')
-                )))";
-            array_push($params, $needle, $needle, $needle, $needle, $needle);
+                ))
+                OR " . self::BANK_REF_MATCH . ")";
+            array_push($params, $needle, $needle, $needle, $needle, $needle, $needle);
         }
         // Rozsah účtů (Featura D) — EXISTS na journal_entry_lines, indexováno přes
         // idx_jel_supplier_account. Chybějící mez se doplní neutrální hranicí.

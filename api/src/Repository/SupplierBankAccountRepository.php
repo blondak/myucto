@@ -11,7 +11,7 @@ use PDO;
 final class SupplierBankAccountRepository
 {
     private const COLUMNS = 'id, supplier_id, currency_id, label, account_number, bank_code, iban,
-        currency, account_canonical, kind, analytic_suffix, source, is_active, created_at, updated_at';
+        currency, account_canonical, kind, analytic_suffix, document_series, source, is_active, created_at, updated_at';
 
     public function __construct(
         private readonly Connection $db,
@@ -290,12 +290,60 @@ final class SupplierBankAccountRepository
         }
     }
 
-    /** @param array{kind?:string,label?:?string,is_active?:bool,analytic_suffix?:?string} $patch */
+    /**
+     * Dokladové řady, které už drží nějaký účet firmy (i neaktivní — jeho zápisy řadu nesou dál).
+     *
+     * @return array<string,true>
+     */
+    public function usedDocumentSeries(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT document_series FROM supplier_bank_accounts
+              WHERE supplier_id = ? AND document_series IS NOT NULL'
+        );
+        $stmt->execute([$supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $series) {
+            $out[(string) $series] = true;
+        }
+        return $out;
+    }
+
+    public function findByDocumentSeries(int $supplierId, string $series): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM supplier_bank_accounts
+              WHERE supplier_id = ? AND document_series = ? LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $series]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : $this->cast($row);
+    }
+
+    /**
+     * Přidělí řadu účtu, který ji ještě NEMÁ. False při souběhu (unique index
+     * uq_sba_document_series) i když ji účet mezitím dostal; volající si ji přečte znovu.
+     */
+    public function assignDocumentSeries(int $supplierId, int $id, string $series): bool
+    {
+        try {
+            $stmt = $this->db->pdo()->prepare(
+                'UPDATE supplier_bank_accounts SET document_series = ?
+                  WHERE supplier_id = ? AND id = ? AND document_series IS NULL'
+            );
+            $stmt->execute([$series, $supplierId, $id]);
+            return $stmt->rowCount() > 0;
+        } catch (\PDOException) {
+            return false;
+        }
+    }
+
+    /** @param array{kind?:string,label?:?string,is_active?:bool,analytic_suffix?:?string,document_series?:string} $patch */
     public function update(int $supplierId, int $id, array $patch): bool
     {
         $sets = [];
         $params = [];
-        foreach (['kind', 'label', 'analytic_suffix'] as $field) {
+        foreach (['kind', 'label', 'analytic_suffix', 'document_series'] as $field) {
             if (array_key_exists($field, $patch)) {
                 $sets[] = $field . ' = ?';
                 $params[] = $patch[$field];

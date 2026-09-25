@@ -244,7 +244,7 @@ if (!in_array('--no-analyze', $argv, true)) {
 // Auto-backfill po migracích — detekuje stale data a spouští příslušné skripty
 // s --apply. Skip pokud user dal --no-backfills (CI / read-only deploy).
 if (!in_array('--no-backfills', $argv, true)) {
-    runAutoBackfills($db, __DIR__);
+    runAutoBackfills($db, __DIR__, $connection);
 }
 
 /**
@@ -252,7 +252,7 @@ if (!in_array('--no-backfills', $argv, true)) {
  * Idempotentní: prázdné COUNT → skip skript. Výstup skriptu se streamuje na
  * stdout/stderr (passthru), aby uživatel viděl pokrok per řádek.
  */
-function runAutoBackfills(\PDO $db, string $binDir): void
+function runAutoBackfills(\PDO $db, string $binDir, Connection $connection): void
 {
     $checks = [
         [
@@ -320,6 +320,14 @@ function runAutoBackfills(\PDO $db, string $binDir): void
             'reason'  => 'příchozích dokladů v kořeni Dokumentů',
             'count'   => static fn (): int => (new \MyInvoice\Service\PurchaseInvoice\SubmissionFolderBackfill($db))->pending(),
             'script'  => 'backfill-submission-folders.php',
+        ],
+        [
+            // Bankovní zápisy v otevřených obdobích s číslem mimo řadu účtu (migrace 1896),
+            // viz BankDocumentNumberBackfill.
+            'name'    => 'bank-document-series',
+            'reason'  => 'bankovních zápisů k přečíslování na dokladovou řadu účtu',
+            'count'   => static fn (): int => (new \MyInvoice\Service\Accounting\Bank\BankDocumentNumberBackfill($connection))->pending(),
+            'script'  => 'bank-document-series-backfill.php',
         ],
     ];
 

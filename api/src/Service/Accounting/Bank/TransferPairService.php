@@ -152,7 +152,6 @@ final class TransferPairService
         $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $lines, [
             'entry_date' => (string) $tx['posted_at'],
             'document_date' => (string) $tx['posted_at'],
-            'document_no' => $this->documentNo($tx),
             'description' => $this->entryDescription($tx),
             'posted' => true,
             'user_id' => $userId,
@@ -520,12 +519,6 @@ final class TransferPairService
     private function effectiveCurrency(array $tx): string
     {
         return strtoupper((string) ($tx['currency'] ?? $tx['statement_currency'] ?? 'CZK'));
-    }
-
-    private function documentNo(array $tx): string
-    {
-        $ref = trim((string) ($tx['bank_ref'] ?? ''));
-        return $ref !== '' ? $ref : 'BANK-' . (int) $tx['id'];
     }
 
     /**
