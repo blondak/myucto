@@ -59,6 +59,8 @@ final class SchemaIntegrityService
                 => 'migrace starší řady, která z repozitáře zmizela; její změny nesou pozdější migrace',
             '1720_gopay_payout_account_no_default.sql'
                 => 'krátce vydaná a vrácená migrace; její efekt srovnává 1814_gopay_payout_account_default.sql',
+            '1897_card_clearing_removal.sql'
+                => 'krátce vydaná a vrácená migrace; smazané sloupce mezičlenu karet vrací 1898_card_clearing_restore.sql',
         ],
         'table' => [
             'bank_statement_owners'

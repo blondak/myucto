@@ -54,6 +54,8 @@ final class CreditCardPurchaseModeTest extends BankPostingTestCase
         $this->db->pdo()->prepare('DELETE FROM credit_card_settings WHERE supplier_id = ?')->execute([$this->supplierId]);
         $this->db->pdo()->prepare('DELETE FROM card_clearing_settings WHERE supplier_id = ?')->execute([$this->supplierId]);
         $this->container->get(CardClearingRegime::class)->forget($this->supplierId);
+        // Výchozí režim nákupů je napřímo; tyhle testy ověřují zapnutý mezičlen.
+        $this->container->get(CreditCardSettingsService::class)->save($this->supplierId, ['purchase_mode' => 'clearing'], $this->userId);
 
         $this->cards = $this->container->get(CreditCardAccountRepository::class);
         $this->cc = $this->container->get(CreditCardPostingService::class);

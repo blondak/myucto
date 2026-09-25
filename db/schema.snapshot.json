@@ -880,7 +880,8 @@
         "1893_purchase_invoice_extraction_review.sql",
         "1894_gopay_pending_movements.sql",
         "1895_journal_line_pairings.sql",
-        "1896_bank_document_series.sql"
+        "1896_bank_document_series.sql",
+        "1898_card_clearing_restore.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -3515,7 +3516,7 @@
                 "interest_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "opening_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "private_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
-                "purchase_mode": "enum('clearing','direct') NOT NULL DEFAULT 'clearing'",
+                "purchase_mode": "enum('clearing','direct') NOT NULL DEFAULT 'direct'",
                 "repayment_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "reward_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
