@@ -277,6 +277,102 @@ final class DppoReturnDataProviderTest extends TestCase
         self::assertSame(800.0, $byCode['549']['amount']);
     }
 
+    /**
+     * § 24 odst. 2 písm. w) ZDP: nabývací cena prodaných podílů (561P) je daňová jen do výše
+     * příjmů z prodeje (661), převis jde na ř. 40. Úhrn se sčítá přes všechny prodeje roku.
+     *
+     * @return iterable<string,array{0:list<array{0:string,1:string,2:float}>,1:float}>
+     */
+    public static function sharesSaleCases(): iterable
+    {
+        yield 'prodej se ztrátou' => [[['561P', 'debit', 1000.0], ['661', 'credit', 800.0]], 200.0];
+        yield 'prodej se ziskem' => [[['561P', 'debit', 800.0], ['661', 'credit', 1000.0]], 0.0];
+        yield 'bez prodeje' => [[['602', 'credit', 5000.0]], 0.0];
+        yield 'více prodejů v roce' => [[
+            ['561P', 'debit', 600.0], ['661', 'credit', 300.0],
+            ['561P', 'debit', 400.0], ['661', 'credit', 500.0],
+        ], 200.0];
+    }
+
+    /** @param list<array{0:string,1:string,2:float}> $lines */
+    #[\PHPUnit\Framework\Attributes\DataProvider('sharesSaleCases')]
+    public function testSharesSaleCostAboveProceedsIsAddedBackOnLine40(array $lines, float $expected): void
+    {
+        $this->securitiesFixture();
+        foreach ($lines as $i => [$code, $side, $amount]) {
+            $this->plEntry(500 + $i, '2025-06-30', 'manual', $this->accountId($code), $side, $amount);
+        }
+
+        $result = $this->provider->gather(1, 2025);
+        self::assertSame($expected, $result['securities_cost_excess']);
+        self::assertSame($expected, $result['securities_sale']['addback']);
+        self::assertSame($expected, \MyInvoice\Service\Tax\Return\DppoReturnCalculator::accountingAdjustments($result)[40],
+            'Převis 561P nad 661 je jedinou částí ř. 40 z účetnictví v tomto scénáři.');
+        self::assertSame([], array_values(array_filter($result['suggestions']['addbacks'], static fn (array $a): bool => $a['account_code'] === '561')));
+    }
+
+    /**
+     * Ostatní cenné papíry (561C) mohou být dluhopisy nebo papíry v reálné hodnotě, jejichž
+     * náklad je daňový celý (§ 24/2/r) — převis se proto jen nabídne k posouzení, ř. 40 nemění.
+     */
+    public function testOtherSecuritiesExcessIsOnlySuggestedNotAddedBack(): void
+    {
+        $this->securitiesFixture();
+        $this->plEntry(500, '2025-06-30', 'manual', $this->accountId('561C'), 'debit', 1000.0);
+        $this->plEntry(501, '2025-06-30', 'manual', $this->accountId('661'), 'credit', 800.0);
+
+        $result = $this->provider->gather(1, 2025);
+        self::assertSame(0.0, $result['securities_cost_excess']);
+        $suggestion = array_values(array_filter($result['suggestions']['addbacks'], static fn (array $a): bool => $a['account_code'] === '561'));
+        self::assertCount(1, $suggestion);
+        self::assertSame(200.0, $suggestion[0]['amount']);
+        self::assertSame('taxReturn.suggest_561', $suggestion[0]['hint_key']);
+    }
+
+    /** Nedaňově označený 561P už je celý v nedaňových nákladech — na ř. 40 se nesmí objevit dvakrát. */
+    public function testNonDeductibleSharesAccountIsNotCountedTwice(): void
+    {
+        $this->securitiesFixture();
+        $this->pdo->exec("UPDATE chart_of_accounts SET tax_deductibility = 'non_deductible' WHERE account_code = '561P'");
+        $this->plEntry(500, '2025-06-30', 'manual', $this->accountId('561P'), 'debit', 1000.0);
+        $this->plEntry(501, '2025-06-30', 'manual', $this->accountId('661'), 'credit', 800.0);
+
+        $result = $this->provider->gather(1, 2025);
+        self::assertSame(1000.0, $result['non_deductible_costs']);
+        self::assertSame(0.0, $result['securities_cost_excess']);
+        self::assertSame(1000.0, \MyInvoice\Service\Tax\Return\DppoReturnCalculator::accountingAdjustments($result)[40]);
+    }
+
+    /** Stejný koncept u FO s podvojným účetnictvím: převis 561P nad 661 se vyloučí z výdajů § 7. */
+    public function testDpfoDoubleEntryExcludesSharesExcessFromSection7Expenses(): void
+    {
+        $this->securitiesFixture();
+        $this->plEntry(500, '2025-06-30', 'manual', $this->accountId('561P'), 'debit', 1000.0);
+        $this->plEntry(501, '2025-06-30', 'manual', $this->accountId('661'), 'credit', 800.0);
+
+        $fo = (new \ReflectionClass(\MyInvoice\Service\Tax\Return\DpfoReturnDataProvider::class))->newInstanceWithoutConstructor();
+        (new \ReflectionProperty($fo, 'db'))->setValue($fo, $this->db);
+        (new \ReflectionProperty($fo, 'nonDeductibleCostsService'))->setValue($fo, new NonDeductibleCostsService($this->db));
+        [$revenues, $expenses] = (new \ReflectionMethod($fo, 'vhBase'))->invoke($fo, 1, 2025);
+        self::assertSame(800.0, $revenues);
+        self::assertSame(800.0, $expenses, 'Náklad 1 000 − nedaňový převis 200.');
+    }
+
+    private function securitiesFixture(): void
+    {
+        $this->pdo->exec("INSERT INTO accounting_periods (id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at, row_version) VALUES (1,1,2025,'2025-01-01','2025-12-31','open',NULL,'2025-01-01',1)");
+        $this->pdo->exec("INSERT INTO chart_of_accounts VALUES
+            (60,'561P','expense','deductible','Prodané podíly'),
+            (61,'561C','expense','deductible','Prodané ostatní cenné papíry'),
+            (62,'661','revenue','deductible','Tržby z prodeje cenných papírů a podílů'),
+            (63,'602','revenue','deductible','Tržby')");
+    }
+
+    private function accountId(string $code): int
+    {
+        return (int) $this->pdo->query("SELECT id FROM chart_of_accounts WHERE account_code = '{$code}'")->fetchColumn();
+    }
+
     /** Bez ClosingService (unit test / autowire fallback) je projekce prázdná: vh_projected == vh_posted. */
     public function testProjectionIsEmptyWithoutClosingService(): void
     {

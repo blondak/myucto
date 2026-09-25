@@ -20,6 +20,7 @@ use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
  *   - nedaňové náklady   = Σ nákladů na účtech tax_deductibility='non_deductible' (§25)
  *   - rozdíl odpisů      = depreciation_entries kind tax vs accounting za fiscal_year
  *   - můstek ZC          = rozdíl účetní a daňové ZC prodaného/likvidovaného majetku
+ *   - prodané podíly     = převis 561P nad 661 (§24/2/w, {@see SecuritiesSaleCostLimit})
  *
  * SQL konvence dle ClosingRepository / TaxBaseReportAction (posted_at IS NOT NULL,
  * reversed_by IS NULL, tenant l.supplier_id).
@@ -69,6 +70,8 @@ final class DppoReturnDataProvider
      *   disposal_tax_increase: float, disposal_tax_decrease: float,
      *   disposal_decrease_groups: array<string,float>,
      *   disposals: list<array<string,mixed>>,
+     *   securities_cost_excess: float,
+     *   securities_sale: array<string,mixed>,
      *   closing_projection: array<string,mixed>,
      *   legal_provisions: array<string,mixed>,
      *   suggestions: array{addbacks:list<array<string,mixed>>,deductions:list<array<string,mixed>>,unpaid_liabilities:array<string,mixed>},
@@ -97,6 +100,8 @@ final class DppoReturnDataProvider
                 'disposal_tax_decrease' => 0.0,
                 'disposal_decrease_groups' => [],
                 'disposals' => [],
+                'securities_cost_excess' => 0.0,
+                'securities_sale' => SecuritiesSaleCostLimit::empty(),
                 'closing_projection' => (new ClosingProjectionCalculator())->project(0.0, []),
                 'legal_provisions' => LegalProvisionLedgerService::empty(),
                 'suggestions' => ['addbacks' => [], 'deductions' => []],
@@ -116,6 +121,8 @@ final class DppoReturnDataProvider
         $relatedPartyFlag = $this->relatedPartyCountryFlag($supplierId, $startsOn, $endsOn);
         $relatedPartyAppendix = $this->relatedPartyAppendix($supplierId, $startsOn, $endsOn);
         [$disposalIncrease, $disposalDecrease, $disposals, $disposalWarnings, $disposalDecreaseGroups] = $this->disposalResiduals($supplierId, $startsOn, $endsOn);
+        $securities = (new SecuritiesSaleCostLimit($this->db))->forPeriod($supplierId, $startsOn, $endsOn);
+        [$securitiesSuggestion, $securitiesWarnings] = $this->securitiesSaleReview($securities);
         $projection = $this->closingProjection($supplierId, (int) $period['id'], $endsOn, $vh);
         // Tabulka C přílohy č. 1 II. oddílu (VetaG) — zákonné OP k pohledávkám (§8/§8a/§8b/§8c)
         // a zákonné rezervy (§7). Bez služby (unit testy nad SQLite) zůstane prázdný podklad
@@ -124,7 +131,7 @@ final class DppoReturnDataProvider
             ? $this->legalProvisions->forPeriod($supplierId, (int) $period['id'], $startsOn, $endsOn)
             : LegalProvisionLedgerService::empty();
         $suggestions = [
-            'addbacks' => $this->addbackSuggestions($supplierId, $startsOn, $endsOn),
+            'addbacks' => array_merge($this->addbackSuggestions($supplierId, $startsOn, $endsOn), $securitiesSuggestion),
             'deductions' => $this->deductionSuggestions($supplierId, $startsOn, $endsOn),
             // § 23/3/a/12 — dluhy po 30 měsících. Systém je NEPŘIPOČÍTÁVÁ sám: bod 12 má
             // výjimky, které z účetních dat rozpoznat nelze (nedaňový titul, insolvence,
@@ -163,10 +170,14 @@ final class DppoReturnDataProvider
             'disposal_tax_decrease' => $disposalDecrease,
             'disposal_decrease_groups' => $disposalDecreaseGroups,
             'disposals' => $disposals,
+            // § 24 odst. 2 písm. w) — převis nabývací ceny prodaných podílů nad příjmy
+            // z prodeje, automaticky na ř. 40 ({@see SecuritiesSaleCostLimit}).
+            'securities_cost_excess' => $securities['addback'],
+            'securities_sale' => $securities,
             'closing_projection' => $projection,
             'legal_provisions' => $legalProvisions,
             'suggestions' => $suggestions,
-            'warnings' => array_merge($warnings, $disposalWarnings),
+            'warnings' => array_merge($warnings, $disposalWarnings, $securitiesWarnings),
         ];
     }
 
@@ -278,6 +289,43 @@ final class DppoReturnDataProvider
             ];
         }
         return $out;
+    }
+
+    /**
+     * Prodej podílů a cenných papírů (§ 24 odst. 2 písm. w) ZDP): převis 561P nad 661 jde
+     * na ř. 40 automaticky, zbytek převisu (561C, 561 bez analytiky) jen jako návrh k posouzení
+     * — u dluhopisů a papírů oceňovaných reálnou hodnotou je náklad daňový celý (písm. r).
+     *
+     * @param array<string,mixed> $s výstup {@see SecuritiesSaleCostLimit::forPeriod()}
+     * @return array{0:list<array<string,mixed>>,1:list<string>}
+     */
+    private function securitiesSaleReview(array $s): array
+    {
+        $fmt = static fn (float $v): string => number_format($v, 2, ',', ' ') . ' Kč';
+        $suggestions = [];
+        $warnings = [];
+        if ($s['addback'] > 0.0) {
+            $warnings[] = 'Nabývací cena prodaných podílů (561P, ' . $fmt($s['shares_cost']) . ') převyšuje příjmy '
+                . 'z prodeje podílů a cenných papírů (661, ' . $fmt($s['income']) . '). Převis ' . $fmt($s['addback'])
+                . ' je podle § 24 odst. 2 písm. w) ZDP nedaňový a připočítá se na ř. 40.';
+        }
+        if ($s['shares_cost'] > 0.0) {
+            $warnings[] = 'Prodej podílů: § 24 odst. 2 písm. w) ZDP omezuje nabývací cenu každého podílu příjmem '
+                . 'z jeho vlastního prodeje. Automatický připočet porovnává jen úhrny 561P a 661, je tedy spodní mezí; '
+                . 'ztrátu z jednoho podílu kompenzovanou ziskem z jiného připočtěte ruční položkou. Je-li příjem '
+                . 'z převodu podílu osvobozen (§ 19 odst. 1 písm. ze) ZDP), je nedaňová celá nabývací cena '
+                . 'a příjem patří na ř. 110 — obojí zadejte ručně.';
+        }
+        if ($s['review_amount'] > 0.0) {
+            $suggestions[] = [
+                'account_code' => '561',
+                'name' => 'Prodané cenné papíry nad příjmy z prodeje',
+                'amount' => $s['review_amount'],
+                'hint_key' => 'taxReturn.suggest_561',
+                'already_non_deductible' => false,
+            ];
+        }
+        return [$suggestions, $warnings];
     }
 
     /**

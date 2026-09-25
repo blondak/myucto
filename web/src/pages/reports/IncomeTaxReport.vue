@@ -938,6 +938,19 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
               </tbody>
             </table>
           </div>
+          <div v-if="((state.podklady.securities_sale as any)?.accounts || []).length" class="bg-surface border border-neutral-200 rounded-lg p-4">
+            <div class="text-sm font-semibold mb-2">{{ t('taxReturn.po_securities_title') }}</div>
+            <table class="w-full text-sm">
+              <tbody>
+                <tr><td class="py-1">{{ t('taxReturn.po_securities_shares') }}</td><td class="text-right font-mono whitespace-nowrap">{{ formatMoney(Number((state.podklady.securities_sale as any).shares_cost ?? 0), 'CZK') }}</td></tr>
+                <tr class="border-t border-neutral-100"><td class="py-1">{{ t('taxReturn.po_securities_other') }}</td><td class="text-right font-mono whitespace-nowrap">{{ formatMoney(Number((state.podklady.securities_sale as any).other_cost ?? 0), 'CZK') }}</td></tr>
+                <tr class="border-t border-neutral-100"><td class="py-1">{{ t('taxReturn.po_securities_income') }}</td><td class="text-right font-mono whitespace-nowrap">{{ formatMoney(Number((state.podklady.securities_sale as any).income ?? 0), 'CZK') }}</td></tr>
+                <tr class="border-t border-neutral-100 font-semibold"><td class="py-1">{{ t('taxReturn.po_securities_addback') }}</td><td class="text-right font-mono whitespace-nowrap">{{ formatMoney(Number((state.podklady.securities_sale as any).addback ?? 0), 'CZK') }}</td></tr>
+                <tr v-if="Number((state.podklady.securities_sale as any).review_amount ?? 0) > 0" class="border-t border-neutral-100 text-warning-700"><td class="py-1">{{ t('taxReturn.po_securities_review') }}</td><td class="text-right font-mono whitespace-nowrap">{{ formatMoney(Number((state.podklady.securities_sale as any).review_amount), 'CZK') }}</td></tr>
+              </tbody>
+            </table>
+            <p class="text-xs text-neutral-500 mt-2">{{ t('taxReturn.po_securities_note') }}</p>
+          </div>
         </template>
         <template v-else>
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">

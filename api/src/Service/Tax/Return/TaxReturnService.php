@@ -1633,6 +1633,7 @@ final class TaxReturnService
                 'depreciation' => $data['depreciation'],
                 'disposal_nondeductible_residual' => $data['disposal_nondeductible_residual'],
                 'disposals' => $data['disposals'],
+                'securities_sale' => $data['securities_sale'] ?? SecuritiesSaleCostLimit::empty(),
                 // Feature 1 (projekce VH) + Feature 2 (auto-návrhy §25/§20/§34) pro náhled DPPO.
                 'closing_projection' => $data['closing_projection'] ?? null,
                 'suggestions' => $data['suggestions'] ?? ['addbacks' => [], 'deductions' => []],

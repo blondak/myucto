@@ -18,7 +18,8 @@ namespace MyInvoice\Service\Tax\Return;
  * Pipeline (§23–§35 ZDP, formulář DPPDP9):
  *   ř.10  VH před zdaněním (Σ 6xx − Σ 5xx mimo 59x)
  *   ř.40  výdaje neuznávané za náklady §25 (nedaňové účty + neuznatelná ZC vyřazení
- *         + účetní ZC vyřazení převyšující daňovou + add-back PHM při paušálu na dopravu §24/2/zt)
+ *         + účetní ZC vyřazení převyšující daňovou + nabývací cena prodaných podílů nad
+ *         příjmy z prodeje §24/2/w + add-back PHM při paušálu na dopravu §24/2/zt)
  *   ř.50  účetní odpisy převyšující daňové (zvýšení základu)
  *   ř.62  ostatní částky zvyšující základ §23 (ruční mimo paušál dopravy)
  *   ř.112 doplňková informace k §23/3 písm. c) — např. paušální výdaj na dopravu (§24/2/zt),
@@ -352,6 +353,7 @@ final class DppoReturnCalculator
             $itemLine(20, $increaseLines),
             $itemLine(30, $increaseLines),
             $this->line(40, '40', 'Výdaje neuznávané za náklady (§25)', $line40Reported, 'nedaňové účty + účetní ZC vyřazení převyšující daňovou'
+                . ((float) ($data['securities_cost_excess'] ?? 0) > 0 ? ' + nabývací cena prodaných podílů nad příjmy z prodeje (§24/2/w)' : '')
                 . ($flatRateTravelAddback > 0 ? ' + add-back PHM při paušálu na dopravu (§24/2/zt)' : '')),
             $this->line(50, '50', 'Účetní odpisy převyšující daňové', $line50, 'rozdíl odpisů (zvýšení)'),
             $itemLine(61, $increaseLines),
@@ -437,7 +439,8 @@ final class DppoReturnCalculator
 
     /**
      * Část ř. 40 a ř. 160, kterou přiznání bere z účetnictví a karet majetku (nedaňové účty,
-     * můstek ZC vyřazeného majetku), bez ručních vstupů. Převzetí podaného přiznání
+     * můstek ZC vyřazeného majetku, převis nabývací ceny prodaných podílů nad příjmy z prodeje
+     * podle § 24/2/w), bez ručních vstupů. Převzetí podaného přiznání
      * ({@see \MyInvoice\Service\Migration\Shared\FiledDppoInputs}) z ř. 40 a ř. 160 přebírá
      * jen zbytek nad ni, jinak by se tatáž částka v základu objevila dvakrát.
      *
@@ -450,7 +453,8 @@ final class DppoReturnCalculator
             40 => round(
                 round((float) ($data['non_deductible_costs'] ?? 0), 2)
                 + round((float) ($data['disposal_nondeductible_residual'] ?? 0), 2)
-                + max(0.0, round((float) ($data['disposal_tax_increase'] ?? 0), 2)),
+                + max(0.0, round((float) ($data['disposal_tax_increase'] ?? 0), 2))
+                + max(0.0, round((float) ($data['securities_cost_excess'] ?? 0), 2)),
                 2
             ),
             160 => max(0.0, round((float) ($data['disposal_tax_decrease'] ?? 0), 2)),

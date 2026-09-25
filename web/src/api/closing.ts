@@ -592,6 +592,15 @@ export interface TaxBaseAdjustments {
   period: { id: number; starts_on: string; ends_on: string }
   depreciation: { tax_total: number; accounting_total: number; difference: number; note: string }
   disposals: TaxBaseDisposalRow[]
+  /** § 24/2/w ZDP — stejná čísla jako ř. 40 přiznání DPPO (SecuritiesSaleCostLimit). */
+  securities?: {
+    shares_cost: number
+    other_cost: number
+    income: number
+    addback: number
+    review_amount: number
+    accounts: { account_code: string; name: string; kind: 'shares' | 'other' | 'income'; amount: number }[]
+  }
   info: {
     estimates_388_balance: number
     estimates_389_balance: number
