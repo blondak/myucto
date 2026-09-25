@@ -3,7 +3,8 @@
 declare(strict_types=1);
 
 /**
- * Denní záloha PDF souborů — storage/invoices/, storage/work-reports/, storage/purchase-invoices/
+ * Denní záloha PDF souborů — storage/invoices/, storage/invoices-imported/, storage/work-reports/,
+ * storage/purchase-invoices/
  * → ZIP do storage/backup/{dbname}-pdf-YYYY-MM-DD.zip.
  * Retention: 30 denních + 12 měsíčních (1. v měsíci se zachová déle).
  *
@@ -73,6 +74,9 @@ $sources = [
          'csv', 'txt', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'zip'],
         'storage/invoices',
     ],
+    // Originální PDF faktur převzatých z iDokladu a Fakturoidu. Znovu vyrobit nejdou,
+    // aplikace je jen zobrazuje; bez nich po obnově zůstane u faktury prázdný odkaz.
+    [\MyInvoice\Infrastructure\Config\RuntimePaths::storage('invoices-imported'), null, 'storage/invoices-imported'],
     [\MyInvoice\Infrastructure\Config\RuntimePaths::storage('work-reports'), ['pdf'], 'storage/work-reports'],
     // Přijaté faktury — archive PDF od dodavatelů (fáze 1 integrace forku) + sources/
     // se strojovými originály. Default storage/purchase-invoices; pokud user nastaví

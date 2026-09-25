@@ -73,9 +73,9 @@ final class PayrollBackupArchiveLayoutTest extends TestCase
             'entry',
         );
 
-        self::assertContains('payroll-documents/sup-1/aa/' . $paska, $cesty);
-        self::assertContains('payroll-period-exports/sup-1/bb/' . $archiv, $cesty);
-        self::assertContains('payroll-payment-exports/sup-1/cc/' . $prikaz, $cesty);
+        self::assertContains('storage/payroll-documents/sup-1/aa/' . $paska, $cesty);
+        self::assertContains('storage/payroll-period-exports/sup-1/bb/' . $archiv, $cesty);
+        self::assertContains('storage/payroll-payment-exports/sup-1/cc/' . $prikaz, $cesty);
         foreach ($cesty as $cesta) {
             self::assertStringNotContainsString('.tmp-', $cesta);
         }
@@ -105,12 +105,12 @@ final class PayrollBackupArchiveLayoutTest extends TestCase
         }
 
         // Soubor bez záznamu v databázi se nevynechává — je to nález, ne šum.
-        self::assertSame('neznamy', $druh['payroll-documents/sup-1/ee/' . $sirotek] ?? null);
-        self::assertArrayHasKey('payroll-documents/sup-1/dd/' . $otisk, $druh);
-        self::assertArrayHasKey('payroll-period-exports/sup-1/dd/' . $otisk, $druh);
+        self::assertSame('neznamy', $druh['storage/payroll-documents/sup-1/ee/' . $sirotek] ?? null);
+        self::assertArrayHasKey('storage/payroll-documents/sup-1/dd/' . $otisk, $druh);
+        self::assertArrayHasKey('storage/payroll-period-exports/sup-1/dd/' . $otisk, $druh);
         self::assertNotSame(
             'dokument',
-            $druh['payroll-period-exports/sup-1/dd/' . $otisk],
+            $druh['storage/payroll-period-exports/sup-1/dd/' . $otisk],
             'Zmrazená kopie v archivu se nesmí vydávat za originální dokument.',
         );
     }

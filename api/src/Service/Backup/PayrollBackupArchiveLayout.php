@@ -23,7 +23,8 @@ use PDO;
  * obsahově adresované. Čitelný název by z nich neudělal nic, co jde otevřít —
  * dešifrovat je stejně umí jen aplikace s odpovídající databází — zato by
  * rozbil obnovu, protože aplikace hledá obsah přesně pod otiskem. Záloha se
- * proto rozbaluje jedna ku jedné do `storage/` a člověku slouží `MANIFEST.csv`,
+ * proto rozbaluje jedna ku jedné do kořene instalace (cesty začínají `storage/`,
+ * stejně jako u ostatních záloh) a člověku slouží `MANIFEST.csv`,
  * kde je u každého otisku napsáno, co to je.
  *
  * Nedešifrovat je i věcné rozhodnutí: čitelná záloha výplatních pásek by byla
@@ -32,8 +33,8 @@ use PDO;
 final class PayrollBackupArchiveLayout
 {
     /**
-     * Kořeny mzdového úložiště. Klíč je zároveň prefix uvnitř ZIPu, takže
-     * rozbalením do `storage/` vznikne přesně původní rozložení.
+     * Kořeny mzdového úložiště. Uvnitř ZIPu leží pod `storage/{kořen}`, takže
+     * rozbalením do kořene instalace vznikne přesně původní rozložení.
      */
     private const ROOTS = [
         'payroll-documents',
@@ -46,7 +47,7 @@ final class PayrollBackupArchiveLayout
     /**
      * Soubory k zálohování.
      *
-     * @return list<array{source:string,entry:string}>
+     * @return list<array{source:string,entry:string,root:string}>
      */
     public function all(): array
     {
@@ -79,7 +80,8 @@ final class PayrollBackupArchiveLayout
                 );
                 $files[] = [
                     'source' => $item->getPathname(),
-                    'entry' => $root . '/' . $relative,
+                    'entry' => 'storage/' . $root . '/' . $relative,
+                    'root' => $root,
                 ];
             }
         }
@@ -121,7 +123,7 @@ final class PayrollBackupArchiveLayout
 
         $radky = ["cesta;druh;popis;velikost_b;vytvoreno"];
         foreach ($this->all() as $file) {
-            $koren = strstr($file['entry'], '/', true) ?: '';
+            $koren = $file['root'];
             $klic = basename($file['entry']);
             $popis = $podleKorene[$koren][$klic] ?? null;
             if ($popis === null && $koren === 'payroll-period-exports'
