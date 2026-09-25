@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem,
   type OssBulkResult, type OssBulkScope, type OssBulkSet, type OssBulkFailure, type OssReviewScope } from '@/api/invoices'
@@ -997,6 +998,9 @@ function mobileExtraFields(inv: InvoiceListItem): Array<{ key: string; label: st
 }
 watch(() => [tbl.isVisible('kh'), tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions')], () => { if (groups.value.length) load() })
 const groupByMonth = computed(() => tbl.flag('group_by_month', true))
+const listBoxes = ref<HTMLElement[]>([])
+const listBox = computed(() => (groupByMonth.value ? null : listBoxes.value[0] ?? null))
+useFillViewportHeight(listBox)
 function toggleGrouping() {
   tbl.setFlag('group_by_month', !groupByMonth.value)
   load()
@@ -1186,7 +1190,13 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
     <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
       <div>
         <h1 class="text-2xl font-semibold">{{ t('invoice.title') }}</h1>
-        <p class="text-sm text-neutral-500 mt-0.5">{{ t('invoice.subtitle_grouping') }}</p>
+        <p class="text-sm text-neutral-500 mt-0.5">
+          {{ t('invoice.subtitle_grouping') }}
+          <template v-if="!loading && total > 0">
+            <span class="ml-2 whitespace-nowrap">· {{ groupByMonth ? t('invoice.summary_count', { n: total, m: groups.length }) : t('invoice.summary_continuous', { n: total }) }}</span>
+            <span v-if="total > loadedCount" class="ml-2 whitespace-nowrap">· {{ t('common.loaded_count', { loaded: loadedCount, total }) }}</span>
+          </template>
+        </p>
       </div>
       <div class="flex items-center gap-2 flex-wrap justify-end">
         <template v-if="clientFilter !== '' && !auth.isClientRole && auth.canRead('clients')">
@@ -1456,17 +1466,13 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
     </div>
 
     <div v-else>
-      <div class="text-xs text-neutral-500 mb-3 flex items-center justify-between">
-        <span>{{ groupByMonth ? t('invoice.summary_count', { n: total, m: groups.length }) : t('invoice.summary_continuous', { n: total }) }}</span>
-        <span v-if="total > loadedCount">{{ t('common.loaded_count', { loaded: loadedCount, total }) }}</span>
-      </div>
 
       <!-- Skupiny po měsících -->
-      <section v-for="g in groups" :key="g.month" class="mb-5">
+      <section v-for="g in groups" :key="g.month" :class="groupByMonth ? 'mb-5' : ''">
         <!-- Měsíční rozdělovník ve stylu účetní knihy: název měsíce vlevo, součet
              v mono vpravo, mezi tím vzduch. Sticky, protože při dvaceti řádcích
              na obrazovce je „ve kterém měsíci jsem" ta nejčastější otázka. -->
-        <header v-if="groupByMonth" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-neutral-50/92 border border-neutral-200 rounded-t-lg px-4 py-2.5 mb-0">
+        <header v-if="groupByMonth" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-neutral-50/92 border border-neutral-200 rounded-t-lg px-3 py-2.5 mb-0">
           <div class="flex items-baseline gap-2.5 shrink-0">
             <h2 class="text-[13px] font-semibold uppercase tracking-[0.16em] text-neutral-800">{{ formatMonth(g.month) }}</h2>
             <span class="text-[11px] text-neutral-500 tabular-nums">{{ g.count }} {{ g.count === 1 ? t('invoice.doc_1') : (g.count < 5 ? t('invoice.doc_2_4') : t('invoice.doc_5plus')) }}</span>
@@ -1489,7 +1495,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
 
         <!-- Desktop: tabulka -->
         <div class="hidden md:block bg-surface border border-neutral-200" :class="groupByMonth ? 'border-t-0 rounded-b-lg' : 'rounded-lg'">
-          <div class="overflow-auto scrollbar-slim" :class="groupByMonth ? '' : 'max-h-[calc(100vh-20rem)]'" @scroll.passive="onListScroll">
+          <div ref="listBoxes" class="overflow-auto scrollbar-slim" @scroll.passive="onListScroll">
           <table class="w-full text-sm table-sticky-first singleline-list-table" :class="[tbl.densityClass.value, wrapColumns ? 'multirow-table' : '']">
             <thead class="bg-neutral-50 text-neutral-500 text-[11px] uppercase tracking-[0.11em] border-b border-neutral-200" :class="groupByMonth ? '' : 'sticky top-0 z-20 shadow-sm'">
               <tr>
@@ -1542,7 +1548,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                     />
                   </div>
                 </td>
-                <td v-if="tbl.isVisible('number')" class="px-4 py-2.5 font-mono text-xs">
+                <td v-if="tbl.isVisible('number')" class="px-3 py-2.5 font-mono text-xs">
                   <RouterLink class="row-link" :to="`/invoices/${inv.id}`" @click.stop @auxclick.stop>
                     <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
                     <span v-else class="text-neutral-400">{{ t('invoice.draft_id_short', { id: inv.id }) }}</span>
@@ -1554,27 +1560,27 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                   <span v-if="inv.oss_review_domestic" class="ml-1 px-1 py-0.5 rounded bg-warning-50 text-warning-700 text-[10px] font-sans font-semibold whitespace-nowrap"
                     :title="t('invoice.oss_review_badge.domestic_hint')">{{ t('invoice.oss_review_badge.domestic') }}</span>
                 </td>
-                <td v-if="tbl.isVisible('client')" class="px-4 py-2.5">
-                  <div class="font-medium text-neutral-900 truncate" :title="inv.client_company_name">{{ inv.client_company_name }}</div>
+                <td v-if="tbl.isVisible('client')" class="px-3 py-2.5">
+                  <div class="font-medium text-neutral-900 truncate max-w-[15rem]" :title="inv.client_company_name">{{ inv.client_company_name }}</div>
                   <div v-if="inv.project_name && !wrapColumns" class="text-xs text-neutral-500 truncate max-w-md">{{ inv.project_name }}</div>
                 </td>
-                <td v-if="tbl.isVisible('type')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ typeLabel(inv.invoice_type) }}</td>
-                <td v-if="tbl.isVisible('issued')" class="px-4 py-2.5 text-center text-xs">
+                <td v-if="tbl.isVisible('type')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ typeLabel(inv.invoice_type) }}</td>
+                <td v-if="tbl.isVisible('issued')" class="px-3 py-2.5 text-center text-xs">
                   <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
                 </td>
-                <td v-if="tbl.isVisible('due')" class="px-4 py-2.5 text-center text-xs">
+                <td v-if="tbl.isVisible('due')" class="px-3 py-2.5 text-center text-xs">
                   <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : 'text-neutral-600'">
                     {{ formatDate(inv.due_date) }}
                   </span>
                 </td>
                 <td
                   v-if="tbl.isVisible('amount')"
-                  class="amount-cell px-4 py-2.5 text-right font-mono font-semibold text-neutral-900"
+                  class="amount-cell px-3 py-2.5 text-right font-mono font-semibold text-neutral-900"
                   :style="{ '--bar': amountBarWidth(inv, g) }"
                 >
                   {{ formatMoney(inv.amount_to_pay ?? inv.total_with_vat, inv.currency) }}
                 </td>
-                <td v-if="tbl.isVisible('status')" class="px-4 py-2.5 text-center" @click.stop>
+                <td v-if="tbl.isVisible('status')" class="px-3 py-2.5 text-center" @click.stop>
                   <!-- Pro koncepty (s právem editace) zobraz tlačítko "Výkaz" místo "KONCEPT" badge — rychlý přístup k modalu. -->
                   <button v-if="inv.status === 'draft' && inv.invoice_type !== 'tax_document' && auth.canWrite('invoices')"
                     @click="openWorkReport(inv.id)"
@@ -1591,51 +1597,51 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                   <span v-if="inv.reminder_count > 0" class="ml-1 text-xs px-1 py-0.5 rounded bg-warning-50 text-warning-600 font-semibold"
                     :title="t('invoice.reminder_at', { count: inv.reminder_count, date: formatDate(inv.last_reminder_at) })">⚠ {{ inv.reminder_count }}</span>
                 </td>
-                <td v-if="tbl.isVisible('payment_vs')" class="px-4 py-2.5 font-mono text-xs text-neutral-600">
+                <td v-if="tbl.isVisible('payment_vs')" class="px-3 py-2.5 font-mono text-xs text-neutral-600">
                   <span v-if="inv.payment_varsymbol">{{ inv.payment_varsymbol }}</span>
                   <span v-else class="text-neutral-300">—</span>
                 </td>
-                <td v-if="tbl.isVisible('order_number')" class="px-4 py-2.5 font-mono text-xs text-neutral-600">
+                <td v-if="tbl.isVisible('order_number')" class="px-3 py-2.5 font-mono text-xs text-neutral-600">
                   <span v-if="inv.supplier_order_number">{{ inv.supplier_order_number }}</span>
                   <span v-else class="text-neutral-300">—</span>
                 </td>
-                <td v-if="tbl.isVisible('paid_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
+                <td v-if="tbl.isVisible('paid_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
                   <span v-if="inv.paid_at">{{ formatDate(inv.paid_at) }}</span>
                   <span v-else class="text-neutral-300">—</span>
                 </td>
-                <td v-if="tbl.isVisible('payment_method')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
+                <td v-if="tbl.isVisible('payment_method')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
                   {{ t(`payment_method.${inv.payment_method || 'bank_transfer'}`) }}
                 </td>
-                <td v-if="tbl.isVisible('booked_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
+                <td v-if="tbl.isVisible('booked_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
                   <span v-if="inv.booked_at">{{ formatDate(inv.booked_at) }}</span>
                   <span v-else class="text-neutral-300">—</span>
                 </td>
-                <td v-if="tbl.isVisible('exchange_rate')" class="px-4 py-2.5 text-right font-mono text-xs text-neutral-600">
+                <td v-if="tbl.isVisible('exchange_rate')" class="px-3 py-2.5 text-right font-mono text-xs text-neutral-600">
                   <span v-if="inv.currency !== 'CZK' && inv.exchange_rate">{{ formatRate(inv.exchange_rate) }}</span>
                   <span v-else class="text-neutral-300">—</span>
                 </td>
-                <td v-if="tbl.isVisible('amount_czk')" class="px-4 py-2.5 text-right font-mono text-xs text-neutral-600">
+                <td v-if="tbl.isVisible('amount_czk')" class="px-3 py-2.5 text-right font-mono text-xs text-neutral-600">
                   <!-- BE konvence: CZK dokladům kurz vždy 1 (i kdyby byl v datech); bez kurzu nepočítat -->
                   <span v-if="inv.currency === 'CZK'">{{ formatMoney(inv.total_with_vat, 'CZK') }}</span>
                   <span v-else-if="inv.exchange_rate">{{ formatMoney(inv.total_with_vat * inv.exchange_rate, 'CZK') }}</span>
                   <span v-else class="text-neutral-300">—</span>
                 </td>
-                <td v-if="tbl.isVisible('base')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_without_vat, inv.currency) }}</td>
-                <td v-if="tbl.isVisible('vat')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_vat, inv.currency) }}</td>
-                <td v-if="tbl.isVisible('total')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_with_vat, inv.currency) }}</td>
-                <td v-if="tbl.isVisible('project')" class="px-4 py-2.5 text-xs text-neutral-600">{{ inv.project_name || '—' }}</td>
-                <td v-if="tbl.isVisible('sent_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ inv.sent_at ? formatDate(inv.sent_at) : '—' }}</td>
-                <td v-if="tbl.isVisible('paid_total')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.paid_total ?? 0, inv.currency) }}</td>
-                <td v-if="tbl.isVisible('remaining_amount')" class="px-4 py-2.5 text-right font-mono text-xs"
+                <td v-if="tbl.isVisible('base')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_without_vat, inv.currency) }}</td>
+                <td v-if="tbl.isVisible('vat')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_vat, inv.currency) }}</td>
+                <td v-if="tbl.isVisible('total')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_with_vat, inv.currency) }}</td>
+                <td v-if="tbl.isVisible('project')" class="px-3 py-2.5 text-xs text-neutral-600">{{ inv.project_name || '—' }}</td>
+                <td v-if="tbl.isVisible('sent_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ inv.sent_at ? formatDate(inv.sent_at) : '—' }}</td>
+                <td v-if="tbl.isVisible('paid_total')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.paid_total ?? 0, inv.currency) }}</td>
+                <td v-if="tbl.isVisible('remaining_amount')" class="px-3 py-2.5 text-right font-mono text-xs"
                   :class="showsRemaining(inv) && (inv.remaining_amount ?? 0) > 0.005 ? 'text-neutral-900' : 'text-neutral-400'">
                   <span v-if="showsRemaining(inv)">{{ formatMoney(inv.remaining_amount ?? 0, inv.currency) }}</span>
                   <span v-else class="text-neutral-300">—</span>
                 </td>
-                <td v-if="tbl.isVisible('vat_breakdown')" class="px-4 py-2.5"><VatBreakdownCell :rows="inv.vat_breakdown" :currency="inv.currency" /></td>
-                <td v-if="tbl.isVisible('debit_accounts')" class="px-4 py-2.5 font-mono text-xs">{{ inv.debit_accounts?.join(', ') || '—' }}</td>
-                <td v-if="tbl.isVisible('credit_accounts')" class="px-4 py-2.5 font-mono text-xs">{{ inv.credit_accounts?.join(', ') || '—' }}</td>
-                <td v-if="tbl.isVisible('kh')" class="px-4 py-2.5 font-mono text-xs">{{ inv.kh_sections?.join(', ') || '—' }}</td>
-                <td v-if="tbl.isVisible('dimensions')" class="px-4 py-2.5 text-xs max-w-64 truncate" :title="inv.dimension_labels?.join(' · ')">{{ inv.dimension_labels?.join(' · ') || '—' }}</td>
+                <td v-if="tbl.isVisible('vat_breakdown')" class="px-3 py-2.5"><VatBreakdownCell :rows="inv.vat_breakdown" :currency="inv.currency" /></td>
+                <td v-if="tbl.isVisible('debit_accounts')" class="px-3 py-2.5 font-mono text-xs">{{ inv.debit_accounts?.join(', ') || '—' }}</td>
+                <td v-if="tbl.isVisible('credit_accounts')" class="px-3 py-2.5 font-mono text-xs">{{ inv.credit_accounts?.join(', ') || '—' }}</td>
+                <td v-if="tbl.isVisible('kh')" class="px-3 py-2.5 font-mono text-xs">{{ inv.kh_sections?.join(', ') || '—' }}</td>
+                <td v-if="tbl.isVisible('dimensions')" class="px-3 py-2.5 text-xs max-w-64 truncate" :title="inv.dimension_labels?.join(' · ')">{{ inv.dimension_labels?.join(' · ') || '—' }}</td>
                 <td v-if="tbl.isVisible('locked')" class="px-2 py-2.5 text-center">
                   <PostingBadge v-if="inv.locked?.journal_entry_id"
                     :booked-at="inv.booked_at" :journal-entry-id="inv.locked.journal_entry_id" />

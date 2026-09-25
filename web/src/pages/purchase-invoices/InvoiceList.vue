@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -371,6 +372,9 @@ function mobileExtraFields(inv: PurchaseInvoiceListItem): Array<{ key: string; l
 }
 watch(() => [tbl.isVisible('kh'), tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions')], () => { if (groups.value.length) load() })
 const groupByMonth = computed(() => tbl.flag('group_by_month', true))
+const listBoxes = ref<HTMLElement[]>([])
+const listBox = computed(() => (groupByMonth.value ? null : listBoxes.value[0] ?? null))
+useFillViewportHeight(listBox)
 function toggleGrouping() {
   tbl.setFlag('group_by_month', !groupByMonth.value)
   load()
@@ -954,7 +958,13 @@ async function bulkSetKind() {
     <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
       <div>
         <h1 class="text-2xl font-semibold">{{ t('purchase_invoice.title') }}</h1>
-        <p class="text-sm text-neutral-500 mt-0.5">{{ t('purchase_invoice.subtitle') }}</p>
+        <p class="text-sm text-neutral-500 mt-0.5">
+          {{ t('purchase_invoice.subtitle') }}
+          <template v-if="!loading && total > 0">
+            <span class="ml-2 whitespace-nowrap">· {{ t('purchase_invoice.summary_count', { count: total }) }}</span>
+            <span v-if="loadedCount < total" class="ml-2 whitespace-nowrap">· {{ t('common.loaded_count', { loaded: loadedCount, total }) }}</span>
+          </template>
+        </p>
       </div>
 
       <div class="flex items-center gap-2 flex-wrap">
@@ -1243,17 +1253,13 @@ async function bulkSetKind() {
     </div>
 
     <div v-else>
-      <div class="text-xs text-neutral-500 mb-3 flex items-center justify-between">
-        <span>{{ t('purchase_invoice.summary_count', { count: total }) }}</span>
-        <span v-if="loadedCount < total">{{ t('common.loaded_count', { loaded: loadedCount, total }) }}</span>
-      </div>
 
       <!-- ═══ Skupiny po měsících ═══ -->
-      <section v-for="g in groups" :key="g.month" class="mb-5">
+      <section v-for="g in groups" :key="g.month" :class="groupByMonth ? 'mb-5' : ''">
         <!-- Měsíční rozdělovník ve stylu účetní knihy — stejný vzor jako u vydaných
              faktur: název měsíce vlevo, hairline přes volné místo, součet v mono
              vpravo. Součty se musí umět zalomit, jinak by na mobilu vytlačily stránku. -->
-        <header v-if="groupByMonth" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-neutral-50/92 border border-neutral-200 rounded-t-lg px-4 py-2.5 mb-0">
+        <header v-if="groupByMonth" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-neutral-50/92 border border-neutral-200 rounded-t-lg px-3 py-2.5 mb-0">
           <div class="flex items-baseline gap-2.5 shrink-0">
             <h2 class="text-[13px] font-semibold uppercase tracking-[0.16em] text-neutral-800">{{ formatMonth(g.month) }}</h2>
             <span class="text-[11px] text-neutral-500 tabular-nums">{{ g.count }}</span>
@@ -1269,7 +1275,7 @@ async function bulkSetKind() {
 
         <!-- Desktop: tabulka -->
         <div class="hidden md:block bg-surface border border-neutral-200" :class="groupByMonth ? 'border-t-0 rounded-b-lg' : 'rounded-lg'">
-          <div class="overflow-auto scrollbar-slim" :class="groupByMonth ? '' : 'max-h-[calc(100vh-20rem)]'" @scroll.passive="onListScroll">
+          <div ref="listBoxes" class="overflow-auto scrollbar-slim" @scroll.passive="onListScroll">
             <table class="w-full text-sm table-sticky-first singleline-list-table" :class="[tbl.densityClass.value, wrapColumns ? 'multirow-table purchase-multirow-table' : '']">
               <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide" :class="groupByMonth ? '' : 'sticky top-0 z-20 shadow-sm'">
                 <tr>
@@ -1321,17 +1327,17 @@ async function bulkSetKind() {
                       />
                     </div>
                   </td>
-                  <td v-if="tbl.isVisible('number')" class="px-4 py-2.5 font-mono text-xs">
+                  <td v-if="tbl.isVisible('number')" class="px-3 py-2.5 font-mono text-xs">
                     <RouterLink class="row-link" :to="`/purchase-invoices/${inv.id}`" @click.stop @auxclick.stop>
                       <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
                       <span v-else class="text-neutral-400">#{{ inv.id }}</span>
                     </RouterLink>
                   </td>
-                  <td v-if="tbl.isVisible('vendor')" class="px-4 py-2.5">
-                    <div class="font-medium text-neutral-900 truncate" :title="inv.vendor_company_name">{{ inv.vendor_company_name }}</div>
+                  <td v-if="tbl.isVisible('vendor')" class="px-3 py-2.5">
+                    <div class="font-medium text-neutral-900 truncate max-w-[15rem]" :title="inv.vendor_company_name">{{ inv.vendor_company_name }}</div>
                   </td>
-                  <td v-if="tbl.isVisible('vendor_ic')" class="px-4 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.vendor_ic || '—' }}</td>
-                  <td v-if="tbl.isVisible('vendor_number')" class="px-4 py-2.5 font-mono text-xs text-neutral-600">
+                  <td v-if="tbl.isVisible('vendor_ic')" class="px-3 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.vendor_ic || '—' }}</td>
+                  <td v-if="tbl.isVisible('vendor_number')" class="px-3 py-2.5 font-mono text-xs text-neutral-600">
                     <div class="flex items-center gap-1.5">
                       <span
                         v-if="inv.extraction_warning"
@@ -1356,23 +1362,23 @@ async function bulkSetKind() {
                       <span>{{ inv.vendor_invoice_number }}</span>
                     </div>
                   </td>
-                  <td v-if="tbl.isVisible('kind')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ t(`purchase_invoice.document_kind.${inv.document_kind}`) }}</td>
-                  <td v-if="tbl.isVisible('tax_date')" class="px-4 py-2.5 text-center text-xs">
+                  <td v-if="tbl.isVisible('kind')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ t(`purchase_invoice.document_kind.${inv.document_kind}`) }}</td>
+                  <td v-if="tbl.isVisible('tax_date')" class="px-3 py-2.5 text-center text-xs">
                     <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
                   </td>
-                  <td v-if="tbl.isVisible('due_date')" class="px-4 py-2.5 text-center text-xs">
+                  <td v-if="tbl.isVisible('due_date')" class="px-3 py-2.5 text-center text-xs">
                     <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : 'text-neutral-600'">
                       {{ formatDate(inv.due_date) }}
                     </span>
                   </td>
                   <td
                     v-if="tbl.isVisible('amount')"
-                    class="amount-cell px-4 py-2.5 text-right font-mono font-semibold text-neutral-900"
+                    class="amount-cell px-3 py-2.5 text-right font-mono font-semibold text-neutral-900"
                     :style="{ '--bar': amountBarWidth(inv, g) }"
                   >
                     {{ formatMoney(inv.total_with_vat, inv.currency) }}
                   </td>
-                  <td v-if="tbl.isVisible('status')" class="px-4 py-2.5 text-center">
+                  <td v-if="tbl.isVisible('status')" class="px-3 py-2.5 text-center">
                     <span class="text-xs px-2 py-0.5 rounded" :class="statusBadgeClass(inv.status)">
                       {{ t(`purchase_invoice.status.${inv.status}`) }}
                     </span>
@@ -1390,44 +1396,44 @@ async function bulkSetKind() {
                       </span>
                     </div>
                   </td>
-                  <td v-if="tbl.isVisible('paid_amount')" class="px-4 py-2.5 text-right font-mono text-xs text-neutral-600">
+                  <td v-if="tbl.isVisible('paid_amount')" class="px-3 py-2.5 text-right font-mono text-xs text-neutral-600">
                     <span v-if="showsPayment(inv)">{{ formatMoney(inv.paid_amount ?? 0, inv.currency) }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('remaining_amount')" class="px-4 py-2.5 text-right font-mono text-xs" :class="remainingClass(inv)">
+                  <td v-if="tbl.isVisible('remaining_amount')" class="px-3 py-2.5 text-right font-mono text-xs" :class="remainingClass(inv)">
                     <span v-if="showsPayment(inv)">{{ formatMoney(inv.remaining_amount ?? 0, inv.currency) }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('paid_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
+                  <td v-if="tbl.isVisible('paid_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
                     <span v-if="inv.paid_at">{{ formatDate(inv.paid_at) }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('booked_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
+                  <td v-if="tbl.isVisible('booked_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
                     <span v-if="inv.booked_at">{{ formatDate(inv.booked_at) }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('exchange_rate')" class="px-4 py-2.5 text-right font-mono text-xs text-neutral-600">
+                  <td v-if="tbl.isVisible('exchange_rate')" class="px-3 py-2.5 text-right font-mono text-xs text-neutral-600">
                     <span v-if="inv.currency !== 'CZK' && inv.exchange_rate">{{ formatRate(inv.exchange_rate) }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('vat_deduction')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
+                  <td v-if="tbl.isVisible('vat_deduction')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
                     {{ vatDeductionLabel(inv) }}
                   </td>
-                  <td v-if="tbl.isVisible('expense_category')" class="px-4 py-2.5 text-xs text-neutral-600">
+                  <td v-if="tbl.isVisible('expense_category')" class="px-3 py-2.5 text-xs text-neutral-600">
                     <span v-if="inv.expense_category_label">{{ inv.expense_category_label }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('base')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_without_vat, inv.currency) }}</td>
-                  <td v-if="tbl.isVisible('vat')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_vat, inv.currency) }}</td>
-                  <td v-if="tbl.isVisible('balance')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.amount_to_pay, inv.currency) }}</td>
-                  <td v-if="tbl.isVisible('project')" class="px-4 py-2.5 text-xs text-neutral-600">{{ inv.project_name || '—' }}</td>
-                  <td v-if="tbl.isVisible('received_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ inv.received_at ? formatDate(inv.received_at) : '—' }}</td>
-                  <td v-if="tbl.isVisible('payment_ordered_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ inv.payment_ordered_at ? formatDate(inv.payment_ordered_at) : '—' }}</td>
-                  <td v-if="tbl.isVisible('vat_breakdown')" class="px-4 py-2.5"><VatBreakdownCell :rows="inv.vat_breakdown" :currency="inv.currency" /></td>
-                  <td v-if="tbl.isVisible('debit_accounts')" class="px-4 py-2.5 font-mono text-xs">{{ inv.debit_accounts?.join(', ') || '—' }}</td>
-                  <td v-if="tbl.isVisible('credit_accounts')" class="px-4 py-2.5 font-mono text-xs">{{ inv.credit_accounts?.join(', ') || '—' }}</td>
-                <td v-if="tbl.isVisible('kh')" class="px-4 py-2.5 font-mono text-xs">{{ inv.kh_sections?.join(', ') || '—' }}</td>
-                <td v-if="tbl.isVisible('dimensions')" class="px-4 py-2.5 text-xs max-w-64 truncate" :title="inv.dimension_labels?.join(' · ')">{{ inv.dimension_labels?.join(' · ') || '—' }}</td>
+                  <td v-if="tbl.isVisible('base')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_without_vat, inv.currency) }}</td>
+                  <td v-if="tbl.isVisible('vat')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_vat, inv.currency) }}</td>
+                  <td v-if="tbl.isVisible('balance')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.amount_to_pay, inv.currency) }}</td>
+                  <td v-if="tbl.isVisible('project')" class="px-3 py-2.5 text-xs text-neutral-600">{{ inv.project_name || '—' }}</td>
+                  <td v-if="tbl.isVisible('received_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ inv.received_at ? formatDate(inv.received_at) : '—' }}</td>
+                  <td v-if="tbl.isVisible('payment_ordered_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ inv.payment_ordered_at ? formatDate(inv.payment_ordered_at) : '—' }}</td>
+                  <td v-if="tbl.isVisible('vat_breakdown')" class="px-3 py-2.5"><VatBreakdownCell :rows="inv.vat_breakdown" :currency="inv.currency" /></td>
+                  <td v-if="tbl.isVisible('debit_accounts')" class="px-3 py-2.5 font-mono text-xs">{{ inv.debit_accounts?.join(', ') || '—' }}</td>
+                  <td v-if="tbl.isVisible('credit_accounts')" class="px-3 py-2.5 font-mono text-xs">{{ inv.credit_accounts?.join(', ') || '—' }}</td>
+                <td v-if="tbl.isVisible('kh')" class="px-3 py-2.5 font-mono text-xs">{{ inv.kh_sections?.join(', ') || '—' }}</td>
+                <td v-if="tbl.isVisible('dimensions')" class="px-3 py-2.5 text-xs max-w-64 truncate" :title="inv.dimension_labels?.join(' · ')">{{ inv.dimension_labels?.join(' · ') || '—' }}</td>
                   <td v-if="tbl.isVisible('locked')" class="px-2 py-2.5 text-center">
                     <PostingBadge v-if="inv.locked?.journal_entry_id"
                       :booked-at="inv.booked_at" :journal-entry-id="inv.locked.journal_entry_id" />
