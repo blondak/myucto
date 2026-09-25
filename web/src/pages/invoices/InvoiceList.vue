@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import ListLoadingSpinner from '@/components/ui/ListLoadingSpinner.vue'
 import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem,
@@ -1699,7 +1700,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         </div>
 
         <!-- Mobile: karty -->
-        <div class="md:hidden bg-surface border border-t-0 border-neutral-200 rounded-b-lg divide-y divide-neutral-100 overflow-y-auto scrollbar-slim" :class="groupByMonth ? '' : 'max-h-[calc(100vh-15rem)]'" @scroll.passive="onListScroll">
+        <div class="md:hidden bg-surface border border-t-0 border-neutral-200 rounded-b-lg divide-y divide-neutral-100">
           <div
             v-for="inv in g.invoices"
             :key="`m-${inv.id}`"
@@ -1792,10 +1793,10 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         </div>
       </section>
 
-      <div v-if="page < pages" ref="loadMoreTarget" class="text-center text-sm text-neutral-500 h-6 mt-2 pointer-fine-hidden">
-        <span v-if="loadingMore">{{ t('common.loading_more') }}</span>
+      <div v-if="page < pages" ref="loadMoreTarget" class="text-center text-sm text-neutral-500 pointer-fine-hidden">
       </div>
     </div>
+    <ListLoadingSpinner :show="loading || loadingMore" />
 
     <div v-if="bulkPdfOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" @click.self="bulkPdfOpen = false">
       <div class="bg-surface rounded-lg shadow-xl w-full max-w-md p-5 space-y-4">

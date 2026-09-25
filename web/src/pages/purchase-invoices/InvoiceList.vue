@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import ListLoadingSpinner from '@/components/ui/ListLoadingSpinner.vue'
 import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -1491,7 +1492,7 @@ async function bulkSetKind() {
         </div>
 
         <!-- Mobile: karty -->
-        <div class="md:hidden bg-surface border border-t-0 border-neutral-200 rounded-b-lg divide-y divide-neutral-100 overflow-y-auto scrollbar-slim" :class="groupByMonth ? '' : 'max-h-[calc(100vh-15rem)]'" @scroll.passive="onListScroll">
+        <div class="md:hidden bg-surface border border-t-0 border-neutral-200 rounded-b-lg divide-y divide-neutral-100">
           <div
             v-for="inv in g.invoices"
             :key="`m-${inv.id}`"
@@ -1602,10 +1603,10 @@ async function bulkSetKind() {
         </div>
       </section>
 
-      <div v-if="page < pages" ref="loadMoreTarget" class="text-center text-sm text-neutral-500 h-6 mt-2 pointer-fine-hidden">
-        <span v-if="loadingMore">{{ t('common.loading_more') }}</span>
+      <div v-if="page < pages" ref="loadMoreTarget" class="text-center text-sm text-neutral-500 pointer-fine-hidden">
       </div>
     </div>
+    <ListLoadingSpinner :show="loading || loadingMore" />
     <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" @close="onReviewClosed" />
   </div>
 </template>

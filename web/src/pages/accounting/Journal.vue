@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed, watch, useId } from 'vue'
+import ListLoadingSpinner from '@/components/ui/ListLoadingSpinner.vue'
 import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
@@ -1121,7 +1122,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       <!-- Mobil: stack karet. Sloupce, které si uživatel skryl přes ColumnPicker,
            se neskrývají — picker je desktopový ovladač a na kartě jde o jiné,
            vertikální rozvržení, kde se zápis stejně vejde celý. -->
-      <div class="md:hidden divide-y divide-neutral-100 overflow-y-auto scrollbar-slim max-h-[calc(100vh-15rem)]" @scroll.passive="onListScroll">
+      <div class="md:hidden divide-y divide-neutral-100">
         <div v-for="e in entries" :key="`m-${e.id}`"
           :class="isExpanded(e.id) ? 'bg-primary-50/60' : ''">
           <button type="button" class="cursor-pointer w-full text-left p-3 space-y-1.5"
@@ -1197,10 +1198,10 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
     </div>
 
     <div v-if="!loading && total > perPage" class="text-center text-sm">
-      <div v-if="page < totalPages" ref="loadMoreTarget" class="text-sm text-neutral-500 h-6 mt-2 pointer-fine-hidden">
-        <span v-if="loadingMore">{{ t('common.loading_more') }}</span>
+      <div v-if="page < totalPages" ref="loadMoreTarget" class="text-center text-sm text-neutral-500 pointer-fine-hidden">
       </div>
     </div>
+    <ListLoadingSpinner :show="loading || loadingMore" />
 
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
       @close="sourceDrawerEntryId = null" @focus-entry="onFocusEntry" />
