@@ -150,7 +150,7 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="max-w-4xl">
+  <div class="max-w-6xl">
     <div class="bg-primary-50 border border-primary-200 rounded-lg p-4 mb-4 text-sm text-neutral-700">
       <p class="font-medium text-primary-800 mb-1">{{ t('bank.analytics.explainer_title') }}</p>
       <p>{{ t('bank.analytics.explainer_body') }}</p>
