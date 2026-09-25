@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Accounting;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
@@ -360,6 +361,141 @@ final class SaldoReportTest extends TestCase
         self::assertNotNull($p);
         self::assertSame(self::cents(605.00), self::cents($p['items'][0]['booked_czk']), 'Předpis přichází už netto o zúčtovanou zálohu.');
         self::assertSame(self::cents(605.00), self::cents($p['items'][0]['remaining_czk']));
+    }
+
+    /**
+     * Záloha inkasovaná přímo na 311 s DDKP, ale ještě bez konečné faktury: hlavní kniha
+     * drží na 311 přijatou zálohu bez DPH (221 MD / 311 D 1210, DDKP 311 MD / 343 D 210).
+     * Saldokonto ji dřív neukázalo vůbec (DDKP uzavřela záloha, inkaso nemělo doklad)
+     * a konfrontace hlásila rozdíl −1000. Položka musí sedět k libovolnému dni a po
+     * konečné faktuře zmizet. Uzávěrková kontrola K3 přitom DDKP nesmí hlásit jako
+     * zaplacený doklad s otevřeným saldem.
+     */
+    public function testProformaPaidStraightToReceivableWithTaxDocumentStaysOpenUntilFinalInvoice(): void
+    {
+        $client = $this->client('Záloha s DDKP s.r.o.');
+
+        $proforma = $this->proforma($client, 1210.00, self::YEAR . '-05-01', self::YEAR . '-05-08');
+        $txId = $this->bankInvoicePayment($proforma, 1210.00, self::YEAR . '-05-05');
+        $this->posting->postDocument($this->supplierId, 'bank', $txId, [
+            self::l('221', 'debit', 1210.00),
+            self::l('311', 'credit', 1210.00),
+        ], ['entry_date' => self::YEAR . '-05-05', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $ddkp = $this->invoice($client, 1210.00, self::YEAR . '-05-06', self::YEAR . '-05-06');
+        $this->db->pdo()->prepare(
+            "UPDATE invoices SET invoice_type = 'tax_document', parent_invoice_id = ?, advance_paid_amount = ?,
+                                 status = 'paid', paid_at = ? WHERE id = ?"
+        )->execute([$proforma, 1210.00, self::YEAR . '-05-06', $ddkp]);
+        $this->postInvoice($ddkp, [
+            self::l('311', 'debit', 210.00),
+            self::l('343', 'credit', 210.00),
+        ], self::YEAR . '-05-06');
+
+        $final = $this->invoice($client, 1210.00, self::YEAR . '-06-10', self::YEAR . '-06-24');
+        $this->db->pdo()->prepare(
+            "UPDATE invoices SET parent_invoice_id = ?, advance_paid_amount = ?, status = 'paid', paid_at = ? WHERE id = ?"
+        )->execute([$proforma, 1210.00, self::YEAR . '-06-10', $final]);
+        $this->postInvoice($final, [
+            self::l('311', 'debit', 1210.00),
+            self::l('602', 'credit', 1000.00),
+            self::l('343', 'credit', 210.00),
+            self::l('343', 'debit', 210.00),
+            self::l('311', 'credit', 210.00),
+        ], self::YEAR . '-06-10');
+
+        $expect = [
+            self::YEAR . '-05-04' => 0.00,
+            self::YEAR . '-05-05' => -1210.00,
+            self::YEAR . '-05-31' => -1000.00,
+            self::YEAR . '-06-10' => 0.00,
+        ];
+        foreach ($expect as $asOf => $balance) {
+            $acc = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, $asOf, '311'), '311');
+            self::assertNotNull($acc, $asOf);
+            self::assertSame(self::cents($balance), self::cents($acc['gl_balance']), "HK 311 k {$asOf}");
+            self::assertSame(self::cents($balance), self::cents($acc['open_items_total']), "Σ položek k {$asOf}");
+            self::assertSame(0, self::cents($acc['difference']), "Rozdíl konfrontace k {$asOf}");
+
+            $p = $this->partner($acc, $client);
+            if ($balance === 0.00) {
+                self::assertNull($p, "Bez otevřené zálohy k {$asOf}");
+                continue;
+            }
+            self::assertNotNull($p, $asOf);
+            self::assertCount(1, $p['items'], $asOf);
+            self::assertSame($proforma, (int) $p['items'][0]['doc_id'], 'Položkou je proforma, ke které patří inkaso.');
+            self::assertSame(self::cents($balance), self::cents($p['items'][0]['remaining_czk']), $asOf);
+        }
+
+        $closing = new ClosingRepository($this->db);
+        foreach ([self::YEAR . '-05-31', self::YEAR . '-06-30'] as $asOf) {
+            $flagged = array_values(array_filter(
+                $closing->paidInvoicesOpenSaldo($this->supplierId, $asOf),
+                static fn (array $r): bool => in_array((int) $r['id'], [$proforma, $ddkp, $final], true),
+            ));
+            self::assertSame([], $flagged, "K3 nesmí hlásit zálohu s DDKP k {$asOf}");
+        }
+    }
+
+    /**
+     * Protějšek předchozího testu s výchozími předkontacemi: inkaso 221/324, DDKP 324/343,
+     * zúčtování zálohy v konečné faktuře 324/311. Záloha čeká na 324, 311 zůstává čisté
+     * a položka přijaté zálohy se na 311 objevit nesmí.
+     */
+    public function testAdvanceOn324WithTaxDocumentKeepsReceivableClean(): void
+    {
+        $client = $this->client('Záloha přes 324 s DDKP s.r.o.');
+
+        $proforma = $this->proforma($client, 1210.00, self::YEAR . '-05-01', self::YEAR . '-05-08');
+        $txId = $this->bankInvoicePayment($proforma, 1210.00, self::YEAR . '-05-05');
+        $this->posting->postDocument($this->supplierId, 'bank', $txId, [
+            self::l('221', 'debit', 1210.00),
+            self::l('324', 'credit', 1210.00),
+        ], ['entry_date' => self::YEAR . '-05-05', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $ddkp = $this->invoice($client, 1210.00, self::YEAR . '-05-06', self::YEAR . '-05-06');
+        $this->db->pdo()->prepare(
+            "UPDATE invoices SET invoice_type = 'tax_document', parent_invoice_id = ?, advance_paid_amount = ?,
+                                 status = 'paid', paid_at = ? WHERE id = ?"
+        )->execute([$proforma, 1210.00, self::YEAR . '-05-06', $ddkp]);
+        $this->postInvoice($ddkp, [
+            self::l('324', 'debit', 210.00),
+            self::l('343', 'credit', 210.00),
+        ], self::YEAR . '-05-06');
+
+        $final = $this->invoice($client, 1210.00, self::YEAR . '-06-10', self::YEAR . '-06-24');
+        $this->db->pdo()->prepare(
+            "UPDATE invoices SET parent_invoice_id = ?, advance_paid_amount = ?, status = 'paid', paid_at = ? WHERE id = ?"
+        )->execute([$proforma, 1210.00, self::YEAR . '-06-10', $final]);
+        $this->postInvoice($final, [
+            self::l('311', 'debit', 1210.00),
+            self::l('602', 'credit', 1000.00),
+            self::l('343', 'credit', 210.00),
+            self::l('324', 'debit', 1000.00),
+            self::l('343', 'debit', 210.00),
+            self::l('311', 'credit', 1210.00),
+        ], self::YEAR . '-06-10');
+
+        foreach ([self::YEAR . '-05-31' => 1000.00, self::YEAR . '-06-10' => 0.00] as $asOf => $advance) {
+            $receivable = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, $asOf, '311'), '311');
+            self::assertNotNull($receivable, $asOf);
+            self::assertSame(0, self::cents($receivable['gl_balance']), "HK 311 k {$asOf}");
+            self::assertSame(0, self::cents($receivable['open_items_total']), "Σ položek 311 k {$asOf}");
+            self::assertNull($this->partner($receivable, $client), "Na 311 nic otevřeného k {$asOf}");
+
+            $advances = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, $asOf, '324'), '324');
+            self::assertNotNull($advances, $asOf);
+            self::assertSame(self::cents($advance), self::cents($advances['gl_balance']), "HK 324 k {$asOf}");
+            self::assertSame(self::cents($advance), self::cents($advances['open_items_total']), "Σ položek 324 k {$asOf}");
+            self::assertSame(0, self::cents($advances['difference']), "Rozdíl konfrontace 324 k {$asOf}");
+        }
+
+        $flagged = array_values(array_filter(
+            (new ClosingRepository($this->db))->paidInvoicesOpenSaldo($this->supplierId, self::YEAR . '-06-30'),
+            static fn (array $r): bool => in_array((int) $r['id'], [$proforma, $ddkp, $final], true),
+        ));
+        self::assertSame([], $flagged, 'K3 nesmí hlásit zálohu vedenou přes 324.');
     }
 
     // ── T3c: úhrada, kterou deník uznává až PO rozvahovém dni ────────────────

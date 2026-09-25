@@ -1160,7 +1160,11 @@ final class ClosingRepository
                 -- Úhrada proformy se musí započítat FINÁLNÍ faktuře, ne proformě:
                 -- proforma sama nemá předpis na 311 (nezakládá pohledávku), takže by
                 -- ji `JOIN booked` zahodilo a konečná faktura by svítila jako
-                -- neuhrazená, přestože je zaplacená předem.
+                -- neuhrazená, přestože je zaplacená předem. Jen konečné faktuře, ne
+                -- DDKP: ten zálohu nevyúčtovává, jen z ní odvádí daň (skupinu s konečnou
+                -- fakturou mu dává `doc` níž). Bez konečné faktury úhrada zůstane na
+                -- proformě a `JOIN booked` ji zahodí — přijatá záloha na 311 není
+                -- nesoulad zaplaceného dokladu, ukazuje ji saldokonto.
                 SELECT ip.bank_transaction_id,
                        COALESCE(ch.id, ip.invoice_id) AS invoice_id,
                        ip.amount AS num, a.total_alloc AS den
@@ -1171,7 +1175,7 @@ final class ClosingRepository
                                        AND pf.invoice_type = 'proforma'
                   LEFT JOIN invoices ch ON ch.parent_invoice_id = pf.id
                                        AND ch.supplier_id = ip.supplier_id
-                                       AND ch.invoice_type <> 'proforma'
+                                       AND ch.invoice_type NOT IN ('proforma', 'tax_document')
                                        AND ch.cancelled_at IS NULL
                  WHERE ip.supplier_id = ?
                 UNION ALL
@@ -1260,9 +1264,20 @@ final class ClosingRepository
                 -- Doklad + jeho peněžní vyrovnání; dobropis patří do skupiny svého RODIČE.
                 -- Zdůvodnění skupiny viz {@see paidPurchasesOpenSaldo} — na výnosové straně
                 -- platí zrcadlově (dobropis snižuje pohledávku na 311 i bez pohybu peněz).
+                -- DDKP k proformě patří do skupiny konečné faktury téže proformy: jeho
+                -- 311 MD / 343 D a její zúčtování DPH ze zálohy se na 311 potkají až spolu.
                 SELECT i.id,
                        CASE WHEN i.invoice_type = 'credit_note' AND i.parent_invoice_id IS NOT NULL
-                            THEN i.parent_invoice_id ELSE i.id END AS group_id,
+                            THEN i.parent_invoice_id
+                            WHEN i.invoice_type = 'tax_document' AND i.parent_invoice_id IS NOT NULL
+                            THEN COALESCE((
+                                SELECT MIN(fin.id) FROM invoices fin
+                                 WHERE fin.supplier_id = i.supplier_id
+                                   AND fin.parent_invoice_id = i.parent_invoice_id
+                                   AND fin.invoice_type NOT IN ('proforma', 'tax_document')
+                                   AND fin.cancelled_at IS NULL
+                            ), i.id)
+                            ELSE i.id END AS group_id,
                        b.booked,
                        COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0)
                          + COALESCE(so.settled, 0) + COALESCE(sg.settled, 0) AS settled
@@ -1290,6 +1305,9 @@ final class ClosingRepository
               JOIN clients cl ON cl.id = i.client_id
              WHERE i.status = 'paid'
                AND (i.paid_at IS NULL OR i.paid_at <= ?)
+               -- DDKP bez konečné faktury = čerpání přijaté zálohy, která na 311 čeká na
+               -- vyúčtování. Úhradu nese proforma, takže by tu svítil jako nezaplacený.
+               AND NOT (i.invoice_type = 'tax_document' AND i.parent_invoice_id IS NOT NULL)
             -- Tolerance 1 Kč — zdůvodnění viz paidPurchasesOpenSaldo.
             HAVING ABS(saldo) > 1.0
              ORDER BY ABS(saldo) DESC, i.id";

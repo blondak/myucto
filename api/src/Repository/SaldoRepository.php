@@ -65,7 +65,14 @@ use PDO;
  * finální fakturu; když ji účetní účtuje rovnou na 311, vypadá plně předplacená faktura
  * jako celá otevřená. Agregace proto přičte takovou zálohu do čitatele i jmenovatele
  * poměru — a protože je podmíněná tím, že úhrada zálohy dopadla NA TENHLE účet, tenantů
- * používajících 324/314 se nedotkne.
+ * používajících 324/314 se nedotkne. Dokud konečná faktura neexistuje, drží hlavní kniha
+ * inkaso na účtu jako přijatou zálohu a saldokonto ji ukazuje jako zápornou položku
+ * proformy ({@see fetchReceivedAdvances} s `$onReceivable`).
+ *
+ * Přijatá strana (321) zrcadlo zatím nemá: zálohová PF jde podle pravidla
+ * `advance.paid.payment` na 314 a přijatý DDKP se na zálohu váže přes
+ * `parent_purchase_invoice_id`, kterou {@see advanceOnAccountCte} nesleduje. Zálohová PF
+ * placená přímo na 321 bez konečné faktury proto v konfrontaci 321 zůstává rozdílem.
  *
  * Storno (H4): dřívější filtr `reversed_by IS NULL` odrážel AKTUÁLNÍ stav, ne stav
  * K ASOF — doklad stornovaný AŽ PO rozvahovém dni by k asOf zmizel ze seznamu,
@@ -205,6 +212,12 @@ final class SaldoRepository
             } else {
                 $result = array_merge(
                     $this->fetchOpenInvoices($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
+                    // Přijatá záloha inkasovaná rovnou na tenhle účet a ještě nevyúčtovaná
+                    // konečnou fakturou. Není to pohledávka po splatnosti, proto ji přehled
+                    // neuhrazených dokladů (volá s $dueBefore) nedostane.
+                    $dueBefore === null
+                        ? $this->fetchReceivedAdvances($supplierId, $accountId, $asOf, $limit, $partnerId, null, $orderByDue, onReceivable: true)
+                        : [],
                     $this->fetchOpenPurchases($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
                     $this->fetchOpenOtherItems($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
                 );
@@ -381,6 +394,27 @@ final class SaldoRepository
         return self::openFilterSql($m, "CASE WHEN {$m} > 0 THEN LEAST(1, GREATEST(0, {$s} / {$m})) ELSE 0 END");
     }
 
+    /**
+     * `EXISTS`: vydaný doklad má k `x.as_of` živý zaúčtovaný předpis na účtu `x.account_id`
+     * (vč. analytik). Časovou platnost měří stejně jako hlavní kniha, tj. `entry_date`
+     * zápisu a jeho případného protizápisu. Vyžaduje v dotazu alias `x` z CTE `params`.
+     */
+    private static function invoiceBookedOnAccountSql(string $invoiceIdExpr): string
+    {
+        return "EXISTS (
+                   SELECT 1
+                     FROM journal_entries be
+                     JOIN journal_entry_lines bl ON bl.entry_id = be.id AND bl.supplier_id = be.supplier_id
+                     JOIN chart_of_accounts bca ON bca.id = bl.account_id
+                     LEFT JOIN journal_entries brev ON brev.id = be.reversed_by
+                    WHERE be.supplier_id = x.supplier_id
+                      AND be.source_type = 'invoice' AND be.source_id = {$invoiceIdExpr}
+                      AND be.posted_at IS NOT NULL AND be.entry_date <= x.as_of
+                      AND (be.reversed_by IS NULL OR brev.entry_date > x.as_of)
+                      AND (bca.id = x.account_id OR bca.parent_id = x.account_id)
+               )";
+    }
+
     private static function dueBeforeSql(string $alias, ?string $dueBefore, string $column = 'due_date'): string
     {
         if ($dueBefore === null) {
@@ -515,6 +549,18 @@ final class SaldoRepository
      * parent_invoice_id. Odvození jen z invoice journalu by ukázalo samotné čerpání
      * jako zápornou otevřenou položku a zcela minulo původní 221/324.
      *
+     * `$onReceivable` = stejná záloha, jen inkasovaná PŘÍMO na saldokontní účet
+     * (pravidlo `advance.received.collection` s 311 místo 324). Inkaso 221 MD / 311 D
+     * nemá na 311 žádný doklad, ke kterému by patřilo, a DDKP k němu (311 MD / 343 D)
+     * uzavře {@see advanceOnAccountCte} jako předplacený. Hlavní kniha přitom na 311
+     * drží přijatou zálohu bez DPH, dokud nevznikne konečná faktura — saldokonto ji
+     * dřív neukázalo vůbec a konfrontace hlásila rozdíl ve výši zálohy. Položkou je
+     * proto inkaso snížené o čistý pohyb DDKP na účtu, a to jen do chvíle, kdy k asOf
+     * existuje zaúčtovaná konečná faktura: od té doby zálohu vypořádává její řádek
+     * poměrem v {@see fetchOpenInvoices} (čitatel i jmenovatel nesou zálohu), takže by
+     * se tu započetla podruhé. Proforma s vlastním předpisem na účtu se nebere, tu
+     * vyrovnávají její vlastní úhrady už ve {@see fetchOpenInvoices}.
+     *
      * @return list<array<string,mixed>>
      */
     private function fetchReceivedAdvances(
@@ -525,8 +571,26 @@ final class SaldoRepository
         ?int $partnerId = null,
         ?string $dueBefore = null,
         bool $orderByDue = false,
+        bool $onReceivable = false,
     ): array
     {
+        if ($onReceivable) {
+            $settledAmount = "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END";
+            $settledFilter = "AND child.invoice_type = 'tax_document'";
+            $receivableFilter = '
+               AND NOT ' . self::invoiceBookedOnAccountSql('p.id') . "
+               AND NOT EXISTS (
+                   SELECT 1 FROM invoices fin
+                    WHERE fin.supplier_id = p.supplier_id AND fin.parent_invoice_id = p.id
+                      AND fin.invoice_type NOT IN ('proforma', 'tax_document')
+                      AND " . self::invoiceBookedOnAccountSql('fin.id') . '
+               )';
+        } else {
+            $settledAmount = 'l.amount';
+            $settledFilter = "AND l.side = 'debit'";
+            $receivableFilter = '';
+        }
+
         $sql =
             "WITH params AS (
                 SELECT CAST(? AS UNSIGNED) AS supplier_id,
@@ -536,6 +600,8 @@ final class SaldoRepository
                 SELECT ip.invoice_id, SUM(ip.amount) AS collected_czk
                   FROM invoice_payments ip
                   CROSS JOIN params x
+                  JOIN invoices ipf ON ipf.id = ip.invoice_id AND ipf.supplier_id = ip.supplier_id
+                                   AND ipf.invoice_type = 'proforma'
                  WHERE ip.supplier_id = x.supplier_id AND ip.paid_on <= x.as_of
                    AND (
                        EXISTS (
@@ -569,7 +635,7 @@ final class SaldoRepository
                    )
                  GROUP BY ip.invoice_id
             ), settled AS (
-                SELECT child.parent_invoice_id AS invoice_id, SUM(l.amount) AS settled_czk
+                SELECT child.parent_invoice_id AS invoice_id, SUM({$settledAmount}) AS settled_czk
                   FROM invoices child
                   CROSS JOIN params x
                   JOIN journal_entries e
@@ -580,7 +646,7 @@ final class SaldoRepository
                  WHERE child.supplier_id = x.supplier_id AND child.parent_invoice_id IS NOT NULL
                    AND e.posted_at IS NOT NULL AND e.entry_date <= x.as_of
                    AND (e.reversed_by IS NULL OR rev.entry_date > x.as_of)
-                   AND l.side = 'debit'
+                   {$settledFilter}
                    AND (ca.id = x.account_id OR ca.parent_id = x.account_id)
                  GROUP BY child.parent_invoice_id
             )
@@ -598,6 +664,7 @@ final class SaldoRepository
               LEFT JOIN settled s ON s.invoice_id = p.id
              WHERE p.invoice_type = 'proforma'
                AND " . self::advanceOpenFilterSql('c.collected_czk', 'COALESCE(s.settled_czk, 0)')
+               . $receivableFilter
                . self::partnerSql($partnerId)
                . self::dueBeforeSql('p', $dueBefore)
                . self::orderSql('p', $orderByDue);

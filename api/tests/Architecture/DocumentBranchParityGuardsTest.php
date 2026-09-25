@@ -114,8 +114,21 @@ final class DocumentBranchParityGuardsTest extends TestCase
         // najednou. Přijatá to takhle udělat NEMŮŽE — vyúčtovací faktura se váže přes
         // advance_purchase_invoice_id (UNIQUE index), DDKP přes parent_purchase_invoice_id,
         // takže musí obě cesty vyjmenovat a DDKP odlišit podle document_kind.
+        //
+        // Záloha inkasovaná přímo na 311: vydaný DDKP (pravidlo advance.received.vatdocument
+        // přesměrované z 324 na 311) čerpá zálohu na tomtéž účtu jako konečná faktura, takže
+        // se od ní musí odlišit. Přijaté zrcadlo (zálohová PF placená na 321) zatím není:
+        // přijatý DDKP nese amount_to_pay ≠ 0 a status paid, takže by ho uzavíral jiný
+        // mechanismus než vydaný. Vědomá mezera, popsaná v doc-komentáři SaldoRepository.
         'Repository/SaldoRepository.php' => [
             'fetchPaidAdvances' => 'vydaná větev pokrývá DDKP obecným parent_invoice_id IS NOT NULL',
+            'fetchReceivedAdvances' => 'DDKP vs. konečná faktura na 311; přijaté zrcadlo na 321 je vědomá mezera',
+        ],
+        // K3 na 311: vydaný DDKP k proformě patří do skupiny konečné faktury a bez ní se
+        // nehlásí. Přijatý DDKP se o K3 na 321 nestará — účtuje jen daň proti záloze
+        // (advance.paid.vatdocument, výchozí 343/314) a úhradu nese záloha na 314.
+        'Repository/ClosingRepository.php' => [
+            'paidInvoicesOpenSaldo' => 'vydaný DDKP k proformě ve skupině konečné faktury; přijatý na 321 předpis nemá',
         ],
     ];
 
