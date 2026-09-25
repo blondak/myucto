@@ -181,6 +181,33 @@ final class DppoReturnCalculatorTest extends TestCase
         self::assertSame([['group' => '54', 'amount' => 25000.0], ['group' => '55', 'amount' => 5000.0]], $decrease['line160_appendix']);
     }
 
+    /** § 24/2/w ZDP: převis nabývací ceny prodaných podílů nad příjmy z prodeje je nedaňový → ř. 40. */
+    public function testSecuritiesCostExcessIsAddedOnLine40(): void
+    {
+        $r = $this->calcRun(['vh' => 100000, 'non_deductible_costs' => 1000, 'securities_cost_excess' => 200], []);
+        self::assertSame(1200.0, self::lineValue($r['lines'], 40));
+        self::assertSame(0.0, self::lineValue($r['lines'], 62));
+        self::assertSame(101200.0, self::lineValue($r['lines'], 200));
+        self::assertStringContainsString('§24/2/w', self::lineSource($r['lines'], 40));
+        self::assertSame(1200.0, DppoReturnCalculator::accountingAdjustments(['non_deductible_costs' => 1000, 'securities_cost_excess' => 200])[40],
+            'Převzaté podané přiznání odečítá z ř. 40 část z účetnictví; připočet podílů do ní patří.');
+
+        $none = $this->calcRun(['vh' => 100000, 'securities_cost_excess' => 0], []);
+        self::assertSame(0.0, self::lineValue($none['lines'], 40));
+        self::assertStringNotContainsString('§24/2/w', self::lineSource($none['lines'], 40));
+    }
+
+    /** @param list<array<string,mixed>> $lines */
+    private static function lineSource(array $lines, int $n): string
+    {
+        foreach ($lines as $l) {
+            if ($l['line'] === $n) {
+                return (string) $l['source'];
+            }
+        }
+        throw new \RuntimeException("Řádek $n nenalezen");
+    }
+
     public function testDonationItemsExcludeBelow2000(): void
     {
         // E7 (audit 2026-07): §20/8 — PO odečte jen dary v hodnotě ≥ 2 000 Kč.

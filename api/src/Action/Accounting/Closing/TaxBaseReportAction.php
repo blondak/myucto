@@ -10,6 +10,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\Assets\DisposalResiduals;
+use MyInvoice\Service\Tax\Return\SecuritiesSaleCostLimit;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Log\LoggerInterface;
@@ -22,7 +23,8 @@ use Psr\Log\LoggerInterface;
  *
  * Vrací: (a) rozdíl daňových a účetních odpisů roku (úprava základu daně),
  * (b) vyřazený majetek roku s daňovou/účetní zůstatkovou cenou a klasifikací
- * daňové uznatelnosti ZC (§24/2/b, §25/1/o, §24/2/c+l ZDP), (c) informativní
+ * daňové uznatelnosti ZC (§24/2/b, §25/1/o, §24/2/c+l ZDP), (b2) prodané podíly
+ * a cenné papíry proti příjmům z prodeje (§24/2/w ZDP), (c) informativní
  * zůstatky dohadných účtů 388/389 a kurzové rozdíly 563/663 z přecenění.
  */
 final class TaxBaseReportAction
@@ -60,6 +62,9 @@ final class TaxBaseReportAction
                 ],
                 'depreciation' => $this->depreciationDiff($supplierId, $fiscalYear),
                 'disposals'    => $this->disposals($supplierId, $period),
+                // Stejná čísla, se kterými počítá ř. 40 přiznání DPPO (§ 24/2/w ZDP).
+                'securities'   => (new SecuritiesSaleCostLimit($this->db))
+                    ->forPeriod($supplierId, (string) $period['starts_on'], (string) $period['ends_on']),
                 'info'         => $this->infoBalances($supplierId, $period),
                 'note'         => 'Evidenční podklad pro přiznání DPPO — systém nic neúčtuje; splatná daň '
                     . '(MD 591 / D 341) se účtuje ručním zápisem.',

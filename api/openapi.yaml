@@ -12528,13 +12528,15 @@ paths:
       summary: Evidenční podklad DPPO (R19 — bez účtování, bez XML)
       description: |
         Rozdíl daňových a účetních odpisů roku, vyřazený majetek s daňovou/účetní
-        ZC a klasifikací uznatelnosti (§24/2/b, §25/1/t, §24/2/l ZDP) a informativní
-        zůstatky 388/389 + kurzové rozdíly 563/663 z přecenění.
+        ZC a klasifikací uznatelnosti (§24/2/b, §25/1/t, §24/2/l ZDP), prodané podíly
+        a cenné papíry proti příjmům z prodeje (`securities`, §24/2/w ZDP: `addback` je
+        částka připočtená na ř. 40 přiznání DPPO, `review_amount` převis ostatních cenných
+        papírů k posouzení) a informativní zůstatky 388/389 + kurzové rozdíly 563/663 z přecenění.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: fiscal_year, required: true, schema: { type: integer } }
       responses:
-        '200': { description: "OK {depreciation, disposals, info}", content: { application/json: { schema: { type: object } } } }
+        '200': { description: "OK {depreciation, disposals, securities, info}", content: { application/json: { schema: { type: object } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
