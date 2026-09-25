@@ -146,6 +146,38 @@ final class BankDocumentNumberTest extends BankPostingTestCase
         self::assertSame('STORNO ' . self::SERIES . '-10', $this->documentNo($reversalId));
     }
 
+    /**
+     * Převod z jiného programu zapíše bankovní zápis s číslem dokladu zdroje a naváže ho
+     * na převzatý pohyb. To číslo je vazba na původní doklad: nepřečísluje ho backfill
+     * ani přeúčtování pohybu.
+     */
+    public function testTakenOverEntryKeepsSourceDocumentNumber(): void
+    {
+        $tx = $this->transaction($this->statement(), -73.00, ['posted_at' => self::YEAR . '-10-11']);
+        $entryId = $this->legacyEntry($tx, 'SYNTH-BV-0042', self::YEAR . '-10-11');
+        $this->db->pdo()->prepare(
+            "INSERT INTO pohoda_import_map (supplier_id, kind, pohoda_key, target_id) VALUES (?, 'journal_entry', ?, ?)"
+        )->execute([$this->supplierId, 'synth-' . $entryId, $entryId]);
+
+        $result = (new BankDocumentNumberBackfill($this->db))->run($this->supplierId, self::YEAR . '-01-01', true);
+        self::assertNotContains($entryId, array_column($result['changes'], 'entry_id'));
+        self::assertSame('SYNTH-BV-0042', $this->documentNo($entryId));
+
+        $this->posting->postDocument($this->supplierId, 'bank', $tx, [
+            ['account_code' => '568', 'side' => 'debit', 'amount' => 73.00],
+            ['account_code' => '221', 'side' => 'credit', 'amount' => 73.00],
+        ], ['entry_date' => self::YEAR . '-10-11', 'user_id' => $this->userId]);
+        self::assertSame('SYNTH-BV-0042', $this->documentNo($entryId), 'Přeúčtování převzatého zápisu číslo zdroje nemění.');
+    }
+
+    public function testDeactivatedAccountKeepsItsSeries(): void
+    {
+        $tx = $this->transaction($this->statement(), -12.00, ['posted_at' => self::YEAR . '-02-03']);
+        $this->db->pdo()->prepare('UPDATE supplier_bank_accounts SET is_active = 0 WHERE id = ?')->execute([$this->accountId]);
+
+        self::assertSame(self::SERIES . '-02', (new BankDocumentNumber($this->db))->forTransaction($this->supplierId, $tx, self::YEAR . '-02-03'));
+    }
+
     public function testChangingSeriesInSettingsRenumbersEntries(): void
     {
         $tx = $this->transaction($this->statement(), -80.00, ['posted_at' => self::YEAR . '-04-20']);

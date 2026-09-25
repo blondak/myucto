@@ -23,8 +23,10 @@ use PDO;
  * přes technické číslo BANK-<id>, návrh zaúčtování, který na něj ukazuje, nebo přes
  * shodné ID pohybu z banky a datum. Storno přebírá výsledné číslo stornovaného zápisu
  * s předponou STORNO, stejně jako {@see \MyInvoice\Service\Accounting\PostingService::reverse()}.
- * Zápis, ke kterému pohyb ani vlastní účet dohledat nejde (převzatá historie z jiného
- * programu, výpis cizího účtu), zůstává beze změny.
+ * Vypořádání platby kartou nese číslo svého pohybu stejně jako bankovní zápis.
+ * Zápis převzatý z jiného účetního programu ({@see BankDocumentNumber::takenOverSql()})
+ * si nechává číslo dokladu zdroje. Zápis, ke kterému pohyb ani vlastní účet dohledat
+ * nejde (výpis cizího účtu), zůstává beze změny.
  *
  * Idempotentní: mění jen zápisy, jejichž číslo se liší od spočteného.
  */
@@ -176,7 +178,7 @@ final class BankDocumentNumberBackfill
             return $reversalOf[$reversalId];
         }
         $stmt = $this->db->pdo()->prepare(
-            "SELECT id FROM journal_entries WHERE supplier_id = ? AND reversed_by = ? AND source_type = 'bank' LIMIT 1"
+            'SELECT id FROM journal_entries WHERE supplier_id = ? AND reversed_by = ? AND ' . self::sourceTypeSql('journal_entries') . ' LIMIT 1'
         );
         $stmt->execute([$supplierId, $reversalId]);
         $id = $stmt->fetchColumn();
@@ -203,7 +205,7 @@ final class BankDocumentNumberBackfill
         }
         $pdo = $this->db->pdo();
         $legacyId = BankDocumentNumber::legacyTxId($entry['document_no']);
-        if ($legacyId !== null && $this->txExists($legacyId)) {
+        if ($legacyId !== null && $this->txExists($supplierId, $legacyId)) {
             return $legacyId;
         }
         $stmt = $pdo->prepare(
@@ -213,7 +215,7 @@ final class BankDocumentNumberBackfill
         );
         $stmt->execute([$supplierId, (int) $entry['id']]);
         $txId = $stmt->fetchColumn();
-        if ($txId !== false && $this->txExists((int) $txId)) {
+        if ($txId !== false && $this->txExists($supplierId, (int) $txId)) {
             return (int) $txId;
         }
         if ($entry['document_no'] === null || trim((string) $entry['document_no']) === '') {
@@ -234,11 +236,20 @@ final class BankDocumentNumberBackfill
         return count($ids) === 1 ? (int) $ids[0] : null;
     }
 
-    private function txExists(int $txId): bool
+    private function txExists(int $supplierId, int $txId): bool
     {
-        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM bank_transactions WHERE id = ?');
-        $stmt->execute([$txId]);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE bt.id = ? AND ' . BankStatementOwnershipResolver::sql('bs')
+        );
+        $stmt->execute([$txId, ...BankStatementOwnershipResolver::params($supplierId)]);
         return $stmt->fetchColumn() !== false;
+    }
+
+    private static function sourceTypeSql(string $alias): string
+    {
+        return $alias . ".source_type IN ('" . implode("', '", BankDocumentNumber::SOURCE_TYPES) . "')";
     }
 
     /** @return list<array<string,mixed>> */
@@ -247,7 +258,8 @@ final class BankDocumentNumberBackfill
         $sql = "SELECT je.id, je.supplier_id, je.entry_date, je.document_no, je.source_id, je.reversed_by
                   FROM journal_entries je
                   JOIN accounting_periods p ON p.id = je.period_id AND p.supplier_id = je.supplier_id
-                 WHERE je.supplier_id = ? AND je.source_type = 'bank' AND p.status = 'open'";
+                 WHERE je.supplier_id = ? AND " . self::sourceTypeSql('je') . " AND p.status = 'open'
+                   AND NOT " . BankDocumentNumber::takenOverSql('je');
         $params = [$supplierId];
         if ($fromDate !== null) {
             $sql .= ' AND je.entry_date >= ?';
@@ -274,7 +286,8 @@ final class BankDocumentNumberBackfill
         $sql = "SELECT DISTINCT je.supplier_id
                   FROM journal_entries je
                   JOIN accounting_periods p ON p.id = je.period_id AND p.supplier_id = je.supplier_id
-                 WHERE je.source_type = 'bank' AND p.status = 'open'";
+                 WHERE " . self::sourceTypeSql('je') . " AND p.status = 'open'
+                   AND NOT " . BankDocumentNumber::takenOverSql('je');
         $params = [];
         if ($fromDate !== null) {
             $sql .= ' AND je.entry_date >= ?';

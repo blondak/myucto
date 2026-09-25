@@ -99,7 +99,10 @@ výpis účtu s řadou BCR. Za rok má každý účet dvanáct čísel, rok urč
 období. Číslo se odvozuje z měsíce data zaúčtování pohybu, nikoli z konkrétního
 výpisu, takže je stejné, ať pohyb přišel z denního načtení přes přímé napojení,
 z měsíčního výpisu, nebo po smazání a novém načtení výpisu. Storno nese číslo
-stornovaného zápisu s předponou `STORNO`.
+stornovaného zápisu s předponou `STORNO`. Stejné číslo jako zápis platby dostane
+i vypořádání platby kartou s dokladem, protože vychází ze stejného výpisu.
+Bankovní zápisy převzaté z jiného účetního programu si nechávají číslo dokladu
+z původního programu.
 
 Výchozí řadu dostane každý účet automaticky podle druhu a měny:
 

@@ -48,7 +48,7 @@ final class SupplierBankAccountRepository
         return $row === false ? null : $this->cast($row);
     }
 
-    public function matchCounterparty(int $supplierId, string $counterpartyAccount, ?string $counterpartyBank): ?array
+    public function matchCounterparty(int $supplierId, string $counterpartyAccount, ?string $counterpartyBank, bool $includeInactive = false): ?array
     {
         $canonical = AccountNumberNormalizer::canonical($counterpartyAccount);
         if ($canonical === null) {
@@ -58,14 +58,15 @@ final class SupplierBankAccountRepository
         // Úvěrový účet kreditní karty se najde i neaktivní: bez něj by vlastní noha pohybu
         // spadla na holé 221 a dluh vůči bance by se v účetnictví tvářil jako peníze.
         $sql = "SELECT " . self::COLUMNS . " FROM supplier_bank_accounts
-                 WHERE supplier_id = ? AND (is_active = 1 OR kind = 'credit_card') AND account_canonical = ?";
+                 WHERE supplier_id = ? AND " . ($includeInactive ? '1 = 1' : "(is_active = 1 OR kind = 'credit_card')") . " AND account_canonical = ?";
         $params = [$supplierId, $canonical];
+        $activeFirst = $includeInactive ? 'is_active DESC, ' : '';
         if ($bank !== null) {
-            $sql .= " AND bank_code_norm IN ('', ?) ORDER BY (bank_code_norm = ?) DESC, id ASC";
+            $sql .= " AND bank_code_norm IN ('', ?) ORDER BY (bank_code_norm = ?) DESC, {$activeFirst}id ASC";
             $params[] = $bank;
             $params[] = $bank;
         } else {
-            $sql .= ' ORDER BY id ASC';
+            $sql .= " ORDER BY {$activeFirst}id ASC";
         }
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);

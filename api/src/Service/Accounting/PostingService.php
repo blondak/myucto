@@ -334,7 +334,8 @@ final class PostingService
             // Číslo bankovního dokladu určuje jen řada účtu a měsíc zápisu, nikdy volající:
             // jinak by každá cesta (párování, pravidlo, převod, kreditka, přeúčtování) mohla
             // číslovat po svém a po novém importu výpisu by týž pohyb dostal jiné číslo.
-            $documentNo = $sourceType === 'bank' && $sourceId !== null
+            $bankDocument = BankDocumentNumber::numbersSource($sourceType) && $sourceId !== null;
+            $documentNo = $bankDocument
                 ? $this->bankDocumentNumber()->forTransaction($supplierId, $sourceId, $entryDate)
                 : ($meta['document_no'] ?? null);
             $header = [
@@ -367,6 +368,9 @@ final class PostingService
                         'payroll_rewrite_forbidden',
                         'Zaúčtovaný mzdový předpis je neměnný; oprava patří do nové revize.',
                     );
+                }
+                if ($bankDocument && $this->bankDocumentNumber()->isTakenOver($supplierId, (int) $existing['id'])) {
+                    $header['document_no'] = $existing['document_no'];
                 }
                 $existing['lines'] = $this->journal->linesForEntry((int) $existing['id'], $supplierId);
                 if ($taxNeutralRewrite) {

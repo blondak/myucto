@@ -22,8 +22,9 @@ use PDO;
  * stejný pohyb dostane po každém novém importu stejné číslo.
  *
  * Číslo nastavuje {@see \MyInvoice\Service\Accounting\PostingService::postDocument()}
- * každému zápisu se zdrojem ('bank', id pohybu), bez ohledu na to, co poslal volající.
- * Storno přebírá číslo stornovaného zápisu s předponou STORNO. Původní ID pohybu z banky
+ * každému zápisu se zdrojem z {@see self::SOURCE_TYPES} a id pohybu, bez ohledu na to,
+ * co poslal volající. Výjimkou je přeúčtování zápisu převzatého z jiného programu, který
+ * si nechává číslo dokladu zdroje. Storno přebírá číslo stornovaného zápisu s předponou STORNO. Původní ID pohybu z banky
  * zůstává v bank_transactions.bank_ref a deník podle něj dál vyhledává.
  *
  * Pohyb, jehož výpis nepatří žádnému evidovanému účtu firmy, dostane dosavadní číslo
@@ -32,6 +33,15 @@ use PDO;
 final class BankDocumentNumber
 {
     public const SERIES_PATTERN = '/^[A-Z0-9]{1,10}$/';
+
+    /**
+     * Zdroje zápisů, jejichž dokladem je bankovní výpis: zápis pohybu a vypořádání platby
+     * kartou k tomuto pohybu. U obou je source_id id pohybu.
+     */
+    public const SOURCE_TYPES = ['bank', 'card_settlement'];
+
+    /** Mapy převodů z jiných účetních programů; zápis v nich nese číslo dokladu zdroje. */
+    private const TAKEOVER_MAPS = ['money_s3_import_map', 'pohoda_import_map', 'premier_import_map'];
 
     private const LEGACY_PREFIX = 'BANK-';
 
@@ -43,6 +53,35 @@ final class BankDocumentNumber
     public function __construct(private readonly Connection $db, ?SupplierBankAccountRepository $accounts = null)
     {
         $this->accounts = $accounts ?? new SupplierBankAccountRepository($db, new BankStatementOwnershipResolver($db));
+    }
+
+    public static function numbersSource(string $sourceType): bool
+    {
+        return in_array($sourceType, self::SOURCE_TYPES, true);
+    }
+
+    /**
+     * SQL podmínka „zápis převzatý z jiného účetního programu". Převod zapisuje deník
+     * s číslem dokladu zdroje a teprve pak zápis naváže na převzatý pohyb (source_id),
+     * takže podle zdroje ho od vlastního bankovního zápisu nerozlišíš. Číslo dokladu
+     * převzatého zápisu je vazba na doklad v původním programu a nepřečíslovává se.
+     */
+    public static function takenOverSql(string $alias): string
+    {
+        return '(' . implode(' OR ', array_map(
+            static fn (string $map): string => "EXISTS (SELECT 1 FROM {$map} tom
+                WHERE tom.supplier_id = {$alias}.supplier_id AND tom.kind = 'journal_entry' AND tom.target_id = {$alias}.id)",
+            self::TAKEOVER_MAPS,
+        )) . ')';
+    }
+
+    public function isTakenOver(int $supplierId, int $entryId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::takenOverSql('je') . ' FROM journal_entries je WHERE je.id = ? AND je.supplier_id = ?'
+        );
+        $stmt->execute([$entryId, $supplierId]);
+        return (bool) $stmt->fetchColumn();
     }
 
     public static function isValidSeries(mixed $series): bool
@@ -141,7 +180,9 @@ final class BankDocumentNumber
         $bankCode = $bankCode === null || trim($bankCode) === '' ? null : trim($bankCode);
         $key = $supplierId . '|' . $accountNumber . '|' . ($bankCode ?? '');
         if (!array_key_exists($key, $this->accountCache)) {
-            $this->accountCache[$key] = $this->accounts->matchCounterparty($supplierId, $accountNumber, $bankCode);
+            // I neaktivní účet: řada patří jeho zápisům dál, jinak by přeúčtování pohybu
+            // zrušeného účtu vrátilo zápisu ID pohybu z banky.
+            $this->accountCache[$key] = $this->accounts->matchCounterparty($supplierId, $accountNumber, $bankCode, true);
         }
         $account = $this->accountCache[$key];
         if ($account === null) {

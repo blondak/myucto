@@ -25,10 +25,13 @@ final class BankDocumentNumberSingleSourceTest extends TestCase
         $code = (string) file_get_contents(dirname(__DIR__, 2) . '/src/Service/Accounting/PostingService.php');
 
         self::assertMatchesRegularExpression(
-            "/\\\$sourceType === 'bank' && \\\$sourceId !== null\s*\?\s*\\\$this->bankDocumentNumber\(\)->forTransaction\(/",
+            "/\\\$bankDocument = BankDocumentNumber::numbersSource\(\\\$sourceType\) && \\\$sourceId !== null;\s*"
+                . "\\\$documentNo = \\\$bankDocument\s*\?\s*\\\$this->bankDocumentNumber\(\)->forTransaction\(/",
             $code,
             'PostingService::postDocument() musí číslo bankovního dokladu brát z BankDocumentNumber.',
         );
+        self::assertContains('card_settlement', \MyInvoice\Service\Accounting\Bank\BankDocumentNumber::SOURCE_TYPES,
+            'Vypořádání platby kartou se opírá o týž bankovní výpis a nese číslo jeho pohybu.');
     }
 
     public function testNoBankPostingPassesItsOwnDocumentNumber(): void
