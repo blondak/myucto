@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Tax\Return;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\AccountingPeriodStatus;
+use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\Assets\DisposalResiduals;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
@@ -51,6 +53,8 @@ final class DppoReturnDataProvider
         // Tabulka C přílohy č. 1 II. oddílu (VetaG) — volitelná ze stejného důvodu:
         // bez ní se rozpad zákonných OP a rezerv jen přeskočí a builder varuje.
         private readonly ?LegalProvisionLedgerService $legalProvisions = null,
+        // Nezaúčtované odpisy roku do projekce uzávěrky — volitelná ze stejného důvodu jako $closing.
+        private readonly ?DepreciationPostingService $depreciationPreview = null,
     ) {}
 
     /**
@@ -123,7 +127,7 @@ final class DppoReturnDataProvider
         [$disposalIncrease, $disposalDecrease, $disposals, $disposalWarnings, $disposalDecreaseGroups] = $this->disposalResiduals($supplierId, $startsOn, $endsOn);
         $securities = (new SecuritiesSaleCostLimit($this->db))->forPeriod($supplierId, $startsOn, $endsOn);
         [$securitiesSuggestion, $securitiesWarnings] = $this->securitiesSaleReview($securities);
-        $projection = $this->closingProjection($supplierId, (int) $period['id'], $endsOn, $vh);
+        $projection = $this->closingProjection($supplierId, $period, $vh);
         // Tabulka C přílohy č. 1 II. oddílu (VetaG) — zákonné OP k pohledávkám (§8/§8a/§8b/§8c)
         // a zákonné rezervy (§7). Bez služby (unit testy nad SQLite) zůstane prázdný podklad
         // a builder z toho udělá varování, ne tichou nulu.
@@ -186,17 +190,39 @@ final class DppoReturnDataProvider
      * read-only náhledy z {@see ClosingService}; skládá je čistý {@see ClosingProjectionCalculator}.
      * Každý krok se do projekce zahrne JEN pokud ještě není zaúčtovaný (jinak už je ve vh_posted):
      * u 381 podle preview['existing'], u fx podle posted zápisu k rozvahovému dni, u rozpuštění 381
-     * z minulého období podle stavu open_next. Bez ClosingService (unit testy) → prázdná projekce.
+     * z minulého období podle stavu open_next, u odpisů podle depreciation_entries roku (náhled
+     * {@see DepreciationPostingService::previewYear()} vrací jen rozdíl proti zaúčtovanému; uzavřený
+     * rok se neprojektuje). Bez ClosingService (unit testy) → prázdná projekce.
      *
+     * @param array<string,mixed> $period
      * @return array<string,mixed>
      */
-    private function closingProjection(int $supplierId, int $periodId, string $endsOn, float $vhPosted): array
+    private function closingProjection(int $supplierId, array $period, float $vhPosted): array
     {
         $calc = new ClosingProjectionCalculator();
         if ($this->closing === null) {
             return $calc->project($vhPosted, []);
         }
+        $periodId = (int) $period['id'];
+        $endsOn = (string) $period['ends_on'];
         $sources = [];
+        // Odpisy a zásoby jen v neuzavřeném roce: uzavřený rok je má zaúčtované (nebo krok
+        // vědomě přeskočený) a jeho náhled se nesmí měnit.
+        $open = !AccountingPeriodStatus::isClosed((string) ($period['status'] ?? ''));
+        try {
+            if ($open && $this->depreciationPreview !== null) {
+                $sources['depreciation'] = $this->depreciationPreview->previewYear($supplierId, (int) $period['fiscal_year']);
+            }
+        } catch (\Throwable) {
+        }
+        try {
+            // Zásoby způsobem B: jen dokud není uzávěrkový slot zaúčtovaný (pak je ve vh_posted).
+            $stock = $open ? $this->closing->stockValuationProjection($supplierId, $periodId) : null;
+            if ($stock !== null && $stock['applicable'] && !$stock['posted']) {
+                $sources['stock'] = $stock;
+            }
+        } catch (\Throwable) {
+        }
         // Každý náhled izolovaně — chyba jednoho kroku (např. chybí kontace) nesmí shodit náhled.
         try {
             $sources['small_asset'] = $this->closing->smallAssetAccrualPreview($supplierId, $periodId);

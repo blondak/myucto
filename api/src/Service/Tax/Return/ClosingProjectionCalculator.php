@@ -20,6 +20,8 @@ namespace MyInvoice\Service\Tax\Return;
  *   • rozpuštění 381 z minulého období → −VH (zvyšuje náklad 5xx)  [volající: jen pending částka]
  *   • opravné položky 558/559          → −VH (INFORMATIVNÍ — potvrzuje účetní per pohledávka)
  *   • dohadné položky pasivní 5xx/389  → −VH (INFORMATIVNÍ — potvrzuje účetní per dodavatel)
+ *   • konečný stav zásob (způsob B)    → +VH (112/132/123 proti 501/504/583) [volající: jen nezaúčtovaný]
+ *   • odpisy roku 551                  → −VH, daňový odpis do `depreciation` [volající: jen pending část]
  *
  * Opravné položky a dohady jsou návrhy, které účetní teprve potvrdí/upraví/zamítne — proto
  * `optional=true` a do vh_projected (a odvozené daně) se NEzapočítávají, jen se zobrazí.
@@ -33,12 +35,15 @@ final class ClosingProjectionCalculator
      *   fx?:array<string,mixed>|null,
      *   prior_release?:array<string,mixed>|null,
      *   provisions?:array<string,mixed>|null,
-     *   estimates?:array<string,mixed>|null
+     *   estimates?:array<string,mixed>|null,
+     *   depreciation?:array{pending_accounting?:float,pending_tax?:float}|null,
+     *   stock?:array{total?:float}|null
      * } $sources
      * @return array{
      *   vh_posted:float,
      *   items:list<array{key:string,label_key:string,amount:float,sign:int,optional:bool}>,
      *   vh_projected:float,
+     *   depreciation:array{accounting:float,tax:float},
      *   is_projection:bool
      * }
      */
@@ -107,8 +112,28 @@ final class ClosingProjectionCalculator
             }
         }
 
+        // Konečný stav zásob (způsob B, MD 112/132/123 proti 501/504/583) → +VH. Volající předá
+        // jen nezaúčtovaný krok.
+        $st = $sources['stock'] ?? null;
+        if (is_array($st)) {
+            $amount = round((float) ($st['total'] ?? 0), 2);
+            if (self::cents($amount) !== 0) {
+                $items[] = self::item('stock_closing', 'taxReturn.proj_stock', abs($amount), $amount >= 0 ? 1 : -1, false);
+            }
+        }
+
+        // Nezaúčtované odpisy roku (DepreciationPostingService::previewYear): účetní odpis
+        // sníží VH (551), daňový jde do rozdílu odpisů ř. 50/150, který z `depreciation`
+        // dopočte DppoReturnCalculator stejně jako u zaúčtovaných odpisů.
+        $dep = $sources['depreciation'] ?? null;
+        $pendingAcc = is_array($dep) ? round((float) ($dep['pending_accounting'] ?? 0), 2) : 0.0;
+        $pendingTax = is_array($dep) ? round((float) ($dep['pending_tax'] ?? 0), 2) : 0.0;
+        if (self::cents($pendingAcc) !== 0) {
+            $items[] = self::item('depreciation', 'taxReturn.proj_depreciation', abs($pendingAcc), $pendingAcc > 0 ? -1 : 1, false);
+        }
+
         $vhProjected = round($vhPosted, 2);
-        $hasProjection = false;
+        $hasProjection = self::cents($pendingTax) !== 0;
         foreach ($items as $it) {
             if (!$it['optional']) {
                 $vhProjected = round($vhProjected + $it['sign'] * $it['amount'], 2);
@@ -120,6 +145,7 @@ final class ClosingProjectionCalculator
             'vh_posted' => round($vhPosted, 2),
             'items' => $items,
             'vh_projected' => $vhProjected,
+            'depreciation' => ['accounting' => $pendingAcc, 'tax' => $pendingTax],
             'is_projection' => $hasProjection,
         ];
     }

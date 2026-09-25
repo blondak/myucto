@@ -903,6 +903,30 @@ final class ClosingService
         });
     }
 
+    /**
+     * Dopad kroku „Zásoby" na VH, dokud není zaúčtovaný (projekce uzávěrky pro náhled DPPO).
+     * Jen slot `closing` mění VH (MD 112/132/123 proti 501/504/583); manka i přebytky
+     * jsou vůči VH neutrální přeúčtování. Tytéž podklady ({@see StockClosingValuation::totals})
+     * a táž podmínka použitelnosti jako {@see runStockValuation()}. Read-only.
+     *
+     * @return array{applicable:bool, posted:bool, total:float}
+     */
+    public function stockValuationProjection(int $supplierId, int $periodId): array
+    {
+        $period = $this->periods->findById($supplierId, $periodId);
+        if ($period === null || !$this->stockStepRequired($supplierId)) {
+            return ['applicable' => false, 'posted' => false, 'total' => 0.0];
+        }
+        $posted = $this->journal->findBySource($supplierId, 'closing', ClosingSourceId::stockClosing($periodId)) !== null;
+        $closing = $this->stockValuation->totals($supplierId, (string) $period['starts_on'], (string) $period['ends_on'])['closing'];
+
+        return [
+            'applicable' => true,
+            'posted' => $posted,
+            'total' => round($closing['material'] + $closing['goods'] + $closing['product'], 2),
+        ];
+    }
+
     // ── kroky 4/5: asistent dohadů a časového rozlišení (R22) ─────────────────
 
     /**

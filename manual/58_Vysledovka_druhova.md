@@ -149,12 +149,17 @@ už ukazují jiné stránky:
 | Řádek | Odkud je |
 |---|---|
 | Výsledek hospodaření průběžně (zaúčtováno) | ř. 10 náhledu DPPO; shoduje se s řádkem Výsledek hospodaření před zdaněním výše (k poslednímu dni období) |
-| Nezaúčtované operace uzávěrky (časové rozlišení drobného majetku a nákladů příštích období, kurzové rozdíly, rozpuštění rozlišení z minulého roku) | projekce uzávěrky v náhledu DPPO, odkaz vede na uzávěrku období ([kap. 72](72_Uzaverka.md)) |
+| Nezaúčtované operace uzávěrky (časové rozlišení drobného majetku a nákladů příštích období, kurzové rozdíly, rozpuštění rozlišení z minulého roku, konečný stav zásob způsobem B) | projekce uzávěrky v náhledu DPPO, odkaz vede na uzávěrku období ([kap. 72](72_Uzaverka.md)) |
+| Odpisy roku podle odpisového plánu (nezaúčtované) | tatáž projekce z karet majetku ([kap. 28](28_Majetek.md)); účetní odpis sníží výsledek, rozdíl proti daňovému odpisu jde do ř. 50 nebo ř. 150 |
 | Opravné položky a dohadné položky | tatáž projekce; jde o návrhy, které účetní teprve potvrdí, proto jsou šedě a do odhadu se nesčítají |
-| Odpisy roku podle odpisového plánu (nezaúčtované) | karty majetku ([kap. 28](28_Majetek.md)); šedě a mimo součty, protože náhled DPPO odpisy zahrne až po jejich zaúčtování |
-| Odhad výsledku hospodaření před zdaněním, připočitatelné a odčitatelné položky (ř. 70 a ř. 170), základ daně, odhad daně | náhled DPPO ([§ 43.3](43_Dan_z_prijmu.md)) včetně ručních úprav základu, ztráty, darů a slev |
+| Odhad výsledku hospodaření před zdaněním, připočitatelné a odčitatelné položky (ř. 70 a ř. 170 včetně rozdílu nezaúčtovaných odpisů), základ daně, odhad daně | projekce v náhledu DPPO ([§ 43.3](43_Dan_z_prijmu.md)) včetně ručních úprav základu, ztráty, darů a slev |
 | Zaplacené zálohy na daň a odhad doplatku nebo přeplatku | zálohy zadané v přiznání, jinak jistě spárované zálohy z evidence ([§ 43.4](43_Dan_z_prijmu.md)) |
 | Odhad výsledku hospodaření po zdanění | odhad výsledku před zdaněním minus odhad daně |
+
+Blok i náhled DPPO ukazují tatáž čísla. Jakmile se krok uzávěrky nebo odpisy
+roku zaúčtují, položka z projekce zmizí a částka je v průběžném výsledku,
+takže se nic nezapočte dvakrát. Mzdy ani jiné budoucí provozní náklady do
+zbytku roku odhad neobsahuje, jde o uzávěrku k dnešnímu stavu účetnictví.
 
 U každého řádku je odkaz na stránku, ze které číslo pochází. Blok se
 nezobrazí u fyzické osoby, v uzavřeném roce, při filtru dimenze ani

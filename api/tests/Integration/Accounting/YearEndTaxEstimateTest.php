@@ -180,7 +180,7 @@ final class YearEndTaxEstimateTest extends TestCase
         self::assertSame((float) $preview['result']['tax'], $e['tax']);
     }
 
-    public function testUnpostedDepreciationIsShownOnceAndNeverAddedTwice(): void
+    public function testUnpostedDepreciationIsProjectedOnceAndNeverAddedTwice(): void
     {
         $this->assets->create($this->supplierId, [
             'inventory_number' => 'ODH-001',
@@ -194,22 +194,28 @@ final class YearEndTaxEstimateTest extends TestCase
             'acc_useful_life_months' => 60,
         ], ['user_id' => $this->userId]);
 
+        $plan = $this->depreciation->previewYear($this->supplierId, self::YEAR);
+        self::assertSame(1, $plan['assets']);
+        self::assertGreaterThan(0.0, $plan['pending_accounting']);
+        self::assertGreaterThan(0.0, $plan['pending_tax']);
+
         $before = $this->service->estimate($this->supplierId, $this->periodId);
-        $dep = $before['depreciation'];
-        self::assertIsArray($dep);
-        self::assertSame(1, $dep['assets']);
-        self::assertGreaterThan(0.0, $dep['pending_accounting']);
-        self::assertGreaterThan(0.0, $dep['pending_tax']);
-        self::assertSame($before['vh_posted'], $before['vh_before_tax'], 'Nezaúčtované odpisy nejsou v odhadu VH (náhled DPPO je nemá).');
+        $items = array_column($before['closing_items'], null, 'key');
+        self::assertArrayHasKey('depreciation', $items, 'Nezaúčtované odpisy jsou položkou projekce uzávěrky.');
+        self::assertSame([$plan['pending_accounting'], -1, false], [$items['depreciation']['amount'], $items['depreciation']['sign'], $items['depreciation']['optional']]);
+        self::assertSame(round($before['vh_posted'] - $plan['pending_accounting'], 2), $before['vh_before_tax']);
+        $previewBefore = $this->returns->previewReadOnly($this->supplierId, self::YEAR, 'po')['result'];
+        self::assertSame((float) $previewBefore['projection']['projected_tax'], $before['tax'], 'Blok a náhled DPPO mají stejnou daň.');
 
         $this->depreciation->bookYear($this->supplierId, self::YEAR, ['posted_by' => $this->userId]);
         $after = $this->service->estimate($this->supplierId, $this->periodId);
 
-        self::assertSame(0.0, $after['depreciation']['pending_accounting']);
-        self::assertSame(0.0, $after['depreciation']['pending_tax']);
-        self::assertSame($dep['pending_accounting'], $after['depreciation']['posted_accounting']);
-        self::assertSame(round($before['vh_posted'] - $dep['pending_accounting'], 2), $after['vh_posted'],
+        self::assertArrayNotHasKey('depreciation', array_column($after['closing_items'], null, 'key'));
+        self::assertSame(round($before['vh_posted'] - $plan['pending_accounting'], 2), $after['vh_posted'],
             'Po zaúčtování je odpis ve VH právě jednou.');
+        self::assertSame($before['vh_before_tax'], $after['vh_before_tax'], 'Odhad VH se zaúčtováním nemění.');
+        self::assertSame($before['tax_base'], $after['tax_base'], 'Základ se zaúčtováním nemění (rozdíl odpisů stejnou cestou).');
+        self::assertSame($before['tax'], $after['tax']);
     }
 
     public function testClosedYearOrPostedIncomeTaxHasNoEstimate(): void

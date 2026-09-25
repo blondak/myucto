@@ -309,6 +309,39 @@ final class DppoReturnCalculatorTest extends TestCase
         self::assertSame(126000.0, $r['projection']['projected_tax']);
     }
 
+    /**
+     * Nezaúčtované odpisy v projekci jdou do rozdílu odpisů stejnou cestou jako zaúčtované:
+     * zaúčtováno účetní 10 000 / daňové 10 000 (ř. 50 = 0), nezaúčtováno účetní 30 000 /
+     * daňové 12 000 → ř. 50 projekce = 18 000. Základ 500 000 − 30 000 + 18 000 = 488 000.
+     */
+    public function testProjectedDepreciationUsesSameLine50And150AsPosted(): void
+    {
+        $r = $this->calcRun(
+            [
+                'vh' => 500000,
+                'depreciation' => ['tax' => 10000.0, 'accounting' => 10000.0],
+                'closing_projection' => [
+                    'is_projection' => true,
+                    'vh_posted' => 500000.0,
+                    'vh_projected' => 470000.0,
+                    'depreciation' => ['accounting' => 30000.0, 'tax' => 12000.0],
+                    'items' => [['key' => 'depreciation', 'label_key' => 'x', 'amount' => 30000.0, 'sign' => -1, 'optional' => false]],
+                ],
+            ],
+            []
+        );
+        self::assertSame(500000.0, $r['summary']['base'], 'Zaúčtovaný základ se nemění.');
+        self::assertSame(18000.0, $r['projection']['projected_increases']);
+        self::assertSame(0.0, $r['projection']['projected_decreases']);
+        self::assertSame(488000.0, $r['projection']['projected_base']);
+        self::assertSame(102480.0, $r['projection']['projected_tax']);
+
+        // Tentýž stav po zaúčtování (odpisy v podkladech, projekce bez odpisů) dá stejný základ.
+        $posted = $this->calcRun(['vh' => 470000, 'depreciation' => ['tax' => 22000.0, 'accounting' => 40000.0]], []);
+        self::assertSame(488000.0, $posted['summary']['base']);
+        self::assertSame(102480.0, $posted['tax']);
+    }
+
     /** Bez projekce (nebo is_projection=false) je result['projection'] null a posted daň beze změny. */
     public function testNoProjectionKeyWhenNotProjecting(): void
     {

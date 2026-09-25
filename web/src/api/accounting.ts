@@ -1604,15 +1604,6 @@ export interface YearEndTaxEstimate {
   advances_source?: 'return' | 'schedules' | 'none'
   balance_due?: number
   vh_after_tax?: number
-  depreciation?: {
-    assets: number
-    planned_accounting: number
-    posted_accounting: number
-    pending_accounting: number
-    planned_tax: number
-    confirmed_tax: number
-    pending_tax: number
-  } | null
 }
 
 // ── Saldokonto (audit 2026-07, D6/1)───────────────────────────────────────
