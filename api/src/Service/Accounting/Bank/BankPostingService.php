@@ -18,8 +18,6 @@ use MyInvoice\Service\Accounting\PolicyInput;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
-use MyInvoice\Service\Accounting\Card\CardClearingRegime;
-use MyInvoice\Service\Accounting\Card\CardSettlementService;
 use MyInvoice\Service\Accounting\Bank\Detect\BankDetectorChain;
 use MyInvoice\Service\Accounting\Bank\Detect\DetectionResult;
 use MyInvoice\Service\Accounting\Learning\CorrectionRecorder;
@@ -96,13 +94,6 @@ final class BankPostingService
          * si cizí zápis poznamená jako `posted_elsewhere`, banka ho přeskočí).
          */
         private readonly ?PayrollBankEvidenceGuard $payrollEvidence = null,
-        /**
-         * Platby kartou přes mezičlen (378.x): bankovní zápis je vždy 378.x/221, spárování
-         * s dokladem je samostatné vypořádání 321/378.x. Bez nich (nullable kvůli ručním
-         * konstrukcím v testech) běží dosavadní účtování 321/221.
-         */
-        private readonly ?CardClearingRegime $cardRegime = null,
-        private readonly ?CardSettlementService $cardSettlement = null,
     ) {}
 
     /**
@@ -263,13 +254,6 @@ final class BankPostingService
             $isMatched = in_array((string) $tx['match_status'], ['auto_exact', 'auto_partial', 'manual'], true)
                 || !empty($tx['has_explicit_allocation']);
 
-            // Platba kartou v režimu mezičlenu má bankovní zápis 378.x/221 bez ohledu na
-            // párování — jde proto cestou spárované platby a pravidla typu „platba kartou
-            // bez dokladu 548/221" ani detektory ji nepřebijí.
-            if (!$isMatched && $this->cardClearingFor($supplierId, $tx, false) !== null) {
-                $isMatched = true;
-            }
-
             // Jediný hook detektorů před obecným FX guardem. Matched platby mají
             // přednost; stejnoměnný cizoměnový vlastní převod smí projít tierem 20.
             if (!$isMatched) {
@@ -423,7 +407,6 @@ final class BankPostingService
             // Podpis zápisu dimenze nezná: přepárování na jinou fakturu se stejnou částkou
             // nechá zápis být, dimenze nové faktury se proto dorovnají zvlášť.
             $this->posting->restampDimensions($supplierId, 'bank', $txId);
-            $this->afterCardBankPosted($supplierId, $txId, $userId);
             return ['action' => 'posted', 'reason' => 'already_posted', 'entry_id' => $liveEntryId];
         }
 
@@ -465,12 +448,6 @@ final class BankPostingService
             return $this->paymentMatchSuggestion($supplierId, $tx, 'period_closed');
         }
 
-        // Náhled výš kartu ani analytiku nezakládá (jen spočítá, co by vzniklo). Teď se
-        // doopravdy účtuje — řádky platby kartou se postaví znovu i se založením.
-        if ($this->cardClearingFor($supplierId, $tx, false) !== null) {
-            $postedLines = $this->withBankAnalytic($supplierId, $tx, $this->buildMatched($supplierId, $tx, null, true)['lines']);
-        }
-
         try {
             $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $postedLines, [
                 'entry_date'    => $postedAt,
@@ -510,41 +487,34 @@ final class BankPostingService
             ['journal_entry_id' => $entryId],
             supplierId: $supplierId,
         );
-        $this->afterCardBankPosted($supplierId, $txId, $userId);
         return ['action' => 'posted', 'reason' => 'matched', 'entry_id' => $entryId];
     }
 
     /**
+     * Spárovaná platba, i platba kartou: úhrada se účtuje přímo proti bance (321/221,
+     * 221/311), kurzový rozdíl 563/663 a haléřový 548/648 ve stejném zápisu.
+     *
      * @param array<string,mixed> $tx
      * @return array{lines:list<array<string,mixed>>}
      */
-    private function buildMatched(int $supplierId, array $tx, ?string $cashAccount = null, bool $createCard = false): array
+    private function buildMatched(int $supplierId, array $tx): array
     {
-        // Bankovní zápis platby kartou v režimu mezičlenu (378.x/221). Vypořádání s dokladem
-        // staví tatáž funkce níž s $cashAccount = analytika mezičlenu místo banky.
-        // $createCard = true jen těsně před skutečným zaúčtováním; náhledy a návrhy nezapisují.
-        if ($cashAccount === null) {
-            $card = $this->cardClearingFor($supplierId, $tx, $createCard);
-            if ($card !== null) {
-                return ['lines' => $this->cardBankLines($supplierId, $tx, $card['code'])];
-            }
-        }
         $isForeign = $this->effectiveCurrency($tx) !== 'CZK';
         if ((float) $tx['amount'] > 0) {
             return $isForeign
-                ? $this->buildIncomingMatchedFx($supplierId, $tx, $cashAccount)
-                : $this->buildIncomingMatched($supplierId, $tx, $cashAccount);
+                ? $this->buildIncomingMatchedFx($supplierId, $tx)
+                : $this->buildIncomingMatched($supplierId, $tx);
         }
         return $isForeign
-            ? $this->buildOutgoingMatchedFx($supplierId, $tx, $cashAccount)
-            : $this->buildOutgoingMatched($supplierId, $tx, $cashAccount);
+            ? $this->buildOutgoingMatchedFx($supplierId, $tx)
+            : $this->buildOutgoingMatched($supplierId, $tx);
     }
 
     /**
      * @param array<string,mixed> $tx
      * @return array{lines:list<array{account_code:string, side:string, amount:float}>}
      */
-    private function buildIncomingMatched(int $supplierId, array $tx, ?string $cashAccount = null): array
+    private function buildIncomingMatched(int $supplierId, array $tx): array
     {
         $txId = (int) $tx['id'];
         $absAmount = round(abs((float) $tx['amount']), 2);
@@ -579,7 +549,7 @@ final class BankPostingService
         $this->assertInvoicesNotOverpaid($supplierId, $allocations, $usedFallback);
 
         $rule = $this->postingRules->resolve($supplierId, 'payment.receivable.bank');
-        $bankAcc = $cashAccount ?? ($rule['debit_account_code'] ?? '221');
+        $bankAcc = $rule['debit_account_code'] ?? '221';
         $receivable = $rule['credit_account_code'] ?? '311';
 
         // CZK pohyb proti jedné cizoměnové vydané faktuře má dvě peněžní
@@ -756,7 +726,7 @@ final class BankPostingService
      * @param array<string,mixed> $tx
      * @return array{lines:list<array{account_code:string, side:string, amount:float}>}
      */
-    private function buildOutgoingMatched(int $supplierId, array $tx, ?string $cashAccount = null): array
+    private function buildOutgoingMatched(int $supplierId, array $tx): array
     {
         $txId = (int) $tx['id'];
         $absAmount = round(abs((float) $tx['amount']), 2);
@@ -784,7 +754,7 @@ final class BankPostingService
 
         $rule = $this->postingRules->resolve($supplierId, 'payment.payable.bank');
         $payable = $rule['debit_account_code'] ?? '321';
-        $bankAcc = $cashAccount ?? ($rule['credit_account_code'] ?? '221');
+        $bankAcc = $rule['credit_account_code'] ?? '221';
 
         if (count($allocations) > 1 && array_all(
             $allocations,
@@ -1130,7 +1100,7 @@ final class BankPostingService
      * @param array<string,mixed> $tx
      * @return array{lines:list<array{account_code:string, side:string, amount:float}>}
      */
-    private function buildIncomingMatchedFx(int $supplierId, array $tx, ?string $cashAccount = null): array
+    private function buildIncomingMatchedFx(int $supplierId, array $tx): array
     {
         $txId = (int) $tx['id'];
         $currency = $this->effectiveCurrency($tx);
@@ -1166,14 +1136,14 @@ final class BankPostingService
         // jiné cizí měně než úhrada) nebo směs měn → ruční ověření (blokovaný návrh).
         $class = $this->classifyIncomingFxCurrency($supplierId, $allocations, $currency);
         if ($class === 'czk_invoice') {
-            return $this->buildIncomingCrossCurrencyFx($supplierId, $tx, $allocations, $currency, $absForeign, $usedFallback, $cashAccount);
+            return $this->buildIncomingCrossCurrencyFx($supplierId, $tx, $allocations, $currency, $absForeign, $usedFallback);
         }
         if ($class === 'cross_currency') {
             throw new PostingException('cross_currency', 'Křížovou měnu (cizí úhrada × jiná cizí měna faktury) nelze zaúčtovat automaticky.');
         }
 
         $rule = $this->postingRules->resolve($supplierId, 'payment.receivable.bank');
-        $bankAcc = $cashAccount ?? ($rule['debit_account_code'] ?? '221');
+        $bankAcc = $rule['debit_account_code'] ?? '221';
         $receivable = $rule['credit_account_code'] ?? '311';
 
         $paymentRate = $this->paymentRateForDay($supplierId, $currency, (string) $tx['posted_at']);
@@ -1253,10 +1223,9 @@ final class BankPostingService
         string $currency,
         float $absForeign,
         bool $usedFallback,
-        ?string $cashAccount = null,
     ): array {
         $rule = $this->postingRules->resolve($supplierId, 'payment.receivable.bank');
-        $bankAcc = $cashAccount ?? ($rule['debit_account_code'] ?? '221');
+        $bankAcc = $rule['debit_account_code'] ?? '221';
         $receivable = $rule['credit_account_code'] ?? '311';
 
         $paymentRate = $this->paymentRateForDay($supplierId, $currency, (string) $tx['posted_at']);
@@ -1349,7 +1318,7 @@ final class BankPostingService
      * @param array<string,mixed> $tx
      * @return array{lines:list<array{account_code:string, side:string, amount:float}>}
      */
-    private function buildOutgoingMatchedFx(int $supplierId, array $tx, ?string $cashAccount = null): array
+    private function buildOutgoingMatchedFx(int $supplierId, array $tx): array
     {
         $txId = (int) $tx['id'];
         $currency = $this->effectiveCurrency($tx);
@@ -1367,7 +1336,7 @@ final class BankPostingService
 
         $rule = $this->postingRules->resolve($supplierId, 'payment.payable.bank');
         $payable = $rule['debit_account_code'] ?? '321';
-        $bankAcc = $cashAccount ?? ($rule['credit_account_code'] ?? '221');
+        $bankAcc = $rule['credit_account_code'] ?? '221';
 
         $paymentRate = $this->paymentRateForDay($supplierId, $currency, (string) $tx['posted_at']);
         $bankCzk = round($absForeign * $paymentRate, 2);
@@ -1600,11 +1569,6 @@ final class BankPostingService
         $rule = $this->postingRules->resolve($supplierId, (float) $tx['amount'] > 0 ? 'payment.receivable.bank' : 'payment.payable.bank');
         $debit = $rule['debit_account_code'] ?? ((float) $tx['amount'] > 0 ? '221' : '321');
         $credit = $rule['credit_account_code'] ?? ((float) $tx['amount'] > 0 ? '311' : '221');
-        // Návrh platby kartou ukazuje to, co se po schválení skutečně zaúčtuje: mezičlen/banka.
-        $card = $this->cardClearingFor($supplierId, $tx, false);
-        if ($card !== null) {
-            [$debit, $credit] = (float) $tx['amount'] > 0 ? ['221', $card['code']] : [$card['code'], '221'];
-        }
         $res = $this->suggestions->createIfNoPending([
             'supplier_id'         => $supplierId,
             'bank_transaction_id' => (int) $tx['id'],
@@ -1621,329 +1585,6 @@ final class BankPostingService
                 ? 'blocked' : (in_array($note, ['already_paid_verify', 'overpaid_verify'], true) ? 'needs_input' : 'pending'),
         ]);
         return ['action' => 'suggested', 'reason' => $note, 'suggestion_id' => $res['id']];
-    }
-
-    // ── platby kartou přes mezičlen (378.x) ─────────────────────────────────────
-
-    /**
-     * Pohyby kartou, které nejsou nákupem: výběr hotovosti (261/211) a poplatek (568)
-     * se účtují dál svými pravidly, ne přes mezičlen karty.
-     */
-    private const CARD_NON_PURCHASE_PREFIXES = ['211', '213', '261', '568'];
-
-    /**
-     * Mezičlen pro pohyb kartou, pokud pro něj platí režim karet; jinak null.
-     *
-     * Režim je u pohybu LEPIVÝ: zaúčtovaný pohyb zůstává v režimu, ve kterém se zaúčtoval.
-     * Pohyb zaúčtovaný před zapnutím (321/221, 548/221) se nikdy nepřeúčtuje na 378, a pohyb
-     * zaúčtovaný na 378.x se po vypnutí režimu, změně syntetiky nebo analytiky karty nevrátí
-     * na 321/221 — změna nastavení platí jen pro budoucí zápisy.
-     *
-     * @param array<string,mixed> $tx
-     * @return array{code:string, card_id:?int, resolved:bool}|null
-     */
-    private function cardClearingFor(int $supplierId, array $tx, bool $create = false): ?array
-    {
-        if ($this->cardRegime === null || (string) ($tx['source'] ?? 'statement') !== 'statement') {
-            return null;
-        }
-        // Kreditní karta: režim určuje úvěrový účet výpisu, koncovka nerozhoduje.
-        $creditCard = $this->cardRegime->creditCardAccountFor($supplierId, $tx);
-        if ($creditCard === null && !\MyInvoice\Service\Bank\Card\CardNumberMask::isValidLast4((string) ($tx['card_last4'] ?? ''))) {
-            return null;
-        }
-        $liveCodes = $this->liveBankEntryCodes($supplierId, (int) $tx['id']);
-        if ($liveCodes !== null) {
-            foreach ($liveCodes as $code) {
-                if ($this->cardRegime->isClearingCode($supplierId, $code)) {
-                    return ['code' => $code, 'card_id' => null, 'resolved' => true];
-                }
-            }
-            return null;
-        }
-        if ($creditCard !== null) {
-            return $this->cardRegime->creditCardClearingFor($supplierId, $tx, $creditCard, $create);
-        }
-        if (!$this->cardRegime->isActiveOn($supplierId, (string) $tx['posted_at'])
-            || $this->isCardCashOrFee($supplierId, $tx)) {
-            return null;
-        }
-        return $this->cardRegime->clearingFor($supplierId, $tx, $create);
-    }
-
-    /**
-     * Bankovní zápis platby kartou: MD 378.x / D 221 (výdaj), MD 221 / D 378.x (vratka).
-     * Cizí měna: obě nohy kurzem dne platby a s cizoměnovou stopou (vzor pravidel).
-     *
-     * @param array<string,mixed> $tx
-     * @return list<array<string,mixed>>
-     */
-    private function cardBankLines(int $supplierId, array $tx, string $clearingCode): array
-    {
-        $amount = (float) $tx['amount'];
-        $foreign = round(abs($amount), 2);
-        $currency = strtoupper($this->effectiveCurrency($tx));
-        $rate = $currency === 'CZK' ? null : $this->paymentRateForDay($supplierId, $currency, (string) $tx['posted_at']);
-        $czk = $rate === null ? $foreign : round($foreign * $rate, 2);
-        $outgoing = $amount < 0;
-        $rule = $this->postingRules->resolve($supplierId, $outgoing ? 'payment.payable.bank' : 'payment.receivable.bank');
-        $bankAcc = (string) (($outgoing ? ($rule['credit_account_code'] ?? null) : ($rule['debit_account_code'] ?? null)) ?: '221');
-
-        $clearing = $this->line($clearingCode, $outgoing ? 'debit' : 'credit', $czk);
-        $bank = $this->line($bankAcc, $outgoing ? 'credit' : 'debit', $czk);
-        if ($rate !== null) {
-            $clearing = $this->withFxTrace($clearing, $currency, $rate, $foreign);
-            $bank = $this->withFxTrace($bank, $currency, $rate, $foreign);
-        }
-        return [$clearing, $bank];
-    }
-
-    /**
-     * Řádek mezičlenu karty v živém bankovním zápisu pohybu, nebo null (pohyb není
-     * zaúčtovaný přes mezičlen).
-     *
-     * @return array{code:string, side:string, amount:float, currency_code:?string, fx_rate:?float, amount_foreign:?float}|null
-     */
-    public function liveCardClearingLine(int $supplierId, int $txId): ?array
-    {
-        if ($this->cardRegime === null) {
-            return null;
-        }
-        $entry = $this->journal->findBySource($supplierId, 'bank', $txId);
-        if ($entry === null || ($entry['reversed_by'] ?? null) !== null) {
-            return null;
-        }
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT c.account_code, jel.side, jel.amount, jel.currency_code, jel.fx_rate, jel.amount_foreign
-               FROM journal_entry_lines jel
-               JOIN chart_of_accounts c ON c.id = jel.account_id AND c.supplier_id = jel.supplier_id
-              WHERE jel.entry_id = ? AND jel.supplier_id = ?
-              ORDER BY jel.line_no, jel.id'
-        );
-        $stmt->execute([(int) $entry['id'], $supplierId]);
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
-            if ($this->cardRegime->isClearingCode($supplierId, (string) $row['account_code'])) {
-                return [
-                    'code'           => (string) $row['account_code'],
-                    'side'           => (string) $row['side'],
-                    'amount'         => round((float) $row['amount'], 2),
-                    'currency_code'  => $row['currency_code'] !== null ? (string) $row['currency_code'] : null,
-                    'fx_rate'        => $row['fx_rate'] !== null ? (float) $row['fx_rate'] : null,
-                    'amount_foreign' => $row['amount_foreign'] !== null ? (float) $row['amount_foreign'] : null,
-                ];
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Vypořádání platby kartou s dokladem — JEDINÉ místo, které ho staví. Volá ho každá
-     * cesta, po které se pohyb kartou spáruje nebo zaúčtuje (import, ruční i automatické
-     * párování, schválení návrhu, zaúčtování dokladu, který dorazil později).
-     *
-     * Zápis: MD 321 (kurzem předpisu) / D 378.x (částka z bankovního zápisu), kurzový rozdíl
-     * 563/663, haléřový rozdíl 548/648 — stejné sestavení jako úhrada 321/221 bez mezičlenu,
-     * jen s analytikou karty na místě banky. Bez párování → živé vypořádání se stornuje.
-     *
-     * @return array{action:string, entry_id?:int, reason?:string}
-     */
-    public function syncCardSettlement(int $supplierId, int $txId, ?int $userId = null): array
-    {
-        if ($this->cardSettlement === null) {
-            return ['action' => 'none', 'reason' => 'not_configured'];
-        }
-        $clearing = $this->liveCardClearingLine($supplierId, $txId);
-        if ($clearing === null) {
-            return ['action' => 'none', 'reason' => 'no_card_bank_entry'];
-        }
-        if ($this->policy !== null && $this->policy->levelFor($supplierId, OperationType::BANK_PAYMENT_MATCHED) === 'off') {
-            return ['action' => 'skipped', 'reason' => 'policy_off'];
-        }
-        $this->normalizeRoundingFullPurchase($supplierId, $txId);
-        $this->normalizeRoundingFullInvoice($supplierId, $txId);
-        $tx = $this->loadTx($txId);
-        if ($tx === null) {
-            return ['action' => 'none', 'reason' => 'transaction_not_found'];
-        }
-        $lines = null;
-        if (!empty($tx['has_explicit_allocation'])) {
-            try {
-                $lines = $this->buildMatched($supplierId, $tx, $clearing['code'])['lines'];
-            } catch (PostingException $e) {
-                return ['action' => 'skipped', 'reason' => $e->errorCode];
-            }
-            $lines = $this->alignCardSettlement($supplierId, $lines, $clearing);
-        }
-        if ($lines !== null) {
-            // Doklad dorazil k platbě, kterou účetní mezitím uzavřela bez dokladu — uzavření
-            // ustoupí vypořádání, jinak by 378.x byl odúčtovaný dvakrát.
-            $this->cardSettlement->reverseLive($supplierId, $txId, CardSettlementService::SOURCE_WRITEOFF, ['user_id' => $userId]);
-        }
-        return $this->cardSettlement->sync($supplierId, $txId, CardSettlementService::SOURCE_SETTLEMENT, $lines, [
-            'txDate'      => substr((string) $tx['posted_at'], 0, 10),
-            // composeParts místo mb_substr: ořez na hranici slova (viz JournalDescriptionBuilder).
-            'description' => \MyInvoice\Service\Accounting\JournalDescriptionBuilder::composeParts([
-                'Vypořádání platby kartou',
-                $this->entryDescription($tx),
-            ]),
-            'user_id'     => $userId,
-        ]);
-    }
-
-    /**
-     * Zrušení párování pohybu. Platba kartou přes mezičlen: storno jen vypořádání, bankovní
-     * zápis 378.x/221 zůstává (platba kartou proběhla, jen k ní zatím není doklad). Ostatní
-     * pohyby: storno bankovního zápisu jako dřív ({@see unpost()}).
-     *
-     * @param array{user_id?:?int, posted_by?:?int, reason?:?string} $meta
-     */
-    public function releaseMatch(int $supplierId, int $txId, array $meta): void
-    {
-        if ($this->cardSettlement !== null && $this->liveCardClearingLine($supplierId, $txId) !== null) {
-            $this->cardSettlement->reverseLive($supplierId, $txId, CardSettlementService::SOURCE_SETTLEMENT, $meta);
-            return;
-        }
-        $this->unpost($supplierId, $txId, $meta);
-    }
-
-    /**
-     * Doklad se zaúčtoval (nebo změnil) — dorovnej vypořádání všech pohybů kartou, které
-     * jsou na něj spárované. Vrací počet pohybů kartou, kterých se to týkalo.
-     */
-    public function syncCardSettlementsForPurchase(int $supplierId, int $purchaseInvoiceId, ?int $userId = null): int
-    {
-        if ($this->cardSettlement === null) {
-            return 0;
-        }
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT DISTINCT bank_transaction_id FROM payment_matches
-              WHERE supplier_id = ? AND purchase_invoice_id = ? AND bank_transaction_id IS NOT NULL'
-        );
-        $stmt->execute([$supplierId, $purchaseInvoiceId]);
-        $count = 0;
-        foreach (array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []) as $txId) {
-            if ($this->liveCardClearingLine($supplierId, $txId) === null) {
-                continue;
-            }
-            $this->afterCardBankPosted($supplierId, $txId, $userId);
-            $count++;
-        }
-        return $count;
-    }
-
-    /** Po zaúčtování bankovního zápisu pohybu kartou dorovná vypořádání. Nikdy nevyhazuje. */
-    private function afterCardBankPosted(int $supplierId, int $txId, ?int $userId): void
-    {
-        if ($this->cardSettlement === null || $this->liveCardClearingLine($supplierId, $txId) === null) {
-            return;
-        }
-        $pdo = $this->db->pdo();
-        $inTx = $pdo->inTransaction();
-        $savepoint = 'card_settlement_' . max(0, $txId);
-        if ($inTx) {
-            $pdo->exec('SAVEPOINT ' . $savepoint);
-        }
-        try {
-            $this->syncCardSettlement($supplierId, $txId, $userId);
-            if ($inTx) {
-                $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
-            }
-        } catch (\Throwable $e) {
-            if ($inTx && $pdo->inTransaction()) {
-                $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
-                $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
-            }
-            try {
-                $this->activity->log('card_settlement.error', $userId, 'bank_transaction', $txId,
-                    ['message' => $e->getMessage()], supplierId: $supplierId);
-            } catch (\Throwable) {
-            }
-        }
-    }
-
-    /**
-     * Noha mezičlenu ve vypořádání = přesně částka z bankovního zápisu (i s cizoměnovou
-     * stopou), rozdíl vůči předpisu padne do kurzového rozdílu. Výsledkové účty rozdílů
-     * se berou z nastavení účtování karet.
-     *
-     * @param list<array<string,mixed>> $lines
-     * @param array{code:string, side:string, amount:float, currency_code:?string, fx_rate:?float, amount_foreign:?float} $clearing
-     * @return list<array<string,mixed>>
-     */
-    private function alignCardSettlement(int $supplierId, array $lines, array $clearing): array
-    {
-        $side = $clearing['side'] === 'debit' ? 'credit' : 'debit';
-        [$loss, $gain] = $this->fxResultAccounts($supplierId);
-        $findLeg = static function (array $lines) use ($clearing, $side): ?int {
-            foreach ($lines as $i => $l) {
-                if ((string) $l['account_code'] === $clearing['code'] && (string) $l['side'] === $side) {
-                    return $i;
-                }
-            }
-            return null;
-        };
-        $idx = $findLeg($lines);
-        if ($idx !== null && abs((float) $lines[$idx]['amount'] - $clearing['amount']) >= 0.005) {
-            $lines[$idx]['amount'] = $clearing['amount'];
-            $lines = array_values(array_filter(
-                $lines,
-                static fn (array $l): bool => !in_array((string) $l['account_code'], [$loss, $gain], true),
-            ));
-            $this->appendFxDifference($lines, $supplierId, 0.0, $side === 'debit');
-            $idx = $findLeg($lines);
-        }
-        if ($idx !== null && $clearing['currency_code'] !== null) {
-            $lines[$idx]['currency_code'] = $clearing['currency_code'];
-            $lines[$idx]['fx_rate'] = $clearing['fx_rate'];
-            $lines[$idx]['amount_foreign'] = $clearing['amount_foreign'];
-        }
-
-        $settings = $this->cardRegime?->settings($supplierId) ?? [];
-        $map = array_filter([
-            $loss => $settings['fx_loss_account_code'] ?? null,
-            $gain => $settings['fx_gain_account_code'] ?? null,
-            '548' => $settings['rounding_loss_account_code'] ?? null,
-            '648' => $settings['rounding_gain_account_code'] ?? null,
-        ], static fn (mixed $v): bool => is_string($v) && $v !== '');
-        foreach ($lines as $i => $l) {
-            $code = (string) $l['account_code'];
-            if ($code !== $clearing['code'] && isset($map[$code])) {
-                $lines[$i]['account_code'] = (string) $map[$code];
-            }
-        }
-        return $lines;
-    }
-
-    /**
-     * Výběr hotovosti a poplatek kartou nejsou nákup — patří jim vlastní pravidlo (261/221,
-     * 568/221) nebo rozpoznaný vlastní převod, ne mezičlen karty.
-     *
-     * @param array<string,mixed> $tx
-     */
-    private function isCardCashOrFee(int $supplierId, array $tx): bool
-    {
-        if ($this->transfers !== null && $this->transfers->detectTransaction($supplierId, (int) $tx['id']) !== null) {
-            return true;
-        }
-        $direction = (float) $tx['amount'] > 0 ? 'incoming' : 'outgoing';
-        $currency = strtoupper($this->effectiveCurrency($tx));
-        $match = $this->matchTxArray($tx);
-        foreach ($this->rules->findActive($supplierId, $direction) as $rule) {
-            if (strtoupper((string) ($rule['applies_currency'] ?? 'CZK')) !== $currency
-                || !$this->ruleMatcher->matching($rule, $match)) {
-                continue;
-            }
-            if (in_array((string) ($rule['operation_type'] ?? ''), [OperationType::BANK_FEE, OperationType::BANK_TRANSFER_OWN], true)) {
-                return true;
-            }
-            $counter = (string) ($direction === 'outgoing' ? $rule['debit_account_code'] : $rule['credit_account_code']);
-            foreach (self::CARD_NON_PURCHASE_PREFIXES as $prefix) {
-                if (str_starts_with($counter, $prefix)) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     /** @return list<string>|null kódy účtů živého bankovního zápisu, null = pohyb nezaúčtovaný */
@@ -2125,8 +1766,7 @@ final class BankPostingService
             return ['status' => 'skipped', 'reason' => 'ignored'];
         }
         if (in_array((string) $tx['match_status'], ['auto_exact', 'auto_partial', 'manual'], true)
-            || !empty($tx['has_explicit_allocation'])
-            || $this->cardClearingFor($supplierId, $tx, false) !== null) {
+            || !empty($tx['has_explicit_allocation'])) {
             return ['status' => 'skipped', 'reason' => 'payment_matched'];
         }
 
@@ -2441,10 +2081,7 @@ final class BankPostingService
                 && (!empty($tx['matched_invoice_id']) || !empty($tx['matched_purchase_invoice_id'])));
         $bank = $this->previews?->code($supplierId, $tx, '221');
         $result = ['bank_account_code' => $bank['code'] ?? null, 'matched' => $matched,
-            'lines' => [], 'resolved' => $bank['resolved'] ?? false, 'reason' => null,
-            // Platba kartou: analytika mezičlenu, případně karta/analytika, která při
-            // zaúčtování teprve vznikne (náhled nic nezakládá).
-            'card_clearing' => $this->cardClearingFor($supplierId, $tx, false)];
+            'lines' => [], 'resolved' => $bank['resolved'] ?? false, 'reason' => null];
         try {
             if ((string) ($tx['source'] ?? 'statement') !== 'statement') {
                 throw new PostingException('email_notice_provisional', 'Avízo se neúčtuje.');
@@ -2685,7 +2322,7 @@ final class BankPostingService
                 }
                 $lines = (string) ($sug['note'] ?? '') === 'fee_gap'
                     ? $this->buildIncomingFeeGap($supplierId, $tx, (float) $sug['amount'])['lines']
-                    : $this->buildMatched($supplierId, $tx, null, true)['lines'];
+                    : $this->buildMatched($supplierId, $tx)['lines'];
             } else {
                 $debit = $overrides['debit_account_code'] ?? (string) $sug['debit_account_code'];
                 $credit = $overrides['credit_account_code'] ?? (string) $sug['credit_account_code'];
@@ -2718,7 +2355,6 @@ final class BankPostingService
 
             $this->suggestions->markApproved($supplierId, $suggestionId, $entryId, $meta['user_id'] ?? null);
             $this->markSchedulePaid($supplierId, $sug['tax_advance_schedule_id'] ?? null, $tx);
-            $this->afterCardBankPosted($supplierId, $txId, $meta['user_id'] ?? null);
             $overridden = $overrides !== [];
             if ($overridden) {
                 $this->corrections?->fromSuggestion(
@@ -3056,12 +2692,6 @@ final class BankPostingService
                     409,
                 );
             }
-            // Bez bankového zápisu platby kartou nesmí zůstat vypořádání ani uzavření
-            // proti mezičlenu — jinak by 378.x nesl protistranu k platbě, která v deníku není.
-            if ($this->cardSettlement !== null) {
-                $this->cardSettlement->reverseLive($supplierId, $txId, CardSettlementService::SOURCE_SETTLEMENT, $meta);
-                $this->cardSettlement->reverseLive($supplierId, $txId, CardSettlementService::SOURCE_WRITEOFF, $meta);
-            }
             $reversalId = $this->posting->reverse($supplierId, $entryId, [
                 'entry_date' => $originalDate,
                 'description' => $meta['description'] ?? ('Storno bankovního zápisu #' . $entryId),
@@ -3269,15 +2899,6 @@ final class BankPostingService
         $existing = $this->journal->findBySource($supplierId, 'bank', $txId);
         if ($existing === null || (int) $existing['id'] !== $entryId || ($existing['reversed_by'] ?? null) !== null) {
             throw new PostingException('not_found', 'K transakci není odpovídající aktivní účetní zápis.', 404);
-        }
-        if ($this->cardSettlement !== null
-            && ($this->cardSettlement->hasLive($supplierId, $txId, CardSettlementService::SOURCE_SETTLEMENT)
-                || $this->cardSettlement->hasLive($supplierId, $txId, CardSettlementService::SOURCE_WRITEOFF))) {
-            throw new PostingException(
-                'card_settlement_exists',
-                'K platbě kartou existuje vypořádání s dokladem nebo uzavření bez dokladu — nejdřív zrušte párování.',
-                409,
-            );
         }
 
         $this->releasePosting(

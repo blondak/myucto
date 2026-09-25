@@ -40,9 +40,6 @@ final class DocumentAutoPoster
         private readonly EmbeddingWriter $embeddingWriter,
         private readonly ExpenseAutoClassifier $autoClassifier,
         private readonly CommercialFeatureAccess $commercialFeatures,
-        // Zaúčtovaný doklad může být úhradou platby kartou, která čekala na předpis 321 —
-        // po zaúčtování se dorovná vypořádání 321/378.x (viz BankPostingService).
-        private readonly \MyInvoice\Service\Accounting\Bank\BankPostingService $bankPosting,
     ) {}
 
     /**
@@ -83,7 +80,6 @@ final class DocumentAutoPoster
         )->execute([$bookedBy, $docId, $supplierId]);
         if ($sourceType === 'purchase_invoice') {
             $this->embeddingWriter->enqueueFromDecision($supplierId, 'purchase_invoice', $docId);
-            $this->bankPosting->syncCardSettlementsForPurchase($supplierId, $docId, $meta['user_id'] ?? null);
         }
 
         return $entryId;

@@ -10,15 +10,13 @@ import { importCreditCardStatement } from './creditCardImport'
 import { openingLines, STATE_CLASS, statementLink, todoRows } from './creditCardWork'
 import {
   creditCardsApi,
-  CREDIT_CARD_PURCHASE_MODES,
   type CreditCardDetail,
   type CreditCardPayload,
-  type CreditCardPurchaseMode,
   type CreditCardSettingsResponse,
   type CreditCardTransaction,
   type CreditCardTransactionKind,
 } from '@/api/creditCards'
-import { apiErrorCode, apiErrorMessage } from '@/api/errors'
+import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 
@@ -48,9 +46,6 @@ const form = reactive<CreditCardPayload>({
 const analyticChoice = ref<string>('')
 const settings = ref<CreditCardSettingsResponse | null>(null)
 const isDoubleEntry = computed(() => !!settings.value?.double_entry)
-/** '' = výchozí režim firmy. */
-const modeChoice = ref<CreditCardPurchaseMode | ''>('')
-const clearingChoice = ref<string>('')
 const openingContra = ref<string>('')
 const openingDate = ref<string>('')
 const postingBusy = ref(false)
@@ -62,8 +57,6 @@ function fill(a: CreditCardDetail) {
     repayment_bank_code: a.repayment_bank_code, repayment_vs: a.repayment_vs, note: a.note,
   })
   analyticChoice.value = a.account_code ?? ''
-  modeChoice.value = a.clearing?.account_mode ?? ''
-  clearingChoice.value = a.clearing?.account_code ?? ''
   openingContra.value = a.opening?.contra_account_code ?? ''
   openingDate.value = a.opening?.entry_date ?? ''
 }
@@ -85,24 +78,6 @@ async function load() {
 }
 onMounted(load)
 
-/** Po změně režimu nabídne dohnání pohybů, které ještě nejsou zaúčtované. */
-async function changeMode() {
-  if (!account.value) return
-  postingBusy.value = true
-  try {
-    fill(await creditCardsApi.setPurchaseMode(accountId.value, modeChoice.value || null))
-    toast.success(t('credit_cards.mode_changed'))
-  } catch (e) {
-    toast.error(apiErrorMessage(e, t('credit_cards.save_failed')))
-    postingBusy.value = false
-    return
-  }
-  postingBusy.value = false
-  if ((account.value?.unposted_count ?? 0) > 0 && window.confirm(t('credit_cards.post_pending_offer', { n: account.value?.unposted_count ?? 0 }))) {
-    await postPending()
-  }
-}
-
 async function postPending() {
   postingBusy.value = true
   try {
@@ -111,23 +86,6 @@ async function postPending() {
     toast.success(t('credit_cards.post_pending_done', { posted: result.posted, suggested: result.suggested, skipped: result.skipped }))
   } catch (e) {
     toast.error(apiErrorMessage(e, t('credit_cards.post_pending_failed')))
-  } finally {
-    postingBusy.value = false
-  }
-}
-
-async function changeClearingAnalytic(confirm = false) {
-  postingBusy.value = true
-  try {
-    fill(await creditCardsApi.setClearingAnalytic(accountId.value, clearingChoice.value || null, confirm))
-    toast.success(t('credit_cards.analytic_changed'))
-  } catch (e) {
-    if (!confirm && apiErrorCode(e) === 'confirm_required' && window.confirm(apiErrorMessage(e))) {
-      postingBusy.value = false
-      await changeClearingAnalytic(true)
-      return
-    }
-    toast.error(apiErrorMessage(e, t('credit_cards.analytic_change_failed')))
   } finally {
     postingBusy.value = false
   }
@@ -434,86 +392,29 @@ const INPUT = 'h-9 w-full px-3 border border-neutral-300 rounded-md text-sm bg-s
         <p class="text-xs text-warning-800">{{ t('credit_cards.opening_help') }}</p>
       </section>
 
-      <div class="mt-4 grid gap-4 lg:grid-cols-2">
-        <!-- Co zbývá dořešit: pohyby se zpracovávají ve výpisu, tady je rozcestník. -->
-        <section class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 md:p-5 space-y-3" data-testid="credit-card-todo">
-          <h2 class="text-sm font-semibold text-neutral-700">{{ t('credit_cards.todo_title') }}</h2>
-          <p v-if="todo.length === 0" class="text-sm text-success-700">{{ t('credit_cards.todo_none') }}</p>
-          <ul v-else class="divide-y divide-neutral-100 text-sm">
-            <li v-for="row in todo" :key="row.state" class="py-2 flex flex-wrap items-center justify-between gap-2">
-              <div class="min-w-0">
-                <div class="font-medium text-neutral-800">{{ t(`credit_cards.todo.${row.state}`, { n: row.count }) }}</div>
-                <div class="text-xs text-neutral-500">{{ t(`credit_cards.todo_hint.${row.state}`) }}</div>
-              </div>
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="font-medium whitespace-nowrap">{{ formatMoney(row.amount) }}</span>
-                <RouterLink v-if="row.first_statement_id" :to="statementLink(row.first_statement_id, row.first_tx_id)"
-                  :class="btnOutline('primary')" class="whitespace-nowrap">
-                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" />
-                  </svg>
-                  {{ t('credit_cards.todo_open') }}
-                </RouterLink>
-                <a v-if="row.state === 'clearing_open'" href="#credit-card-without-document"
-                  :class="btnOutline('warning')" class="whitespace-nowrap">
-                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" />
-                  </svg>
-                  {{ t('credit_cards.todo_documents') }}
-                </a>
-              </div>
-            </li>
-          </ul>
-        </section>
-
-        <!-- Režim nákupů a mezičlen úvěrového účtu. -->
-        <section v-if="isDoubleEntry" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 md:p-5 space-y-3" data-testid="credit-card-mode">
-          <h2 class="text-sm font-semibold text-neutral-700">{{ t('credit_cards.mode_title') }}</h2>
-          <div class="flex flex-wrap items-end gap-2">
-            <label class="block text-sm">
-              <span class="text-xs font-medium text-neutral-600">{{ t('credit_cards.mode_label') }}</span>
-              <select v-model="modeChoice" :class="INPUT" class="min-w-[18rem]" :disabled="!canPost || account.archived" data-testid="purchase-mode">
-                <option value="">{{ t('credit_cards.mode_default', { mode: t(`credit_cards.mode.${account.clearing.default_mode}`) }) }}</option>
-                <option v-for="m in CREDIT_CARD_PURCHASE_MODES" :key="m" :value="m">{{ t(`credit_cards.mode.${m}`) }}</option>
-              </select>
-            </label>
-            <button v-if="canPost && !account.archived" type="button" :class="btnOutline('primary')" class="whitespace-nowrap"
-              :disabled="postingBusy || modeChoice === (account.clearing.account_mode ?? '')" @click="changeMode()">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
-              </svg>
-              {{ t('credit_cards.mode_save') }}
-            </button>
-          </div>
-          <p class="text-xs text-neutral-500">{{ t(`credit_cards.mode_help.${account.clearing.mode}`) }}</p>
-          <div v-if="account.clearing.mode === 'clearing' || account.clearing.account_code" class="grid gap-3 sm:grid-cols-2 text-sm">
-            <div>
-              <div class="text-xs text-neutral-500">{{ t('credit_cards.clearing_account') }}</div>
-              <div class="font-mono">{{ account.clearing.account_code ?? t('credit_cards.clearing_pending', { syn: account.clearing.synthetic }) }}</div>
+      <!-- Co zbývá dořešit: pohyby se zpracovávají ve výpisu, tady je rozcestník. -->
+      <section class="mt-4 bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 md:p-5 space-y-3" data-testid="credit-card-todo">
+        <h2 class="text-sm font-semibold text-neutral-700">{{ t('credit_cards.todo_title') }}</h2>
+        <p v-if="todo.length === 0" class="text-sm text-success-700">{{ t('credit_cards.todo_none') }}</p>
+        <ul v-else class="divide-y divide-neutral-100 text-sm">
+          <li v-for="row in todo" :key="row.state" class="py-2 flex flex-wrap items-center justify-between gap-2">
+            <div class="min-w-0">
+              <div class="font-medium text-neutral-800">{{ t(`credit_cards.todo.${row.state}`, { n: row.count }) }}</div>
+              <div class="text-xs text-neutral-500">{{ t(`credit_cards.todo_hint.${row.state}`) }}</div>
             </div>
-            <div>
-              <div class="text-xs text-neutral-500">{{ t('credit_cards.clearing_balance') }}</div>
-              <div class="font-medium" :class="Math.abs(account.clearing.balance) >= 0.005 ? 'text-warning-700' : ''">{{ formatMoney(account.clearing.balance) }}</div>
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-medium whitespace-nowrap">{{ formatMoney(row.amount) }}</span>
+              <RouterLink v-if="row.first_statement_id" :to="statementLink(row.first_statement_id, row.first_tx_id)"
+                :class="btnOutline('primary')" class="whitespace-nowrap">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" />
+                </svg>
+                {{ t('credit_cards.todo_open') }}
+              </RouterLink>
             </div>
-          </div>
-          <div v-if="canPost && !account.archived && account.clearing.options.length > 0" class="flex flex-wrap items-end gap-2">
-            <label class="block text-sm">
-              <span class="text-xs font-medium text-neutral-600">{{ t('credit_cards.clearing_change_label') }}</span>
-              <select v-model="clearingChoice" :class="INPUT" class="min-w-[16rem]">
-                <option value="">{{ t('credit_cards.clearing_auto') }}</option>
-                <option v-for="o in account.clearing.options" :key="o.id" :value="o.account_code">{{ o.account_code }} - {{ o.name }}</option>
-              </select>
-            </label>
-            <button type="button" :class="btnOutline('warning')" class="whitespace-nowrap"
-              :disabled="postingBusy || clearingChoice === (account.clearing.account_code ?? '')" @click="changeClearingAnalytic()">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
-              </svg>
-              {{ t('credit_cards.analytic_change') }}
-            </button>
-          </div>
-        </section>
-      </div>
+          </li>
+        </ul>
+      </section>
 
       <!-- Nákupy bez dokladu: tatáž komponenta jako Platby bez dokladu u platebních karet,
            jen omezená na tento úvěrový účet (kreditka se s platebními kartami nemíchá). -->
@@ -610,7 +511,6 @@ const INPUT = 'h-9 w-full px-3 border border-neutral-300 rounded-md text-sm bg-s
                       :class="STATE_CLASS[tx.state]" :title="t(`credit_cards.state_hint.${tx.state}`)">
                       {{ t(`credit_cards.state.${tx.state}`) }}
                     </RouterLink>
-                    <div v-if="tx.clearing_code" class="mt-0.5 font-mono text-[11px] text-neutral-500">{{ tx.clearing_code }}</div>
                   </td>
                 </tr>
               </tbody>

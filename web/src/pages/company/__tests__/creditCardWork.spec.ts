@@ -32,12 +32,12 @@ describe('todoRows', () => {
 
   it('vrací jen stavy, kde něco zbývá, v pevném pořadí', () => {
     const todo: Record<CreditCardTodoState, CreditCardTodoRow> = {
-      clearing_open: row(2, 300),
+      suggested: row(2, 300),
       unposted: row(1, 50),
-      suggested: row(0),
     }
-    expect(todoRows(todo).map(r => r.state)).toEqual(['unposted', 'clearing_open'])
+    expect(todoRows(todo).map(r => r.state)).toEqual(['unposted', 'suggested'])
     expect(todoRows(todo)[1].amount).toBe(300)
+    expect(todoRows({ unposted: row(1, 50), suggested: row(0) }).map(r => r.state)).toEqual(['unposted'])
   })
 
   it('bez dat je prázdné', () => {
@@ -47,8 +47,8 @@ describe('todoRows', () => {
 
 describe('isTodo', () => {
   it('vyřešené stavy nejsou úkol', () => {
-    expect(isTodo('clearing_open')).toBe(true)
-    expect(isTodo('settled')).toBe(false)
+    expect(isTodo('unposted')).toBe(true)
+    expect(isTodo('posted')).toBe(false)
     expect(isTodo('ignored')).toBe(false)
   })
 })

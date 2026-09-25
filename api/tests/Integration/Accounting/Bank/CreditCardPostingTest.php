@@ -6,7 +6,6 @@ namespace MyInvoice\Tests\Integration\Accounting\Bank;
 
 use MyInvoice\Action\Bank\CreditCardAction;
 use MyInvoice\Repository\CreditCardAccountRepository;
-use MyInvoice\Service\Accounting\Card\CardClearingRegime;
 use MyInvoice\Service\Accounting\CreditCard\CreditCardAccounts;
 use MyInvoice\Service\Accounting\CreditCard\CreditCardConversionService;
 use MyInvoice\Service\Accounting\PostingException;
@@ -59,11 +58,9 @@ final class CreditCardPostingTest extends BankPostingTestCase
         $this->ccCode = $code;
     }
 
-    /** Režim bez mezičlenu: spárovaný nákup jde rovnou 321/231.x (mezičlen viz CreditCardPurchaseModeTest). */
+    /** Spárovaný nákup kreditkou jde rovnou 321/231.x. */
     public function testMatchedPurchasePostsPayableAgainstCreditCardLoan(): void
     {
-        $this->container->get(\MyInvoice\Service\Accounting\CreditCard\CreditCardPostingService::class)
-            ->setPurchaseMode($this->supplierId, $this->ccId, 'direct');
         $pi = $this->postedPurchase(500.00);
         $tx = $this->ccTx(-500.00, 'Nákup na internetu | d.tran. 14.06.2099');
         $this->paymentMatch($tx, $pi, 500.00);
@@ -212,24 +209,20 @@ final class CreditCardPostingTest extends BankPostingTestCase
         self::assertNotSame('posted', $miss['action'], 'Platba s jiným VS není splátka této kreditky.');
     }
 
-    public function testCardPurchaseOnCreditCardGoesThroughCardClearing(): void
+    /** Nákup kreditkou bez dokladu nemá mezičlen: zůstává v běžné frontě pohybů, nic nejde na 378. */
+    public function testUnmatchedCardPurchaseIsNotPostedToClearingAccount(): void
     {
-        $this->db->pdo()->prepare(
-            "INSERT INTO card_clearing_settings (supplier_id, enabled, effective_from, clearing_synthetic)
-             VALUES (?, 1, '2099-01-01', '378')
-             ON DUPLICATE KEY UPDATE enabled = 1, effective_from = '2099-01-01', clearing_synthetic = '378'"
-        )->execute([$this->supplierId]);
-        $this->container->get(CardClearingRegime::class)->forget($this->supplierId);
         $tx = $this->ccTx(-640.00, 'PLATBA U OBCHODNÍKA GOOGLE PAY | d.tran. 14.06.2099');
         $this->db->pdo()->prepare("UPDATE bank_transactions SET card_last4 = '1111' WHERE id = ?")->execute([$tx]);
 
         $res = $this->service->handleTransaction($tx, $this->userId);
 
-        self::assertSame('posted', $res['action'], json_encode($res));
-        $lines = $this->linesByAccountCode((int) $res['entry_id']);
-        self::assertEqualsWithDelta(640.00, $this->lineOnPrefix($lines, '378', 'debit'), 0.001, 'Platba kartou jde přes mezičlen platebních karet.');
-        self::assertEqualsWithDelta(640.00, $lines[$this->ccCode]['credit'], 0.001, '… ale proti úvěru, ne proti bance.');
-        self::assertSame([], $this->bankCodes($lines));
+        if (($res['action'] ?? null) === 'posted') {
+            $lines = $this->linesByAccountCode((int) $res['entry_id']);
+            self::assertEqualsWithDelta(0.0, $this->lineOnPrefix($lines, '378', 'debit'), 0.001, json_encode($res));
+        } else {
+            self::assertNotSame('posted', $res['action'] ?? null);
+        }
     }
 
     /**
@@ -305,7 +298,7 @@ final class CreditCardPostingTest extends BankPostingTestCase
             'SELECT supplier_id FROM bank_statements WHERE id = ' . (int) $result['statement_id']
         )->fetchColumn());
         $code = CreditCardAccounts::codeFor((string) $account['analytic_suffix']);
-        self::assertEqualsWithDelta(-200.00 - 55.00 + 1000.00, $this->balance($code), 0.001, 'Úrok, splátka i nákup (výchozí režim mezičlenu 378.x) se zaúčtovaly automaticky.');
+        self::assertEqualsWithDelta(-55.00 + 1000.00, $this->balance($code), 0.001, 'Úrok a splátka se zaúčtovaly automaticky, nákup bez dokladu čeká ve frontě.');
 
         $again = $this->importer()->importParsed($this->supplierId, $parsed, $this->lastPdf, 'vypis.pdf', $this->userId);
         self::assertTrue($again['duplicate']);

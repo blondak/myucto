@@ -69,7 +69,6 @@ final class TransitionPurchaseInvoiceStatusAction
         private readonly DocumentAutoPoster $autoPoster,
         private readonly SmallAssetService $smallAssets,
         private readonly CashSettlementService $cashSettlement,
-        private readonly \MyInvoice\Service\Accounting\Card\CardPaymentAutomation $cardAutomation,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -280,12 +279,6 @@ final class TransitionPurchaseInvoiceStatusAction
                 $ip,
                 $request->getHeaderLine('User-Agent'),
             );
-        }
-
-        // Platba kartou: přijatý doklad s koncovkou karty se spáruje s pohybem karty
-        // a zaúčtuje se vypořádání 321/378.x (idempotentní, bez režimu karet no-op).
-        if (in_array($target, ['received', 'booked', 'paid'], true)) {
-            $this->cardAutomation->afterPurchaseReady($supplierId, $id, isset($user['id']) ? (int) $user['id'] : null);
         }
 
         // Evidence drobného majetku (§DM): protějšek hooku v UpdatePurchaseInvoiceAction,

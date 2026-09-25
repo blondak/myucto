@@ -880,7 +880,8 @@
         "1893_purchase_invoice_extraction_review.sql",
         "1894_gopay_pending_movements.sql",
         "1895_journal_line_pairings.sql",
-        "1896_bank_document_series.sql"
+        "1896_bank_document_series.sql",
+        "1897_card_clearing_removal.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -3477,7 +3478,6 @@
                 "label": "varchar(120) NOT NULL",
                 "note": "varchar(500) NULL DEFAULT NULL",
                 "opening_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
-                "purchase_mode": "enum('clearing','direct') NULL DEFAULT NULL",
                 "repayment_account": "varchar(40) NULL DEFAULT NULL",
                 "repayment_bank_code": "char(4) NULL DEFAULT NULL",
                 "repayment_vs": "varchar(20) NULL DEFAULT NULL",
@@ -3514,15 +3514,11 @@
                 "fee_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "interest_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "opening_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
-                "private_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
-                "purchase_mode": "enum('clearing','direct') NOT NULL DEFAULT 'clearing'",
                 "repayment_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "reward_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
-                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL",
-                "writeoff_nontax_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
-                "writeoff_tax_account_id": "bigint(20) unsigned NULL DEFAULT NULL"
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (supplier_id)",
@@ -3530,25 +3526,19 @@
                 "fk_ccst_fee": "BTREE (fee_account_id)",
                 "fk_ccst_interest": "BTREE (interest_account_id)",
                 "fk_ccst_opening": "BTREE (opening_account_id)",
-                "fk_ccst_private": "BTREE (private_account_id)",
                 "fk_ccst_repayment": "BTREE (repayment_account_id)",
                 "fk_ccst_reward": "BTREE (reward_account_id)",
-                "fk_ccst_user": "BTREE (updated_by)",
-                "fk_ccst_writeoff_nontax": "BTREE (writeoff_nontax_account_id)",
-                "fk_ccst_writeoff_tax": "BTREE (writeoff_tax_account_id)"
+                "fk_ccst_user": "BTREE (updated_by)"
             },
             "foreign_keys": {
                 "fk_ccst_cash": "(cash_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ccst_fee": "(fee_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ccst_interest": "(interest_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ccst_opening": "(opening_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
-                "fk_ccst_private": "(private_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ccst_repayment": "(repayment_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ccst_reward": "(reward_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ccst_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
-                "fk_ccst_user": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
-                "fk_ccst_writeoff_nontax": "(writeoff_nontax_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL",
-                "fk_ccst_writeoff_tax": "(writeoff_tax_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+                "fk_ccst_user": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": []
         },
@@ -7199,7 +7189,6 @@
                 "holder_name": "varchar(191) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
-                "is_verified": "tinyint(1) NOT NULL DEFAULT 1",
                 "label": "varchar(120) NOT NULL",
                 "last4": "char(4) NOT NULL",
                 "note": "varchar(500) NULL DEFAULT NULL",

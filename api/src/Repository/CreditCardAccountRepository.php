@@ -265,51 +265,6 @@ final class CreditCardAccountRepository
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
-    /** Režim nákupů účtu (null = výchozí režim firmy). */
-    public function setPurchaseMode(int $supplierId, int $id, ?string $mode): void
-    {
-        $this->db->pdo()->prepare('UPDATE credit_card_accounts SET purchase_mode = ? WHERE id = ? AND supplier_id = ?')
-            ->execute([$mode, $id, $supplierId]);
-    }
-
-    /** Přidělí suffix analytiky mezičlenu, jen když ho účet ještě nemá (souběh řeší unikátní index). */
-    public function assignClearingSuffixIfEmpty(int $supplierId, int $id, string $suffix): bool
-    {
-        try {
-            $stmt = $this->db->pdo()->prepare(
-                'UPDATE credit_card_accounts SET clearing_suffix = ?
-                  WHERE id = ? AND supplier_id = ? AND clearing_suffix IS NULL'
-            );
-            $stmt->execute([$suffix, $id, $supplierId]);
-            return $stmt->rowCount() > 0;
-        } catch (\PDOException $e) {
-            if (($e->errorInfo[0] ?? null) === '23000') {
-                return false;
-            }
-            throw $e;
-        }
-    }
-
-    public function setClearingSuffix(int $supplierId, int $id, ?string $suffix): void
-    {
-        $this->db->pdo()->prepare('UPDATE credit_card_accounts SET clearing_suffix = ? WHERE id = ? AND supplier_id = ?')
-            ->execute([$suffix, $id, $supplierId]);
-    }
-
-    /** @return array<string,int> suffix mezičlenu → id úvěrového účtu (i archivovaného) */
-    public function usedClearingSuffixes(int $supplierId): array
-    {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT clearing_suffix, id FROM credit_card_accounts WHERE supplier_id = ? AND clearing_suffix IS NOT NULL'
-        );
-        $stmt->execute([$supplierId]);
-        $out = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
-            $out[(string) $r['clearing_suffix']] = (int) $r['id'];
-        }
-        return $out;
-    }
-
     /** Zamkne řádek účtu do konce transakce (počáteční dluh se smí zaúčtovat jen jednou). */
     public function lockForUpdate(int $supplierId, int $id): ?array
     {
@@ -364,8 +319,6 @@ final class CreditCardAccountRepository
             'currency'            => (string) $r['currency'],
             'credit_limit'        => $r['credit_limit'] !== null ? round((float) $r['credit_limit'], 2) : null,
             'analytic_suffix'     => $r['analytic_suffix'] !== null ? (string) $r['analytic_suffix'] : null,
-            'purchase_mode'       => isset($r['purchase_mode']) && $r['purchase_mode'] !== null ? (string) $r['purchase_mode'] : null,
-            'clearing_suffix'     => isset($r['clearing_suffix']) && $r['clearing_suffix'] !== null ? (string) $r['clearing_suffix'] : null,
             'opening_entry_id'    => isset($r['opening_entry_id']) && $r['opening_entry_id'] !== null ? (int) $r['opening_entry_id'] : null,
             'repayment_account'  => $r['repayment_account'] !== null ? (string) $r['repayment_account'] : null,
             'repayment_bank_code' => $r['repayment_bank_code'] !== null ? (string) $r['repayment_bank_code'] : null,

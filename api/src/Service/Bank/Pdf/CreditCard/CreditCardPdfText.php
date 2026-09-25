@@ -86,7 +86,7 @@ final class CreditCardPdfText
 
     /**
      * Řádek transakce ve tvaru GpcParser. Koncovka karty jen u karetních operací -
-     * poplatek nebo úrok v sekci karty nesmí projít mezičlenem platebních karet.
+     * poplatek nebo úrok v sekci karty se jako platba kartou párovat nesmí.
      *
      * @return array<string,mixed>
      */
