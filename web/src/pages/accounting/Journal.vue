@@ -784,7 +784,10 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
     <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div>
         <h1 class="text-2xl font-semibold">{{ t('accounting.journal.title') }}</h1>
-        <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.journal.subtitle') }}</p>
+        <p class="text-sm text-neutral-500 mt-0.5">
+          {{ t('accounting.journal.subtitle') }}
+          <span v-if="!loading && total > 0" class="ml-2 whitespace-nowrap">· {{ t('common.loaded_count', { loaded: entries.length, total }) }}</span>
+        </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <button type="button" :disabled="exporting" :class="btnOutline('primary')" @click="exportFile('pdf')">
@@ -1190,8 +1193,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       </div>
     </div>
 
-    <div v-if="!loading && total > perPage" class="mt-4 text-center text-sm">
-      <span class="text-neutral-500">{{ t('common.loaded_count', { loaded: entries.length, total }) }}</span>
+    <div v-if="!loading && total > perPage" class="text-center text-sm">
       <div v-if="page < totalPages" ref="loadMoreTarget" class="mt-2 pointer-fine-hidden">
         <button type="button" :disabled="loadingMore" @click="load(false)"
           :class="btnOutline('primary')">
