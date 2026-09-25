@@ -529,6 +529,9 @@ onMounted(reload)
                       <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14"/>
                     </svg>
                   </RouterLink>
+                  <div v-if="it.source_bank_ref && it.source_bank_ref !== it.document_no"
+                       class="font-mono text-[10px] text-neutral-400 whitespace-nowrap"
+                       :title="t('accounting.journal.bank_ref_hint', { ref: it.source_bank_ref })">{{ it.source_bank_ref }}</div>
                 </td>
                 <td v-if="showLineAccount" class="px-3 py-2">
                   <RouterLink :to="{ name: 'accounting-account-detail', params: { accountId: it.account_id }, query: { from: filters.from, to: filters.to } }"

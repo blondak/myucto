@@ -10,6 +10,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
+use MyInvoice\Service\Accounting\Bank\BankDocumentNumber;
 use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier;
@@ -129,6 +130,8 @@ final class PostingService
     private array $itemAccountTrace = [];
 
     private ?DimensionStamper $dimensionStamper = null;
+
+    private ?BankDocumentNumber $bankDocumentNumber = null;
 
     /**
      * Varování pravidel dimenzí (vynucení `warning`) z posledního {@see postDocument()}.
@@ -328,12 +331,19 @@ final class PostingService
             if ($description === null || trim((string) $description) === '') {
                 $description = $this->defaultDescription($supplierId, $sourceType, $sourceId);
             }
+            // Číslo bankovního dokladu určuje jen řada účtu a měsíc zápisu, nikdy volající:
+            // jinak by každá cesta (párování, pravidlo, převod, kreditka, přeúčtování) mohla
+            // číslovat po svém a po novém importu výpisu by týž pohyb dostal jiné číslo.
+            $bankDocument = BankDocumentNumber::numbersSource($sourceType) && $sourceId !== null;
+            $documentNo = $bankDocument
+                ? $this->bankDocumentNumber()->forTransaction($supplierId, $sourceId, $entryDate)
+                : ($meta['document_no'] ?? null);
             $header = [
                 'supplier_id'   => $supplierId,
                 'period_id'     => (int) $period['id'],
                 'entry_date'    => $entryDate,
                 'document_date' => $meta['document_date'] ?? null,
-                'document_no'   => $meta['document_no'] ?? null,
+                'document_no'   => $documentNo,
                 'description'   => $description,
                 'source_type'   => $sourceType,
                 'source_id'     => $sourceId,
@@ -358,6 +368,9 @@ final class PostingService
                         'payroll_rewrite_forbidden',
                         'Zaúčtovaný mzdový předpis je neměnný; oprava patří do nové revize.',
                     );
+                }
+                if ($bankDocument && $this->bankDocumentNumber()->isTakenOver($supplierId, (int) $existing['id'])) {
+                    $header['document_no'] = $existing['document_no'];
                 }
                 $existing['lines'] = $this->journal->linesForEntry((int) $existing['id'], $supplierId);
                 if ($taxNeutralRewrite) {
@@ -2343,6 +2356,11 @@ final class PostingService
     }
 
     // ── interní ───────────────────────────────────────────────────────────────
+
+    private function bankDocumentNumber(): BankDocumentNumber
+    {
+        return $this->bankDocumentNumber ??= new BankDocumentNumber($this->db);
+    }
 
     private function dimensionStamper(): DimensionStamper
     {

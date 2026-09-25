@@ -10,6 +10,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
+use MyInvoice\Service\Accounting\Bank\BankDocumentNumber;
+use MyInvoice\Service\Accounting\Bank\BankDocumentNumberBackfill;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -22,6 +24,8 @@ final class SupplierBankAccountAction
         private readonly SupplierBankAccountRepository $accounts,
         private readonly Connection $db,
         private readonly BankAnalyticAssigner $analytics,
+        private readonly BankDocumentNumber $documentNumbers,
+        private readonly BankDocumentNumberBackfill $renumbering,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -33,6 +37,7 @@ final class SupplierBankAccountAction
         // políčko u účtu, který analytiku mít má — tak ji dohrajeme rovnou. Běží až za
         // requireDoubleEntry: v daňové evidenci žádná osnova ani deník není.
         $this->analytics->ensureAllForSupplier($supplierId);
+        $this->documentNumbers->ensureAllForSupplier($supplierId);
         return Json::ok($response, ['accounts' => array_map([$this, 'publicRow'], $this->accounts->listForSupplier($supplierId))]);
     }
 
@@ -111,6 +116,21 @@ final class SupplierBankAccountAction
             }
             $patch['is_active'] = $body['is_active'];
         }
+        if (array_key_exists('document_series', $body)) {
+            $series = BankDocumentNumber::normalizeSeries((string) ($body['document_series'] ?? ''));
+            if ($series === '') {
+                return Json::error($response, 'validation_failed', 'Dokladová řada bankovního účtu je povinná.', 422);
+            }
+            if (!BankDocumentNumber::isValidSeries($series)) {
+                return Json::error($response, 'validation_failed', 'Dokladová řada smí obsahovat jen písmena A–Z a číslice, nejvýše 10 znaků.', 422);
+            }
+            $holder = $this->accounts->findByDocumentSeries($supplierId, $series);
+            if ($holder !== null && (int) $holder['id'] !== $id) {
+                return Json::error($response, 'validation_failed', 'Dokladovou řadu ' . $series . ' už používá jiný bankovní účet.', 422);
+            }
+            $patch['document_series'] = $series;
+        }
+        $seriesChanged = isset($patch['document_series']) && $patch['document_series'] !== ($current['document_series'] ?? null);
         $this->accounts->update($supplierId, $id, $patch);
         // Analytika musí v osnově existovat, jinak by na ni postDocument neuměl zaúčtovat.
         // Ruční přiřazení na už existující účet (např. termínovaný vklad na 221100) se
@@ -122,14 +142,21 @@ final class SupplierBankAccountAction
                 (string) ($patch['label'] ?? $current['label'] ?? ''),
             );
         }
-        return Json::ok($response, $this->publicRow($this->accounts->find($supplierId, $id) ?? []));
+        // Nová řada platí i pro zápisy, které už v deníku jsou — v otevřených obdobích
+        // se přečíslují hned, uzavřená zůstávají s čísly, se kterými byla uzavřena.
+        $renumbered = $seriesChanged
+            ? $this->renumbering->run($supplierId, null, true, $this->userId($request))['changed']
+            : 0;
+        $row = $this->publicRow($this->accounts->find($supplierId, $id) ?? []);
+        $row['renumbered_entries'] = $renumbered;
+        return Json::ok($response, $row);
     }
 
     private function publicRow(array $row): array
     {
         return array_intersect_key($row, array_flip([
             'id', 'label', 'account_number', 'bank_code', 'iban', 'currency', 'kind',
-            'analytic_suffix', 'is_active', 'source', 'currency_id',
+            'analytic_suffix', 'document_series', 'is_active', 'source', 'currency_id',
         ]));
     }
 }

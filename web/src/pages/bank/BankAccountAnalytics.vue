@@ -31,7 +31,7 @@ const error = ref('')
 const saving = ref(false)
 
 // Drafty per účet — uložené hodnoty se drží zvlášť, ať jde poznat „změněno".
-interface Draft { kind: BankAccountKind; label: string; analytic_suffix: string; is_active: boolean }
+interface Draft { kind: BankAccountKind; label: string; analytic_suffix: string; document_series: string; is_active: boolean }
 const drafts = ref<Record<number, Draft>>({})
 
 const canWrite = computed(() => auth.canWrite('accounting'))
@@ -41,6 +41,7 @@ function draftFrom(a: SupplierBankAccount): Draft {
     kind: a.kind,
     label: a.label ?? '',
     analytic_suffix: a.analytic_suffix ?? '',
+    document_series: a.document_series ?? '',
     is_active: Boolean(a.is_active),
   }
 }
@@ -51,10 +52,18 @@ function isDirty(a: SupplierBankAccount): boolean {
   return d.kind !== a.kind
     || d.label !== (a.label ?? '')
     || d.analytic_suffix !== (a.analytic_suffix ?? '')
+    || normalizeSeries(d.document_series) !== (a.document_series ?? '')
     || d.is_active !== Boolean(a.is_active)
 }
 
 const dirtyCount = computed(() => accounts.value.filter(isDirty).length)
+
+// Stejný tvar jako na serveru (BankDocumentNumber::SERIES_PATTERN).
+const SERIES_PATTERN = /^[A-Z0-9]{1,10}$/
+
+function normalizeSeries(value: string): string {
+  return value.trim().toUpperCase()
+}
 
 async function load() {
   loading.value = true
@@ -74,9 +83,22 @@ async function load() {
 async function saveAll() {
   if (!canWrite.value || saving.value || dirtyCount.value === 0) return
   saving.value = true
+  let renumbered = 0
   try {
     for (const a of accounts.value.filter(isDirty)) {
       const d = drafts.value[a.id]
+      const series = normalizeSeries(d.document_series)
+      if (!SERIES_PATTERN.test(series)) {
+        toast.error(t('bank.analytics.series_invalid', { account: accountLabel(a) }))
+        return
+      }
+      const seriesClash = accounts.value.find(
+        (o) => o.id !== a.id && normalizeSeries(drafts.value[o.id]?.document_series ?? '') === series,
+      )
+      if (seriesClash) {
+        toast.error(t('bank.analytics.series_taken', { series, account: accountLabel(seriesClash) }))
+        return
+      }
       if (d.analytic_suffix !== '' && !/^[0-9]{1,6}$/.test(d.analytic_suffix)) {
         toast.error(t('bank.analytics.suffix_invalid', { account: accountLabel(a) }))
         return
@@ -96,16 +118,20 @@ async function saveAll() {
       }
       // Úvěrový účet kreditní karty: druh, analytiku (231) i archivaci spravuje stránka
       // Kreditní karty; vypnout ho tu nejde (pohyby by spadly na 221).
-      await bankPostingApi.updateAccount(a.id, a.kind === 'credit_card'
-        ? { label: d.label.trim() || null }
+      const seriesPatch = series !== (a.document_series ?? '') ? { document_series: series } : {}
+      const saved = await bankPostingApi.updateAccount(a.id, a.kind === 'credit_card'
+        ? { label: d.label.trim() || null, ...seriesPatch }
         : {
             kind: d.kind,
             label: d.label.trim() || null,
             analytic_suffix: d.analytic_suffix.trim() || null,
             is_active: d.is_active,
+            ...seriesPatch,
           })
+      renumbered += saved.renumbered_entries ?? 0
     }
     toast.success(t('bank.analytics.saved'))
+    if (renumbered > 0) toast.success(t('bank.analytics.series_renumbered', { count: renumbered }))
     await load()
   } catch (e) {
     toast.error(apiErrorMessage(e))
@@ -128,6 +154,7 @@ onMounted(load)
     <div class="bg-primary-50 border border-primary-200 rounded-lg p-4 mb-4 text-sm text-neutral-700">
       <p class="font-medium text-primary-800 mb-1">{{ t('bank.analytics.explainer_title') }}</p>
       <p>{{ t('bank.analytics.explainer_body') }}</p>
+      <p class="mt-2">{{ t('bank.analytics.series_explainer') }}</p>
     </div>
 
     <div v-if="error" class="bg-danger-50 border border-danger-500/40 text-danger-500 rounded-md p-3 text-sm mb-4">
@@ -151,6 +178,7 @@ onMounted(load)
                 <th class="px-3 py-2 text-left font-medium">{{ t('bank.analytics.col.label') }}</th>
                 <th class="px-3 py-2 text-left font-medium">{{ t('bank.analytics.col.kind') }}</th>
                 <th class="px-3 py-2 text-left font-medium whitespace-nowrap">{{ t('bank.analytics.col.analytic') }}</th>
+                <th class="px-3 py-2 text-left font-medium whitespace-nowrap">{{ t('bank.analytics.col.series') }}</th>
                 <th class="px-3 py-2 text-center font-medium">{{ t('bank.analytics.col.active') }}</th>
               </tr>
             </thead>
@@ -188,6 +216,11 @@ onMounted(load)
                       = {{ BANK_PREFIX + drafts[a.id].analytic_suffix }}
                     </span>
                   </div>
+                </td>
+                <td class="px-3 py-2">
+                  <input v-model="drafts[a.id].document_series" type="text" maxlength="10" :disabled="!canWrite"
+                         placeholder="BCR"
+                         class="w-24 h-8 px-2 border border-neutral-300 rounded-md text-xs bg-surface font-mono uppercase disabled:bg-neutral-50" />
                 </td>
                 <td class="px-3 py-2 text-center">
                   <input v-model="drafts[a.id].is_active" type="checkbox" :disabled="!canWrite || a.kind === 'credit_card'"

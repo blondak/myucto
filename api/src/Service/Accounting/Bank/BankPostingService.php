@@ -474,7 +474,6 @@ final class BankPostingService
             $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $postedLines, [
                 'entry_date'    => $postedAt,
                 'document_date' => $postedAt,
-                'document_no'   => $this->documentNo($tx),
                 'description'   => $this->entryDescription($tx),
                 'posted'        => true,
                 'user_id'       => $userId,
@@ -1764,7 +1763,6 @@ final class BankPostingService
                 'Vypořádání platby kartou',
                 $this->entryDescription($tx),
             ]),
-            'document_no' => $this->documentNo($tx),
             'user_id'     => $userId,
         ]);
     }
@@ -2195,7 +2193,6 @@ final class BankPostingService
                 ]), [
                     'entry_date' => (string) $tx['posted_at'],
                     'document_date' => (string) $tx['posted_at'],
-                    'document_no' => $this->documentNo($tx),
                     // Popis z detektoru je VĚCNÝ OBSAH („Záloha na daň z příjmů"),
                     // ne identifikace pohybu — proto vstupuje jako detail, ne místo
                     // celého popisu. Sám o sobě je u desítek plateb shodný.
@@ -2319,7 +2316,6 @@ final class BankPostingService
                 ]), [
                     'entry_date'    => $postedAt,
                     'document_date' => $postedAt,
-                    'document_no'   => $this->documentNo($tx),
                     // Popis pravidla je věcný obsah, ne identifikace pohybu — viz
                     // stejné místo u detektoru výš.
                     'description'   => $this->entryDescription($tx, (string) ($rule['description'] ?? '')),
@@ -2691,7 +2687,6 @@ final class BankPostingService
             $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $this->withBankAnalytic($supplierId, $tx, $lines), [
                 'entry_date'    => (string) $tx['posted_at'],
                 'document_date' => (string) $tx['posted_at'],
-                'document_no'   => $this->documentNo($tx),
                 'description'   => $this->entryDescription($tx),
                 'posted'        => true,
                 'user_id'       => $meta['user_id'] ?? null,
@@ -2904,7 +2899,6 @@ final class BankPostingService
             $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $this->withBankAnalytic($supplierId, $tx, $lines), [
                 'entry_date'    => (string) $tx['posted_at'],
                 'document_date' => (string) $tx['posted_at'],
-                'document_no'   => $this->documentNo($tx),
                 'description'   => $description,
                 'posted'        => true,
                 'user_id'       => $meta['user_id'] ?? null,
@@ -4113,12 +4107,6 @@ final class BankPostingService
         } else {
             $lines[] = $this->line('548', 'debit', -$cents / 100.0);
         }
-    }
-
-    private function documentNo(array $tx): string
-    {
-        $ref = isset($tx['bank_ref']) && trim((string) $tx['bank_ref']) !== '' ? trim((string) $tx['bank_ref']) : null;
-        return $ref ?? ('BANK-' . (int) $tx['id']);
     }
 
     /**

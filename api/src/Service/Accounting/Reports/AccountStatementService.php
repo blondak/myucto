@@ -67,7 +67,8 @@ final class AccountStatementService
                 // Drill-down na prvotní doklad — shodná sada polí jako v deníku
                 // (JournalEntryRepository::paginate), aby proklik vedl na tentýž doklad.
                 'source_statement_id'       => $l['source_statement_id'],
-                'source_doc_number'         => $l['source_doc_number'],
+                'source_bank_ref'           => $l['source_bank_ref'] ?? null,
+                'source_doc_number'       => $l['source_doc_number'],
                 'source_register_id'        => $l['source_register_id'],
                 'source_asset_id'           => $l['source_asset_id'],
                 'source_asset_name'         => $l['source_asset_name'],

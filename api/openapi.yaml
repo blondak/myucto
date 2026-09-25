@@ -11565,7 +11565,7 @@ paths:
       tags: [Accounting]
       summary: Upraví vlastní bankovní účet
       description: >-
-        Účetní/admin. Mění klasifikaci a aktivaci účtu; cizí tenant vrací 404. Úvěrový účet
+        Účetní/admin. Mění klasifikaci, dokladovou řadu a aktivaci účtu; cizí tenant vrací 404. Úvěrový účet
         kreditní karty (kind = credit_card) se tudy neupravuje (422) a na kreditní účet nejde
         účet ani přepnout, to dělá import výpisu nebo převod na stránce Kreditní karty.
       parameters:
@@ -11588,9 +11588,25 @@ paths:
                     obsazené číslo vrací 422. Prázdná hodnota u účtu BEZ analytiky znamená
                     „přiděl automaticky"; u účtu, který analytiku už má, je odmítnutá (422) —
                     analytiku lze jen změnit na jiné číslo, ne zrušit.
+                document_series:
+                  type: string
+                  pattern: '^[A-Za-z0-9]{1,10}$'
+                  description: >-
+                    Dokladová řada bankovních zápisů účtu (ukládá se velkými písmeny). Musí být
+                    v rámci firmy jedinečná, obsazená řada vrací 422. Po změně se přečíslují
+                    bankovní zápisy účtu v otevřených účetních obdobích (renumbered_entries).
                 is_active: { type: boolean }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SupplierBankAccount' } } } }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SupplierBankAccount'
+                  - type: object
+                    properties:
+                      renumbered_entries: { type: integer, description: Počet bankovních zápisů přečíslovaných po změně dokladové řady. }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
@@ -25401,6 +25417,7 @@ components:
           enum: [debit, credit, null]
           description: "Jen v listu a jen když je aktivní filtr account_from/account_to — strana (MD/D), na kterou amount připadá u filtrovaného rozsahu účtů. Null bez filtru na účet."
         source_statement_id: { type: [integer, "null"], description: "Jen source_type=bank — ID bankovního výpisu pro drill-down (audit 2026-07)." }
+        source_bank_ref: { type: [string, "null"], description: "Jen source_type=bank — ID pohybu z banky. Číslo dokladu (document_no) bankovního zápisu je dokladová řada účtu a měsíc výpisu (BCR-08); vyhledávání document_no a q hledá i v ID pohybu." }
         source_doc_number: { type: [string, "null"], description: "Jen source_type=cash — číslo pokladního dokladu pro drill-down (audit 2026-07)." }
         source_register_id: { type: [integer, "null"], description: "Jen source_type=cash — ID pokladny (audit 2026-07)." }
         has_related: { type: boolean, description: "Jen v listu — zápis má protějšek v grafu doklad ↔ úhrada (bankovní pohyb, pokladní doklad nebo zápočet)." }
@@ -27519,6 +27536,7 @@ components:
             credit_card = úvěrový účet kreditní karty. Jeho pohyby se účtují na analytiku 231
             (spravuje ji stránka Kreditní karty), analytic_suffix 221 zůstává prázdný.
         analytic_suffix: { type: [string, "null"], description: 'Analytika účtu 221 (221<suffix>); přiděluje se automaticky každému aktivnímu účtu kromě úvěrového účtu kreditní karty.' }
+        document_series: { type: [string, "null"], pattern: '^[A-Z0-9]{1,10}$', description: 'Dokladová řada bankovních zápisů účtu. Číslo dokladu bankovního zápisu v deníku je řada a měsíc data zápisu (BCR-08). Chybějící řadu přidělí aplikace podle druhu a měny účtu (BCR běžný CZK, BCE běžný EUR, BCS spořicí …).' }
         is_active: { type: boolean }
         source: { type: string, enum: [currencies, statement, manual] }
         currency_id: { type: [integer, "null"] }

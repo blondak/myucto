@@ -158,6 +158,8 @@ export interface JournalEntry {
   amount_side?: JournalSide | null
   /** Obohaceno v listu jen pro source_type='bank' — drill-down na bankovní výpis. */
   source_statement_id?: number | null
+  /** Jen source_type='bank' — ID pohybu z banky; číslo dokladu nese řadu účtu (BCR-08). */
+  source_bank_ref?: string | null
   /** Obohaceno v listu jen pro source_type='cash' — drill-down na pokladní doklad. */
   source_doc_number?: string | null
   source_register_id?: number | null
@@ -1139,6 +1141,7 @@ export interface AccountStatementItem {
   account_name: string
   /** Obohacení pro drill-down na prvotní doklad — viz utils/journalSourceLink.ts. */
   source_statement_id: number | null
+  source_bank_ref?: string | null
   source_doc_number: string | null
   source_register_id: number | null
   source_asset_id: number | null
