@@ -504,6 +504,15 @@ možnosti:
 Vyrovnání rozdílu je dostupné v podvojném účetnictví a s oprávněním k účetnictví.
 V daňové evidenci aplikace jen oznámí, kolik zbývá uhradit.
 
+Korunová platba cizoměnové faktury mimo kurzovou toleranci (částečná úhrada nebo
+druhá platba už uhrazené faktury) se automaticky nezaúčtuje a čeká ve frontě
+**K zaúčtování** na ruční ověření. Závazek na 321 se tak neodúčtuje víc, než kolik
+z faktury zbývá.
+
+Příchozí platba spárovaná s přijatou fakturou (vrácený dobropis, vrácený
+přeplatek) se do uhrazené částky počítá se záporným znaménkem. Vrácený dobropis
+proto nic nedluží a faktura, ke které dodavatel vrátil část peněz, ukáže zbytek.
+
 ## 29.6 Cron — automatický scan
 
 Místo ručního uploadu můžeš nastavit **cron**, který bude pravidelně skenovat
