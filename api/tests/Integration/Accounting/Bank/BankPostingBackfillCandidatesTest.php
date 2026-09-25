@@ -123,6 +123,24 @@ final class BankPostingBackfillCandidatesTest extends BankPostingTestCase
     }
 
     /**
+     * Confidence 65, ale doklad sám uvádí k úhradě přesně zaplacenou částku
+     * (1 000,00 − 0,50 zaokrouhlení): guard služby to bere jako plnou úhradu,
+     * takže ji SQL musí nabídnout taky.
+     */
+    public function testDeclaredRoundingIsOfferedDespiteWeakMatch(): void
+    {
+        $case = $this->roundingLeftover('DECLARED65', 'auto_partial', 'auto', 65);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET rounding = -0.50 WHERE id = ?')->execute([$case['purchase']]);
+
+        $report = $this->backfill->run($this->supplierId, $this->from(), true, false);
+
+        self::assertSame(1, $report['normalized_full']);
+        $lines = $this->linesByAccountCode($case['entry']);
+        self::assertEqualsWithDelta(1000.00, $lines['321']['debit'], 0.001);
+        self::assertEqualsWithDelta(0.50, $lines['648']['credit'], 0.001);
+    }
+
+    /**
      * Split platba (2+ alokace na jednu tx) je legitimní stav, kde není co srovnávat —
      * guard služby ji odmítá a SQL ji nesmí protlačit dál.
      */

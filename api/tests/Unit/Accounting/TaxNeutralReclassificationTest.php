@@ -28,7 +28,58 @@ final class TaxNeutralReclassificationTest extends TestCase
         11 => ['code' => '548.100', 'account_type' => 'expense', 'tax_deductibility' => 'deductible'],
         12 => ['code' => '221.100', 'account_type' => 'asset', 'tax_deductibility' => 'deductible'],
         13 => ['code' => '381', 'account_type' => 'asset', 'tax_deductibility' => 'deductible'],
+        14 => ['code' => '648.100', 'account_type' => 'revenue', 'tax_deductibility' => 'deductible'],
     ];
+
+    /** Úhrada 859,00 přijaté faktury 859,35 (zaokrouhlení −0,35), zaúčtovaná bez dorovnání. */
+    private static function roundedPayment(): array
+    {
+        return [
+            ['account_id' => 5, 'side' => 'debit', 'amount' => 859.00],
+            ['account_id' => 12, 'side' => 'credit', 'amount' => 859.00],
+        ];
+    }
+
+    /**
+     * Srovnání úhrady na nominál předpisu: 321 se uzavře celou částkou a haléře jdou
+     * na 648. Mění se saldokonto proti účtu zaokrouhlení (do 1 Kč), DPH ani banka ne.
+     * Do podání DPPO projde, pak už ne (mění výsledek).
+     */
+    public function testRoundingSettlementIsAllowedBeforeIncomeTaxFiling(): void
+    {
+        $after = [
+            ['account_id' => 5, 'side' => 'debit', 'amount' => 859.35],
+            ['account_id' => 12, 'side' => 'credit', 'amount' => 859.00],
+            ['account_id' => 14, 'side' => 'credit', 'amount' => 0.35],
+        ];
+
+        self::assertNull(R::violation(self::roundedPayment(), $after, self::ACCOUNTS, false));
+        self::assertSame(R::AMOUNTS_CHANGED, R::violation(self::roundedPayment(), $after, self::ACCOUNTS, true));
+    }
+
+    /** Dorovnání nad 1 Kč nebo s dalším účtem už haléřovým zaokrouhlením není. */
+    public function testRoundingExceptionIsNarrow(): void
+    {
+        $tooMuch = [
+            ['account_id' => 5, 'side' => 'debit', 'amount' => 860.01],
+            ['account_id' => 12, 'side' => 'credit', 'amount' => 859.00],
+            ['account_id' => 14, 'side' => 'credit', 'amount' => 1.01],
+        ];
+        self::assertSame(R::AMOUNTS_CHANGED, R::violation(self::roundedPayment(), $tooMuch, self::ACCOUNTS, false));
+
+        $otherAccount = [
+            ['account_id' => 5, 'side' => 'debit', 'amount' => 859.35],
+            ['account_id' => 12, 'side' => 'credit', 'amount' => 859.00],
+            ['account_id' => 2, 'side' => 'credit', 'amount' => 0.35],
+        ];
+        self::assertSame(R::AMOUNTS_CHANGED, R::violation(self::roundedPayment(), $otherAccount, self::ACCOUNTS, false));
+
+        $bank = [
+            ['account_id' => 5, 'side' => 'debit', 'amount' => 859.35],
+            ['account_id' => 12, 'side' => 'credit', 'amount' => 859.35],
+        ];
+        self::assertSame(R::AMOUNTS_CHANGED, R::violation(self::roundedPayment(), $bank, self::ACCOUNTS, false));
+    }
 
     /** Přijatá faktura se slevou zaúčtovanou samostatně jako Dal 518 (stav před opravou). */
     private static function discountAsCredit(): array

@@ -346,6 +346,20 @@ function runAutoBackfills(\PDO $db, string $binDir, Connection $connection): voi
             'count'   => static fn (): int => (new \MyInvoice\Service\Accounting\DocumentEntryNumberBackfill($connection))->pending(),
             'script'  => 'document-entry-number-backfill.php',
         ],
+        [
+            // Zaúčtované úhrady přijatých faktur s haléřovým zbytkem na 321 (doklad se
+            // zaokrouhlením, dobropis s vratkou), jen otevřená období, přepis na místě.
+            // Viz PurchaseRoundingSettlementBackfill.
+            'name'    => 'purchase-rounding-settlement',
+            'reason'  => 'úhrad přijatých faktur k dorovnání haléřového zbytku',
+            // Náhled běží přes engine účtování (dry-run v transakci), takže služba i její
+            // závislosti musí sdílet JEDNO spojení z kontejneru — s vlastním spojením by
+            // rollback náhledu nezahrnul zápisy enginu.
+            'count'   => static fn (): int => \MyInvoice\Bootstrap::buildApp()->getContainer()
+                ->get(\MyInvoice\Service\Accounting\Bank\PurchaseRoundingSettlementBackfill::class)
+                ->pending(),
+            'script'  => 'purchase-rounding-settlement-backfill.php',
+        ],
     ];
 
     echo "\n=== Auto-backfill check ===\n";

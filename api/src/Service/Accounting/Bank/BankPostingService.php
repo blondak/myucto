@@ -3634,6 +3634,42 @@ final class BankPostingService
         return true;
     }
 
+    /**
+     * Přepíše ŽIVÝ zápis spárované úhrady podle aktuálního párování, na místě a k jeho
+     * vlastnímu datu. Pro dávkové srovnání haléřového zbytku
+     * ({@see PurchaseRoundingSettlementBackfill}) u úhrad, které už zaúčtované jsou,
+     * často v datu zamčeném podaným DPH. Zámek tu obchází jen daňově neutrální přepis
+     * ({@see \MyInvoice\Service\Accounting\TaxNeutralReclassification}), který
+     * PostingService ověří znovu pod zámkem zápisu: haléřové dorovnání 321 ↔ 548/648
+     * projde jen do podání DPPO, cokoli jiného skončí `date_locked`.
+     *
+     * Řádky staví týž {@see buildMatched()} jako živý import — žádná druhá logika.
+     */
+    public function repostMatchedInPlace(int $supplierId, int $txId, ?int $userId = null): int
+    {
+        $tx = $this->loadTx($txId);
+        if ($tx === null || !$this->txOwnedBySupplier($txId, $supplierId)) {
+            throw new PostingException('not_found', 'Transakce nenalezena.', 404);
+        }
+        $live = $this->journal->findBySource($supplierId, 'bank', $txId);
+        if ($live === null || ($live['reversed_by'] ?? null) !== null) {
+            throw new PostingException('document_not_posted', 'Pohyb nemá živý zápis, který by se dal přepsat.');
+        }
+        $build = $this->buildMatched($supplierId, $tx);
+        $lines = $this->withBankAnalytic($supplierId, $tx, $build['lines']);
+
+        return $this->posting->postDocument($supplierId, 'bank', $txId, $lines, [
+            'entry_date'          => (string) $live['entry_date'],
+            'document_date'       => $live['document_date'] ?? null,
+            'description'         => $live['description'] ?? null,
+            'posted'              => true,
+            'posted_at'           => $live['posted_at'] ?? null,
+            'posted_by'           => isset($live['posted_by']) ? (int) $live['posted_by'] : null,
+            'user_id'             => $userId,
+            'tax_neutral_rewrite' => true,
+        ]);
+    }
+
     public function normalizeRoundingFullPurchase(int $supplierId, int $txId): bool
     {
         $pdo = $this->db->pdo();
@@ -3642,7 +3678,7 @@ final class BankPostingService
                     bs.currency AS statement_currency,
                     pm.id AS match_id, pm.invoice_id, pm.purchase_invoice_id, pm.amount AS allocated,
                     pm.match_type, pm.match_confidence,
-                    pi.status, pi.amount_to_pay, pi.exchange_rate, cur.code AS invoice_currency
+                    pi.status, pi.amount_to_pay, pi.rounding, pi.exchange_rate, cur.code AS invoice_currency
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
                JOIN payment_matches pm ON pm.bank_transaction_id = bt.id AND pm.supplier_id = ?
@@ -3661,26 +3697,39 @@ final class BankPostingService
         $row = $rows[0];
         $txCurrency = strtoupper(trim((string) ($row['tx_currency'] ?: $row['statement_currency'])));
         $txAmount = abs((float) $row['amount']);
-        $invoiceAmount = (float) $row['amount_to_pay'];
+        // Dobropis má amount_to_pay záporné a jeho úhradou je PŘÍCHOZÍ vratka. Srovnává
+        // se v absolutní hodnotě; směr pohybu musí znaménku dokladu odpovídat (guard níž).
+        $refund = (float) $row['amount_to_pay'] < 0.0;
+        $invoiceAmount = abs((float) $row['amount_to_pay']);
         $invoiceCurrency = strtoupper((string) $row['invoice_currency']);
         // Ruční párování nemá confidence (NULL) — důkazem je člověk, ne skóre.
         $manualMatch = (string) $row['match_type'] === 'manual';
         $confidence = (int) ($row['match_confidence'] ?? 0);
         $sameCurrency = $txCurrency !== '' && $txCurrency === $invoiceCurrency;
+        // Pohyb přesně na částku „k úhradě", kterou uvádí sám doklad (amount_to_pay +
+        // rounding), je plná úhrada i při slabém skóre párování: dodavatel zaokrouhlil
+        // a zaplaceno je přesně to, co žádal. Nejde o náhodnou shodu částky, kterou
+        // práh 70 chrání. Bez toho zůstal doklad se zaokrouhlením na 321 s haléřovým
+        // zbytkem (párování shodou částky a data má skóre 65).
+        $rounding = (float) ($row['rounding'] ?? 0);
+        $declaredFull = $sameCurrency
+            && abs($rounding) >= 0.005
+            && abs($txAmount - abs(round((float) $row['amount_to_pay'] + $rounding, 2))) < 0.005;
         $sameCurrencyFull = $sameCurrency
-            && ($manualMatch || $confidence >= 70)
+            && ($manualMatch || $confidence >= 70 || $declaredFull)
             && abs($txAmount - $invoiceAmount) <= FxPaymentSettlement::AMOUNT_TOLERANCE;
         $invoiceRate = (float) ($row['exchange_rate'] ?? 0);
         $expectedCzk = $invoiceRate > 0.0
             ? FxPaymentSettlement::expectedLocalAmount($invoiceAmount, $invoiceRate)
             : 0.0;
         $crossCurrencyFull = !$sameCurrency
+            && !$refund
             && FxPaymentSettlement::isCzkPaymentOfForeignInvoice($txCurrency, $invoiceCurrency)
             && ($manualMatch || $confidence >= 60)
             && $expectedCzk > 0.0
             && abs($txAmount - $expectedCzk) <= FxPaymentSettlement::matchTolerance($expectedCzk);
         if ((string) $row['source'] !== 'statement'
-            || (float) $row['amount'] >= 0.0
+            || ($refund ? (float) $row['amount'] <= 0.0 : (float) $row['amount'] >= 0.0)
             // auto_exact patří do seznamu taky: rozdíl do EXACT_MATCH_TOLERANCE (0,05) sice
             // fakturu rovnou označí jako paid, ale alokace i tak drží částku TRANSAKCE, takže
             // haléřový zbytek zůstane viset na 321 a doklad vypadá uzavřeně, aniž by byl.

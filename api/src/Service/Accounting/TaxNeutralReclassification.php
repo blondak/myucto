@@ -42,6 +42,9 @@ final class TaxNeutralReclassification
     public const ACCOUNT_CLASS_CHANGED = 'account_class_changed';
     public const TAX_DEDUCTIBILITY_CHANGED = 'tax_deductibility_changed';
 
+    /** Strop haléřového dorovnání úhrady; týž jako BankPostingService::ROUNDING_TOLERANCE_CENTS. */
+    public const ROUNDING_TOLERANCE_CENTS = 100;
+
     private const MESSAGES = [
         self::UNKNOWN_ACCOUNT           => 'oprava používá účet, který není v osnově',
         self::SPECIAL_ACCOUNT           => 'oprava mění závěrkový nebo podrozvahový účet',
@@ -77,6 +80,8 @@ final class TaxNeutralReclassification
 
         $money = 0;
         $settlement = 0;
+        $rounding = 0;
+        $onlySettlementAndRounding = true;
         $perDeductibility = [];
         $classes = [];
         foreach ($changed as $accountId => $cents) {
@@ -95,6 +100,10 @@ final class TaxNeutralReclassification
                 $money += $cents;
             } elseif (self::isSettlementAccount($code)) {
                 $settlement += $cents;
+            } elseif (self::isRoundingAccount($code)) {
+                $rounding += $cents;
+            } else {
+                $onlySettlementAndRounding = false;
             }
             $classes[$code[0] ?? ''] = true;
             $bucket = (string) ($account['tax_deductibility'] ?? 'deductible');
@@ -105,7 +114,20 @@ final class TaxNeutralReclassification
             return self::AMOUNTS_CHANGED;
         }
         if ($settlement !== 0) {
-            return self::AMOUNTS_CHANGED;
+            // Jediná výjimka: haléřové dorovnání úhrady. Doklad se zaokrouhlením
+            // (zaplaceno 16 371,00 na předpis 16 370,09) se uzavře až tehdy, když se
+            // úhrada srovná na nominál předpisu a rozdíl jde na 548/648 — stejně jako
+            // to od začátku dělá BankPostingService při živém párování. Mění se jen
+            // saldokonto proti účtu zaokrouhlení, nejvýš o 1 Kč, DPH ani peníze ne.
+            // Mění to ale výsledek, a tak jen do podání DPPO (jako přesun mezi třídami).
+            if ($incomeTaxFiled
+                || !$onlySettlementAndRounding
+                || $settlement + $rounding !== 0
+                || abs($rounding) > self::ROUNDING_TOLERANCE_CENTS
+            ) {
+                return self::AMOUNTS_CHANGED;
+            }
+            return null;
         }
         if (!$incomeTaxFiled) {
             return null;
@@ -138,5 +160,11 @@ final class TaxNeutralReclassification
     private static function isSettlementAccount(string $code): bool
     {
         return in_array(substr($code, 0, 2), ['31', '32', '33', '35', '36', '37'], true);
+    }
+
+    /** Účty haléřového dorovnání úhrad (BankPostingService::appendRounding). */
+    private static function isRoundingAccount(string $code): bool
+    {
+        return str_starts_with($code, '548') || str_starts_with($code, '648');
     }
 }
