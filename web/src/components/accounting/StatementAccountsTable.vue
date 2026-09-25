@@ -31,6 +31,8 @@ function netD(acc: StatementAccountLine): number {
 
 const profit = computed(() => props.part === 'balance' ? props.report.balance.profit : props.report.profit_loss.profit)
 
+const closedAtYearEnd = computed(() => props.report.closed && props.report.as_of === props.report.period.ends_on)
+
 const sections = computed(() => props.report.profit_loss.sections
   .filter(s => s.expenses.length || s.revenues.length)
   .map(s => ({ ...s, accounts: [...s.expenses, ...s.revenues] })))
@@ -50,7 +52,7 @@ const subtotals = computed(() => {
   <div>
     <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3 text-xs text-neutral-500">
       <span>{{ t('accounting.statement_accounts.note_before_closing') }}</span>
-      <span v-if="report.closed" class="px-2 py-0.5 rounded bg-neutral-100 text-neutral-600">
+      <span v-if="closedAtYearEnd" class="px-2 py-0.5 rounded bg-neutral-100 text-neutral-600" data-test="accounts-closed-note">
         {{ t('accounting.statement_accounts.closed_note') }}
       </span>
       <label class="inline-flex items-center gap-1.5 cursor-pointer ml-auto whitespace-nowrap">
@@ -59,7 +61,14 @@ const subtotals = computed(() => {
       </label>
     </div>
 
-    <div v-if="!report.checks.profit_matches"
+    <div v-if="!report.checks.profit_matches && report.dimension"
+      class="bg-warning-50 border border-warning-200 rounded-lg p-3 mb-4 text-sm text-warning-800" data-test="accounts-profit-mismatch-dimension">
+      {{ t('accounting.statement_accounts.profit_mismatch_dimension', {
+        balance: format(report.checks.profit_balance),
+        pl: format(report.checks.profit_loss),
+      }) }}
+    </div>
+    <div v-else-if="!report.checks.profit_matches"
       class="bg-danger-50 border border-danger-200 rounded-lg p-3 mb-4 text-sm text-danger-700" data-test="accounts-profit-mismatch">
       {{ t('accounting.statement_accounts.profit_mismatch', {
         balance: format(report.checks.profit_balance),

@@ -13687,6 +13687,7 @@
       "profit": "zisk",
       "loss": "ztráta",
       "profit_mismatch": "Výsledek hospodaření z rozvahových účtů ({balance}) se neshoduje s výsledkem z výsledkových účtů ({pl}). Zkontrolujte počáteční stavy a uzávěrku minulého roku.",
+      "profit_mismatch_dimension": "Při filtru dimenze obsahují rozvahové účty jen řádky s touto hodnotou, proto se jejich výsledek ({balance}) může lišit od výsledku z výsledkových účtů ({pl}). Za výsledek dimenze berte výsledovku.",
       "unassigned_hint": "Počet výsledkových účtů, které výkaz zisku a ztráty nemá v žádném řádku: {count}. Výsledek hospodaření je zahrnuje, výkaz ne. Doplňte výjimky mapování výkazů."
     },
     "income_statement": {

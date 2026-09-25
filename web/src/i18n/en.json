@@ -13687,6 +13687,7 @@
       "profit": "profit",
       "loss": "loss",
       "profit_mismatch": "Profit from balance sheet accounts ({balance}) does not match profit from income statement accounts ({pl}). Check opening balances and last year's closing.",
+      "profit_mismatch_dimension": "With a dimension filter, balance sheet accounts contain only lines carrying this value, so their result ({balance}) may differ from the result of income statement accounts ({pl}). Use the income statement as the result of the dimension.",
       "unassigned_hint": "Number of income statement accounts that are not on any row of the income statement: {count}. The profit includes them, the statement does not. Add statement mapping overrides."
     },
     "income_statement": {

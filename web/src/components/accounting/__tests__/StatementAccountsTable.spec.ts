@@ -40,12 +40,14 @@ function report(profit: number): StatementAccountsReport {
   }
 }
 
-function mountTable(part: 'balance' | 'profit_loss', profit = -2000) {
+function mountTable(part: 'balance' | 'profit_loss', profit = -2000, patch: Partial<StatementAccountsReport> = {}) {
   return mount(StatementAccountsTable, {
-    props: { report: report(profit), part, format: (v: number | null | undefined) => String(v) },
+    props: { report: { ...report(profit), ...patch }, part, format: (v: number | null | undefined) => String(v) },
     global: { stubs: { RouterLink: RouterLinkStub } },
   })
 }
+
+const mismatch = { profit_balance: 500, profit_loss: -2000, profit_matches: false, technical_residual: 0, unassigned_count: 0 }
 
 describe('StatementAccountsTable', () => {
   it('odkazuje ze syntetiky i analytiky na opis účtu k rozvahovému dni', () => {
@@ -77,5 +79,18 @@ describe('StatementAccountsTable', () => {
     const text = mountTable('profit_loss').text()
     expect(text).toContain('accounting.statement_accounts.section_operating')
     expect(text).not.toContain('accounting.statement_accounts.section_financial')
+  })
+
+  it('poznámku o účtech 702 a 710 ukáže jen u uzavřeného roku ke konci období', () => {
+    expect(mountTable('balance', -2000, { closed: true }).find('[data-test="accounts-closed-note"]').exists()).toBe(false)
+    expect(mountTable('balance', -2000, { closed: true, as_of: '2099-12-31' }).find('[data-test="accounts-closed-note"]').exists()).toBe(true)
+  })
+
+  it('nesoulad výsledku při filtru dimenze hlásí jako upozornění, ne chybu', () => {
+    const plain = mountTable('balance', -2000, { checks: mismatch })
+    expect(plain.find('[data-test="accounts-profit-mismatch"]').exists()).toBe(true)
+    const dim = mountTable('balance', -2000, { checks: mismatch, dimension: { type_id: 1, value_id: 1, value_ids: [1] } })
+    expect(dim.find('[data-test="accounts-profit-mismatch"]').exists()).toBe(false)
+    expect(dim.find('[data-test="accounts-profit-mismatch-dimension"]').exists()).toBe(true)
   })
 })

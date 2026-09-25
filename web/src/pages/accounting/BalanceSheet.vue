@@ -289,7 +289,7 @@ onMounted(async () => {
     <DimensionReportLinks current="balance" :from="selectedPeriod?.starts_on ?? ''" :to="filters.as_of || selectedPeriod?.ends_on || ''"
       :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants" />
     <p v-if="rangeAdjusted" class="mb-3 rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs text-warning-700" data-test="balance-range-adjusted">{{ t('dimensions.balance_range_adjusted') }}</p>
-    <p v-if="report?.dimension" class="mb-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800" data-test="balance-dimension-note">
+    <p v-if="view === 'statement' && report?.dimension" class="mb-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800" data-test="balance-dimension-note">
       {{ t('dimensions.balance_filter_note') }}
     </p>
 

@@ -233,15 +233,18 @@ své straně. Každá třída má svůj součet.
 Pod součtem rozvahových účtů je zvýrazněný řádek **Výsledek hospodaření**
 (zisk zeleně, ztráta červeně) jako rozdíl `Σ MD − Σ D`. Je k dispozici
 kdykoli během roku bez uzávěrky. Zůstatky jsou vždy před uzavřením účetních
-knih: uzávěrkový zápis se nezapočítává, takže po uzavření roku pohled ukazuje
-přesně to, co uzávěrka převedla na konečný účet rozvažný 702.
+knih: uzávěrkový zápis se nezapočítává, takže po uzavření roku pohled k poslednímu
+dni období ukazuje přesně to, co uzávěrka převedla na konečný účet rozvažný 702.
 
 Kliknutím na účet se otevře jeho opis od začátku období do rozvahového dne.
 Rozvahový den a filtr dimenze platí stejně jako u výkazu, rozsah výkazu se
 tu nepoužívá. Když se výsledek z rozvahových účtů neliší od výsledku
 z výsledkových účtů ([§ 58.6](58_Vysledovka_druhova.md)), je vše v pořádku;
 rozdíl stránka ohlásí nad tabulkou a obvykle ukazuje na chybu v počátečních
-stavech nebo v uzávěrce minulého roku.
+stavech nebo v uzávěrce minulého roku. Při filtru dimenze obsahují rozvahové
+účty jen řádky s touto hodnotou, takže se jejich výsledek od výsledovky
+lišit může; stránka to pak ukáže jen jako upozornění a za výsledek dimenze
+platí výsledovka.
 
 Export PDF a XLSX z této záložky vytvoří rozvahu po účtech v jednotce zvolené
 přepínačem **Kč / tis. Kč**.
