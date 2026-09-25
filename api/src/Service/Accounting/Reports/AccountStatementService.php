@@ -20,6 +20,7 @@ final class AccountStatementService
         private readonly LedgerReportRepository $ledger,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly AccountingPeriodRepository $periods,
+        private readonly JournalLineContext $context,
     ) {}
 
     /**
@@ -72,8 +73,13 @@ final class AccountStatementService
                 'source_asset_name'         => $l['source_asset_name'],
                 'source_settlement_doc_type' => $l['source_settlement_doc_type'],
                 'source_settlement_doc_id'  => $l['source_settlement_doc_id'],
+                'line_id'        => (int) $l['line_id'],
+                'line_no'        => (int) $l['line_no'],
+                'currency_code'  => $l['currency_code'],
+                'amount_foreign' => $l['amount_foreign'],
             ];
         }
+        $items = $this->context->enrich($supplierId, $items);
 
         $turnovers = $this->ledger->accountTurnovers($supplierId, $accountId, $from, $to, $excludeClosing);
 

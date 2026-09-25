@@ -2307,6 +2307,15 @@ final class Routes
             $g->get('/reports/trial-balance/export',              [TrialBalanceAction::class, 'export']);
             $g->get('/reports/account-statement/{accountId:[0-9]+}',        [AccountStatementAction::class, 'get']);
             $g->get('/reports/account-statement/{accountId:[0-9]+}/export', [AccountStatementAction::class, 'export']);
+            // Otevřené položky a párování řádků deníku (okruhy) na libovolném účtu.
+            $g->post  ('/open-items/pairings/delete',                         [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'delete']);
+            $g->get   ('/open-items/pairings/{id:[0-9]+}',                    [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'pairing']);
+            $g->post  ('/open-items/pairings/{id:[0-9]+}/lines',              [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'addLines']);
+            $g->delete('/open-items/pairings/{id:[0-9]+}/lines/{entryId:[0-9]+}/{lineNo:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'removeLine']);
+            $g->get   ('/open-items/{accountId:[0-9]+}',                      [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'get']);
+            $g->get   ('/open-items/{accountId:[0-9]+}/suggestions',          [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'suggestions']);
+            $g->post  ('/open-items/{accountId:[0-9]+}/suggestions/apply',    [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'applySuggestions']);
+            $g->post  ('/open-items/{accountId:[0-9]+}/pairings',             [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'create']);
             $g->get('/reports/balance-sheet',                     [FinancialStatementAction::class, 'balanceSheet']);
             $g->get('/reports/balance-sheet/export',              [FinancialStatementAction::class, 'exportBalanceSheet']);
             $g->get('/reports/income-statement',                  [FinancialStatementAction::class, 'incomeStatement']);

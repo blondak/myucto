@@ -1145,6 +1145,104 @@ export interface AccountStatementItem {
   source_asset_name: string | null
   source_settlement_doc_type: string | null
   source_settlement_doc_id: number | null
+  line_id: number
+  line_no: number
+  /** Účty opačné strany téhož zápisu. */
+  counter_accounts: string | null
+  partner: string | null
+  variable_symbol: string | null
+  currency: string
+  amount_foreign: number | null
+  /** Okruh párování, ve kterém řádek leží. */
+  pairing_id: number | null
+}
+
+export interface OpenItemLine {
+  line_id: number
+  line_no: number
+  entry_id: number
+  entry_date: string
+  document_no: string | null
+  description: string | null
+  source_type: string
+  source_id: number | null
+  side: JournalSide
+  amount: number
+  open_amount: number
+  open_balance: number
+  balance: number
+  account_id: number
+  account_code: string
+  account_name: string
+  is_reversed: boolean
+  source_statement_id: number | null
+  source_doc_number: string | null
+  source_register_id: number | null
+  source_asset_id: number | null
+  source_settlement_doc_type: string | null
+  source_settlement_doc_id: number | null
+  counter_accounts: string | null
+  partner: string | null
+  variable_symbol: string | null
+  currency: string
+  amount_foreign: number | null
+  pairing_id: number | null
+}
+
+export interface OpenItemsReport {
+  account: { id: number; code: string; name: string; type: AccountType; normal_side: NormalSide | null; is_synthetic: boolean }
+  as_of: string
+  only_open: boolean
+  items: OpenItemLine[]
+  total: number
+  page: number
+  per_page: number
+  line_count: number
+  open_count: number
+  open_md: number
+  open_d: number
+  open_total: number
+  balance: number
+  difference: number
+}
+
+export interface LinePairingItem {
+  entry_id: number
+  line_no: number
+  account_id: number
+  line_id: number | null
+  side: JournalSide | null
+  amount: number | null
+  entry_date: string
+  document_no: string | null
+  description: string | null
+  source_type: string
+  source_id: number | null
+  posted: boolean
+}
+
+export interface LinePairing {
+  id: number
+  account_id: number
+  account_code: string
+  account_name: string
+  note: string | null
+  origin: 'manual' | 'suggestion'
+  created_by: number | null
+  created_at: string
+  items: LinePairingItem[]
+  total_md: number
+  total_d: number
+  remainder: number
+  balanced: boolean
+}
+
+export interface PairingSuggestion {
+  kind: 'reversal' | 'amount'
+  account_id: number
+  amount: number
+  days_apart: number
+  lines: Array<{ line_id: number; entry_id: number; entry_date: string; document_no: string | null; description: string | null; side: JournalSide; amount: number }>
 }
 
 export interface AccountStatementReport {
@@ -2033,6 +2131,22 @@ export const accountingApi = {
     api.post<BalanceInventorySaveResult>(`/accounting/periods/${periodId}/closing/inventory`, payload).then(r => r.data),
   getAccountStatement: (accountId: number, params: { from: string; to: string; page?: number; per_page?: number }) =>
     api.get<AccountStatementReport>(`/accounting/reports/account-statement/${accountId}`, { params }).then(r => r.data),
+  getOpenItems: (accountId: number, params: { as_of: string; only_open: 0 | 1; page?: number; per_page?: number }) =>
+    api.get<OpenItemsReport>(`/accounting/open-items/${accountId}`, { params }).then(r => r.data),
+  getLinePairing: (pairingId: number) =>
+    api.get<LinePairing>(`/accounting/open-items/pairings/${pairingId}`).then(r => r.data),
+  createLinePairing: (accountId: number, lineIds: number[], note?: string | null) =>
+    api.post<LinePairing>(`/accounting/open-items/${accountId}/pairings`, { line_ids: lineIds, note: note ?? null }).then(r => r.data),
+  addLinesToPairing: (pairingId: number, lineIds: number[]) =>
+    api.post<LinePairing>(`/accounting/open-items/pairings/${pairingId}/lines`, { line_ids: lineIds }).then(r => r.data),
+  removeLineFromPairing: (pairingId: number, entryId: number, lineNo: number) =>
+    api.delete<{ pairing: LinePairing | null }>(`/accounting/open-items/pairings/${pairingId}/lines/${entryId}/${lineNo}`).then(r => r.data),
+  deleteLinePairings: (pairingIds: number[]) =>
+    api.post<{ deleted: number }>('/accounting/open-items/pairings/delete', { pairing_ids: pairingIds }).then(r => r.data),
+  getPairingSuggestions: (accountId: number, params: { as_of: string; days: number }) =>
+    api.get<{ as_of: string; days: number; items: PairingSuggestion[] }>(`/accounting/open-items/${accountId}/suggestions`, { params }).then(r => r.data),
+  applyPairingSuggestions: (accountId: number, payload: { as_of: string; days: number; pairs?: number[][] }) =>
+    api.post<{ created: number }>(`/accounting/open-items/${accountId}/suggestions/apply`, payload).then(r => r.data),
   getBalanceSheet: (params: StatementParams) =>
     api.get<BalanceSheetReport>('/accounting/reports/balance-sheet', { params }).then(r => r.data),
   getIncomeStatement: (params: StatementParams) =>

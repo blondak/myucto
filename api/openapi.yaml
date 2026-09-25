@@ -10635,6 +10635,48 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/v1/accounting/open-items/{accountId}:
+    get:
+      tags: [Accounting]
+      summary: Otevřené položky účtu k datu (párování řádků deníku do okruhů)
+      description: |
+        Řádky účtu (vč. analytik pod syntetikou) k datu `as_of` s otevřenou částkou.
+        Součet otevřených částek (`open_total`) se rovná zůstatku účtu (`balance`);
+        `difference` je jejich rozdíl a má být nulový.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: accountId, required: true, schema: { type: integer } }
+        - { in: query, name: as_of, required: true, schema: { type: string, format: date } }
+        - { in: query, name: only_open, schema: { type: integer, enum: [0, 1], default: 1 } }
+        - { in: query, name: page, schema: { type: integer, default: 1 } }
+        - { in: query, name: per_page, schema: { type: integer, default: 100, maximum: 500 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  account: { type: object }
+                  as_of: { type: string, format: date }
+                  only_open: { type: boolean }
+                  total: { type: integer }
+                  page: { type: integer }
+                  per_page: { type: integer }
+                  line_count: { type: integer }
+                  open_count: { type: integer }
+                  open_md: { type: number }
+                  open_d: { type: number }
+                  open_total: { type: number }
+                  balance: { type: number }
+                  difference: { type: number }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/OpenItemLine' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/reports/balance-sheet:
     get:
       tags: [Accounting]
@@ -21583,6 +21625,38 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    OpenItemLine:
+      type: object
+      properties:
+        line_id: { type: integer, format: int64 }
+        line_no: { type: integer }
+        entry_id: { type: integer, format: int64 }
+        entry_date: { type: string, format: date }
+        document_no: { type: [string, 'null'] }
+        description: { type: [string, 'null'] }
+        source_type: { type: string }
+        source_id: { type: [integer, 'null'], format: int64 }
+        side: { type: string, enum: [debit, credit] }
+        amount: { type: number }
+        open_amount: { type: number, description: Otevřená část řádku (0 = spárováno) }
+        open_balance: { type: number, description: Průběžný otevřený zůstatek }
+        balance: { type: number, description: Průběžný zůstatek účtu }
+        account_id: { type: integer, format: int64 }
+        account_code: { type: string }
+        account_name: { type: string }
+        is_reversed: { type: boolean }
+        source_statement_id: { type: [integer, 'null'], format: int64 }
+        source_doc_number: { type: [string, 'null'] }
+        source_register_id: { type: [integer, 'null'], format: int64 }
+        source_asset_id: { type: [integer, 'null'], format: int64 }
+        source_settlement_doc_type: { type: [string, 'null'] }
+        source_settlement_doc_id: { type: [integer, 'null'], format: int64 }
+        counter_accounts: { type: [string, 'null'] }
+        partner: { type: [string, 'null'] }
+        variable_symbol: { type: [string, 'null'] }
+        currency: { type: string }
+        amount_foreign: { type: [number, 'null'] }
+        pairing_id: { type: [integer, 'null'], format: int64 }
     OtherItemSchedule:
       type: object
       properties:

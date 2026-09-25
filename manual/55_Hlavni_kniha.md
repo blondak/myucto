@@ -102,6 +102,52 @@ výpis, pokladní doklad, kartu majetku nebo na vyrovnaný doklad zápočtu; bez
 rozpoznaného zdroje na konkrétní zápis účetního deníku. PDF/XLSX opisu obsahuje
 celý zvolený rozsah, nejen aktuální stránku.
 
+Každý řádek dál ukazuje:
+
+- **Partner** a **VS** ze zdrojového dokladu (faktura, bankovní pohyb, pokladní
+  doklad, u zápočtu hrazený doklad),
+- **Protiúčet**, tedy účty opačné strany téhož zápisu,
+- **Okruh**, pokud je řádek spárovaný (viz níže),
+- **Měnu**; u cizoměnového řádku i částku v cizí měně.
+
+XLSX opisu nese partnera, VS, protiúčet a okruh také.
+
+### Otevřené položky a párování
+
+Záložka **Otevřené položky - párování** ukazuje, z čeho se skládá zůstatek
+účtu k datu. Funguje na kterémkoli účtu, typicky na 261 Peníze na cestě
+(převody mezi účty), 395 Vnitřní zúčtování, zálohách nebo půjčkách.
+
+Řádky, které se navzájem vyrovnávají, spojíš do **okruhu**: zaškrtni je
+a klikni na **Spárovat**. Lišta nad tabulkou průběžně ukazuje rozdíl MD a Dal
+vybraných řádků. Vyrovnaný okruh je uzavřený a jeho řádky z pohledu
+**Jen otevřené** zmizí. Nevyrovnaný okruh je povolený: rozdíl zůstane otevřený
+na straně, která převažuje, a to na nejnovějším řádku.
+
+Sloupce **Otevřeno MD**, **Otevřeno Dal** a **Otevřený zůstatek** počítají jen
+otevřené části řádků. Součet otevřených položek se vždy rovná zůstatku účtu;
+karta **Zůstatek účtu** nahoře to kontroluje a případný rozdíl zvýrazní.
+
+- Okruh drží řádky jednoho účtu, u syntetiky vždy jedné analytiky. Řádek
+  smí být jen v jednom okruhu.
+- Počáteční stav z otevření knih je v seznamu jako běžný řádek, takže se
+  dá spárovat s pozdějším vyrovnáním.
+- Datum **K datu** počítá jen řádky do toho dne. Okruh, jehož protějšek přišel
+  později, je k tomu dni otevřený.
+- Klik na číslo okruhu otevře dole jeho položky. Odtud jde řádek z okruhu
+  odebrat, přidat do okruhu další zaškrtnuté řádky nebo celý okruh zrušit.
+  Odebráním předposledního řádku okruh zanikne.
+- **Návrhy párování** najdou storno s původním zápisem a dvojice stejné
+  částky na opačných stranách téhož účtu v zadaném okně dní. **Spárovat
+  návrhy** z nich založí okruhy jedním klikem.
+
+Párování nemění účetní deník, obraty ani zůstatky. Proto jde měnit i v
+uzavřeném nebo zamčeném období. Když se doklad přeúčtuje a jeho řádek zůstane
+na stejném účtu, okruh zůstane beze změny. Když řádek přejde na jiný účet nebo
+se zápis stornuje nebo smaže, řádek z okruhu vypadne a zbytek okruhu je znovu
+otevřený. Okruh, ve kterém zůstane jediný řádek, zanikne a řádek jde spárovat
+znovu. Tyto změny se zapisují do historie aktivit.
+
 ## 55.6 Export a návaznosti
 
 **Export PDF** a **Export XLSX** používají stejné období, rozsah, rozpad
