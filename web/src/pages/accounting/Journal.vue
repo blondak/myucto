@@ -1026,7 +1026,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                        :title="t('accounting.journal.bank_ref_hint', { ref: e.source_bank_ref })">{{ e.source_bank_ref }}</div>
                 </td>
                 <td v-if="tbl.isVisible('document_date')" class="px-3 py-2 whitespace-nowrap">{{ e.document_date ? formatDate(e.document_date) : '—' }}</td>
-                <td v-if="tbl.isVisible('description')" class="px-3 py-2" :title="e.description || undefined">
+                <td v-if="tbl.isVisible('description')" class="px-3 py-2 wrap-cell min-w-64" :title="e.description || undefined">
                   {{ e.description || '—' }}
                   <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
                 </td>

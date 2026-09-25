@@ -716,6 +716,10 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
       min-width: 4rem;
       max-width: 4rem;
     }
+    .singleline-list-table:not(.multirow-table) > tbody > tr:not(.table-detail-row) > td.wrap-cell {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
   }
 
   @media (min-width: 768px) {
