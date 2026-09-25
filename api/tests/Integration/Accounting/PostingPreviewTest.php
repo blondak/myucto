@@ -36,6 +36,7 @@ final class PostingPreviewTest extends TestCase
     private Connection $db;
     private JournalAction $action;
     private \MyInvoice\Service\Accounting\PostingService $posting;
+    private \MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier $autoClassifier;
 
     private int $supplierId = 0;
     private int $vendorId = 0;
@@ -55,6 +56,7 @@ final class PostingPreviewTest extends TestCase
             $this->db      = $c->get(Connection::class);
             $this->action  = $c->get(JournalAction::class);
             $this->posting = $c->get(\MyInvoice\Service\Accounting\PostingService::class);
+            $this->autoClassifier = $c->get(\MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier::class);
             $seeder        = $c->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
@@ -154,6 +156,37 @@ final class PostingPreviewTest extends TestCase
         self::assertContains('548.100', array_column($lines, 'account_code'));
         $item->execute([$id]);
         self::assertSame($before, $item->fetch(\PDO::FETCH_ASSOC), 'GET náhled nesmí návrh uložit do položky.');
+    }
+
+    /**
+     * Ručně zvolený druh nákladu (bez účtu, bez provenience automatu) jistý návrh
+     * nepřebije — ani při zaúčtování, ani zápisem automatu. Dřív se chránil jen účet.
+     */
+    public function testManualExpenseKindIsNotOverriddenByCertainRule(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO chart_of_accounts
+                (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id)
+             SELECT ?, "548.100", "Pojistné", "expense", "debit", 0, id
+               FROM chart_of_accounts
+              WHERE supplier_id = ? AND account_code = "548"'
+        )->execute([$this->supplierId, $this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO expense_classification_rules
+                (supplier_id, name, description_contains, expense_kind, target_account_code, priority, created_by)
+             VALUES (?, "Pojistné → 548.100", "pojist", "service", "548.100", 10, ?)'
+        )->execute([$this->supplierId, $this->userId]);
+
+        $id = $this->purchase(35_485.0, 'Roční pojistné odpovědnosti');
+        $pdo->prepare("UPDATE purchase_invoice_items SET expense_kind = 'material', expense_account_code = NULL,
+                          expense_classification_source = NULL WHERE purchase_invoice_id = ?")->execute([$id]);
+
+        $accounts = array_column($this->preview($id)['lines'], 'account_code');
+        self::assertNotContains('548.100', $accounts, 'Ruční druh nákladu nesmí přebít jisté pravidlo.');
+
+        $changes = $this->autoClassifier->applyToInvoice($this->supplierId, $id);
+        self::assertSame([], $changes, 'Automat nesmí přepsat ruční druh nákladu.');
     }
 
     /** Nedaňový doklad zachová druh nákladu, ale použije jeho nedaňovou analytiku. */

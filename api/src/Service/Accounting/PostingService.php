@@ -12,6 +12,7 @@ use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
+use MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
@@ -1390,7 +1391,7 @@ final class PostingService
     ): ?array {
         $suggestions = $this->expenseClassification->suggestForInvoice($supplierId, $purchaseInvoiceId);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, expense_kind, expense_account_code, total_without_vat, total_vat
+            'SELECT id, expense_kind, expense_account_code, expense_classification_source, total_without_vat, total_vat
                FROM purchase_invoice_items
               WHERE purchase_invoice_id = ?'
         );
@@ -1418,9 +1419,15 @@ final class PostingService
             }
 
             // Náhled i samotné zaúčtování musí použít jistý návrh stejně jako auto-post,
-            // ale bez zápisu do dokladu. Ručně zvolený účet má vždy přednost.
+            // ale bez zápisu do dokladu. Ruční volba účetní (účet i samotný druh) má vždy
+            // přednost — stejné pravidlo jako zápis automatu (ExpenseAutoClassifier).
             $suggestion = $suggestions[(int) $row['id']] ?? null;
-            if ($approved === null && $override === null && $suggestion !== null && !empty($suggestion['auto'])) {
+            $manual = ExpenseAutoClassifier::isManualClassification(
+                $row['expense_kind'] !== null ? (string) $row['expense_kind'] : null,
+                $override,
+                $row['expense_classification_source'] !== null ? (string) $row['expense_classification_source'] : null,
+            );
+            if ($approved === null && !$manual && $suggestion !== null && !empty($suggestion['auto'])) {
                 $kindValue = (string) $suggestion['expense_kind'];
                 $suggestedAccount = trim((string) ($suggestion['expense_account_code'] ?? ''));
                 $override = $suggestedAccount === '' ? null : $suggestedAccount;
