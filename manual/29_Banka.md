@@ -485,6 +485,25 @@ u automatického párování. Pokud platby faktury přesto přesahují částku 
 úhrada se nezaúčtuje automaticky a čeká ve frontě **K zaúčtování** na kontrolu
 dvojí úhrady.
 
+### Ruční párování přijaté faktury s nižší platbou
+
+Přijatou fakturu označí ruční párování jako uhrazenou jen tehdy, když platba
+pokryje zbývající částku. Rozdíl do 1,00 (v měně faktury) banka dorovná na
+548/648, korunovou platbu cizoměnové faktury bere v kurzové toleranci jako úhradu
+celé faktury a rozdíl zaúčtuje jako kurzový.
+
+Je-li platba nižší, faktura zůstane **částečně uhrazená** a aplikace nabídne dvě
+možnosti:
+
+- **Nechat částečně uhrazené**: zbytek se doplatí později (další platbou,
+  příkazem k úhradě nebo zápočtem).
+- **Uhradit a vyrovnat rozdíl**: zbytek se hned zaúčtuje jako zápočet proti
+  zvolenému účtu (321 MD / zvolený účet D). Předvolený je účet 648, u cizí měny
+  663. Faktura se tím uzavře.
+
+Vyrovnání rozdílu je dostupné v podvojném účetnictví a s oprávněním k účetnictví.
+V daňové evidenci aplikace jen oznámí, kolik zbývá uhradit.
+
 ## 29.6 Cron — automatický scan
 
 Místo ručního uploadu můžeš nastavit **cron**, který bude pravidelně skenovat

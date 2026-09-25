@@ -15383,6 +15383,16 @@
       "post_settlement": "Post to journal",
       "settlement_posted": "Set-off posted to the journal."
     },
+    "payment_summary": {
+      "title": "Payment",
+      "to_pay": "To pay",
+      "paid": "Paid",
+      "remaining": "Remaining",
+      "shortfall_note": "The document is marked as paid, but the recorded payments do not cover it. The difference stays open on the ledger account. Settle it with “Settle the rest”.",
+      "settle_rest": "Settle the rest",
+      "settle_rest_title": "Settle the rest of the document",
+      "settle_rest_intro": "{amount} remains to be paid. The difference is posted as a set-off against the chosen account (typically 648/548, 663/563 for a foreign currency) and closes the document."
+    },
     "credit_note_link": {
       "label": "Corrected invoice",
       "none": "— not linked —",
@@ -15494,6 +15504,8 @@
       "overdue": "Overdue",
       "unmatched": "No payment matched",
       "unmatched_hint": "Documents marked as paid but with no posted payment (neither bank nor cash) — the 321 payable stays open in the journal.",
+      "paid_shortfall": "Paid with a difference",
+      "paid_shortfall_hint": "Documents marked as paid whose recorded payments do not cover the full amount. The rest stays open on the ledger account.",
       "unpaid_as_of_label": "Unpaid as of",
       "unpaid_as_of_hint": "Shows documents issued by the selected date that were not fully paid as of that day — regardless of today's status. Same definition as in the Balance report (Saldokonto).",
       "unpaid_as_of_clear": "Clear date filter",
@@ -15511,6 +15523,8 @@
     },
     "payment_ordered_badge": "In payment order",
     "payment_ordered_at_tooltip": "Added to a payment order on {date}",
+    "paid_shortfall_badge": "paid with a difference",
+    "paid_shortfall_tooltip": "Recorded payments do not cover the document, {amount} remains.",
     "validation": {
       "vendor_required": "Select a vendor.",
       "vendor_invoice_number_required": "Vendor invoice number is required.",
@@ -15581,6 +15595,8 @@
     "col_vat_deduction": "VAT deduction",
     "col_received_at": "Received on",
     "col_payment_ordered_at": "Sent for payment",
+    "col_paid_amount": "Paid",
+    "col_remaining_amount": "Remaining",
     "vat_deduction_short": {
       "full": "full",
       "none": "not claimed",
@@ -18468,6 +18484,13 @@
     "split_purchase_group": "Purchase invoices",
     "split_difference": "Payment difference from the invoice total: {amount}",
     "split_fx_hint": "The payment is allocated proportionally across the invoices. Posting records the difference from their accounting exchange rates as an exchange gain or loss.",
+    "purchase_shortfall": {
+      "title": "The payment did not cover the whole invoice",
+      "intro": "{amount} remains to be paid after matching. The document stays partially paid. You can leave the difference to be paid later, or settle it right away as a set-off against the chosen account (typically 648/548, 663/563 for a foreign currency).",
+      "keep_partial": "Leave partially paid",
+      "settle": "Pay and settle the difference",
+      "partial_info": "The payment did not cover the whole invoice, {amount} remains to be paid. The document stays partially paid."
+    },
     "split_hint": "Combinations of one client's invoices whose sum matches this payment (window ±{days} days).",
     "split_hint_all": "Combinations of one client’s invoices adding up to this payment (no date limit — for enforced or otherwise late settlements).",
     "split_widen": "Search a wider window (±{days} days)",

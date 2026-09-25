@@ -3,6 +3,8 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
 import { useHotkey } from '@/composables/useHotkey'
+import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { apiErrorMessage } from '@/api/errors'
 import {
@@ -311,6 +313,42 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     }
   }
 
+  /**
+   * Ruční párování přijaté faktury s NIŽŠÍ platbou: doklad zůstal částečně uhrazený.
+   * Účetní dostane volbu: nechat ho tak (a doplatit později), nebo rozdíl rovnou
+   * vyrovnat zápočtem proti zvolenému účtu (321 MD / 648 nebo 663 D).
+   */
+  const purchaseShortfall = ref<{ purchaseInvoiceId: number; docNumber: string; remaining: number; currency: string } | null>(null)
+
+  function notePurchaseShortfall(
+    r: { partial_payment?: boolean; remaining?: number; currency?: string; purchase_invoice_id?: number },
+    docNumber: string,
+  ) {
+    if (!r.partial_payment || !r.purchase_invoice_id || (r.remaining ?? 0) <= 0.005) return
+    // Zápočet proti účtu je jen v podvojném účetnictví a jen s právem na účetnictví,
+    // jinde zbývá oznámit, že doklad zůstal částečně uhrazený.
+    const auth = useAuthStore()
+    const canSettle = auth.hasCommercialFeatures && auth.canWrite('accounting')
+      && useSupplierStore().currentSupplier?.accounting_mode === 'double_entry'
+    if (!canSettle) {
+      toast.info(t('bank.purchase_shortfall.partial_info', { amount: formatMoney(r.remaining ?? 0, r.currency || 'CZK') }))
+      return
+    }
+    purchaseShortfall.value = {
+      purchaseInvoiceId: r.purchase_invoice_id,
+      docNumber,
+      remaining: r.remaining ?? 0,
+      currency: r.currency || 'CZK',
+    }
+  }
+
+  function closePurchaseShortfall() { purchaseShortfall.value = null }
+
+  async function onPurchaseShortfallSettled() {
+    purchaseShortfall.value = null
+    await opts.reload()
+  }
+
   async function confirmCandidate(c: MatchCandidate) {
     if (!matchingTx.value) return
     matchError.value = ''
@@ -319,6 +357,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
         c.type === 'invoice' ? { invoiceId: c.id } : { purchaseInvoiceId: c.id })
       matchingTx.value = null
       toastPosting(r.posting)
+      notePurchaseShortfall(r, c.ref || `#${c.id}`)
       await opts.reload()
     } catch (e: any) {
       matchError.value = apiErrorMessage(e, t('bank.match_failed'))
@@ -329,9 +368,11 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     if (!matchingTx.value || !matchVarsymbol.value.trim()) return
     matchError.value = ''
     try {
-      const r = await bankApi.matchManual(matchingTx.value, { varsymbol: matchVarsymbol.value.trim() })
+      const vs = matchVarsymbol.value.trim()
+      const r = await bankApi.matchManual(matchingTx.value, { varsymbol: vs })
       matchingTx.value = null
       toastPosting(r.posting)
+      notePurchaseShortfall(r, vs)
       await opts.reload()
     } catch (e: any) {
       matchError.value = apiErrorMessage(e, t('bank.match_failed'))
@@ -492,6 +533,8 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     currentSuggestion,
     startMatch, widenSplitWindow, onAnchorSearch, onAnchorSelect,
     confirmSuggestion, confirmCandidate, confirmMatch, confirmGoPayCandidate, closeMatch,
+    // nedoplatek přijaté faktury po ručním párování
+    purchaseShortfall, closePurchaseShortfall, onPurchaseShortfallSettled,
     // vytvoření přijaté faktury
     createTx, createVendorId, vendorModalOpen, creatingPi,
     openCreate, onVendorCreated, submitCreatePurchase, closeCreate,

@@ -365,6 +365,26 @@ async function onAltPayDone() {
   purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
 }
 
+// Úhrada dokladu: kolik je uhrazeno a kolik zbývá (v měně dokladu, SSOT na BE).
+const showPaymentSummary = computed(() =>
+  !!invoice.value && invoice.value.status !== 'draft' && invoice.value.status !== 'cancelled'
+  && invoice.value.remaining_amount !== undefined)
+// Uhrazený doklad, který evidované úhrady nepokrývají, zbytek visí na saldokontě.
+const hasPaidShortfall = computed(() =>
+  invoice.value?.status === 'paid' && (invoice.value.remaining_amount ?? 0) > 0.005)
+// „Vyrovnat zbytek": existuje úhrada a po ní zbytek. Zápočet proti účtu je účetní
+// operace (podvojné účetnictví, právo na účetnictví); bez jakékoli úhrady jde o běžné
+// „Označit jako uhrazené".
+const canSettleRest = computed(() =>
+  !!invoice.value && isDoubleEntry.value && auth.canWrite('accounting')
+  && ['received', 'booked', 'paid'].includes(invoice.value.status)
+  && (invoice.value.paid_amount ?? 0) > 0.005 && (invoice.value.remaining_amount ?? 0) > 0.005)
+const settleRestOpen = ref(false)
+async function onSettleRestDone() {
+  settleRestOpen.value = false
+  await load()
+}
+
 async function transition(target: PurchaseInvoiceStatus, paidDate?: string) {
   if (!invoice.value) return
   if (target === 'paid' && !paidDate) { openMarkPaid(); return }
@@ -725,6 +745,9 @@ const purchaseActions = computed<ActionItem[]>(() => {
       }
     }
   }
+
+  items.push({ key: 'settle-rest', label: t('purchase_invoice.payment_summary.settle_rest'), icon: 'coin', tier: 'secondary', variant: 'warning',
+    show: canSettleRest.value, run: () => { settleRestOpen.value = true } })
 
   items.push({ key: 'qr', label: t('purchase_invoice.qr.button'), icon: 'qr', tier: 'secondary', variant: 'primary',
     show: canPayWithQr.value, run: openQr })
@@ -1436,6 +1459,23 @@ const purchaseActions = computed<ActionItem[]>(() => {
             </template>
             <div v-if="invoice.advance_paid_amount > 0" class="flex justify-between text-neutral-500"><dt>{{ t('purchase_invoice.totals.advance_paid') }}</dt><dd class="font-mono">−{{ formatMoney(invoice.advance_paid_amount, invoice.currency) }}</dd></div>
             <div class="flex justify-between font-semibold text-lg border-t border-neutral-200 pt-2"><dt>{{ t('purchase_invoice.totals.to_pay') }}</dt><dd class="font-mono">{{ formatMoney((invoice.amount_to_pay ?? invoice.total_with_vat) + (invoice.rounding || 0), invoice.currency) }}</dd></div>
+            <!-- Úhrada dokladu: uhrazeno / zbývá (v měně dokladu) -->
+            <template v-if="showPaymentSummary">
+              <div class="flex justify-between text-neutral-600" data-testid="pi-paid-amount"><dt>{{ t('purchase_invoice.payment_summary.paid') }}</dt><dd class="font-mono">{{ formatMoney(invoice.paid_amount ?? 0, invoice.currency) }}</dd></div>
+              <div class="flex justify-between font-semibold" data-testid="pi-remaining-amount"
+                :class="hasPaidShortfall ? 'text-warning-700' : ((invoice.remaining_amount ?? 0) > 0.005 ? 'text-neutral-900' : 'text-neutral-500')">
+                <dt>{{ t('purchase_invoice.payment_summary.remaining') }}</dt>
+                <dd class="font-mono">{{ formatMoney(invoice.remaining_amount ?? 0, invoice.currency) }}</dd>
+              </div>
+              <div v-if="hasPaidShortfall" class="rounded-md bg-warning-50 border border-warning-500/30 px-3 py-2 text-xs text-warning-700">
+                {{ t('purchase_invoice.payment_summary.shortfall_note') }}
+                <button v-if="canSettleRest" type="button" @click="settleRestOpen = true"
+                  :class="[btnOutline('warning'), 'mt-2 whitespace-nowrap']">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
+                  {{ t('purchase_invoice.payment_summary.settle_rest') }}
+                </button>
+              </div>
+            </template>
             <!-- CZK přepočet (jen pokud faktura není CZK + má exchange_rate) -->
             <template v-if="invoice.currency !== 'CZK' && invoice.exchange_rate">
               <div class="border-t border-neutral-200 pt-3 mt-3">
@@ -1741,10 +1781,22 @@ const purchaseActions = computed<ActionItem[]>(() => {
       <!-- Označit jako uhrazené — evidenčně / pokladnou / zápočtem -->
       <PaymentMethodModal v-if="markPaidOpen && invoice" doc-type="purchase_invoice"
         :doc-id="invoice.id" :doc-number="invoice.vendor_invoice_number || `#${invoice.id}`"
-        :amount="Number(invoice.total_with_vat ?? 0)" :partner-name="invoice.vendor_snapshot?.company_name"
+        :amount="Number(invoice.remaining_amount ?? invoice.amount_to_pay ?? invoice.total_with_vat ?? 0)"
+        :currency="invoice.currency" :partner-name="invoice.vendor_snapshot?.company_name"
         :busy="acting"
         @close="markPaidOpen = false" @done="onAltPayDone"
         @mark-paid="p => transition('paid', p.date)" />
+
+      <!-- Vyrovnání zbytku (nedoplatku) zápočtem proti účtu: 321 MD / zvolený účet D. -->
+      <PaymentMethodModal v-if="settleRestOpen && invoice" doc-type="purchase_invoice" settlement-only
+        :doc-id="invoice.id" :doc-number="invoice.vendor_invoice_number || `#${invoice.id}`"
+        :amount="Number(invoice.remaining_amount ?? 0)" :currency="invoice.currency"
+        :partner-name="invoice.vendor_snapshot?.company_name"
+        :default-account-code="invoice.currency === 'CZK' ? '648' : '663'"
+        :title="t('purchase_invoice.payment_summary.settle_rest_title')"
+        :intro="t('purchase_invoice.payment_summary.settle_rest_intro', { amount: formatMoney(invoice.remaining_amount ?? 0, invoice.currency) })"
+        :confirm-label="t('purchase_invoice.payment_summary.settle_rest')"
+        @close="settleRestOpen = false" @done="onSettleRestDone" />
 
       <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="purchase_invoice" :entity-id="invoice.id" />
 
