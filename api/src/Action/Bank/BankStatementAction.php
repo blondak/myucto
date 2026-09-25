@@ -3845,23 +3845,64 @@ final class BankStatementAction
         }
 
         // Load transaction for amount + posted_at
-        $tx = $pdo->prepare('SELECT posted_at, amount, statement_id FROM bank_transactions WHERE id = ?');
+        $tx = $pdo->prepare(
+            'SELECT bt.posted_at, bt.amount, bt.statement_id,
+                    COALESCE(NULLIF(bt.currency, ""), NULLIF(bs.currency, "")) AS currency
+               FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE bt.id = ?'
+        );
         $tx->execute([$txId]);
         $txRow = $tx->fetch(\PDO::FETCH_ASSOC) ?: [];
         $postedAt = (string) ($txRow['posted_at'] ?? date('Y-m-d'));
         $statementId = (int) ($txRow['statement_id'] ?? 0);
         $absAmount = abs((float) ($txRow['amount'] ?? 0));
+        $txCurrency = isset($txRow['currency']) && $txRow['currency'] !== null ? strtoupper((string) $txRow['currency']) : null;
 
         $userId = (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
 
+        $partial = null;
         $pdo->beginTransaction();
         try {
+            // Zbytek dokladu BEZ tohoto pohybu (opakované párování ho nesmí počítat proti
+            // sobě), v měně dokladu — SSOT PurchaseSettledExpr, zamčený s dokladem.
+            $settled = PurchaseSettledExpr::settled('p', excludeBankTransactionId: $txId);
+            $docStmt = $pdo->prepare(
+                "SELECT p.amount_to_pay - ({$settled}) AS remaining, p.exchange_rate, cur.code AS currency
+                   FROM purchase_invoices p
+                   JOIN currencies cur ON cur.id = p.currency_id
+                  WHERE p.id = ? AND p.supplier_id = ?
+                  FOR UPDATE"
+            );
+            $docStmt->execute([$purchaseInvoiceId, $supplierId]);
+            $doc = $docStmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+            $remaining = round((float) ($doc['remaining'] ?? 0), 2);
+            $docCurrency = strtoupper((string) ($doc['currency'] ?? 'CZK'));
+            $docRate = (float) ($doc['exchange_rate'] ?? 0);
+
+            // Ruční spárování dřív doklad označilo jako uhrazený vždy, bez ohledu na částku.
+            // Banka pak zaúčtovala jen skutečnou platbu a na 321 zůstal nedoplatek, který
+            // doklad ani saldokonto neukázaly. Uzavírá se proto jen platba, která zbytek
+            // pokryje v téže toleranci, se kterou ho pak dorovná banka
+            // (FxPaymentSettlement::settlesRemaining — sdílí ji normalizace 548/648
+            // i automatické párování). Menší platba nechá doklad částečně uhrazený a UI
+            // nabídne rozdíl vyrovnat zápočtem proti účtu. Sloučená úhrada
+            // (manualMatchPurchaseSplit) nesoulad odmítá celou, proto ji to netýká.
+            $settlesFully = FxPaymentSettlement::settlesRemaining($absAmount, $remaining, $docCurrency, $docRate, $txCurrency);
+
             // Mark purchase paid — jen pokud ještě není (ručně zaplacenou jen navážeme,
             // status/paid_at nepřepisujeme — respektujeme stav nastavený uživatelem).
-            if (!$alreadyPaid) {
+            if (!$alreadyPaid && $settlesFully) {
                 $pdo->prepare(
                     "UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?"
                 )->execute([$postedAt, $purchaseInvoiceId]);
+            }
+            if (!$settlesFully) {
+                $paidInDocCurrency = FxPaymentSettlement::amountInInvoiceCurrency($absAmount, $docCurrency, $docRate, $txCurrency, 0.0);
+                $partial = [
+                    'remaining' => round($remaining - $paidInDocCurrency, 2),
+                    'currency'  => $docCurrency,
+                ];
             }
 
             // Pohyb z auto_partial už auto řádek pro tuto dvojici má — ruční párování ho převezme.
@@ -3901,14 +3942,21 @@ final class BankStatementAction
             'purchase_invoice_id' => $purchaseInvoiceId,
             'paid_at'             => $postedAt,
             'amount'              => $absAmount,
+            'partial_payment'     => $partial !== null,
         ], $ip, $request->getHeaderLine('User-Agent'), $supplierId);
 
-        return Json::ok($response, [
+        $result = [
             'matched'             => true,
             'paid_at'             => $postedAt,
             'purchase_invoice_id' => $purchaseInvoiceId,
             'posting'             => $posting,
-        ]);
+        ];
+        if ($partial !== null) {
+            $result['partial_payment'] = true;
+            $result['remaining'] = $partial['remaining'];
+            $result['currency'] = $partial['currency'];
+        }
+        return Json::ok($response, $result);
     }
 
     private function recordManualMatchV2(int $transactionId, int $supplierId, int $userId): void

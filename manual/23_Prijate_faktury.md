@@ -16,6 +16,17 @@ V hlavním menu **Přijaté faktury**.
 
 Seznam lze kliknutím na záhlaví sloupce řadit podle údajů dokladu, dodavatele,
 data či částky. Řazení se uplatní na celý filtrovaný výsledek před stránkováním.
+
+Sloupce **Uhrazeno** a **Zbývá uhradit** ukazují, kolik je z faktury zaplaceno
+a kolik zbývá, vždy v měně faktury. Počítají se ze všech úhrad dohromady: banka,
+pokladna, vzájemný zápočet i zápočet proti účtu. Korunová platba cizoměnové
+faktury se přepočte do měny faktury. Faktura označená jako uhrazená bez jakékoli
+evidované úhrady se bere jako uhrazená celá, daňový doklad k platbě (DDKP) nic
+nedluží. Uhrazená faktura, kterou evidované úhrady nepokrývají o víc než 1 Kč
+(u cizí měny přepočteno kurzem faktury), má u stavu štítek **uhrazeno s rozdílem**
+a zbytek zvýrazněný; všechny takové faktury najdete filtrem **Uhrazeno s rozdílem**.
+Haléřový zbytek do 1 Kč dorovnává banka, štítek nedostane. Na mobilu se
+u částečně uhrazené faktury zobrazí obě částky přímo v kartě.
 Přepínač nad tabulkou volí měsíční skupiny nebo souvislý seznam; nastavení se
 ukládá pro přihlášeného uživatele. V měsíčním pohledu zaškrtávací políčko
 v záhlaví označí pouze zobrazené doklady daného měsíce. Nabídka **Sloupce** umožňuje
@@ -538,7 +549,13 @@ faktury platí zrcadlově.
 
 Po uložení / přechodu na detail:
 
-- Vidíš dodavatele (s IČO/DIČ), datumy, položky, DPH rozpis, totály, K úhradě.
+- Vidíš dodavatele (s IČO/DIČ), datumy, položky, DPH rozpis, totály, K úhradě
+  a pod ní **Uhrazeno** a **Zbývá uhradit** (v měně faktury, ze všech úhrad dohromady).
+- Uhrazená faktura, kterou evidované úhrady nepokrývají (typicky platba nižší
+  o pár korun nebo eur), ukáže upozornění a akci **Vyrovnat zbytek**. Ta zbytek
+  zaúčtuje jako zápočet proti zvolenému účtu (321 MD / zvolený účet D), předvolený
+  je účet 648, u cizí měny 663. Stav ani datum úhrady faktury se nemění, zbytek na
+  321 se tím vyrovná. Stejnou akci nabízí i částečně uhrazená faktura.
 - Karta **Daňové zařazení** nabízí rychlý přehled údajů přímo rozhodujících o DPH:
   reverse charge, plátcovství dodavatele a nárok na odpočet včetně procenta u
   kráceného. Typ dokladu, VAT klasifikaci (kód i popis), daňovou uznatelnost,
@@ -593,8 +610,10 @@ Zápočet jde **stornovat** (v přehledu úhrad v detailu dokladu). Storno vytvo
 a když po vrácení jeho částky zbytek zase vznikne, vrátí doklad ze stavu *Uhrazená* zpět.
 Doklad doplacený jiným kanálem zůstane uhrazený.
 
-Zatím jen doklady v **CZK**; v daňové evidenci se zápočet neúčtuje (deník tam není), ale
-doklad vyrovná stejně.
+U cizoměnové faktury se částka zápočtu zadává v měně faktury a do deníku se převede
+kurzem, kterým je faktura předepsaná na 321, takže na saldokontu nezůstane kurzový
+zbytek. V daňové evidenci se zápočet neúčtuje (deník tam není), ale doklad vyrovná
+stejně.
 
 ### 23.3.2 Propojení zálohy s vyúčtovací fakturou (proti dvojímu započtení)
 

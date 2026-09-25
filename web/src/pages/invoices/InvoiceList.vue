@@ -943,6 +943,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'project', labelKey: 'invoice.col_project', defaultHidden: true },
   { key: 'sent_at', labelKey: 'invoice.col_sent_at', defaultHidden: true },
   { key: 'paid_total', labelKey: 'invoice.col_paid_total', defaultHidden: true },
+  { key: 'remaining_amount', labelKey: 'invoice.col_remaining_amount', defaultHidden: true },
   { key: 'vat_breakdown', labelKey: 'invoice.col_vat_breakdown', defaultHidden: true },
   { key: 'debit_accounts', labelKey: 'invoice.col_debit_accounts', defaultHidden: true },
   { key: 'credit_accounts', labelKey: 'invoice.col_credit_accounts', defaultHidden: true },
@@ -965,6 +966,11 @@ function onListScroll(event: Event) {
   if (!groupByMonth.value && el.scrollTop + el.clientHeight >= el.scrollHeight - 240
     && !loading.value && !loadingMore.value && page.value < pages.value) void load(false)
 }
+// Zbývá uhradit dává smysl jen u platného dokladu, koncept a storno nic nedluží.
+function showsRemaining(inv: InvoiceListItem): boolean {
+  return inv.status !== 'draft' && inv.status !== 'cancelled' && inv.remaining_amount !== undefined
+}
+
 function mobileExtraFields(inv: InvoiceListItem): Array<{ key: string; label: string; value: string }> {
   const values: Record<string, string> = {
     payment_vs: inv.payment_varsymbol || '—',
@@ -980,6 +986,7 @@ function mobileExtraFields(inv: InvoiceListItem): Array<{ key: string; label: st
     project: inv.project_name || '—',
     sent_at: inv.sent_at ? formatDate(inv.sent_at) : '—',
     paid_total: formatMoney(inv.paid_total ?? 0, inv.currency),
+    remaining_amount: showsRemaining(inv) ? formatMoney(inv.remaining_amount ?? 0, inv.currency) : '—',
     kh: inv.kh_sections?.join(', ') || '—',
     debit_accounts: inv.debit_accounts?.join(', ') || '—',
     credit_accounts: inv.credit_accounts?.join(', ') || '—',
@@ -1501,7 +1508,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                 <template v-for="c in COLUMNS.filter(c => tbl.isVisible(c.key))" :key="c.key">
                   <th v-if="c.key === 'kh' || c.key === 'dimensions'" scope="col" class="py-2 px-3 text-xs uppercase tracking-wide font-medium text-neutral-500 text-left">{{ t(c.labelKey) }}</th>
                   <SortableTh v-else :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
-                    :align="['amount', 'amount_czk', 'exchange_rate', 'base', 'vat', 'total', 'paid_total'].includes(c.key) ? 'right' : 'left'"
+                    :align="['amount', 'amount_czk', 'exchange_rate', 'base', 'vat', 'total', 'paid_total', 'remaining_amount'].includes(c.key) ? 'right' : 'left'"
                     @toggle="onSortToggle" />
                 </template>
                 <th class="px-1 py-2 w-8">
@@ -1620,6 +1627,11 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                 <td v-if="tbl.isVisible('project')" class="px-4 py-2.5 text-xs text-neutral-600">{{ inv.project_name || '—' }}</td>
                 <td v-if="tbl.isVisible('sent_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ inv.sent_at ? formatDate(inv.sent_at) : '—' }}</td>
                 <td v-if="tbl.isVisible('paid_total')" class="px-4 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.paid_total ?? 0, inv.currency) }}</td>
+                <td v-if="tbl.isVisible('remaining_amount')" class="px-4 py-2.5 text-right font-mono text-xs"
+                  :class="showsRemaining(inv) && (inv.remaining_amount ?? 0) > 0.005 ? 'text-neutral-900' : 'text-neutral-400'">
+                  <span v-if="showsRemaining(inv)">{{ formatMoney(inv.remaining_amount ?? 0, inv.currency) }}</span>
+                  <span v-else class="text-neutral-300">—</span>
+                </td>
                 <td v-if="tbl.isVisible('vat_breakdown')" class="px-4 py-2.5"><VatBreakdownCell :rows="inv.vat_breakdown" :currency="inv.currency" /></td>
                 <td v-if="tbl.isVisible('debit_accounts')" class="px-4 py-2.5 font-mono text-xs">{{ inv.debit_accounts?.join(', ') || '—' }}</td>
                 <td v-if="tbl.isVisible('credit_accounts')" class="px-4 py-2.5 font-mono text-xs">{{ inv.credit_accounts?.join(', ') || '—' }}</td>

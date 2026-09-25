@@ -35,19 +35,21 @@ use PDO;
  *   - purchase_invoices: nemají obdobu `invoice_payments` — `status='paid'`
  *     je plně krytý až od `paid_at`
  *     (nastaví ho i hotovostní úhrada přes CashDocumentService::applySideEffects)
- *     = plně kryto; jinak se poměr skládá ze Σ `payment_matches.amount` (banka)
- *     a Σ obou ZÁPOČTOVÝCH cest k asOf ({@see \MyInvoice\Support\Sql\PurchaseSettledExpr::offsetSettledAsOf}
+ *     = plně kryto; jinak se poměr skládá ze Σ `payment_matches.amount` (banka),
+ *     Σ pokladních dokladů a Σ obou ZÁPOČTOVÝCH cest k asOf ({@see \MyInvoice\Support\Sql\PurchaseSettledExpr::offsetSettledAsOf}
  *     — `offset_agreement_items` a `invoice_settlements`). Na `status='paid'` se
  *     u zápočtu spolehnout NELZE: doúčtování zápočtu bez účetní stopy stav dokladu
  *     záměrně nepřestavuje (`InvoiceSettlementService::postRow`) a ČÁSTEČNÝ zápočet
  *     doklad na `paid` nepřeklápí vůbec — bez téhle složky by vyrovnaná faktura
  *     svítila jako celá otevřená a částečně započtená celou částkou místo zbytkem.
- *     KNOWN GAP (H3): `payment_matches.amount` je uložen
- *     v MĚNĚ TRANSAKCE (StatementMatcher::matchPurchase ukládá `$absAmount` bez
- *     převodu na měnu PF), ne nutně v měně PF — u cizoměnové PF s ČÁSTEČNOU
- *     bankovní úhradou proto může poměr vyjít nepřesně (zůstane vidět jako
- *     rozdíl v konfrontaci, ne tiše špatně). Plná/hotovostní úhrada (přes
- *     `status='paid'`) tímto zkreslením netrpí.
+ *     Ani `status='paid'` není bezpodmínečný: když k dokladu úhrady EXISTUJÍ a nechávají
+ *     na saldokontě zbytek nad {@see SHORTFALL_TOLERANCE_CZK}, jde o nedoplatek a doklad
+ *     zůstává otevřený svým zbytkem (dřív ho ruční párování s nižší platbou tiše
+ *     uzavřelo a saldo zbytek na 321 schovalo).
+ *     `payment_matches.amount` je v MĚNĚ TRANSAKCE; do měny PF ho převádí
+ *     {@see \MyInvoice\Support\Sql\PurchaseSettledExpr::bankAmountSql()} (dříve KNOWN GAP H3).
+ *     Nepřevoditelná kombinace (cizí měna pohybu × jiná měna dokladu) zůstává nepřesná
+ *     a projeví se jako rozdíl konfrontace.
  *
  * DATUM VYROVNÁNÍ musí být totéž, které zná HLAVNÍ KNIHA (jinak konfrontace nesedí):
  * u bankovních úhrad se proto NEBERE `invoice_payments.paid_on` / `purchase_invoices.paid_at`
@@ -93,6 +95,14 @@ final class SaldoRepository
      * SQL tak vrací nadmnožinu otevřených položek a poslední slovo má pořád PHP.
      */
     private const OPEN_EPSILON = '0.0045';
+    /**
+     * Zbytek na saldokontě (Kč), nad kterým „uhrazená" přijatá faktura se zaznamenanou
+     * úhradou přestává být plně krytá. Táž koruna jako dorovnání 548/648 v bance
+     * (`BankPostingService::ROUNDING_TOLERANCE_CENTS`) a uzávěrková kontrola
+     * `ClosingRepository::paidPurchasesOpenSaldo()` — co banka dorovná, saldo neukáže,
+     * a co kontrola hlásí, saldo neschová.
+     */
+    private const SHORTFALL_TOLERANCE_CZK = 1.0;
     private const CANDIDATE_PAGE_SIZE = 5000;
 
     public function __construct(private readonly Connection $db) {}
@@ -1045,6 +1055,9 @@ final class SaldoRepository
         $offsets = PurchaseSettledExpr::offsetSettledAsOf('d');
 
         $settlementDate = 'COALESCE(bs.settled_on, DATE(bt.posted_at))';
+        $matchAmount    = PurchaseSettledExpr::bankAmountSql('pm', 'bt', 'mbs', 'mpi', 'mdc');
+        $cashAmount     = PurchaseSettledExpr::cashAmountSql('cd', 'cpi', 'cdc');
+        $cashExpr       = 'COALESCE(ch.cash_sum, 0)';
         $matchedExpr    = 'COALESCE(m.matched_sum, 0)';
         $afterExpr      = 'COALESCE(m.matched_after, 0)';
         $advanceExpr    = 'ROUND(COALESCE(adv.advance_sum, 0), 2)';
@@ -1059,26 +1072,52 @@ final class SaldoRepository
         // zahodí jako uzavřené. `{$offsets}` se v HAVING vyhodnotí znovu (aliasy tu
         // odkazovat nelze, viz fetchOpenInvoices) — jsou to dva indexové poddotazy
         // nad drobnými zápočtovými tabulkami.
-        $ratioFor = static fn (string $offsets): string =>
-            "CASE WHEN d.status = 'paid' AND d.paid_at IS NOT NULL
-                       AND DATE(d.paid_at) <= ? AND {$afterExpr} = 0
-                  THEN 1 ELSE " . self::paidRatioSql(
-                "{$matchedExpr} + ({$offsets}) + {$advanceExpr}",
-                "{$toPayExpr} + {$advanceExpr}",
-            ) . ' END';
+        // Zkratka „paid ⇒ plně kryto" NEPLATÍ pro doklad, jehož evidované úhrady ho
+        // prokazatelně nepokrývají: úhrada existuje, ale nechává na saldokontě zbytek nad
+        // korunovou toleranci. Přesně tak vypadal ručně spárovaný nedoplatek — doklad
+        // `paid`, banka zaúčtovala jen skutečnou platbu a zbytek na 321 saldokonto
+        // schovalo. Dobropisy (záporné `amount_to_pay`) se nehodnotí: jejich proplacení
+        // se do poměru nepromítá a zkratka je jediné, co je uzavírá. SQL práh je o haléř
+        // nižší než PHP ({@see SHORTFALL_TOLERANCE_CZK}), aby filtr zůstal nadmnožinou.
+        $ratioFor = static function (string $offsets) use ($matchedExpr, $cashExpr, $advanceExpr, $toPayExpr, $afterExpr, $bookedExpr): string {
+            $signal = "{$matchedExpr} + {$cashExpr} + ({$offsets}) + {$advanceExpr}";
+            $signalRatio = self::paidRatioSql($signal, "{$toPayExpr} + {$advanceExpr}");
+            $shortfallThreshold = number_format(self::SHORTFALL_TOLERANCE_CZK - 0.01, 2, '.', '');
+
+            return "CASE WHEN d.status = 'paid' AND d.paid_at IS NOT NULL
+                          AND DATE(d.paid_at) <= ? AND {$afterExpr} = 0
+                          AND NOT ({$toPayExpr} > 0 AND ({$signal}) > 0.005
+                                   AND ABS({$bookedExpr} * (1 - ({$signalRatio}))) > {$shortfallThreshold})
+                     THEN 1 ELSE {$signalRatio} END";
+        };
 
         $sql =
             "WITH bank_settle AS (
                 " . self::bankSettleCte($supplierId) . "
             ), matches AS (
                 SELECT pm.purchase_invoice_id AS doc_id,
-                       SUM(CASE WHEN {$settlementDate} <= ? THEN pm.amount ELSE 0 END) AS matched_sum,
+                       SUM(CASE WHEN {$settlementDate} <= ? THEN {$matchAmount} ELSE 0 END) AS matched_sum,
                        SUM(CASE WHEN {$settlementDate} >  ? THEN 1 ELSE 0 END) AS matched_after
                   FROM payment_matches pm
                   JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
+                  JOIN bank_statements mbs ON mbs.id = bt.statement_id
+                  JOIN purchase_invoices mpi ON mpi.id = pm.purchase_invoice_id AND mpi.supplier_id = pm.supplier_id
+                  JOIN currencies mdc ON mdc.id = mpi.currency_id
                   LEFT JOIN bank_settle bs ON bs.bank_transaction_id = pm.bank_transaction_id
                  WHERE pm.supplier_id = {$supplierId} AND pm.purchase_invoice_id IS NOT NULL
                  GROUP BY pm.purchase_invoice_id
+            ), cash AS (
+                -- Pokladní úhrady k asOf (vratka odečítá). Stornovaný doklad se počítá,
+                -- dokud jeho protizápis k asOf ještě nenastal — stejně jako u zápočtů.
+                SELECT cd.purchase_invoice_id AS doc_id, SUM({$cashAmount}) AS cash_sum
+                  FROM cash_documents cd
+                  JOIN purchase_invoices cpi ON cpi.id = cd.purchase_invoice_id AND cpi.supplier_id = cd.supplier_id
+                  JOIN currencies cdc ON cdc.id = cpi.currency_id
+                  LEFT JOIN journal_entries crev ON crev.id = cd.reversal_entry_id
+                 WHERE cd.supplier_id = {$supplierId} AND cd.purchase_invoice_id IS NOT NULL
+                   AND cd.issue_date <= ?
+                   AND (cd.status = 'posted' OR (cd.status = 'reversed' AND crev.entry_date > ?))
+                 GROUP BY cd.purchase_invoice_id
             ), advances AS (
                 {$advanceCte}
             )
@@ -1089,6 +1128,7 @@ final class SaldoRepository
                    cur.code AS currency_code,
                    {$toPayExpr} AS amount_to_pay,
                    {$matchedExpr} AS paid_from_matches,
+                   {$cashExpr} AS paid_from_cash,
                    {$afterExpr} AS matches_after_as_of,
                    {$offsets} AS settled_by_offsets,
                    {$advanceExpr} AS advance_on_account,
@@ -1102,6 +1142,7 @@ final class SaldoRepository
               JOIN clients cl          ON cl.id = d.vendor_id
               JOIN currencies cur      ON cur.id = d.currency_id
               LEFT JOIN matches m      ON m.doc_id = d.id
+              LEFT JOIN cash ch        ON ch.doc_id = d.id
               LEFT JOIN advances adv   ON adv.advance_id = d.advance_purchase_invoice_id
              WHERE e.supplier_id = {$supplierId} AND e.source_type = 'purchase_invoice'
                AND e.posted_at IS NOT NULL
@@ -1113,7 +1154,7 @@ final class SaldoRepository
                " . self::partnerSql($partnerId) . self::dueBeforeSql('d', $dueBefore) . "
              GROUP BY d.id, d.supplier_id, doc_no, d.issue_date, d.due_date, d.status, d.paid_at,
                       cl.id, cl.company_name, cur.code, d.amount_to_pay,
-                      m.matched_sum, m.matched_after, adv.advance_sum
+                      m.matched_sum, m.matched_after, ch.cash_sum, adv.advance_sum
             HAVING " . self::openFilterSql($bookedExpr, $ratioFor(PurchaseSettledExpr::offsetSettledAsOf('d'))) . "
              " . self::orderSql('d', $orderByDue);
 
@@ -1134,6 +1175,16 @@ final class SaldoRepository
                     && substr((string) $r['paid_at'], 0, 10) <= $asOf
                     && (int) $r['matches_after_as_of'] === 0;
                 $advance = round((float) $r['advance_on_account'], 2);
+                $booked = round((float) $r['booked_signed'], 2);
+                $signal = (float) $r['paid_from_matches'] + (float) $r['paid_from_cash']
+                    + (float) $r['settled_by_offsets'] + $advance;
+                $toPay = (float) $r['amount_to_pay'] + $advance;
+                // Nedoplatek na „uhrazeném" dokladu (viz $ratioFor výš): úhrady existují,
+                // ale nechávají na saldokontě zbytek nad toleranci → zkratka neplatí.
+                $shortfall = (float) $r['amount_to_pay'] > 0
+                    && $signal > 0.005
+                    && abs(self::settlementAmounts($booked, $this->paidRatio(false, $signal, $toPay))['remaining'])
+                        > self::SHORTFALL_TOLERANCE_CZK;
                 return [
                     'doc_type'       => 'purchase_invoice',
                     'doc_id'         => (int) $r['doc_id'],
@@ -1146,15 +1197,12 @@ final class SaldoRepository
                     'currency_code'  => (string) $r['currency_code'],
                     'booked_signed'  => round((float) $r['booked_signed'], 2),
                     'foreign_signed' => round((float) $r['foreign_signed'], 2),
-                    // status='paid' je autoritativní až od paid_at; jinak se poměr skládá z kanálů,
-                    // kterými se přijatá faktura umí vyrovnat: banka (payment_matches, KNOWN GAP H3)
-                    // a oba zápočty ({@see PurchaseSettledExpr::offsetSettledAsOf}). Zálohová PF
-                    // uhrazená přímo na 321 (bez 314) vstupuje do poměru zrcadlově k vydané větvi.
-                    'paid_ratio'     => $this->paidRatio(
-                        $paidByStatusAsOf,
-                        (float) $r['paid_from_matches'] + (float) $r['settled_by_offsets'] + $advance,
-                        (float) $r['amount_to_pay'] + $advance,
-                    ),
+                    // status='paid' je autoritativní až od paid_at (a jen bez nedoplatku); jinak
+                    // se poměr skládá z kanálů, kterými se přijatá faktura umí vyrovnat: banka
+                    // (payment_matches převedené do měny dokladu), pokladna a oba zápočty
+                    // ({@see PurchaseSettledExpr::offsetSettledAsOf}). Zálohová PF uhrazená přímo
+                    // na 321 (bez 314) vstupuje do poměru zrcadlově k vydané větvi.
+                    'paid_ratio'     => $this->paidRatio($paidByStatusAsOf && !$shortfall, $signal, $toPay),
                 ];
             },
             $limit,

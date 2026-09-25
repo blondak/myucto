@@ -23,7 +23,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Vrací seznam přijatých faktur seskupený po měsících (per tenant).
  * Filtry: status, document_kind, vendor_id, project_id (id | 'none' = bez zakázky),
  * year, month, date_from, date_to, currency, q, unpaid_only, overdue,
- * unpaid_as_of (YYYY-MM-DD — stav úhrady K DATU X, ne dnešní status; viz PurchaseInvoiceRepository::listGroupedByMonth)
+ * unpaid_as_of (YYYY-MM-DD — stav úhrady K DATU X, ne dnešní status; viz PurchaseInvoiceRepository::listGroupedByMonth),
+ * paid_shortfall (uhrazené doklady, které evidované úhrady nepokrývají).
+ * Řádek nese paid_amount / remaining_amount v měně dokladu (SSOT PurchaseSettledExpr).
  */
 final class ListPurchaseInvoicesAction
 {
@@ -70,6 +72,7 @@ final class ListPurchaseInvoicesAction
             'unpaid_as_of'  => $unpaidAsOf !== '' ? $unpaidAsOf : null,
             'unmatched'     => !empty($filter['unmatched']),
             'needs_review'  => !empty($filter['needs_review']),
+            'paid_shortfall' => !empty($filter['paid_shortfall']),
             'payment_ordered' => $filter['payment_ordered'] ?? null,
             'booked'        => $filter['booked'] ?? null,
             'import_batch_id' => $filter['import_batch_id'] ?? null,

@@ -14,6 +14,7 @@ use MyInvoice\Support\ExchangeRateSources;
 use MyInvoice\Support\PaymentMethods;
 use MyInvoice\Support\PublicAuthorityFeeText;
 use MyInvoice\Support\Sql\PayablePredicate;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
 /**
@@ -60,7 +61,10 @@ final class PurchaseInvoiceRepository
                     cur.code AS currency, cur.symbol AS currency_symbol, cur.decimals AS currency_decimals,
                     pcur.code AS payment_currency, pcur.symbol AS payment_currency_symbol,
                     ec.label AS expense_category_label, ec.code AS expense_category_code,
-                    prj.name AS project_name, prj.project_number AS project_number
+                    prj.name AS project_name, prj.project_number AS project_number,
+                    (' . PurchaseSettledExpr::paidAmount('pi') . ') AS paid_amount,
+                    (' . PurchaseSettledExpr::remainingAmount('pi') . ') AS remaining_amount,
+                    ' . PurchaseSettledExpr::paidShortfallCondition('pi', 'cur.code') . ' AS paid_shortfall
                FROM purchase_invoices pi
                JOIN clients c        ON c.id   = pi.vendor_id
                JOIN currencies cur   ON cur.id = pi.currency_id
@@ -879,8 +883,16 @@ final class PurchaseInvoiceRepository
             // podle bankovního párování k asOf) > tolerance.
             $where[] = "NOT (pi.status = 'paid' AND pi.paid_at IS NOT NULL AND DATE(pi.paid_at) <= ?)";
             $params[] = $asOf;
-            $where[] = "(pi.amount_to_pay - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm"
+            // Částka párování převedená do měny dokladu — týž převod jako saldo
+            // (PurchaseSettledExpr::bankAmountSql, dřív KNOWN GAP H3). Nedoplatek na dokladu
+            // ve stavu `paid` tenhle filtr nehledá: je to seznam podle stavu k datu, zbytek
+            // takového dokladu ukazuje sloupec „Zbývá uhradit" a saldokonto.
+            $where[] = "(pi.amount_to_pay - COALESCE((SELECT SUM("
+                . \MyInvoice\Support\Sql\PurchaseSettledExpr::bankAmountSql('pm', 'bt', 'ubs', 'pi', 'udc')
+                . ") FROM payment_matches pm"
                 . " JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id"
+                . " JOIN bank_statements ubs ON ubs.id = bt.statement_id"
+                . " JOIN currencies udc ON udc.id = pi.currency_id"
                 . " WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id"
                 . " AND bt.posted_at <= ?), 0)) > 0.005";
             $params[] = $asOf;
@@ -921,6 +933,12 @@ final class PurchaseInvoiceRepository
         }
         if (!empty($filters['needs_review'])) {
             $where[] = "pi.extraction_warning IS NOT NULL";
+        }
+        // „Uhrazeno s rozdílem" — doklad je `paid`, ale evidované úhrady ho nepokrývají
+        // (typicky ručně spárovaná nižší platba z doby, kdy párování uzavíralo doklad bez
+        // ohledu na částku). Zbytek se dá vyrovnat z detailu dokladu.
+        if (!empty($filters['paid_shortfall'])) {
+            $where[] = PurchaseSettledExpr::paidShortfallCondition('pi', 'cur.code');
         }
         if (!empty($filters['import_batch_id'])) {
             $where[] = 'pi.import_batch_id = ?';
@@ -976,6 +994,8 @@ final class PurchaseInvoiceRepository
             'exchange_rate' => 'pi.exchange_rate', 'vat_deduction' => 'pi.vat_deduction',
             'expense_category' => 'ec.label', 'base' => 'pi.total_without_vat',
             'vat' => 'pi.total_vat', 'balance' => 'pi.amount_to_pay',
+            'paid_amount' => '(' . PurchaseSettledExpr::paidAmount('pi') . ')',
+            'remaining_amount' => '(' . PurchaseSettledExpr::remainingAmount('pi') . ')',
             'project' => 'prj.name', 'received_at' => 'pi.received_at',
             'payment_ordered_at' => 'pi.payment_ordered_at',
             'vat_breakdown' => 'pi.total_vat',
@@ -1001,6 +1021,9 @@ final class PurchaseInvoiceRepository
                        pi.exchange_rate, pi.exchange_rate_date,
                        pi.total_without_vat, pi.total_vat, pi.total_with_vat,
                        pi.advance_paid_amount, pi.amount_to_pay,
+                       (" . PurchaseSettledExpr::paidAmount('pi') . ") AS paid_amount,
+                       (" . PurchaseSettledExpr::remainingAmount('pi') . ") AS remaining_amount,
+                       " . PurchaseSettledExpr::paidShortfallCondition('pi', 'cur.code') . " AS paid_shortfall,
                        pi.payment_ordered_at,
                        pi.status, pi.booked_at, pi.paid_at, pi.cancelled_at,
                        pi.extraction_warning, pi.vat_deduction, pi.vat_deduction_percent, pi.tax_deductible,
@@ -3393,6 +3416,12 @@ final class PurchaseInvoiceRepository
             'paid_amount_payment_ccy', 'paid_amount_invoice_ccy', 'exchange_diff_base',
         ] as $f) {
             if (array_key_exists($f, $row) && $row[$f] !== null) $row[$f] = (float) $row[$f];
+        }
+        foreach (['paid_amount', 'remaining_amount'] as $f) {
+            if (array_key_exists($f, $row) && $row[$f] !== null) $row[$f] = round((float) $row[$f], 2);
+        }
+        if (array_key_exists('paid_shortfall', $row)) {
+            $row['paid_shortfall'] = (bool) $row['paid_shortfall'];
         }
         // Decode JSON snapshots (DB column je longtext, ne JSON type)
         foreach (['vendor_snapshot', 'own_snapshot'] as $f) {

@@ -952,7 +952,7 @@ paths:
         - { in: query, name: 'filter[include_dimensions]', description: "1 = doplnit štítky dimenzí jen u firmy se zapnutými dimenzemi", schema: { type: integer, enum: [0, 1], default: 0 } }
         - in: query
           name: sort_key
-          schema: { type: string, enum: [number, client, type, issued, due, amount, status, payment_vs, order_number, paid_at, payment_method, booked_at, exchange_rate, amount_czk, base, vat, total, project, sent_at, paid_total, vat_breakdown, debit_accounts, credit_accounts, locked] }
+          schema: { type: string, enum: [number, client, type, issued, due, amount, status, payment_vs, order_number, paid_at, payment_method, booked_at, exchange_rate, amount_czk, base, vat, total, project, sent_at, paid_total, remaining_amount, vat_breakdown, debit_accounts, credit_accounts, locked] }
         - in: query
           name: sort_dir
           schema: { type: string, enum: [asc, desc], default: desc }
@@ -6006,9 +6006,13 @@ paths:
             nebyl uhrazen celý `amount_to_pay`. Přijaté faktury nemají obdobu
             `invoice_payments` — plná úhrada k X je autoritativní jen přes
             `status='paid' AND paid_at <= X`, jinak best-effort ze součtu
-            `payment_matches.amount` s `bank_transactions.posted_at <= X` (jen bankovní
-            párování). Stejná definice jako v saldokontu.
+            bankovních párování s `bank_transactions.posted_at <= X`, převedených
+            do měny dokladu (jen bankovní párování).
           schema: { type: string, format: date, example: "2026-06-30" }
+        - in: query
+          name: filter[paid_shortfall]
+          description: "1 = jen doklady ve stavu uhrazeno, které evidované úhrady nepokrývají o víc než 1 Kč (paid_shortfall)"
+          schema: { type: integer, enum: [0, 1], default: 0 }
         - in: query
           name: filter[booked]
           description: "Zaúčtování (jen podvojné účetnictví): 1 = zaúčtováno (booked_at není NULL), 0 = nezaúčtováno"
@@ -6026,7 +6030,7 @@ paths:
         - { in: query, name: 'filter[include_dimensions]', description: "1 = doplnit štítky dimenzí jen u firmy se zapnutými dimenzemi", schema: { type: integer, enum: [0, 1], default: 0 } }
         - in: query
           name: sort_key
-          schema: { type: string, enum: [number, vendor, vendor_ic, vendor_number, kind, tax_date, due_date, amount, status, paid_at, booked_at, exchange_rate, vat_deduction, expense_category, base, vat, balance, project, received_at, payment_ordered_at, vat_breakdown, debit_accounts, credit_accounts, locked] }
+          schema: { type: string, enum: [number, vendor, vendor_ic, vendor_number, kind, tax_date, due_date, amount, status, paid_at, booked_at, exchange_rate, vat_deduction, expense_category, base, vat, balance, paid_amount, remaining_amount, project, received_at, payment_ordered_at, vat_breakdown, debit_accounts, credit_accounts, locked] }
         - in: query
           name: sort_dir
           schema: { type: string, enum: [asc, desc], default: desc }
@@ -26684,7 +26688,9 @@ components:
           description: |
             Faktury skupiny — list vrací podmnožinu polí `Invoice` (bez items,
             bankovních polí apod.) plus listová pole `month_bucket` (YYYY-MM),
-            `has_work_report` a `project_requires_approval`.
+            `has_work_report`, `project_requires_approval` a `remaining_amount`
+            (zbývá uhradit v měně dokladu = `amount_to_pay − paid_total`; 0 u finálního
+            dokladu k zaplacené proformě a u dokladu `paid` bez evidované platby).
 
             Dále booleany `oss_review_domestic` a `oss_review_oss` — doklad má řádek
             k ručnímu posouzení místa plnění mimo OSS, resp. v OSS podání. Rozlišují
@@ -28514,6 +28520,9 @@ components:
         total_with_vat: { type: number }
         advance_paid_amount: { type: number }
         amount_to_pay: { type: number, description: "Generated column = total_with_vat - advance_paid_amount" }
+        paid_amount: { type: number, description: "Uhrazeno v měně dokladu — banka, pokladna, vzájemný zápočet i zápočet proti účtu. Doklad ve stavu paid bez evidované úhrady se bere jako uhrazený celý." }
+        remaining_amount: { type: number, description: "Zbývá uhradit v měně dokladu = amount_to_pay − paid_amount. DDKP (tax_document) nic nedluží, zbytek 0." }
+        paid_shortfall: { type: boolean, description: "Uhrazeno s rozdílem: stav paid, ale zbytek po evidovaných úhradách je v korunách (zbytek × kurz dokladu) vyšší než 1 Kč." }
         exchange_rate: { type: [number, "null"] }
         exchange_rate_date: { type: [string, "null"], format: date }
         status: { type: string, enum: [draft, received, booked, paid, cancelled] }
@@ -28893,6 +28902,9 @@ components:
         rounding: { type: number }
         advance_paid_amount: { type: number }
         amount_to_pay: { type: number }
+        paid_amount: { type: number, description: "Uhrazeno v měně dokladu (banka, pokladna, oba zápočty); stav paid bez evidované úhrady = celá částka." }
+        remaining_amount: { type: number, description: "Zbývá uhradit v měně dokladu = amount_to_pay − paid_amount." }
+        paid_shortfall: { type: boolean, description: "Uhrazeno s rozdílem: stav paid, ale zbytek po evidovaných úhradách je vyšší než 1 Kč." }
         payment_currency_id: { type: [integer, "null"] }
         payment_exchange_rate: { type: [number, "null"] }
         paid_amount_payment_ccy: { type: [number, "null"] }

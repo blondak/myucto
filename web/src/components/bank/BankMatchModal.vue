@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/auth'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import MatchSuggestionPanel from './MatchSuggestionPanel.vue'
+import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
 import type { BankTransactionActions } from '@/composables/useBankTransactionActions'
 
 const props = defineProps<{
@@ -27,10 +28,23 @@ const {
   widenSplitWindow, onAnchorSearch, onAnchorSelect,
   confirmSuggestion, confirmCandidate, confirmMatch, confirmGoPayCandidate, closeMatch,
   acceptTxSuggestion, rejectTxSuggestion,
+  purchaseShortfall, closePurchaseShortfall, onPurchaseShortfallSettled,
 } = props.actions
 </script>
 
 <template>
+  <!-- Ruční párování s nižší platbou: doklad zůstal částečně uhrazený. Volba (a) nechat
+       tak = zavřít, (b) rozdíl vyrovnat zápočtem proti účtu (321 MD / zvolený účet D). -->
+  <PaymentMethodModal v-if="purchaseShortfall" doc-type="purchase_invoice" settlement-only
+    :doc-id="purchaseShortfall.purchaseInvoiceId" :doc-number="purchaseShortfall.docNumber"
+    :amount="purchaseShortfall.remaining" :currency="purchaseShortfall.currency"
+    :default-account-code="purchaseShortfall.currency === 'CZK' ? '648' : '663'"
+    :title="t('bank.purchase_shortfall.title')"
+    :intro="t('bank.purchase_shortfall.intro', { amount: formatMoney(purchaseShortfall.remaining, purchaseShortfall.currency) })"
+    :cancel-label="t('bank.purchase_shortfall.keep_partial')"
+    :confirm-label="t('bank.purchase_shortfall.settle')"
+    @close="closePurchaseShortfall" @done="onPurchaseShortfallSettled" />
+
   <div v-if="matchingTx" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
     <div class="bg-surface rounded-xl shadow-lg max-w-md w-full max-h-[90vh] overflow-y-auto p-5">
       <h3 class="text-lg font-semibold mb-1">{{ t('bank.manual_match_title') }}</h3>

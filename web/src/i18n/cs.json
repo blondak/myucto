@@ -15430,6 +15430,16 @@
       "post_settlement": "Doúčtovat",
       "settlement_posted": "Zápočet doúčtován do deníku."
     },
+    "payment_summary": {
+      "title": "Úhrada dokladu",
+      "to_pay": "K úhradě",
+      "paid": "Uhrazeno",
+      "remaining": "Zbývá uhradit",
+      "shortfall_note": "Doklad je označený jako uhrazený, ale evidované úhrady ho nepokrývají. Rozdíl zůstává na saldokontě otevřený, vyrovnejte ho tlačítkem „Vyrovnat zbytek“.",
+      "settle_rest": "Vyrovnat zbytek",
+      "settle_rest_title": "Vyrovnat zbytek dokladu",
+      "settle_rest_intro": "Zbývá uhradit {amount}. Rozdíl se zaúčtuje jako zápočet proti zvolenému účtu (typicky 648/548, u cizí měny 663/563) a doklad se tím uzavře."
+    },
     "credit_note_link": {
       "label": "Opravovaná faktura",
       "none": "— nepropojeno —",
@@ -15541,6 +15551,8 @@
       "overdue": "Po splatnosti",
       "unmatched": "Bez párování úhrady",
       "unmatched_hint": "Doklady označené jako uhrazené, ale bez zaúčtované úhrady (banka ani pokladna) — závazek 321 zůstává v deníku otevřený.",
+      "paid_shortfall": "Uhrazeno s rozdílem",
+      "paid_shortfall_hint": "Doklady označené jako uhrazené, jejichž evidované úhrady nepokrývají celou částku. Zbytek zůstává na saldokontě otevřený.",
       "unpaid_as_of_label": "Neuhrazené k datu",
       "unpaid_as_of_hint": "Zobrazí doklady vystavené do zvoleného data, u kterých k tomu dni nebyla uhrazena celá částka — bez ohledu na dnešní stav. Stejná definice jako v Saldokontu.",
       "unpaid_as_of_clear": "Zrušit filtr na datum",
@@ -15558,6 +15570,8 @@
     },
     "payment_ordered_badge": "Předáno k úhradě",
     "payment_ordered_at_tooltip": "Zařazeno do platebního příkazu {date}",
+    "paid_shortfall_badge": "uhrazeno s rozdílem",
+    "paid_shortfall_tooltip": "Evidované úhrady doklad nepokrývají, zbývá {amount}.",
     "validation": {
       "vendor_required": "Vyber dodavatele.",
       "vendor_invoice_number_required": "Číslo dokladu od dodavatele je povinné.",
@@ -15628,6 +15642,8 @@
     "col_vat_deduction": "Odpočet DPH",
     "col_received_at": "Přijato dne",
     "col_payment_ordered_at": "Předáno k úhradě",
+    "col_paid_amount": "Uhrazeno",
+    "col_remaining_amount": "Zbývá uhradit",
     "vat_deduction_short": {
       "full": "plný",
       "none": "neuplatnit",
@@ -17039,6 +17055,7 @@
     "col_project": "Zakázka",
     "col_sent_at": "Odesláno dne",
     "col_paid_total": "Uhrazeno celkem",
+    "col_remaining_amount": "Zbývá uhradit",
     "col_kh": "Oddíl KH",
     "col_vat_breakdown": "Rozpad DPH",
     "col_debit_accounts": "Předkontace MD",
@@ -18515,6 +18532,13 @@
     "split_purchase_group": "Přijaté faktury",
     "split_difference": "Rozdíl platby proti součtu faktur: {amount}",
     "split_fx_hint": "Částka platby se rozdělí mezi faktury poměrně. Při zaúčtování se rozdíl proti účetním kurzům zachytí jako kurzový rozdíl.",
+    "purchase_shortfall": {
+      "title": "Platba nepokryla celou fakturu",
+      "intro": "Po spárování zbývá uhradit {amount}. Doklad zůstal částečně uhrazený. Rozdíl můžete nechat k doplacení, nebo ho hned vyrovnat zápočtem proti zvolenému účtu (typicky 648/548, u cizí měny 663/563).",
+      "keep_partial": "Nechat částečně uhrazené",
+      "settle": "Uhradit a vyrovnat rozdíl",
+      "partial_info": "Platba nepokryla celou fakturu, zbývá uhradit {amount}. Doklad zůstal částečně uhrazený."
+    },
     "split_hint": "Kombinace faktur jednoho klienta, jejichž součet odpovídá této platbě (okno ±{days} dní).",
     "split_hint_all": "Kombinace faktur jednoho klienta, jejichž součet odpovídá této platbě (bez omezení datem — pro vymožené a jinak opožděné úhrady).",
     "split_widen": "Hledat v širším okně (±{days} dní)",
