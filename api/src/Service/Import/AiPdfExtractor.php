@@ -15,6 +15,7 @@ use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Support\AdvanceTaxDocumentText;
 use MyInvoice\Support\PaymentMethods;
+use MyInvoice\Support\PdfBytes;
 use MyInvoice\Support\PublicAuthorityFeeText;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -87,6 +88,9 @@ final class AiPdfExtractor
      */
     public function extractAndCreate(int $supplierId, int $userId, string $pdfBytes, ?string $modelOverride = null, ?string $originalFilename = null, ?string $importBatchId = null): array
     {
+        // Hlavička PDF posunutá o prázdný řádek / BOM (dompdf za PHP skriptem s mezerou)
+        // — oprav na vstupu, ať ISDOC, AI klienti i archivace dostanou PDF od `%PDF-`.
+        $pdfBytes = PdfBytes::normalize($pdfBytes);
         // ISDOC-first rozhodnutí (F7 §3.9) — sdílený router (stejný jako inbox scanner).
         // Detekuje isdocx balíček, embedded ISDOC v PDF, a rozhoduje o AI fallbacku
         // s OPRAVENOU sémantikou: validní ISDOC ⇒ AI se NIKDY nevolá; přítomný ISDOC

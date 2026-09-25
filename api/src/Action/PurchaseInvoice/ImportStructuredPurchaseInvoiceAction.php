@@ -15,6 +15,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Import\InvoiceExtractionRouter;
 use MyInvoice\Service\Import\InvoiceImportService;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Support\PdfBytes;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\UploadedFileInterface;
@@ -88,6 +89,9 @@ final class ImportStructuredPurchaseInvoiceAction
         }
         if ($size > self::MAX_FILE_SIZE) {
             return Json::error($response, 'file_too_large', 'Soubor je příliš velký (max 20 MiB).', 413);
+        }
+        if ($extension === 'pdf') {
+            $bytes = PdfBytes::normalize($bytes);   // hlavička posunutá o prázdný řádek / BOM
         }
         if ($extension === 'pdf' && !str_starts_with($bytes, '%PDF-')) {
             return Json::error($response, 'invalid_document', 'Soubor není platný PDF dokument.', 422);
