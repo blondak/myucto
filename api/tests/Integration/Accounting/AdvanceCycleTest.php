@@ -158,6 +158,36 @@ final class AdvanceCycleTest extends BankPostingTestCase
         $this->assertBalancedEntry($entryId);
     }
 
+    // (d2) — poskytnutá záloha vedená přímo na závazku (předkontace 321/321): zúčtování by
+    //        byl pár 321 MD / 321 D, který se vyruší a jen zdvojí obrat → nezapisuje se.
+    public function testPurchaseAdvanceOnPayableHasNoSelfCancellingSettlementPair(): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO posting_rules (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active)
+             VALUES (?, ?, "Záloha na 321", ?, ?, 0, 1)
+             ON DUPLICATE KEY UPDATE debit_account_code = VALUES(debit_account_code), credit_account_code = VALUES(credit_account_code)'
+        );
+        $stmt->execute([$this->supplierId, 'advance.paid.payment', '321', '221']);
+        $stmt->execute([$this->supplierId, 'advance.paid.settlement', '321', '321']);
+
+        $vendor = $this->client('Dodavatel záloha na 321');
+        $advPf = $this->purchaseInvoice('ZPF-D2', $vendor, 1210.00, 'advance');
+        $tx = $this->payAdvancePfViaBank($advPf, 1210.00);
+        $final = $this->purchaseWithItem('PF-D2', $vendor, 1000.00, 210.00, 'invoice', $advPf);
+        $entryId = $this->posting->postDocument(
+            $this->supplierId,
+            'purchase_invoice',
+            $final,
+            $this->posting->buildFromPurchaseInvoice($this->supplierId, $final),
+            ['entry_date' => self::YEAR . '-06-20'],
+        );
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(1210.00, $byAcc['321']['credit'] ?? 0.0, 0.001, 'Závazek z faktury.');
+        self::assertSame(0.0, $byAcc['321']['debit'] ?? 0.0, 'Žádný pár 321 MD / 321 D.');
+        $sum = $this->accountSums([$this->entryIdForBankTx($tx), $entryId]);
+        self::assertSame(0, self::cents($sum['321'] ?? 0), '321 po vyúčtování na nule.');
+    }
+
     public function testSaldo324ShowsOnlyUnsettledReceivedAdvance(): void
     {
         $client = $this->client('Odběratel saldo 324');
