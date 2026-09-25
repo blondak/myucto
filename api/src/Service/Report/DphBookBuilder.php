@@ -84,7 +84,9 @@ final class DphBookBuilder
         // žurnál). Seskupíme per (doklad, kód, sazba) do jednoho řádku přehledu a
         // zařadíme do sekcí dle dphdp3_line (+ mirror 43, + ř.47 majetek).
         $sections = [];
-        foreach ($this->groupLedgerRows($supplierId, $start, $end) as $g) {
+        $groups = $this->groupLedgerRows($supplierId, $start, $end);
+        $nilKhDocuments = $this->nilKhDocuments($groups, $vatBucket);
+        foreach ($groups as $g) {
             $scope = $g['source'] === 'sale' ? 'issued' : 'received';
             $line = $g['dphdp3_line'];
             if ($line === null) {
@@ -103,7 +105,7 @@ final class DphBookBuilder
                 'label'                 => $g['label'] !== '' ? $g['label'] : '(bez klasifikace)',
                 'dphdp3_line'           => $line,
                 'dphdp3_line_secondary' => $g['dphdp3_line_secondary'],
-                'kh_section'            => $this->effectiveKhSection($g, $khItemThreshold),
+                'kh_section'            => $this->effectiveKhSection($g, $khItemThreshold, $nilKhDocuments),
                 'vat_rate'              => $g['vat_rate'],
             ];
             $row = $this->toBookRow($g);
@@ -474,14 +476,21 @@ final class DphBookBuilder
      * ze 3. země tiskne A.2 — stejně jako výkaz.
      * Ostatní sekce (A.1, A.2, B.1, NULL) se nepřepočítávají.
      *
+     * Doklad s nulovým základem i daní tuzemské části (vyúčtování plně předplacené
+     * zálohy) v KH není, proto ani v Knize nemá sekci — {@see KontrolniHlaseniBuilder::isNilKhAmount()}.
+     *
      * @param array<string,mixed> $g kanonický (seskupený) řádek ledgeru
      * @param float $itemThreshold limit KH pro rok období (číselník daňových konstant)
+     * @param array<string,true> $nilKhDocuments identity dokladů bez částky pro KH
      */
-    private function effectiveKhSection(array $g, float $itemThreshold): ?string
+    private function effectiveKhSection(array $g, float $itemThreshold, array $nilKhDocuments = []): ?string
     {
         $kh = $g['kh_section'] ?? null;
         if (!in_array($kh, ['A.4', 'A.5', 'B.2', 'B.3'], true)) {
             return $kh;
+        }
+        if (isset($nilKhDocuments[VatLedgerService::documentIdentity($g)])) {
+            return null;
         }
         // § 101e: „nad 10 000 Kč" = OSTŘE více → přesně 10 000 jde do sumace (A.5/B.3),
         // ne jednotlivě (A.4/B.2). Proto '>' (ne '>='), shodně s KontrolniHlaseniBuilder.
@@ -490,6 +499,42 @@ final class DphBookBuilder
         return str_starts_with($kh, 'A.')
             ? ($itemized ? 'A.4' : 'A.5')
             : ($itemized ? 'B.2' : 'B.3');
+    }
+
+    /**
+     * Identity dokladů, jejichž tuzemská zdanitelná část (sekce A.4/A.5/B.2/B.3) má ve všech
+     * sazbách nulový základ i daň — týmž rozřazením sazeb jako KontrolniHlaseniBuilder.
+     *
+     * @param list<array<string,mixed>> $groups seskupené řádky ledgeru
+     * @return array<string,true>
+     */
+    private function nilKhDocuments(array $groups, float $vatBucket): array
+    {
+        $sums = [];
+        foreach ($groups as $g) {
+            // Stejný výběr řádků jako KontrolniHlaseniBuilder: přijaté jen s nárokem na odpočet.
+            $khEligible = $g['source'] === 'sale' || ($g['dphdp3_line'] ?? null) !== null;
+            if (!$khEligible || !in_array($g['kh_section'] ?? null, ['A.4', 'A.5', 'B.2', 'B.3'], true) || !empty($g['is_reverse_charge'])) {
+                continue;
+            }
+            $rate = (float) $g['vat_rate'];
+            if ($rate <= 0) {
+                continue;
+            }
+            $key = VatLedgerService::documentIdentity($g);
+            $bucket = $rate >= $vatBucket ? 21 : 12;
+            $sums[$key] ??= ['b21' => 0.0, 'v21' => 0.0, 'b12' => 0.0, 'v12' => 0.0];
+            $sums[$key]['b' . $bucket] += (float) $g['base_czk'];
+            $sums[$key]['v' . $bucket] += (float) $g['vat_czk'];
+        }
+        $out = [];
+        foreach ($sums as $key => $s) {
+            if (KontrolniHlaseniBuilder::isNilKhAmount($s['b21'], $s['v21'], $s['b12'], $s['v12'])) {
+                $out[$key] = true;
+            }
+        }
+
+        return $out;
     }
 
     private function sectionOrder(string $key): int
