@@ -199,10 +199,12 @@ final class InvoiceSettlementRepository
     public function lockPurchase(int $supplierId, int $docId): ?array
     {
         $remaining = PurchaseSettledExpr::remaining('p');
+        $settled = PurchaseSettledExpr::settled('p');
         $stmt = $this->db->pdo()->prepare(
             "SELECT p.total_with_vat, p.status, p.document_kind, p.vendor_invoice_number, p.varsymbol,
-                    c.code AS currency,
-                    ({$remaining}) AS remaining
+                    p.exchange_rate, c.code AS currency,
+                    ({$remaining}) AS remaining,
+                    ({$settled}) AS settled
                FROM purchase_invoices p
                LEFT JOIN currencies c ON c.id = p.currency_id
               WHERE p.id = ? AND p.supplier_id = ?
@@ -215,12 +217,55 @@ final class InvoiceSettlementRepository
         }
         $number = (string) ($row['vendor_invoice_number'] ?? '');
         return [
-            'total'     => round((float) $row['total_with_vat'], 2),
-            'remaining' => round((float) $row['remaining'], 2),
-            'status'    => (string) $row['status'],
-            'currency'  => (string) ($row['currency'] ?? 'CZK'),
-            'number'    => $number !== '' ? $number : (string) ($row['varsymbol'] ?? ''),
-            'kind'      => (string) ($row['document_kind'] ?? 'invoice'),
+            'total'         => round((float) $row['total_with_vat'], 2),
+            'remaining'     => round((float) $row['remaining'], 2),
+            'settled'       => round((float) $row['settled'], 2),
+            'status'        => (string) $row['status'],
+            'currency'      => (string) ($row['currency'] ?? 'CZK'),
+            'exchange_rate' => $row['exchange_rate'] !== null ? (float) $row['exchange_rate'] : null,
+            'number'        => $number !== '' ? $number : (string) ($row['varsymbol'] ?? ''),
+            'kind'          => (string) ($row['document_kind'] ?? 'invoice'),
         ];
+    }
+
+    /**
+     * Kurz, kterým je přijatá faktura předepsaná na saldokontě — z cizoměnové stopy
+     * zaúčtovaného předpisu, s fallbackem na kurz dokladu. Zrcadlí
+     * `BankPostingService::predpisFxRate()`: závazek se musí odúčtovat týmž kurzem, jakým
+     * vznikl, jinak na 321 zůstane kurzový drobek.
+     */
+    public function purchasePredpisRate(int $supplierId, int $docId): ?float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT l.fx_rate
+               FROM journal_entries e
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+              WHERE e.supplier_id = ? AND e.source_type = 'purchase_invoice' AND e.source_id = ?
+                AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+                AND l.currency_code IS NOT NULL AND l.fx_rate > 0
+              ORDER BY e.id DESC, l.line_no, l.id
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $docId]);
+        $rate = $stmt->fetchColumn();
+        if ($rate !== false && (float) $rate > 0) {
+            return (float) $rate;
+        }
+        $doc = $this->db->pdo()->prepare('SELECT exchange_rate FROM purchase_invoices WHERE id = ? AND supplier_id = ?');
+        $doc->execute([$docId, $supplierId]);
+        $fallback = $doc->fetchColumn();
+        return $fallback !== false && (float) $fallback > 0 ? (float) $fallback : null;
+    }
+
+    /** Měna přijaté faktury (kód), nebo null, když doklad neexistuje. */
+    public function purchaseCurrency(int $supplierId, int $docId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT c.code FROM purchase_invoices p JOIN currencies c ON c.id = p.currency_id
+              WHERE p.id = ? AND p.supplier_id = ?'
+        );
+        $stmt->execute([$docId, $supplierId]);
+        $code = $stmt->fetchColumn();
+        return $code === false ? null : strtoupper((string) $code);
     }
 }

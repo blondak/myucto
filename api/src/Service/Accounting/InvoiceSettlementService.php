@@ -139,7 +139,7 @@ final class InvoiceSettlementService
             // Daňová evidence (§6) nemá posting engine — vyrovnání dokladu ale platí i tam.
             $entryId = null;
             if ($this->supplierAccountingMode($supplierId) !== 'tax_evidence') {
-                $lines = $this->buildLines($docType, $accountCode, $doc['counter_account'], $amount);
+                $lines = $this->buildLines($docType, $accountCode, $doc['counter_account'], $amount, $doc['fx'] ?? null);
                 $entryId = $this->posting->postDocument($supplierId, 'settlement', $settlementId, $lines, [
                     'entry_date'  => $settledOn,
                     'document_no' => $doc['number'],
@@ -158,9 +158,11 @@ final class InvoiceSettlementService
                     'created_by' => $userId,
                 ]);
                 $paymentId = (int) $res['payment_id'];
-            } elseif ($doc['settles_fully'] ?? true) {
+            } elseif (($doc['settles_fully'] ?? true) && ($doc['status'] ?? '') !== 'paid') {
                 // Částečný zápočet doklad NEUZAVÍRÁ — zůstává 'received'/'booked' a dál
                 // se nabízí k úhradě (příkaz, další zápočet) už jen svým zbytkem.
+                // Vyrovnání zbytku na dokladu, který už 'paid' je, stav ani datum úhrady
+                // nepřepisuje: dorovnává jen saldokonto.
                 $this->purchaseInvoices->setStatus($docId, 'paid', $supplierId, $settledOn);
             }
 
@@ -326,7 +328,10 @@ final class InvoiceSettlementService
         try {
             $docType = (string) $row['doc_type'];
             $counter = $this->documentAccount($supplierId, $docType, (int) $row['doc_id']);
-            $lines = $this->buildLines($docType, (string) $row['account_code'], $counter, (float) $row['amount']);
+            $fx = $docType === 'purchase_invoice'
+                ? $this->purchaseFx($supplierId, (int) $row['doc_id'], (string) ($this->repo->purchaseCurrency($supplierId, (int) $row['doc_id']) ?? 'CZK'))
+                : null;
+            $lines = $this->buildLines($docType, (string) $row['account_code'], $counter, (float) $row['amount'], $fx);
             $entryId = $this->posting->postDocument($supplierId, 'settlement', (int) $row['id'], $lines, [
                 'entry_date'  => (string) $row['settled_on'],
                 'document_no' => (string) ($row['doc_no'] ?? ''),
@@ -427,18 +432,25 @@ final class InvoiceSettlementService
         if ($pf === null) {
             throw new SettlementException('doc_not_found', 'Přijatá faktura nenalezena.', 404);
         }
-        if (!in_array($pf['status'], ['received', 'booked'], true)) {
+        // Zbytek k úhradě zamčený `FOR UPDATE` (viz lockPurchase) — dvě souběžné žádosti
+        // o zápočet téhož dokladu se serializují a druhá vidí zbytek už snížený první.
+        $remaining = round((float) $pf['remaining'], 2);
+        // Uhrazený doklad s NEDOPLATKEM: platba odešla, ale nižší než zbývalo, a doklad byl
+        // přesto označen jako uhrazený (dřív to ruční párování dělalo potichu). Na 321 visí
+        // rozdíl, který jinak nejde zavřít — proto ho sem pouštíme, ale jen když nějaká
+        // úhrada opravdu existuje. Doklad „uhrazený" ručně bez evidované úhrady sem nepatří:
+        // jeho zbytek je celá faktura a vyrovnat ji zápočtem by byla jiná operace.
+        $paidWithShortfall = $pf['status'] === 'paid'
+            && self::cents((float) $pf['settled']) > 0
+            && self::cents($remaining) > self::TOLERANCE_CENTS;
+        if (!in_array($pf['status'], ['received', 'booked'], true) && !$paidWithShortfall) {
             throw new SettlementException(
                 'doc_not_payable',
                 'Zápočet lze provést jen u přijaté faktury ve stavu Přijatá nebo Zaúčtovaná.',
             );
         }
-        if ($pf['currency'] !== 'CZK') {
-            throw new SettlementException('foreign_currency', 'Zápočet je zatím podporovaný jen u dokladů v CZK.');
-        }
-        // Zbytek k úhradě zamčený `FOR UPDATE` (viz lockPurchase) — dvě souběžné žádosti
-        // o zápočet téhož dokladu se serializují a druhá vidí zbytek už snížený první.
-        $remaining = round((float) $pf['remaining'], 2);
+        $currency = strtoupper((string) $pf['currency']);
+        $fx = $this->purchaseFx($supplierId, $docId, $currency);
         if (self::cents($remaining) <= 0) {
             // Doklad může být ve stavu Přijatá/Zaúčtovaná (třeba po odznačení úhrady)
             // a přesto celý pokrytý — typicky zápočtem, kterému chybí účetní zápis.
@@ -454,7 +466,7 @@ final class InvoiceSettlementService
         if (self::cents($amount) > self::cents($remaining) + self::TOLERANCE_CENTS) {
             throw new SettlementException(
                 'amount_over_remaining',
-                sprintf('Částka zápočtu (%.2f Kč) převyšuje zbytek k úhradě (%.2f Kč).', $amount, $remaining),
+                sprintf('Částka zápočtu (%.2f %s) převyšuje zbytek k úhradě (%.2f %s).', $amount, $currency, $remaining, $currency),
             );
         }
         // Zálohová PF visí na poskytnutých zálohách (314), běžná na 321.
@@ -465,28 +477,64 @@ final class InvoiceSettlementService
             'number'          => $pf['number'],
             'doc_account'     => $counter,
             'counter_account' => $counter,
+            'status'          => $pf['status'],
+            'fx'              => $fx,
             // Vyrovnává zápočet doklad celý? Rozhoduje o překlopení na 'paid'.
             'settles_fully'   => self::cents($amount) >= self::cents($remaining) - self::TOLERANCE_CENTS,
         ];
     }
 
     /**
-     * @return list<array{account_code:string, side:string, amount:float}>
+     * Cizoměnová přijatá faktura: zápočet se eviduje v měně DOKLADU (tak ho sčítá
+     * {@see PurchaseSettledExpr} proti `amount_to_pay`), ale deník je v korunách. Závazek
+     * se proto odúčtuje KURZEM PŘEDPISU — týmž, jakým na 321 vznikl — jinak by na
+     * saldokontu zůstal kurzový drobek. Tak odúčtovává 321 i banka
+     * (`BankPostingService::buildOutgoingMatchedFx`). Korunový doklad → null.
+     *
+     * @return array{currency:string, rate:float}|null
      */
-    private function buildLines(string $docType, string $accountCode, string $counterAccount, float $amount): array
+    private function purchaseFx(int $supplierId, int $docId, string $currency): ?array
+    {
+        $currency = strtoupper($currency);
+        if ($currency === 'CZK') {
+            return null;
+        }
+        $rate = $this->repo->purchasePredpisRate($supplierId, $docId);
+        if ($rate === null || $rate <= 0) {
+            throw new SettlementException(
+                'missing_exchange_rate',
+                'Cizoměnová faktura nemá kurz, kterým by šel zápočet převést do korun.',
+            );
+        }
+        return ['currency' => $currency, 'rate' => $rate];
+    }
+
+    /**
+     * @param array{currency:string, rate:float}|null $fx cizoměnová přijatá faktura (viz {@see purchaseFx()})
+     * @return list<array<string,mixed>>
+     */
+    private function buildLines(string $docType, string $accountCode, string $counterAccount, float $amount, ?array $fx = null): array
     {
         $amount = round($amount, 2);
-        return $docType === 'invoice'
+        if ($docType === 'invoice') {
             // Pohledávka se uzavírá: <zvolený účet> MD / 311 (resp. 324) D.
-            ? [
+            return [
                 ['account_code' => $accountCode,    'side' => 'debit',  'amount' => $amount],
                 ['account_code' => $counterAccount, 'side' => 'credit', 'amount' => $amount],
-            ]
-            // Závazek se uzavírá: 321 (resp. 314) MD / <zvolený účet> D.
-            : [
-                ['account_code' => $counterAccount, 'side' => 'debit',  'amount' => $amount],
-                ['account_code' => $accountCode,    'side' => 'credit', 'amount' => $amount],
             ];
+        }
+        // Závazek se uzavírá: 321 (resp. 314) MD / <zvolený účet> D.
+        $czk = $fx === null ? $amount : round($amount * $fx['rate'], 2);
+        $payable = ['account_code' => $counterAccount, 'side' => 'debit', 'amount' => $czk];
+        if ($fx !== null) {
+            $payable['currency_code'] = $fx['currency'];
+            $payable['fx_rate'] = $fx['rate'];
+            $payable['amount_foreign'] = $amount;
+        }
+        return [
+            $payable,
+            ['account_code' => $accountCode, 'side' => 'credit', 'amount' => $czk],
+        ];
     }
 
     private function ruleAccount(int $supplierId, string $ruleKey, string $side, string $fallback): string

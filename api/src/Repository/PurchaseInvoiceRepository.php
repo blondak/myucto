@@ -879,8 +879,16 @@ final class PurchaseInvoiceRepository
             // podle bankovního párování k asOf) > tolerance.
             $where[] = "NOT (pi.status = 'paid' AND pi.paid_at IS NOT NULL AND DATE(pi.paid_at) <= ?)";
             $params[] = $asOf;
-            $where[] = "(pi.amount_to_pay - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm"
+            // Částka párování převedená do měny dokladu — týž převod jako saldo
+            // (PurchaseSettledExpr::bankAmountSql, dřív KNOWN GAP H3). Nedoplatek na dokladu
+            // ve stavu `paid` tenhle filtr nehledá: je to seznam podle stavu k datu, zbytek
+            // takového dokladu ukazuje sloupec „Zbývá uhradit" a saldokonto.
+            $where[] = "(pi.amount_to_pay - COALESCE((SELECT SUM("
+                . \MyInvoice\Support\Sql\PurchaseSettledExpr::bankAmountSql('pm', 'bt', 'ubs', 'pi', 'udc')
+                . ") FROM payment_matches pm"
                 . " JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id"
+                . " JOIN bank_statements ubs ON ubs.id = bt.statement_id"
+                . " JOIN currencies udc ON udc.id = pi.currency_id"
                 . " WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id"
                 . " AND bt.posted_at <= ?), 0)) > 0.005";
             $params[] = $asOf;
