@@ -28760,6 +28760,19 @@ components:
           description: "Volitelné rozdělení rekapitulace DPH na odpočtové a účetní režimy; prázdné pole zachovává hlavičkové nastavení."
           items: { $ref: '#/components/schemas/PurchaseVatAllocation' }
         extraction_warning: { type: [string, "null"], description: "Varování z AI/automatické extrakce dokladu (rozdíl součtů apod.)" }
+        extraction_review:
+          type: [object, "null"]
+          description: "Strukturované podklady ke kontrole AI extrakce (migrace 1893); maže se spolu s extraction_warning."
+          properties:
+            expense_kinds:
+              type: array
+              items:
+                type: object
+                properties:
+                  order_index: { type: integer, description: "Pořadí řádku dokladu, ke kterému návrh patří" }
+                  kind: { type: string, enum: [service, material, small_asset, small_intangible, fixed_asset] }
+                  confidence: { type: number }
+                  reason: { type: string }
         idoklad_id: { type: [integer, "null"], description: "ID v iDoklad (jen u importovaných)" }
         fakturoid_id: { type: [integer, "null"], description: "ID ve Fakturoid (jen u importovaných)" }
         created_by: { type: integer }

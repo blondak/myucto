@@ -1117,6 +1117,9 @@ final class AiPdfExtractor
         if ($expenseKindWarning !== null) {
             try {
                 $this->repo->appendExtractionWarning($id, $supplierId, $expenseKindWarning);
+                $this->repo->setExtractionReview($id, $supplierId, [
+                    'expense_kinds' => AiExpenseKindProposal::reviewPayload($kindProposals),
+                ]);
             } catch (\Throwable) {
                 // Varování je „nice to have" — faktura už je vytvořená správně.
             }

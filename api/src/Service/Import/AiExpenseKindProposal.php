@@ -184,6 +184,27 @@ final class AiExpenseKindProposal
             . 'potvrďte nebo opravte v editoru u každé položky:' . "\n" . implode("\n", $lines);
     }
 
+    /**
+     * Totéž co {@see warningText()}, ale strojově — pro kontrolní okno po importu, které
+     * řádek s návrhem zvýrazní a návrh nabídne k převzetí (`purchase_invoices.extraction_review`).
+     *
+     * @param array<int,ExpenseKindSuggestion> $proposals klíč = order_index řádku
+     * @return list<array{order_index:int, kind:string, confidence:float, reason:string}>
+     */
+    public static function reviewPayload(array $proposals): array
+    {
+        $out = [];
+        foreach ($proposals as $index => $p) {
+            $out[] = [
+                'order_index' => (int) $index,
+                'kind'        => $p->kind->value,
+                'confidence'  => round($p->confidence, 2),
+                'reason'      => $p->reason,
+            ];
+        }
+        return $out;
+    }
+
     private static function kindLabel(ExpenseKind $kind): string
     {
         return match ($kind) {

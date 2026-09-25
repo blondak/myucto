@@ -215,6 +215,7 @@ use MyInvoice\Action\PurchaseInvoice\BankPaymentOrderSubmissionAction;
 use MyInvoice\Action\PurchaseInvoice\ListPurchaseInvoicesAction;
 use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceImportBatchesAction;
 use MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceDocumentKindAction;
+use MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceExpenseKindsAction;
 use MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceProjectAction;
 use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceActivityAction;
 use MyInvoice\Action\PurchaseInvoice\ScanInboxAction;
@@ -717,6 +718,7 @@ final class Routes
         // Zakázka (issue #29) — smí i u zaúčtovaného dokladu, je to analytická dimenze.
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/project',         SetPurchaseInvoiceProjectAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/dismiss-extraction-warning', DismissExtractionWarningAction::class);
+        $app->put    ('/api/purchase-invoices/{id:[0-9]+}/expense-kinds',   SetPurchaseInvoiceExpenseKindsAction::class);
         // Kontrola dokladu proti vytěžení přílohy (odznak v detailu) a potvrzení „v pořádku"
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/attachment-check',             [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'showPurchaseInvoice']);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/attachment-check/acknowledge', [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'acknowledgePurchaseInvoice']);

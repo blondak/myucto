@@ -2978,9 +2978,30 @@ final class PurchaseInvoiceRepository
      */
     public function setExtractionWarning(int $id, int $supplierId, ?string $warning): void
     {
+        // Vyčištění hlášení (Beru na vědomí / kontrola dokončena) maže i strukturované
+        // podklady ke kontrole — bez hlášení už není co kontrolovat.
         $this->db->pdo()->prepare(
-            'UPDATE purchase_invoices SET extraction_warning = ? WHERE id = ? AND supplier_id = ?'
-        )->execute([$warning, $id, $supplierId]);
+            $warning === null
+                ? 'UPDATE purchase_invoices SET extraction_warning = NULL, extraction_review = NULL WHERE id = ? AND supplier_id = ?'
+                : 'UPDATE purchase_invoices SET extraction_warning = ? WHERE id = ? AND supplier_id = ?'
+        )->execute($warning === null ? [$id, $supplierId] : [$warning, $id, $supplierId]);
+    }
+
+    /**
+     * Strukturované podklady ke kontrole AI extrakce (migrace 1893), např. návrhy
+     * druhu nákladu po řádcích. Null podklady smaže.
+     *
+     * @param array<string,mixed>|null $review
+     */
+    public function setExtractionReview(int $id, int $supplierId, ?array $review): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE purchase_invoices SET extraction_review = ? WHERE id = ? AND supplier_id = ?'
+        )->execute([
+            $review === null ? null : json_encode($review, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+            $id,
+            $supplierId,
+        ]);
     }
 
     /**
@@ -3375,6 +3396,11 @@ final class PurchaseInvoiceRepository
             $raw = $row['vat_overrides'];
             $decoded = (is_string($raw) && $raw !== '') ? json_decode($raw, true) : null;
             $row['vat_overrides'] = (is_array($decoded) && $decoded !== []) ? $decoded : null;
+        }
+        if (array_key_exists('extraction_review', $row)) {
+            $raw = $row['extraction_review'];
+            $decoded = (is_string($raw) && $raw !== '') ? json_decode($raw, true) : null;
+            $row['extraction_review'] = is_array($decoded) ? $decoded : null;
         }
         return $row;
     }

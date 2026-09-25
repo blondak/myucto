@@ -876,7 +876,8 @@
         "1889_other_item_payment_ownership.sql",
         "1890_other_item_allocation_reversal.sql",
         "1891_other_item_posting_lines.sql",
-        "1892_payroll_takeover_source_jmhz.sql"
+        "1892_payroll_takeover_source_jmhz.sql",
+        "1893_purchase_invoice_extraction_review.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -16902,6 +16903,7 @@
                 "exchange_rate_source": "enum('cnb','manual','idoklad','fakturoid','fixed','import','user') NOT NULL DEFAULT 'manual'",
                 "expense_category_id": "int(10) unsigned NULL DEFAULT NULL",
                 "external_barcode": "varchar(64) NULL DEFAULT NULL",
+                "extraction_review": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
                 "extraction_warning": "text NULL DEFAULT NULL",
                 "fakturoid_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
@@ -17010,6 +17012,7 @@
             },
             "checks": {
                 "chk_pi_card_last4": "`card_last4` is null or `card_last4` regexp '^[0-9]{4}$'",
+                "extraction_review": "json_valid(`extraction_review`)",
                 "own_snapshot": "json_valid(`own_snapshot`)",
                 "vat_overrides": "json_valid(`vat_overrides`)",
                 "vendor_snapshot": "json_valid(`vendor_snapshot`)"

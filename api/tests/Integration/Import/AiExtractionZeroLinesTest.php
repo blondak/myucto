@@ -38,6 +38,31 @@ final class AiExtractionZeroLinesTest extends StockTestCase
         self::assertStringNotContainsString('reserved logs', $warning);
     }
 
+    /** Kontrolní okno zvýrazní přesně ty řádky, které jmenuje hlášení. */
+    public function testExpenseKindProposalsAreStoredForReview(): void
+    {
+        $id = $this->createDraft([
+            ['description' => 'Konzultace k projektu', 'quantity' => 1, 'unit_price_without_vat' => 1000, 'vat_rate' => 21,
+             'expense_kind' => 'service', 'expense_kind_confidence' => 0.9, 'expense_kind_reasoning' => 'Služba podle dokladu'],
+            ['description' => 'Zero line', 'quantity' => 1, 'unit_price_without_vat' => 0, 'vat_rate' => 21],
+            ['description' => 'Kancelářská židle', 'quantity' => 1, 'unit_price_without_vat' => 3000, 'vat_rate' => 21,
+             'expense_kind' => 'small_asset', 'expense_kind_confidence' => 0.9, 'expense_kind_reasoning' => 'Vybavení kanceláře'],
+        ], 4000.0);
+
+        $row = $this->db->pdo()->query('SELECT extraction_warning, extraction_review FROM purchase_invoices WHERE id = ' . $id)
+            ->fetch(\PDO::FETCH_ASSOC);
+        $review = json_decode((string) $row['extraction_review'], true);
+        self::assertIsArray($review, 'Návrhy druhu nákladu se musí uložit strukturovaně.');
+
+        preg_match_all('/řádek (\d+)/u', (string) $row['extraction_warning'], $m);
+        $fromWarning = array_map(static fn (string $n): int => (int) $n - 1, $m[1]);
+        self::assertNotSame([], $fromWarning);
+        self::assertSame($fromWarning, array_column($review['expense_kinds'], 'order_index'));
+        foreach ($review['expense_kinds'] as $p) {
+            self::assertContains($p['kind'], ['service', 'material', 'small_asset', 'small_intangible', 'fixed_asset']);
+        }
+    }
+
     public function testDocumentWithOnlyZeroLinesKeepsThem(): void
     {
         $id = $this->createDraft([
