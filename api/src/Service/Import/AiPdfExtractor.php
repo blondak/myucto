@@ -571,9 +571,15 @@ final class AiPdfExtractor
         $kindProposals = [];
 
         $items = [];
-        // array_values: validace zaručuje jen `is_array`, ne souvislé klíče. Bez přeindexování
-        // by se u řídkého pole rozešel $idx (→ order_index, $kindProposals) s pozicí v $items.
-        foreach (array_values($data['items']) as $idx => $line) {
+        // Nulové řádky (předplatné rozepsané na „50 GB reserved … $0.00") do dokladu
+        // nepatří — nemají vliv na základ ani DPH, jen zahlcují hlášení o druhu nákladu.
+        // Doklad, který má nulové úplně všechny řádky, necháme beze změny.
+        $lines = array_values($data['items']);
+        $dropZeroLines = array_filter($lines, static fn ($l): bool => !self::isZeroAmountLine($l)) !== [];
+        // $idx je pozice v $items (→ order_index, $kindProposals), ne v AI poli — po
+        // vyřazení nulových řádků se jinak rozejdou.
+        foreach ($lines as $line) {
+            $idx = count($items);
             $rate = (float) ($line['vat_rate'] ?? 0);
             $qtyAi = (float) ($line['quantity'] ?? 0);
             $priceAi = (float) ($line['unit_price_without_vat'] ?? 0);
@@ -598,6 +604,9 @@ final class AiPdfExtractor
                 // Běžná faktura: trust AI sign (slevy mají záporné quantity nebo price).
                 $qty = $qtyAi;
                 $price = $priceAi;
+            }
+            if ($dropZeroLines && round($qty * $price, 2) === 0.0) {
+                continue;
             }
             // Deterministická vrstva má PŘEDNOST, AI je až fallback — rozhoduje o tom
             // AiExpenseKindProposal::resolve(), ať je vrstvení na jednom místě (§DM).
@@ -1448,6 +1457,19 @@ final class AiPdfExtractor
             return [1.0, $lineTotal];
         }
         return [$qty, $unitPrice];
+    }
+
+    /** Řádek AI extrakce s nulovou částkou (qty × cena i případná řádková částka). */
+    public static function isZeroAmountLine(mixed $line): bool
+    {
+        if (!is_array($line)) {
+            return true;
+        }
+        $lineTotal = $line['line_total_without_vat'] ?? null;
+        if (is_numeric($lineTotal) && round((float) $lineTotal, 2) !== 0.0) {
+            return false;
+        }
+        return round((float) ($line['quantity'] ?? 0) * (float) ($line['unit_price_without_vat'] ?? 0), 2) === 0.0;
     }
 
     /**

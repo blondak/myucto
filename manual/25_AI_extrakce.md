@@ -88,6 +88,11 @@ Koncept nese **varování**, že položky nebyly vytěženy — pokud potřebuje
 rozepsaný, doplň řádky ručně. Doklady, které jednotkové ceny uvádějí, se
 extrahují **beze změny** i nadále včetně rozpadu na položky.
 
+**Nulové řádky** se do dokladu nepřebírají. Typicky předplatné, které rozepisuje
+kvóty zahrnuté v ceně („50 GB reserved logs — 0,00"), nemění základ ani DPH.
+Slevy se zápornou částkou zůstávají. Pokud má doklad nulové všechny řádky,
+převezmou se všechny.
+
 ### 25.1.8 Kontrola dat a identifikátorů při extrakci
 
 - **Datum objednávky není datum vystavení.** Extraktor přijme jako datum
