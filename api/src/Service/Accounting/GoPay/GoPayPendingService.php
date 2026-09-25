@@ -273,8 +273,9 @@ final class GoPayPendingService
 
     /**
      * Před smazáním úhrady faktury: čekající pohyb i jeho zápis zmizí s ní (za
-     * stejných podmínek jako mazání vyúčtování). Pohyb už převzatý vyúčtováním
-     * smazat nejde, GoPay platbu potvrdil, oprava patří do vyúčtování.
+     * stejných podmínek jako mazání vyúčtování). Úhradu, kterou už potvrdilo
+     * vyúčtování, smazat nejde, ať pohyb vznikl převzetím čekajícího pohybu, nebo
+     * přímo z vyúčtování: jeho zápis 221/311 by zůstal bez úhrady.
      */
     public function releaseForPayment(int $paymentId): void
     {
@@ -283,7 +284,7 @@ final class GoPayPendingService
             'SELECT gm.id,gm.supplier_id,gm.clearing_id,gc.clearing_id provider_clearing_id
                FROM gopay_movements gm
           LEFT JOIN gopay_clearings gc ON gc.id=gm.clearing_id AND gc.supplier_id=gm.supplier_id
-              WHERE gm.invoice_payment_id=? AND gm.origin="payment"
+              WHERE gm.invoice_payment_id=? AND gm.movement_type="credit"
               ORDER BY gm.id FOR UPDATE'
         );
         $stmt->execute([$paymentId]);
@@ -329,7 +330,8 @@ final class GoPayPendingService
                FROM invoice_payments ip
                JOIN supplier s ON s.id=ip.supplier_id AND s.accounting_mode="double_entry"
                JOIN gopay_settings gs ON gs.supplier_id=ip.supplier_id AND gs.currency=ip.currency
-              WHERE ip.supplier_id=? AND ip.bank_reference LIKE "GOPAY:%"
+              WHERE ip.supplier_id=? AND ip.bank_reference LIKE BINARY "GOPAY:%"
+                AND CHAR_LENGTH(TRIM(SUBSTRING(ip.bank_reference,7))) BETWEEN 1 AND 40
                 AND NOT EXISTS(SELECT 1 FROM gopay_movements gm
                                 WHERE gm.supplier_id=ip.supplier_id AND gm.movement_type="credit"
                                   AND (gm.invoice_payment_id=ip.id

@@ -217,6 +217,32 @@ final class GoPayPendingPaymentTest extends TestCase
         self::assertSame(1000.0, $this->receivableInLedger($invoiceId, self::YEAR . '-01-31'));
     }
 
+    public function testPaymentPostedDirectlyFromClearingCannotBeDeleted(): void
+    {
+        $this->configureAccounts();
+        [$invoiceId, $creditNoteId] = $this->documents();
+        $this->postDocuments($invoiceId, $creditNoteId);
+        $this->db->pdo()->prepare(
+            'INSERT INTO invoice_payments (supplier_id,invoice_id,paid_on,amount,currency,bank_reference,source,created_by)
+             VALUES (?,?,?,1000,"CZK",?,"mark_paid",?)'
+        )->execute([$this->supplierId, $invoiceId, self::YEAR . '-01-15', 'GOPAY:' . self::SESSION, $this->userId]);
+        $paymentId = (int) $this->db->pdo()->lastInsertId();
+        $this->bankPayout();
+        $this->service->import($this->supplierId, $this->userId, 'synthetic-pending.xml', $this->xml());
+        $movement = $this->pendingMovement($invoiceId);
+        self::assertSame('clearing', $movement['origin']);
+        self::assertSame($paymentId, (int) $movement['invoice_payment_id']);
+
+        try {
+            $this->payments->deletePayment($paymentId);
+            self::fail('Úhradu zaúčtovanou z vyúčtování nejde smazat.');
+        } catch (GoPayException $e) {
+            self::assertSame('payment_in_clearing', $e->errorCode);
+        }
+        self::assertNotNull($this->payments->findPayment($paymentId));
+        self::assertSame(0.0, $this->receivableInLedger($invoiceId, self::YEAR . '-01-31'));
+    }
+
     public function testBackfillPostsLegacyPaymentsOnceAndIsIdempotent(): void
     {
         $this->configureAccounts();
