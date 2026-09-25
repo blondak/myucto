@@ -991,7 +991,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       <!-- Desktop: tabulka. Na mobilu se jedenáct sloupců deníku nedá zúžit ani
            vodorovným posunem — rozbalený detail se schová do buňky široké jako
            obrazovka a čte se přes scrollbar. Proto stack karet. -->
-      <div class="hidden md:block overflow-auto scrollbar-slim max-h-[calc(100vh-20rem)]" @scroll.passive="onListScroll">
+      <div class="hidden md:block overflow-auto scrollbar-slim max-h-[calc(100vh-18.25rem)]" @scroll.passive="onListScroll">
         <table class="w-full text-sm singleline-list-table" :class="[tbl.densityClass.value, wrapColumns ? 'multirow-table' : '']">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide sticky top-0 z-20 shadow-sm">
             <tr>
