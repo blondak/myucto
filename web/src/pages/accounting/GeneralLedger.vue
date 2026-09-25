@@ -795,6 +795,9 @@ onMounted(async () => {
                                           class="font-mono text-xs text-primary-600 hover:text-primary-700 hover:underline">
                                           {{ it.document_no || t('accounting.account_statement.journal_link', { id: it.entry_id }) }}
                                         </RouterLink>
+                                        <div v-if="it.source_bank_ref && it.source_bank_ref !== it.document_no"
+                                             class="font-mono text-[10px] text-neutral-400 whitespace-nowrap"
+                                             :title="t('accounting.journal.bank_ref_hint', { ref: it.source_bank_ref })">{{ it.source_bank_ref }}</div>
                                       </td>
                                       <td class="px-2 py-1 font-mono text-xs text-neutral-500">{{ it.account_code }}</td>
                                       <td class="px-2 py-1">{{ it.description || '—' }}</td>

@@ -242,8 +242,8 @@ export const bankPostingApi = {
   // Vlastní bankovní účty firmy — metadata pro kontaci (druh, label, analytika 221.xxx).
   listAccounts: () =>
     api.get<{ accounts: SupplierBankAccount[] }>('/accounting/bank-accounts').then(r => r.data.accounts),
-  updateAccount: (id: number, patch: Partial<Pick<SupplierBankAccount, 'kind' | 'label' | 'analytic_suffix' | 'is_active'>>) =>
-    api.patch<SupplierBankAccount>(`/accounting/bank-accounts/${id}`, patch).then(r => r.data),
+  updateAccount: (id: number, patch: Partial<Pick<SupplierBankAccount, 'kind' | 'label' | 'analytic_suffix' | 'document_series' | 'is_active'>>) =>
+    api.patch<SupplierBankAccount & { renumbered_entries?: number }>(`/accounting/bank-accounts/${id}`, patch).then(r => r.data),
 }
 
 // ── Vlastní bankovní účty (kontace 221.xxx) ─────────────────────────────────
@@ -259,6 +259,8 @@ export interface SupplierBankAccount {
   currency: string | null
   kind: BankAccountKind
   analytic_suffix: string | null
+  /** Dokladová řada bankovních zápisů účtu; číslo dokladu v deníku je řada-MM (BCR-08). */
+  document_series: string | null
   is_active: boolean | number
   source: string | null
   currency_id: number | null

@@ -1019,7 +1019,12 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                   <span class="inline-block transition-transform" :class="{ 'rotate-90': isExpanded(e.id) }">▸</span>
                 </td>
                 <td v-if="tbl.isVisible('date')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(e.entry_date) }}</td>
-                <td v-if="tbl.isVisible('document_no')" class="px-3 py-2 font-mono text-xs">{{ e.document_no || '—' }}</td>
+                <td v-if="tbl.isVisible('document_no')" class="px-3 py-2 font-mono text-xs">
+                  {{ e.document_no || '—' }}
+                  <div v-if="e.source_bank_ref && e.source_bank_ref !== e.document_no"
+                       class="text-[10px] text-neutral-400 whitespace-nowrap"
+                       :title="t('accounting.journal.bank_ref_hint', { ref: e.source_bank_ref })">{{ e.source_bank_ref }}</div>
+                </td>
                 <td v-if="tbl.isVisible('document_date')" class="px-3 py-2 whitespace-nowrap">{{ e.document_date ? formatDate(e.document_date) : '—' }}</td>
                 <td v-if="tbl.isVisible('description')" class="px-3 py-2" :title="e.description || undefined">
                   {{ e.description || '—' }}
@@ -1120,6 +1125,9 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                 <span class="text-neutral-400 shrink-0 inline-block transition-transform"
                   :class="{ 'rotate-90': isExpanded(e.id) }">▸</span>
                 <span class="font-mono text-xs text-neutral-600">{{ e.document_no || '—' }}</span>
+                <span v-if="e.source_bank_ref && e.source_bank_ref !== e.document_no"
+                      class="font-mono text-[10px] text-neutral-400 truncate"
+                      :title="t('accounting.journal.bank_ref_hint', { ref: e.source_bank_ref })">{{ e.source_bank_ref }}</span>
               </span>
               <span class="font-mono text-sm font-semibold whitespace-nowrap">
                 {{ formatMoney(e.amount ?? 0) }}

@@ -12821,6 +12821,7 @@
       "filter_period": "Období",
       "filter_document_no": "Číslo dokladu",
       "filter_document_no_placeholder": "Hledat číslo…",
+      "bank_ref_hint": "ID pohybu v bance: {ref}",
       "filter_date_from": "Datum od",
       "filter_date_to": "Datum do",
       "filter_source": "Zdroj",
@@ -18528,6 +18529,10 @@
       "suffix_taken": "Analytiku {suffix} už používá účet {account}.",
       "saved": "Bankovní účty byly uloženy.",
       "unsaved": "Neuložené změny: {count} účtů",
+      "series_explainer": "Dokladová řada čísluje bankovní zápisy v deníku: číslo dokladu je řada a měsíc výpisu (např. BCR-08 pro srpnový výpis). Číslo nezávisí na tom, jestli pohyb přišel z denního výpisu, měsíčního výpisu nebo po novém načtení. Po změně řady se přečíslují zápisy v otevřených obdobích, uzavřená období zůstávají beze změny.",
+      "series_invalid": "Dokladová řada u účtu {account} smí obsahovat jen písmena A–Z a číslice, nejvýše 10 znaků.",
+      "series_taken": "Dokladovou řadu {series} už používá účet {account}.",
+      "series_renumbered": "Přečíslováno bankovních zápisů v deníku: {count}.",
       "kinds": {
         "current": "Běžný účet",
         "savings": "Spořicí účet",
@@ -18541,6 +18546,7 @@
         "label": "Název",
         "kind": "Druh",
         "analytic": "Analytika",
+        "series": "Dokladová řada",
         "active": "Aktivní"
       }
     },

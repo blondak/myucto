@@ -74,6 +74,7 @@ V tabulce u každého účtu nastavíš:
 | Název | Vlastní pojmenování účtu (použije se i jako název analytiky v rozvrhu) |
 | Druh | Běžný účet / spořicí účet / termínovaný vklad |
 | Analytika | Číslo za tečkou — vedle se hned ukáže výsledný účet (např. `221.200`) |
+| Dokladová řada | Řada, pod kterou se bankovní zápisy účtu číslují v deníku (např. `BCR`) |
 | Aktivní | Neaktivní účet se do kontací nenabízí, ale své číslo si drží |
 
 Číslo můžeš **přepsat** — typicky když už některý účet v rozvrhu vedeš pod
@@ -89,6 +90,41 @@ nikdy nepřidělí, aby nový účet nezdědil cizí zůstatek.
 > doklad (`221.xxx` / 221) v **otevřeném** období; do uzavřených a schválených let se
 > nezasahuje a rozvahový řádek „Peněžní prostředky na účtech" se rozpadem uvnitř
 > 221 stejně nemění.
+
+#### Dokladová řada bankovních zápisů
+
+Bankovní zápis má v deníku, hlavní knize i opisu účtu jako **číslo dokladu**
+dokladovou řadu účtu a pořadové číslo měsíčního výpisu: `BCR-08` je srpnový
+výpis účtu s řadou BCR. Za rok má každý účet dvanáct čísel, rok určuje účetní
+období. Číslo se odvozuje z měsíce data zaúčtování pohybu, nikoli z konkrétního
+výpisu, takže je stejné, ať pohyb přišel z denního načtení přes přímé napojení,
+z měsíčního výpisu, nebo po smazání a novém načtení výpisu. Storno nese číslo
+stornovaného zápisu s předponou `STORNO`.
+
+Výchozí řadu dostane každý účet automaticky podle druhu a měny:
+
+| Účet | Řada |
+|---|---|
+| Běžný účet v Kč | `BCR` |
+| Běžný účet v cizí měně | `BC` + první písmeno měny (EUR → `BCE`) |
+| Spořicí účet | `BCS` |
+| Termínovaný vklad | `BCT` |
+| Kreditní karta | `BCK` |
+
+Má-li firma víc účtů se stejnou výchozí řadou, další dostanou pořadové číslo
+(`BCR2`, `BCR3` …). Řadu můžeš přepsat na libovolnou kombinaci písmen A–Z
+a číslic (nejvýše 10 znaků), jedna řada patří vždy jen jednomu účtu.
+
+Po uložení nové řady se **přečíslují bankovní zápisy účtu v otevřených
+obdobích** a aplikace ukáže jejich počet. Uzavřená a schválená období si
+ponechají čísla, se kterými byla uzavřena. Původní identifikátor pohybu
+z banky se neztrácí: deník ho ukazuje drobně pod číslem dokladu a pole
+**Číslo dokladu** i fulltext podle něj dál vyhledávají.
+
+Stejné přečíslování jde spustit i z příkazové řádky, například po převzetí
+dat: `php api/bin/bank-document-series-backfill.php` vypíše, co by se změnilo,
+s `--apply` změny zapíše (volitelně `--supplier=<id>` a `--from-date=RRRR-MM-DD`).
+Po aktualizaci aplikace ho spouští automaticky i `php api/bin/migrate.php`.
 
 ### 30.1.3 Přímé napojení na banku
 

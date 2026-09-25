@@ -12821,6 +12821,7 @@
       "filter_period": "Period",
       "filter_document_no": "Document number",
       "filter_document_no_placeholder": "Search number…",
+      "bank_ref_hint": "Bank movement ID: {ref}",
       "filter_date_from": "Date from",
       "filter_date_to": "Date to",
       "filter_source": "Source",
@@ -18528,6 +18529,10 @@
       "suffix_taken": "Sub-account {suffix} is already used by {account}.",
       "saved": "Bank accounts saved.",
       "unsaved": "Unsaved changes: {count} accounts",
+      "series_explainer": "The document series numbers bank entries in the journal: the document number is the series plus the statement month (e.g. BCR-08 for the August statement). The number does not depend on whether the movement came from a daily statement, a monthly statement or a re-import. After changing the series, entries in open periods are renumbered; closed periods stay unchanged.",
+      "series_invalid": "The document series of account {account} may only contain letters A–Z and digits, at most 10 characters.",
+      "series_taken": "Document series {series} is already used by account {account}.",
+      "series_renumbered": "Bank journal entries renumbered: {count}.",
       "kinds": {
         "current": "Current account",
         "savings": "Savings account",
@@ -18541,6 +18546,7 @@
         "label": "Label",
         "kind": "Kind",
         "analytic": "Analytic code",
+        "series": "Document series",
         "active": "Active"
       }
     },
