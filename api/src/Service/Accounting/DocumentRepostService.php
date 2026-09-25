@@ -323,7 +323,12 @@ final class DocumentRepostService
                 ]);
             }
 
-            $postMeta = array_merge($meta, ['entry_date' => $targetDate]);
+            // Řádky z dialogu nenesou cizoměnovou stopu (321 v EUR apod.). Převezme se
+            // z opravovaného zápisu, ať je oprava přepisem nebo stornem a novým zápisem.
+            $postMeta = array_merge($meta, [
+                'entry_date'              => $targetDate,
+                'inherit_line_trace_from' => (int) $plan['entry_id'],
+            ]);
             if ($plan['reason_code'] === 'tax_neutral_rewrite') {
                 // PostingService podmínky ověří znovu sám, pod zámkem zápisu.
                 $postMeta['tax_neutral_rewrite'] = true;
