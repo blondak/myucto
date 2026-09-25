@@ -338,6 +338,14 @@ function runAutoBackfills(\PDO $db, string $binDir, Connection $connection): voi
             'count'   => static fn (): int => (new \MyInvoice\Service\Accounting\Bank\CardClearingConversion($connection))->pending(),
             'script'  => 'card-clearing-to-direct.php',
         ],
+        [
+            // Zápisy faktur z automatického zaúčtování a přeúčtování bez čísla dokladu
+            // (jen otevřená období), viz DocumentEntryNumberBackfill.
+            'name'    => 'document-entry-number',
+            'reason'  => 'zápisů faktur bez čísla dokladu',
+            'count'   => static fn (): int => (new \MyInvoice\Service\Accounting\DocumentEntryNumberBackfill($connection))->pending(),
+            'script'  => 'document-entry-number-backfill.php',
+        ],
     ];
 
     echo "\n=== Auto-backfill check ===\n";

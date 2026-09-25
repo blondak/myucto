@@ -338,6 +338,11 @@ final class PostingService
             $documentNo = $bankDocument
                 ? $this->bankDocumentNumber()->forTransaction($supplierId, $sourceId, $entryDate)
                 : ($meta['document_no'] ?? null);
+            // Zápis faktury nese číslo dokladu i tehdy, když ho volající nedodá (automatické
+            // zaúčtování po vystavení, přeúčtování zápisu bez čísla) — viz DocumentEntryNumber.
+            if (($documentNo === null || trim((string) $documentNo) === '') && $sourceId !== null) {
+                $documentNo = (new DocumentEntryNumber($this->db))->forDocument($supplierId, $sourceType, $sourceId);
+            }
             $header = [
                 'supplier_id'   => $supplierId,
                 'period_id'     => (int) $period['id'],
