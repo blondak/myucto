@@ -90,6 +90,35 @@ final class ClosingProjectionCalculatorTest extends TestCase
         self::assertSame(40000.0, $prov['amount']);
     }
 
+    /** Nezaúčtované odpisy: účetní snižují VH, daňové jdou dál do rozdílu odpisů (ř. 50/150). */
+    public function testPendingDepreciationReducesProjectedVhAndCarriesTaxPart(): void
+    {
+        $r = $this->calc->project(1000000.0, [
+            'depreciation' => ['pending_accounting' => 24000.0, 'pending_tax' => 13200.0],
+        ]);
+        self::assertTrue($r['is_projection']);
+        self::assertSame(976000.0, $r['vh_projected']);
+        self::assertSame(['accounting' => 24000.0, 'tax' => 13200.0], $r['depreciation']);
+        self::assertSame(['depreciation', -1, false], [$r['items'][0]['key'], $r['items'][0]['sign'], $r['items'][0]['optional']]);
+    }
+
+    /** Jen daňový odpis bez účetního (např. účetní už zaúčtovaný) je projekcí, i když VH nemění. */
+    public function testPendingTaxDepreciationAloneIsProjection(): void
+    {
+        $r = $this->calc->project(1000000.0, ['depreciation' => ['pending_accounting' => 0.0, 'pending_tax' => 5000.0]]);
+        self::assertTrue($r['is_projection']);
+        self::assertSame(1000000.0, $r['vh_projected']);
+        self::assertSame([], $r['items']);
+    }
+
+    /** Konečný stav zásob (způsob B) zvyšuje VH. */
+    public function testStockClosingRaisesProjectedVh(): void
+    {
+        $r = $this->calc->project(1000000.0, ['stock' => ['applicable' => true, 'posted' => false, 'total' => 35000.0]]);
+        self::assertSame(1035000.0, $r['vh_projected']);
+        self::assertSame(['stock_closing', 1, false], [$r['items'][0]['key'], $r['items'][0]['sign'], $r['items'][0]['optional']]);
+    }
+
     /** Prázdné zdroje → žádná projekce, vh_projected == vh_posted. */
     public function testEmptySourcesYieldNoProjection(): void
     {

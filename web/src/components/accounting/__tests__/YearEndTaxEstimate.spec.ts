@@ -29,6 +29,7 @@ function estimate(patch: Partial<Estimate> = {}): Estimate {
     closing_items: [
       { key: 'small_asset_accrual', label_key: 'taxReturn.proj_small_asset', amount: 20000, sign: 1, optional: false },
       { key: 'estimate', label_key: 'taxReturn.proj_estimate', amount: 11000, sign: -1, optional: true },
+      { key: 'depreciation', label_key: 'taxReturn.proj_depreciation', amount: 24000, sign: -1, optional: false },
     ],
     is_projection: true,
     vh_before_tax: 670000,
@@ -40,10 +41,6 @@ function estimate(patch: Partial<Estimate> = {}): Estimate {
     advances_source: 'return',
     balance_due: 141200,
     vh_after_tax: 518800,
-    depreciation: {
-      assets: 1, planned_accounting: 24000, posted_accounting: 0, pending_accounting: 24000,
-      planned_tax: 13200, confirmed_tax: 0, pending_tax: 13200,
-    },
     ...patch,
   }
 }
@@ -73,7 +70,11 @@ describe('YearEndTaxEstimate', () => {
     const optional = w.find('[data-test="estimate-closing-estimate"]')
     expect(optional.text()).toContain('accounting.statement_accounts.estimate.optional_hint')
     expect(optional.classes()).toContain('text-neutral-400')
-    expect(w.find('[data-test="estimate-depreciation"]').text()).toContain('− 24000')
+    const dep = w.find('[data-test="estimate-closing-depreciation"]')
+    expect(dep.text()).toContain('taxReturn.proj_depreciation')
+    expect(dep.text()).toContain('− 24000')
+    expect(dep.classes()).not.toContain('text-neutral-400')
+    expect(dep.find('a').attributes('data-to')).toBe(JSON.stringify({ name: 'accounting-assets' }))
 
     const links = w.findAll('a').map(a => a.attributes('data-to'))
     expect(links).toContain(JSON.stringify({ name: 'reports-income-tax', query: { year: '2099', tab: 'nahled' } }))

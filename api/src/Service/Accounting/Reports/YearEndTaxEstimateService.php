@@ -7,7 +7,6 @@ namespace MyInvoice\Service\Accounting\Reports;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\AccountingPeriodStatus;
-use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Tax\Return\TaxReturnException;
 use MyInvoice\Service\Tax\Return\TaxReturnService;
@@ -22,9 +21,8 @@ use MyInvoice\Service\Tax\Return\TaxReturnService;
  *     náhledu přiznání včetně ručních úprav, ztráty, darů a slev;
  *   - zaplacené zálohy: tatáž hodnota, se kterou počítá náhled (ruční vstup přiznání,
  *     jinak jisté spárované zálohy z evidence §38a);
- *   - odpisy roku: {@see DepreciationPostingService::previewYear()}. Náhled DPPO je
- *     zahrne až po zaúčtování (depreciation_entries), proto se tu jen ukazují a do VH
- *     ani daně se nepřičítají, jinak by odhad neseděl s náhledem přiznání.
+ *   - nezaúčtované odpisy roku jsou položkou téže projekce uzávěrky (účetní snižují VH,
+ *     rozdíl proti daňovým jde do ř. 50/150), takže je blok i náhled DPPO mají stejně.
  *
  * Blok má smysl jen pro právnickou osobu v roce, který ještě nemá zaúčtovanou daň
  * z příjmů (591) a není uzavřený. Daň fyzické osoby není nákladem podniku, takže
@@ -36,7 +34,6 @@ final class YearEndTaxEstimateService
         private readonly Connection $db,
         private readonly AccountingPeriodRepository $periods,
         private readonly TaxReturnService $taxReturns,
-        private readonly DepreciationPostingService $depreciation,
     ) {}
 
     /**
@@ -89,12 +86,6 @@ final class YearEndTaxEstimateService
         $base = round((float) ($isProjection ? $projection['projected_base'] : ($summary['base'] ?? 0)), 2);
         $advances = round((float) ($result['advances_paid'] ?? 0), 2);
 
-        try {
-            $depreciation = $this->depreciation->previewYear($supplierId, $fiscalYear);
-        } catch (\Throwable) {
-            $depreciation = null;
-        }
-
         return [
             'applicable' => true,
             'reason' => null,
@@ -104,15 +95,14 @@ final class YearEndTaxEstimateService
             'closing_items' => array_values((array) ($closing['items'] ?? [])),
             'is_projection' => $isProjection,
             'vh_before_tax' => $vhBeforeTax,
-            'increases' => $this->lineValue($result, 70),
-            'decreases' => $this->lineValue($result, 170),
+            'increases' => round((float) ($isProjection ? ($projection['projected_increases'] ?? $this->lineValue($result, 70)) : $this->lineValue($result, 70)), 2),
+            'decreases' => round((float) ($isProjection ? ($projection['projected_decreases'] ?? $this->lineValue($result, 170)) : $this->lineValue($result, 170)), 2),
             'tax_base' => $base,
             'tax' => $tax,
             'advances_paid' => $advances,
             'advances_source' => $preview['advances_source'],
             'balance_due' => round($tax - $advances, 2),
             'vh_after_tax' => round($vhBeforeTax - $tax, 2),
-            'depreciation' => $depreciation,
         ];
     }
 

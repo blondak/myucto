@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { accountingApi, type YearEndTaxEstimate, type YearEndClosingItem } from '@/api/accounting'
+import { closingProjectionLabelKey, closingProjectionSource } from '@/utils/closingProjection'
 
 const props = defineProps<{
   periodId: number
@@ -14,17 +15,6 @@ const { t } = useI18n()
 const estimate = ref<YearEndTaxEstimate | null>(null)
 const loading = ref(false)
 const failed = ref(false)
-
-// Popisky uzávěrkových operací posílá backend jako klíč náhledu DPPO; literály tu drží
-// jmenný prostor `taxReturn` v mapě překladů této stránky.
-const CLOSING_LABELS: Record<string, string> = {
-  small_asset_accrual: 'taxReturn.proj_small_asset',
-  prepaid_expense_accrual: 'taxReturn.proj_prepaid',
-  fx_revaluation: 'taxReturn.proj_fx',
-  prior_deferral_release: 'taxReturn.proj_prior_release',
-  provision: 'taxReturn.proj_provision',
-  estimate: 'taxReturn.proj_estimate',
-}
 
 let requestSeq = 0
 async function load() {
@@ -50,21 +40,13 @@ const fiscalYear = computed(() => String(estimate.value?.period.fiscal_year ?? '
 function dppoLink(tab: 'podklady' | 'upravy' | 'nahled' | 'zalohy'): RouteLocationRaw {
   return { name: 'reports-income-tax', query: { year: fiscalYear.value, tab } }
 }
-const closingLink = computed<RouteLocationRaw>(() => ({ name: 'accounting-period-closing', params: { id: props.periodId } }))
-const assetsLink: RouteLocationRaw = { name: 'accounting-assets' }
-
 function closingLabel(item: YearEndClosingItem): string {
-  return t(CLOSING_LABELS[item.key] ?? item.label_key)
+  return t(closingProjectionLabelKey(item))
 }
 
 function signed(value: number, sign: number): string {
   return `${sign >= 0 ? '+' : '−'} ${props.format(Math.abs(value))}`
 }
-
-const pendingDepreciation = computed(() => {
-  const d = estimate.value?.depreciation
-  return d && (d.pending_accounting !== 0 || d.pending_tax !== 0) ? d : null
-})
 </script>
 
 <template>
@@ -111,20 +93,16 @@ const pendingDepreciation = computed(() => {
               <span v-if="item.optional" class="text-[10px] uppercase ml-1">· {{ t('accounting.statement_accounts.estimate.optional_hint') }}</span>
             </td>
             <td class="px-3 py-1.5 text-right font-mono whitespace-nowrap">{{ signed(item.amount, item.sign) }}</td>
-            <td class="px-3 py-1.5 text-xs"><RouterLink :to="closingLink" class="text-primary-600 hover:underline">{{ t('accounting.statement_accounts.estimate.src_closing') }}</RouterLink></td>
+            <td class="px-3 py-1.5 text-xs">
+              <RouterLink v-if="closingProjectionSource(item.key, periodId)" :to="closingProjectionSource(item.key, periodId)!.to" class="text-primary-600 hover:underline">
+                {{ t(closingProjectionSource(item.key, periodId)!.labelKey) }}
+              </RouterLink>
+            </td>
           </tr>
           <tr v-if="!(estimate.closing_items ?? []).length">
             <td colspan="3" class="px-3 py-1.5 pl-6 text-xs text-neutral-500">{{ t('accounting.statement_accounts.estimate.closing_none') }}</td>
           </tr>
 
-          <tr v-if="pendingDepreciation" class="text-neutral-400" data-test="estimate-depreciation">
-            <td class="px-3 py-1.5 pl-6">
-              {{ t('accounting.statement_accounts.estimate.depreciation') }}
-              <div class="text-xs">{{ t('accounting.statement_accounts.estimate.depreciation_hint', { tax: format(pendingDepreciation.pending_tax) }) }}</div>
-            </td>
-            <td class="px-3 py-1.5 text-right font-mono whitespace-nowrap align-top">{{ signed(pendingDepreciation.pending_accounting, -1) }}</td>
-            <td class="px-3 py-1.5 text-xs align-top"><RouterLink :to="assetsLink" class="text-primary-600 hover:underline">{{ t('accounting.statement_accounts.estimate.src_assets') }}</RouterLink></td>
-          </tr>
 
           <tr class="font-semibold bg-warning-50/40" data-test="estimate-vh-before-tax">
             <td class="px-3 py-1.5">{{ t('accounting.statement_accounts.estimate.vh_before_tax') }}</td>
