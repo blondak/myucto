@@ -108,6 +108,17 @@ final class DocumentBranchParityGuardsTest extends TestCase
         'Service/Report/VatCrossCheckService.php' => [
             'checkDraftAdvanceTaxDocuments' => 'kontrola chybějícího DDKP dává smysl jen na vydané větvi',
         ],
+
+        // Vazba úhrady zálohy na DDKP a konečnou fakturu je zrcadlená, jen se jinak čte:
+        // vydaný DDKP i finál visí na proformě přes TENTÝŽ parent_invoice_id (vydaná větev
+        // je bere výčtem `IN ('invoice', 'tax_document')`, který guard nepočítá), přijatý
+        // DDKP visí přes parent_purchase_invoice_id a finál přes advance_purchase_invoice_id,
+        // takže přijatá větev musí DDKP rozlišit podle document_kind.
+        'Service/Accounting/JournalLinkService.php' => [
+            'hasRelatedMap'      => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
+            'advanceParentOf'    => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
+            'withAdvanceChildren' => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
+        ],
     ];
 
     public function testTaxDocumentExceptionIsMirroredOnBothBranches(): void
