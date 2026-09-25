@@ -2537,6 +2537,8 @@ final class Routes
             $g->patch ('/bank-accounts/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\Bank\SupplierBankAccountAction::class, 'update']);
             $g->get   ('/gopay/settings',                             [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'settings']);
             $g->put   ('/gopay/settings',                             [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'saveSettings']);
+            $g->get   ('/gopay/pending',                              [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'pending']);
+            $g->post  ('/gopay/pending/post',                         [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'postPending']);
             $g->get   ('/gopay/clearings',                            [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'list']);
             $g->post  ('/gopay/clearings/import',                     [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'import']);
             $g->get   ('/gopay/clearings/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'detail']);
