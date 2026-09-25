@@ -125,7 +125,9 @@ Nad formulářem je **drag & drop zóna** pro PDF, fotku, ISDOC nebo ISDOCX:
   deterministicky bez AI. Systém ověří IČO odběratele, vyhledá nebo založí
   dodavatele, vytvoří předvyplněný koncept včetně položek, DPH a platebních údajů
   a rovnou ho otevře v editoru ke kontrole. Tato cesta je dostupná i klientské roli
-  s oprávněním vytvářet přijaté faktury.
+  s oprávněním vytvářet přijaté faktury. Vložený ISDOC se načte i z PDF, které
+  vystavitel zamkl proti úpravám (otevře se bez hesla, heslo chrání jen oprávnění),
+  jak to dělají například faktury z iÚčta.
 - Běžné PDF bez vloženého ISDOC nebo fotka se pouze připraví jako příloha. Pole
   vyplníš ručně a originál se po prvním uložení automaticky **archivuje** mimo
   webroot. Pro nestrukturované PDF lze podle oprávnění použít také
