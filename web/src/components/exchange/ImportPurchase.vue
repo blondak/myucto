@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter, RouterLink } from 'vue-router'
 import ImportReportPanel from '@/components/exchange/ImportReportPanel.vue'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
+import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import { useFileImportJob } from '@/composables/useFileImportJob'
 import { purchaseInvoicesApi, type InboxScanResult } from '@/api/purchaseInvoices'
 import { integrationsApi, type AnthropicCredentialsStatus } from '@/api/integrations'
@@ -84,6 +85,13 @@ async function loadAiStatus() {
   }
 }
 onMounted(loadAiStatus)
+
+// Kontrola vytěžených dokladů po skenu — okno přeskočí doklady bez hlášení.
+const reviewIds = ref<number[] | null>(null)
+const createdIds = computed(() => (scanResult.value?.details ?? [])
+  .filter(d => d.status === 'created' && d.purchase_invoice_id)
+  .map(d => d.purchase_invoice_id as number))
+
 async function runScan() {
   scanRunning.value = true
   scanResult.value = null
@@ -94,6 +102,7 @@ async function runScan() {
       skipped: scanResult.value.skipped,
       failed:  scanResult.value.failed,
     }))
+    if (createdIds.value.length) reviewIds.value = createdIds.value
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
@@ -266,6 +275,11 @@ async function runScan() {
             <div><span class="font-semibold text-danger-500">{{ scanResult.failed }}</span> {{ t('imports.summary_failed') }}</div>
           </div>
           <p v-if="scanResult.inbox_dir" class="text-xs text-neutral-500 mb-2 font-mono">{{ scanResult.inbox_dir }}</p>
+          <button v-if="createdIds.length" type="button" :class="btnOutline('warning')" class="whitespace-nowrap mb-2" @click="reviewIds = createdIds">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            {{ t('purchase_invoice.extraction_review.open_count', { count: createdIds.length }) }}
+          </button>
+          <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" @close="reviewIds = null" />
 
           <!-- Prominent box: faktury které NEBYLY importovány (failed + skipped, ale ne 'imported') -->
           <div v-if="notImportedItems.length > 0" class="mt-3 rounded-md bg-warning-50 border border-warning-500/40 p-3">

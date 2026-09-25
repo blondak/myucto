@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { parseExtractionWarning } from '@/utils/extractionWarning'
+import { parseExtractionWarning, withoutExpenseKindSection } from '@/utils/extractionWarning'
+
+describe('withoutExpenseKindSection', () => {
+  it('drops only the expense kind section', () => {
+    const warning = 'Reverse charge: zkontrolujte povahu plnění.'
+      + '\n\nAI navrhuje druh nákladu u 1 řádků — NENÍ nastaven:\n• řádek 1: Služba (AI)'
+      + '\n\nSoučet řádků nesedí.'
+
+    expect(withoutExpenseKindSection(warning)).toBe('Reverse charge: zkontrolujte povahu plnění.\n\nSoučet řádků nesedí.')
+    expect(withoutExpenseKindSection(null)).toBe('')
+  })
+})
 
 describe('parseExtractionWarning', () => {
   it('splits sections and bullet lines with row labels', () => {

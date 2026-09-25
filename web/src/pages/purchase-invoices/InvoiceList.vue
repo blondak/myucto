@@ -22,6 +22,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
 import { useListKeyboard } from '@/composables/useListKeyboard'
 import { clientsApi, type Client } from '@/api/clients'
@@ -220,6 +221,19 @@ const bulkBusy = ref(false)
  * seznamu tak, jak ho uživatel vidí, ne po skupinách.
  */
 const flatRows = computed(() => groups.value.flatMap(g => g.invoices))
+
+// Kontrola AI vytěžených dokladů faktura po faktuře — vybrané řádky, jinak vše načtené s hlášením.
+const reviewIds = ref<number[] | null>(null)
+const reviewableIds = computed(() => {
+  const flagged = flatRows.value.filter(r => r.extraction_warning)
+  const selected = new Set(selectedIds.value)
+  const pick = selected.size ? flagged.filter(r => selected.has(r.id)) : flagged
+  return pick.map(r => r.id)
+})
+function onReviewClosed() {
+  reviewIds.value = null
+  load()
+}
 const rowIndexById = computed(() => {
   const map = new Map<number, number>()
   flatRows.value.forEach((inv, i) => map.set(inv.id, i))
@@ -880,6 +894,11 @@ async function bulkSetKind() {
             {{ t('purchase_invoice.filters.vendor_edit') }}
           </RouterLink>
         </template>
+        <button v-if="reviewableIds.length && auth.canWrite('purchase_invoices')" type="button"
+          :class="btnOutline('warning')" class="whitespace-nowrap" @click="reviewIds = reviewableIds">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          {{ t('purchase_invoice.extraction_review.open_count', { count: reviewableIds.length }) }}
+        </button>
         <RouterLink
           v-if="auth.canWrite('purchase_invoices.create') || auth.isDemo"
           to="/purchase-invoices/new"
@@ -1466,5 +1485,6 @@ async function bulkSetKind() {
         </button>
       </div>
     </div>
+    <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" @close="onReviewClosed" />
   </div>
 </template>

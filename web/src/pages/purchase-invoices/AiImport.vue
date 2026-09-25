@@ -9,6 +9,7 @@ import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
 import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnOutlineSm } from '@/components/ui/buttonStyles'
+import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -117,9 +118,20 @@ async function runAiBatch() {
     }
     await Promise.all([loadAiCreds(), loadLastBatch()])
     toast.success(t('integrations.ai.batch_done', { n: aiBatchQueue.value.filter(x => x.status === 'ok').length }))
+    openReview(batchInvoiceIds.value)
   } finally {
     aiBatchRunning.value = false
   }
+}
+
+// Kontrola vytěžených dokladů faktura po faktuře — otevře se sama po importu,
+// okno samo přeskočí doklady bez hlášení (a když žádný nezbude, jen to oznámí).
+const reviewIds = ref<number[] | null>(null)
+const batchInvoiceIds = computed(() => aiBatchQueue.value
+  .filter(x => x.status === 'ok' && x.result?.purchase_invoice_id && !x.result?.duplicate)
+  .map(x => x.result.purchase_invoice_id as number))
+function openReview(ids: number[]) {
+  if (ids.length) reviewIds.value = ids
 }
 
 const batchOkCount = computed(() => aiBatchQueue.value.filter(x => x.status === 'ok').length)
@@ -187,6 +199,7 @@ async function runAiExtract() {
     if (aiResult.value.ok) {
       toast.success(t('integrations.ai.extract_success'))
       await Promise.all([loadAiCreds(), loadLastBatch()])
+      if (aiResult.value.purchase_invoice_id && !aiResult.value.duplicate) openReview([aiResult.value.purchase_invoice_id])
     }
   } catch (e: any) {
     // Server vrátil 422 (extraction_failed) — extract ai_data ze response
@@ -361,10 +374,16 @@ onMounted(() => {
           <span class="text-sm text-success-700">
             ✓ {{ t('integrations.ai.batch_summary', { ok: batchOkCount, failed: batchFailedCount }) }}
           </span>
-          <RouterLink :to="batchListLink(aiBatchId)" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
-            {{ t('integrations.ai.show_in_list') }}
-          </RouterLink>
+          <div class="flex flex-wrap gap-2">
+            <button v-if="batchInvoiceIds.length" type="button" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" @click="openReview(batchInvoiceIds)">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              {{ t('purchase_invoice.extraction_review.open_count', { count: batchInvoiceIds.length }) }}
+            </button>
+            <RouterLink :to="batchListLink(aiBatchId)" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
+              {{ t('integrations.ai.show_in_list') }}
+            </RouterLink>
+          </div>
         </div>
         <p class="text-xs text-neutral-500 mt-2">
           ℹ {{ t('integrations.ai.batch_serial_hint') }}
@@ -377,6 +396,11 @@ onMounted(() => {
           <button v-if="aiResult.purchase_invoice_id" type="button" @click="gotoInvoice(aiResult.purchase_invoice_id!)"
                   class="ml-3 cursor-pointer underline hover:text-success-700">
             {{ t('integrations.ai.go_to_invoice') }} #{{ aiResult.purchase_invoice_id }}
+          </button>
+          <button v-if="aiResult.purchase_invoice_id && !aiResult.duplicate" type="button"
+                  @click="openReview([aiResult.purchase_invoice_id!])"
+                  class="ml-3 cursor-pointer underline hover:text-success-700">
+            {{ t('purchase_invoice.extraction_review.open') }}
           </button>
           <div v-if="aiResult.purchase_invoice_id && aiResult.document_kind && aiResult.document_kind !== 'advance'"
                class="mt-2 flex items-center gap-2 flex-wrap text-neutral-700">
@@ -419,5 +443,6 @@ onMounted(() => {
         </details>
       </div>
     </div>
+    <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" @close="reviewIds = null" />
   </div>
 </template>

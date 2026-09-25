@@ -12,6 +12,8 @@ import {
   type PurchaseDocumentKind,
   type ExpenseKind,
   type ExpenseKindSuggestion,
+  type ExtractionExpenseKindProposal,
+  type ExtractionReview,
   type ExchangeRateSource,
   type VatDeduction,
   type PurchaseVatAllocation,
@@ -424,7 +426,18 @@ onBeforeUnmount(() => setPendingPdfUrl(null))
 // Diagnostické varování z AI extrakce (např. mezisoučty čteny jako items).
 // Backend sets via PurchaseInvoiceRepository::setExtractionWarning po sanity-check.
 const extractionWarning = ref<string | null>(null)
+const extractionReview = ref<ExtractionReview | null>(null)
 const dismissingWarning = ref(false)
+
+// Návrh druhu nákladu z AI extrakce pro řádek (klíčem je order_index z uloženého dokladu).
+// Řádek s návrhem a bez zvoleného druhu je orámovaný červeně, dokud ho uživatel nevyřeší.
+function aiProposalFor(it: { order_index?: number }): ExtractionExpenseKindProposal | undefined {
+  if (!extractionWarning.value || it.order_index === undefined) return undefined
+  return extractionReview.value?.expense_kinds?.find(p => p.order_index === it.order_index)
+}
+function needsKindAttention(it: { order_index?: number; expense_kind?: ExpenseKind | null }): boolean {
+  return !!aiProposalFor(it) && !it.expense_kind
+}
 
 async function dismissWarning() {
   const invId = Number(route.params.id)
@@ -433,6 +446,7 @@ async function dismissWarning() {
   try {
     await purchaseInvoicesApi.dismissExtractionWarning(invId)
     extractionWarning.value = null
+    extractionReview.value = null
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
@@ -862,6 +876,7 @@ function populate(inv: PurchaseInvoice) {
   }
   hydrateStockSelections()
   extractionWarning.value = inv.extraction_warning ?? null
+  extractionReview.value = inv.extraction_review ?? null
   // Ruční rekapitulace DPH dle dokladu (§ 73) → naplň override mapu.
   vatOverrides.value = {}
   for (const o of inv.vat_overrides ?? []) {
@@ -898,7 +913,7 @@ function populate(inv: PurchaseInvoice) {
   }
 }
 
-const EXPENSE_KINDS: ExpenseKind[] = ['service', 'material', 'small_asset', 'fixed_asset']
+const EXPENSE_KINDS: ExpenseKind[] = ['service', 'material', 'small_asset', 'small_intangible', 'fixed_asset']
 
 // §DM: klasifikace je na položce (faktura běžně míchá majetek + službu), hlavičkový
 // `is_fixed_asset` z ní jen odvozujeme — dva ručně editovatelné zdroje pravdy by se
@@ -1939,7 +1954,7 @@ function fieldErr(key: string): string | null {
           </thead>
           <tbody>
             <template v-for="(it, i) in form.items" :key="rowKey(it)">
-            <tr class="border-t border-neutral-200">
+            <tr class="border-t border-neutral-200" :class="needsKindAttention(it) ? 'bg-danger-50/40 outline outline-2 -outline-offset-2 outline-danger-500/60' : ''">
               <td class="py-2 pl-5 pr-2">
                 <div class="flex items-start gap-1">
                 <StockDescriptionField
@@ -1986,11 +2001,16 @@ function fieldErr(key: string): string | null {
                 <select
                   v-model="it.expense_kind"
                   :title="t('purchase_invoice.items.expense_kind_hint')"
-                  class="w-full h-9 px-1 border border-neutral-300 rounded bg-surface text-sm"
+                  class="w-full h-9 px-1 border rounded bg-surface text-sm"
+                  :class="needsKindAttention(it) ? 'border-danger-500' : 'border-neutral-300'"
                 >
                   <option :value="null">{{ t('purchase_invoice.items.expense_kind_unset') }}</option>
                   <option v-for="k in EXPENSE_KINDS" :key="k" :value="k">{{ t(`purchase_invoice.expense_kind.${k}`) }}</option>
                 </select>
+                <div v-if="aiProposalFor(it) && it.expense_kind !== aiProposalFor(it)!.kind" class="mt-1 flex flex-wrap items-center gap-1 text-xs text-neutral-600">
+                  <span :title="aiProposalFor(it)!.reason">{{ t('purchase_invoice.extraction_review.proposal', { kind: t(`purchase_invoice.expense_kind.${aiProposalFor(it)!.kind}`), pct: Math.round(aiProposalFor(it)!.confidence * 100) }) }}</span>
+                  <button type="button" class="text-primary-600 hover:underline" @click="it.expense_kind = aiProposalFor(it)!.kind">{{ t('purchase_invoice.extraction_review.apply') }}</button>
+                </div>
                 <ExpenseKindSuggestionHint
                   v-if="suggestionFor(it)"
                   :suggestion="suggestionFor(it)!"
@@ -2041,7 +2061,8 @@ function fieldErr(key: string): string | null {
 
         <!-- Mobile: stack karet (každé pole na vlastním řádku, čitelné inputy) -->
         <div v-if="form.items.length > 0" class="md:hidden divide-y divide-neutral-200 border-t border-neutral-200">
-          <div v-for="(it, i) in form.items" :key="`m-${rowKey(it)}`" class="p-3 space-y-2">
+          <div v-for="(it, i) in form.items" :key="`m-${rowKey(it)}`" class="p-3 space-y-2"
+            :class="needsKindAttention(it) ? 'bg-danger-50/40 outline outline-2 -outline-offset-2 outline-danger-500/60' : ''">
             <div class="flex items-center justify-between text-xs text-neutral-500">
               <span class="font-mono">#{{ i + 1 }}</span>
               <span class="flex-1"></span>
@@ -2100,11 +2121,16 @@ function fieldErr(key: string): string | null {
               <select
                 v-model="it.expense_kind"
                 :title="t('purchase_invoice.items.expense_kind_hint')"
-                class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm"
+                class="w-full h-10 px-2 border rounded bg-surface text-sm"
+                :class="needsKindAttention(it) ? 'border-danger-500' : 'border-neutral-300'"
               >
                 <option :value="null">{{ t('purchase_invoice.items.expense_kind_unset') }}</option>
                 <option v-for="k in EXPENSE_KINDS" :key="k" :value="k">{{ t(`purchase_invoice.expense_kind.${k}`) }}</option>
               </select>
+              <div v-if="aiProposalFor(it) && it.expense_kind !== aiProposalFor(it)!.kind" class="mt-1 flex flex-wrap items-center gap-1 text-xs text-neutral-600">
+                <span>{{ t('purchase_invoice.extraction_review.proposal', { kind: t(`purchase_invoice.expense_kind.${aiProposalFor(it)!.kind}`), pct: Math.round(aiProposalFor(it)!.confidence * 100) }) }}</span>
+                <button type="button" class="text-primary-600 hover:underline" @click="it.expense_kind = aiProposalFor(it)!.kind">{{ t('purchase_invoice.extraction_review.apply') }}</button>
+              </div>
               <ExpenseKindSuggestionHint
                 v-if="suggestionFor(it)"
                 :suggestion="suggestionFor(it)!"

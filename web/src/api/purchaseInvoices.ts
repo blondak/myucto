@@ -58,7 +58,20 @@ export type PaymentAccountSource = 'isdoc' | 'ai' | 'ai_reextract' | 'qr_image' 
  * service=518, material=501 (vč. PHM), small_asset=501 + karta drobného majetku,
  * fixed_asset=042 + odpisy. NULL = neurčeno (chová se jako dosud → 518).
  */
-export type ExpenseKind = 'service' | 'material' | 'small_asset' | 'fixed_asset'
+export type ExpenseKind = 'service' | 'material' | 'small_asset' | 'small_intangible' | 'fixed_asset'
+
+/** Návrh druhu nákladu z AI extrakce pro řádek (klíčem je order_index). */
+export interface ExtractionExpenseKindProposal {
+  order_index: number
+  kind: ExpenseKind
+  confidence: number
+  reason: string
+}
+
+/** Strukturované podklady ke kontrole AI extrakce (migrace 1893). */
+export interface ExtractionReview {
+  expense_kinds?: ExtractionExpenseKindProposal[]
+}
 
 /** Odkud návrh přišel: pravidlo tenanta / klíčové slovo / práh §26/2 ZDP / AI. */
 export type ExpenseKindSuggestionSource = 'rule' | 'keyword' | 'threshold' | 'ai'
@@ -446,6 +459,8 @@ export interface PurchaseInvoice {
    * NULL = vše OK / faktura nebyla AI-importována.
    */
   extraction_warning: string | null
+  /** Strukturované návrhy ke kontrole — maže se spolu s extraction_warning. */
+  extraction_review?: ExtractionReview | null
   created_by: number
   created_at: string
   updated_at: string
@@ -791,6 +806,11 @@ export const purchaseInvoicesApi = {
 
   dismissExtractionWarning: (id: number) =>
     api.post<PurchaseInvoice>(`/purchase-invoices/${id}/dismiss-extraction-warning`).then(r => r.data),
+
+  /** Druh nákladu po položkách — kontrolní okno po AI importu, i u zaplaceného dokladu. */
+  setExpenseKinds: (id: number, items: { id: number; expense_kind: ExpenseKind | null }[]) =>
+    api.put<PurchaseInvoice & { _repost?: { entry_id: number } }>(`/purchase-invoices/${id}/expense-kinds`, { items })
+      .then(r => r.data),
 
   /** Rychlá změna typu dokladu (#232) — oprava AI klasifikace po importu. */
   setDocumentKind: (id: number, documentKind: PurchaseDocumentKind) =>

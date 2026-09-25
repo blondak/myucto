@@ -5,6 +5,7 @@ import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vu
 import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
+import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import PurchaseItemMeta from '@/components/purchase/PurchaseItemMeta.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -20,7 +21,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { canSaveToCompanyFolder, pdfFileName, savePdfToCompanyFolder } from '@/composables/useCompanyPdfSave'
 import { apiErrorMessage } from '@/api/errors'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilledSm, btnOutline } from '@/components/ui/buttonStyles'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import PostingPreviewModal from '@/components/accounting/PostingPreviewModal.vue'
@@ -95,6 +96,7 @@ const pdfPreviewOpen = pdfPreview.open
 const pdfSideBySide = computed(() => !!invoice.value?.pdf_path && pdfPreviewOpen.value && pdfPreview.wide.value)
 const pdfInlineUrl = computed(() => (invoice.value ? `${purchaseInvoicesApi.pdfUrl(invoice.value.id, true)}#view=FitH` : ''))
 const dismissingWarning = ref(false)
+const reviewOpen = ref(false)
 
 async function dismissWarning() {
   if (!invoice.value || dismissingWarning.value) return
@@ -795,15 +797,22 @@ const purchaseActions = computed<ActionItem[]>(() => {
           <div class="font-medium text-warning-700">{{ t('purchase_invoice.extraction.warning_title') }}</div>
           <ExtractionWarningText :warning="invoice.extraction_warning" class="text-warning-700/90 mt-1" />
         </div>
-        <button
-          type="button"
-          @click="dismissWarning"
-          :disabled="dismissingWarning"
-          class="cursor-pointer text-xs px-2 py-1 border border-warning-500/50 rounded text-warning-700 hover:bg-warning-100 disabled:opacity-50 shrink-0"
-        >
-          {{ t('purchase_invoice.extraction.dismiss') }}
-        </button>
+        <div class="flex flex-col gap-1.5 shrink-0">
+          <button type="button" :class="btnFilledSm('warning')" @click="reviewOpen = true">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            {{ t('purchase_invoice.extraction_review.open') }}
+          </button>
+          <button
+            type="button"
+            @click="dismissWarning"
+            :disabled="dismissingWarning"
+            class="cursor-pointer text-xs px-2 py-1 border border-warning-500/50 rounded text-warning-700 hover:bg-warning-100 disabled:opacity-50"
+          >
+            {{ t('purchase_invoice.extraction.dismiss') }}
+          </button>
+        </div>
       </div>
+      <ExtractionReviewModal v-if="reviewOpen" :invoice-ids="[invoice.id]" @updated="(inv) => (invoice = inv)" @close="reviewOpen = false" />
 
       <!-- ═══ Hlavička: varsymbol + status + akce ═══ -->
       <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">

@@ -16,6 +16,20 @@ function toItem(raw: string): ExtractionWarningItem {
   return m ? { label: m[1], text: m[2] } : { label: null, text }
 }
 
+/** Úvod sekce s návrhy druhu nákladu (AiExpenseKindProposal::warningText na backendu). */
+const EXPENSE_KIND_SECTION = 'AI navrhuje druh nákladu'
+
+/**
+ * Hlášení bez sekce s návrhy druhu nákladu — kontrolní okno ji nahrazuje seznamem
+ * položek s výběrem, takže by se jinak zobrazila dvakrát.
+ */
+export function withoutExpenseKindSection(warning: string | null | undefined): string {
+  return (warning ?? '')
+    .split(/\r?\n\s*\r?\n/)
+    .filter((block) => !block.trim().startsWith(EXPENSE_KIND_SECTION))
+    .join('\n\n')
+}
+
 /**
  * Rozloží `extraction_warning` na sekce. Backend skládá sekce oddělené prázdným
  * řádkem a odrážky `• …` na samostatných řádcích; starší uložené texty můžou mít

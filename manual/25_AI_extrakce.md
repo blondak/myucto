@@ -179,6 +179,41 @@ Nahoře na stránce je vždy vidět **poslední import** (datum a počet doklad�
 s odkazem do seznamu. Starší importy najdeš v seznamu přijatých faktur ve filtru
 **Import (dávka)**.
 
+### 25.1.12 Kontrola vytěžených dokladů
+
+Po AI importu se otevře okno **Kontrola vytěžených dokladů**. Prochází doklady
+jeden po druhém a ukáže jen ty, které mají hlášení ke kontrole. Když žádný
+nemá, okno jen oznámí, že není co kontrolovat.
+
+- Nahoře je dodavatel, číslo dokladu, datum, stav a částka a odkaz **Otevřít doklad**.
+- Pod tím jsou ostatní části hlášení (reverse charge, nesouhlasící součty apod.).
+- Hlavní část je **druh nákladu po položkách**. Položka, u které AI navrhuje druh
+  nákladu a druh zatím není zvolený, je **orámovaná červeně**. U návrhu je jistota
+  a zdůvodnění, tlačítko **Použít** ho převezme. **Použít návrhy AI** převezme
+  všechny najednou.
+- **Uložit a další** uloží druhy nákladu a přejde na další doklad. Se zaškrtnutým
+  **Označit jako zkontrolované** zároveň zmizí hlášení (jako **Beru na vědomí**).
+  **Přeskočit** nechá doklad beze změny.
+
+Druh nákladu jde v okně změnit i u dokladu, který import rovnou označil jako
+zaplacený, bez vynucené úpravy v editoru. U dokladu, který už není koncept, to
+smí jen administrátor firmy. Zaúčtovaný doklad v otevřeném období se po změně
+přeúčtuje. Doklad v uzavřeném období nebo stornovaný okno jen zobrazí; opravu
+je potřeba udělat v editoru.
+
+Okno se otevírá:
+
+- samo po importu na stránce **Nákup → AI import** (jednotlivý doklad i dávka),
+  znovu tlačítkem **Zkontrolovat vytěžené**,
+- po **Vytěžit a vytvořit** v příchozích dokladech, před otevřením editoru,
+- po ručním spuštění **scan inboxu** ([§ 21](21_Importy.md)),
+- tlačítkem **Zkontrolovat** ve žlutém hlášení v detailu faktury,
+- tlačítkem **Zkontrolovat vytěžené** v seznamu přijatých faktur (vybrané
+  řádky, jinak všechny načtené doklady s hlášením).
+
+V editoru faktury jsou tytéž položky orámované červeně a návrh AI je u výběru
+druhu nákladu s tlačítkem **Použít**.
+
 ## 25.2 Multi-provider AI brána (výběr poskytovatele)
 
 AI extrakce neběží natvrdo nad jedním modelem — MyÚčto.cz nabízí **AI bránu** se
