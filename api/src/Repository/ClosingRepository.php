@@ -1501,9 +1501,21 @@ final class ClosingRepository
                 -- takže dvojice účet vynuluje, i když peníze nikdy netekly (vrácené zboží
                 -- prostě sníží závazek). Hodnotit každou stranu zvlášť znamenalo hlásit
                 -- obě jako otevřené saldo v plné výši, přestože 321 je po nich nula.
+                -- Přijatý DDKP k záloze placené na 321 patří do skupiny konečné faktury téže
+                -- zálohy (zrcadlo paidInvoicesOpenSaldo): úhradu nese záloha a konečná faktura
+                -- ji přebírá přes settled_advance.
                 SELECT pi.id,
                        CASE WHEN pi.document_kind = 'credit_note' AND pi.parent_purchase_invoice_id IS NOT NULL
-                            THEN pi.parent_purchase_invoice_id ELSE pi.id END AS group_id,
+                            THEN pi.parent_purchase_invoice_id
+                            WHEN pi.document_kind = 'tax_document' AND pi.parent_purchase_invoice_id IS NOT NULL
+                            THEN COALESCE((
+                                SELECT MIN(fin.id) FROM purchase_invoices fin
+                                 WHERE fin.supplier_id = pi.supplier_id
+                                   AND fin.advance_purchase_invoice_id = pi.parent_purchase_invoice_id
+                                   AND fin.document_kind NOT IN ('advance', 'tax_document')
+                                   AND fin.cancelled_at IS NULL
+                            ), pi.id)
+                            ELSE pi.id END AS group_id,
                        b.booked,
                        COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0) + COALESCE(so.settled, 0)
                        + COALESCE(sg.settled, 0) + COALESCE(sa.settled, 0) AS settled
@@ -1535,6 +1547,9 @@ final class ClosingRepository
               JOIN clients cl ON cl.id = pi.vendor_id
              WHERE pi.status = 'paid'
                AND (pi.paid_at IS NULL OR pi.paid_at <= ?)
+               -- DDKP bez konečné faktury = čerpání poskytnuté zálohy, která na 321 čeká na
+               -- vyúčtování; úhradu nese záloha.
+               AND NOT (pi.document_kind = 'tax_document' AND pi.parent_purchase_invoice_id IS NOT NULL)
             -- Tolerance 1 Kč: haléřové rozdíly vznikají zaokrouhlením úhrady (banka pošle
             -- 1 637 Kč proti faktuře 1 637,52) a chybějící úhrada to být nemůže. Dřív 0,50 Kč
             -- propouštělo i takové řádky a účetní je musela odbavovat jednu po druhé.

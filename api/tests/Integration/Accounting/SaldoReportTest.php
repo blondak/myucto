@@ -439,6 +439,83 @@ final class SaldoReportTest extends TestCase
     }
 
     /**
+     * Zrcadlo na přijaté straně: zálohová PF zaplacená přímo na 321 (321 MD / 221 D 1210),
+     * přijatý DDKP 343 MD / 321 D 210, konečná faktura s vyúčtováním zálohy. Do konečné
+     * faktury drží HK na 321 poskytnutou zálohu bez DPH (debet 1000) a saldokonto ji musí
+     * ukázat jako položku zálohy; K3 přijatých faktur DDKP hlásit nesmí.
+     */
+    public function testPurchaseAdvancePaidStraightToPayableWithTaxDocumentStaysOpenUntilFinalInvoice(): void
+    {
+        $vendor = $this->client('Dodavatel se zálohou s.r.o.');
+        $pdo = $this->db->pdo();
+
+        $advance = $this->purchaseInvoice($vendor, 1210.00, self::YEAR . '-05-01', self::YEAR . '-05-08');
+        $pdo->prepare("UPDATE purchase_invoices SET document_kind = 'advance', status = 'paid', paid_at = ? WHERE id = ?")
+            ->execute([self::YEAR . '-05-05', $advance]);
+        $txId = $this->bankPayment($advance, 1210.00, self::YEAR . '-05-05');
+        $this->posting->postDocument($this->supplierId, 'bank', $txId, [
+            self::l('321', 'debit', 1210.00),
+            self::l('221', 'credit', 1210.00),
+        ], ['entry_date' => self::YEAR . '-05-05', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $ddkp = $this->purchaseInvoice($vendor, 1210.00, self::YEAR . '-05-06', self::YEAR . '-05-06');
+        $pdo->prepare(
+            "UPDATE purchase_invoices SET document_kind = 'tax_document', parent_purchase_invoice_id = ?,
+                                          status = 'paid', paid_at = ? WHERE id = ?"
+        )->execute([$advance, self::YEAR . '-05-06', $ddkp]);
+        $this->postPurchase($ddkp, [
+            self::l('343', 'debit', 210.00),
+            self::l('321', 'credit', 210.00),
+        ], self::YEAR . '-05-06');
+
+        $final = $this->purchaseInvoice($vendor, 1210.00, self::YEAR . '-06-10', self::YEAR . '-06-24');
+        $pdo->prepare(
+            "UPDATE purchase_invoices SET advance_purchase_invoice_id = ?, advance_paid_amount = ?,
+                                          status = 'paid', paid_at = ? WHERE id = ?"
+        )->execute([$advance, 1210.00, self::YEAR . '-06-10', $final]);
+        $this->postPurchase($final, [
+            self::l('501', 'debit', 1000.00),
+            self::l('343', 'debit', 210.00),
+            self::l('321', 'credit', 1210.00),
+            self::l('321', 'debit', 210.00),
+            self::l('343', 'credit', 210.00),
+        ], self::YEAR . '-06-10');
+
+        $expect = [
+            self::YEAR . '-05-04' => 0.00,
+            self::YEAR . '-05-05' => -1210.00,
+            self::YEAR . '-05-31' => -1000.00,
+            self::YEAR . '-06-10' => 0.00,
+        ];
+        foreach ($expect as $asOf => $balance) {
+            $acc = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, $asOf, '321'), '321');
+            self::assertNotNull($acc, $asOf);
+            self::assertSame(self::cents($balance), self::cents($acc['gl_balance']), "HK 321 k {$asOf}");
+            self::assertSame(self::cents($balance), self::cents($acc['open_items_total']), "Σ položek 321 k {$asOf}");
+            self::assertSame(0, self::cents($acc['difference']), "Rozdíl konfrontace 321 k {$asOf}");
+
+            $p = $this->partner($acc, $vendor);
+            if ($balance === 0.00) {
+                self::assertNull($p, "Bez otevřené zálohy k {$asOf}");
+                continue;
+            }
+            self::assertNotNull($p, $asOf);
+            self::assertCount(1, $p['items'], $asOf);
+            self::assertSame($advance, (int) $p['items'][0]['doc_id'], 'Položkou je zálohová PF, ke které patří úhrada.');
+            self::assertSame(self::cents($balance), self::cents($p['items'][0]['remaining_czk']), $asOf);
+        }
+
+        $closing = new ClosingRepository($this->db);
+        foreach ([self::YEAR . '-05-31', self::YEAR . '-06-30'] as $asOf) {
+            $flagged = array_values(array_filter(
+                $closing->paidPurchasesOpenSaldo($this->supplierId, $asOf),
+                static fn (array $r): bool => in_array((int) $r['id'], [$advance, $ddkp, $final], true),
+            ));
+            self::assertSame([], $flagged, "K3 nesmí hlásit poskytnutou zálohu s DDKP k {$asOf}");
+        }
+    }
+
+    /**
      * Protějšek předchozího testu s výchozími předkontacemi: inkaso 221/324, DDKP 324/343,
      * zúčtování zálohy v konečné faktuře 324/311. Záloha čeká na 324, 311 zůstává čisté
      * a položka přijaté zálohy se na 311 objevit nesmí.
@@ -1109,6 +1186,20 @@ final class SaldoReportTest extends TestCase
             $this->supplierId,
             'invoice',
             $invoiceId,
+            $lines,
+            ['entry_date' => $date, 'posted_by' => $this->userId, 'user_id' => $this->userId],
+        );
+    }
+
+    /**
+     * @param list<array{account_code:string, side:string, amount:float}> $lines
+     */
+    private function postPurchase(int $purchaseInvoiceId, array $lines, string $date): int
+    {
+        return $this->posting->postDocument(
+            $this->supplierId,
+            'purchase_invoice',
+            $purchaseInvoiceId,
             $lines,
             ['entry_date' => $date, 'posted_by' => $this->userId, 'user_id' => $this->userId],
         );

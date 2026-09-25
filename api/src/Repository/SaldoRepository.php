@@ -67,12 +67,8 @@ use PDO;
  * poměru — a protože je podmíněná tím, že úhrada zálohy dopadla NA TENHLE účet, tenantů
  * používajících 324/314 se nedotkne. Dokud konečná faktura neexistuje, drží hlavní kniha
  * inkaso na účtu jako přijatou zálohu a saldokonto ji ukazuje jako zápornou položku
- * proformy ({@see fetchReceivedAdvances} s `$onReceivable`).
- *
- * Přijatá strana (321) zrcadlo zatím nemá: zálohová PF jde podle pravidla
- * `advance.paid.payment` na 314 a přijatý DDKP se na zálohu váže přes
- * `parent_purchase_invoice_id`, kterou {@see advanceOnAccountCte} nesleduje. Zálohová PF
- * placená přímo na 321 bez konečné faktury proto v konfrontaci 321 zůstává rozdílem.
+ * proformy ({@see fetchReceivedAdvances} s `$onReceivable`). Zrcadlově poskytnutá záloha
+ * placená přímo na 321 ({@see fetchPaidAdvances} s `$onPayable`).
  *
  * Storno (H4): dřívější filtr `reversed_by IS NULL` odrážel AKTUÁLNÍ stav, ne stav
  * K ASOF — doklad stornovaný AŽ PO rozvahovém dni by k asOf zmizel ze seznamu,
@@ -219,6 +215,9 @@ final class SaldoRepository
                         ? $this->fetchReceivedAdvances($supplierId, $accountId, $asOf, $limit, $partnerId, null, $orderByDue, onReceivable: true)
                         : [],
                     $this->fetchOpenPurchases($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
+                    $dueBefore === null
+                        ? $this->fetchPaidAdvances($supplierId, $accountId, $asOf, $limit, $partnerId, null, $orderByDue, onPayable: true)
+                        : [],
                     $this->fetchOpenOtherItems($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
                 );
             }
@@ -401,6 +400,17 @@ final class SaldoRepository
      */
     private static function invoiceBookedOnAccountSql(string $invoiceIdExpr): string
     {
+        return self::bookedOnAccountSql('invoice', $invoiceIdExpr);
+    }
+
+    /** Zrcadlo {@see invoiceBookedOnAccountSql} pro přijatý doklad. */
+    private static function purchaseBookedOnAccountSql(string $purchaseIdExpr): string
+    {
+        return self::bookedOnAccountSql('purchase_invoice', $purchaseIdExpr);
+    }
+
+    private static function bookedOnAccountSql(string $sourceType, string $docIdExpr): string
+    {
         return "EXISTS (
                    SELECT 1
                      FROM journal_entries be
@@ -408,7 +418,7 @@ final class SaldoRepository
                      JOIN chart_of_accounts bca ON bca.id = bl.account_id
                      LEFT JOIN journal_entries brev ON brev.id = be.reversed_by
                     WHERE be.supplier_id = x.supplier_id
-                      AND be.source_type = 'invoice' AND be.source_id = {$invoiceIdExpr}
+                      AND be.source_type = '{$sourceType}' AND be.source_id = {$docIdExpr}
                       AND be.posted_at IS NOT NULL AND be.entry_date <= x.as_of
                       AND (be.reversed_by IS NULL OR brev.entry_date > x.as_of)
                       AND (bca.id = x.account_id OR bca.parent_id = x.account_id)
@@ -707,6 +717,14 @@ final class SaldoRepository
      * takže konfrontace ukazovala rozdíl o zaplacenou částku sníženou o daň, aniž by
      * bylo z čeho poznat proč.
      *
+     * `$onPayable` = zrcadlo {@see fetchReceivedAdvances} s `$onReceivable`: zálohová PF
+     * zaplacená přímo na saldokontní účet (pravidlo `advance.paid.payment` s 321 místo 314).
+     * Úhrada 321 MD / 221 D nemá na 321 doklad a přijatý DDKP k ní (343 MD / 321 D) uzavře
+     * zkratka „uhrazeno" ve {@see fetchOpenPurchases}. Položkou je proto úhrada snížená
+     * o čistý pohyb DDKP na účtu, dokud k asOf není zaúčtovaná konečná faktura (tu pak
+     * vyrovnává {@see advanceOnAccountCte}). Záloha s vlastním předpisem na účtu se nebere
+     * a samostatný DDKP taky ne: ten na 321 nese vlastní předpis i úhradu a vyrovná se sám.
+     *
      * @return list<array<string,mixed>>
      */
     private function fetchPaidAdvances(
@@ -717,8 +735,60 @@ final class SaldoRepository
         ?int $partnerId = null,
         ?string $dueBefore = null,
         bool $orderByDue = false,
+        bool $onPayable = false,
     ): array
     {
+        if ($onPayable) {
+            $settledAmount = "CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END";
+            $settledSide = '';
+            $kindFilter = "p.document_kind = 'advance'"
+                . ' AND NOT ' . self::purchaseBookedOnAccountSql('p.id') . "
+               AND NOT EXISTS (
+                   SELECT 1 FROM purchase_invoices fin
+                    WHERE fin.supplier_id = p.supplier_id AND fin.advance_purchase_invoice_id = p.id
+                      AND " . self::purchaseBookedOnAccountSql('fin.id') . '
+               )';
+            $links = "SELECT id AS child_id, supplier_id, parent_purchase_invoice_id AS advance_id
+                        FROM purchase_invoices
+                       WHERE document_kind = 'tax_document'
+                         AND parent_purchase_invoice_id IS NOT NULL
+                         AND advance_purchase_invoice_id IS NULL";
+        } else {
+            $settledAmount = 'l.amount';
+            $settledSide = "AND l.side = 'credit'";
+            $kindFilter = "(p.document_kind = 'advance'
+                    OR (p.document_kind = 'tax_document' AND p.parent_purchase_invoice_id IS NULL))";
+            // Čerpání zálohy má TŘI vazební cesty a všechny musí do součtu:
+            //   advance_purchase_invoice_id — vyúčtovací faktura (321 MD / 314 D),
+            //   parent_purchase_invoice_id  — přijatý DDKP § 28 (343 MD / 314 D),
+            //   samostatný DDKP bez rodiče  — čerpá SÁM SEBE (343 MD / 314 D).
+            // DDKP první cestu použít NEMŮŽE: nad advance_purchase_invoice_id je
+            // UNIQUE index (jedna záloha = jedna vyúčtovací faktura). Bez druhé větve
+            // proto kredit DDKP na 314 vypadl a záloha svítila jako otevřená o celou
+            // částku DPH navíc. Vydaná větev (324) tenhle problém nemá — používá
+            // obecné parent_invoice_id IS NOT NULL, které chytí DDKP i finál.
+            // Podmínka advance_purchase_invoice_id IS NULL v druhé větvi brání dvojímu
+            // započtení, kdyby jeden doklad nesl obě vazby.
+            // Samostatný DDKP je sám sobě zálohou i jejím čerpáním: na 314 mu sedí debet
+            // z úhrady a kredit vlastní daně, zbytek (základ) čeká na konečnou fakturu. Bez
+            // třetí větve by svítil jako otevřený o celou zaplacenou částku včetně daně.
+            $links = "SELECT id AS child_id, supplier_id, advance_purchase_invoice_id AS advance_id
+                        FROM purchase_invoices
+                       WHERE advance_purchase_invoice_id IS NOT NULL
+                      UNION ALL
+                      SELECT id, supplier_id, parent_purchase_invoice_id
+                        FROM purchase_invoices
+                       WHERE document_kind = 'tax_document'
+                         AND parent_purchase_invoice_id IS NOT NULL
+                         AND advance_purchase_invoice_id IS NULL
+                      UNION ALL
+                      SELECT id, supplier_id, id
+                        FROM purchase_invoices
+                       WHERE document_kind = 'tax_document'
+                         AND parent_purchase_invoice_id IS NULL
+                         AND advance_purchase_invoice_id IS NULL";
+        }
+
         $sql =
             "WITH params AS (
                 SELECT CAST(? AS UNSIGNED) AS supplier_id,
@@ -731,6 +801,8 @@ final class SaldoRepository
                         FROM payment_matches pm
                         CROSS JOIN params x
                         JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
+                        JOIN purchase_invoices ppi ON ppi.id = pm.purchase_invoice_id AND ppi.supplier_id = pm.supplier_id
+                                                  AND ppi.document_kind IN ('advance', 'tax_document')
                        WHERE pm.supplier_id = x.supplier_id AND pm.purchase_invoice_id IS NOT NULL
                          AND DATE(bt.posted_at) <= x.as_of
                          AND EXISTS (
@@ -750,6 +822,8 @@ final class SaldoRepository
                       SELECT cd.purchase_invoice_id AS advance_id, cd.total_amount AS paid_czk
                         FROM cash_documents cd
                         CROSS JOIN params x
+                        JOIN purchase_invoices cpi ON cpi.id = cd.purchase_invoice_id AND cpi.supplier_id = cd.supplier_id
+                                                  AND cpi.document_kind IN ('advance', 'tax_document')
                        WHERE cd.supplier_id = x.supplier_id AND cd.purchase_invoice_id IS NOT NULL
                          AND cd.issue_date <= x.as_of
                          AND EXISTS (
@@ -768,38 +842,9 @@ final class SaldoRepository
                   ) movements
                  GROUP BY advance_id
             ), settled AS (
-                -- Čerpání zálohy má TŘI vazební cesty a všechny musí do součtu:
-                --   advance_purchase_invoice_id — vyúčtovací faktura (321 MD / 314 D),
-                --   parent_purchase_invoice_id  — přijatý DDKP § 28 (343 MD / 314 D),
-                --   samostatný DDKP bez rodiče  — čerpá SÁM SEBE (343 MD / 314 D).
-                -- DDKP první cestu použít NEMŮŽE: nad advance_purchase_invoice_id je
-                -- UNIQUE index (jedna záloha = jedna vyúčtovací faktura). Bez druhé větve
-                -- proto kredit DDKP na 314 vypadl a záloha svítila jako otevřená o celou
-                -- částku DPH navíc. Vydaná větev (324) tenhle problém nemá — používá
-                -- obecné parent_invoice_id IS NOT NULL, které chytí DDKP i finál.
-                -- Podmínka advance_purchase_invoice_id IS NULL v druhé větvi brání dvojímu
-                -- započtení, kdyby jeden doklad nesl obě vazby.
-                SELECT link.advance_id, SUM(l.amount) AS settled_czk
+                SELECT link.advance_id, SUM({$settledAmount}) AS settled_czk
                   FROM (
-                      SELECT id AS child_id, supplier_id, advance_purchase_invoice_id AS advance_id
-                        FROM purchase_invoices
-                       WHERE advance_purchase_invoice_id IS NOT NULL
-                      UNION ALL
-                      SELECT id, supplier_id, parent_purchase_invoice_id
-                        FROM purchase_invoices
-                       WHERE document_kind = 'tax_document'
-                         AND parent_purchase_invoice_id IS NOT NULL
-                         AND advance_purchase_invoice_id IS NULL
-                      UNION ALL
-                      -- Samostatný DDKP je sám sobě zálohou i jejím čerpáním: na 314 mu
-                      -- sedí debet z úhrady a kredit vlastní daně, zbytek (základ) čeká
-                      -- na konečnou fakturu. Bez téhle větve by svítil jako otevřený
-                      -- o celou zaplacenou částku včetně daně, kterou už odečetl.
-                      SELECT id, supplier_id, id
-                        FROM purchase_invoices
-                       WHERE document_kind = 'tax_document'
-                         AND parent_purchase_invoice_id IS NULL
-                         AND advance_purchase_invoice_id IS NULL
+                      {$links}
                   ) link
                   CROSS JOIN params x
                   JOIN journal_entries e
@@ -811,7 +856,7 @@ final class SaldoRepository
                  WHERE link.supplier_id = x.supplier_id
                    AND e.posted_at IS NOT NULL AND e.entry_date <= x.as_of
                    AND (e.reversed_by IS NULL OR rev.entry_date > x.as_of)
-                   AND l.side = 'credit'
+                   {$settledSide}
                    AND (ca.id = x.account_id OR ca.parent_id = x.account_id)
                  GROUP BY link.advance_id
             )
@@ -827,8 +872,7 @@ final class SaldoRepository
               JOIN clients cl ON cl.id = p.vendor_id
               JOIN currencies cur ON cur.id = p.currency_id
               LEFT JOIN settled s ON s.advance_id = p.id
-             WHERE (p.document_kind = 'advance'
-                    OR (p.document_kind = 'tax_document' AND p.parent_purchase_invoice_id IS NULL))
+             WHERE {$kindFilter}
                AND " . self::advanceOpenFilterSql('paid.paid_czk', 'COALESCE(s.settled_czk, 0)')
                . self::partnerSql($partnerId)
                . self::dueBeforeSql('p', $dueBefore)
