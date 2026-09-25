@@ -1197,12 +1197,8 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
     </div>
 
     <div v-if="!loading && total > perPage" class="text-center text-sm">
-      <div v-if="page < totalPages" ref="loadMoreTarget" class="mt-2 pointer-fine-hidden">
-        <button type="button" :disabled="loadingMore" @click="load(false)"
-          :class="btnOutline('primary')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m0 0l-6-6m6 6l6-6" /></svg>
-          {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
-        </button>
+      <div v-if="page < totalPages" ref="loadMoreTarget" class="text-sm text-neutral-500 h-6 mt-2 pointer-fine-hidden">
+        <span v-if="loadingMore">{{ t('common.loading_more') }}</span>
       </div>
     </div>
 
