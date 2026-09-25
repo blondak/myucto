@@ -107,7 +107,11 @@ final class UnmarkPaidAction
 
         // Smaže evidované platby + přepočítá paid_total; u dokladu s kladnou částkou
         // k úhradě tím service rovnou revertuje status (sent/issued) a vyčistí paid_at.
-        $this->payments->deleteAllForInvoice($id);
+        try {
+            $this->payments->deleteAllForInvoice($id);
+        } catch (\RuntimeException $e) {
+            return Json::error($response, 'payment_locked', $e->getMessage(), 409);
+        }
 
         // Finální doklad krytý zálohou (amount_to_pay <= 0, žádné platby) service
         // nerevertuje — bookkeeping flip vrátíme přímo (původní chování).

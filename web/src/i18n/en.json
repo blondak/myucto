@@ -16624,7 +16624,7 @@
       "counterparty_mismatch": "counterparty does not match",
       "currency_mismatch": "currency does not match",
       "fx_on_czk_czk": "FX difference on a CZK payment",
-      "marked_paid_unposted": "marked paid manually — no payment posted (e.g. set-off)",
+      "marked_paid_unposted": "marked paid, but the payment is not posted (e.g. a manual set-off or an unposted GoPay payment, see Accounting → GoPay)",
       "attachment_tax_date_period": "tax point on the attachment in another month",
       "attachment_tax_date": "tax point on the attachment on another day",
       "attachment_amount": "amount on the attachment differs",
@@ -19095,6 +19095,18 @@
       "empty": "No GoPay XML has been imported yet",
       "empty_description": "Save the settings, then upload your first monthly Clearing XML."
     },
+    "pending": {
+      "title": "Awaiting clearing",
+      "description": "An invoice paid through GoPay is posted on the payment date: the receivable (311) is settled and GoPay holds the money (GoPay account). These payments have not been confirmed by any clearing yet. The next clearing import takes them over without another entry.",
+      "total": "Arrives in the next clearing",
+      "empty": "No GoPay payment is awaiting clearing.",
+      "unrecorded": "GoPay payments not yet posted on the payment date: {count}",
+      "unposted": "Awaiting payments with a posting error: {count}",
+      "post_button": "Post payments awaiting clearing",
+      "posting": "Posting...",
+      "posted": "Done. Newly posted {created}, posted awaiting payments {posted}.",
+      "posted_with_issues": "Newly posted {created}, posted {posted}, with an error {issues}. The reason is shown next to the payment."
+    },
     "col": {
       "date": "Payout date",
       "clearing_id": "Clearing ID",
@@ -19175,7 +19187,9 @@
       "pdf_invalid_extension": "Only PDF files are allowed.",
       "pdf_invalid": "The file is not a valid PDF.",
       "pdf_not_found": "The clearing PDF was not found.",
-      "not_found": "The GoPay clearing was not found."
+      "not_found": "The GoPay clearing was not found.",
+      "payment_in_clearing": "The payment is already confirmed by a GoPay clearing. Delete the clearing first.",
+      "payment_already_posted": "The invoice payment is already posted by another GoPay movement."
     }
   },
   "bank_accounts": {

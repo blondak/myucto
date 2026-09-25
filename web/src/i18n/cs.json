@@ -16624,7 +16624,7 @@
       "counterparty_mismatch": "protistrana nesedí",
       "currency_mismatch": "měna nesedí",
       "fx_on_czk_czk": "kurzový rozdíl na korunové platbě",
-      "marked_paid_unposted": "označeno jako uhrazené ručně — úhrada není zaúčtovaná (např. zápočet)",
+      "marked_paid_unposted": "označeno jako uhrazené, ale úhrada není zaúčtovaná (např. ruční zápočet nebo GoPay úhrada bez zaúčtování, viz Účetnictví → GoPay)",
       "attachment_tax_date_period": "DUZP na příloze v jiném měsíci",
       "attachment_tax_date": "DUZP na příloze jiný den",
       "attachment_amount": "částka na příloze jiná",
@@ -19095,6 +19095,18 @@
       "empty": "Zatím nebylo načteno žádné GoPay XML",
       "empty_description": "Po uložení nastavení nahraj první měsíční Clearing XML."
     },
+    "pending": {
+      "title": "Čeká na vyúčtování",
+      "description": "Úhrada faktury přes GoPay se zaúčtuje dnem platby: pohledávka (311) zaniká a peníze drží GoPay (GoPay účet). Tady jsou úhrady, které ještě nepotvrdilo žádné vyúčtování. Příští import vyúčtování je převezme bez dalšího zápisu.",
+      "total": "Dorazí v příštím vyúčtování",
+      "empty": "Žádná GoPay úhrada nečeká na vyúčtování.",
+      "unrecorded": "GoPay úhrady bez zaúčtování ke dni platby: {count}",
+      "unposted": "Čekající úhrady s chybou zaúčtování: {count}",
+      "post_button": "Zaúčtovat úhrady čekající na vyúčtování",
+      "posting": "Účtuji...",
+      "posted": "Hotovo. Nově zaúčtováno {created}, čekajících úhrad je zaúčtovaných {posted}.",
+      "posted_with_issues": "Nově zaúčtováno {created}, zaúčtovaných {posted}, s chybou {issues}. Důvod je uvedený u úhrady."
+    },
     "col": {
       "date": "Datum převodu",
       "clearing_id": "Clearing ID",
@@ -19175,7 +19187,9 @@
       "pdf_invalid_extension": "Povolené je pouze PDF.",
       "pdf_invalid": "Soubor není platné PDF.",
       "pdf_not_found": "PDF vyúčtování nebylo nalezeno.",
-      "not_found": "GoPay vyúčtování nebylo nalezeno."
+      "not_found": "GoPay vyúčtování nebylo nalezeno.",
+      "payment_in_clearing": "Úhrada je už potvrzená vyúčtováním GoPay. Smazat ji lze až po smazání vyúčtování.",
+      "payment_already_posted": "Úhrada faktury je už zaúčtovaná jiným GoPay pohybem."
     }
   },
   "bank_accounts": {

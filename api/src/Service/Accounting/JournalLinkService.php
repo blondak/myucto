@@ -821,21 +821,24 @@ final class JournalLinkService
         if ($kind === 'gopay') {
             foreach ($this->rows(
                 "SELECT m.id,m.performed_on,m.amount,m.order_id,m.payment_session_id,
-                        m.movement_type,c.id clearing_pk,c.clearing_id,c.currency
+                        m.movement_type,c.id clearing_pk,c.clearing_id,COALESCE(c.currency,m.currency) currency
                    FROM gopay_movements m
-                   JOIN gopay_clearings c ON c.id=m.clearing_id AND c.supplier_id=m.supplier_id
+              LEFT JOIN gopay_clearings c ON c.id=m.clearing_id AND c.supplier_id=m.supplier_id
                   WHERE m.supplier_id=? AND m.id IN ({$in})",
                 array_merge([$supplierId], $ids)
             ) as $r) {
                 $id = (int) $r['id'];
                 $reference = (string) ($r['order_id'] ?: $r['payment_session_id'] ?: ('#' . $id));
+                $pending = $r['clearing_pk'] === null;
                 $out[$id] = [
                     'title' => 'GoPay ' . $reference,
-                    'subtitle' => 'Vyúčtování ' . (string) $r['clearing_id'],
+                    'subtitle' => $pending ? 'Čeká na vyúčtování' : 'Vyúčtování ' . (string) $r['clearing_id'],
                     'date' => (string) $r['performed_on'],
                     'amount' => (float) $r['amount'],
                     'currency' => strtoupper((string) $r['currency']),
-                    'route' => ['name' => 'gopay', 'query' => ['clearing' => (int) $r['clearing_pk']]],
+                    'route' => $pending
+                        ? ['name' => 'gopay']
+                        : ['name' => 'gopay', 'query' => ['clearing' => (int) $r['clearing_pk']]],
                 ];
             }
             return $out;
