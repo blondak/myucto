@@ -119,6 +119,29 @@ final class JournalEntryRepository
 
         $this->deleteLines($id);
         $this->insertLines($pdo, $id, (int) $header['supplier_id'], $lines);
+
+        // Okruh drží řádek přes (zápis, pořadí), takže přeúčtování ho přežije. Pokud
+        // na stejném pořadí teď sedí jiný účet, položka z okruhu odejde se stopou v auditu.
+        $this->logReleasedPairings(
+            (int) $header['supplier_id'],
+            $id,
+            (new JournalLinePairingRepository($this->db))->releaseStale((int) $header['supplier_id'], $id),
+            'repost',
+        );
+    }
+
+    /**
+     * @param list<array{pairing_id:int, entry_id:int, line_no:int}> $released
+     */
+    private function logReleasedPairings(int $supplierId, int $entryId, array $released, string $reason): void
+    {
+        if ($released === []) {
+            return;
+        }
+        $this->activity->log('accounting.pairing_released', null, 'journal_entry', $entryId, [
+            'reason' => $reason,
+            'items'  => $released,
+        ], null, null, $supplierId);
     }
 
     public function deleteLines(int $entryId): void
@@ -300,7 +323,18 @@ final class JournalEntryRepository
               WHERE id = ? AND supplier_id = ? AND reversed_by IS NULL'
         );
         $stmt->execute([$reversalEntryId, $id, $supplierId]);
-        return $stmt->rowCount() > 0;
+        if ($stmt->rowCount() === 0) {
+            return false;
+        }
+        // Originál se se svým protizápisem vyruší; jeho dřívější spárování s úhradou
+        // by jinak drželo úhradu uzavřenou a protizápis visel otevřený.
+        $this->logReleasedPairings(
+            $supplierId,
+            $id,
+            (new JournalLinePairingRepository($this->db))->releaseEntry($supplierId, $id),
+            'reversal',
+        );
+        return true;
     }
 
     /**

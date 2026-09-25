@@ -1,0 +1,260 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Accounting\Reports;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\JournalLinePairingRepository;
+use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
+use MyInvoice\Service\Accounting\DocumentPartnerName;
+use PDO;
+
+/**
+ * Kontext řádků výpisu účtu: protiúčet, partner, variabilní symbol, měna a okruh.
+ *
+ * Dotahuje se dávkově pro jednu stránku výpisu (pár dotazů bez ohledu na počet
+ * řádků), ne JOINy v dotazu s běžícím zůstatkem: ten jede přes celou historii
+ * účtu a další JOINy na doklady by ho zpomalily kvůli sloupcům, které se ukážou
+ * jen na jedné stránce.
+ *
+ * Partner a VS se berou ze zdrojového dokladu zápisu (vydaná a přijatá faktura,
+ * bankovní pohyb, pokladní doklad, zápočet přes hrazený doklad). Měna je měna
+ * řádku, jinak měna dokladu, jinak CZK.
+ */
+final class JournalLineContext
+{
+    private const MAX_COUNTER_ACCOUNTS = 3;
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly JournalLinePairingRepository $pairings,
+    ) {}
+
+    /**
+     * Každá položka musí nést entry_id, line_no, account_id (účet řádku), side,
+     * source_type, source_id, currency_code a amount_foreign.
+     *
+     * @param list<array<string,mixed>> $items
+     * @return list<array<string,mixed>>
+     */
+    public function enrich(int $supplierId, array $items): array
+    {
+        if ($items === []) {
+            return [];
+        }
+        $entryIds = array_values(array_unique(array_map(static fn (array $i): int => (int) $i['entry_id'], $items)));
+        $entryLines = $this->entryLines($supplierId, $entryIds);
+
+        $refs = [];
+        foreach ($items as $it) {
+            $sid = $it['source_id'] ?? null;
+            if ($sid !== null && (int) $sid > 0 && (int) $sid < ClosingSourceId::STOCK_SLOT_BASE) {
+                $refs[(string) $it['source_type']][] = (int) $sid;
+            }
+        }
+        $docs = $this->documents($supplierId, $refs);
+        $pairingMap = $this->pairings->pairingsForLines($supplierId, array_map(static fn (array $i): array => [
+            'entry_id' => (int) $i['entry_id'],
+            'line_no' => (int) $i['line_no'],
+            'account_id' => (int) $i['account_id'],
+        ], $items));
+
+        foreach ($items as &$it) {
+            $doc = $docs[(string) $it['source_type'] . ':' . (string) ($it['source_id'] ?? '')] ?? null;
+            $it['counter_accounts'] = $this->counterAccounts($entryLines[(int) $it['entry_id']] ?? [], $it);
+            $it['partner'] = $doc['partner'] ?? null;
+            $it['variable_symbol'] = $doc['vs'] ?? null;
+            $lineCurrency = isset($it['currency_code']) && $it['currency_code'] !== null && $it['currency_code'] !== ''
+                ? strtoupper((string) $it['currency_code']) : null;
+            $it['currency'] = $lineCurrency ?? ($doc['currency'] ?? 'CZK');
+            $it['amount_foreign'] = isset($it['amount_foreign']) && $it['amount_foreign'] !== null
+                ? round((float) $it['amount_foreign'], 2) : null;
+            $it['pairing_id'] = $pairingMap[$it['entry_id'] . ':' . $it['line_no'] . ':' . $it['account_id']] ?? null;
+            unset($it['currency_code']);
+        }
+        unset($it);
+        return $items;
+    }
+
+    /**
+     * Protiúčty řádku: účty opačné strany téhož zápisu (bez účtu řádku samého);
+     * když žádné nejsou, ostatní účty zápisu.
+     *
+     * @param list<array{line_no:int, account_code:string, side:string}> $lines
+     * @param array<string,mixed> $item
+     */
+    private function counterAccounts(array $lines, array $item): ?string
+    {
+        $own = (string) ($item['account_code'] ?? '');
+        $opposite = [];
+        $other = [];
+        foreach ($lines as $l) {
+            if ($l['account_code'] === $own) {
+                continue;
+            }
+            $other[$l['account_code']] = true;
+            if ($l['side'] !== $item['side']) {
+                $opposite[$l['account_code']] = true;
+            }
+        }
+        $codes = array_keys($opposite !== [] ? $opposite : $other);
+        if ($codes === []) {
+            return null;
+        }
+        sort($codes, SORT_STRING);
+        $shown = array_slice($codes, 0, self::MAX_COUNTER_ACCOUNTS);
+        return implode(', ', $shown) . (count($codes) > self::MAX_COUNTER_ACCOUNTS ? ', …' : '');
+    }
+
+    /**
+     * @param list<int> $entryIds
+     * @return array<int,list<array{line_no:int, account_code:string, side:string}>>
+     */
+    private function entryLines(int $supplierId, array $entryIds): array
+    {
+        $out = [];
+        foreach (array_chunk($entryIds, 500) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT l.entry_id, l.line_no, l.side, ca.account_code
+                   FROM journal_entry_lines l
+                   JOIN chart_of_accounts ca ON ca.id = l.account_id
+                  WHERE l.supplier_id = ? AND l.entry_id IN ({$in})"
+            );
+            $stmt->execute([$supplierId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $out[(int) $r['entry_id']][] = [
+                    'line_no'      => (int) $r['line_no'],
+                    'account_code' => (string) $r['account_code'],
+                    'side'         => (string) $r['side'],
+                ];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string,list<int>> $refs source_type => id[]
+     * @return array<string,array{partner:?string, vs:?string, currency:?string}> "typ:id" => kontext
+     */
+    private function documents(int $supplierId, array $refs): array
+    {
+        $out = [];
+        $settlements = $refs['settlement'] ?? [];
+        if ($settlements !== []) {
+            foreach ($this->rows(
+                "SELECT id, doc_type, doc_id FROM invoice_settlements WHERE supplier_id = ? AND id IN (%s)",
+                $supplierId,
+                $settlements,
+            ) as $r) {
+                $type = (string) $r['doc_type'];
+                if ($type === 'invoice' || $type === 'purchase_invoice') {
+                    $refs[$type][] = (int) $r['doc_id'];
+                    $out['settlement:' . $r['id']] = ['ref' => $type . ':' . $r['doc_id']];
+                }
+            }
+        }
+
+        if (!empty($refs['invoice'])) {
+            foreach ($this->rows(
+                "SELECT i.id, i.varsymbol, i.client_snapshot, c.company_name, c.first_name, c.last_name,
+                        UPPER(cur.code) AS currency
+                   FROM invoices i
+              LEFT JOIN clients c ON c.id = i.client_id AND c.supplier_id = i.supplier_id
+              LEFT JOIN currencies cur ON cur.id = i.currency_id
+                  WHERE i.supplier_id = ? AND i.id IN (%s)",
+                $supplierId,
+                $refs['invoice'],
+            ) as $r) {
+                $out['invoice:' . $r['id']] = [
+                    'partner'  => DocumentPartnerName::from($r),
+                    'vs'       => self::nullable($r['varsymbol']),
+                    'currency' => self::nullable($r['currency']),
+                ];
+            }
+        }
+        if (!empty($refs['purchase_invoice'])) {
+            foreach ($this->rows(
+                "SELECT p.id, p.varsymbol, p.vendor_snapshot, c.company_name, c.first_name, c.last_name,
+                        UPPER(cur.code) AS currency
+                   FROM purchase_invoices p
+              LEFT JOIN clients c ON c.id = p.vendor_id AND c.supplier_id = p.supplier_id
+              LEFT JOIN currencies cur ON cur.id = p.currency_id
+                  WHERE p.supplier_id = ? AND p.id IN (%s)",
+                $supplierId,
+                $refs['purchase_invoice'],
+            ) as $r) {
+                $out['purchase_invoice:' . $r['id']] = [
+                    'partner'  => DocumentPartnerName::from($r, 'vendor_snapshot'),
+                    'vs'       => self::nullable($r['varsymbol']),
+                    'currency' => self::nullable($r['currency']),
+                ];
+            }
+        }
+        if (!empty($refs['bank'])) {
+            // bank_transactions nemá supplier_id — tenant přes výpis.
+            foreach ($this->rows(
+                "SELECT t.id, t.counterparty_name, t.variable_symbol, UPPER(COALESCE(t.currency, s.currency)) AS currency
+                   FROM bank_transactions t
+                   JOIN bank_statements s ON s.id = t.statement_id
+                  WHERE s.supplier_id = ? AND t.id IN (%s)",
+                $supplierId,
+                $refs['bank'],
+            ) as $r) {
+                $out['bank:' . $r['id']] = [
+                    'partner'  => self::nullable($r['counterparty_name']),
+                    'vs'       => self::nullable($r['variable_symbol']),
+                    'currency' => self::nullable($r['currency']),
+                ];
+            }
+        }
+        if (!empty($refs['cash'])) {
+            foreach ($this->rows(
+                "SELECT id, partner_name, UPPER(currency_code) AS currency
+                   FROM cash_documents
+                  WHERE supplier_id = ? AND id IN (%s)",
+                $supplierId,
+                $refs['cash'],
+            ) as $r) {
+                $out['cash:' . $r['id']] = [
+                    'partner'  => self::nullable($r['partner_name']),
+                    'vs'       => null,
+                    'currency' => self::nullable($r['currency']),
+                ];
+            }
+        }
+
+        foreach ($out as $key => $ctx) {
+            if (isset($ctx['ref'])) {
+                $out[$key] = $out[$ctx['ref']] ?? ['partner' => null, 'vs' => null, 'currency' => null];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<int> $ids
+     * @return list<array<string,mixed>>
+     */
+    private function rows(string $sqlWithIn, int $supplierId, array $ids): array
+    {
+        $ids = array_values(array_unique($ids));
+        $rows = [];
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(sprintf($sqlWithIn, implode(',', array_fill(0, count($chunk), '?'))));
+            $stmt->execute([$supplierId, ...$chunk]);
+            $rows = [...$rows, ...$stmt->fetchAll(PDO::FETCH_ASSOC)];
+        }
+        return $rows;
+    }
+
+    private static function nullable(mixed $v): ?string
+    {
+        if ($v === null) {
+            return null;
+        }
+        $s = trim((string) $v);
+        return $s === '' ? null : $s;
+    }
+}
