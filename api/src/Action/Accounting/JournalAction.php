@@ -614,6 +614,9 @@ final class JournalAction
      *
      * Rozhodnutí přepsat × stornovat × odmítnout dělá {@see DocumentRepostService},
      * tedy TATÁŽ služba, která ho pak provede — náhled se s výsledkem nemůže rozejít.
+     *
+     * POST s tělem `{ lines: [...] }` vrátí rozhodnutí pro ty konkrétní opravené řádky
+     * (přepis na místě v zamčeném datu, nebo důvod storna). Nic nezapisuje.
      */
     public function repostPlan(Request $request, Response $response, array $args): Response
     {
@@ -627,6 +630,19 @@ final class JournalAction
         }
 
         try {
+            if (strtoupper($request->getMethod()) === 'POST') {
+                $body = (array) ($request->getParsedBody() ?? []);
+                $lines = is_array($body['lines'] ?? null) ? $this->parsePostingLines($body['lines']) : null;
+                if ($lines === null) {
+                    return Json::error(
+                        $response,
+                        'validation_failed',
+                        'Každý řádek potřebuje account_code, side (debit/credit) a kladnou částku.',
+                        422,
+                    );
+                }
+                return Json::ok($response, $this->repost->previewPlan($supplierId, $sourceType, $docId, $lines));
+            }
             return Json::ok($response, $this->repost->plan($supplierId, $sourceType, $docId));
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);

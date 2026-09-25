@@ -127,6 +127,26 @@ final class DocumentRepostService
     }
 
     /**
+     * Náhled rozhodnutí pro KONKRÉTNÍ opravené řádky, jak je dialog právě má. Jde
+     * touž cestou jako {@see repost()} (u banky přes bankovní invarianty), jen nic
+     * nezapíše. Dialog podle něj ukáže, jestli se zápis přepíše na místě, nebo proč
+     * je potřeba storno. Bez něj by se o tom rozhodovalo až po potvrzení.
+     *
+     * @param 'invoice'|'purchase_invoice'|'bank' $sourceType
+     * @param list<array{account_code:string, side:string, amount:float}> $lines
+     *
+     * @return array<string,mixed> totéž co {@see plan()}
+     */
+    public function previewPlan(int $supplierId, string $sourceType, int $docId, array $lines): array
+    {
+        if ($sourceType === 'bank') {
+            $lines = $this->bankPosting->prepareRepostLines($supplierId, $docId, $lines);
+        }
+
+        return $this->plan($supplierId, $sourceType, $docId, $lines);
+    }
+
+    /**
      * ROZHODNUTÍ samo — čistá funkce nad stavem, bez DB.
      *
      * Je oddělené schválně, a to ze dvou důvodů. Za prvé je to jediné místo, kde se

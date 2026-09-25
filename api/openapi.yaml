@@ -9813,6 +9813,49 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+    post:
+      tags: [Accounting]
+      summary: Plán přeúčtování pro konkrétní opravené řádky
+      description: >-
+        Totéž rozhodnutí jako GET, ale nad opravenými řádky z těla, bez zápisu.
+        V zamčeném datu vrátí `strategy: replace` s `reason_code: tax_neutral_rewrite`,
+        když je oprava jen přesunem mezi účty bez daňového dopadu, jinak
+        `strategy: reverse` a v `tax_neutral_violation` důvod, proč přepis na místě nejde.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: source, required: true, schema: { type: string, enum: [invoices, purchase-invoices, bank-transactions] } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                lines:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [account_code, side, amount]
+                    properties:
+                      account_code: { type: string }
+                      side: { type: string, enum: [debit, credit] }
+                      amount: { type: number, format: float, exclusiveMinimum: 0 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalRepostPlan' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Doklad není zaúčtovaný
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/journal/repost/{source}/{id}:
     post:
@@ -28834,8 +28877,17 @@ components:
         date_shifted: { type: boolean, description: target_date se liší od entry_date — provedení vyžaduje potvrzení }
         reason_code:
           type: [string, "null"]
-          enum: [period_not_open, date_locked, entry_reversed, null]
-          description: Proč nejde přepsat na místě (resp. proč je operace blokovaná)
+          enum: [period_not_open, date_locked, entry_reversed, tax_neutral_rewrite, null]
+          description: >-
+            Proč nejde přepsat na místě (resp. proč je operace blokovaná);
+            `tax_neutral_rewrite` = přepis na místě v zamčeném datu
+        tax_neutral_available:
+          type: boolean
+          description: Datum je zamčené podaným DPH, ale přesun mezi účty bez daňového dopadu se přepíše na místě
+        tax_neutral_violation:
+          type: [string, "null"]
+          enum: [unknown_account, special_account, tax_account_changed, amounts_changed, account_class_changed, tax_deductibility_changed, null]
+          description: Proč opravené řádky nejdou přepsat na místě (jen u plánu s řádky)
         lines:
           type: array
           description: Aktuální řádky zápisu — dialog je předvyplní k úpravě
