@@ -329,6 +329,15 @@ function runAutoBackfills(\PDO $db, string $binDir, Connection $connection): voi
             'count'   => static fn (): int => (new \MyInvoice\Service\Accounting\Bank\BankDocumentNumberBackfill($connection))->pending(),
             'script'  => 'bank-document-series-backfill.php',
         ],
+        [
+            // Platby kartou zaúčtované dřív přes mezičlen 378.x se převedou na přímé
+            // účtování banky, viz CardClearingConversion. Tabulky a sloupce mezičlenu,
+            // ze kterých převod pozná analytiky karet, migrace zatím nemažou.
+            'name'    => 'card-clearing-to-direct',
+            'reason'  => 'plateb kartou na mezičlenu k převodu na přímé účtování',
+            'count'   => static fn (): int => (new \MyInvoice\Service\Accounting\Bank\CardClearingConversion($connection))->pending(),
+            'script'  => 'card-clearing-to-direct.php',
+        ],
     ];
 
     echo "\n=== Auto-backfill check ===\n";
