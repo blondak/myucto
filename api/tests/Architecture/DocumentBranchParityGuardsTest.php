@@ -109,13 +109,15 @@ final class DocumentBranchParityGuardsTest extends TestCase
             'checkDraftAdvanceTaxDocuments' => 'kontrola chybějícího DDKP dává smysl jen na vydané větvi',
         ],
 
-        // Saldo 324 vs. 314: vydaná větev čerpání zálohy hledá obecným
-        // `child.parent_invoice_id IS NOT NULL`, které chytí DDKP i vyúčtovací fakturu
-        // najednou. Přijatá to takhle udělat NEMŮŽE — vyúčtovací faktura se váže přes
-        // advance_purchase_invoice_id (UNIQUE index), DDKP přes parent_purchase_invoice_id,
-        // takže musí obě cesty vyjmenovat a DDKP odlišit podle document_kind.
-        'Repository/SaldoRepository.php' => [
-            'fetchPaidAdvances' => 'vydaná větev pokrývá DDKP obecným parent_invoice_id IS NOT NULL',
+        // Vazba úhrady zálohy na DDKP a konečnou fakturu je zrcadlená, jen se jinak čte:
+        // vydaný DDKP i finál visí na proformě přes TENTÝŽ parent_invoice_id (vydaná větev
+        // je bere výčtem `IN ('invoice', 'tax_document')`, který guard nepočítá), přijatý
+        // DDKP visí přes parent_purchase_invoice_id a finál přes advance_purchase_invoice_id,
+        // takže přijatá větev musí DDKP rozlišit podle document_kind.
+        'Service/Accounting/JournalLinkService.php' => [
+            'hasRelatedMap'      => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
+            'advanceParentOf'    => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
+            'withAdvanceChildren' => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
         ],
     ];
 

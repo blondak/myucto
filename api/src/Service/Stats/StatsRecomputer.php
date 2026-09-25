@@ -31,7 +31,10 @@ final class StatsRecomputer
         if ($projectId <= 0) return;
         $pdo = $this->db->pdo();
 
-        $pdo->beginTransaction();
+        // Volající smí přepočet pustit uvnitř vlastní transakce (IssueInvoiceAction to
+        // výslovně podporuje), pak se jeho transakce nezakládá ani nepotvrzuje tady.
+        $owns = !$pdo->inTransaction();
+        if ($owns) $pdo->beginTransaction();
         try {
             $pdo->prepare('DELETE FROM project_revenue_cache WHERE project_id = ?')
                 ->execute([$projectId]);
@@ -67,9 +70,9 @@ final class StatsRecomputer
                     (int) $r['cnt'],
                 ]);
             }
-            $pdo->commit();
+            if ($owns) $pdo->commit();
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($owns && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
     }
@@ -82,7 +85,8 @@ final class StatsRecomputer
         if ($clientId <= 0) return;
         $pdo = $this->db->pdo();
 
-        $pdo->beginTransaction();
+        $owns = !$pdo->inTransaction();
+        if ($owns) $pdo->beginTransaction();
         try {
             $pdo->prepare('DELETE FROM client_revenue_cache WHERE client_id = ?')
                 ->execute([$clientId]);
@@ -118,9 +122,9 @@ final class StatsRecomputer
                     (int) $r['cnt'],
                 ]);
             }
-            $pdo->commit();
+            if ($owns) $pdo->commit();
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($owns && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
     }

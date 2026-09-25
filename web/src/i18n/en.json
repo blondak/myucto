@@ -13169,6 +13169,7 @@
       "entry_reversed": "The document's entry has been reversed — post a correction as a new entry.",
       "empty_entry": "The document has no lines to post.",
       "advance_settlement_ambiguous": "The advance has several tax documents for payment, so the advance VAT to deduct cannot be determined unambiguously. Check the links between the advance and its tax documents for payment.",
+      "advance_tax_document_unposted": "The tax document for the payment received on this advance is not posted. Post it before the final invoice, otherwise the advance would be settled against VAT that is not on the account yet.",
       "ddkp_reverse_charge_unsupported": "A tax document for payment under the reverse-charge regime is not posted automatically — post the VAT with a manual entry.",
       "date_locked": "The entry date falls into the locked part of the books. An admin can move the lock in accounting settings.",
       "repost_date_shift_confirmation_required": "The original date is closed or locked — confirm that both the reversal and the correction will land on a different date."
@@ -16725,6 +16726,7 @@
       "currency_mismatch": "currency does not match",
       "fx_on_czk_czk": "FX difference on a CZK payment",
       "marked_paid_unposted": "marked paid, but the payment is not posted (e.g. a manual set-off or an unposted GoPay payment, see Accounting → GoPay)",
+      "marked_paid_unposted_payable": "marked paid, but the payment is not posted (e.g. a manual set-off, a card payment or a payment not linked to the document)",
       "attachment_tax_date_period": "tax point on the attachment in another month",
       "attachment_tax_date": "tax point on the attachment on another day",
       "attachment_amount": "amount on the attachment differs",

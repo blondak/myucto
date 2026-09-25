@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
+use MyInvoice\Support\Sql\LinkedManualSettlementSql;
 use PDO;
 
 /**
@@ -1096,9 +1097,11 @@ final class ClosingRepository
      *   saldo   = booked − settled.
      *
      * Úhrada bez vazby na deník (mark_paid / ruční platba bez dokladu) settled
-     * nezvýší → doklad se objeví v nálezu. Zápočty (source_type='offset') a ruční
-     * zápisy na 311 vazbu na doklad nenesou — projeví se jako otevřené saldo,
-     * což je pro inventarizační kontrolu žádoucí (člověk ověří). Tolerance
+     * nezvýší → doklad se objeví v nálezu. Zápočty (source_type='offset') vazbu na
+     * doklad nenesou — projeví se jako otevřené saldo, což je pro inventarizační
+     * kontrolu žádoucí (člověk ověří). Ruční zápis na 311 se jako vyrovnání počítá
+     * jen tehdy, když ho účetní na doklad výslovně navázala
+     * ({@see linkedManualSettledSql}). Tolerance
      * |saldo| > 0,50 Kč (haléřová/kurzová zaokrouhlení nehlásíme).
      *
      * Placeholdery jsou v každém CTE zvlášť (žádné `params` CTE): MariaDB 11.8
@@ -1160,7 +1163,11 @@ final class ClosingRepository
                 -- Úhrada proformy se musí započítat FINÁLNÍ faktuře, ne proformě:
                 -- proforma sama nemá předpis na 311 (nezakládá pohledávku), takže by
                 -- ji `JOIN booked` zahodilo a konečná faktura by svítila jako
-                -- neuhrazená, přestože je zaplacená předem.
+                -- neuhrazená, přestože je zaplacená předem. Jen konečné faktuře, ne
+                -- DDKP: ten zálohu nevyúčtovává, jen z ní odvádí daň (skupinu s konečnou
+                -- fakturou mu dává `doc` níž). Bez konečné faktury úhrada zůstane na
+                -- proformě a `JOIN booked` ji zahodí — přijatá záloha na 311 není
+                -- nesoulad zaplaceného dokladu, ukazuje ji saldokonto.
                 SELECT ip.bank_transaction_id,
                        COALESCE(ch.id, ip.invoice_id) AS invoice_id,
                        ip.amount AS num, a.total_alloc AS den
@@ -1171,7 +1178,7 @@ final class ClosingRepository
                                        AND pf.invoice_type = 'proforma'
                   LEFT JOIN invoices ch ON ch.parent_invoice_id = pf.id
                                        AND ch.supplier_id = ip.supplier_id
-                                       AND ch.invoice_type <> 'proforma'
+                                       AND ch.invoice_type NOT IN ('proforma', 'tax_document')
                                        AND ch.cancelled_at IS NULL
                  WHERE ip.supplier_id = ?
                 UNION ALL
@@ -1256,22 +1263,37 @@ final class ClosingRepository
                    AND (e.reversed_by IS NULL OR rev.entry_date > ?)
                    AND (ca.account_code LIKE '311%' OR COALESCE(pa.account_code, '') LIKE '311%')
                  GROUP BY COALESCE(gm.invoice_id, gm.credit_note_id)
+            ), settled_manual AS (
+                " . self::linkedManualSettledSql('invoice', '311', 'credit') . "
             ), doc AS (
                 -- Doklad + jeho peněžní vyrovnání; dobropis patří do skupiny svého RODIČE.
                 -- Zdůvodnění skupiny viz {@see paidPurchasesOpenSaldo} — na výnosové straně
                 -- platí zrcadlově (dobropis snižuje pohledávku na 311 i bez pohybu peněz).
+                -- DDKP k proformě patří do skupiny konečné faktury téže proformy: jeho
+                -- 311 MD / 343 D a její zúčtování DPH ze zálohy se na 311 potkají až spolu.
                 SELECT i.id,
                        CASE WHEN i.invoice_type = 'credit_note' AND i.parent_invoice_id IS NOT NULL
-                            THEN i.parent_invoice_id ELSE i.id END AS group_id,
+                            THEN i.parent_invoice_id
+                            WHEN i.invoice_type = 'tax_document' AND i.parent_invoice_id IS NOT NULL
+                            THEN COALESCE((
+                                SELECT MIN(fin.id) FROM invoices fin
+                                 WHERE fin.supplier_id = i.supplier_id
+                                   AND fin.parent_invoice_id = i.parent_invoice_id
+                                   AND fin.invoice_type NOT IN ('proforma', 'tax_document')
+                                   AND fin.cancelled_at IS NULL
+                            ), i.id)
+                            ELSE i.id END AS group_id,
                        b.booked,
                        COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0)
-                         + COALESCE(so.settled, 0) + COALESCE(sg.settled, 0) AS settled
+                         + COALESCE(so.settled, 0) + COALESCE(sg.settled, 0)
+                         + COALESCE(sm.settled, 0) AS settled
                   FROM booked b
                   JOIN invoices i ON i.id = b.invoice_id AND i.supplier_id = ?
                   LEFT JOIN settled_bank sb ON sb.invoice_id = i.id
                   LEFT JOIN settled_cash sc ON sc.invoice_id = i.id
                   LEFT JOIN settled_offset so ON so.invoice_id = i.id
                   LEFT JOIN settled_gopay sg ON sg.invoice_id = i.id
+                  LEFT JOIN settled_manual sm ON sm.doc_id = i.id
             ), grp AS (
                 SELECT group_id, SUM(booked) AS booked, SUM(settled) AS settled
                   FROM doc
@@ -1290,6 +1312,9 @@ final class ClosingRepository
               JOIN clients cl ON cl.id = i.client_id
              WHERE i.status = 'paid'
                AND (i.paid_at IS NULL OR i.paid_at <= ?)
+               -- DDKP bez konečné faktury = čerpání přijaté zálohy, která na 311 čeká na
+               -- vyúčtování. Úhradu nese proforma, takže by tu svítil jako nezaplacený.
+               AND NOT (i.invoice_type = 'tax_document' AND i.parent_invoice_id IS NOT NULL)
             -- Tolerance 1 Kč — zdůvodnění viz paidPurchasesOpenSaldo.
             HAVING ABS(saldo) > 1.0
              ORDER BY ABS(saldo) DESC, i.id";
@@ -1302,10 +1327,21 @@ final class ClosingRepository
             $supplierId, $asOf, $asOf,          // settled_cash
             $supplierId, $asOf, $asOf,          // settled_offset
             $supplierId, $asOf, $asOf,          // settled_gopay
+            $supplierId, $asOf, $asOf,          // settled_manual
             $supplierId,                        // doc
             $supplierId, $asOf,                 // final SELECT
         ]);
         return array_map(static fn (array $r): array => self::castPaidSaldoRow($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** Vyrovnání ručním zápisem navázaným na doklad — viz {@see LinkedManualSettlementSql}. */
+    private static function linkedManualSettledSql(string $docType, string $accountPrefix, string $settleSide): string
+    {
+        return LinkedManualSettlementSql::sql(
+            $docType,
+            $settleSide,
+            LinkedManualSettlementSql::accountPrefixPredicate($accountPrefix),
+        );
     }
 
     /**
@@ -1477,18 +1513,33 @@ final class ClosingRepository
                           AND (ea.reversed_by IS NULL OR reva.entry_date > ?)
                           AND (caa.account_code LIKE '321%' OR COALESCE(paa.account_code, '') LIKE '321%')
                    )
+            ), settled_manual AS (
+                " . self::linkedManualSettledSql('purchase_invoice', '321', 'debit') . "
             ), doc AS (
                 -- Doklad = předpis + jeho vlastní peněžní vyrovnání. Dobropis se přiřadí
                 -- ke skupině svého RODIČE: opravný doklad nese na 321 opačné znaménko,
                 -- takže dvojice účet vynuluje, i když peníze nikdy netekly (vrácené zboží
                 -- prostě sníží závazek). Hodnotit každou stranu zvlášť znamenalo hlásit
                 -- obě jako otevřené saldo v plné výši, přestože 321 je po nich nula.
+                -- Přijatý DDKP k záloze placené na 321 patří do skupiny konečné faktury téže
+                -- zálohy (zrcadlo paidInvoicesOpenSaldo): úhradu nese záloha a konečná faktura
+                -- ji přebírá přes settled_advance.
                 SELECT pi.id,
                        CASE WHEN pi.document_kind = 'credit_note' AND pi.parent_purchase_invoice_id IS NOT NULL
-                            THEN pi.parent_purchase_invoice_id ELSE pi.id END AS group_id,
+                            THEN pi.parent_purchase_invoice_id
+                            WHEN pi.document_kind = 'tax_document' AND pi.parent_purchase_invoice_id IS NOT NULL
+                            THEN COALESCE((
+                                SELECT MIN(fin.id) FROM purchase_invoices fin
+                                 WHERE fin.supplier_id = pi.supplier_id
+                                   AND fin.advance_purchase_invoice_id = pi.parent_purchase_invoice_id
+                                   AND fin.document_kind NOT IN ('advance', 'tax_document')
+                                   AND fin.cancelled_at IS NULL
+                            ), pi.id)
+                            ELSE pi.id END AS group_id,
                        b.booked,
                        COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0) + COALESCE(so.settled, 0)
-                       + COALESCE(sg.settled, 0) + COALESCE(sa.settled, 0) AS settled
+                       + COALESCE(sg.settled, 0) + COALESCE(sa.settled, 0)
+                       + COALESCE(sm.settled, 0) AS settled
                   FROM booked b
                   JOIN purchase_invoices pi ON pi.id = b.purchase_invoice_id AND pi.supplier_id = ?
                   LEFT JOIN settled_bank sb ON sb.purchase_invoice_id = pi.id
@@ -1496,6 +1547,7 @@ final class ClosingRepository
                   LEFT JOIN settled_offset so ON so.purchase_invoice_id = pi.id
                   LEFT JOIN settled_agreement sg ON sg.purchase_invoice_id = pi.id
                   LEFT JOIN settled_advance sa ON sa.purchase_invoice_id = pi.id
+                  LEFT JOIN settled_manual sm ON sm.doc_id = pi.id
             ), grp AS (
                 SELECT group_id, SUM(booked) AS booked, SUM(settled) AS settled
                   FROM doc
@@ -1517,6 +1569,9 @@ final class ClosingRepository
               JOIN clients cl ON cl.id = pi.vendor_id
              WHERE pi.status = 'paid'
                AND (pi.paid_at IS NULL OR pi.paid_at <= ?)
+               -- DDKP bez konečné faktury = čerpání poskytnuté zálohy, která na 321 čeká na
+               -- vyúčtování; úhradu nese záloha.
+               AND NOT (pi.document_kind = 'tax_document' AND pi.parent_purchase_invoice_id IS NOT NULL)
             -- Tolerance 1 Kč: haléřové rozdíly vznikají zaokrouhlením úhrady (banka pošle
             -- 1 637 Kč proti faktuře 1 637,52) a chybějící úhrada to být nemůže. Dřív 0,50 Kč
             -- propouštělo i takové řádky a účetní je musela odbavovat jednu po druhé.
@@ -1534,6 +1589,7 @@ final class ClosingRepository
             $supplierId,                        // agreement_alloc
             $supplierId,                        // settled_agreement
             $supplierId, $supplierId, $asOf, $asOf, // settled_advance (+ guard nad deníkem)
+            $supplierId, $asOf, $asOf,          // settled_manual
             $supplierId,                        // doc
             $supplierId, $asOf,                 // final SELECT
         ]);
