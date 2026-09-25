@@ -719,6 +719,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     .singleline-list-table:not(.multirow-table) > tbody > tr:not(.table-detail-row) > td.wrap-cell {
       white-space: normal;
       overflow-wrap: anywhere;
+      min-width: 16rem;
     }
   }
 
@@ -761,6 +762,10 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+    .multirow-table > thead > tr > th.wrap-cell,
+    .multirow-table > tbody > tr:not(.table-detail-row) > td.wrap-cell {
+      grid-column: span 2;
     }
     .multirow-table > tbody > tr:not(.table-detail-row) > td.clip-cell {
       overflow: hidden;
