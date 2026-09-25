@@ -21588,6 +21588,9 @@
       "gaps_found": "Gaps found: {count}"
     },
     "dph_book": {
+      "nil_row_note": "Zero base and VAT (typically settlement of a fully paid advance)",
+      "nil_kh": "not reported",
+      "nil_kh_hint": "A document with zero base and VAT is not included in the control statement. The supply is reported on the tax document for the received payment.",
       "title": "VAT ledger",
       "subtitle": "Internal VAT journal grouped by VAT return rows. Not an official tax submission.",
       "download_pdf": "Download PDF",

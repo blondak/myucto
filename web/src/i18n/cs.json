@@ -21588,6 +21588,9 @@
       "gaps_found": "Nalezené mezery: {count}"
     },
     "dph_book": {
+      "nil_row_note": "Nulový základ i daň (typicky vyúčtování plně uhrazené zálohy)",
+      "nil_kh": "nevykazuje se",
+      "nil_kh_hint": "Doklad s nulovým základem i daní se do kontrolního hlášení neuvádí. Plnění je vykázané na daňovém dokladu k přijaté platbě.",
       "title": "Kniha DPH",
       "subtitle": "Interní VAT žurnál seskupený podle řádků DPH přiznání. Není to podání FÚ.",
       "download_pdf": "Stáhnout PDF",
