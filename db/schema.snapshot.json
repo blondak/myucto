@@ -877,7 +877,10 @@
         "1890_other_item_allocation_reversal.sql",
         "1891_other_item_posting_lines.sql",
         "1892_payroll_takeover_source_jmhz.sql",
-        "1893_purchase_invoice_extraction_review.sql"
+        "1893_purchase_invoice_extraction_review.sql",
+        "1894_gopay_pending_movements.sql",
+        "1895_journal_line_pairings.sql",
+        "1896_bank_document_series.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -5091,11 +5094,12 @@
             "columns": {
                 "account_movement_id": "varchar(40) NULL DEFAULT NULL",
                 "amount": "decimal(14,2) NOT NULL",
-                "clearing_id": "bigint(20) unsigned NOT NULL",
+                "clearing_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "counterparty_name": "varchar(190) NULL DEFAULT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "credit_note_id": "bigint(20) unsigned NULL DEFAULT NULL",
-                "external_id": "varchar(80) NOT NULL",
+                "currency": "char(3) NULL DEFAULT NULL",
+                "external_id": "varchar(80) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "invoice_payment_id": "bigint(20) unsigned NULL DEFAULT NULL",
@@ -5104,6 +5108,7 @@
                 "journal_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "movement_type": "enum('credit','storno','storno_fee','clearing_fee','fee_credit','payout') NOT NULL",
                 "order_id": "varchar(80) NULL DEFAULT NULL",
+                "origin": "enum('clearing','payment') NOT NULL DEFAULT 'clearing'",
                 "payment_channel": "varchar(40) NULL DEFAULT NULL",
                 "payment_session_id": "varchar(40) NULL DEFAULT NULL",
                 "performed_on": "date NOT NULL",
@@ -5120,6 +5125,7 @@
                 "idx_gopay_movement_journal": "BTREE (journal_entry_id)",
                 "idx_gopay_movement_order": "BTREE (supplier_id, order_id)",
                 "idx_gopay_movement_payment_session": "BTREE (supplier_id, payment_session_id)",
+                "idx_gopay_movement_pending": "BTREE (supplier_id, clearing_id, origin)",
                 "idx_gopay_movement_status": "BTREE (supplier_id, status, performed_on)",
                 "uq_gopay_movement_external": "UNIQUE BTREE (supplier_id, external_id)"
             },
@@ -6328,6 +6334,54 @@
             },
             "foreign_keys": {
                 "fk_jif_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "journal_line_pairing_items": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_id": "bigint(20) unsigned NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "entry_id": "bigint(20) unsigned NOT NULL",
+                "line_no": "int(10) unsigned NOT NULL",
+                "pairing_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, entry_id, line_no)",
+                "idx_jlpi_pairing": "BTREE (supplier_id, pairing_id)"
+            },
+            "foreign_keys": {
+                "fk_jlpi_entry": "(supplier_id, entry_id) -> journal_entries (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_jlpi_pairing": "(supplier_id, pairing_id) -> journal_line_pairings (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "journal_line_pairings": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_id": "bigint(20) unsigned NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "note": "varchar(255) NULL DEFAULT NULL",
+                "origin": "enum('manual','suggestion') NOT NULL DEFAULT 'manual'",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_jlp_created_by": "BTREE (created_by)",
+                "idx_jlp_supplier_account": "BTREE (supplier_id, account_id)",
+                "uq_jlp_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_jlp_account_supplier": "(supplier_id, account_id) -> chart_of_accounts (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_jlp_created_by": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_jlp_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },
@@ -20285,6 +20339,7 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "currency": "char(3) NULL DEFAULT NULL",
                 "currency_id": "int(10) unsigned NULL DEFAULT NULL",
+                "document_series": "varchar(10) NULL DEFAULT NULL",
                 "iban": "varchar(34) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
@@ -20299,7 +20354,8 @@
                 "fk_sba_currency": "BTREE (currency_id)",
                 "idx_sba_supplier": "BTREE (supplier_id, is_active)",
                 "uq_sba_account": "UNIQUE BTREE (supplier_id, account_canonical, bank_code_norm)",
-                "uq_sba_analytic": "UNIQUE BTREE (supplier_id, analytic_suffix)"
+                "uq_sba_analytic": "UNIQUE BTREE (supplier_id, analytic_suffix)",
+                "uq_sba_document_series": "UNIQUE BTREE (supplier_id, document_series)"
             },
             "foreign_keys": {
                 "fk_sba_currency": "(currency_id) -> currencies (id) ON UPDATE RESTRICT ON DELETE SET NULL",
