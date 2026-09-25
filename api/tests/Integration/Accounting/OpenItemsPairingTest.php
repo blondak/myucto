@@ -272,18 +272,23 @@ final class OpenItemsPairingTest extends TestCase
 
         $storno = $this->posting->reverse($this->supplierId, $a, ['entry_date' => self::YEAR . '-09-30', 'user_id' => $this->userId]);
 
-        $left = $this->openItems->pairing($this->supplierId, $pairing['id']);
-        self::assertCount(1, $left['items'], 'Stornovaný řádek z okruhu vypadl.');
-        self::assertSame($b, $left['items'][0]['entry_id']);
+        $this->expectRejection('not_found', fn () => $this->openItems->pairing($this->supplierId, $pairing['id']));
 
         $suggestions = $this->openItems->suggestions($this->supplierId, $transit, self::YEAR . '-12-31', 0);
         self::assertCount(1, $suggestions);
         self::assertSame('reversal', $suggestions[0]['kind'], 'Originál se stornem se navrhne bez ohledu na datum.');
         self::assertEqualsCanonicalizing([$a, $storno], array_column($suggestions[0]['lines'], 'entry_id'));
 
-        $data = $this->openItems->build($this->supplierId, $transit, self::YEAR . '-12-31', true, 1, 100);
+        $data = $this->openItems->build($this->supplierId, $transit, self::YEAR . '-12-31', false, 1, 100);
         self::assertSame(0, self::cents($data['difference']));
+        $partner = array_values(array_filter($data['items'], static fn (array $i): bool => $i['entry_id'] === $b));
+        self::assertNull($partner[0]['pairing_id'], 'Protějšek stornovaného řádku je znovu volný, ne v okruhu o jednom řádku.');
+        self::assertSame(self::cents(400.00), self::cents($partner[0]['open_amount']));
         self::assertSame($this->auditCount('accounting.pairing_released', $a), 1);
+
+        $c = $this->manual([self::l('261', 'debit', 400.00), self::l('221', 'credit', 400.00)], '-03-05');
+        $again = $this->openItems->create($this->supplierId, $transit, [$this->lineId($b, '261'), $this->lineId($c, '261')], null, $this->meta);
+        self::assertTrue($again['balanced'], 'Uvolněný protějšek jde spárovat s opraveným zápisem.');
     }
 
     public function testRepostKeepsPairingUnlessLineMovedToAnotherAccount(): void
@@ -306,8 +311,47 @@ final class OpenItemsPairingTest extends TestCase
             ['account_id' => $this->accountId('211'), 'side' => 'debit', 'amount' => 700.00, 'line_no' => 0],
             ['account_id' => $this->accountId('221'), 'side' => 'credit', 'amount' => 700.00, 'line_no' => 1],
         ]);
-        self::assertCount(1, $this->openItems->pairing($this->supplierId, $pairing['id'])['items'], 'Řádek přesunutý na jiný účet z okruhu vypadl.');
+        $this->expectRejection('not_found', fn () => $this->openItems->pairing($this->supplierId, $pairing['id']));
+        $open = $this->openItems->build($this->supplierId, $transit, self::YEAR . '-12-31', true, 1, 100);
+        self::assertSame(1, $open['open_count'], 'Řádek přesunutý na jiný účet z okruhu vypadl a protějšek je otevřený.');
+        self::assertNull($open['items'][0]['pairing_id']);
         self::assertSame(1, $this->auditCount('accounting.pairing_released', $a));
+    }
+
+    public function testRemovingLineDissolvesPairingLeftWithOneLine(): void
+    {
+        $transit = $this->accountId('261');
+        $a = $this->manual([self::l('261', 'debit', 300.00), self::l('221', 'credit', 300.00)], '-03-01');
+        $b = $this->manual([self::l('221', 'debit', 300.00), self::l('261', 'credit', 300.00)], '-03-02');
+        $pairing = $this->openItems->create($this->supplierId, $transit, [$this->lineId($a, '261'), $this->lineId($b, '261')], null, $this->meta);
+
+        $lineNo = (int) $this->db->pdo()->query('SELECT line_no FROM journal_entry_lines WHERE id = ' . $this->lineId($b, '261'))->fetchColumn();
+        self::assertNull($this->openItems->removeLine($this->supplierId, $pairing['id'], $b, $lineNo, $this->meta));
+        $this->expectRejection('not_found', fn () => $this->openItems->pairing($this->supplierId, $pairing['id']));
+        self::assertCount(1, $this->openItems->suggestions($this->supplierId, $transit, self::YEAR . '-12-31', 7));
+    }
+
+    public function testDeletedEntryLeavesPartnerFreeForSuggestionsAndNewPairing(): void
+    {
+        $transit = $this->accountId('261');
+        $a = $this->manual([self::l('261', 'debit', 900.00), self::l('221', 'credit', 900.00)], '-03-01');
+        $b = $this->manual([self::l('221', 'debit', 900.00), self::l('261', 'credit', 900.00)], '-03-02');
+        $pairing = $this->openItems->create($this->supplierId, $transit, [$this->lineId($a, '261'), $this->lineId($b, '261')], null, $this->meta);
+
+        $this->db->pdo()->prepare('DELETE FROM journal_entries WHERE id = ? AND supplier_id = ?')->execute([$a, $this->supplierId]);
+
+        $open = $this->openItems->build($this->supplierId, $transit, self::YEAR . '-12-31', true, 1, 100);
+        self::assertSame(1, $open['open_count']);
+        self::assertNull($open['items'][0]['pairing_id'], 'Zbytek okruhu po smazání zápisu se čte jako nespárovaný.');
+
+        $c = $this->manual([self::l('261', 'debit', 900.00), self::l('221', 'credit', 900.00)], '-03-03');
+        $suggestions = $this->openItems->suggestions($this->supplierId, $transit, self::YEAR . '-12-31', 7);
+        self::assertCount(1, $suggestions);
+        self::assertEqualsCanonicalizing([$b, $c], array_column($suggestions[0]['lines'], 'entry_id'));
+
+        self::assertSame(1, $this->openItems->applySuggestions($this->supplierId, $transit, self::YEAR . '-12-31', 7, null, $this->meta));
+        $this->expectRejection('not_found', fn () => $this->openItems->pairing($this->supplierId, $pairing['id']));
+        self::assertSame(0, $this->openItems->build($this->supplierId, $transit, self::YEAR . '-12-31', true, 1, 100)['open_count']);
     }
 
     public function testStatementCarriesCounterAccountAndPairing(): void

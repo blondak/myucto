@@ -142,6 +142,7 @@ final class OpenItemsService
             throw new ReportException('validation_failed', 'Okruh musí mít alespoň dva řádky.', 422);
         }
         return $this->transactional(function () use ($supplierId, $accountId, $lineIds, $note, $meta, $origin): array {
+            $this->pruneDegenerate($supplierId, null, $meta);
             $refs = $this->validatedLines($supplierId, $accountId, $lineIds, null);
             $lineAccountId = $refs[0]['account_id'];
             $pairingId = $this->pairings->create($supplierId, $lineAccountId, $refs, $note, $origin, $meta['user_id'] ?? null);
@@ -169,6 +170,7 @@ final class OpenItemsService
             if ($pairing === null) {
                 throw new ReportException('not_found', 'Okruh nenalezen.', 404);
             }
+            $this->pruneDegenerate($supplierId, $pairingId, $meta);
             $refs = $this->validatedLines($supplierId, $pairing['account_id'], $lineIds, $pairing['account_id']);
             $this->pairings->addItems($supplierId, $pairingId, $refs);
             $this->log('accounting.pairing_lines_added', $supplierId, $pairingId, [
@@ -193,9 +195,10 @@ final class OpenItemsService
             if (!$this->pairings->removeItem($supplierId, $pairingId, $entryId, $lineNo)) {
                 throw new ReportException('not_found', 'Řádek v okruhu není.', 404);
             }
-            $this->pairings->deleteEmpty($supplierId, [$pairingId]);
+            $dissolved = $this->pairings->dissolveDegenerate($supplierId, [$pairingId]);
             $this->log('accounting.pairing_line_removed', $supplierId, $pairingId, [
                 'entry_id' => $entryId, 'line_no' => $lineNo,
+                'dissolved' => $dissolved,
             ], $meta);
             return $this->pairings->find($supplierId, $pairingId) === null ? null : $this->pairing($supplierId, $pairingId);
         });
@@ -326,6 +329,24 @@ final class OpenItemsService
             }
             return $created;
         });
+    }
+
+    /**
+     * Smazání zápisu odnese jeho položky okruhů kaskádou a v okruhu může zůstat jediný
+     * řádek. Čtení ho bere jako nespárovaný; před zápisem se takový okruh zruší, aby
+     * řádek nenarazil na primární klíč položky.
+     *
+     * @param array{user_id:?int, ip:?string, user_agent:?string} $meta
+     */
+    private function pruneDegenerate(int $supplierId, ?int $keep, array $meta): void
+    {
+        $byPairing = [];
+        foreach ($this->pairings->dissolveDegenerate($supplierId, null, $keep) as $item) {
+            $byPairing[$item['pairing_id']][] = ['entry_id' => $item['entry_id'], 'line_no' => $item['line_no']];
+        }
+        foreach ($byPairing as $pairingId => $lines) {
+            $this->log('accounting.pairing_deleted', $supplierId, $pairingId, ['reason' => 'degenerate', 'lines' => $lines], $meta);
+        }
     }
 
     /**

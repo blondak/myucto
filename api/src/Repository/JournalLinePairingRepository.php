@@ -48,6 +48,7 @@ final class JournalLinePairingRepository
           LEFT JOIN journal_line_pairing_items p
                  ON p.supplier_id = l.supplier_id AND p.entry_id = l.entry_id
                 AND p.line_no = l.line_no AND p.account_id = l.account_id
+                AND " . self::liveItem('p') . "
               WHERE l.supplier_id = ? AND l.id IN ({$in})"
         );
         $stmt->execute([$supplierId, ...$lineIds]);
@@ -82,9 +83,10 @@ final class JournalLinePairingRepository
         }
         $in = implode(',', array_fill(0, count($entryIds), '?'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT entry_id, line_no, account_id, pairing_id
-               FROM journal_line_pairing_items
-              WHERE supplier_id = ? AND entry_id IN ({$in})"
+            "SELECT i.entry_id, i.line_no, i.account_id, i.pairing_id
+               FROM journal_line_pairing_items i
+              WHERE i.supplier_id = ? AND i.entry_id IN ({$in})
+                AND " . self::liveItem('i')
         );
         $stmt->execute([$supplierId, ...$entryIds]);
         $out = [];
@@ -205,21 +207,68 @@ final class JournalLinePairingRepository
         ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    /** Smaže okruhy, které po uvolnění řádků zůstaly prázdné. @param list<int> $pairingIds */
-    public function deleteEmpty(int $supplierId, array $pairingIds): void
+    /**
+     * Zruší okruhy, ve kterých zůstal nejvýš jeden řádek. Okruh o jednom řádku nic
+     * nepáruje, jen by řádek blokoval pro návrhy i pro nový okruh.
+     *
+     * @param list<int>|null $pairingIds NULL = všechny okruhy firmy (úklid po kaskádě smazaného zápisu)
+     * @return list<array{pairing_id:int, entry_id:int, line_no:int}> položky, které tím z okruhu odešly
+     */
+    public function dissolveDegenerate(int $supplierId, ?array $pairingIds = null, ?int $keep = null): array
     {
-        $pairingIds = array_values(array_unique($pairingIds));
-        if ($pairingIds === []) {
-            return;
+        $pdo = $this->db->pdo();
+        $params = [$supplierId];
+        $filter = '';
+        if ($pairingIds !== null) {
+            $pairingIds = array_values(array_unique(array_map('intval', $pairingIds)));
+            if ($pairingIds === []) {
+                return [];
+            }
+            $filter .= ' AND p.id IN (' . implode(',', array_fill(0, count($pairingIds), '?')) . ')';
+            $params = [...$params, ...$pairingIds];
         }
-        $in = implode(',', array_fill(0, count($pairingIds), '?'));
-        $this->db->pdo()->prepare(
-            "DELETE FROM journal_line_pairings
-              WHERE supplier_id = ? AND id IN ({$in})
-                AND NOT EXISTS (SELECT 1 FROM journal_line_pairing_items i
-                                 WHERE i.supplier_id = journal_line_pairings.supplier_id
-                                   AND i.pairing_id = journal_line_pairings.id)"
-        )->execute([$supplierId, ...$pairingIds]);
+        if ($keep !== null) {
+            $filter .= ' AND p.id <> ?';
+            $params[] = $keep;
+        }
+        $stmt = $pdo->prepare(
+            "SELECT p.id
+               FROM journal_line_pairings p
+              WHERE p.supplier_id = ?{$filter}
+                AND (SELECT COUNT(*) FROM journal_line_pairing_items i
+                      WHERE i.supplier_id = p.supplier_id AND i.pairing_id = p.id) < 2"
+        );
+        $stmt->execute($params);
+        $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        if ($ids === []) {
+            return [];
+        }
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $left = $pdo->prepare(
+            "SELECT pairing_id, entry_id, line_no FROM journal_line_pairing_items
+              WHERE supplier_id = ? AND pairing_id IN ({$in})"
+        );
+        $left->execute([$supplierId, ...$ids]);
+        $released = array_map(static fn (array $r): array => [
+            'pairing_id' => (int) $r['pairing_id'],
+            'entry_id'   => (int) $r['entry_id'],
+            'line_no'    => (int) $r['line_no'],
+        ], $left->fetchAll(PDO::FETCH_ASSOC));
+        $pdo->prepare("DELETE FROM journal_line_pairings WHERE supplier_id = ? AND id IN ({$in})")
+            ->execute([$supplierId, ...$ids]);
+        return $released;
+    }
+
+    /**
+     * Podmínka „položka `$alias` leží v okruhu, kde je ještě jiný řádek". Okruh
+     * o jednom řádku (zbytek po smazání zápisu kaskádou) se tak čte jako nespárovaný,
+     * dokud ho zápisová akce neuklidí přes {@see dissolveDegenerate()}.
+     */
+    private static function liveItem(string $alias): string
+    {
+        return "EXISTS (SELECT 1 FROM journal_line_pairing_items o
+                         WHERE o.supplier_id = {$alias}.supplier_id AND o.pairing_id = {$alias}.pairing_id
+                           AND (o.entry_id <> {$alias}.entry_id OR o.line_no <> {$alias}.line_no))";
     }
 
     /**
@@ -273,8 +322,7 @@ final class JournalLinePairingRepository
         foreach ($released as $r) {
             $delete->execute([$supplierId, $r['entry_id'], $r['line_no']]);
         }
-        $this->deleteEmpty($supplierId, array_column($released, 'pairing_id'));
-        return $released;
+        return [...$released, ...$this->dissolveDegenerate($supplierId, array_column($released, 'pairing_id'))];
     }
 
     /**
@@ -414,6 +462,7 @@ final class JournalLinePairingRepository
              LEFT JOIN journal_line_pairing_items p
                     ON p.supplier_id = l.supplier_id AND p.entry_id = l.entry_id
                    AND p.line_no = l.line_no AND p.account_id = l.account_id
+                   AND " . self::liveItem('p') . "
                  WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                    AND (l.account_id = ? OR ca.parent_id = ?)
                    AND e.entry_date <= ?

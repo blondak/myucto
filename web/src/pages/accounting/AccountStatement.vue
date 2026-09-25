@@ -78,6 +78,7 @@ async function load() {
 function applyFilters() {
   page.value = 1
   openPage.value = 1
+  suggestions.value = null
   reload()
 }
 
@@ -260,6 +261,7 @@ async function pairSelected() {
     const pairing = await accountingApi.createLinePairing(accountId.value, lines.map(l => l.line_id))
     toast.success(t('accounting.account_statement.open.paired_ok', { id: pairing.id }))
     clearSelection()
+    suggestions.value = null
     activePairing.value = pairing
     await loadOpen()
   } catch (e: any) {
@@ -306,6 +308,7 @@ async function addSelectedToPairing() {
   try {
     activePairing.value = await accountingApi.addLinesToPairing(pairing.id, lines.map(l => l.line_id))
     clearSelection()
+    suggestions.value = null
     await loadOpen()
   } catch (e: any) {
     toast.error(errorMessage(e))

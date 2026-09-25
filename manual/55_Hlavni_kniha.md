@@ -136,6 +136,7 @@ karta **Zůstatek účtu** nahoře to kontroluje a případný rozdíl zvýrazn�
   později, je k tomu dni otevřený.
 - Klik na číslo okruhu otevře dole jeho položky. Odtud jde řádek z okruhu
   odebrat, přidat do okruhu další zaškrtnuté řádky nebo celý okruh zrušit.
+  Odebráním předposledního řádku okruh zanikne.
 - **Návrhy párování** najdou storno s původním zápisem a dvojice stejné
   částky na opačných stranách téhož účtu v zadaném okně dní. **Spárovat
   návrhy** z nich založí okruhy jedním klikem.
@@ -143,8 +144,9 @@ karta **Zůstatek účtu** nahoře to kontroluje a případný rozdíl zvýrazn�
 Párování nemění účetní deník, obraty ani zůstatky. Proto jde měnit i v
 uzavřeném nebo zamčeném období. Když se doklad přeúčtuje a jeho řádek zůstane
 na stejném účtu, okruh zůstane beze změny. Když řádek přejde na jiný účet nebo
-se zápis stornuje, řádek z okruhu vypadne a zbytek okruhu je znovu otevřený.
-Tyto změny se zapisují do historie aktivit.
+se zápis stornuje nebo smaže, řádek z okruhu vypadne a zbytek okruhu je znovu
+otevřený. Okruh, ve kterém zůstane jediný řádek, zanikne a řádek jde spárovat
+znovu. Tyto změny se zapisují do historie aktivit.
 
 ## 55.6 Export a návaznosti
 
