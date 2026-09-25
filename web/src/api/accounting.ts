@@ -1526,6 +1526,56 @@ export interface IncomeStatementReport {
   }
 }
 
+// ── Rozvaha a výsledovka po účtech ─────────────────────────────────────────
+export interface StatementAccountLine {
+  account_id: number
+  account_code: string
+  name: string
+  account_type?: string
+  md: number
+  d: number
+  analytics?: StatementAccountLine[]
+}
+
+export type StatementAccountSectionKey = 'operating' | 'financial' | 'unassigned' | 'tax' | 'transfer'
+
+export interface StatementAccountsReport {
+  version_code: string
+  as_of: string
+  entity: StatementEntity
+  period: ReportPeriod
+  closed: boolean
+  dimension?: ReportDimensionFilter | null
+  balance: {
+    classes: { class: string; accounts: StatementAccountLine[]; md: number; d: number }[]
+    md: number
+    d: number
+    profit: number
+  }
+  profit_loss: {
+    sections: {
+      key: StatementAccountSectionKey
+      expenses: StatementAccountLine[]
+      revenues: StatementAccountLine[]
+      expense_total: number
+      revenue_total: number
+      result: number
+    }[]
+    operating_profit: number
+    financial_profit: number
+    profit_before_tax: number
+    profit_after_tax: number
+    profit: number
+  }
+  checks: {
+    profit_balance: number
+    profit_loss: number
+    profit_matches: boolean
+    technical_residual: number
+    unassigned_count: number
+  }
+}
+
 // ── Saldokonto (audit 2026-07, D6/1) ───────────────────────────────────────
 export interface SaldoParams {
   period_id: number
@@ -2154,6 +2204,9 @@ export const accountingApi = {
     api.get<BalanceSheetReport>('/accounting/reports/balance-sheet', { params }).then(r => r.data),
   getIncomeStatement: (params: StatementParams) =>
     api.get<IncomeStatementReport>('/accounting/reports/income-statement', { params }).then(r => r.data),
+  /** Rozvaha a výsledovka po účtech s hospodářským výsledkem (zůstatky před uzávěrkou). */
+  getStatementAccounts: (params: Omit<StatementParams, 'scope'>) =>
+    api.get<StatementAccountsReport>('/accounting/reports/statement-accounts', { params }).then(r => r.data),
   /**
    * VZZ v ÚČELOVÉM členění. Bez úplné mapy funkcí backend výkaz NESESTAVÍ a vrátí
    * `function_map_incomplete` s výčtem nepřiřazených účtů — nepřiřazený náklad by z výkazu
