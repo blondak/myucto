@@ -399,6 +399,8 @@ export interface JournalRelatedItem {
   entry_date: string | null
   entry_document_no: string | null
   entry_posted: boolean
+  /** false = doklad se do deníku neúčtuje nikdy (proforma, zálohová PF); chybějící zápis není nález. */
+  postable?: boolean
 }
 
 export interface JournalRelated {
@@ -1631,6 +1633,14 @@ export interface SaldoItem {
   paid_czk: number
   remaining_czk: number
   days_overdue: number
+  /** advance_pending = záloha zaplacená na saldokontní účet, čeká na konečnou fakturu. */
+  kind?: 'document' | 'advance_pending'
+  label?: string | null
+  /** Přijatá (poskytnutá) platba zálohy — u advance_pending místo booked_czk. */
+  advance_payment_czk?: number | null
+  /** Daň z daňového dokladu k platbě — u advance_pending místo paid_czk. */
+  advance_vat_czk?: number | null
+  tax_document_id?: number | null
 }
 
 export interface SaldoPartner {

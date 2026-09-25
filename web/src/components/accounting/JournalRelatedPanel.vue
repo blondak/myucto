@@ -191,7 +191,13 @@ function onEntryClick(e: MouseEvent, entryId: number): void {
             Nezaúčtovaný protějšek je sám o sobě nález (saldo nesedí s deníkem),
             proto se místo prokliku vypíše důvod, ne prázdné místo.
           -->
-          <span v-if="it.entry_id === null"
+          <!-- Záloha se do deníku neúčtuje nikdy (účtuje se až úhrada) — neutrální štítek, ne nález. -->
+          <span v-if="it.entry_id === null && it.postable === false"
+                data-test="related-advance-not-postable"
+                class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs font-medium text-neutral-600 whitespace-nowrap">
+            {{ t('accounting.journal.related.advance_not_postable') }}
+          </span>
+          <span v-else-if="it.entry_id === null"
                 class="rounded bg-warning-50 px-1.5 py-0.5 text-xs font-medium text-warning-600 whitespace-nowrap">
             {{ t('accounting.journal.related.not_posted') }}
           </span>

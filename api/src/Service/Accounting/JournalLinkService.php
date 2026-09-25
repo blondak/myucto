@@ -803,6 +803,9 @@ final class JournalLinkService
                 'entry_date'        => $entry['entry_date'] ?? null,
                 'entry_document_no' => $entry['document_no'] ?? null,
                 'entry_posted'      => isset($entry['posted_at']) && $entry['posted_at'] !== null,
+                // Záloha (proforma, zálohová PF) se neúčtuje nikdy — do deníku jde až její
+                // úhrada. Chybějící zápis u ní proto není nález, panel ho má ukázat neutrálně.
+                'postable'          => $desc['postable'] ?? true,
             ];
         }
 
@@ -880,7 +883,7 @@ final class JournalLinkService
 
         if ($kind === 'invoice') {
             foreach ($this->rows(
-                "SELECT i.id, i.varsymbol, i.issue_date, i.total_with_vat, i.client_snapshot,
+                "SELECT i.id, i.varsymbol, i.issue_date, i.total_with_vat, i.client_snapshot, i.invoice_type,
                         c.company_name, c.first_name, c.last_name,
                         UPPER(COALESCE(cur.code, 'CZK')) AS currency
                    FROM invoices i
@@ -897,6 +900,7 @@ final class JournalLinkService
                     'amount'   => (float) $r['total_with_vat'],
                     'currency' => (string) $r['currency'],
                     'route'    => ['name' => 'invoice-detail', 'params' => ['id' => $id]],
+                    'postable' => (string) $r['invoice_type'] !== 'proforma',
                 ];
             }
             return $out;
@@ -904,7 +908,7 @@ final class JournalLinkService
 
         if ($kind === 'purchase_invoice') {
             foreach ($this->rows(
-                "SELECT p.id, p.varsymbol, p.vendor_invoice_number, p.issue_date, p.total_with_vat,
+                "SELECT p.id, p.varsymbol, p.vendor_invoice_number, p.issue_date, p.total_with_vat, p.document_kind,
                         p.vendor_snapshot, c.company_name, c.first_name, c.last_name,
                         UPPER(COALESCE(cur.code, 'CZK')) AS currency
                    FROM purchase_invoices p
@@ -921,6 +925,7 @@ final class JournalLinkService
                     'amount'   => (float) $r['total_with_vat'],
                     'currency' => (string) $r['currency'],
                     'route'    => ['name' => 'purchase-invoice-detail', 'params' => ['id' => $id]],
+                    'postable' => (string) $r['document_kind'] !== 'advance',
                 ];
             }
             return $out;

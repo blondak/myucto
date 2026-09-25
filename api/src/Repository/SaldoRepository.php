@@ -666,7 +666,11 @@ final class SaldoRepository
                    p.issue_date, p.due_date, p.status,
                    cl.id AS partner_id, cl.company_name AS partner_name,
                    cur.code AS currency_code,
-                   c.collected_czk, COALESCE(s.settled_czk, 0) AS settled_czk
+                   c.collected_czk, COALESCE(s.settled_czk, 0) AS settled_czk,
+                   (SELECT td.id FROM invoices td
+                     WHERE td.supplier_id = p.supplier_id AND td.parent_invoice_id = p.id
+                       AND td.invoice_type = 'tax_document' AND td.status NOT IN ('draft', 'cancelled')
+                     ORDER BY td.id LIMIT 1) AS tax_document_id
               FROM collected c
               JOIN invoices p ON p.id = c.invoice_id
               JOIN params x ON x.supplier_id = p.supplier_id
@@ -683,10 +687,14 @@ final class SaldoRepository
         return $this->fetchDefinitiveOpenRows(
             $sql,
             static fn (string $pageSql): array => [$supplierId, $asOf, $accountId],
-            static function (array $r): array {
+            static function (array $r) use ($onReceivable): array {
                 $collected = round((float) $r['collected_czk'], 2);
                 $settled = round((float) $r['settled_czk'], 2);
                 return [
+                    // Záloha na saldokontním účtu čekající na vyúčtování — sestava ji musí
+                    // popsat jinak než fakturu (částka = přijatá platba, uhrazeno = daň DDKP).
+                    'kind'           => $onReceivable ? 'advance_pending' : 'document',
+                    'tax_document_id' => $r['tax_document_id'] !== null ? (int) $r['tax_document_id'] : null,
                     'doc_type'       => 'invoice',
                     'doc_id'         => (int) $r['doc_id'],
                     'doc_no'         => (string) $r['doc_no'],
@@ -866,7 +874,11 @@ final class SaldoRepository
                    p.issue_date, p.due_date, p.status,
                    cl.id AS partner_id, cl.company_name AS partner_name,
                    cur.code AS currency_code,
-                   paid.paid_czk, COALESCE(s.settled_czk, 0) AS settled_czk
+                   paid.paid_czk, COALESCE(s.settled_czk, 0) AS settled_czk,
+                   (SELECT td.id FROM purchase_invoices td
+                     WHERE td.supplier_id = p.supplier_id AND td.parent_purchase_invoice_id = p.id
+                       AND td.document_kind = 'tax_document' AND td.status NOT IN ('draft', 'cancelled')
+                     ORDER BY td.id LIMIT 1) AS tax_document_id
               FROM paid
               JOIN purchase_invoices p ON p.id = paid.advance_id
               JOIN params x ON x.supplier_id = p.supplier_id
@@ -882,10 +894,12 @@ final class SaldoRepository
         return $this->fetchDefinitiveOpenRows(
             $sql,
             static fn (string $pageSql): array => [$supplierId, $asOf, $accountId],
-            static function (array $r): array {
+            static function (array $r) use ($onPayable): array {
                 $paid = round((float) $r['paid_czk'], 2);
                 $settled = round((float) $r['settled_czk'], 2);
                 return [
+                    'kind'           => $onPayable ? 'advance_pending' : 'document',
+                    'tax_document_id' => $r['tax_document_id'] !== null ? (int) $r['tax_document_id'] : null,
                     'doc_type'       => 'purchase_invoice',
                     'doc_id'         => (int) $r['doc_id'],
                     'doc_no'         => (string) $r['doc_no'],

@@ -101,6 +101,7 @@ final class AdvanceFullFlowTest extends BankPostingTestCase
         $finalEntry = $this->ensurePosted($final);
         self::assertEqualsWithDelta(1000.00, $this->side($finalEntry, '602', 'credit'), 0.001, 'Výnos za celý základ.');
         self::assertEqualsWithDelta(0.00, $this->side($finalEntry, '343.200', 'credit'), 0.001, 'Daň přiznal DDKP, vyúčtování ji neopakuje.');
+        $this->assertSettlementPair($finalEntry, $advanceOn311, 1000.00);
 
         // 4) Obraty zálohového cyklu: 311 i 324 na nule, 343 nese daň právě jednou.
         $sum = $this->sums([$bankEntry, $ddkpEntry, $finalEntry]);
@@ -171,6 +172,7 @@ final class AdvanceFullFlowTest extends BankPostingTestCase
         $this->issue($final);
         $finalEntry = $this->ensurePosted($final);
         self::assertEqualsWithDelta(210.00, $this->side($finalEntry, '343.200', 'credit'), 0.001, 'Vyúčtování nese celou daň.');
+        $this->assertSettlementPair($finalEntry, $advanceOn311, 1210.00);
 
         $sum = $this->sums([$bankEntry, $finalEntry]);
         self::assertSame(0, self::cents($sum['311'] ?? 0), '311 na nule.');
@@ -222,6 +224,20 @@ final class AdvanceFullFlowTest extends BankPostingTestCase
              VALUES (?, 'Dílo', 1, 'ks', ?, ?, 21.00, ?, ?, ?, 0)"
         )->execute([$id, $base, $this->vatRateId, $base, $vat, $base + $vat]);
         return $id;
+    }
+
+    /**
+     * Zúčtování zálohy v zápisu vyúčtování: přes 324 pár 324 MD / 311 D; u zálohy vedené
+     * přímo na 311 se pár 311/311 nezapisuje (vyruší se a jen zdvojí obrat zápisu).
+     */
+    private function assertSettlementPair(int $entryId, bool $advanceOn311, float $amount): void
+    {
+        if ($advanceOn311) {
+            self::assertEqualsWithDelta(0.00, $this->side($entryId, '311', 'credit'), 0.001, 'Záloha na 311: žádný pár 311/311.');
+            return;
+        }
+        self::assertEqualsWithDelta($amount, $this->side($entryId, '324', 'debit'), 0.001, 'Zúčtování 324 MD.');
+        self::assertEqualsWithDelta($amount, $this->side($entryId, '311', 'credit'), 0.001, 'Zúčtování 311 D.');
     }
 
     private function issue(int $invoiceId): void

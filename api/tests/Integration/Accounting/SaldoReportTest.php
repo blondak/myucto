@@ -428,6 +428,15 @@ final class SaldoReportTest extends TestCase
             self::assertSame(self::cents($balance), self::cents($p['items'][0]['remaining_czk']), $asOf);
         }
 
+        // Položka zálohy se sestavě popisuje jako záloha, ne jako faktura se zápornou úhradou.
+        $item = $this->partner($this->accBlock($this->saldo->build($this->supplierId, $this->periodId, self::YEAR . '-05-31', '311'), '311'), $client)['items'][0];
+        self::assertSame('advance_pending', $item['kind']);
+        self::assertSame('Přijatá záloha – čeká na vyúčtování', $item['label']);
+        self::assertSame(self::cents(1210.00), self::cents($item['advance_payment_czk']), 'Částka = přijatá platba.');
+        self::assertSame(self::cents(210.00), self::cents($item['advance_vat_czk']), 'Uhrazeno = daň z DDKP.');
+        self::assertSame($ddkp, $item['tax_document_id']);
+        self::assertSame(0, $item['days_overdue'], 'Záloha není pohledávka po splatnosti.');
+
         $closing = new ClosingRepository($this->db);
         foreach ([self::YEAR . '-05-31', self::YEAR . '-06-30'] as $asOf) {
             $flagged = array_values(array_filter(
@@ -504,6 +513,13 @@ final class SaldoReportTest extends TestCase
             self::assertSame($advance, (int) $p['items'][0]['doc_id'], 'Položkou je zálohová PF, ke které patří úhrada.');
             self::assertSame(self::cents($balance), self::cents($p['items'][0]['remaining_czk']), $asOf);
         }
+
+        $item = $this->partner($this->accBlock($this->saldo->build($this->supplierId, $this->periodId, self::YEAR . '-05-31', '321'), '321'), $vendor)['items'][0];
+        self::assertSame('advance_pending', $item['kind']);
+        self::assertSame('Poskytnutá záloha – čeká na vyúčtování', $item['label']);
+        self::assertSame(self::cents(1210.00), self::cents($item['advance_payment_czk']));
+        self::assertSame(self::cents(210.00), self::cents($item['advance_vat_czk']));
+        self::assertSame($ddkp, $item['tax_document_id']);
 
         $closing = new ClosingRepository($this->db);
         foreach ([self::YEAR . '-05-31', self::YEAR . '-06-30'] as $asOf) {
