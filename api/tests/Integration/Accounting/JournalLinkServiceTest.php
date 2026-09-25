@@ -218,6 +218,90 @@ final class JournalLinkServiceTest extends BankPostingTestCase
         self::assertSame('not_found', $missing['body']['error']['code']);
     }
 
+    /**
+     * Úhrada zálohy: záloha (proforma) vlastní zápis nemá, zaúčtuje se jen banka.
+     * Bankovní zápis proto musí vést i na daňový doklad k platbě a konečnou fakturu
+     * téže zálohy, a oba doklady zpátky na úhradu zálohy. Odznak musí sedět s panelem.
+     */
+    public function testAdvancePaymentLinksTaxDocumentAndFinalInvoice(): void
+    {
+        $clientId = $this->client('Odběratel JL záloha');
+        $proforma = $this->saleInvoice('JL0101', $clientId, 1210.0, 'proforma', 'paid');
+        $txId     = $this->transaction($this->statement(), 1210.0, ['variable_symbol' => 'JL0101']);
+        $this->invoicePayment($proforma, $txId, 1210.0);
+        $bankEntry = $this->postPredpis('bank', $txId, '221', '324', 1210.0);
+
+        $ddkp = $this->saleInvoice('JL0102', $clientId, 1210.0, 'tax_document', 'paid');
+        $final = $this->saleInvoice('JL0103', $clientId, 1210.0);
+        $this->db->pdo()->prepare('UPDATE invoices SET parent_invoice_id = ? WHERE id IN (?, ?)')
+            ->execute([$proforma, $ddkp, $final]);
+        $ddkpEntry  = $this->postPredpis('invoice', $ddkp, '324', '343', 210.0);
+        $finalEntry = $this->postPredpis('invoice', $final, '311', '604', 1210.0);
+
+        $fromBank = $this->related($bankEntry)['items'];
+        $docs = array_map(static fn (array $i): string => $i['source_type'] . ':' . $i['source_id'], $fromBank);
+        self::assertContains('invoice:' . $proforma, $docs, 'Banka vede na zálohu.');
+        self::assertContains('invoice:' . $ddkp, $docs, 'Banka vede na daňový doklad k platbě.');
+        self::assertContains('invoice:' . $final, $docs, 'Banka vede na konečnou fakturu.');
+
+        foreach ([$ddkpEntry, $finalEntry] as $entryId) {
+            $payments = array_values(array_filter(
+                $this->related($entryId)['items'],
+                static fn (array $i): bool => $i['source_type'] === 'bank',
+            ));
+            self::assertCount(1, $payments, "Zápis #{$entryId} ukazuje úhradu zálohy.");
+            self::assertSame($txId, $payments[0]['source_id']);
+            self::assertSame($bankEntry, $payments[0]['entry_id'], 'S jejím zaúčtováním.');
+            self::assertSame(1210.0, (float) $payments[0]['allocated_amount']);
+        }
+
+        $page = array_map(fn (int $id): array => $this->journal->find($id, $this->supplierId), [$bankEntry, $ddkpEntry, $finalEntry]);
+        $map = $this->links->hasRelatedMap($this->supplierId, $page);
+        foreach ([$bankEntry, $ddkpEntry, $finalEntry] as $id) {
+            self::assertArrayHasKey($id, $map, "Odznak u zápisu #{$id} chybí, panel přitom vazbu má.");
+        }
+    }
+
+    /** Zrcadlo pro přijatou stranu: zálohová PF, přijatý DDKP a konečná faktura. */
+    public function testPurchaseAdvancePaymentLinksTaxDocumentAndFinalInvoice(): void
+    {
+        $vendorId = $this->client('Dodavatel JL záloha');
+        $advance  = $this->purchaseInvoice('JLA-1', $vendorId, 1210.0, 'advance');
+        $txId     = $this->transaction($this->statement(), -1210.0);
+        $this->paymentMatch($txId, $advance, 1210.0);
+        $bankEntry = $this->postPredpis('bank', $txId, '314', '221', 1210.0);
+
+        $ddkp  = $this->purchaseInvoice('JLA-2', $vendorId, 1210.0, 'tax_document');
+        $final = $this->purchaseInvoice('JLA-3', $vendorId, 1210.0);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE purchase_invoices SET parent_purchase_invoice_id = ? WHERE id = ?')->execute([$advance, $ddkp]);
+        $pdo->prepare('UPDATE purchase_invoices SET advance_purchase_invoice_id = ? WHERE id = ?')->execute([$advance, $final]);
+        $ddkpEntry  = $this->postPredpis('purchase_invoice', $ddkp, '343', '314', 210.0);
+        $finalEntry = $this->postPredpis('purchase_invoice', $final, '518', '321', 1210.0);
+
+        $docs = array_map(
+            static fn (array $i): string => $i['source_type'] . ':' . $i['source_id'],
+            $this->related($bankEntry)['items'],
+        );
+        self::assertContains('purchase_invoice:' . $advance, $docs);
+        self::assertContains('purchase_invoice:' . $ddkp, $docs);
+        self::assertContains('purchase_invoice:' . $final, $docs);
+
+        foreach ([$ddkpEntry, $finalEntry] as $entryId) {
+            $payments = array_values(array_filter(
+                $this->related($entryId)['items'],
+                static fn (array $i): bool => $i['source_type'] === 'bank',
+            ));
+            self::assertCount(1, $payments, "Zápis #{$entryId} ukazuje úhradu zálohy.");
+            self::assertSame($bankEntry, $payments[0]['entry_id']);
+        }
+
+        $page = array_map(fn (int $id): array => $this->journal->find($id, $this->supplierId), [$ddkpEntry, $finalEntry]);
+        $map = $this->links->hasRelatedMap($this->supplierId, $page);
+        self::assertArrayHasKey($ddkpEntry, $map);
+        self::assertArrayHasKey($finalEntry, $map);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /** @return array{items:list<array<string,mixed>>, truncated:bool} */
