@@ -77,7 +77,7 @@ const search = ref('')
 const statusFilter = ref<string>('')
 const typeFilter = ref<string>('')
 const clientFilter = ref<number | ''>('')
-const yearFilter = ref<number | ''>(new Date().getFullYear())
+const yearFilter = ref<number | ''>('')
 const monthFilter = ref<number | ''>('')
 const dateFrom = ref<string>('')
 const dateTo = ref<string>('')
@@ -919,7 +919,7 @@ async function load(reset = true) {
 
 // Sync filtrů s URL query (stejný pattern jako PurchaseInvoiceList) — detekuje menu
 // link click přes route.query change z !empty na empty → reset.
-const DEFAULT_YEAR = new Date().getFullYear()
+const DEFAULT_YEAR: number | '' = ''
 
 const COLUMNS: ColumnDef[] = [
   { key: 'number', labelKey: 'invoice.varsymbol_label', required: true },
@@ -1092,8 +1092,7 @@ function buildQuery(): Record<string, string> {
   if (statusFilter.value) q.status = statusFilter.value
   if (typeFilter.value) q.type = typeFilter.value
   if (clientFilter.value !== '') q.client_id = String(clientFilter.value)
-  if (yearFilter.value === '') q.year = 'all'
-  else if (yearFilter.value !== DEFAULT_YEAR) q.year = String(yearFilter.value)
+  if (yearFilter.value !== DEFAULT_YEAR) q.year = String(yearFilter.value)
   if (monthFilter.value !== '') q.month = String(monthFilter.value)
   if (dateFrom.value) q.from = dateFrom.value
   if (dateTo.value) q.to = dateTo.value

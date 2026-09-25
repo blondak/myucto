@@ -76,7 +76,7 @@ const flashedIds = ref<Set<number>>(new Set())
 const search = ref('')
 const statusFilter = ref<PurchaseInvoiceStatus | ''>('')
 const kindFilter = ref<PurchaseDocumentKind | ''>('')
-const yearFilter = ref<number | ''>(new Date().getFullYear())
+const yearFilter = ref<number | ''>('')
 const monthFilter = ref<number | ''>('')
 const dateFrom = ref('')
 const dateTo = ref('')
@@ -299,7 +299,7 @@ let searchTimeout: ReturnType<typeof setTimeout> | null = null
 // detekovat menu click (= URL bez query → reset). Pro klika na menu link
 // "Přijaté faktury" už když je na této stránce a má aktivní filtr (např. overdue=1)
 // se URL změní zpět na čistou — watch fires reset všech ref.
-const DEFAULT_YEAR = new Date().getFullYear()
+const DEFAULT_YEAR: number | '' = ''
 
 const COLUMNS: ColumnDef[] = [
   { key: 'number', labelKey: 'purchase_invoice.fields.varsymbol', required: true },
@@ -487,9 +487,8 @@ function buildQuery(): Record<string, string> {
   const q: Record<string, string> = {}
   if (statusFilter.value) q.status = statusFilter.value
   if (kindFilter.value) q.kind = kindFilter.value
-  // year=DEFAULT_YEAR je default a nepatří do URL; explicit "" (Vše) ano (jako 'all').
-  if (yearFilter.value === '') q.year = 'all'
-  else if (yearFilter.value !== DEFAULT_YEAR) q.year = String(yearFilter.value)
+  // Výchozí jsou všechny roky a do URL nepatří; starý odkaz year=all se čte dál.
+  if (yearFilter.value !== DEFAULT_YEAR) q.year = String(yearFilter.value)
   if (monthFilter.value !== '') q.month = String(monthFilter.value)
   if (dateFrom.value) q.from = dateFrom.value
   if (dateTo.value) q.to = dateTo.value
