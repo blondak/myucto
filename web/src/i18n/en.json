@@ -22356,6 +22356,7 @@
     "save_selection": "Save gateway settings",
     "selection_saved": "Gateway settings saved.",
     "warn_not_configured": "The selected provider has no configured credentials — extraction will not work.",
+    "warn_not_active": "The {provider} key is saved, but extraction still runs through another provider. Switch it with Save gateway settings.",
     "credentials_title": "Credentials — {provider}",
     "credentials_hint": "BYOK — paste your own API key. The key is write-only (never shown). Empty field = keep existing key.",
     "api_key": "API key",

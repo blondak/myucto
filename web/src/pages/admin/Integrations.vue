@@ -327,16 +327,20 @@ function syncCredForm() {
   credTestMsg.value = null
 }
 
-async function loadAiCreds() {
+// keepProvider: po uložení/smazání klíče zůstane vybraná záložka, kterou uživatel
+// právě upravuje — jinak by skočila zpět na aktivního poskytovatele brány.
+async function loadAiCreds(keepProvider = false) {
   try {
+    const testMsg = credTestMsg.value
     aiCreds.value = await integrationsApi.getAiCredentials()
-    aiProvider.value = aiCreds.value.ai_provider
+    if (!keepProvider) aiProvider.value = aiCreds.value.ai_provider
     aiRegion.value = aiCreds.value.ai_data_region
     aiEuRequired.value = aiCreds.value.ai_eu_residency_required
     aiNotes.value = aiCreds.value.ai_extraction_notes ?? ''
     aiEffort.value = aiCreds.value.ai_effort ?? 'default'
     aiTuningMsg.value = null
     syncCredForm()
+    if (keepProvider) credTestMsg.value = testMsg
   } catch {
     // Backend brána ještě nemusí být nasazená — degradujeme defenzivně (UI zůstane prázdné).
     aiCreds.value = null
@@ -463,7 +467,10 @@ async function saveAiCredentials() {
       ? { ok: true, text: t('aiGateway.test_ok', { model: r.model || '' }) }
       : { ok: false, text: r.test_error || t('aiGateway.test_failed') }
     credForm.api_key = ''
-    await loadAiCreds()
+    await loadAiCreds(true)
+    if (r.test_ok && aiCreds.value && aiCreds.value.ai_provider !== aiProvider.value) {
+      toast.warning(t('aiGateway.warn_not_active', { provider: providerLabel(aiProvider.value) }))
+    }
   } catch (e) {
     credTestMsg.value = { ok: false, text: apiErrorMessage(e) }
   } finally {
@@ -490,7 +497,7 @@ async function deleteAiCredentials() {
   if (!confirm(t('aiGateway.delete_confirm'))) return
   try {
     await integrationsApi.deleteAiCredentials(aiProvider.value)
-    await loadAiCreds()
+    await loadAiCreds(true)
     toast.success(t('aiGateway.deleted'))
   } catch (e) {
     toast.error(apiErrorMessage(e))

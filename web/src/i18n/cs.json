@@ -22356,6 +22356,7 @@
     "save_selection": "Uložit nastavení brány",
     "selection_saved": "Nastavení brány uloženo.",
     "warn_not_configured": "Vybraný poskytovatel nemá nakonfigurované přihlašovací údaje — extrakce nebude fungovat.",
+    "warn_not_active": "Klíč pro {provider} je uložený, ale extrakce zatím běží přes jiného poskytovatele. Přepnete ji tlačítkem Uložit nastavení brány.",
     "credentials_title": "Přihlašovací údaje — {provider}",
     "credentials_hint": "BYOK — vlož vlastní API klíč. Klíč je write-only (nikdy se nezobrazuje). Prázdné pole = zachovat stávající klíč.",
     "api_key": "API klíč",
