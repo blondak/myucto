@@ -255,7 +255,11 @@ final class SmallAssetService
         $stmt->execute([$purchaseInvoiceId, $supplierId]);
         $all = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $nets = $applyDiscounts ? PurchaseDiscountAllocation::netsAfterDiscounts($all) : null;
+        $nets = $applyDiscounts
+            ? PurchaseDiscountAllocation::netsAfterDiscounts(
+                PurchaseDiscountAllocation::withReturns($this->db->pdo(), $supplierId, $purchaseInvoiceId, $all),
+            )
+            : null;
         $small = [ExpenseKind::SmallAsset->value, ExpenseKind::SmallIntangible->value];
         $rows = [];
         foreach ($all as $row) {

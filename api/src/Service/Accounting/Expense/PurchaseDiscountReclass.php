@@ -78,7 +78,9 @@ final class PurchaseDiscountReclass
     public function run(int $supplierId, int $purchaseInvoiceId, bool $apply, ?int $userId = null): array
     {
         $items = $this->items($purchaseInvoiceId, $supplierId);
-        $allocation = PurchaseDiscountAllocation::allocate($items);
+        $allocation = PurchaseDiscountAllocation::allocate(
+            PurchaseDiscountAllocation::withReturns($this->db->pdo(), $supplierId, $purchaseInvoiceId, $items),
+        );
         $report = [
             'supplier_id' => $supplierId, 'purchase_invoice_id' => $purchaseInvoiceId, 'state' => 'none',
             'discount_lines' => count($allocation), 'posting_changes' => false, 'strategy' => null,
