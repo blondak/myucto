@@ -952,7 +952,7 @@ paths:
         - { in: query, name: 'filter[include_dimensions]', description: "1 = doplnit štítky dimenzí jen u firmy se zapnutými dimenzemi", schema: { type: integer, enum: [0, 1], default: 0 } }
         - in: query
           name: sort_key
-          schema: { type: string, enum: [number, client, type, issued, due, amount, status, payment_vs, order_number, paid_at, payment_method, booked_at, exchange_rate, amount_czk, base, vat, total, project, sent_at, paid_total, vat_breakdown, debit_accounts, credit_accounts, locked] }
+          schema: { type: string, enum: [number, client, type, issued, due, amount, status, payment_vs, order_number, paid_at, payment_method, booked_at, exchange_rate, amount_czk, base, vat, total, project, sent_at, paid_total, remaining_amount, vat_breakdown, debit_accounts, credit_accounts, locked] }
         - in: query
           name: sort_dir
           schema: { type: string, enum: [asc, desc], default: desc }
@@ -26597,7 +26597,9 @@ components:
           description: |
             Faktury skupiny — list vrací podmnožinu polí `Invoice` (bez items,
             bankovních polí apod.) plus listová pole `month_bucket` (YYYY-MM),
-            `has_work_report` a `project_requires_approval`.
+            `has_work_report`, `project_requires_approval` a `remaining_amount`
+            (zbývá uhradit v měně dokladu = `amount_to_pay − paid_total`; 0 u finálního
+            dokladu k zaplacené proformě a u dokladu `paid` bez evidované platby).
 
             Dále booleany `oss_review_domestic` a `oss_review_oss` — doklad má řádek
             k ručnímu posouzení místa plnění mimo OSS, resp. v OSS podání. Rozlišují

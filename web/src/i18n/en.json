@@ -17008,6 +17008,7 @@
     "col_project": "Project",
     "col_sent_at": "Sent on",
     "col_paid_total": "Total paid",
+    "col_remaining_amount": "Remaining",
     "col_kh": "VAT statement section",
     "col_vat_breakdown": "VAT breakdown",
     "col_debit_accounts": "Debit accounts",

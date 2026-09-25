@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\PurchaseInvoice;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -27,6 +28,7 @@ final class PaidRemainingListTest extends TestCase
 
     private Connection $db;
     private PurchaseInvoiceRepository $purchases;
+    private InvoiceRepository $invoices;
     private int $supplierId = 0;
     private int $czkId = 0;
     private int $vendorId = 0;
@@ -43,6 +45,7 @@ final class PaidRemainingListTest extends TestCase
             $container = Bootstrap::buildApp()->getContainer();
             $this->db = $container->get(Connection::class);
             $this->purchases = $container->get(PurchaseInvoiceRepository::class);
+            $this->invoices = $container->get(InvoiceRepository::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -105,6 +108,25 @@ final class PaidRemainingListTest extends TestCase
         self::assertSame([$partial, $open, $shortfall, $markedPaid], array_keys($sorted));
     }
 
+    public function testIssuedListReturnsRemaining(): void
+    {
+        $partial = $this->invoice('FV-2099-901', 1000.00, 250.00, 'sent');
+        $marked = $this->invoice('FV-2099-902', 500.00, 0.00, 'paid');
+        $final = $this->invoice('FV-2099-903', 0.00, 0.00, 'paid');
+
+        $result = $this->invoices->listGroupedByMonth(['supplier_id' => $this->supplierId], 1, 50);
+        $rows = [];
+        foreach ($result['data'] as $group) {
+            foreach ($group['invoices'] as $row) {
+                $rows[(int) $row['id']] = $row;
+            }
+        }
+
+        self::assertEqualsWithDelta(750.00, $rows[$partial]['remaining_amount'], 0.001);
+        self::assertEqualsWithDelta(0.00, $rows[$marked]['remaining_amount'], 0.001);
+        self::assertEqualsWithDelta(0.00, $rows[$final]['remaining_amount'], 0.001);
+    }
+
     /** @return array<int, array<string,mixed>> */
     private function purchaseRows(array $filters): array
     {
@@ -146,5 +168,21 @@ final class PaidRemainingListTest extends TestCase
             "INSERT INTO invoice_settlements (supplier_id, doc_type, doc_id, settled_on, amount, account_id, status)
              VALUES (?, 'purchase_invoice', ?, '2099-06-20', ?, ?, 'confirmed')"
         )->execute([$this->supplierId, $pfId, $amount, $accountId]);
+    }
+
+    private function invoice(string $varsymbol, float $total, float $paid, string $status): int
+    {
+        $issue = '2099-06-10';
+        $this->db->pdo()->prepare(
+            'INSERT INTO invoices
+                (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
+                 currency_id, reverse_charge, total_without_vat, total_vat, total_with_vat,
+                 paid_total, status, vat_classification_code, created_by)
+             VALUES (?, ?, "invoice", ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, "1", ?)'
+        )->execute([
+            $this->supplierId, $varsymbol, $this->vendorId, $issue, $issue, $issue,
+            $this->czkId, $total, $total, $paid, $status, $this->userId,
+        ]);
+        return (int) $this->db->pdo()->lastInsertId();
     }
 }

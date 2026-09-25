@@ -427,6 +427,8 @@ export interface InvoiceListItem {
   advance_paid_amount: number
   amount_to_pay: number
   paid_total?: number
+  /** Zbývá uhradit v měně dokladu (0 u finálního dokladu k zaplacené proformě a u „Uhrazeno" bez platby). */
+  remaining_amount?: number
   payment_status?: PaymentStatus | null
   status: InvoiceStatus
   payment_method: PaymentMethod
