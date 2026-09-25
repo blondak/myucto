@@ -991,6 +991,10 @@ final class InvoiceRepository
             'amount_czk' => "CASE WHEN cur.code = 'CZK' THEN i.total_with_vat ELSE i.total_with_vat * i.exchange_rate END",
             'base' => 'i.total_without_vat', 'vat' => 'i.total_vat', 'total' => 'i.total_with_vat',
             'project' => 'p.name', 'sent_at' => 'i.sent_at', 'paid_total' => 'i.paid_total',
+            'vat_breakdown' => 'i.total_vat',
+            'debit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'debit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = i.supplier_id AND je.source_type = 'invoice' AND je.source_id = i.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL)",
+            'credit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'credit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = i.supplier_id AND je.source_type = 'invoice' AND je.source_id = i.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL)",
+            'locked' => 'i.booked_at',
         ];
         $sortKey = (string) ($filters['sort_key'] ?? '');
         $sortDir = strtolower((string) ($filters['sort_dir'] ?? '')) === 'asc' ? 'ASC' : 'DESC';

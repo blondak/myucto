@@ -21,7 +21,19 @@ ukládá pro přihlášeného uživatele. V měsíčním pohledu zaškrtávací 
 v záhlaví označí pouze zobrazené doklady daného měsíce. Nabídka **Sloupce** umožňuje
 doplnit základ daně, DPH, zůstatek k úhradě, zakázku, datum přijetí,
 datum předání k úhradě a oddíl kontrolního hlášení.
-Oddíl KH se načítá z Knihy DPH po zapnutí sloupce.
+  Oddíl KH se načítá z Knihy DPH po zapnutí sloupce.
+  Tento sloupec nemá řazení v seznamu.
+Lze zapnout také **Rozpad DPH** podle sazeb a **Účty MD/Dal** ze zaúčtování;
+v nabídce **Sloupce** jsou sestavy **Výchozí klient** (dosavadní stručný seznam),
+**Výchozí účetní** (DPH, předkontace a oddíl KH) a **Výchozí komplet** (všechny údaje
+včetně oddílu KH). Po volbě sestavy lze jednotlivé sloupce dále měnit.
+Podrobnosti se načtou jen při zobrazení příslušného sloupce. Firma se zapnutými
+dimenzemi může přidat také sloupec **Dimenze** s hodnotami z hlavičky a položek
+dokladu; načítá se jen při zapnutí sloupce. Je-li sloupců více, záhlaví i faktury
+se rozloží do několika řádků. V souvislém seznamu
+zůstává záhlaví při posunu na očích a tabulka má posuvník na spodním okraji.
+Měsíční přehled používá běžně posuvné záhlaví. Na mobilu jsou vybrané údaje
+v kartách faktur.
 Při vzestupném řazení podle DUZP se v měsíčním pohledu zobrazí nejstarší měsíce první.
 První kliknutí na záhlaví sloupce řadí sestupně, druhé vzestupně a třetí vrátí
 výchozí pořadí.

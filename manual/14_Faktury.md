@@ -24,7 +24,8 @@ ukládá pro přihlášeného uživatele. Kliknutí na záhlaví sloupce seřad�
 filtrovaný výsledek před stránkováním; první kliknutí řadí sestupně, druhé
 vzestupně a třetí vrátí výchozí pořadí. V měsíčním
 pohledu se při vzestupném řazení podle DUZP zobrazí nejstarší měsíce první.
-U ostatních sloupců zůstávají měsíce od nejnovějšího a řadí se doklady uvnitř nich.
+  U ostatních sloupců zůstávají měsíce od nejnovějšího a řadí se doklady uvnitř nich.
+  Oddíl KH se zobrazuje podle Knihy DPH a nemá řazení v seznamu.
 Křížek v pravém okraji záhlaví tabulky vrátí výchozí řazení.
 Seznam načítá 50 faktur v jedné dávce. Při posunu dolů se u konce seznamu
 automaticky načte další stránka; tlačítko
@@ -49,6 +50,17 @@ faktury), **Objednávka**, **Zakázka**, **Odesláno dne**, **Uhrazeno celkem**,
 základ daně, DPH, celkovou částku a oddíl kontrolního
 hlášení. Oddíl KH se doplňuje z Knihy DPH až po zapnutí sloupce; doklad bez
 zařazení do KH má prázdnou hodnotu.
+Volitelné jsou také **Rozpad DPH** podle sazeb a **Účty MD/Dal** ze zaúčtování.
+V nabídce **Sloupce** jsou sestavy **Výchozí klient** (dosavadní stručný seznam),
+**Výchozí účetní** (DPH, předkontace a oddíl KH) a **Výchozí komplet** (všechny dostupné
+údaje včetně oddílu KH). Po výběru sestavy lze sloupce dále jednotlivě upravit.
+Tyto podrobnosti se načítají až po zapnutí příslušného sloupce. Firma se
+zapnutými dimenzemi může přidat také sloupec **Dimenze** s hodnotami z hlavičky
+a položek dokladu; načítá se pouze při zapnutí sloupce. Při větším počtu
+sloupců se záhlaví i každá faktura automaticky rozloží do několika řádků.
+V souvislém seznamu zůstává záhlaví při posunu viditelné a posuvník tabulky je
+po ruce na jejím spodním okraji. V měsíčním přehledu se záhlaví s obsahem
+posouvá běžně. Na mobilu se stejné zvolené údaje zobrazují v kartách faktur.
 
 ### 14.1.1 Filtry (vlevo)
 

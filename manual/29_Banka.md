@@ -185,7 +185,10 @@ změny. Smazání se odmítne, když pohyb dokládá ještě jiný import.
 Záložka **Všechny pohyby** je společný přehled transakcí napříč výpisy, účty a
 roky. Na rozdíl od fronty **K zaúčtování** ukazuje i již spárované a zaúčtované
 pohyby. U každého řádku vidíš náš zdrojový účet, účet protistrany, výpis,
-párování a stav zaúčtování.
+párování a stav zaúčtování. Filtr **Stav** nabízí stejné stavy párování jako
+detail výpisu. Pod **Nespárováno** jsou pouze pohyby čekající na fakturu;
+vlastní převody, mzdy a pohyby zaúčtované mimo saldokonto se vynechají.
+Filtr **Ignorováno** ukáže i dříve ignorované položky.
 
 Akce jsou stejné jako v detailu konkrétního výpisu: otevření nebo zrušení
 párování, rozdělené párování, vytvoření dokladu, přiložení podkladu, vyžádání
@@ -317,6 +320,17 @@ eviduje jako částečná úhrada přepočtená kurzem faktury. V podvojném
 
 Pro transakce, které se nespárovaly automaticky (typicky chybí VS, nebo
 částka nesedí kvůli devizovému kurzu či bankovnímu poplatku):
+
+Filtr **Nespárováno** v detailu výpisu ukazuje pohyby, které skutečně čekají
+na spárování s dokladem. Nezahrnuje vlastní převody, mzdové platby ani pohyby
+zaúčtované mimo saldokontní účty, například bankovní poplatky, platby kartou
+a daně. Tyto pohyby zůstávají ve výpisu dostupné bez filtru.
+Akce **Nespárované XLSX** stáhne všechny takové pohyby z aktuálního výpisu,
+včetně těch na dalších stránkách. Soubor obsahuje bankovní účet, směr a datum
+platby, text, částku, měnu a poznámky účetní z účetního zápisu. Tlačítko
+**Odeslat klientovi** před odesláním ukáže počet pohybů, účet a adresy aktivních
+klientských uživatelů firmy a vyžádá potvrzení. Odesílá stejný XLSX soubor;
+bez nespárovaných pohybů nebo bez klientského příjemce se nic neodešle.
 
 - Pod stavem **Nespárováno** je vidět důvod, proč transakci automat nevzal,
   například *Žádná vydaná faktura s tímto VS* (platba přišla dřív, než faktura

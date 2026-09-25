@@ -1,0 +1,9 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#15131D;">Unmatched bank transactions</h1>
+<p style="margin:0 0 16px;">Hello,</p>
+<p style="margin:0 0 16px;">Attached is a list of <strong>{{ count }}</strong> bank transactions on account <strong>{{ account }}</strong> that still need a document or confirmation. Please provide the missing documents.</p>
+<p style="margin:0 0 16px;">The accountant's notes are included beside each transaction in the XLSX file.</p>
+<p style="margin:24px 0 0;font-size:13px;color:#7A748C;">Thank you.</p>
+{% endblock %}

@@ -149,6 +149,13 @@ zápisu, při shodném datu podle pořadí vzniku) se sloupci:
 - **Zaúčtováno dne**, **Zaúčtoval**, **ID zápisu**, **Vytvořeno** a **Změněno**
   *(skryto ve výchozím zobrazení)*.
 
+Mezi volitelnými sloupci jsou také **Rozpad DPH** podle sazeb u faktur,
+**Účty MD/Dal** a při zapnutých dimenzích firmy také **Dimenze** z řádků zápisu.
+Tyto podrobnosti se načítají až po zapnutí
+příslušného sloupce. Při větším počtu sloupců se záhlaví i zápisy rozloží do
+několika řádků. Při posunu seznamu zůstává záhlaví viditelné a tabulka má
+posuvník u spodního okraje. Na mobilu se zvolené údaje zobrazují v kartách.
+
 Přes ikonu ozubeného kola (**ColumnPicker**) si zobrazené sloupce přizpůsobíš, přepínačem
 hustoty řádků (**DensityToggle**) zvolíš kompaktnější nebo prostornější tabulku. Nastavené
 kombinace filtrů lze uložit a znovu použít přes **Uložené filtry**.

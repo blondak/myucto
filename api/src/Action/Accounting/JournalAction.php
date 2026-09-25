@@ -12,6 +12,8 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Repository\InvoiceListDetailsRepository;
+use MyInvoice\Repository\DimensionListSummaryRepository;
 use MyInvoice\Repository\JournalEntryAttachmentRepository;
 use MyInvoice\Repository\JournalEntryDocumentLinkRepository;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
@@ -79,6 +81,7 @@ final class JournalAction
         private readonly AiPostingOverrideResolver $aiOverrides,
         private readonly EmbeddingWriter $embeddingWriter,
         private readonly JournalEntryRepository $journal,
+        private readonly InvoiceListDetailsRepository $listDetails,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
@@ -102,6 +105,7 @@ final class JournalAction
         private readonly JournalIntegrityService $integrity,
         private readonly LoggerInterface $log,
         private readonly DimensionService $dimensions,
+        private readonly DimensionListSummaryRepository $dimensionSummaries,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -128,9 +132,37 @@ final class JournalAction
         // viz JournalLinkService::hasRelatedMap(). Bez něj by účetní musel rozbalit
         // každý řádek, aby zjistil, jestli je zápis na něco navázaný.
         $related = $this->links->hasRelatedMap($supplierId, $result['items']);
+        $includePosting = ($q['include_posting_accounts'] ?? null) === '1';
+        $includeVat = ($q['include_vat_breakdown'] ?? null) === '1';
+        $includeDimensions = ($q['include_dimensions'] ?? null) === '1';
+        $entryIds = array_map(static fn (array $item): int => (int) $item['id'], $result['items']);
+        $linesByEntry = $includePosting
+            ? $this->journal->linesForEntries($entryIds, $supplierId)
+            : [];
+        $dimensionLabels = $includeDimensions ? $this->dimensionSummaries->forJournalEntries($supplierId, $entryIds) : [];
+        $vatBySource = [];
+        if ($includeVat) {
+            foreach (['invoice', 'purchase_invoice'] as $source) {
+                $ids = array_values(array_unique(array_map(
+                    static fn (array $item): int => (int) $item['source_id'],
+                    array_filter($result['items'], static fn (array $item): bool => $item['source_type'] === $source && $item['source_id'] !== null),
+                )));
+                $vatBySource[$source] = $this->listDetails->vatForDocuments($supplierId, $source, $ids);
+            }
+        }
         foreach ($result['items'] as &$item) {
             $item['automation'] = $provenance[(int) $item['id']] ?? null;
             $item['has_related'] = isset($related[(int) $item['id']]);
+            if ($includePosting) {
+                $item['posting_lines'] = $linesByEntry[(int) $item['id']] ?? [];
+            }
+            if ($includeVat) {
+                $item['vat_breakdown'] = $vatBySource[$item['source_type']][(int) $item['source_id']]['vat_breakdown'] ?? [];
+                $item['source_currency'] = $vatBySource[$item['source_type']][(int) $item['source_id']]['source_currency'] ?? null;
+            }
+            if ($includeDimensions) {
+                $item['dimension_labels'] = $dimensionLabels[(int) $item['id']] ?? [];
+            }
         }
         unset($item);
         return Json::ok($response, [

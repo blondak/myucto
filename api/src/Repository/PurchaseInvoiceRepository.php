@@ -968,7 +968,7 @@ final class PurchaseInvoiceRepository
         $selectTotal = $perPage > 0 ? ', COUNT(*) OVER() AS total_rows' : '';
 
         $sortColumns = [
-            'number' => 'pi.varsymbol', 'vendor' => 'c.company_name',
+            'number' => 'pi.varsymbol', 'vendor' => 'c.company_name', 'vendor_ic' => 'c.ic',
             'vendor_number' => 'pi.vendor_invoice_number', 'kind' => 'pi.document_kind',
             'tax_date' => 'COALESCE(pi.tax_date, pi.issue_date)', 'due_date' => 'pi.due_date',
             'amount' => 'pi.total_with_vat', 'status' => 'pi.status',
@@ -978,6 +978,10 @@ final class PurchaseInvoiceRepository
             'vat' => 'pi.total_vat', 'balance' => 'pi.amount_to_pay',
             'project' => 'prj.name', 'received_at' => 'pi.received_at',
             'payment_ordered_at' => 'pi.payment_ordered_at',
+            'vat_breakdown' => 'pi.total_vat',
+            'debit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'debit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = pi.supplier_id AND je.source_type = 'purchase_invoice' AND je.source_id = pi.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL)",
+            'credit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'credit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = pi.supplier_id AND je.source_type = 'purchase_invoice' AND je.source_id = pi.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL)",
+            'locked' => 'pi.booked_at',
         ];
         $sortKey = (string) ($filters['sort_key'] ?? '');
         $sortDir = strtolower((string) ($filters['sort_dir'] ?? '')) === 'asc' ? 'ASC' : 'DESC';

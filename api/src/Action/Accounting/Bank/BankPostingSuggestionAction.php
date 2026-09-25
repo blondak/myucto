@@ -75,12 +75,15 @@ final class BankPostingSuggestionAction
         $perPage = max(1, min(self::MAX_PER_PAGE, (int) ($q['per_page'] ?? 50)));
         // scope=all → záložka „Všechny pohyby" (i zaúčtované, napříč účty); jinak fronta k zaúčtování.
         $scope = ($q['scope'] ?? '') === 'all' ? 'all' : 'unposted';
+        $matchStatus = in_array($q['status'] ?? null, ['unmatched', 'auto_exact', 'auto_partial', 'manual', 'ignored'], true)
+            ? (string) $q['status'] : null;
         $result = $this->suggestions->paginateUnposted(
             $supplierId,
             $perPage,
             ($page - 1) * $perPage,
             [
                 'scope' => $scope,
+                'status' => $matchStatus,
                 'year' => isset($q['year']) && (int) $q['year'] > 0 ? (int) $q['year'] : null,
                 'q' => isset($q['q']) ? mb_substr(trim((string) $q['q']), 0, 100) : null,
                 'account' => isset($q['account']) && $q['account'] !== '' ? (string) $q['account'] : null,

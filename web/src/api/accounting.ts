@@ -181,6 +181,10 @@ export interface JournalEntry {
    */
   has_related?: boolean
   automation?: AutomationProvenance | null
+  posting_lines?: Array<{ side: JournalSide; amount: number; account_code: string; account_name: string | null }>
+  vat_breakdown?: Array<{ rate: number; base: number; vat: number }>
+  source_currency?: string | null
+  dimension_labels?: string[]
   _warnings?: Array<'entry_date_outside_document_year'>
 }
 
@@ -506,6 +510,9 @@ export interface JournalHistoryResponse {
 }
 
 export interface JournalFilters {
+  include_vat_breakdown?: boolean
+  include_posting_accounts?: boolean
+  include_dimensions?: boolean
   sort_key?: string
   sort_dir?: 'asc' | 'desc'
   document_no?: string
@@ -1772,6 +1779,9 @@ export const accountingApi = {
   // Deník
   listJournal: (filters?: JournalFilters) => {
     const params: Record<string, string | number> = {}
+    if (filters?.include_vat_breakdown) params.include_vat_breakdown = 1
+    if (filters?.include_posting_accounts) params.include_posting_accounts = 1
+    if (filters?.include_dimensions) params.include_dimensions = 1
     if (filters?.sort_key) params.sort_key = filters.sort_key
     if (filters?.sort_dir) params.sort_dir = filters.sort_dir
     if (filters?.document_no) params.document_no = filters.document_no

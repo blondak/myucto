@@ -3215,6 +3215,9 @@ final class Routes
         $app->get  ('/api/bank-statements/{id:[0-9]+}',      [BankStatementAction::class, 'detail']);
         $app->get  ('/api/bank-statements/{id:[0-9]+}/download', [BankStatementAction::class, 'download']);
         $app->get  ('/api/bank-statements/{id:[0-9]+}/export-gpc', \MyInvoice\Action\Bank\GpcExportAction::class);
+        $app->get  ('/api/bank-statements/{id:[0-9]+}/export-unmatched', [\MyInvoice\Action\Bank\UnmatchedBankExportAction::class, 'download']);
+        $app->get  ('/api/bank-statements/{id:[0-9]+}/unmatched-recipients', [\MyInvoice\Action\Bank\UnmatchedBankExportAction::class, 'recipients']);
+        $app->post ('/api/bank-statements/{id:[0-9]+}/send-unmatched', [\MyInvoice\Action\Bank\UnmatchedBankExportAction::class, 'send']);
         $app->post ('/api/bank-statements/{id:[0-9]+}/pdf',  [BankStatementAction::class, 'uploadPdf']);
         $app->get  ('/api/bank-statements/{id:[0-9]+}/pdf',  [BankStatementAction::class, 'downloadPdf']);
         $app->delete('/api/bank-statements/{id:[0-9]+}/pdf', [BankStatementAction::class, 'deletePdf']);

@@ -454,6 +454,10 @@ export interface InvoiceListItem {
   oss_review_oss?: boolean
   month_bucket: string
   kh_sections?: string[]
+  vat_breakdown?: Array<{ rate: number; base: number; vat: number }>
+  debit_accounts?: string[]
+  credit_accounts?: string[]
+  dimension_labels?: string[]
   /** Zámek dokladu (F6) — jediný zdroj pravdy je BE, FE nic nedopočítává. Optional = BC. */
   locked?: DocumentLock
 }
@@ -554,6 +558,9 @@ export interface ListFilters {
   sort_dir?: 'asc' | 'desc'
   group_by_month?: boolean
   include_kh?: boolean
+  include_vat_breakdown?: boolean
+  include_posting_accounts?: boolean
+  include_dimensions?: boolean
   status?: string | string[]
   type?: string | string[]
   client_id?: number
@@ -711,6 +718,9 @@ export const invoicesApi = {
     if (filters.sort_dir)    params.sort_dir               = filters.sort_dir
     if (filters.group_by_month === false) params['filter[group_by_month]'] = 0
     if (filters.include_kh) params['filter[include_kh]'] = 1
+    if (filters.include_vat_breakdown) params['filter[include_vat_breakdown]'] = 1
+    if (filters.include_posting_accounts) params['filter[include_posting_accounts]'] = 1
+    if (filters.include_dimensions) params['filter[include_dimensions]'] = 1
     return api.get<{ data: MonthGroup[]; meta: InvoiceListMeta }>('/invoices', { params }).then(r => r.data)
   },
 

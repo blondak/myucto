@@ -539,6 +539,10 @@ export interface PurchaseInvoiceListItem {
   month_bucket: string
   project_name?: string | null
   kh_sections?: string[]
+  vat_breakdown?: Array<{ rate: number; base: number; vat: number }>
+  debit_accounts?: string[]
+  credit_accounts?: string[]
+  dimension_labels?: string[]
   /** §DM — aspoň jedna položka je drobný majetek (EXISTS v list SELECTu) → ikonka v seznamu. */
   has_small_asset?: boolean
   extraction_warning: string | null
@@ -643,6 +647,9 @@ export interface PurchaseListFilters {
   sort_dir?: 'asc' | 'desc'
   group_by_month?: boolean
   include_kh?: boolean
+  include_vat_breakdown?: boolean
+  include_posting_accounts?: boolean
+  include_dimensions?: boolean
   status?: PurchaseInvoiceStatus | PurchaseInvoiceStatus[]
   document_kind?: PurchaseDocumentKind | PurchaseDocumentKind[]
   vendor_id?: number
@@ -744,6 +751,9 @@ export const purchaseInvoicesApi = {
     if (filters.sort_dir)    params.sort_dir               = filters.sort_dir
     if (filters.group_by_month === false) params['filter[group_by_month]'] = 0
     if (filters.include_kh) params['filter[include_kh]'] = 1
+    if (filters.include_vat_breakdown) params['filter[include_vat_breakdown]'] = 1
+    if (filters.include_posting_accounts) params['filter[include_posting_accounts]'] = 1
+    if (filters.include_dimensions) params['filter[include_dimensions]'] = 1
     return api.get<{ data: PurchaseMonthGroup[]; meta: PurchaseListMeta }>(
       '/purchase-invoices',
       { params },

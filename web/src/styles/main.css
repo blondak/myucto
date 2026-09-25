@@ -702,6 +702,128 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     font-size: 0.8125rem;
   }
 
+  @media (min-width: 768px) {
+    .singleline-list-table:not(.multirow-table) > thead > tr > th,
+    .singleline-list-table:not(.multirow-table) > tbody > tr:not(.table-detail-row) > td {
+      white-space: nowrap;
+    }
+    .singleline-list-table:not(.multirow-table) > thead > tr > th span {
+      white-space: nowrap;
+    }
+    .singleline-list-table:not(.multirow-table) > thead > tr > th:first-child,
+    .singleline-list-table:not(.multirow-table) > tbody > tr:not(.table-detail-row) > td:first-child {
+      width: 4rem;
+      min-width: 4rem;
+      max-width: 4rem;
+    }
+  }
+
+  @media (min-width: 768px) {
+    .multirow-table,
+    .multirow-table > thead,
+    .multirow-table > tbody {
+      display: block;
+      width: 100%;
+    }
+    .multirow-table > thead > tr,
+    .multirow-table > tbody > tr:not(.table-detail-row) {
+      display: grid;
+      position: relative;
+      padding-left: 2.75rem;
+      padding-right: 2.75rem;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .multirow-table > thead > tr > th,
+    .multirow-table > tbody > tr:not(.table-detail-row) > td {
+      min-width: 0;
+      text-align: left !important;
+      border-right: 1px solid color-mix(in oklab, var(--color-neutral-200) 55%, transparent);
+      padding: 0.3rem 0.65rem !important;
+      line-height: 1.25;
+      align-self: center;
+    }
+    .multirow-table > thead > tr > th {
+      background-color: var(--color-neutral-50);
+      border-bottom: 1px solid var(--color-neutral-200);
+      align-self: stretch;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .multirow-table > tbody > tr:not(.table-detail-row) {
+      border-bottom: 1px solid var(--color-neutral-200);
+    }
+    .multirow-table > thead > tr > :first-child,
+    .multirow-table > tbody > tr:not(.table-detail-row) > :first-child {
+      position: absolute !important;
+      left: 0;
+      top: 0;
+      width: 2.75rem;
+      height: auto;
+      padding: 0.45rem !important;
+      border-right: 1px solid var(--color-neutral-200);
+    }
+    .multirow-table > tbody > tr:not(.table-detail-row) > td:first-child > div {
+      justify-content: flex-start;
+    }
+    .multirow-table > thead > tr > :last-child,
+    .multirow-table > tbody > tr:not(.table-detail-row) > :last-child {
+      position: absolute;
+      right: 0;
+      top: 0;
+      width: 2.75rem;
+      height: 100%;
+      padding: 0.45rem !important;
+      border-left: 1px solid var(--color-neutral-200);
+      border-right: 0;
+    }
+    .multirow-table > tbody > tr:not(.table-detail-row) > td:not(:first-child) {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .multirow-table > tbody > tr.table-detail-row,
+    .multirow-table > tbody > tr.table-detail-row > td {
+      display: block;
+      width: 100%;
+    }
+  }
+  @media (min-width: 1200px) {
+    .multirow-table > thead > tr,
+    .multirow-table > tbody > tr:not(.table-detail-row) {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+  }
+  @media (min-width: 1360px) {
+    .multirow-table > thead > tr,
+    .multirow-table > tbody > tr:not(.table-detail-row) {
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
+  }
+  @media (min-width: 1800px) {
+    .multirow-table > thead > tr,
+    .multirow-table > tbody > tr:not(.table-detail-row) {
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+    }
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .pointer-fine-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    .pointer-fine-hidden:focus-within {
+      position: static;
+      width: auto;
+      height: auto;
+      overflow: visible;
+      clip-path: none;
+    }
+  }
+
   /*
    * ─── Datové tabulky: vzhledové defaulty ───
    * Doplněk k nevrstveným pravidlům výš. Tady schválně přes :where() (specificita 0),

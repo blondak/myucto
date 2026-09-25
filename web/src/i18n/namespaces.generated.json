@@ -241,6 +241,7 @@
       "project"
     ],
     "invoices": [
+      "dimensions",
       "lock",
       "oss_rates",
       "payment_method",
@@ -308,6 +309,7 @@
       "purchase_invoice"
     ],
     "purchase-invoices": [
+      "dimensions",
       "lock",
       "purchase_invoice"
     ],

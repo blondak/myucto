@@ -526,6 +526,14 @@ export const bankApi = {
     const base = api.defaults.baseURL ?? ''
     return `${base.replace(/\/$/, '')}/bank-statements/${id}/export-gpc`
   },
+  unmatchedExportUrl: (id: number): string => {
+    const base = api.defaults.baseURL ?? ''
+    return `${base.replace(/\/$/, '')}/bank-statements/${id}/export-unmatched`
+  },
+  unmatchedRecipients: (id: number) =>
+    api.get<{ to: string[]; count: number; account: string }>(`/bank-statements/${id}/unmatched-recipients`).then(r => r.data),
+  sendUnmatched: (id: number) =>
+    api.post<{ sent_to: string[]; count: number; deferred: boolean }>(`/bank-statements/${id}/send-unmatched`, { confirmed: true }).then(r => r.data),
   downloadUrl: (id: number): string => {
     const base = api.defaults.baseURL ?? ''
     return `${base.replace(/\/$/, '')}/bank-statements/${id}/download`

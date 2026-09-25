@@ -947,9 +947,12 @@ paths:
           name: filter[include_kh]
           description: "1 = doplnit oddíly KH z Knihy DPH do kh_sections na každém dokladu"
           schema: { type: integer, enum: [0, 1], default: 0 }
+        - { in: query, name: 'filter[include_vat_breakdown]', description: "1 = doplnit rozpad základu a DPH podle sazeb jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: 'filter[include_posting_accounts]', description: "1 = doplnit účty MD/Dal ze zaúčtování jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: 'filter[include_dimensions]', description: "1 = doplnit štítky dimenzí jen u firmy se zapnutými dimenzemi", schema: { type: integer, enum: [0, 1], default: 0 } }
         - in: query
           name: sort_key
-          schema: { type: string, enum: [number, client, type, issued, due, amount, status, payment_vs, order_number, paid_at, payment_method, booked_at, exchange_rate, amount_czk, base, vat, total, project, sent_at, paid_total] }
+          schema: { type: string, enum: [number, client, type, issued, due, amount, status, payment_vs, order_number, paid_at, payment_method, booked_at, exchange_rate, amount_czk, base, vat, total, project, sent_at, paid_total, vat_breakdown, debit_accounts, credit_accounts, locked] }
         - in: query
           name: sort_dir
           schema: { type: string, enum: [asc, desc], default: desc }
@@ -3171,6 +3174,63 @@ paths:
         '404': { description: Výpis nenalezen }
         '422': { description: Chybějící nebo konfliktní zůstatky či nepodporované údaje }
 
+  /api/v1/bank-statements/{id}/export-unmatched:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [Bank]
+      summary: XLSX skutečně nespárovaných pohybů výpisu
+      description: Výpis všech stran bez stránkování; vylučuje vlastní převody, mzdy a pohyby zaúčtované mimo saldokontní účty. Obsahuje účet, směr, datum, text, částku, měnu a poznámky účetního zápisu.
+      responses:
+        '200':
+          description: Soubor XLSX
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '404': { description: Výpis nenalezen nebo nepatří firmě }
+
+  /api/v1/bank-statements/{id}/unmatched-recipients:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [Bank]
+      summary: Náhled příjemců a počtu pohybů před odesláním XLSX
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankUnmatchedExportPreview' }
+        '404': { description: Výpis nenalezen nebo nepatří firmě }
+
+  /api/v1/bank-statements/{id}/send-unmatched:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+    post:
+      tags: [Bank]
+      summary: Odešle klientským uživatelům XLSX skutečně nespárovaných pohybů
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmed]
+              properties:
+                confirmed: { type: boolean, enum: [true] }
+      responses:
+        '200':
+          description: Odesláno nebo zařazeno do fronty
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankUnmatchedExportSend' }
+        '404': { description: Výpis nenalezen nebo nepatří firmě }
+        '422': { description: Chybí potvrzení, pohyby nebo klientský příjemce }
+        '502': { description: Odeslání e-mailu selhalo }
+
   /api/v1/bank-statements/{id}/download:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -3914,12 +3974,13 @@ paths:
       - $ref: '#/components/parameters/SupplierIdHeader'
     get:
       tags: [Accounting]
-      summary: Všechny skutečné bankovní pohyby bez aktivního účetního zápisu
-      description: Zahrnuje i pohyby, pro které nevznikl návrh kontace; ignorované položky a e-mailová avíza vynechává.
+      summary: Bankovní pohyby ve frontě k zaúčtování nebo napříč výpisy
+      description: "Výchozí scope=unposted vynechává zaúčtované a ignorované položky; scope=all zahrnuje i je. E-mailová avíza se nezahrnují. Filtr status=unmatched vynechává vyřízené pohyby bez očekávané faktury stejně jako detail výpisu."
       parameters:
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
         - { in: query, name: scope, schema: { type: string, enum: [unposted, all] }, description: "'all' = záložka „Všechny pohyby\" (i zaúčtované, napříč účty)." }
+        - { in: query, name: status, schema: { type: string, enum: [unmatched, auto_exact, auto_partial, manual, ignored] }, description: "Stav spárování pro scope=all. Hodnota unmatched ukazuje jen skutečně nevyřízené párování s dokladem." }
         - { in: query, name: year, schema: { type: integer } }
         - { in: query, name: q, schema: { type: string }, description: "Fulltext přes protistranu, VS, popis, číslo účtu a částku." }
         - { in: query, name: account, schema: { type: string }, description: Náš zdrojový účet výpisu (account_number). }
@@ -5960,9 +6021,12 @@ paths:
           name: filter[include_kh]
           description: "1 = doplnit oddíly KH z Knihy DPH do kh_sections na každém dokladu"
           schema: { type: integer, enum: [0, 1], default: 0 }
+        - { in: query, name: 'filter[include_vat_breakdown]', description: "1 = doplnit rozpad základu a DPH podle sazeb jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: 'filter[include_posting_accounts]', description: "1 = doplnit účty MD/Dal ze zaúčtování jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: 'filter[include_dimensions]', description: "1 = doplnit štítky dimenzí jen u firmy se zapnutými dimenzemi", schema: { type: integer, enum: [0, 1], default: 0 } }
         - in: query
           name: sort_key
-          schema: { type: string, enum: [number, vendor, vendor_number, kind, tax_date, due_date, amount, status, paid_at, booked_at, exchange_rate, vat_deduction, expense_category, base, vat, balance, project, received_at, payment_ordered_at] }
+          schema: { type: string, enum: [number, vendor, vendor_ic, vendor_number, kind, tax_date, due_date, amount, status, paid_at, booked_at, exchange_rate, vat_deduction, expense_category, base, vat, balance, project, received_at, payment_ordered_at, vat_breakdown, debit_accounts, credit_accounts, locked] }
         - in: query
           name: sort_dir
           schema: { type: string, enum: [asc, desc], default: desc }
@@ -9569,7 +9633,10 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: page, schema: { type: integer, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, default: 50, maximum: 200 } }
-        - { in: query, name: sort_key, schema: { type: string, enum: [date, document_date, description, source, status, posted_at, posted_by, document_no, amount, entry_id, created_at, updated_at] } }
+        - { in: query, name: sort_key, schema: { type: string, enum: [date, document_date, description, source, status, posted_at, posted_by, document_no, amount, entry_id, created_at, updated_at, vat_breakdown, debit_accounts, credit_accounts] } }
+        - { in: query, name: include_vat_breakdown, description: "1 = doplnit rozpad DPH zdrojových faktur jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: include_posting_accounts, description: "1 = doplnit účetní řádky s účty MD/Dal jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: include_dimensions, description: "1 = doplnit štítky dimenzí řádků deníku jen u firmy se zapnutými dimenzemi", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: sort_dir, schema: { type: string, enum: [asc, desc], default: desc } }
         - { in: query, name: document_no, description: Částečná shoda čísla dokladu, schema: { type: string, maxLength: 50 } }
         - { in: query, name: period_id, schema: { type: integer } }
@@ -25263,6 +25330,10 @@ components:
         source_doc_number: { type: [string, "null"], description: "Jen source_type=cash — číslo pokladního dokladu pro drill-down (audit 2026-07)." }
         source_register_id: { type: [integer, "null"], description: "Jen source_type=cash — ID pokladny (audit 2026-07)." }
         has_related: { type: boolean, description: "Jen v listu — zápis má protějšek v grafu doklad ↔ úhrada (bankovní pohyb, pokladní doklad nebo zápočet)." }
+        vat_breakdown: { type: array, description: "Jen s include_vat_breakdown=1; u faktur rozpad podle sazeb, jinak prázdné pole.", items: { $ref: '#/components/schemas/VatBreakdownRow' } }
+        source_currency: { type: [string, "null"], description: "Jen s include_vat_breakdown=1; měna zdrojové faktury." }
+        posting_lines: { type: array, description: "Jen s include_posting_accounts=1; řádky zápisu s účty MD/Dal.", items: { $ref: '#/components/schemas/JournalLine' } }
+        dimension_labels: { type: array, description: "Jen s include_dimensions=1 a při zapnutých dimenzích; souhrn hodnot z řádků zápisu.", items: { type: string } }
         automation:
           type: [object, "null"]
           allOf:
@@ -26314,6 +26385,14 @@ components:
           description: "E-mailové kontakty dle účelu (#86) — replace-all: pošli kompletní pole; klíč vynech, pokud kontakty neměníš. Max 10 kontaktů."
           items: { $ref: '#/components/schemas/ClientEmailContact' }
 
+    VatBreakdownRow:
+      type: object
+      required: [rate, base, vat]
+      properties:
+        rate: { type: number, format: float }
+        base: { type: number, format: float }
+        vat: { type: number, format: float }
+
     Invoice:
       type: object
       properties:
@@ -26378,6 +26457,10 @@ components:
           type: array
           description: "Oddíly kontrolního hlášení podle Knihy DPH; dostupné jen v seznamu s filter[include_kh]=1."
           items: { type: string }
+        source_currency: { type: string, description: "Měna rozpadu DPH; jen s filter[include_vat_breakdown]=1." }
+        debit_accounts: { type: array, description: "Účty MD ze zaúčtování; jen v seznamu s filter[include_posting_accounts]=1.", items: { type: string } }
+        credit_accounts: { type: array, description: "Účty Dal ze zaúčtování; jen v seznamu s filter[include_posting_accounts]=1.", items: { type: string } }
+        dimension_labels: { type: array, description: "Jen v seznamu s filter[include_dimensions]=1 a při zapnutých dimenzích; souhrn hodnot z dokladu.", items: { type: string } }
         issue_date: { type: string, format: date }
         due_date: { type: string, format: date }
         tax_date: { type: [string, "null"], format: date, description: "DUZP — null u proforem" }
@@ -26408,7 +26491,7 @@ components:
             discount_amount: { type: number, format: float, description: "Kladná peněžní hodnota slevy (= součet záporných slevových položek)" }
         vat_breakdown:
           type: array
-          description: "Per-sazba rozpad DPH (vstup pro QR + PDF)"
+          description: "Rozpad DPH podle sazeb. V seznamu jen s filter[include_vat_breakdown]=1; v detailu slouží také pro QR a PDF."
           items:
             type: object
             properties:
@@ -27560,6 +27643,22 @@ components:
           type: string
           description: Doplňující důvod — přítomný jen když ho služba uvedla.
 
+    BankUnmatchedExportPreview:
+      type: object
+      required: [to, count, account]
+      properties:
+        to: { type: array, items: { type: string, format: email } }
+        count: { type: integer }
+        account: { type: string }
+
+    BankUnmatchedExportSend:
+      type: object
+      required: [sent_to, count, deferred]
+      properties:
+        sent_to: { type: array, items: { type: string, format: email } }
+        count: { type: integer }
+        deferred: { type: boolean }
+
     BankStatement:
       type: object
       description: |
@@ -28341,6 +28440,11 @@ components:
           type: array
           description: "Oddíly kontrolního hlášení podle Knihy DPH; dostupné jen s filter[include_kh]=1."
           items: { type: string }
+        vat_breakdown: { type: array, description: "Jen s filter[include_vat_breakdown]=1.", items: { $ref: '#/components/schemas/VatBreakdownRow' } }
+        source_currency: { type: string, description: "Měna rozpadu DPH; jen s filter[include_vat_breakdown]=1." }
+        debit_accounts: { type: array, description: "Účty MD ze zaúčtování; jen s filter[include_posting_accounts]=1.", items: { type: string } }
+        credit_accounts: { type: array, description: "Účty Dal ze zaúčtování; jen s filter[include_posting_accounts]=1.", items: { type: string } }
+        dimension_labels: { type: array, description: "Jen v seznamu s filter[include_dimensions]=1 a při zapnutých dimenzích; souhrn hodnot z dokladu.", items: { type: string } }
         has_small_asset:
           type: boolean
           description: "§DM — aspoň jedna položka dokladu má expense_kind='small_asset' (drobný majetek). Jen v seznamu, v detailu se odvozuje z items[]."

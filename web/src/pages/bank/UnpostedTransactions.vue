@@ -32,6 +32,11 @@ const year = ref<number | null>(null)
 const search = ref('')
 const accounts = ref<BankAccountOption[]>([])
 const accountFilter = ref<string>('')
+const statusFilter = ref<'' | 'unmatched' | 'auto_exact' | 'auto_partial' | 'manual' | 'ignored'>('')
+const STATUS_OPTIONS = ['unmatched', 'auto_exact', 'auto_partial', 'manual', 'ignored'] as const
+function statusLabel(status: string): string {
+  return t(`bank.match_status.${status}`)
+}
 function accountLabel(a: BankAccountOption): string {
   const num = formatAccountNumber(a.account_number, a.bank_code)
   return a.label ? `${num} — ${a.label}` : num
@@ -73,6 +78,7 @@ async function load(silent = false) {
       page: page.value,
       per_page: perPage.value,
       scope: props.scope,
+      ...(props.scope === 'all' && statusFilter.value ? { status: statusFilter.value } : {}),
       ...(year.value ? { year: year.value } : {}),
       ...(search.value.trim() ? { q: search.value.trim() } : {}),
       ...(accountFilter.value ? { account: accountFilter.value } : {}),
@@ -102,7 +108,7 @@ async function changed(silent = false) {
 
 // Změna filtru vždy zpět na první stranu — jinak by uživatel skončil na prázdné stránce.
 let searchTimer: ReturnType<typeof setTimeout> | undefined
-watch([search, year, accountFilter, page, () => props.scope, txSort.sort], () => { loadGeneration++ }, { flush: 'sync' })
+watch([search, year, accountFilter, statusFilter, page, () => props.scope, txSort.sort], () => { loadGeneration++ }, { flush: 'sync' })
 function resetAndLoad() {
   if (page.value !== 1) { page.value = 1; return } // watch(page) načte sám
   void load()
@@ -113,6 +119,7 @@ watch(search, () => {
 })
 watch(year, resetAndLoad)
 watch(accountFilter, resetAndLoad)
+watch(statusFilter, resetAndLoad)
 watch(txSort.sort, resetAndLoad)
 watch(() => props.scope, () => {
   if (props.scope !== 'all' && txSort.sort.value?.key === 'account') txSort.sort.value = null
@@ -149,12 +156,17 @@ watch(page, () => {
         <option value="">{{ t('bank.all_own_accounts') }}</option>
         <option v-for="a in accounts" :key="a.account_number" :value="a.account_number">{{ accountLabel(a) }}</option>
       </select>
+      <select v-if="scope === 'all'" v-model="statusFilter" :aria-label="t('bank.filter_status')"
+        class="h-9 px-2 border border-neutral-300 rounded-md text-sm max-w-full">
+        <option value="">{{ t('bank.filter_all') }}</option>
+        <option v-for="status in STATUS_OPTIONS" :key="status" :value="status">{{ statusLabel(status) }}</option>
+      </select>
       <BankTransactionSortSelect v-model="txSort.selectValue.value" class="md:hidden" :keys="sortKeys" />
       <span class="text-xs text-neutral-500 whitespace-nowrap">{{ t('bank.posting.count_found', { n: total }) }}</span>
     </div>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <EmptyState v-else-if="items.length === 0 && (search || year || accountFilter)" boxed variant="filtered"
+    <EmptyState v-else-if="items.length === 0 && (search || year || accountFilter || (scope === 'all' && statusFilter))" boxed variant="filtered"
       :title="t('bank.posting.no_match')" />
     <EmptyState v-else-if="items.length === 0" boxed icon="checkCircle" accent="success" :title="t('bank.posting.unposted_empty')" />
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">

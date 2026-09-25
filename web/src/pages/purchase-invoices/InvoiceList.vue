@@ -33,11 +33,13 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { useDimensions } from '@/composables/useDimensions'
 import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
+import VatBreakdownCell from '@/components/ui/VatBreakdownCell.vue'
 import { useSupplierStore } from '@/stores/supplier'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
@@ -47,6 +49,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 const { t, locale } = useI18n()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
+const dimensions = useDimensions()
 // Hromadné účtování a filtr zaúčtování jsou dostupné jen v podvojném účetnictví.
 const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
 const router = useRouter()
@@ -296,6 +299,7 @@ const DEFAULT_YEAR = new Date().getFullYear()
 const COLUMNS: ColumnDef[] = [
   { key: 'number', labelKey: 'purchase_invoice.fields.varsymbol', required: true },
   { key: 'vendor', labelKey: 'purchase_invoice.fields.vendor', required: true },
+  { key: 'vendor_ic', labelKey: 'common.ic' },
   { key: 'vendor_number', labelKey: 'purchase_invoice.fields.vendor_invoice_number' },
   { key: 'kind', labelKey: 'purchase_invoice.fields.document_kind' },
   { key: 'tax_date', labelKey: 'purchase_invoice.fields.tax_date' },
@@ -314,11 +318,50 @@ const COLUMNS: ColumnDef[] = [
   { key: 'project', labelKey: 'invoice.col_project', defaultHidden: true },
   { key: 'received_at', labelKey: 'purchase_invoice.col_received_at', defaultHidden: true },
   { key: 'payment_ordered_at', labelKey: 'purchase_invoice.col_payment_ordered_at', defaultHidden: true },
-  { key: 'kh', labelKey: 'invoice.col_kh', defaultHidden: true, sortable: false },
+  { key: 'vat_breakdown', labelKey: 'invoice.col_vat_breakdown', defaultHidden: true },
+  { key: 'debit_accounts', labelKey: 'invoice.col_debit_accounts', defaultHidden: true },
+  { key: 'credit_accounts', labelKey: 'invoice.col_credit_accounts', defaultHidden: true },
+  { key: 'kh', labelKey: 'invoice.col_kh', defaultHidden: true },
+  { key: 'dimensions', labelKey: 'dimensions.title', defaultHidden: true, available: () => dimensions.enabled.value },
   { key: 'locked', labelKey: 'lock.column' },
 ]
 const tbl = useTablePrefs('purchase_invoices', COLUMNS)
-watch(() => tbl.isVisible('kh'), () => { if (groups.value.length) load() })
+const COLUMN_PRESETS = [
+  { key: 'client', labelKey: 'common.columns_preset_client', visibleKeys: null },
+  { key: 'accountant', labelKey: 'common.columns_preset_accountant', visibleKeys: [
+    'number', 'vendor', 'vendor_ic', 'vendor_number', 'tax_date', 'amount',
+    'vat_deduction', 'vat_breakdown', 'debit_accounts', 'credit_accounts', 'kh', 'locked',
+  ] },
+  { key: 'complete', labelKey: 'common.columns_preset_complete', visibleKeys: COLUMNS.map(c => c.key) },
+]
+const wrapColumns = computed(() => COLUMNS.some(c => c.defaultHidden && tbl.isVisible(c.key)) && COLUMNS.filter(c => tbl.isVisible(c.key)).length + 2 > 10)
+function onListScroll(event: Event) {
+  const el = event.currentTarget as HTMLElement
+  if (!groupByMonth.value && el.scrollTop + el.clientHeight >= el.scrollHeight - 240
+    && !loading.value && !loadingMore.value && page.value < pages.value) void load(false)
+}
+function mobileExtraFields(inv: PurchaseInvoiceListItem): Array<{ key: string; label: string; value: string }> {
+  const values: Record<string, string> = {
+    paid_at: inv.paid_at ? formatDate(inv.paid_at) : '—',
+    booked_at: inv.booked_at ? formatDate(inv.booked_at) : '—',
+    exchange_rate: inv.currency !== 'CZK' && inv.exchange_rate ? formatRate(inv.exchange_rate) : '—',
+    vat_deduction: vatDeductionLabel(inv),
+    expense_category: inv.expense_category_label || '—',
+    base: formatMoney(inv.total_without_vat, inv.currency),
+    vat: formatMoney(inv.total_vat, inv.currency),
+    balance: formatMoney(inv.amount_to_pay, inv.currency),
+    project: inv.project_name || '—',
+    received_at: inv.received_at ? formatDate(inv.received_at) : '—',
+    payment_ordered_at: inv.payment_ordered_at ? formatDate(inv.payment_ordered_at) : '—',
+    kh: inv.kh_sections?.join(', ') || '—',
+    debit_accounts: inv.debit_accounts?.join(', ') || '—',
+    credit_accounts: inv.credit_accounts?.join(', ') || '—',
+    dimensions: inv.dimension_labels?.join(' · ') || '—',
+  }
+  return COLUMNS.filter(c => c.defaultHidden && c.key !== 'vat_breakdown' && tbl.isVisible(c.key))
+    .map(c => ({ key: c.key, label: t(c.labelKey), value: values[c.key] ?? '—' }))
+}
+watch(() => [tbl.isVisible('kh'), tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions')], () => { if (groups.value.length) load() })
 const groupByMonth = computed(() => tbl.flag('group_by_month', true))
 function toggleGrouping() {
   tbl.setFlag('group_by_month', !groupByMonth.value)
@@ -576,6 +619,9 @@ async function fetchPage(reset: boolean) {
       sort_dir: tbl.sort.value?.dir,
       group_by_month: groupByMonth.value,
       include_kh: tbl.isVisible('kh'),
+      include_vat_breakdown: tbl.isVisible('vat_breakdown'),
+      include_posting_accounts: tbl.isVisible('debit_accounts') || tbl.isVisible('credit_accounts'),
+      include_dimensions: tbl.isVisible('dimensions'),
     })
     if (seq !== loadSeq) return
     if (reset) {
@@ -1139,7 +1185,7 @@ async function bulkSetKind() {
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
           {{ groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly') }}
         </button>
-        <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+        <ColumnPicker :ctrl="tbl" :presets="COLUMN_PRESETS" />
         <DensityToggle class="hidden md:block" :ctrl="tbl" />
       </template>
     </FilterBar>
@@ -1174,7 +1220,7 @@ async function bulkSetKind() {
         <!-- Měsíční rozdělovník ve stylu účetní knihy — stejný vzor jako u vydaných
              faktur: název měsíce vlevo, hairline přes volné místo, součet v mono
              vpravo. Součty se musí umět zalomit, jinak by na mobilu vytlačily stránku. -->
-        <header v-if="groupByMonth" class="sticky top-16 z-[5] flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-neutral-50/92 backdrop-blur-md border border-neutral-200 rounded-t-lg px-4 py-2.5 mb-0">
+        <header v-if="groupByMonth" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-neutral-50/92 border border-neutral-200 rounded-t-lg px-4 py-2.5 mb-0">
           <div class="flex items-baseline gap-2.5 shrink-0">
             <h2 class="text-[13px] font-semibold uppercase tracking-[0.16em] text-neutral-800">{{ formatMonth(g.month) }}</h2>
             <span class="text-[11px] text-neutral-500 tabular-nums">{{ g.count }}</span>
@@ -1189,10 +1235,10 @@ async function bulkSetKind() {
         </header>
 
         <!-- Desktop: tabulka -->
-        <div class="hidden md:block bg-surface border border-neutral-200 overflow-hidden" :class="groupByMonth ? 'border-t-0 rounded-b-lg' : 'rounded-lg'">
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm table-sticky-first" :class="tbl.densityClass.value">
-              <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
+        <div class="hidden md:block bg-surface border border-neutral-200" :class="groupByMonth ? 'border-t-0 rounded-b-lg' : 'rounded-lg'">
+          <div class="overflow-auto scrollbar-slim" :class="groupByMonth ? '' : 'max-h-[calc(100vh-20rem)]'" @scroll.passive="onListScroll">
+            <table class="w-full text-sm table-sticky-first singleline-list-table" :class="[tbl.densityClass.value, wrapColumns ? 'multirow-table' : '']">
+              <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide" :class="groupByMonth ? '' : 'sticky top-0 z-20 shadow-sm'">
                 <tr>
                   <th class="px-2 py-2 w-10 text-center">
                     <input
@@ -1205,14 +1251,12 @@ async function bulkSetKind() {
                       class="w-4 h-4 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
                     />
                   </th>
-                  <SortableTh v-for="c in COLUMNS.filter(c => c.key !== 'locked' && c.sortable !== false && tbl.isVisible(c.key))" :key="c.key"
-                    :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
-                    :align="['amount', 'exchange_rate', 'base', 'vat', 'balance'].includes(c.key) ? 'right' : 'left'"
-                    @toggle="onSortToggle" />
-                  <th v-if="tbl.isVisible('kh')" class="text-left px-4 py-2 font-medium">{{ t('invoice.col_kh') }}</th>
-                  <th v-if="tbl.isVisible('locked')" class="text-center px-2 py-2 font-medium w-8">
-                    <span class="sr-only">{{ t('lock.column') }}</span>
-                  </th>
+                  <template v-for="c in COLUMNS.filter(c => tbl.isVisible(c.key))" :key="c.key">
+                    <th v-if="c.key === 'kh' || c.key === 'dimensions'" scope="col" class="py-2 px-3 text-xs uppercase tracking-wide font-medium text-neutral-500 text-left">{{ t(c.labelKey) }}</th>
+                    <SortableTh v-else :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
+                      :align="['amount', 'exchange_rate', 'base', 'vat', 'balance'].includes(c.key) ? 'right' : 'left'"
+                      @toggle="onSortToggle" />
+                  </template>
                   <th class="px-1 py-2 w-8">
                     <button v-if="tbl.sort.value" type="button" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800"
                       :title="t('common.reset_sort')" :aria-label="t('common.reset_sort')" @click.stop="clearSort">×</button>
@@ -1251,9 +1295,9 @@ async function bulkSetKind() {
                     </RouterLink>
                   </td>
                   <td v-if="tbl.isVisible('vendor')" class="px-4 py-2.5">
-                    <div class="font-medium text-neutral-900">{{ inv.vendor_company_name }}</div>
-                    <div v-if="inv.vendor_ic" class="text-xs text-neutral-500 font-mono">{{ t('common.ic') }} {{ inv.vendor_ic }}</div>
+                    <div class="font-medium text-neutral-900 truncate" :title="inv.vendor_company_name">{{ inv.vendor_company_name }}</div>
                   </td>
+                  <td v-if="tbl.isVisible('vendor_ic')" class="px-4 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.vendor_ic || '—' }}</td>
                   <td v-if="tbl.isVisible('vendor_number')" class="px-4 py-2.5 font-mono text-xs text-neutral-600">
                     <div class="flex items-center gap-1.5">
                       <span
@@ -1332,7 +1376,11 @@ async function bulkSetKind() {
                   <td v-if="tbl.isVisible('project')" class="px-4 py-2.5 text-xs text-neutral-600">{{ inv.project_name || '—' }}</td>
                   <td v-if="tbl.isVisible('received_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ inv.received_at ? formatDate(inv.received_at) : '—' }}</td>
                   <td v-if="tbl.isVisible('payment_ordered_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ inv.payment_ordered_at ? formatDate(inv.payment_ordered_at) : '—' }}</td>
-                  <td v-if="tbl.isVisible('kh')" class="px-4 py-2.5 font-mono text-xs">{{ inv.kh_sections?.join(', ') || '—' }}</td>
+                  <td v-if="tbl.isVisible('vat_breakdown')" class="px-4 py-2.5"><VatBreakdownCell :rows="inv.vat_breakdown" :currency="inv.currency" /></td>
+                  <td v-if="tbl.isVisible('debit_accounts')" class="px-4 py-2.5 font-mono text-xs">{{ inv.debit_accounts?.join(', ') || '—' }}</td>
+                  <td v-if="tbl.isVisible('credit_accounts')" class="px-4 py-2.5 font-mono text-xs">{{ inv.credit_accounts?.join(', ') || '—' }}</td>
+                <td v-if="tbl.isVisible('kh')" class="px-4 py-2.5 font-mono text-xs">{{ inv.kh_sections?.join(', ') || '—' }}</td>
+                <td v-if="tbl.isVisible('dimensions')" class="px-4 py-2.5 text-xs max-w-64 truncate" :title="inv.dimension_labels?.join(' · ')">{{ inv.dimension_labels?.join(' · ') || '—' }}</td>
                   <td v-if="tbl.isVisible('locked')" class="px-2 py-2.5 text-center">
                     <PostingBadge v-if="inv.locked?.journal_entry_id"
                       :booked-at="inv.booked_at" :journal-entry-id="inv.locked.journal_entry_id" />
@@ -1359,7 +1407,7 @@ async function bulkSetKind() {
 
                 <!-- Náhled položek dokladu. Neklikatelný řádek (žádné @click), aby
                      klik do náhledu neotevřel fakturu — uživatel si tu chce jen číst. -->
-                <tr v-if="expandedId === inv.id" class="bg-neutral-50/60">
+                <tr v-if="expandedId === inv.id" class="table-detail-row bg-neutral-50/60">
                   <td :colspan="expandedColspan" class="px-6 py-3">
                     <div v-if="expandedLoading" class="text-xs text-neutral-500">{{ t('common.loading') }}</div>
                     <div v-else-if="!expandedItems || expandedItems.length === 0" class="text-xs text-neutral-500">{{ t('common.no_data') }}</div>
@@ -1390,7 +1438,7 @@ async function bulkSetKind() {
         </div>
 
         <!-- Mobile: karty -->
-        <div class="md:hidden bg-surface border border-t-0 border-neutral-200 rounded-b-lg divide-y divide-neutral-100 overflow-hidden">
+        <div class="md:hidden bg-surface border border-t-0 border-neutral-200 rounded-b-lg divide-y divide-neutral-100 overflow-y-auto scrollbar-slim" :class="groupByMonth ? '' : 'max-h-[calc(100vh-15rem)]'" @scroll.passive="onListScroll">
           <div
             v-for="inv in g.invoices"
             :key="`m-${inv.id}`"
@@ -1473,11 +1521,21 @@ async function bulkSetKind() {
                 </div>
               </div>
             </div>
+            <div v-if="mobileExtraFields(inv).length || tbl.isVisible('vat_breakdown')" class="mt-3 ml-8 border-t border-neutral-200 pt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+              <div v-for="field in mobileExtraFields(inv)" :key="field.key" class="min-w-0">
+                <div class="text-neutral-500">{{ field.label }}</div>
+                <div class="font-medium text-neutral-800 break-words">{{ field.value }}</div>
+              </div>
+              <div v-if="tbl.isVisible('vat_breakdown')" class="col-span-2">
+                <div class="text-neutral-500 mb-1">{{ t('invoice.col_vat_breakdown') }}</div>
+                <VatBreakdownCell :rows="inv.vat_breakdown" :currency="inv.currency" />
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      <div v-if="page < pages" ref="loadMoreTarget" class="text-center mt-3">
+      <div v-if="page < pages" ref="loadMoreTarget" class="text-center mt-3 pointer-fine-hidden">
         <button @click="load(false)" :disabled="loadingMore"
           class="cursor-pointer h-10 px-5 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium disabled:opacity-50 rounded-md inline-flex items-center gap-2 shadow-sm">
           {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}

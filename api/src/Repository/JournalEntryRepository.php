@@ -612,6 +612,9 @@ final class JournalEntryRepository
                 (SELECT pi.vendor_invoice_number FROM purchase_invoices pi WHERE je.source_type = 'purchase_invoice' AND pi.id = je.source_id AND pi.supplier_id = je.supplier_id),
                 (SELECT pi.varsymbol FROM purchase_invoices pi WHERE je.source_type = 'purchase_invoice' AND pi.id = je.source_id AND pi.supplier_id = je.supplier_id))",
             'amount' => $accountFiltered ? 'ABS(' . self::FILTERED_NET_AMOUNT_SUBQUERY . ')' : self::AMOUNT_SUBQUERY,
+            'debit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entry_lines jel JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE jel.entry_id = je.id AND jel.supplier_id = je.supplier_id AND jel.side = 'debit')",
+            'credit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entry_lines jel JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE jel.entry_id = je.id AND jel.supplier_id = je.supplier_id AND jel.side = 'credit')",
+            'vat_breakdown' => "CASE WHEN je.source_type = 'invoice' THEN (SELECT i.total_vat FROM invoices i WHERE i.id = je.source_id AND i.supplier_id = je.supplier_id) WHEN je.source_type = 'purchase_invoice' THEN (SELECT pi.total_vat FROM purchase_invoices pi WHERE pi.id = je.source_id AND pi.supplier_id = je.supplier_id) ELSE NULL END",
         ];
         $sortKey = (string) ($filters['sort_key'] ?? '');
         $sortDir = strtolower((string) ($filters['sort_dir'] ?? '')) === 'asc' ? 'ASC' : 'DESC';

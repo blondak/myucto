@@ -24,6 +24,7 @@ use MyInvoice\Service\Bank\StatementReconciliationException;
 use MyInvoice\Service\Bank\StatementImporter;
 use MyInvoice\Service\Bank\StatementTransactionScope;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
+use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
 use MyInvoice\Service\Bank\BankTransactionReleaseException;
 use MyInvoice\Service\Bank\BankTransactionReleaseService;
 use MyInvoice\Service\Invoice\InvoiceAlreadySettledException;
@@ -1642,6 +1643,9 @@ final class BankStatementAction
         if ($statusFilter !== '') {
             $txWhere .= ' AND bt.match_status = ?';
             $txParams[] = $statusFilter;
+            if ($statusFilter === 'unmatched') {
+                $txWhere .= ' AND NOT ' . NonInvoiceBankTransactionScope::sql($sid, 'bt.id');
+            }
         }
         if ($postingFilter !== '') {
             $exists = BankTransactionPostingScope::existsSql($sid, 'bt.id');
