@@ -34,6 +34,7 @@ use MyInvoice\Service\Ai\AiKillSwitchService;
 use MyInvoice\Service\Ai\AiSuggestionService;
 use MyInvoice\Service\Ai\AnomalyDetector;
 use MyInvoice\Service\Ai\EmbeddingWriter;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
 /**
@@ -896,7 +897,8 @@ final class BankPostingService
 
     /**
      * CZK karetní/bankovní úhrada jedné cizoměnové přijaté faktury. Částka 321 se
-     * bere z nominálu a kurzu předpisu, bankovní noha je skutečně odepsaná CZK částka.
+     * bere ze zbytku dokladu v cizí měně a kurzu předpisu, bankovní noha je skutečně
+     * odepsaná CZK částka.
      * Rozdíl je kurzový zisk/ztráta; nejde o haléřové dorovnání 548/648.
      *
      * @return array{lines:list<array{account_code:string, side:string, amount:float}>}
@@ -922,9 +924,30 @@ final class BankPostingService
             throw new PostingException('document_not_posted', 'Přijatá faktura #' . $purchaseId . ' nemá zaúčtovaný předpis.');
         }
         $rate = $this->predpisFxRate($supplierId, (int) $entry['id'], $purchase);
-        $foreign = round((float) $purchase['amount_to_pay'], 2);
-        $predpisCzk = round($foreign * $rate, 2);
         $bankCzk = round(abs((float) $tx['amount']), 2);
+        // Odúčtovat se smí jen ZBYTEK dokladu (bez tohoto pohybu) a jen když ho korunová
+        // platba v kurzové toleranci pokryje. Menší platba je částečná úhrada: ruční
+        // párování doklad nechá otevřený ({@see FxPaymentSettlement::settlesRemaining()})
+        // a SSOT {@see PurchaseSettledExpr::bankAmountSql()} ji počítá přepočtem, takže
+        // odúčtovat celý nominál s rozdílem na 563 by 321 uzavřelo dřív než doklad a
+        // „Vyrovnat zbytek" by závazek odúčtoval podruhé. Totéž u druhé platby už
+        // uhrazeného dokladu. Obojí jde k ručnímu ověření, stejně jako příchozí křížová měna.
+        $settled = PurchaseSettledExpr::settled('pi', excludeBankTransactionId: (int) $tx['id']);
+        $remainingStmt = $this->db->pdo()->prepare(
+            "SELECT pi.amount_to_pay - ({$settled}) FROM purchase_invoices pi WHERE pi.id = ? AND pi.supplier_id = ?"
+        );
+        $remainingStmt->execute([$purchaseId, $supplierId]);
+        $foreign = round((float) $remainingStmt->fetchColumn(), 2);
+        $docRate = (float) ($purchase['exchange_rate'] ?? 0) > 0.0 ? (float) $purchase['exchange_rate'] : $rate;
+        if ($foreign <= 0.005
+            || !FxPaymentSettlement::isFullCzkSettlement($bankCzk, $foreign, (string) $purchase['currency'], $docRate, FxPaymentSettlement::LOCAL_CURRENCY)
+        ) {
+            throw new PostingException(
+                'cross_currency',
+                'Korunová platba nepokrývá zbytek cizoměnové přijaté faktury #' . $purchaseId . ' v kurzové toleranci — vyžaduje ruční ověření.',
+            );
+        }
+        $predpisCzk = round($foreign * $rate, 2);
 
         $lines = [
             $this->withFxTrace(
