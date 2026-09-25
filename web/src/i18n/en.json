@@ -18366,6 +18366,7 @@
       "outside_saldo": "No document"
     },
     "outside_saldo_hint": "Posted outside receivable/payable accounts (tax, levy, fee, loan repayment) — this transaction has no document.",
+    "match_badge_hint": "Click to match with a document",
     "match_reason_title": "Why automatic matching left this transaction unmatched",
     "match_reason": {
       "payroll_settled": "Already used by a payroll payment",

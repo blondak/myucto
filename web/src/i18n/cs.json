@@ -18366,6 +18366,7 @@
       "outside_saldo": "Bez dokladu"
     },
     "outside_saldo_hint": "Zaúčtováno mimo saldokontní účty (daň, odvod, poplatek, splátka) — pohyb doklad nemá.",
+    "match_badge_hint": "Klikněte pro spárování s dokladem",
     "match_reason_title": "Proč automatické párování pohyb nespárovalo",
     "match_reason": {
       "payroll_settled": "Pohyb už uhradil mzdu",
