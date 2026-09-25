@@ -757,6 +757,14 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     .multirow-table > tbody > tr:not(.table-detail-row) {
       border-bottom: 1px solid var(--color-neutral-200);
     }
+    .multirow-table > tbody > tr:not(.table-detail-row) > td.wrap-cell {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .multirow-table > tbody > tr:not(.table-detail-row) > td.clip-cell {
+      overflow: hidden;
+    }
     .multirow-table > thead > tr > :nth-last-child(2):not(:first-child),
     .multirow-table > tbody > tr:not(.table-detail-row) > :nth-last-child(2):not(:first-child) {
       border-right: 0;

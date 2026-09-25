@@ -1030,7 +1030,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                   {{ e.description || '—' }}
                   <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
                 </td>
-                <td v-if="tbl.isVisible('source')" class="px-3 py-2 whitespace-nowrap">
+                <td v-if="tbl.isVisible('source')" class="px-3 py-2 whitespace-nowrap clip-cell">
                   <!-- Jeden řádek: `flex-wrap` lámal odznak automatu a značku
                        vazby pod odkaz a sloupec pak vypadal jako dva různé údaje. -->
                   <div class="flex items-center gap-1.5">
