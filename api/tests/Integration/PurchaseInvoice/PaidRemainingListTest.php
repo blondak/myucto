@@ -118,6 +118,30 @@ final class PaidRemainingListTest extends TestCase
         self::assertSame([$partial, $open, $shortfall, $rounding], array_slice(array_keys($sorted), 0, 4));
     }
 
+    public function testBankDirectionSignsThePayment(): void
+    {
+        $partial = $this->purchase('PF-2099-911', 1000.00, 'booked');
+        $this->bankMatch($partial, -300.00, 300.00);
+        // Vrácený dobropis: příchozí platba k dokladu se zápornou částkou ho vyrovná.
+        $creditNote = $this->purchase('PF-2099-912', -500.00, 'paid', 'credit_note');
+        $this->bankMatch($creditNote, 500.00, 500.00);
+        // Vrácený přeplatek úhradu snižuje (na 321 zase visí dluh).
+        $refunded = $this->purchase('PF-2099-913', 1000.00, 'paid');
+        $this->bankMatch($refunded, -1000.00, 1000.00);
+        $this->bankMatch($refunded, 200.00, 200.00);
+
+        $rows = $this->purchaseRows([]);
+
+        self::assertEqualsWithDelta(300.00, $rows[$partial]['paid_amount'], 0.001);
+        self::assertEqualsWithDelta(700.00, $rows[$partial]['remaining_amount'], 0.001);
+        self::assertEqualsWithDelta(-500.00, $rows[$creditNote]['paid_amount'], 0.001);
+        self::assertEqualsWithDelta(0.00, $rows[$creditNote]['remaining_amount'], 0.001, 'Vrácený dobropis nic nedluží.');
+        self::assertFalse($rows[$creditNote]['paid_shortfall']);
+        self::assertEqualsWithDelta(800.00, $rows[$refunded]['paid_amount'], 0.001);
+        self::assertEqualsWithDelta(200.00, $rows[$refunded]['remaining_amount'], 0.001);
+        self::assertTrue($rows[$refunded]['paid_shortfall']);
+    }
+
     public function testIssuedListReturnsRemaining(): void
     {
         $partial = $this->invoice('FV-2099-901', 1000.00, 250.00, 'sent');
@@ -178,6 +202,26 @@ final class PaidRemainingListTest extends TestCase
             "INSERT INTO invoice_settlements (supplier_id, doc_type, doc_id, settled_on, amount, account_id, status)
              VALUES (?, 'purchase_invoice', ?, '2099-06-20', ?, ?, 'confirmed')"
         )->execute([$this->supplierId, $pfId, $amount, $accountId]);
+    }
+
+    /** Bankovní párování: `$txAmount` se znaménkem pohybu, `$matched` jako ho ukládá párování (kladné). */
+    private function bankMatch(int $pfId, float $txAmount, float $matched): void
+    {
+        $pdo = $this->db->pdo();
+        $marker = '__paid_remaining2099__' . bin2hex(random_bytes(4));
+        $pdo->prepare(
+            "INSERT INTO bank_statements (file_name, file_hash, account_number, bank_code, currency, statement_date)
+             VALUES (?, ?, '1000000005', '0100', 'CZK', '2099-06-20')"
+        )->execute([$marker . '.gpc', hash('sha256', $marker)]);
+        $statementId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-06-20', ?, 'CZK')"
+        )->execute([$statementId, $txAmount]);
+        $txId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payment_matches (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type)
+             VALUES (?, ?, ?, ?, 'manual')"
+        )->execute([$this->supplierId, $txId, $pfId, $matched]);
     }
 
     private function invoice(string $varsymbol, float $total, float $paid, string $status): int

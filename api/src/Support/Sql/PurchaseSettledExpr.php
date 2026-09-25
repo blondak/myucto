@@ -100,6 +100,12 @@ final class PurchaseSettledExpr
      *     se bere jako úhrada celého nominálu. Syrová částka párování v cizí měně by se
      *     sčítala jako by byla v měně dokladu a vyrobila by nedoplatek, který v deníku není.
      *
+     * Směr určuje znaménko, stejně jako u pokladny: `payment_matches.amount` je vždy kladné,
+     * odchozí platba úhradu zvyšuje a PŘÍCHOZÍ (vratka dobropisu, vrácený přeplatek) ji
+     * snižuje. Bez toho vrácený dobropis (`amount_to_pay` záporné) ukazoval zbytek
+     * dvojnásobku své částky a saldo ho nechávalo otevřený. Větve s nominálem vrací
+     * `amount_to_pay`, které znaménko dokladu už nese.
+     *
      * Veřejné, protože totéž potřebuje saldo k rozvahovému dni, které si banku skládá
      * vlastní agregací s datem zaúčtování.
      *
@@ -117,12 +123,12 @@ final class PurchaseSettledExpr
 
         // Bez GREATEST(): výraz běží i v jednotkových testech nad SQLite.
         return sprintf(
-            "CASE WHEN %9\$s.id IS NULL OR %1\$s = UPPER(%2\$s.code) THEN %3\$s.amount
+            "CASE WHEN %9\$s.id IS NULL OR %1\$s = UPPER(%2\$s.code) THEN %10\$s * %3\$s.amount
                   WHEN %1\$s = '%4\$s' AND %5\$sexchange_rate > 0 THEN
-                       CASE WHEN ABS(%3\$s.amount - %6\$s) <= %7\$s
-                              OR ABS(%3\$s.amount - %6\$s) <= ABS(%6\$s) * %8\$s
+                       CASE WHEN ABS(%3\$s.amount - ABS(%6\$s)) <= %7\$s
+                              OR ABS(%3\$s.amount - ABS(%6\$s)) <= ABS(%6\$s) * %8\$s
                             THEN %5\$samount_to_pay
-                            ELSE ROUND(%3\$s.amount / %5\$sexchange_rate, 2) END
+                            ELSE %10\$s * ROUND(%3\$s.amount / %5\$sexchange_rate, 2) END
                   ELSE %5\$samount_to_pay END",
             $txCurrency,
             $docCurrency,
@@ -133,6 +139,7 @@ final class PurchaseSettledExpr
             self::sqlNumber(FxPaymentSettlement::AMOUNT_TOLERANCE),
             self::sqlNumber(FxPaymentSettlement::MATCH_TOLERANCE_PCT),
             $bt,
+            "(CASE WHEN {$bt}.amount > 0 THEN -1 ELSE 1 END)",
         );
     }
 
