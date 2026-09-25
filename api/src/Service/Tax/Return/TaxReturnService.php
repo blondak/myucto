@@ -220,6 +220,54 @@ final class TaxReturnService
     }
 
     /**
+     * Náhled řádného přiznání jen ke čtení: stejný výpočet jako {@see getReturn()} nad
+     * uloženými ručními vstupy (úpravy §23–§25, ztráta, dary, slevy), ale bez založení
+     * draftu a bez párování záloh s bankou. getReturn před výpočtem doplní do PRÁZDNÉHO
+     * pole zaplacených záloh jisté (exact) spárované zálohy z evidence; tady se totéž
+     * udělá jen v paměti, aby čísla seděla se stránkou náhledu. Finalizované přiznání
+     * vrací uložený výpočet.
+     *
+     * @return array{status:'none'|'draft'|'final', result:array<string,mixed>, podklady:array<string,mixed>,
+     *     advances_source:'return'|'schedules'|'none'}
+     */
+    public function previewReadOnly(int $supplierId, int $year, string $type): array
+    {
+        $this->assertType($type);
+        $this->assertSupplierType($supplierId, $type);
+        $row = $this->returns->find($supplierId, $year, $type, 'radne', 1);
+        $stored = $row !== null && is_array($row['computed'] ?? null) ? (array) $row['computed'] : [];
+        if ($row !== null && $row['status'] === 'final' && is_array($stored['computed'] ?? null)) {
+            $paid = (float) ($stored['computed']['advances_paid'] ?? 0);
+            return [
+                'status' => 'final',
+                'result' => (array) $stored['computed'],
+                'podklady' => (array) ($stored['podklady'] ?? []),
+                'advances_source' => $paid > 0 ? 'return' : 'none',
+            ];
+        }
+
+        $inputs = $row !== null ? (array) $row['inputs'] : [];
+        $source = 'none';
+        if ((float) ($inputs['tax_paid_advances'] ?? 0) > 0.0) {
+            $source = 'return';
+        } elseif ($row === null || $row['status'] === 'draft') {
+            $exact = (float) ($this->advanceSchedules->paidTotals($supplierId, $type, $year)['exact']['tax'] ?? 0);
+            if ($exact > 0.0) {
+                $inputs['tax_paid_advances'] = round($exact, 2);
+                $source = 'schedules';
+            }
+        }
+        $computation = $this->compute($supplierId, $year, $type, $inputs, 'radne');
+
+        return [
+            'status' => $row === null ? 'none' : (string) $row['status'],
+            'result' => $computation['result'],
+            'podklady' => $computation['podklady'],
+            'advances_source' => $source,
+        ];
+    }
+
+    /**
      * Uloží ruční vstupy (draft, CAS na row_version). Vrací aktualizovaný stav.
      *
      * @param array<string,mixed> $inputs

@@ -56,9 +56,7 @@ final class DepreciationPostingService
      */
     public function bookYear(int $supplierId, int $fiscalYear, array $meta = [], bool $allowClosingPeriod = false): array
     {
-        $modeStmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
-        $modeStmt->execute([$supplierId]);
-        $taxEvidence = $modeStmt->fetchColumn() === 'tax_evidence';
+        $taxEvidence = $this->isTaxEvidence($supplierId);
         $result = [
             'booked' => 0,
             'skipped' => 0,
@@ -67,30 +65,8 @@ final class DepreciationPostingService
             'errors' => [],
         ];
 
-        // Reálné hranice zdaňovacího období (hospodářský rok posunut), fallback kalendář.
         $calendar = $this->supplierCalendar($supplierId);
-        $periodRow = $this->periods->findByYear($supplierId, $fiscalYear);
-        if ($periodRow !== null) {
-            $periodStart = (string) $periodRow['starts_on'];
-            $periodEnd = (string) $periodRow['ends_on'];
-        } elseif ($calendar->isCalendar() || $taxEvidence) {
-            $periodStart = $calendar->periodStart($fiscalYear);
-            $periodEnd = $calendar->periodEnd($fiscalYear);
-        } else {
-            // Hospodářský rok bez založeného období — nezakládat omylem kalendářní
-            // období přes ensureOpenPeriodFor (F4). Uživatel založí období nejdřív.
-            // Navigace v hlášce musí sedět na SKUTEČNOU položku menu: „Účetnictví →
-            // Uzávěrka" (routa /accounting/periods). Dřív tu stálo „Účetnictví →
-            // Období", což je sekce, která v rozhraní neexistuje — uživatel ji hledal
-            // marně. `fiscal_year` v kontextu chyby staví proklik na FE.
-            throw new PostingException(
-                'period_missing',
-                'Účetní období ' . $fiscalYear . ' (hospodářský rok) není založeno — '
-                . 'nejdřív ho vytvořte v Účetnictví → Uzávěrka.',
-                422,
-                ['fiscal_year' => $fiscalYear],
-            );
-        }
+        [$periodStart, $periodEnd] = $this->bookingWindow($supplierId, $fiscalYear, $taxEvidence);
 
         $pdo = $this->db->pdo();
         foreach ($this->assets->listForBooking($supplierId, $fiscalYear, $periodStart, $periodEnd) as $asset) {
@@ -139,31 +115,23 @@ final class DepreciationPostingService
 
                 // 1) účetní řádek roku → upsert (posted) + journal 551/oprávky. Rok, jehož
                 //    odpisy zaúčtoval deník převzatý z jiného programu, se znovu neúčtuje.
-                if (!$taxEvidence && $asset['accumulated_account_code'] !== null
-                    && !DepreciationEntryRepository::isBookedByMigratedJournal($this->entries->findYear($assetId, 'accounting', $fiscalYear))) {
-                    $accRow = $this->calculator->accountingYearRow(
-                        $ctx,
-                        $fiscalYear,
-                        (string) $asset['acc_method'],
-                        (string) $asset['tax_method'],
-                    );
-                    if ($accRow !== null && round((float) $accRow['amount'], 2) > 0.0) {
-                        // Zaúčtování k poslednímu dni ZDAŇOVACÍHO OBDOBÍ (reálné hranice
-                        // z hlavičky bookYear — hospodářský rok posunut).
-                        $entryDate = $periodEnd;
-                        if ($asset['disposal_date'] !== null && $asset['disposal_date'] < $entryDate) {
-                            $entryDate = (string) $asset['disposal_date'];
-                        }
-                        $this->postAccountingEntry($supplierId, $asset, $accRow, $entryDate, $meta, $allowClosingPeriod);
-                        $accAmount = round((float) $accRow['amount'], 2);
-                        $bookedSomething = true;
+                $accRow = $this->accountingRowToBook($asset, $ctx, $fiscalYear, $taxEvidence);
+                if ($accRow !== null) {
+                    // Zaúčtování k poslednímu dni ZDAŇOVACÍHO OBDOBÍ (reálné hranice
+                    // z hlavičky bookYear — hospodářský rok posunut).
+                    $entryDate = $periodEnd;
+                    if ($asset['disposal_date'] !== null && $asset['disposal_date'] < $entryDate) {
+                        $entryDate = (string) $asset['disposal_date'];
                     }
+                    $this->postAccountingEntry($supplierId, $asset, $accRow, $entryDate, $meta, $allowClosingPeriod);
+                    $accAmount = round((float) $accRow['amount'], 2);
+                    $bookedSomething = true;
                 }
 
                 // 2) daňový řádek roku → upsert confirmed; existující pauza (R14) i ručně
                 //    přepsaný odpis roku se nechají být
                 $existingTax = $this->entries->findYear($assetId, 'tax', $fiscalYear);
-                if ($existingTax === null || (!$existingTax['is_paused'] && !DepreciationEntryRepository::isOverridden($existingTax))) {
+                if (self::taxRowIsRecomputed($existingTax)) {
                     $taxRow = $this->calculator->taxYearRow($ctx, (string) $asset['tax_method'], $fiscalYear);
                     if ($taxRow !== null) {
                         $this->entries->upsert([
@@ -224,6 +192,127 @@ final class DepreciationPostingService
         }
 
         return $result;
+    }
+
+    /**
+     * Co by {@see bookYear()} za rok zaúčtoval, bez zápisu: stejný výběr majetku, stejné
+     * roční řádky kalkulátoru, stejná pravidla přeskočení (převzatý deník, pauza, ruční
+     * přepis). `pending_*` je rozdíl proti tomu, co už za rok leží v evidenci — o tolik
+     * se po zaúčtování změní účetní náklad 551 (VH), resp. daňové odpisy v DPPO.
+     * Chronologický zámek předchozího roku se nekontroluje: jde o odhad, ne o zaúčtování.
+     *
+     * @return array{assets:int, planned_accounting:float, posted_accounting:float, pending_accounting:float,
+     *     planned_tax:float, confirmed_tax:float, pending_tax:float}
+     */
+    public function previewYear(int $supplierId, int $fiscalYear): array
+    {
+        $taxEvidence = $this->isTaxEvidence($supplierId);
+        [$periodStart, $periodEnd] = $this->bookingWindow($supplierId, $fiscalYear, $taxEvidence);
+
+        $out = [
+            'assets' => 0,
+            'planned_accounting' => 0.0, 'posted_accounting' => 0.0, 'pending_accounting' => 0.0,
+            'planned_tax' => 0.0, 'confirmed_tax' => 0.0, 'pending_tax' => 0.0,
+        ];
+        foreach ($this->assets->listForBooking($supplierId, $fiscalYear, $periodStart, $periodEnd) as $asset) {
+            $assetId = (int) $asset['id'];
+            $ctx = $this->buildContext($asset);
+            $existingAcc = $this->entries->findYear($assetId, 'accounting', $fiscalYear);
+            $existingTax = $this->entries->findYear($assetId, 'tax', $fiscalYear);
+            $postedAcc = $existingAcc !== null ? round((float) $existingAcc['amount'], 2) : 0.0;
+            $confirmedTax = $existingTax !== null ? round((float) $existingTax['amount'], 2) : 0.0;
+
+            $accRow = $this->accountingRowToBook($asset, $ctx, $fiscalYear, $taxEvidence);
+            $plannedAcc = $accRow !== null ? round((float) $accRow['amount'], 2) : $postedAcc;
+            $taxRow = self::taxRowIsRecomputed($existingTax)
+                ? $this->calculator->taxYearRow($ctx, (string) $asset['tax_method'], $fiscalYear)
+                : null;
+            $plannedTax = $taxRow !== null ? round((float) $taxRow['amount'], 2) : $confirmedTax;
+
+            if ($plannedAcc === 0.0 && $plannedTax === 0.0 && $postedAcc === 0.0 && $confirmedTax === 0.0) {
+                continue;
+            }
+            $out['assets']++;
+            $out['planned_accounting'] += $plannedAcc;
+            $out['posted_accounting'] += $postedAcc;
+            $out['planned_tax'] += $plannedTax;
+            $out['confirmed_tax'] += $confirmedTax;
+        }
+        foreach (['planned_accounting', 'posted_accounting', 'planned_tax', 'confirmed_tax'] as $k) {
+            $out[$k] = round($out[$k], 2);
+        }
+        $out['pending_accounting'] = round($out['planned_accounting'] - $out['posted_accounting'], 2);
+        $out['pending_tax'] = round($out['planned_tax'] - $out['confirmed_tax'], 2);
+
+        return $out;
+    }
+
+    /**
+     * Účetní roční řádek, který bookYear pro majetek zaúčtuje, nebo null (daňová evidence,
+     * karta bez účtu oprávek, rok zaúčtovaný převzatým deníkem, nulový odpis).
+     *
+     * @param array<string,mixed> $asset
+     * @return array<string,mixed>|null
+     */
+    private function accountingRowToBook(array $asset, DepreciationContext $ctx, int $fiscalYear, bool $taxEvidence): ?array
+    {
+        if ($taxEvidence || $asset['accumulated_account_code'] === null
+            || DepreciationEntryRepository::isBookedByMigratedJournal($this->entries->findYear((int) $asset['id'], 'accounting', $fiscalYear))) {
+            return null;
+        }
+        $row = $this->calculator->accountingYearRow(
+            $ctx,
+            $fiscalYear,
+            (string) $asset['acc_method'],
+            (string) $asset['tax_method'],
+        );
+
+        return $row !== null && round((float) $row['amount'], 2) > 0.0 ? $row : null;
+    }
+
+    /** Přepočítá bookYear daňový řádek? Pauzu (R14) a ruční přepis nechává být. */
+    private static function taxRowIsRecomputed(?array $existingTax): bool
+    {
+        return $existingTax === null
+            || (!$existingTax['is_paused'] && !DepreciationEntryRepository::isOverridden($existingTax));
+    }
+
+    private function isTaxEvidence(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+
+        return $stmt->fetchColumn() === 'tax_evidence';
+    }
+
+    /**
+     * Reálné hranice zdaňovacího období (hospodářský rok posunut), fallback kalendář.
+     *
+     * @return array{0:string,1:string}
+     */
+    private function bookingWindow(int $supplierId, int $fiscalYear, bool $taxEvidence): array
+    {
+        $calendar = $this->supplierCalendar($supplierId);
+        $periodRow = $this->periods->findByYear($supplierId, $fiscalYear);
+        if ($periodRow !== null) {
+            return [(string) $periodRow['starts_on'], (string) $periodRow['ends_on']];
+        }
+        if ($calendar->isCalendar() || $taxEvidence) {
+            return [$calendar->periodStart($fiscalYear), $calendar->periodEnd($fiscalYear)];
+        }
+        // Hospodářský rok bez založeného období — nezakládat omylem kalendářní
+        // období přes ensureOpenPeriodFor (F4). Uživatel založí období nejdřív.
+        // Navigace v hlášce musí sedět na SKUTEČNOU položku menu: „Účetnictví →
+        // Uzávěrka" (routa /accounting/periods). Dřív tu stálo „Účetnictví →
+        // Období", což je sekce, která v rozhraní neexistuje — uživatel ji hledal
+        // marně. `fiscal_year` v kontextu chyby staví proklik na FE.
+        throw new PostingException(
+            'period_missing',
+            'Účetní období ' . $fiscalYear . ' (hospodářský rok) není založeno — '
+            . 'nejdřív ho vytvořte v Účetnictví → Uzávěrka.',
+            422,
+            ['fiscal_year' => $fiscalYear],
+        );
     }
 
     /**
