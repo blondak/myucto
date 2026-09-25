@@ -8,7 +8,7 @@ s přijatými doklady stejně jako platby z běžného účtu.
 
 Kreditní karta se vede **jen tady**, ne mezi [Platebními kartami](31_Platebni_karty.md).
 Platební karty jsou karty k běžnému účtu: jejich platby jdou z bankovního výpisu
-běžného účtu a účtují se přes mezičlen platební karty. Nákup kreditkou jde z výpisu
+běžného účtu a účtují se proti bankovnímu účtu 221. Nákup kreditkou jde z výpisu
 úvěrového účtu a účtuje se přes úvěrový účet, i když výpis nese koncovku karty.
 Platební kartu s koncovkou, kterou nesou jen výpisy kreditní karty, aplikace
 nezaloží a odkáže sem.
@@ -101,23 +101,19 @@ u pohybu kreditní karty vždy zapíše na analytiku 231 úvěrového účtu.
 Detail kreditní karty slouží jako rozcestník:
 
 - u každého pohybu ukazuje druh (nákup, vratka, splátka, úrok, poplatek, výběr
-  hotovosti, odměna) a **stav**: nezaúčtováno, návrh ke schválení, chybí doklad
-  (nákup leží na mezičlenu), vypořádáno, zaúčtováno, ignorováno. Klik na pohyb
-  otevře výpis rovnou na něm,
-- souhrn **Co zbývá dořešit** sečte počty a částky nezaúčtovaných pohybů, návrhů
-  a nákupů bez dokladu a otevře výpis na nejstarším z nich; u nákupů bez dokladu
-  vede na sekci **Nákupy bez dokladu** níže na stránce,
+  hotovosti, odměna) a **stav**: nezaúčtováno, návrh ke schválení, zaúčtováno,
+  ignorováno. Klik na pohyb otevře výpis rovnou na něm,
+- souhrn **Co zbývá dořešit** sečte počty a částky nezaúčtovaných pohybů
+  a návrhů a otevře výpis na nejstarším z nich,
 - sekce **Nákupy bez dokladu** ukazuje nákupy tohoto úvěrového účtu, ke kterým
-  zatím není doklad: nahrajete k nim účtenku, spárujete je, nebo nákup uzavřete
-  bez dokladu (akce stejné jako u platebních karet). Nákupy kreditkou se
-  v Platebních kartách neukazují,
+  zatím není doklad: nahrajete k nim účtenku nebo je spárujete (akce stejné jako
+  u platebních karet). Nákupy kreditkou se v Platebních kartách neukazují,
 - tabulka výpisů ukazuje ke každému výpisu zůstatek analytiky 231 ke dni výpisu
   (zeleně, když sedí na konečný zůstatek výpisu), počet nevyřešených pohybů
   a tlačítko **Zpracovat ve výpisu**.
 
-Měsíční odsouhlasení tak znamená: zůstatek 231 ke dni výpisu sedí na výpis,
-zůstatek mezičlenu odpovídá nákupům bez dokladu a souhrn Co zbývá dořešit je
-prázdný.
+Měsíční odsouhlasení tak znamená: zůstatek 231 ke dni výpisu sedí na výpis
+a souhrn Co zbývá dořešit je prázdný.
 
 ### 112.2.2 Počáteční dluh
 
@@ -139,12 +135,9 @@ D 231.x, přeplatek obráceně.
 ### 112.2.3 Nákupy bez dokladu
 
 Sekce **Nákupy bez dokladu** v detailu kreditní karty ukazuje nákupy úvěrového
-účtu zaúčtované na mezičlen, ke kterým zatím není přijatý doklad. Nahoře je název
-účtu, počet plateb a jejich součet. Pod obchodníkem je vedle popisu z výpisu
-(datum transakce, zúčtovaná částka a měna, místo) uvedena analytika mezičlenu,
-na které nákup čeká, například **Mezičlen 378.101**. Každý úvěrový účet má svou
-analytiku, takže zůstatek mezičlenu se rovná součtu nákupů v této sekci.
-Sekce se zobrazuje jen v podvojném účetnictví s režimem nákupů přes mezičlen.
+účtu, ke kterým zatím není spárovaný přijatý doklad. Nahoře je název účtu, počet
+plateb a jejich součet; pod obchodníkem je popis z výpisu (datum transakce,
+zúčtovaná částka a měna, místo). Sekce se zobrazuje jen v podvojném účetnictví.
 Odkaz **Detail kreditní karty** u názvu účtu vede na tentýž detail.
 
 U každého nákupu jsou tyto akce:
@@ -158,28 +151,15 @@ U každého nákupu jsou tyto akce:
   Samotné nahrání nic nezaúčtuje.
 - **Spárovat**: po potvrzení dokladu spustí párování nákupu znovu. Výpisy
   kreditních karet často neuvádějí koncovku karty, takže doklad se k nákupu
-  přiřadí až tímto tlačítkem. Spárováním vznikne vypořádání MD 321 / D 378.x
+  přiřadí až tímto tlačítkem. Spárováním se nákup zaúčtuje MD 321 / D 231.x
   (s kurzovým či haléřovým rozdílem). Podobný doklad se nabídne jako návrh
   k potvrzení v detailu výpisu.
-- **Bez dokladu, nedaňově**: nákup, ke kterému doklad nebude, uzavře do
-  nedaňového nákladu: MD 548 (analytika z nastavení kreditní karty, jinak
-  platebních karet) / D 378.x.
-- **Bez dokladu, daňově**: uzavře nákup do daňového nákladu, výchozí MD 518 /
-  D 378.x, bez odpočtu DPH. Jen tam, kde výdaj prokážete jiným průkazným
-  dokladem než přijatou fakturou.
-- **K tíži držitele**: soukromý nákup kartou firmy: MD 335 (případně 355 nebo
-  378) / D 378.x. Vznikne pohledávka za držitelem v účetnictví, žádný doklad
-  ani srážka ze mzdy.
 - **Výpis**: otevře výpis kreditní karty rovnou na tomto pohybu.
 
-Tři uzavírací akce vyžadují oprávnění zaúčtovat bankovní pohyby. Dialog ukáže
-datum, obchodníka a částku a dovolí vybrat jiný účet z osnovy. Zápis dostane
-číslo **KARTA-**číslo pohybu a datum nákupu (v uzavřeném období první otevřený
-den); vratka se zaúčtuje s opačnými stranami. Uzavřený nákup ze sekce zmizí.
-Když k němu později dorazí doklad a spáruje se, uzavření se samo stornuje.
-Omylem uzavřený nákup vrátíte stornem zápisu KARTA-… v účetním deníku.
+Nákup, ke kterému doklad nebude, zaúčtujete ve výpisu jako každý jiný bankovní
+pohyb: ručně (MD/D), pravidlem nebo schválením návrhu automatiky.
 
-**Splátka kreditní karty** mezičlen nepoužívá. Splátka z vlastního běžného účtu
+**Splátka kreditní karty** se spáruje jako převod. Splátka z vlastního běžného účtu
 se spáruje jako vlastní převod: na úvěrovém účtu MD 231.x / D 261, na běžném
 účtu MD 261 / D 221.x. Splátka bez protiúčtu ve výpisu se zaúčtuje MD 231.x /
 D 261 (nastavitelné 261 nebo 395).
@@ -195,52 +175,26 @@ Datum zápisu je **datum zaúčtování bankou**, ne datum transakce. Zůstatek
 analytiky tak ke každému dni odpovídá výpisu. Datum transakce a původní částka
 v cizí měně zůstávají v popisu pohybu.
 
-### 112.3.1 Režim nákupů
+### 112.3.1 Nákupy kartou
 
-Nákup kartou se účtuje podle **režimu nákupů**. Výchozí režim firmy určíte
-v Nastavení účtování, u jednotlivého úvěrového účtu ho změníte v jeho detailu.
+Nákup kartou se účtuje **přímo proti úvěru**, bez mezičlenu: spárováním
+s přijatým dokladem (MD 321 / D 231.x, kurzový rozdíl 563/663, haléřový rozdíl
+548/648), pravidlem, naučenou kontací nebo ručně. Dokud k tomu nedojde, na 231
+chybí a kontrola proti výpisu ukáže rozdíl. Účtenku k nákupu nahrajete v sekci
+Nákupy bez dokladu v detailu kreditky; vytěží se do přijatého dokladu a po jeho
+kontrole ho spárujete.
 
-**Přes mezičlen** (výchozí). Nákup se zaúčtuje hned v den zaúčtování bankou na
-mezičlen proti úvěru, MD 378.x / D 231.x. Dluh vůči bance tak v účetnictví je,
-i když doklad ještě nedorazil, a zůstatek 231 vždy sedí na výpis. Doklad pak
-nákup vypořádá z mezičlenu:
-
-- spárováním pohybu s přijatým dokladem (MD 321 / D 378.x, kurzový rozdíl
-  563/663, haléřový rozdíl 548/648),
-- nahráním účtenky v sekci Nákupy bez dokladu v detailu kreditky (účtenka se vytěží do
-  přijatého dokladu, po jeho kontrole ho spárujete),
-- bez dokladu jedním z uzavření: **nedaňově** (nedaňový náklad), **daňově**
-  (daňový náklad bez DPH, jen s jiným průkazným dokladem) nebo **k tíži
-  držitele** (soukromý nákup, pohledávka za zaměstnancem nebo společníkem).
-  Dorazí-li doklad později, uzavření se samo zruší.
-
-Mezičlen je syntetika z nastavení platebních karet (378, 261 nebo 395).
-Každý úvěrový účet dostane vlastní analytiku ve stejné řadě jako platební
-karty (378.101, 378.102 …); karta se u kreditky pozná podle úvěrového účtu,
-ne podle koncovky. Jinou existující analytiku mezičlenu vyberete v detailu
-účtu. Přes mezičlen jdou jen nákupy a vratky; úroky, poplatky, splátky,
-výběry a odměny se účtují podle tabulky níže.
-
-**Bez mezičlenu.** Nákup se zaúčtuje až spárováním s dokladem (MD 321 /
-D 231.x), pravidlem, naučenou kontací nebo ručně. Dokud k tomu nedojde, na 231
-chybí a kontrola proti výpisu ukáže rozdíl.
-
-Změna režimu platí pro pohyby, které ještě nejsou zaúčtované. Zaúčtované
-pohyby zůstávají, jak jsou. Akce **Zaúčtovat čekající pohyby** v detailu účtu
-(nabídne se i po změně režimu) pošle nezaúčtované pohyby výpisů znovu
-automatikou podle aktuálního režimu a nastavení.
+Akce **Zaúčtovat čekající pohyby** v detailu účtu pošle nezaúčtované pohyby
+výpisů znovu automatikou podle aktuálního nastavení, typicky po spárování
+nákupů s doklady.
 
 ### 112.3.2 Zápisy
 
 | Případ | Zápis |
 |---|---|
-| Nákup kartou, režim přes mezičlen | MD 378.x / D 231.x |
-| Doklad k nákupu z mezičlenu | MD 321 / D 378.x |
-| Nákup bez dokladu, uzavření nedaňově / daňově / k tíži držitele | MD 548.990 / 518 / 335 / D 378.x |
-| Vratka, režim přes mezičlen | MD 231.x / D 378.x |
-| Nákup kartou spárovaný s dokladem, režim bez mezičlenu | MD 321 / D 231.x |
-| Nákup bez dokladu podle pravidla nebo ručně, režim bez mezičlenu | MD 5xx / D 231.x |
-| Vratka spárovaná s dobropisem, režim bez mezičlenu | MD 231.x / D 321 |
+| Nákup kartou spárovaný s dokladem | MD 321 / D 231.x |
+| Nákup bez dokladu podle pravidla nebo ručně | MD 5xx / D 231.x |
+| Vratka spárovaná s dobropisem | MD 231.x / D 321 |
 | Počáteční dluh z prvního výpisu | MD 379 / D 231.x |
 | Splátka z vlastního běžného účtu | kreditní karta MD 231.x / D 261, běžný účet MD 261 / D 221.x |
 | Splátka bez protiúčtu na výpisu | MD 231.x / D 261 |
@@ -266,7 +220,7 @@ vlastními účty. Zamítnutý návrh se u pohybu znovu nenabízí.
 
 ### 112.3.3 Nastavení účtování
 
-Záložka **Nastavení účtování** určuje výchozí režim nákupů a účty:
+Záložka **Nastavení účtování** určuje účty:
 
 | Pole | Výchozí účet | Povolené účty |
 |---|---|---|
@@ -275,14 +229,10 @@ Záložka **Nastavení účtování** určuje výchozí režim nákupů a účty
 | Splátka bez protiúčtu | 261 | 261, 395 |
 | Výběr hotovosti kartou | 261 | 261, 211 |
 | Odměna a cashback | 648 | 6xx |
-| Nákup bez dokladu, daňový náklad | 518 | 5xx |
-| Nákup bez dokladu, nedaňový náklad | podle nastavení platebních karet (548.990) | 5xx |
-| Soukromý nákup (k tíži držitele) | podle nastavení platebních karet (335) | 335, 355, 378 |
 | Protiúčet počátečního dluhu | 379 | třídy 3 a 4 |
 
-Nedaňové účty jsou v nabídce označené podle příznaku v účtové osnově.
-Analytiku mezičlenu karty zvolit nejde. Změna platí jen pro nové zápisy,
-zaúčtované pohyby se nepřeúčtovávají.
+Nedaňové účty jsou v nabídce označené podle příznaku v účtové osnově. Změna
+platí jen pro nové zápisy, zaúčtované pohyby se nepřeúčtovávají.
 
 ### 112.3.4 Daňová evidence
 
@@ -295,8 +245,8 @@ jako příjem. Nákupy kreditkou v daňové evidenci evidujte přes doklady
 ## 112.4 Oprávnění
 
 Přehled, detail a nastavení vidí uživatelé s přístupem k bance. Načtení výpisu
-vyžaduje oprávnění k importu bankovních výpisů. Nastavení účtování, režim nákupů,
-výběr analytiky 231 i mezičlenu, zaúčtování čekajících pohybů a počátečního
+vyžaduje oprávnění k importu bankovních výpisů. Nastavení účtování,
+výběr analytiky 231, zaúčtování čekajících pohybů a počátečního
 dluhu a převod účtu na kreditní kartu vyžadují oprávnění k zaúčtování
 bankovních pohybů. Údaje úvěrového účtu upravují uživatelé s oprávněním ke
 správě bankovních účtů firmy.

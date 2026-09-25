@@ -496,10 +496,9 @@ final class JournalIntegrityServiceTest extends TestCase
         $before = $this->service->check($this->supplierId)[JournalIntegrityService::TYPE_ORPHAN_ENTRY]['count'];
 
         $this->insertBalancedEntry('bank', 1900000000 + $this->supplierId, 50.00);
-        $this->insertBalancedEntry('card_settlement', 1900000001 + $this->supplierId, 30.00);
 
         $after = $this->service->check($this->supplierId)[JournalIntegrityService::TYPE_ORPHAN_ENTRY]['count'];
-        self::assertSame($before + 2, $after);
+        self::assertSame($before + 1, $after);
     }
 
     public function testBankEntryOfExistingTransactionIsNotOrphan(): void

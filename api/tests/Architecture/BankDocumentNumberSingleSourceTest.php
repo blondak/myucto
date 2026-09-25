@@ -30,8 +30,6 @@ final class BankDocumentNumberSingleSourceTest extends TestCase
             $code,
             'PostingService::postDocument() musí číslo bankovního dokladu brát z BankDocumentNumber.',
         );
-        self::assertContains('card_settlement', \MyInvoice\Service\Accounting\Bank\BankDocumentNumber::SOURCE_TYPES,
-            'Vypořádání platby kartou se opírá o týž bankovní výpis a nese číslo jeho pohybu.');
     }
 
     public function testNoBankPostingPassesItsOwnDocumentNumber(): void

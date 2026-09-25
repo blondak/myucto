@@ -23,7 +23,6 @@ use PDO;
  * přes technické číslo BANK-<id>, návrh zaúčtování, který na něj ukazuje, nebo přes
  * shodné ID pohybu z banky a datum. Storno přebírá výsledné číslo stornovaného zápisu
  * s předponou STORNO, stejně jako {@see \MyInvoice\Service\Accounting\PostingService::reverse()}.
- * Vypořádání platby kartou nese číslo svého pohybu stejně jako bankovní zápis.
  * Zápis převzatý z jiného účetního programu ({@see BankDocumentNumber::takenOverSql()})
  * si nechává číslo dokladu zdroje. Zápis, ke kterému pohyb ani vlastní účet dohledat
  * nejde (výpis cizího účtu), zůstává beze změny.

@@ -94,7 +94,6 @@ final class AiPdfExtractorUnitTest extends TestCase
             new ExpenseKindClassifier(), // pure, bez DB — mock by nic nepřidal
             $planner,
             null, // uložení vytěžení importu — helpery ho nepotřebují
-            null, // automatika plateb kartou — helpery ji nepotřebují
             new NullLogger(),
         );
     }

@@ -32,7 +32,7 @@ final class CreditCardTransactionKind
         self::FEE, self::CASH, self::REWARD,
     ];
 
-    /** Karetní operace - jen ty nesou koncovku karty (a smí jít přes mezičlen platebních karet). */
+    /** Karetní operace - jen ty nesou koncovku karty. */
     public const CARD_KINDS = [self::PURCHASE, self::REFUND, self::CASH];
 
     public static function classify(?string $description, float $amount): string

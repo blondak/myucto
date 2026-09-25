@@ -34,11 +34,8 @@ final class BankDocumentNumber
 {
     public const SERIES_PATTERN = '/^[A-Z0-9]{1,10}$/';
 
-    /**
-     * Zdroje zápisů, jejichž dokladem je bankovní výpis: zápis pohybu a vypořádání platby
-     * kartou k tomuto pohybu. U obou je source_id id pohybu.
-     */
-    public const SOURCE_TYPES = ['bank', 'card_settlement'];
+    /** Zdroje zápisů, jejichž dokladem je bankovní výpis; source_id je id pohybu. */
+    public const SOURCE_TYPES = ['bank'];
 
     /** Mapy převodů z jiných účetních programů; zápis v nich nese číslo dokladu zdroje. */
     private const TAKEOVER_MAPS = ['money_s3_import_map', 'pohoda_import_map', 'premier_import_map'];

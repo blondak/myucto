@@ -6,7 +6,6 @@ import { useAuthStore } from '@/stores/auth'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import UnmatchedCardPayments from './UnmatchedCardPayments.vue'
-import CardClearingSettings from './CardClearingSettings.vue'
 import { paymentCardsApi, type PaymentCard } from '@/api/paymentCards'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
@@ -18,9 +17,9 @@ const router = useRouter()
 const auth = useAuthStore()
 const toast = useToast()
 
-type Tab = 'cards' | 'unmatched' | 'settings'
-const tabs = computed<Tab[]>(() => (auth.canRead('bank') ? ['cards', 'unmatched', 'settings'] : ['cards']))
-const tab = ref<Tab>(route.query.tab === 'unmatched' || route.query.tab === 'settings' ? route.query.tab : 'cards')
+type Tab = 'cards' | 'unmatched'
+const tabs = computed<Tab[]>(() => (auth.canRead('bank') ? ['cards', 'unmatched'] : ['cards']))
+const tab = ref<Tab>(route.query.tab === 'unmatched' ? 'unmatched' : 'cards')
 watch(tab, v => {
   if (route.query.tab !== v) void router.replace({ query: { ...route.query, tab: v } })
 })
@@ -69,8 +68,6 @@ function validity(c: PaymentCard): string {
 function detail(c: PaymentCard) {
   void router.push({ name: 'payment-card-detail', params: { id: c.id } })
 }
-/** Karty, které založil import výpisu z neznámé koncovky a čekají na doplnění. */
-const unverifiedCount = computed(() => cards.value.filter(c => !c.is_verified && !c.archived).length)
 </script>
 
 <template>
@@ -94,12 +91,8 @@ const unverifiedCount = computed(() => cards.value.filter(c => !c.is_verified &&
     </div>
 
     <UnmatchedCardPayments v-if="tab === 'unmatched'" />
-    <CardClearingSettings v-else-if="tab === 'settings'" />
 
     <template v-else>
-      <div v-if="unverifiedCount > 0" class="mb-3 rounded-lg border border-warning-500/40 bg-warning-50 px-4 py-3 text-sm text-warning-700">
-        {{ t('payment_cards.unverified_banner', { n: unverifiedCount }) }}
-      </div>
       <div class="flex flex-wrap items-center gap-2 mb-3">
         <label class="inline-flex items-center gap-2 text-sm text-neutral-600 cursor-pointer">
           <input v-model="showArchived" type="checkbox" class="rounded border-neutral-300" />
@@ -141,9 +134,6 @@ const unverifiedCount = computed(() => cards.value.filter(c => !c.is_verified &&
                 <td class="px-3 py-2 text-center">
                   <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset whitespace-nowrap"
                     :class="STATUS_CLASS[statusOf(c)]">{{ t(`payment_cards.status_${statusOf(c)}`) }}</span>
-                  <span v-if="!c.is_verified" class="ml-1 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset whitespace-nowrap bg-warning-50 text-warning-700 ring-warning-600/20">
-                    {{ t('payment_cards.status_unverified') }}
-                  </span>
                 </td>
               </tr>
             </tbody>
@@ -154,13 +144,8 @@ const unverifiedCount = computed(() => cards.value.filter(c => !c.is_verified &&
             class="block px-4 py-3 hover:bg-neutral-50">
             <div class="flex items-center justify-between gap-2">
               <span class="font-medium text-neutral-800 truncate">{{ c.label }}</span>
-              <span class="flex flex-wrap gap-1 justify-end">
-                <span v-if="!c.is_verified" class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset whitespace-nowrap bg-warning-50 text-warning-700 ring-warning-600/20">
-                  {{ t('payment_cards.status_unverified') }}
-                </span>
-                <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset whitespace-nowrap"
-                  :class="STATUS_CLASS[statusOf(c)]">{{ t(`payment_cards.status_${statusOf(c)}`) }}</span>
-              </span>
+              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset whitespace-nowrap"
+                :class="STATUS_CLASS[statusOf(c)]">{{ t(`payment_cards.status_${statusOf(c)}`) }}</span>
             </div>
             <div class="mt-1 text-xs text-neutral-600 flex flex-wrap gap-x-3">
               <span class="font-mono">{{ t('payment_cards.masked', { last4: c.last4 }) }}</span>
