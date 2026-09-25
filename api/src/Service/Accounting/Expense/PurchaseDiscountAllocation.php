@@ -25,6 +25,8 @@ namespace MyInvoice\Service\Accounting\Expense;
  *   - jinak jde na zboží: doprava, poplatky ani služby (druh výdaje service) slevu
  *     nenesou, pokud mezi cíli zůstane i něco jiného („Aktionsrabatt" −7,24 u adaptéru
  *     197,39 a dopravy 5,59),
+ *   - zboží vrácené dobropisem navázaným na fakturu slevu na zboží nenese (vrací se
+ *     v plné ceně), u částečné vratky jen zbylá část ({@see withReturns()}),
  *   - mezi cíle se rozpočítá poměrem jejich základu.
  *
  * Slevový řádek s vlastním adresným účtem (ručně zvolený expense_account_code) je
@@ -95,6 +97,9 @@ final class PurchaseDiscountAllocation
                 static fn (array $p): bool => (int) round((float) $p['total_without_vat'] * 100) === $discountCents,
             );
             $named = self::namedTargets($description, array_diff_key($targets, $shipping));
+            // Váha cíle = základ položky; u slevy na zboží bez části, kterou dodavatel
+            // vzal zpět dobropisem (returned_without_vat, viz withReturns()).
+            $weightOf = static fn (array $p): float => (float) $p['total_without_vat'];
             if (self::isShippingOrFee($description)) {
                 $targets = $shipping !== [] ? $shipping : $targets;
             } elseif ($sameAsShipping !== []) {
@@ -112,23 +117,81 @@ final class PurchaseDiscountAllocation
                 if ($goods !== [] && count($goods) < count($targets)) {
                     $targets = $goods;
                 }
+                // Zboží vrácené dobropisem slevu nenese: dárkový šek zůstal u toho, co si
+                // kupující nechal. Vrácený switch jde zpět v plné ceně, sleva patří routeru.
+                $weightOf = static fn (array $p): float => max(
+                    0.0,
+                    (float) $p['total_without_vat'] - (float) ($p['returned_without_vat'] ?? 0.0),
+                );
+                $kept = array_filter($targets, static fn (array $p): bool => $weightOf($p) > 0.004);
+                if ($kept !== []) {
+                    $targets = $kept;
+                } else {
+                    $weightOf = static fn (array $p): float => (float) $p['total_without_vat'];
+                }
             }
 
             $base = 0.0;
             foreach ($targets as $t) {
-                $base += (float) $t['total_without_vat'];
+                $base += $weightOf($t);
             }
             if ($base <= 0.0) {
                 continue;
             }
             $shares = [];
             foreach ($targets as $id => $t) {
-                $shares[(int) $id] = (float) $t['total_without_vat'] / $base;
+                $shares[(int) $id] = $weightOf($t) / $base;
             }
             $out[(int) $item['id']] = $shares;
         }
 
         return $out;
+    }
+
+    /**
+     * Doplní položkám `returned_without_vat` = kolik ze základu položky vzal dodavatel
+     * zpět dobropisy navázanými na tuto fakturu (parent_purchase_invoice_id). Řádek
+     * dobropisu se páruje na položku téhož popisu a sazby; vrácená část je nejvýš
+     * celý základ položky (částečná vratka = jen vrácená část).
+     *
+     * @param list<array<string,mixed>> $items řádky faktury (id, description, vat_rate_snapshot, total_without_vat)
+     * @return list<array<string,mixed>>
+     */
+    public static function withReturns(\PDO $pdo, int $supplierId, int $purchaseInvoiceId, array $items): array
+    {
+        $stmt = $pdo->prepare(
+            "SELECT pii.description, pii.vat_rate_snapshot, pii.total_without_vat
+               FROM purchase_invoice_items pii
+               JOIN purchase_invoices cn ON cn.id = pii.purchase_invoice_id
+              WHERE cn.supplier_id = ? AND cn.parent_purchase_invoice_id = ?
+                AND cn.document_kind = 'credit_note' AND cn.status NOT IN ('cancelled', 'draft')
+                AND pii.total_without_vat < 0"
+        );
+        $stmt->execute([$supplierId, $purchaseInvoiceId]);
+        $pool = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $key = self::returnKey((string) $row['description'], (float) $row['vat_rate_snapshot']);
+            $pool[$key] = ($pool[$key] ?? 0) + (int) round(abs((float) $row['total_without_vat']) * 100);
+        }
+        if ($pool === []) {
+            return $items;
+        }
+        foreach ($items as $i => $item) {
+            $net = (int) round((float) $item['total_without_vat'] * 100);
+            $key = self::returnKey((string) ($item['description'] ?? ''), (float) ($item['vat_rate_snapshot'] ?? 0));
+            if ($net <= 0 || ($pool[$key] ?? 0) <= 0) {
+                continue;
+            }
+            $returned = min($net, $pool[$key]);
+            $pool[$key] -= $returned;
+            $items[$i]['returned_without_vat'] = $returned / 100;
+        }
+        return $items;
+    }
+
+    private static function returnKey(string $description, float $rate): string
+    {
+        return mb_strtolower(trim($description)) . '|' . number_format($rate, 2, '.', '');
     }
 
     /**

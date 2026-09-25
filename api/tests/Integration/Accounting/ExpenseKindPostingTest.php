@@ -268,6 +268,41 @@ final class ExpenseKindPostingTest extends BankPostingTestCase
         self::assertEqualsWithDelta(0.83, $byAcc['518']['debit'], 0.001);
     }
 
+    /**
+     * Zboží vrácené dobropisem slevu na zboží nenese. Vzor Alza: switch vrácen dobropisem
+     * v plné ceně, router ponechán, dárkový šek −82,64 patří celý routeru. Dřív se
+     * rozpočítal i na switch, a karta switche by po přepočtu dostala jinou cenu než ta,
+     * kterou dobropis vyřadil — vznikla by nová aktivní karta vráceného zboží.
+     */
+    public function testReturnedGoodsDoNotCarryGoodsDiscount(): void
+    {
+        $pf = $this->purchaseWithItems('PF-VRACENO', [
+            ['Switch 10G', 3680.32, 772.87, 'small_asset'],
+            ['Členství AlzaPlus+', 146.28, 30.72, 'service'],
+            ['WiFi router', 10623.85, 2231.01, 'small_asset'],
+            ['Doručení na prodejnu', 37.19, 7.81, 'service'],
+            ['Sleva na dopravné', -37.19, -7.81, 'service'],
+            ['Sleva na zboží - dárkový šek', -82.64, -17.36, 'service'],
+            ['Sleva AlzaPlus+ (SL835)', -145.45, -30.54, 'service'],
+        ]);
+        $cn = $this->purchaseWithItems('PF-VRACENO-DOBROPIS', [
+            ['Switch 10G', -3680.32, -772.87, 'small_asset'],
+        ], 'credit_note');
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET parent_purchase_invoice_id = ? WHERE id = ?')->execute([$pf, $cn]);
+
+        $byAcc = $this->postAndGetLines($pf);
+
+        self::assertEqualsWithDelta(3680.32 + 10623.85 - 82.64, $byAcc[$this->materialAccount]['debit'], 0.001);
+        self::assertEqualsWithDelta(0.83, $byAcc['518']['debit'], 0.001);
+
+        $service = $this->container->get(\MyInvoice\Service\Accounting\SmallAsset\SmallAssetService::class);
+        $service->generateFromPurchaseInvoice($this->supplierId, $pf, $this->userId);
+        $prices = $this->db->pdo()->query('SELECT name, price FROM small_assets WHERE purchase_invoice_id = ' . $pf . ' ORDER BY name')
+            ->fetchAll(\PDO::FETCH_KEY_PAIR);
+        self::assertEqualsWithDelta(3680.32, (float) $prices['Switch 10G'], 0.001, 'Vrácený switch v plné ceně.');
+        self::assertEqualsWithDelta(10541.21, (float) $prices['WiFi router'], 0.001, 'Šek zlevňuje router.');
+    }
+
     /** @param array<string,array{debit:float,credit:float}> $byAcc */
     private function assertEntryBalanced(array $byAcc): void
     {

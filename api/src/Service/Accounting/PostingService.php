@@ -1507,7 +1507,9 @@ final class PostingService
 
         // Slevový řádek nemá vlastní účet: jde na účty zlevněných položek (SSOT
         // PurchaseDiscountAllocation, tentýž rozpad používá evidence drobného majetku).
-        $discounts = PurchaseDiscountAllocation::allocate($items);
+        $discounts = PurchaseDiscountAllocation::allocate(
+            PurchaseDiscountAllocation::withReturns($this->db->pdo(), $supplierId, $purchaseInvoiceId, $items),
+        );
 
         $anyClassified = false;
         $weights = [];

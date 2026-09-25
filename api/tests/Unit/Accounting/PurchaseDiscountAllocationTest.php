@@ -47,6 +47,17 @@ final class PurchaseDiscountAllocationTest extends TestCase
         self::assertEquals([2 => 270.00, 3 => 90.00, 1 => 100.00], A::netsAfterDiscounts($items));
     }
 
+    public function testReturnedGoodsAreSkippedAndPartialReturnWeighsTheRest(): void
+    {
+        $switch = self::item(1, 'Switch', 3000.00, 'small_asset') + ['returned_without_vat' => 3000.00];
+        $router = self::item(2, 'Router', 1000.00, 'small_asset');
+        $voucher = self::item(3, 'Dárkový šek voucher', -100.00, 'service');
+        self::assertSame([3 => [2 => 1.0]], A::allocate([$switch, $router, $voucher]));
+
+        $switch['returned_without_vat'] = 2000.00;
+        self::assertEquals([3 => [1 => 0.5, 2 => 0.5]], A::allocate([$switch, $router, $voucher]));
+    }
+
     public function testNonDiscountNegativeLineAndExplicitAccountAreLeftAlone(): void
     {
         $items = [
