@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\SmallAsset;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\SmallAssetRepository;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
+use MyInvoice\Service\Accounting\Expense\PurchaseDiscountAllocation;
 use MyInvoice\Service\Accounting\PostingException;
 use PDO;
 
@@ -165,25 +166,11 @@ final class SmallAssetService
             throw new PostingException('not_found', 'Doklad nenalezen.', 404);
         }
 
-        $stmt = $this->db->pdo()->prepare(
-            // DDHM i DDNM — obojí patří do evidence (ČÚS 013), liší se jen druhem karty.
-            'SELECT pii.id, pii.description, pii.quantity, pii.unit_price_without_vat, pii.total_without_vat,
-                    pii.expense_kind
-               FROM purchase_invoice_items pii
-               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
-              WHERE pii.purchase_invoice_id = ? AND pi.supplier_id = ? AND pii.expense_kind IN (?, ?)
-              ORDER BY pii.order_index, pii.id'
-        );
-        $stmt->execute([
-            $purchaseInvoiceId, $supplierId,
-            ExpenseKind::SmallAsset->value, ExpenseKind::SmallIntangible->value,
-        ]);
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
         if ($header['is_credit_note']) {
             return ['created' => [], 'skipped' => 0,
-                'disposed' => $this->disposeReturned($supplierId, $header, $rows)];
+                'disposed' => $this->disposeReturned($supplierId, $header, $this->smallAssetRows($supplierId, $purchaseInvoiceId, false))];
         }
+        $rows = $this->smallAssetRows($supplierId, $purchaseInvoiceId, true);
 
         // Kartu zakládá JEN skutečná faktura. Proforma / zálohová faktura (document_kind
         // 'advance') NENÍ pořízení — je to jen výzva k platbě zálohy (účtuje se na 314, ne do
@@ -242,6 +229,48 @@ final class SmallAssetService
         }
 
         return ['created' => $created, 'skipped' => $skipped, 'disposed' => []];
+    }
+
+    /**
+     * Řádky dokladu klasifikované jako drobný majetek (DDHM i DDNM — obojí patří do
+     * evidence, ČÚS 013, liší se jen druhem karty).
+     *
+     * S `$applyDiscounts` nesou v `total_without_vat` základ PO slevových řádcích, které
+     * k nim patří podle {@see PurchaseDiscountAllocation} — tentýž rozpad jako zaúčtování,
+     * takže karta sedí na 501. Sleva klasifikovaná jinak než zboží (typicky jako služba)
+     * se tak do ceny karty promítne taky; dřív karta zůstala v ceně před slevou.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function smallAssetRows(int $supplierId, int $purchaseInvoiceId, bool $applyDiscounts): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT pii.id, pii.description, pii.quantity, pii.unit_price_without_vat, pii.total_without_vat,
+                    pii.vat_rate_snapshot, pii.expense_kind, pii.expense_account_code
+               FROM purchase_invoice_items pii
+               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
+              WHERE pii.purchase_invoice_id = ? AND pi.supplier_id = ?
+              ORDER BY pii.order_index, pii.id'
+        );
+        $stmt->execute([$purchaseInvoiceId, $supplierId]);
+        $all = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $nets = $applyDiscounts ? PurchaseDiscountAllocation::netsAfterDiscounts($all) : null;
+        $small = [ExpenseKind::SmallAsset->value, ExpenseKind::SmallIntangible->value];
+        $rows = [];
+        foreach ($all as $row) {
+            if (!in_array((string) $row['expense_kind'], $small, true)) {
+                continue;
+            }
+            if ($nets !== null) {
+                if (!array_key_exists((int) $row['id'], $nets)) {
+                    continue;   // slevový řádek rozpuštěný do zlevněných položek
+                }
+                $row['total_without_vat'] = $nets[(int) $row['id']];
+            }
+            $rows[] = $row;
+        }
+        return $rows;
     }
 
     /**
@@ -375,17 +404,7 @@ final class SmallAssetService
         // právě vytvořené karty. Proto tady MUSÍ být tentýž filtr druhů jako v generate
         // (DDHM i DDNM): dokud se ptal jen na `small_asset`, karta drobného NEhmotného
         // majetku se v témže běhu založila a hned zase smazala.
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT pii.id, pii.description, pii.total_without_vat
-               FROM purchase_invoice_items pii
-               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
-              WHERE pii.purchase_invoice_id = ? AND pi.supplier_id = ? AND pii.expense_kind IN (?, ?)'
-        );
-        $stmt->execute([
-            $purchaseInvoiceId, $supplierId,
-            ExpenseKind::SmallAsset->value, ExpenseKind::SmallIntangible->value,
-        ]);
-        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $items = $this->smallAssetRows($supplierId, $purchaseInvoiceId, true);
         $prices = $this->allocateDiscounts($items);
         // Karta je vždy v CZK, takže generate cenu násobí kurzem dokladu — a klíč pro úklid
         // musí projít TOUTÉŽ transformací. Bez toho držel úklid u cizoměnové faktury cenu

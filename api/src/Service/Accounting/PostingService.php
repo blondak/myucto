@@ -15,6 +15,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
+use MyInvoice\Service\Accounting\Expense\PurchaseDiscountAllocation;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Report\VatLedgerService;
@@ -1493,7 +1494,8 @@ final class PostingService
     ): ?array {
         $suggestions = $this->expenseClassification->suggestForInvoice($supplierId, $purchaseInvoiceId);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, expense_kind, expense_account_code, expense_classification_source, total_without_vat, total_vat
+            'SELECT id, description, vat_rate_snapshot, expense_kind, expense_account_code,
+                    expense_classification_source, total_without_vat, total_vat
                FROM purchase_invoice_items
               WHERE purchase_invoice_id = ?'
         );
@@ -1503,8 +1505,14 @@ final class PostingService
             return null;
         }
 
+        // Slevový řádek nemá vlastní účet: jde na účty zlevněných položek (SSOT
+        // PurchaseDiscountAllocation, tentýž rozpad používá evidence drobného majetku).
+        $discounts = PurchaseDiscountAllocation::allocate($items);
+
         $anyClassified = false;
         $weights = [];
+        $itemAccounts = [];
+        $itemWeights = [];
         foreach ($items as $row) {
             $kindValue = $row['expense_kind'] !== null ? (string) $row['expense_kind'] : null;
             $override = trim((string) ($row['expense_account_code'] ?? ''));
@@ -1552,8 +1560,6 @@ final class PostingService
                 $account = $this->nonDeductibleExpenseAccount($supplierId, $account);
             }
 
-            $this->itemAccountTrace['purchase_invoice|' . $purchaseInvoiceId][(int) $row['id']] = $account;
-
             $net = round((float) $row['total_without_vat'] * $rate, 2);
             $vat = round((float) $row['total_vat'] * $rate, 2);
             $w = match (true) {
@@ -1562,7 +1568,30 @@ final class PostingService
                 $vatDeduction === 'proportional' => round($net + round($vat * (1.0 - $pct), 2), 2),
                 default => $net,
             };
-            $weights[$account] = round(($weights[$account] ?? 0.0) + $w, 2);
+            $itemAccounts[(int) $row['id']] = $account;
+            $itemWeights[(int) $row['id']] = $w;
+        }
+
+        foreach ($itemAccounts as $itemId => $account) {
+            $shares = $discounts[$itemId] ?? null;
+            if ($shares === null) {
+                $weights[$account] = round(($weights[$account] ?? 0.0) + $itemWeights[$itemId], 2);
+                continue;
+            }
+            // Váha slevy se rozdělí na účty cílových položek; do stopy řádku (dimenze)
+            // jde účet té, na kterou připadá největší díl.
+            $main = null;
+            foreach ($shares as $targetId => $share) {
+                $targetAccount = $itemAccounts[$targetId];
+                $weights[$targetAccount] = round(($weights[$targetAccount] ?? 0.0) + $itemWeights[$itemId] * $share, 2);
+                if ($main === null || $share > $shares[$main]) {
+                    $main = $targetId;
+                }
+            }
+            $itemAccounts[$itemId] = $itemAccounts[$main];
+        }
+        foreach ($itemAccounts as $itemId => $account) {
+            $this->itemAccountTrace['purchase_invoice|' . $purchaseInvoiceId][$itemId] = $account;
         }
 
         if (!$anyClassified) {
@@ -1601,9 +1630,10 @@ final class PostingService
      *
      * SLEVOVÉ ŘÁDKY (item_kind='discount') vazbu na kartu nemají a spadnou proto na
      * $defaultAccount — procentní sleva z hlavičky se generuje per sazba DPH, ne per položka,
-     * takže není ke které kartě ji přiřadit. Shodné chování má nákladová strana (viz komentář
-     * o slevách Alzy v appendSplit); u prodeje majetku se sleva na hlavičce stejně nepoužívá,
-     * cena se zadá rovnou na řádku.
+     * takže není ke které kartě ji přiřadit. Nákladová strana je jiná: přijatá faktura nese
+     * slevu jako samostatný řádek u konkrétního zboží a ta se rozpouští do zlevněných
+     * položek ({@see PurchaseDiscountAllocation}). U prodeje majetku se sleva na hlavičce
+     * nepoužívá, cena se zadá rovnou na řádku.
      *
      * @param list<int> $excludeItemIds odpočtové řádky § 37a (viz {@see advanceDeduction})
      * @return array<string,float>|null
