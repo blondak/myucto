@@ -16,6 +16,7 @@ import { ICONS, btnOutline, btnFilled, btnOutlineSm } from '@/components/ui/butt
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import SaldoAdvanceInfo from '@/components/accounting/SaldoAdvanceInfo.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -210,6 +211,21 @@ function partnerKey(accCode: string, partnerId: number) {
 function toggle(accCode: string, partnerId: number) {
   const k = partnerKey(accCode, partnerId)
   expanded[k] = !expanded[k]
+}
+
+/**
+ * Záloha čekající na vyúčtování (kind = advance_pending) nemá „částku a úhradu" jako
+ * faktura: Částka = přijatá/poskytnutá platba, Uhrazeno = daň z daňového dokladu
+ * k platbě. Zbývá zůstává se znaménkem (základ zálohy), aby součet seděl na hlavní knihu.
+ */
+function amountOf(it: SaldoItem): number {
+  return it.kind === 'advance_pending' ? (it.advance_payment_czk ?? 0) : it.booked_czk
+}
+function paidOf(it: SaldoItem): number {
+  return it.kind === 'advance_pending' ? (it.advance_vat_czk ?? 0) : it.paid_czk
+}
+function paidTitle(it: SaldoItem): string | undefined {
+  return it.kind === 'advance_pending' ? t('accounting.saldo.advance_vat_tooltip') : undefined
 }
 
 function docLink(it: SaldoItem) {
@@ -440,6 +456,7 @@ onMounted(async () => {
                     <RouterLink :to="docLink(it)" class="text-primary-600 hover:text-primary-700 hover:underline font-mono">
                       {{ it.doc_no }}
                     </RouterLink>
+                    <SaldoAdvanceInfo v-if="it.kind === 'advance_pending'" :item="it" :side="it.side" />
                   </td>
                   <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.issue_date) }}</td>
                   <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.due_date) }}</td>
@@ -447,12 +464,17 @@ onMounted(async () => {
                     {{ it.days_overdue > 0 ? it.days_overdue : '—' }}
                   </td>
                   <td class="px-3 py-2 text-right font-mono">
-                    {{ formatMoney(it.booked_czk) }}
-                    <span v-if="it.currency_code !== 'CZK'" class="block text-xs text-neutral-400">
+                    {{ formatMoney(amountOf(it)) }}
+                    <span v-if="it.currency_code !== 'CZK' && it.kind !== 'advance_pending'" class="block text-xs text-neutral-400">
                       {{ formatMoney(it.amount_foreign) }} {{ it.currency_code }}
                     </span>
                   </td>
-                  <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.paid_czk) }}</td>
+                  <td class="px-3 py-2 text-right font-mono" :title="paidTitle(it)">
+                    {{ formatMoney(paidOf(it)) }}
+                    <span v-if="it.kind === 'advance_pending' && paidOf(it) !== 0" class="block text-xs text-neutral-400 font-sans">
+                      {{ t('accounting.saldo.advance_vat_hint') }}
+                    </span>
+                  </td>
                   <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.remaining_czk) }}</td>
                 </tr>
               </tbody>
@@ -550,6 +572,7 @@ onMounted(async () => {
                       <RouterLink :to="docLink(it)" class="text-primary-600 hover:text-primary-700 hover:underline font-mono">
                         {{ it.doc_no }}
                       </RouterLink>
+                      <SaldoAdvanceInfo v-if="it.kind === 'advance_pending'" :item="it" :side="sideOfAccount(b.account.normal_side)" />
                     </td>
                     <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.issue_date) }}</td>
                     <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.due_date) }}</td>
@@ -557,12 +580,17 @@ onMounted(async () => {
                       {{ it.days_overdue > 0 ? it.days_overdue : '—' }}
                     </td>
                     <td class="px-3 py-2 text-right font-mono">
-                      {{ formatMoney(it.booked_czk) }}
-                      <span v-if="it.currency_code !== 'CZK'" class="block text-xs text-neutral-400">
+                      {{ formatMoney(amountOf(it)) }}
+                      <span v-if="it.currency_code !== 'CZK' && it.kind !== 'advance_pending'" class="block text-xs text-neutral-400">
                         {{ formatMoney(it.amount_foreign) }} {{ it.currency_code }}
                       </span>
                     </td>
-                    <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.paid_czk) }}</td>
+                    <td class="px-3 py-2 text-right font-mono" :title="paidTitle(it)">
+                      {{ formatMoney(paidOf(it)) }}
+                      <span v-if="it.kind === 'advance_pending' && paidOf(it) !== 0" class="block text-xs text-neutral-400 font-sans">
+                        {{ t('accounting.saldo.advance_vat_hint') }}
+                      </span>
+                    </td>
                     <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.remaining_czk) }}</td>
                   </tr>
                 </template>

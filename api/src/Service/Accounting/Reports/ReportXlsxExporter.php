@@ -949,12 +949,13 @@ final class ReportXlsxExporter
                     if ($ccy !== 'CZK') {
                         $docNo .= ' (' . $this->czMoney((float) ($it['amount_foreign'] ?? 0)) . ' ' . $ccy . ')';
                     }
+                    [$docNo, $amount, $paid] = $this->saldoItemCells($it, $docNo);
                     $sheet->setCellValueExplicit([1, $r], $docNo, DataType::TYPE_STRING);
                     $sheet->setCellValue([2, $r], $this->czDate((string) ($it['issue_date'] ?? '')));
                     $sheet->setCellValue([3, $r], $this->czDate((string) ($it['due_date'] ?? '')));
                     $sheet->setCellValue([4, $r], (int) ($it['days_overdue'] ?? 0) > 0 ? (int) $it['days_overdue'] : '');
-                    $sheet->setCellValue([5, $r], (float) ($it['booked_czk'] ?? 0));
-                    $sheet->setCellValue([6, $r], (float) ($it['paid_czk'] ?? 0));
+                    $sheet->setCellValue([5, $r], $amount);
+                    $sheet->setCellValue([6, $r], $paid);
                     $sheet->setCellValue([7, $r], (float) ($it['remaining_czk'] ?? 0));
                     $r++;
                 }
@@ -976,6 +977,28 @@ final class ReportXlsxExporter
      * @param array<string,mixed> $data
      * @return array{bytes:string, filename:string, mime:string}
      */
+    /**
+     * Popis a částky řádku saldokonta. Záloha čekající na vyúčtování nemá „částku
+     * a úhradu" jako faktura: Částka = přijatá/poskytnutá platba, Uhrazeno = daň
+     * z daňového dokladu k platbě a popis to řekne slovy. Zbývá (základ zálohy se
+     * znaménkem) zůstává, aby součet seděl na hlavní knihu.
+     *
+     * @param array<string,mixed> $it
+     * @return array{0:string, 1:float, 2:float}
+     */
+    private function saldoItemCells(array $it, string $docNo): array
+    {
+        if (($it['kind'] ?? 'document') !== 'advance_pending') {
+            return [$docNo, (float) ($it['booked_czk'] ?? 0), (float) ($it['paid_czk'] ?? 0)];
+        }
+        $vat = (float) ($it['advance_vat_czk'] ?? 0);
+        $label = $docNo . ' — ' . (string) ($it['label'] ?? '');
+        if (abs($vat) >= 0.005) {
+            $label .= ' (Uhrazeno = DPH z daňového dokladu k platbě)';
+        }
+        return [$label, (float) ($it['advance_payment_czk'] ?? 0), $vat];
+    }
+
     private function saldoFlat(array $data): array
     {
         $asOf = (string) ($data['as_of'] ?? '');
@@ -1031,15 +1054,16 @@ final class ReportXlsxExporter
             $total = 0.0;
             foreach ($rows as $it) {
                 $ccy = (string) ($it['currency_code'] ?? 'CZK');
+                [$docNo, $amount, $paid] = $this->saldoItemCells($it, (string) ($it['doc_no'] ?? ''));
                 $sheet->setCellValueExplicit([1, $r], (string) ($it['account_code'] ?? ''), DataType::TYPE_STRING);
                 $sheet->setCellValueExplicit([2, $r], (string) ($it['partner_name'] ?? ''), DataType::TYPE_STRING);
-                $sheet->setCellValueExplicit([3, $r], (string) ($it['doc_no'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit([3, $r], $docNo, DataType::TYPE_STRING);
                 $sheet->setCellValue([4, $r], $this->czDate((string) ($it['issue_date'] ?? '')));
                 $sheet->setCellValue([5, $r], $this->czDate((string) ($it['due_date'] ?? '')));
                 $sheet->setCellValue([6, $r], (int) ($it['days_overdue'] ?? 0) > 0 ? (int) $it['days_overdue'] : '');
                 $sheet->setCellValueExplicit([7, $r], $ccy, DataType::TYPE_STRING);
-                $sheet->setCellValue([8, $r], (float) ($it['booked_czk'] ?? 0));
-                $sheet->setCellValue([9, $r], (float) ($it['paid_czk'] ?? 0));
+                $sheet->setCellValue([8, $r], $amount);
+                $sheet->setCellValue([9, $r], $paid);
                 $sheet->setCellValue([10, $r], (float) ($it['remaining_czk'] ?? 0));
                 $total += (float) ($it['remaining_czk'] ?? 0);
                 $r++;

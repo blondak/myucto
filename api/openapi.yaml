@@ -10920,6 +10920,13 @@ paths:
         `matches`) jsou vždy za celou sestavu, ne za stránku; blok účtu nese
         `partners_pagination` (`page`, `per_page`, `total`, `pages`). Bez `page`
         se vrací celá sestava.
+
+        Položka nese `kind`: `document` (doklad) nebo `advance_pending` (záloha
+        zaplacená přímo na saldokontní účet, ke které ještě nevznikla konečná
+        faktura). U `advance_pending` jsou navíc `label`, `advance_payment_czk`
+        (přijatá/poskytnutá platba), `advance_vat_czk` (daň z daňového dokladu
+        k platbě) a `tax_document_id`; `remaining_czk` je základ zálohy se znaménkem
+        (součet položek = zůstatek hlavní knihy) a `days_overdue` je 0.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: period_id, required: true, schema: { type: integer } }
