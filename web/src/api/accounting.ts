@@ -1683,6 +1683,8 @@ export const POSTING_ERROR_CODES = [
   'entry_reversed', 'empty_entry',
   // Vyúčtování zálohy má víc kandidátů → nelze jednoznačně odečíst zálohovou DPH.
   'advance_settlement_ambiguous',
+  // Vyúčtování zálohy s daňovým dokladem k platbě, který ještě není zaúčtovaný.
+  'advance_tax_document_unposted',
   // DDKP (daňový doklad k platbě) v reverse-charge režimu se automaticky neúčtuje.
   'ddkp_reverse_charge_unsupported',
   // Přeúčtování: datum je zamčené (§35 soft-close) resp. storno i oprava by padly
