@@ -632,6 +632,15 @@ rozdíl do **1 Kč** (zaokrouhlení, bankovní poplatek v alokaci) se dorovná a
 na účet **648** (výnos) nebo **548** (náklad) — nad tuto toleranci se transakce
 nezaúčtuje sama a čeká na ruční zásah.
 
+**Přijatá faktura se zaokrouhlením** (pole Zaokrouhlení, typicky 16 370,09 +0,91
+= k úhradě 16 371,00) má předpis na 321 v nominálu, zaokrouhlení do DPH nevstupuje.
+Když úhrada přesně odpovídá částce k úhradě, považuje se za plnou úhradu i při
+párování jen podle částky a data: závazek se uzavře nominálem a zaokrouhlení jde
+na 548 (zaplaceno víc) nebo 648 (zaplaceno méně). U dobropisu stejně s příchozí
+vratkou. Úhrady zaúčtované dřív bez tohoto dorovnání srovná
+`php api/bin/purchase-rounding-settlement-backfill.php` (spouští ho i migrace)
+přepisem zápisu úhrady na místě, jen v otevřeném účetním roce.
+
 Než se zápis vytvoří, MyÚčto ověří:
 
 - transakce je buď v **CZK**, nebo — u spárované platby — ve **stejné cizí měně jako

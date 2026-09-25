@@ -1883,8 +1883,14 @@ export interface RepostPlan {
   reason_code: 'period_not_open' | 'date_locked' | 'entry_reversed' | 'tax_neutral_rewrite' | null
   /** Zamčené datum v otevřeném roce: přesun mezi účty téže třídy bez daňového dopadu se přepíše na místě. */
   tax_neutral_available: boolean
+  /** Proč opravené řádky nejdou přepsat na místě (jen u plánu počítaného nad řádky). */
+  tax_neutral_violation?: RepostTaxNeutralViolation | null
   lines: Array<{ account_code: string | null; account_name: string | null; side: 'debit' | 'credit'; amount: number }>
 }
+
+export type RepostTaxNeutralViolation =
+  | 'unknown_account' | 'special_account' | 'tax_account_changed'
+  | 'amounts_changed' | 'account_class_changed' | 'tax_deductibility_changed'
 
 export interface RepostResult {
   strategy: 'replace' | 'reverse'
@@ -2033,7 +2039,10 @@ export const accountingApi = {
   // provede, takže se náhled s výsledkem nemůže rozejít.
   repostPlan: (source: JournalPostingSource, id: number) =>
     api.get<RepostPlan>(`/accounting/journal/repost-plan/${source}/${id}`).then(r => r.data),
-  repost: (source: JournalPostingSource, id: number, payload: RepostPayload) =>
+  /** Totéž rozhodnutí nad opravenými řádky z dialogu (na místě × storno), bez zápisu. */
+  repostPlanForLines: (source: JournalPostingSource, id: number, lines: RepostPayload['lines']) =>
+    api.post<RepostPlan>(`/accounting/journal/repost-plan/${source}/${id}`, { lines }).then(r => r.data),
+  repost:(source: JournalPostingSource, id: number, payload: RepostPayload) =>
     api.post<JournalEntryDetail & { repost: RepostResult }>(
       `/accounting/journal/repost/${source}/${id}`, payload).then(r => r.data),
   /** Podle jaké šablony kontace vznikla a kde se ta šablona opraví. */

@@ -168,6 +168,9 @@ final class ExpenseKindPostingTest extends BankPostingTestCase
      * „Sleva na dopravné" −37,19 a „Služba Sleva" −100,00 dají na 518 dohromady −100,00.
      * Slepé abs() z toho udělalo 518 MD 100,00 místo D → zápis rozvážený o 200,00
      * a assertBalanced doklad odmítl zaúčtovat.
+     *
+     * Slevové řádky se dnes rozpouští do zlevněných položek (PurchaseDiscountAllocation),
+     * proto zápornou skupinu drží řádek, který slevou není (vratka obalu).
      */
     public function testNegativeGroupGoesToOppositeSideAndEntryStaysBalanced(): void
     {
@@ -175,7 +178,7 @@ final class ExpenseKindPostingTest extends BankPostingTestCase
             ['Monitor 40" Dell', 34919.26, 7333.04, 'small_asset'],
             ['Doručení na prodejnu', 37.19, 7.81, 'service'],
             ['Sleva na dopravné', -37.19, -7.81, 'service'],
-            ['Služba Sleva', -100.00, 0.00, 'service'],
+            ['Vratka obalu', -100.00, 0.00, 'service'],
         ]);
 
         $byAcc = $this->postAndGetLines($pf);
@@ -194,7 +197,7 @@ final class ExpenseKindPostingTest extends BankPostingTestCase
             ['Monitor 40" Dell', -34919.26, -7333.04, 'small_asset'],
             ['Doručení na prodejnu', -37.19, -7.81, 'service'],
             ['Sleva na dopravné', 37.19, 7.81, 'service'],
-            ['Služba Sleva', 100.00, 0.00, 'service'],
+            ['Vratka obalu', 100.00, 0.00, 'service'],
         ], 'credit_note');
 
         $byAcc = $this->postAndGetLines($pf);
@@ -203,6 +206,66 @@ final class ExpenseKindPostingTest extends BankPostingTestCase
         self::assertEqualsWithDelta(100.00, $byAcc['518']['debit'], 0.001,
             'U dobropisu je to zrcadlově — kladná skupina jde na MD.');
         $this->assertEntryBalanced($byAcc);
+    }
+
+    /**
+     * Slevový řádek bez vlastního účtu jde do ceny zlevněného zboží, ne na 518 zvlášť.
+     * Vzor Amazon: adaptér 197,39 (drobný majetek), doprava 5,59, „Aktionsrabatt" −7,24
+     * s druhem služba. Dřív: 501 = 197,39, 518 = 5,59 − 7,24 = −1,65 (záporně na D),
+     * karta drobného majetku v ceně před slevou.
+     */
+    public function testDiscountLineFollowsDiscountedGoods(): void
+    {
+        $pf = $this->purchaseWithItems('PF-RABATT', [
+            ['Thunderbolt 10G adaptér', 197.39, 41.45, 'small_asset'],
+            ['Versandkosten', 5.59, 1.17, 'service'],
+            ['Aktionsrabatt', -7.24, -1.52, 'service'],
+        ]);
+
+        $byAcc = $this->postAndGetLines($pf);
+
+        self::assertEqualsWithDelta(190.15, $byAcc[$this->materialAccount]['debit'], 0.001, 'Sleva snižuje zboží.');
+        self::assertEqualsWithDelta(5.59, $byAcc['518']['debit'], 0.001, 'Doprava slevu nenese.');
+        self::assertEqualsWithDelta(0.0, $byAcc['518']['credit'], 0.001);
+        self::assertEqualsWithDelta(41.10, $byAcc['343.100']['debit'], 0.001, 'DPH beze změny.');
+        self::assertEqualsWithDelta(236.84, $byAcc['321']['credit'], 0.001, 'Závazek beze změny.');
+
+        $cards = $this->container->get(\MyInvoice\Service\Accounting\SmallAsset\SmallAssetService::class)
+            ->generateFromPurchaseInvoice($this->supplierId, $pf, $this->userId);
+        self::assertCount(1, $cards['created']);
+        $price = (float) $this->db->pdo()->query('SELECT price FROM small_assets WHERE id = ' . $cards['created'][0])->fetchColumn();
+        self::assertEqualsWithDelta(190.15, $price, 0.001, 'Karta drobného majetku je v ceně po slevě.');
+    }
+
+    /** Sleva přesně ve výši dopravy je doprava zdarma: jde na dopravu, zboží zůstává celé. */
+    public function testDiscountEqualToShippingGoesToShipping(): void
+    {
+        $pf = $this->purchaseWithItems('PF-FREESHIP', [
+            ['Bluetooth klávesnice', 33.61, 7.06, 'small_asset'],
+            ['Versandkosten', 3.69, 0.77, null],
+            ['Aktionsrabatt', -3.69, -0.77, null],
+        ]);
+
+        $byAcc = $this->postAndGetLines($pf);
+
+        self::assertEqualsWithDelta(33.61, $byAcc[$this->materialAccount]['debit'], 0.001);
+        self::assertArrayNotHasKey('518', $byAcc, 'Doprava a její sleva se vyruší.');
+        $this->assertEntryBalanced($byAcc);
+    }
+
+    /** Sleva, která jmenuje položku, patří k ní — ne poměrně ke všemu zboží. */
+    public function testNamedDiscountGoesToNamedItem(): void
+    {
+        $pf = $this->purchaseWithItems('PF-NAMED', [
+            ['WiFi router', 10000.00, 2100.00, 'small_asset'],
+            ['Členství AlzaPlus+ na rok', 146.28, 30.72, 'service'],
+            ['Sleva AlzaPlus+ (SL835)', -145.45, -30.54, 'service'],
+        ]);
+
+        $byAcc = $this->postAndGetLines($pf);
+
+        self::assertEqualsWithDelta(10000.00, $byAcc[$this->materialAccount]['debit'], 0.001);
+        self::assertEqualsWithDelta(0.83, $byAcc['518']['debit'], 0.001);
     }
 
     /** @param array<string,array{debit:float,credit:float}> $byAcc */

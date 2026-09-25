@@ -825,14 +825,24 @@ zkopírují na nový zápis; stornovaný si je nechá.
 přiznáním k DPH, chrání tedy DPH, ne kontaci nákladu. Dokud rok není v uzávěrce, zápis
 v zamčeném datu se přepíše na místě, pokud oprava splní všechny podmínky:
 
-- na straně MD i Dal zůstávají stejné celkové částky, mění se jen účty,
 - nemění se žádný účet daní (34x, tedy ani DPH),
+- nemění se částka peněz, pohledávek a závazků (účty třídy 2 a skupin 31–33, 35–37);
+  přesun mezi nimi, třeba 321 → 325, projde,
 - je-li za rok už podané přiznání k dani z příjmů, navíc: všechny měněné účty patří
-  do stejné účtové třídy (typicky náklad 511 → 518.100) a nemění se daňová uznatelnost
-  (přesun na nedaňovou analytiku .990 jde stornem).
+  do stejné účtové třídy (typicky náklad 511 → 518.100), takže se nemění výsledek,
+  a nemění se daňová uznatelnost (přesun na nedaňovou analytiku .990 jde stornem).
+
+Porovnává se čistý pohyb (MD − Dal) na každém účtu, ne součty stran. Když se tedy
+sleva zaúčtovaná zvlášť na straně Dal 518 rozpustí do ceny zboží na 501, součet stran
+zápisu se zmenší, ale DPH, závazek ani výsledek se nemění a zápis se přepíše na místě.
 
 Dokud přiznání k dani z příjmů podané není, projde tedy i přesun mezi třídami, například
 dodatečně doplněné časové rozlišení 518 → 381 při opravě přijaté faktury.
+
+Dialog to rozhodne už při úpravě řádků (ptá se serveru stejnou kontrolou, jakou pak
+projde uložení). Buď napíše, že se zápis přepíše na místě k původnímu datu, nebo řekne,
+proč to nejde (mění se DPH, saldokontní účet, po podání DPPO výsledek nebo uznatelnost),
+a teprve pak si vyžádá potvrzení posunu data.
 Kontrolu dělá server ještě jednou těsně před zápisem. Když oprava podmínky nesplní,
 postupuje se stornem a novým zápisem jako v tabulce výše. U přijaté faktury se nový
 nákladový účet zapíše i na položku dokladu, pokud se celý náklad přesunul z jednoho

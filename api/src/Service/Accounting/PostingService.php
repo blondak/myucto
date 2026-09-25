@@ -15,6 +15,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
+use MyInvoice\Service\Accounting\Expense\PurchaseDiscountAllocation;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Report\VatLedgerService;
@@ -248,6 +249,17 @@ final class PostingService
         $this->dimensionWarnings = $this->dimensionStamper()->rules()->check($supplierId, $sourceType, $resolved, $entryDate);
         self::assertBalanced($resolved); // v haléřích; UnbalancedEntryException při nerovnosti
 
+        // Přeúčtování ručně zadanými řádky (DocumentRepostService): dialog cizoměnovou
+        // stopu saldokontních řádků nezná, převezme se z opravovaného zápisu — i když se
+        // mezitím stornoval a oprava jde novým zápisem.
+        if (!empty($meta['inherit_line_trace_from'])) {
+            $resolved = $this->inheritLineTrace(
+                $supplierId,
+                $this->journal->linesForEntry((int) $meta['inherit_line_trace_from'], $supplierId),
+                $resolved,
+            );
+        }
+
         // R7 (Epic F4): flag allow_closing_period smí nastavit VÝHRADNĚ ClosingService —
         // závěrkové zápisy k ends_on se účtují do období ve stavu 'closing' (nikdy closed/approved).
         $allowClosing = !empty($meta['allow_closing_period']);
@@ -380,7 +392,7 @@ final class PostingService
                 $existing['lines'] = $this->journal->linesForEntry((int) $existing['id'], $supplierId);
                 if ($taxNeutralRewrite) {
                     $this->assertTaxNeutralRewrite($supplierId, $existing, $entryDate, $resolved);
-                    $resolved = self::carryOverLineTrace($existing['lines'], $resolved);
+                    $resolved = $this->inheritLineTrace($supplierId, $existing['lines'], $resolved);
                 }
                 $entryId = $this->rewriteExisting(
                     $supplierId,
@@ -831,16 +843,65 @@ final class PostingService
     }
 
     /**
-     * Při daňově neutrálním přepisu se mění jen účet. Cizoměnová stopa saldokontních
-     * řádků a středisko se proto přenesou z původních řádků, které zůstaly beze změny
-     * (týž účet, strana i částka) — jinak by přepis tiše smazal podklad kurzových rozdílů.
+     * Cizoměnová stopa (a středisko) z původních řádků do opravených. SSOT pro přepis
+     * na místě i pro přeúčtování stornem a novým zápisem: ručně zadané řádky stopu
+     * neznají a bez ní by oprava tiše smazala podklad kurzových rozdílů a přecenění.
+     *
+     * Nejdřív řádky beze změny (týž účet, strana i částka) převezmou stopu doslova. Pak
+     * saldokontní řádek (31x/32x), jehož částka se změnila: když na tomtéž účtu a straně
+     * zůstal právě jeden původní řádek se stopou, cizí částka se přepočte poměrem nové
+     * a původní korunové částky (kurz zůstává). Víc kandidátů = nejednoznačné, řádek
+     * zůstane bez stopy a přecenění ho uvidí jako korunový — stejně jako dosud.
      *
      * @param list<array<string,mixed>> $existingLines
      * @param list<array<string,mixed>> $resolved
      * @return list<array<string,mixed>>
      */
-    private static function carryOverLineTrace(array $existingLines, array $resolved): array
+    private function inheritLineTrace(int $supplierId, array $existingLines, array $resolved): array
     {
+        [$resolved, $pool, $matched] = self::carryOverExactTrace($existingLines, $resolved);
+        $pool = array_values(array_filter($pool, static fn (array $l): bool => ($l['currency_code'] ?? null) !== null
+            && ($l['amount_foreign'] ?? null) !== null && self::cents($l['amount']) !== 0));
+        if ($pool === []) {
+            return $resolved;
+        }
+        $accounts = $this->accounts->idToAccountMap($supplierId);
+        foreach ($resolved as $i => $line) {
+            if (isset($matched[$i]) || ($line['currency_code'] ?? null) !== null) {
+                continue;
+            }
+            $code = (string) ($accounts[(int) $line['account_id']]['code'] ?? '');
+            if (!in_array(substr($code, 0, 2), ['31', '32'], true)) {
+                continue;
+            }
+            $candidates = array_filter(
+                $pool,
+                static fn (array $old): bool => (int) $old['account_id'] === (int) $line['account_id']
+                    && (string) $old['side'] === (string) $line['side'],
+            );
+            if (count($candidates) !== 1) {
+                continue;
+            }
+            $old = array_values($candidates)[0];
+            $resolved[$i]['currency_code'] = $old['currency_code'];
+            $resolved[$i]['fx_rate'] = $old['fx_rate'] ?? null;
+            $resolved[$i]['amount_foreign'] = round(
+                (float) $old['amount_foreign'] * (float) $line['amount'] / (float) $old['amount'],
+                2,
+            );
+        }
+        return $resolved;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $existingLines
+     * @param list<array<string,mixed>> $resolved
+     * @return array{0:list<array<string,mixed>>, 1:list<array<string,mixed>>, 2:array<int,true>}
+     *         opravené řádky, nespárované původní řádky, indexy řádků spárovaných doslova
+     */
+    private static function carryOverExactTrace(array $existingLines, array $resolved): array
+    {
+        $matched = [];
         $pool = $existingLines;
         foreach ($resolved as $i => $line) {
             foreach ($pool as $j => $old) {
@@ -858,11 +919,12 @@ final class PostingService
                 if (($line['cost_center'] ?? null) === null && ($old['cost_center'] ?? null) !== null) {
                     $resolved[$i]['cost_center'] = $old['cost_center'];
                 }
+                $matched[$i] = true;
                 unset($pool[$j]);
                 break;
             }
         }
-        return $resolved;
+        return [$resolved, array_values($pool), $matched];
     }
 
     // ── build helpers (vrací řádky; zápis dělá postDocument → jednotkově testovatelné) ──
@@ -1432,7 +1494,8 @@ final class PostingService
     ): ?array {
         $suggestions = $this->expenseClassification->suggestForInvoice($supplierId, $purchaseInvoiceId);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, expense_kind, expense_account_code, expense_classification_source, total_without_vat, total_vat
+            'SELECT id, description, vat_rate_snapshot, expense_kind, expense_account_code,
+                    expense_classification_source, total_without_vat, total_vat
                FROM purchase_invoice_items
               WHERE purchase_invoice_id = ?'
         );
@@ -1442,8 +1505,14 @@ final class PostingService
             return null;
         }
 
+        // Slevový řádek nemá vlastní účet: jde na účty zlevněných položek (SSOT
+        // PurchaseDiscountAllocation, tentýž rozpad používá evidence drobného majetku).
+        $discounts = PurchaseDiscountAllocation::allocate($items);
+
         $anyClassified = false;
         $weights = [];
+        $itemAccounts = [];
+        $itemWeights = [];
         foreach ($items as $row) {
             $kindValue = $row['expense_kind'] !== null ? (string) $row['expense_kind'] : null;
             $override = trim((string) ($row['expense_account_code'] ?? ''));
@@ -1491,8 +1560,6 @@ final class PostingService
                 $account = $this->nonDeductibleExpenseAccount($supplierId, $account);
             }
 
-            $this->itemAccountTrace['purchase_invoice|' . $purchaseInvoiceId][(int) $row['id']] = $account;
-
             $net = round((float) $row['total_without_vat'] * $rate, 2);
             $vat = round((float) $row['total_vat'] * $rate, 2);
             $w = match (true) {
@@ -1501,7 +1568,30 @@ final class PostingService
                 $vatDeduction === 'proportional' => round($net + round($vat * (1.0 - $pct), 2), 2),
                 default => $net,
             };
-            $weights[$account] = round(($weights[$account] ?? 0.0) + $w, 2);
+            $itemAccounts[(int) $row['id']] = $account;
+            $itemWeights[(int) $row['id']] = $w;
+        }
+
+        foreach ($itemAccounts as $itemId => $account) {
+            $shares = $discounts[$itemId] ?? null;
+            if ($shares === null) {
+                $weights[$account] = round(($weights[$account] ?? 0.0) + $itemWeights[$itemId], 2);
+                continue;
+            }
+            // Váha slevy se rozdělí na účty cílových položek; do stopy řádku (dimenze)
+            // jde účet té, na kterou připadá největší díl.
+            $main = null;
+            foreach ($shares as $targetId => $share) {
+                $targetAccount = $itemAccounts[$targetId];
+                $weights[$targetAccount] = round(($weights[$targetAccount] ?? 0.0) + $itemWeights[$itemId] * $share, 2);
+                if ($main === null || $share > $shares[$main]) {
+                    $main = $targetId;
+                }
+            }
+            $itemAccounts[$itemId] = $itemAccounts[$main];
+        }
+        foreach ($itemAccounts as $itemId => $account) {
+            $this->itemAccountTrace['purchase_invoice|' . $purchaseInvoiceId][$itemId] = $account;
         }
 
         if (!$anyClassified) {
@@ -1540,9 +1630,10 @@ final class PostingService
      *
      * SLEVOVÉ ŘÁDKY (item_kind='discount') vazbu na kartu nemají a spadnou proto na
      * $defaultAccount — procentní sleva z hlavičky se generuje per sazba DPH, ne per položka,
-     * takže není ke které kartě ji přiřadit. Shodné chování má nákladová strana (viz komentář
-     * o slevách Alzy v appendSplit); u prodeje majetku se sleva na hlavičce stejně nepoužívá,
-     * cena se zadá rovnou na řádku.
+     * takže není ke které kartě ji přiřadit. Nákladová strana je jiná: přijatá faktura nese
+     * slevu jako samostatný řádek u konkrétního zboží a ta se rozpouští do zlevněných
+     * položek ({@see PurchaseDiscountAllocation}). U prodeje majetku se sleva na hlavičce
+     * nepoužívá, cena se zadá rovnou na řádku.
      *
      * @param list<int> $excludeItemIds odpočtové řádky § 37a (viz {@see advanceDeduction})
      * @return array<string,float>|null

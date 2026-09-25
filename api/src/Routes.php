@@ -2159,6 +2159,8 @@ final class Routes
             // BankPostingService, ne obecná cesta.
             $g->get   ('/journal/repost-plan/{source:invoices|purchase-invoices|bank-transactions}/{id:[0-9]+}',
                 [JournalAction::class, 'repostPlan']);
+            $g->post  ('/journal/repost-plan/{source:invoices|purchase-invoices|bank-transactions}/{id:[0-9]+}',
+                [JournalAction::class, 'repostPlan']);
             $g->post  ('/journal/repost/{source:invoices|purchase-invoices|bank-transactions}/{id:[0-9]+}',
                 [JournalAction::class, 'repost']);
             // Podle jaké šablony (předkontace / pravidla) kontace vznikla a kde se opraví.
