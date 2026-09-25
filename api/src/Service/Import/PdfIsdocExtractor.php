@@ -37,7 +37,10 @@ final class PdfIsdocExtractor
         }
 
         // 1) Najdi všechny EmbeddedFile objekty (raw stream bytes per objektu).
-        $candidates = $this->findEmbeddedFileStreams($pdfBytes);
+        //    Zamčené PDF (iÚčto/mPDF s prázdným uživatelským heslem) má streamy
+        //    zašifrované — dešifrujeme je; zašifrovaný název přílohy pak
+        //    filename match nenajde a rozhodne content sniff.
+        $candidates = $this->findEmbeddedFileStreams($pdfBytes, PdfStandardDecryptor::fromPdf($pdfBytes));
         if ($candidates === []) {
             return null;
         }
@@ -94,7 +97,7 @@ final class PdfIsdocExtractor
      *
      * @return array<int, string>
      */
-    private function findEmbeddedFileStreams(string $pdf): array
+    private function findEmbeddedFileStreams(string $pdf, ?PdfStandardDecryptor $decryptor): array
     {
         $result = [];
         $offset = 0;
@@ -150,10 +153,13 @@ final class PdfIsdocExtractor
                 }
             }
 
+            $offset = $afterStream + (is_string($stream) ? strlen($stream) : 1);
+            if ($stream !== null && $stream !== '' && $decryptor !== null) {
+                $stream = $decryptor->decryptStream($stream, $objHeader['id'], $objHeader['gen']);
+            }
             if ($stream !== null && $stream !== '') {
                 $result[$objHeader['id']] = $stream;
             }
-            $offset = $afterStream + (is_string($stream) ? strlen($stream) : 1);
         }
 
         return $result;
@@ -162,7 +168,7 @@ final class PdfIsdocExtractor
     /**
      * Zpětně dohledá nejbližší `N M obj\n` header před zadanou pozicí.
      *
-     * @return array{id:int, bodyStart:int}|null
+     * @return array{id:int, gen:int, bodyStart:int}|null
      */
     private function findObjHeaderBefore(string $pdf, int $pos): ?array
     {
@@ -180,6 +186,7 @@ final class PdfIsdocExtractor
         $lastMatchLen = strlen($last[0]);
         return [
             'id'        => (int) end($matches[1])[0],
+            'gen'       => (int) end($matches[2])[0],
             'bodyStart' => $windowStart + $lastMatchOffset + $lastMatchLen,
         ];
     }
