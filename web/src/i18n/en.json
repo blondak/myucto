@@ -16863,6 +16863,8 @@
     "columns": "Columns",
     "columns_reset": "Reset to default",
     "columns_presets": "Default layouts",
+    "columns_preset_default": "Default",
+    "columns_preset_full": "Complete",
     "columns_preset_client": "Client default",
     "columns_preset_accountant": "Accountant default",
     "columns_preset_complete": "Complete default",

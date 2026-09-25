@@ -420,6 +420,10 @@ const COLUMNS: ColumnDef[] = [
   { key: 'dimensions', labelKey: 'dimensions.title', defaultHidden: true, available: () => dims.enabled.value },
 ]
 const tbl = useTablePrefs('journal', COLUMNS)
+const COLUMN_PRESETS = [
+  { key: 'default', labelKey: 'common.columns_preset_default', visibleKeys: null },
+  { key: 'complete', labelKey: 'common.columns_preset_full', visibleKeys: COLUMNS.map(c => c.key) },
+]
 const wrapColumns = computed(() => COLUMNS.some(c => c.defaultHidden && tbl.isVisible(c.key)) && COLUMNS.filter(c => tbl.isVisible(c.key)).length + 2 > 10)
 function onListScroll(event: Event) {
   const el = event.currentTarget as HTMLElement
@@ -966,7 +970,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       <template #actions>
         <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.journal.reset_filters') }}</button>
         <SavedFiltersMenu :ctrl="saved" />
-        <ColumnPicker :ctrl="tbl" />
+        <ColumnPicker :ctrl="tbl" :presets="COLUMN_PRESETS" />
         <DensityToggle class="hidden md:block" :ctrl="tbl" />
       </template>
     </FilterBar>

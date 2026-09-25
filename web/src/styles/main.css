@@ -730,7 +730,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
       display: grid;
       position: relative;
       padding-left: 2.75rem;
-      padding-right: 2.75rem;
+      min-height: 3.75rem;
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
     .multirow-table > thead > tr > th,
@@ -763,8 +763,11 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
       left: 0;
       top: 0;
       width: 2.75rem;
-      height: auto;
-      padding: 0.45rem !important;
+      height: 1.75rem;
+      padding: 0 !important;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       border-right: 1px solid var(--color-neutral-200);
     }
     .multirow-table > tbody > tr:not(.table-detail-row) > td:first-child > div {
@@ -773,11 +776,12 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     .multirow-table > thead > tr > :last-child,
     .multirow-table > tbody > tr:not(.table-detail-row) > :last-child {
       position: absolute;
-      right: 0;
-      top: 0;
-      width: 2.75rem;
-      height: 100%;
-      padding: 0.45rem !important;
+      left: 0;
+      bottom: 0;
+      width: 2.75rem !important;
+      height: 1.75rem;
+      padding: 0 !important;
+      text-align: center !important;
       border-left: 0;
       border-right: 0;
     }
@@ -808,6 +812,12 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     .multirow-table > thead > tr,
     .multirow-table > tbody > tr:not(.table-detail-row) {
       grid-template-columns: repeat(8, minmax(0, 1fr));
+    }
+  }
+  @media (min-width: 1900px) {
+    .purchase-multirow-table > thead > tr,
+    .purchase-multirow-table > tbody > tr:not(.table-detail-row) {
+      grid-template-columns: repeat(9, minmax(0, 1fr));
     }
   }
   @media (hover: hover) and (pointer: fine) {

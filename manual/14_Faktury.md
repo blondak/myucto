@@ -26,7 +26,7 @@ vzestupně a třetí vrátí výchozí pořadí. V měsíčním
 pohledu se při vzestupném řazení podle DUZP zobrazí nejstarší měsíce první.
   U ostatních sloupců zůstávají měsíce od nejnovějšího a řadí se doklady uvnitř nich.
   Oddíl KH se zobrazuje podle Knihy DPH a nemá řazení v seznamu.
-Křížek v pravém okraji záhlaví tabulky vrátí výchozí řazení.
+Křížek v záhlaví tabulky vrátí výchozí řazení.
 Seznam načítá 50 faktur v jedné dávce. Při posunu dolů se u konce seznamu
 automaticky načte další stránka; tlačítko
 **Načíst další** zůstává k dispozici pro ruční načtení.
@@ -58,6 +58,7 @@ Tyto podrobnosti se načítají až po zapnutí příslušného sloupce. Firma s
 zapnutými dimenzemi může přidat také sloupec **Dimenze** s hodnotami z hlavičky
 a položek dokladu; načítá se pouze při zapnutí sloupce. Při větším počtu
 sloupců se záhlaví i každá faktura automaticky rozloží do několika řádků.
+Šipka pro náhled položek dokladu je v tomto zobrazení vlevo dole u faktury.
 V souvislém seznamu zůstává záhlaví při posunu viditelné a posuvník tabulky je
 po ruce na jejím spodním okraji. V měsíčním přehledu se záhlaví s obsahem
 posouvá běžně. Na mobilu se stejné zvolené údaje zobrazují v kartách faktur.

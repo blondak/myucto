@@ -1237,7 +1237,7 @@ async function bulkSetKind() {
         <!-- Desktop: tabulka -->
         <div class="hidden md:block bg-surface border border-neutral-200" :class="groupByMonth ? 'border-t-0 rounded-b-lg' : 'rounded-lg'">
           <div class="overflow-auto scrollbar-slim" :class="groupByMonth ? '' : 'max-h-[calc(100vh-20rem)]'" @scroll.passive="onListScroll">
-            <table class="w-full text-sm table-sticky-first singleline-list-table" :class="[tbl.densityClass.value, wrapColumns ? 'multirow-table' : '']">
+            <table class="w-full text-sm table-sticky-first singleline-list-table" :class="[tbl.densityClass.value, wrapColumns ? 'multirow-table purchase-multirow-table' : '']">
               <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide" :class="groupByMonth ? '' : 'sticky top-0 z-20 shadow-sm'">
                 <tr>
                   <th class="px-2 py-2 w-10 text-center">

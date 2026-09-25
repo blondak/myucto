@@ -156,8 +156,9 @@ příslušného sloupce. Při větším počtu sloupců se záhlaví i zápisy r
 několika řádků. Při posunu seznamu zůstává záhlaví viditelné a tabulka má
 posuvník u spodního okraje. Na mobilu se zvolené údaje zobrazují v kartách.
 
-Přes ikonu ozubeného kola (**ColumnPicker**) si zobrazené sloupce přizpůsobíš, přepínačem
-hustoty řádků (**DensityToggle**) zvolíš kompaktnější nebo prostornější tabulku. Nastavené
+V nabídce **Sloupce** je sestava **Výchozí** se stručným seznamem a sestava
+**Kompletní** se všemi dostupnými údaji. Potom lze sloupce jednotlivě upravit.
+Přepínačem **Hustota** zvolíš kompaktnější nebo prostornější tabulku. Nastavené
 kombinace filtrů lze uložit a znovu použít přes **Uložené filtry**.
 
 ### 52.2.1 Drill-down na zdrojový doklad

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { onClickOutside } from '@vueuse/core'
 import type { TablePrefsCtrl } from '@/composables/useTablePrefs'
@@ -9,8 +9,31 @@ const props = defineProps<{ ctrl: TablePrefsCtrl; presets?: ColumnPreset[] }>()
 const { t } = useI18n()
 
 const root = ref<HTMLElement | null>(null)
+const popup = ref<HTMLElement | null>(null)
 const open = ref(false)
+const menuStyle = ref<Record<string, string> | undefined>(undefined)
 onClickOutside(root, () => { open.value = false })
+async function toggleOpen() {
+  open.value = !open.value
+  if (!open.value) return
+  menuStyle.value = undefined
+  await nextTick()
+  if (!root.value || !popup.value) return
+  const trigger = root.value.getBoundingClientRect()
+  const width = popup.value.offsetWidth
+  const margin = 8
+  const left = Math.max(margin, Math.min(trigger.right - width, window.innerWidth - width - margin))
+  const below = window.innerHeight - trigger.bottom - margin
+  const above = trigger.top - margin
+  const openAbove = below < 240 && above > below
+  const maxHeight = Math.min(openAbove ? above : below, window.innerHeight * 0.7, 512)
+  menuStyle.value = {
+    left: `${left - trigger.left}px`,
+    right: 'auto',
+    maxHeight: `${maxHeight}px`,
+    ...(openAbove ? { bottom: `${trigger.height + 4}px`, marginTop: '0' } : {}),
+  }
+}
 function applyPreset(preset: ColumnPreset) {
   if (preset.visibleKeys === null) props.ctrl.resetColumns()
   else props.ctrl.setVisibleColumns(preset.visibleKeys)
@@ -26,7 +49,7 @@ function isPresetActive(preset: ColumnPreset): boolean {
   <div ref="root" class="relative">
     <button
       type="button"
-      @click="open = !open"
+      @click="toggleOpen"
       :aria-expanded="open"
       class="cursor-pointer shrink-0 whitespace-nowrap h-9 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-neutral-300 bg-surface text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
       :class="open ? 'bg-neutral-50' : ''"
@@ -49,7 +72,9 @@ function isPresetActive(preset: ColumnPreset): boolean {
     >
       <div
         v-if="open"
-        class="absolute right-0 mt-1 w-64 bg-surface border border-neutral-200 rounded-lg shadow-lg py-1 z-40 max-h-[min(70vh,32rem)] flex flex-col"
+        ref="popup"
+        class="absolute right-0 mt-1 w-64 max-w-[calc(100vw-1rem)] bg-surface border border-neutral-200 rounded-lg shadow-lg py-1 z-40 max-h-[min(70vh,32rem)] flex flex-col"
+        :style="menuStyle"
       >
         <div v-if="presets?.length" class="px-3 pt-1.5 pb-2 border-b border-neutral-100">
           <div class="text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1.5">{{ t('common.columns_presets') }}</div>

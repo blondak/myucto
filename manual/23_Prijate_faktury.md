@@ -30,14 +30,15 @@ včetně oddílu KH). Po volbě sestavy lze jednotlivé sloupce dále měnit.
 Podrobnosti se načtou jen při zobrazení příslušného sloupce. Firma se zapnutými
 dimenzemi může přidat také sloupec **Dimenze** s hodnotami z hlavičky a položek
 dokladu; načítá se jen při zapnutí sloupce. Je-li sloupců více, záhlaví i faktury
-se rozloží do několika řádků. V souvislém seznamu
-zůstává záhlaví při posunu na očích a tabulka má posuvník na spodním okraji.
+se rozloží do několika řádků a šipka pro náhled položek je vlevo dole u faktury.
+V souvislém seznamu zůstává záhlaví při posunu na očích a tabulka má posuvník
+na spodním okraji.
 Měsíční přehled používá běžně posuvné záhlaví. Na mobilu jsou vybrané údaje
 v kartách faktur.
 Při vzestupném řazení podle DUZP se v měsíčním pohledu zobrazí nejstarší měsíce první.
 První kliknutí na záhlaví sloupce řadí sestupně, druhé vzestupně a třetí vrátí
 výchozí pořadí.
-Křížek v pravém okraji záhlaví tabulky vrátí výchozí řazení.
+Křížek v záhlaví tabulky vrátí výchozí řazení.
 Seznam načítá 50 faktur v jedné dávce. Při posunu dolů se u konce seznamu
 automaticky načte další stránka; tlačítko
 **Načíst další** slouží k ručnímu načtení.
