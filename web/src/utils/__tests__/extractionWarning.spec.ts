@@ -22,7 +22,9 @@ describe('parseExtractionWarning', () => {
     const sections = parseExtractionWarning(warning)
 
     expect(sections).toHaveLength(2)
-    expect(sections[0]).toEqual({ paragraphs: ['Reverse charge (přijetí služby ze 3. země): zkontrolujte povahu plnění.'], items: [] })
+    const rc = 'Reverse charge (přijetí služby ze 3. země): zkontrolujte povahu plnění.'
+    expect(sections[0]).toEqual({ raw: rc, paragraphs: [rc], items: [] })
+    expect(sections[1].raw.startsWith('AI navrhuje druh nákladu')).toBe(true)
     expect(sections[1].paragraphs).toHaveLength(1)
     expect(sections[1].items).toEqual([
       { label: 'řádek 1 „Subscription to Team"', text: 'Služba (AI, jistota 40 %; AI z dokladu ⇒ Služba)' },

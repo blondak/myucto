@@ -15316,7 +15316,9 @@
       "manual_fallback": "Vyplnit ručně",
       "warning_title": "AI extrakce vyžaduje kontrolu",
       "needs_review_tooltip": "Tato faktura vyžaduje kontrolu po AI extrakci",
-      "dismiss": "Beru na vědomí"
+      "dismiss": "Beru na vědomí",
+      "resolve_section": "Vyřešeno",
+      "resolve_section_hint": "Bod je zkontrolovaný, skrýt ho z hlášení. Ostatní body zůstanou."
     },
     "extraction_review": {
       "title": "Kontrola vytěžených dokladů",
@@ -15330,7 +15332,6 @@
       "apply": "Použít",
       "apply_all": "Použít návrhy AI ({count})",
       "kind_unset": "— neurčeno —",
-      "mark_resolved": "Označit jako zkontrolované",
       "back": "Zpět",
       "skip": "Přeskočit",
       "close": "Zavřít",

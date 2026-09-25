@@ -19,6 +19,7 @@ use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
 use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\ExtractionReviewSync;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -55,6 +56,7 @@ final class SetPurchaseInvoiceExpenseKindsAction
         private readonly SmallAssetService $smallAssets,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly ExtractionReviewSync $reviewSync,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -134,6 +136,8 @@ final class SetPurchaseInvoiceExpenseKindsAction
             foreach ($changes as $itemId => $change) {
                 $stmt->execute([$change['to'], $change['to'] === ExpenseKind::FixedAsset->value ? 1 : 0, $itemId, $id]);
             }
+            // Odrážky hlášení u řádků, které teď druh mají, zmizí (týž háček jako replaceItems).
+            $this->reviewSync->afterItemsChanged($supplierId, $id);
             if ($ownTransaction) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();

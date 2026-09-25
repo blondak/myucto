@@ -804,8 +804,10 @@ export const purchaseInvoicesApi = {
       ...(target === 'paid' ? { paid_date: paidDate || appIsoDate() } : {}),
     }).then(r => r.data),
 
-  dismissExtractionWarning: (id: number) =>
-    api.post<PurchaseInvoice>(`/purchase-invoices/${id}/dismiss-extraction-warning`).then(r => r.data),
+  /** Bez `section` smaže celé hlášení, se `section` jen tuto jeho část (vyřešený bod). */
+  dismissExtractionWarning: (id: number, section?: string) =>
+    api.post<PurchaseInvoice>(`/purchase-invoices/${id}/dismiss-extraction-warning`, section ? { section } : undefined)
+      .then(r => r.data),
 
   /** Druh nákladu po položkách — kontrolní okno po AI importu, i u zaplaceného dokladu. */
   setExpenseKinds: (id: number, items: { id: number; expense_kind: ExpenseKind | null }[]) =>

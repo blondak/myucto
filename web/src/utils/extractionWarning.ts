@@ -4,6 +4,8 @@ export interface ExtractionWarningItem {
 }
 
 export interface ExtractionWarningSection {
+  /** Původní text sekce — posílá se backendu, když uživatel bod označí jako vyřešený. */
+  raw: string
   paragraphs: string[]
   items: ExtractionWarningItem[]
 }
@@ -40,7 +42,7 @@ export function parseExtractionWarning(warning: string | null | undefined): Extr
   return warning
     .split(/\r?\n\s*\r?\n/)
     .map((block) => {
-      const section: ExtractionWarningSection = { paragraphs: [], items: [] }
+      const section: ExtractionWarningSection = { raw: block.trim(), paragraphs: [], items: [] }
       for (const line of block.split(/\r?\n/)) {
         const parts = line.split(/\s+(?=•\s)/).map((p) => p.trim()).filter(Boolean)
         for (const part of parts) {

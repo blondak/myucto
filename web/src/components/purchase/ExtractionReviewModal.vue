@@ -49,7 +49,6 @@ const queue = ref<PurchaseInvoice[]>([])
 const index = ref(0)
 const loading = ref(true)
 const saving = ref(false)
-const markResolved = ref(true)
 const kinds = reactive<Record<number, ExpenseKind | null>>({})
 
 const invoice = computed<PurchaseInvoice | null>(() => queue.value[index.value] ?? null)
@@ -112,13 +111,12 @@ async function save(): Promise<void> {
     const changed = items.value
       .filter((it) => (it.expense_kind ?? null) !== kinds[it.id as number])
       .map((it) => ({ id: it.id as number, expense_kind: kinds[it.id as number] }))
+    // Odrážky hlášení u řádků, které teď druh mají, odebere backend sám; ostatní
+    // body hlášení zůstávají, dokud je uživatel neoznačí jako vyřešené.
     if (changed.length && !readOnlyReason.value) {
       const res = await purchaseInvoicesApi.setExpenseKinds(inv.id, changed)
       if (res._repost) toast.info(t('purchase_invoice.extraction_review.reposted'))
       updated = res
-    }
-    if (markResolved.value && updated.extraction_warning && !readOnlyReason.value) {
-      updated = await purchaseInvoicesApi.dismissExtractionWarning(inv.id)
     }
     queue.value[index.value] = updated
     emit('updated', updated)
@@ -127,6 +125,22 @@ async function save(): Promise<void> {
     toast.error(apiErrorMessage(e))
   } finally {
     saving.value = false
+  }
+}
+
+const resolving = ref(false)
+async function resolveSection(section: string): Promise<void> {
+  const inv = invoice.value
+  if (!inv || resolving.value) return
+  resolving.value = true
+  try {
+    const updated = await purchaseInvoicesApi.dismissExtractionWarning(inv.id, section)
+    queue.value[index.value] = updated
+    emit('updated', updated)
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    resolving.value = false
   }
 }
 
@@ -178,7 +192,7 @@ onMounted(async () => {
 
       <!-- Ostatní části hlášení (sekce o druhu nákladu je níž jako seznam) -->
       <div v-if="otherWarning" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700">
-        <ExtractionWarningText :warning="otherWarning" />
+        <ExtractionWarningText :warning="otherWarning" :dismissible="!readOnlyReason" :busy="resolving" @dismiss="resolveSection" />
       </div>
 
       <!-- Druh nákladu po položkách -->
@@ -235,10 +249,6 @@ onMounted(async () => {
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex flex-wrap items-center gap-4 text-sm text-neutral-600">
           <span>{{ t('purchase_invoice.extraction_review.counter', { n: index + 1, total: queue.length }) }}</span>
-          <label v-if="invoice.extraction_warning && !readOnlyReason" class="inline-flex items-center gap-2 cursor-pointer">
-            <input v-model="markResolved" type="checkbox" class="rounded border-neutral-300" />
-            {{ t('purchase_invoice.extraction_review.mark_resolved') }}
-          </label>
         </div>
         <div class="flex flex-wrap gap-2">
           <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :disabled="index === 0 || saving" @click="goTo(index - 1)">

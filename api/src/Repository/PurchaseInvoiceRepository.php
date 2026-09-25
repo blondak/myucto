@@ -9,6 +9,7 @@ use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Invoice\TimeBilling;
+use MyInvoice\Service\PurchaseInvoice\ExtractionReviewSync;
 use MyInvoice\Support\ExchangeRateSources;
 use MyInvoice\Support\PaymentMethods;
 use MyInvoice\Support\PublicAuthorityFeeText;
@@ -1999,6 +2000,11 @@ final class PurchaseInvoiceRepository
                 self::normalizeAccrualDate($item['accrual_to'] ?? null),
                 $stockItemId,
             ]);
+        }
+
+        // Odrážky hlášení AI extrakce u řádků, které teď druh nákladu mají, zmizí.
+        if ($supplierId > 0) {
+            (new ExtractionReviewSync($this->db))->afterItemsChanged($supplierId, $purchaseInvoiceId);
         }
     }
 

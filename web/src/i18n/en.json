@@ -15316,7 +15316,9 @@
       "manual_fallback": "Fill manually",
       "warning_title": "AI extraction needs review",
       "needs_review_tooltip": "This invoice needs review after AI extraction",
-      "dismiss": "Acknowledge"
+      "dismiss": "Acknowledge",
+      "resolve_section": "Resolved",
+      "resolve_section_hint": "This point is checked, hide it from the warning. The other points stay."
     },
     "extraction_review": {
       "title": "Review extracted documents",
@@ -15330,7 +15332,6 @@
       "apply": "Apply",
       "apply_all": "Apply AI suggestions ({count})",
       "kind_unset": "— not set —",
-      "mark_resolved": "Mark as reviewed",
       "back": "Back",
       "skip": "Skip",
       "close": "Close",

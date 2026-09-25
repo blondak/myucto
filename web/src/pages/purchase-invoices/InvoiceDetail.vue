@@ -98,11 +98,11 @@ const pdfInlineUrl = computed(() => (invoice.value ? `${purchaseInvoicesApi.pdfU
 const dismissingWarning = ref(false)
 const reviewOpen = ref(false)
 
-async function dismissWarning() {
+async function dismissWarning(section?: string) {
   if (!invoice.value || dismissingWarning.value) return
   dismissingWarning.value = true
   try {
-    invoice.value = await purchaseInvoicesApi.dismissExtractionWarning(invoice.value.id)
+    invoice.value = await purchaseInvoicesApi.dismissExtractionWarning(invoice.value.id, section)
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
@@ -795,7 +795,8 @@ const purchaseActions = computed<ActionItem[]>(() => {
         </svg>
         <div class="text-sm flex-1 min-w-0">
           <div class="font-medium text-warning-700">{{ t('purchase_invoice.extraction.warning_title') }}</div>
-          <ExtractionWarningText :warning="invoice.extraction_warning" class="text-warning-700/90 mt-1" />
+          <ExtractionWarningText :warning="invoice.extraction_warning" class="text-warning-700/90 mt-1"
+            dismissible :busy="dismissingWarning" @dismiss="dismissWarning" />
         </div>
         <div class="flex flex-col gap-1.5 shrink-0">
           <button type="button" :class="btnFilledSm('warning')" @click="reviewOpen = true">
@@ -804,7 +805,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
           </button>
           <button
             type="button"
-            @click="dismissWarning"
+            @click="dismissWarning()"
             :disabled="dismissingWarning"
             class="cursor-pointer text-xs px-2 py-1 border border-warning-500/50 rounded text-warning-700 hover:bg-warning-100 disabled:opacity-50"
           >

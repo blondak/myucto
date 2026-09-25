@@ -439,14 +439,14 @@ function needsKindAttention(it: { order_index?: number; expense_kind?: ExpenseKi
   return !!aiProposalFor(it) && !it.expense_kind
 }
 
-async function dismissWarning() {
+async function dismissWarning(section?: string) {
   const invId = Number(route.params.id)
   if (!invId || dismissingWarning.value) return
   dismissingWarning.value = true
   try {
-    await purchaseInvoicesApi.dismissExtractionWarning(invId)
-    extractionWarning.value = null
-    extractionReview.value = null
+    const inv = await purchaseInvoicesApi.dismissExtractionWarning(invId, section)
+    extractionWarning.value = inv.extraction_warning ?? null
+    extractionReview.value = inv.extraction_review ?? null
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
@@ -1499,11 +1499,12 @@ function fieldErr(key: string): string | null {
       </svg>
       <div class="text-sm flex-1 min-w-0">
         <div class="font-medium text-warning-700">{{ t('purchase_invoice.extraction.warning_title') }}</div>
-        <ExtractionWarningText :warning="extractionWarning" class="text-warning-700/90 mt-1" />
+        <ExtractionWarningText :warning="extractionWarning" class="text-warning-700/90 mt-1"
+          dismissible :busy="dismissingWarning" @dismiss="dismissWarning" />
       </div>
       <button
         type="button"
-        @click="dismissWarning"
+        @click="dismissWarning()"
         :disabled="dismissingWarning"
         class="cursor-pointer text-xs px-2 py-1 border border-warning-500/50 rounded text-warning-700 hover:bg-warning-100 disabled:opacity-50 shrink-0"
       >

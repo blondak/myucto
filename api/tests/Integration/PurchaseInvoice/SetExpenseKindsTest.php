@@ -12,6 +12,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Import\AiExpenseKindProposal;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -181,7 +182,84 @@ final class SetExpenseKindsTest extends TestCase
         self::assertNull($after['extraction_review']);
     }
 
+    /** Trello MCUAD #10: odrážky hlášení mizí postupně, jak se řádky řeší. */
+    public function testWarningBulletsDisappearAsRowsGetKind(): void
+    {
+        [$id, $first, $second] = $this->createInvoice();
+        $this->seedWarning($id);
+
+        $this->put($id, ['items' => [['id' => $first, 'expense_kind' => 'service']]]);
+        $inv = $this->repo->find($id, $this->supplierId);
+        self::assertStringContainsString(self::RC_SECTION, (string) $inv['extraction_warning'], 'Jiný bod hlášení zůstává.');
+        self::assertStringNotContainsString('řádek 1', (string) $inv['extraction_warning']);
+        self::assertStringContainsString('u 1 řádků', (string) $inv['extraction_warning']);
+        self::assertStringContainsString('řádek 2', (string) $inv['extraction_warning']);
+        self::assertSame([1], array_column($inv['extraction_review']['expense_kinds'], 'order_index'));
+
+        $this->put($id, ['items' => [['id' => $second, 'expense_kind' => 'small_asset']]]);
+        $inv = $this->repo->find($id, $this->supplierId);
+        self::assertSame(self::RC_SECTION, $inv['extraction_warning'], 'Po vyřešení všech řádků zmizí celá sekce.');
+        self::assertNull($inv['extraction_review']);
+    }
+
+    /** Uložení v editoru (replaceItems) řeší odrážky stejně jako kontrolní okno. */
+    public function testEditorSaveAlsoPrunesBullets(): void
+    {
+        [$id] = $this->createInvoice();
+        $this->seedWarning($id);
+        $items = $this->repo->find($id, $this->supplierId)['items'];
+        $items[0]['expense_kind'] = 'material';
+        $items[1]['expense_kind'] = 'service';
+
+        $this->repo->replaceItems($id, $items);
+
+        self::assertSame(self::RC_SECTION, $this->repo->find($id, $this->supplierId)['extraction_warning']);
+    }
+
+    public function testDismissSingleSectionKeepsTheRest(): void
+    {
+        [$id] = $this->createInvoice();
+        $this->seedWarning($id);
+
+        $res = $this->dismiss($id, ['section' => self::RC_SECTION]);
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        $inv = $this->repo->find($id, $this->supplierId);
+        self::assertStringStartsWith('AI navrhuje druh nákladu', (string) $inv['extraction_warning']);
+        self::assertCount(2, $inv['extraction_review']['expense_kinds']);
+
+        self::assertSame(409, $this->dismiss($id, ['section' => 'Neexistující bod'])['status']);
+
+        $this->dismiss($id, ['section' => (string) $inv['extraction_warning']]);
+        $inv = $this->repo->find($id, $this->supplierId);
+        self::assertNull($inv['extraction_warning'], 'Poslední sekce → doklad přestane být ke kontrole.');
+        self::assertNull($inv['extraction_review']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    private const RC_SECTION = 'Reverse charge (přijetí služby ze 3. země): zkontrolujte povahu plnění.';
+
+    private function seedWarning(int $id): void
+    {
+        $entries = [
+            ['order_index' => 0, 'kind' => 'service', 'confidence' => 0.4, 'reason' => 'AI z dokladu'],
+            ['order_index' => 1, 'kind' => 'small_asset', 'confidence' => 0.9, 'reason' => 'text obsahuje „monitor"'],
+        ];
+        $this->repo->appendExtractionWarning($id, $this->supplierId, self::RC_SECTION);
+        $this->repo->appendExtractionWarning($id, $this->supplierId, (string) AiExpenseKindProposal::warningTextFromReview(
+            $entries, [0 => 'Předplatné (PHPUnit)', 1 => 'Monitor (PHPUnit)'],
+        ));
+        $this->repo->setExtractionReview($id, $this->supplierId, ['expense_kinds' => $entries]);
+    }
+
+    /**
+     * @param  array<string,mixed> $body
+     * @return array{status:int, body:array<string,mixed>}
+     */
+    private function dismiss(int $id, array $body): array
+    {
+        return self::decode(($this->dismiss)($this->request('POST', $body), new Psr7Response(), ['id' => (string) $id]));
+    }
 
     /** @return list<int> [invoiceId, itemId1, itemId2] */
     private function createInvoice(): array

@@ -162,27 +162,49 @@ final class AiExpenseKindProposal
      */
     public static function warningText(array $proposals, array $items): ?string
     {
-        if ($proposals === []) {
-            return null;
+        $descriptions = [];
+        foreach ($proposals as $index => $_) {
+            $descriptions[$index] = (string) ($items[$index]['description'] ?? '');
         }
+        return self::warningTextFromReview(self::reviewPayload($proposals), $descriptions);
+    }
+
+    /**
+     * Sekce hlášení z uložených návrhů (`extraction_review.expense_kinds`) — tentýž text
+     * jako {@see warningText()}, aby šla sekce po vyřešení řádků přegenerovat
+     * ({@see \MyInvoice\Service\PurchaseInvoice\ExtractionReviewSync}).
+     *
+     * @param list<array{order_index:int, kind:string, confidence:float|int, reason:string}> $entries
+     * @param array<int,string> $descriptions order_index => popis řádku
+     */
+    public static function warningTextFromReview(array $entries, array $descriptions): ?string
+    {
         $lines = [];
-        foreach ($proposals as $index => $p) {
-            $description = AiPayloadSanitizer::sanitizeItemText(
-                (string) ($items[$index]['description'] ?? ''),
-                self::DESCRIPTION_MAX,
-            );
+        foreach ($entries as $e) {
+            $kind = ExpenseKind::tryFrom((string) ($e['kind'] ?? ''));
+            if ($kind === null) {
+                continue;
+            }
+            $index = (int) $e['order_index'];
+            $description = AiPayloadSanitizer::sanitizeItemText($descriptions[$index] ?? '', self::DESCRIPTION_MAX);
             $lines[] = sprintf(
                 '• řádek %d%s: %s (AI, jistota %d %%; %s)',
                 $index + 1,
                 $description !== '' ? ' „' . $description . '"' : '',
-                self::kindLabel($p->kind),
-                (int) round($p->confidence * 100),
-                $p->reason,
+                self::kindLabel($kind),
+                (int) round((float) $e['confidence'] * 100),
+                (string) ($e['reason'] ?? ''),
             );
         }
-        return 'AI navrhuje druh nákladu u ' . count($proposals) . ' řádků — NENÍ nastaven, '
+        if ($lines === []) {
+            return null;
+        }
+        return self::WARNING_HEADER_PREFIX . ' u ' . count($lines) . ' řádků — NENÍ nastaven, '
             . 'potvrďte nebo opravte v editoru u každé položky:' . "\n" . implode("\n", $lines);
     }
+
+    /** Úvod sekce s návrhy — podle něj se sekce v hlášení pozná (i ve frontendu). */
+    public const WARNING_HEADER_PREFIX = 'AI navrhuje druh nákladu';
 
     /**
      * Totéž co {@see warningText()}, ale strojově — pro kontrolní okno po importu, které
@@ -211,6 +233,7 @@ final class AiExpenseKindProposal
             ExpenseKind::Service => 'Služba',
             ExpenseKind::Material => 'Materiál',
             ExpenseKind::SmallAsset => 'Drobný majetek',
+            ExpenseKind::SmallIntangible => 'Drobný nehmotný majetek',
             ExpenseKind::FixedAsset => 'Dlouhodobý majetek',
         };
     }
