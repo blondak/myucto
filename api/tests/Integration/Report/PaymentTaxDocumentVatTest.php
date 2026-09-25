@@ -282,6 +282,86 @@ final class PaymentTaxDocumentVatTest extends TestCase
         self::assertEqualsWithDelta(600.00, $vat12, 0.05, 'Σ daň 12 % = původní daň');
     }
 
+    /**
+     * Vyúčtování plně předplacené zálohy má po odpočtu podle § 37a nulový základ i daň.
+     * Plnění vykázal daňový doklad k platbě (A.4), vyúčtování se do KH neuvádí: ani do
+     * výkazu, ani jako sekce v Knize DPH (sloupec KH, štítky v seznamu faktur).
+     */
+    public function testFullyPrepaidFinalInvoiceIsNotInKh(): void
+    {
+        $pdo = $this->db->pdo();
+        $proformaId = $this->seedProforma('2099110901', '2099-11-02', [[12000.00, 2520.00, 21.0]]);
+        $rec = $this->payments->recordPayment($proformaId, 14520.00, '2099-11-05', ['source' => 'manual']);
+        self::assertTrue($rec['became_paid']);
+        $taxDocId = $this->taxDocCreator->createForPayment($rec['payment_id'], $this->userId);
+        $this->invoiceIds[] = $taxDocId;
+        $pdo->prepare("UPDATE invoices SET varsymbol = '2099110902', status = 'paid', paid_at = tax_date WHERE id = ?")
+            ->execute([$taxDocId]);
+
+        $finalId = $this->finalCreator->create($proformaId, $this->userId, '2099-11-20', '2099-11-20');
+        $this->invoiceIds[] = $finalId;
+        $pdo->prepare("UPDATE invoices SET varsymbol = '2099110903', status = 'paid', paid_at = '2099-11-20' WHERE id = ?")
+            ->execute([$finalId]);
+        self::assertEqualsWithDelta(0.0, (float) $this->col($finalId, 'total_with_vat'), 0.001);
+
+        $sections = [];
+        foreach ($this->kh->invoiceSections($this->supplierId, self::YEAR, 11) as $row) {
+            $sections[(int) $row['invoice_id']][] = $row['section'];
+        }
+        self::assertSame(['A.4'], $sections[$taxDocId] ?? null, 'Plnění vykazuje daňový doklad k platbě.');
+        self::assertArrayNotHasKey($finalId, $sections, 'Vyúčtování s nulovým základem i daní do KH nepatří.');
+
+        $xml = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, 11)['xml']);
+        foreach ($xml->DPHKH1->VetaA4 as $a4) {
+            self::assertNotSame('2099110903', (string) $a4['c_evid_dd']);
+        }
+
+        $finalRows = [];
+        foreach ($this->bookSections(11) as $s) {
+            foreach ($s['rows'] as $row) {
+                if ((int) $row['invoice_id'] === $finalId) {
+                    $finalRows[] = $row;
+                }
+            }
+        }
+        self::assertNotEmpty($finalRows, 'Kniha DPH doklad dál eviduje.');
+        foreach ($finalRows as $row) {
+            self::assertNull($row['kh_section'], 'Kniha DPH nesmí vyúčtování přiřadit sekci KH.');
+        }
+
+        $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, 11, 'monthly')['xml']))->DPHDP3;
+        self::assertSame('12000', (string) $dp->Veta1['obrat23'], 'Přiznání DPH se nemění: plnění jednou, z dokladu k platbě.');
+        self::assertSame('2520', (string) $dp->Veta1['dan23']);
+    }
+
+    /**
+     * Limit 10 000 Kč u vyúčtování se posuzuje podle částky dokladu po odpočtu zálohy
+     * (GFŘ, KH Časté dotazy, oddíl VI: doplatek 8 470 Kč z plnění 60 500 Kč patří do A.5).
+     * Plnění 12 100 Kč, záloha s dokladem 6 050 Kč → vyúčtování na 6 050 Kč jde do A.5.
+     */
+    public function testFinalInvoiceLimitUsesAmountAfterAdvance(): void
+    {
+        $pdo = $this->db->pdo();
+        $proformaId = $this->seedProforma('2099120901', '2099-12-01', [[10000.00, 2100.00, 21.0]]);
+        $rec = $this->payments->recordPayment($proformaId, 6050.00, '2099-12-03', ['source' => 'manual']);
+        $taxDocId = $this->taxDocCreator->createForPayment($rec['payment_id'], $this->userId);
+        $this->invoiceIds[] = $taxDocId;
+        $pdo->prepare("UPDATE invoices SET varsymbol = '2099120902', status = 'paid', paid_at = tax_date WHERE id = ?")
+            ->execute([$taxDocId]);
+        $this->payments->recordPayment($proformaId, 6050.00, '2099-12-10', ['source' => 'manual']);
+        $finalId = $this->finalCreator->create($proformaId, $this->userId, '2099-12-15', '2099-12-15');
+        $this->invoiceIds[] = $finalId;
+        $pdo->prepare("UPDATE invoices SET varsymbol = '2099120903', status = 'paid', paid_at = '2099-12-15' WHERE id = ?")
+            ->execute([$finalId]);
+
+        $sections = [];
+        foreach ($this->kh->invoiceSections($this->supplierId, self::YEAR, 12) as $row) {
+            $sections[(int) $row['invoice_id']] = $row;
+        }
+        self::assertSame('A.5', $sections[$finalId]['section'] ?? null);
+        self::assertEqualsWithDelta(5000.00, $sections[$finalId]['base21'], 0.02, 'Vykazuje se rozdíl po odpočtu zálohy.');
+    }
+
     public function testReverseChargeProformaRefusesPaymentTaxDocument(): void
     {
         $proformaId = $this->seedProforma('2099090911', '2099-09-02', [[8000.00, 0.00, 21.0]], reverseCharge: true);
