@@ -243,6 +243,12 @@ final class JournalLinkServiceTest extends BankPostingTestCase
         self::assertContains('invoice:' . $proforma, $docs, 'Banka vede na zálohu.');
         self::assertContains('invoice:' . $ddkp, $docs, 'Banka vede na daňový doklad k platbě.');
         self::assertContains('invoice:' . $final, $docs, 'Banka vede na konečnou fakturu.');
+        $postable = [];
+        foreach ($fromBank as $i) {
+            $postable[$i['source_type'] . ':' . $i['source_id']] = $i['postable'];
+        }
+        self::assertFalse($postable['invoice:' . $proforma], 'Proforma se neúčtuje — chybějící zápis není nález.');
+        self::assertTrue($postable['invoice:' . $ddkp]);
 
         foreach ([$ddkpEntry, $finalEntry] as $entryId) {
             $payments = array_values(array_filter(
@@ -279,11 +285,14 @@ final class JournalLinkServiceTest extends BankPostingTestCase
         $ddkpEntry  = $this->postPredpis('purchase_invoice', $ddkp, '343', '314', 210.0);
         $finalEntry = $this->postPredpis('purchase_invoice', $final, '518', '321', 1210.0);
 
-        $docs = array_map(
-            static fn (array $i): string => $i['source_type'] . ':' . $i['source_id'],
-            $this->related($bankEntry)['items'],
-        );
+        $items = $this->related($bankEntry)['items'];
+        $docs = array_map(static fn (array $i): string => $i['source_type'] . ':' . $i['source_id'], $items);
         self::assertContains('purchase_invoice:' . $advance, $docs);
+        foreach ($items as $i) {
+            if ($i['source_type'] === 'purchase_invoice') {
+                self::assertSame($i['source_id'] !== $advance, $i['postable'], 'Zálohová PF se neúčtuje, ostatní ano.');
+            }
+        }
         self::assertContains('purchase_invoice:' . $ddkp, $docs);
         self::assertContains('purchase_invoice:' . $final, $docs);
 

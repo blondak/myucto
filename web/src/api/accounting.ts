@@ -399,6 +399,8 @@ export interface JournalRelatedItem {
   entry_date: string | null
   entry_document_no: string | null
   entry_posted: boolean
+  /** false = doklad se do deníku neúčtuje nikdy (proforma, zálohová PF); chybějící zápis není nález. */
+  postable?: boolean
 }
 
 export interface JournalRelated {
