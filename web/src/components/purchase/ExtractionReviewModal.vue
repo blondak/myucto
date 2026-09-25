@@ -79,8 +79,11 @@ const readOnlyReason = computed<string | null>(() => {
   const inv = invoice.value
   if (!inv) return null
   if (inv.status === 'cancelled') return t('purchase_invoice.extraction_review.readonly_cancelled')
-  if (inv.locked?.is_locked) return t('purchase_invoice.extraction_review.readonly_locked')
-  if (inv.status !== 'draft' && !auth.isCompanyAdminRole) return t('purchase_invoice.extraction_review.readonly_admin')
+  // `locked.is_locked` znamená „zamčeno pro klienta" (účetní spravuje, datum…) —
+  // účetní blokuje jen uzavřené období, stejně jako backend (GuardsDocumentLock).
+  const closedPeriod = ['closed', 'approved'].includes(inv.locked?.period_status ?? '')
+  if (closedPeriod || (auth.isClientRole && inv.locked?.is_locked)) return t('purchase_invoice.extraction_review.readonly_locked')
+  if (inv.status !== 'draft' && auth.isClientRole) return t('purchase_invoice.extraction_review.readonly_client')
   return null
 })
 

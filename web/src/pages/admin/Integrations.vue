@@ -467,10 +467,19 @@ async function saveAiCredentials() {
       ? { ok: true, text: t('aiGateway.test_ok', { model: r.model || '' }) }
       : { ok: false, text: r.test_error || t('aiGateway.test_failed') }
     credForm.api_key = ''
-    await loadAiCreds(true)
-    if (r.test_ok && aiCreds.value && aiCreds.value.ai_provider !== aiProvider.value) {
-      toast.warning(t('aiGateway.warn_not_active', { provider: providerLabel(aiProvider.value) }))
+    // Vybraný poskytovatel = aktivní poskytovatel: „Uložit" ukládá i volbu brány.
+    // Jinak by uživatel uložil klíč a extrakce by dál běžela přes jiného poskytovatele
+    // (typicky bez klíče). Výsledek testu se jen ohlásí, volbu nepodmiňuje.
+    if (aiCreds.value && aiCreds.value.ai_provider !== aiProvider.value) {
+      await settingsApi.updateSupplier({
+        ai_provider: aiProvider.value,
+        ai_data_region: aiRegion.value,
+        ai_eu_residency_required: aiEuRequired.value,
+      })
+      await loadAiAssist()
+      toast.success(t('aiGateway.switched_active', { provider: providerLabel(aiProvider.value) }))
     }
+    await loadAiCreds(true)
   } catch (e) {
     credTestMsg.value = { ok: false, text: apiErrorMessage(e) }
   } finally {
@@ -956,8 +965,16 @@ onMounted(() => {
                   aiProvider === p ? 'bg-primary-600 text-white border-primary-600 font-medium' : 'bg-surface text-neutral-700 border-neutral-300 hover:border-neutral-400']">
                 {{ providerLabel(p) }}
                 <span v-if="providerConfigured(p)" class="text-success-500" :class="aiProvider === p ? 'text-white' : ''">✓</span>
+                <span v-if="aiCreds?.ai_provider === p"
+                  class="ml-0.5 px-1.5 py-px rounded text-[10px] font-semibold uppercase tracking-wide"
+                  :class="aiProvider === p ? 'bg-white/20 text-white' : 'bg-success-50 text-success-700'">
+                  {{ t('aiGateway.active_badge') }}
+                </span>
               </button>
             </div>
+            <p v-if="aiCreds && aiCreds.ai_provider !== aiProvider" class="mt-2 text-xs text-warning-700">
+              {{ t('aiGateway.not_active_hint', { active: providerLabel(aiCreds.ai_provider), provider: providerLabel(aiProvider) }) }}
+            </p>
           </div>
 
           <div class="flex flex-wrap items-center gap-4">

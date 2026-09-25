@@ -34,7 +34,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  * Pojistky jsou TYTÉŽ jako u vynucené úpravy ({@see UpdatePurchaseInvoiceAction}):
  *   - zámek dokladu (uzavřené období, podané přiznání) se kontroluje první;
- *   - koncept smí upravit každý, kdo smí upravovat přijaté faktury, jiný stav jen admin firmy;
+ *   - smí každý, kdo smí upravovat přijaté faktury, v jakémkoli stavu kromě storna
+ *     (druh nákladu je klasifikace, ne částka); klient z portálu jen u konceptu;
  *   - storno je neměnné;
  *   - zaúčtovaný doklad v otevřeném období se přeúčtuje, v uzavřeném se odmítne
  *     (oprava tam vyžaduje reconcile v editoru);
@@ -81,9 +82,11 @@ final class SetPurchaseInvoiceExpenseKindsAction
         if ($status === 'cancelled') {
             return Json::error($response, 'not_editable', 'Stornovaný doklad nelze upravit.', 409);
         }
-        if ($status !== 'draft' && !RequestAuthorization::isCompanyAdmin($request)) {
+        // Druh nákladu je klasifikace, ne částka: účetní ho musí umět doplnit i u dokladu,
+        // který import rovnou označil jako zaplacený. Klient (portál) jen u konceptu.
+        if ($status !== 'draft' && RequestAuthorization::isClientType($request)) {
             return Json::error($response, 'not_editable',
-                "Druh nákladu u dokladu ve stavu '{$status}' může změnit jen administrátor firmy.", 409);
+                "Druh nákladu u dokladu ve stavu '{$status}' doplní vaše účetní.", 409);
         }
         if ($lock->posted && $lock->inClosedPeriod) {
             return Json::error($response, 'posted_in_closed_period',

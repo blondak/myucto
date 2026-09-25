@@ -202,8 +202,8 @@ nemá, okno jen oznámí, že není co kontrolovat.
   **Přeskočit** nechá doklad beze změny.
 
 Druh nákladu jde v okně změnit i u dokladu, který import rovnou označil jako
-zaplacený, bez vynucené úpravy v editoru. U dokladu, který už není koncept, to
-smí jen administrátor firmy. Zaúčtovaný doklad v otevřeném období se po změně
+zaplacený, bez vynucené úpravy v editoru. Klient z portálu ho mění jen
+u konceptu. Zaúčtovaný doklad v otevřeném období se po změně
 přeúčtuje. Doklad v uzavřeném období nebo stornovaný okno jen zobrazí; opravu
 je potřeba udělat v editoru.
 

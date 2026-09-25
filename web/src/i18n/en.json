@@ -15342,7 +15342,7 @@
       "reposted": "The document was re-posted with the new expense kind.",
       "readonly_cancelled": "A cancelled document cannot be edited.",
       "readonly_locked": "The document is locked (closed period or filed return). Fix the expense kind in the editor.",
-      "readonly_admin": "The document is no longer a draft; only a company administrator can change the expense kind."
+      "readonly_client": "The document is no longer a draft; your accountant will set the expense kind."
     },
     "advance_link": {
       "title": "Advance invoice",
@@ -22382,7 +22382,9 @@
     "save_selection": "Save gateway settings",
     "selection_saved": "Gateway settings saved.",
     "warn_not_configured": "The selected provider has no configured credentials — extraction will not work.",
-    "warn_not_active": "The {provider} key is saved, but extraction still runs through another provider. Switch it with Save gateway settings.",
+    "switched_active": "Extraction now runs through {provider}.",
+    "active_badge": "active",
+    "not_active_hint": "Extraction runs through {active}. Saving switches it to {provider}.",
     "credentials_title": "Credentials — {provider}",
     "credentials_hint": "BYOK — paste your own API key. The key is write-only (never shown). Empty field = keep existing key.",
     "api_key": "API key",

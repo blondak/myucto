@@ -142,18 +142,18 @@ final class SetExpenseKindsTest extends TestCase
         self::assertNull($this->items($otherId)[$foreign]['expense_kind'], 'Cizí položka se nesmí změnit.');
     }
 
-    /** Zaplacený doklad z importu: admin ho opraví bez vynucené úpravy, ostatní ne. */
-    public function testNonDraftNeedsCompanyAdmin(): void
+    /** Zaplacený doklad z importu: účetní ho opraví bez vynucené úpravy, klient z portálu ne. */
+    public function testNonDraftIsEditableByStaffButNotByClient(): void
     {
         [$id, $item] = $this->createInvoice();
         $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?")
             ->execute([self::ISSUE_DATE, $id]);
 
-        $denied = $this->put($id, ['items' => [['id' => $item, 'expense_kind' => 'service']]], 'accountant');
-        self::assertSame(409, $denied['status'], json_encode($denied['body'], JSON_UNESCAPED_UNICODE));
+        $denied = $this->put($id, ['items' => [['id' => $item, 'expense_kind' => 'service']]], 'client');
+        self::assertContains($denied['status'], [403, 409], json_encode($denied['body'], JSON_UNESCAPED_UNICODE));
         self::assertNull($this->items($id)[$item]['expense_kind']);
 
-        $ok = $this->put($id, ['items' => [['id' => $item, 'expense_kind' => 'service']]]);
+        $ok = $this->put($id, ['items' => [['id' => $item, 'expense_kind' => 'service']]], 'accountant');
         self::assertSame(200, $ok['status'], json_encode($ok['body'], JSON_UNESCAPED_UNICODE));
         self::assertSame('service', $this->items($id)[$item]['expense_kind']);
     }
