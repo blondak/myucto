@@ -9,7 +9,10 @@ import {
   type EntityCategory,
   type StatementScope,
   type StatementRowAccount,
+  type StatementAccountsReport,
+  type StatementParams,
 } from '@/api/accounting'
+import StatementAccountsTable from '@/components/accounting/StatementAccountsTable.vue'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
@@ -36,6 +39,9 @@ function fm(value: number | null | undefined): string {
 
 const periods = ref<AccountingPeriod[]>([])
 const report = ref<BalanceSheetReport | null>(null)
+const view = ref<'statement' | 'accounts'>('statement')
+const accountsReport = ref<StatementAccountsReport | null>(null)
+const hasData = computed(() => view.value === 'accounts' ? !!accountsReport.value : !!report.value)
 const category = ref<EntityCategory | null>(null)
 const loading = ref(false)
 const rangeAdjusted = ref(false)
@@ -60,6 +66,17 @@ function queryParams() {
   }
 }
 
+function accountsParams(): Omit<StatementParams, 'scope'> {
+  const { period_id, as_of, dimension_value_id, dimension_descendants } = queryParams() as StatementParams
+  return { period_id, as_of, dimension_value_id, dimension_descendants }
+}
+
+function switchView(next: 'statement' | 'accounts') {
+  if (view.value === next) return
+  view.value = next
+  void load()
+}
+
 function onDimensionValue(valueId: number | null) {
   filters.dimension_value_id = valueId
   void load()
@@ -75,8 +92,12 @@ async function load() {
   loading.value = true
   expandedRowCode.value = null
   try {
-    report.value = await accountingApi.getBalanceSheet(queryParams())
-    if (filters.scope === 'auto') {
+    if (view.value === 'accounts') {
+      accountsReport.value = await accountingApi.getStatementAccounts(accountsParams())
+    } else {
+      report.value = await accountingApi.getBalanceSheet(queryParams())
+    }
+    if (view.value === 'statement' && filters.scope === 'auto') {
       try {
         category.value = await accountingApi.getEntityCategory(Number(filters.period_id))
       } catch {
@@ -90,6 +111,7 @@ async function load() {
       from: selectedPeriod.value?.starts_on ?? '',
       to: filters.as_of || selectedPeriod.value?.ends_on || '',
       ...(filters.scope !== 'auto' ? { scope: filters.scope } : {}),
+      ...(view.value === 'accounts' ? { view: 'accounts' } : {}),
       ...(filters.dimension_value_id ? {
         dimension_value_id: String(filters.dimension_value_id),
         dimension_descendants: filters.dimension_descendants ? '1' : '0',
@@ -98,6 +120,7 @@ async function load() {
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
     report.value = null
+    accountsReport.value = null
   } finally {
     loading.value = false
   }
@@ -127,11 +150,17 @@ function accountLink(acc: StatementRowAccount) {
 
 const exporting = ref(false)
 async function exportFile(format: 'pdf' | 'xlsx') {
-  if (!filters.period_id || !report.value) return
+  if (!filters.period_id || !hasData.value) return
   exporting.value = true
   try {
-    const r = await accountingApi.exportReport('/accounting/reports/balance-sheet/export', { ...queryParams(), format })
-    downloadBlob(r.data as unknown as Blob, `rozvaha-${report.value.as_of}.${format}`)
+    if (view.value === 'accounts' && accountsReport.value) {
+      const r = await accountingApi.exportReport('/accounting/reports/statement-accounts/export',
+        { ...accountsParams(), part: 'balance', unit: unit.value, format })
+      downloadBlob(r.data as unknown as Blob, `rozvaha-po-uctech-${accountsReport.value.as_of}.${format}`)
+    } else if (report.value) {
+      const r = await accountingApi.exportReport('/accounting/reports/balance-sheet/export', { ...queryParams(), format })
+      downloadBlob(r.data as unknown as Blob, `rozvaha-${report.value.as_of}.${format}`)
+    }
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally {
@@ -167,6 +196,7 @@ onMounted(async () => {
     rangeAdjusted.value = !!fromQuery && !!toQuery && !queryPeriod
     filters.period_id = selectedPeriod.id
     if (typeof q.scope === 'string' && ['auto', 'full', 'small', 'micro'].includes(q.scope)) filters.scope = q.scope as StatementScope
+    if (q.view === 'accounts') view.value = 'accounts'
     if (toQuery && toQuery >= selectedPeriod.starts_on && toQuery <= selectedPeriod.ends_on) filters.as_of = toQuery
     const valueId = Number(q.dimension_value_id)
     if (Number.isSafeInteger(valueId) && valueId > 0) filters.dimension_value_id = valueId
@@ -179,31 +209,46 @@ onMounted(async () => {
 <template>
   <div>
     <ActivationBanner />
-    <div class="flex items-center justify-between mb-4">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
         <h1 class="text-2xl font-semibold">{{ t('accounting.balance_sheet.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.balance_sheet.subtitle') }}</p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <div class="flex rounded-md border border-neutral-300 overflow-hidden text-sm font-medium">
           <button @click="unit = 'czk'"
-            class="cursor-pointer h-9 px-3" :class="unit === 'czk' ? 'bg-primary-600 text-white' : 'hover:bg-neutral-50'">
+            class="cursor-pointer h-9 px-3 whitespace-nowrap" :class="unit === 'czk' ? 'bg-primary-600 text-white' : 'hover:bg-neutral-50'">
             {{ t('reports.unit_czk') }}
           </button>
           <button @click="unit = 'thousands'"
-            class="cursor-pointer h-9 px-3 border-l border-neutral-300" :class="unit === 'thousands' ? 'bg-primary-600 text-white' : 'hover:bg-neutral-50'">
+            class="cursor-pointer h-9 px-3 whitespace-nowrap border-l border-neutral-300" :class="unit === 'thousands' ? 'bg-primary-600 text-white' : 'hover:bg-neutral-50'">
             {{ t('reports.unit_thousands') }}
           </button>
         </div>
-        <button :disabled="!report || exporting" @click="exportFile('pdf')" :class="btnOutline('primary')">
+        <button :disabled="!hasData || exporting" @click="exportFile('pdf')" :class="btnOutline('primary')" class="whitespace-nowrap">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('accounting.balance_sheet.export_pdf') }}
         </button>
-        <button :disabled="!report || exporting" @click="exportFile('xlsx')" :class="btnOutline('primary')">
+        <button :disabled="!hasData || exporting" @click="exportFile('xlsx')" :class="btnOutline('primary')" class="whitespace-nowrap">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('accounting.balance_sheet.export_xlsx') }}
         </button>
       </div>
+    </div>
+
+    <div class="flex flex-wrap gap-2 border-b border-neutral-200 mb-4" role="tablist">
+      <button type="button" role="tab" :aria-selected="view === 'statement'" data-test="tab-statement"
+              class="px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap"
+              :class="view === 'statement' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'"
+              @click="switchView('statement')">
+        {{ t('accounting.statement_accounts.tab_statement') }}
+      </button>
+      <button type="button" role="tab" :aria-selected="view === 'accounts'" data-test="tab-accounts"
+              class="px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap"
+              :class="view === 'accounts' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'"
+              @click="switchView('accounts')">
+        {{ t('accounting.statement_accounts.tab_accounts') }}
+      </button>
     </div>
 
     <!-- Filtry -->
@@ -221,7 +266,7 @@ onMounted(async () => {
           <DateInput v-model="filters.as_of" @change="rangeAdjusted = false; load()"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
-        <div>
+        <div v-if="view === 'statement'">
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.balance_sheet.filter_scope') }}</label>
           <select v-model="filters.scope" @change="load"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
@@ -231,7 +276,7 @@ onMounted(async () => {
             <option value="micro">{{ t('accounting.balance_sheet.scope_micro') }}</option>
           </select>
         </div>
-        <div v-if="filters.scope === 'auto' && category" class="flex items-end pb-1">
+        <div v-if="view === 'statement' && filters.scope === 'auto' && category" class="flex items-end pb-1">
           <span class="text-xs px-2 py-1 rounded bg-primary-50 text-primary-700 font-medium">
             {{ t(`accounting.balance_sheet.category_${category.category}`) }}
           </span>
@@ -250,9 +295,18 @@ onMounted(async () => {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <EmptyState v-else-if="!report" boxed accent="neutral" icon="doc" :title="t('accounting.balance_sheet.empty')" />
+    <EmptyState v-else-if="!hasData" boxed accent="neutral" icon="doc" :title="t('accounting.balance_sheet.empty')" />
 
-    <template v-else>
+    <template v-else-if="view === 'accounts' && accountsReport">
+      <div class="text-xs text-neutral-500 mb-3">
+        {{ accountsReport.entity.name }}<template v-if="accountsReport.entity.ico"> · IČO {{ accountsReport.entity.ico }}</template>
+        · {{ t('accounting.balance_sheet.prepared_at') }}: {{ accountsReport.entity.prepared_at }}
+        <template v-if="unit === 'thousands'"> · {{ t('reports.unit_thousands_note') }}</template>
+      </div>
+      <StatementAccountsTable :report="accountsReport" part="balance" :format="fm" />
+    </template>
+
+    <template v-else-if="report">
       <div class="text-xs text-neutral-500 mb-3">
         {{ report.entity.name }}<template v-if="report.entity.ico"> · IČO {{ report.entity.ico }}</template>
         · {{ t('accounting.balance_sheet.prepared_at') }}: {{ report.entity.prepared_at }}

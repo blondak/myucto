@@ -111,3 +111,28 @@ používají stejné období, datum, rozsah, mapu i minulé období jako obrazov
 Účetní jednotka používající členění nákladů podle funkce sestaví samostatnou
 [účelovou výsledovku](59_Vysledovka_ucelova.md); obě varianty mají shodný
 celkový výsledek, ale jinou strukturu provozních nákladů.
+
+## 58.6 Výsledovka po účtech
+
+Záložka **Po účtech** ukáže nákladové a výnosové účty se zůstatkem od začátku
+období do data sestavení, rozdělené do skupin **Provozní činnost**,
+**Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku
+hospodaření společníkům**. Skupinu určuje stejná mapa jako výkaz (včetně
+výjimek firmy), takže účet je vždy ve skupině, do které ho výkaz započte.
+Náklady jsou ve sloupci **Náklady (MD)**, výnosy ve sloupci **Výnosy (D)**,
+každá skupina končí svým výsledkem.
+
+Pod skupinami následují mezisoučty **Provozní výsledek hospodaření**,
+**Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a
+**po zdanění** a zvýrazněný řádek **Výsledek hospodaření** za účetní období.
+Hodnoty se shodují s řádky výkazu a s výsledkem v rozvaze po účtech
+([§ 57.8](57_Rozvaha.md)). Uzávěrkový zápis se nezapočítává, po uzavření roku
+tak pohled ukazuje obsah konečného účtu 710.
+
+Výsledkový účet, který mapa výkazu nezná, je ve skupině **Účty nezařazené ve
+výkazu**. Výsledek hospodaření ho zahrnuje, výkaz ne, proto stránka nad
+tabulkou upozorní a účet je třeba zařadit výjimkou mapování
+([§ 57.7](57_Rozvaha.md)).
+
+Kliknutím na účet se otevře jeho opis. Export PDF a XLSX z této záložky
+vytvoří výsledovku po účtech v jednotce zvolené přepínačem **Kč / tis. Kč**.
