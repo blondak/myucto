@@ -16725,6 +16725,7 @@
       "currency_mismatch": "měna nesedí",
       "fx_on_czk_czk": "kurzový rozdíl na korunové platbě",
       "marked_paid_unposted": "označeno jako uhrazené, ale úhrada není zaúčtovaná (např. ruční zápočet nebo GoPay úhrada bez zaúčtování, viz Účetnictví → GoPay)",
+      "marked_paid_unposted_payable": "označeno jako uhrazené, ale úhrada není zaúčtovaná (např. ruční zápočet, platba kartou nebo úhrada, která není navázaná na doklad)",
       "attachment_tax_date_period": "DUZP na příloze v jiném měsíci",
       "attachment_tax_date": "DUZP na příloze jiný den",
       "attachment_amount": "částka na příloze jiná",

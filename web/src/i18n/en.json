@@ -16725,6 +16725,7 @@
       "currency_mismatch": "currency does not match",
       "fx_on_czk_czk": "FX difference on a CZK payment",
       "marked_paid_unposted": "marked paid, but the payment is not posted (e.g. a manual set-off or an unposted GoPay payment, see Accounting → GoPay)",
+      "marked_paid_unposted_payable": "marked paid, but the payment is not posted (e.g. a manual set-off, a card payment or a payment not linked to the document)",
       "attachment_tax_date_period": "tax point on the attachment in another month",
       "attachment_tax_date": "tax point on the attachment on another day",
       "attachment_amount": "amount on the attachment differs",
