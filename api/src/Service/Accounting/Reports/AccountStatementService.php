@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Reports;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\LedgerReportRepository;
+use MyInvoice\Service\Accounting\JournalLineAmount;
 
 /**
  * Opis účtu (Epic F2): stránkovaný výpis pohybů účtu (vč. analytik pod
@@ -57,7 +58,7 @@ final class AccountStatementService
                 'source_type' => (string) $l['source_type'],
                 'source_id'   => $l['source_id'],
                 'side'        => (string) $l['side'],
-                'amount'      => (float) $l['amount'],
+                'amount'      => JournalLineAmount::signed($l),
                 'balance'     => round($opening + (float) $l['running_delta'], 2),
                 // Účet ŘÁDKU — u syntetiky je opis složený z analytik, bez tohohle
                 // sloupce nešlo poznat, na které z nich pohyb visí.
@@ -77,7 +78,9 @@ final class AccountStatementService
                 'line_id'        => (int) $l['line_id'],
                 'line_no'        => (int) $l['line_no'],
                 'currency_code'  => $l['currency_code'],
-                'amount_foreign' => $l['amount_foreign'],
+                'amount_foreign' => $l['amount_foreign'] === null ? null : JournalLineAmount::signed([
+                    'amount' => $l['amount_foreign'], 'is_red_storno' => $l['is_red_storno'],
+                ]),
             ];
         }
         $items = $this->context->enrich($supplierId, $items);

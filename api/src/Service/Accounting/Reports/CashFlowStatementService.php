@@ -191,7 +191,7 @@ final class CashFlowStatementService
         $sql =
             "SELECT a.account_code AS counter_code,
                     MIN(a.name) AS counter_name,
-                    ROUND(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 2) AS amount
+                    ROUND(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END), 2) AS amount
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
                JOIN chart_of_accounts a  ON a.id = l.account_id
@@ -236,7 +236,7 @@ final class CashFlowStatementService
         $notCard = $this->notCardClearing($supplierId, 'a');
 
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id

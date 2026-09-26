@@ -285,7 +285,7 @@ final class DppoReturnDataProvider
         $params = array_merge([$supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE], array_map(static fn (string $p): string => $p . '%', $prefixes));
         $stmt = $this->db->pdo()->prepare(
             "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT a.account_code, a.name, a.tax_deductibility,
-                    COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0) AS turnover
+                    COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS turnover
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
@@ -443,7 +443,7 @@ final class DppoReturnDataProvider
     private function accountGroupExpense(int $supplierId, string $startsOn, string $endsOn, string $groupPrefix): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0) AS c
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS c
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
@@ -472,7 +472,7 @@ final class DppoReturnDataProvider
     private function profitBeforeTax(int $supplierId, string $startsOn, string $endsOn): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0) AS vh
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS vh
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "

@@ -15,8 +15,10 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Reports\JournalExportService;
 use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
+use MyInvoice\Service\Pdf\JournalPdfRenderer;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use Smalot\PdfParser\Parser as PdfTextParser;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -44,6 +46,7 @@ final class JournalExportAndHistoryTest extends TestCase
     private PostingService $posting;
     private JournalExportService $journalExport;
     private ReportXlsxExporter $xlsx;
+    private JournalPdfRenderer $pdf;
 
     private int $supplierId = 0;
     private int $userId = 0;
@@ -65,6 +68,7 @@ final class JournalExportAndHistoryTest extends TestCase
             $this->posting       = $container->get(PostingService::class);
             $this->journalExport = $container->get(JournalExportService::class);
             $this->xlsx           = $container->get(ReportXlsxExporter::class);
+            $this->pdf            = $container->get(JournalPdfRenderer::class);
             $seeder               = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -353,6 +357,32 @@ final class JournalExportAndHistoryTest extends TestCase
         self::assertSame(200, $res['status']);
         self::assertStringContainsString('spreadsheetml', $res['contentType']);
         self::assertGreaterThan(500, strlen($res['raw']));
+    }
+
+    public function testRedStornoExportUsesNegativeHeaderDetailsAndTotals(): void
+    {
+        $entryId = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 10.0, 'is_red_storno' => true],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 10.0, 'is_red_storno' => true],
+        ], ['entry_date' => self::YEAR . '-04-02', 'description' => 'Červené storno export', 'user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        $data = $this->journalExport->build($this->supplierId, ['entry_id' => $entryId]);
+        self::assertSame(-10.0, $data['totals']['debit']);
+        self::assertSame(-10.0, $data['totals']['credit']);
+
+        $out = $this->xlsx->journal($data);
+        $path = tempnam(sys_get_temp_dir(), 'jred');
+        self::assertNotFalse($path);
+        file_put_contents($path, $out['bytes']);
+        $sheet = IOFactory::load($path)->getActiveSheet();
+        unlink($path);
+
+        self::assertSame(-10.0, $sheet->getCell('G6')->getValue());
+        self::assertSame(-10.0, $sheet->getCell('H6')->getValue());
+        self::assertSame(-10.0, $sheet->getCell('G7')->getValue());
+        self::assertSame(-10.0, $sheet->getCell('H8')->getValue());
+        $pdfText = (new PdfTextParser())->parseContent($this->pdf->render($data))->getText();
+        self::assertGreaterThanOrEqual(4, substr_count($pdfText, '-10,00'));
     }
 
     /**

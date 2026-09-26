@@ -104,7 +104,7 @@ final class DisposalResiduals
                       ORDER BY de.fiscal_year DESC LIMIT 1) AS tax_residual,
                     (SELECT COALESCE(SUM(de.amount), 0) FROM depreciation_entries de
                       WHERE de.supplier_id = a.supplier_id AND de.asset_id = a.id AND de.kind = \'accounting\') AS accounting_total,
-                    (SELECT SUM(jl.amount)
+                    (SELECT SUM(jl.signed_amount)
                        FROM journal_entries je
                        JOIN journal_entry_lines jl ON jl.entry_id = je.id AND jl.supplier_id = je.supplier_id
                        JOIN chart_of_accounts ca ON ca.id = jl.account_id
@@ -125,12 +125,12 @@ final class DisposalResiduals
                     (SELECT je.id FROM journal_entries je
                       WHERE je.id = a.disposal_entry_id AND je.supplier_id = a.supplier_id
                         AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL) AS linked_entry_id,
-                    (SELECT SUM(jl.amount)
+                    (SELECT SUM(jl.signed_amount)
                        FROM journal_entry_lines jl
                        JOIN chart_of_accounts ca ON ca.id = jl.account_id
                       WHERE jl.entry_id = a.disposal_entry_id AND jl.supplier_id = a.supplier_id
                         AND jl.side = \'debit\' AND ca.account_code LIKE \'' . self::JOURNAL_EXPENSE_PREFIX . '%\') AS linked_residual,
-                    (SELECT SUM(jl.amount)
+                    (SELECT SUM(jl.signed_amount)
                        FROM journal_entry_lines jl
                        JOIN chart_of_accounts ca ON ca.id = jl.account_id
                       WHERE jl.entry_id = a.disposal_entry_id AND jl.supplier_id = a.supplier_id AND jl.side = \'credit\'
@@ -304,7 +304,7 @@ final class DisposalResiduals
     private function journalResidual(int $supplierId, string $date, string $account): float
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT COALESCE(SUM(dl.amount), 0)' . self::journalDisposalFrom('je.entry_date = ?') . '
+            'SELECT COALESCE(SUM(dl.signed_amount), 0)' . self::journalDisposalFrom('je.entry_date = ?') . '
                 AND NOT EXISTS (
                     SELECT 1 FROM assets la WHERE la.supplier_id = je.supplier_id AND la.disposal_entry_id = je.id
                 )'

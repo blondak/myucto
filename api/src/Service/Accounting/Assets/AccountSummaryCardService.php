@@ -208,7 +208,7 @@ final class AccountSummaryCardService
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT je.id, je.entry_date, je.source_type, je.document_no, je.description,
-                    SUM(CASE WHEN jl.side = 'debit' THEN jl.amount ELSE -jl.amount END) AS net
+                    SUM(CASE WHEN jl.side = 'debit' THEN jl.signed_amount ELSE -jl.signed_amount END) AS net
                FROM journal_entries je
                JOIN journal_entry_lines jl ON jl.entry_id = je.id AND jl.supplier_id = je.supplier_id
                JOIN chart_of_accounts ca ON ca.id = jl.account_id

@@ -13,6 +13,7 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\TaxAdvanceScheduleRepository;
 use MyInvoice\Service\Accounting\AutoPostingPolicyService;
+use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\OperationType;
 use MyInvoice\Service\Accounting\PolicyInput;
 use MyInvoice\Service\Accounting\PostingException;
@@ -121,7 +122,7 @@ final class BankPostingService
     /**
      * Má transakce živý zápis TOTOŽNÝ s předloženými řádky? Vrací jeho id, jinak null.
      *
-     * Porovnává se množina (strana, kód účtu, částka v haléřích) — tedy účetní obsah,
+     * Porovnává se množina (strana, kód účtu, podepsaná částka v haléřích) — tedy účetní obsah,
      * ne pořadí řádků ani jejich id. Částky přes haléře, ať float reprezentace nedělá
      * falešné rozdíly.
      *
@@ -136,7 +137,7 @@ final class BankPostingService
         $entryId = (int) $existing['id'];
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT c.account_code AS code, jel.side, jel.amount
+            'SELECT c.account_code AS code, jel.side, jel.amount, jel.is_red_storno
                FROM journal_entry_lines jel
                JOIN chart_of_accounts c ON c.id = jel.account_id
               WHERE jel.entry_id = ? AND jel.supplier_id = ?'
@@ -150,7 +151,7 @@ final class BankPostingService
                     '%s|%s|%d',
                     (string) $r['side'],
                     (string) $r['code'],
-                    (int) round(((float) $r['amount']) * 100.0)
+                    JournalLineAmount::signedCents($r)
                 );
             }
             sort($out);
@@ -162,6 +163,7 @@ final class BankPostingService
                 'side'   => $l['side'],
                 'code'   => $l['account_code'],
                 'amount' => $l['amount'],
+                'is_red_storno' => $l['is_red_storno'] ?? false,
             ],
             $lines
         ));
@@ -3676,6 +3678,21 @@ final class BankPostingService
         return ['account_code' => $code, 'side' => $side, 'amount' => round($amount, 2)];
     }
 
+    /** @param array<string,mixed> $line */
+    private function redStornoFlag(array $line, int $index): bool
+    {
+        if (!array_key_exists('is_red_storno', $line)) {
+            return false;
+        }
+        if (!is_bool($line['is_red_storno'])) {
+            throw new PostingException(
+                'validation_failed',
+                'Řádek ' . ($index + 1) . ': is_red_storno musí být boolean.',
+            );
+        }
+        return $line['is_red_storno'];
+    }
+
     /**
      * Validace řádků rozúčtování z UI. Vyváženost (Σ MD = Σ D) i existenci účtů ověří až
      * PostingService::postDocument(); tady se hlídá to, co je specifické pro bankovní pohyb:
@@ -3716,6 +3733,7 @@ final class BankPostingService
             $code = trim((string) ($r['account_code'] ?? ''));
             $side = (string) ($r['side'] ?? '');
             $amount = round((float) ($r['amount'] ?? 0), 2);
+            $isRedStorno = $this->redStornoFlag($r, $i);
             if ($code === '' || !in_array($side, ['debit', 'credit'], true)) {
                 throw new PostingException('validation_failed', 'Řádek ' . ($i + 1) . ': chybí účet nebo strana.');
             }
@@ -3723,8 +3741,11 @@ final class BankPostingService
                 throw new PostingException('validation_failed', 'Řádek ' . ($i + 1) . ': částka musí být kladná.');
             }
             $line = $this->line($code, $side, $amount);
+            if ($isRedStorno) {
+                $line['is_red_storno'] = true;
+            }
             if (str_starts_with($code, '221')) {
-                $bankCents += (int) round($amount * 100.0) * ($side === 'debit' ? 1 : -1);
+                $bankCents += JournalLineAmount::signedCents($line) * ($side === 'debit' ? 1 : -1);
                 // §4/12 — cizoměnový účet se vede i v cizí měně. Stopa patří na bankovní
                 // nohu: jen ta je skutečně v cizí měně (protiúčty jsou korunové předpisy).
                 if ($fxRate !== null && $currency !== null && $absAmount > 0.0) {
@@ -3775,6 +3796,7 @@ final class BankPostingService
             $code = trim((string) ($r['account_code'] ?? ''));
             $side = (string) ($r['side'] ?? '');
             $foreign = round((float) ($r['amount'] ?? 0), 2);
+            $isRedStorno = $this->redStornoFlag($r, $i);
             if ($code === '' || !in_array($side, ['debit', 'credit'], true)) {
                 throw new PostingException('validation_failed', 'Řádek ' . ($i + 1) . ': chybí účet nebo strana.');
             }
@@ -3787,7 +3809,10 @@ final class BankPostingService
                         . ': saldokonto rozúčtuj v korunách, pohledávka i závazek se odúčtovávají kurzem předpisu.');
                 }
             }
-            $cents = (int) round($foreign * 100.0);
+            $cents = JournalLineAmount::signedCents([
+                'amount' => $foreign,
+                'is_red_storno' => $isRedStorno,
+            ]);
             $isBank = str_starts_with($code, '221');
             if ($isBank) {
                 $bankForeignCents += $side === 'debit' ? $cents : -$cents;
@@ -3797,7 +3822,13 @@ final class BankPostingService
             } else {
                 $creditForeignCents += $cents;
             }
-            $parsed[] = ['code' => $code, 'side' => $side, 'foreign' => $foreign, 'bank' => $isBank];
+            $parsed[] = [
+                'code' => $code,
+                'side' => $side,
+                'foreign' => $foreign,
+                'bank' => $isBank,
+                'is_red_storno' => $isRedStorno,
+            ];
         }
 
         $expectedForeignCents = (int) round(($signedAmount > 0 ? $foreignAmount : -$foreignAmount) * 100.0);
@@ -3837,20 +3868,32 @@ final class BankPostingService
         // Banka musí sedět na korunový ekvivalent výpisu přesně (invariant 221 = výpis).
         $bankNetCents = 0;
         foreach ($parsed as $idx => $p) {
-            if ($p['bank']) $bankNetCents += (int) round($czk[$idx] * 100.0) * ($p['side'] === 'debit' ? 1 : -1);
+            if ($p['bank']) {
+                $bankNetCents += JournalLineAmount::signedCents([
+                    'amount' => $czk[$idx],
+                    'is_red_storno' => $p['is_red_storno'],
+                ]) * ($p['side'] === 'debit' ? 1 : -1);
+            }
         }
         $bankFix = (int) round(($signedAmount > 0 ? $absAmount : -$absAmount) * 100.0) - $bankNetCents;
-        $czk[$largestBank] = round($czk[$largestBank] + ($parsed[$largestBank]['side'] === 'debit' ? $bankFix : -$bankFix) / 100, 2);
+        $bankDirection = ($parsed[$largestBank]['side'] === 'debit' ? 1 : -1)
+            * ($parsed[$largestBank]['is_red_storno'] ? -1 : 1);
+        $czk[$largestBank] = round($czk[$largestBank] + $bankFix * $bankDirection / 100, 2);
 
         // Haléřový rozdíl z přepočtu protiúčtů vyrovná největší protiúčet.
         $diffCents = 0;
         foreach ($parsed as $idx => $p) {
-            $diffCents += (int) round($czk[$idx] * 100.0) * ($p['side'] === 'debit' ? 1 : -1);
+            $diffCents += JournalLineAmount::signedCents([
+                'amount' => $czk[$idx],
+                'is_red_storno' => $p['is_red_storno'],
+            ]) * ($p['side'] === 'debit' ? 1 : -1);
         }
         if (abs($diffCents) > count($parsed)) {
             throw new PostingException('validation_failed', 'Po přepočtu kurzem se zápis nepodařilo vyrovnat.');
         }
-        $adjust = $parsed[$largestCounter]['side'] === 'credit' ? $diffCents : -$diffCents;
+        $counterDirection = ($parsed[$largestCounter]['side'] === 'debit' ? 1 : -1)
+            * ($parsed[$largestCounter]['is_red_storno'] ? -1 : 1);
+        $adjust = -$diffCents * $counterDirection;
         $czk[$largestCounter] = round($czk[$largestCounter] + $adjust / 100, 2);
         if ($czk[$largestCounter] <= 0.0) {
             throw new PostingException('validation_failed', 'Po přepočtu kurzem vyšla částka řádku nulová.');
@@ -3859,6 +3902,9 @@ final class BankPostingService
         $lines = [];
         foreach ($parsed as $idx => $p) {
             $line = $this->line($p['code'], $p['side'], $czk[$idx]);
+            if ($p['is_red_storno']) {
+                $line['is_red_storno'] = true;
+            }
             $lines[] = $p['bank'] ? $this->withFxTrace($line, $currency, $fxRate, $p['foreign']) : $line;
         }
         return $lines;
@@ -3889,7 +3935,10 @@ final class BankPostingService
         $bank = '';
         $counter = '';
         foreach ($lines as $l) {
-            if ($bank === '' && str_starts_with($l['account_code'], '221') && $l['side'] === $wantBankSide) {
+            $effectiveSide = !empty($l['is_red_storno'])
+                ? ($l['side'] === 'debit' ? 'credit' : 'debit')
+                : $l['side'];
+            if ($bank === '' && str_starts_with($l['account_code'], '221') && $effectiveSide === $wantBankSide) {
                 $bank = $l['account_code'];
             } elseif ($counter === '' && !str_starts_with($l['account_code'], '221')) {
                 $counter = $l['account_code'];

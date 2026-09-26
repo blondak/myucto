@@ -316,7 +316,7 @@ final class PaymentMatchAuditChecker
         foreach (array_chunk(array_values(array_unique(array_map('intval', $bankTransactionIds))), 500) as $ids) {
             $placeholders = implode(', ', array_fill(0, count($ids), '?'));
             $stmt = $this->db->pdo()->prepare(
-                "SELECT e.source_id, SUM(l.amount) AS total
+                "SELECT e.source_id, SUM(l.signed_amount) AS total
                    FROM journal_entries e
                    JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                    JOIN chart_of_accounts ca ON ca.id = l.account_id

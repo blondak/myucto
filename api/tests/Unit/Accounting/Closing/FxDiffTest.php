@@ -287,6 +287,24 @@ final class FxDiffTest extends TestCase
         self::assertSame('EUR', $reversal[0]['currency_code'] ?? $reversal[1]['currency_code'], 'FX stopa zůstává.');
     }
 
+    public function testRedStornoFxReversalKeepsSideAndBecomesOrdinary(): void
+    {
+        $service = $this->service([], []);
+        $reversal = $service->buildReversal([[
+            'account_code' => '311',
+            'side' => 'debit',
+            'amount' => 10.00,
+            'is_red_storno' => true,
+            'currency_code' => 'EUR',
+            'amount_foreign' => 0.40,
+        ]]);
+
+        self::assertSame('debit', $reversal[0]['side']);
+        self::assertFalse($reversal[0]['is_red_storno']);
+        self::assertSame(10.00, $reversal[0]['amount']);
+        self::assertSame(0.40, $reversal[0]['amount_foreign']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /**

@@ -164,7 +164,7 @@ final class LegalProvisionLedgerService
     private function creditBalance(int $supplierId, int $periodId, string $accountCode, string $asOf): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0)
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
@@ -198,7 +198,7 @@ final class LegalProvisionLedgerService
             ? "AND COALESCE(a.tax_deductibility, 'deductible') <> 'non_deductible'"
             : '';
         $stmt = $this->db->pdo()->prepare(
-            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
@@ -220,7 +220,8 @@ final class LegalProvisionLedgerService
     {
         $stmt = $this->db->pdo()->prepare(
             "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . ", creation_entries AS (
-                SELECT e.id AS root_entry_id, e.id, e.reversed_by, l.amount, 1 AS direction
+                SELECT e.id AS root_entry_id, e.id, e.reversed_by,
+                       l.signed_amount AS amount, 1 AS direction
                   FROM journal_entry_lines l
                   JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
                   " . JournalTaxOrigin::join() . "

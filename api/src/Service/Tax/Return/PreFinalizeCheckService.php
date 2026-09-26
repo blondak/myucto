@@ -324,7 +324,7 @@ final class PreFinalizeCheckService
         }
         $stmt = $this->db->pdo()->prepare(
             "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT a.id AS account_id, a.account_code, a.name,
-                    ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2) AS turnover
+                    ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 2) AS turnover
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
@@ -461,7 +461,7 @@ final class PreFinalizeCheckService
     private function accountTurnover(int $supplierId, string $codePrefix, string $startsOn, string $endsOn): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "

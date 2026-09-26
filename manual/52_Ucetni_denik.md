@@ -326,6 +326,13 @@ Tabulka řádků, kde ke každému přidáš:
 - **Částku** — kladné číslo, na 2 desetinná místa (vždy v účetní měně CZK — ruční zápis
   přes formulář **nepodporuje** zadání cizí měny/kurzu na řádku, na rozdíl od
   automatických zápisů z cizoměnových faktur, viz [§ 52.5](#525-multi-menove-radky-zapisu)),
+- **Červené storno** — částka zůstává v poli kladná, ale zápis ji odečte na
+  zvolené původní straně MD nebo Dal. V deníku a výkazech se zobrazuje záporně.
+  Běžné storno na opačnou stranu funguje samostatně; stejný zůstatek neznamená
+  stejný obrat. Kopírování i přeúčtování zápisu zachová příznak červeného storna.
+  Při rozúčtování čistě červeného zápisu nový řádek převezme stejné znaménko.
+  Opis účtu, otevřené položky a jejich exporty zobrazují záporný účetní účinek
+  na původní straně. Takový zápis zatím nelze uložit jako šablonu.
 - **Středisko** — volitelné analytické členění. Pole našeptává aktivní položky z firemního
   číselníku **Nástroje → Střediska**, ale kvůli kompatibilitě historických zápisů lze
   ponechat i vlastní volný text.

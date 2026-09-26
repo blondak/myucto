@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { journalAmount } from '@/utils/journalAmount'
 /**
  * Náhled kontace před zaúčtováním dokladu.
  *
@@ -46,8 +47,8 @@ const error = ref('')
 
 const totals = computed(() => {
   const rows = preview.value?.lines ?? []
-  const debit = rows.filter(l => l.side === 'debit').reduce((s, l) => s + l.amount, 0)
-  const credit = rows.filter(l => l.side === 'credit').reduce((s, l) => s + l.amount, 0)
+  const debit = rows.filter(l => l.side === 'debit').reduce((s, l) => s + journalAmount(l), 0)
+  const credit = rows.filter(l => l.side === 'credit').reduce((s, l) => s + journalAmount(l), 0)
   return { debit, credit }
 })
 
@@ -72,6 +73,7 @@ async function startEditing(): Promise<void> {
     account_code: l.account_code,
     side: l.side as 'debit' | 'credit',
     amount: l.amount,
+    is_red_storno: l.is_red_storno,
   }))
   editing.value = true
 }
@@ -218,6 +220,7 @@ async function confirmPost(): Promise<void> {
             account_code: l.account_code,
             side: l.side,
             amount: l.amount ?? 0,
+        is_red_storno: l.is_red_storno,
           })),
         }
       : undefined
@@ -381,10 +384,10 @@ async function confirmPost(): Promise<void> {
                   <span v-if="l.cost_center" class="ml-2 text-xs text-neutral-400">{{ l.cost_center }}</span>
                 </td>
                 <td class="px-3 py-2 text-right font-mono">
-                  {{ l.side === 'debit' ? formatMoney(l.amount, 'CZK') : '' }}
+                  {{ l.side === 'debit' ? formatMoney(journalAmount(l), 'CZK') : '' }}
                 </td>
                 <td class="px-3 py-2 text-right font-mono">
-                  {{ l.side === 'credit' ? formatMoney(l.amount, 'CZK') : '' }}
+                  {{ l.side === 'credit' ? formatMoney(journalAmount(l), 'CZK') : '' }}
                 </td>
               </tr>
             </tbody>

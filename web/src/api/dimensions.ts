@@ -181,6 +181,7 @@ export interface DocumentDimensionsPreviewLine {
   account_name: string | null
   side: 'debit' | 'credit'
   amount: number
+  is_red_storno: boolean
   dimensions: Record<number, number>
 }
 

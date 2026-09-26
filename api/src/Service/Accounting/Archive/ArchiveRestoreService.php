@@ -1026,8 +1026,8 @@ final class ArchiveRestoreService
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT je.period_id,
-                    SUM(CASE WHEN jel.side = 'debit'  THEN jel.amount ELSE 0 END) AS md,
-                    SUM(CASE WHEN jel.side = 'credit' THEN jel.amount ELSE 0 END) AS d
+                    SUM(CASE WHEN jel.side = 'debit'  THEN jel.signed_amount ELSE 0 END) AS md,
+                    SUM(CASE WHEN jel.side = 'credit' THEN jel.signed_amount ELSE 0 END) AS d
                FROM journal_entries je
                JOIN journal_entry_lines jel ON jel.entry_id = je.id
               WHERE je.supplier_id = ? AND je.posted_at IS NOT NULL

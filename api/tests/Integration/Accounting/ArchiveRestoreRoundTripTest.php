@@ -485,6 +485,15 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         // Deník: 2 ruční zápisy (source_id NULL)
         $this->manual(1000.00, '311', '602');
         $this->manual(250.00, '518', '321');
+        $this->posting->postDocument($sid, 'manual', null, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 25.00, 'is_red_storno' => true],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 25.00, 'is_red_storno' => true],
+        ], [
+            'entry_date' => self::YEAR . '-02-01',
+            'description' => 'Syntetické červené storno',
+            'posted' => true,
+            'posted_by' => $this->userId,
+        ]);
 
         // Pokladna: registr + prodej s DPH (source_type='cash') + převod
         $reg = $this->registers->create($sid, ['name' => 'Pokladna', 'account_code' => '211', 'is_default' => true]);
@@ -548,6 +557,9 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         foreach ($origCounts as $key => $val) {
             self::assertSame($val, $newCounts[$key], "Agregát '{$key}' se po obnově shoduje ({$val}).");
         }
+        self::assertSame(2, (int) $this->db->pdo()->query(
+            "SELECT COUNT(*) FROM journal_entry_lines WHERE supplier_id = {$newSid} AND is_red_storno = 1"
+        )->fetchColumn(), 'Příznak červeného storna přežil export i obnovu.');
 
         // 3) source_type='cash' zápisy míří na cash_documents NOVÉ firmy (deferred remap)
         $orphanCash = (int) $this->db->pdo()->query(
@@ -823,7 +835,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         }
         // agregát částek pro shodu obsahu, ne jen počtu
         $out['jel_debit_halere'] = (int) round(100 * (float) $this->db->pdo()->query(
-            "SELECT COALESCE(SUM(amount),0) FROM journal_entry_lines WHERE supplier_id = {$sid} AND side = 'debit'"
+            "SELECT COALESCE(SUM(signed_amount),0) FROM journal_entry_lines WHERE supplier_id = {$sid} AND side = 'debit'"
         )->fetchColumn());
         return $out;
     }
@@ -833,8 +845,8 @@ final class ArchiveRestoreRoundTripTest extends TestCase
     {
         $rows = $this->db->pdo()->query(
             "SELECT je.period_id,
-                    SUM(CASE WHEN jel.side='debit' THEN jel.amount ELSE 0 END)
-                  - SUM(CASE WHEN jel.side='credit' THEN jel.amount ELSE 0 END) AS diff
+                    SUM(CASE WHEN jel.side='debit' THEN jel.signed_amount ELSE 0 END)
+                  - SUM(CASE WHEN jel.side='credit' THEN jel.signed_amount ELSE 0 END) AS diff
                FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id
               WHERE je.supplier_id = {$sid} AND je.posted_at IS NOT NULL
               GROUP BY je.period_id"

@@ -163,6 +163,7 @@ final class DocumentJournalPurge
                             'account_id'     => (int) $line['account_id'],
                             'side'           => (string) $line['side'],
                             'amount'         => (float) $line['amount'],
+                            'is_red_storno'  => (bool) $line['is_red_storno'],
                             'currency_code'  => $line['currency_code'],
                             'amount_foreign' => $line['amount_foreign'],
                             'cost_center'    => $line['cost_center'],

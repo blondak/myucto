@@ -185,6 +185,24 @@ final class DimensionReportsTest extends TestCase
         self::assertSame([$a => 1, $b => 2, $c => 2], $cents, 'Zbytek po zaokrouhlení nese hodnota s nižším id při shodě podílů.');
     }
 
+    public function testRedStornoSplitReducesEachDimensionCost(): void
+    {
+        $a = $this->value($this->centerType, 'R-S1');
+        $b = $this->value($this->centerType, 'R-S2');
+        $split = ['dimension_splits' => [$this->centerType => [$a => 0.5, $b => 0.5]]];
+        $this->post([['518', 'debit', 100.00, $split], ['321', 'credit', 100.00]]);
+        $this->post([
+            ['518', 'debit', 20.00, $split + ['is_red_storno' => true]],
+            ['321', 'credit', 20.00, ['is_red_storno' => true]],
+        ]);
+
+        $rows = array_column($this->profit->build($this->supplierId, $this->centerType, self::FROM, self::TO, [$this->supplierId])['rows'], null, 'value_id');
+        foreach ([$a, $b] as $valueId) {
+            self::assertEqualsWithDelta(40.0, $rows[$valueId]['own']['cost'], 0.001);
+            self::assertEqualsWithDelta(-40.0, $this->incomeProfit($this->dimensions->filter($this->supplierId, $valueId)), 0.001);
+        }
+    }
+
     public function testJournalFilterFindsEntryWithSplitLine(): void
     {
         $a = $this->value($this->centerType, 'R-J1');

@@ -186,14 +186,18 @@ final class MonthlyCheckTest extends TestCase
             ['account_code' => '602', 'side' => 'credit', 'amount' => 25],
         ], ['entry_date' => self::YEAR . '-03-11', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
         $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '221.731', 'side' => 'debit', 'amount' => 20, 'is_red_storno' => true],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 20, 'is_red_storno' => true],
+        ], ['entry_date' => self::YEAR . '-03-12', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
             ['account_code' => '381', 'side' => 'debit', 'amount' => 50],
             ['account_code' => '221.731', 'side' => 'credit', 'amount' => 50],
         ], ['entry_date' => self::YEAR . '-04-10', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
 
         $codes = ['221', '221.731', '888.731', '381', '999', '221'];
         foreach ([
-            self::YEAR . '-03-31' => [125.0, 100.0, 25.0, 0.0, 0.0],
-            self::YEAR . '-04-30' => [75.0, 50.0, 25.0, 50.0, 0.0],
+            self::YEAR . '-03-31' => [105.0, 80.0, 25.0, 0.0, 0.0],
+            self::YEAR . '-04-30' => [55.0, 30.0, 25.0, 50.0, 0.0],
         ] as $asOf => $expected) {
             $batched = $this->closingRepository->accountBalances($this->supplierId, $codes, $asOf);
             self::assertSame([221, '221.731', '888.731', 381, 999], array_keys($batched));

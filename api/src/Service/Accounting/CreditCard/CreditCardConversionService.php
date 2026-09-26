@@ -137,6 +137,9 @@ final class CreditCardConversionService
                 'cost_center'  => $l['cost_center'],
                 'project_id'   => $l['project_id'],
             ];
+            if (!empty($l['is_red_storno'])) {
+                $line['is_red_storno'] = true;
+            }
             if ($l['currency_code'] !== null) {
                 $line['currency_code'] = (string) $l['currency_code'];
                 $line['fx_rate'] = $l['fx_rate'];

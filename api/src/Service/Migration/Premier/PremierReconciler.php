@@ -163,9 +163,9 @@ final class PremierReconciler
         // Doklad převzatý v cizí měně se s deníkem v Kč porovná přepočtený kurzem dokladu.
         $total = ForeignCurrencyTakeover::homeAmountSql('d.total_with_vat', 'd.exchange_rate');
         $spec = [
-            ['purchase_invoices', 'purchase_invoices', $total, "'purchase_invoice'", 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END"],
-            ['issued_invoices', 'invoices', $total, "'invoice'", 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END"],
-            ['cash', 'cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", "'cash_document'", 'cash', '211', "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END"],
+            ['purchase_invoices', 'purchase_invoices', $total, "'purchase_invoice'", 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END"],
+            ['issued_invoices', 'invoices', $total, "'invoice'", 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
+            ['cash', 'cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", "'cash_document'", 'cash', '211', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
         ];
         $out = [];
         foreach ($spec as [$key, $table, $expr, $kinds, $docType, $prefix, $sign]) {
@@ -183,7 +183,7 @@ final class PremierReconciler
             [$supplierId, $periodId]
         );
         $bankJournal = $scalar(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
                JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id

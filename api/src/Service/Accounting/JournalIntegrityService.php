@@ -314,8 +314,8 @@ final class JournalIntegrityService
         $base =
             "SELECT je.id AS entry_id, je.source_type, je.source_id, je.document_no,
                     COUNT(l.id) AS line_count,
-                    ROUND(COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 0), 2) AS debit,
-                    ROUND(COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 0), 2) AS credit
+                    ROUND(COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END), 0), 2) AS debit,
+                    ROUND(COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END), 0), 2) AS credit
                FROM journal_entries je
                LEFT JOIN journal_entry_lines l ON l.entry_id = je.id
               WHERE je.supplier_id = :sid
@@ -548,13 +548,13 @@ final class JournalIntegrityService
                    SELECT 1 FROM journal_entry_lines l
                     WHERE l.entry_id = je.id
                     GROUP BY l.account_id, l.side
-                   HAVING " . $matches('SUM(l.amount)') . "
+                   HAVING " . $matches('SUM(l.signed_amount)') . "
                )
                AND NOT EXISTS (
                    SELECT 1 FROM journal_entry_lines l
                     WHERE l.entry_id = je.id
                     GROUP BY l.account_id
-                   HAVING " . $matches("SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END)") . "
+                   HAVING " . $matches("SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END)") . "
                )";
     }
 

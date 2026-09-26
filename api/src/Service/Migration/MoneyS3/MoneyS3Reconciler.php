@@ -193,10 +193,10 @@ final class MoneyS3Reconciler
 
         $spec = [
             // [klíč, tabulka, částka dokladu, druh v mapě, účet, znaménko řádku]
-            ['purchase_invoices', 'purchase_invoices', self::documentTotal(), 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END"],
-            ['issued_invoices', 'invoices', self::documentTotal(), 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END"],
+            ['purchase_invoices', 'purchase_invoices', self::documentTotal(), 'purchase_invoice', '321', "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END"],
+            ['issued_invoices', 'invoices', self::documentTotal(), 'invoice', '311', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
             // Znaménko pokladního dokladu nese doc_type (in = příjem na MD 211, out = výdej z 211).
-            ['cash', 'cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", 'cash_document', '211', "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END"],
+            ['cash', 'cash_documents', "CASE WHEN d.doc_type = 'in' THEN d.total_amount ELSE -d.total_amount END", 'cash_document', '211', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END"],
         ];
         $rows = [];
         $other = [];
@@ -220,7 +220,7 @@ final class MoneyS3Reconciler
         $bankDocs->execute([$ctx->supplierId, $periodId]);
         $rows[] = ['bank',
             round((float) $bankDocs->fetchColumn(), 2),
-            $scalar($ledger('bank_transaction', '221', "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END", false)
+            $scalar($ledger('bank_transaction', '221', "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END", false)
                 . " AND EXISTS (SELECT 1 FROM journal_entry_document_links kc
                                   JOIN bank_transactions tc ON tc.id = kc.doc_id
                                   JOIN bank_statements sc ON sc.id = tc.statement_id
@@ -295,7 +295,7 @@ final class MoneyS3Reconciler
                           AND EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = e.supplier_id AND m.kind = 'bank_transaction' AND m.target_id = t.id)";
             $sql = "SELECT e.document_no,
                            (SELECT COALESCE(SUM(t.amount), 0) {$linked}) AS docs,
-                           (SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+                           (SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                               FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
                              WHERE l.supplier_id = e.supplier_id AND l.entry_id = e.id AND a.account_code LIKE '221%') AS journal
                       FROM journal_entries e
@@ -306,7 +306,7 @@ final class MoneyS3Reconciler
                 return [];
             }
             [$table, $expr, $kind, $docType, $prefix, $creditPositive] = $spec;
-            $sign = $creditPositive ? "CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END" : "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END";
+            $sign = $creditPositive ? "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END" : "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END";
             $linked = "FROM journal_entry_document_links k
                          JOIN {$table} d ON d.id = k.doc_id AND d.supplier_id = k.supplier_id
                         WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = '{$docType}'

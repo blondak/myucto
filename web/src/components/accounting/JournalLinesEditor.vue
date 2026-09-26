@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { journalAmount } from '@/utils/journalAmount'
 import { computed, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatMoney } from '@/composables/useFormat'
@@ -16,6 +17,7 @@ import type { ChartAccount } from '@/api/accounting'
  */
 
 export interface EditorLine {
+  is_red_storno?: boolean
   account_code: string
   side: 'debit' | 'credit'
   amount: number | null
@@ -62,7 +64,8 @@ function update(lines: EditorLine[]) {
 }
 
 function addLine() {
-  update([...props.modelValue, { account_code: '', side: 'debit', amount: null }])
+  const isRedStorno = props.modelValue.length > 0 && props.modelValue.every(l => l.is_red_storno === true)
+  update([...props.modelValue, { account_code: '', side: 'debit', amount: null, is_red_storno: isRedStorno }])
 }
 
 function removeLine(i: number) {
@@ -73,9 +76,9 @@ function removeLine(i: number) {
 }
 
 const debitSum = computed(() =>
-  props.modelValue.filter(l => l.side === 'debit').reduce((s, l) => s + (l.amount ?? 0), 0))
+  props.modelValue.filter(l => l.side === 'debit').reduce((s, l) => s + journalAmount(l), 0))
 const creditSum = computed(() =>
-  props.modelValue.filter(l => l.side === 'credit').reduce((s, l) => s + (l.amount ?? 0), 0))
+  props.modelValue.filter(l => l.side === 'credit').reduce((s, l) => s + journalAmount(l), 0))
 
 /** Zaokrouhlení na haléře — bez něj hlásí 0.1 + 0.2 ≠ 0.3 nevyvážený zápis. */
 const diff = computed(() => Math.round((debitSum.value - creditSum.value) * 100) / 100)
@@ -112,6 +115,7 @@ defineExpose({ balanced, complete, valid: computed(() => balanced.value && compl
         :placeholder="t('accounting.lines_editor.line_description')"
         class="w-40 h-10 px-2 border border-neutral-300 rounded-md text-sm shrink-0" />
 
+      <span v-if="l.is_red_storno" class="text-xs text-danger-600">{{ t('accounting.journal.red_storno') }}</span>
       <input v-model.number="l.amount" :disabled="disabled" type="number" step="0.01" min="0"
         class="w-28 h-10 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right shrink-0" />
 

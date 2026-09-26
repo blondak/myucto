@@ -55,8 +55,8 @@ final class TaxNeutralReclassification
     ];
 
     /**
-     * @param list<array{account_id:int, side:string, amount:float|int|string}> $before řádky v deníku
-     * @param list<array{account_id:int, side:string, amount:float|int|string}> $after  opravené řádky
+     * @param list<array{account_id:int, side:string, amount:float|int|string, is_red_storno?:bool}> $before řádky v deníku
+     * @param list<array{account_id:int, side:string, amount:float|int|string, is_red_storno?:bool}> $after  opravené řádky
      * @param array<int, array{code:string, account_type?:string, tax_deductibility?:string}> $accounts
      * @param bool $incomeTaxFiled přiznání k dani z příjmů za rok zápisu už je podané
      *
@@ -67,7 +67,7 @@ final class TaxNeutralReclassification
         $net = [];
         foreach ([[$before, -1], [$after, 1]] as [$lines, $sign]) {
             foreach ($lines as $line) {
-                $cents = (int) round(((float) $line['amount']) * 100.0);
+                $cents = JournalLineAmount::signedCents($line);
                 $signed = (string) $line['side'] === 'credit' ? -$cents : $cents;
                 $accountId = (int) $line['account_id'];
                 $net[$accountId] = ($net[$accountId] ?? 0) + $sign * $signed;

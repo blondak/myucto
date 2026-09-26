@@ -1540,7 +1540,7 @@ final class CashDocumentService
     private function loadPostingLines(int $supplierId, int $entryId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT jel.side, jel.amount, coa.account_code, coa.name AS account_name
+            'SELECT jel.side, jel.signed_amount AS amount, coa.account_code, coa.name AS account_name
                FROM journal_entry_lines jel
                JOIN chart_of_accounts coa ON coa.id = jel.account_id
               WHERE jel.entry_id = ? AND jel.supplier_id = ?

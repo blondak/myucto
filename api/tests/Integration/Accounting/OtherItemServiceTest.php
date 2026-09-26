@@ -10,6 +10,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\OtherItemException;
 use MyInvoice\Service\Accounting\OtherItemService;
+use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -24,6 +25,7 @@ final class OtherItemServiceTest extends TestCase
     private Connection $db;
     private PDO $pdo;
     private OtherItemService $service;
+    private PostingService $posting;
     private int $supplierId;
 
     protected function setUp(): void
@@ -31,6 +33,7 @@ final class OtherItemServiceTest extends TestCase
         $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         $this->service = $container->get(OtherItemService::class);
+        $this->posting = $container->get(PostingService::class);
         $this->pdo = $this->db->pdo();
         $this->pdo->beginTransaction();
         $source = (int) $this->pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
@@ -293,6 +296,61 @@ final class OtherItemServiceTest extends TestCase
         $this->pdo->prepare('DELETE FROM bank_transactions WHERE id = ?')->execute([$transactionId]);
         self::assertEqualsWithDelta(1200.0,
             (float) $this->service->get($this->supplierId, (int) $draft['id'])['remaining_amount'], 0.001);
+    }
+
+    public function testPayableAcceptsOutgoingBankPaymentPostedAsRedStorno(): void
+    {
+        $draft = $this->service->create($this->supplierId, $this->input(), null);
+        $posted = $this->service->post($this->supplierId, (int) $draft['id'], null);
+
+        $this->pdo->prepare(
+            'INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, statement_date, currency)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $this->supplierId,
+            'synteticky-red-storno-vypis',
+            hash('sha256', uniqid('', true)),
+            '1000000005/0100',
+            '2099-01-20',
+            'CZK',
+        ]);
+        $statementId = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            'INSERT INTO bank_transactions
+                (statement_id, posted_at, amount, currency, match_status, counterparty_name, description)
+             VALUES (?, ?, ?, ?, "unmatched", "Syntetický dodavatel", "Red-storno úhrada závazku")'
+        )->execute([$statementId, '2099-01-20', -500, 'CZK']);
+        $transactionId = (int) $this->pdo->lastInsertId();
+
+        $this->posting->postDocument($this->supplierId, 'bank', $transactionId, [
+            ['account_code' => '221', 'side' => 'debit', 'amount' => 500, 'is_red_storno' => true],
+            ['account_code' => '325', 'side' => 'credit', 'amount' => 500, 'is_red_storno' => true],
+        ], ['entry_date' => '2099-01-20', 'posted' => true]);
+
+        self::assertContains(
+            $transactionId,
+            array_column(
+                $this->service->paymentCandidates(
+                    $this->supplierId,
+                    (int) $posted['id'],
+                    '',
+                    20,
+                    true,
+                    false,
+                ),
+                'id',
+            ),
+            'Red MD 221 / red D 325 je platný odchozí bankovní pohyb proti závazku.',
+        );
+
+        $allocated = $this->service->allocate(
+            $this->supplierId,
+            (int) $posted['id'],
+            ['bank_transaction_id' => $transactionId, 'amount' => 500],
+            null,
+        );
+        self::assertEqualsWithDelta(700.0, (float) $allocated['remaining_amount'], 0.001);
+        self::assertCount(1, $this->service->allocations($this->supplierId, (int) $posted['id']));
     }
 
     public function testResultForecastUsesCounterAccountAndIgnoresBalanceSheetItems(): void

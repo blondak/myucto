@@ -23,6 +23,28 @@ function line(partial: Partial<JournalLine> & Pick<JournalLine, 'side' | 'amount
 }
 
 describe('journalPairs', () => {
+  it('zachová strany a záporné částky červeného storna včetně cizí měny', () => {
+    const lines = [
+      line({ side: 'debit', amount: 2500, amount_foreign: 100, currency_code: 'EUR', is_red_storno: true }),
+      line({ side: 'credit', amount: 2500, amount_foreign: 100, currency_code: 'EUR', is_red_storno: true }),
+    ]
+    expect(canPair(lines)).toBe(true)
+    const [pair] = pairLines(lines)
+    expect(pair.amount).toBe(-2500)
+    expect(pair.amountForeign).toBe(-100)
+    expect(pair.debit).toBe(lines[0])
+    expect(pair.credit).toBe(lines[1])
+  })
+
+  it('smíšená znaménka ukáže po původních řádcích bez domyšleného párování', () => {
+    const lines = [
+      line({ side: 'debit', amount: 200 }),
+      line({ side: 'debit', amount: 100, is_red_storno: true }),
+      line({ side: 'credit', amount: 100 }),
+    ]
+    expect(canPair(lines)).toBe(false)
+  })
+
   it('spáruje prostou úhradu na jednu souvztažnost', () => {
     const lines = [
       line({ side: 'debit', amount: 101640, account_code: '221.400' }),

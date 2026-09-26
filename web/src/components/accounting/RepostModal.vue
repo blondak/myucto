@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { journalAmount } from '@/utils/journalAmount'
 /**
  * Přeúčtování už zaúčtovaného dokladu — oprava kontace, která v deníku je.
  *
@@ -180,6 +181,7 @@ async function load(): Promise<void> {
       account_code: l.account_code ?? '',
       side: l.side,
       amount: l.amount,
+      is_red_storno: l.is_red_storno,
     }))
     applyProposal()
   } catch (e: any) {
@@ -220,16 +222,16 @@ function applyProposal(): void {
 const postingChanged = computed(() => {
   if (!plan.value) return false
   if (description.value.trim() !== (plan.value.description ?? '').trim()) return true
-  const key = (ls: Array<{ account_code: string | null; side: string; amount: number | string | null }>) =>
-    ls.map(l => `${l.side}|${(l.account_code ?? '').trim()}|${Math.round(Number(l.amount ?? 0) * 100)}`).sort().join(';')
+  const key = (ls: Array<{ account_code: string | null; side: string; amount: number | string | null; is_red_storno?: boolean }>) =>
+    ls.map(l => `${l.side}|${(l.account_code ?? '').trim()}|${Math.round(Number(l.amount ?? 0) * 100)}|${l.is_red_storno ? 1 : 0}`).sort().join(';')
   return key(lines.value) !== key(plan.value.lines)
 })
 
 function scheduleLinesPlan(): void {
   if (linesPlanTimer) clearTimeout(linesPlanTimer)
   const base = plan.value
-  const linesKey = (ls: Array<{ account_code: string | null; side: string; amount: number | string | null }>) =>
-    ls.map(l => `${l.side}|${(l.account_code ?? '').trim()}|${Math.round(Number(l.amount ?? 0) * 100)}`).sort().join(';')
+  const linesKey = (ls: Array<{ account_code: string | null; side: string; amount: number | string | null; is_red_storno?: boolean }>) =>
+    ls.map(l => `${l.side}|${(l.account_code ?? '').trim()}|${Math.round(Number(l.amount ?? 0) * 100)}|${l.is_red_storno ? 1 : 0}`).sort().join(';')
   if (!base || !base.tax_neutral_available || base.strategy === 'replace'
     || linesKey(lines.value) === linesKey(base.lines)
     || lines.value.some(l => !l.account_code.trim() || !(Number(l.amount ?? 0) > 0))) {
@@ -246,6 +248,7 @@ function scheduleLinesPlan(): void {
         account_code: l.account_code,
         side: l.side,
         amount: l.amount ?? 0,
+        is_red_storno: l.is_red_storno,
       })))
       if (seq === linesPlanSeq) linesPlan.value = result
     } catch {
@@ -297,6 +300,7 @@ async function submit(): Promise<void> {
         account_code: l.account_code,
         side: l.side,
         amount: l.amount ?? 0,
+        is_red_storno: l.is_red_storno,
       })),
       description: description.value.trim() || null,
       confirm_date_shift: confirmShift.value,
@@ -421,7 +425,7 @@ async function submit(): Promise<void> {
               <li v-for="line in dimPreview.lines" :key="line.id" class="flex flex-wrap items-center gap-x-2 gap-y-1 py-1">
                 <span class="font-mono font-medium">{{ line.account_code }}</span>
                 <span class="text-xs text-neutral-500">{{ line.side === 'debit' ? t('accounting.journal.side.debit') : t('accounting.journal.side.credit') }}</span>
-                <span class="font-mono">{{ formatMoney(line.amount) }}</span>
+                <span class="font-mono">{{ formatMoney(journalAmount(line)) }}</span>
                 <DimensionChips :dimensions="line.dimensions" class="ml-auto" />
               </li>
             </ul>

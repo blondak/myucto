@@ -259,8 +259,8 @@ final class DocumentBackfill
         }
 
         $balStmt = $pdo->prepare(
-            "SELECT CAST(ROUND(COALESCE(SUM(CASE WHEN side = 'debit' THEN amount END), 0) * 100) AS SIGNED) AS debit_cents,
-                    CAST(ROUND(COALESCE(SUM(CASE WHEN side = 'credit' THEN amount END), 0) * 100) AS SIGNED) AS credit_cents
+            "SELECT CAST(ROUND(COALESCE(SUM(CASE WHEN side = 'debit' THEN signed_amount END), 0) * 100) AS SIGNED) AS debit_cents,
+                    CAST(ROUND(COALESCE(SUM(CASE WHEN side = 'credit' THEN signed_amount END), 0) * 100) AS SIGNED) AS credit_cents
                FROM journal_entry_lines WHERE supplier_id = ?"
         );
         $balStmt->execute([$supplierId]);

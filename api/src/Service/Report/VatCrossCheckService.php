@@ -717,7 +717,7 @@ final class VatCrossCheckService
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(CONCAT(e.source_type, ':', e.source_id), CONCAT('manual:', e.id)) AS doc_key,
                     MIN(e.entry_date) AS entry_date,
-                    SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS net
+                    SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
                JOIN chart_of_accounts ca ON ca.id = l.account_id
@@ -826,7 +826,7 @@ final class VatCrossCheckService
         $stmt = $this->db->pdo()->prepare(
             "SELECT CONCAT(e.source_type, ':', e.source_id) AS doc_key,
                     MIN(e.entry_date) AS entry_date,
-                    SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS net
+                    SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
                JOIN chart_of_accounts ca ON ca.id = l.account_id

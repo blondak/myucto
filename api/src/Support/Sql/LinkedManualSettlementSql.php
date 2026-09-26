@@ -44,7 +44,7 @@ final class LinkedManualSettlementSql
         }
 
         return "SELECT dl.doc_id,
-                       SUM(CASE WHEN l.side = '{$settleSide}' THEN l.amount ELSE -l.amount END) AS settled
+                       SUM(CASE WHEN l.side = '{$settleSide}' THEN l.signed_amount ELSE -l.signed_amount END) AS settled
                   FROM journal_entry_document_links dl
                   JOIN journal_entries e ON e.id = dl.entry_id AND e.supplier_id = dl.supplier_id
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id

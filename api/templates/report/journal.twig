@@ -93,6 +93,7 @@
             <td class="num">{% if e.amount_side is null or e.amount_side == 'credit' %}{{ e.amount|cz_money }}{% endif %}</td>
         </tr>
         {% for l in e.lines %}
+            {% set line_amount = l.is_red_storno ? -l.amount : l.amount %}
             <tr class="entry-line">
                 <td></td>
                 <td></td>
@@ -100,8 +101,8 @@
                 <td></td>
                 <td>{{ l.account_code }}</td>
                 <td>{{ l.account_name|slice(0, 40) }}</td>
-                <td class="num">{% if l.side == 'debit' %}{{ l.amount|cz_money }}{% endif %}</td>
-                <td class="num">{% if l.side == 'credit' %}{{ l.amount|cz_money }}{% endif %}</td>
+                <td class="num">{% if l.side == 'debit' %}{{ line_amount|cz_money }}{% endif %}</td>
+                <td class="num">{% if l.side == 'credit' %}{{ line_amount|cz_money }}{% endif %}</td>
             </tr>
         {% endfor %}
     {% endfor %}

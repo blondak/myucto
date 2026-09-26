@@ -239,6 +239,89 @@ final class PostingServiceTest extends TestCase
         self::assertSame(2, (int) $entry['row_version'], 'Přepis zvýší row_version.');
     }
 
+    public function testInheritedForeignTraceKeepsRedStornoIdentityWhenEqualLinesAreReordered(): void
+    {
+        $originalId = $this->posting->postDocument(
+            $this->supplierId,
+            'manual',
+            null,
+            [
+                ['account_code' => '311', 'side' => 'debit', 'amount' => 1000.00, 'currency_code' => 'EUR', 'fx_rate' => 25.00, 'amount_foreign' => 40.00],
+                ['account_code' => '311', 'side' => 'debit', 'amount' => 1000.00, 'is_red_storno' => true, 'currency_code' => 'EUR', 'fx_rate' => 20.00, 'amount_foreign' => 50.00],
+                ['account_code' => '602', 'side' => 'credit', 'amount' => 1000.00, 'currency_code' => 'EUR', 'fx_rate' => 25.00, 'amount_foreign' => 40.00],
+                ['account_code' => '602', 'side' => 'credit', 'amount' => 1000.00, 'is_red_storno' => true, 'currency_code' => 'EUR', 'fx_rate' => 20.00, 'amount_foreign' => 50.00],
+            ],
+            ['entry_date' => self::YEAR . '-06-15', 'description' => 'Původní cizoměnový zápis'],
+        );
+
+        $correctedId = $this->posting->postDocument(
+            $this->supplierId,
+            'manual',
+            null,
+            [
+                ['account_code' => '311', 'side' => 'debit', 'amount' => 1000.00, 'is_red_storno' => true],
+                ['account_code' => '311', 'side' => 'debit', 'amount' => 1000.00],
+                ['account_code' => '602', 'side' => 'credit', 'amount' => 1000.00, 'is_red_storno' => true],
+                ['account_code' => '602', 'side' => 'credit', 'amount' => 1000.00],
+            ],
+            [
+                'entry_date' => self::YEAR . '-06-15',
+                'description' => 'Opravený cizoměnový zápis',
+                'inherit_line_trace_from' => $originalId,
+            ],
+        );
+
+        $receivable = $this->foreignTraceByRedFlag($correctedId, '311');
+        self::assertEqualsWithDelta(40.00, (float) $receivable['regular']['amount_foreign'], 0.001);
+        self::assertEqualsWithDelta(25.00, (float) $receivable['regular']['fx_rate'], 0.001);
+        self::assertEqualsWithDelta(50.00, (float) $receivable['red']['amount_foreign'], 0.001);
+        self::assertEqualsWithDelta(20.00, (float) $receivable['red']['fx_rate'], 0.001);
+
+        $revenue = $this->foreignTraceByRedFlag($correctedId, '602');
+        $effectiveDebit = (float) $receivable['regular']['amount_foreign'] - (float) $receivable['red']['amount_foreign'];
+        $effectiveCredit = (float) $revenue['regular']['amount_foreign'] - (float) $revenue['red']['amount_foreign'];
+        self::assertEqualsWithDelta($effectiveDebit, $effectiveCredit, 0.001, 'Efektivní cizoměnové strany zůstávají vyvážené.');
+    }
+
+    public function testInheritedForeignTraceFallbackSeparatesRegularAndRedStornoCandidates(): void
+    {
+        $originalId = $this->posting->postDocument(
+            $this->supplierId,
+            'manual',
+            null,
+            [
+                ['account_code' => '311', 'side' => 'debit', 'amount' => 1000.00, 'currency_code' => 'EUR', 'fx_rate' => 25.00, 'amount_foreign' => 40.00],
+                ['account_code' => '311', 'side' => 'debit', 'amount' => 1000.00, 'is_red_storno' => true, 'currency_code' => 'EUR', 'fx_rate' => 20.00, 'amount_foreign' => 50.00],
+                ['account_code' => '602', 'side' => 'credit', 'amount' => 1000.00],
+                ['account_code' => '602', 'side' => 'credit', 'amount' => 1000.00, 'is_red_storno' => true],
+            ],
+            ['entry_date' => self::YEAR . '-06-15', 'description' => 'Původní cizoměnový zápis'],
+        );
+
+        $correctedId = $this->posting->postDocument(
+            $this->supplierId,
+            'manual',
+            null,
+            [
+                ['account_code' => '311', 'side' => 'debit', 'amount' => 2000.00, 'is_red_storno' => true],
+                ['account_code' => '311', 'side' => 'debit', 'amount' => 2000.00],
+                ['account_code' => '602', 'side' => 'credit', 'amount' => 2000.00, 'is_red_storno' => true],
+                ['account_code' => '602', 'side' => 'credit', 'amount' => 2000.00],
+            ],
+            [
+                'entry_date' => self::YEAR . '-06-15',
+                'description' => 'Opravený cizoměnový zápis',
+                'inherit_line_trace_from' => $originalId,
+            ],
+        );
+
+        $receivable = $this->foreignTraceByRedFlag($correctedId, '311');
+        self::assertEqualsWithDelta(80.00, (float) $receivable['regular']['amount_foreign'], 0.001);
+        self::assertEqualsWithDelta(25.00, (float) $receivable['regular']['fx_rate'], 0.001);
+        self::assertEqualsWithDelta(100.00, (float) $receivable['red']['amount_foreign'], 0.001);
+        self::assertEqualsWithDelta(20.00, (float) $receivable['red']['fx_rate'], 0.001);
+    }
+
     public function testDraftThenRepostPromotesToPosted(): void
     {
         $client    = $this->client('Odběratel s.r.o.', true, false);
@@ -1506,6 +1589,27 @@ final class PostingServiceTest extends TestCase
             $out[$code][$l['side']] += (float) $l['amount'];
         }
         return $out;
+    }
+
+    /** @return array{regular:array<string,mixed>,red:array<string,mixed>} */
+    private function foreignTraceByRedFlag(int $entryId, string $accountCode): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT l.is_red_storno, l.currency_code, l.fx_rate, l.amount_foreign
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.entry_id = ? AND a.supplier_id = ? AND a.account_code = ?
+              ORDER BY l.is_red_storno'
+        );
+        $stmt->execute([$entryId, $this->supplierId, $accountCode]);
+
+        $trace = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $trace[(bool) $row['is_red_storno'] ? 'red' : 'regular'] = $row;
+        }
+        self::assertSame(['regular', 'red'], array_keys($trace));
+
+        return $trace;
     }
 
     /** @param list<array<string,mixed>> $lines */

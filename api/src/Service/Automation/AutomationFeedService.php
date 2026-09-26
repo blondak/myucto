@@ -594,8 +594,8 @@ final class AutomationFeedService
     private function generalLedgerShare(int $supplierId, string $from, string $to): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN bps.id IS NOT NULL THEN ABS(jel.amount) ELSE 0 END),0) automated,
-                    COALESCE(SUM(ABS(jel.amount)),0) total
+            "SELECT COALESCE(SUM(CASE WHEN bps.id IS NOT NULL THEN ABS(jel.signed_amount) ELSE 0 END),0) automated,
+                    COALESCE(SUM(ABS(jel.signed_amount)),0) total
                FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id=je.id AND jel.side='debit'
           LEFT JOIN bank_posting_suggestions bps ON bps.journal_entry_id=je.id AND bps.status IN ('auto_posted','approved')
               WHERE je.supplier_id=? AND je.entry_date BETWEEN ? AND ? AND je.posted_at IS NOT NULL"
@@ -621,7 +621,7 @@ final class AutomationFeedService
             "SELECT je.id,je.document_no,je.entry_date,
                     MAX(CASE WHEN jel.side='debit' THEN coa.account_code END) debit_account_code,
                     MAX(CASE WHEN jel.side='credit' THEN coa.account_code END) credit_account_code,
-                    MAX(jel.amount) amount
+                    MAX(jel.signed_amount) amount
                FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id=je.id JOIN chart_of_accounts coa ON coa.id=jel.account_id
               WHERE je.id IN ($entryIn) AND je.supplier_id IN ($supplierIn) GROUP BY je.id,je.document_no,je.entry_date"
         );

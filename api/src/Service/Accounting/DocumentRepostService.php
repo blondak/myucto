@@ -406,6 +406,7 @@ final class DocumentRepostService
                 'account_id' => $codeMap[$code]['id'],
                 'side'       => (string) ($line['side'] ?? ''),
                 'amount'     => (float) ($line['amount'] ?? 0),
+                'is_red_storno' => (bool) ($line['is_red_storno'] ?? false),
             ];
         }
 
@@ -509,6 +510,7 @@ final class DocumentRepostService
                 'account_name' => isset($acc['name']) ? (string) $acc['name'] : null,
                 'side'         => (string) $line['side'],
                 'amount'       => (float) $line['amount'],
+                'is_red_storno' => (bool) ($line['is_red_storno'] ?? false),
             ];
         }
         return $out;

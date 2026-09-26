@@ -22,7 +22,7 @@ final class LegalAllowanceCreationSplitTest extends TestCase
         $this->pdo->setAttribute(\PDO::ATTR_DEFAULT_FETCH_MODE, \PDO::FETCH_ASSOC);
         $this->pdo->createFunction('CONCAT', static fn (...$parts): string => implode('', $parts));
         $this->pdo->exec("CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, period_id INTEGER, source_type TEXT, source_id INTEGER, reversed_by INTEGER, entry_date TEXT, posted_at TEXT);
-            CREATE TABLE journal_entry_lines (entry_id INTEGER, supplier_id INTEGER, account_id INTEGER, side TEXT, amount REAL);
+            CREATE TABLE journal_entry_lines (entry_id INTEGER, supplier_id INTEGER, account_id INTEGER, side TEXT, amount REAL, is_red_storno INTEGER GENERATED ALWAYS AS (0) VIRTUAL, signed_amount REAL GENERATED ALWAYS AS (amount) VIRTUAL);
             CREATE TABLE chart_of_accounts (id INTEGER PRIMARY KEY, account_code TEXT, account_type TEXT, tax_deductibility TEXT, parent_id INTEGER);
             CREATE TABLE accounting_closing_steps (supplier_id INTEGER, period_id INTEGER, step_key TEXT, payload TEXT);
             INSERT INTO chart_of_accounts VALUES (1,'558','expense','deductible',NULL),(2,'391','asset','deductible',NULL),(3,'701','closing','deductible',NULL);

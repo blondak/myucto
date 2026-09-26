@@ -435,7 +435,7 @@ final class DimensionService
      * @param array<int|string,mixed>|null $splits
      * @return array{header:array<int,int>, items:array<int,array<int,int>>,
      *               restamp:array{lines:int,needs_repost:bool,locked:bool}, refused:bool,
-     *               lines:list<array{id:int, entry_id:int, account_code:?string, account_name:?string, side:string, amount:float, dimensions:array<int,int>}>}
+     *               lines:list<array{id:int, entry_id:int, account_code:?string, account_name:?string, side:string, amount:float, is_red_storno:bool, dimensions:array<int,int>}>}
      */
     public function previewDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items, ?array $splits = null): array
     {
@@ -608,7 +608,7 @@ final class DimensionService
     /**
      * Řádky živých (nestornovaných) zápisů dokladu i s dimenzemi.
      *
-     * @return list<array{id:int, entry_id:int, account_code:?string, account_name:?string, side:string, amount:float, dimensions:array<int,int>}>
+     * @return list<array{id:int, entry_id:int, account_code:?string, account_name:?string, side:string, amount:float, is_red_storno:bool, dimensions:array<int,int>}>
      */
     private function postedLines(int $supplierId, ?string $sourceType, int $docId): array
     {
@@ -616,7 +616,7 @@ final class DimensionService
             return [];
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT l.id, l.entry_id, a.account_code, a.name AS account_name, l.side, l.amount
+            'SELECT l.id, l.entry_id, a.account_code, a.name AS account_name, l.side, l.amount, l.is_red_storno
                FROM journal_entries je
                JOIN journal_entry_lines l ON l.entry_id = je.id AND l.supplier_id = je.supplier_id
                LEFT JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = je.supplier_id
@@ -633,6 +633,7 @@ final class DimensionService
             'account_name' => $r['account_name'] === null ? null : (string) $r['account_name'],
             'side' => (string) $r['side'],
             'amount' => (float) $r['amount'],
+            'is_red_storno' => (bool) $r['is_red_storno'],
             'dimensions' => $dims[(int) $r['id']] ?? [],
         ], $rows);
     }

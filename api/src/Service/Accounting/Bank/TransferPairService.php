@@ -369,6 +369,7 @@ final class TransferPairService
                JOIN chart_of_accounts coa ON coa.id = jl.account_id AND coa.supplier_id = je.supplier_id
               WHERE je.supplier_id = ? AND je.source_type = "manual" AND je.reversed_by IS NULL
                 AND coa.account_code LIKE "261%" AND jl.side = ? AND jl.amount = ?
+                AND jl.is_red_storno = 0
                 AND je.entry_date BETWEEN DATE_SUB(?, INTERVAL ' . $windowDays . ' DAY) AND DATE_ADD(?, INTERVAL ' . $windowDays . ' DAY)
                 AND EXISTS (
                     SELECT 1
@@ -377,7 +378,7 @@ final class TransferPairService
                         ON bank_coa.id = bank_jl.account_id AND bank_coa.supplier_id = bank_jl.supplier_id
                      WHERE bank_jl.entry_id = je.id AND bank_jl.supplier_id = je.supplier_id
                        AND bank_coa.account_code LIKE "221%" AND bank_jl.side <> jl.side
-                       AND bank_jl.amount = jl.amount
+                       AND bank_jl.amount = jl.amount AND bank_jl.is_red_storno = 0
                 )
               ORDER BY ABS(DATEDIFF(je.entry_date, ?)), je.id
               LIMIT 1'

@@ -393,13 +393,13 @@ final class DimensionProfitService
                    COALESCE(p.name, a.name) AS name,
                    a.account_type,
                    SUM(CASE WHEN a.account_type = 'revenue'
-                            THEN CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END ELSE 0 END) AS revenue,
+                            THEN CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END ELSE 0 END) AS revenue,
                    SUM(CASE WHEN a.account_type = 'expense'
-                            THEN CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END ELSE 0 END) AS cost,
+                            THEN CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END ELSE 0 END) AS cost,
                    SUM(CASE WHEN a.account_type = 'expense' AND {$nonDeductible}
-                            THEN CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END ELSE 0 END) AS non_deductible_cost,
+                            THEN CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END ELSE 0 END) AS non_deductible_cost,
                    SUM(CASE WHEN a.account_type = 'expense' AND a.account_code LIKE '59%'
-                            THEN CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END ELSE 0 END) AS income_tax_cost
+                            THEN CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END ELSE 0 END) AS income_tax_cost
               FROM journal_entry_lines l
               JOIN journal_entries e ON e.id = l.entry_id
               " . JournalTaxOrigin::join() . "
@@ -444,6 +444,8 @@ final class DimensionProfitService
         $monthGroup = $monthly ? "DATE_FORMAT(e.entry_date, '%Y-%m'), " : '';
         $nonDeductible = NonDeductibleCostsService::predicate();
         [$partsSql, $partsParams] = DimensionSplitAllocation::partsSql($typeId, null, $supplierId);
+        // Rozdělení haléřů zůstává kladné; znaménko storna se přidá až k dílu řádku.
+        $signedPart = '(CASE WHEN l.is_red_storno = 1 THEN -sp.amount ELSE sp.amount END)';
         $stmt = $this->db->pdo()->prepare(
             'WITH RECURSIVE ' . JournalTaxOrigin::cte($supplierId) . "
             SELECT {$monthSelect}sp.value_id,
@@ -451,13 +453,13 @@ final class DimensionProfitService
                    COALESCE(p.name, a.name) AS name,
                    a.account_type,
                    SUM(CASE WHEN a.account_type = 'revenue'
-                            THEN CASE WHEN l.side = 'credit' THEN sp.amount ELSE -sp.amount END ELSE 0 END) AS revenue,
+                            THEN CASE WHEN l.side = 'credit' THEN {$signedPart} ELSE -{$signedPart} END ELSE 0 END) AS revenue,
                    SUM(CASE WHEN a.account_type = 'expense'
-                            THEN CASE WHEN l.side = 'debit' THEN sp.amount ELSE -sp.amount END ELSE 0 END) AS cost,
+                            THEN CASE WHEN l.side = 'debit' THEN {$signedPart} ELSE -{$signedPart} END ELSE 0 END) AS cost,
                    SUM(CASE WHEN a.account_type = 'expense' AND {$nonDeductible}
-                            THEN CASE WHEN l.side = 'debit' THEN sp.amount ELSE -sp.amount END ELSE 0 END) AS non_deductible_cost,
+                            THEN CASE WHEN l.side = 'debit' THEN {$signedPart} ELSE -{$signedPart} END ELSE 0 END) AS non_deductible_cost,
                    SUM(CASE WHEN a.account_type = 'expense' AND a.account_code LIKE '59%'
-                            THEN CASE WHEN l.side = 'debit' THEN sp.amount ELSE -sp.amount END ELSE 0 END) AS income_tax_cost
+                            THEN CASE WHEN l.side = 'debit' THEN {$signedPart} ELSE -{$signedPart} END ELSE 0 END) AS income_tax_cost
               FROM ({$partsSql}) sp
               JOIN journal_entry_lines l ON l.id = sp.line_id
               JOIN journal_entries e ON e.id = l.entry_id

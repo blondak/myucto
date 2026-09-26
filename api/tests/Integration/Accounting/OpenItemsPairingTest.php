@@ -145,6 +145,94 @@ final class OpenItemsPairingTest extends TestCase
         self::assertSame(self::cents($statement['closing_balance']), self::cents($data['open_total']), 'Σ otevřených = konečný zůstatek opisu účtu.');
     }
 
+    public function testRedStornoPairingUsesAccountingEffectAndSurvivesRewrite(): void
+    {
+        $clearing = $this->accountId('395');
+        $debit = $this->manual([self::l('395', 'debit', 100.00), self::l('221', 'credit', 100.00)], '-01-10');
+        $redDebit = $this->manual([self::l('395', 'debit', 20.00, true), self::l('221', 'credit', 20.00, true)], '-01-11');
+        $credit = $this->manual([self::l('221', 'debit', 80.00), self::l('395', 'credit', 80.00)], '-01-12');
+
+        $pairing = $this->openItems->create($this->supplierId, $clearing, [
+            $this->lineId($debit, '395'),
+            $this->lineId($redDebit, '395'),
+            $this->lineId($credit, '395'),
+        ], null, $this->meta);
+
+        self::assertTrue($pairing['balanced'], 'MD 100 + červené MD 20 + D 80 tvoří vyrovnaný okruh.');
+        self::assertSame(self::cents(80.00), self::cents($pairing['total_md']));
+        self::assertSame(self::cents(80.00), self::cents($pairing['total_d']));
+        self::assertSame([false, true, false], array_column($pairing['items'], 'is_red_storno'));
+
+        $data = $this->openItems->build($this->supplierId, $clearing, self::YEAR . '-12-31', false, 1, 100);
+        self::assertSame(0, $data['open_count']);
+        self::assertSame(0, self::cents($data['open_total']));
+        self::assertSame(0, self::cents($data['balance']));
+        self::assertSame(0, self::cents($data['difference']));
+        self::assertSame([0, 0, 0], array_map(static fn (array $item): int => self::cents($item['open_amount']), $data['items']));
+
+        $this->rewrite($redDebit, [
+            ['account_id' => $clearing, 'side' => 'debit', 'amount' => 20.00, 'is_red_storno' => true, 'line_no' => 0],
+            ['account_id' => $this->accountId('221'), 'side' => 'credit', 'amount' => 20.00, 'is_red_storno' => true, 'line_no' => 1],
+        ]);
+
+        $afterRewrite = $this->openItems->pairing($this->supplierId, $pairing['id']);
+        self::assertTrue($afterRewrite['balanced'], 'Přepis řádku na stejném účtu zachová red storno i vyrovnání okruhu.');
+        self::assertTrue($afterRewrite['items'][1]['is_red_storno']);
+        self::assertSame(0, $this->openItems->build($this->supplierId, $clearing, self::YEAR . '-12-31', true, 1, 100)['open_count']);
+    }
+
+    public function testUnpairedRedStornoKeepsSignedOpenAmount(): void
+    {
+        $clearing = $this->accountId('395');
+        $this->manual([self::l('395', 'debit', 40.00, true), self::l('221', 'credit', 40.00, true)], '-01-15');
+
+        $data = $this->openItems->build($this->supplierId, $clearing, self::YEAR . '-12-31', true, 1, 100);
+
+        self::assertSame(1, $data['open_count']);
+        self::assertTrue($data['items'][0]['is_red_storno']);
+        self::assertSame(self::cents(-40.00), self::cents($data['items'][0]['amount']));
+        self::assertSame(self::cents(-40.00), self::cents($data['items'][0]['open_amount']));
+        self::assertSame(self::cents(-40.00), self::cents($data['open_md']));
+        self::assertSame(self::cents(-40.00), self::cents($data['open_total']));
+        self::assertSame(self::cents(-40.00), self::cents($data['balance']));
+        self::assertSame(0, self::cents($data['difference']));
+    }
+
+    public function testSuggestionsPairRedStornoByEffectiveSide(): void
+    {
+        $clearing = $this->accountId('395');
+        $red = $this->manual([self::l('395', 'debit', 150.00, true), self::l('221', 'credit', 150.00, true)], '-05-02');
+        $regular = $this->manual([self::l('395', 'debit', 150.00), self::l('221', 'credit', 150.00)], '-05-04');
+
+        $suggestions = $this->openItems->suggestions($this->supplierId, $clearing, self::YEAR . '-12-31', 7);
+
+        self::assertCount(1, $suggestions, 'Řádky na stejné uložené straně se párují podle opačného účetního účinku.');
+        self::assertSame('amount', $suggestions[0]['kind']);
+        self::assertEqualsCanonicalizing([$red, $regular], array_column($suggestions[0]['lines'], 'entry_id'));
+        self::assertEqualsCanonicalizing([true, false], array_column($suggestions[0]['lines'], 'is_red_storno'));
+
+        self::assertSame(1, $this->openItems->applySuggestions($this->supplierId, $clearing, self::YEAR . '-12-31', 7, null, $this->meta));
+        self::assertSame(0, $this->openItems->build($this->supplierId, $clearing, self::YEAR . '-12-31', true, 1, 100)['open_count']);
+    }
+
+    public function testSuggestionsRecognizeReversalOfRedStornoOnSameStoredSide(): void
+    {
+        $clearing = $this->accountId('395');
+        $original = $this->manual([self::l('395', 'debit', 60.00, true), self::l('221', 'credit', 60.00, true)], '-03-01');
+        $reversal = $this->posting->reverse($this->supplierId, $original, [
+            'entry_date' => self::YEAR . '-09-30',
+            'user_id'    => $this->userId,
+        ]);
+
+        $suggestions = $this->openItems->suggestions($this->supplierId, $clearing, self::YEAR . '-12-31', 0);
+
+        self::assertCount(1, $suggestions, 'Reverzace red storna se navrhne i při stejné uložené straně a mimo datumové okno.');
+        self::assertSame('reversal', $suggestions[0]['kind']);
+        self::assertEqualsCanonicalizing([$original, $reversal], array_column($suggestions[0]['lines'], 'entry_id'));
+        self::assertSame(['debit'], array_values(array_unique(array_column($suggestions[0]['lines'], 'side'))));
+        self::assertEqualsCanonicalizing([true, false], array_column($suggestions[0]['lines'], 'is_red_storno'));
+    }
+
     public function testAsOfDateExcludesLaterMembers(): void
     {
         $transit = $this->accountId('261');
@@ -433,7 +521,7 @@ final class OpenItemsPairingTest extends TestCase
     /**
      * Přepis zápisu na místě — stejná cesta, jakou jde přeúčtování dokladu.
      *
-     * @param list<array{account_id:int, side:string, amount:float, line_no:int}> $lines
+     * @param list<array{account_id:int, side:string, amount:float, is_red_storno?:bool, line_no:int}> $lines
      */
     private function rewrite(int $entryId, array $lines): void
     {
@@ -453,7 +541,7 @@ final class OpenItemsPairingTest extends TestCase
     }
 
     /**
-     * @param list<array{account_code:string, side:string, amount:float}> $lines
+     * @param list<array{account_code:string, side:string, amount:float, is_red_storno?:bool}> $lines
      */
     private function manual(array $lines, string $monthDay): int
     {
@@ -465,7 +553,7 @@ final class OpenItemsPairingTest extends TestCase
     }
 
     /**
-     * @param list<array{account_code:string, side:string, amount:float}> $lines
+     * @param list<array{account_code:string, side:string, amount:float, is_red_storno?:bool}> $lines
      */
     private function technical(array $lines, string $monthDay, string $sourceType): int
     {
@@ -477,10 +565,14 @@ final class OpenItemsPairingTest extends TestCase
         ]);
     }
 
-    /** @return array{account_code:string, side:string, amount:float} */
-    private static function l(string $code, string $side, float $amount): array
+    /** @return array{account_code:string, side:string, amount:float, is_red_storno?:bool} */
+    private static function l(string $code, string $side, float $amount, bool $isRedStorno = false): array
     {
-        return ['account_code' => $code, 'side' => $side, 'amount' => $amount];
+        $line = ['account_code' => $code, 'side' => $side, 'amount' => $amount];
+        if ($isRedStorno) {
+            $line['is_red_storno'] = true;
+        }
+        return $line;
     }
 
     private static function cents(float|int|string|null $amount): int

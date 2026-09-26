@@ -72,15 +72,15 @@ final class LedgerReportRepository
                     SUM(CASE WHEN (e.entry_date < ? OR (e.entry_date = ? AND e.source_type = 'opening'))
                               AND (a.account_type NOT IN ('revenue','expense') OR e.entry_date >= ?)
                               AND (a.account_type NOT IN ('asset','liability','equity') OR ? IS NULL OR e.entry_date >= ?)
-                              AND l.side = 'debit'  THEN l.amount ELSE 0 END) AS ps_md,
+                              AND l.side = 'debit'  THEN l.signed_amount ELSE 0 END) AS ps_md,
                     SUM(CASE WHEN (e.entry_date < ? OR (e.entry_date = ? AND e.source_type = 'opening'))
                               AND (a.account_type NOT IN ('revenue','expense') OR e.entry_date >= ?)
                               AND (a.account_type NOT IN ('asset','liability','equity') OR ? IS NULL OR e.entry_date >= ?)
-                              AND l.side = 'credit' THEN l.amount ELSE 0 END) AS ps_d,
+                              AND l.side = 'credit' THEN l.signed_amount ELSE 0 END) AS ps_d,
                     SUM(CASE WHEN e.entry_date >= ? AND {$turnoverOpeningSql}
-                              AND l.side = 'debit'  THEN l.amount ELSE 0 END) AS to_md,
+                              AND l.side = 'debit'  THEN l.signed_amount ELSE 0 END) AS to_md,
                     SUM(CASE WHEN e.entry_date >= ? AND {$turnoverOpeningSql}
-                              AND l.side = 'credit' THEN l.amount ELSE 0 END) AS to_d
+                              AND l.side = 'credit' THEN l.signed_amount ELSE 0 END) AS to_d
                 FROM {$linesSql}
                 JOIN journal_entries e   ON e.id = l.entry_id
                 " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
@@ -153,8 +153,8 @@ final class LedgerReportRepository
         $stmt = $this->db->pdo()->prepare(
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT CASE WHEN ? = 1 THEN a.id ELSE COALESCE(a.parent_id, a.id) END AS acc_id,
                     DATE_FORMAT(e.entry_date, '%Y-%m') AS ym,
-                    SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END) AS md,
-                    SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END) AS d
+                    SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END) AS md,
+                    SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END) AS d
                FROM {$linesSql}
                JOIN journal_entries e   ON e.id = l.entry_id
                " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
@@ -195,7 +195,7 @@ final class LedgerReportRepository
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT * FROM (
                 SELECT e.id AS entry_id, e.entry_date, e.document_no, e.description, e.source_type, e.source_id,
                        ca.id AS line_account_id, ca.account_code, ca.name AS line_account_name,
-                       l.id AS line_id, l.side, l.amount, l.line_no, l.currency_code, l.amount_foreign,
+                       l.id AS line_id, l.side, l.amount, l.is_red_storno, l.line_no, l.currency_code, l.amount_foreign,
                        bt.statement_id AS source_statement_id,
                        bt.bank_ref AS source_bank_ref,
                        cd.doc_number AS source_doc_number,
@@ -204,7 +204,7 @@ final class LedgerReportRepository
                        ast.name AS source_asset_name,
                        stl.doc_type AS source_settlement_doc_type,
                        stl.doc_id AS source_settlement_doc_id,
-                       SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END)
+                       SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END)
                          OVER (ORDER BY e.entry_date, e.id, l.line_no
                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_delta
                   FROM journal_entry_lines l
@@ -236,6 +236,7 @@ final class LedgerReportRepository
             $r['line_id'] = (int) $r['line_id'];
             $r['source_id'] = $r['source_id'] === null ? null : (int) $r['source_id'];
             $r['amount'] = round((float) $r['amount'], 2);
+            $r['is_red_storno'] = (bool) $r['is_red_storno'];
             $r['line_no'] = (int) $r['line_no'];
             $r['running_delta'] = round((float) $r['running_delta'], 2);
             $r['line_account_id'] = (int) $r['line_account_id'];
@@ -293,7 +294,7 @@ final class LedgerReportRepository
         $anchor = $this->openingAnchor($supplierId, $from);
         $closingSql = $excludeClosing ? " AND " . JournalTaxOrigin::includedSql() : '';
         $stmt = $this->db->pdo()->prepare(
-            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
                " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
@@ -343,8 +344,8 @@ final class LedgerReportRepository
     {
         [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
         $stmt = $this->db->pdo()->prepare(
-            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 0) AS md,
-                    COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 0) AS d
+            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END), 0) AS md,
+                    COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END), 0) AS d
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
                " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
@@ -380,8 +381,8 @@ final class LedgerReportRepository
         $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
         [$linesSql, $linesParams] = $this->lineSource($supplierId, $dimension);
         $stmt = $this->db->pdo()->prepare(
-            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 0) AS md,
-                    COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 0) AS d
+            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END), 0) AS md,
+                    COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END), 0) AS d
                FROM {$linesSql}
                JOIN journal_entries e ON e.id = l.entry_id
               " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
@@ -465,8 +466,8 @@ final class LedgerReportRepository
                     a.id AS leaf_id,
                     a.account_code AS leaf_code,
                     a.name AS leaf_name,
-                    SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END) AS md,
-                    SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END) AS d
+                    SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END) AS md,
+                    SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END) AS d
                FROM {$linesSql}
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
@@ -615,7 +616,7 @@ final class LedgerReportRepository
         // (source_id >= STOCK_SLOT_BASE, 501/504/648) do obratu PATŘÍ a počítají se. Chrání
         // freeze() po uzavření i fallback přepočet closed období.
         $stmt = $this->db->pdo()->prepare(
-            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0)
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "

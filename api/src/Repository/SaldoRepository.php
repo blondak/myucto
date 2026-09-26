@@ -251,7 +251,7 @@ final class SaldoRepository
         ?string $dueBefore,
         bool $orderByDue,
     ): array {
-        $booked = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2)";
+        $booked = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 2)";
         $paid = 'COALESCE(paid.paid_sum, 0)';
         $ratio = "CASE WHEN ABS({$booked}) < 0.005 THEN 0
                        ELSE LEAST(1, GREATEST(0, {$paid} / ABS({$booked}))) END";
@@ -593,7 +593,7 @@ final class SaldoRepository
     ): array
     {
         if ($onReceivable) {
-            $settledAmount = "CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END";
+            $settledAmount = "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END";
             $settledFilter = "AND child.invoice_type = 'tax_document'";
             $receivableFilter = '
                AND NOT ' . self::invoiceBookedOnAccountSql('p.id') . "
@@ -604,7 +604,7 @@ final class SaldoRepository
                       AND " . self::invoiceBookedOnAccountSql('fin.id') . '
                )';
         } else {
-            $settledAmount = 'l.amount';
+            $settledAmount = 'l.signed_amount';
             $settledFilter = "AND l.side = 'debit'";
             $receivableFilter = '';
         }
@@ -755,7 +755,7 @@ final class SaldoRepository
     ): array
     {
         if ($onPayable) {
-            $settledAmount = "CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END";
+            $settledAmount = "CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END";
             $settledSide = '';
             $kindFilter = "p.document_kind = 'advance'"
                 . ' AND NOT ' . self::purchaseBookedOnAccountSql('p.id') . "
@@ -770,7 +770,7 @@ final class SaldoRepository
                          AND parent_purchase_invoice_id IS NOT NULL
                          AND advance_purchase_invoice_id IS NULL";
         } else {
-            $settledAmount = 'l.amount';
+            $settledAmount = 'l.signed_amount';
             $settledSide = "AND l.side = 'credit'";
             $kindFilter = "(p.document_kind = 'advance'
                     OR (p.document_kind = 'tax_document' AND p.parent_purchase_invoice_id IS NULL))";
@@ -973,9 +973,9 @@ final class SaldoRepository
         $paidExpr    = 'COALESCE(paid.paid_sum, 0)';
         $advanceExpr = 'ROUND(COALESCE(adv.advance_sum, 0), 2)';
         $toPayExpr   = 'COALESCE(d.amount_to_pay, 0)';
-        $bookedExpr  = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2)";
+        $bookedExpr  = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 2)";
         $foreignExpr = "ROUND(SUM(CASE WHEN l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
-                                       THEN (CASE WHEN l.side = 'debit' THEN l.amount_foreign ELSE -l.amount_foreign END)
+                                       THEN (CASE WHEN l.side = 'debit' THEN l.signed_amount_foreign ELSE -l.signed_amount_foreign END)
                                        ELSE 0 END), 2)";
         // Proplacený dobropis se v `invoice_payments` neobjeví (PAYABLE_TYPES ho tam
         // nepustí) — zkratka „vrácené peníze ⇒ poměr 1" je proto jediný způsob, jak
@@ -1232,9 +1232,9 @@ final class SaldoRepository
         $afterExpr      = 'COALESCE(m.matched_after, 0)';
         $advanceExpr    = 'ROUND(COALESCE(adv.advance_sum, 0), 2)';
         $toPayExpr      = 'COALESCE(d.amount_to_pay, 0)';
-        $bookedExpr     = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2)";
+        $bookedExpr     = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 2)";
         $foreignExpr    = "ROUND(SUM(CASE WHEN l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
-                                          THEN (CASE WHEN l.side = 'debit' THEN l.amount_foreign ELSE -l.amount_foreign END)
+                                          THEN (CASE WHEN l.side = 'debit' THEN l.signed_amount_foreign ELSE -l.signed_amount_foreign END)
                                           ELSE 0 END), 2)";
 
         // Zkratka „doklad je k asOf plně uhrazený podle svého stavu" — SQL protějšek

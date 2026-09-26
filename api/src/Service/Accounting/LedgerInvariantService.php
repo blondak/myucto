@@ -156,8 +156,8 @@ final class LedgerInvariantService
             "SELECT CONCAT('zápis #', e.id, ' (firma ', e.supplier_id, ', ', e.entry_date,
                            ', ', e.source_type, ') rozdíl ', diff_cents, ' h') AS violation
                FROM (SELECT e.id, e.supplier_id, e.entry_date, e.source_type,
-                            SUM(CASE WHEN l.side = 'debit' THEN ROUND(l.amount * 100)
-                                     ELSE -ROUND(l.amount * 100) END) AS diff_cents
+                            SUM(CASE WHEN l.side = 'debit' THEN ROUND(l.signed_amount * 100)
+                                     ELSE -ROUND(l.signed_amount * 100) END) AS diff_cents
                        FROM journal_entries e
                        JOIN journal_entry_lines l ON l.entry_id = e.id
                       WHERE e.posted_at IS NOT NULL
@@ -183,7 +183,7 @@ final class LedgerInvariantService
             "SELECT CONCAT('firma ', supplier_id, ', rok ', fiscal_year, ', účet ', account_code,
                            ' zůstatek ', balance) AS violation
                FROM (SELECT p.supplier_id, p.fiscal_year, a.account_code,
-                            ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2) AS balance
+                            ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 2) AS balance
                        FROM accounting_periods p
                        JOIN journal_entries e
                          ON e.supplier_id = p.supplier_id
@@ -218,7 +218,7 @@ final class LedgerInvariantService
             "SELECT CONCAT('firma ', supplier_id, ', rok ', fiscal_year, ', zúčtovací účet ',
                            account_code, ' zůstatek ', balance) AS violation
                FROM (SELECT p.supplier_id, p.fiscal_year, a.account_code,
-                            ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2) AS balance
+                            ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 2) AS balance
                        FROM accounting_periods p
                        JOIN journal_entries e
                          ON e.supplier_id = p.supplier_id
@@ -313,7 +313,7 @@ final class LedgerInvariantService
             "SELECT CONCAT('vyřazená karta #', id, ' (', inventory_number, '): účet ',
                            account_code, ' drží ', balance) AS violation
                FROM (SELECT a.id, a.inventory_number, ac.account_code,
-                            ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2) AS balance
+                            ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 2) AS balance
                        FROM assets a
                        JOIN journal_entries e
                          ON e.supplier_id = a.supplier_id

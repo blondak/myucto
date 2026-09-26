@@ -183,6 +183,82 @@ final class FxRevaluationTest extends TestCase
         );
     }
 
+    public function testUnpaidRedStornoCreditNoteIsRevaluedWithSignedFxAmount(): void
+    {
+        $creditNoteId = $this->postEurInvoice(
+            -1000.00,
+            24.50,
+            'credit_note',
+            'DOB-2098-EUR-1',
+        );
+
+        $open = array_values(array_filter(
+            $this->closingRepo->openFxItems($this->supplierId, self::ENDS_ON),
+            static fn (array $item): bool => $item['doc_type'] === 'invoice'
+                && $item['doc_id'] === $creditNoteId,
+        ));
+        self::assertCount(1, $open);
+        self::assertSame(self::cents(-1000.00), self::cents((float) $open[0]['amount_foreign']));
+
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $preview = $this->closing->fxPreview($this->supplierId, $this->periodId);
+        $this->closing->runFxRevaluation(
+            $this->supplierId,
+            $this->periodId,
+            [],
+            $this->rv(),
+            $this->meta(),
+        );
+
+        $slot = $this->journal->findBySource(
+            $this->supplierId,
+            'fx_revaluation',
+            ClosingSourceId::fxSaldo($this->periodId),
+        );
+        self::assertNotNull($slot, 'Záporná otevřená cizoměnová pohledávka se nesmí přeskočit.');
+        $byCode = $this->linesByAccountCode((int) $slot['id']);
+        self::assertSame(self::cents(600.00), self::cents($byCode['563']['debit']));
+        self::assertSame(self::cents(600.00), self::cents($byCode['311']['credit']));
+
+        self::assertCount(1, $preview['saldo']['detail']);
+        $detail = $preview['saldo']['detail'][0];
+        self::assertSame(self::cents(-1000.00), self::cents((float) $detail['remaining_foreign']));
+        self::assertSame(self::cents(-600.00), self::cents((float) $detail['diff']));
+        self::assertSame('loss', $detail['direction']);
+    }
+
+    public function testOrdinaryInvoiceAndRedCreditNoteAreRevaluedAsSignedNet(): void
+    {
+        $this->postEurInvoice(1000.00, 24.50, 'invoice', 'FV-2098-EUR-MIX');
+        $this->postEurInvoice(-400.00, 24.50, 'credit_note', 'DOB-2098-EUR-MIX');
+
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $preview = $this->closing->fxPreview($this->supplierId, $this->periodId);
+        $this->closing->runFxRevaluation(
+            $this->supplierId,
+            $this->periodId,
+            [],
+            $this->rv(),
+            $this->meta(),
+        );
+
+        $slot = $this->journal->findBySource(
+            $this->supplierId,
+            'fx_revaluation',
+            ClosingSourceId::fxSaldo($this->periodId),
+        );
+        self::assertNotNull($slot);
+        $byCode = $this->linesByAccountCode((int) $slot['id']);
+        self::assertSame(self::cents(360.00), self::cents($byCode['311']['debit']),
+            'Přecenění musí vycházet z netto 600 EUR, ne z hrubých 1 000 EUR.');
+        self::assertSame(self::cents(360.00), self::cents($byCode['663']['credit']));
+        self::assertArrayNotHasKey('563', $byCode);
+
+        self::assertCount(2, $preview['saldo']['detail']);
+        self::assertSame(self::cents(360.00), self::cents((float) $preview['totals']['gain']));
+        self::assertSame(0, self::cents((float) $preview['totals']['loss']));
+    }
+
     // ── I9: FX storno k 1. dni dle fx_reversal_at_open (R11) ────────────────
 
     public function testI9OpenNextCreatesSaldoReversalOnlyWhenEnabled(): void
@@ -423,7 +499,12 @@ final class FxRevaluationTest extends TestCase
      * EUR faktura bez DPH (základ = celkem v EUR) s kurzem dokladu — saldokontní
      * řádek 311 nese currency/fx_rate/amount_foreign (1008 withForeign).
      */
-    private function postEurInvoice(float $totalEur, float $docRate): int
+    private function postEurInvoice(
+        float $totalEur,
+        float $docRate,
+        string $invoiceType = 'invoice',
+        string $varsymbol = 'FV-2098-EUR-1',
+    ): int
     {
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
@@ -440,10 +521,10 @@ final class FxRevaluationTest extends TestCase
             'INSERT INTO invoices (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
                 currency_id, exchange_rate, reverse_charge, total_without_vat, total_vat, total_with_vat,
                 status, vat_classification_code, created_by)
-             VALUES (?, ?, "invoice", ?, ?, ?, ?, ?, ?, 0, ?, 0.00, ?, "issued", "1", ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0.00, ?, "issued", "1", ?)'
         );
         $stmt->execute([
-            $this->supplierId, 'FV-2098-EUR-1', $clientId, $issue, $issue, $issue,
+            $this->supplierId, $varsymbol, $invoiceType, $clientId, $issue, $issue, $issue,
             $this->eurId, $docRate, $totalEur, $totalEur, $this->userId,
         ]);
         $invoiceId = (int) $pdo->lastInsertId();
@@ -456,6 +537,13 @@ final class FxRevaluationTest extends TestCase
         )->execute([$invoiceId, $totalEur, $this->vatRateId, $totalEur, $totalEur]);
 
         $lines = $this->posting->buildFromInvoice($this->supplierId, $invoiceId);
+        if ($totalEur < 0.0) {
+            foreach ($lines as &$line) {
+                $line['side'] = $line['side'] === 'debit' ? 'credit' : 'debit';
+                $line['is_red_storno'] = true;
+            }
+            unset($line);
+        }
         $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, $lines, [
             'entry_date' => $issue,
             'posted_by' => $this->userId,

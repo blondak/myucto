@@ -58,7 +58,7 @@ final class SecuritiesSaleCostLimit
         $stmt = $this->db->pdo()->prepare(
             "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT a.account_code, a.name, a.account_type,
                     COALESCE(SUM(CASE WHEN a.account_type = 'expense' AND " . NonDeductibleCostsService::predicate() . " THEN 0
-                                      WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0) AS turnover
+                                      WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS turnover
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "

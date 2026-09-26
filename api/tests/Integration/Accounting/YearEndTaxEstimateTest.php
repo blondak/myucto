@@ -232,6 +232,23 @@ final class YearEndTaxEstimateTest extends TestCase
         self::assertSame('period_closed', $e['reason']);
     }
 
+    public function testRedStornoOfIncomeTaxKeepsEstimateAvailable(): void
+    {
+        $this->post(self::YEAR . '-12-31', [
+            ['591', 'debit', 100000],
+            ['341', 'credit', 100000],
+        ], 'income_tax');
+        $this->post(self::YEAR . '-12-31', [
+            ['591', 'debit', 100000, true],
+            ['341', 'credit', 100000, true],
+        ], 'manual');
+
+        $e = $this->service->estimate($this->supplierId, $this->periodId);
+
+        self::assertTrue($e['applicable']);
+        self::assertNull($e['reason']);
+    }
+
     public function testNaturalPersonHasNoEstimate(): void
     {
         $this->db->pdo()->prepare("UPDATE supplier SET taxpayer_type = 'fo' WHERE id = ?")->execute([$this->supplierId]);
@@ -248,7 +265,7 @@ final class YearEndTaxEstimateTest extends TestCase
         self::assertSame(AccessLevel::READ, $p->minimum);
     }
 
-    /** @param list<array{0:string,1:string,2:float|int}> $lines */
+    /** @param list<array{0:string,1:string,2:float|int,3?:bool}> $lines */
     private function post(string $date, array $lines, string $sourceType = 'manual'): void
     {
         $pdo = $this->db->pdo();
@@ -257,10 +274,11 @@ final class YearEndTaxEstimateTest extends TestCase
         )->execute([$this->supplierId, $this->periodId, $date, $sourceType]);
         $entryId = (int) $pdo->lastInsertId();
         $ids = $pdo->prepare('SELECT id FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?');
-        $ins = $pdo->prepare('INSERT INTO journal_entry_lines (entry_id, supplier_id, account_id, side, amount) VALUES (?, ?, ?, ?, ?)');
-        foreach ($lines as [$code, $side, $amount]) {
+        $ins = $pdo->prepare('INSERT INTO journal_entry_lines (entry_id, supplier_id, account_id, side, amount, is_red_storno) VALUES (?, ?, ?, ?, ?, ?)');
+        foreach ($lines as $line) {
+            [$code, $side, $amount] = $line;
             $ids->execute([$this->supplierId, $code]);
-            $ins->execute([$entryId, $this->supplierId, (int) $ids->fetchColumn(), $side, $amount]);
+            $ins->execute([$entryId, $this->supplierId, (int) $ids->fetchColumn(), $side, $amount, !empty($line[3]) ? 1 : 0]);
         }
     }
 

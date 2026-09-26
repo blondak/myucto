@@ -5,6 +5,7 @@ import { RouterLink } from 'vue-router'
 import { formatMoney } from '@/composables/useFormat'
 import type { JournalLine } from '@/api/accounting'
 import { calendarYearRange } from '@/utils/accountingPeriod'
+import { journalAmount, journalForeignAmount } from '@/utils/journalAmount'
 import { canPair, pairLines } from '@/utils/journalPairs'
 import DimensionChips from '@/components/dimensions/DimensionChips.vue'
 
@@ -72,7 +73,7 @@ function rowBorder(i: number): string {
 
 /** Součet strany MD — u vyrovnaného zápisu je shodný se stranou DAL. */
 const total = computed(() =>
-  props.lines.filter(l => l.side === 'debit').reduce((s, l) => s + Number(l.amount || 0), 0))
+  props.lines.filter(l => l.side === 'debit').reduce((s, l) => s + journalAmount(l), 0))
 
 /**
  * U jediné souvztažnosti (resp. dvouřádkového zápisu po stranách) je součet jen
@@ -93,7 +94,7 @@ const netByAccount = computed(() => {
   const net = new Map<string, number>()
   for (const l of props.lines) {
     const code = String(l.account_code ?? '')
-    const amount = Number(l.amount || 0) * (l.side === 'debit' ? 1 : -1)
+    const amount = journalAmount(l) * (l.side === 'debit' ? 1 : -1)
     net.set(code, (net.get(code) ?? 0) + amount)
   }
   return net
@@ -135,6 +136,7 @@ function movementLink(line: JournalLine) {
 
 <template>
   <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+    <p v-if="lines.some(line => line.is_red_storno)" class="px-3 py-2 text-xs text-danger-600">{{ t('accounting.journal.red_storno') }}</p>
     <!-- ── Desktop, souvztažnosti: MD účet | DAL účet | částka ──
          Na mobilu se tři sloupce s názvy účtů do šířky nevejdou, tam je z každé
          dvojice karta. -->
@@ -218,17 +220,17 @@ function movementLink(line: JournalLine) {
           <td v-if="showsCostCenter" class="text-neutral-500 text-xs" :class="cell">{{ l.cost_center || '—' }}</td>
           <td class="text-right font-mono font-medium text-neutral-900" :class="cell">
             <template v-if="l.side === 'debit'">
-              {{ formatMoney(l.amount) }}
+              {{ formatMoney(journalAmount(l)) }}
               <div v-if="l.amount_foreign != null && l.currency_code" class="text-xs font-normal text-neutral-400">
-                {{ formatMoney(l.amount_foreign, l.currency_code) }}
+                {{ formatMoney(journalForeignAmount(l) ?? 0, l.currency_code) }}
               </div>
             </template>
           </td>
           <td class="text-right font-mono font-medium text-neutral-900" :class="cell">
             <template v-if="l.side === 'credit'">
-              {{ formatMoney(l.amount) }}
+              {{ formatMoney(journalAmount(l)) }}
               <div v-if="l.amount_foreign != null && l.currency_code" class="text-xs font-normal text-neutral-400">
-                {{ formatMoney(l.amount_foreign, l.currency_code) }}
+                {{ formatMoney(journalForeignAmount(l) ?? 0, l.currency_code) }}
               </div>
             </template>
           </td>
@@ -303,9 +305,9 @@ function movementLink(line: JournalLine) {
               :class="l.side === 'debit' ? 'text-neutral-500' : 'text-neutral-400'">
               {{ l.side === 'debit' ? t('accounting.journal.side.debit') : t('accounting.journal.side.credit') }}
             </div>
-            <div class="font-mono text-sm font-medium text-neutral-900">{{ formatMoney(l.amount) }}</div>
+            <div class="font-mono text-sm font-medium text-neutral-900">{{ formatMoney(journalAmount(l)) }}</div>
             <div v-if="l.amount_foreign != null && l.currency_code" class="text-xs text-neutral-400 font-mono">
-              {{ formatMoney(l.amount_foreign, l.currency_code) }}
+              {{ formatMoney(journalForeignAmount(l) ?? 0, l.currency_code) }}
             </div>
           </div>
         </div>

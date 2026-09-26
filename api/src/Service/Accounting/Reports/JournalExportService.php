@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Reports;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\AutomationProvenanceService;
+use MyInvoice\Service\Accounting\JournalLineAmount;
 use PDO;
 
 /**
@@ -62,10 +63,11 @@ final class JournalExportService
                 default => 'ručně',
             };
             foreach ($lines as $line) {
+                $amount = JournalLineAmount::signed($line);
                 if ($line['side'] === 'debit') {
-                    $totalDebit += $line['amount'];
+                    $totalDebit += $amount;
                 } else {
-                    $totalCredit += $line['amount'];
+                    $totalCredit += $amount;
                 }
             }
         }

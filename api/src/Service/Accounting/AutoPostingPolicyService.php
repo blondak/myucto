@@ -417,7 +417,7 @@ final class AutoPostingPolicyService implements TransferAutoPolicyInterface
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT
-                COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0) AS balance,
+                COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS balance,
                 MAX(CASE WHEN e.reversed_by IS NULL AND l.side = 'credit' THEN 1 ELSE 0 END) AS has_credit
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id

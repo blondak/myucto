@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingSetupRepository;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
+use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
 use PDO;
@@ -495,7 +496,8 @@ final class AccountingHistoryReclassificationService
             return null;
         }
         $lineStmt = $this->db->pdo()->prepare(
-            'SELECT coa.account_code, jel.side, jel.amount, jel.currency_code, jel.fx_rate,
+            'SELECT coa.account_code, jel.side, jel.amount, jel.is_red_storno,
+                    jel.currency_code, jel.fx_rate,
                     jel.amount_foreign, jel.cost_center, jel.project_id
                FROM journal_entry_lines jel
                JOIN chart_of_accounts coa ON coa.id = jel.account_id AND coa.supplier_id = jel.supplier_id
@@ -557,6 +559,7 @@ final class AccountingHistoryReclassificationService
                 'account_code' => (string) $line['account_code'],
                 'side' => (string) $line['side'],
                 'amount' => round((float) $line['amount'], 2),
+                'is_red_storno' => (bool) ($line['is_red_storno'] ?? false),
                 'cost_center' => ($line['cost_center'] ?? null) ?: null,
                 'project_id' => isset($line['project_id']) ? (int) $line['project_id'] : null,
             ];
@@ -583,7 +586,7 @@ final class AccountingHistoryReclassificationService
         $debit = 0;
         $credit = 0;
         foreach ($merged as $line) {
-            $cents = (int) round((float) $line['amount'] * 100);
+            $cents = JournalLineAmount::signedCents($line);
             $line['side'] === 'debit' ? $debit += $cents : $credit += $cents;
         }
         if ($debit !== $credit) {

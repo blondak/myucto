@@ -30,7 +30,7 @@ final class JournalLinePairingRepository
      * Řádky deníku daného tenanta podle id, i s tím, co potřebuje validace okruhu.
      *
      * @param list<int> $lineIds
-     * @return array<int,array{line_id:int, entry_id:int, line_no:int, account_id:int, parent_id:?int, side:string, amount:float, posted:bool, pairing_id:?int}>
+     * @return array<int,array{line_id:int, entry_id:int, line_no:int, account_id:int, parent_id:?int, side:string, amount:float, is_red_storno:bool, posted:bool, pairing_id:?int}>
      */
     public function lineRefs(int $supplierId, array $lineIds): array
     {
@@ -40,7 +40,7 @@ final class JournalLinePairingRepository
         }
         $in = implode(',', array_fill(0, count($lineIds), '?'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT l.id, l.entry_id, l.line_no, l.account_id, ca.parent_id, l.side, l.amount,
+            "SELECT l.id, l.entry_id, l.line_no, l.account_id, ca.parent_id, l.side, l.amount, l.is_red_storno,
                     e.posted_at, p.pairing_id
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
@@ -62,6 +62,7 @@ final class JournalLinePairingRepository
                 'parent_id'  => $r['parent_id'] === null ? null : (int) $r['parent_id'],
                 'side'       => (string) $r['side'],
                 'amount'     => round((float) $r['amount'], 2),
+                'is_red_storno' => (bool) $r['is_red_storno'],
                 'posted'     => $r['posted_at'] !== null,
                 'pairing_id' => $r['pairing_id'] === null ? null : (int) $r['pairing_id'],
             ];
@@ -180,7 +181,7 @@ final class JournalLinePairingRepository
     public function items(int $supplierId, int $pairingId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT i.entry_id, i.line_no, i.account_id, l.id AS line_id, l.side, l.amount,
+            'SELECT i.entry_id, i.line_no, i.account_id, l.id AS line_id, l.side, l.amount, l.is_red_storno,
                     e.entry_date, e.document_no, e.description, e.source_type, e.source_id, e.posted_at
                FROM journal_line_pairing_items i
                JOIN journal_entries e ON e.id = i.entry_id AND e.supplier_id = i.supplier_id
@@ -198,6 +199,7 @@ final class JournalLinePairingRepository
             'line_id'     => $r['line_id'] === null ? null : (int) $r['line_id'],
             'side'        => $r['side'] === null ? null : (string) $r['side'],
             'amount'      => $r['amount'] === null ? null : round((float) $r['amount'], 2),
+            'is_red_storno' => $r['is_red_storno'] === null ? null : (bool) $r['is_red_storno'],
             'entry_date'  => (string) $r['entry_date'],
             'document_no' => $r['document_no'],
             'description' => $r['description'],
@@ -377,6 +379,7 @@ final class JournalLinePairingRepository
             $r['source_id'] = $r['source_id'] === null ? null : (int) $r['source_id'];
             $r['pairing_id'] = $r['pairing_id'] === null ? null : (int) $r['pairing_id'];
             $r['reversed_by'] = $r['reversed_by'] === null ? null : (int) $r['reversed_by'];
+            $r['is_red_storno'] = (bool) $r['is_red_storno'];
             foreach (['amount', 'open_amount', 'running_balance', 'running_open'] as $k) {
                 $r[$k] = round((float) $r[$k], 2);
             }
@@ -420,7 +423,7 @@ final class JournalLinePairingRepository
     {
         [$sql, $params] = $this->openItemsCte($supplierId, $accountId, $asOf, $periodStart, $anchor);
         $stmt = $this->db->pdo()->prepare(
-            $sql . ' SELECT line_id, entry_id, line_no, account_id, side, amount, entry_date,
+            $sql . ' SELECT line_id, entry_id, line_no, account_id, side, amount, is_red_storno, entry_date,
                             document_no, description, reversed_by
                        FROM opened
                       WHERE pairing_id IS NULL
@@ -434,6 +437,7 @@ final class JournalLinePairingRepository
             'account_id'  => (int) $r['account_id'],
             'side'        => (string) $r['side'],
             'amount'      => round((float) $r['amount'], 2),
+            'is_red_storno' => (bool) $r['is_red_storno'],
             'entry_date'  => (string) $r['entry_date'],
             'document_no' => $r['document_no'],
             'description' => $r['description'],
@@ -451,8 +455,9 @@ final class JournalLinePairingRepository
         $sql = "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . ",
             base AS (
                 SELECT l.id AS line_id, l.entry_id, l.line_no, l.account_id, l.side, l.amount,
-                       l.currency_code, l.amount_foreign,
-                       CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END AS signed,
+                       l.is_red_storno, l.signed_amount,
+                       l.currency_code, l.signed_amount_foreign AS amount_foreign,
+                       CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END AS signed,
                        e.entry_date, e.document_no, e.description, e.source_type, e.source_id,
                        e.reversed_by, p.pairing_id
                   FROM journal_entry_lines l
@@ -473,8 +478,8 @@ final class JournalLinePairingRepository
             grp AS (
                 SELECT pairing_id,
                        SUM(signed) AS net,
-                       SUM(CASE WHEN side = 'debit' THEN amount ELSE 0 END) AS md,
-                       SUM(CASE WHEN side = 'credit' THEN amount ELSE 0 END) AS d
+                       SUM(CASE WHEN signed > 0 THEN signed ELSE 0 END) AS md,
+                       SUM(CASE WHEN signed < 0 THEN -signed ELSE 0 END) AS d
                   FROM base
                  WHERE pairing_id IS NOT NULL
                  GROUP BY pairing_id
@@ -482,14 +487,16 @@ final class JournalLinePairingRepository
             calc AS (
                 SELECT b.*,
                        CASE
-                         WHEN b.pairing_id IS NULL THEN b.amount
+                         WHEN b.pairing_id IS NULL THEN b.signed_amount
                          WHEN g.net = 0 THEN 0
-                         WHEN (g.net > 0 AND b.side = 'debit') OR (g.net < 0 AND b.side = 'credit') THEN
-                           LEAST(b.amount, GREATEST(0,
-                             SUM(b.amount) OVER (PARTITION BY b.pairing_id, b.side
-                                                 ORDER BY b.entry_date, b.entry_id, b.line_no
-                                                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
-                             - CASE WHEN g.net > 0 THEN g.d ELSE g.md END))
+                         WHEN (g.net > 0 AND b.signed > 0) OR (g.net < 0 AND b.signed < 0) THEN
+                           (CASE WHEN b.is_red_storno = 1 THEN -1 ELSE 1 END)
+                           * LEAST(b.amount, GREATEST(0,
+                               SUM(b.amount) OVER (
+                                   PARTITION BY b.pairing_id, CASE WHEN b.signed > 0 THEN 'debit' ELSE 'credit' END
+                                   ORDER BY b.entry_date, b.entry_id, b.line_no
+                                   ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                               ) - CASE WHEN g.net > 0 THEN g.d ELSE g.md END))
                          ELSE 0
                        END AS open_amount
                   FROM base b

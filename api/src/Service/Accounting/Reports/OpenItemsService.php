@@ -10,6 +10,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalLinePairingRepository;
 use MyInvoice\Repository\LedgerReportRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Accounting\JournalLineAmount;
 
 /**
  * Otevřené položky a párování (okruhy) na libovolném účtu — saldokonto řádků deníku.
@@ -63,7 +64,8 @@ final class OpenItemsService
                 'source_type'     => (string) $r['source_type'],
                 'source_id'       => $r['source_id'],
                 'side'            => (string) $r['side'],
-                'amount'          => $r['amount'],
+                'amount'          => JournalLineAmount::signed($r),
+                'is_red_storno'   => (bool) $r['is_red_storno'],
                 'open_amount'     => $r['open_amount'],
                 'open_balance'    => $r['running_open'],
                 'balance'         => $r['running_balance'],
@@ -112,7 +114,12 @@ final class OpenItemsService
         if ($pairing === null) {
             throw new ReportException('not_found', 'Okruh nenalezen.', 404);
         }
-        $items = $this->pairings->items($supplierId, $pairingId);
+        $items = array_map(static function (array $item): array {
+            if ($item['line_id'] !== null) {
+                $item['amount'] = JournalLineAmount::signed($item);
+            }
+            return $item;
+        }, $this->pairings->items($supplierId, $pairingId));
         $md = 0.0;
         $d = 0.0;
         foreach ($items as $it) {
@@ -260,7 +267,7 @@ final class OpenItemsService
             foreach ($byEntry[$orig['reversed_by']] ?? [] as $mirror) {
                 if (isset($used[$mirror['line_id']])
                     || $mirror['account_id'] !== $orig['account_id']
-                    || $mirror['side'] === $orig['side']
+                    || self::effectiveSide($mirror) === self::effectiveSide($orig)
                     || self::cents($mirror['amount']) !== self::cents($orig['amount'])) {
                     continue;
                 }
@@ -273,7 +280,7 @@ final class OpenItemsService
         $groups = [];
         foreach ($lines as $l) {
             if (isset($used[$l['line_id']])) continue;
-            $groups[$l['account_id'] . ':' . self::cents($l['amount'])][$l['side']][] = $l;
+            $groups[$l['account_id'] . ':' . self::cents($l['amount'])][self::effectiveSide($l)][] = $l;
         }
         foreach ($groups as $group) {
             $debits = $group['debit'] ?? [];
@@ -351,7 +358,7 @@ final class OpenItemsService
 
     /**
      * @param list<int> $lineIds
-     * @return list<array{line_id:int, entry_id:int, line_no:int, account_id:int, side:string, amount:float}>
+     * @return list<array{line_id:int, entry_id:int, line_no:int, account_id:int, side:string, amount:float, is_red_storno:bool}>
      */
     private function validatedLines(int $supplierId, int $accountId, array $lineIds, ?int $requiredLineAccount): array
     {
@@ -513,7 +520,8 @@ final class OpenItemsService
             'document_no' => $l['document_no'],
             'description' => $l['description'],
             'side'        => $l['side'],
-            'amount'      => $l['amount'],
+            'amount'      => JournalLineAmount::signed($l),
+            'is_red_storno' => (bool) ($l['is_red_storno'] ?? false),
         ];
         $lines = [$pick($a), $pick($b)];
         usort($lines, static fn (array $x, array $y): int => [$x['entry_date'], $x['line_id']] <=> [$y['entry_date'], $y['line_id']]);
@@ -529,6 +537,15 @@ final class OpenItemsService
     private static function daysBetween(string $a, string $b): int
     {
         return (int) abs((new \DateTimeImmutable($a))->diff(new \DateTimeImmutable($b))->days);
+    }
+
+    /** @param array{side:string, is_red_storno?:bool} $line */
+    private static function effectiveSide(array $line): string
+    {
+        if (empty($line['is_red_storno'])) {
+            return $line['side'];
+        }
+        return $line['side'] === 'debit' ? 'credit' : 'debit';
     }
 
     private static function cents(float $amount): int

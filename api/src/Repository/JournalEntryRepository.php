@@ -32,7 +32,7 @@ final class JournalEntryRepository
      *     document_no?:?string, description?:?string, source_type?:string,
      *     source_id?:?int, posted_at?:?string, posted_by?:?int
      * } $header
-     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, cost_center?:?string, project_id?:?int, line_no?:int}> $lines
+     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, is_red_storno?:bool, cost_center?:?string, project_id?:?int, line_no?:int}> $lines
      */
     public function insert(array $header, array $lines): int
     {
@@ -85,7 +85,7 @@ final class JournalEntryRepository
      *     document_no?:?string, description?:?string, source_type?:string,
      *     source_id?:?int, posted_at?:?string, posted_by?:?int
      * } $header
-     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, cost_center?:?string, project_id?:?int, line_no?:int}> $lines
+     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, is_red_storno?:bool, cost_center?:?string, project_id?:?int, line_no?:int}> $lines
      */
     public function replace(int $id, array $header, array $lines): void
     {
@@ -353,15 +353,15 @@ final class JournalEntryRepository
     }
 
     /**
-     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, cost_center?:?string, project_id?:?int, line_no?:int}> $lines
+     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, is_red_storno?:bool, cost_center?:?string, project_id?:?int, line_no?:int}> $lines
      */
     private function insertLines(\PDO $pdo, int $entryId, int $supplierId, array $lines): void
     {
         $lineStmt = $pdo->prepare(
             'INSERT INTO journal_entry_lines
-                (entry_id, supplier_id, account_id, side, amount, currency_code, fx_rate,
+                (entry_id, supplier_id, account_id, side, amount, is_red_storno, currency_code, fx_rate,
                  amount_foreign, cost_center, project_id, line_no)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $n = 0;
         $assignments = null;
@@ -372,6 +372,7 @@ final class JournalEntryRepository
                 $line['account_id'],
                 $line['side'],
                 $line['amount'],
+                !empty($line['is_red_storno']) ? 1 : 0,
                 $line['currency_code'] ?? null,
                 $line['fx_rate'] ?? null,
                 $line['amount_foreign'] ?? null,
@@ -579,7 +580,7 @@ final class JournalEntryRepository
     public function linesForEntry(int $entryId, int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, entry_id, supplier_id, account_id, side, amount, currency_code, fx_rate,
+            'SELECT id, entry_id, supplier_id, account_id, side, amount, is_red_storno, currency_code, fx_rate,
                     amount_foreign, cost_center, project_id, line_no
                FROM journal_entry_lines
               WHERE entry_id = ? AND supplier_id = ?
@@ -592,6 +593,7 @@ final class JournalEntryRepository
             $r['supplier_id'] = (int) $r['supplier_id'];
             $r['account_id'] = (int) $r['account_id'];
             $r['amount'] = (float) $r['amount'];
+            $r['is_red_storno'] = (bool) $r['is_red_storno'];
             $r['fx_rate'] = $r['fx_rate'] === null ? null : (float) $r['fx_rate'];
             $r['amount_foreign'] = $r['amount_foreign'] === null ? null : (float) $r['amount_foreign'];
             $r['project_id'] = $r['project_id'] === null ? null : (int) $r['project_id'];
@@ -745,7 +747,7 @@ final class JournalEntryRepository
 
     /** Korelovaný subselect s celkovou částkou zápisu (Σ MD = Σ Dal u vyváženého zápisu). */
     private const AMOUNT_SUBQUERY =
-        '(SELECT COALESCE(SUM(jel.amount), 0) FROM journal_entry_lines jel WHERE jel.entry_id = je.id AND jel.side = \'debit\')';
+        '(SELECT COALESCE(SUM(jel.signed_amount), 0) FROM journal_entry_lines jel WHERE jel.entry_id = je.id AND jel.side = \'debit\')';
 
     /**
      * Korelovaný subselect s ČISTOU částkou zápisu na filtrovaném rozsahu účtů
@@ -760,7 +762,7 @@ final class JournalEntryRepository
      * rozsahu, ale částka by se počítala z jiného (viz accountRangeBounds()).
      */
     private const FILTERED_NET_AMOUNT_SUBQUERY =
-        '(SELECT COALESCE(SUM(CASE WHEN jel.side = \'debit\' THEN jel.amount ELSE -jel.amount END), 0)
+        '(SELECT COALESCE(SUM(CASE WHEN jel.side = \'debit\' THEN jel.signed_amount ELSE -jel.signed_amount END), 0)
             FROM journal_entry_lines jel
             JOIN chart_of_accounts c ON c.id = jel.account_id
            WHERE jel.entry_id = je.id AND jel.supplier_id = je.supplier_id
@@ -849,7 +851,7 @@ final class JournalEntryRepository
         }
         $place = implode(',', array_fill(0, count($entryIds), '?'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT jel.entry_id, jel.side, jel.amount, jel.cost_center, jel.line_no,
+            "SELECT jel.entry_id, jel.side, jel.amount, jel.is_red_storno, jel.cost_center, jel.line_no,
                     c.account_code, c.name AS account_name
                FROM journal_entry_lines jel
                JOIN chart_of_accounts c ON c.id = jel.account_id
@@ -864,6 +866,7 @@ final class JournalEntryRepository
             $out[$entryId][] = [
                 'side'         => $r['side'],
                 'amount'       => (float) $r['amount'],
+                'is_red_storno' => (bool) $r['is_red_storno'],
                 'cost_center'  => $r['cost_center'],
                 'account_code' => $r['account_code'],
                 'account_name' => $r['account_name'],
@@ -902,7 +905,7 @@ final class JournalEntryRepository
         }
 
         $lineStmt = $pdo->prepare(
-            'SELECT jel.id, jel.account_id, jel.side, jel.amount, jel.cost_center, jel.line_no,
+            'SELECT jel.id, jel.account_id, jel.side, jel.amount, jel.is_red_storno, jel.cost_center, jel.line_no,
                     c.account_code, c.name AS account_name,
                     ROW_START AS valid_from, ROW_END AS valid_to
                FROM journal_entry_lines FOR SYSTEM_TIME ALL jel
@@ -927,6 +930,7 @@ final class JournalEntryRepository
                 $r['id'] = (int) $r['id'];
                 $r['account_id'] = (int) $r['account_id'];
                 $r['amount'] = (float) $r['amount'];
+                $r['is_red_storno'] = (bool) $r['is_red_storno'];
                 $r['line_no'] = (int) $r['line_no'];
                 return $r;
             }, $lines),
@@ -1014,14 +1018,23 @@ final class JournalEntryRepository
         }
         // Rozsah částky (Featura D) — Σ MD zápisu (zrcadlí AMOUNT_SUBQUERY výše).
         if (isset($filters['amount_from']) || isset($filters['amount_to'])) {
+            $having = match (true) {
+                isset($filters['amount_from'], $filters['amount_to']) => 'SUM(jel.signed_amount) BETWEEN ? AND ?',
+                isset($filters['amount_from']) => 'SUM(jel.signed_amount) >= ?',
+                default => 'SUM(jel.signed_amount) <= ?',
+            };
             $where[] = "EXISTS (
                 SELECT 1 FROM journal_entry_lines jel
                  WHERE jel.entry_id = je.id AND jel.side = 'debit'
                  GROUP BY jel.entry_id
-                HAVING SUM(jel.amount) BETWEEN ? AND ?
+                HAVING {$having}
             )";
-            $params[] = isset($filters['amount_from']) ? (float) $filters['amount_from'] : 0.0;
-            $params[] = isset($filters['amount_to']) ? (float) $filters['amount_to'] : 999999999999.99;
+            if (isset($filters['amount_from'])) {
+                $params[] = (float) $filters['amount_from'];
+            }
+            if (isset($filters['amount_to'])) {
+                $params[] = (float) $filters['amount_to'];
+            }
         }
         // Hodnota dimenze (včetně podřízených): zápis projde, nese-li ji aspoň jeden
         // jeho řádek. Sémantiku řádku sdílí se sestavami přes DimensionFilter.

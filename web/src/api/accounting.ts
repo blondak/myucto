@@ -109,6 +109,7 @@ export interface JournalLine {
   supplier_id: number
   account_id: number
   side: JournalSide
+  is_red_storno?: boolean
   amount: number
   currency_code: string | null
   fx_rate: number | null
@@ -210,6 +211,7 @@ export interface PostingPreviewLine {
   account_code: string
   account_name: string | null
   side: 'debit' | 'credit'
+  is_red_storno?: boolean
   amount: number
   cost_center?: string | null
 }
@@ -448,6 +450,7 @@ export interface JournalHistoryLine {
   account_code: string | null
   account_name: string | null
   side: JournalSide
+  is_red_storno?: boolean
   amount: number
   cost_center: string | null
   line_no: number
@@ -550,6 +553,7 @@ export interface JournalFilters {
 export interface ManualLinePayload {
   account_code: string
   side: JournalSide
+  is_red_storno?: boolean
   amount: number
   cost_center?: string
   /** Dimenze řádku: typ → hodnota. */
@@ -563,7 +567,7 @@ export interface PostDocumentPayload {
   entry_date?: string
   description?: string
   document_no?: string
-  lines?: { account_code: string; side: JournalSide; amount: number }[]
+  lines?: { account_code: string; side: JournalSide; amount: number; is_red_storno?: boolean }[]
 }
 
 /** Odpověď „Zeptat se AI na kontaci". Vrací JEN nákladový účet — protistrana je daná. */
@@ -1173,6 +1177,7 @@ export interface OpenItemLine {
   source_id: number | null
   side: JournalSide
   amount: number
+  is_red_storno?: boolean
   open_amount: number
   open_balance: number
   balance: number
@@ -1885,7 +1890,7 @@ export interface RepostPlan {
   tax_neutral_available: boolean
   /** Proč opravené řádky nejdou přepsat na místě (jen u plánu počítaného nad řádky). */
   tax_neutral_violation?: RepostTaxNeutralViolation | null
-  lines: Array<{ account_code: string | null; account_name: string | null; side: 'debit' | 'credit'; amount: number }>
+  lines: Array<{ account_code: string | null; account_name: string | null; side: 'debit' | 'credit'; amount: number; is_red_storno?: boolean }>
 }
 
 export type RepostTaxNeutralViolation =
@@ -1902,7 +1907,7 @@ export interface RepostResult {
 }
 
 export interface RepostPayload {
-  lines: Array<{ account_code: string; side: 'debit' | 'credit'; amount: number }>
+  lines: Array<{ account_code: string; side: 'debit' | 'credit'; amount: number; is_red_storno?: boolean }>
   description?: string | null
   confirm_date_shift?: boolean
   /** Dimenze dokladu uložené v téže transakci (bez `items` zůstanou dimenze položek). */
