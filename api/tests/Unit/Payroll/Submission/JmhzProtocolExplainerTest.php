@@ -36,12 +36,28 @@ final class JmhzProtocolExplainerTest extends TestCase
     }
 
     /**
-     * Regrese na skutečnou odpověď z testovacího prostředí: ČSSZ vrátila kód
-     * 20022, jehož kontrola ve slovníku 1.4.1.6 vůbec není. Fail-closed by
+     * Prostor kódů ČSSZ je širší než náš katalog: skutečný protokol vrátil
+     * 20022 dřív, než katalog 1.4.2.10 kontrolu 22 zveřejnil. Fail-closed by
      * shodilo zpracování celé odpovědi právě ve chvíli, kdy uživatel potřebuje
      * vědět, proč mu podání neprošlo.
      */
     public function testUnknownControlDoesNotBreakTheExplanation(): void
+    {
+        $explained = $this->explain(
+            'JMHZ25_LT_G: 20999 - Kontrola, kterou katalog nezná',
+            '20999',
+        );
+
+        self::assertNotSame([], $explained);
+        self::assertSame(999, $explained[0]['control_id']);
+        self::assertNull($explained[0]['control']);
+    }
+
+    /**
+     * Regrese na skutečnou odpověď z testovacího prostředí. Od katalogu
+     * 1.4.2.10 je kontrola 22 připnutá, takže se hláška doplní z katalogu.
+     */
+    public function testDuplicateSubmissionGuidIsEnrichedFromControl22(): void
     {
         $explained = $this->explain(
             'JMHZ25_LT_G: 20022 - Podání typu R se stejným idPodani,'
@@ -49,9 +65,9 @@ final class JmhzProtocolExplainerTest extends TestCase
             '20022',
         );
 
-        self::assertNotSame([], $explained);
         self::assertSame(22, $explained[0]['control_id']);
-        self::assertNull($explained[0]['control']);
+        self::assertIsArray($explained[0]['control']);
+        self::assertSame(['10001', '10007'], $explained[0]['control']['attribute_ids']);
         self::assertStringContainsString('již existuje', $explained[0]['message']);
     }
 

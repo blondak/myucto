@@ -39,6 +39,15 @@ final readonly class JmhzSubmissionBridgeService
     private const PRODUCT_NAME = 'MyÚčto.cz';
     private const SUBJECT_TYPE = 'payroll_run';
 
+    /**
+     * Kontrola 290 je propustná, ale u hlášení po splatnosti pojistného se
+     * slevou může ČSSZ slevu neuznat a dopočítat pojistné. Zmrazit takové
+     * hlášení jde jen s výslovným potvrzením účetní; bez něj skončí tímhle
+     * kódem, podle kterého obrazovka nabídne potvrzení.
+     */
+    public const LATE_DISCOUNT_CONFIRMATION_CODE = 'jmhz_submission_late_discount_confirmation_required';
+    private const LATE_DISCOUNT_CONTROL_ID = 290;
+
     public function __construct(
         private JmhzScenario1DocumentService $documents,
         private JmhzScenario1XmlValidator $validator,
@@ -66,6 +75,7 @@ final readonly class JmhzSubmissionBridgeService
         string $environment,
         ?int $createdBy = null,
         ?int $officeId = null,
+        bool $lateDiscountConfirmed = false,
     ): array {
         if ($supplierId <= 0
             || $preparationId <= 0
@@ -129,6 +139,7 @@ final readonly class JmhzSubmissionBridgeService
             $runId,
             $periodStart,
             $keys,
+            $lateDiscountConfirmed,
         ): array {
             if (!$this->submissionRepository->lockSupplier($supplierId)) {
                 throw new \DomainException(
@@ -193,6 +204,7 @@ final readonly class JmhzSubmissionBridgeService
                         . self::describeControls($controls),
                 );
             }
+            self::assertLateDiscountConfirmed($controls, $lateDiscountConfirmed);
             $identity = self::frozenIdentity($result['xml']);
 
             $part = $this->submissions->addPart(
@@ -257,6 +269,28 @@ final readonly class JmhzSubmissionBridgeService
                 'variable_symbol' => $identity['variable_symbol'],
             ];
         });
+    }
+
+    /**
+     * Varování kontroly 290 (sleva po lhůtě) se musí potvrdit dřív, než se
+     * hlášení zmrazí. Bez potvrzení skončí zmrazení kódem
+     * {@see self::LATE_DISCOUNT_CONFIRMATION_CODE} a nevznikne nic.
+     */
+    public static function assertLateDiscountConfirmed(
+        JmhzControlEvaluationReport $controls,
+        bool $confirmed,
+    ): void {
+        if ($confirmed) {
+            return;
+        }
+        foreach ($controls->warnings() as $finding) {
+            if ($finding->controlId === self::LATE_DISCOUNT_CONTROL_ID) {
+                throw new JmhzXmlException(
+                    self::LATE_DISCOUNT_CONFIRMATION_CODE,
+                    $finding->message,
+                );
+            }
+        }
     }
 
     public static function sourceEventReference(int $preparationId): string

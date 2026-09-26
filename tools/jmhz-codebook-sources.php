@@ -49,12 +49,12 @@ return [
         ],
         'control-catalog' => [
             'target' => 'dictionary-1.4.1.6',
-            'filename' => 'Katalog kontrol MH(public)_1.4.2.9.xlsx',
-            'version' => '1.4.2.9',
+            'filename' => 'Katalog kontrol MH(public)_1.4.2.10.xlsx',
+            'version' => '1.4.2.10',
             'url' => 'https://developers.mpsv.cz/assets/documents/'
-                . 'bd8555d8-95b5-42dd-a4d8-e494fb839ba0/Katalog kontrol MH(public)_1.4.2.9.xlsx',
-            'sha256' => '94ce830c8c70ba99235cb6af663f4f14464911df2b127e2e53ff180e112dcb8f',
-            'byte_length' => 200678,
+                . 'c5905c65-8fe0-4a60-826d-e8f0237bb6c8/Katalog kontrol MH(public)_1.4.2.10.xlsx',
+            'sha256' => '38a8eaf2d399feaeb92616b5244c0133b9d4acc0c087fa095dda4d75bc83f7b2',
+            'byte_length' => 201343,
             'content_types' => [
                 'application/octet-stream',
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -140,8 +140,8 @@ return [
         'dictionary-1.4.1.6/manifest.json' => [
             'schema_version' => 'jmhz-spec-package.v1',
             'identity_key' => 'package_key',
-            'identity' => 'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.9_manifest-v1',
-            'manifest_sha256' => '3d8b45317198db8d21d1eda6aed304ad70bdf8448bc4a118d7092c7bd5a05fe3',
+            'identity' => 'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.10_manifest-v1',
+            'manifest_sha256' => 'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d',
             'counts' => [
                 'attributes' => 442,
                 'monthly_attributes' => 234,
@@ -164,7 +164,7 @@ return [
             'schema_version' => 'jmhz-external-codebook-overlay.v1',
             'identity_key' => 'overlay_key',
             'identity' => 'jmhz-external-codebooks-cisob-2026_czemalfa-2026-08-13-v1',
-            'manifest_sha256' => '5e0806c21b9c0b94a70e21ca6b01a18997042ea169f2e37c0e030268d10c3e12',
+            'manifest_sha256' => '9135eb3396c7ee35268de74b7c3c0b0e330f44e8c918e3fd2f1540d3bff45f13',
             'counts' => [
                 'codebooks' => 2,
                 'municipalities' => 6254,
@@ -172,13 +172,13 @@ return [
                 'entries' => 6504,
             ],
             'external_reference_codebooks' => [],
-            'base_manifest_sha256' => '3d8b45317198db8d21d1eda6aed304ad70bdf8448bc4a118d7092c7bd5a05fe3',
+            'base_manifest_sha256' => 'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d',
         ],
         'external-codebooks-2026-08-31/manifest.json' => [
             'schema_version' => 'jmhz-external-codebook-overlay.v1',
             'identity_key' => 'overlay_key',
             'identity' => 'jmhz-external-codebooks-cisob-511-2025-through-2026-08-31_czemalfa-2026-08-13-v1',
-            'manifest_sha256' => '3b721a584603c7c8bfae34956abf47841ef2732bbf1cf8b7e74f2d0c3099a5eb',
+            'manifest_sha256' => 'ccacac5e10f7059349c62ee680e70dfa3f96b4a1251661ba2fb6166cd537032c',
             'counts' => [
                 'codebooks' => 2,
                 'municipalities' => 6254,
@@ -186,13 +186,13 @@ return [
                 'entries' => 6504,
             ],
             'external_reference_codebooks' => [],
-            'base_manifest_sha256' => '3d8b45317198db8d21d1eda6aed304ad70bdf8448bc4a118d7092c7bd5a05fe3',
+            'base_manifest_sha256' => 'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d',
         ],
         'external-codebooks-2026-09-01/manifest.json' => [
             'schema_version' => 'jmhz-external-codebook-overlay.v1',
             'identity_key' => 'overlay_key',
             'identity' => 'jmhz-external-codebooks-cisob-145-2026_czemalfa-2026-08-26-v1',
-            'manifest_sha256' => '8eec649bd98bc35cc866b8e547efb99a9f96407c3e1a9cb245ee865b635c8853',
+            'manifest_sha256' => '66b2481ef5724006e8f64541330d541cd9acec42e914077ed722154c10e220bf',
             'counts' => [
                 'codebooks' => 2,
                 'municipalities' => 6254,
@@ -200,7 +200,7 @@ return [
                 'entries' => 6504,
             ],
             'external_reference_codebooks' => [],
-            'base_manifest_sha256' => '3d8b45317198db8d21d1eda6aed304ad70bdf8448bc4a118d7092c7bd5a05fe3',
+            'base_manifest_sha256' => 'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d',
         ],
     ],
 ];

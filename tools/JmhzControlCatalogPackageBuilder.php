@@ -12,11 +12,11 @@ require dirname(__DIR__) . '/api/vendor/autoload.php';
 final class JmhzControlCatalogPackageBuilder
 {
     private const SOURCE_SHA256 =
-        '94ce830c8c70ba99235cb6af663f4f14464911df2b127e2e53ff180e112dcb8f';
+        '38a8eaf2d399feaeb92616b5244c0133b9d4acc0c087fa095dda4d75bc83f7b2';
     private const SPEC_PACKAGE_KEY =
-        'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.9_manifest-v1';
+        'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.10_manifest-v1';
     private const SPEC_MANIFEST_SHA256 =
-        '3d8b45317198db8d21d1eda6aed304ad70bdf8448bc4a118d7092c7bd5a05fe3';
+        'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d';
 
     public function build(string $sourcePath, string $outputPath): void
     {
@@ -42,8 +42,8 @@ final class JmhzControlCatalogPackageBuilder
         $parameterValues = array_merge(...array_column($parameters, 'values'));
         $payload = [
             'schema_version' => 'jmhz-control-source-catalog.v4',
-            'catalog_key' => 'jmhz-controls-1.4.2.9-source-v4',
-            'version' => '1.4.2.9',
+            'catalog_key' => 'jmhz-controls-1.4.2.10-source-v4',
+            'version' => '1.4.2.10',
             'spec_package_key' => self::SPEC_PACKAGE_KEY,
             'spec_manifest_sha256' => self::SPEC_MANIFEST_SHA256,
             'source' => [

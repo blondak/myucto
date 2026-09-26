@@ -16,9 +16,9 @@ final class JmhzControlCatalogBundleTest extends TestCase
         $counts = $manifest['payload']['counts'];
 
         self::assertSame(JmhzControlSourceCatalog::MANIFEST_SHA256, $manifest['manifest_sha256']);
-        self::assertSame('1.4.2.9', $manifest['payload']['version']);
-        self::assertSame(199, $counts['controls']);
-        self::assertSame(825, $counts['attribute_refs']);
+        self::assertSame('1.4.2.10', $manifest['payload']['version']);
+        self::assertSame(200, $counts['controls']);
+        self::assertSame(827, $counts['attribute_refs']);
         self::assertSame(219, $counts['unique_attributes']);
         self::assertSame(1, $counts['symbolic_attribute_refs']);
         self::assertSame(1, $counts['source_anomalies']);
@@ -26,7 +26,7 @@ final class JmhzControlCatalogBundleTest extends TestCase
         self::assertSame(30, $counts['parameter_control_refs']);
         self::assertSame(10, $counts['missing_parameter_control_refs']);
         self::assertSame(50, $counts['parameter_values']);
-        self::assertSame(177, $counts['blocking_remote_controls']);
+        self::assertSame(178, $counts['blocking_remote_controls']);
         self::assertSame(18, $counts['passable_remote_controls']);
         self::assertSame(4, $counts['unavailable_remote_controls']);
     }
@@ -81,6 +81,21 @@ final class JmhzControlCatalogBundleTest extends TestCase
         self::assertStringContainsString('rozhodná období od 04/2026 dál', $definitions[164]->detail);
         self::assertSame(['10032', '10006', '10010', '10011'], $definitions[290]->attributeIds);
         self::assertStringContainsString('jehož pojistná část byla akceptována', $definitions[290]->detail);
+        // 1.4.2.10: kontrola platí pro jakékoli podání po lhůtě, ne jen opravné.
+        self::assertStringContainsString('v zákonné i po zákonné lhůtě', $definitions[290]->detail);
+        self::assertStringNotContainsString('opravného podání', $definitions[290]->detail);
+        self::assertSame('passable', $definitions[290]->remotePassability->value);
+    }
+
+    public function testControl22DuplicateSubmissionGuidIsPinned(): void
+    {
+        $definition = JmhzControlSourceCatalog::load()->definition(22);
+
+        self::assertSame(['10001', '10007'], $definition->attributeIds);
+        self::assertSame('dis', $definition->remoteSystem->value);
+        self::assertSame('blocking', $definition->remotePassability->value);
+        self::assertSame(20022, $definition->id->disErrorCode());
+        self::assertStringContainsString('Shodné podání typu řádné', $definition->detail);
     }
 
     public function testOfficialControl333AnomalyIsRecordedWithoutInventingAResolution(): void
@@ -94,7 +109,7 @@ final class JmhzControlCatalogBundleTest extends TestCase
             'official_detail_attribute_mismatch',
             $row['source_anomaly']['code'],
         );
-        self::assertSame(['B188', 'C188', 'L188', 'M188'], $row['source_anomaly']['source_cells']);
+        self::assertSame(['B189', 'C189', 'L189', 'M189'], $row['source_anomaly']['source_cells']);
         self::assertSame(
             ['10006', '10032', '10010', '10011'],
             $row['source_anomaly']['declared_attribute_ids'],

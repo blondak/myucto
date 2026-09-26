@@ -1,11 +1,11 @@
 {
-    "manifest_sha256": "5e0806c21b9c0b94a70e21ca6b01a18997042ea169f2e37c0e030268d10c3e12",
+    "manifest_sha256": "9135eb3396c7ee35268de74b7c3c0b0e330f44e8c918e3fd2f1540d3bff45f13",
     "payload": {
         "schema_version": "jmhz-external-codebook-overlay.v1",
         "overlay_key": "jmhz-external-codebooks-cisob-2026_czemalfa-2026-08-13-v1",
         "base_spec": {
-            "package_key": "jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.9_manifest-v1",
-            "manifest_sha256": "3d8b45317198db8d21d1eda6aed304ad70bdf8448bc4a118d7092c7bd5a05fe3"
+            "package_key": "jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.10_manifest-v1",
+            "manifest_sha256": "de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d"
         },
         "snapshot_date": "2026-08-13",
         "parser_version": 1,

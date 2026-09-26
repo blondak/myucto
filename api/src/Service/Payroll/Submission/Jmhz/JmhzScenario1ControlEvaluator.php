@@ -11,7 +11,7 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentit
  * Vykonávací implementace kontrol katalogu ČSSZ nad prvním profilem měsíčního
  * hlášení (`scenario_1`, `form:bezPriznaku`, řádné podání).
  *
- * Katalog 1.4.2.9 popisuje 199 kontrol textem, ne strojově. Tahle třída je
+ * Katalog 1.4.2.10 popisuje 200 kontrol textem, ne strojově. Tahle třída je
  * jediné místo, kde se text překládá do kódu, a drží tři pravidla:
  *
  * 1. **Sazby se nezadrátovávají.** Každý koeficient se bere z parametrických
@@ -46,7 +46,15 @@ final class JmhzScenario1ControlEvaluator
      * v pokrytí — rozhodne o nich až protokol o zpracování.
      */
     private const NOT_EVALUABLE = [
-        7 => 'Úhrn se skládá z vyměřovacích základů zaměstnance (10477, 10478)'
+        // Nová DIS kontrola katalogu 1.4.2.10. Zda už idPodani ČSSZ zná s jiným
+        // variabilním symbolem nebo obdobím, případně zda shodné R nebo S už
+        // přijala, ví jen evidence ČSSZ. Lokálně za ni drží pořádek
+        // JmhzSubmissionGuidPolicy a jedno řádné podání na povinnost; jako
+        // nepokrytá by jinak zablokovala každé podání.
+        22 => 'Jedinečnost GUID podání vůči variabilnímu symbolu, období a už'
+            . ' přijatému řádnému či stornovacímu podání rozhoduje evidence'
+            . ' ČSSZ, ne obsah jednoho XML.',
+        7 =>'Úhrn se skládá z vyměřovacích základů zaměstnance (10477, 10478)'
             . ' rozlišených druhem činnosti (10239), které první profil nevykazuje.',
         // Okruh, ve kterém sleva podle § 7a náleží, se v hotovém XML nedá
         // přečíst: rozhoduje o něm druh činnosti (10239) a bližší určení
@@ -94,8 +102,6 @@ final class JmhzScenario1ControlEvaluator
         262 => 'Existenci ID PPV ověřuje pouze registr ČSSZ.',
         263 => 'Existenci IK MPSV ověřuje pouze registr ČSSZ.',
         264 => 'Existenci dvojice IK MPSV a ID PPV ověřuje pouze registr ČSSZ.',
-        290 => 'Porovnání se slevou z posledního včas podaného hlášení vyžaduje'
-            . ' historii akceptovaných pojistných částí, kterou drží ČSSZ.',
         291 => 'Platnost oznámeného záměru uplatňovat slevu (OZUSPOJ) eviduje ČSSZ.',
         323 => 'Detekce duplicitního přijetí se opírá o identifikátor zprávy'
             . ' a čas přijetí, které přiděluje až ČSSZ.',
@@ -112,7 +118,7 @@ final class JmhzScenario1ControlEvaluator
             . ' který první profil nevykazuje.',
         326 => 'Jedinečnost řádného podání za období se rozhoduje nad evidencí'
             . ' podání, ne nad obsahem jednoho XML.',
-        333 => 'Oficiální katalog 1.4.2.9 má u kontroly časového omezení slevy'
+        333 => 'Oficiální katalog 1.4.2.10 má u kontroly časového omezení slevy'
             . ' rozporné odkazy na atributy. Věcný výsledek navíc závisí na datu'
             . ' přijetí podání, které přiděluje až ČSSZ; lokálně se proto'
             . ' neodhaduje a rozhodne protokol ČSSZ.',
@@ -213,7 +219,7 @@ final class JmhzScenario1ControlEvaluator
             204, 207, 208, 209, 213, 215,
             191, 192, 193, 211, 216, 227, 229, 232, 233, 235,
             236, 237, 240, 244, 248, 251,
-            253, 255, 260, 265, 267, 269, 270, 271, 272, 273, 275, 282, 283, 284, 286,
+            253, 255, 260, 265, 267, 269, 270, 271, 272, 273, 275, 282, 283, 284, 286, 290,
             296, 297, 298, 299, 300, 301, 303, 304, 306, 307, 309, 310, 315, 328, 329, 330, 332,
             335, 341, 342, 343, 354, 355,
         ];
@@ -475,6 +481,7 @@ final class JmhzScenario1ControlEvaluator
             72 => $this->incomeNotNegative($projection),
             74 => $this->taxBonusFloor($projection),
             90 => $this->periodAlreadyClosed($projection, $context),
+            290 => $this->lateSubmissionDiscount($projection, $context),
             94 => $this->nonNegativeScaled($projection, '10259'),
             95 => $this->nonNegativeScaled($projection, '10260'),
             96 => $this->nonNegativeScaled($projection, '10261'),
@@ -1290,6 +1297,53 @@ final class JmhzScenario1ControlEvaluator
         }
 
         return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+    }
+
+    /**
+     * Kontrola 290 v katalogu 1.4.2.10: u podání po zákonné lhůtě nesmí sleva
+     * na pojistném zaměstnavatele (10032) převýšit slevu z posledního hlášení
+     * s akceptovanou pojistnou částí, podaného v lhůtě i po ní.
+     *
+     * Poslední akceptované hlášení zná jen ČSSZ, takže samotné porovnání
+     * lokálně udělat nejde. Víme ale, KDY kontrola dopadá: hlášení odchází po
+     * splatnosti pojistného a uplatňuje slevu. Kontrola je propustná, proto se
+     * v té situaci hlásí jako varování, které účetní před zmrazením vědomě
+     * potvrdí ({@see JmhzSubmissionBridgeService::LATE_DISCOUNT_CONFIRMATION_CODE}).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function lateSubmissionDiscount(
+        JmhzAttributeProjection $projection,
+        JmhzControlContext $context,
+    ): array {
+        $discount = $projection->pvpoj()->integer('10032');
+        if ($discount === null || $discount <= 0 || $this->period($projection) === null) {
+            return [JmhzControlVerdict::notApplicable(
+                JmhzAttributeProjection::PART_PVPOJ,
+                'Hlášení slevu na pojistném zaměstnavatele neuplatňuje.',
+            )];
+        }
+        try {
+            $dueOn = $this->deadlines->forPeriod($this->periodStart($projection))->dueOn;
+        } catch (\InvalidArgumentException) {
+            return [JmhzControlVerdict::notApplicable(
+                JmhzAttributeProjection::PART_PVPOJ,
+                'Období je mimo účinnost jednotného měsíčního hlášení.',
+            )];
+        }
+        if (strcmp($context->evaluatedOn, $dueOn) <= 0) {
+            return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_PVPOJ)];
+        }
+
+        return [JmhzControlVerdict::failed(
+            JmhzAttributeProjection::PART_PVPOJ,
+            null,
+            "Hlášení se podává po lhůtě ({$dueOn}) a uplatňuje slevu na pojistném"
+                . " zaměstnavatele {$discount} Kč. ČSSZ ji porovná se slevou"
+                . ' v posledním hlášení s akceptovanou pojistnou částí; vyšší'
+                . ' slevu po splatnosti pojistného uplatnit nelze. Ověřte, že'
+                . ' sleva poslední akceptovanou nepřevyšuje, a zmrazení potvrďte.',
+        )];
     }
 
     /** @return list<JmhzControlVerdict> */
@@ -3728,7 +3782,7 @@ final class JmhzScenario1ControlEvaluator
 
     /**
      * Typy formuláře součásti podle druhu činnosti (10239) tak, jak je
-     * vyjmenovává kontrola 343 katalogu 1.4.2.9 (body 1, 2, 3, 5, 6 a 7).
+     * vyjmenovává kontrola 343 katalogu 1.4.2.10 (body 1, 2, 3, 5, 6 a 7).
      * Klíčem je lokální jméno elementu, který `xs:choice` součásti zvolil
      * (`formBezPriznaku.xsd` → `bezPriznaku`).
      *

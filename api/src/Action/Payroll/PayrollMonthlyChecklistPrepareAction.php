@@ -9,6 +9,8 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\PayrollMonthlyAgendaPreparationService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -93,7 +95,14 @@ final class PayrollMonthlyChecklistPrepareAction
                 $agendaCode,
                 $insurerCode,
                 $this->userId($request),
+                ($body['confirm_late_discount'] ?? false) === true,
             );
+        } catch (JmhzXmlException $exception) {
+            $code = $exception->validationCode === JmhzSubmissionBridgeService::LATE_DISCOUNT_CONFIRMATION_CODE
+                ? $exception->validationCode
+                : 'conflict';
+
+            return Json::error($response, $code, $exception->getMessage(), 409);
         } catch (\DomainException $exception) {
             return Json::error($response, 'conflict', $exception->getMessage(), 409);
         } catch (\InvalidArgumentException $exception) {
