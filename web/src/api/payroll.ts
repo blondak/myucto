@@ -5790,12 +5790,25 @@ export interface PayrollTerminationRecord {
   severance_multiple_override: number | null
   severance_override_reason: string | null
   working_time_account_applies: boolean
+  /**
+   * Den, kdy povinný nastoupil k jinému plátci nebo mu vznikl jiný příjem
+   * (§ 299 odst. 4 věta druhá o. s. ř.). Násobky odstupného za měsíce od
+   * tohoto dne se počítají spolu s tím příjmem.
+   */
+  other_income_from: string | null
+  /** Nezabavitelnou částku za tyto měsíce započítává nový plátce. */
+  other_payer_applies_protected_amount: boolean
+  work_injury_compensation_payer: PayrollWorkInjuryCompensationPayer | null
+  work_injury_compensation_paid_on: string | null
   death_tax_assessment: string | null
   death_tax_assessed_by: number | null
   death_tax_assessed_at: string | null
   row_version: number
   updated_at: string
 }
+
+/** Kdo vyplácí jednorázovou náhradu podle § 271ca ZP. */
+export type PayrollWorkInjuryCompensationPayer = 'employer' | 'insurer'
 
 export interface PayrollTerminationInputRef {
   id: number
@@ -5868,7 +5881,8 @@ export interface PayrollTerminationOverview {
     input: PayrollTerminationInputRef | null
   }
   severance: {
-    state: 'not_applicable' | 'reason_missing' | 'blocked' | 'ready' | 'created'
+    /** `insurer` = jednorázovou náhradu § 271ca ZP vyplácí pojišťovna, vstup nevzniká. */
+    state: 'not_applicable' | 'reason_missing' | 'blocked' | 'ready' | 'created' | 'insurer'
     kind: 'severance' | 'work_injury_compensation' | null
     statutory_multiple: number
     multiple: number
@@ -5877,6 +5891,12 @@ export interface PayrollTerminationOverview {
     counted_previous: Array<{ start: string, end: string }>
     monthly_average_minor: number | null
     amount_minor: number
+    /** Počet násobků průměru, ze kterých se sráží zvlášť (§ 299 odst. 4 o. s. ř.). */
+    garnishment_multiple: number | null
+    /** Poslední den doby poskytování odstupného. */
+    garnishment_period_to: string | null
+    work_injury_payer: PayrollWorkInjuryCompensationPayer | null
+    work_injury_paid_on: string | null
     input: PayrollTerminationInputRef | null
     override_reason?: string | null
   }
@@ -5903,6 +5923,8 @@ export interface PayrollTerminationPayload {
   severance_multiple_override: number | null
   severance_override_reason: string | null
   working_time_account_applies: boolean
+  other_income_from?: string | null
+  other_payer_applies_protected_amount?: boolean
   row_version?: number
 }
 
@@ -8577,9 +8599,18 @@ export const payrollApi = {
     api.post<PayrollTerminationOverview>(
       `/payroll/employments/${employmentId}/termination/leave-settlement/reverse`,
     ).then(response => response.data),
-  createTerminationSeverance: (employmentId: number) =>
+  createTerminationSeverance: (employmentId: number, garnishmentMultiple?: number | null) =>
     api.post<PayrollTerminationOverview>(
       `/payroll/employments/${employmentId}/termination/severance-input`,
+      garnishmentMultiple ? { garnishment_multiple: garnishmentMultiple } : {},
+    ).then(response => response.data),
+  createTerminationWorkInjuryCompensation: (
+    employmentId: number,
+    payload: { payer: PayrollWorkInjuryCompensationPayer, paid_on: string },
+  ) =>
+    api.post<PayrollTerminationOverview>(
+      `/payroll/employments/${employmentId}/termination/work-injury-compensation`,
+      payload,
     ).then(response => response.data),
   addTerminationSurvivor: (employmentId: number, payload: PayrollTerminationSurvivorPayload) =>
     api.post<PayrollTerminationOverview>(

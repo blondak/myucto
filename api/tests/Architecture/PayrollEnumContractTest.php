@@ -481,6 +481,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Net\DeductionAgreementCommand',
         'payrollDeductions.ts::DeductionAgreementKind' => 'db:payroll_deduction_agreements.deduction_kind',
         'payrollDeductions.ts::DeductionLegalBasis' => 'db:payroll_deduction_agreements.legal_basis',
+        'payroll.ts::PayrollWorkInjuryCompensationPayer'
+            => 'db:payroll_employment_terminations.work_injury_compensation_payer',
         'payroll.ts::PayrollEmploymentCertificateDeductionSourceKind'
             => 'const:MyInvoice\Service\Payroll\Document\EmploymentCertificateDeduction::SOURCE_KINDS',
 
@@ -735,6 +737,8 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.deductions.commands'    => 'enum:MyInvoice\Service\Payroll\Net\DeductionAgreementCommand',
         'payroll.deductions.kinds'       => 'db:payroll_deduction_agreements.deduction_kind',
         'payroll.deductions.legal_basis' => 'db:payroll_deduction_agreements.legal_basis',
+        'payroll.people.termination.work_injury.payers'
+            => 'db:payroll_employment_terminations.work_injury_compensation_payer',
         'payroll.people.exit_documents.source_kind'
             => 'const:MyInvoice\Service\Payroll\Document\EmploymentCertificateDeduction::SOURCE_KINDS',
         'payroll.deductions.change_kind' => 'db:payroll_deduction_agreement_versions.change_kind',
