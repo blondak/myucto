@@ -568,6 +568,11 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const CLIENT_ONLY_UNIONS = [
+        'payrollAbsences.ts::LeaveAbsenceDecision' =>
+            'Parametr hromadného výpočtu nároku na dovolenou (`absence_decisions`: druh '
+            . 'absence => include/exclude), ne uložený stav. Platí jen pro dávku, zapisuje se '
+            . 'do zdůvodnění nároku; server ho čte v PayrollAbsenceAction a '
+            . 'AutomaticLeaveEntitlementService::calculateBatch().',
         'payroll.ts::PayrollRegistrationMode' =>
             'Parametr požadavku přípravy registrace (`registration_mode`), ne '
             . 'uložený stav: `auto` = rozhodne resolver, `full` = plná registrace '
