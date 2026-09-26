@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Repository\Payroll\JmhzDeferralRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -77,6 +78,7 @@ final readonly class JmhzSubmissionBridgeService
         private ClockInterface $clock,
         private PayrollObligationService $obligations,
         private JmhzDeadlinePolicy $deadlines,
+        private JmhzDeferralRepository $deferrals,
         /**
          * Historie podání předchozím programem. Volitelná jako ostatní rozšíření
          * platformy: testy mostu ji stavět nemusí a bez ní se nic nekontroluje.
@@ -162,6 +164,26 @@ final readonly class JmhzSubmissionBridgeService
             );
         }
         $document = $resolution->requireResolvedDocument();
+        /*
+         * Nad 1500 formulářů se hlášení dělí do dílčích balíků. Test hlášení
+         * je sestaví a ověří (JmhzScenario1XmlValidator::dryRunPackages),
+         * zmrazení k odeslání ale zatím staví jen jediný artefakt a jediný
+         * pokus o odeslání. Radši to říct hned, než zmrazit podání, které by
+         * transport odeslal jen z části.
+         */
+        $formCount = $document->payload['header']['individual_form_count'] ?? 0;
+        if (is_int($formCount) && $formCount > JmhzScenario1XmlSerializer::PACKAGE_FORM_LIMIT) {
+            throw new JmhzXmlException(
+                'jmhz_submission_split_unsupported',
+                sprintf(
+                    'Hlášení má %d formulářů a musí se rozdělit do %d dílčích balíků. Test hlášení'
+                        . ' balíky sestaví a ověří; zmrazení a odeslání dílčích balíků aplikace zatím'
+                        . ' neumí, podejte je ručně přes ePortál ČSSZ.',
+                    $formCount,
+                    (int) ceil($formCount / JmhzScenario1XmlSerializer::PACKAGE_FORM_LIMIT),
+                ),
+            );
+        }
         $snapshotHash = self::snapshotHash($document);
         $runId = self::runId($document);
         $periodStart = self::periodStart($document);
@@ -314,6 +336,20 @@ final readonly class JmhzSubmissionBridgeService
                 $validated['row_version'],
                 'ready',
             );
+            // Odložené vztahy se k řádnému hlášení váží v TÉŽE transakci jako
+            // jeho zmrazení: formulář, který hlášení vynechalo, musí mít dohledatelnou
+            // povinnost doplnit ho opravou. Bez vazby by odložení vypadalo jako
+            // vyřízené, jakmile se revize změní.
+            if ($resolution->exclusion?->purpose === JmhzFormExclusion::PURPOSE_DEFERRAL) {
+                foreach ($resolution->exclusion->deferralIds as $deferralId) {
+                    $this->deferrals->insertBinding(
+                        $supplierId,
+                        $deferralId,
+                        $environment,
+                        $submission['id'],
+                    );
+                }
+            }
 
             return [
                 'submission_id' => $submission['id'],

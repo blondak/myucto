@@ -908,6 +908,59 @@ mate: typicky první nepovedený pokus u podání, které nakonec odešlo jinou
 cestou. Aplikace proto smazat nedovolí pokus, ke kterému úřad vydal protokol
 nebo dodejku, ani pokus, jehož identifikátorem je podání u úřadu vedené.
 
+### 85.11.4 Test měsíčního hlášení a nálezy
+
+Tlačítko **Otestovat** v přehledu JMHZ zmrazí přípravu nad schválenou revizí
+běhu, sestaví z ní XML a prožene ho schématem ČSSZ i katalogem kontrol. Nic
+neodesílá. Když hlášení sestavit nejde, vypíše nálezy seskupené podle příčiny.
+U každého nálezu je:
+
+- **co je špatně** (popisek v jazyce aplikace),
+- **u koho** (jména dotčených zaměstnanců nebo název účtárny),
+- **kde se to opravuje** (krok nápravy a tlačítko, které otevře přesné místo:
+  kartu pracovního vztahu s konkrétním polem, absence, průměrný výdělek,
+  pracovní dobu, mzdový běh, mzdové složky, potvrzení právních skutečností,
+  roční údaje zaměstnavatele v Nastavení mezd na záložce Podání nebo mzdové
+  účtárny).
+
+Nálezy, které vzniknou až při sestavení formuláře (například přesčas nad
+odpracovanými hodinami, bonus bez podepsaného prohlášení nebo rozpad mzdy bez
+mzdy), se hlásí u konkrétního pracovního vztahu stejně jako ostatní. Technická
+vada přípravy (změněné podklady, nesouhlasící otisk) nabídne tlačítko **Spustit
+test znovu**. Případ, který aplikace záměrně nezpracovává automaticky, řekne,
+že se podává ručně přes ePortál ČSSZ.
+
+### 85.11.5 Odložení vztahu z řádného hlášení
+
+Jeden zaměstnanec s neúplnými daty nesmí zablokovat hlášení za ostatní. U
+nálezu na pracovním vztahu nebo osobě nabídne test tlačítko **Odložit
+z hlášení**. Po zadání důvodu (zapíše se do auditní stopy) se test spustí
+znovu a řádné hlášení se sestaví bez formuláře odloženého vztahu.
+
+Co odložení znamená:
+
+- **Je to nesplněná povinnost.** Formulář musí ČSSZ dostat stejně jako ostatní;
+  ČSSZ hlášení přijme částečně a k doplnění vyzve. Lhůta řádného hlášení
+  (20. den následujícího měsíce) platí i pro odložený vztah.
+- **Pojistná část a sleva zůstávají za všechny.** Přehled o výši pojistného
+  i sleva na pojistném se uplatní za všechny zaměstnance včetně odloženého,
+  protože po splatnosti už slevu uplatnit nelze. Kontroly, které porovnávají
+  pojistnou část se součtem podaných formulářů, proto hlásí varování; test je
+  označí jako **očekávané** a hlášení projde.
+- **Souhrn daní** zahrne i odloženou osobu, pokud má zálohu na daň spočtenou.
+- **Souběh:** má-li zaměstnanec v téže registraci víc vztahů, odloží se všechny,
+  protože pojistné osoby a souhrnná data nese jediný formulář.
+- **Firemní nález odložit nejde.** Chybějící variabilní symbol účtárny, pojistná
+  část, souhrn nebo mzdová složka se odložením jednoho vztahu nevyřeší.
+
+Odložené vztahy běhu jsou vidět v seznamu **Odložené vztahy** pod testem se
+stavem a lhůtou. Dokud řádné hlášení nezmrazíte, můžete odložení zrušit (opět
+s důvodem). Po přijetí řádného hlášení doplňte data vztahu, případně opravte
+a znovu schvalte mzdový běh, a zvolte **Doplnit opravným hlášením**. Aplikace
+připraví hlášení nad aktuální revizí a zmrazí opravné hlášení, které formulář
+odloženého vztahu doplní. Odešlete ho ve **Stavu odeslání** jako každé jiné.
+Když data vztahu ještě nejsou úplná, řekne přesně, co chybí.
+
 ## 85.12 Storno a obsahová oprava JMHZ
 
 Za jedno rozhodné období existuje právě jedno **řádné** hlášení. Druhý pokus
@@ -917,10 +970,14 @@ stejně zamítla jako duplicitu. Výjimkou je zamítnuté nebo stornované řád
 hlášení: to se za dané období nahrazuje novým řádným.
 
 Storno JMHZ nevzniká přepsáním původního XML. V **Stavu odeslání** otevřete
-způsobilé předchozí podání a zvolte řízenou akci. **Připravit storno** zruší
-celé hlášení za období. **Opravit hodnoty hlášení** pracuje s aktuální úplnou
-přípravou JMHZ po opravě mzdových údajů a vytvoří skutečné obsahové opravné
-hlášení. Aplikace vytvoří nový neměnný artefakt s vazbou na původní podání.
+způsobilé předchozí podání a zvolte řízenou akci. **Připravit storno** nabídne
+dva rozsahy: **Celé podání za období** zruší celé hlášení, **Jen vybrané
+pracovní vztahy** připraví opravné hlášení se stornujícími formuláři jen
+u zaměstnanců, které vyberete podle jména (ostatní formuláře zůstanou u ČSSZ
+platné; storno vybraných vztahů jde jen u úplně přijatého hlášení). Obojí se
+nejdřív potvrzuje. **Opravit hodnoty hlášení** pracuje s aktuální přípravou
+JMHZ po opravě mzdových údajů a vytvoří skutečné obsahové opravné hlášení.
+Aplikace vytvoří nový neměnný artefakt s vazbou na původní podání.
 
 Příprava storna sama nic neodešle. Nový artefakt se ve **Stavu odeslání** ukáže
 v oddílu **Připravená podání čekají na odeslání** se svým přesným číslem,
@@ -941,8 +998,8 @@ nepodala tutéž datovou větu dvakrát. Pokračujte odkazem **Otevřít odchoz�
 zprávy**, kde se dokončí přihlášení, odeslání a evidence doručenky.
 
 Ve **Stavu odeslání** nemusíte opisovat GUID ani interní číslo přípravy.
-Aplikace nabídne jen úplné aktuální přípravy pro stejnou firmu, prostředí,
-období a mzdový běh; jedinou možnost vybere automaticky, z více možností vyberete
+Aplikace nabídne aktuální přípravy pro stejnou firmu, prostředí, období
+a mzdový běh (i takové, kde má nález jiný zaměstnanec); jedinou možnost vybere automaticky, z více možností vyberete
 ve vyhledávatelné nabídce. Potom spojí neměnné odeslané XML s výsledky
 jednotlivých formulářů z přijatých podepsaných protokolů ČSSZ. Neověřený,
 neúplný nebo rozporný protokol opravu zablokuje. Zaměstnance vybíráte primárně
@@ -954,7 +1011,13 @@ vytvoří novou identitu formuláře.
 
 Vyberete jen vztahy, jejichž obsah chcete změnit, ale souhrn a PVPOJ se při
 dopadu kontrolují proti úplnému aktuálnímu setu všech osob firmy. Tím se
-pojistný přehled nikdy nepřepočítá jen z vybrané podmnožiny. Příprava opravy
+pojistný přehled nikdy nepřepočítá jen z vybrané podmnožiny. Oprava posuzuje
+jen vybrané vztahy, pojistnou část a souhrn: nález u jiného zaměstnance ji
+nezastaví, takový vztah jen nejde vybrat a aplikace ho vypíše zvlášť. Opravu
+zastaví jen nález na vybraném vztahu nebo v pojistné části a souhrnu. Hlavička
+opravy nese variabilní symbol ze zmrazeného řádného hlášení, takže se oprava
+k řádnému hlášení spáruje i poté, co se variabilní symbol účtárny změnil.
+Příprava za jiné období se odmítne s uvedením obou období. Příprava opravy
 zůstává oddělená od odeslání: nejprve potvrdíte zmrazení přesných bajtů XML a
 teprve potom podání odešlete v oddílu připravených podání. Opakovaná stejná
 akce vrátí tentýž zmrazený artefakt. Testovací a produkční prostředí mají

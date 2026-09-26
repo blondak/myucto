@@ -50,6 +50,49 @@ final readonly class JmhzScenario1XmlValidator
         ];
     }
 
+    /**
+     * Řádné hlášení jako dílčí balíky. Do 1500 formulářů jediný balík, bajtově
+     * shodný s {@see self::dryRun()}; nad 1500 každý balík zvlášť ověřený XSD.
+     *
+     * @return array{packages:list<array{ordinal:int,xml:string,sha256:string}>,schema:array<string,string>}
+     */
+    public function dryRunPackages(
+        JmhzScenario1Resolution $resolution,
+        JmhzSubmissionEnvelope $envelope,
+    ): array {
+        if ($resolution->status() !== 'resolved' || $resolution->blockers !== []) {
+            throw new JmhzXmlException(
+                'jmhz_xml_resolution_blocked',
+                'Blokovaný dokument nelze serializovat do podání.',
+            );
+        }
+        $document = $resolution->requireResolvedDocument();
+        $packages = $this->serializer->serializePackages($document, $envelope);
+        $repeated = $this->serializer->serializePackages($document, $envelope);
+        $schema = $this->schemas->entryPoint();
+        $result = [];
+        foreach ($packages as $index => $xml) {
+            if (!hash_equals(hash('sha256', $repeated[$index] ?? ''), hash('sha256', $xml))) {
+                throw new JmhzXmlException(
+                    'jmhz_xml_not_byte_stable',
+                    'Serializace téhož dokumentu nevrátila shodné bajty.',
+                );
+            }
+            $this->assertSchemaValid($xml, $schema['path']);
+            $result[] = ['ordinal' => $index + 1, 'xml' => $xml, 'sha256' => hash('sha256', $xml)];
+        }
+
+        return [
+            'packages' => $result,
+            'schema' => [
+                'package_key' => $schema['package_key'],
+                'data_version' => $schema['data_version'],
+                'bundle_sha256' => $schema['bundle_sha256'],
+                'document_sha256' => $document->sha256(),
+            ],
+        ];
+    }
+
     /** @return array{xml:string,sha256:string,schema:array<string,string>} */
     public function dryRunCorrection(
         JmhzScenario1Resolution $resolution,

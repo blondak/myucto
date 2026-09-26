@@ -144,6 +144,36 @@ final readonly class JmhzSubmissionEnvelope
         );
     }
 
+    /**
+     * Tatáž obálka pro jiný dílčí balík téhož hlášení.
+     *
+     * GUID podání i datum a čas vyplnění musí být shodné ve všech balících
+     * jednoho hlášení (pravidla dílčích podání ČSSZ); liší se jen pořadí.
+     */
+    public function forPackage(int $packageOrdinal, int $packageCount): self
+    {
+        if ($packageOrdinal < 1
+            || $packageCount < 1
+            || $packageOrdinal > $packageCount
+            || $packageCount > 999
+        ) {
+            throw new JmhzXmlException(
+                'jmhz_envelope_package_invalid',
+                'Pořadí a počet balíků dat musí být v rozsahu 1 až 999.',
+            );
+        }
+
+        return new self(
+            $this->submissionGuid,
+            $this->formGuids,
+            $this->filledAt,
+            $packageOrdinal,
+            $packageCount,
+            $this->productName,
+            $this->productVersion,
+        );
+    }
+
     public function formGuid(?int $employmentId): string
     {
         $guid = $employmentId === null

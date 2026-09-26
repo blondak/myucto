@@ -1087,6 +1087,97 @@ describe('PayrollTransportHistoryPanel', () => {
       .toContain('payroll.submissions.transport.storno.frozen 91')
   })
 
+  /*
+   * Storno jen vybraných vztahů: routa i klient existovaly, obrazovka ne.
+   * Účetní vybírá lidi podle jména, potvrzuje dopad a teprve pak vznikne
+   * opravné hlášení se stornujícími formuláři.
+   */
+  it('storno vybraných vztahů nabídne lidi podle jména a potvrzení dopadu', async () => {
+    m.jmhzCorrectableComponents.mockResolvedValue({
+      environment: 'production',
+      submission_id: 70,
+      components: [
+        { form_guid: 'AAAA0001', person_external_identifier: '1000000001', employment_external_identifier: '2000000000000000000001', employee_name: 'Jana Syntetická' },
+        { form_guid: 'AAAA0002', person_external_identifier: '1000000019', employment_external_identifier: '2000000000000000000002', employee_name: 'Petr Syntetický' },
+      ],
+    })
+    m.cancelJmhzSubmissionComponents.mockResolvedValue({
+      submission_id: 93,
+      part_id: 1,
+      artifact_id: 2,
+      status: 'ready',
+      row_version: 3,
+      environment: 'production',
+      artifact_sha256: 'd'.repeat(64),
+      created: true,
+      submission_kind: 'correction',
+      corrects_submission_id: 70,
+      submission_guid: '0195AAAA-1111-7222-8333-BBBBCCCCDDDD',
+      variable_symbol: '1234567890',
+      month: 7,
+      year: 2026,
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+    await wrapper.get('[data-test="transport-cancel-70"]').trigger('click')
+    await wrapper.get('[data-test="transport-cancel-mode-components-70"]').trigger('change')
+    await flushPromises()
+
+    expect(m.jmhzCorrectableComponents).toHaveBeenCalledWith(70, 'production')
+    const panel = wrapper.get('[data-test="transport-cancel-components-70"]')
+    expect(panel.text()).toContain('Petr Syntetický')
+    const submit = wrapper.get('[data-test="transport-cancel-components-submit-70"]')
+    expect(submit.attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-test="transport-cancel-component-2000000000000000000002"] input').setValue(true)
+    expect(wrapper.get('[data-test="transport-cancel-components-submit-70"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="transport-cancel-components-impact-70"]').setValue(true)
+    await wrapper.get('[data-test="transport-cancel-components-submit-70"]').trigger('click')
+    await flushPromises()
+
+    expect(m.cancelJmhzSubmissionComponents).toHaveBeenCalledWith(70, 'production', ['AAAA0002'])
+    expect(m.cancelJmhzSubmission).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="transport-success"]').text())
+      .toContain('payroll.jmhz_gate.cancel_components.frozen 93')
+  })
+
+  it('obsahová oprava ukáže vztahy, které teď opravit nejde', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({ status: 'completed', completed_at: '2026-08-11 10:00:00' })],
+    })
+    m.jmhzContentCorrectionCandidates.mockResolvedValue({
+      environment: 'production',
+      submission_id: 70,
+      preparation_id: 125,
+      document_sha256: 'f'.repeat(64),
+      forms: [{
+        employee_name: 'Jana Syntetická',
+        person_external_identifier: '1234567890',
+        employment_external_identifier: '987654321',
+        effective_state: 'accepted',
+        protocol_error_count: 0,
+        action: 'correct_values',
+      }],
+      blocked_forms: [{
+        code: 'jmhz_average_hourly_earning_missing',
+        entity_type: 'employment',
+        entity_id: 12,
+        attribute_ids: ['10345'],
+        reason: 'Chybí ověřený průměrný hodinový výdělek.',
+      }],
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+    await wrapper.get('[data-test="transport-correct-70"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="transport-correct-blocked"]').text())
+      .toContain('payroll.jmhz_gate.correction_blocked.title')
+  })
+
   it('obsahová oprava rozliší opravu přijatého a doplnění odmítnutého formuláře', async () => {
     const components = [{
       employee_name: 'Jana Syntetická',

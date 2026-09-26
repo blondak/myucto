@@ -210,9 +210,8 @@ final class JmhzScenario1XmlDryRunServiceTest extends TestCase
     private function validatorReturning(string $xml): JmhzScenario1XmlValidator
     {
         $validator = $this->createStub(JmhzScenario1XmlValidator::class);
-        $validator->method('dryRun')->willReturn([
-            'xml' => $xml,
-            'sha256' => hash('sha256', $xml),
+        $validator->method('dryRunPackages')->willReturn([
+            'packages' => [['ordinal' => 1, 'xml' => $xml, 'sha256' => hash('sha256', $xml)]],
             'schema' => [
                 'package_key' => 'jmhz-1.4.3.6',
                 'data_version' => '1.4.3',

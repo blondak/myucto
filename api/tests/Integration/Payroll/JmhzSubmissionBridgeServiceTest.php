@@ -8,15 +8,19 @@ use DOMDocument;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\JmhzDeferralRepository;
 use MyInvoice\Repository\Payroll\JmhzPreparationSnapshotRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlContext;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlDryRunService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormLedgerResolver;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFormExclusion;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreview;
@@ -41,6 +45,7 @@ use MyInvoice\Service\Payroll\Submission\PayrollSubmissionRetryConfirmationServi
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzRejectedSubmissionRefreezeService;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionAbandonService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
@@ -747,6 +752,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             $this->obligations,
             new MockClock('2037-12-31 11:30:00 Europe/Prague'),
             new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
+            new JmhzDeferralRepository($this->db),
         );
         $method = new \ReflectionMethod($service, 'correctionObligation');
         $method->invoke(
@@ -1391,6 +1397,300 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
     }
 
     /**
+     * Jeden blokovaný zaměstnanec nesmí zastavit hlášení za ostatní.
+     *
+     * Odložený vztah nemá v řádném hlášení formulář, ale pojistná část je
+     * dál za všechny tři zaměstnance: pojistné i sleva se musí uplatnit do
+     * splatnosti. Nesoulad pojistné části se součtem podaných formulářů hlásí
+     * jen propustné kontroly (12, 7), takže podání vznikne.
+     */
+    public function testDeferredEmploymentLeavesRegularSubmissionWithRemainingFormsAndWholePvpoj(): void
+    {
+        $payload = $this->payloadWithPeople(3);
+        unset($payload['people'][2]['employments'][0]['earnings_by_attribute_minor']['10330']);
+        $pvpoj = $this->pvpoj(employerTotal: 744, people: 3);
+
+        $full = $this->resolutionFor($pvpoj, $payload);
+        self::assertSame('blocked', $full->status());
+        self::assertSame(
+            [['jmhz_scenario1_earnings_vector_incomplete', 'employment', 103]],
+            array_map(
+                static fn (JmhzScenario1Blocker $blocker): array
+                    => [$blocker->code, $blocker->entityType, $blocker->entityId],
+                $full->blockers,
+            ),
+        );
+        self::assertTrue($full->blockers[0]->deferrable());
+
+        $partial = $this->resolutionFor(
+            $pvpoj,
+            $payload,
+            exclusion: JmhzFormExclusion::deferral([103], []),
+        );
+        self::assertSame('resolved', $partial->status());
+        $document = $partial->requireResolvedDocument();
+        self::assertSame([11, 12], array_column($document->payload['people'], 'employee_id'));
+        self::assertSame(2, $document->payload['header']['individual_form_count']);
+        self::assertSame(
+            ['jmhz_scenario1_earnings_vector_incomplete'],
+            array_map(
+                static fn (JmhzScenario1Blocker $blocker): string => $blocker->code,
+                $partial->excludedBlockers,
+            ),
+        );
+        // Souhrn daní zahrne i odloženou osobu - její záloha je spočtená.
+        self::assertSame(
+            ['advance_tax_after_credits' => 450, 'tax_bonus' => 0],
+            $document->payload['employer']['summary_totals'],
+        );
+        self::assertSame(
+            [
+                'purpose' => 'deferral',
+                'employment_ids' => [103],
+                'employee_ids' => [13],
+                'deferral_ids' => [],
+                'summary_excluded_employee_ids' => [],
+            ],
+            $document->payload['provenance']['form_exclusion'],
+        );
+
+        $frozen = $this->bridge($partial)->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(),
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        self::assertTrue($frozen['created']);
+        $xml = $this->submissions->artifactBytes($this->supplierId, $frozen['artifact_id']);
+        self::assertSame(2, substr_count($xml, '</formularOsoby>'));
+        self::assertStringNotContainsString('2000000000000000000003', $xml);
+        self::assertStringContainsString('<pvpoj:pojistneZamestnance>213</pvpoj:pojistneZamestnance>', $xml);
+        self::assertStringContainsString('<pvpoj:zakladZamestnavateleA>3000</pvpoj:zakladZamestnavateleA>', $xml);
+        self::assertStringContainsString('<so:danZalohaPoSleve>450</so:danZalohaPoSleve>', $xml);
+
+        $report = JmhzScenario1ControlValidator::create(CzechPayrollRulesets2026::provider())
+            ->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
+        self::assertTrue($report->submittable());
+        $warnings = array_map(
+            static fn ($finding): int => $finding->controlId,
+            $report->warnings(),
+        );
+        self::assertContains(12, $warnings);
+        self::assertSame(
+            [],
+            array_diff($warnings, JmhzScenario1XmlDryRunService::DEFERRAL_EXPECTED_CONTROL_IDS),
+            'Odložení smí vyvolat jen propustné kontroly součtu formulářů.',
+        );
+    }
+
+    /**
+     * Nad 1500 formulářů test hlášení balíky sestaví, zmrazení k odeslání je
+     * ale zatím neumí - musí to říct dřív, než cokoli založí.
+     */
+    public function testSubmissionOverOneBatchIsRefusedBeforeAnythingIsFrozen(): void
+    {
+        $payload = $this->resolution()->requireResolvedDocument()->payload;
+        $payload['header']['individual_form_count'] = 1501;
+        $bridge = $this->bridge(new JmhzScenario1Resolution(new JmhzScenario1NormalizedDocument($payload), []));
+
+        try {
+            $bridge->bridge($this->supplierId, self::PREPARATION_ID, $this->registerObligation(), self::ENVIRONMENT, $this->userId);
+            self::fail('Hlášení nad jeden balík se nesmí zmrazit jako jediný balík.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame('jmhz_submission_split_unsupported', $exception->validationCode);
+            self::assertStringContainsString('2 dílčích balíků', $exception->getMessage());
+        }
+        self::assertSame(0, $this->countRows('payroll_submissions'));
+    }
+
+    /**
+     * Souběh: pojistné osoby a souhrnná data nese jediný formulář, takže
+     * odložit jen jeden ze souběžných vztahů by změnilo, co vykazuje druhý.
+     */
+    public function testDeferringOnlyOneOfConcurrentEmploymentsIsRefused(): void
+    {
+        $payload = $this->payloadWithPeople(2);
+        $secondary = $payload['people'][0]['employments'][0];
+        $secondary['employment_id'] = 104;
+        $secondary['employment']['is_primary'] = false;
+        $secondary['identity']['jmhz_employment_external_identifier']['value'] = '2000000000000000000004';
+        $secondary['insurance']['relationship_id'] = 'employment:104';
+        $payload['people'][0]['employments'][] = $secondary;
+
+        $partial = $this->resolutionFor(
+            $this->pvpoj(employerTotal: 496, people: 2),
+            $payload,
+            exclusion: JmhzFormExclusion::deferral([104], []),
+        );
+
+        self::assertContains(
+            ['jmhz_deferral_concurrent_incomplete', 'person', 11],
+            array_map(
+                static fn (JmhzScenario1Blocker $blocker): array
+                    => [$blocker->code, $blocker->entityType, $blocker->entityId],
+                $partial->blockers,
+            ),
+        );
+    }
+
+    public function testDeferringEveryFormOfTheRegistrationIsRefused(): void
+    {
+        $partial = $this->resolutionFor(
+            $this->pvpoj(),
+            $this->payload(),
+            exclusion: JmhzFormExclusion::deferral([101], []),
+        );
+
+        self::assertContains(
+            'jmhz_deferral_no_form_left',
+            array_map(
+                static fn (JmhzScenario1Blocker $blocker): string => $blocker->code,
+                $partial->blockers,
+            ),
+        );
+    }
+
+    /**
+     * Po změně variabilního symbolu účtárny se oprava musí dál spárovat
+     * s řádným hlášením - hlavička opravy nese VS ze ZMRAZENÉHO řádného
+     * hlášení (kontrola 22 ČSSZ). Dřív oprava spadla na „jiná registrace".
+     */
+    public function testContentCorrectionKeepsFrozenVariableSymbolAfterOfficeSymbolChange(): void
+    {
+        $original = $this->bridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(),
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        $originalXml = $this->submissions->artifactBytes($this->supplierId, $original['artifact_id']);
+        $this->acceptWithFormOutcome($original, $this->firstFormGuid($originalXml), 'accepted');
+
+        $payload = $this->payload();
+        $payload['employer_summary']['office']['social_security_variable_symbol'] = '9990001234';
+        $changed = $this->resolutionFor($this->pvpoj(variableSymbol: '9990001234'), $payload);
+        self::assertSame('9990001234', $changed->requireResolvedDocument()->payload['header']['variable_symbol']);
+
+        $service = $this->contentCorrections($changed);
+        $candidates = $service->candidates(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+        );
+        self::assertSame(['2000000000000000000001'], array_column($candidates['forms'], 'employment_external_identifier'));
+        $correction = $service->freeze(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+            ['2000000000000000000001'],
+            $this->userId,
+        );
+
+        $xml = $this->submissions->artifactBytes($this->supplierId, $correction['artifact_id']);
+        self::assertStringContainsString('<variabilniSymbol>1234567890</variabilniSymbol>', $xml);
+        self::assertSame('1234567890', $correction['variable_symbol']);
+    }
+
+    public function testContentCorrectionForAnotherPeriodNamesBothPeriods(): void
+    {
+        $original = $this->bridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(),
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        $originalXml = $this->submissions->artifactBytes($this->supplierId, $original['artifact_id']);
+        $this->acceptWithFormOutcome($original, $this->firstFormGuid($originalXml), 'accepted');
+        $august = $this->resolutionFor(
+            $this->pvpoj(period: '2026-08'),
+            $this->payloadForPeriod('2026-08-01', '2026-08-31'),
+            periodStart: '2026-08-01',
+            periodEnd: '2026-08-31',
+        );
+        $documents = $this->createStub(JmhzScenario1DocumentService::class);
+        $documents->method('resolveForCorrection')->willReturn($august);
+        $frozen = new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions);
+        $service = new JmhzContentCorrectionSubmissionService(
+            $documents,
+            new JmhzScenario1XmlValidator(),
+            JmhzScenario1ControlValidator::create(CzechPayrollRulesets2026::provider()),
+            new JmhzSubmissionGuidFactory(),
+            new JmhzEffectiveFormLedgerResolver($this->submissionRepository, $frozen),
+            $frozen,
+            $this->preparations,
+            $this->people,
+            $this->submissionRepository,
+            $this->submissions,
+            $this->obligations,
+            new MockClock('2026-09-05 11:30:00 Europe/Prague'),
+            new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
+            new JmhzDeferralRepository($this->db),
+        );
+
+        try {
+            $service->candidates(
+                $this->supplierId,
+                self::ENVIRONMENT,
+                $original['submission_id'],
+                self::PREPARATION_ID,
+            );
+            self::fail('Příprava za jiné období nesmí vést k opravě.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame('jmhz_content_correction_scope_mismatch', $exception->validationCode);
+            self::assertStringContainsString('08/2026', $exception->getMessage());
+            self::assertStringContainsString('07/2026', $exception->getMessage());
+        }
+    }
+
+    /**
+     * Příprava s `$count` osobami, každá s jedním vztahem (101, 102, …) a
+     * vlastní ordinary evidencí.
+     *
+     * @return array<string,mixed>
+     */
+    private function payloadWithPeople(int $count): array
+    {
+        $payload = $this->payload();
+        $template = $payload['people'][0];
+        for ($index = 1; $index < $count; $index++) {
+            $employeeId = 11 + $index;
+            $employmentId = 101 + $index;
+            $person = $template;
+            $person['employee_id'] = $employeeId;
+            $person['employments'][0]['employment_id'] = $employmentId;
+            $oic = 1000000001 + 20 * $index;
+            while (!PayrollRegistrationIdentityService::oicChecksumValid((string) $oic)) {
+                ++$oic;
+            }
+            $person['employments'][0]['identity']['person_external_identifier']['value']
+                = (string) $oic;
+            $person['employments'][0]['identity']['jmhz_employment_external_identifier']['value']
+                = sprintf('2%021d', 1 + $index);
+            $person['employments'][0]['insurance']['relationship_id'] = "employment:{$employmentId}";
+            $person['person_summary']['statutory']['net_pay']['relationships']
+                = [['relationship_id' => "employment:{$employmentId}"]];
+            $payload['people'][] = $person;
+            $payload['ordinary_evidence'][] = [
+                'scope' => ['employee_id' => $employeeId, 'employment_id' => $employmentId],
+                'attribute_values' => ['10116' => false, '10546' => false],
+            ];
+            $payload['source_versions']['ordinary_evidence'][] = [
+                'employment_id' => $employmentId,
+                'id' => 600 + $employmentId,
+                'source_manifest_sha256' => str_repeat('6', 64),
+                'snapshot_fingerprint' => str_repeat('7', 64),
+            ];
+        }
+
+        return $payload;
+    }
+
+    /**
      * Most, který dokument řeší podle zvolené mzdové účtárny — stejně jako
      * skutečný `JmhzScenario1DocumentService`.
      */
@@ -1420,6 +1720,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             new MockClock('2026-08-05 11:30:00 Europe/Prague'),
             $this->obligations,
             new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
+            new JmhzDeferralRepository($this->db),
         );
     }
 
@@ -1483,7 +1784,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
     private function contentCorrections(JmhzScenario1Resolution $resolution): JmhzContentCorrectionSubmissionService
     {
         $documents = $this->createMock(JmhzScenario1DocumentService::class);
-        $documents->expects(self::exactly(2))->method('resolve')->willReturn($resolution);
+        $documents->expects(self::exactly(2))->method('resolveForCorrection')->willReturn($resolution);
         $frozen = new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions);
         $clock = new MockClock('2026-08-05 11:30:00 Europe/Prague');
 
@@ -1503,6 +1804,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             $this->obligations,
             $clock,
             new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
+            new JmhzDeferralRepository($this->db),
         );
     }
 
@@ -1539,6 +1841,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             new MockClock($now),
             $this->obligations,
             new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
+            new JmhzDeferralRepository($this->db),
         );
     }
 
@@ -1695,6 +1998,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         ?int $officeId = null,
         string $periodStart = self::PERIOD_START,
         string $periodEnd = self::PERIOD_END,
+        ?JmhzFormExclusion $exclusion = null,
     ): JmhzScenario1Resolution {
         $preparation = new JmhzVerifiedPreparationSnapshot(
             self::PREPARATION_ID,
@@ -1720,8 +2024,12 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             ],
             $payload ?? $this->payload(),
         );
+        $resolver = new JmhzScenario1DocumentResolver();
+        if ($exclusion !== null) {
+            return $resolver->resolveExcluding($preparation, $pvpoj, null, $officeId, [], $exclusion);
+        }
 
-        return (new JmhzScenario1DocumentResolver())->resolve(
+        return $resolver->resolve(
             $preparation,
             $pvpoj,
             null,

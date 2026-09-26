@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Support;
 
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
+use MyInvoice\Action\Payroll\PayrollJmhzDeferralAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPreparationAction;
+use MyInvoice\Action\Payroll\PayrollJmhzSubmissionFreezeAction;
 use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
 use MyInvoice\Action\Payroll\PayrollTimeAction;
 use MyInvoice\Bootstrap;
@@ -29,6 +31,11 @@ use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
+use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
+use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceipt;
+use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceiptFormOutcome;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Service\Payroll\Time\CzechHolidayCalendar;
 use PDO;
@@ -1287,6 +1294,54 @@ trait PayrollFullFlowTrait
     }
 
     /**
+     * Oprava schváleného běhu: vyžádání opravy, nová revize nad aktuálními
+     * podklady, přepočet a schválení. Tudy vede náprava dat, která běh
+     * zmrazil (průměr, podmínky vztahu …).
+     *
+     * @param array<string,mixed> $approvedRun řádek běhu ze schválené revize
+     */
+    private function correctPayrollRun(array $approvedRun, string $key, string $reason): PayrollRunCommandResult
+    {
+        $runId = (int) $approvedRun['id'];
+        $requested = $this->runs->requestCorrection(
+            $this->supplierId,
+            $runId,
+            (int) $approvedRun['row_version'],
+            "{$key}-request",
+            $this->actors[0],
+            $reason,
+        );
+        $reopened = $this->runs->reopen(
+            $this->supplierId,
+            $runId,
+            (int) $requested->run['row_version'],
+            "{$key}-reopen",
+            $this->actors[0],
+            $reason,
+        );
+        $calculated = $this->runs->calculate(
+            $this->supplierId,
+            $runId,
+            (int) $reopened->run['row_version'],
+            "{$key}-calculate",
+            $this->actors[0],
+        );
+        self::assertSame(
+            [],
+            $this->blockingValidations((int) $calculated->revision['id']),
+            'Zaseknutí: přepočet opravy běhu.',
+        );
+
+        return $this->runs->approve(
+            $this->supplierId,
+            $runId,
+            (int) $calculated->run['row_version'],
+            "{$key}-approve",
+            $this->actors[0],
+        );
+    }
+
+    /**
      * Příprava měsíčního hlášení JMHZ ze schválené revize (testovací prostředí).
      *
      * @return array{status:int,body:array<string,mixed>}
@@ -1327,6 +1382,157 @@ trait PayrollFullFlowTrait
         );
 
         return ['status' => $response->getStatusCode(), 'body' => $this->json($response)];
+    }
+
+    /**
+     * Zmrazení řádného hlášení z přípravy (testovací prostředí) - cesta
+     * tlačítka Odeslat, bez samotného odeslání.
+     *
+     * @return array{status:int,body:array<string,mixed>}
+     */
+    private function freezeJmhzSubmission(int $preparationId, int $officeId): array
+    {
+        $freeze = $this->container->get(PayrollJmhzSubmissionFreezeAction::class);
+        if (!$freeze instanceof PayrollJmhzSubmissionFreezeAction) {
+            throw new \RuntimeException('Zmrazení hlášení JMHZ není dostupné.');
+        }
+        $response = $freeze(
+            $this->request('POST', "/api/payroll/submissions/jmhz-freeze/{$preparationId}")
+                ->withParsedBody(['environment' => 'test', 'office' => (string) $officeId]),
+            new Response(),
+            ['preparationId' => (string) $preparationId],
+        );
+
+        return ['status' => $response->getStatusCode(), 'body' => $this->json($response)];
+    }
+
+    /**
+     * Odložení vztahu z řádného hlášení, jak ho zadá účetní v testu hlášení.
+     *
+     * @return array{status:int,body:array<string,mixed>}
+     */
+    private function deferJmhzEmployment(int $preparationId, int $employmentId, int $officeId, string $reason): array
+    {
+        $response = $this->jmhzDeferrals()->create(
+            $this->request('POST', '/api/payroll/submissions/jmhz-deferrals')->withParsedBody([
+                'environment' => 'test',
+                'preparation_id' => $preparationId,
+                'employment_id' => $employmentId,
+                'office' => (string) $officeId,
+                'reason' => $reason,
+            ]),
+            new Response(),
+        );
+
+        return ['status' => $response->getStatusCode(), 'body' => $this->json($response)];
+    }
+
+    /**
+     * Přehled odložení za revizi (testovací prostředí).
+     *
+     * @return array{status:int,body:array<string,mixed>}
+     */
+    private function listJmhzDeferrals(int $revisionId): array
+    {
+        $response = $this->jmhzDeferrals()->list(
+            $this->request('GET', '/api/payroll/submissions/jmhz-deferrals')
+                ->withQueryParams(['revision' => (string) $revisionId, 'environment' => 'test']),
+            new Response(),
+        );
+
+        return ['status' => $response->getStatusCode(), 'body' => $this->json($response)];
+    }
+
+    /**
+     * „Doplnit opravným hlášením" u odloženého vztahu.
+     *
+     * @return array{status:int,body:array<string,mixed>}
+     */
+    private function completeJmhzDeferral(int $deferralId): array
+    {
+        $response = $this->jmhzDeferrals()->complete(
+            $this->request('POST', "/api/payroll/submissions/jmhz-deferrals/{$deferralId}/complete")
+                ->withParsedBody(['environment' => 'test']),
+            new Response(),
+            ['id' => (string) $deferralId],
+        );
+
+        return ['status' => $response->getStatusCode(), 'body' => $this->json($response)];
+    }
+
+    private function jmhzDeferrals(): PayrollJmhzDeferralAction
+    {
+        $action = $this->container->get(PayrollJmhzDeferralAction::class);
+        if (!$action instanceof PayrollJmhzDeferralAction) {
+            throw new \RuntimeException('Odložení vztahu JMHZ není dostupné.');
+        }
+
+        return $action;
+    }
+
+    /**
+     * Přijetí zmrazeného podání ČSSZ: odesláno a protokol s výsledkem pro
+     * každý formulář podání.
+     */
+    private function acceptJmhzSubmission(int $submissionId, string $status = 'accepted'): void
+    {
+        $submissions = $this->container->get(PayrollSubmissionService::class);
+        $frozen = $this->container->get(JmhzFrozenPayloadReader::class);
+        if (!$submissions instanceof PayrollSubmissionService || !$frozen instanceof JmhzFrozenPayloadReader) {
+            throw new \RuntimeException('Platforma podání není dostupná.');
+        }
+        $rowVersion = (int) $this->scalar(
+            'SELECT row_version FROM payroll_submissions WHERE supplier_id = ? AND id = ?',
+            [$this->supplierId, $submissionId],
+        );
+        $reference = "VREP-FLOW-{$submissionId}";
+        $submitted = $submissions->transition($this->supplierId, $submissionId, $rowVersion, 'submitted', $reference);
+        $outcomes = [];
+        foreach ($frozen->describe($this->supplierId, 'test', $submissionId)['forms'] as $form) {
+            $outcomes[] = new PayrollVerifiedReceiptFormOutcome(
+                $form['form_guid'],
+                null,
+                1,
+                'ProcessedAndComplete',
+                'accepted',
+                $form['person_external_identifier'],
+                $form['employment_external_identifier'],
+                [],
+            );
+        }
+        $verifier = new class ($status, $outcomes) implements PayrollReceiptVerifierInterface {
+            /** @param list<PayrollVerifiedReceiptFormOutcome> $outcomes */
+            public function __construct(private readonly string $status, private readonly array $outcomes) {}
+
+            public function verify(
+                string $bytes,
+                string $channel,
+                string $environment,
+                ?string $expectedCorrelationReference,
+            ): PayrollVerifiedReceipt {
+                return new PayrollVerifiedReceipt(
+                    $this->status,
+                    $expectedCorrelationReference,
+                    [],
+                    $this->outcomes,
+                );
+            }
+        };
+        $submissions->importReceipt(
+            $this->supplierId,
+            $submissionId,
+            $submitted['row_version'],
+            null,
+            '<signed-jmhz-protocol/>',
+            "receipt:flow-{$submissionId}",
+            $reference,
+            'CSSZ_JMHZ',
+            $status,
+            'vrep_apep',
+            "receipt-flow-{$submissionId}",
+            $this->actors[0],
+            $verifier,
+        );
     }
 
     /** @param list<mixed> $params */

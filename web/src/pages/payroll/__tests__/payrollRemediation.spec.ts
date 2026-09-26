@@ -24,6 +24,32 @@ describe('mzdové úkony mají konkrétní nápravu', () => {
     }
   })
 
+  /*
+   * Kódy výjimek ELDP (potvrzení, dokument, rok bez pojištění …) chodí panelu
+   * jako jediný nález. Bez mapování skončily „neznámou chybou" s odkazem na
+   * podporu, přestože se náprava dělá o dvě pole výš ve formuláři.
+   */
+  it('pokrývá i kódy výjimek evidenčního listu', () => {
+    for (const [files, catalog] of [
+      [[
+        'Submission/Eldp/EldpAnnualStatementBuilder.php',
+        'Submission/Eldp/EldpManualCompletionService.php',
+        'Submission/Eldp/EldpStatementService.php',
+        'Submission/Eldp/EldpSchemaCatalog.php',
+        'Submission/Eldp/EldpXmlValidator.php',
+        'Submission/Eldp/EldpXmlSerializer.php',
+      ], eldpRemediationCodes],
+    ] as const) {
+      const codes = new Set<string>()
+      for (const file of files) {
+        const source = readFileSync(resolve(process.cwd(), `../api/src/Service/Payroll/${file}`), 'utf8')
+        for (const match of source.matchAll(/Exception\(\s*'(eldp_[a-z_]+)'/g)) codes.add(match[1]!)
+      }
+      expect(codes.size).toBeGreaterThanOrEqual(6)
+      expect([...codes].filter(code => !Object.hasOwn(catalog, code))).toEqual([])
+    }
+  })
+
   it('všechny příčiny i postupy mají srozumitelné cs/en překlady', () => {
     for (const locale of ['cs', 'en']) {
       const t = createI18n({ legacy: false, locale, messages: { cs, en } }).global.t

@@ -176,10 +176,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         unset($section);
 
         try {
-            (new JmhzScenario1XmlValidator())->dryRun(
-                $this->resolutionFor($payload),
-                $this->envelope(),
-            );
+            $this->refuse($payload);
             self::fail('Rozporný úhrn vyloučených dob musel podání zablokovat.');
         } catch (JmhzXmlException $exception) {
             self::assertSame('jmhz_xml_eldp_excluded_days_sum_mismatch', $exception->validationCode);
@@ -301,10 +298,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         unset($section);
 
         try {
-            (new JmhzScenario1XmlValidator())->dryRun(
-                $this->resolutionFor($payload),
-                $this->envelope(),
-            );
+            $this->refuse($payload);
             self::fail('Rozporný úhrn vyloučených dnů musel podání zablokovat.');
         } catch (JmhzXmlException $exception) {
             self::assertSame(
@@ -392,10 +386,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         unset($earnings);
 
         try {
-            (new JmhzScenario1XmlValidator())->dryRun(
-                $this->resolutionFor($payload),
-                $this->envelope(),
-            );
+            $this->refuse($payload);
             self::fail('Příplatek při nulové zúčtované mzdě musel podání zablokovat.');
         } catch (JmhzXmlException $exception) {
             self::assertSame(
@@ -470,6 +461,89 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         self::assertStringNotContainsString('<so:souhrn>', $result['xml']);
         self::assertStringNotContainsString('<pvpoj:PVPOJ>', $result['xml']);
         self::assertStringContainsString('<formularePocetVBaliku>1</formularePocetVBaliku>', $result['xml']);
+    }
+
+    /**
+     * Nad 1500 formulářů DIS jediný balík odmítne. Hlášení se proto dělí:
+     * všechny balíky nesou tentýž GUID podání i datum vyplnění, souhrn
+     * a pojistnou část jen první, počty podle kontrol 227, 235, 300 a 301.
+     */
+    public function testMoreThan1500FormsAreSplitIntoPackagesSharingTheSubmissionIdentity(): void
+    {
+        $payload = $this->payload();
+        $template = $payload['people'][0];
+        $formGuids = [101 => '0195E2C4-1A2B-7C3D-8E4F-5A6B7C8D9E10'];
+        $guids = new \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory();
+        for ($index = 1; $index < 1501; $index++) {
+            $employeeId = 11 + $index;
+            $employmentId = 101 + $index;
+            $person = $template;
+            $person['employee_id'] = $employeeId;
+            $person['employments'][0]['employment_id'] = $employmentId;
+            $person['employments'][0]['identity']['jmhz_employment_external_identifier']['value']
+                = sprintf('3%021d', $index);
+            $person['employments'][0]['insurance']['relationship_id'] = "employment:{$employmentId}";
+            $person['person_summary']['statutory']['net_pay']['relationships']
+                = [['relationship_id' => "employment:{$employmentId}"]];
+            $payload['people'][] = $person;
+            $payload['ordinary_evidence'][] = [
+                'scope' => ['employee_id' => $employeeId, 'employment_id' => $employmentId],
+                'attribute_values' => ['10116' => false, '10546' => false],
+            ];
+            $formGuids[$employmentId] = $guids->next();
+        }
+        $resolution = $this->resolutionFor($payload);
+        self::assertSame('resolved', $resolution->status(), 'Nad 1500 formulářů nesmí dokument blokovat.');
+
+        $result = (new JmhzScenario1XmlValidator())->dryRunPackages(
+            $resolution,
+            JmhzSubmissionEnvelope::create(
+                '0195e2c4-1a2b-7c3d-8e4f-5a6b7c8d9e0f',
+                $formGuids,
+                '2026-08-05T09:30:00Z',
+                'MyÚčto.cz',
+                '5.6.0',
+            ),
+        );
+
+        self::assertCount(2, $result['packages']);
+        [$first, $second] = [$result['packages'][0]['xml'], $result['packages'][1]['xml']];
+        foreach ([$first, $second] as $xml) {
+            self::assertStringContainsString('<idPodani>0195E2C4-1A2B-7C3D-8E4F-5A6B7C8D9E0F</idPodani>', $xml);
+            self::assertStringContainsString('<datumVyplneni>2026-08-05T09:30:00Z</datumVyplneni>', $xml);
+            self::assertStringContainsString('<balikyPocet>2</balikyPocet>', $xml);
+            self::assertStringContainsString('<formularePocetCelkem>1503</formularePocetCelkem>', $xml);
+        }
+        self::assertStringContainsString('<balikPoradi>1</balikPoradi>', $first);
+        self::assertStringContainsString('<formularePocetVBaliku>1502</formularePocetVBaliku>', $first);
+        self::assertSame(1500, substr_count($first, '</formularOsoby>'));
+        self::assertStringContainsString('<so:souhrn>', $first);
+        self::assertStringContainsString('<pvpoj:PVPOJ>', $first);
+        self::assertStringContainsString('<balikPoradi>2</balikPoradi>', $second);
+        self::assertStringContainsString('<formularePocetVBaliku>1</formularePocetVBaliku>', $second);
+        self::assertSame(1, substr_count($second, '</formularOsoby>'));
+        self::assertStringNotContainsString('<so:souhrn>', $second);
+        self::assertStringNotContainsString('<pvpoj:PVPOJ>', $second);
+
+        $validator = JmhzScenario1ControlValidator::create(CzechPayrollRulesets2026::provider());
+        foreach ([$first, $second] as $xml) {
+            $report = $validator->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
+            $blocking = array_map(
+                static fn (JmhzControlFinding $finding): int => $finding->controlId,
+                $report->blocking(),
+            );
+            foreach ([84, 93, 232, 235, 240, 300, 301] as $packageControl) {
+                self::assertNotContains($packageControl, $blocking, "Kontrola {$packageControl} balíku.");
+            }
+        }
+
+        // Jediný balík zůstává bajtově shodný s dosavadní serializací.
+        $single = $this->resolution();
+        $envelope = $this->envelope();
+        self::assertSame(
+            [(new JmhzScenario1XmlSerializer())->serialize($single->requireResolvedDocument(), $envelope)],
+            (new JmhzScenario1XmlSerializer())->serializePackages($single->requireResolvedDocument(), $envelope),
+        );
     }
 
     public function testCorrectionHeaderRefusesMoreThan1502Components(): void
@@ -1001,10 +1075,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         unset($tax);
 
         try {
-            (new JmhzScenario1XmlValidator())->dryRun(
-                $this->resolutionFor($payload),
-                $this->envelope(),
-            );
+            $this->refuse($payload);
             self::fail('Sleva bez podepsaného prohlášení musela podání zablokovat.');
         } catch (JmhzXmlException $exception) {
             self::assertSame(
@@ -1110,10 +1181,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             ['jmhz_functional_benefits_status'] = 'unverified';
 
         try {
-            (new JmhzScenario1XmlValidator())->dryRun(
-                $this->resolutionFor($payload),
-                $this->envelope(),
-            );
+            $this->refuse($payload);
             self::fail('Nedoložený výklad nevyplněného tri-state musel podání zablokovat.');
         } catch (JmhzXmlException $exception) {
             self::assertSame('jmhz_xml_attribute_unresolved', $exception->validationCode);
@@ -1249,10 +1317,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         unset($employment);
 
         try {
-            (new JmhzScenario1XmlValidator())->dryRun(
-                $this->resolutionFor($payload),
-                $this->envelope(),
-            );
+            $this->refuse($payload);
             self::fail('Neúplná jmenná větev musela podání zablokovat.');
         } catch (JmhzXmlException $exception) {
             self::assertSame(
@@ -1285,10 +1350,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             ['jmhz_employment_external_identifier'] = null;
 
         try {
-            (new JmhzScenario1XmlValidator())->dryRun(
-                $this->resolutionFor($payload),
-                $this->envelope(),
-            );
+            $this->refuse($payload);
             self::fail('Neúplná dvojice identifikátorů musela podání zablokovat.');
         } catch (JmhzXmlException $exception) {
             self::assertSame('jmhz_xml_attribute_unresolved', $exception->validationCode);
@@ -1317,10 +1379,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         );
 
         try {
-            (new JmhzScenario1XmlValidator())->dryRun(
-                $this->resolutionFor($payload),
-                $this->envelope(),
-            );
+            $this->refuse($payload);
             self::fail('Chybějící zmrazený atribut musel podání zablokovat.');
         } catch (JmhzXmlException $exception) {
             self::assertSame('jmhz_xml_attribute_unresolved', $exception->validationCode);
@@ -1340,10 +1399,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         $payload['people'][0]['employments'][0]['average_earning'] = null;
 
         try {
-            (new JmhzScenario1XmlValidator())->dryRun(
-                $this->resolutionFor($payload),
-                $this->envelope(),
-            );
+            $this->refuse($payload);
             self::fail('Chybějící průměrný výdělek musel podání zablokovat.');
         } catch (JmhzXmlException $exception) {
             self::assertSame(
@@ -1361,10 +1417,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         $payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0]['code'] = null;
 
         try {
-            (new JmhzScenario1XmlValidator())->dryRun(
-                $this->resolutionFor($payload),
-                $this->envelope(),
-            );
+            $this->refuse($payload);
             self::fail('ELDP sekce s dny bez kódu musela podání zablokovat.');
         } catch (JmhzXmlException $exception) {
             self::assertSame('jmhz_xml_eldp_code_required', $exception->validationCode);
@@ -1687,10 +1740,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         unset($values);
 
         try {
-            (new JmhzScenario1XmlValidator())->dryRun(
-                $this->resolutionFor($payload),
-                $this->envelope(),
-            );
+            $this->refuse($payload);
             self::fail('Přesčas nad odpracované hodiny musel podání zablokovat.');
         } catch (JmhzXmlException $exception) {
             self::assertSame(
@@ -1785,10 +1835,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         $payload['people'][0]['employments'][0]['exempt_income_minor'] = 200_000;
 
         try {
-            (new JmhzScenario1XmlValidator())->dryRun(
-                $this->resolutionFor($payload),
-                $this->envelope(),
-            );
+            $this->refuse($payload);
             self::fail('Osvobozený příjem nad úhrnem musel podání zablokovat.');
         } catch (JmhzXmlException $exception) {
             self::assertSame(
@@ -1993,6 +2040,38 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         return $payload;
     }
 
+    /**
+     * Vada formuláře, kterou pozná až serializér, se od resolveru vrací jako
+     * nález NA VZTAHU - aby šel vztah odložit z řádného hlášení a proklik vedl
+     * na něj. Serializér ji dál odmítá sám, kdyby se k němu dokument dostal
+     * jinou cestou; vrátí se jeho výjimka.
+     *
+     * @param array<string,mixed> $payload
+     */
+    private function refuse(array $payload): never
+    {
+        try {
+            (new JmhzScenario1XmlValidator())->dryRun(
+                $this->resolutionFor($payload),
+                $this->envelope(),
+            );
+        } catch (JmhzXmlException $exception) {
+            $probed = $this->resolutionFor($payload, forSubmission: true);
+            self::assertSame('blocked', $probed->status());
+            $matching = array_values(array_filter(
+                $probed->blockers,
+                static fn ($blocker): bool => $blocker->code === $exception->validationCode,
+            ));
+            self::assertCount(1, $matching, 'Vada formuláře musí být nálezem na vztahu.');
+            self::assertSame('employment', $matching[0]->entityType);
+            self::assertSame(101, $matching[0]->entityId);
+            self::assertSame($exception->getMessage(), $matching[0]->message);
+            self::assertTrue($matching[0]->deferrable());
+            throw $exception;
+        }
+        self::fail('Serializér musel dokument odmítnout.');
+    }
+
     private function envelope(): JmhzSubmissionEnvelope
     {
         return JmhzSubmissionEnvelope::create(
@@ -2013,6 +2092,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
     private function resolutionFor(
         array $payload,
         ?JmhzPvpojPreview $pvpoj = null,
+        bool $forSubmission = false,
     ): \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Resolution {
         $preparation = new JmhzVerifiedPreparationSnapshot(
             501,
@@ -2039,10 +2119,11 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             $payload,
         );
 
-        return (new JmhzScenario1DocumentResolver())->resolve(
-            $preparation,
-            $pvpoj ?? $this->pvpoj(),
-        );
+        $resolver = new JmhzScenario1DocumentResolver();
+
+        return $forSubmission
+            ? $resolver->resolveForSubmission($preparation, $pvpoj ?? $this->pvpoj())
+            : $resolver->resolve($preparation, $pvpoj ?? $this->pvpoj());
     }
 
     /**

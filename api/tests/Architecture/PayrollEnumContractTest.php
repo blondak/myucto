@@ -387,6 +387,11 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollSubmissionInboxProblemKind'     => 'db:payroll_submission_inbox_items.problem_kind',
         'payroll.ts::PayrollSubmissionInboxEscalationLevel' => 'db:payroll_submission_inbox_items.escalation_level',
         'payroll.ts::PayrollJmhzTransportStatus'      => 'db:payroll_submission_transport_attempts.status',
+        // Kam UI pošle nález hlášení a stav odloženého vztahu.
+        'payroll.ts::PayrollJmhzRemediationKind'
+            => 'const:MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerCatalog::KINDS',
+        'payroll.ts::PayrollJmhzDeferralState'
+            => 'const:MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeferralService::STATES',
         'payroll.ts::PayrollJmhzImportedProtocolKind' => 'db:payroll_imported_jmhz_protocols.protocol_kind',
         'payroll.ts::PayrollJmhzControlOutcome'
             => 'enum:MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlOutcome',

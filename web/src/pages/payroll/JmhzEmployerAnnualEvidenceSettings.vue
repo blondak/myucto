@@ -188,7 +188,11 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="rounded-xl border border-neutral-200 bg-surface p-5" data-test="jmhz-employer-annual">
+  <section
+    id="jmhz-employer-annual-evidence"
+    class="scroll-mt-20 rounded-xl border border-neutral-200 bg-surface p-5"
+    data-test="jmhz-employer-annual"
+  >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h2 class="text-base font-semibold text-neutral-900">

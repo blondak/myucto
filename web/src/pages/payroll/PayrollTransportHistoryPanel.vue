@@ -34,6 +34,8 @@ import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
 import {
   payrollApi,
   type PayrollJmhzContentCorrectionForm,
+  type PayrollJmhzCorrectableComponent,
+  type PayrollJmhzXmlDryRunBlocker,
   type PayrollJmhzContentCorrectionPreparation,
   type PayrollJmhzImportedProtocol,
   type PayrollJmhzIsdsEnqueueResult,
@@ -59,8 +61,9 @@ import { formatDate, formatDateTime, formatPeriod, formatUtcDateTime } from '@/c
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
 import PayrollPossiblyDeliveredNotice from '@/components/payroll/PayrollPossiblyDeliveredNotice.vue'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
+import { jmhzBlockerLabel } from './jmhzBlockerRemediation'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const auth = useAuthStore()
 const {
   request: sendConfirmRequest,
@@ -112,6 +115,8 @@ const correctionPreparationId = ref<number | null>(null)
 const correctionCandidatesLoaded = ref(false)
 const correctionQuery = ref('')
 const correctionImpactConfirmed = ref(false)
+/** Vztahy s nálezem, které se teď opravit nedají; opravu ostatních nezastaví. */
+const correctionBlocked = ref<PayrollJmhzXmlDryRunBlocker[]>([])
 const readyDispatchPending = ref<{ id: number; channel: 'isds' | 'vrep' } | null>(null)
 const readyIsdsResults = ref<Record<number, PayrollJmhzIsdsEnqueueResult>>({})
 const readyGateways = ref<Record<number, GatewayStart>>({})
@@ -863,7 +868,74 @@ async function deleteAttempt(attempt: PayrollJmhzTransportAttempt) {
   }
 }
 
+/*
+ * Storno vybraných vztahů. Celé podání se ruší zřídka; častější je, že do
+ * přijatého hlášení omylem padl vztah, který tam nepatří (duplicitní nebo
+ * ukončený). Opravné hlášení pak nese jen stornující formuláře vybraných
+ * vztahů, ostatní formuláře zůstávají u ČSSZ platné.
+ */
+const cancelMode = ref<'whole' | 'components'>('whole')
+const cancelComponents = ref<(PayrollJmhzCorrectableComponent & { employee_name?: string | null })[]>([])
+const cancelComponentsLoading = ref(false)
+const cancelComponentsError = ref('')
+const selectedCancelGuids = ref<string[]>([])
+const cancelComponentsConfirmed = ref(false)
+
+async function chooseCancelMode(submissionId: number, mode: 'whole' | 'components') {
+  cancelMode.value = mode
+  selectedCancelGuids.value = []
+  cancelComponentsConfirmed.value = false
+  cancelComponentsError.value = ''
+  if (mode !== 'components' || cancelComponents.value.length > 0) return
+  cancelComponentsLoading.value = true
+  try {
+    const result = await payrollApi.jmhzCorrectableComponents(submissionId, environment.value)
+    if (cancellingId.value !== submissionId) return
+    cancelComponents.value = result.components
+  } catch (exception: unknown) {
+    cancelComponentsError.value = apiErrorMessage(
+      exception,
+      t('payroll.jmhz_gate.cancel_components.load_failed'),
+    )
+  } finally {
+    cancelComponentsLoading.value = false
+  }
+}
+
+async function confirmCancelComponents(submissionId: number) {
+  if (!canWrite.value || busy.value || selectedCancelGuids.value.length === 0
+    || !cancelComponentsConfirmed.value
+  ) return
+  cancelPendingId.value = submissionId
+  actionError.value = ''
+  success.value = ''
+  try {
+    const result = await payrollApi.cancelJmhzSubmissionComponents(
+      submissionId,
+      environment.value,
+      [...new Set(selectedCancelGuids.value)],
+    )
+    cancellingId.value = null
+    await load()
+    success.value = result.created
+      ? t('payroll.jmhz_gate.cancel_components.frozen', { id: result.submission_id })
+      : t('payroll.jmhz_gate.cancel_components.already', { id: result.submission_id })
+  } catch (exception: unknown) {
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.jmhz_gate.cancel_components.failed'),
+    )
+  } finally {
+    cancelPendingId.value = null
+  }
+}
+
 function askToCancel(submissionId: number) {
+  cancelMode.value = 'whole'
+  cancelComponents.value = []
+  selectedCancelGuids.value = []
+  cancelComponentsConfirmed.value = false
+  cancelComponentsError.value = ''
   if (busy.value) return
   closeCorrection()
   cancellingId.value = submissionId
@@ -921,6 +993,7 @@ async function loadContentCorrectionCandidates(submissionId: number) {
       environment.value,
     )
     correctableComponents.value = result.forms
+    correctionBlocked.value = result.blocked_forms ?? []
     correctionCandidatesLoaded.value = true
   } catch (exception: unknown) {
     correctingId.value = null
@@ -936,6 +1009,7 @@ async function loadContentCorrectionCandidates(submissionId: number) {
 function closeCorrection() {
   correctingId.value = null
   correctableComponents.value = []
+  correctionBlocked.value = []
   correctionPreparations.value = []
   selectedCorrectionGuids.value = []
   correctionQuery.value = ''
@@ -1744,6 +1818,22 @@ onMounted(loadVariableSymbols)
                 {{ t('payroll.submissions.transport.correction.no_results') }}
               </p>
 
+              <div
+                v-if="correctionBlocked.length"
+                class="mt-3 rounded-lg border border-neutral-300 bg-surface p-3 text-sm text-neutral-700"
+                data-test="transport-correct-blocked"
+              >
+                <p class="font-medium">
+                  {{ t('payroll.jmhz_gate.correction_blocked.title', { count: correctionBlocked.length }) }}
+                </p>
+                <ul class="mt-1 list-disc pl-4 text-xs">
+                  <li v-for="(blocker, index) in correctionBlocked" :key="`${blocker.code}-${blocker.entity_type}-${blocker.entity_id ?? index}`">
+                    {{ jmhzBlockerLabel(t, te, blocker) }}
+                  </li>
+                </ul>
+                <p class="mt-1 text-xs">{{ t('payroll.jmhz_gate.correction_blocked.hint') }}</p>
+              </div>
+
               <label
                 class="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-warning-500/40 bg-surface p-4"
               >
@@ -1796,11 +1886,87 @@ onMounted(loadVariableSymbols)
                 period: periodLabel(entry.group),
               }) }}
             </p>
-            <p class="mt-1 text-sm text-danger-700">
+            <fieldset class="mt-2 flex flex-wrap gap-x-6 gap-y-2 text-sm text-danger-800">
+              <legend class="sr-only">{{ t('payroll.jmhz_gate.cancel_components.mode_label') }}</legend>
+              <label class="flex cursor-pointer items-center gap-2">
+                <input
+                  type="radio"
+                  name="jmhz-cancel-mode"
+                  value="whole"
+                  :checked="cancelMode === 'whole'"
+                  :data-test="`transport-cancel-mode-whole-${entry.group.submissionId}`"
+                  @change="chooseCancelMode(entry.group.submissionId, 'whole')"
+                >
+                {{ t('payroll.jmhz_gate.cancel_components.mode_whole') }}
+              </label>
+              <label class="flex cursor-pointer items-center gap-2">
+                <input
+                  type="radio"
+                  name="jmhz-cancel-mode"
+                  value="components"
+                  :checked="cancelMode === 'components'"
+                  :data-test="`transport-cancel-mode-components-${entry.group.submissionId}`"
+                  @change="chooseCancelMode(entry.group.submissionId, 'components')"
+                >
+                {{ t('payroll.jmhz_gate.cancel_components.mode_components') }}
+              </label>
+            </fieldset>
+            <p v-if="cancelMode === 'whole'" class="mt-1 text-sm text-danger-700">
               {{ t('payroll.submissions.transport.storno.confirm_text') }}
             </p>
+            <div v-else class="mt-2" :data-test="`transport-cancel-components-${entry.group.submissionId}`">
+              <p class="text-sm text-danger-700">{{ t('payroll.jmhz_gate.cancel_components.description') }}</p>
+              <p v-if="cancelComponentsLoading" class="mt-2 text-sm text-neutral-600" role="status">
+                {{ t('common.loading') }}
+              </p>
+              <p v-if="cancelComponentsError" class="mt-2 rounded-lg border border-danger-500/30 bg-surface p-2 text-sm text-danger-700">
+                {{ cancelComponentsError }}
+              </p>
+              <div v-if="cancelComponents.length" class="mt-2 max-h-80 space-y-2 overflow-y-auto pr-1">
+                <label
+                  v-for="component in cancelComponents"
+                  :key="component.form_guid"
+                  class="flex cursor-pointer items-start gap-3 rounded-lg border border-danger-500/30 bg-surface p-3"
+                  :data-test="`transport-cancel-component-${component.employment_external_identifier}`"
+                >
+                  <input
+                    v-model="selectedCancelGuids"
+                    type="checkbox"
+                    :value="component.form_guid"
+                    class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-danger-700 focus:ring-danger-500"
+                  >
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-sm font-medium text-neutral-900">
+                      {{ component.employee_name ?? t('payroll.submissions.transport.correction.employee_unknown') }}
+                    </span>
+                    <span class="mt-0.5 block text-xs text-neutral-600">
+                      {{ t('payroll.submissions.transport.correction.technical_identity', {
+                        employment: component.employment_external_identifier,
+                        person: component.person_external_identifier,
+                      }) }}
+                    </span>
+                  </span>
+                </label>
+              </div>
+              <label class="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-danger-500/40 bg-surface p-3">
+                <input
+                  v-model="cancelComponentsConfirmed"
+                  type="checkbox"
+                  :data-test="`transport-cancel-components-impact-${entry.group.submissionId}`"
+                  class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-danger-700 focus:ring-danger-500"
+                >
+                <span class="text-sm text-neutral-800">{{ t('payroll.jmhz_gate.cancel_components.impact') }}</span>
+              </label>
+              <p
+                v-if="selectedCancelGuids.length === 0 || !cancelComponentsConfirmed"
+                class="mt-1 text-xs text-danger-700"
+              >
+                {{ t('payroll.jmhz_gate.cancel_components.disabled_reason') }}
+              </p>
+            </div>
             <div class="mt-3 flex flex-wrap gap-2">
               <button
+                v-if="cancelMode === 'whole'"
                 type="button"
                 :data-test="`transport-cancel-submit-${entry.group.submissionId}`"
                 :class="btnFilled('danger')"
@@ -1808,6 +1974,19 @@ onMounted(loadVariableSymbols)
                 @click="confirmCancel(entry.group.submissionId)"
               >
                 {{ t('payroll.submissions.transport.storno.confirm') }}
+              </button>
+              <button
+                v-else
+                type="button"
+                :data-test="`transport-cancel-components-submit-${entry.group.submissionId}`"
+                :class="btnFilled('danger')"
+                :disabled="busy || selectedCancelGuids.length === 0 || !cancelComponentsConfirmed"
+                @click="confirmCancelComponents(entry.group.submissionId)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.x" />
+                </svg>
+                {{ t('payroll.jmhz_gate.cancel_components.confirm', { count: selectedCancelGuids.length }) }}
               </button>
               <button
                 type="button"

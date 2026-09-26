@@ -3949,11 +3949,113 @@ export interface PayrollJmhzIsdsEnqueueResult {
   }
 }
 
+/**
+ * Druh nápravy nálezu, tedy místo v aplikaci, kam UI účetní pošle
+ * (`JmhzBlockerCatalog::KINDS`).
+ */
+export type PayrollJmhzRemediationKind =
+  | 'employment_terms'
+  | 'employment_profile'
+  | 'employment_identity'
+  | 'employee_identity'
+  | 'statutory_evidence'
+  | 'dependants'
+  | 'absences'
+  | 'averages'
+  | 'time'
+  | 'runs'
+  | 'components'
+  | 'ordinary_evidence'
+  | 'employer_annual'
+  | 'office'
+  | 'annual_settlement'
+  | 'takeover'
+  | 'workplace'
+  | 'correction'
+  | 'submission'
+  | 'retry'
+  | 'manual'
+  | 'support'
+
 export interface PayrollJmhzXmlDryRunBlocker {
   code: string
   entity_type: string
   entity_id: number | null
   attribute_ids: string[]
+  /** Důvod česky ze serveru jako záloha, když kód nemá překlad. */
+  reason?: string
+  action?: string
+  message?: string | null
+  remediation?: { kind: PayrollJmhzRemediationKind, field: string | null }
+  /** Nález na vztahu nebo osobě, kvůli kterému lze vztah odložit z řádného hlášení. */
+  deferrable?: boolean
+}
+
+/** Vztahy vynechané z hlášení (odložené) a co to znamená pro kontroly. */
+export interface PayrollJmhzDryRunDeferred {
+  purpose: 'deferral' | 'correction_scope'
+  deferral_ids: number[]
+  employment_ids: number[]
+  employee_ids: number[]
+  summary_excluded_employee_ids: number[]
+  blockers: PayrollJmhzXmlDryRunBlocker[]
+  /** Propustné kontroly součtu formulářů, jejichž varování je při odložení očekávané. */
+  expected_warning_control_ids: number[]
+}
+
+export type PayrollJmhzDeferralState =
+  | 'pending'
+  | 'omitted'
+  | 'to_complete'
+  | 'completing'
+  | 'completed'
+  | 'revoked'
+  | 'stale'
+
+export interface PayrollJmhzDeferral {
+  id: number
+  row_version: number
+  status: 'active' | 'revoked'
+  state: PayrollJmhzDeferralState
+  run_id: number
+  source_revision_id: number
+  revision_no: number | null
+  office_id: number | null
+  employee_id: number
+  employee_name: string | null
+  employment_id: number
+  reason: string
+  blocker_codes: string[]
+  created_at: string
+  created_by: number
+  revoked_at: string | null
+  revoke_reason: string | null
+  regular_submission_id: number | null
+  regular_status: string | null
+  correction_submission_id: number | null
+  correction_status: string | null
+  can_revoke: boolean
+  can_complete: boolean
+}
+
+export interface PayrollJmhzDeferralList {
+  environment: 'test' | 'production'
+  run_id: number
+  period_start: string
+  due_on: string
+  overdue: boolean
+  open_count: number
+  deferrals: PayrollJmhzDeferral[]
+}
+
+export interface PayrollJmhzDeferralCreated {
+  created: boolean
+  deferral_ids: number[]
+  employee_id: number
+  employment_ids: number[]
+  office_id: number | null
+  source_revision_id: number
+  blocker_codes: string[]
 }
 
 /**
@@ -4001,6 +4103,15 @@ export interface PayrollJmhzXmlDryRun {
   status: 'blocked' | 'dry_run_valid' | 'dry_run_incomplete'
   preparation_id: number
   blockers: PayrollJmhzXmlDryRunBlocker[]
+  deferred?: PayrollJmhzDryRunDeferred | null
+  /** Nad 1500 formulářů dílčí balíky hlášení; do 1500 prázdné. */
+  packages?: {
+    ordinal: number
+    xml: string
+    xml_sha256: string
+    submittable: boolean
+    blocking: PayrollJmhzControlFinding[]
+  }[]
   controls?: PayrollJmhzControlReport
   deadline?: {
     period_start: string
@@ -6597,6 +6708,8 @@ export interface PayrollJmhzCorrectableComponent {
   form_guid: string
   person_external_identifier: string
   employment_external_identifier: string
+  /** Jméno podle ID PPV; u převzatých dat může chybět. */
+  employee_name?: string | null
 }
 
 export interface PayrollJmhzContentCorrectionForm {
@@ -6637,6 +6750,8 @@ export interface PayrollJmhzContentCorrectionCandidates {
   preparation_id: number
   document_sha256: string
   forms: PayrollJmhzContentCorrectionForm[]
+  /** Vztahy s nálezem, které teď opravit nejde; opravu ostatních nezastaví. */
+  blocked_forms?: PayrollJmhzXmlDryRunBlocker[]
 }
 
 export interface PayrollJmhzTransportHistory {
@@ -7746,6 +7861,50 @@ export const payrollApi = {
       ...(officeId == null ? {} : { office: officeId }),
       ...(confirmLateDiscount ? { confirm_late_discount: true } : {}),
     },
+  ).then(response => response.data),
+  /** Odložení vztahů z řádného hlášení za mzdový běh revize. */
+  jmhzDeferrals: (
+    revisionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.get<PayrollJmhzDeferralList>(
+    '/payroll/submissions/jmhz-deferrals',
+    { params: { revision: revisionId, environment } },
+  ).then(response => response.data),
+  /**
+   * Odloží blokovaný vztah (a s ním souběžné vztahy téže osoby v registraci)
+   * z řádného hlášení. Důvod je povinný a jde do auditní stopy.
+   */
+  deferJmhzEmployment: (input: {
+    environment: PayrollJmhzTransportEnvironment
+    preparationId: number
+    employmentId: number
+    officeId?: number | null
+    reason: string
+  }) => api.post<PayrollJmhzDeferralCreated>(
+    '/payroll/submissions/jmhz-deferrals',
+    {
+      environment: input.environment,
+      preparation_id: input.preparationId,
+      employment_id: input.employmentId,
+      ...(input.officeId == null ? {} : { office: input.officeId }),
+      reason: input.reason,
+    },
+  ).then(response => response.data),
+  revokeJmhzDeferral: (
+    deferralId: number,
+    rowVersion: number,
+    reason: string,
+  ) => api.post<{ revoked_ids: number[], employee_id: number, source_revision_id: number }>(
+    `/payroll/submissions/jmhz-deferrals/${deferralId}/revoke`,
+    { row_version: rowVersion, reason },
+  ).then(response => response.data),
+  /** Doplní formulář odloženého vztahu opravným hlášením (jen zmrazí). */
+  completeJmhzDeferral: (
+    deferralId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.post<PayrollJmhzCorrectiveSubmission & { preparation_id: number, completed_employment_ids: number[] }>(
+    `/payroll/submissions/jmhz-deferrals/${deferralId}/complete`,
+    { environment },
   ).then(response => response.data),
   previewEmploymentRegistration: (
     employmentId: number,

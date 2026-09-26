@@ -54,6 +54,7 @@ final readonly class JmhzScenario1XmlDryRunService
                 'preparation_id' => $preparationId,
                 'office_id' => $officeId,
                 'blockers' => $blockers,
+                'deferred' => self::deferred($resolution, null),
                 'official_submission' => $this->officialSubmission(),
             ];
             if (in_array(
@@ -97,7 +98,7 @@ final readonly class JmhzScenario1XmlDryRunService
         }
 
         $document = $resolution->requireResolvedDocument();
-        $result = $this->validator->dryRun(
+        $result = $this->validator->dryRunPackages(
             $resolution,
             JmhzSubmissionEnvelope::create(
                 $this->guids->next(),
@@ -111,26 +112,104 @@ final readonly class JmhzScenario1XmlDryRunService
         // XSD hlídá tvar, katalog kontrol obsah. Teprve oboje dohromady říká,
         // jestli by ČSSZ podání přijala — a mezera v pokrytí katalogu se musí
         // projevit jako nepřipravenost, ne jako zelený test.
-        $controls = $this->controls->validate(
-            $result['xml'],
-            JmhzControlContext::today(schemaValidated: true),
+        $reports = [];
+        foreach ($result['packages'] as $package) {
+            $reports[] = $this->controls->validate(
+                $package['xml'],
+                JmhzControlContext::today(schemaValidated: true),
+            );
+        }
+        $controls = $reports[0];
+        $submittable = array_reduce(
+            $reports,
+            static fn (bool $carry, JmhzControlEvaluationReport $report): bool
+                => $carry && $report->submittable(),
+            true,
         );
+        $first = $result['packages'][0];
 
         return [
-            'status' => $controls->submittable() ? 'dry_run_valid' : 'dry_run_incomplete',
+            'status' => $submittable ? 'dry_run_valid' : 'dry_run_incomplete',
             'preparation_id' => $preparationId,
             'office_id' => $officeId,
             'blockers' => [],
+            'deferred' => self::deferred($resolution, $controls),
             'controls' => $controls->toArray(),
+            // Nad 1500 formulářů je hlášení rozdělené do dílčích balíků; každý
+            // se ověřuje zvlášť a kontroly souhrnu a pojistné části jsou
+            // v prvním.
+            'packages' => count($result['packages']) === 1 ? [] : array_map(
+                static fn (array $package, JmhzControlEvaluationReport $report): array => [
+                    'ordinal' => $package['ordinal'],
+                    'xml' => $package['xml'],
+                    'xml_sha256' => $package['sha256'],
+                    'submittable' => $report->submittable(),
+                    'blocking' => array_map(
+                        static fn (JmhzControlFinding $finding): array => $finding->toArray(),
+                        [...$report->blocking(), ...$report->coverageGaps()],
+                    ),
+                ],
+                $result['packages'],
+                $reports,
+            ),
             'deadline' => $this->deadline($document),
-            'xml' => $result['xml'],
-            'xml_sha256' => $result['sha256'],
+            'xml' => $first['xml'],
+            'xml_sha256' => $first['sha256'],
             'schema' => $result['schema'],
             'guids' => [
                 'scope' => 'preview_only',
                 'note' => 'GUIDy náhledu se pro ostré podání nepoužijí; to si vyžádá vlastní a zmrazí je.',
             ],
             'official_submission' => $this->officialSubmission(),
+        ];
+    }
+
+    /**
+     * Propustné kontroly, které porovnávají pojistnou část se SOUČTEM
+     * podaných formulářů. Pojistná část nese pojistné a slevu za všechny
+     * zaměstnance včetně odložených (jinak by se sleva po splatnosti už
+     * uplatnit nedala), takže při odložení se musí rozejít - a ČSSZ to tak
+     * výslovně připouští. Varování z nich jsou očekávaná, ne chyba.
+     */
+    public const DEFERRAL_EXPECTED_CONTROL_IDS = [1, 7, 9, 12, 142, 207, 209, 213, 227, 269, 297, 298];
+
+    /**
+     * Vynechané formuláře hlášení: kdo, proč a která varování kontrol to
+     * vysvětluje.
+     *
+     * @return array<string,mixed>|null
+     */
+    private static function deferred(
+        JmhzScenario1Resolution $resolution,
+        ?JmhzControlEvaluationReport $controls,
+    ): ?array {
+        if ($resolution->exclusion === null || $resolution->exclusion->isEmpty()) {
+            return null;
+        }
+        $provenance = $resolution->candidate?->payload['provenance'] ?? null;
+        $exclusion = is_array($provenance) ? ($provenance['form_exclusion'] ?? null) : null;
+        $expected = [];
+        foreach ($controls?->warnings() ?? [] as $finding) {
+            if (in_array($finding->controlId, self::DEFERRAL_EXPECTED_CONTROL_IDS, true)) {
+                $expected[$finding->controlId] = true;
+            }
+        }
+        $expected = array_keys($expected);
+        sort($expected, SORT_NUMERIC);
+
+        return [
+            'purpose' => $resolution->exclusion->purpose,
+            'deferral_ids' => $resolution->exclusion->deferralIds,
+            'employment_ids' => is_array($exclusion) ? ($exclusion['employment_ids'] ?? []) : [],
+            'employee_ids' => is_array($exclusion) ? ($exclusion['employee_ids'] ?? []) : [],
+            'summary_excluded_employee_ids' => is_array($exclusion)
+                ? ($exclusion['summary_excluded_employee_ids'] ?? [])
+                : [],
+            'blockers' => array_map(
+                static fn (JmhzScenario1Blocker $blocker): array => $blocker->toArray(),
+                $resolution->excludedBlockers,
+            ),
+            'expected_warning_control_ids' => $expected,
         ];
     }
 

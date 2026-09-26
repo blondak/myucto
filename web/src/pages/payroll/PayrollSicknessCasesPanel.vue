@@ -28,9 +28,10 @@
  * u připraveného podání.
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import { personalNumberLabel } from './employmentLifecycleUi'
+import { usePayrollServerMessage } from './payrollServerMessage'
+import { apiErrorCode } from '@/api/errors'
 import {
   payrollSicknessCasesApi,
   type PayrollSicknessBenefitKind,
@@ -60,6 +61,7 @@ import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConf
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 
 const { t } = useI18n()
+const { errorMessage: serverErrorMessage } = usePayrollServerMessage()
 const auth = useAuthStore()
 const {
   request: sendConfirmRequest,
@@ -215,26 +217,15 @@ function minorToCzk(value: number | null | undefined): string {
 const errorCode = ref<string | null>(null)
 const errorCase = ref<PayrollSicknessCase | null>(null)
 
-/**
- * Server vrací chybu jako `{ error: { code, message } }`. Dřív se tu četlo
- * `data.error` jako text, takže místo věty se ukázal objekt.
+/*
+ * Chyba serveru: `{ error: { code, message } }`. Dřív se četlo `data.error`
+ * jako text, takže se místo věty ukázalo „[object Object]". V jiném jazyce
+ * se místo české věty serveru ukáže překlad kódu. Kód si panel drží pro
+ * proklik na místo, kde se chyba opraví.
  */
 function message(err: unknown): string {
-  errorCode.value = null
-  if (isAxiosError(err)) {
-    const data = err.response?.data as {
-      message?: string
-      error?: string | { code?: string, message?: string }
-    } | undefined
-    if (data?.error && typeof data.error === 'object') {
-      errorCode.value = data.error.code ?? null
-      return data.error.message || t('payroll.sicknessCases.errors.generic')
-    }
-    return data?.message
-      || (typeof data?.error === 'string' ? data.error : '')
-      || t('payroll.sicknessCases.errors.generic')
-  }
-  return t('payroll.sicknessCases.errors.generic')
+  errorCode.value = apiErrorCode(err) || null
+  return serverErrorMessage(err, t('payroll.sicknessCases.errors.generic'))
 }
 
 /** Chyby, které se opravují na kartě osoby (identita, účet, adresa, vyživovaná osoba). */
