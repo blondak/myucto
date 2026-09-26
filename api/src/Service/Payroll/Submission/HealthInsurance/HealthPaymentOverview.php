@@ -26,6 +26,10 @@ final readonly class HealthPaymentOverview
      *   employer_contribution_minor_units:int,
      *   total_contribution_minor_units:int
      * }> $people
+     * @param ?string $correctionDiscoveredOn den zjištění chyby u opravné
+     *     revize (lhůta opravného přehledu, § 25 odst. 4 z. 592/1992 Sb.).
+     *     Záměrně NENÍ v toArray(): obsah přehledu ani jeho otisk na něm
+     *     nezávisí, jen termín.
      */
     public function __construct(
         public int $supplierId,
@@ -41,6 +45,7 @@ final readonly class HealthPaymentOverview
         public string $rulesetHash,
         public array $totals,
         public array $people,
+        public ?string $correctionDiscoveredOn = null,
     ) {}
 
     /** @return array<string,mixed> */

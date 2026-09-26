@@ -559,6 +559,16 @@ final readonly class HealthInsuranceSubmissionService
             ];
         }
         $window = $this->deadlines->forPaymentOverview($overview->period);
+        // Opravný přehled má vlastní lhůtu: 8 dnů ode dne zjištění chyby
+        // (§ 25 odst. 4 z. 592/1992 Sb.), ne 20. den po mzdovém období —
+        // ten bývá u opravy dávno pryč. Použije se jen tehdy, když podání
+        // opravdu skončí jako opravné (bez předchůdce jde o řádný přehled).
+        $correctiveWindow = $overview->revisionKind === 'correction'
+            && $overview->correctionDiscoveredOn !== null
+            ? $this->deadlines->forCorrectivePaymentOverview(
+                $overview->correctionDiscoveredOn,
+            )
+            : null;
         $submissionKind = $overview->revisionKind;
         $subjectReference =
             'payroll_run:' . $overview->runId . ':' . $insurerCode;
@@ -577,6 +587,7 @@ final readonly class HealthInsuranceSubmissionService
             $xml,
             $pdf,
             $window,
+            $correctiveWindow,
             $submissionKind,
             $subjectReference,
             $sourceEventReference,
@@ -652,6 +663,9 @@ final readonly class HealthInsuranceSubmissionService
                 $payload = $regularDocuments['payload'];
                 $xml = $regularDocuments['xml'];
                 $pdf = $regularDocuments['pdf'];
+            }
+            if ($submissionKind === 'correction' && $correctiveWindow !== null) {
+                $window = $correctiveWindow;
             }
             $sourceHash = hash('sha256', CanonicalJson::encode([
                 'schema_reference' =>

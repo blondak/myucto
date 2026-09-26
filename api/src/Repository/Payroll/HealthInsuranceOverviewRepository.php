@@ -30,6 +30,14 @@ final class HealthInsuranceOverviewRepository
             );
         }
 
+        /*
+         * Den ZJIŠTĚNÍ chyby u opravné revize — od něj běží lhůta opravného
+         * přehledu (§ 25 odst. 4 z. 592/1992 Sb.). Je to poslední žádost
+         * o opravu běhu před vznikem revize (přechod do `correction_pending`),
+         * a když ji historie nemá, vznik opravné revize samotné. Dřívější
+         * den nedává nic: chyba nemohla být zjištěna dřív, než o ní účetní
+         * řekla aplikaci.
+         */
         $statement = $this->db->pdo()->prepare(
             'SELECT revision.id,
                     revision.run_id,
@@ -37,7 +45,17 @@ final class HealthInsuranceOverviewRepository
                     revision.revision_kind,
                     revision.status AS revision_status,
                     run.period_start,
-                    run.current_revision_no
+                    run.current_revision_no,
+                    CASE WHEN revision.revision_kind = "correction" THEN
+                        DATE(COALESCE((
+                            SELECT MAX(event.created_at)
+                              FROM payroll_run_events event
+                             WHERE event.supplier_id = revision.supplier_id
+                               AND event.run_id = revision.run_id
+                               AND event.to_status = "correction_pending"
+                               AND event.created_at <= revision.created_at
+                        ), revision.created_at))
+                    END AS correction_discovered_on
                FROM payroll_run_revisions revision
                JOIN payroll_runs run
                  ON run.supplier_id = revision.supplier_id
@@ -78,6 +96,7 @@ final class HealthInsuranceOverviewRepository
                     $revision['current_revision_no'] ?? null,
                     'current_revision_no',
                 ),
+                'correction_discovered_on' => $revision['correction_discovered_on'] ?? null,
             ],
             'statutory_result' => $statutory,
         ];
