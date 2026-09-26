@@ -26307,6 +26307,7 @@
       "jmhz_eldp_days_compared": "months with compared ELDP days",
       "jmhz_eldp_days_differ": "months with differing ELDP days",
       "jmhz_failed": "submission details not taken over",
+      "jmhz_terms_closed_employment": "ended employments whose terms were not completed from submissions",
       "terms_weekly_hours": "weekly working hours from reports",
       "terms_workload_basis_points": "workloads from reports",
       "terms_work_place": "places of work from submissions",

@@ -46,6 +46,8 @@ final class PohodaPayrollJmhzWriter
     private const ENVIRONMENT = 'production';
     /** Druh věty registrace podle `RegZAMitems.RelTyp` ({@see PohodaPayrollPeople}). */
     private const REGISTRATION_TYPES = ['1' => 'start', '2' => 'end', '3' => 'existing'];
+    /** Stavy vztahu, u kterých jdou podmínky opravit (stejné jako u importu hlášení z XML). */
+    private const OPEN_STATUSES = ['planned', 'preregistered', 'active', 'suspended'];
 
     private int $messages = 0;
 
@@ -329,6 +331,13 @@ final class PohodaPayrollJmhzWriter
             $desired[$field] ??= $value;
         }
         if ($desired === []) {
+            return;
+        }
+        // Podmínky ukončeného vztahu nejde opravit ani na kartě; z hlášení se pak
+        // nezapisují a jen se spočítají (údaj je v historii podání).
+        $status = $this->employments->employmentById($supplierId, $employmentId)['status'] ?? null;
+        if (!in_array($status, self::OPEN_STATUSES, true)) {
+            $protocol->count($step, 'jmhz_terms_closed_employment');
             return;
         }
         $this->part($protocol, $step, $number, 'Podmínky vztahu z podání',

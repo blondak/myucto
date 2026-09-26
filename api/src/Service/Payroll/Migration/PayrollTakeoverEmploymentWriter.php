@@ -20,6 +20,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelationshipDetailPolicy;
 
 /**
  * Zápis převzatého PRACOVNÍHO VZTAHU ({@see PayrollTakeoverEmployment}): sjednaná mzda
@@ -358,6 +359,15 @@ final class PayrollTakeoverEmploymentWriter
             if (!$empty($desired[$field] ?? null) && $empty($current[$field] ?? null)) {
                 $changes[$field] = $desired[$field];
             }
+        }
+        // Upřesnění vztahu jen u druhu činnosti, který ho připouští (jediné pravidlo,
+        // podle kterého ho kontroluje i karta vztahu a registrace).
+        $activity = (string) ($changes['activity_code'] ?? $current['activity_code'] ?? '');
+        if (isset($changes['jmhz_relationship_detail_code'])
+            && ($activity === '' || PayrollRegistrationRelationshipDetailPolicy::modeForActivity($activity)
+                === PayrollRegistrationRelationshipDetailPolicy::MODE_FORBIDDEN)
+        ) {
+            unset($changes['jmhz_relationship_detail_code']);
         }
         if (!$empty($desired['weekly_hours'] ?? null) && $empty($current['weekly_hours'] ?? null)) {
             $changes['weekly_hours'] = $desired['weekly_hours'];
