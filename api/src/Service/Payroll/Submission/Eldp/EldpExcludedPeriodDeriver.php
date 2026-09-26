@@ -123,7 +123,18 @@ final class EldpExcludedPeriodDeriver
      *
      * @var list<string>
      */
-    public const INCOME_LESS_TYPES = ['unpaid_leave', 'unexcused', 'parental'];
+    public const INCOME_LESS_TYPES = [...self::UNPAID_EXCUSED_TYPES, 'unexcused', 'parental'];
+
+    /**
+     * Omluvené nepřítomnosti, za které náhrada příjmu nenáleží: neplacené
+     * volno a pracovní volno bez náhrady mzdy (výkon veřejné funkce podle
+     * § 200 až 202 ZP, neplacená překážka na straně zaměstnance). Jediné
+     * místo, kde se tahle skupina vyjmenovává — ELDP, doba pojištění i
+     * vyloučené dny § 18 odst. 7 z ní čtou stejně.
+     *
+     * @var list<string>
+     */
+    public const UNPAID_EXCUSED_TYPES = ['unpaid_leave', 'public_function', 'employee_obstacle_unpaid'];
 
     public const MONTH_INSURED = 'insured';
     public const MONTH_OUTSIDE_INSURANCE = 'outside_insurance';
@@ -236,7 +247,7 @@ final class EldpExcludedPeriodDeriver
          * nebyl zúčtován započitatelný příjem. Ten případ řeší volající;
          * do vyloučených dob nepatří ani tehdy.
          */
-        'unpaid_leave',
+        ...self::UNPAID_EXCUSED_TYPES,
         'unexcused',
         'parental',
         /*
@@ -245,7 +256,8 @@ final class EldpExcludedPeriodDeriver
          * Náhrada mzdy je součástí vyměřovacího základu, takže by se vyloučená
          * doba kryla s příjmem — a § 16 odst. 4 věta třetí návětí zákona
          * č. 155/1995 Sb. vyloučenou dobu při krytí s příjmem zapovídá.
-         * Neplacenou variantu aplikace neeviduje.
+         * Neplacená varianta má vlastní druh `employee_obstacle_unpaid`
+         * a patří do {@see self::UNPAID_EXCUSED_TYPES}.
          */
         'employee_obstacle',
     ];
@@ -305,6 +317,8 @@ final class EldpExcludedPeriodDeriver
      */
     private const SECTION18_ATTRIBUTES = [
         'unpaid_leave' => 'omluvenaNepritomnost',
+        'public_function' => 'omluvenaNepritomnost',
+        'employee_obstacle_unpaid' => 'omluvenaNepritomnost',
         'compensatory_time_off' => 'omluvenaNepritomnost',
         'parental' => 'omluvenaNepritomnost',
     ];

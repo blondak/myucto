@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { payrollApi, type PayrollEmployment } from '@/api/payroll'
+import DateInput from '@/components/ui/DateInput.vue'
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
@@ -884,6 +885,44 @@ describe('EmploymentCard', () => {
 
     await wrapper.setProps({ employment: resolved })
     expect(wrapper.find('[data-test="legacy-registration-warning"]').exists()).toBe(false)
+  })
+
+  /*
+   * § 38j odst. 3 ZDP: potvrzení o zdanitelných příjmech do 10 dnů od žádosti.
+   * Den žádosti se zapisuje přímo u položky checklistu, jinak termín nevznikne.
+   */
+  it('u potvrzení o příjmech zapíše den žádosti zaměstnance', async () => {
+    const ended = employment()
+    ended.checklist = [{
+      id: 5,
+      phase: 'offboarding',
+      item_key: 'taxable_income_confirmation',
+      status: 'pending',
+      due_date: null,
+      completed_at: null,
+      note: null,
+      row_version: 2,
+    }]
+    const wrapper = await mountCard(ended, {
+      props: { employment: ended, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+    vi.mocked(payrollApi.updateEmploymentChecklist).mockResolvedValue(ended)
+
+    const block = wrapper.get('[data-test="checklist-confirmation-request"]')
+    const save = block.get('[data-test="checklist-confirmation-request-save"]')
+    expect((save.element as HTMLButtonElement).disabled).toBe(true)
+
+    await block.findComponent(DateInput).vm.$emit('update:modelValue', '2026-09-21')
+    await save.trigger('click')
+    await flushPromises()
+
+    expect(payrollApi.updateEmploymentChecklist)
+      .toHaveBeenCalledWith(10, 'taxable_income_confirmation', {
+        row_version: 2,
+        status: 'pending',
+        requested_on: '2026-09-21',
+      })
   })
 
   /**

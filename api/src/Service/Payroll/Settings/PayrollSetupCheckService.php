@@ -109,9 +109,11 @@ final class PayrollSetupCheckService
             $channel = $policy['delivery_channel'] ?? null;
             $verifiedOn = $policy['delivery_verified_on'] ?? null;
             $ready = is_string($channel)
+                // S/MIME je jen historická hodnota výčtu — neodešle nic, takže
+                // připraveným kanálem není ({@see PayrollEmployerPolicyService}).
                 && in_array(
                     $channel,
-                    ['employee_portal', 'smime_email', 'manual_handover'],
+                    ['employee_portal', 'manual_handover'],
                     true,
                 )
                 && is_string($verifiedOn)

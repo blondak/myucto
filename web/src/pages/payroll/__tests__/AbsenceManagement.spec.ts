@@ -486,6 +486,34 @@ describe('AbsenceManagement', () => {
     wrapper.unmount()
   })
 
+  /*
+   * Výkon veřejné funkce a neplacená překážka jsou vlastní druhy — dřív
+   * zbývalo jen „jiné", na kterém se hlášení zastaví. Formulář vysvětlí, že
+   * náhrada nevzniká.
+   */
+  it('nabídne výkon veřejné funkce i neplacenou překážku a vysvětlí je', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    const type = wrapper.findComponent('[data-test="absence-type"]') as VueWrapper<any>
+    expect(type.props('options')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'public_function' }),
+      expect.objectContaining({ value: 'employee_obstacle_unpaid' }),
+    ]))
+    expect(wrapper.find('[data-test="absence-unpaid-excused-hint"]').exists()).toBe(false)
+
+    type.vm.$emit('update:modelValue', 'public_function')
+    await flushPromises()
+    expect(wrapper.find('[data-test="absence-unpaid-excused-hint"]').exists()).toBe(true)
+    await wrapper.get('[data-test="absence-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.createAbsence).toHaveBeenLastCalledWith(expect.objectContaining({
+      absence_type: 'public_function',
+      average_snapshot_id: null,
+    }))
+    wrapper.unmount()
+  })
+
   it('u jiného druhu než PPM dny porodu neposílá', async () => {
     const wrapper = mount(AbsenceManagement)
     await flushPromises()

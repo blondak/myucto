@@ -228,6 +228,14 @@ final class PayrollJmhzAbsenceHoursDeriverTest extends TestCase
             'rodičovská dovolená' => ['parental', 'parental', 'parental_hours'],
             'neplacené volno' => ['unpaid_leave', 'unpaid_leave', 'unpaid_leave_hours'],
             'neomluvená absence' => ['unexcused', 'unexcused', 'unexcused_hours'],
+            // Pracovní volno bez náhrady mzdy: do 10471 („s náhradou mzdy")
+            // nepatří, jen do úhrnu 10275 — na bloku neplaceného volna.
+            'výkon veřejné funkce' => ['public_function', 'unpaid_leave', 'unpaid_leave_hours'],
+            'neplacená překážka na straně zaměstnance' => [
+                'employee_obstacle_unpaid',
+                'unpaid_leave',
+                'unpaid_leave_hours',
+            ],
             // § 114 odst. 1 ZP: za dobu čerpání mzda nepřísluší, do 10276 nepatří.
             'náhradní volno za přesčas' => [
                 'compensatory_time_off',

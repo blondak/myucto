@@ -214,6 +214,13 @@ final class PayrollComponentDefaults
                 // zdanitelný příjem ze závislé činnosti a vstupuje do vyměřovacích základů.
                 ['CESTOVNI_NAHRADA_LIMIT', 'Cestovní náhrada do zákonného limitu', 'travel_reimbursement', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'included', null, 'not_subject_to_tax'],
                 ['CESTOVNI_NAHRADA_NADLIMIT', 'Nadlimitní cestovní náhrada', 'travel_reimbursement', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
+                // Odpočet poskytnuté zálohy při vyúčtování cesty (§ 183 ZP) —
+                // ZÁPORNÁ částka. Záloha není příjem ani jeho snížení: nesmí
+                // pohnout žádným základem ani výkazem, jen výplatou. Proto je
+                // všude `excluded` a daňově stojí vedle nezdaněné náhrady, proti
+                // které se započítává. Účetní protiúčet (pohledávka za
+                // zaměstnancem, 335) doplní mzdový můstek podle kódu složky.
+                ['CESTOVNI_NAHRADA_ZALOHA', 'Odpočet zálohy na pracovní cestu', 'travel_reimbursement', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', null, 'not_subject_to_tax'],
             ],
         ],
     ];

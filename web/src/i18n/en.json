@@ -3894,6 +3894,18 @@
         "annual_settlement_result": "Annual tax settlement",
         "monthly_bundle": "Monthly ZIP bundle"
       },
+      "payslip_delivery": {
+        "run": "Send payslips: {office}",
+        "running": "Queuing payslips…",
+        "hint": "Sends a secure link to their payslip to every employee who agreed to electronic delivery. A payslip that already has a link is not sent again.",
+        "confirm": "Send payslips ({office}) by secure link to all employees who agreed to electronic delivery?",
+        "queued": "Queued for sending: {queued}, already queued before: {already}.",
+        "none": "The revision has no generated payslips yet. Generate the documents first.",
+        "failed": "The payslips could not be queued for sending.",
+        "title": "Payslip delivery",
+        "summary": "Payslips in total {total}: newly queued {queued}, already queued {already}, skipped {skipped}.",
+        "skipped_intro": "These employees did not receive the payslip. Hand it over another way, or fill in what is missing:"
+      },
       "secure_delivery": {
         "send_link": "Send secure link",
         "sending_link": "Sending…",
@@ -5112,6 +5124,9 @@
       "show_detail": "Show",
       "hide_detail": "Hide",
       "timeline_title": "Timeline and changes",
+      "confirmation_requested_on": "Date of the employee's request",
+      "confirmation_request_save": "Record request",
+      "confirmation_request_hint": "The certificate is issued within 10 days of the request (Section 38j(3) of the Income Tax Act). Once the request date is recorded, the statutory deadline overview tracks it.",
       "complete": "Complete",
       "confirm_start": "Confirm start on {date}",
       "registered_elsewhere": "Already registered — resolved",
@@ -7803,7 +7818,8 @@
           "source_reference": "The source reference may be at most 255 characters long.",
           "delivery_verified_on": "The delivery channel verification date is not a valid date."
         },
-        "delivery_verified_on_hint": "Optional. Until you fill the date in, the policy saves, but payslips will not be sent through this channel."
+        "delivery_verified_on_hint": "Optional. Until you fill the date in, the policy saves, but payslips will not be sent through this channel.",
+        "delivery_smime_unsupported": "Encrypted e-mail does not send payroll documents yet, so employees would receive nothing. Choose the employee portal or an audited manual handover; the policy cannot be saved with this channel."
       },
       "health_accounts": {
         "title": "Institution payment accounts",
@@ -7951,7 +7967,8 @@
         "risky_savings": "Risk-work retirement savings",
         "employee_receivable": "Receivable from the employee",
         "non_deductible_benefit": "Non-deductible part of a benefit",
-        "travel_expense": "Travel reimbursements"
+        "travel_expense": "Travel reimbursements",
+        "accident_insurance": "Statutory employer liability insurance"
       },
       "validation": {
         "title": "Correct the highlighted fields before saving.",
@@ -8037,7 +8054,8 @@
         "non_deductible_benefit": "The tax-exempt part of a non-cash benefit (recreation, sport, culture, health care, printed books). Under Section 25(1)(h) of the Income Tax Act it is precisely the EXEMPT part that is non-deductible; the part above the cap is taxed at the employee and stays deductible. Account 528 flows automatically into non-deductible expenses in the corporate income tax return.",
         "travel_expense": "A travel allowance reimburses an expense under Part Seven of the Labour Code; it is not remuneration for work and does not belong in wage expenses. The contra account stays the payable account of the employment relationship, because the allowance is paid together with the wage.",
         "enforcement_deductions": "Deductions ordered by a court, a bailiff or an insolvency administrator. Kept apart from other deductions because they carry a claim ranking and go to a different recipient than voluntary deductions — on a shared account the two balances merge and cannot be traced.",
-        "enforcement_fee_revenue": "The CZK 50 monthly flat fee the wage payer keeps from the deducted amount to cover its costs (Section 270(2) of the Civil Procedure Code). It is deducted from the employee but not sent to the creditor — without moving it to revenue, a balance would build up on the garnishment liability every month. Usually 648 Other operating revenue. Leave empty to keep the fee on the liability."
+        "enforcement_fee_revenue": "The CZK 50 monthly flat fee the wage payer keeps from the deducted amount to cover its costs (Section 270(2) of the Civil Procedure Code). It is deducted from the employee but not sent to the creditor — without moving it to revenue, a balance would build up on the garnishment liability every month. Usually 648 Other operating revenue. Leave empty to keep the fee on the liability.",
+        "accident_insurance": "Quarterly premium under Decree No. 125/1993 Coll. The insurer issues no document, so under double-entry bookkeeping the charge (debit expense / credit liability) is created when payments are prepared for the last month of the quarter, and the payment is then posted against that liability."
       },
       "registration_source_reference_hint": "Optional. A reference to the notice or decision you copied the variable symbol from."
     },
@@ -8133,7 +8151,9 @@
           "checklist": "Per-person deadline",
           "registration_change": "Change to report",
           "tax_statement": "Tax statement",
-          "sickness_case": "Sickness benefit"
+          "sickness_case": "Sickness benefit",
+          "annual_settlement": "Annual tax settlement",
+          "foreign_permit": "Foreign worker permit"
         },
         "tax_statement": {
           "form": {
@@ -8141,7 +8161,15 @@
             "dpsvd2": "Withholding tax statement (DPSVD2)"
           },
           "subject": "for {year}"
-        }
+        },
+        "kind": {
+          "annual_settlement_request": "Find out annual settlement requests (by 15 Feb)",
+          "annual_settlement_perform": "Perform the annual tax settlement (by 31 Mar)",
+          "annual_settlement_refund": "Refund the settlement overpayment with the March payroll",
+          "foreign_permit_residence": "Residence permit expires",
+          "foreign_permit_work": "Work permit expires"
+        },
+        "annual_settlement_undecided": "{count} people with income for {year} have not yet decided whether they request the settlement"
       },
       "operational_health": {
         "title": "Payroll operational overview",
@@ -14385,6 +14413,8 @@
         "vat_clearing": "VAT clearing",
         "card_settlement": "Card payment settlement",
         "card_writeoff": "Card payment closed",
+        "payroll_travel": "Business trip settlement",
+        "payroll_accident_insurance": "Statutory employer liability insurance",
         "journal_entry": "Journal entry"
       },
       "history": {
@@ -25520,6 +25550,20 @@
       "settlement": "Balance against the advance: {amount}",
       "manual_review": "The settlement requires manual review and cannot be approved:"
     },
+    "settlement": {
+      "label": "Advance settlement",
+      "mode_payroll": "Through payroll (the advance is deducted from pay)",
+      "mode_cash": "Through the cash desk (only the taxable part goes to payroll)",
+      "help_payroll": "The full entitlement goes to payroll and the advance already paid is deducted from the payout. An advance above the entitlement is not withheld from wages; the employee returns it to the cash desk.",
+      "help_cash": "Settle the tax-free reimbursement through the cash desk (top-up or refund). Only the above-limit part goes to payroll because it has to be taxed. Under double-entry bookkeeping the tax-free part is posted against the receivable from the employee.",
+      "advance": "Advance paid",
+      "payroll_net": "Effect on the payout (before tax on the above-limit part)",
+      "cash_payout": "Top-up from the cash desk",
+      "employee_refund": "Employee returns the excess advance",
+      "refund_notice": "The advance exceeded the entitlement. The employee returns {amount} to the cash desk.",
+      "cash_payout_notice": "Pay the top-up of {amount} from the cash desk.",
+      "posting_skipped": "The tax-free part could not be posted ({reason}). Settle the trip again once the accounting period is open."
+    },
     "messages": {
       "load_failed": "Business trips could not be loaded.",
       "preview_failed": "The calculation preview could not be computed.",
@@ -25590,11 +25634,13 @@
       "paternity": "Paternity leave",
       "parental": "Parental leave",
       "unpaid_leave": "Unpaid leave",
-      "employee_obstacle": "Employee-side obstacle",
+      "employee_obstacle": "Employee-side obstacle with wage compensation",
       "employer_obstacle": "Employer-side obstacle",
       "compensatory_time_off": "Compensatory time off for overtime",
       "unexcused": "Unexcused absence",
-      "other": "Other absence"
+      "other": "Other absence",
+      "public_function": "Holding a public office (unpaid leave)",
+      "employee_obstacle_unpaid": "Employee-side obstacle without wage compensation"
     },
     "status": {
       "requested": "Pending",
@@ -25610,6 +25656,7 @@
     "absences": {
       "new": "New absence",
       "new_needs_person": "A new absence can only be created for a specific employee — it is tied to an employment.",
+      "unpaid_excused_hint": "Time off without wage compensation (Sections 199–202 of the Labour Code). No compensation input is created; the hours go to the monthly report only as unworked hours (10275), in the unpaid leave block. If the law grants compensation for the office, enter it as a payroll input.",
       "list": "Recorded absences",
       "empty": "No absences in the selected period.",
       "type": "Absence type",

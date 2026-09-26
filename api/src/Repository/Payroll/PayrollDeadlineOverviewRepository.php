@@ -545,6 +545,181 @@ final readonly class PayrollDeadlineOverviewRepository
     }
 
     /** @return list<array<string,mixed>> */
+    /**
+     * Požádal, ale zúčtování dosud neproběhlo (§ 38ch odst. 4 — do 31. 3.).
+     * Kdo musí podat přiznání, tomu se zúčtování neprovádí (§ 38ch odst. 1
+     * věta druhá), takže do přehledu nepatří.
+     *
+     * @param list<int> $years
+     * @return list<array{employee_id:int,full_name:string,tax_year:int}>
+     */
+    public function annualSettlementsToPerform(int $supplierId, array $years): array
+    {
+        if ($years === []) {
+            return [];
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT request.employee_id, employee.full_name, request.tax_year
+               FROM payroll_annual_settlement_requests request
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = request.supplier_id
+                AND employee.id = request.employee_id
+          LEFT JOIN payroll_annual_settlement_outcomes outcome
+                 ON outcome.supplier_id = request.supplier_id
+                AND outcome.employee_id = request.employee_id
+                AND outcome.tax_year = request.tax_year
+              WHERE request.supplier_id = ?
+                AND request.tax_year IN (' . implode(',', array_fill(0, count($years), '?')) . ')
+                AND request.request_status = "requested"
+                AND request.filing_obligation <> "required"
+                AND outcome.id IS NULL'
+        );
+        $statement->execute([$supplierId, ...$years]);
+
+        return array_map(static fn (array $row): array => [
+            'employee_id' => (int) $row['employee_id'],
+            'full_name' => (string) $row['full_name'],
+            'tax_year' => (int) $row['tax_year'],
+        ], $this->rows($statement));
+    }
+
+    /**
+     * Provedené zúčtování s přeplatkem k výplatě, který ještě nevyplatil žádný
+     * mzdový běh (§ 38ch odst. 5 — nejpozději se mzdou za březen).
+     *
+     * @param list<int> $years
+     * @return list<array{employee_id:int,full_name:string,tax_year:int,payable_minor:int}>
+     */
+    public function annualSettlementRefundsUnpaid(int $supplierId, array $years): array
+    {
+        if ($years === []) {
+            return [];
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT outcome.employee_id, employee.full_name, outcome.tax_year,
+                    outcome.payable_minor
+               FROM payroll_annual_settlement_outcomes outcome
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = outcome.supplier_id
+                AND employee.id = outcome.employee_id
+              WHERE outcome.supplier_id = ?
+                AND outcome.tax_year IN (' . implode(',', array_fill(0, count($years), '?')) . ')
+                AND outcome.payable_minor > 0
+                AND outcome.payout_run_id IS NULL'
+        );
+        $statement->execute([$supplierId, ...$years]);
+
+        return array_map(static fn (array $row): array => [
+            'employee_id' => (int) $row['employee_id'],
+            'full_name' => (string) $row['full_name'],
+            'tax_year' => (int) $row['tax_year'],
+            'payable_minor' => (int) $row['payable_minor'],
+        ], $this->rows($statement));
+    }
+
+    /**
+     * Kolik lidí s příjmem v roce ještě nemá rozhodnuto, jestli o roční
+     * zúčtování žádá (žádost neexistuje nebo je „nevíme").
+     *
+     * Příjem = čistý výsledek aktuální schválené revize běhu v roce. Rozhoduje
+     * se po lidech, ne po vztazích — zúčtování je za poplatníka.
+     *
+     * @param list<int> $years
+     * @return array<int,int> rok → počet lidí
+     */
+    public function annualSettlementUndecidedCounts(int $supplierId, array $years): array
+    {
+        if ($years === []) {
+            return [];
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT YEAR(net.period_start) AS tax_year,
+                    COUNT(DISTINCT net.employee_id) AS undecided
+               FROM payroll_net_results net
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = net.supplier_id
+                AND revision.id = net.revision_id
+                AND revision.status = "approved"
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+                AND run.current_revision_no = revision.revision_no
+          LEFT JOIN payroll_annual_settlement_requests request
+                 ON request.supplier_id = net.supplier_id
+                AND request.employee_id = net.employee_id
+                AND request.tax_year = YEAR(net.period_start)
+              WHERE net.supplier_id = ?
+                AND net.period_start >= ?
+                AND net.period_start < ?
+                AND (request.id IS NULL OR request.request_status = "unknown")
+              GROUP BY YEAR(net.period_start)'
+        );
+        $statement->execute([
+            $supplierId,
+            sprintf('%04d-01-01', min($years)),
+            sprintf('%04d-01-01', max($years) + 1),
+        ]);
+        $counts = [];
+        foreach ($this->rows($statement) as $row) {
+            $year = (int) $row['tax_year'];
+            if (in_array($year, $years, true)) {
+                $counts[$year] = (int) $row['undecided'];
+            }
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Povolení cizince (k pobytu, k zaměstnání), jehož platnost končí v okně
+     * a nemá nástupce. Nástupcem je i povolení téhož druhu zapsané později
+     * bez výslovné vazby — dohled se ptá, jestli má člověk po konci platnosti
+     * dál čím pracovat, ne jak bylo zapsané. Jen lidé s trvajícím vztahem.
+     *
+     * @return list<array{permit_id:int,employee_id:int,full_name:string,permit_kind:string,permit_label:string,valid_until:string}>
+     */
+    public function foreignPermitExpiries(int $supplierId, string $from, string $to): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT permit.id AS permit_id, permit.employee_id, employee.full_name,
+                    permit.permit_kind, permit.permit_label, permit.valid_until
+               FROM payroll_person_foreign_permits permit
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = permit.supplier_id
+                AND employee.id = permit.employee_id
+              WHERE permit.supplier_id = ?
+                AND permit.valid_until IS NOT NULL
+                AND permit.valid_until BETWEEN ? AND ?
+                AND NOT EXISTS (
+                    SELECT 1 FROM payroll_person_foreign_permits newer
+                     WHERE newer.supplier_id = permit.supplier_id
+                       AND newer.employee_id = permit.employee_id
+                       AND newer.permit_kind = permit.permit_kind
+                       AND newer.id <> permit.id
+                       AND (newer.supersedes_permit_id = permit.id
+                            OR newer.effective_from > permit.effective_from)
+                )
+                AND EXISTS (
+                    SELECT 1 FROM payroll_employments employment
+                     WHERE employment.supplier_id = permit.supplier_id
+                       AND employment.employee_id = permit.employee_id
+                       AND employment.status IN ("planned", "preregistered", "active", "suspended")
+                       AND (employment.end_date IS NULL OR employment.end_date >= permit.valid_until)
+                )
+              ORDER BY permit.valid_until, permit.id'
+        );
+        $statement->execute([$supplierId, $from, $to]);
+
+        return array_map(static fn (array $row): array => [
+            'permit_id' => (int) $row['permit_id'],
+            'employee_id' => (int) $row['employee_id'],
+            'full_name' => (string) $row['full_name'],
+            'permit_kind' => (string) $row['permit_kind'],
+            'permit_label' => (string) $row['permit_label'],
+            'valid_until' => (string) $row['valid_until'],
+        ], $this->rows($statement));
+    }
+
     private function rows(\PDOStatement $statement): array
     {
         return array_values($statement->fetchAll(PDO::FETCH_ASSOC));

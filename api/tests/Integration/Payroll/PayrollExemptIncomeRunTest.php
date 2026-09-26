@@ -192,6 +192,61 @@ final class PayrollExemptIncomeRunTest extends TestCase
     }
 
     /**
+     * Záloha na pracovní cestu se ve výplatě odečte ZÁPORNÝM vstupem. Běh ho
+     * musí přijmout (do žádného základu nevstupuje, takže nejde o zápornou
+     * opravu minulého období) a snížit jím jen peníze k výplatě.
+     */
+    public function testTravelAdvanceOffsetLowersOnlyThePayout(): void
+    {
+        $travelOverrides = [
+            'tax_treatment' => 'exempt',
+            'exemption_basis' => 'not_subject_to_tax',
+            'social_treatment' => 'excluded',
+            'social_participation_treatment' => 'excluded',
+            'health_treatment' => 'excluded',
+            'health_participation_treatment' => 'excluded',
+            'average_earning_treatment' => 'excluded',
+            'enforcement_treatment' => 'excluded',
+            'jmhz_treatment' => 'excluded',
+        ];
+        $this->seedInput(
+            'CESTOVNI_NAHRADA_LIMIT',
+            'Cestovní náhrada do zákonného limitu',
+            'travel_reimbursement',
+            $travelOverrides,
+            self::TRAVEL_MINOR,
+        );
+        $advance = 100_000;
+        $this->seedInput(
+            'CESTOVNI_NAHRADA_ZALOHA',
+            'Odpočet zálohy na pracovní cestu',
+            'travel_reimbursement',
+            [...$travelOverrides, 'statistics_treatment' => 'excluded'],
+            -$advance,
+        );
+
+        $statutory = $this->calculateRun();
+
+        self::assertSame('calculated', $statutory['result']['statutory']['status'], sprintf(
+            "Zákonný výpočet nedoběhl. Celý balík:\n%s",
+            CanonicalJson::encode($statutory['result']['statutory']),
+        ));
+        $person = $statutory['result']['statutory']['people'][0];
+        self::assertSame(
+            self::REMUNERATION_MINOR,
+            $person['income_tax']['advance_tax']['taxable_income_minor_units'],
+        );
+        self::assertSame(
+            self::REMUNERATION_MINOR,
+            $person['social_insurance']['relationships'][0]['assessment_base_minor_units'],
+        );
+        self::assertSame(
+            self::REMUNERATION_MINOR + self::TRAVEL_MINOR - $advance,
+            $person['net_pay']['cash_income_minor_units'],
+        );
+    }
+
+    /**
      * Roční koš § 6 odst. 9 ZDP: podlimitní část je osvobozená, nadlimitní se
      * zdaní jako běžný příjem. Zmrazený rozpad je doklad obojího.
      */

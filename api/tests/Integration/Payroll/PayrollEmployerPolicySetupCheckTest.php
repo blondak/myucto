@@ -279,6 +279,43 @@ final class PayrollEmployerPolicySetupCheckTest extends TestCase
         }
     }
 
+    /**
+     * Politika uložená dřív se šifrovaným e-mailem nesmí projít jako připravené
+     * bezpečné doručení — tím kanálem se neodešle nic.
+     */
+    public function testLegacySmimeChannelIsNotAReadyDeliveryChannel(): void
+    {
+        $this->createEmployerSettings($this->db->pdo(), $this->supplierId);
+        $saved = $this->policies->save(
+            $this->supplierId,
+            null,
+            $this->policyInput(),
+            0,
+            $this->actorId,
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employer_policies SET delivery_channel = "smime_email", row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $saved['id']]);
+
+        $result = $this->setupCheck->check(
+            $this->supplierId,
+            '2026-06-01',
+            new PayrollSetupFeatures(
+                homeOffice: true,
+                travelExpenses: true,
+                automaticPosting: true,
+                secureDelivery: true,
+                jmhz: true,
+                activeApproverCount: 2,
+                jmhzRegistryReady: true,
+                jmhzCertificateReady: true,
+            ),
+        );
+
+        self::assertContains('secure_delivery', $result['blockers']);
+    }
+
     public function testAuditRowsAreAppendOnly(): void
     {
         $created = $this->policies->save(

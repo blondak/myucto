@@ -19,6 +19,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Travel\BusinessTripCalculation;
 use MyInvoice\Service\Payroll\Travel\BusinessTripCalculator;
 use MyInvoice\Service\Payroll\Travel\BusinessTripMaterializer;
+use MyInvoice\Service\Payroll\Travel\BusinessTripSettlement;
 use MyInvoice\Service\Payroll\Travel\BusinessTripValidator;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -95,8 +96,11 @@ final class PayrollTravelAction
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
 
+        $calculation = $this->calculate($data);
+
         return Json::ok($response, [
-            'calculation' => $this->calculate($data)->jsonSerialize(),
+            'calculation' => $calculation->jsonSerialize(),
+            'settlement' => $this->settlement($data, $calculation),
         ]);
     }
 
@@ -172,9 +176,12 @@ final class PayrollTravelAction
             return Json::error($response, 'not_found', 'Pracovní cesta nebyla nalezena.', 404);
         }
 
+        $calculation = $this->calculateStored($trip);
+
         return Json::ok($response, [
             'trip' => $trip,
-            'calculation' => $this->calculateStored($trip)->jsonSerialize(),
+            'calculation' => $calculation->jsonSerialize(),
+            'settlement' => $this->settlement($trip, $calculation),
         ]);
     }
 
@@ -241,6 +248,7 @@ final class PayrollTravelAction
         return Json::ok($response, [
             'trip' => $approved,
             'calculation' => $calculation->jsonSerialize(),
+            'settlement' => $this->settlement($approved, $calculation),
         ]);
     }
 
@@ -352,6 +360,28 @@ final class PayrollTravelAction
         // `changed` je false, když už cesta zrušená byla — opakované zrušení
         // nesmí spadnout ani vyrobit druhý auditní záznam.
         return Json::ok($response, ['trip' => $trip, 'cancelled' => $changed]);
+    }
+
+    /**
+     * Vypořádání proti záloze — tentýž výpočet, ze kterého promítnutí do mzdy
+     * zakládá vstupy, aby náhled ukazoval přesně to, co se stane.
+     *
+     * @param array<string,mixed> $trip
+     * @return array<string,int|string>|null
+     */
+    private function settlement(array $trip, BusinessTripCalculation $calculation): ?array
+    {
+        if (!$calculation->isSupported()) {
+            return null;
+        }
+        $mode = $trip['advance_settlement'] ?? BusinessTripSettlement::MODE_PAYROLL;
+
+        return BusinessTripSettlement::calculate(
+            is_string($mode) ? $mode : BusinessTripSettlement::MODE_PAYROLL,
+            $calculation->exemptTotalMinor,
+            $calculation->taxableTotalMinor,
+            $calculation->advanceMinor,
+        )->toArray();
     }
 
     /** @param array<string,mixed> $data */

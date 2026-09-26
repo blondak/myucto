@@ -630,8 +630,13 @@ Ve výstupní části jsou navíc **Evidenční list důchodového pojištění 
 a **Potvrzení o zdanitelných příjmech**. Položka, která na konkrétní vztah
 nedopadá, se vůbec nezaloží — ELDP se u vztahů skončených **od 1. 4. 2026**
 nezakládá, protože jej podle pravidel JMHZ sestavuje ČSSZ z měsíčního hlášení.
-Potvrzení o zdanitelných příjmech termín nemá záměrně: § 38j odst. 3 zákona
-o daních z příjmů počítá lhůtu od žádosti zaměstnance, a tu aplikace neeviduje.
+Potvrzení o zdanitelných příjmech se vydává na žádost zaměstnance do 10 dnů
+od jejího podání (§ 38j odst. 3 zákona o daních z příjmů). U nesplněné položky
+je proto pole **Den žádosti zaměstnance**; po stisku **Zapsat žádost** dostane
+položka termín (den žádosti + 10 dnů) a hlídá ji panel **Zákonné termíny**.
+Dokud den žádosti není zapsaný, položka termín nemá. Povinnost se uzavře sama,
+jakmile se v aplikaci vytvoří potvrzení o zdanitelných příjmech; potvrzení
+vydané před zapsanou žádostí ji neuzavře.
 
 Přihlášky a odhlášky se odškrtnou samy až podle **stavu podání**: splněné jsou,
 když podání odešlo (nebo bylo přijato) v ostrém prostředí. Připravené, ale

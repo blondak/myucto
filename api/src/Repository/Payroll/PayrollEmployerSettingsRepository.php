@@ -31,6 +31,8 @@ final class PayrollEmployerSettingsRepository
         'employee_receivable_debit' => 'employee_receivable_debit_account',
         'non_deductible_benefit_debit' => 'non_deductible_benefit_debit_account',
         'travel_expense_debit' => 'travel_expense_debit_account',
+        'accident_insurance_debit' => 'accident_insurance_debit_account',
+        'accident_insurance_credit' => 'accident_insurance_credit_account',
     ];
 
     private const STRING_COLUMNS = [

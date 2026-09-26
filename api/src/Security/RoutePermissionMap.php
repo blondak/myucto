@@ -470,6 +470,7 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/employments/[0-9]+/documents/exit$#', 'payroll.documents', AccessLevel::READ],
         ['POST', '#^/api/payroll/employments/[0-9]+/documents/exit/(employment-certificate|average-earnings-certificate|average-earnings-statement)$#', 'payroll.documents', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/revisions/[0-9]+/documents/batch$#', 'payroll.documents', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/runs/[0-9]+/revisions/[0-9]+/documents/secure-links$#', 'payroll.documents', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/documents/batches/[0-9]+$#', 'payroll.documents', AccessLevel::READ],
         ['GET', '#^/api/payroll/documents/batches/[0-9]+/items$#', 'payroll.documents', AccessLevel::READ],
         ['POST', '#^/api/payroll/documents/batches/[0-9]+/items/[0-9]+/retry$#', 'payroll.documents', AccessLevel::WRITE],

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Deadline;
 
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
+use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementStatute;
 use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
@@ -51,6 +52,13 @@ use Psr\Clock\ClockInterface;
  *    sociální událostí, ne založením podání: kdyby se termín odvozoval jen
  *    z `payroll_obligations`, existoval by teprve od okamžiku, kdy někdo klikl
  *    na Připravit — tedy přesně tehdy, kdy už ho hlídat netřeba.
+ * 6. **roční zúčtování záloh** — zjistit do 15. 2., kdo o zúčtování žádá,
+ *    provést ho do 31. 3. a přeplatek vrátit se mzdou za březen (§ 38ch ZDP,
+ *    lhůty drží {@see AnnualSettlementStatute}),
+ * 7. **konec platnosti povolení cizince** — povolení k pobytu nebo
+ *    k zaměstnání bez nástupce u člověka s trvajícím vztahem. Bez platného
+ *    povolení nesmí cizinec pracovat (§ 89 zák. č. 435/2004 Sb.) a dosud to
+ *    hlásila jen jeho karta, tedy místo, kam se nikdo nedívá, dokud ho nehledá.
  *
  * ## Co se do něj vědomě nedostane
  *
@@ -118,6 +126,8 @@ final readonly class PayrollDeadlineOverviewService
         'registration_change',
         'tax_statement',
         'sickness_case',
+        'annual_settlement',
+        'foreign_permit',
     ];
 
     /** Kolik dnů dopředu se termín považuje za „brzy". */
@@ -142,7 +152,21 @@ final readonly class PayrollDeadlineOverviewService
      *
      * @var list<string>
      */
-    public const PERSON_SOURCES = ['checklist', 'registration_change', 'sickness_case'];
+    public const PERSON_SOURCES = [
+        'checklist',
+        'registration_change',
+        'sickness_case',
+        'annual_settlement',
+        'foreign_permit',
+    ];
+
+    /**
+     * Přeplatek ze zúčtování se vrací „nejpozději při zúčtování mzdy za březen"
+     * (§ 38ch odst. 5 ZDP). Mzda za březen je splatná nejpozději v dubnu
+     * (§ 141 odst. 1 zákoníku práce), takže poslední den, kdy vrácení ještě
+     * může proběhnout včas, je konec dubna.
+     */
+    private const ANNUAL_REFUND_DUE_MONTH_DAY = '04-30';
 
     public const GROUP_ITEMS_DEFAULT_LIMIT = 50;
 
@@ -428,6 +452,8 @@ final readonly class PayrollDeadlineOverviewService
             ...$this->registrationChangeItems($supplierId, $environment, $from, $to),
             ...$this->taxStatementItems($supplierId, $from, $to),
             ...$this->sicknessCaseItems($supplierId, $environment, $from, $to),
+            ...$this->annualSettlementItems($supplierId, $from, $to),
+            ...$this->foreignPermitItems($supplierId, $from, $to),
         ];
         usort(
             $items,
@@ -565,6 +591,8 @@ final readonly class PayrollDeadlineOverviewService
             'registration_change' => $this->registrationChangeItems($supplierId, $environment, $from, $to),
             'tax_statement' => $this->taxStatementItems($supplierId, $from, $to),
             'sickness_case' => $this->sicknessCaseItems($supplierId, $environment, $from, $to),
+            'annual_settlement' => $this->annualSettlementItems($supplierId, $from, $to),
+            'foreign_permit' => $this->foreignPermitItems($supplierId, $from, $to),
             default => [],
         };
     }
@@ -1049,6 +1077,149 @@ final readonly class PayrollDeadlineOverviewService
                     'path' => '/payroll/submissions',
                 ];
             }
+        }
+
+        return $items;
+    }
+
+    /**
+     * Roční zúčtování záloh (§ 38ch ZDP): tři lhůty za každý rok, jehož
+     * termíny padnou do okna.
+     *
+     * - **žádosti** do 15. 2. — kolik lidí s příjmem v roce ještě nemá
+     *   rozhodnuto, zda o zúčtování žádá. Jen dokud lhůta neuplynula: po ní už
+     *   zaměstnanec požádat nemůže a připomínka by jen strašila.
+     * - **provedení** do 31. 3. — kdo požádal a zúčtování ještě nemá.
+     * - **vrácení přeplatku** — provedené zúčtování s přeplatkem, který ještě
+     *   nevyplatil žádný mzdový běh.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function annualSettlementItems(
+        int $supplierId,
+        string $from,
+        string $to,
+    ): array {
+        $years = [];
+        for ($year = (int) substr($from, 0, 4) - 1; $year <= (int) substr($to, 0, 4); ++$year) {
+            $years[] = $year;
+        }
+        $requestDue = static fn (int $year): string
+            => AnnualSettlementStatute::requestDeadline($year)->format('Y-m-d');
+        $performDue = static fn (int $year): string
+            => AnnualSettlementStatute::settlementDeadline($year)->format('Y-m-d');
+        $refundDue = static fn (int $year): string
+            => sprintf('%04d-%s', $year + 1, self::ANNUAL_REFUND_DUE_MONTH_DAY);
+        $inWindow = static fn (string $due): bool => $due >= $from && $due <= $to;
+
+        $items = [];
+        $requestYears = array_values(array_filter(
+            $years,
+            fn (int $year): bool => $inWindow($requestDue($year))
+                && $this->phase($requestDue($year)) !== 'overdue',
+        ));
+        foreach ($this->repository->annualSettlementUndecidedCounts($supplierId, $requestYears) as $year => $count) {
+            if ($count < 1) {
+                continue;
+            }
+            $items[] = $this->annualSettlementItem(
+                'annual_settlement_request',
+                'annual_settlement_request:' . $year,
+                (string) $count,
+                $year,
+                $requestDue($year),
+                null,
+                '§ 38ch odst. 1 zákona č. 586/1992 Sb.',
+            ) + ['undecided_count' => $count];
+        }
+        $performYears = array_values(array_filter($years, fn (int $y): bool => $inWindow($performDue($y))));
+        foreach ($this->repository->annualSettlementsToPerform($supplierId, $performYears) as $row) {
+            $items[] = $this->annualSettlementItem(
+                'annual_settlement_perform',
+                'annual_settlement_perform:' . $row['tax_year'] . ':' . $row['employee_id'],
+                $row['full_name'],
+                $row['tax_year'],
+                $performDue($row['tax_year']),
+                $row['employee_id'],
+                '§ 38ch odst. 4 zákona č. 586/1992 Sb.',
+            );
+        }
+        $refundYears = array_values(array_filter($years, fn (int $y): bool => $inWindow($refundDue($y))));
+        foreach ($this->repository->annualSettlementRefundsUnpaid($supplierId, $refundYears) as $row) {
+            $items[] = $this->annualSettlementItem(
+                'annual_settlement_refund',
+                'annual_settlement_refund:' . $row['tax_year'] . ':' . $row['employee_id'],
+                $row['full_name'],
+                $row['tax_year'],
+                $refundDue($row['tax_year']),
+                $row['employee_id'],
+                '§ 38ch odst. 5 zákona č. 586/1992 Sb., § 141 odst. 1 zákoníku práce',
+            ) + ['remaining_minor' => $row['payable_minor']];
+        }
+
+        return $items;
+    }
+
+    /** @return array<string,mixed> */
+    private function annualSettlementItem(
+        string $title,
+        string $reference,
+        string $subject,
+        int $taxYear,
+        string $dueOn,
+        ?int $employeeId,
+        string $legalReference,
+    ): array {
+        $query = 'year=' . $taxYear . ($employeeId === null ? '' : '&person=' . $employeeId);
+
+        return [
+            'source' => 'annual_settlement',
+            'reference' => $reference,
+            'title' => $title,
+            'subject' => $subject,
+            'period' => null,
+            'due_on' => $dueOn,
+            'phase' => $this->phase($dueOn),
+            'days_to_due' => $this->daysToDue($dueOn),
+            'is_overdue' => $this->phase($dueOn) === 'overdue',
+            'statement_year' => $taxYear,
+            'employee_id' => $employeeId,
+            'deadline_source' => $legalReference,
+            'deadline_source_status' => 'statute_verified',
+            'path' => '/payroll/annual-settlement?' . $query,
+        ];
+    }
+
+    /**
+     * Konec platnosti povolení cizince bez nástupce.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function foreignPermitItems(
+        int $supplierId,
+        string $from,
+        string $to,
+    ): array {
+        $items = [];
+        foreach ($this->repository->foreignPermitExpiries($supplierId, $from, $to) as $row) {
+            $dueOn = $row['valid_until'];
+            $items[] = [
+                'source' => 'foreign_permit',
+                'reference' => 'payroll_foreign_permit:' . $row['permit_id'],
+                'title' => 'foreign_permit_' . $row['permit_kind'],
+                'subject' => $row['full_name'],
+                'period' => null,
+                'due_on' => $dueOn,
+                'phase' => $this->phase($dueOn),
+                'days_to_due' => $this->daysToDue($dueOn),
+                'is_overdue' => $this->phase($dueOn) === 'overdue',
+                'employee_id' => $row['employee_id'],
+                'permit_id' => $row['permit_id'],
+                'permit_label' => $row['permit_label'],
+                'deadline_source' => '§ 89 zákona č. 435/2004 Sb.',
+                'deadline_source_status' => 'statute_verified',
+                'path' => '/payroll/people/' . $row['employee_id'],
+            ];
         }
 
         return $items;

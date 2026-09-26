@@ -114,6 +114,62 @@ final class PayrollSecureDeliveryService
     }
 
     /**
+     * Hromadné rozeslání výplatních pásek jedné schválené revize.
+     *
+     * Každá páska jde TOUŽ cestou jako jednotlivé odeslání ({@see self::enqueue()}):
+     * stejná brána, stejný souhlas osoby, stejná idempotence. Opakované kliknutí
+     * proto nepošle nic dvakrát a páska, která už odkaz má, se jen započítá jako
+     * „už ve frontě".
+     *
+     * Brána zaměstnavatele (kanál, ověření, release) se ověří PŘEDEM jednou za
+     * celou dávku — když je zavřená, nemá smysl vypisovat stejný důvod u sta lidí.
+     * Důvody jednotlivých osob (papír, chybějící e-mail) se naopak sbírají po
+     * řádcích, aby účetní viděla, komu pásku musí předat jinak.
+     *
+     * @return array{
+     *   total:int,queued:int,already_queued:int,
+     *   skipped:list<array{document_id:int,employee_id:int,employee_name:string,reason:string,message:string}>
+     * }
+     * @throws PayrollSecureDeliveryBlockedException
+     * @throws PayrollProductionGateException
+     */
+    public function enqueueRevisionPayslips(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+        ?int $actorUserId,
+    ): array {
+        if ($supplierId <= 0 || $runId <= 0 || $revisionId <= 0) {
+            throw new \InvalidArgumentException('Identita mzdové revize není platná.');
+        }
+        $documents = $this->documents->currentPayslipsForRevision($supplierId, $runId, $revisionId);
+        $result = ['total' => count($documents), 'queued' => 0, 'already_queued' => 0, 'skipped' => []];
+        if ($documents === []) {
+            return $result;
+        }
+        $this->policy->assertDispatchAllowed($supplierId, $this->effectiveOn($documents[0]));
+
+        foreach ($documents as $document) {
+            $documentId = (int) $document['id'];
+            try {
+                $queued = $this->enqueue($supplierId, $documentId, $actorUserId);
+            } catch (PayrollSecureDeliveryBlockedException $exception) {
+                $result['skipped'][] = [
+                    'document_id' => $documentId,
+                    'employee_id' => (int) $document['employee_id'],
+                    'employee_name' => (string) ($document['employee_name'] ?? ''),
+                    'reason' => $exception->reasonCode(),
+                    'message' => $exception->getMessage(),
+                ];
+                continue;
+            }
+            $queued['created'] ? $result['queued']++ : $result['already_queued']++;
+        }
+
+        return $result;
+    }
+
+    /**
      * Zneplatní odkaz. Používá se i jako „poslat znovu": nejdřív zneplatnit starý,
      * teprve pak zařadit nový, aby po firmě nekolovaly dva platné odkazy na jednu
      * pásku.

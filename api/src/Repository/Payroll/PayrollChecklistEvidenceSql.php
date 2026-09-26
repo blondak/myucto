@@ -62,6 +62,11 @@ final class PayrollChecklistEvidenceSql
                      'taxable_income_advance_certificate',
                      'taxable_income_withholding_certificate'
                    )
+               -- Se zapsaným dnem žádosti (termín = žádost + 10 dnů, § 38j
+               -- odst. 3 ZDP) uzavře povinnost jen potvrzení vydané od žádosti,
+               -- ne staré z dřívějška.
+               AND (item.due_date IS NULL
+                    OR document.created_at >= item.due_date - INTERVAL 10 DAY)
           )
           WHEN 'social_jmhz_registration' THEN EXISTS (
             SELECT 1 FROM payroll_obligations obligation

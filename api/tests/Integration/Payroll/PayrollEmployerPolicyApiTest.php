@@ -304,6 +304,29 @@ final class PayrollEmployerPolicyApiTest extends TestCase
         );
     }
 
+    /**
+     * Šifrovaný e-mail (S/MIME) odesílání mzdových dokumentů neumí — brána
+     * odesílání ho odmítne. Politika s ním by zaměstnancům slibovala doručení,
+     * které se nestane, takže se uložit nesmí.
+     */
+    public function testUnimplementedSmimeChannelCannotBeSaved(): void
+    {
+        $response = $this->action->create(
+            $this->request('POST', $this->supplierId)->withParsedBody(
+                $this->payload([
+                    'delivery_channel' => 'smime_email',
+                    'delivery_verified_on' => '2026-01-01',
+                ]),
+            ),
+            new Response(),
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        $error = $this->row($this->json($response)['error'] ?? null);
+        self::assertSame('validation_failed', $error['code']);
+        self::assertStringContainsString('S/MIME', (string) $error['message']);
+    }
+
     public function testValidationSessionPermissionAndDisabledModuleErrors(): void
     {
         $invalid = $this->action->create(

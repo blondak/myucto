@@ -41,8 +41,9 @@ enum PayrollWageReplacementTitle: string
     /**
      * Doba, za kterou mzda ani náhrada nepřísluší: neplacené volno, náhradní
      * volno za přesčas (§ 114 odst. 1 ZP — přesčas se už zaplatil dosaženou
-     * mzdou, volnem se nahrazuje jen příplatek), neomluvené zameškání a
-     * nerozlišené „jiné".
+     * mzdou, volnem se nahrazuje jen příplatek), neomluvené zameškání,
+     * pracovní volno bez náhrady mzdy (výkon veřejné funkce, neplacená
+     * překážka na straně zaměstnance) a nerozlišené „jiné".
      */
     case Unpaid = 'unpaid';
 
@@ -56,7 +57,8 @@ enum PayrollWageReplacementTitle: string
             'vacation' => self::Vacation,
             'ocr', 'long_term_care', 'ppm', 'paternity', 'parental' => self::StateBenefit,
             'employee_obstacle', 'employer_obstacle' => self::PaidObstacle,
-            'unpaid_leave', 'compensatory_time_off', 'unexcused', 'other' => self::Unpaid,
+            'unpaid_leave', 'compensatory_time_off', 'unexcused', 'other',
+            'public_function', 'employee_obstacle_unpaid' => self::Unpaid,
             default => null,
         };
     }

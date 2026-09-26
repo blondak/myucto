@@ -81,7 +81,9 @@ export function usePayrollDeadlineLabels() {
         ? `payroll.people.registration.changes.duty_short.${title}`
         : source === 'tax_statement'
           ? `payroll.dashboard.deadlines.tax_statement.form.${title}`
-          : `payroll.people.checklist.${title}`
+          : source === 'annual_settlement' || source === 'foreign_permit'
+            ? `payroll.dashboard.deadlines.kind.${title}`
+            : `payroll.people.checklist.${title}`
     return te(path) ? t(path) : title
   }
 
@@ -95,6 +97,15 @@ export function usePayrollDeadlineLabels() {
       return t('payroll.dashboard.deadlines.tax_statement.subject', {
         year: item.statement_year,
       })
+    }
+    if (item.source === 'annual_settlement' && item.undecided_count !== undefined) {
+      return t('payroll.dashboard.deadlines.annual_settlement_undecided', {
+        count: item.undecided_count,
+        year: item.statement_year ?? '',
+      })
+    }
+    if (item.source === 'foreign_permit' && item.permit_label) {
+      return `${item.subject} · ${item.permit_label}`
     }
     return item.subject
   }
@@ -111,6 +122,17 @@ export function usePayrollDeadlineLabels() {
       return { name: 'payroll-people', query: { person: String(item.employee_id) } }
     }
     if (item.source === 'checklist') return { name: 'payroll-people' }
+    if (item.source === 'foreign_permit' && item.employee_id !== undefined) {
+      return { name: 'payroll-people', query: { person: String(item.employee_id) } }
+    }
+    if (item.source === 'annual_settlement') {
+      const query: Record<string, string> = {}
+      if (item.statement_year !== undefined) query.year = String(item.statement_year)
+      if (item.employee_id !== undefined && item.employee_id !== null) {
+        query.person = String(item.employee_id)
+      }
+      return { name: 'payroll-annual-settlement', query }
+    }
     if (item.source === 'tax_statement') {
       return {
         name: 'payroll-dashboard',

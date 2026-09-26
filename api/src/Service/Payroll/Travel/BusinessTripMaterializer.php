@@ -19,17 +19,33 @@ use PDOException;
  * část na `CESTOVNI_NAHRADA_NADLIMIT` (zdanitelný příjem ve všech základech).
  * Opakované volání nevytvoří duplicitu — dedupe drží unikátní external_id
  * mzdového vstupu a unikátní zdrojová reference v payroll_travel_compensation_links.
+ *
+ * ── Záloha ──────────────────────────────────────────────────────────────────
+ * Vyúčtování podle § 183 zákoníku práce je nárok MINUS poskytnutá záloha. Dřív
+ * šel do mzdy celý nárok a záloha zůstala jen ve snímku, takže ji zaměstnanec
+ * dostal podruhé. Kde se rozdíl vypořádá, říká `advance_settlement` cesty:
+ *
+ *  - `payroll`: nárok jde do mzdy celý (daňové zařazení obou částí se tím
+ *    nemění) a vedle něj vznikne záporný vstup `CESTOVNI_NAHRADA_ZALOHA`, který
+ *    zálohu z výplaty odečte. Účetně MD závazek vůči zaměstnanci / D pohledávka
+ *    za zaměstnancem (335), na které záloha visí od výplaty z pokladny.
+ *    Odečte se nejvýš celý nárok: přeplatek zálohy (záloha > nárok) se ze mzdy
+ *    nesráží, zaměstnanec ho vrací ({@see BusinessTripSettlement}).
+ *  - `cash`: nezdaněná část se vyrovná pokladnou, takže do mzdy jde jen
+ *    nadlimitní část. Nezdaněnou část zaúčtuje {@see BusinessTripCashPosting}.
  */
 final class BusinessTripMaterializer
 {
     public const COMPONENT_EXEMPT = 'CESTOVNI_NAHRADA_LIMIT';
     public const COMPONENT_TAXABLE = 'CESTOVNI_NAHRADA_NADLIMIT';
+    public const COMPONENT_ADVANCE = 'CESTOVNI_NAHRADA_ZALOHA';
     private const SOURCE_SYSTEM = 'payroll_business_trip';
 
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollBusinessTripRepository $trips,
         private readonly PayrollComponentRepository $components,
+        private readonly BusinessTripCashPosting $cashPosting,
     ) {}
 
     /** @return array<string,mixed> */
@@ -52,32 +68,45 @@ final class BusinessTripMaterializer
                     'Do mzdy lze promítnout jen schválené vyúčtování pracovní cesty.',
                 );
             }
+            // Cesta vypořádaná dřív, než se záloha odečítala, dostala do mzdy
+            // celý nárok a její období je typicky uzavřené. Opakované promítnutí
+            // jí proto odpočet zálohy DODATEČNĚ nepřidá — jen přehraje, co už
+            // existuje. Rozdíl se u takové cesty řeší opravnou revizí.
+            $firstSettlement = $state['status'] === 'approved';
             $trip = $this->trips->find($supplierId, $tripId)
                 ?? throw new \RuntimeException('Pracovní cestu se nepodařilo načíst.');
             $periodStart = PayrollTimeValue::string(
                 $trip['settlement_period_start'] ?? null,
                 'settlement_period_start',
             );
+            $settlement = BusinessTripSettlement::fromTrip($trip);
 
             $created = [];
             $replayed = [];
-            foreach ([
-                'exempt' => [self::COMPONENT_EXEMPT, (int) $trip['exempt_total_minor']],
-                'taxable' => [self::COMPONENT_TAXABLE, (int) $trip['taxable_total_minor']],
-            ] as $part => [$code, $amount]) {
-                if ($amount <= 0) {
+            $parts = [
+                'exempt' => [self::COMPONENT_EXEMPT, $settlement->payrollExemptMinor],
+                'taxable' => [self::COMPONENT_TAXABLE, $settlement->taxableMinor],
+                'advance' => [self::COMPONENT_ADVANCE, -$settlement->payrollAdvanceOffsetMinor],
+            ];
+            foreach ($parts as $part => [$code, $amount]) {
+                if ($amount === 0) {
                     continue;
                 }
                 $componentId = $this->componentId($supplierId, $code, $periodStart);
-                $result = $this->upsertInput(
-                    $supplierId,
-                    $trip,
-                    $periodStart,
-                    $componentId,
-                    $part,
-                    $amount,
-                    $userId,
-                );
+                $result = $part === 'advance' && !$firstSettlement
+                    ? $this->existingInput($supplierId, $trip, $periodStart, $part)
+                    : $this->upsertInput(
+                        $supplierId,
+                        $trip,
+                        $periodStart,
+                        $componentId,
+                        $part,
+                        $amount,
+                        $userId,
+                    );
+                if ($result === null) {
+                    continue;
+                }
                 $this->linkInput($supplierId, $tripId, $result['input_id'], $part);
                 $row = [
                     'part' => $part,
@@ -91,6 +120,9 @@ final class BusinessTripMaterializer
                     $replayed[] = $row;
                 }
             }
+            $posting = $settlement->mode === BusinessTripSettlement::MODE_CASH
+                ? $this->cashPosting->post($supplierId, $trip, $settlement, $userId)
+                : null;
             $this->trips->markSettled($supplierId, $tripId);
             if ($ownsTransaction) {
                 $pdo->commit();
@@ -108,6 +140,8 @@ final class BusinessTripMaterializer
             'replayed_count' => count($replayed),
             'created' => $created,
             'replayed' => $replayed,
+            'settlement' => $settlement->toArray(),
+            'posting' => $posting,
         ];
     }
 
@@ -151,6 +185,15 @@ final class BusinessTripMaterializer
             'ruleset_id' => PayrollTimeValue::string($trip['ruleset_id'] ?? null, 'ruleset_id'),
             'calculation' => $trip['calculation'],
         ];
+        // Způsob vypořádání se do snímku přidává jen tehdy, když se od dosavadního
+        // chování liší — snímek cesty bez zálohy placené mzdou zůstává bajtově
+        // stejný jako před zavedením vypořádání.
+        if (($trip['advance_settlement'] ?? BusinessTripSettlement::MODE_PAYROLL)
+            !== BusinessTripSettlement::MODE_PAYROLL
+            || $part === 'advance'
+        ) {
+            $snapshot['advance_settlement'] = (string) $trip['advance_settlement'];
+        }
         $json = CanonicalJson::encode($snapshot);
         $hash = hash('sha256', $json, true);
 
@@ -181,21 +224,40 @@ final class BusinessTripMaterializer
             if ((string) $e->getCode() !== '23000') {
                 throw $e;
             }
-            $existing = $pdo->prepare(
-                'SELECT id
-                   FROM payroll_inputs
-                  WHERE supplier_id = ? AND employment_id = ?
-                    AND period_start = ? AND source_kind = "travel"
-                    AND external_id = ? AND status <> "cancelled"'
-            );
-            $existing->execute([$supplierId, $employmentId, $periodStart, $externalId]);
-            $id = $existing->fetchColumn();
-            if ($id === false) {
+            $existing = $this->existingInput($supplierId, $trip, $periodStart, $part);
+            if ($existing === null) {
                 throw $e;
             }
 
-            return ['input_id' => PayrollTimeValue::int($id, 'input_id'), 'created' => false];
+            return $existing;
         }
+    }
+
+    /**
+     * @param array<string,mixed> $trip
+     * @return array{input_id:int,created:bool}|null
+     */
+    private function existingInput(
+        int $supplierId,
+        array $trip,
+        string $periodStart,
+        string $part,
+    ): ?array {
+        $tripId = PayrollTimeValue::int($trip['id'] ?? null, 'trip_id');
+        $employmentId = PayrollTimeValue::int($trip['employment_id'] ?? null, 'employment_id');
+        $existing = $this->db->pdo()->prepare(
+            'SELECT id
+               FROM payroll_inputs
+              WHERE supplier_id = ? AND employment_id = ?
+                AND period_start = ? AND source_kind = "travel"
+                AND external_id = ? AND status <> "cancelled"'
+        );
+        $existing->execute([$supplierId, $employmentId, $periodStart, "travel:{$tripId}:{$part}"]);
+        $id = $existing->fetchColumn();
+
+        return $id === false
+            ? null
+            : ['input_id' => PayrollTimeValue::int($id, 'input_id'), 'created' => false];
     }
 
     private function linkInput(int $supplierId, int $tripId, int $inputId, string $part): void

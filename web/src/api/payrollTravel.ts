@@ -80,6 +80,24 @@ export interface TravelCalculation {
   advance_minor: number
   settlement_difference_minor: number
   steps: TravelCalculationStep[]
+  /** Vypořádání proti záloze — jen v náhledu, dopočítá ho server. */
+  settlement?: TravelSettlement | null
+}
+
+export type TravelAdvanceSettlement = 'payroll' | 'cash'
+
+/** Rozpad vyúčtování proti záloze (§ 183 ZP), tentýž výpočet jako promítnutí do mzdy. */
+export interface TravelSettlement {
+  mode: TravelAdvanceSettlement
+  entitlement_minor: number
+  exempt_minor: number
+  taxable_minor: number
+  advance_minor: number
+  payroll_exempt_minor: number
+  payroll_advance_offset_minor: number
+  payroll_net_minor: number
+  cash_payout_minor: number
+  employee_refund_minor: number
 }
 
 export interface TravelTrip {
@@ -106,6 +124,7 @@ export interface TravelTrip {
   meal_rate_band_2_minor: number | null
   meal_rate_band_3_minor: number | null
   advance_minor: number
+  advance_settlement: TravelAdvanceSettlement
   settlement_period_start: string
   status: TravelTripStatus
   entitlement_total_minor: number | null
@@ -149,6 +168,7 @@ export interface TravelTripPayload {
   meal_rate_band_2?: string | null
   meal_rate_band_3?: string | null
   advance?: string | null
+  advance_settlement?: TravelAdvanceSettlement
   settlement_period: string
   items: TravelTripItemPayload[]
   free_meals: { meal_date: string; meal_count: number }[]
@@ -163,6 +183,8 @@ export interface TravelMaterialization {
   replayed_count: number
   created: { part: string; component_code: string; input_id: number; amount_minor: number }[]
   replayed: { part: string; component_code: string; input_id: number; amount_minor: number }[]
+  settlement?: TravelSettlement
+  posting?: { status: string; journal_entry_id: number | null; reason: string | null } | null
 }
 
 export interface TravelTripsPage {
@@ -195,8 +217,13 @@ export const payrollTravelApi = {
       },
     }).then(response => response.data),
   preview: (payload: TravelTripPayload) =>
-    api.post<{ calculation: TravelCalculation }>('/payroll/travel/preview', payload)
-      .then(response => response.data.calculation),
+    api.post<{ calculation: TravelCalculation; settlement?: TravelSettlement | null }>(
+      '/payroll/travel/preview',
+      payload,
+    ).then(response => ({
+      ...response.data.calculation,
+      settlement: response.data.settlement ?? null,
+    })),
   create: (payload: TravelTripPayload) =>
     api.post<{ trip: TravelTrip }>('/payroll/travel/trips', payload)
       .then(response => response.data.trip),

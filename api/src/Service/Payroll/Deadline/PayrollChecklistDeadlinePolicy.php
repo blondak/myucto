@@ -44,8 +44,8 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollEmployeeRegistratio
  *
  * Kde se lhůta odvodit nedá, vrací se `dueOn = null` a `not_derived` —
  * NIKDY dohadované datum. Týká se to potvrzení o zdanitelných příjmech
- * (§ 38j odst. 3 ZDP: do 10 dnů od ŽÁDOSTI zaměstnance, kterou aplikace
- * neeviduje), interních kontrol a starých vztahů před účinností pravidel.
+ * (§ 38j odst. 3 ZDP: do 10 dnů od ŽÁDOSTI zaměstnance — dokud účetní den
+ * žádosti nezapíše, viz {@see self::taxableIncomeConfirmationOnRequest()}), interních kontrol a starých vztahů před účinností pravidel.
  *
  * ## Položky, které se vůbec nezakládají
  *
@@ -60,6 +60,17 @@ final class PayrollChecklistDeadlinePolicy
 {
     /** § 38k odst. 4 zákona č. 586/1992 Sb. — do 30 dnů po vstupu do zaměstnání. */
     private const TAX_DECLARATION_DAYS = 30;
+
+    /**
+     * § 38j odst. 3 zákona č. 586/1992 Sb.: „Na žádost poplatníka je plátce daně
+     * povinen … vystavit nejpozději do deseti dnů od podání žádosti doklad
+     * o souhrnných údajích uvedených ve mzdovém listě." Ověřeno proti úplnému
+     * znění 26. 9. 2026 — jiná lhůta (např. pevné datum v únoru) v zákoně není.
+     */
+    public const TAXABLE_INCOME_CONFIRMATION_DAYS = 10;
+
+    /** Položka checklistu, jejíž lhůta běží od žádosti zaměstnance. */
+    public const TAXABLE_INCOME_CONFIRMATION_ITEM = 'taxable_income_confirmation';
 
     /**
      * REGZEC A2–A8: do 8 dnů od rozhodné skutečnosti — odhlášení § 19 odst. 6
@@ -167,11 +178,36 @@ final class PayrollChecklistDeadlinePolicy
             'taxable_income_confirmation' => $this->notDerived(
                 $itemKey,
                 'Vydává se na žádost zaměstnance do 10 dnů od jejího podání '
-                . '(§ 38j odst. 3 zákona č. 586/1992 Sb.). Den žádosti '
-                . 'aplikace neeviduje, proto se termín neodvozuje.',
+                . '(§ 38j odst. 3 zákona č. 586/1992 Sb.). Termín vznikne, '
+                . 'až u položky zapíšete den žádosti.',
             ),
             default => $this->notDerived($itemKey, null),
         };
+    }
+
+    /**
+     * Lhůta potvrzení o zdanitelných příjmech, jakmile je známý den žádosti.
+     *
+     * Bez dne žádosti termín neexistuje ({@see self::forItem()} vrací
+     * `not_derived`); jakmile ho účetní zapíše, běží deset kalendářních dnů.
+     */
+    public function taxableIncomeConfirmationOnRequest(string $requestedOn): PayrollChecklistDeadline
+    {
+        $requested = \DateTimeImmutable::createFromFormat('!Y-m-d', $requestedOn);
+        if ($requested === false || $requested->format('Y-m-d') !== $requestedOn) {
+            throw new \InvalidArgumentException('Den žádosti o potvrzení musí být datum RRRR-MM-DD.');
+        }
+
+        return new PayrollChecklistDeadline(
+            self::TAXABLE_INCOME_CONFIRMATION_ITEM,
+            $requested
+                ->modify('+' . self::TAXABLE_INCOME_CONFIRMATION_DAYS . ' days')
+                ->format('Y-m-d'),
+            self::RULESET_CONTRACT,
+            '§ 38j odst. 3 zákona č. 586/1992 Sb. — do 10 dnů od žádosti ze dne '
+                . $requested->format('j. n. Y'),
+            'statute_verified',
+        );
     }
 
     private function healthNotification(

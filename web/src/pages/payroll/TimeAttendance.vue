@@ -235,13 +235,22 @@ const approvalRareAbsences = ref<Record<string, string>>({
   unexcused: '',
   compensatory_time_off: '',
 })
+/*
+ * Pracovní volno bez náhrady mzdy (výkon veřejné funkce, neplacená překážka)
+ * stojí v souhrnu na bloku neplaceného volna — server ho tam navrhuje
+ * (PayrollJmhzAbsenceHoursDeriver), takže ho dialog musí i ukázat.
+ */
 const RARE_ABSENCE_BLOCKS = [
-  { key: 'maternity', absenceType: 'ppm', suggestion: 'maternity_hours' },
-  { key: 'paternity', absenceType: 'paternity', suggestion: 'paternity_hours' },
-  { key: 'parental', absenceType: 'parental', suggestion: 'parental_hours' },
-  { key: 'unpaid_leave', absenceType: 'unpaid_leave', suggestion: 'unpaid_leave_hours' },
-  { key: 'unexcused', absenceType: 'unexcused', suggestion: 'unexcused_hours' },
-  { key: 'compensatory_time_off', absenceType: 'compensatory_time_off', suggestion: 'compensatory_time_off_hours' },
+  { key: 'maternity', absenceTypes: ['ppm'], suggestion: 'maternity_hours' },
+  { key: 'paternity', absenceTypes: ['paternity'], suggestion: 'paternity_hours' },
+  { key: 'parental', absenceTypes: ['parental'], suggestion: 'parental_hours' },
+  {
+    key: 'unpaid_leave',
+    absenceTypes: ['unpaid_leave', 'public_function', 'employee_obstacle_unpaid'],
+    suggestion: 'unpaid_leave_hours',
+  },
+  { key: 'unexcused', absenceTypes: ['unexcused'], suggestion: 'unexcused_hours' },
+  { key: 'compensatory_time_off', absenceTypes: ['compensatory_time_off'], suggestion: 'compensatory_time_off_hours' },
 ] as const
 const approvalNote = ref('')
 const reopenItem = ref<PayrollTimeOverviewItem | null>(null)
@@ -784,7 +793,8 @@ function fillWorkedAsAgreed() {
  */
 const visibleRareAbsenceBlocks = computed(() => {
   const types = approvalItem.value?.jmhz_work_summary.preview?.absence_types ?? []
-  return RARE_ABSENCE_BLOCKS.filter(block => types.includes(block.absenceType))
+  return RARE_ABSENCE_BLOCKS.filter(block =>
+    block.absenceTypes.some(type => types.includes(type)))
 })
 
 function clearConditionalValues() {

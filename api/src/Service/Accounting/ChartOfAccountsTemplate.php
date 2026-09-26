@@ -189,6 +189,7 @@ final class ChartOfAccountsTemplate
         ['code' => '379.100', 'name' => 'Srážky ze mzdy', 'type' => 'liability', 'normal_side' => 'credit', 'parent_code' => '379'],
         ['code' => '379.200', 'name' => 'Exekuční a insolvenční srážky', 'type' => 'liability', 'normal_side' => 'credit', 'parent_code' => '379'],
         ['code' => '379.300', 'name' => 'Spoření u rizikové práce', 'type' => 'liability', 'normal_side' => 'credit', 'parent_code' => '379'],
+        ['code' => '379.400', 'name' => 'Zákonné pojištění odpovědnosti zaměstnavatele', 'type' => 'liability', 'normal_side' => 'credit', 'parent_code' => '379'],
         ['code' => '381', 'name' => 'Náklady příštích období', 'type' => 'asset', 'normal_side' => 'debit'],
         ['code' => '382', 'name' => 'Komplexní náklady příštích období', 'type' => 'asset', 'normal_side' => 'debit'],
         ['code' => '383', 'name' => 'Výdaje příštích období', 'type' => 'liability', 'normal_side' => 'credit'],

@@ -765,6 +765,31 @@ async function transition(target: PayrollEmploymentStatus) {
   }
 }
 
+/*
+ * Potvrzení o zdanitelných příjmech se vydává na žádost do 10 dnů (§ 38j
+ * odst. 3 ZDP). Lhůta vzniká až dnem žádosti — zapíše ho účetní a termín
+ * pak hlídá přehled zákonných termínů.
+ */
+const confirmationRequestedOn = ref('')
+
+async function recordConfirmationRequest(item: PayrollEmploymentChecklistItem) {
+  if (busy.value || confirmationRequestedOn.value === '') return
+  busy.value = true
+  try {
+    const updated = await payrollApi.updateEmploymentChecklist(props.employment.id, item.item_key, {
+      row_version: item.row_version,
+      status: 'pending',
+      requested_on: confirmationRequestedOn.value,
+    })
+    confirmationRequestedOn.value = ''
+    emit('updated', updated)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.mutation_failed')))
+  } finally {
+    busy.value = false
+  }
+}
+
 async function setChecklist(itemKey: string, rowVersion: number, status: PayrollChecklistStatus) {
   if (busy.value) return
   busy.value = true
@@ -1651,6 +1676,28 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               a vrátit — nešlo tedy říct, že povinnost na tenhle vztah nesedí
               (prohlášení k dani u někoho, kdo ho podepsal u jiného plátce).
             -->
+            <div
+              v-if="canWrite && item.item_key === 'taxable_income_confirmation' && item.status === 'pending'"
+              class="flex w-full flex-wrap items-end gap-2"
+              data-test="checklist-confirmation-request"
+            >
+              <label class="block">
+                <span class="mb-0.5 block text-neutral-600">{{ t('payroll.people.confirmation_requested_on') }}</span>
+                <DateInput v-model="confirmationRequestedOn" class="h-8 rounded-md border border-neutral-300 bg-surface px-2 text-xs text-neutral-800" />
+              </label>
+              <button
+                type="button"
+                :class="btnOutlineSm('primary')"
+                class="whitespace-nowrap"
+                :disabled="busy || confirmationRequestedOn === ''"
+                data-test="checklist-confirmation-request-save"
+                @click="recordConfirmationRequest(item)"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>
+                {{ t('payroll.people.confirmation_request_save') }}
+              </button>
+              <p class="w-full text-neutral-500">{{ t('payroll.people.confirmation_request_hint') }}</p>
+            </div>
             <div v-if="canWrite" class="flex flex-wrap gap-1">
               <template v-if="item.status === 'pending'">
                 <button type="button" :class="btnOutlineSm('success')" :disabled="busy" @click="setChecklist(item.item_key, item.row_version, 'completed')">{{ t('payroll.people.complete') }}</button>

@@ -17,6 +17,7 @@ use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
 use MyInvoice\Service\Payroll\Payment\PayrollInstitutionPaymentTargetResolver;
 use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsuranceCalculator;
 use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsuranceLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsurancePosting;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentQueryService;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -110,6 +111,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
             $connection,
             new PayrollLevyDeadlinePolicy(),
             new PayrollAccidentInsuranceCalculator(),
+            $container->get(PayrollAccidentInsurancePosting::class),
         );
     }
 
@@ -361,6 +363,59 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
         // 630 − 420 = 210 Kč.
         self::assertSame(21_000, (int) $row['amount_minor']);
         self::assertSame($first['liability_ids'][0], (int) $row['previous_liability_id']);
+    }
+
+    /**
+     * Pojistné si zaměstnavatel počítá sám a pojistitel žádný doklad
+     * nevystavuje — předpis do deníku proto musí vzniknout se závazkem.
+     * Opravná revize, která pojistné zvýší, předepíše jen rozdíl.
+     */
+    public function testQuarterlyPremiumIsPostedToTheJournalWithItsCorrection(): void
+    {
+        $this->makeDoubleEntry();
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createMonth('2026-01-01', 20_000_00);
+        $this->createMonth('2026-02-01', 30_000_00);
+        $marchRevisionId = $this->createMonth('2026-03-01', 50_000_00);
+
+        $first = $this->materializer->materialize($this->supplierId, $marchRevisionId, $this->actorId);
+
+        self::assertSame('posted', $first['posting']['status'] ?? null, (string) json_encode($first));
+        self::assertSame(
+            ['379|credit' => '420.00', '548|debit' => '420.00'],
+            $this->journalLines('payroll_accident_insurance', $first['liability_ids'][0]),
+        );
+        $entryDate = $this->db->pdo()->prepare(
+            'SELECT entry_date FROM journal_entries
+              WHERE supplier_id = ? AND source_type = "payroll_accident_insurance" AND source_id = ?',
+        );
+        $entryDate->execute([$this->supplierId, $first['liability_ids'][0]]);
+        self::assertSame('2026-03-31', (string) $entryDate->fetchColumn());
+
+        $replay = $this->materializer->materialize($this->supplierId, $marchRevisionId, $this->actorId);
+        self::assertSame('already_posted', $replay['posting']['status'] ?? null);
+
+        $correctionId = $this->createCorrectionRevision('2026-03-01', $marchRevisionId, 100_000_00);
+        $correction = $this->materializer->materialize($this->supplierId, $correctionId, $this->actorId);
+        self::assertSame(
+            ['379|credit' => '210.00', '548|debit' => '210.00'],
+            $this->journalLines('payroll_accident_insurance', $correction['liability_ids'][0]),
+        );
+    }
+
+    /** Daňová evidence deník nemá — závazek vznikne, předpis ne. */
+    public function testTaxEvidenceCreatesNoJournalEntry(): void
+    {
+        $this->pdoSetAccountingMode('tax_evidence');
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createMonth('2026-01-01', 20_000_00);
+        $this->createMonth('2026-02-01', 30_000_00);
+        $marchRevisionId = $this->createMonth('2026-03-01', 50_000_00);
+
+        $result = $this->materializer->materialize($this->supplierId, $marchRevisionId, $this->actorId);
+
+        self::assertSame(1, $result['created_count']);
+        self::assertSame('not_applicable', $result['posting']['status'] ?? null);
     }
 
     /**
@@ -699,6 +754,50 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
         );
 
         return $revisionId;
+    }
+
+    private function makeDoubleEntry(): void
+    {
+        $this->pdoSetAccountingMode('double_entry');
+        foreach ([['548', 'expense'], ['379', 'liability']] as [$code, $type]) {
+            $this->db->pdo()->prepare(
+                'INSERT IGNORE INTO chart_of_accounts
+                    (supplier_id, account_code, name, account_type, is_active)
+                 VALUES (?, ?, ?, ?, 1)',
+            )->execute([$this->supplierId, $code, "Účet {$code}", $type]);
+        }
+    }
+
+    private function pdoSetAccountingMode(string $mode): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO supplier_accounting_modes
+                (supplier_id, effective_from, accounting_mode)
+             VALUES (?, "2000-01-01", ?)
+             ON DUPLICATE KEY UPDATE accounting_mode = VALUES(accounting_mode)',
+        )->execute([$this->supplierId, $mode]);
+    }
+
+    /** @return array<string,string> `účet|strana` → částka */
+    private function journalLines(string $sourceType, int $sourceId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT account.account_code, line.side, CAST(line.amount AS CHAR) AS amount
+               FROM journal_entries entry
+               JOIN journal_entry_lines line
+                 ON line.supplier_id = entry.supplier_id AND line.entry_id = entry.id
+               JOIN chart_of_accounts account
+                 ON account.supplier_id = line.supplier_id AND account.id = line.account_id
+              WHERE entry.supplier_id = ? AND entry.source_type = ? AND entry.source_id = ?
+              ORDER BY account.account_code',
+        );
+        $statement->execute([$this->supplierId, $sourceType, $sourceId]);
+        $lines = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $lines["{$row['account_code']}|{$row['side']}"] = (string) $row['amount'];
+        }
+
+        return $lines;
     }
 
     private function createActor(PDO $pdo): int

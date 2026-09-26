@@ -62,6 +62,8 @@ const ACCOUNT_GROUPS: Record<PayrollPostingMapKey, string> = {
   employee_receivable_debit: 'employee_receivable',
   non_deductible_benefit_debit: 'non_deductible_benefit',
   travel_expense_debit: 'travel_expense',
+  accident_insurance_debit: 'accident_insurance',
+  accident_insurance_credit: 'accident_insurance',
 }
 
 const loading = ref(false)

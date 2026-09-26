@@ -42,6 +42,34 @@ final class EldpSection18ExcludedDaysTest extends TestCase
     }
 
     /**
+     * Pracovní volno bez náhrady mzdy (výkon veřejné funkce, neplacená
+     * překážka) je omluvená nepřítomnost bez náhrady příjmu — vyloučený den
+     * § 18 odst. 7 stejně jako neplacené volno. Vyloučenou DOBOU podle § 16
+     * odst. 4 písm. a) ale není a měsíc bez příjmu dobou pojištění nezůstane.
+     */
+    public function testUnpaidPublicFunctionAndObstacleAreExcusedAbsenceDays(): void
+    {
+        $absences = [
+            $this->absence(1, 'public_function', '2026-08-10', '2026-08-11'),
+            $this->absence(2, 'employee_obstacle_unpaid', '2026-08-13', '2026-08-13'),
+        ];
+        $deriver = new EldpExcludedPeriodDeriver();
+
+        $section18 = $deriver->deriveSection18($absences, '2026-08-01', '2026-08-31');
+        self::assertTrue($section18['derivable']);
+        self::assertSame(3, $section18['components']['omluvenaNepritomnost']);
+
+        $excluded = $deriver->derive($absences, '2026-08-01', '2026-08-31', '2026-08');
+        self::assertSame([], $excluded['blockers']);
+        self::assertSame(0, $excluded['total']);
+
+        self::assertSame(
+            EldpExcludedPeriodDeriver::MONTH_OUTSIDE_INSURANCE,
+            EldpExcludedPeriodDeriver::insuranceMonthStatus($absences, 0, '2026-08-01', '2026-08-31'),
+        );
+    }
+
+    /**
      * Neplacené volno přesahující měsíc se ořízne na interval řezu — den mimo
      * dobu pojištění nemá z čeho být vyloučený.
      */

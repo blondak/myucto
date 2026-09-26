@@ -1371,6 +1371,10 @@ final class Routes
                 '/documents/{documentId:[0-9]+}/secure-links/{linkId:[0-9]+}',
                 [PayrollDocumentDeliveryAction::class, 'revoke'],
             );
+            $g->post(
+                '/runs/{runId:[0-9]+}/revisions/{revisionId:[0-9]+}/documents/secure-links',
+                [PayrollDocumentDeliveryAction::class, 'sendRevisionPayslips'],
+            );
             $g->get('/people', [PayrollPeopleAction::class, 'list']);
             $g->post('/people', [PayrollPeopleAction::class, 'create']);
             $g->get('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'detail']);

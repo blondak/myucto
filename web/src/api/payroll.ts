@@ -2684,6 +2684,9 @@ export interface PayrollEmployerAccounts {
   non_deductible_benefit_debit: string
   /** Cestovní náhrada je náhrada výdaje podle části sedmé ZP, ne mzda. */
   travel_expense_debit: string
+  /** Zákonné pojištění odpovědnosti (vyhl. 125/1993 Sb.) — 548 MD / 379.400 D. */
+  accident_insurance_debit: string
+  accident_insurance_credit: string
 }
 
 export interface PayrollAccountOption {
@@ -3263,6 +3266,7 @@ export type PayrollDeadlinePhase = 'overdue' | 'due_today' | 'due_soon' | 'open'
 
 export type PayrollDeadlineSource = 'submission' | 'levy' | 'checklist'
   | 'registration_change' | 'tax_statement' | 'sickness_case'
+  | 'annual_settlement' | 'foreign_permit'
 
 export interface PayrollDeadlineItem {
   source: PayrollDeadlineSource
@@ -3302,6 +3306,11 @@ export interface PayrollDeadlineItem {
   electronic_due_on?: string | null
   /** U obou vyúčtování `false` — lhůtu prodloužit nelze. */
   extendable?: boolean
+  /** Roční zúčtování: kolik lidí s příjmem ještě nemá rozhodnuto o žádosti. */
+  undecided_count?: number
+  /** Povolení cizince, jehož platnost končí. */
+  permit_id?: number
+  permit_label?: string
 }
 
 export interface PayrollDeadlineOverview {
@@ -5063,6 +5072,23 @@ export interface PayrollDocumentSecureLinkCreateResult {
   created: boolean
   recipient_masked: string
   expires_at: string | null
+}
+
+/**
+ * Výsledek hromadného rozeslání pásek revize. Nese jen počty a důvody
+ * přeskočených osob — adresy ani odkazy server nevrací.
+ */
+export interface PayrollRevisionPayslipDeliveryResult {
+  total: number
+  queued: number
+  already_queued: number
+  skipped: {
+    document_id: number
+    employee_id: number
+    employee_name: string
+    reason: PayrollSecureDeliveryBlockedReason
+    message: string
+  }[]
 }
 
 export interface PayrollDocumentRevision {
@@ -7388,7 +7414,13 @@ export const payrollApi = {
   updateEmploymentChecklist: (
     employmentId: number,
     itemKey: string,
-    payload: { row_version: number; status: PayrollChecklistStatus; note?: string | null },
+    payload: {
+      row_version: number
+      status: PayrollChecklistStatus
+      note?: string | null
+      /** Den žádosti zaměstnance — jen potvrzení o zdanitelných příjmech (§ 38j odst. 3 ZDP). */
+      requested_on?: string | null
+    },
   ) =>
     api.put<{ employment: PayrollEmployment }>(
       `/payroll/employments/${employmentId}/checklist/${itemKey}`,
@@ -8742,6 +8774,11 @@ export const payrollApi = {
   sendDocumentSecureLink: (documentId: number) =>
     api.post<PayrollDocumentSecureLinkCreateResult>(
       `/payroll/documents/${documentId}/secure-links`,
+      {},
+    ).then(response => response.data),
+  sendRevisionPayslips: (runId: number, revisionId: number) =>
+    api.post<PayrollRevisionPayslipDeliveryResult>(
+      `/payroll/runs/${runId}/revisions/${revisionId}/documents/secure-links`,
       {},
     ).then(response => response.data),
   revokeDocumentSecureLink: (documentId: number, linkId: number) =>

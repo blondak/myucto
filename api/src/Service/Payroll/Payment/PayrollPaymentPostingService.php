@@ -68,16 +68,20 @@ final class PayrollPaymentPostingService
     /**
      * Druhy závazků, které mzdový můstek NEÚČTUJE, takže není co odúčtovat.
      *
-     * Zákonné pojištění odpovědnosti zaměstnavatele (§ 205d zákoníku práce)
-     * i benefity placené třetí straně vznikají vlastním dokladem (přijatá
+     * Benefity placené třetí straně vznikají vlastním dokladem (přijatá
      * faktura, interní doklad) a v deníku už závazek mají odtud. Shodný seznam
      * drží informativní kategorie `unposted_liabilities` v
      * {@see \MyInvoice\Service\Payroll\Posting\PayrollPostingReconciliationService}.
      *
+     * Zákonné pojištění odpovědnosti zaměstnavatele tu není: pojistitel žádný
+     * doklad nevystavuje, předpis proto zakládá mzdový modul sám
+     * ({@see PayrollAccidentInsurancePosting}) a úhrada se účtuje proti účtu
+     * toho předpisu. Závazek bez předpisu (starší, daňová evidence) se ale
+     * dál neúčtuje — viz {@see self::accidentInsuranceAccount()}.
+     *
      * @var list<string>
      */
     private const UNPOSTED_LIABILITY_KINDS = [
-        'statutory_insurance',
         'benefit',
         'other',
     ];
@@ -112,6 +116,7 @@ final class PayrollPaymentPostingService
         private readonly AccountingModeRepository $accountingModes,
         private readonly ?BankAnalyticResolver $bankAnalytics = null,
         private readonly ?BankPostingSuggestionRepository $bankSuggestions = null,
+        private readonly ?PayrollAccidentInsurancePosting $accidentInsurance = null,
     ) {}
 
     /**
@@ -221,21 +226,28 @@ final class PayrollPaymentPostingService
             return self::outcome('skipped', null, 'liability_posted_elsewhere');
         }
 
-        $snapshot = $this->repository->revisionSnapshot(
-            $supplierId,
-            $liability['revision_id'],
-        );
-        if ($snapshot === null) {
-            return self::outcome('skipped', null, 'revision_snapshot_missing');
-        }
-        $accounts = self::frozenAccounts($snapshot);
-        if ($accounts === null) {
-            return self::outcome('skipped', null, 'revision_snapshot_missing');
-        }
+        if ($liability['liability_kind'] === 'statutory_insurance') {
+            $liabilityAccount = $this->accidentInsuranceAccount($supplierId, $liability);
+            if ($liabilityAccount === null) {
+                return self::outcome('skipped', null, 'liability_posted_elsewhere');
+            }
+        } else {
+            $snapshot = $this->repository->revisionSnapshot(
+                $supplierId,
+                $liability['revision_id'],
+            );
+            if ($snapshot === null) {
+                return self::outcome('skipped', null, 'revision_snapshot_missing');
+            }
+            $accounts = self::frozenAccounts($snapshot);
+            if ($accounts === null) {
+                return self::outcome('skipped', null, 'revision_snapshot_missing');
+            }
 
-        $liabilityAccount = $liability['liability_kind'] === 'net_wage'
-            ? self::netWageAccount($snapshot, $accounts, $liability['employee_id'])
-            : self::institutionAccount($accounts, $liability['liability_kind']);
+            $liabilityAccount = $liability['liability_kind'] === 'net_wage'
+                ? self::netWageAccount($snapshot, $accounts, $liability['employee_id'])
+                : self::institutionAccount($accounts, $liability['liability_kind']);
+        }
         if ($liabilityAccount === null) {
             return self::outcome(
                 'skipped',
@@ -311,6 +323,28 @@ final class PayrollPaymentPostingService
         }
 
         return self::outcome('posted', $entryId);
+    }
+
+    /**
+     * Účet závazku zákonného pojištění odpovědnosti — ten, na kterém stojí
+     * předpis PRÁVĚ TOHOTO řádku závazku. Bez předpisu `null`: závazek, který
+     * v deníku není, se úhradou odúčtovat nesmí, jinak by 379 zůstala
+     * debetní.
+     *
+     * @param array<string,mixed> $liability
+     */
+    private function accidentInsuranceAccount(int $supplierId, array $liability): ?string
+    {
+        $id = $liability['id'] ?? null;
+        $direction = $liability['direction'] ?? null;
+        if ($this->accidentInsurance === null
+            || !is_int($id)
+            || !in_array($direction, ['outgoing', 'incoming'], true)
+        ) {
+            return null;
+        }
+
+        return $this->accidentInsurance->liabilityAccount($supplierId, $id, $direction);
     }
 
     /**

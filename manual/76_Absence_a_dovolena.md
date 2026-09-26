@@ -159,9 +159,31 @@ neexistuje. Nárok určíte hromadným výpočtem popsaným níže.
 Krácení dovolené se řídí § 223 zákoníku práce: aplikace vynutí zákonné minimum
 podle odst. 2, odmítne krácení dřív, než je nárok určen, i krácení nad rámec
 nároku. Podmínku dvoutýdenního zbytku hlídá jen u vztahu, který trval celý
-kalendářní rok, protože zákon ji váže právě na to. Krácení jen o neomluveně
-zameškané hodiny podle § 223 odst. 1 aplikace zatím sama nevyhodnotí — evidence
-absencí druh „neomluvená" nezná, takže rozsah určete z vlastních podkladů.
+kalendářní rok, protože zákon ji váže právě na to. Krátit lze jen o neomluveně
+zameškané hodiny podle § 223 odst. 1: zapište je v evidenci absencí druhem
+**Neomluvená absence** a nechte je schválit. Ruční položka krácení v knize
+dovolené pak projde jen do součtu schválených neomluvených hodin v témže roce;
+bez evidované neomluvené absence ji aplikace odmítne. O tom, že jde
+o neomluvené zameškání, rozhoduje zaměstnavatel (§ 348 odst. 3), aplikace ho
+z jiných druhů nepřítomnosti neodvozuje.
+
+### Pracovní volno bez náhrady mzdy
+
+Vedle placené **překážky na straně zaměstnance s náhradou mzdy** eviduje agenda
+dva druhy volna, za které náhrada mzdy nepřísluší:
+
+- **Výkon veřejné funkce (volno bez náhrady)** podle § 200 až 202 zákoníku práce,
+- **Překážka na straně zaměstnance bez náhrady mzdy**.
+
+Zapíšou se bez průměrného výdělku, po schválení nevznikne žádný mzdový vstup
+a z odpracované doby se vyjmou stejně jako neplacené volno. V měsíčním hlášení
+jdou jejich hodiny jen do celkového počtu neodpracovaných hodin (10275) na bloku
+neplaceného volna, ne mezi překážky s náhradou mzdy (10471). V evidenčním listu
+se chovají jako neplacené volno: vyloučenou dobou nejsou, celé dny se vykážou
+jako vyloučené dny pro nemocenské dávky a měsíc bez započitatelného příjmu se za
+dobu pojištění nepovažuje. Přiznává-li zákon za konkrétní veřejnou funkci
+náhradu mzdy, zadejte ji jako mzdový vstup; výpočet takové náhrady aplikace
+sama nedělá.
 
 ### 76.8.1 Hromadný výpočet nároku
 
@@ -249,8 +271,8 @@ vyloučené dny pro nemocenské dávky (omluvená nepřítomnost bez náhrady p�
 Platí to pro měsíce, jejichž pracovní doba se potvrdí po zavedení této
 podpory; dřív potvrzený měsíc je potřeba znovu otevřít a potvrdit.
 
-**Měsíc, ve kterém rodičovská, neplacené volno nebo neomluvená absence
-nenechaly žádný započitatelný příjem**, se podle § 11 odst. 2 zákona
+**Měsíc, ve kterém rodičovská, neplacené volno, pracovní volno bez náhrady mzdy
+nebo neomluvená absence nenechaly žádný započitatelný příjem**, se podle § 11 odst. 2 zákona
 č. 155/1995 Sb. za dobu pojištění nepovažuje. Hlášení ho vykáže s kódem
 činnosti, nulou dnů pojištění a nulovým vyměřovacím základem; dny neplaceného
 volna i rodičovské dovolené uvede jako vyloučené dny pro nemocenské dávky
@@ -262,9 +284,9 @@ počtem dnů a nulovým základem.
 
 Do mzdových vstupů se za takový měsíc nic nezadává, ani nulová mzda. Mzdový
 běh vztah spočítá i bez jediné mzdové složky, pokud v měsíci leží schválená
-nepřítomnost bez náhrady mzdy od zaměstnavatele (neplacené volno, rodičovská,
-neomluvená absence, peněžitá pomoc v mateřství, otcovská, nemoc nebo
-ošetřovné, náhradní volno). Varování „pracovní vztah nemá v období žádnou
+nepřítomnost bez náhrady mzdy od zaměstnavatele (neplacené volno, pracovní
+volno bez náhrady mzdy, rodičovská, neomluvená absence, peněžitá pomoc
+v mateřství, otcovská, nemoc nebo ošetřovné, náhradní volno). Varování „pracovní vztah nemá v období žádnou
 schválenou mzdovou složku“ se pak jen zobrazí a nevyžaduje potvrzení výjimky.
 Bez takové nepřítomnosti zůstává potvrzení výjimky povinné, protože jde
 nejspíš o zapomenutou mzdu.

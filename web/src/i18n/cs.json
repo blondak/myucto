@@ -3894,6 +3894,18 @@
         "annual_settlement_result": "Roční zúčtování záloh",
         "monthly_bundle": "Měsíční balíček ZIP"
       },
+      "payslip_delivery": {
+        "run": "Rozeslat pásky: {office}",
+        "running": "Zařazuji pásky…",
+        "hint": "Pošle zaměstnancům se souhlasem s elektronickým doručením zabezpečený odkaz na jejich výplatní pásku. Páska, která už odkaz má, se znovu neposílá.",
+        "confirm": "Rozeslat výplatní pásky ({office}) zabezpečeným odkazem všem zaměstnancům, kteří s elektronickým doručením souhlasí?",
+        "queued": "Zařazeno k odeslání: {queued}, už zařazených dřív: {already}.",
+        "none": "Revize zatím nemá vygenerované výplatní pásky. Nejdřív spusťte generování dokumentů.",
+        "failed": "Výplatní pásky se nepodařilo zařadit k odeslání.",
+        "title": "Rozeslání výplatních pásek",
+        "summary": "Pásek celkem {total}: nově zařazeno {queued}, už zařazených {already}, přeskočeno {skipped}.",
+        "skipped_intro": "Těmto zaměstnancům se páska neposlala. Předejte ji jinak, nebo doplňte, co chybí:"
+      },
       "secure_delivery": {
         "send_link": "Poslat zabezpečený odkaz",
         "sending_link": "Odesílám…",
@@ -5112,6 +5124,9 @@
       "show_detail": "Zobrazit",
       "hide_detail": "Skrýt",
       "timeline_title": "Časová osa a změny",
+      "confirmation_requested_on": "Den žádosti zaměstnance",
+      "confirmation_request_save": "Zapsat žádost",
+      "confirmation_request_hint": "Potvrzení se vydává do 10 dnů od žádosti (§ 38j odst. 3 ZDP). Po zapsání dne žádosti hlídá termín přehled zákonných termínů.",
       "complete": "Splnit",
       "confirm_start": "Potvrdit nástup k {date}",
       "registered_elsewhere": "Už je přihlášený — vyřešeno",
@@ -7803,7 +7818,8 @@
           "source_reference": "Reference zdroje smí mít nejvýše 255 znaků.",
           "delivery_verified_on": "Datum ověření doručovacího kanálu není platné datum."
         },
-        "delivery_verified_on_hint": "Nepovinné. Dokud datum nedoplníte, politika se uloží, ale výplatnice se tímto kanálem neodešlou."
+        "delivery_verified_on_hint": "Nepovinné. Dokud datum nedoplníte, politika se uloží, ale výplatnice se tímto kanálem neodešlou.",
+        "delivery_smime_unsupported": "Šifrovaný e-mail zatím mzdové dokumenty neodesílá, zaměstnancům by nic nepřišlo. Zvolte portál zaměstnance, nebo auditované ruční předání; s tímto kanálem politiku uložit nelze."
       },
       "health_accounts": {
         "title": "Platební účty institucí",
@@ -7951,7 +7967,8 @@
         "risky_savings": "Povinné spoření u rizikové práce",
         "employee_receivable": "Pohledávka za zaměstnancem",
         "non_deductible_benefit": "Nedaňová část benefitu",
-        "travel_expense": "Cestovní náhrady"
+        "travel_expense": "Cestovní náhrady",
+        "accident_insurance": "Zákonné pojištění odpovědnosti"
       },
       "validation": {
         "title": "Před uložením opravte označená pole.",
@@ -8037,7 +8054,8 @@
         "non_deductible_benefit": "Osvobozená část nepeněžního benefitu (rekreace, sport, kultura, zdraví, tištěné knihy). Podle § 25 odst. 1 písm. h) ZDP je nedaňová právě ta OSVOBOZENÁ část; nadlimitní část se zaměstnanci zdaní a nákladem zůstává. Účet 528 se sám propíše do nedaňových nákladů v přiznání k dani z příjmů.",
         "travel_expense": "Cestovní náhrada je náhrada výdaje podle části sedmé zákoníku práce, ne odměna za práci — do mzdových nákladů nepatří. Protiúčtem zůstává závazkový účet pracovního vztahu, protože se náhrada vyplácí spolu se mzdou.",
         "enforcement_deductions": "Srážky nařízené soudem, exekutorem nebo insolvenčním správcem. Oddělené od ostatních srážek proto, že se u nich vede pořadí pohledávek a posílají se jinému příjemci než dobrovolné srážky — na společném účtu se saldo obou skupin slije a nejde dohledat.",
-        "enforcement_fee_revenue": "Paušál 50 Kč měsíčně, který si plátce mzdy ponechá ze sražené částky jako náhradu nákladů (§ 270 odst. 2 o. s. ř.). Zaměstnanci se srazí, oprávněnému se ale neposílá — bez převodu na výnos by na závazku exekučních srážek zůstával každý měsíc zůstatek. Obvykle 648 Ostatní provozní výnosy. Nechte prázdné, pokud má paušál zůstat na závazku."
+        "enforcement_fee_revenue": "Paušál 50 Kč měsíčně, který si plátce mzdy ponechá ze sražené částky jako náhradu nákladů (§ 270 odst. 2 o. s. ř.). Zaměstnanci se srazí, oprávněnému se ale neposílá — bez převodu na výnos by na závazku exekučních srážek zůstával každý měsíc zůstatek. Obvykle 648 Ostatní provozní výnosy. Nechte prázdné, pokud má paušál zůstat na závazku.",
+        "accident_insurance": "Čtvrtletní pojistné podle vyhlášky č. 125/1993 Sb. Pojišťovna žádný doklad nevystavuje, takže předpis (MD náklad / D závazek) vzniká v podvojném účetnictví při přípravě plateb za poslední měsíc čtvrtletí a úhrada se pak účtuje proti tomuto závazku."
       },
       "registration_source_reference_hint": "Nepovinné. Odkaz na výměr nebo rozhodnutí, ze kterého jste variabilní symbol opsali."
     },
@@ -8133,7 +8151,9 @@
           "checklist": "Lhůta u člověka",
           "registration_change": "Změna k ohlášení",
           "tax_statement": "Vyúčtování daně",
-          "sickness_case": "Dávka nemocenského"
+          "sickness_case": "Dávka nemocenského",
+          "annual_settlement": "Roční zúčtování",
+          "foreign_permit": "Povolení cizince"
         },
         "tax_statement": {
           "form": {
@@ -8141,7 +8161,15 @@
             "dpsvd2": "Vyúčtování srážkové daně (DPSVD2)"
           },
           "subject": "za rok {year}"
-        }
+        },
+        "kind": {
+          "annual_settlement_request": "Zjistit žádosti o roční zúčtování (do 15. 2.)",
+          "annual_settlement_perform": "Provést roční zúčtování (do 31. 3.)",
+          "annual_settlement_refund": "Vrátit přeplatek ze zúčtování se mzdou za březen",
+          "foreign_permit_residence": "Končí povolení k pobytu",
+          "foreign_permit_work": "Končí povolení k zaměstnání"
+        },
+        "annual_settlement_undecided": "{count} lidí s příjmem za rok {year} ještě nemá rozhodnuto, zda o zúčtování žádají"
       },
       "operational_health": {
         "title": "Provozní přehled mezd",
@@ -14385,6 +14413,8 @@
         "vat_clearing": "Zúčtování DPH",
         "card_settlement": "Vypořádání platby kartou",
         "card_writeoff": "Uzavření platby kartou",
+        "payroll_travel": "Vyúčtování pracovní cesty",
+        "payroll_accident_insurance": "Zákonné pojištění odpovědnosti",
         "journal_entry": "Účetní zápis"
       },
       "history": {
@@ -25520,6 +25550,20 @@
       "settlement": "Doplatek nebo vratka proti záloze: {amount}",
       "manual_review": "Vyúčtování vyžaduje ruční posouzení a nelze ho schválit:"
     },
+    "settlement": {
+      "label": "Vypořádání zálohy",
+      "mode_payroll": "Mzdou (záloha se odečte ve výplatě)",
+      "mode_cash": "Pokladnou (do mzdy jen nadlimitní část)",
+      "help_payroll": "Do mzdy jde celý nárok a poskytnutá záloha se z výplaty odečte. Přeplatek zálohy se ze mzdy nesráží, zaměstnanec ho vrací do pokladny.",
+      "help_cash": "Nezdaněnou náhradu vyrovnáte pokladnou (doplatek nebo vrácení přeplatku). Do mzdy jde jen nadlimitní část, protože se musí zdanit. V podvojném účetnictví se nezdaněná část zaúčtuje proti pohledávce za zaměstnancem.",
+      "advance": "Poskytnutá záloha",
+      "payroll_net": "Dopad do výplaty (před zdaněním nadlimitní části)",
+      "cash_payout": "Doplatek z pokladny",
+      "employee_refund": "Zaměstnanec vrací přeplatek zálohy",
+      "refund_notice": "Záloha převýšila nárok. Zaměstnanec vrací do pokladny {amount}.",
+      "cash_payout_notice": "Vyplaťte z pokladny doplatek {amount}.",
+      "posting_skipped": "Nezdaněnou část se nepodařilo zaúčtovat ({reason}). Promítněte vyúčtování znovu, až bude účetní období otevřené."
+    },
     "messages": {
       "load_failed": "Pracovní cesty se nepodařilo načíst.",
       "preview_failed": "Náhled výpočtu se nepodařilo spočítat.",
@@ -25590,11 +25634,13 @@
       "paternity": "Otcovská",
       "parental": "Rodičovská",
       "unpaid_leave": "Neplacené volno",
-      "employee_obstacle": "Překážka na straně zaměstnance",
+      "employee_obstacle": "Překážka na straně zaměstnance s náhradou mzdy",
       "employer_obstacle": "Překážka na straně zaměstnavatele",
       "compensatory_time_off": "Náhradní volno za přesčas",
       "unexcused": "Neomluvená absence",
-      "other": "Jiná absence"
+      "other": "Jiná absence",
+      "public_function": "Výkon veřejné funkce (volno bez náhrady)",
+      "employee_obstacle_unpaid": "Překážka na straně zaměstnance bez náhrady mzdy"
     },
     "status": {
       "requested": "Ke schválení",
@@ -25610,6 +25656,7 @@
     "absences": {
       "new": "Nová absence",
       "new_needs_person": "Novou nepřítomnost lze založit až po výběru konkrétního zaměstnance — váže se k pracovnímu vztahu.",
+      "unpaid_excused_hint": "Pracovní volno bez náhrady mzdy (§ 199 až 202 zákoníku práce). Náhrada se nepočítá a mzdový vstup nevznikne; hodiny jdou do měsíčního hlášení jen jako neodpracované (10275), v bloku neplaceného volna. Přiznává-li zákon za funkci náhradu, zadejte ji jako mzdový vstup.",
       "list": "Evidované absence",
       "empty": "Ve zvoleném období nejsou žádné absence.",
       "type": "Druh absence",

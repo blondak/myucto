@@ -524,6 +524,8 @@ final class PayrollEnumContractTest extends TestCase
         'payrollTravel.ts::TravelFuelKind'      => 'enum:MyInvoice\Service\Payroll\Travel\TravelFuelKind',
         'payrollTravel.ts::TravelItemKind'      => 'enum:MyInvoice\Service\Payroll\Travel\TravelExpenseItemKind',
         'payrollTravel.ts::TravelTripStatus'    => 'db:payroll_business_trips.status',
+        'payrollTravel.ts::TravelAdvanceSettlement'
+            => 'db:payroll_business_trips.advance_settlement',
     ];
 
     /**

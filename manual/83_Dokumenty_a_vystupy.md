@@ -177,3 +177,38 @@ integrita zdroje, aplikace ZIP nevytvoří a zobrazí důvod.
 > potvrzení vytvoříš v záložce Roční dokumenty. Potvrzení při skončení vytváříš
 > v detailu konkrétního vztahu a podací protokoly se evidují samostatně. Neúplný
 > měsíční balíček proto neznamená, že jsou všechny povinné výstupy hotové.
+
+## 83.10 Doručení výplatních pásek zaměstnancům
+
+Výplatní pásku lze zaměstnanci poslat **zabezpečeným odkazem** e-mailem
+(§ 142 zákoníku práce, elektronicky jen se souhlasem zaměstnance). E-mail
+obsahuje jen odkaz; pásku si zaměstnanec stáhne po ověření jednorázovým kódem.
+Odkaz ani jeho adresu účetní v aplikaci nevidí, vidí jen, komu (maskovaně)
+odešel a zda si ho zaměstnanec vyzvedl.
+
+Odeslání projde jen tehdy, když platí všechny podmínky zároveň:
+
+1. doručování je na instanci zapnuté,
+2. nastavení mezd je dokončené,
+3. zaměstnavatelská politika má kanál **Portál zaměstnance** s vyplněným datem
+   ověření (**Mzdy → Nastavení → Politiky a připravenost**),
+4. zaměstnanec má v kartě zvolené elektronické doručení,
+5. zaměstnanec má aktivní primární e-mail.
+
+Šifrovaný e-mail (S/MIME) mzdové dokumenty neodesílá a v politice ho zvolit
+nelze. Politika, která ho má uložený z dřívějška, se při úpravě musí přepnout
+na portál zaměstnance nebo na auditované ruční předání.
+
+**Jednotlivě.** U řádku výplatní pásky v seznamu dokumentů použijte **Poslat
+zabezpečený odkaz**. Starý odkaz lze zneplatnit a poslat nový.
+
+**Hromadně.** Tlačítko **Rozeslat pásky** u schválené revize (jedno pro každou
+mzdovou účtárnu) po potvrzení zařadí k odeslání platné výplatní pásky revize
+všem zaměstnancům najednou. Skrytá nebo opravou nahrazená páska se neposílá.
+Každá páska prochází stejnými podmínkami jako při jednotlivém odeslání, takže
+opakované kliknutí nic nepošle dvakrát; páska, která už odkaz má, se jen
+započte jako už zařazená. Není-li splněná podmínka zaměstnavatele (body 1 až 3),
+nezařadí se nic a aplikace řekne proč. Zaměstnanci, kterým se páska poslat
+nemohla (volba papíru, chybějící e-mail), zůstanou po odeslání vypsaní na
+stránce i s důvodem, aby šlo pásku předat jinak. E-maily odesílá fronta na
+pozadí, ne samotné kliknutí.

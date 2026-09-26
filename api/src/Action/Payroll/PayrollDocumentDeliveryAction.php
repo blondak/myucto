@@ -22,6 +22,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET    /api/payroll/documents/{documentId}/secure-links       — stav odkazů
  *   POST   /api/payroll/documents/{documentId}/secure-links       — zařadit odeslání
  *   DELETE /api/payroll/documents/{documentId}/secure-links/{id}  — zneplatnit
+ *   POST   /api/payroll/runs/{runId}/revisions/{revisionId}/documents/secure-links
+ *                                                                  — rozeslat pásky revize
  *
  * Zařazení vyžaduje WRITE, protože je to odchozí akce s osobními údaji, ne čtení.
  *
@@ -116,6 +118,73 @@ final class PayrollDocumentDeliveryAction
             'payroll_document',
             $documentId,
             ['link_id' => $result['link_id'], 'created' => $result['created']],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+
+        return $this->noStore(Json::ok($response, $result, 202));
+    }
+
+    /**
+     * Hromadné rozeslání výplatních pásek schválené revize. Odpověď nese jen
+     * počty a důvody přeskočených osob — žádné adresy ani odkazy.
+     *
+     * @param array<string,string> $args
+     */
+    public function sendRevisionPayslips(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.documents',
+            AccessLevel::WRITE,
+            $error,
+        ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+
+        $supplierId = $this->currentSupplierId($request);
+        $runId = (int) ($args['runId'] ?? 0);
+        $revisionId = (int) ($args['revisionId'] ?? 0);
+        $actorUserId = $this->userId($request);
+
+        try {
+            $result = $this->delivery->enqueueRevisionPayslips(
+                $supplierId,
+                $runId,
+                $revisionId,
+                $actorUserId,
+            );
+        } catch (PayrollSecureDeliveryBlockedException $exception) {
+            return $this->noStore(Json::error(
+                $response,
+                'secure_delivery_blocked',
+                $exception->getMessage(),
+                409,
+                ['reason' => $exception->reasonCode()],
+            ));
+        } catch (PayrollProductionGateException $exception) {
+            return $this->noStore(Json::error(
+                $response,
+                'payroll_production_gate',
+                $exception->getMessage(),
+                409,
+            ));
+        }
+
+        $this->activity->log(
+            'payroll.document_secure_links_bulk_queued',
+            $actorUserId,
+            'payroll_run_revision',
+            $revisionId,
+            [
+                'run_id' => $runId,
+                'total' => $result['total'],
+                'queued' => $result['queued'],
+                'already_queued' => $result['already_queued'],
+                'skipped' => count($result['skipped']),
+            ],
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
             $request->getHeaderLine('User-Agent'),
             $supplierId,

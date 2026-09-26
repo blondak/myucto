@@ -136,7 +136,12 @@ Zadá-li se sazba, která v příloze č. 2 není, formulář na to upozorní, a
 uložení nezablokuje — doložená odlišná sazba má přednost před číselníkem.
 Z uložené sazby se čtvrtletně počítá pojistné z vyměřovacího základu sociálního
 pojištění; minimum je 100 Kč za kalendářní čtvrtletí a výsledek se zaokrouhluje
-nahoru na celé koruny.
+nahoru na celé koruny. Závazek vznikne při přípravě plateb za poslední měsíc
+čtvrtletí. V podvojném účetnictví se s ním zaúčtuje i předpis pojistného
+k poslednímu dni čtvrtletí (výchozí 548 / 379.400, případně 379, pokud firma
+analytiku v osnově nemá). Opravná revize, která pojistné změní, předepíše jen
+rozdíl. Úhrada spárovaná s tímto závazkem se pak účtuje proti účtu předpisu.
+Zamčené účetní období předpis přeskočí a další příprava plateb ho doplní.
 
 Osobní variabilní symbol ČSSZ a číslo pojištěnce OSVČ v obecném nastavení firmy
 zůstávají určena pro vlastní odvody fyzické osoby. Platby zaměstnavatele je
@@ -168,6 +173,7 @@ osnovy tam, kde se od výchozí liší:
 | **Pohledávka za zaměstnancem** | záporná čistá mzda | 335 proti 331 nebo 366 |
 | **Nedaňová část benefitu** | osvobozená část nepeněžního benefitu | 528 |
 | **Cestovní náhrady** | vyúčtování pracovní cesty promítnuté do mzdy | 512 proti 331 nebo 366 |
+| **Zákonné pojištění odpovědnosti** | čtvrtletní předpis pojistného podle vyhlášky č. 125/1993 Sb. | 548 / 379.400 |
 
 Zákonný příspěvek na spoření u rizikové práce se zaměstnanci nevyplácí a
 penzijní společnost není institucí sociálního ani zdravotního pojištění, proto

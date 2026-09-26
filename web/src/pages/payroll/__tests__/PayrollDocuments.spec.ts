@@ -29,8 +29,10 @@ const m = vi.hoisted(() => ({
   documentSecureLinks: vi.fn(),
   sendDocumentSecureLink: vi.fn(),
   revokeDocumentSecureLink: vi.fn(),
+  sendRevisionPayslips: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  toastWarning: vi.fn(),
 }))
 
 // Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
@@ -74,6 +76,7 @@ vi.mock('@/api/payroll', () => ({
     documentSecureLinks: m.documentSecureLinks,
     sendDocumentSecureLink: m.sendDocumentSecureLink,
     revokeDocumentSecureLink: m.revokeDocumentSecureLink,
+    sendRevisionPayslips: m.sendRevisionPayslips,
   },
 }))
 
@@ -84,7 +87,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
+  useToast: () => ({ success: m.toastSuccess, error: m.toastError, warning: m.toastWarning }),
 }))
 
 // `useTablePrefs` táhne @/i18n, které volá skutečné `createI18n` — továrna
@@ -1193,5 +1196,55 @@ describe('PayrollDocuments', () => {
     expect(wrapper.find('[data-test="payroll-focus-notice"]').text())
       .not.toContain('payroll.agendas.focus.missing')
     expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(true)
+  })
+
+  /*
+   * Hromadné rozeslání pásek: stovky lidí nejde obejít po jednom. Kdo se
+   * nerozeslal, musí zůstat na stránce i s důvodem — jinak účetní neví, komu
+   * pásku předat jinak.
+   */
+  it('rozešle pásky revize a vypíše, komu se neposlaly', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    m.sendRevisionPayslips.mockResolvedValue({
+      total: 3,
+      queued: 1,
+      already_queued: 1,
+      skipped: [{
+        document_id: 23,
+        employee_id: 33,
+        employee_name: 'Syntetická Papírová',
+        reason: 'employee_prefers_paper',
+        message: 'Zaměstnanec má v kartě zvolené předání na papíře.',
+      }],
+    })
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    await wrapper.get('[data-test="send-revision-payslips"]').trigger('click')
+    await flushPromises()
+
+    expect(confirmSpy).toHaveBeenCalledOnce()
+    expect(m.sendRevisionPayslips).toHaveBeenCalledWith(11, 12)
+    const report = wrapper.get('[data-test="payslip-delivery-report"]')
+    expect(report.text()).toContain('payroll.documents.payslip_delivery.summary')
+    const skipped = wrapper.findAll('[data-test="payslip-delivery-skipped"]')
+    expect(skipped).toHaveLength(1)
+    expect(skipped[0].text()).toContain('Syntetická Papírová')
+    expect(skipped[0].text()).toContain('payroll.documents.secure_delivery.reason.employee_prefers_paper')
+    confirmSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('bez potvrzení pásky nerozešle', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    await wrapper.get('[data-test="send-revision-payslips"]').trigger('click')
+    await flushPromises()
+
+    expect(m.sendRevisionPayslips).not.toHaveBeenCalled()
+    confirmSpy.mockRestore()
+    wrapper.unmount()
   })
 })
