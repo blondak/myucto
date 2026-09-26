@@ -350,6 +350,46 @@ final class EmploymentExitDocumentServiceTest extends TestCase
         self::assertSame('average_earnings_certificate', $purpose);
     }
 
+    /**
+     * Potvrzení pro Úřad práce bere způsob skončení ze záznamu na kartě
+     * vztahu. Jiný druh skončení, než jaký záznam odvozuje, neprojde —
+     * dřív se volil ručně nezávisle na odhlášce A2.
+     */
+    public function testAverageEarningsCertificateMustMatchTheTerminationRecord(): void
+    {
+        $this->insertApprovedAverageEarningSnapshot(2026, 3);
+        $this->insertTaxDeclaration('signed');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_terminations
+                (supplier_id, employment_id, termination_method, legal_ground)
+             VALUES (?, ?, "employee_notice", "none")',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        try {
+            $this->service->generateAverageEarningsDocument(
+                $this->supplierId,
+                $this->employmentId,
+                AverageEarningsSnapshotBuilder::CERTIFICATE_PURPOSE,
+                self::certificateEvidence(),
+                'synthetic-average-exit-mismatch',
+                $this->userId,
+            );
+            self::fail('Potvrzení s jiným způsobem skončení, než tvrdí záznam, prošlo.');
+        } catch (EmploymentExitReadinessException $exception) {
+            self::assertSame('termination_reason_mismatch', $exception->readinessCode);
+        }
+
+        $document = $this->service->generateAverageEarningsDocument(
+            $this->supplierId,
+            $this->employmentId,
+            AverageEarningsSnapshotBuilder::CERTIFICATE_PURPOSE,
+            ['termination_reason_kind' => 'employee_unilateral'] + self::certificateEvidence(),
+            'synthetic-average-exit-matching',
+            $this->userId,
+        );
+        self::assertSame('average_earnings_certificate', $document['document_kind']);
+    }
+
     public function testAverageEarningsStatementIsIssuedWithoutTaxEvidence(): void
     {
         $this->insertApprovedAverageEarningSnapshot(2026, 3);

@@ -111,6 +111,7 @@ use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAgendaSummaryAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentDimensionAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentSurchargePolicyAction;
+use MyInvoice\Action\Payroll\PayrollEmploymentTerminationAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceIsdsAction;
 use MyInvoice\Action\Payroll\PayrollHealthNotificationAction;
@@ -2061,6 +2062,16 @@ final class Routes
             // nešel schválit měsíc s prací o svátku ani ve ztíženém prostředí:
             // materializace příplatků je fail-closed a sjednat se to dosud
             // nedalo nikde.
+            // Skončení vztahu: jediný zdroj důvodu skončení (A2, potvrzení pro
+            // Úřad práce, odstupné), vyrovnání dovolené a úmrtí (§ 328 ZP).
+            $g->get('/employments/{id:[0-9]+}/termination', [PayrollEmploymentTerminationAction::class, 'show']);
+            $g->put('/employments/{id:[0-9]+}/termination', [PayrollEmploymentTerminationAction::class, 'save']);
+            $g->post('/employments/{id:[0-9]+}/termination/leave-settlement', [PayrollEmploymentTerminationAction::class, 'settleLeave']);
+            $g->post('/employments/{id:[0-9]+}/termination/leave-settlement/reverse', [PayrollEmploymentTerminationAction::class, 'reverseLeave']);
+            $g->post('/employments/{id:[0-9]+}/termination/severance-input', [PayrollEmploymentTerminationAction::class, 'createSeverance']);
+            $g->post('/employments/{id:[0-9]+}/termination/survivors', [PayrollEmploymentTerminationAction::class, 'addSurvivor']);
+            $g->delete('/employments/{id:[0-9]+}/termination/survivors/{survivorId:[0-9]+}', [PayrollEmploymentTerminationAction::class, 'removeSurvivor']);
+            $g->post('/employments/{id:[0-9]+}/termination/death-tax-assessment', [PayrollEmploymentTerminationAction::class, 'assessDeathTax']);
             $g->get(
                 '/employments/{id:[0-9]+}/surcharge-policies',
                 [PayrollEmploymentSurchargePolicyAction::class, 'list'],

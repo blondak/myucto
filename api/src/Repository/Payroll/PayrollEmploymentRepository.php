@@ -55,15 +55,12 @@ final class PayrollEmploymentRepository
      * vzniknout i zaniknout (storno revize, smazaný výkaz) a přepsaný stav
      * by pak tvrdil hotovo nad něčím, co už neexistuje.
      *
+     * Výčet i dotaz drží {@see PayrollChecklistEvidenceSql}, sdílený s přehledem
+     * termínů.
+     *
      * @var array<string,string>
      */
-    private const CHECKLIST_EVIDENCE = [
-        'eldp_submission' => 'eldp_statement',
-        'taxable_income_confirmation' => 'taxable_income_document',
-        'social_jmhz_registration' => 'registration_obligation',
-        'health_insurance_registration' => 'health_start_obligation',
-        'health_insurance_deregistration' => 'health_end_obligation',
-    ];
+    private const CHECKLIST_EVIDENCE = PayrollChecklistEvidenceSql::EVIDENCE_KINDS;
 
     /**
      * Povinnosti, které na daný druh vztahu nesedí a nemají se ani zakládat.
@@ -1466,60 +1463,7 @@ final class PayrollEmploymentRepository
                     item.deadline_source, item.deadline_source_status,
                     item.completed_at, item.note, item.row_version,
                     item.created_at, item.updated_at,
-                    CASE item.item_key
-                      WHEN \'eldp_submission\' THEN EXISTS (
-                        SELECT 1 FROM payroll_eldp_statements statement
-                         WHERE statement.supplier_id = item.supplier_id
-                           AND statement.employment_id = item.employment_id
-                      )
-                      WHEN \'taxable_income_confirmation\' THEN EXISTS (
-                        SELECT 1
-                          FROM payroll_generated_documents document
-                          JOIN payroll_employments employment
-                            ON employment.supplier_id = item.supplier_id
-                           AND employment.id = item.employment_id
-                         WHERE document.supplier_id = item.supplier_id
-                           AND document.employee_id = employment.employee_id
-                           AND document.document_kind IN (
-                                 \'taxable_income_advance_certificate\',
-                                 \'taxable_income_withholding_certificate\'
-                               )
-                      )
-                      WHEN \'social_jmhz_registration\' THEN EXISTS (
-                        SELECT 1 FROM payroll_obligations obligation
-                         WHERE obligation.supplier_id = item.supplier_id
-                           AND obligation.source_event_type
-                                 = \'payroll_employment_registration\'
-                           AND obligation.source_event_reference
-                                 = CONCAT(\'payroll_employment:\', item.employment_id)
-                           AND obligation.status <> \'cancelled\'
-                      )
-                      WHEN \'health_insurance_registration\' THEN EXISTS (
-                        SELECT 1 FROM payroll_obligations obligation
-                         WHERE obligation.supplier_id = item.supplier_id
-                           AND obligation.source_event_type
-                                 = \'payroll_health_notification\'
-                           AND obligation.source_event_reference LIKE CONCAT(
-                                 \'payroll_health_notification:\',
-                                 item.employment_id,
-                                 \':employment_start:%\'
-                               )
-                           AND obligation.status <> \'cancelled\'
-                      )
-                      WHEN \'health_insurance_deregistration\' THEN EXISTS (
-                        SELECT 1 FROM payroll_obligations obligation
-                         WHERE obligation.supplier_id = item.supplier_id
-                           AND obligation.source_event_type
-                                 = \'payroll_health_notification\'
-                           AND obligation.source_event_reference LIKE CONCAT(
-                                 \'payroll_health_notification:\',
-                                 item.employment_id,
-                                 \':employment_end:%\'
-                               )
-                           AND obligation.status <> \'cancelled\'
-                      )
-                      ELSE 0
-                    END AS evidence_present
+                    ' . PayrollChecklistEvidenceSql::evidencePresent() . ' AS evidence_present
                FROM payroll_employment_checklist_items item
               WHERE item.supplier_id = ? AND item.employment_id = ?
               ORDER BY FIELD(item.phase, \'onboarding\', \'change\', \'offboarding\'),

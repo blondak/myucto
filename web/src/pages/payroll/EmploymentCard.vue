@@ -13,6 +13,7 @@ import {
   type PayrollMealEntitlementBasis,
   type PayrollJmhzMunicipalityOption,
   type PayrollEmploymentTermsPayload,
+  type PayrollTerminationOverview,
 } from '@/api/payroll'
 import type { PayrollOffice } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
@@ -32,6 +33,7 @@ import EmploymentSurchargePolicyPanel from './EmploymentSurchargePolicyPanel.vue
 import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
 import EmploymentJmhzIdentityPanel from './EmploymentJmhzIdentityPanel.vue'
 import EmploymentRegistrationPanel from './EmploymentRegistrationPanel.vue'
+import EmploymentTerminationPanel from './EmploymentTerminationPanel.vue'
 import PayrollOpeningBalancesPanel from './PayrollOpeningBalancesPanel.vue'
 import {
   employmentCodeLabel,
@@ -65,6 +67,8 @@ const { t } = useI18n()
 const toast = useToast()
 const busy = ref(false)
 const transitionDate = ref(todayIso())
+/** Skončení vztahu — jediný zdroj důvodu pro odhlášku A2 a potvrzení pro ÚP. */
+const terminationOverview = ref<PayrollTerminationOverview | null>(null)
 const jmhzOptions = ref<PayrollEmploymentJmhzEvidenceOptions | null>(null)
 const jmhzOptionsFailed = ref(false)
 const municipalityOptions = ref<PayrollJmhzMunicipalityOption[]>([])
@@ -1706,10 +1710,21 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
         @click="markRegisteredElsewhere"
       >{{ t('payroll.people.registered_elsewhere') }}</button>
     </p>
+    <!--
+      Skončení vztahu stojí před odhláškou: důvod skončení se zadává tady
+      a odhláška A2 i potvrzení pro Úřad práce si ho odsud předvyplní.
+    -->
+    <EmploymentTerminationPanel
+      v-if="employment.end_date && (employment.status === 'ended' || employment.status === 'archived')"
+      :employment-id="employment.id"
+      :can-write="canWrite"
+      @loaded="terminationOverview = $event"
+    />
     <EmploymentRegistrationPanel
       :employment-id="employment.id"
       :person-id="employment.employee_id"
       :can-write="canWrite"
+      :a2-prefill="terminationOverview?.a2_prefill ?? null"
     />
 
     <EmploymentJmhzIdentityPanel
@@ -1735,6 +1750,8 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       v-if="employment.end_date && canReadDocuments"
       :employment="employment"
       :can-write="canWriteDocuments === true"
+      :termination-reason-kind="terminationOverview?.derived?.unemployment_office_kind ?? null"
+      :employee-stated-reason="terminationOverview?.termination?.employee_stated_reason ?? null"
     />
       </div>
     </div>

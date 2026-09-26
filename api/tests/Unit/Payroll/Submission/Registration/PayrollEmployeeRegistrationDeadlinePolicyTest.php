@@ -18,6 +18,40 @@ final class PayrollEmployeeRegistrationDeadlinePolicyTest extends TestCase
         $this->policy = new PayrollEmployeeRegistrationDeadlinePolicy();
     }
 
+    /**
+     * Odhlášení při skončení a nenastoupení mají vlastní odstavce § 19
+     * zákona č. 323/2025 Sb. Dřív kód citoval u nenastoupení § 17 odst. 5
+     * (povinnost zaměstnavatele, ne zaměstnance) a u A2 „paragraf k doložení".
+     */
+    public function testLegalBasisCitesTheEmployeeParagraphs(): void
+    {
+        $basis = PayrollEmployeeRegistrationDeadlinePolicy::LEGAL_BASIS;
+
+        self::assertSame('§ 19 odst. 6 písm. a) zákona č. 323/2025 Sb.', $basis['termination']);
+        self::assertSame('§ 19 odst. 4 zákona č. 323/2025 Sb.', $basis['no_show']);
+        self::assertSame('§ 19 odst. 5 zákona č. 323/2025 Sb.', $basis['change']);
+    }
+
+    /**
+     * Oprava citací nesmí pohnout otiskem rulesetu: nese ho už evidovaná
+     * povinnost a jiný otisk by u ní vyrobil nový požadavek se stejným klíčem.
+     */
+    public function testCitationFixKeepsRulesetHashes(): void
+    {
+        self::assertSame(
+            '7ff6c541a0f0ead9848e25bd1da926a0c2ad0bf1fe543aeae18ab2f0b0850fde',
+            $this->policy->forEmploymentStart('2026-09-15')->rulesetHash,
+        );
+        self::assertSame(
+            'fa0fb189eb3ecb9f581cc66845c6cfda3b1f50a31f4f78e45d00e88ae00b2c72',
+            $this->policy->forNoShow('2026-09-15')->rulesetHash,
+        );
+        self::assertSame(
+            'e71daa70b517a39e6f41ce21113bb7e686968ecdebabcbec5a081f3f0ad99216',
+            $this->policy->forFollowUp(2, '2026-09-15')->rulesetHash,
+        );
+    }
+
     public function testRegistrationWindowOpensEightCalendarDaysBeforeStart(): void
     {
         $window = $this->policy->forEmploymentStart('2026-09-15');

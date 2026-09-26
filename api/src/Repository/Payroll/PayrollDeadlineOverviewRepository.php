@@ -231,7 +231,7 @@ final readonly class PayrollDeadlineOverviewRepository
                 AND item.due_date >= ?
                 AND item.due_date <= ?
                 AND (? IS NULL OR item.item_key = ?)
-                AND ' . self::OPEN_CHECKLIST_ITEM . '
+                AND ' . self::openChecklistItem() . '
               ORDER BY item.due_date ASC, item.id ASC'
         );
         $statement->execute([$supplierId, $from, $to, $itemKey, $itemKey]);
@@ -249,7 +249,7 @@ final readonly class PayrollDeadlineOverviewRepository
      * dotazu byla k vidění jen na kartě každého vztahu zvlášť, takže 225 lidí
      * po importu znamenalo 225 ručních odškrtnutí.
      *
-     * Výběr je TENTÝŽ jako u položek s termínem ({@see self::OPEN_CHECKLIST_ITEM}),
+     * Výběr je TENTÝŽ jako u položek s termínem ({@see self::openChecklistItem()}),
      * liší se jen podmínkou na `due_date`.
      *
      * @return list<array{
@@ -281,7 +281,7 @@ final readonly class PayrollDeadlineOverviewRepository
               WHERE item.supplier_id = ?
                 AND item.due_date IS NULL
                 AND (? IS NULL OR item.item_key = ?)
-                AND ' . self::OPEN_CHECKLIST_ITEM . '
+                AND ' . self::openChecklistItem() . '
               ORDER BY item.id ASC'
         );
         $statement->execute([$supplierId, $itemKey, $itemKey]);
@@ -305,7 +305,7 @@ final readonly class PayrollDeadlineOverviewRepository
                 AND employment.id = item.employment_id
               WHERE item.supplier_id = ?
                 AND item.due_date IS NULL
-                AND ' . self::OPEN_CHECKLIST_ITEM . '
+                AND ' . self::openChecklistItem() . '
               GROUP BY item.item_key'
         );
         $statement->execute([$supplierId]);
@@ -322,62 +322,19 @@ final readonly class PayrollDeadlineOverviewRepository
      * Co je „nevyřízená položka checklistu" — sdílené oběma dotazům výše, aby
      * skupina s termínem a skupina bez termínu nevybíraly podle dvou pravidel.
      *
-     * Vyřazuje položky, ke kterým existuje DOKLAD (stejný výčet jako
-     * `PayrollEmploymentRepository::CHECKLIST_EVIDENCE` a její
-     * `effective_status`); jinak by hlídač připomínal to, co je hotové.
-     * Potvrzení o zdanitelných příjmech se tu dřív nevyřazovalo, protože nikdy
-     * nemělo termín a do přehledu se nedostalo; bez termínu už se dostane.
+     * Vyřazuje položky, ke kterým existuje DOKLAD — tentýž výraz
+     * ({@see PayrollChecklistEvidenceSql}) jako `effective_status` na kartě
+     * vztahu; jinak by hlídač připomínal to, co je hotové, nebo naopak mlčel
+     * u odhlášky, která je jen připravená.
      *
      * Předpokládá aliasy `item` a `employment`.
      */
-    private const OPEN_CHECKLIST_ITEM = '
-                item.status = \'pending\'
-                AND employment.status NOT IN (\'no_show\', \'archived\')
-                AND NOT EXISTS (
-                      SELECT 1 FROM payroll_eldp_statements statement
-                       WHERE item.item_key = \'eldp_submission\'
-                         AND statement.supplier_id = item.supplier_id
-                         AND statement.employment_id = item.employment_id
-                    )
-                AND NOT EXISTS (
-                      SELECT 1 FROM payroll_generated_documents document
-                       WHERE item.item_key = \'taxable_income_confirmation\'
-                         AND document.supplier_id = item.supplier_id
-                         AND document.employee_id = employment.employee_id
-                         AND document.document_kind IN (
-                               \'taxable_income_advance_certificate\',
-                               \'taxable_income_withholding_certificate\'
-                             )
-                    )
-                AND NOT EXISTS (
-                      SELECT 1 FROM payroll_obligations obligation
-                       WHERE item.item_key IN (
-                               \'social_jmhz_registration\',
-                               \'health_insurance_registration\',
-                               \'health_insurance_deregistration\'
-                             )
-                         AND obligation.supplier_id = item.supplier_id
-                         AND obligation.status <> \'cancelled\'
-                         AND (
-                           (item.item_key = \'social_jmhz_registration\'
-                            AND obligation.source_event_type
-                                  = \'payroll_employment_registration\'
-                            AND obligation.source_event_reference
-                                  = CONCAT(\'payroll_employment:\', item.employment_id))
-                           OR (item.item_key = \'health_insurance_registration\'
-                               AND obligation.source_event_type
-                                     = \'payroll_health_notification\'
-                               AND obligation.source_event_reference LIKE CONCAT(
-                                     \'payroll_health_notification:\',
-                                     item.employment_id, \':employment_start:%\'))
-                           OR (item.item_key = \'health_insurance_deregistration\'
-                               AND obligation.source_event_type
-                                     = \'payroll_health_notification\'
-                               AND obligation.source_event_reference LIKE CONCAT(
-                                     \'payroll_health_notification:\',
-                                     item.employment_id, \':employment_end:%\'))
-                         )
-                    )';
+    private static function openChecklistItem(): string
+    {
+        return "item.status = 'pending'
+                AND employment.status NOT IN ('no_show', 'archived')
+                AND NOT (" . PayrollChecklistEvidenceSql::evidencePresent() . ')';
+    }
 
     /**
      * Položky checklistu podle id, jen v rámci firmy. Cizí nebo neexistující
