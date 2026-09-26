@@ -773,6 +773,9 @@ final class ClientRepository
         if (array_key_exists('is_customer', $row)) $row['is_customer'] = (bool) $row['is_customer'];
         if (array_key_exists('is_vendor', $row))   $row['is_vendor']   = (bool) $row['is_vendor'];
         if (array_key_exists('is_fuel_station', $row)) $row['is_fuel_station'] = (bool) $row['is_fuel_station'];
+        // Formulář čte příznak striktně (`=== true`); bez přetypování přišla `1`, checkbox
+        // zůstal prázdný a uložení karty spojenou osobu i s typem vztahu tiše smazalo.
+        if (array_key_exists('related_party', $row)) $row['related_party'] = (bool) $row['related_party'];
         if (array_key_exists('auto_send_reminders', $row)) {
             $row['auto_send_reminders'] = (bool) $row['auto_send_reminders'];
         }

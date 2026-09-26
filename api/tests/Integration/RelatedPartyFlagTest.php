@@ -137,6 +137,23 @@ final class RelatedPartyFlagTest extends TestCase
         self::assertSame('otherwise', $row['related_party_type']);
     }
 
+    /**
+     * API vrací příznak jako bool. Formulář ho čte `=== true`, takže s `1` z DB checkbox
+     * zůstal prázdný a první uložení karty spojenou osobu tiše odznačilo.
+     */
+    public function testFindReturnsFlagAsBool(): void
+    {
+        $id = $this->client();
+        self::assertFalse($this->clients->find($id)['related_party']);
+
+        $this->clients->update($id, $this->payload([
+            'related_party' => true,
+            'related_party_type' => 'capital',
+        ]));
+
+        self::assertTrue($this->clients->find($id)['related_party']);
+    }
+
     /** Výchozí stav je „není spojená osoba" — dosavadní klienti se nemění. */
     public function testDefaultIsNotRelated(): void
     {
