@@ -53,7 +53,7 @@ final class CrmBankUnmatchedNonInvoiceTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             $this->crm = $c->get(CrmAggregationService::class);
         } catch (\Throwable $e) {
@@ -206,7 +206,7 @@ final class CrmBankUnmatchedNonInvoiceTest extends TestCase
             ->createServerRequest('GET', '/api/bank-statements/' . $this->statementId)
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withQueryParams(['status' => 'unmatched']);
-        $action = Bootstrap::buildApp()->getContainer()->get(BankStatementAction::class);
+        $action = Bootstrap::buildContainer()->get(BankStatementAction::class);
         $response = $action->detail($request, (new ResponseFactory())->createResponse(), ['id' => $this->statementId]);
         self::assertSame(200, $response->getStatusCode());
         $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
@@ -281,7 +281,7 @@ final class CrmBankUnmatchedNonInvoiceTest extends TestCase
         $transfer = $this->insertIncoming();
         $this->insertSuggestion($transfer, 'auto_posted');
 
-        $action = Bootstrap::buildApp()->getContainer()->get(UnmatchedBankExportAction::class);
+        $action = Bootstrap::buildContainer()->get(UnmatchedBankExportAction::class);
         $request = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/bank-statements/' . $this->statementId . '/unmatched-recipients')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId);

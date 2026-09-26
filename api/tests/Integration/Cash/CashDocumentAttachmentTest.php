@@ -53,7 +53,7 @@ final class CashDocumentAttachmentTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db              = $c->get(Connection::class);
             $this->documentsAction = $c->get(DocumentsAction::class);
             $this->linkSearch      = $c->get(LinkSearchAction::class);

@@ -51,7 +51,7 @@ final class VatClassificationDefaulterTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection (CI runner skipne).');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->conn = $container->get(Connection::class);
             $this->defaulter = $container->get(VatClassificationDefaulter::class);
         } catch (\Throwable $e) {

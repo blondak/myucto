@@ -45,7 +45,7 @@ final class InvoiceDiscountTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             if ($container === null) {
                 $this->markTestSkipped('Container not available');
             }

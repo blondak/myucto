@@ -75,9 +75,9 @@ final class PayrollRunConcurrencyTest extends TestCase
             // v téže session — zámek by se sám sobě nikdy nepostavil do cesty
             // a test by serializaci jen předstíral. Connection MUSÍ vzniknout
             // UVNITŘ zóny; rozhodnutí „smím sdílet PDO?" padá v konstruktoru.
-            $containerA = Bootstrap::buildApp()->getContainer();
+            $containerA = Bootstrap::buildContainer();
             $containerB = Connection::withoutSharedTestConnection(static function () {
-                $c = Bootstrap::buildApp()->getContainer();
+                $c = Bootstrap::buildContainer();
                 $c->get(Connection::class);
 
                 return $c;

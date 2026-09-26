@@ -43,7 +43,7 @@ final class AccountingActivationTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(AccountingActivationAction::class);
             $this->settings = $container->get(SettingsAction::class);

@@ -37,7 +37,7 @@ final class EmailPdfInvoiceIngestorTest extends TestCase
             $this->markTestSkipped('cfg.php missing');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             if ($container === null) {
                 $this->markTestSkipped('Container not available');
             }
@@ -134,7 +134,7 @@ final class EmailPdfInvoiceIngestorTest extends TestCase
     /** Backfill přesune jen originál podání z kořene, běžný dokument v kořeni nechá být. */
     public function testFolderBackfillMovesOnlySubmissionOriginals(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $ingest = $container->get(\MyInvoice\Service\Document\DocumentIngestService::class);
         $storage = $container->get(\MyInvoice\Service\Document\DocumentStorage::class);
 

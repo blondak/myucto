@@ -48,7 +48,7 @@ final class PurchaseSummaryActionCostTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
@@ -320,7 +320,7 @@ final class PurchaseSummaryActionCostTest extends TestCase
 
     public function testDashboardDetectsOldZeroAmountPurchaseOnlyForItsSupplier(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $action = $container->get(\MyInvoice\Action\Dashboard\SummaryAction::class);
         $this->pdo->prepare("INSERT INTO supplier
             (company_name, street, city, zip, country_id, email, default_currency_id, default_vat_rate_id)

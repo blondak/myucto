@@ -48,7 +48,7 @@ final class OssRateResolutionSchemaTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->deriver = $container->get(OssItemDeriver::class);
             $this->resolver = $container->get(VatRateResolver::class);

@@ -164,7 +164,7 @@ require $root . '/api/vendor/autoload.php';
 $config = \MyInvoice\Infrastructure\Config\Config::load($root);
 $configuredDatabase = (string) $config->get('db.name');
 if ($configuredDatabase !== $expectedDatabase || preg_match('/_test(?:_worker[A-Za-z0-9_]*)?$/D', $configuredDatabase) !== 1) { exit(10); }
-$pdo = \MyInvoice\Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Infrastructure\Database\Connection::class)->pdo();
+$pdo = \MyInvoice\Bootstrap::buildContainer()->get(\MyInvoice\Infrastructure\Database\Connection::class)->pdo();
 if ((string) $pdo->query('SELECT DATABASE()')->fetchColumn() !== $expectedDatabase) { exit(11); }
 $pdo->beginTransaction();
 file_put_contents($controlFile, json_encode(['ready' => true, 'connection_id' => (int) $pdo->query('SELECT CONNECTION_ID()')->fetchColumn()], JSON_THROW_ON_ERROR));

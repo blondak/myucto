@@ -58,7 +58,7 @@ abstract class CashJournalTestCase extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->container = $c;
             $this->db      = $c->get(Connection::class);
             $this->repo    = $c->get(CashJournalRepository::class);

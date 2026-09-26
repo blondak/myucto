@@ -27,7 +27,7 @@ final class PayrollStatutoryAccumulatorRepositoryTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer()
+        $container = Bootstrap::buildContainer()
             ?? throw new \RuntimeException('DI kontejner není dostupný.');
         $db = $container->get(Connection::class);
         $repository = $container->get(PayrollStatutoryAccumulatorRepository::class);

@@ -50,7 +50,7 @@ final class PayrollPersonProfileApiTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollPersonProfileAction::class);
             $this->validator = $container->get(PayrollPersonProfileValidator::class);

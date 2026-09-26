@@ -29,7 +29,7 @@ final class IpMatcherWiringTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DI bootstrap.');
         }
         try {
-            $matcher = Bootstrap::buildApp()->getContainer()->get(IpMatcher::class);
+            $matcher = Bootstrap::buildContainer()->get(IpMatcher::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }

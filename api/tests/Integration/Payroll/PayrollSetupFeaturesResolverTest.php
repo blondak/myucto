@@ -33,7 +33,7 @@ final class PayrollSetupFeaturesResolverTest extends TestCase
             self::markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->resolver = $container->get(PayrollSetupFeaturesResolver::class);
         } catch (\Throwable $exception) {

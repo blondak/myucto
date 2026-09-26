@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Architecture;
 
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -125,11 +126,8 @@ final class VendorConfigGuideTest extends TestCase
     private function sourceText(string $dir): string
     {
         $out = '';
-        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir));
-        foreach ($it as $file) {
-            if ($file->isFile() && $file->getExtension() === 'php') {
-                $out .= (string) file_get_contents($file->getPathname());
-            }
+        foreach (SourceCorpus::files($dir) as $file) {
+            $out .= SourceCorpus::read($file);
         }
         return $out;
     }

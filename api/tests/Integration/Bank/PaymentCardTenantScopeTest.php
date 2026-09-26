@@ -50,7 +50,7 @@ final class PaymentCardTenantScopeTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             $this->action = $c->get(PaymentCardAction::class);
             $this->overviewAction = $c->get(CardPaymentOverviewAction::class);

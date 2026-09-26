@@ -72,7 +72,7 @@ final class KhDphTaxScenariosTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection (CI runner skipne).');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db   = $container->get(Connection::class);
             $this->kh   = $container->get(KontrolniHlaseniBuilder::class);
             $this->dph  = $container->get(DphPriznaniBuilder::class);
@@ -1591,7 +1591,7 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->sale('2099068801', $euCust, '22', false, $d(5), $d(5), [[10000, 0, 0]]);
 
         $pdo = $this->db->pdo();
-        $archiver = \MyInvoice\Bootstrap::buildApp()->getContainer()
+        $archiver = \MyInvoice\Bootstrap::buildContainer()
             ->get(\MyInvoice\Service\Report\TaxSubmissionArchiver::class);
 
         $radne = $this->shv->build($this->supplierId, self::YEAR, self::MONTH, 'monthly', 'radne');

@@ -37,7 +37,7 @@ final class MfaRecoveryCodeTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             $this->codes = $c->get(MfaRecoveryCodeService::class);
         } catch (\Throwable $e) {
@@ -269,7 +269,7 @@ final class MfaRecoveryCodeTest extends TestCase
      */
     private function issueFirstBatch(): array
     {
-        $action = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Action\Auth\TotpAction::class);
+        $action = Bootstrap::buildContainer()->get(\MyInvoice\Action\Auth\TotpAction::class);
         // setAccessible() je od PHP 8.1 bez efektu a od 8.5 deprecated — reflexe
         // se na neveřejnou metodu dostane sama.
         $method = new \ReflectionMethod($action, 'issueFirstRecoveryCodes');

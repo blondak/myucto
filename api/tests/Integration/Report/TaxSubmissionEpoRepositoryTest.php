@@ -36,7 +36,7 @@ final class TaxSubmissionEpoRepositoryTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->documents = $container->get(DocumentRepository::class);
             $this->submissions = $container->get(TaxSubmissionRepository::class);

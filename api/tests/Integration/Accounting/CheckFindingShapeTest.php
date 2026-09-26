@@ -34,7 +34,7 @@ final class CheckFindingShapeTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DI.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->normalizer = $c->get(CheckFindingNormalizer::class);
             $c->get(Connection::class)->close();
         } catch (\Throwable $e) {

@@ -72,7 +72,7 @@ final class ExplicitDiBindingArityTest extends TestCase
             self::markTestSkipped('cfg.php neexistuje — test vyžaduje DI kontejner.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
         } catch (\Throwable $e) {
             self::markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }

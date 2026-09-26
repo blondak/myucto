@@ -40,7 +40,7 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollInstitutionAccountsAction::class);
             $this->sensitiveData = $container->get(PayrollSensitiveData::class);

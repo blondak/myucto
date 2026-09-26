@@ -46,7 +46,7 @@ final class SupplierAccountingModeGuardTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container    = Bootstrap::buildApp()->getContainer();
+            $container    = Bootstrap::buildContainer();
             $this->db     = $container->get(Connection::class);
             $this->action = $container->get(SettingsAction::class);
             $this->profileAction = $container->get(CompanyProfileAction::class);

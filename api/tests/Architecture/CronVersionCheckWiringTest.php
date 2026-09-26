@@ -19,7 +19,7 @@ final class CronVersionCheckWiringTest extends TestCase
         // (web cesta) je pro tuhle záruku jedno — obě dávají tentýž kontejner.
         self::assertTrue(
             str_contains($source, 'Bootstrap::buildContainer()')
-            || str_contains($source, 'Bootstrap::buildApp()->getContainer()'),
+            || str_contains($source, 'Bootstrap::buildContainer()'),
             'cron-version-check musí brát kontejner z Bootstrapu.',
         );
         self::assertStringContainsString(

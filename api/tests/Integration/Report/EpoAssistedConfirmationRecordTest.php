@@ -35,7 +35,7 @@ final class EpoAssistedConfirmationRecordTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->submissions = $container->get(TaxSubmissionRepository::class);
             $this->epo = $container->get(TaxSubmissionEpoRepository::class);

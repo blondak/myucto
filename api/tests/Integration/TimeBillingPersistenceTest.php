@@ -29,7 +29,7 @@ final class TimeBillingPersistenceTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->container = Bootstrap::buildApp()->getContainer();
+        $this->container = Bootstrap::buildContainer();
         $this->db = $this->container->get(Connection::class);
         $pdo = $this->db->pdo();
         $this->supplierId = (int) $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();

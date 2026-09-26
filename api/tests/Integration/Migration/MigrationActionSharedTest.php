@@ -49,7 +49,7 @@ final class MigrationActionSharedTest extends TestCase
             $this->markTestSkipped('cfg.php missing');
         }
         try {
-            $this->container = Bootstrap::buildApp()->getContainer();
+            $this->container = Bootstrap::buildContainer();
             $this->db = $this->container->get(Connection::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI unavailable: ' . $e->getMessage());

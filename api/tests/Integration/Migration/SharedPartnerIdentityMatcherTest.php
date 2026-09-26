@@ -28,7 +28,7 @@ final class SharedPartnerIdentityMatcherTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->matcher = $container->get(PartnerIdentityMatcher::class);
         } catch (\Throwable $e) {

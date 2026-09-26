@@ -46,7 +46,7 @@ final class PayrollRulesetAdminServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer()
+        $container = Bootstrap::buildContainer()
             ?? throw new \RuntimeException('DI kontejner není dostupný.');
         $db = $container->get(Connection::class);
         if (!$db instanceof Connection) {

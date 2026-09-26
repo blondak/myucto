@@ -42,7 +42,7 @@ final class PurchaseInvoiceDuplicateTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db           = $container->get(Connection::class);
             $this->createAction = $container->get(CreatePurchaseInvoiceAction::class);
         } catch (\Throwable $e) {
@@ -153,7 +153,7 @@ final class PurchaseInvoiceDuplicateTest extends TestCase
         self::assertSame(201, $created->getStatusCode());
         $id = (int) $pdo->query('SELECT id FROM purchase_invoices WHERE vendor_id = ' . $this->vendorId)->fetchColumn();
         $pdo->prepare('UPDATE clients SET is_customer = 1, is_vendor = 0 WHERE id = ?')->execute([$this->vendorId]);
-        $action = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Action\PurchaseInvoice\UpdatePurchaseInvoiceAction::class);
+        $action = Bootstrap::buildContainer()->get(\MyInvoice\Action\PurchaseInvoice\UpdatePurchaseInvoiceAction::class);
         $request = (new ServerRequestFactory())
             ->createServerRequest('PUT', '/api/purchase-invoices/' . $id)
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)

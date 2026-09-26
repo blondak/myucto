@@ -41,7 +41,7 @@ final class PayrollPostingServiceImmutabilityTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->posting = $container->get(PostingService::class);
             $this->journal = $container->get(JournalEntryRepository::class);

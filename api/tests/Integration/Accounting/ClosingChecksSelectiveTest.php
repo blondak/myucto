@@ -41,7 +41,7 @@ final class ClosingChecksSelectiveTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->closing = $container->get(ClosingService::class);
             $this->db = $container->get(Connection::class);
             $periods = $container->get(AccountingPeriodRepository::class);

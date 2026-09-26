@@ -59,7 +59,7 @@ final class BalanceSheetPresentationTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db          = $c->get(Connection::class);
             $this->statements  = $c->get(FinancialStatementService::class);
             $this->overrides   = $c->get(StatementOverrideService::class);

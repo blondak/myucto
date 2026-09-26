@@ -80,7 +80,7 @@ final class PayrollInstanceExportCoverageTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->scopes = $container->get(TenantScopeResolver::class);
             $this->export = $container->get(InstanceExportService::class);

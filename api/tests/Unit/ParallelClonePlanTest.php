@@ -26,14 +26,11 @@ final class ParallelClonePlanTest extends TestCase
                     ['TABLE_NAME' => 'child', 'COLUMN_NAME' => 'id'],
                     ['TABLE_NAME' => 'child', 'COLUMN_NAME' => 'parent_id'],
                     ['TABLE_NAME' => 'parent', 'COLUMN_NAME' => 'id'],
-                ],
-                str_contains($sql, 'information_schema.TRIGGERS') => [
-                    ['TRIGGER_NAME' => 'child_a', 'EVENT_OBJECT_TABLE' => 'child'],
-                    ['TRIGGER_NAME' => 'child_b', 'EVENT_OBJECT_TABLE' => 'child'],
+                    ['TABLE_NAME' => 'empty', 'COLUMN_NAME' => 'id'],
                 ],
                 str_contains($sql, 'information_schema.ROUTINES') => [],
                 str_contains($sql, "TABLE_TYPE = 'VIEW'") => [],
-                default => ['child', 'parent'],
+                default => ['child', 'parent', 'empty'],
             };
             $statement = $this->createStub(PDOStatement::class);
             $statement->method('fetchAll')->willReturn($rows);
@@ -43,6 +40,16 @@ final class ParallelClonePlanTest extends TestCase
             $metadata[] = $sql;
             $statement = $this->createStub(PDOStatement::class);
             $statement->method('fetch')->willReturn(['Create Table' => 'DDL ' . $sql]);
+            $statement->method('fetchColumn')->willReturn(str_contains($sql, '.`empty`') ? false : 1);
+            if (str_starts_with($sql, 'SHOW TRIGGERS')) {
+                $row = [
+                    'Trigger' => 'z_first', 'Table' => 'child', 'Timing' => 'BEFORE', 'Event' => 'INSERT',
+                    'Statement' => 'SET NEW.id = NEW.id', 'sql_mode' => 'STRICT_ALL_TABLES',
+                    'character_set_client' => 'utf8mb4', 'collation_connection' => 'utf8mb4_unicode_ci',
+                    'Database Collation' => 'utf8mb4_unicode_ci', 'Definer' => 'synthetic@localhost',
+                ];
+                $statement->method('fetchAll')->willReturn([$row, ['Trigger' => 'a_second'] + $row]);
+            }
             return $statement;
         });
         $pdo->method('exec')->willReturnCallback(static function (string $sql) use (&$executed): int {
@@ -50,15 +57,26 @@ final class ParallelClonePlanTest extends TestCase
             return 0;
         });
         $plan = \sourceClonePlan($pdo, 'synthetic_test');
-        self::assertSame(['parent', 'child'], array_keys($plan['tables']));
+        self::assertSame(['empty', 'parent', 'child'], array_keys($plan['tables']));
+        self::assertFalse($plan['tables']['empty']['has_rows']);
+        self::assertTrue($plan['tables']['child']['has_rows']);
         self::assertSame('`id`, `parent_id`', $plan['tables']['child']['columns']);
         $sourceQueryCount = count($metadata);
         \cloneDatabase($pdo, $plan, 'synthetic_first_test');
         \cloneDatabase($pdo, $plan, 'synthetic_second_test');
         self::assertCount($sourceQueryCount + 2, $metadata);
-        self::assertCount(2, array_filter($executed, static fn (string $sql): bool => str_contains($sql, 'DDL SHOW CREATE TRIGGER `synthetic_test`.`child_a`')));
+        self::assertCount(2, array_filter($executed, static fn (string $sql): bool => str_contains($sql, 'DDL SHOW CREATE TRIGGER `synthetic_test`.`z_first`')));
+        $triggerDdl = array_values(array_filter($executed, static fn (string $sql): bool => str_starts_with($sql, 'DDL SHOW CREATE TRIGGER')));
+        self::assertSame([
+            'DDL SHOW CREATE TRIGGER `synthetic_test`.`z_first`',
+            'DDL SHOW CREATE TRIGGER `synthetic_test`.`a_second`',
+            'DDL SHOW CREATE TRIGGER `synthetic_test`.`z_first`',
+            'DDL SHOW CREATE TRIGGER `synthetic_test`.`a_second`',
+        ], $triggerDdl);
         self::assertContains('INSERT INTO `synthetic_first_test`.`child` (`id`, `parent_id`) SELECT `id`, `parent_id` FROM `synthetic_test`.`child`', $executed);
         self::assertContains('INSERT INTO `synthetic_second_test`.`child` (`id`, `parent_id`) SELECT `id`, `parent_id` FROM `synthetic_test`.`child`', $executed);
+        self::assertCount(2, array_filter($executed, static fn (string $sql): bool => str_contains($sql, 'DDL SHOW CREATE TABLE `synthetic_test`.`empty`')));
+        self::assertSame([], array_values(array_filter($executed, static fn (string $sql): bool => str_starts_with($sql, 'INSERT INTO') && str_contains($sql, '.`empty`'))));
         self::assertSame('SET SESSION FOREIGN_KEY_CHECKS = 1', end($executed));
     }
 

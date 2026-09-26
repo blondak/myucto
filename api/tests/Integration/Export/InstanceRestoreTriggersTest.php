@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Export;
 
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Database\TriggerMetadata;
 use MyInvoice\Service\Export\Instance\InstanceExportException;
 use MyInvoice\Service\Export\Instance\InstanceRestoreTriggers;
 use PDO;
@@ -45,6 +46,13 @@ final class InstanceRestoreTriggersTest extends TestCase
         if (isset($this->server) && preg_match('/^myucto_restore_triggers_[a-f0-9]{12}$/D', $this->database) === 1) {
             $this->server->exec("DROP DATABASE IF EXISTS `{$this->database}`");
         }
+    }
+
+    public function testMetadataMatchesInformationSchemaIncludingNonAlphabeticalActionOrder(): void
+    {
+        $expected = $this->pdo->query('SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORDER, ACTION_STATEMENT, SQL_MODE, CHARACTER_SET_CLIENT, COLLATION_CONNECTION, DATABASE_COLLATION, DEFINER FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() ORDER BY EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORDER')->fetchAll(PDO::FETCH_ASSOC);
+        self::assertSame($expected, $this->triggerMetadata());
+        self::assertSame(['z_first', 'a_second', 'immutable'], array_column($expected, 'TRIGGER_NAME'));
     }
 
     public function testSnapshotImportPreservesStoredDataAndRestoresOrderedRuntimeGuards(): void
@@ -206,7 +214,7 @@ final class InstanceRestoreTriggersTest extends TestCase
 
     private function triggerMetadata(): array
     {
-        return $this->pdo->query('SELECT TRIGGER_NAME, ACTION_ORDER, ACTION_STATEMENT, SQL_MODE, CHARACTER_SET_CLIENT, COLLATION_CONNECTION, DATABASE_COLLATION, DEFINER FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() ORDER BY EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORDER')->fetchAll(PDO::FETCH_ASSOC);
+        return TriggerMetadata::read($this->pdo, $this->database);
     }
 
     private function context(): array

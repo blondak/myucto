@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Database\TriggerMetadata;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -70,9 +71,9 @@ final class PayrollJmhzScenarioRequirementMigrationRuntimeTest extends TestCase
                   'payroll_jmhz_matrix_evidence_members'
                 )",
         ));
-        self::assertSame(26, $this->scalar($db,
-            "SELECT COUNT(*) FROM information_schema.TRIGGERS
-              WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME LIKE 'trg_jmhz_scn_%'",
+        self::assertCount(26, array_filter(
+            TriggerMetadata::read($db, $this->database),
+            static fn (array $trigger): bool => str_starts_with($trigger['TRIGGER_NAME'], 'trg_jmhz_scn_'),
         ));
         self::assertSame(2, $this->matrixOwnershipForeignKeyCount($db));
 
@@ -87,9 +88,9 @@ final class PayrollJmhzScenarioRequirementMigrationRuntimeTest extends TestCase
         );
         $this->runMigrator();
 
-        self::assertSame(26, $this->scalar($db,
-            "SELECT COUNT(*) FROM information_schema.TRIGGERS
-              WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME LIKE 'trg_jmhz_scn_%'",
+        self::assertCount(26, array_filter(
+            TriggerMetadata::read($db, $this->database),
+            static fn (array $trigger): bool => str_starts_with($trigger['TRIGGER_NAME'], 'trg_jmhz_scn_'),
         ));
         self::assertSame(2, $this->matrixOwnershipForeignKeyCount($db));
     }

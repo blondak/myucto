@@ -109,7 +109,14 @@ final class SaldoRepository
     private const SHORTFALL_TOLERANCE_CZK = 1.0;
     private const CANDIDATE_PAGE_SIZE = 5000;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly int $candidatePageSize = self::CANDIDATE_PAGE_SIZE,
+    ) {
+        if ($candidatePageSize < 1 || $candidatePageSize > self::CANDIDATE_PAGE_SIZE) {
+            throw new \InvalidArgumentException('Neplatná velikost dávky saldokonta.');
+        }
+    }
 
     /**
      * Syntetický (nebo listový) účet firmy dle kódu. Vrací i normal_side a typ pro
@@ -479,8 +486,8 @@ final class SaldoRepository
     private function iterateDefinitiveOpenRows(string $sql, callable $params, callable $map, ?int $limit): \Generator
     {
         $pageSize = $limit === null
-            ? self::CANDIDATE_PAGE_SIZE
-            : min(self::CANDIDATE_PAGE_SIZE, max(1, $limit));
+            ? $this->candidatePageSize
+            : min($this->candidatePageSize, max(1, $limit));
         $offset = 0;
         $count = 0;
         do {

@@ -55,7 +55,7 @@ final class PayrollSubmissionListPaginationTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $this->db = Bootstrap::buildApp()->getContainer()->get(Connection::class);
+            $this->db = Bootstrap::buildContainer()->get(Connection::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -617,7 +617,7 @@ final class PayrollSubmissionListPaginationTest extends TestCase
 
     private function inboxRepository(): PayrollSubmissionInboxRepository
     {
-        $repository = Bootstrap::buildApp()->getContainer()
+        $repository = Bootstrap::buildContainer()
             ->get(PayrollSubmissionInboxRepository::class);
         self::assertInstanceOf(PayrollSubmissionInboxRepository::class, $repository);
 
@@ -626,7 +626,7 @@ final class PayrollSubmissionListPaginationTest extends TestCase
 
     private function transportRepository(): PayrollSubmissionTransportAttemptRepository
     {
-        $repository = Bootstrap::buildApp()->getContainer()
+        $repository = Bootstrap::buildContainer()
             ->get(PayrollSubmissionTransportAttemptRepository::class);
         self::assertInstanceOf(
             PayrollSubmissionTransportAttemptRepository::class,
@@ -638,7 +638,7 @@ final class PayrollSubmissionListPaginationTest extends TestCase
 
     private function inboxAction(): PayrollSubmissionInboxAction
     {
-        $action = Bootstrap::buildApp()->getContainer()
+        $action = Bootstrap::buildContainer()
             ->get(PayrollSubmissionInboxAction::class);
         self::assertInstanceOf(PayrollSubmissionInboxAction::class, $action);
 
@@ -647,7 +647,7 @@ final class PayrollSubmissionListPaginationTest extends TestCase
 
     private function transportAction(): PayrollJmhzTransportAction
     {
-        $action = Bootstrap::buildApp()->getContainer()
+        $action = Bootstrap::buildContainer()
             ->get(PayrollJmhzTransportAction::class);
         self::assertInstanceOf(PayrollJmhzTransportAction::class, $action);
 
@@ -656,7 +656,7 @@ final class PayrollSubmissionListPaginationTest extends TestCase
 
     private function overviewAction(): PayrollSubmissionOverviewAction
     {
-        $action = Bootstrap::buildApp()->getContainer()
+        $action = Bootstrap::buildContainer()
             ->get(PayrollSubmissionOverviewAction::class);
         self::assertInstanceOf(PayrollSubmissionOverviewAction::class, $action);
 
@@ -665,7 +665,7 @@ final class PayrollSubmissionListPaginationTest extends TestCase
 
     private function regzelAction(): PayrollRegzelAction
     {
-        $action = Bootstrap::buildApp()->getContainer()->get(PayrollRegzelAction::class);
+        $action = Bootstrap::buildContainer()->get(PayrollRegzelAction::class);
         self::assertInstanceOf(PayrollRegzelAction::class, $action);
 
         return $action;

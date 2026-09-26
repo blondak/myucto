@@ -65,7 +65,7 @@ final class PayrollHistoricalPeriodMarkingTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             if ($container === null) {
                 throw new \RuntimeException('DI kontejner není dostupný.');
             }

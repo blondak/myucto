@@ -55,7 +55,7 @@ final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         if ($container === null) {
             throw new \RuntimeException('DI kontejner není dostupný.');
         }
@@ -283,7 +283,7 @@ final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
     /** @param list<array{valid_from:string, rows:list<array{0:string,1:string,2:string,3:string,4:string,5:string,6:string,7:string,8:string,9:string,10:string,11:string,12:?string}>}> $catalog */
     private function repositoryWith(array $catalog): PayrollComponentRepository
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         if ($container === null) {
             throw new \RuntimeException('DI kontejner není dostupný.');
         }

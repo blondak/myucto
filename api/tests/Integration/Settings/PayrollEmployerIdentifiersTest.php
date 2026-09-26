@@ -46,7 +46,7 @@ final class PayrollEmployerIdentifiersTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db       = $container->get(Connection::class);
             $this->settings = $container->get(SettingsAction::class);
             $this->accounts = $container->get(PayrollInstitutionAccountRepository::class);

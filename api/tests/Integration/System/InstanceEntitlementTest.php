@@ -35,7 +35,7 @@ final class InstanceEntitlementTest extends TestCase
             $this->markTestSkipped('cfg.php chybí');
         }
 
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         self::assertNotNull($container);
         $this->db  = $container->get(Connection::class);
         $this->pdo = $this->db->pdo();

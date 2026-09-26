@@ -41,7 +41,7 @@ final class PayrollSubmissionInboxServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_obligations')) {
             $this->markTestSkipped('Migrace 1279 neproběhla.');
@@ -354,7 +354,7 @@ final class PayrollSubmissionInboxServiceTest extends TestCase
             'inbox-no-mutation',
         );
 
-        $submissionRepository = Bootstrap::buildApp()->getContainer()
+        $submissionRepository = Bootstrap::buildContainer()
             ->get(PayrollSubmissionRepository::class);
         self::assertInstanceOf(
             PayrollSubmissionRepository::class,

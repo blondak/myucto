@@ -39,7 +39,7 @@ final class Section74bServiceTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db      = $c->get(Connection::class);
             $this->service = $c->get(Section74bService::class);
         } catch (\Throwable $e) {

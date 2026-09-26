@@ -48,7 +48,7 @@ final class GoPayServiceTest extends TestCase
         if (!is_file($root . '/cfg.php')) {
             $this->markTestSkipped('Test vyžaduje lokální databázi.');
         }
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         $this->service = $container->get(GoPayService::class);
         $this->bankPosting = $container->get(BankPostingService::class);

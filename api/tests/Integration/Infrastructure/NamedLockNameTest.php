@@ -38,7 +38,7 @@ final class NamedLockNameTest extends TestCase
             $this->markTestSkipped('cfg.php missing');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             if ($container === null) {
                 $this->markTestSkipped('Container not available');
             }

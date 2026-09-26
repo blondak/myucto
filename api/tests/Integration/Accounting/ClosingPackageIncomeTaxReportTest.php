@@ -47,7 +47,7 @@ final class ClosingPackageIncomeTaxReportTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje, test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->package = $container->get(ClosingPackageService::class);
             $this->jobs = $container->get(ImportJobRepository::class);

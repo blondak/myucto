@@ -60,7 +60,7 @@ final class CrmUnbookedDocumentsTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             $this->crm = $c->get(CrmAggregationService::class);
         } catch (\Throwable $e) {

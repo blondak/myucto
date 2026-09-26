@@ -26,7 +26,7 @@ final class TableStatisticsTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $this->db = Bootstrap::buildApp()->getContainer()->get(Connection::class);
+            $this->db = Bootstrap::buildContainer()->get(Connection::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }

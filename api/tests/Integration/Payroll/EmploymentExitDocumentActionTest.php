@@ -28,7 +28,7 @@ final class EmploymentExitDocumentActionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         self::assertNotNull($container);
         $this->db = $container->get(Connection::class);
         $this->action = $container->get(

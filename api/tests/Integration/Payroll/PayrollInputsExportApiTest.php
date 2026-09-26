@@ -62,7 +62,7 @@ final class PayrollInputsExportApiTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         if ($container === null) {
             throw new \RuntimeException('DI kontejner není dostupný.');
         }

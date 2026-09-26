@@ -40,7 +40,7 @@ final class TransferAutoPolicyWiringTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $this->container = Bootstrap::buildApp()->getContainer();
+            $this->container = Bootstrap::buildContainer();
             $this->db = $this->container->get(Connection::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());

@@ -46,7 +46,7 @@ final class MonthlyReportServiceTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection (CI runner skipne).');
         }
 
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->service = $container->get(MonthlyReportService::class);
         $this->statements = $container->get(FinancialStatementService::class);
         $this->saldo = $container->get(SaldoService::class);

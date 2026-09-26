@@ -43,7 +43,7 @@ final class DimensionVisibilityTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->service = $container->get(DimensionService::class);
             $this->repo = $container->get(DimensionRepository::class);
@@ -141,7 +141,7 @@ final class DimensionVisibilityTest extends TestCase
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplier)
             ->withQueryParams(['filter' => ['include_dimensions' => '1']]);
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         foreach ([ListInvoicesAction::class, ListPurchaseInvoicesAction::class] as $class) {
             $response = $container->get($class)($request, (new ResponseFactory())->createResponse());
             self::assertSame(403, $response->getStatusCode(), $class);

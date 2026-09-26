@@ -51,7 +51,7 @@ final class JournalReversalPairTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db            = $container->get(Connection::class);
             $this->journalAction = $container->get(JournalAction::class);
             $this->otherItems    = $container->get(OtherItemService::class);

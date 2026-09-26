@@ -39,7 +39,7 @@ final class PdfImportExtractionTest extends TestCase
             self::markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             if (!$container instanceof \DI\Container) {
                 self::markTestSkipped('Kontejner neumí make().');
             }

@@ -43,7 +43,7 @@ final class PayrollForeignPermitApiTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollForeignPermitAction::class);
             $this->documentsAction = $container->get(DocumentsAction::class);

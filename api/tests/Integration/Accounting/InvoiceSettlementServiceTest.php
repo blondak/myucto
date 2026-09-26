@@ -50,7 +50,7 @@ final class InvoiceSettlementServiceTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db       = $container->get(Connection::class);
             $this->service  = $container->get(InvoiceSettlementService::class);
             $this->journal  = $container->get(JournalEntryRepository::class);

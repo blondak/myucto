@@ -38,7 +38,7 @@ final class ChartOfAccountsSeederTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db       = $container->get(Connection::class);
             $this->seeder   = $container->get(ChartOfAccountsSeeder::class);
             $this->coaRepo  = $container->get(ChartOfAccountsRepository::class);

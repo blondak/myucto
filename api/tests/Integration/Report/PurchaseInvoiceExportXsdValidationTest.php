@@ -51,7 +51,7 @@ final class PurchaseInvoiceExportXsdValidationTest extends TestCase
             $this->markTestSkipped('Chybí Pohoda/ISDOC XSD.');
         }
 
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->exporter = $container->get(PurchaseInvoiceExportService::class);
         $this->validator = $container->get(XmlSchemaValidator::class);
         $this->conn = $container->get(Connection::class);

@@ -28,6 +28,7 @@ require __DIR__ . '/../vendor/autoload.php';
 // naopak nevadí. Regenerace: průnik `createMock|createStub|createPartialMock|
 // createConfiguredMock|getMockBuilder` v `tests/` s `final class` v `src/`.
 \DG\BypassFinals::allowPaths([
+    '*/api/src/Repository/SaldoRepository.php',
     '*/api/src/Service/Payroll/Import/Registration/RegistrationImportLookup.php',
     '*/api/src/Service/Payroll/Security/PayrollSensitiveData.php',
     '*/api/src/Service/Payroll/Submission/Registration/PayrollRegistrationIdentityService.php',

@@ -35,7 +35,7 @@ final class OrphanRowsGuardTest extends TestCase
             self::markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $db = Bootstrap::buildApp()->getContainer()->get(Connection::class);
+            $db = Bootstrap::buildContainer()->get(Connection::class);
         } catch (\Throwable $e) {
             self::markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }

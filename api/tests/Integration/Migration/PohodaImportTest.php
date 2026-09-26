@@ -42,7 +42,7 @@ final class PohodaImportTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje - test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->importer = $container->get(PohodaImporter::class);
             $this->ossLedger = $container->get(OssLedgerService::class);
@@ -136,7 +136,7 @@ final class PohodaImportTest extends TestCase
 
         // Doklad minulého období je v deníku zastoupený počátečními stavy - Doúčtování
         // dokladů ho nesmí nabízet, jinak by se zaúčtoval podruhé.
-        $pending = Bootstrap::buildApp()->getContainer()->get(PendingBackfillCounter::class)->count($supplierId);
+        $pending = Bootstrap::buildContainer()->get(PendingBackfillCounter::class)->count($supplierId);
         self::assertSame(0, $pending['invoices'], json_encode($pending));
         self::assertSame(0, $pending['purchase_invoices'], json_encode($pending));
         self::assertSame(0, $pending['cash_documents'], json_encode($pending));
@@ -206,7 +206,7 @@ final class PohodaImportTest extends TestCase
         $coefficient->execute([$supplierId, SyntheticPohodaExport::YEAR]);
         self::assertSame(['100', null], array_values(array_map(static fn ($v) => $v === null ? null : (string) $v, $coefficient->fetch(\PDO::FETCH_ASSOC) ?: [])));
 
-        $return = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 1, 'monthly');
+        $return = Bootstrap::buildContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 1, 'monthly');
         self::assertEqualsWithDelta(105.0, (float) ($return['summary']['lines']['40k']['vat'] ?? 0), 0.005, 'Krácený odpočet ř. 40 (sloupec krácený).');
     }
 
@@ -221,7 +221,7 @@ final class PohodaImportTest extends TestCase
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame(1, $this->rows('purchase_invoices', $supplierId, "vendor_invoice_number = 'D-2026-7' AND is_fixed_asset = 1"));
 
-        $return = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 1, 'monthly');
+        $return = Bootstrap::buildContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 1, 'monthly');
         self::assertEqualsWithDelta(500.0, (float) ($return['summary']['lines']['47']['base'] ?? 0), 0.005, json_encode($return['summary']['lines']));
         self::assertEqualsWithDelta(105.0, (float) ($return['summary']['lines']['40']['vat'] ?? 0), 0.005);
     }
@@ -244,7 +244,7 @@ final class PohodaImportTest extends TestCase
         self::assertSame(1, $this->rows('purchase_invoices', $supplierId, sprintf(
             "varsymbol = '%s' AND reverse_charge = 1 AND total_with_vat = 2530.00 AND status <> 'draft'", SyntheticPohodaExport::SELF_ASSESSED_PURCHASE)), $this->explain($protocol));
 
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $lines = $container->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 2, 'monthly')['summary']['lines'];
         self::assertEqualsWithDelta(2500.0, (float) ($lines['5']['base'] ?? 0), 0.005, json_encode($lines));
         self::assertEqualsWithDelta(525.0, (float) ($lines['5']['vat'] ?? 0), 0.005, json_encode($lines));
@@ -351,7 +351,7 @@ final class PohodaImportTest extends TestCase
         // Zařazení se neúčtuje - zůstatky 022/082 přišly počátečními stavy.
         self::assertSame(0, $this->rows('journal_entries', $supplierId, "source_type = 'asset'"));
 
-        $plan = Bootstrap::buildApp()->getContainer()->get(AssetService::class)->plan($supplierId, (int) $asset['id']);
+        $plan = Bootstrap::buildContainer()->get(AssetService::class)->plan($supplierId, (int) $asset['id']);
         $year = array_values(array_filter($plan['accounting'], static fn (array $row): bool => (int) $row['fiscal_year'] === SyntheticPohodaExport::YEAR))[0] ?? null;
         self::assertNotNull($year, json_encode($plan['accounting']));
         self::assertEqualsWithDelta(45000.0, (float) $year['amount'], 0.005, 'Duben až prosinec 2026 po 5 000 Kč.');
@@ -765,7 +765,7 @@ final class PohodaImportTest extends TestCase
      */
     public function testForeignCurrencyDocumentsAreTakenOverInTheirCurrencyWithIdenticalVatReturn(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $foreign = $this->supplier();
         $this->currency($foreign, 'EUR');
         $dirA = SyntheticPohodaExport::write($this->tmp . '/a');

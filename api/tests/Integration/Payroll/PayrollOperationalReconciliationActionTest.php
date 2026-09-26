@@ -29,7 +29,7 @@ final class PayrollOperationalReconciliationActionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         foreach ([
             'payroll_operational_reconciliation_issues',

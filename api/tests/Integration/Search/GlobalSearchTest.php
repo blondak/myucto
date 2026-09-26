@@ -48,7 +48,7 @@ final class GlobalSearchTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db        = $c->get(Connection::class);
             $this->clients   = $c->get(ClientRepository::class);
             $this->invoices  = $c->get(InvoiceRepository::class);

@@ -37,7 +37,7 @@ final class MoneyS3PayrollImportTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje - test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->importer = $container->get(MoneyS3Importer::class);
         } catch (\Throwable $e) {
