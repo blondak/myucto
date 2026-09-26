@@ -53,6 +53,7 @@ import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm
 const DUTY_KINDS: HealthDutyKind[] = [
   'employment_start',
   'employment_end',
+  'single_day_employment',
   'employee_data_change',
   'insurer_change',
   'maternity_leave_start',

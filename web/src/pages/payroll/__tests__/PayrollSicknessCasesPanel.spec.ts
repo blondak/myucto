@@ -215,18 +215,153 @@ describe('PayrollSicknessCasesPanel', () => {
   })
 
   /**
-   * Datovou větu NEMPRI umí aplikace sestavit jen u NEM a VPM. U ošetřovného
-   * musí zůstat zavřená s vlastní větou proč — žádost o dávku podává pojištěnec.
+   * Ošetřovné bylo zablokované jako „údaje, které zaměstnavatel nedrží“.
+   * Zaměstnavatel žádost přijímá a předává, takže NEMPRI jde připravit;
+   * HZUPN se u ošetřovného nenabízí — hlášení při ukončení neschopnosti nemá.
    */
-  it('nedovolí připravit NEMPRI u dávky, kterou zaměstnavatel nedrží', async () => {
+  it('dovolí připravit NEMPRI u ošetřovného a HZUPN nenabízí', async () => {
     m.list.mockResolvedValue(listResponse([sicknessCase({ benefit_kind: 'OSE', id: 9 })]))
     const wrapper = await mountPanel()
-    const prepareNempri = wrapper.findAll('button').find(
-      button => button.text().includes('actions.prepareNempri'),
-    )
 
-    expect(prepareNempri?.attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('hints.benefitKindNotSerializable')
+    expect(actionsOf(wrapper, 'prepare-nempri')?.disabled).toBe(false)
+    expect(actionsOf(wrapper, 'prepare-hzupn')?.show).toBe(false)
+    expect(wrapper.text()).not.toContain('hints.benefitKindNotSerializable')
+  })
+
+  /**
+   * Celá žádost o ošetřovné jde zadat v editoru a uloží se jedním voláním:
+   * akce, dny péče, ruční měsíc rozhodného období (Kč → haléře)
+   * i příjem z malého rozsahu.
+   */
+  it('uloží žádost o ošetřovné i rozhodné období z editoru', async () => {
+    m.list.mockResolvedValue(listResponse([sicknessCase({
+      benefit_kind: 'OSE',
+      incapacity_to: '2026-09-11',
+      probable_income_suggestion_minor: 4_200_000,
+    })]))
+    m.update.mockResolvedValue(sicknessCase())
+    const wrapper = await mountPanel()
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('actions.edit'))!
+      .trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="sickness-case-application"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="sickness-case-actions"]').exists()).toBe(true)
+    // HZUPN sekce (ukončení neschopnosti) u ošetřovného není.
+    expect(wrapper.find('[data-test="sickness-case-returned-to-work"]').exists()).toBe(false)
+
+    await wrapper.find('[data-test="sickness-case-action-end"]').setValue(true)
+    await wrapper.find('[data-test="sickness-case-care-reason"]').setValue('ill')
+    await wrapper.find('[data-test="sickness-case-relationship-code"]').setValue('AB')
+    await wrapper.find('[data-test="sickness-case-cared-first-name"]').setValue('Dítě')
+    await wrapper.find('[data-test="sickness-case-cared-last-name"]').setValue('Testovací')
+    await wrapper.find('[data-test="sickness-case-small-scope-income"]').setValue('3500')
+    actionsOf(wrapper, 'care-add')!.run!()
+    actionsOf(wrapper, 'decisive-add')!.run!()
+    await flushPromises()
+    const careFields = wrapper.findAll('[data-test="sickness-case-care-days"] input[type="text"]')
+    await careFields[0].setValue('2026-09-07')
+    await careFields[1].setValue('2026-09-11')
+    const month = wrapper.find('[data-test="sickness-case-decisive-month-0"]')
+    await month.find('input[type="month"]').setValue('2025-12')
+    await month.find('input[inputmode="decimal"]').setValue('31000,50')
+    await month.find('input[type="number"]').setValue('4')
+    actionsOf(wrapper, 'suggest-probable-income')!.run!()
+    await flushPromises()
+
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('actions.save'))!
+      .trigger('click')
+    await flushPromises()
+
+    const payload = m.update.mock.calls[0][3]
+    expect(payload.action_start).toBe(1)
+    expect(payload.action_end).toBe(1)
+    expect(payload.care_reason).toBe('ill')
+    expect(payload.relationship_code).toBe('AB')
+    expect(payload.cared_first_name).toBe('Dítě')
+    expect(payload.small_scope_income_minor).toBe(350_000)
+    expect(payload.probable_income_czk).toBe(42_000)
+    expect(payload.care_days).toEqual([{ from: '2026-09-07', to: '2026-09-11' }])
+    expect(payload.decisive_months).toEqual([
+      { period: '2025-12', income_minor: 3_100_050, excluded_days: 4 },
+    ])
+  })
+
+  /**
+   * HZUPN „nevrátil se do práce“ nese důvod i den, ke kterému nastal —
+   * ČSSZ takové hlášení přijímá. Dřív šel zaškrtnout jen návrat.
+   */
+  it('umí zadat HZUPN bez návratu do práce s důvodem', async () => {
+    m.update.mockResolvedValue(sicknessCase())
+    const wrapper = await mountPanel()
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('actions.edit'))!
+      .trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="sickness-case-return-reason"]').exists()).toBe(false)
+    await wrapper.find('[data-test="sickness-case-returned-to-work"]').setValue('0')
+    await flushPromises()
+    await wrapper.find('[data-test="sickness-case-return-reason"]').setValue('skončení zaměstnání')
+    await wrapper.find('[data-test="sickness-case-correction"]').setValue(true)
+    await wrapper.find('[data-test="sickness-case-contact-name"]').setValue('Mzdová Účetní')
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('actions.save'))!
+      .trigger('click')
+    await flushPromises()
+
+    const payload = m.update.mock.calls[0][3]
+    expect(payload.returned_to_work).toBe(0)
+    expect(payload.return_reason).toBe('skončení zaměstnání')
+    expect(payload.correction).toBe(1)
+    expect(payload.contact_worker_name).toBe('Mzdová Účetní')
+  })
+
+  /**
+   * Blokátor ze serveru musí říct, KDE se opraví: chybějící výplatní účet
+   * vede na kartu osoby, chybějící převzatý měsíc na kontrolu převodu.
+   */
+  it('u chyby výplatního účtu nabídne proklik na kartu osoby', async () => {
+    m.preview.mockRejectedValue({
+      isAxiosError: true,
+      response: { data: { error: {
+        code: 'nempri_payment_connection_missing',
+        message: 'Zaměstnanec nemá ve výplatním profilu účet.',
+      } } },
+    })
+    const wrapper = await mountPanel()
+
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('actions.previewNempri'))!
+      .trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="sickness-case-error"]').text())
+      .toContain('Zaměstnanec nemá ve výplatním profilu účet.')
+    expect(wrapper.find('[data-test="sickness-case-error-fix-person"]').exists()).toBe(true)
+  })
+
+  it('u chybějícího měsíce rozhodného období odkáže na kontrolu převodu a editor', async () => {
+    m.preview.mockRejectedValue({
+      isAxiosError: true,
+      response: { data: { error: {
+        code: 'nempri_decisive_month_missing',
+        message: 'Chybí převzatá mzda: 2025-11.',
+      } } },
+    })
+    const wrapper = await mountPanel()
+
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('actions.previewNempri'))!
+      .trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="sickness-case-error-fix-reconciliation"]').exists()).toBe(true)
+    actionsOf(wrapper, 'error-fix-edit')!.run!()
+    await flushPromises()
+    expect(wrapper.find('[data-test="sickness-case-decisive-period"]').exists()).toBe(true)
   })
 
   /**

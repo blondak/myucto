@@ -7067,6 +7067,34 @@
       "manualCompletionNotice": "Stáhněte kontrolní XML, ověřte údaje a podání dokončete ručně v aktuálním oficiálním rozhraní ČSSZ. Soubor neoznačujeme jako přímo importovatelný.",
       "downloadControlXml": "Stáhnout kontrolní XML",
       "downloading": "Stahuji kontrolní XML…",
+      "formSheet": {
+        "title": "Údaje tiskopisu k opisu",
+        "description": "Kontrolní XML nese jen řádky listu. Typ, „zaměstnán od“, datum vyhotovení a měsíce „X“ opište do tiskopisu z tohoto přehledu.",
+        "type": "Typ evidenčního listu",
+        "types": {
+          "01": "01 – za rok nebo na výzvu",
+          "02": "02 – při skončení zaměstnání",
+          "51": "51 – opravný k typu 01",
+          "52": "52 – opravný k typu 02"
+        },
+        "employedFrom": "Zaměstnán od",
+        "preparedOn": "Datum vyhotovení",
+        "corrects": "Opravuje evidenční list č. {id}",
+        "code": "Kód",
+        "period": "Od – do",
+        "days": "Dnů",
+        "base": "Vyměřovací základ",
+        "monthsX": "Měsíce „X“",
+        "postTermination": "příjem zúčtovaný po skončení zaměstnání",
+        "none": "—"
+      },
+      "correction": {
+        "label": "Opravný evidenční list",
+        "hint": "Zmrazený list se nepřepisuje. Změnil-li se po zmrazení podklad (doplatek, oprava mzdy), připravte opravný list — nahradí poslední list za tento rok a vztah.",
+        "preparedOn": "Datum vyhotovení (nepovinné)",
+        "preparedOnHint": "Nesmí předcházet datu „Do“ žádného řádku (ČSSZ jinak list odmítne chybou 251). Když ho nevyplníte, použije se konec posledního zúčtovaného měsíce.",
+        "created": "Opravný evidenční list byl sestaven jako kontrolní podklad."
+      },
       "manual": {
         "title": "Doložit ruční dokončení",
         "description": "Po dokončení v oficiálním rozhraní vyberte aktivní firemní dokument z DMS, uveďte referenci výsledku a datum. Aplikace načte a otiskne skutečné bajty dokumentu na serveru.",
@@ -8948,6 +8976,7 @@
       "kind": {
         "employment_start": "Nástup do zaměstnání",
         "employment_end": "Skončení zaměstnání",
+        "single_day_employment": "Jednodenní zaměstnání",
         "employee_data_change": "Změna údajů",
         "insurer_change": "Přestup mezi pojišťovnami",
         "maternity_leave_start": "Nástup na mateřskou",
@@ -9175,7 +9204,11 @@
         "case": "Případ",
         "employerConfirmation": "Potvrzení zaměstnavatele",
         "endOfIncapacity": "Ukončení neschopnosti",
-        "workDays": "Dny práce v době neschopnosti"
+        "workDays": "Dny práce v době neschopnosti",
+        "workDaysBenefit": "Dny práce v období dávky",
+        "application": "Žádost o dávku",
+        "decisivePeriod": "Rozhodné období",
+        "contact": "Kontaktní pracovník"
       },
       "benefitKinds": {
         "NEM": "Nemocenské",
@@ -9207,12 +9240,16 @@
         "recordAccepted": "Zapsat přijetí",
         "recordRejected": "Zapsat odmítnutí",
         "addWorkInterval": "Přidat interval",
-        "removeWorkInterval": "Odebrat"
+        "removeWorkInterval": "Odebrat",
+        "addCareInterval": "Přidat dny péče",
+        "addDecisiveMonth": "Přidat měsíc",
+        "suggestProbableIncome": "Navrhnout z mzdy",
+        "suggestProbableIncomeValue": "Navrhnout z mzdy ({amount} Kč)"
       },
       "hints": {
         "createRequirements": "Nejdřív vyberte osobu, pracovní vztah a den vzniku sociální události.",
         "readOnly": "K mzdovým podáním nemáte právo zápisu.",
-        "benefitKindNotSerializable": "U této dávky nese datová věta i žádost o dávku s údaji o dítěti nebo ošetřované osobě. Ty podává pojištěnec, zaměstnavatel je nemá a aplikace je nedomýšlí — podání připravte v ePortálu ČSSZ. Případ tu zůstává i s hlídanou lhůtou.",
+        "probableIncomeNoSuggestion": "Pracovní vztah nemá ke dni události sjednanou měsíční mzdu, ze které by šel návrh spočítat. Zadejte částku ručně.",
         "incapacityEndRequired": "Hlášení při ukončení pracovní neschopnosti se podává až po jejím skončení. Doplňte den skončení.",
         "alreadyPrepared": "Podání už je připravené. Odešlete ho tlačítkem Odeslat datovou schránkou, nebo podejte opravné podání s číslem rozhodnutí.",
         "receiptDateRequired": "Nejdřív doplňte den doručení podání ČSSZ z protokolu.",
@@ -9239,6 +9276,74 @@
       },
       "errors": {
         "generic": "Operaci se nepodařilo dokončit."
+      },
+      "careReasons": {
+        "ill": "Onemocnění nebo úraz",
+        "quarantine": "Nařízená karanténa",
+        "cannot_care": "Osoba pečující o dítě nemůže péči zajistit",
+        "school_closed": "Uzavření školy nebo zařízení"
+      },
+      "form": {
+        "correction": "Opravné podání",
+        "foreignCase": "Zahraniční případ (rozhodnutí mimo ČR a SR)",
+        "additionalNote": "Další sdělení pro OSSZ",
+        "decisionNumberHint": "Číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře) je u nemocenského, ošetřovného a dlouhodobého ošetřovného povinné; bez něj ČSSZ podání nespáruje. Nemusí ho mít jen zahraniční případ. Opravné podání nahradí dřívější podání se stejným číslem rozhodnutí.",
+        "smallScopeIncome": "Příjem ze zaměstnání malého rozsahu (Kč)",
+        "smallScopeIncomeHint": "Vyplňte jen u zaměstnání malého rozsahu, a to v celých korunách.",
+        "applicationHint": "Údaje opište ze žádosti, kterou vám zaměstnanec předal. Zaměstnavatel žádost přijímá a předává ČSSZ (§ 97 odst. 1 zákona o nemocenském pojištění).",
+        "actionStart": "Vznik",
+        "actionContinuation": "Trvání",
+        "actionEnd": "Ukončení",
+        "actionsHint": "Zaškrtněte alespoň jednu akci. Potvrzení zaměstnavatele, rozhodné období a den, od kterého se žádá, se posílají jen s akcí Vznik. Při střídání ošetřujících osob první osoba péči ukončí a druhá podá vlastní žádost se vznikem.",
+        "applicationFrom": "Žádá o dávku od",
+        "applicationTo": "Žádá o dávku do",
+        "child": "Dítě",
+        "caredPerson": "Ošetřovaná osoba",
+        "caredPersonHint": "Vyberte vyživovanou osobu z karty zaměstnance — rodné číslo se doplní samo. Není-li v evidenci, zadejte jméno, příjmení a datum narození.",
+        "caredFirstName": "Jméno",
+        "caredLastName": "Příjmení",
+        "caredBirthDate": "Datum narození",
+        "careReason": "Důvod péče",
+        "schoolName": "Název školy nebo zařízení",
+        "schoolBusinessId": "IČO školy nebo zařízení",
+        "relationshipCode": "Kód vztahu k ošetřované osobě",
+        "paternityReason": "Důvod otcovské (kód)",
+        "maternityCareReason": "Důvod péče (kód)",
+        "childOrder": "Pořadí dítěte",
+        "codebookHint": "Kódy opište z žádosti; jsou to hodnoty číselníku ČSSZ (1 až 3 znaky, číslice a velká písmena).",
+        "sharedHousehold": "Žije s ošetřovanou osobou ve společné domácnosti",
+        "loneCaregiver": "Je osamělý",
+        "childUnder16": "Má v péči dítě do 16 let",
+        "otherMaternityClaim": "Jiná osoba má na dítě nárok na PPM",
+        "caredPersonally": "Pečoval osobně",
+        "alternation": "Střídání ošetřujících osob",
+        "declarationsHint": "Nevyplnil-li zaměstnanec v žádosti některé prohlášení, nechte ho nezaškrtnuté — podle zásad NEMPRI se uvede „NE“ a žádost se nezdrží.",
+        "careDays": "Dny, kdy pečoval",
+        "careFrom": "Pečoval od",
+        "careTo": "Pečoval do",
+        "workedLastDay": "V poslední den před péčí pracoval",
+        "plannedShifts": "Měl na dny dávky rozvržené směny",
+        "plannedShiftsWorked": "Rozvržené směny odpracoval",
+        "decisivePeriodHint": "Měsíce, za které MyÚčto podalo měsíční hlášení, si ČSSZ vezme z něj. Ostatní měsíce rozhodného období (před rokem 2026 a před začátkem vedení mezd v MyÚčtu) se berou z převzatých mezd. Chybí-li k měsíci převzatá mzda, doplňte ho tady ručně.",
+        "probableIncome": "Pravděpodobný měsíční příjem (Kč)",
+        "probableIncomeHint": "Vyplňte, když je rozhodné období kratší než 30 dnů (onemocnění krátce po nástupu). Návrh vychází ze sjednané měsíční hrubé mzdy.",
+        "decisiveMonth": "Měsíc",
+        "countableIncome": "Započitatelný příjem (Kč)",
+        "excludedDays": "Vyloučené dny",
+        "contactName": "Jméno a příjmení",
+        "contactPhone": "Telefon",
+        "contactEmail": "E-mail",
+        "paymentConnectionHint": "Způsob výplaty mzdy se do oznámení doplní sám z výplatního profilu zaměstnance (účet, na který chodí mzda, nebo adresa při výplatě v hotovosti).",
+        "returnedYes": "Ano",
+        "returnedNo": "Ne",
+        "returnReason": "Důvod, proč se nevrátil",
+        "returnReasonDate": "Den, ke kterému důvod nastal"
+      },
+      "errorFix": {
+        "where": "Oprava u osoby {name}:",
+        "personCard": "Otevřít kartu osoby",
+        "reconciliation": "Otevřít kontrolu převodu mezd",
+        "editCase": "Upravit případ"
       }
     },
     "employerSettings": {
@@ -9281,7 +9386,8 @@
         "entries": "Zkontrolovat docházku vztahu",
         "imports": "Otevřít importy docházky",
         "average": "Doplnit průměr tohoto vztahu",
-        "takeover": "Otevřít kontrolu převodu mezd"
+        "takeover": "Otevřít kontrolu převodu mezd",
+        "eldp_form": "Upravit formulář evidenčního listu"
       },
       "eldp": {
         "period": "Vykazované období: {period}.",
@@ -9301,7 +9407,9 @@
           "income_month": "V měsíci nebyl zúčtován žádný započitatelný příjem a z evidovaných nepřítomností nejde rozhodnout, zda je měsíc dobou pojištění (nemoc spolu s neplaceným volnem, měsíc porodu nebo měsíc bez příjmu i bez nepřítomnosti).",
           "unknown": "Přípravu evidenčního listu zastavila chyba, kterou musí posoudit podpora.",
           "takeover": "Převzatý mzdový měsíc z původního programu nemá údaj, který evidenční list potřebuje, nebo si odporuje se mzdami vedenými v MyÚčtu.",
-          "takeover_revision": "Mzdu za označený měsíc počítá MyÚčto, ale nemá schválenou revizi; převzatá data z původního programu ji nahradit nesmí."
+          "takeover_revision": "Mzdu za označený měsíc počítá MyÚčto, ale nemá schválenou revizi; převzatá data z původního programu ji nahradit nesmí.",
+          "prepared_on": "Datum vyhotovení evidenčního listu předchází datu „Do“ některého řádku; ČSSZ takový list odmítá chybou 251.",
+          "correction": "Evidenční list za tento rok a vztah už je zmrazený, nebo opravný list nemá co opravit."
         },
         "steps": {
           "no_revisions": "V agendě Mzdy vyberte vykazovaný rok a zkontrolujte měsíce trvání vztahu. Doplňte skutečně chybějící výpočty a jejich schválení. Pokud mzdy vznikly mimo aplikaci, nevytvářejte fiktivní výpočty; zpracování historických podkladů dohodněte s podporou.",
@@ -9319,7 +9427,9 @@
           "income_month": "Otevřete Absence tohoto vztahu a ověřte nepřítomnosti v označeném měsíci. Chybí-li evidovaná nepřítomnost nebo zapomenutá mzda, doplňte ji a mzdu přepočítejte. Pokud evidence odpovídá skutečnosti, rozhoduje zákon jen o celém měsíci a aplikace ho nevyhodnotí sama; takový měsíc zpracujte ručně a nic kvůli kontrole neupravujte.",
           "unknown": "Kontaktujte podporu a přiložte vykazovaný rok, pracovní vztah a technické podrobnosti níže. Údaje zaměstnance ani schválené mzdy kvůli této chybě neměňte naslepo.",
           "takeover": "Otevřete Kontrolu převodu mezd, u označeného měsíce doplňte chybějící údaj (druh činnosti, dny účasti, vyměřovací základ, trvání vztahu) a převod zopakujte. Údaj nedoplňujte odhadem: evidenční list je podklad pro výpočet důchodu. Pokud jej původní program nevydal, sestavte evidenční list za dotčený měsíc mimo aplikaci.",
-          "takeover_revision": "Otevřete mzdy označeného měsíce, dokončete výpočet a schvalte aktuální revizi, nebo rozpracovaný běh zrušte. Teprve potom připravte evidenční list znovu. Převzatá data měsíc nenahradí, aby se rozpracovaný výpočet s jinými čísly neschoval."
+          "takeover_revision": "Otevřete mzdy označeného měsíce, dokončete výpočet a schvalte aktuální revizi, nebo rozpracovaný běh zrušte. Teprve potom připravte evidenční list znovu. Převzatá data měsíc nenahradí, aby se rozpracovaný výpočet s jinými čísly neschoval.",
+          "prepared_on": "V poli Datum vyhotovení zadejte den nejdříve shodný s posledním datem „Do“ (u ukončení zaměstnání den skončení nebo pozdější), případně pole vyprázdněte a použije se konec posledního zúčtovaného měsíce.",
+          "correction": "Změnil-li se po zmrazení podklad, zaškrtněte Opravný evidenční list a list připravte znovu. Nezměnil-li se, opravný list nepotřebujete; neexistuje-li ještě žádný list, připravte nejdřív řádný."
         }
       },
       "work": {

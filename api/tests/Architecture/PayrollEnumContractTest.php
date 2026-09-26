@@ -435,6 +435,10 @@ final class PayrollEnumContractTest extends TestCase
         // podání s různým právním základem, ne dvě fáze jednoho.
         'payrollSicknessCases.ts::PayrollSicknessDocumentKind'
             => 'enum:MyInvoice\Service\Payroll\Submission\Sickness\SicknessDocumentKind',
+        // Důvod péče u ošetřovného. Každá hodnota je jiný prvek věty
+        // (`onemocnela`, `narizenaKarantena`, …), takže neznámá by se ztratila.
+        'payrollSicknessCases.ts::PayrollSicknessCareReason'
+            => 'const:MyInvoice\Service\Payroll\Submission\Sickness\NempriBenefitApplication::CARE_REASONS',
 
         // Politiky zaměstnavatele
         'payroll.ts::PayrollBusinessDayRule'     => 'policy:payday_business_day_rule',

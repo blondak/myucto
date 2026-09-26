@@ -376,6 +376,95 @@ describe('PayrollEldpPanel', () => {
     }))
   })
 
+  it('nad zmrazeným listem nabídne opravný list a pošle ho pod vlastním klíčem', async () => {
+    m.eldpStatement.mockResolvedValue({
+      statement: {
+        id: 5,
+        statement_sequence: 1,
+        corrects_statement_id: null,
+        statement_kind: 'termination',
+        period_from: '2025-01-01',
+        period_to: '2025-08-31',
+        section_count: 2,
+        insurance_days: 243,
+        excluded_days_total: 0,
+        deducted_days_total: 0,
+        due_on: '2025-09-30',
+        earliest_submission_on: '2025-09-30',
+        xml_sha256: 'a'.repeat(64),
+        payload: {
+          form: {
+            eldp_type: '02',
+            employed_from: '2019-05-01',
+            prepared_on: '2025-09-30',
+            corrects: null,
+          },
+          eldp_sections: [
+            { code: '1++', valid_from: '2025-01-01', valid_to: '2025-08-31', insurance_days: 212, assessment_base_czk: 80000, months_without_insurance: [6] },
+            { code: '1P+', valid_from: null, valid_to: null, insurance_days: 0, assessment_base_czk: 5000, months_without_insurance: [] },
+          ],
+        },
+      },
+      eligibility: { allowed: true, routine: true, reason: 'Syntetický důvod.', rule: 'transitional_before_2026', authority_request_available: false },
+      manual_completion: null,
+    })
+    m.prepareEldp.mockResolvedValue({
+      statement_id: 6,
+      created: true,
+      statement_kind: 'termination',
+      eldp_type: '52',
+      corrects_statement_id: 5,
+      section_count: 2,
+      insurance_days: 243,
+      excluded_days_total: 0,
+      due_on: '2025-09-30',
+      earliest_submission_on: '2025-09-30',
+      obligation_id: 7,
+      submission_id: 9,
+      part_id: 11,
+      artifact_id: 13,
+      submission_status: 'prepared',
+      xml_sha256: 'b'.repeat(64),
+      environment: 'production',
+    })
+    const wrapper = mount(PayrollEldpPanel)
+    await flushPromises()
+
+    await fillConfirmation(wrapper)
+    expect(wrapper.get('[data-test="eldp-form-type"]').text()).toContain('payroll.eldp.formSheet.types.02')
+    const rows = wrapper.findAll('[data-test="eldp-form-section"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.findAll('td')[4]!.text()).toBe('6')
+    expect(rows[1]!.text()).toContain('payroll.eldp.formSheet.postTermination')
+
+    await wrapper.get('[data-test="eldp-correction"]').setValue(true)
+    await wrapper.get('[data-test="eldp-prepared-on"]').setValue('2025-10-05')
+    await wrapper.get('[data-test="eldp-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(m.prepareEldp).toHaveBeenCalledWith(expect.objectContaining({
+      correction: true,
+      prepared_on: '2025-10-05',
+      idempotency_key: 'eldp-correction:production:101:2025:5',
+    }))
+    expect(wrapper.get('[data-test="eldp-success"]').text())
+      .toContain('payroll.eldp.correction.created')
+  })
+
+  it('bez zmrazeného listu opravný list nenabídne', async () => {
+    const wrapper = mount(PayrollEldpPanel)
+    await flushPromises()
+
+    await fillConfirmation(wrapper)
+    await wrapper.get('[data-test="eldp-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(m.prepareEldp).toHaveBeenCalledWith(expect.objectContaining({
+      correction: false,
+      prepared_on: null,
+    }))
+  })
+
   it('doloží přijetí jen ID firemního DMS dokumentu a odliší je od odeslání', async () => {
     m.eldpStatement.mockResolvedValue({
       statement: {

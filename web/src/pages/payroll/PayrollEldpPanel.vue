@@ -66,6 +66,13 @@ const deductedDaysNone = ref(false)
 const requestedByAuthority = ref(false)
 const authorityRequestReceivedOn = ref('')
 const note = ref('')
+/*
+ * Opravný evidenční list. Zmrazený list se nepřepisuje; změněný podklad jde
+ * jako nový list s odkazem na opravovaný. Nabízí se jen tam, kde už nějaký
+ * list za rok a vztah zmrazený je — jinak není co opravovat.
+ */
+const correction = ref(false)
+const preparedOn = ref('')
 const statement = ref<PayrollEldpStatement | null>(null)
 const eligibility = ref<PayrollEldpEligibility | null>(null)
 const prepared = ref<PayrollEldpPrepared | null>(null)
@@ -241,6 +248,58 @@ function monthLabel(periodStart: string): string {
   return periodStart.slice(0, 7)
 }
 
+/*
+ * Údaje tiskopisu, které kontrolní XML (`eldpType` JMHZ) nenese: typ listu,
+ * „zaměstnán od", datum vyhotovení a měsíce „X". Starší zmrazené listy je ve
+ * snapshotu nemají, a pak se přehled neukazuje.
+ */
+interface EldpFormSheet {
+  eldp_type: string
+  employed_from: string
+  prepared_on: string
+  corrects: { statement_id: number } | null
+}
+
+interface EldpFormSection {
+  code: string
+  valid_from: string | null
+  valid_to: string | null
+  insurance_days: number
+  assessment_base_czk: number
+  months_without_insurance: number[]
+}
+
+const formSheet = computed<EldpFormSheet | null>(() => {
+  const value = statement.value?.payload?.form as Partial<EldpFormSheet> | undefined
+  return typeof value?.eldp_type === 'string'
+    && typeof value.employed_from === 'string'
+    && typeof value.prepared_on === 'string'
+    ? value as EldpFormSheet
+    : null
+})
+
+const formSections = computed<EldpFormSection[]>(() => {
+  const value = statement.value?.payload?.eldp_sections
+  return Array.isArray(value)
+    ? value.filter((item): item is EldpFormSection =>
+      typeof (item as Partial<EldpFormSection> | null)?.code === 'string')
+    : []
+})
+
+function sectionPeriod(section: EldpFormSection): string {
+  if (section.valid_from === null || section.valid_to === null) {
+    return t('payroll.eldp.formSheet.postTermination')
+  }
+  return `${formatDate(section.valid_from)} – ${formatDate(section.valid_to)}`
+}
+
+function monthsX(section: EldpFormSection): string {
+  const months = Array.isArray(section.months_without_insurance)
+    ? section.months_without_insurance
+    : []
+  return months.length ? months.join(', ') : t('payroll.eldp.formSheet.none')
+}
+
 function takeoverSourceLabel(code: string): string {
   return t(`payroll.migration_reconciliation.source_name.${code}`)
 }
@@ -386,11 +445,20 @@ async function prepare(): Promise<void> {
         ? authorityRequestReceivedOn.value
         : null,
       note: note.value.trim(),
-      idempotency_key: `eldp:${environment.value}:${employmentId.value}:${year.value}`,
+      // Opravný list je nový požadavek: pod klíčem řádného listu by ho server
+      // odmítl jako jiné potvrzení téhož požadavku.
+      idempotency_key: correction.value && statement.value
+        ? `eldp-correction:${environment.value}:${employmentId.value}:${year.value}:${statement.value.id}`
+        : `eldp:${environment.value}:${employmentId.value}:${year.value}`,
+      correction: correction.value && statement.value !== null,
+      prepared_on: preparedOn.value !== '' ? preparedOn.value : null,
     })
     success.value = prepared.value.created
-      ? t('payroll.eldp.preparedCreated')
+      ? (prepared.value.corrects_statement_id
+        ? t('payroll.eldp.correction.created')
+        : t('payroll.eldp.preparedCreated'))
       : t('payroll.eldp.preparedReplayed')
+    correction.value = false
     await loadStatement()
   } catch (exception) {
     if (isAxiosError(exception)) {
@@ -435,6 +503,8 @@ watch(personId, value => {
 })
 watch([employmentId, year, environment], () => {
   prepared.value = null
+  correction.value = false
+  preparedOn.value = ''
   manualCompletion.value = null
   completionError.value = ''
   completionSuccess.value = ''
@@ -625,6 +695,30 @@ watch(requestedByAuthority, value => {
             {{ t('payroll.eldp.noteOptionalHint') }}
           </span>
         </label>
+        <label class="block max-w-sm text-sm">
+          <span class="mb-1 block font-medium text-neutral-700">
+            {{ t('payroll.eldp.correction.preparedOn') }}
+          </span>
+          <DateInput
+            v-model="preparedOn"
+            class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+            data-test="eldp-prepared-on" />
+          <span class="mt-1 block text-xs text-neutral-500">
+            {{ t('payroll.eldp.correction.preparedOnHint') }}
+          </span>
+        </label>
+        <label v-if="statement" class="flex items-start gap-2 text-sm text-neutral-700">
+          <input
+            v-model="correction"
+            type="checkbox"
+            class="mt-0.5"
+            data-test="eldp-correction"
+          >
+          <span>
+            <span class="font-medium">{{ t('payroll.eldp.correction.label') }}</span>
+            <span class="mt-0.5 block text-xs text-neutral-500">{{ t('payroll.eldp.correction.hint') }}</span>
+          </span>
+        </label>
       </div>
 
       <div
@@ -660,6 +754,63 @@ watch(requestedByAuthority, value => {
             <dd class="font-medium">{{ statement.section_count }}</dd>
           </div>
         </dl>
+      </div>
+
+      <!--
+        Údaje tiskopisu, které kontrolní XML nenese. Účetní je opisuje do
+        oficiálního rozhraní ČSSZ spolu s řádky listu.
+      -->
+      <div
+        v-if="statement && formSheet"
+        class="rounded-lg border border-neutral-200 bg-surface p-3 text-sm"
+        data-test="eldp-form-sheet"
+      >
+        <p class="font-medium text-neutral-900">{{ t('payroll.eldp.formSheet.title') }}</p>
+        <p class="mt-1 max-w-prose text-xs text-neutral-600">{{ t('payroll.eldp.formSheet.description') }}</p>
+        <dl class="mt-2 grid gap-2 sm:grid-cols-3">
+          <div>
+            <dt class="text-xs text-neutral-500">{{ t('payroll.eldp.formSheet.type') }}</dt>
+            <dd class="font-medium" data-test="eldp-form-type">{{ t(`payroll.eldp.formSheet.types.${formSheet.eldp_type}`) }}</dd>
+          </div>
+          <div>
+            <dt class="text-xs text-neutral-500">{{ t('payroll.eldp.formSheet.employedFrom') }}</dt>
+            <dd class="font-medium">{{ formatDate(formSheet.employed_from) }}</dd>
+          </div>
+          <div>
+            <dt class="text-xs text-neutral-500">{{ t('payroll.eldp.formSheet.preparedOn') }}</dt>
+            <dd class="font-medium">{{ formatDate(formSheet.prepared_on) }}</dd>
+          </div>
+        </dl>
+        <p v-if="formSheet.corrects" class="mt-2 text-xs font-medium text-warning-700" data-test="eldp-form-corrects">
+          {{ t('payroll.eldp.formSheet.corrects', { id: formSheet.corrects.statement_id }) }}
+        </p>
+        <div class="mt-2 overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="text-neutral-500">
+              <tr>
+                <th class="py-1 pr-3 font-medium">{{ t('payroll.eldp.formSheet.code') }}</th>
+                <th class="py-1 pr-3 font-medium">{{ t('payroll.eldp.formSheet.period') }}</th>
+                <th class="py-1 pr-3 font-medium">{{ t('payroll.eldp.formSheet.days') }}</th>
+                <th class="py-1 pr-3 font-medium">{{ t('payroll.eldp.formSheet.base') }}</th>
+                <th class="py-1 font-medium">{{ t('payroll.eldp.formSheet.monthsX') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(section, index) in formSections"
+                :key="`${section.code}-${index}`"
+                class="border-t border-neutral-100"
+                data-test="eldp-form-section"
+              >
+                <td class="py-1 pr-3 font-medium">{{ section.code }}</td>
+                <td class="py-1 pr-3">{{ sectionPeriod(section) }}</td>
+                <td class="py-1 pr-3">{{ section.insurance_days }}</td>
+                <td class="py-1 pr-3">{{ section.assessment_base_czk }}</td>
+                <td class="py-1">{{ monthsX(section) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <!--
