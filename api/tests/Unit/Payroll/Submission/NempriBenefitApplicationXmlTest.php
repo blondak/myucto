@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Payroll\Submission;
 use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\Sickness\HzupnXmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriBenefitApplication;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriCodebook;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriDecisiveMonth;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriDecisivePeriod;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriPaymentConnection;
@@ -56,7 +57,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
         self::assertStringContainsString('<oseTrvani>false</oseTrvani>', $xml);
         self::assertStringContainsString('<oseUkonceni>true</oseUkonceni>', $xml);
         self::assertStringContainsString('<onemocnela>true</onemocnela>', $xml);
-        self::assertStringContainsString('<kodRodVztah>AB</kodRodVztah>', $xml);
+        self::assertStringContainsString('<kodRodVztah>PL</kodRodVztah>', $xml);
         self::assertStringContainsString('<odeDne>2026-09-07</odeDne>', $xml);
         self::assertStringContainsString('<rodneCislo>1501010007</rodneCislo>', $xml);
         self::assertStringContainsString('<pecovalVeDnech>', $xml);
@@ -142,7 +143,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
         $application = new NempriBenefitApplication(
             fromDate: '2026-09-14',
             person: new NempriPerson('Dítě', 'Testovací', null, '2026-09-10'),
-            paternityReason: '1',
+            paternityReason: 'OTC',
             plannedShifts: false,
             shiftHoursLastDay: '8',
         );
@@ -154,7 +155,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
         $this->validator->validateNempri($payload, $xml);
 
         self::assertStringContainsString('<druhDavky>OPP</druhDavky>', $xml);
-        self::assertStringContainsString('<duvodOtcovske>1</duvodOtcovske>', $xml);
+        self::assertStringContainsString('<duvodOtcovske>OTC</duvodOtcovske>', $xml);
         self::assertStringContainsString('<datumNarozeni>2026-09-10</datumNarozeni>', $xml);
         self::assertStringNotContainsString('cisloRozhodnuti', $xml);
     }
@@ -184,14 +185,114 @@ final class NempriBenefitApplicationXmlTest extends TestCase
             actionStart: true,
             fromDate: '2026-09-01',
             person: new NempriPerson('Osoba', 'Ošetřovaná', null, '1950-01-01'),
-            relationshipCode: 'X1',
+            relationshipCode: '3',
             alternation: false,
         ));
         $xml = $this->serializer->serialize($dlo);
         $this->validator->validateNempri($dlo, $xml);
 
         self::assertStringContainsString('<dloVznik>true</dloVznik>', $xml);
-        self::assertStringContainsString('<kodVztah>X1</kodVztah>', $xml);
+        self::assertStringContainsString('<kodVztah>3</kodVztah>', $xml);
+    }
+
+    /**
+     * Kódy mimo číselníky ČSSZ. XSD je má jako `StCiselnik`, takže je připnuté
+     * schéma propustí — odmítla by je až územní správa. Každý druh dávky má
+     * vlastní číselník: „PL“ je platný vztah u ošetřovného, u DLO ne.
+     */
+    public function testCodesOutsideCsszCodebooksAreRefused(): void
+    {
+        $this->expectRejected(
+            'nempri_relationship_code_invalid',
+            $this->payload(SicknessBenefitKind::Ose, $this->careApplication(relationshipCode: 'AB')),
+        );
+        $this->expectRejected(
+            'nempri_relationship_code_invalid',
+            $this->payload(SicknessBenefitKind::Dlo, new NempriBenefitApplication(
+                actionStart: true,
+                fromDate: '2026-09-01',
+                person: new NempriPerson('Osoba', 'Ošetřovaná', null, '1950-01-01'),
+                relationshipCode: 'PL',
+                alternation: false,
+            )),
+        );
+        $this->expectRejected(
+            'nempri_paternity_reason_invalid',
+            $this->payload(SicknessBenefitKind::Opp, new NempriBenefitApplication(
+                fromDate: '2026-09-14',
+                person: new NempriPerson('Dítě', 'Testovací', null, '2026-09-10'),
+                paternityReason: '1',
+                plannedShifts: false,
+            ), ['decisionNumber' => null]),
+        );
+        $this->expectRejected(
+            'nempri_maternity_care_reason_invalid',
+            $this->payload(SicknessBenefitKind::Ppm, new NempriBenefitApplication(
+                fromDate: '2026-09-01',
+                person: new NempriPerson('Dítě', 'Testovací', null, '2026-08-20'),
+                maternityCareReason: 'XYZ',
+            ), ['decisionNumber' => null, 'unpaidLeave' => false]),
+        );
+    }
+
+    /**
+     * DV NEMPRI25 u `duvodPece`: s důvodem převzetí nesmí věta nést číslo
+     * rozhodnutí a musí nést převzaté dítě.
+     */
+    public function testMaternityCareReasonExcludesDecisionNumberAndNeedsChild(): void
+    {
+        $valid = $this->payload(SicknessBenefitKind::Ppm, new NempriBenefitApplication(
+            fromDate: '2026-09-01',
+            person: new NempriPerson('Dítě', 'Testovací', null, '2026-08-20'),
+            maternityCareReason: 'ROZ',
+        ), ['decisionNumber' => null, 'unpaidLeave' => false]);
+        $xml = $this->serializer->serialize($valid);
+        $this->validator->validateNempri($valid, $xml);
+        self::assertStringContainsString('<duvodPece>ROZ</duvodPece>', $xml);
+
+        $this->expectRejected(
+            'nempri_maternity_care_reason_with_decision_number',
+            $this->payload(SicknessBenefitKind::Ppm, new NempriBenefitApplication(
+                fromDate: '2026-09-01',
+                person: new NempriPerson('Dítě', 'Testovací', null, '2026-08-20'),
+                maternityCareReason: 'ROZ',
+            ), ['decisionNumber' => 'R123', 'unpaidLeave' => false]),
+        );
+        $this->expectRejected(
+            'nempri_maternity_care_child_missing',
+            $this->payload(SicknessBenefitKind::Ppm, new NempriBenefitApplication(
+                fromDate: '2026-09-01',
+                maternityCareReason: 'ROZ',
+            ), ['decisionNumber' => null, 'unpaidLeave' => false]),
+        );
+    }
+
+    public function testEveryCodebookValueValidatesAgainstPinnedSchema(): void
+    {
+        foreach (NempriCodebook::FAMILY_RELATIONSHIPS as $code) {
+            $payload = $this->payload(SicknessBenefitKind::Ose, $this->careApplication(relationshipCode: $code));
+            $this->validator->validateNempri($payload, $this->serializer->serialize($payload));
+        }
+        foreach (NempriCodebook::CARE_RELATIONSHIPS as $code) {
+            $payload = $this->payload(SicknessBenefitKind::Dlo, new NempriBenefitApplication(
+                actionStart: true,
+                fromDate: '2026-09-01',
+                person: new NempriPerson('Osoba', 'Ošetřovaná', null, '1950-01-01'),
+                relationshipCode: $code,
+                alternation: false,
+            ));
+            $this->validator->validateNempri($payload, $this->serializer->serialize($payload));
+        }
+        foreach (NempriCodebook::PATERNITY_REASONS as $code) {
+            $payload = $this->payload(SicknessBenefitKind::Opp, new NempriBenefitApplication(
+                fromDate: '2026-09-14',
+                person: new NempriPerson('Dítě', 'Testovací', null, '2026-09-10'),
+                paternityReason: $code,
+                plannedShifts: false,
+            ), ['decisionNumber' => null]);
+            $this->validator->validateNempri($payload, $this->serializer->serialize($payload));
+        }
+        self::assertCount(29, NempriCodebook::CARE_RELATIONSHIPS);
     }
 
     /**
@@ -302,6 +403,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
         bool $person = true,
         ?string $careReason = NempriBenefitApplication::CARE_REASON_ILL,
         ?string $schoolName = null,
+        string $relationshipCode = 'PL',
     ): NempriBenefitApplication {
         return new NempriBenefitApplication(
             actionStart: $actionStart,
@@ -318,7 +420,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
             otherMaternityClaim: false,
             caredPersonally: true,
             careDays: [['from' => '2026-09-07', 'to' => '2026-09-11']],
-            relationshipCode: 'AB',
+            relationshipCode: $relationshipCode,
             workedLastDay: false,
             shiftHoursLastDay: '8',
             plannedShifts: true,

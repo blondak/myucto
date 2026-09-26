@@ -160,6 +160,7 @@ final readonly class SicknessCaseService
     ): array {
         $kind = $this->benefitKind($benefitKind);
         $values = $this->normalize($input, true);
+        $this->assertCodebooks($kind, $values);
         $incapacityFrom = (string) $values['incapacity_from'];
         $context = $this->requireContext(
             $supplierId,
@@ -250,6 +251,10 @@ final readonly class SicknessCaseService
             );
         }
         $values = $this->normalize($input, false);
+        $this->assertCodebooks(
+            SicknessBenefitKind::from((string) $row['benefit_kind']),
+            $values,
+        );
         $this->assertCaredDependant($supplierId, (int) $row['employee_id'], $values);
         $decisiveMonths = $this->decisiveMonthsInput($input);
         if ($values !== []) {
@@ -284,6 +289,34 @@ final readonly class SicknessCaseService
         }
 
         return $this->requireCase($supplierId, $environment, $caseId);
+    }
+
+    /**
+     * Kódy z číselníků ČSSZ se kontrolují už při uložení, ne až při přípravě
+     * podání: kód jiného druhu dávky nebo mimo číselník by jinak ležel
+     * v případu, dokud by ho neodmítla územní správa.
+     *
+     * Kontroluje se jen to, co požadavek mění — starý neplatný kód, který
+     * uživatel právě neopravuje, nesmí zablokovat úpravu jiného pole. Do věty
+     * se stejně nedostane: odmítne ho {@see SicknessXmlValidator}.
+     *
+     * @param array<string,mixed> $values
+     */
+    private function assertCodebooks(SicknessBenefitKind $kind, array $values): void
+    {
+        $touched = array_intersect_key(
+            $values,
+            array_flip(['relationship_code', 'paternity_reason', 'maternity_care_reason']),
+        );
+        if ($touched === []) {
+            return;
+        }
+        NempriCodebook::assertValid(
+            $kind,
+            array_key_exists('relationship_code', $touched) ? $touched['relationship_code'] : null,
+            array_key_exists('paternity_reason', $touched) ? $touched['paternity_reason'] : null,
+            array_key_exists('maternity_care_reason', $touched) ? $touched['maternity_care_reason'] : null,
+        );
     }
 
     /**

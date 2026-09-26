@@ -85,7 +85,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
                 'child_under_16' => true,
                 'cared_personally' => true,
                 'care_days' => [['from' => '2026-02-09', 'to' => '2026-02-13']],
-                'relationship_code' => 'AB',
+                'relationship_code' => 'PL',
                 'planned_shifts' => true,
                 'planned_shifts_worked' => false,
                 'contact_worker_name' => 'Mzdová Účetní',
@@ -181,6 +181,47 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
 
         self::assertStringContainsString('<navratDoPrace>N</navratDoPrace>', (string) $preview['xml']);
         self::assertStringContainsString('<datumNavratDoPrace>2026-03-16</datumNavratDoPrace>', (string) $preview['xml']);
+    }
+
+    /**
+     * Kód z cizího číselníku se odmítne už při uložení případu: „PL“ je
+     * vztah u ošetřovného (CIS_RODVZTAH), u dlouhodobého ošetřovného platí
+     * CIS_VZTAH. Dřív šlo uložit cokoli o 1 až 3 znacích.
+     */
+    public function testCaseRefusesCodeFromAnotherCodebookOnSave(): void
+    {
+        [, $employmentId] = $this->employee();
+        $cases = $this->service(SicknessCaseService::class);
+        foreach ([
+            ['OSE', ['relationship_code' => 'AB'], 'nempri_relationship_code_invalid'],
+            ['DLO', ['relationship_code' => 'PL'], 'nempri_relationship_code_invalid'],
+            ['OPP', ['paternity_reason' => '1'], 'nempri_paternity_reason_invalid'],
+            ['NEM', ['maternity_care_reason' => 'ROZ'], 'nempri_maternity_care_reason_not_in_kind'],
+        ] as [$kind, $input, $code]) {
+            try {
+                $cases->create(
+                    $this->supplierId,
+                    'test',
+                    $employmentId,
+                    $kind,
+                    ['incapacity_from' => '2026-02-09', ...$input],
+                    $this->userId,
+                );
+                self::fail("Případ {$kind} s kódem mimo číselník se nesmí uložit.");
+            } catch (SicknessException $exception) {
+                self::assertSame($code, $exception->validationCode);
+            }
+        }
+
+        $dlo = $cases->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'DLO',
+            ['incapacity_from' => '2026-02-09', 'relationship_code' => '3'],
+            $this->userId,
+        );
+        self::assertSame('3', $dlo['relationship_code']);
     }
 
     public function testDecisiveMonthWithoutAnySourceStopsThePreview(): void
