@@ -415,6 +415,56 @@ final class PayrollTakeoverPersonWriter
     }
 
     /**
+     * Odpověď „tytéž děti jiná osoba v domácnosti nevyživuje" (JMHZ 10453 = NE) u nároků,
+     * které ji ještě nemají. Zdrojem je hlášení, které předchozí program za osobu podal;
+     * bez odpovědi se měsíční hlášení nezmrazí. Kladnou odpověď převod nezapisuje: hlášení
+     * pak musí jmenovat tu druhou osobu a to je rozhodnutí účetní.
+     *
+     * @return array<string,int>
+     */
+    public function otherCaregiverNone(int $supplierId, int $employeeId, ?int $userId): array
+    {
+        $today = date('Y-m-d');
+        $view = $this->dependants->overview($supplierId, $employeeId, $today)
+            ?? throw new \DomainException('zaměstnanec nebyl nalezen.');
+        $updated = 0;
+        foreach ($view['dependants'] as $dependant) {
+            foreach ($dependant['claims'] as $claim) {
+                if ($claim['superseded_by_id'] !== null || $claim['other_household_caregiver_status'] !== 'unknown' || $claim['is_frozen']) {
+                    continue;
+                }
+                $this->dependants->saveClaim(
+                    $supplierId,
+                    $employeeId,
+                    (int) $dependant['id'],
+                    (int) $claim['id'],
+                    $this->dependantValidator->validateClaim([
+                        'child_order' => $claim['child_order'],
+                        'credit_status' => $claim['credit_status'],
+                        'claim_reason' => $claim['claim_reason'],
+                        'evidence_status' => $claim['evidence_status'],
+                        'evidence_reference' => $claim['evidence_reference'],
+                        'shared_household_confirmed' => $claim['shared_household_confirmed'],
+                        'other_claimant_excluded' => $claim['other_claimant_excluded'],
+                        'ztp_p' => $claim['ztp_p'],
+                        'effective_from' => $claim['effective_from'],
+                        'effective_to' => $claim['effective_to'],
+                        'other_household_caregiver_status' => 'none',
+                    ]),
+                    $claim['row_version'],
+                    $today,
+                    $userId,
+                    null,
+                    null,
+                );
+                $updated++;
+            }
+        }
+
+        return $updated > 0 ? ['children_other_caregiver_none' => $updated] : [];
+    }
+
+    /**
      * Výplatní účty osoby. Založí se jen osobě bez účtů; ověření viz
      * {@see self::verifyAccounts()}. Mzda odcházela ve zdroji na účet, takže způsob
      * výplaty je bankovní; hotovostní dávka by jinak čekala na ruční přepnutí u každé osoby.

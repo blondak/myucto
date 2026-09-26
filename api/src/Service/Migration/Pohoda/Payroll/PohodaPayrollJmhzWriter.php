@@ -181,17 +181,20 @@ final class PohodaPayrollJmhzWriter
         }
         foreach ($byPerson as $employeeId => $person) {
             $children = self::children($person['months']);
-            if ($children['children'] === []) {
-                continue;
-            }
             $record = $person['record'];
-            $takeover = new PayrollTakeoverPerson(
-                key: (string) $record['person_key'],
-                children: $children['children'],
-                firstSignedPeriod: is_string($record['first_signed_period'] ?? null) ? $record['first_signed_period'] : $children['first_signed'],
-            );
-            $this->part($protocol, $step, (string) $record['personal_number'], 'Děti z hlášení',
-                fn (): array => self::prefixed('jmhz_', $this->people->children($supplierId, $employeeId, $takeover, $userId, $policy)));
+            if ($children['children'] !== []) {
+                $takeover = new PayrollTakeoverPerson(
+                    key: (string) $record['person_key'],
+                    children: $children['children'],
+                    firstSignedPeriod: is_string($record['first_signed_period'] ?? null) ? $record['first_signed_period'] : $children['first_signed'],
+                );
+                $this->part($protocol, $step, (string) $record['personal_number'], 'Děti z hlášení',
+                    fn (): array => self::prefixed('jmhz_', $this->people->children($supplierId, $employeeId, $takeover, $userId, $policy)));
+            }
+            if (self::otherCaregiver($person['months']) === false) {
+                $this->part($protocol, $step, (string) $record['personal_number'], 'Jiná osoba vyživující děti (10453)',
+                    fn (): array => self::prefixed('jmhz_', $this->people->otherCaregiverNone($supplierId, $employeeId, $userId)));
+            }
         }
         if ($unconfirmed > 0) {
             $protocol->count($step, 'jmhz_identifiers_unconfirmed', $unconfirmed);
@@ -402,6 +405,31 @@ final class PohodaPayrollJmhzWriter
         ksort($byQuarter);
 
         return array_values($byQuarter);
+    }
+
+    /**
+     * Odpověď na „tytéž děti vyživuje i jiná osoba" (10453) z posledního formuláře osoby
+     * se zvýhodněním na děti; `null` = žádný takový formulář odpověď nenese.
+     *
+     * @param array<string,list<JmhzReportForm>> $months období => formuláře osoby
+     */
+    public static function otherCaregiver(array $months): ?bool
+    {
+        ksort($months, SORT_STRING);
+        $answer = null;
+        foreach ($months as $forms) {
+            foreach ($forms as $form) {
+                if (!$form->hasSummary || $form->declarationSigned !== true || ($form->childCredit['children'] ?? []) === []) {
+                    continue;
+                }
+                $flag = $form->childCredit['other_caregiver'] ?? null;
+                if (is_bool($flag)) {
+                    $answer = $flag;
+                }
+            }
+        }
+
+        return $answer;
     }
 
     /**
