@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
+
 final class JmhzScenarioSelectorResolver
 {
     private function __construct(
@@ -69,7 +71,7 @@ final class JmhzScenarioSelectorResolver
         }
         $scenarioKey = match (true) {
             $activityCode === 'M' => 'scenario_2',
-            in_array($activityCode, ['K', 'N', 'O', 'P', 'Q', 'R', 'S'], true),
+            PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity($activityCode),
             preg_match('/^[1-9]$/D', $activityCode) === 1 && $relationshipDetailCode === '3'
                 => 'scenario_3',
             preg_match('/^[1-9]$/D', $activityCode) === 1 && $relationshipDetailCode === '2'
@@ -154,7 +156,7 @@ final class JmhzScenarioSelectorResolver
         }
         sort($attributes, SORT_STRING);
         $preparationSupported = $scenarioKey === 'scenario_3'
-            && $activityCode === 'S'
+            && PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity($activityCode)
             && $relationshipDetailCode === '1';
 
         return [

@@ -103,6 +103,30 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         self::assertStringNotContainsString('<form:zdravPojZamestnavatel>', $result['xml']);
     }
 
+    /**
+     * Prokurista (druh činnosti P) jde stejným formulářem `cinnostKS` jako
+     * jednatel; přijatá hlášení jiného systému ho nesou s kódem ELDP P++.
+     * Kontrola 343 chce pro K a N až S právě tenhle formulář.
+     */
+    public function testProcuristIsReportedThroughTheCorporateBodyBranch(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($this->statutoryPayload(declarationSigned: true, activityCode: 'P')),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString('<form:cinnostKS', $result['xml']);
+        self::assertStringContainsString('<form:kod>P++</form:kod>', $result['xml']);
+        $report = JmhzScenario1ControlValidator::create(CzechPayrollRulesets2026::provider())
+            ->validate($result['xml'], new JmhzControlContext('2026-08-14', schemaValidated: true));
+        $failed343 = array_filter(
+            $report->findings,
+            static fn (JmhzControlFinding $finding): bool => $finding->controlId === 343
+                && $finding->outcome === JmhzControlOutcome::Failed,
+        );
+        self::assertSame([], $failed343);
+    }
+
     public function testStatutoryBranchKeepsZeroDanBonusWithDeclaration(): void
     {
         $result = (new JmhzScenario1XmlValidator())->dryRun(
@@ -593,21 +617,21 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function statutoryPayload(bool $declarationSigned): array
+    private function statutoryPayload(bool $declarationSigned, string $activityCode = 'S'): array
     {
         $payload = $this->payload();
         $payload['scope']['scenario_set'] = ['scenario_3'];
         $employment = &$payload['people'][0]['employments'][0];
         $employment['employment']['relation_type'] = 'statutory_body';
-        $employment['term']['activity_code'] = 'S';
+        $employment['term']['activity_code'] = $activityCode;
         $employment['term']['jmhz_relationship_detail_code'] = '1';
         $employment['term']['tax_declaration_signed'] = $declarationSigned;
         $employment['scenario_resolution'] = [
             'scenario_key' => 'scenario_3',
-            'activity_code' => 'S',
+            'activity_code' => $activityCode,
             'relationship_detail_code' => '1',
         ];
-        $employment['eldp']['eldp_sections'][0]['code'] = 'S++';
+        $employment['eldp']['eldp_sections'][0]['code'] = $activityCode . '++';
         $employment['insurance']['kind'] = 'corporate_body';
         unset($employment);
 

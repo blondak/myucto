@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Import\Registration;
 
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
+
 /**
  * Jedna věta registrace ČSSZ (element `employee`) tak, jak ji přečetl
  * {@see RegistrationXmlReader}. Hodnoty jsou jen převzaté ze souboru — nic se tu
@@ -119,7 +121,11 @@ final readonly class RegistrationRecord
             return 'dpp';
         }
 
-        return $code === 'S' ? 'statutory_body' : null;
+        // K (dobrovolný pracovník pečovatelské služby) sice jde stejným
+        // formulářem, ale členem orgánu není; druh vztahu import nehádá.
+        return $code !== 'K' && PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity($code)
+            ? 'statutory_body'
+            : null;
     }
 
     /** Den, ke kterému se údaje věty vztahují. */

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Service\Payroll\IncomeTax\TaxRegime;
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 
 final class JmhzScenario1DocumentResolver
@@ -374,7 +375,9 @@ final class JmhzScenario1DocumentResolver
                             ['partner_dependent', 'statutory_body'],
                             true,
                         )
-                            || ($selector['activity_code'] ?? null) !== 'S'
+                            || !PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity(
+                                $selector['activity_code'] ?? null,
+                            )
                             || ($selector['relationship_detail_code'] ?? null) !== '1'))
                 ) {
                     $blockers[] = $this->blocker(

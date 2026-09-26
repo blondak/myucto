@@ -8,6 +8,20 @@ final class PayrollEmploymentJmhzActivityFamily
 {
     private const DPP_ACTIVITY_CODES = ['T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'ZA', 'ZB', 'ZC'];
 
+    /**
+     * Druhy činnosti formuláře `cinnostKS` (kontrola 343 ČSSZ: K, N, O, P, Q,
+     * R, S). Společník, jednatel nebo člen orgánu se nevykazuje jen kódem S:
+     * prokurista je P, člen kolektivního orgánu Q, likvidátor R. Přijatá
+     * hlášení jiného mzdového systému nesou u takového vztahu P s kódem ELDP
+     * P++ a ČSSZ je přijala. M (pěstoun) sem nepatří, má vlastní formulář.
+     */
+    public const CORPORATE_BODY_ACTIVITY_CODES = ['K', 'N', 'O', 'P', 'Q', 'R', 'S'];
+
+    public static function isCorporateBodyActivity(mixed $activityCode): bool
+    {
+        return in_array($activityCode, self::CORPORATE_BODY_ACTIVITY_CODES, true);
+    }
+
     public static function appliesTo(string $relationType): bool
     {
         return in_array(
@@ -52,7 +66,7 @@ final class PayrollEmploymentJmhzActivityFamily
                 && $relationshipDetailCode === null,
             'dpp' => in_array($activityCode, self::DPP_ACTIVITY_CODES, true)
                 && $relationshipDetailCode === null,
-            'partner_dependent', 'statutory_body' => $activityCode === 'S'
+            'partner_dependent', 'statutory_body' => self::isCorporateBodyActivity($activityCode)
                 && $relationshipDetailCode === '1',
             default => false,
         };

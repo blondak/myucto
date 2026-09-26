@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use DOMDocument;
 use DOMElement;
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 
 /**
  * Serializér podporovaných běžných profilů měsíčního hlášení: `scenario_1`
@@ -762,12 +763,15 @@ final class JmhzScenario1XmlSerializer
         array $employment,
     ): DOMElement {
         $selector = $this->object($employment['selector'] ?? null);
-        if (($selector['activity_code'] ?? null) !== 'S'
+        if (!PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity(
+            $selector['activity_code'] ?? null,
+        )
             || ($selector['relationship_detail_code'] ?? null) !== '1'
         ) {
             $this->invalid(
                 'jmhz_xml_scenario_3_profile_unsupported',
-                'Větev činnost K–S podporuje pouze statutární profil S/detail 1.',
+                'Větev činnost K–S podporuje druhy činnosti K a N až S'
+                    . ' s bližším určením „žádné“.',
             );
         }
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:cinnostKS');
