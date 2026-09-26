@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
 use MyInvoice\Service\Payroll\PayrollApprovedPeriodFreeze;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityRequirements;
 use PDO;
 
 /**
@@ -121,6 +122,16 @@ final class PayrollPersonProfileRepository
                 'effective_from' => (string) $item['effective_from'],
                 'effective_to' => $item['effective_to'] === null ? null : (string) $item['effective_to'],
                 'row_version' => (int) $item['row_version'],
+                /*
+                 * Co verzi chybí pro registraci na ČSSZ — z TÉHOŽ seznamu, podle
+                 * kterého příprava registrace odmítá. Štítek sekce „Údaje pro
+                 * registraci zaměstnance" si to dřív počítal sám a svítil
+                 * „Doplněno" už po vyplnění titulu.
+                 */
+                'registration_missing' => PayrollRegistrationIdentityRequirements::missingForProfile(
+                    $item,
+                    $item['birth_surname'] !== null,
+                ),
             ],
         );
         $addresses = $this->rows(
@@ -454,6 +465,7 @@ final class PayrollPersonProfileRepository
         ?string $birthDate,
         ?string $birthNumber,
         string $effectiveFrom,
+        ?string $birthSurname = null,
     ): void {
         /*
          * Datum narození a pohlaví se z rodného čísla ODVODÍ.
@@ -482,8 +494,10 @@ final class PayrollPersonProfileRepository
                 'title_prefix' => null,
                 'title_suffix_present' => false,
                 'title_suffix' => null,
-                'birth_surname_present' => false,
-                'birth_surname' => null,
+                // Rodné příjmení jde se zakládáním: registrace ČSSZ ho vyžaduje
+                // a formulář ho nabízí předvyplněné příjmením.
+                'birth_surname_present' => $birthSurname !== null,
+                'birth_surname' => $birthSurname,
                 'birth_surname_source_id' => null,
                 'birth_date_present' => $birthDate !== null,
                 'birth_date' => $birthDate,

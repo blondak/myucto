@@ -516,6 +516,8 @@ export interface PayrollPersonCreatePayload {
    */
   first_name: string
   last_name: string
+  /** Rodné příjmení pro registraci ČSSZ; formulář ho předvyplní příjmením. */
+  birth_surname?: string | null
   birth_date: string | null
   birth_number: string | null
   relation_type: PayrollRelationType
@@ -573,6 +575,11 @@ export interface PayrollPersonIdentityHistory {
   effective_from: string
   effective_to: string | null
   row_version: number
+  /**
+   * Údaje této verze, které chybí pro registraci na ČSSZ (`identity.*`).
+   * Týž seznam, podle kterého odmítá příprava registrace.
+   */
+  registration_missing?: string[]
 }
 
 export interface PayrollPersonAddress {
@@ -4198,7 +4205,32 @@ export interface PayrollRegistrationPreview {
   xml_sha256: string
   deadline: PayrollRegistrationDeadline
   employer_registration: PayrollRegistrationEmployerDeadline | null
+  /** Neblokující upozornění (zástupný variabilní symbol zaměstnavatele…). */
+  warnings?: PayrollRegistrationPreviewWarning[]
   official_submission: { supported: false, reason: string }
+}
+
+/** Kam vede proklik z hlášky přípravy registrace (a jejích upozornění). */
+export type PayrollRegistrationProblemTarget = 'person' | 'employer_settings'
+
+export interface PayrollRegistrationPreviewWarning {
+  code: string
+  field: string
+  message: string
+  target: PayrollRegistrationProblemTarget
+}
+
+/**
+ * Jeden chybějící údaj z odmítnuté přípravy registrace
+ * (`error.problems` u kódu `registration_data_incomplete`). Server je vrací
+ * všechny najednou; `panel` + `field` je adresa pole na kartě osoby.
+ */
+export interface PayrollRegistrationMissingItem {
+  field: string
+  label: string
+  message: string
+  panel: string | null
+  target: PayrollRegistrationProblemTarget
 }
 
 export interface PayrollRegistrationSubmission {

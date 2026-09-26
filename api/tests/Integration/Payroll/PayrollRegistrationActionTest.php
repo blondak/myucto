@@ -1864,21 +1864,105 @@ final class PayrollRegistrationActionTest extends TestCase
 
         self::assertSame(422, $response->getStatusCode());
         $error = $this->json($response)['error'];
-        self::assertSame(
-            'registration_employer_variable_symbol_missing',
-            $error['code'],
-        );
-        // Věta musí začínat lidským názvem údaje, jmenovat konkrétní
-        // obrazovku a technický název nechat až v závorce na konci.
-        self::assertSame(
-            'Variabilní symbol zaměstnavatele u ČSSZ chybí u mzdové účtárny, '
-            . 'pod kterou pracovní vztah patří, a bez něj ČSSZ neví, komu '
-            . 'zaměstnance přihlásit. Údaj doplňte na Mzdy → Nastavení mezd '
-            . '→ Zaměstnavatel a účtárny — v tomhle formuláři se nezadává. '
-            . 'Potom registraci připravte znovu (employer_variable_symbol).',
+        self::assertSame('registration_data_incomplete', $error['code']);
+        // Věta jmenuje údaj lidsky a technický název do ní nepatří; kam jít,
+        // nese položka seznamu (`target`), podle které klient nabídne proklik.
+        self::assertStringContainsString(
+            'variabilní symbol zaměstnavatele u ČSSZ',
             $error['message'],
         );
+        self::assertStringNotContainsString('(employer_variable_symbol)', $error['message']);
+        self::assertSame([[
+            'field' => 'employer_variable_symbol',
+            'label' => 'Variabilní symbol zaměstnavatele u ČSSZ',
+            'message' => 'Variabilní symbol zaměstnavatele u ČSSZ chybí u mzdové '
+                . 'účtárny, pod kterou pracovní vztah patří, a bez něj ČSSZ neví, '
+                . 'komu zaměstnance přihlásit. Doplňte v Mzdy → Nastavení mezd '
+                . '→ Zaměstnavatel a účtárny.',
+            'panel' => null,
+            'target' => 'employer_settings',
+        ]], $error['problems']);
         self::assertSame(0, $this->countSubmissions());
+    }
+
+    /**
+     * Chybějící údaje se hlásí VŠECHNY NAJEDNOU a každý s adresou pole.
+     *
+     * Dřív příprava spadla na prvním z nich (občanství), po doplnění na dalším
+     * (rodné příjmení s technickým `(birth_surname)` v textu) a tak dál —
+     * účetní chodila na kartu osoby pro každý údaj zvlášť.
+     */
+    public function testIncompleteRegistrationListsEveryMissingItemAtOnce(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_identity_history
+                SET citizenship_country_code = NULL, birth_place = NULL,
+                    birth_surname = NULL
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->identityId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_offices SET social_security_variable_symbol = NULL
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->officeId]);
+
+        $response = ($this->action)->preview(
+            $this->request('GET'),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        $error = $this->json($response)['error'];
+        self::assertSame('registration_data_incomplete', $error['code']);
+        self::assertSame(
+            [
+                'identity.birth_surname',
+                'identity.birth_place',
+                'identity.citizenship_country_code',
+                'employer_variable_symbol',
+            ],
+            array_column($error['problems'], 'field'),
+        );
+        self::assertSame(
+            ['registration_identity', 'registration_identity', 'registration_identity', null],
+            array_column($error['problems'], 'panel'),
+        );
+        foreach ($error['problems'] as $problem) {
+            self::assertDoesNotMatchRegularExpression('/\([a-z_.]+\)/', $problem['message']);
+        }
+        self::assertDoesNotMatchRegularExpression('/\([a-z_.]+\)/', $error['message']);
+        self::assertStringContainsString('rodné příjmení', $error['message']);
+        self::assertStringContainsString('státní občanství', $error['message']);
+    }
+
+    /**
+     * Ukázkový variabilní symbol projde formální kontrolou, ale podání by
+     * odešlo pod cizím zaměstnavatelem. Náhled na to upozorní, neblokuje.
+     */
+    public function testPlaceholderVariableSymbolIsWarnedInPreview(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_offices SET social_security_variable_symbol = "9876543210"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->officeId]);
+
+        $response = ($this->action)->preview(
+            $this->request('GET'),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertStringContainsString('vs="9876543210"', $body['xml']);
+        self::assertSame('employer_variable_symbol_placeholder', $body['warnings'][0]['code']);
+        self::assertSame('employer_settings', $body['warnings'][0]['target']);
+
+        $prepared = $this->json($this->post());
+        self::assertContains(
+            'employer_variable_symbol_placeholder',
+            array_column($prepared['problems'], 'code'),
+        );
     }
 
     /** Bez data nástupu nelze určit lhůtu ani podat přihlášku. */
@@ -1994,6 +2078,7 @@ final class PayrollRegistrationActionTest extends TestCase
         $body = $this->json($response);
         self::assertSame('PREZEC26', $body['agenda_code']);
         self::assertStringContainsString('<PREZEC', $body['xml']);
+        self::assertSame([], $body['warnings']);
         self::assertFalse($body['official_submission']['supported']);
         self::assertSame(0, $this->countSubmissions());
         self::assertSame(0, $this->countObligations('PREZEC26'));

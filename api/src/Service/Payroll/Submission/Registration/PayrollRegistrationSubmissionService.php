@@ -95,6 +95,7 @@ final readonly class PayrollRegistrationSubmissionService
      *   deadline:array{earliest_registration_on:string,due_on:string,
      *     calendar_basis:string,ruleset_id:string},
      *   employer_registration:?array<string,string>,
+     *   warnings:list<array{code:string,field:string,message:string,target:string}>,
      *   official_submission:array{supported:bool,reason:string}
      * }
      */
@@ -112,6 +113,10 @@ final readonly class PayrollRegistrationSubmissionService
             $eventId,
         );
 
+        $variableSymbolWarning = EmployerVariableSymbolPlausibility::warning(
+            $resolved['employer_variable_symbol'],
+        );
+
         return [
             'employment_id' => $employmentId,
             'agenda_code' => $resolved['interaction']->documentType,
@@ -121,6 +126,11 @@ final readonly class PayrollRegistrationSubmissionService
             'xml_sha256' => hash('sha256', $resolved['xml']),
             'deadline' => $this->describeDeadline($resolved['deadline']),
             'employer_registration' => $resolved['employer_deadline'],
+            // Neblokuje, jen upozorní: náhled je poslední místo, kde účetní
+            // XML vidí dřív, než odejde.
+            'warnings' => $variableSymbolWarning === null
+                ? []
+                : [$variableSymbolWarning],
             'official_submission' => [
                 'supported' => false,
                 'reason' => 'Tohle je jen náhled: podání se nezakládá '
@@ -220,6 +230,16 @@ final readonly class PayrollRegistrationSubmissionService
             0,
             $eventId,
         );
+        $variableSymbolWarning = EmployerVariableSymbolPlausibility::warning(
+            $probe['employer_variable_symbol'],
+        );
+        if ($variableSymbolWarning !== null) {
+            $problems[] = [
+                'field' => $variableSymbolWarning['field'],
+                'code' => $variableSymbolWarning['code'],
+                'message' => $variableSymbolWarning['message'],
+            ];
+        }
         $obligation = $this->registerObligation(
             $supplierId,
             $environment,
@@ -443,7 +463,9 @@ final readonly class PayrollRegistrationSubmissionService
      *   snapshot:PayrollRegistrationIdentitySnapshot,
      *   xml:string,source_hash:string,schema_version:string,
      *   deadline:PayrollEmployeeRegistrationDeadlineWindow,
-     *   employer_deadline:?array<string,string>
+     *   employer_deadline:?array<string,string>,
+     *   event_effective_on:?string,source_event_reference:string,
+     *   employer_variable_symbol:string
      * }
      */
     private function resolve(
@@ -511,6 +533,18 @@ final readonly class PayrollRegistrationSubmissionService
         // vazbu agenda ↔ snapshot ověří znovu, takže případný rozpor spadne
         // hlasitě a ne až na XSD.
         $citizenship = $source['identity']['citizenship_country_code'] ?? null;
+        $agenda = $this->interactions->agendaFor(
+            is_string($citizenship) ? $citizenship : null,
+            $interactionContext,
+        );
+        $this->assertComplete(
+            $source,
+            $context,
+            $event,
+            // Bez občanství se mezi PREZEC a REGZEC rozhodnout nedá, ledaže
+            // jde o událost A2–A8, která je vždycky REGZEC.
+            is_string($citizenship) || $event !== null ? $agenda : null,
+        );
         $snapshot = $this->snapshots->build(
             $this->scope(
                 $supplierId,
@@ -518,10 +552,7 @@ final readonly class PayrollRegistrationSubmissionService
                 $employmentId,
                 $context,
                 $submissionId,
-                $this->interactions->agendaFor(
-                    is_string($citizenship) ? $citizenship : null,
-                    $interactionContext,
-                ),
+                $agenda,
                 $effectiveOn,
             ),
             $source,
@@ -594,11 +625,78 @@ final readonly class PayrollRegistrationSubmissionService
                 ? $this->employerDeadline($context)
                 : null,
             'event_effective_on' => $event === null ? null : $effectiveOn,
+            'employer_variable_symbol' => $payload->employerVariableSymbol,
             'source_event_reference' => self::sourceEventReference(
                 $employmentId,
                 $eventId,
             ),
         ];
+    }
+
+    /**
+     * Všechno, co registraci chybí, NAJEDNOU.
+     *
+     * Dřív se chybějící údaje hlásily po jednom tak, jak na ně narazil
+     * serializér: po doplnění občanství vyskočilo rodné příjmení, pak místo
+     * narození, pak variabilní symbol. Účetní tak na jednu přihlášku chodila
+     * na kartu osoby čtyřikrát. Seznam požadavků drží
+     * {@see PayrollRegistrationIdentityRequirements}; tady se k němu přidají
+     * údaje zaměstnavatele, které čte {@see self::payload()}.
+     *
+     * Chybí-li identita úplně, mlčí se: to hlásí snapshot vlastní větou.
+     *
+     * @param array<string,mixed> $source
+     * @param array<string,mixed> $context
+     * @param array<string,mixed>|null $event
+     */
+    private function assertComplete(
+        array $source,
+        array $context,
+        ?array $event,
+        ?string $agenda,
+    ): void {
+        $identity = $source['identity'] ?? null;
+        $identifiers = $source['identifiers'] ?? null;
+        $problems = is_array($identity)
+            ? PayrollRegistrationIdentityRequirements::missing(
+                $agenda,
+                $identity,
+                is_array($identifiers) ? $identifiers : [],
+            )
+            : [];
+
+        $eventEmployer = is_array($event['employer'] ?? null)
+            ? $event['employer']
+            : null;
+        $variableSymbol = $eventEmployer['variable_symbol']
+            ?? $context['employer_variable_symbol'];
+        if (!is_string($variableSymbol) || $variableSymbol === '') {
+            $problems[] = PayrollRegistrationIdentityRequirements::employerProblem(
+                'employer_variable_symbol',
+                'chybí u mzdové účtárny, pod kterou pracovní vztah patří, '
+                . 'a bez něj ČSSZ neví, komu zaměstnance přihlásit.',
+            );
+        }
+        $workplaceCode = $eventEmployer['workplace_code']
+            ?? $context['cssz_workplace_code'];
+        if ($agenda === self::AGENDA_REGZEC
+            && (!is_string($workplaceCode) || $workplaceCode === '')
+        ) {
+            $problems[] = PayrollRegistrationIdentityRequirements::employerProblem(
+                'cssz_workplace_code',
+                'chybí; v nastavení se položka jmenuje „Kód správy '
+                . 'sociálního zabezpečení".',
+            );
+        }
+        if ($problems === []) {
+            return;
+        }
+
+        throw new PayrollRegistrationXmlException(
+            'registration_data_incomplete',
+            PayrollRegistrationIdentityRequirements::summary($problems),
+            $problems,
+        );
     }
 
     /**

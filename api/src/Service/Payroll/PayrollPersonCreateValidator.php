@@ -26,6 +26,7 @@ namespace MyInvoice\Service\Payroll;
  *   employment_code:?string,
  *   first_name:?string,
  *   last_name:?string,
+ *   birth_surname:?string,
  *   birth_number:?string,
  *   health_insurer_code:?string
  * }
@@ -81,6 +82,12 @@ final class PayrollPersonCreateValidator
         $lastName = $this->optionalNamePart(
             $input['last_name'] ?? null,
             'Příjmení může mít nejvýše ' . self::MAX_NAME_PART . ' znaků.',
+        );
+        // Rodné příjmení vyžaduje registrace u ČSSZ (PREZEC i REGZEC). Formulář
+        // ho předvyplňuje příjmením; nepovinné zůstává kvůli API a starším klientům.
+        $birthSurname = $this->optionalNamePart(
+            $input['birth_surname'] ?? null,
+            'Rodné příjmení může mít nejvýše ' . self::MAX_NAME_PART . ' znaků.',
         );
 
         $birthDate = $this->optionalDate(
@@ -254,6 +261,7 @@ final class PayrollPersonCreateValidator
             'employment_code' => $employmentCode === '' ? null : (string) $employment['code'],
             'first_name' => $firstName,
             'last_name' => $lastName,
+            'birth_surname' => $birthSurname,
             'birth_number' => $birthNumber,
             'health_insurer_code' => $insurerCode === '' ? null : $insurerCode,
         ];

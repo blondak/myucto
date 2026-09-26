@@ -54,6 +54,40 @@ final class PayrollEmploymentJmhzActivityFamily
         };
     }
 
+    /**
+     * Druh činnosti pro DALŠÍ vztah téhož druhu u zaměstnavatele.
+     *
+     * Kód nese pořadí souběžného vztahu: druhý pracovní poměr u téhož
+     * zaměstnavatele je „2", druhá DPČ „B", druhá DPP „U". Dostane se první
+     * kód řady, který žádný jiný živý vztah osoby nepoužívá — po skončení
+     * prvního poměru tak nový zase dostane „1". Kód mimo řadu (vedle „1"
+     * třeba „10") pořadí neovlivní. Je to NÁVRH, účetní ho může přepsat.
+     *
+     * @param list<string> $usedCodes kódy živých souběžných vztahů osoby
+     * @return array{0:?string,1:?string} [activity_code, relationship_detail_code]
+     */
+    public static function nextRelationDefaults(string $relationType, array $usedCodes): array
+    {
+        [$first, $detail] = self::firstRelationDefaults($relationType);
+        $sequence = match ($relationType) {
+            'employment', 'small_scale_employment' => array_map(strval(...), range(1, 9)),
+            'dpc' => range('A', 'J'),
+            'dpp' => self::DPP_ACTIVITY_CODES,
+            // Společník a člen orgánu pořadí v kódu nenesou.
+            default => null,
+        };
+        if ($sequence === null) {
+            return [$first, $detail];
+        }
+        foreach ($sequence as $code) {
+            if (!in_array($code, $usedCodes, true)) {
+                return [$code, $detail];
+            }
+        }
+
+        return [null, null];
+    }
+
     public static function matches(
         string $relationType,
         string $activityCode,

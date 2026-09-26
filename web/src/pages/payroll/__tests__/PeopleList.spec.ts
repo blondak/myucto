@@ -511,6 +511,37 @@ describe('PeopleList toolbar and shared employee creation', () => {
     expect(m.saveStatutoryEvidence).not.toHaveBeenCalled()
   })
 
+  /**
+   * UI-3 + UI-10: datum narození se doplní z rodného čísla (jen do prázdného
+   * pole) a rodné příjmení jde s příjmením, dokud ho uživatel nepřepíše.
+   */
+  it('doplní datum narození z rodného čísla a rodné příjmení z příjmení', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="add-employee"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="new-employee-first-name"]').setValue('Jana')
+    await wrapper.get('[data-test="new-employee-last-name"]').setValue('Nová')
+    expect((wrapper.get('[data-test="new-employee-birth-surname"]').element as HTMLInputElement).value)
+      .toBe('Nová')
+    await wrapper.get('[data-test="new-employee-birth-number"]').setValue('915203/1234')
+    await flushPromises()
+    expect(wrapper.find('[data-test="new-employee-birth-date-derived"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="new-employee-birth-surname"]').setValue('Stará')
+    await wrapper.get('[data-test="new-employee-last-name"]').setValue('Nováková')
+    await wrapper.get('[data-test="new-employee-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.createPerson).toHaveBeenCalledWith(expect.objectContaining({
+      last_name: 'Nováková',
+      birth_surname: 'Stará',
+      birth_date: '1991-02-03',
+      birth_number: '915203/1234',
+    }))
+  })
+
   it('pošle zadané osobní číslo a neplatný tvar odmítne ještě v prohlížeči', async () => {
     const wrapper = mountPage()
     await flushPromises()
@@ -707,7 +738,9 @@ describe('PeopleList toolbar and shared employee creation', () => {
       full_name: 'Delta Nová',
       first_name: 'Delta',
       last_name: 'Nová',
-      birth_date: null,
+      // Rodné příjmení se předvyplní příjmením, datum narození z rodného čísla.
+      birth_surname: 'Nová',
+      birth_date: '2000-01-01',
       birth_number: '0001010009',
       relation_type: 'employment',
       planned_start_on: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),

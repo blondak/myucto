@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollEmploymentAccountingClassifier;
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Deadline\PayrollChecklistDeadlinePolicy;
 use MyInvoice\Service\Payroll\PayrollEmploymentLifecycle;
 use PDO;
@@ -156,17 +157,33 @@ final class PayrollEmploymentRepository
         // za osobu, ne v cyklu přes vztahy. Karta vztahu ho jen ukazuje
         // a odkazuje na zákonnou evidenci, kde se nastavuje.
         $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
-        $taxDeclaration = $this->taxDeclaration($supplierId, $employeeId, $today);
-        // Zdravotní pojišťovna je stejný případ jako prohlášení k dani: vede ji
-        // zákonná evidence OSOBY, ale rozhoduje o odvodu z tohoto vztahu —
-        // a účetní ji na kartě hledala. Zrcadlo, ne druhé zadávací místo.
-        $healthInsurer = $this->healthInsurer($supplierId, $employeeId, $today);
+        /*
+         * Zdravotní pojišťovna je stejný případ jako prohlášení k dani: vede ji
+         * zákonná evidence OSOBY, ale rozhoduje o odvodu z tohoto vztahu —
+         * a účetní ji na kartě hledala. Zrcadlo, ne druhé zadávací místo.
+         *
+         * Obojí se čte k ROZHODNÉMU dni vztahu: u vztahu, který ještě nezačal,
+         * ke dni nástupu. Pojišťovna zadaná s platností od nástupu jinak
+         * svítila „Nezadáno" až do dne nástupu, přestože je v pořádku.
+         * Čte se jednou za rozhodný den, ne za každý vztah.
+         *
+         * @var array<string,array{tax:?array<string,mixed>,insurer:?array<string,mixed>}> $statutoryByDate
+         */
+        $statutoryByDate = [];
 
         $result = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $fetched) {
             $row = $this->row($fetched);
             $employmentId = (int) $row['id'];
             $relationType = (string) $row['relation_type'];
+            $startDate = $row['start_date'] === null ? null : (string) $row['start_date'];
+            $onDate = $startDate !== null && $startDate > $today ? $startDate : $today;
+            $statutoryByDate[$onDate] ??= [
+                'tax' => $this->taxDeclaration($supplierId, $employeeId, $onDate),
+                'insurer' => $this->healthInsurer($supplierId, $employeeId, $onDate),
+            ];
+            $taxDeclaration = $statutoryByDate[$onDate]['tax'];
+            $healthInsurer = $statutoryByDate[$onDate]['insurer'];
             // Rozhodnutí o mazání patří i do seznamu — jinak by frontend musel
             // nabízet akci naslepo a důvod blokace by se dozvěděl až po kliknutí.
             $deletion = $this->deletion->canDelete($supplierId, $employmentId);
@@ -239,6 +256,29 @@ final class PayrollEmploymentRepository
                 $data['terms']['office_id'],
             );
             $this->assertPrimaryAvailable($supplierId, $employeeId, $data['terms']['is_primary'], null);
+            /*
+             * Druh činnosti pro ČSSZ se u nového vztahu PŘEDVYPLNÍ podle druhu
+             * a pořadí: první pracovní poměr „1", druhý souběžný u téhož
+             * zaměstnavatele „2", DPČ „A", DPP „T"… Zůstával prázdný, takže se
+             * na něj přišlo až u registrace nebo měsíčního hlášení. Zadaný kód
+             * má vždy přednost.
+             */
+            if (($data['terms']['activity_code'] ?? null) === null
+                && PayrollEmploymentJmhzActivityFamily::appliesTo((string) $data['relation_type'])
+            ) {
+                [$activityCode, $detailCode] = PayrollEmploymentJmhzActivityFamily::nextRelationDefaults(
+                    (string) $data['relation_type'],
+                    $this->concurrentActivityCodes(
+                        $supplierId,
+                        $employeeId,
+                        (string) ($data['terms']['planned_start_on'] ?? $data['terms']['effective_from']),
+                    ),
+                );
+                if ($activityCode !== null) {
+                    $data['terms']['activity_code'] = $activityCode;
+                    $data['terms']['jmhz_relationship_detail_code'] ??= $detailCode;
+                }
+            }
             $data['terms']['tax_declaration_signed'] = $this->taxDeclarationSigned(
                 $supplierId,
                 $employeeId,
@@ -1342,6 +1382,40 @@ final class PayrollEmploymentRepository
     ): bool {
         return ($this->taxDeclaration($supplierId, $employeeId, $onDate)['status'] ?? null)
             === 'signed';
+    }
+
+    /**
+     * Druhy činnosti živých vztahů osoby, které se s novým vztahem překrývají
+     * (nejsou ukončené, archivované ani nenastoupené a neskončily před jeho
+     * nástupem). Bere se poslední verze podmínek každého vztahu.
+     *
+     * @return list<string>
+     */
+    private function concurrentActivityCodes(int $supplierId, int $employeeId, string $startOn): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT latest.activity_code
+               FROM (
+                 SELECT terms.activity_code,
+                        ROW_NUMBER() OVER (
+                          PARTITION BY terms.employment_id
+                          ORDER BY terms.effective_from DESC, terms.id DESC
+                        ) AS version_rank
+                   FROM payroll_employment_terms terms
+                   JOIN payroll_employments employment
+                     ON employment.supplier_id = terms.supplier_id
+                    AND employment.id = terms.employment_id
+                  WHERE employment.supplier_id = ?
+                    AND employment.employee_id = ?
+                    AND employment.status NOT IN ('ended', 'archived', 'no_show')
+                    AND (employment.end_date IS NULL OR employment.end_date >= ?)
+               ) latest
+              WHERE latest.version_rank = 1
+                AND latest.activity_code IS NOT NULL"
+        );
+        $stmt->execute([$supplierId, $employeeId, $startOn]);
+
+        return array_values(array_map(strval(...), $stmt->fetchAll(PDO::FETCH_COLUMN)));
     }
 
     /** @return array{status:string,effective_from:string,effective_to:?string}|null */

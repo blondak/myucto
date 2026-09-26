@@ -31,6 +31,7 @@ import { loadDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultIns
 import { loadPayrollOffices } from '@/composables/usePayrollOffices'
 import { useToast } from '@/composables/useToast'
 import { healthInsurerOptions } from '@/utils/healthInsurers'
+import { czechBirthNumberFacts } from '@/utils/czechBirthNumber'
 import { fieldSelector, revealField } from '@/utils/revealField'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -190,6 +191,8 @@ const selectedOfficeOption = computed(
 const employeeForm = reactive({
   first_name: '',
   last_name: '',
+  /** Předvyplňuje se příjmením, dokud ho uživatel sám nepřepíše. */
+  birth_surname: '',
   birth_date: '',
   birth_number: '',
   relation_type: 'employment' as PayrollRelationType,
@@ -210,6 +213,33 @@ const employeeForm = reactive({
   jmhz_temporary_assignment_status: 'no' as PayrollVerifiedTriState,
 })
 const insurerOptions = healthInsurerOptions()
+
+/**
+ * Rodné příjmení jde s příjmením, dokud do něj uživatel nesáhne — registrace
+ * u ČSSZ ho vyžaduje a u prvotního zadání je skoro vždycky stejné.
+ */
+const birthSurnameFollowsLastName = ref(true)
+watch(() => employeeForm.last_name, (lastName) => {
+  if (birthSurnameFollowsLastName.value) employeeForm.birth_surname = lastName
+})
+function onNewEmployeeBirthSurnameInput() {
+  birthSurnameFollowsLastName.value = false
+}
+
+/**
+ * Datum narození z rodného čísla. Doplní se jen do prázdného pole, případně
+ * přepíše hodnotu, kterou sem předtím doplnilo samo (oprava překlepu v RČ),
+ * nikdy datum, které uživatel napsal ručně.
+ */
+const derivedBirthDate = ref('')
+watch(() => employeeForm.birth_number, (birthNumber) => {
+  const facts = czechBirthNumberFacts(birthNumber)
+  if (facts === null) return
+  if (employeeForm.birth_date === '' || employeeForm.birth_date === derivedBirthDate.value) {
+    employeeForm.birth_date = facts.birthDate
+    derivedBirthDate.value = facts.birthDate
+  }
+})
 /** Celé jméno vzniká spojením zadaných částí, nikdy naopak — viz komentář výš. */
 const newEmployeeFullName = computed(
   () => [employeeForm.first_name.trim(), employeeForm.last_name.trim()]
@@ -502,7 +532,10 @@ function removeEmploymentFromDetail(personId: number, employmentId: number) {
 function resetEmployeeForm() {
   employeeForm.first_name = ''
   employeeForm.last_name = ''
+  employeeForm.birth_surname = ''
+  birthSurnameFollowsLastName.value = true
   employeeForm.birth_date = ''
+  derivedBirthDate.value = ''
   employeeForm.birth_number = ''
   employeeForm.relation_type = 'employment'
   employeeForm.planned_start_on = todayIso()
@@ -856,6 +889,7 @@ async function createEmployee() {
     full_name: newEmployeeFullName.value,
     first_name: firstName,
     last_name: lastName,
+    birth_surname: employeeForm.birth_surname.trim() || null,
     birth_date: employeeForm.birth_date || null,
     birth_number: employeeForm.birth_number.trim() || null,
     relation_type: employeeForm.relation_type,
@@ -1392,7 +1426,17 @@ onMounted(async () => {
           </label>
           <label class="min-w-0 text-xs text-neutral-600">
             {{ t('payroll.people.create.birth_date') }}
-            <DateInput v-model="employeeForm.birth_date" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
+            <DateInput v-model="employeeForm.birth_date" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-birth-date" />
+            <span v-if="derivedBirthDate !== '' && employeeForm.birth_date === derivedBirthDate" class="mt-1 block text-xs text-neutral-500" data-test="new-employee-birth-date-derived">
+              {{ t('payroll.people.create.birth_date_from_birth_number') }}
+            </span>
+          </label>
+          <label class="min-w-0 text-xs text-neutral-600">
+            {{ t('payroll.people.create.birth_surname') }}
+            <input v-model="employeeForm.birth_surname" maxlength="96" autocomplete="off" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-birth-surname" @input="onNewEmployeeBirthSurnameInput">
+            <span class="mt-1 block text-xs text-neutral-500">
+              {{ t('payroll.people.create.birth_surname_hint') }}
+            </span>
           </label>
           <label class="min-w-0 text-xs text-neutral-600">
             {{ t('payroll.people.create.monthly_gross') }}

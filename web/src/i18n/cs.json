@@ -4465,6 +4465,9 @@
         "full_name_preview": "Na kartě se povede jako {name}.",
         "birth_number": "Rodné číslo",
         "birth_date": "Datum narození",
+        "birth_date_from_birth_number": "Doplněno z rodného čísla.",
+        "birth_surname": "Rodné příjmení",
+        "birth_surname_hint": "Předvyplňuje se příjmením. Vyžaduje ho přihláška na ČSSZ — liší-li se (např. po sňatku), přepište ho.",
         "relation_type": "Druh pracovního vztahu",
         "planned_start": "Plánovaný nástup",
         "personal_number_hint": "Nepovinné. Když ho nevyplníte, přidělí se automaticky.",
@@ -4843,6 +4846,9 @@
         "registration_identity_hint": "Datum a místo narození, občanství a pohlaví pro PREZEC/REGZEC. Rozbalte jen při nástupu nebo změně evidence.",
         "registration_identity_filled": "Doplněno",
         "registration_identity_empty": "Zatím nedoplněno",
+        "registration_identity_missing": "Chybí: {fields}",
+        "birth_surname": "Rodné příjmení",
+        "birth_surname_prefilled_hint": "Předvyplněno z příjmení. Změnila-li osoba příjmení (např. sňatkem), opravte ho.",
         "registration_identity_effective_hint": "Údaje se uloží do stejné historické verze a platí od data uvedeného výše.",
         "title_prefix": "Titul před jménem",
         "title_suffix": "Titul za jménem",
@@ -4980,6 +4986,7 @@
       "person_evidence_title": "Ze zákonné evidence osoby",
       "health_insurer": "Zdravotní pojišťovna",
       "health_insurer_hint": "Vede se v zákonné evidenci osoby, ne u vztahu — sem se hodnota jen přebírá. Rozhoduje o tom, komu se odvádí zdravotní pojistné.",
+      "health_insurer_from": "{value} · od {date}",
       "health_insurer_state": {
         "verified": "Ověřeno",
         "unverified": "Neověřeno",
@@ -5990,12 +5997,37 @@
           "open_other": "Otevřít překrývající se vztah",
           "open_own": "Upravit druh činnosti tohoto vztahu"
         },
-        "prepared": "{agenda} je připravená k odeslání.",
+        "prepared": "Podání „{agenda}“ je připravené k odeslání.",
         "not_sent_yet": "Zatím neodesláno. Zaměstnanec bude přihlášený až potvrzením od ČSSZ.",
         "environment_label": "Prostředí",
         "environment": {
           "test": "Test",
           "production": "Produkce"
+        },
+        "environment_notice": {
+          "production": "Podává se do PRODUKCE ČSSZ — přihláška půjde do ostrého registru pojištěnců. Na zkoušku přepněte prostředí vpravo nahoře na Test.",
+          "test": "Podává se do TESTOVACÍHO prostředí ČSSZ — zaměstnance to nepřihlásí. Ostré podání vyžaduje přepnout prostředí na Produkci."
+        },
+        "missing": {
+          "title": "Registraci nic nechybí. | Registraci zatím nejde sestavit, chybí 1 údaj. | Registraci zatím nejde sestavit, chybí {count} údaje. | Registraci zatím nejde sestavit, chybí {count} údajů.",
+          "where_person": "karta osoby → Úplná osobní evidence",
+          "where_employer": "Nastavení mezd → Zaměstnavatel a účtárny",
+          "open": "Doplnit",
+          "open_settings": "Otevřít nastavení mezd",
+          "variable_symbol_placeholder": "Variabilní symbol zaměstnavatele vypadá jako zástupná hodnota (řada číslic z ukázek), ne jako symbol, který firmě přidělila ČSSZ. Ověřte ho v nastavení mezd u účtárny dřív, než podání odešlete.",
+          "fields": {
+            "first_name": "Jméno",
+            "last_name": "Příjmení",
+            "birth_surname": "Rodné příjmení",
+            "birth_place": "Místo narození",
+            "citizenship_country_code": "Státní občanství",
+            "sex": "Pohlaví (muž, nebo žena)",
+            "birth_date": "Datum narození",
+            "birth_country_code": "Stát narození",
+            "identifier": "Rodné číslo nebo EČP",
+            "employer_variable_symbol": "Variabilní symbol zaměstnavatele u ČSSZ",
+            "cssz_workplace_code": "Kód správy sociálního zabezpečení"
+          }
         },
         "send_test": "Odeslat do testu",
         "send_production": "Odeslat do produkce",

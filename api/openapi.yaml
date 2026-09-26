@@ -23595,6 +23595,11 @@ components:
           nullable: true
           maxLength: 96
           description: Příjmení do historické identity; platí totéž co u `first_name`.
+        birth_surname:
+          type: string
+          nullable: true
+          maxLength: 96
+          description: Rodné příjmení do historické identity; vyžaduje ho registrace u ČSSZ (PREZEC/REGZEC).
         birth_date: { type: string, format: date, nullable: true }
         birth_number: { type: string, nullable: true, description: 'Rodné číslo; ukládá se šifrovaně mezi identifikátory osoby, ne na kartu.' }
         relation_type: { type: string, enum: [employment, small_scale_employment, dpp, dpc, partner_dependent, statutory_body] }

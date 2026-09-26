@@ -384,6 +384,9 @@ final class PayrollRegistrationAction
                 $exception->validationCode,
                 $exception->getMessage(),
                 422,
+                $exception->problems === []
+                    ? []
+                    : ['problems' => $exception->problems],
             ));
         } catch (PayrollRegistrationIdentitySnapshotException $exception) {
             $status = $exception->validationCode

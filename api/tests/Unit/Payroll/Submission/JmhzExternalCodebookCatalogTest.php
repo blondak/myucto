@@ -38,6 +38,27 @@ final class JmhzExternalCodebookCatalogTest extends TestCase
         );
     }
 
+    /**
+     * Hledání obce pracoviště: bez diakritiky a s nejlepší shodou vpředu.
+     * „Praha" v profilu A1 nevracela Prahu a „Plzen" bez háčku nic.
+     */
+    public function testMunicipalitySearchFoldsDiacriticsAndRanksBestMatchFirst(): void
+    {
+        $catalog = $this->catalog();
+
+        $praha = $catalog->searchMunicipalities('Praha', '2026-10-31', 5);
+        self::assertSame('554782', $praha[0]['code']);
+        self::assertSame('Hlavní město Praha', $praha[0]['label']);
+
+        $plzen = $catalog->searchMunicipalities('plzen', '2026-10-31', 5);
+        self::assertSame('Plzeň', $plzen[0]['label']);
+
+        self::assertSame(
+            [['code' => '537004', 'label' => 'Nymburk']],
+            $catalog->searchMunicipalities('537004', '2026-10-31', 5),
+        );
+    }
+
     public function testDateRegistryUses511ThroughAugustAnd145FromSeptember(): void
     {
         $catalog = $this->catalog();

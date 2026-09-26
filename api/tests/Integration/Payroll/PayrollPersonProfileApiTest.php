@@ -165,6 +165,12 @@ final class PayrollPersonProfileApiTest extends TestCase
         self::assertStringNotContainsString('Příkladová', $json);
         self::assertArrayHasKey('birth_surname_masked', $profile['identity_history'][0]);
         self::assertArrayNotHasKey('birth_surname', $profile['identity_history'][0]);
+        // Štítek „Údaje pro registraci zaměstnance" bere stav z téhož seznamu
+        // jako příprava registrace: rodné příjmení je, zbytek pro ČSSZ ne.
+        self::assertSame(
+            ['identity.birth_place', 'identity.citizenship_country_code', 'identity.sex'],
+            $profile['identity_history'][0]['registration_missing'],
+        );
         self::assertArrayHasKey('address_masked', $profile['addresses'][0]);
         self::assertArrayNotHasKey('street_line', $profile['addresses'][0]);
         self::assertStringContainsString('example.invalid', $profile['contacts'][0]['value_masked']);

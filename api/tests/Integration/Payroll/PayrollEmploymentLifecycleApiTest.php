@@ -982,6 +982,45 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertArrayHasKey('tax_declaration', $employment);
     }
 
+    /**
+     * „Přidat pracovní vztah" posílá druh činnosti prázdný. Server ho
+     * předvyplní podle druhu a pořadí souběžného vztahu u zaměstnavatele —
+     * dřív zůstal prázdný a chyběl až u registrace a měsíčního hlášení.
+     */
+    public function testNewEmploymentGetsActivityCodeByKindAndOrder(): void
+    {
+        $withoutCode = function (string $code, string $relationType, bool $primary): array {
+            $terms = $this->termsPayload($primary, '2026-01-01', $relationType);
+            $terms['activity_code'] = null;
+            $terms['jmhz_relationship_detail_code'] = null;
+            $response = $this->action->create(
+                $this->request(
+                    'POST',
+                    "/api/payroll/people/{$this->employeeId}/employments",
+                    [
+                        'code' => $code,
+                        'relation_type' => $relationType,
+                        'monthly_gross_minor' => 4000000,
+                        'terms' => $terms,
+                    ],
+                ),
+                new Response(),
+                ['id' => (string) $this->employeeId],
+            );
+            self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+            $employment = $this->json($response)['employment'];
+            $latest = $employment['terms'][0];
+
+            return [$latest['activity_code'], $latest['jmhz_relationship_detail_code']];
+        };
+
+        self::assertSame(['1', '1'], $withoutCode('POR-1', 'employment', true));
+        self::assertSame(['2', '1'], $withoutCode('POR-2', 'employment', false));
+        self::assertSame(['A', null], $withoutCode('DPC-1', 'dpc', false));
+        self::assertSame(['T', null], $withoutCode('DPP-1', 'dpp', false));
+        self::assertSame(['U', null], $withoutCode('DPP-2', 'dpp', false));
+    }
+
     public function testEmploymentWithoutOfficeTakesTheEmployerDefault(): void
     {
         $this->db->pdo()->prepare(
