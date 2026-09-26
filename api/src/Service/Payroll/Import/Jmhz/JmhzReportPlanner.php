@@ -342,7 +342,7 @@ final class JmhzReportPlanner
             if ($auto === null && $this->foreignIdPpv($supplierId, (int) $pair['id'], $environment, $form)) {
                 return ['public' => []] + $result(
                     'Vybraný vztah ' . $pair['code'] . ' má v evidenci jiné ID PPV než formulář, takže jde o jiný '
-                    . 'pracovní vztah. Formulář patří dalšímu vztahu osoby — ten založí věta „Vztah doložený '
+                    . 'pracovní vztah. Formulář patří dalšímu vztahu osoby; ten založí věta „Vztah doložený '
                     . 'měsíčními hlášeními JMHZ“, nebo ho založte ručně a formulář přiřaďte k němu.',
                 );
             }
@@ -363,7 +363,7 @@ final class JmhzReportPlanner
                 'employment' => null,
                 'new_employment' => true,
                 'warnings' => [...$warnings, 'Osoba je v evidenci, ale žádný její pracovní vztah nemá ID PPV z formuláře '
-                    . '(jiné vztahy mají vlastní ID PPV). Formulář dokládá další, souběžný vztah téže osoby — založí ho '
+                    . '(jiné vztahy mají vlastní ID PPV). Formulář dokládá další, souběžný vztah téže osoby; založí ho '
                     . 'věta „Vztah doložený měsíčními hlášeními JMHZ“; vyberte ji spolu s formulářem. K existujícímu '
                     . 'vztahu formulář přiřadit nejde.'],
                 'blocker' => null,

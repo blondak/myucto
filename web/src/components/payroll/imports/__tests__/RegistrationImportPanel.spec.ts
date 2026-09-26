@@ -206,7 +206,7 @@ describe('import JMHZ — souběžný vztah, druh vztahu, odhadnutý nástup, ne
       outcome: 'incomplete',
       unresolved: [{
         key: concurrentForm.key, file: 'jmhz-01.xml', period: '2026-01', label: 'Syntetická osoba',
-        reason: 'Pracovní vztah formuláře v evidenci není — nezaložila ho žádná věta dávky.',
+        reason: 'Pracovní vztah formuláře v evidenci není, nezaložila ho žádná věta dávky.',
       }],
     } satisfies RegistrationApplyResult)
     await applyAll(wrapper)

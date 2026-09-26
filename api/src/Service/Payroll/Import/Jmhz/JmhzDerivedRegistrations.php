@@ -77,7 +77,7 @@ final class JmhzDerivedRegistrations
                     ? 'Hlášení nenese druh činnosti ani ELDP a vztah nebyl účasten na pojištění (bez vyměřovacího '
                         . 'základu, bez stanovené týdenní doby, s příjmem z nepojištěné činnosti). Příjem ani v jednom '
                         . 'měsíci nedosáhl ' . number_format(JmhzEmploymentHistory::SMALL_SCALE_LIMIT_CZK, 0, ',', ' ')
-                        . ' Kč, takže může jít o DPP i o DPČ malého rozsahu. Založí se DPP — jde-li o DPČ, zvolte '
+                        . ' Kč, takže může jít o DPP i o DPČ malého rozsahu. Založí se DPP; jde-li o DPČ, zvolte '
                         . 'druh vztahu v náhledu.'
                     : 'Hlášení nenese druh činnosti ani ELDP, ale vztah nebyl účasten na pojištění (bez vyměřovacího '
                         . 'základu, bez stanovené týdenní doby) a měl příjem z nepojištěné činnosti nad rozhodným '
@@ -174,7 +174,7 @@ final class JmhzDerivedRegistrations
         if ($start['needs_check']) {
             $notes[] = "Nástup {$start['on']} je odhadnutý: dávka nemá hlášení za dřívější měsíce, vztah tedy mohl "
                 . 'začít už dřív. Doplňte skutečný nástup ze smlouvy na kartě pracovního vztahu (Mzdy → Zaměstnanci '
-                . '→ vztah → Sjednané podmínky) — nebo nahrajte export zaměstnanců z ePortálu ČSSZ (od 15. 10. 2026 '
+                . '→ vztah → Sjednané podmínky), nebo nahrajte export zaměstnanců z ePortálu ČSSZ (od 15. 10. 2026 '
                 . 'nese začátek pojistného vztahu) či hlášení za dřívější měsíce.';
         }
 

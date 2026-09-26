@@ -340,7 +340,7 @@ final class RegistrationImportService
                 'reason' => $blocked
                     ? (string) $plan['blocker']
                     : ($plan['operation'] === 'create_employment'
-                        ? 'Pracovní vztah formuláře v evidenci není — nezaložila ho žádná věta dávky.'
+                        ? 'Pracovní vztah formuláře v evidenci není, nezaložila ho žádná věta dávky.'
                         : 'Formulář není spárovaný s pracovním vztahem.'),
             ];
         }

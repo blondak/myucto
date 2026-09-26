@@ -334,7 +334,7 @@ a stornovací podání se skládá s řádným podle pořadí.
 
 **Další vztah téže osoby (souběh).** Když formulář nese OIČ osoby, kterou už
 evidujete, ale ID zaměstnání, které žádný její vztah nemá, a její ostatní vztahy
-mají ID zaměstnání jiné, jde o další, souběžný vztah — typicky dohodu vedle
+mají ID zaměstnání jiné, jde o další, souběžný vztah, typicky dohodu vedle
 pracovního poměru. Náhled u formuláře ukáže operaci **Založit vztah**
 s vysvětlením a vztah založí věta **Odvozeno z hlášení JMHZ** (jako vedlejší,
 ne hlavní vztah osoby). Vyberte obojí najednou; při zápisu se formuláře

@@ -123,7 +123,7 @@ final class RegistrationImportPlanner
             ],
         ];
         if ($record->insuredPersonNumber !== null && $record->birthNumber === null) {
-            $plan['warnings'][] = 'Věta nese místo rodného čísla evidenční číslo pojištěnce (EČP) — osoba '
+            $plan['warnings'][] = 'Věta nese místo rodného čísla evidenční číslo pojištěnce (EČP), osoba '
                 . 'nejspíš rodné číslo nemá (cizinec). Osoba se hledá podle EČP.';
         } elseif ($ecp !== null) {
             $plan['warnings'][] = 'Číslo pojištěnce ve větě není platné rodné číslo, osoba se hledá '
@@ -290,7 +290,7 @@ final class RegistrationImportPlanner
         $this->change($plan, 'health_insurer_code', 'Zdravotní pojišťovna', null, $insurer);
         if ($birthNumber === null) {
             $plan['warnings'][] = $ecp !== null
-                ? 'Evidenční číslo pojištěnce (EČP) se z věty nepřevezme — doplňte ho na kartě osoby.'
+                ? 'Evidenční číslo pojištěnce (EČP) se z věty nepřevezme, doplňte ho na kartě osoby.'
                 : 'Rodné číslo se z věty nepřevezme — doplňte ho na kartě osoby.';
         }
 
