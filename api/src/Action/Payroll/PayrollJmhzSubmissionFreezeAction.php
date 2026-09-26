@@ -10,6 +10,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -72,7 +73,13 @@ final class PayrollJmhzSubmissionFreezeAction
                 $officeId,
             );
         } catch (\DomainException $exception) {
-            return Json::error($response, 'conflict', $exception->getMessage(), 409);
+            // Měsíc podaný předchozím programem má vlastní kód: obrazovka k němu
+            // nabídne odkaz na historii převzatých podání, kde se dá ověřit a opravit.
+            $code = $exception instanceof JmhzXmlException && $exception->validationCode === 'jmhz_period_submitted_externally'
+                ? $exception->validationCode
+                : 'conflict';
+
+            return Json::error($response, $code, $exception->getMessage(), 409);
         } catch (\InvalidArgumentException $exception) {
             return $this->invalid($response, $exception->getMessage());
         }

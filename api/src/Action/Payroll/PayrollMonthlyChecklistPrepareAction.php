@@ -9,6 +9,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\PayrollMonthlyAgendaPreparationService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -95,7 +96,13 @@ final class PayrollMonthlyChecklistPrepareAction
                 $this->userId($request),
             );
         } catch (\DomainException $exception) {
-            return Json::error($response, 'conflict', $exception->getMessage(), 409);
+            // Měsíc podaný předchozím programem: vlastní kód, přehled k hlášce
+            // nabídne odkaz na historii převzatých podání.
+            $code = $exception instanceof JmhzXmlException && $exception->validationCode === 'jmhz_period_submitted_externally'
+                ? $exception->validationCode
+                : 'conflict';
+
+            return Json::error($response, $code, $exception->getMessage(), 409);
         } catch (\InvalidArgumentException $exception) {
             return $this->invalid($response, $exception->getMessage());
         } catch (\RuntimeException $exception) {

@@ -160,6 +160,13 @@ final class Bootstrap
                     'messageProcessor',
                     \DI\get(\MyInvoice\Service\Submission\SubmissionInboxMessageProcessor::class),
                 ),
+            // Historie podání předchozím programem je nepovinná kvůli testům mostu;
+            // bez výslovného předání by kontrola duplicitního řádného hlášení neběžela.
+            \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService::class =>
+                \DI\autowire()->constructorParameter(
+                    'external',
+                    \DI\get(\MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore::class),
+                ),
             \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthOfficialFormProvider::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Service\Payroll\Submission\HealthInsurance\CachedHealthOfficialFormProvider::class,

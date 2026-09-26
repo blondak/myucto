@@ -386,6 +386,7 @@ final class AnonymizationService
             'person_external_identifier' => [PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER, 'shape'],
             'employment_external_identifier' => [PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER, 'shape'],
             'registration_a1_profile' => [PayrollSensitiveField::REGISTRATION_A1_PROFILE, 'json'],
+            'external_jmhz_payload' => [PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD, 'json'],
             default => throw new \RuntimeException("Neznámý typ šifrované hodnoty: {$type}"),
         };
         $sensitive = $this->sensitive ?? throw new \LogicException('Šifrování není připravené.');
