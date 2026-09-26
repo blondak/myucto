@@ -5248,6 +5248,7 @@
       "checklist_title": "Duties",
       "checklist_open": "Open: {count}",
       "checklist_all_done": "Done",
+      "checklist_predecessor_handled": "Handled by the previous payroll software (before payroll started in MyÚčto)",
       "show_detail": "Show",
       "hide_detail": "Hide",
       "timeline_title": "Timeline and changes",

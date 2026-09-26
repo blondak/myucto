@@ -730,7 +730,8 @@ const startAlreadyHappened = computed(
 const registrationItem = computed(
   () => props.employment.checklist.find(item => item.item_key === 'social_jmhz_registration') ?? null,
 )
-const registrationPending = computed(() => registrationItem.value?.status === 'pending')
+const registrationPending = computed(() => registrationItem.value !== null
+  && checklistStatus(registrationItem.value) === 'pending')
 
 /**
  * „Přihlášený je, jen ne přes nás." Konkurence to řeší stavem registrace na
@@ -1946,6 +1947,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                    žádost) nemá `due_date` — pak se datum vůbec nepíše, ať tam
                    nesvítí pomlčka bez významu. -->
               <p class="text-neutral-500"><template v-if="item.due_date">{{ formatDate(item.due_date) }} · </template>{{ t(`payroll.people.checklist_status.${checklistStatus(item)}`) }}</p>
+              <p v-if="item.effective_reason === 'predecessor'" class="text-neutral-500" :data-test="`checklist-predecessor-${item.item_key}`">{{ t('payroll.people.checklist_predecessor_handled') }}</p>
             </div>
             <!--
               „Netýká se" model uměl od začátku, ale karta nabízela jen splnit
@@ -1974,7 +1976,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               </button>
               <p class="w-full text-neutral-500">{{ t('payroll.people.confirmation_request_hint') }}</p>
             </div>
-            <div v-if="canWrite" class="flex flex-wrap gap-1">
+            <div v-if="canWrite && item.effective_reason !== 'predecessor'" class="flex flex-wrap gap-1">
               <RouterLink
                 v-if="item.status === 'pending' && healthNotificationTarget(item)"
                 :to="healthNotificationTarget(item)!"

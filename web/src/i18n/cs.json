@@ -5248,6 +5248,7 @@
       "checklist_title": "Povinnosti",
       "checklist_open": "Nesplněno: {count}",
       "checklist_all_done": "Hotovo",
+      "checklist_predecessor_handled": "Vyřízeno předchozím programem (před začátkem vedení mezd v MyÚčtu)",
       "show_detail": "Zobrazit",
       "hide_detail": "Skrýt",
       "timeline_title": "Časová osa a změny",

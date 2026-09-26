@@ -372,6 +372,11 @@ export interface PayrollEmploymentChecklistItem {
    * Volitelné kvůli starší odpovědi bez klíče (pak platí `status`).
    */
   effective_status?: PayrollChecklistStatus
+  /**
+   * Proč je nevyřízená položka přesto splněná: `evidence` = doklad v aplikaci,
+   * `predecessor` = událost před začátkem vedení mezd v MyÚčtu vyřídil předchozí program.
+   */
+  effective_reason?: 'evidence' | 'predecessor' | null
   /** `null` u povinností bez zákonné lhůty (interní kontroly, potvrzení na žádost). */
   due_date: string | null
   completed_at: string | null

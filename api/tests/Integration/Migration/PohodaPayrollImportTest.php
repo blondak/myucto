@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollImporter;
+use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
 use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaPayroll;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -135,13 +136,18 @@ final class PohodaPayrollImportTest extends TestCase
         $terms->execute([$supplierId, $jana['id']]);
         self::assertSame(['cz_isco_code' => '43111', 'jmhz_workplace_municipality_code' => '582786', 'work_place' => 'Brno'], $terms->fetch(\PDO::FETCH_ASSOC), $this->explain($protocol));
 
-        // Zákonné termíny: odškrtnuté jen tam, kde PAMICA nese doklad.
-        self::assertSame([
-            'employment_contract' => 'completed',
-            'health_insurance_registration' => 'completed',
-            'social_jmhz_registration' => 'completed',
-            'tax_declaration' => 'completed',
-        ], $this->checklist($supplierId, (int) $jana['id'], 'onboarding'), $this->explain($protocol));
+        // Zákonné termíny. Jana nastoupila před začátkem vedení mezd v MyÚčtu,
+        // nástup vyřídila PAMICA: povinnost s rozhodnou událostí před startem
+        // se nezakládá a nic nečeká na obsluhu.
+        self::assertSame([], $this->checklist($supplierId, (int) $jana['id'], 'onboarding'), $this->explain($protocol));
+        self::assertNotContains('pending', $this->checklist($supplierId, (int) $jana['id'], 'change'), $this->explain($protocol));
+        self::assertSame(0, $this->scalar(
+            "SELECT COUNT(*) FROM payroll_employment_checklist_items item
+              WHERE item.supplier_id = ? AND item.employment_id = ? AND item.status = 'pending'
+                AND NOT " . PayrollPredecessorObligationScope::sql('item'),
+            [$supplierId, (int) $jana['id']],
+        ), $this->explain($protocol));
+        // Petr nastoupil i skončil za MyÚčta: odškrtnuté jen to, k čemu PAMICA nese doklad.
         self::assertSame([
             'employment_contract' => 'completed',
             'health_insurance_registration' => 'pending',
@@ -152,19 +158,6 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertSame('completed', $offboarding['termination_document'] ?? null, json_encode($offboarding) . $this->explain($protocol));
         self::assertSame('completed', $offboarding['health_insurance_deregistration'] ?? null);
         self::assertSame('completed', $offboarding['social_jmhz_deregistration'] ?? null);
-        $note = $pdo->prepare("SELECT note FROM payroll_employment_checklist_items WHERE supplier_id = ? AND employment_id = ? AND item_key = 'social_jmhz_registration'");
-        $note->execute([$supplierId, $jana['id']]);
-        self::assertStringStartsWith('Převzato z PAMICA', (string) $note->fetchColumn());
-        // Oznámení ZP nezpracované, ale vztah vznikl před převodem u platné pojišťovny.
-        $health = $pdo->prepare("SELECT note FROM payroll_employment_checklist_items WHERE supplier_id = ? AND employment_id = ? AND item_key = 'health_insurance_registration'");
-        $health->execute([$supplierId, $jana['id']]);
-        self::assertStringContainsString('vztah vznikl před převodem', (string) $health->fetchColumn());
-        // Změna měsíční mzdy od února: změnové položky zpracovala PAMICA.
-        self::assertSame([
-            'contract_amendment' => 'completed',
-            'health_insurance_change' => 'completed',
-            'social_jmhz_change' => 'completed',
-        ], $this->checklist($supplierId, (int) $jana['id'], 'change'), $this->explain($protocol));
 
         // Sjednaná měsíční mzda z PAMICA: od ledna 40 000 Kč, od února 42 000 Kč.
         $wages = $pdo->prepare('SELECT effective_from, monthly_gross_minor FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ? ORDER BY effective_from');

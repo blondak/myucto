@@ -321,13 +321,10 @@ final class PremierPayrollImportTest extends TestCase
         self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_person_external_ids x
             JOIN payroll_employments e ON e.employee_id = x.employee_id AND e.supplier_id = x.supplier_id WHERE e.supplier_id = ? AND e.code = '6'", $supplierId),
             'OIČ jen z karty osoby bez přijatého formuláře se nepřevezme.');
-        $done = array_column($this->fetch("SELECT c.item_key FROM payroll_employment_checklist_items c JOIN payroll_employments e ON e.id = c.employment_id
-            WHERE e.supplier_id = ? AND e.code = '5' AND c.status = 'completed' ORDER BY c.item_key", $supplierId), 0);
-        foreach (['employment_contract', 'health_insurance_registration', 'social_jmhz_registration', 'tax_declaration'] as $item) {
-            self::assertContains($item, $done, $this->explain($protocol));
-        }
-        self::assertContains('social_jmhz_deregistration', array_column($this->fetch("SELECT c.item_key FROM payroll_employment_checklist_items c
-            JOIN payroll_employments e ON e.id = c.employment_id WHERE e.supplier_id = ? AND e.code = '6' AND c.status = 'completed'", $supplierId), 0));
+        // Nástup i skončení před začátkem vedení mezd v MyÚčtu vyřídil PREMIER:
+        // povinnosti se nezakládají vůbec, takže nic nečeká na odškrtnutí.
+        self::assertSame([], $this->fetch("SELECT c.item_key FROM payroll_employment_checklist_items c JOIN payroll_employments e ON e.id = c.employment_id
+            WHERE e.supplier_id = ? AND e.code IN ('5', '6') AND c.status = 'pending' AND c.item_key <> 'legacy_start_date'", $supplierId), $this->explain($protocol));
     }
 
     /**

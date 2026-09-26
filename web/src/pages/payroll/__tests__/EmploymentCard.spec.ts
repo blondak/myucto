@@ -1011,6 +1011,35 @@ describe('EmploymentCard', () => {
     expect(wrapper.findComponent({ name: 'EmploymentRegistrationPanel' }).exists()).toBe(true)
   })
 
+  it('povinnost vyřízenou předchozím programem neukáže jako nesplněnou ani nenabídne k odškrtnutí', async () => {
+    const taken: PayrollEmployment = {
+      ...employment(),
+      is_legacy_projection: true,
+      checklist: [{
+        id: 2,
+        phase: 'onboarding',
+        item_key: 'social_jmhz_registration',
+        status: 'pending',
+        effective_status: 'completed',
+        effective_reason: 'predecessor',
+        due_date: null,
+        completed_at: null,
+        note: null,
+        row_version: 1,
+      }],
+    }
+    const wrapper = await mountCard(taken, {
+      props: { employment: taken, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    expect(wrapper.get('[data-test="checklist-predecessor-social_jmhz_registration"]').text())
+      .toContain('payroll.people.checklist_predecessor_handled')
+    expect(wrapper.get('[data-test="employment-checklist"]').text()).toContain('payroll.people.checklist_all_done')
+    expect(wrapper.find('[data-test="checklist-na-social_jmhz_registration"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="legacy-registration-warning"]').exists()).toBe(false)
+  })
+
   /**
    * Varování bylo slepá ulička — svítilo natrvalo a nedalo se s ním nic udělat,
    * přestože u někoho přihlášeného mimo MyÚčto je jen šum.

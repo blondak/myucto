@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use PDO;
 
 /**
@@ -325,7 +326,8 @@ final readonly class PayrollDeadlineOverviewRepository
      * Vyřazuje položky, ke kterým existuje DOKLAD — tentýž výraz
      * ({@see PayrollChecklistEvidenceSql}) jako `effective_status` na kartě
      * vztahu; jinak by hlídač připomínal to, co je hotové, nebo naopak mlčel
-     * u odhlášky, která je jen připravená.
+     * u odhlášky, která je jen připravená. Stejně tak vyřazuje povinnosti, které
+     * vyřídil předchozí program ({@see PayrollPredecessorObligationScope}).
      *
      * Předpokládá aliasy `item` a `employment`.
      */
@@ -333,7 +335,8 @@ final readonly class PayrollDeadlineOverviewRepository
     {
         return "item.status = 'pending'
                 AND employment.status NOT IN ('no_show', 'archived')
-                AND NOT (" . PayrollChecklistEvidenceSql::evidencePresent() . ')';
+                AND NOT (" . PayrollChecklistEvidenceSql::evidencePresent() . ')
+                AND NOT (' . PayrollPredecessorObligationScope::sql('item') . ')';
     }
 
     /**

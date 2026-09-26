@@ -16,6 +16,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
 use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
+use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
@@ -1315,6 +1316,8 @@ final class PayrollRunSnapshotBuilder
      * oba: položka nástupního checklistu je pořád „nevyřízeno" **a** k vztahu
      * neexistuje evidovaná povinnost podání. Přihláška se totiž mohla podat
      * mimo aplikaci — pak ji obsluha odklikne v checklistu a varování zmizí.
+     * Položku z doby před začátkem vedení mezd v MyÚčtu vyřídil předchozí
+     * program ({@see PayrollPredecessorObligationScope}) a nehlásí se.
      *
      * Vztah, který položku checklistu vůbec nemá (převzatá legacy projekce,
      * data z doby před životním cyklem), se ZÁMĚRNĚ nehlásí. O takovém vztahu
@@ -1342,6 +1345,7 @@ final class PayrollRunSnapshotBuilder
                          AND item.phase = \'onboarding\'
                          AND item.item_key = \'social_jmhz_registration\'
                          AND item.status = \'pending\'
+                         AND NOT ' . PayrollPredecessorObligationScope::sql('item') . '
                     ) AS social_pending,
                     EXISTS (
                       SELECT 1 FROM payroll_employment_checklist_items item
@@ -1350,6 +1354,7 @@ final class PayrollRunSnapshotBuilder
                          AND item.phase = \'onboarding\'
                          AND item.item_key = \'health_insurance_registration\'
                          AND item.status = \'pending\'
+                         AND NOT ' . PayrollPredecessorObligationScope::sql('item') . '
                     ) AS health_pending,
                     EXISTS (
                       SELECT 1 FROM payroll_obligations obligation

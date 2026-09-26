@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentAccountingClassifier;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Deadline\PayrollChecklistDeadlinePolicy;
 use MyInvoice\Service\Payroll\PayrollEmploymentLifecycle;
+use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use PDO;
 
 /**
@@ -1559,7 +1560,8 @@ final class PayrollEmploymentRepository
      * Checklist vztahu i s DOKLADEM, který položku odškrtává sám.
      *
      * `effective_status` je to, co se má ukázat: uložený stav, dokud
-     * o položce nikdo nerozhodl, jinak `completed`, existuje-li doklad.
+     * o položce nikdo nerozhodl, jinak `completed`, existuje-li doklad nebo
+     * vyřídil-li povinnost předchozí program ({@see PayrollPredecessorObligationScope}).
      * Uložený stav se nepřepisuje — kdyby se doklad ztratil (storno revize,
      * smazaný výkaz), tvrdil by checklist hotovo nad něčím, co neexistuje.
      *
@@ -1573,7 +1575,8 @@ final class PayrollEmploymentRepository
                     item.deadline_source, item.deadline_source_status,
                     item.completed_at, item.note, item.row_version,
                     item.created_at, item.updated_at,
-                    ' . PayrollChecklistEvidenceSql::evidencePresent() . ' AS evidence_present
+                    ' . PayrollChecklistEvidenceSql::evidencePresent() . ' AS evidence_present,
+                    ' . PayrollPredecessorObligationScope::sql('item') . ' AS predecessor_handled
                FROM payroll_employment_checklist_items item
               WHERE item.supplier_id = ? AND item.employment_id = ?
               ORDER BY FIELD(item.phase, \'onboarding\', \'change\', \'offboarding\'),
@@ -1588,9 +1591,14 @@ final class PayrollEmploymentRepository
             $item['evidence_kind'] = $evidence
                 ? (self::CHECKLIST_EVIDENCE[$item['item_key']] ?? null)
                 : null;
-            $item['effective_status'] = $item['status'] === 'pending' && $evidence
+            $predecessor = (bool) $item['predecessor_handled'];
+            $item['predecessor_handled'] = $predecessor;
+            $item['effective_status'] = $item['status'] === 'pending' && ($evidence || $predecessor)
                 ? 'completed'
                 : $item['status'];
+            $item['effective_reason'] = $item['status'] !== 'pending'
+                ? null
+                : ($evidence ? 'evidence' : ($predecessor ? PayrollPredecessorObligationScope::REASON : null));
             $result[] = $item;
         }
         return $result;
@@ -2126,6 +2134,7 @@ final class PayrollEmploymentRepository
         );
         $skipped = self::CHECKLIST_EXCEPTIONS[$relationType] ?? [];
         $policy = new PayrollChecklistDeadlinePolicy();
+        $startPeriod = $this->moduleStartPeriod($supplierId);
         foreach (self::CHECKLISTS[$phase] as $itemKey) {
             if (in_array($itemKey, $skipped, true)) {
                 continue;
@@ -2135,6 +2144,19 @@ final class PayrollEmploymentRepository
             // roku 2026). Založit ji a nechat obsluhu, ať ji odklikne jako
             // „netýká se", by byl planý poplach u každého skončení.
             if ($deadline === null) {
+                continue;
+            }
+            // Událost před začátkem vedení mezd v MyÚčtu vyřídil předchozí
+            // program — typicky převzetí vztahu z importu.
+            if (PayrollPredecessorObligationScope::handledByPredecessor(
+                $startPeriod,
+                $itemKey,
+                $phase,
+                $deadline->dueOn,
+                $phase === 'onboarding' ? $eventOn : null,
+                $phase === 'offboarding' ? $eventOn : null,
+                $phase === 'change' ? $eventOn : null,
+            )) {
                 continue;
             }
             $insert->execute([
@@ -2148,6 +2170,17 @@ final class PayrollEmploymentRepository
                 $deadline->sourceStatus,
             ]);
         }
+    }
+
+    private function moduleStartPeriod(int $supplierId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT start_period FROM payroll_module_state WHERE supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) ? $value : null;
     }
 
     private function lockEmployee(int $supplierId, int $employeeId): void
