@@ -656,7 +656,7 @@ const dirty = computed(() => !loading.value
   && profile.value !== null
   && (formFingerprint() !== formBaseline.value || rulesFingerprint() !== rulesBaseline.value))
 const { managed } = usePersonCardSaveSection({
-  key: 'profile',
+  key: 'advanced_profile',
   label: () => t('payroll.people.profile.title'),
   dirty: () => dirty.value,
   save,

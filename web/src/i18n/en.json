@@ -4765,7 +4765,10 @@
         "stopped": "Saving stopped at section {section}. Fix what the section points out and save again; the other edited sections remain unsaved.",
         "statutory_defaults": "Fill in standard records (Czech resident)",
         "a1_profile": "REGZEC A1 profile",
-        "health_notification": "Prepare health insurer notice"
+        "health_notification": "Prepare health insurer notice",
+        "dependant": "Dependant",
+        "dependant_claim": "Tax benefit claim",
+        "foreign_permit": "Residence and work permit"
       },
       "quick_edit": {
         "title": "Common employee details",

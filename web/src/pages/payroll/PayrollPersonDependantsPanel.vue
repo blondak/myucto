@@ -23,6 +23,7 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import DateInput from '@/components/ui/DateInput.vue'
+import { usePersonCardSaveSection } from './personCardSave'
 
 const props = defineProps<{ personId: number; canWrite: boolean }>()
 
@@ -222,6 +223,7 @@ function openDependantEditor(dependant: PayrollDependant | null): void {
   dependantForm.existence_to = dependant?.existence_to ?? ''
   dependantForm.note = dependant?.note ?? ''
   dependantForm.row_version = dependant?.row_version ?? 0
+  editorBaseline.value = editorFingerprint()
 }
 
 function openClaimEditor(dependant: PayrollDependant, claim: PayrollDependantClaim | null): void {
@@ -244,6 +246,7 @@ function openClaimEditor(dependant: PayrollDependant, claim: PayrollDependantCla
   claimForm.effective_from = claim?.effective_from ?? earliestClaimFrom(dependant, claimForm.claim_reason)
   claimForm.effective_to = claim?.effective_to ?? latestClaimTo(dependant) ?? ''
   claimForm.row_version = claim?.row_version ?? 0
+  editorBaseline.value = editorFingerprint()
 }
 
 /*
@@ -264,6 +267,29 @@ function setCreditStatus(status: PayrollDependantCreditStatus): void {
     claimForm.other_claimant_excluded = true
   }
 }
+
+/*
+ * Rozepsaná vyživovaná osoba nebo nárok se na kartě osoby ukládá společnou
+ * lištou; otisk formuláře se bere při otevření editoru.
+ */
+const editorBaseline = ref('')
+function editorFingerprint(): string {
+  return JSON.stringify(editor.value === 'claim' ? claimForm : dependantForm)
+}
+const { managed } = usePersonCardSaveSection({
+  key: 'advanced_profile',
+  label: () => t(editor.value === 'claim'
+    ? 'payroll.people.card_save.dependant_claim'
+    : 'payroll.people.card_save.dependant'),
+  // Nový záznam je rozdělaná práce hned: nárok přichází předvyplněný a často
+  // se jen potvrdí, takže „nic se nezměnilo" by ho nešlo uložit.
+  dirty: () => editor.value !== null && (
+    (editor.value === 'claim' ? editingClaimId.value : editingDependantId.value) === null
+    || editorFingerprint() !== editorBaseline.value
+  ),
+  save,
+  discard: closeEditor,
+})
 
 function closeEditor(): void {
   editor.value = null
@@ -387,11 +413,11 @@ function claimPayload(): PayrollDependantClaimPayload {
   return payload
 }
 
-async function save(): Promise<void> {
-  if (!props.canWrite || saving.value) return
+async function save(): Promise<boolean> {
+  if (!props.canWrite || saving.value) return false
   if (editor.value === 'dependant' && ztpPGrantMissing.value) {
     errorMessage.value = t('payroll.people.dependants.ztp_p_grant.required')
-    return
+    return false
   }
   saving.value = true
   errorMessage.value = ''
@@ -420,8 +446,10 @@ async function save(): Promise<void> {
     }
     toast.success(t('payroll.people.dependants.saved'))
     closeEditor()
+    return true
   } catch (error) {
     errorMessage.value = apiErrorMessage(error, t('payroll.people.dependants.save_failed'))
+    return false
   } finally {
     saving.value = false
   }
@@ -912,12 +940,15 @@ function creditLabel(claim: PayrollDependantClaim): string {
         {{ errorMessage }}
       </p>
 
-      <div class="sticky bottom-0 -mx-4 mt-4 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface/95 px-4 py-3 sm:-mx-6 sm:px-6">
+      <div
+        class="-mx-4 mt-4 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface/95 px-4 py-3 sm:-mx-6 sm:px-6"
+        :class="managed ? '' : 'sticky bottom-0'"
+      >
         <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="closeEditor">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
           {{ t('common.cancel') }}
         </button>
-        <button type="submit" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="saving || !canWrite" data-test="save-dependant">
+        <button v-if="!managed" type="submit" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="saving || !canWrite" data-test="save-dependant">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
           {{ t('common.save') }}
         </button>

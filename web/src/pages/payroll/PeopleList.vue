@@ -1086,7 +1086,7 @@ function updateQuickEdit(result: PayrollPersonQuickEditResponse) {
 function toggleAdvancedProfile(event: Event) {
   const element = event.currentTarget as HTMLDetailsElement
   // Sbalení panel odmontuje; rozepsaná osobní evidence by tím zmizela.
-  if (!element.open && cardSave.isDirty('profile')
+  if (!element.open && cardSave.isDirty('advanced_profile')
     && !window.confirm(t('payroll.people.card_save.collapse_confirm'))) {
     element.open = true
     return

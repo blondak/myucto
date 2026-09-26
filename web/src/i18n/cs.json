@@ -4765,7 +4765,10 @@
         "stopped": "Uložení se zastavilo u sekce {section}. Opravte údaje, na které sekce upozorňuje, a uložte znovu; ostatní rozepsané sekce zůstaly neuložené.",
         "statutory_defaults": "Doplnit běžné údaje (rezident ČR)",
         "a1_profile": "Profil REGZEC A1",
-        "health_notification": "Připravit oznámení ZP"
+        "health_notification": "Připravit oznámení ZP",
+        "dependant": "Vyživovaná osoba",
+        "dependant_claim": "Nárok na daňové zvýhodnění",
+        "foreign_permit": "Pobytové a pracovní oprávnění"
       },
       "quick_edit": {
         "title": "Běžné údaje zaměstnance",

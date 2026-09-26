@@ -88,6 +88,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 })
 
 import PeopleList from '@/pages/payroll/PeopleList.vue'
+import { usePersonCardSaveSection } from '@/pages/payroll/personCardSave'
 import { resetPayrollOffices } from '@/composables/usePayrollOffices'
 import { resetDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultInsurer'
 
@@ -1002,5 +1003,55 @@ describe('PeopleList toolbar and shared employee creation', () => {
 
     expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(false)
     expect(m.toastError).not.toHaveBeenCalled()
+  })
+
+  /**
+   * UX-1: karta měla až osm samostatných Uložit a neuložená sekce při
+   * přepnutí tiše zmizela. Sekce se hlásí ke společné liště dole.
+   */
+  it('jedno společné Uložit dole jmenuje rozdělané sekce a uloží je; zavření se zeptá', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'test', true, true), employments: [] })
+    const save = vi.fn(async () => true)
+    const DirtySection = defineComponent({
+      props: ['personId', 'canWrite'],
+      setup() {
+        const state = { dirty: true }
+        usePersonCardSaveSection({
+          label: () => 'Běžné údaje',
+          dirty: () => state.dirty,
+          save: async () => { state.dirty = false; return save() },
+          discard: () => { state.dirty = false },
+        })
+        return () => null
+      },
+    })
+    const wrapper = mount(PeopleList, {
+      global: {
+        stubs: {
+          ActionBar: true,
+          RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
+          EmploymentCard: true,
+          PayrollPersonQuickEdit: DirtySection,
+          PayrollPersonProfilePanel: true,
+          PayrollPersonStatutoryEvidencePanel: true,
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+
+    const bar = wrapper.get('[data-test="person-card-save-bar"]')
+    expect(bar.get('[data-test="person-card-save-sections"]').text()).toBe('Běžné údaje')
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    await wrapper.get('[data-test="back-to-people"]').trigger('click')
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(true)
+    confirmSpy.mockRestore()
+
+    await bar.get('[data-test="person-card-save"]').trigger('click')
+    await flushPromises()
+    expect(save).toHaveBeenCalledTimes(1)
   })
 })

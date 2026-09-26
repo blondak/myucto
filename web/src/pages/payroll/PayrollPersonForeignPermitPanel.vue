@@ -14,6 +14,7 @@ import CountrySelect from '@/components/ui/CountrySelect.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { addDaysIso } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import { usePersonCardSaveSection } from './personCardSave'
 
 const props = defineProps<{
   personId: number
@@ -71,6 +72,7 @@ function resetForm(): void {
   form.value = emptyForm()
   clearDocument()
   saveError.value = ''
+  formBaseline.value = JSON.stringify(form.value)
 }
 
 function statusClass(status: string): string {
@@ -137,13 +139,23 @@ async function load(): Promise<void> {
   }
 }
 
-async function save(): Promise<void> {
-  if (saving.value) return
+/* Rozepsané oprávnění se na kartě osoby ukládá společnou lištou. */
+const formBaseline = ref(JSON.stringify(emptyForm()))
+const { managed } = usePersonCardSaveSection({
+  key: 'advanced_profile',
+  label: () => t('payroll.people.card_save.foreign_permit'),
+  dirty: () => props.canWrite && JSON.stringify(form.value) !== formBaseline.value,
+  save,
+  discard: resetForm,
+})
+
+async function save(): Promise<boolean> {
+  if (saving.value) return false
   saveError.value = ''
   const documentId = validDocumentId()
   if (documentId === null) {
     saveError.value = t('payroll.people.foreign_permits.document_required')
-    return
+    return false
   }
   saving.value = true
   try {
@@ -157,8 +169,10 @@ async function save(): Promise<void> {
     })
     resetForm()
     toast.success(t('payroll.people.foreign_permits.saved'))
+    return true
   } catch (error) {
     saveError.value = apiErrorMessage(error, t('payroll.people.foreign_permits.save_failed'))
+    return false
   } finally {
     saving.value = false
   }
@@ -183,6 +197,7 @@ function editPermit(id: number): void {
   selectedDocument.value = null
   documentQuery.value = permit.document_id === null ? '' : `#${permit.document_id}`
   documentCandidates.value = []
+  formBaseline.value = JSON.stringify(form.value)
 }
 
 async function removePermit(id: number): Promise<void> {
@@ -340,7 +355,7 @@ onMounted(() => { void load() })
             <button v-if="editingId !== null" type="button" :class="btnOutline('neutral')" data-test="foreign-permit-cancel" @click="resetForm">
               {{ t('common.cancel') }}
             </button>
-            <button type="submit" :class="btnFilled('primary')" :disabled="saving" data-test="foreign-permit-save">
+            <button v-if="!managed" type="submit" :class="btnFilled('primary')" :disabled="saving" data-test="foreign-permit-save">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
               {{ saving ? t('common.saving') : t('payroll.people.foreign_permits.save') }}
             </button>
