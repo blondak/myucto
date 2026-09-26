@@ -17,7 +17,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Podání ČSSZ, která za firmu podal předchozí mzdový program (převod z PAMICA,
  * nahrané XML hlášení).
  *
- *   GET    /api/payroll/submissions/jmhz-external        přehled (bez obsahu podání)
+ *   GET    /api/payroll/submissions/jmhz-external        přehled (osoby a akce, bez obsahu podání)
+ *   GET    /api/payroll/submissions/jmhz-external/{id}   detail: všechny formuláře s osobou, akcí a dnem účinnosti
  *   DELETE /api/payroll/submissions/jmhz-external/{id}   odebrání záznamu z historie
  *
  * Záznam blokuje přípravu řádného hlášení za týž měsíc. Když neodpovídá skutečnosti
@@ -48,6 +49,28 @@ final class PayrollJmhzExternalSubmissionAction
             'environment' => $environment,
             'items' => $this->store->overview($this->currentSupplierId($request), $environment),
         ]));
+    }
+
+    /** @param array<string,string> $args */
+    public function detail(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $denied;
+        }
+        $environment = $this->environment($request);
+        if ($environment === null) {
+            return $this->invalid($response, 'Prostředí musí být test nebo production.');
+        }
+        $id = filter_var($args['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if (!is_int($id)) {
+            return $this->invalid($response, 'Podání musí být kladné celé číslo.');
+        }
+        $detail = $this->store->detail($this->currentSupplierId($request), $environment, $id);
+        if ($detail === null) {
+            return $this->noStore(Json::error($response, 'not_found', 'Převzaté podání v téhle firmě není.', 404));
+        }
+
+        return $this->noStore(Json::ok($response, $detail));
     }
 
     /** @param array<string,string> $args */

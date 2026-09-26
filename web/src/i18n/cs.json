@@ -9794,7 +9794,8 @@
         "reported_by_employer": "Hlásí zaměstnavatel (celý měsíc)",
         "code_undocumented": "Bez kódu změny (celý měsíc)",
         "overdue": "Po lhůtě (celý měsíc)",
-        "scope_note": "Dlaždice počítají celý měsíc, ne zúžený výběr v tabulce — filtrem se propadlý termín schovat nedá."
+        "scope_note": "Dlaždice počítají celý měsíc, ne zúžený výběr v tabulce — filtrem se propadlý termín schovat nedá.",
+        "predecessor": "{count} oznámení z doby před začátkem vedení mezd v MyÚčtu vyřídil předchozí program; do lhůt se nepočítají a synchronizace je nezakládá."
       },
       "unresolved": {
         "title": "Vztahy, u kterých povinnost odvodit nelze ({count})"
@@ -9823,12 +9824,14 @@
       },
       "deadline": {
         "employer": "Běží zaměstnavateli",
-        "none": "Zaměstnavateli neběží"
+        "none": "Zaměstnavateli neběží",
+        "predecessor": "Oznámil předchozí program"
       },
       "state": {
         "needs_sync": "Vyhodnoceno; synchronizujte do inboxu",
         "obligation_registered": "V inboxu; HOZ podejte ručně",
-        "insured_reports": "Hlásí sám pojištěnec"
+        "insured_reports": "Hlásí sám pojištěnec",
+        "predecessor": "Před začátkem vedení mezd v MyÚčtu; vyřídil předchozí program"
       },
       "kind": {
         "employment_start": "Nástup do zaměstnání",
@@ -10005,6 +10008,19 @@
         "partially_accepted": "Přijato částečně",
         "rejected": "Odmítnuto",
         "other": "Jiný stav podání"
+      },
+      "filter": {
+        "summary": "Dohlášení potřebuje {pending} z {total} vztahů",
+        "predecessor": "{count} vyřídil předchozí program",
+        "show_all": "Zobrazit všechny vztahy",
+        "nothing_pending": "Žádný vztah dohlášení nepotřebuje. Vztahy, které vyřídil předchozí program nebo MyÚčto, ukáže volba Zobrazit všechny vztahy; ručně dohlásit je jde i tak."
+      },
+      "predecessor": {
+        "badge": "Dohlášeno předchozím programem",
+        "registration": "{program} podal registraci {action} dne {date}.",
+        "program": "Předchozí program",
+        "open": "Zobrazit podání",
+        "deadline": "Lhůta dohlášení (30. 4. 2026) uplynula před začátkem vedení mezd v MyÚčtu, dohlášení tedy vyřídil předchozí program. Když ho ČSSZ nemá, dohlaste ho ručně."
       }
     },
     "discountIntents": {
@@ -11385,17 +11401,55 @@
       "open_migration": "Otevřít převod z PAMICA",
       "unsent_title": "Hlášení za {period} předchozí program neodeslal",
       "unsent_hint": "PAMICA hlášení připravila, ale ČSSZ ho nedostala. Odešlete ho z předchozího programu (měsíce před začátkem vedení mezd MyÚčto nepočítá). Když už odešlo, převod z PAMICA zopakujte s novým exportem, stav se doplní.",
-      "col_period": "Období",
-      "col_type": "Podání",
-      "col_status": "Stav",
-      "col_submitted": "Odesláno",
-      "col_accepted": "Přijato",
-      "col_forms": "Formuláře",
       "col_source": "Zdroj",
-      "forms_matched": "{matched} z {total} spárováno",
-      "remove": "Odebrat",
-      "remove_confirm": "Odebrat z historie {what} za {period}? Použijte jen tehdy, když záznam neodpovídá skutečnosti (hlášení ve skutečnosti neodešlo nebo patří jiné firmě). Za měsíc bez odeslaného hlášení pak MyÚčto řádné hlášení připraví.",
+      "col_result": "Výsledek",
+      "col_guid": "GUID podání",
+      "col_corrects": "Opravuje podání",
+      "col_person": "Osoba",
+      "col_action": "Akce",
+      "col_effective": "Účinnost",
+      "forms_matched": "{matched} z {total} osob spárováno",
+      "more_people": "a dalších {count}",
+      "effective": "účinnost {dates}",
+      "no_period": "Bez období",
+      "unmatched_person": "nespárovaná osoba",
+      "unmatched_form": "Nespárováno se vztahem v MyÚčtu (vztah {ref} v předchozím programu)",
+      "unreadable": "Obsah formuláře se nepodařilo přečíst; je uložený v historii, údaje z něj se nepřevzaly.",
+      "detail": "Detail",
+      "detail_failed": "Detail podání se nepodařilo načíst.",
+      "detail_title_registration": "Registrace zaměstnanců odeslaná {date}",
+      "detail_title_monthly": "{type} za {period}",
+      "section": {
+        "monthly": "Měsíční hlášení JMHZ",
+        "monthly_hint": "Za měsíc s odeslaným řádným hlášením MyÚčto řádné hlášení znovu nepřipraví.",
+        "registration": "Registrace zaměstnanců (REGZEC)",
+        "registration_hint": "Přihlášky (A1), odhlášky (A2) a změny nebo dohlášení údajů (A3), které podal předchozí program. Vztah s registrací tady se v Dohlášení údajů (A3) počítá jako vyřízený."
+      },
+      "action": {
+        "A1": "A1 přihláška",
+        "A2": "A2 odhláška",
+        "A3": "A3 změna / dohlášení údajů",
+        "R": "řádný formulář",
+        "O": "opravný formulář",
+        "S": "stornující formulář",
+        "other": "akce {code}"
+      },
+      "result": {
+        "accepted": "Přijato ČSSZ {date}",
+        "sent": "Odesláno {date}, přijetí předchozí program nezaznamenal",
+        "not_sent": "Neodesláno: ČSSZ podání nedostala"
+      },
+      "remove": "Odebrat z historie",
       "remove_failed": "Záznam se nepodařilo odebrat.",
+      "remove_dialog": {
+        "title": "Odebrat podání z historie?",
+        "when": "Odebírejte jen záznam, který převod převzal chybně: podání ve skutečnosti neodešlo, patří jiné firmě nebo se nahrálo omylem. Podání, které ČSSZ opravdu dostala, v historii nechte.",
+        "monthly_sent": "MyÚčto pak bude brát {period} jako měsíc bez odeslaného řádného hlášení a nabídne jeho přípravu. Když hlášení ČSSZ ve skutečnosti má, druhé řádné hlášení zamítne.",
+        "monthly_unsent": "Neodeslané hlášení nic neblokuje; odebráním jen zmizí upozornění na neodeslaný měsíc.",
+        "registration": "Vztahy z tohoto podání přestanou v Dohlášení údajů (A3) platit za vyřízené předchozím programem.",
+        "restore": "Záznam se vrátí, když převod z předchozího programu zopakujete.",
+        "confirm": "Odebrat z historie"
+      },
       "type": {
         "R": "Řádné hlášení",
         "O": "Opravné hlášení",
@@ -26417,6 +26471,29 @@
       "automatic_summary": "Týden {hours} · výměra {weeks} týdnů · započteno {worked}",
       "ready": "Připraveno",
       "needs_attention": "Doplnit",
+      "open_assessment": "Přejít na posouzení absencí",
+      "open_employment": "Otevřít kartu pracovního vztahu a doplnit podklady",
+      "takeover": "Převzato",
+      "takeover_summary": "Nárok roku určil předchozí program; převodem přišel zůstatek {hours} h (účinnost {date}). Znovu se nepočítá, aby se nárok nezapočetl dvakrát.",
+      "predecessor_absences": "Absence z doby před začátkem vedení mezd v MyÚčtu ({count}) posoudil předchozí program.",
+      "assessment": {
+        "title": "Posouzení jiných absencí (§ 216 odst. 2 a § 348 odst. 1 ZP)",
+        "intro": "U vztahů níže je v roce schválená absence jiná než dovolená. Pro nárok na dovolenou se jako odpracovaná doba počítají jen některé. Rozhodněte jednou za každý druh absence; rozhodnutí platí pro všechny vztahy na stránce a zapíše se do zdůvodnění nároku.",
+        "count": "{people} vztahů, {absences} absencí",
+        "include": "Započítat",
+        "exclude": "Nezapočítat",
+        "decided_include": "započítat",
+        "decided_exclude": "nezapočítat",
+        "after": "Po rozhodnutí se dotčené vztahy označí jako připravené; vyberte je a stiskněte Spočítat vybrané. Výjimku pro jednoho člověka (třeba pracovní úraz) spočítejte v části Ruční výpočet a opravy.",
+        "hint_by_type": {
+          "dpn": "Pracovní neschopnost se započítá nejvýše do 20násobku týdenní pracovní doby za rok; automat limit hlídá. Pracovní úraz a nemoc z povolání se započítávají celé, spočítejte je ručně.",
+          "quarantine": "Karanténa se posuzuje jako pracovní neschopnost: započítá se nejvýše do 20násobku týdenní pracovní doby za rok.",
+          "ppm": "Mateřská dovolená se pro dovolenou posuzuje jako výkon práce, obvykle tedy Započítat.",
+          "parental": "Rodičovská dovolená se započítává jen u otce po dobu, kdy by matka mohla čerpat mateřskou; jinak Nezapočítat.",
+          "unpaid_leave": "Neplacené volno na žádost zaměstnance výkonem práce není, obvykle tedy Nezapočítat.",
+          "other": "Posuďte podle § 216 odst. 2 a § 348 odst. 1 zákoníku práce, jestli se doba pro dovolenou považuje za výkon práce."
+        }
+      },
       "manual_tools": "Ruční výpočet a opravy",
       "manual_tools_hint": "Použijte jen pro výjimky, které nelze bezpečně odvodit z uložených podkladů.",
       "blockers": {

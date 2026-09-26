@@ -293,6 +293,20 @@ describe('PayrollHealthNotificationPanel', () => {
     expect(rows[0].text()).toContain('P')
   })
 
+  it('oznámení z doby před MyÚčtem ukáže jako vyřízené předchozím programem, ne po lhůtě', async () => {
+    m.duties.mockResolvedValue(dutyPage({
+      items: [dutyItem({ handled_by_predecessor: true, deadline: { ...dutyItem().deadline, due_on: '2026-03-11' } })],
+      summary: { ...dutyPage().summary, overdue: 0, handled_by_predecessor: 1 },
+    }))
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+
+    const badge = wrapper.get('[data-test="health-notification-deadline"]')
+    expect(badge.text()).toContain('payroll.health_notifications.deadline.predecessor')
+    expect(badge.classes()).not.toContain('bg-danger-50')
+    expect(wrapper.find('[data-test="health-notifications-summary-predecessor"]').exists()).toBe(true)
+  })
+
   /**
    * Jádro zadání: omezení musí být vidět DŘÍV, než na ně uživatel narazí.
    * Panel s omezeními se proto vykresluje vždy, ne až po chybě.

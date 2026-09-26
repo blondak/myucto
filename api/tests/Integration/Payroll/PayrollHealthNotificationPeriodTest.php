@@ -111,6 +111,27 @@ final class PayrollHealthNotificationPeriodTest extends TestCase
     }
 
     /**
+     * Převzatá firma: nástup z doby před prvním mzdovým obdobím v MyÚčtu
+     * oznamoval předchozí program. Přehled ho dřív počítal jako po lhůtě
+     * a synchronizace z něj zakládala povinnost k podání.
+     */
+    public function testEventBeforeStartPeriodIsHandledByPredecessor(): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_module_state (supplier_id, status, start_period) VALUES (?, 'setup', '2026-07-01')
+             ON DUPLICATE KEY UPDATE start_period = VALUES(start_period)"
+        )->execute([$this->supplierId]);
+
+        $page = $this->service->dutiesForPeriod($this->supplierId, 'production', '2026-06');
+
+        self::assertSame(1, $page['total'], 'Povinnost zůstává vidět, jen jako vyřízená.');
+        self::assertTrue($page['items'][0]['handled_by_predecessor']);
+        self::assertSame(0, $page['summary']['overdue']);
+        self::assertSame(1, $page['summary']['handled_by_predecessor']);
+        self::assertSame(0, $this->service->registerPeriodObligations($this->supplierId, 'production', '2026-06')['total']);
+    }
+
+    /**
      * Skutečnost mimo období se nevrací, i když vztah v období trvá — jinak
      * by přehled za červen připomínal lhůtu, která uplynula v březnu.
      */

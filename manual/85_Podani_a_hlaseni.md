@@ -311,9 +311,15 @@ oddíl s podáními, která za ni podal předchozí program: měsíční hláše
 a registrace zaměstnanců převzaté převodem z PAMICA
 ([§ 108.12](108_Prechod_z_PAMICA.md#10812-odeslana-hlaseni-jmhz-a-registrace))
 a měsíční hlášení nahraná jako XML v `Mzdy → Importy → JMHZ`.
-U každého je období, druh (řádné, opravné, registrace), stav odeslání, kdy
-podání odešlo a kdy ho ČSSZ přijala a kolik formulářů se spárovalo se vztahy
-v evidenci. Firma bez převodu tenhle oddíl nevidí.
+Oddíl je rozdělený na **měsíční hlášení JMHZ** (seskupená po období)
+a **registrace zaměstnanců** (seskupené po měsíci odeslání). U každého podání
+je druh, stav, akce s počtem formulářů (u registrací *A1 přihláška*,
+*A2 odhláška*, *A3 změna / dohlášení údajů*), jména osob, u registrací den
+účinnosti, výsledek (přijato ČSSZ, odesláno bez zaznamenaného přijetí,
+neodesláno) a kolik osob se spárovalo se vztahy v evidenci. Tlačítko
+**Detail** ukáže všechny formuláře podání: osobu s odkazem na její kartu,
+akci a den účinnosti; formulář, který se se vztahem nespároval, nese číslo
+vztahu v předchozím programu. Firma bez převodu tenhle oddíl nevidí.
 
 **Měsíc, za který řádné hlášení odešlo, MyÚčto znovu nepodá.** Druhé řádné
 hlášení za stejný měsíc ČSSZ zamítne jako duplicitní (kontrola č. 22 katalogu
@@ -325,11 +331,14 @@ jako opravné podání z programu, který řádné hlášení podal.
 připravil, ale neodeslal, oddíl na to upozorní: ČSSZ ho nemá a je potřeba ho
 podat.
 
-**Záznam, který neodpovídá, odeberte.** Tlačítko *Odebrat* u řádku po
-potvrzení záznam z historie smaže, třeba když hlášení ve skutečnosti neodešlo
-nebo soubor patří jiné firmě. Za měsíc bez odeslaného hlášení pak MyÚčto řádné
-hlášení připraví. Odebírá uživatel s oprávněním zápisu podání
-(`payroll.submissions`).
+**Záznam, který převod převzal chybně, jde odebrat.** Volba *Odebrat
+z historie* je v nabídce **…** u podání. Dialog vysvětlí, kdy odebrání použít
+(podání ve skutečnosti neodešlo, patří jiné firmě, nahrálo se omylem) a co se
+stane: za měsíc bez odeslaného řádného hlášení MyÚčto hlášení připraví
+a vztahy z odebrané registrace přestanou v Dohlášení údajů (A3) platit za
+vyřízené předchozím programem. Podání, které ČSSZ opravdu dostala, v historii
+nechte. Po zopakování převodu se záznam vrátí. Odebírá uživatel s oprávněním
+zápisu podání (`payroll.submissions`).
 
 ## 85.8 Kontroly a bezpečnost
 
@@ -952,6 +961,16 @@ odeslání a stiskněte **Dohlásit vybrané**. Vada u jednoho vztahu ostatní
 nezastaví — důvod se ukáže v jeho řádku. Připravená podání pak odešlete ze
 záložky **K odeslání**.
 
+U firmy převedené z jiného mzdového programu seznam ve výchozím stavu ukazuje
+jen vztahy, které dohlášení opravdu potřebují. Vztah, za který předchozí
+program registraci podal (v historii **Podání předchozím programem** je
+odeslaná přihláška A1 nebo dohlášení A3), má štítek **Dohlášeno předchozím
+programem** a odkaz na to podání. Stejně se čte vztah, u kterého lhůta
+dohlášení (30. 4. 2026) uplynula před prvním mzdovým obdobím v MyÚčtu, a vztah,
+který nastoupil po 31. 3. 2026, ale před tímto obdobím: přihlášku i dohlášení
+tehdy vyřizoval předchozí program. Volba **Zobrazit všechny vztahy** je ukáže
+a ručně dohlásit je jde i tak, třeba když ČSSZ dohlášení nemá.
+
 Dohlášení jde i za vztah, který už skončil. Údaje se pak čtou ke dni skončení
 a podání nese i datum skončení, jak to ČSSZ u ukončených vztahů vyžaduje.
 
@@ -1223,6 +1242,12 @@ Záložky zdravotních pojišťoven oddělují dvě povinnosti:
 - **HOZ** je hromadné oznámení zaměstnavatele. Aplikace povinnosti odvodí,
   sestaví z nich datovou větu XML i PDF a obojí zmrazí. Připravený soubor není
   odeslaný — odeslání datovou schránkou musíte potvrdit sami.
+
+U firmy převedené z jiného mzdového programu ukazuje záložka **ZP — oznámení**
+i události z měsíců před prvním mzdovým obdobím v MyÚčtu, ale jako
+**Oznámil předchozí program**: nepočítají se do dlaždice *Po lhůtě*
+a synchronizace do inboxu z nich povinnost nezaloží. Když pojišťovna takové
+oznámení nemá, hromadné oznámení za ten měsíc jde připravit ručně.
 
 Kód změny v HOZ se určuje podle skutečnosti a podle zaměstnance:
 

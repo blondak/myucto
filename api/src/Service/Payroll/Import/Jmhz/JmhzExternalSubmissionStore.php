@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Import\Jmhz;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 
@@ -26,6 +27,12 @@ final class JmhzExternalSubmissionStore
     public const SOURCE_JMHZ_XML = 'jmhz_xml';
     public const STATUS_SENT = 'sent';
     public const STATUS_NOT_SENT = 'not_sent';
+
+    /** Věta registrace ({@see PohodaPayrollJmhzWriter}) => akce REGZEC. */
+    private const REGISTRATION_ACTIONS = ['start' => 'A1', 'end' => 'A2', 'existing' => 'A3'];
+
+    /** Kolik osob měsíčního hlášení ukáže přehled; celý seznam je v detailu. */
+    private const PEOPLE_PREVIEW = 3;
 
     public function __construct(
         private readonly Connection $db,
@@ -164,28 +171,205 @@ final class JmhzExternalSubmissionStore
               ORDER BY s.document_kind, s.period DESC, COALESCE(s.submitted_at, s.filled_at) DESC, s.id DESC'
         );
         $stmt->execute([$supplierId, $environment]);
+        $forms = $this->formSummaries($supplierId, $environment, null);
         $out = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            $out[] = [
-                'id' => (int) $row['id'],
-                'source' => (string) $row['source'],
-                'document_kind' => (string) $row['document_kind'],
-                'period' => $row['period'],
-                'submission_type' => $row['submission_type'],
-                'submission_guid' => $row['submission_guid'],
-                'status' => (string) $row['status'],
-                'filled_at' => $row['filled_at'],
-                'submitted_at' => $row['submitted_at'],
-                'accepted_at' => $row['accepted_at'],
-                'form_count' => (int) $row['form_count'],
-                'matched_forms' => (int) $row['matched_forms'],
-                'program' => $row['program'],
-                'file_name' => $row['file_name'],
-                'updated_at' => $row['updated_at'],
+            $out[] = $this->withForms($row, $forms[(int) $row['id']] ?? [], self::PEOPLE_PREVIEW);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Jedno převzaté podání k přečtení: hlavička, výsledek a všechny formuláře
+     * s osobou, akcí a dnem účinnosti. Obsah dokladu se neposílá celý, jen
+     * údaje, podle kterých uživatel pozná, co se podalo (rodná čísla ani částky
+     * z podání neodcházejí).
+     *
+     * @return array<string,mixed>|null
+     */
+    public function detail(int $supplierId, string $environment, int $id): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT s.id, s.source, s.document_kind, s.period, s.submission_type, s.submission_guid, s.status,
+                    s.filled_at, s.submitted_at, s.accepted_at, s.form_count, s.program, s.file_name, s.updated_at,
+                    s.corrected_source_key, s.source_key,
+                    (SELECT COUNT(*) FROM payroll_external_jmhz_submission_forms f
+                      WHERE f.supplier_id = s.supplier_id AND f.submission_id = s.id AND f.employment_id IS NOT NULL) AS matched_forms
+               FROM payroll_external_jmhz_submissions s
+              WHERE s.supplier_id = ? AND s.environment = ? AND s.id = ?'
+        );
+        $stmt->execute([$supplierId, $environment, $id]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $forms = $this->formSummaries($supplierId, $environment, $id)[$id] ?? [];
+        $out = $this->withForms($row, $forms, null);
+        $out['forms'] = $forms;
+        $out['corrects'] = null;
+        if ($row['corrected_source_key'] !== null) {
+            $corrected = $this->db->pdo()->prepare(
+                'SELECT id, period, submission_type, submitted_at FROM payroll_external_jmhz_submissions
+                  WHERE supplier_id = ? AND environment = ? AND source = ? AND source_key = ?'
+            );
+            $corrected->execute([$supplierId, $environment, $row['source'], $row['corrected_source_key']]);
+            $target = $corrected->fetch(\PDO::FETCH_ASSOC);
+            if ($target !== false) {
+                $out['corrects'] = [
+                    'id' => (int) $target['id'],
+                    'period' => $target['period'],
+                    'submission_type' => $target['submission_type'],
+                    'submitted_at' => $target['submitted_at'],
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @param list<array<string,mixed>> $forms
+     * @return array<string,mixed>
+     */
+    private function withForms(array $row, array $forms, ?int $preview): array
+    {
+        $actions = [];
+        $effective = [];
+        foreach ($forms as $form) {
+            $action = (string) ($form['action'] ?? '?');
+            $actions[$action] = ($actions[$action] ?? 0) + 1;
+            if (is_string($form['effective_on'])) {
+                $effective[] = $form['effective_on'];
+            }
+        }
+        ksort($actions);
+        sort($effective);
+        $people = $row['document_kind'] === 'registration' || $preview === null
+            ? $forms
+            : array_slice($forms, 0, $preview);
+
+        return [
+            'id' => (int) $row['id'],
+            'source' => (string) $row['source'],
+            'document_kind' => (string) $row['document_kind'],
+            'period' => $row['period'],
+            'submission_type' => $row['submission_type'],
+            'submission_guid' => $row['submission_guid'],
+            'status' => (string) $row['status'],
+            'filled_at' => $row['filled_at'],
+            'submitted_at' => $row['submitted_at'],
+            'accepted_at' => $row['accepted_at'],
+            'form_count' => (int) $row['form_count'],
+            'matched_forms' => (int) $row['matched_forms'],
+            'program' => $row['program'],
+            'file_name' => $row['file_name'],
+            'updated_at' => $row['updated_at'],
+            'actions' => $actions,
+            'people' => array_map(static fn (array $form): array => [
+                'employee_id' => $form['employee_id'],
+                'employment_id' => $form['employment_id'],
+                'name' => $form['name'],
+                'code' => $form['code'],
+                'action' => $form['action'],
+                'effective_on' => $form['effective_on'],
+            ], $people),
+            'effective_from' => $effective[0] ?? null,
+            'effective_to' => $effective === [] ? null : $effective[count($effective) - 1],
+        ];
+    }
+
+    /**
+     * Formuláře podání s osobou, akcí a dnem účinnosti, podle podání. Obsah se
+     * odpečetí jen u registrací (den účinnosti je uvnitř); měsíční hlášení mají
+     * akci v hlavičce formuláře.
+     *
+     * @return array<int,list<array{position:int,employee_id:?int,employment_id:?int,name:?string,code:?string,
+     *   source_relation_ref:?string,action:?string,form_type:?string,effective_on:?string,unreadable:bool}>>
+     */
+    private function formSummaries(int $supplierId, string $environment, ?int $submissionId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT f.id, f.submission_id, f.position, f.form_type, f.employee_id, f.employment_id, f.source_relation_ref,
+                    s.document_kind, employee.full_name, employment.code,
+                    CASE WHEN s.document_kind = "registration" OR s.id = ? THEN f.payload_ciphertext END AS payload
+               FROM payroll_external_jmhz_submission_forms f
+               JOIN payroll_external_jmhz_submissions s
+                 ON s.supplier_id = f.supplier_id AND s.id = f.submission_id
+               LEFT JOIN payroll_employees employee
+                 ON employee.supplier_id = f.supplier_id AND employee.id = f.employee_id
+               LEFT JOIN payroll_employments employment
+                 ON employment.supplier_id = f.supplier_id AND employment.id = f.employment_id
+              WHERE f.supplier_id = ? AND s.environment = ? AND (? IS NULL OR s.id = ?)
+              ORDER BY f.submission_id, f.position'
+        );
+        $stmt->execute([$submissionId ?? 0, $supplierId, $environment, $submissionId, $submissionId]);
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $payload = [];
+            if (is_string($row['payload']) && str_starts_with($row['payload'], 'enc:v2:')) {
+                try {
+                    $payload = json_decode($this->sensitive->reveal($row['payload'], PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD,
+                        $supplierId, (int) $row['id'], PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION), true) ?: [];
+                } catch (\Throwable) {
+                    $payload = [];
+                }
+            }
+            $formType = $row['form_type'] === null ? null : (string) $row['form_type'];
+            $registration = $row['document_kind'] === 'registration';
+            $out[(int) $row['submission_id']][] = [
+                'position' => (int) $row['position'],
+                'employee_id' => $row['employee_id'] === null ? null : (int) $row['employee_id'],
+                'employment_id' => $row['employment_id'] === null ? null : (int) $row['employment_id'],
+                'name' => $row['full_name'] === null ? null : (string) $row['full_name'],
+                'code' => $row['code'] === null ? null : (string) $row['code'],
+                'source_relation_ref' => $row['source_relation_ref'],
+                'action' => $registration ? (self::REGISTRATION_ACTIONS[$formType] ?? $formType) : $formType,
+                'form_type' => $formType,
+                'effective_on' => $registration ? self::effectiveOn($formType, $payload['attributes'] ?? []) : null,
+                'unreadable' => is_string($payload['error'] ?? null),
             ];
         }
 
         return $out;
+    }
+
+    /**
+     * Den účinnosti registrace z obsahu věty: nástup (10223) u přihlášky,
+     * skončení (10224) u odhlášky, jinak „platnost od" (10009).
+     *
+     * @param mixed $attributes
+     */
+    private static function effectiveOn(?string $formType, mixed $attributes): ?string
+    {
+        if (!is_array($attributes)) {
+            return null;
+        }
+        $values = [];
+        foreach ($attributes as $attribute) {
+            if (!is_array($attribute) || !isset($attribute['id'], $attribute['value']) || (int) ($attribute['order'] ?? 0) !== 0) {
+                continue;
+            }
+            $values[(int) $attribute['id']] ??= (string) $attribute['value'];
+        }
+        $order = match ($formType) {
+            'start' => [10223, 10009],
+            'end' => [10224, 10009],
+            default => [10009],
+        };
+        foreach ($order as $id) {
+            $value = trim($values[$id] ?? '');
+            if (preg_match('/^(\d{4}-\d{2}-\d{2})/', $value, $m) === 1) {
+                return $m[1];
+            }
+            // PAMICA ukládá atributy v českém zápisu.
+            if (preg_match('/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/D', $value, $m) === 1 && checkdate((int) $m[2], (int) $m[1], (int) $m[3])) {
+                return sprintf('%04d-%02d-%02d', (int) $m[3], (int) $m[2], (int) $m[1]);
+            }
+        }
+
+        return null;
     }
 
     /**

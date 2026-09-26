@@ -9794,7 +9794,8 @@
         "reported_by_employer": "Reported by employer (whole month)",
         "code_undocumented": "Without change code (whole month)",
         "overdue": "Past deadline (whole month)",
-        "scope_note": "The tiles count the whole month, not the narrowed selection in the table — a filter cannot hide a missed deadline."
+        "scope_note": "The tiles count the whole month, not the narrowed selection in the table — a filter cannot hide a missed deadline.",
+        "predecessor": "{count} notifications from before payroll started in MyÚčto were handled by the previous program; they do not count toward deadlines and synchronization does not create them."
       },
       "unresolved": {
         "title": "Relationships whose duty cannot be resolved ({count})"
@@ -9823,12 +9824,14 @@
       },
       "deadline": {
         "employer": "Runs for the employer",
-        "none": "Does not run for the employer"
+        "none": "Does not run for the employer",
+        "predecessor": "Notified by the previous program"
       },
       "state": {
         "needs_sync": "Evaluated; synchronize to inbox",
         "obligation_registered": "In inbox; file HOZ manually",
-        "insured_reports": "Reported by the insured person"
+        "insured_reports": "Reported by the insured person",
+        "predecessor": "Before payroll started in MyÚčto; handled by the previous program"
       },
       "kind": {
         "employment_start": "Employment start",
@@ -10005,6 +10008,19 @@
         "partially_accepted": "Partially accepted",
         "rejected": "Rejected",
         "other": "Other filing state"
+      },
+      "filter": {
+        "summary": "{pending} of {total} relationships need the completion",
+        "predecessor": "{count} handled by the previous program",
+        "show_all": "Show all relationships",
+        "nothing_pending": "No relationship needs the completion. Relationships handled by the previous program or MyÚčto appear under Show all relationships; you can still file them manually."
+      },
+      "predecessor": {
+        "badge": "Filed by the previous program",
+        "registration": "{program} filed registration {action} on {date}.",
+        "program": "The previous program",
+        "open": "Show filing",
+        "deadline": "The completion deadline (30 April 2026) passed before payroll started in MyÚčto, so the previous program handled it. If ČSSZ does not have it, file it manually."
       }
     },
     "discountIntents": {
@@ -11385,17 +11401,55 @@
       "open_migration": "Open the PAMICA migration",
       "unsent_title": "The previous program did not send the report for {period}",
       "unsent_hint": "PAMICA prepared the report, but ČSSZ never received it. Send it from the previous program (MyÚčto does not calculate months before payroll started in MyÚčto). If it has been sent since, repeat the PAMICA migration with a new export and the status will be updated.",
-      "col_period": "Period",
-      "col_type": "Submission",
-      "col_status": "Status",
-      "col_submitted": "Sent",
-      "col_accepted": "Accepted",
-      "col_forms": "Forms",
       "col_source": "Source",
-      "forms_matched": "{matched} of {total} matched",
-      "remove": "Remove",
-      "remove_confirm": "Remove {what} for {period} from the history? Use this only when the record does not match reality (the report was not actually sent or belongs to another company). MyÚčto then prepares the regular report for a month without a sent report.",
+      "col_result": "Result",
+      "col_guid": "Submission GUID",
+      "col_corrects": "Corrects submission",
+      "col_person": "Person",
+      "col_action": "Action",
+      "col_effective": "Effective",
+      "forms_matched": "{matched} of {total} people matched",
+      "more_people": "and {count} more",
+      "effective": "effective {dates}",
+      "no_period": "No period",
+      "unmatched_person": "unmatched person",
+      "unmatched_form": "Not matched to a relationship in MyÚčto (relationship {ref} in the previous program)",
+      "unreadable": "The form content could not be read; it is kept in the history, no data was taken from it.",
+      "detail": "Detail",
+      "detail_failed": "The submission detail could not be loaded.",
+      "detail_title_registration": "Employee registrations sent {date}",
+      "detail_title_monthly": "{type} for {period}",
+      "section": {
+        "monthly": "Monthly JMHZ reports",
+        "monthly_hint": "For a month with a sent regular report, MyÚčto does not prepare another regular report.",
+        "registration": "Employee registrations (REGZEC)",
+        "registration_hint": "Registrations (A1), deregistrations (A2) and changes or completions of data (A3) filed by the previous program. A relationship registered here counts as done in Data completion (A3)."
+      },
+      "action": {
+        "A1": "A1 registration",
+        "A2": "A2 deregistration",
+        "A3": "A3 change / data completion",
+        "R": "regular form",
+        "O": "corrective form",
+        "S": "cancelling form",
+        "other": "action {code}"
+      },
+      "result": {
+        "accepted": "Accepted by ČSSZ {date}",
+        "sent": "Sent {date}, the previous program recorded no acceptance",
+        "not_sent": "Not sent: ČSSZ never received it"
+      },
+      "remove": "Remove from history",
       "remove_failed": "The record could not be removed.",
+      "remove_dialog": {
+        "title": "Remove the submission from the history?",
+        "when": "Remove only a record the migration took over by mistake: the submission was not actually sent, belongs to another company or was uploaded by mistake. Keep submissions ČSSZ actually received.",
+        "monthly_sent": "MyÚčto will then treat {period} as a month without a sent regular report and offer to prepare it. If ČSSZ does have the report, it rejects a second regular report.",
+        "monthly_unsent": "An unsent report blocks nothing; removing it only hides the unsent month warning.",
+        "registration": "The relationships in this submission will no longer count as completed by the previous program in Data completion (A3).",
+        "restore": "The record comes back when you repeat the migration from the previous program.",
+        "confirm": "Remove from history"
+      },
       "type": {
         "R": "Regular report",
         "O": "Corrective report",
@@ -26417,6 +26471,29 @@
       "automatic_summary": "Week {hours} · allowance {weeks} weeks · qualifying {worked}",
       "ready": "Ready",
       "needs_attention": "Complete",
+      "open_assessment": "Go to the absence assessment",
+      "open_employment": "Open the employment card and complete the inputs",
+      "takeover": "Taken over",
+      "takeover_summary": "The previous program set this year's entitlement; the migration brought a balance of {hours} h (effective {date}). It is not calculated again so the entitlement is not counted twice.",
+      "predecessor_absences": "Absences from before payroll started in MyÚčto ({count}) were assessed by the previous program.",
+      "assessment": {
+        "title": "Assessment of other absences (§ 216(2) and § 348(1) of the Labour Code)",
+        "intro": "The relationships below have an approved absence other than leave in this year. Only some absences count as worked time for the leave entitlement. Decide once per absence type; the decision applies to all relationships on the page and is recorded in the entitlement rationale.",
+        "count": "{people} relationships, {absences} absences",
+        "include": "Count",
+        "exclude": "Do not count",
+        "decided_include": "count",
+        "decided_exclude": "do not count",
+        "after": "After the decision the affected relationships become ready; select them and press Calculate selected. Calculate an exception for one person (such as a work injury) under Manual calculation and adjustments.",
+        "hint_by_type": {
+          "dpn": "Sick leave counts up to 20 times the weekly working time per year; the automatic calculation applies the limit. A work injury or occupational disease counts in full, calculate it manually.",
+          "quarantine": "Quarantine is treated like sick leave: it counts up to 20 times the weekly working time per year.",
+          "ppm": "Maternity leave counts as work for leave purposes, so usually Count.",
+          "parental": "Parental leave counts only for a father during the period the mother could take maternity leave; otherwise Do not count.",
+          "unpaid_leave": "Unpaid leave at the employee's request is not work, so usually Do not count.",
+          "other": "Assess under § 216(2) and § 348(1) of the Labour Code whether the time counts as work for leave purposes."
+        }
+      },
       "manual_tools": "Manual calculation and adjustments",
       "manual_tools_hint": "Use only for exceptions that cannot be derived safely from stored evidence.",
       "blockers": {

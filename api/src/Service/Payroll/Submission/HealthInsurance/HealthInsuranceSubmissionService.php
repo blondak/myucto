@@ -13,6 +13,8 @@ use MyInvoice\Service\Pdf\PayrollHealthBulkNotificationPdfRenderer;
 use MyInvoice\Service\Pdf\PayrollHealthPaymentOverviewPdfRenderer;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\InstitutionAccountType;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
+use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -97,6 +99,7 @@ final readonly class HealthInsuranceSubmissionService
         private PayrollSubmissionService $submissions,
         private PayrollSubmissionRepository $submissionRepository,
         private SubmissionRecipientRepository $recipients,
+        private PayrollHistoricalPeriodService $historicalPeriods,
     ) {}
 
     /**
@@ -224,6 +227,7 @@ final readonly class HealthInsuranceSubmissionService
         $set = $this->periodDutySet($supplierId, $period);
         $limit = max(1, min(self::PERIOD_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
+        $startPeriod = $this->historicalPeriods->startPeriod($supplierId);
         $all = [];
         $dutiesById = [];
         $registrationsById = [];
@@ -233,7 +237,14 @@ final readonly class HealthInsuranceSubmissionService
                 $supplierId,
                 $duty,
                 $entry['full_name'],
-            );
+            ) + [
+                // Událost před prvním mzdovým obdobím v MyÚčtu oznamoval
+                // předchozí program; není po lhůtě a nic se k ní nepodává.
+                'handled_by_predecessor' => PayrollPredecessorObligationScope::eventHandledByPredecessor(
+                    $startPeriod,
+                    $duty->occurredOn,
+                ),
+            ];
             if ($duty->reportedByEmployer && $duty->deadline !== null) {
                 $dutyId = $duty->sourceEventReference();
                 $dutiesById[$dutyId] = $duty;
@@ -283,6 +294,7 @@ final readonly class HealthInsuranceSubmissionService
             'code_documented' => 0,
             'code_undocumented' => 0,
             'overdue' => 0,
+            'handled_by_predecessor' => 0,
         ];
         $today = $this->today();
         foreach ($all as $item) {
@@ -292,6 +304,10 @@ final readonly class HealthInsuranceSubmissionService
             $summary[$item['change_code']['documented']
                 ? 'code_documented'
                 : 'code_undocumented']++;
+            if ($item['handled_by_predecessor']) {
+                $summary['handled_by_predecessor']++;
+                continue;
+            }
             $dueOn = $item['deadline']['due_on'] ?? null;
             if (is_string($dueOn) && $dueOn < $today) {
                 $summary['overdue']++;
@@ -412,9 +428,13 @@ final readonly class HealthInsuranceSubmissionService
                 );
             }
 
+            $startPeriod = $this->historicalPeriods->startPeriod($supplierId);
             $candidates = [];
             foreach ($set['duties'] as $entry) {
                 $duty = $entry['duty'];
+                if (PayrollPredecessorObligationScope::eventHandledByPredecessor($startPeriod, $duty->occurredOn)) {
+                    continue;
+                }
                 if ($duty->reportedByEmployer && $duty->deadline !== null) {
                     $candidates[$duty->sourceEventReference()] = $duty;
                 }

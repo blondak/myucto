@@ -24,6 +24,7 @@ import {
   type AverageEarningSuggestion,
   type AverageSnapshot,
   type LeaveEntry,
+  type LeaveAbsenceDecision,
   type LeaveEntitlementCandidate,
   type ObstacleKind,
   type PayrollAbsence,
@@ -132,8 +133,70 @@ const leaveCandidatePage = computed(() => Math.floor(
 const leaveThrough = computed(() => leaveYear.value === year
   ? localDate(today)
   : `${leaveYear.value}-12-31`)
+/**
+ * Hromadné posouzení jiných absencí (§ 216 odst. 2, § 348 odst. 1 ZP): účetní
+ * rozhodne jednou za druh absence, jestli se do odpracované doby započítá.
+ * Vztah, kterému chybělo jen toto posouzení, se pak dá spočítat.
+ */
+const absenceDecisions = ref<Record<string, LeaveAbsenceDecision>>({})
+
+function assessmentTypes(candidate: LeaveEntitlementCandidate): string[] {
+  return [...new Set((candidate.assessment_absences ?? []).map(absence => absence.absence_type))]
+}
+
+function onlyAssessmentMissing(candidate: LeaveEntitlementCandidate): boolean {
+  return !candidate.ready
+    && !candidate.takeover
+    && candidate.blockers.length > 0
+    && candidate.blockers.every(blocker => blocker === 'absence_legal_assessment_required')
+}
+
+function isLeaveCandidateSelectable(candidate: LeaveEntitlementCandidate): boolean {
+  if (candidate.ready) return true
+  return onlyAssessmentMissing(candidate)
+    && assessmentTypes(candidate).every(type => absenceDecisions.value[type] !== undefined)
+}
+
+const leaveAssessmentGroups = computed(() => {
+  const groups = new Map<string, { type: string, people: number, absences: number }>()
+  for (const candidate of leaveCandidates.value) {
+    if (!candidate.blockers.includes('absence_legal_assessment_required')) continue
+    for (const type of assessmentTypes(candidate)) {
+      const group = groups.get(type) ?? { type, people: 0, absences: 0 }
+      group.people++
+      group.absences += (candidate.assessment_absences ?? []).filter(absence => absence.absence_type === type).length
+      groups.set(type, group)
+    }
+  }
+  return [...groups.values()].sort((a, b) => b.people - a.people)
+})
+
+const ASSESSMENT_HINTS = ['dpn', 'quarantine', 'ppm', 'parental', 'unpaid_leave']
+
+function assessmentHint(type: string): string {
+  return t(`payroll_absence.leave.assessment.hint_by_type.${ASSESSMENT_HINTS.includes(type) ? type : 'other'}`)
+}
+
+function setAbsenceDecision(type: string, decision: LeaveAbsenceDecision) {
+  absenceDecisions.value = { ...absenceDecisions.value, [type]: decision }
+}
+
+function scrollToLeaveAssessment() {
+  document.getElementById('leave-assessment')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function leaveCandidateTarget(candidate: LeaveEntitlementCandidate) {
+  return {
+    name: 'payroll-people',
+    query: {
+      ...(candidate.employee_id ? { person: String(candidate.employee_id) } : {}),
+      employment: String(candidate.employment_id),
+    },
+  }
+}
+
 const selectedReadyCandidates = computed(() => leaveCandidates.value.filter(candidate =>
-  candidate.ready && selectedLeaveCandidates.value.includes(candidate.employment_id)))
+  isLeaveCandidateSelectable(candidate) && selectedLeaveCandidates.value.includes(candidate.employment_id)))
 const averageCandidatePage = computed(() => Math.floor(
   averageCandidateOffset.value / averageCandidatePageSize,
 ) + 1)
@@ -1104,7 +1167,7 @@ async function loadLeaveCandidates() {
     leaveCandidates.value = page.items
     leaveCandidateTotal.value = page.total
     selectedLeaveCandidates.value = selectedLeaveCandidates.value.filter(id =>
-      page.items.some(candidate => candidate.ready && candidate.employment_id === id))
+      page.items.some(candidate => isLeaveCandidateSelectable(candidate) && candidate.employment_id === id))
   } catch (error: any) {
     leaveCandidateError.value = exactError(error, 'payroll_absence.leave.automatic_load_failed')
   } finally {
@@ -1120,7 +1183,7 @@ function goToLeaveCandidatePage(nextPage: number) {
 
 function selectAllReadyCandidates() {
   selectedLeaveCandidates.value = leaveCandidates.value
-    .filter(candidate => candidate.ready)
+    .filter(isLeaveCandidateSelectable)
     .map(candidate => candidate.employment_id)
 }
 
@@ -1136,6 +1199,11 @@ async function createAutomaticEntitlements() {
         employment_id: candidate.employment_id,
         input_version: candidate.input_version,
       })),
+      absence_decisions: Object.fromEntries(
+        [...new Set(selectedReadyCandidates.value.flatMap(assessmentTypes))]
+          .filter(type => absenceDecisions.value[type] !== undefined)
+          .map(type => [type, absenceDecisions.value[type]]),
+      ),
     })
     toast.success(t('payroll_absence.leave.automatic_created', {
       count: selectedReadyCandidates.value.length,
@@ -2243,13 +2311,80 @@ onMounted(async () => {
           </div>
         </div>
         <p v-if="leaveCandidateError" class="mt-3 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700" role="alert">{{ leaveCandidateError }}</p>
+        <div
+          v-if="!leaveCandidateLoading && leaveAssessmentGroups.length > 0"
+          id="leave-assessment"
+          class="mt-4 rounded-lg border border-warning-200 bg-warning-50/50 p-4"
+          data-test="leave-assessment"
+        >
+          <h3 class="font-semibold text-neutral-900">{{ t('payroll_absence.leave.assessment.title') }}</h3>
+          <p class="mt-1 max-w-3xl text-sm text-neutral-600">{{ t('payroll_absence.leave.assessment.intro') }}</p>
+          <ul class="mt-3 space-y-3">
+            <li
+              v-for="group in leaveAssessmentGroups"
+              :key="group.type"
+              class="flex flex-col gap-2 rounded-lg border border-neutral-200 bg-surface p-3 sm:flex-row sm:items-start sm:justify-between"
+              :data-test="`leave-assessment-${group.type}`"
+            >
+              <div class="min-w-0 text-sm">
+                <p class="font-medium text-neutral-900">
+                  {{ t(`payroll_absence.types.${group.type}`) }}
+                  <span class="font-normal text-neutral-500">· {{ t('payroll_absence.leave.assessment.count', { people: group.people, absences: group.absences }) }}</span>
+                </p>
+                <p class="mt-1 max-w-2xl text-xs text-neutral-600">{{ assessmentHint(group.type) }}</p>
+              </div>
+              <div v-if="canWrite" class="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  :class="[absenceDecisions[group.type] === 'include' ? btnFilled('success') : btnOutline('success'), 'whitespace-nowrap']"
+                  :data-test="`leave-assessment-include-${group.type}`"
+                  @click="setAbsenceDecision(group.type, 'include')"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+                  {{ t('payroll_absence.leave.assessment.include') }}
+                </button>
+                <button
+                  type="button"
+                  :class="[absenceDecisions[group.type] === 'exclude' ? btnFilled('neutral') : btnOutline('neutral'), 'whitespace-nowrap']"
+                  :data-test="`leave-assessment-exclude-${group.type}`"
+                  @click="setAbsenceDecision(group.type, 'exclude')"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+                  {{ t('payroll_absence.leave.assessment.exclude') }}
+                </button>
+              </div>
+            </li>
+          </ul>
+          <p class="mt-3 text-xs text-neutral-500">{{ t('payroll_absence.leave.assessment.after') }}</p>
+        </div>
         <p v-if="leaveCandidateLoading" class="mt-4 text-sm text-neutral-500">{{ t('common.loading') }}</p>
         <div v-else class="mt-4 divide-y divide-neutral-200 rounded-lg border border-neutral-200">
-          <label v-for="candidate in leaveCandidates" :key="candidate.employment_id" class="flex items-start gap-3 p-3" :class="candidate.ready ? 'cursor-pointer' : 'bg-neutral-50'">
-            <input v-if="canWrite" v-model="selectedLeaveCandidates" type="checkbox" :value="candidate.employment_id" :disabled="!candidate.ready" class="mt-1 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500">
+          <div
+            v-for="candidate in leaveCandidates"
+            :key="candidate.employment_id"
+            class="flex items-start gap-3 p-3"
+            :class="isLeaveCandidateSelectable(candidate) ? '' : 'bg-neutral-50'"
+            :data-test="`leave-candidate-${candidate.employment_id}`"
+          >
+            <input
+              v-if="canWrite"
+              :id="`leave-candidate-select-${candidate.employment_id}`"
+              v-model="selectedLeaveCandidates"
+              type="checkbox"
+              :value="candidate.employment_id"
+              :disabled="!isLeaveCandidateSelectable(candidate)"
+              :aria-label="candidate.employee_name"
+              class="mt-1 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500"
+            >
             <span class="min-w-0 flex-1">
-              <span class="block font-medium text-neutral-900">{{ candidate.employee_name }}<template v-if="personalNumberLabel(t, candidate.employment_code)"> · {{ personalNumberLabel(t, candidate.employment_code) }}</template></span>
-              <span v-if="candidate.ready" class="mt-1 block text-xs text-neutral-500">
+              <label :for="`leave-candidate-select-${candidate.employment_id}`" class="block font-medium text-neutral-900">{{ candidate.employee_name }}<template v-if="personalNumberLabel(t, candidate.employment_code)"> · {{ personalNumberLabel(t, candidate.employment_code) }}</template></label>
+              <span v-if="candidate.takeover" class="mt-1 block text-xs text-neutral-600" data-test="leave-candidate-takeover">
+                {{ t('payroll_absence.leave.takeover_summary', {
+                  hours: minutes(candidate.takeover.minutes),
+                  date: formatDate(candidate.takeover.effective_date),
+                }) }}
+              </span>
+              <span v-else-if="candidate.ready" class="mt-1 block text-xs text-neutral-500">
                 {{ t('payroll_absence.leave.automatic_summary', {
                   hours: minutes(candidate.weekly_minutes ?? 0),
                   weeks: candidate.entitlement_weeks,
@@ -2259,11 +2394,58 @@ onMounted(async () => {
               <span v-else class="mt-1 block text-xs text-warning-700">
                 {{ candidate.blockers.map(blocker => t(`payroll_absence.leave.blockers.${blocker}`)).join(' · ') }}
               </span>
+              <span
+                v-if="(candidate.assessment_absences ?? []).length > 0"
+                class="mt-1 flex flex-wrap gap-1"
+                data-test="leave-candidate-assessment-absences"
+              >
+                <span
+                  v-for="absence in candidate.assessment_absences"
+                  :key="absence.id"
+                  class="inline-flex whitespace-nowrap rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700"
+                >
+                  {{ t(`payroll_absence.types.${absence.absence_type}`) }} {{ formatDate(absence.date_from) }} – {{ formatDate(absence.date_to) }}
+                  <template v-if="absenceDecisions[absence.absence_type]">
+                    · {{ t(`payroll_absence.leave.assessment.decided_${absenceDecisions[absence.absence_type]}`) }}
+                  </template>
+                </span>
+              </span>
+              <span v-if="(candidate.predecessor_absences ?? 0) > 0" class="mt-1 block text-xs text-neutral-500">
+                {{ t('payroll_absence.leave.predecessor_absences', { count: candidate.predecessor_absences }) }}
+              </span>
             </span>
-            <span class="rounded-full px-2 py-1 text-xs font-medium" :class="candidate.ready ? 'bg-success-50 text-success-700' : 'bg-warning-50 text-warning-700'">
-              {{ t(candidate.ready ? 'payroll_absence.leave.ready' : 'payroll_absence.leave.needs_attention') }}
+            <span
+              v-if="candidate.takeover"
+              class="whitespace-nowrap rounded-full bg-success-50 px-2 py-1 text-xs font-medium text-success-700"
+            >
+              {{ t('payroll_absence.leave.takeover') }}
             </span>
-          </label>
+            <span
+              v-else-if="isLeaveCandidateSelectable(candidate)"
+              class="whitespace-nowrap rounded-full bg-success-50 px-2 py-1 text-xs font-medium text-success-700"
+            >
+              {{ t('payroll_absence.leave.ready') }}
+            </span>
+            <button
+              v-else-if="candidate.blockers.includes('absence_legal_assessment_required')"
+              type="button"
+              class="whitespace-nowrap rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700 underline-offset-2 hover:underline"
+              :title="t('payroll_absence.leave.open_assessment')"
+              :data-test="`leave-candidate-fix-${candidate.employment_id}`"
+              @click="scrollToLeaveAssessment"
+            >
+              {{ t('payroll_absence.leave.needs_attention') }} →
+            </button>
+            <RouterLink
+              v-else
+              :to="leaveCandidateTarget(candidate)"
+              class="whitespace-nowrap rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700 underline-offset-2 hover:underline"
+              :title="t('payroll_absence.leave.open_employment')"
+              :data-test="`leave-candidate-fix-${candidate.employment_id}`"
+            >
+              {{ t('payroll_absence.leave.needs_attention') }} →
+            </RouterLink>
+          </div>
           <p v-if="leaveCandidates.length === 0" class="p-6 text-center text-sm text-neutral-500">{{ t('payroll_absence.leave.automatic_empty') }}</p>
         </div>
         <PaginationBar class="mt-4" :page="leaveCandidatePage" :per-page="leaveCandidatePageSize" :total="leaveCandidateTotal" @update:page="goToLeaveCandidatePage" />

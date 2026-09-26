@@ -106,6 +106,74 @@ final class JmhzExternalSubmissionStoreTest extends TestCase
         self::assertSame(['sent', 'not_sent'], array_column($overview, 'status'));
     }
 
+    /**
+     * Přehled musí říct, KDO a JAKOU akcí byl v podání: dřív ukazoval u registrace
+     * jen „—" a počet formulářů, takže nešlo poznat, co se podalo.
+     */
+    public function testOverviewAndDetailNamePeopleActionAndEffectiveDay(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO payroll_employees (supplier_id, full_name, taxpayer_type, is_active) VALUES (?, ?, "employee", 1)')
+            ->execute([$this->supplierId, 'Syntetická Nastupující']);
+        $employeeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_employments (supplier_id, employee_id, code, relation_type, status, is_primary, start_date)
+             VALUES (?, ?, "SYN-1", "employment", "active", 0, "2026-05-04")'
+        )->execute([$this->supplierId, $employeeId]);
+        $employmentId = (int) $pdo->lastInsertId();
+
+        $registration = $this->store->store($this->supplierId, 'production', JmhzExternalSubmissionStore::SOURCE_PAMICA, [
+            'source_key' => 'RegZAM:7',
+            'document_kind' => 'registration',
+            'period' => null,
+            'submission_type' => null,
+            'submission_guid' => null,
+            'corrected_source_key' => null,
+            'status' => 'sent',
+            'filled_at' => '2026-05-04T13:18:40',
+            'submitted_at' => '2026-05-04T13:18:40',
+            'accepted_at' => null,
+            'program' => 'PAMICA',
+            'file_name' => null,
+            'payload' => ['program' => 'PAMICA', 'kind' => 'registration', 'header' => []],
+        ], [
+            [
+                'position' => 1, 'form_guid' => null, 'form_type' => 'start', 'source_relation_ref' => '11',
+                'employee_id' => $employeeId, 'employment_id' => $employmentId,
+                'payload' => ['item' => [], 'attributes' => [
+                    ['id' => 10009, 'order' => 0, 'value' => '2026-05-04'],
+                    ['id' => 10223, 'order' => 0, 'value' => '2026-05-04T00:00:00'],
+                ]],
+            ],
+            [
+                'position' => 2, 'form_guid' => null, 'form_type' => 'end', 'source_relation_ref' => '12',
+                'employee_id' => null, 'employment_id' => null,
+                'payload' => ['item' => [], 'attributes' => [['id' => 10224, 'order' => 0, 'value' => '30.04.2026']]],
+            ],
+        ], null);
+        $this->store->store($this->supplierId, 'production', JmhzExternalSubmissionStore::SOURCE_PAMICA,
+            self::submission('R', 'sent'), [self::form(1, 'Syntetická'), self::form(2, 'Zkušební'), self::form(3, 'Další'), self::form(4, 'Poslední')], null);
+
+        $overview = array_column($this->store->overview($this->supplierId, 'production'), null, 'document_kind');
+        $row = $overview['registration'];
+        self::assertSame(['A1' => 1, 'A2' => 1], $row['actions']);
+        self::assertSame('Syntetická Nastupující', $row['people'][0]['name']);
+        self::assertSame('SYN-1', $row['people'][0]['code']);
+        self::assertSame('A1', $row['people'][0]['action']);
+        self::assertSame('2026-05-04', $row['people'][0]['effective_on']);
+        self::assertNull($row['people'][1]['name'], 'Nespárovaná věta zůstane bez jména.');
+        self::assertSame('2026-04-30', $row['effective_from']);
+        self::assertSame('2026-05-04', $row['effective_to']);
+        self::assertSame(['R' => 4], $overview['monthly']['actions']);
+        self::assertCount(3, $overview['monthly']['people'], 'Přehled měsíčního hlášení ukáže jen ochutnávku osob.');
+
+        $detail = $this->store->detail($this->supplierId, 'production', $registration['id']);
+        self::assertNotNull($detail);
+        self::assertCount(2, $detail['forms']);
+        self::assertSame('12', $detail['forms'][1]['source_relation_ref']);
+        self::assertNull($this->store->detail($this->supplierId, 'test', $registration['id']), 'Prostředí se nemíchají.');
+    }
+
     /** @return array<string,mixed> */
     private static function submission(string $type, string $status): array
     {

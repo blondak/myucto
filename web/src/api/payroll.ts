@@ -4633,6 +4633,16 @@ export interface PayrollRegistrationCompletionCandidate {
   completion_effective_on: string | null
   completion_submission_id: number | null
   completion_submission_status: string | null
+  /**
+   * Dohlášení vyřídil předchozí program: `registration` = odeslaná registrace
+   * v historii podání předchozím programem, `deadline` = lhůta uplynula před
+   * začátkem vedení mezd v MyÚčtu.
+   */
+  predecessor_reason?: 'registration' | 'deadline' | null
+  predecessor_submission_id?: number | null
+  predecessor_submitted_at?: string | null
+  predecessor_action?: 'A1' | 'A3' | null
+  predecessor_program?: string | null
 }
 
 export interface PayrollRegistrationCompletionCandidates {
@@ -9776,6 +9786,12 @@ export const payrollApi = {
       '/payroll/submissions/jmhz-external',
       { params: { environment } },
     ).then(response => response.data),
+  /** Jedno převzaté podání se všemi formuláři (osoba, akce, den účinnosti). */
+  jmhzExternalSubmission: (id: number, environment: PayrollJmhzTransportEnvironment) =>
+    api.get<PayrollJmhzExternalSubmissionDetail>(
+      `/payroll/submissions/jmhz-external/${id}`,
+      { params: { environment } },
+    ).then(response => response.data),
   /** Odebere záznam z historie převzatých podání (neodpovídá skutečnosti). */
   deleteJmhzExternalSubmission: (id: number, environment: PayrollJmhzTransportEnvironment) =>
     api.delete<{ deleted: boolean; id: number }>(
@@ -9801,4 +9817,32 @@ export interface PayrollJmhzExternalSubmission {
   program: string | null
   file_name: string | null
   updated_at: string | null
+  /** Počet formulářů podle akce: A1/A2/A3 u registrací, R/O/S u hlášení. */
+  actions?: Record<string, number>
+  /** Osoby podání; u měsíčního hlášení jen prvních pár, celý seznam je v detailu. */
+  people?: PayrollJmhzExternalSubmissionPerson[]
+  effective_from?: string | null
+  effective_to?: string | null
+}
+
+export interface PayrollJmhzExternalSubmissionPerson {
+  employee_id: number | null
+  employment_id: number | null
+  /** `null` = formulář se se vztahem v MyÚčtu nespároval. */
+  name: string | null
+  code: string | null
+  action: string | null
+  effective_on: string | null
+}
+
+export interface PayrollJmhzExternalSubmissionForm extends PayrollJmhzExternalSubmissionPerson {
+  position: number
+  source_relation_ref: string | null
+  form_type: string | null
+  unreadable: boolean
+}
+
+export interface PayrollJmhzExternalSubmissionDetail extends PayrollJmhzExternalSubmission {
+  forms: PayrollJmhzExternalSubmissionForm[]
+  corrects: { id: number; period: string | null; submission_type: string | null; submitted_at: string | null } | null
 }

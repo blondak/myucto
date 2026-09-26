@@ -3,15 +3,22 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 const m = vi.hoisted(() => ({
   list: vi.fn(),
+  detail: vi.fn(),
   remove: vi.fn(),
   canWrite: true,
+  query: {} as Record<string, string>,
 }))
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     jmhzExternalSubmissions: m.list,
+    jmhzExternalSubmission: m.detail,
     deleteJmhzExternalSubmission: m.remove,
   },
+}))
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRoute: () => ({ query: m.query }),
 }))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: () => m.canWrite }),
@@ -51,19 +58,89 @@ function row(overrides: Record<string, unknown> = {}) {
 function mountPanel() {
   return mount(PayrollExternalJmhzSubmissionsPanel, {
     props: { environment: 'production' },
+    attachTo: document.body,
     global: {
       stubs: {
         RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
+        teleport: true,
       },
     },
   })
+}
+
+function registration(overrides: Record<string, unknown> = {}) {
+  return row({
+    id: 20,
+    document_kind: 'registration',
+    period: null,
+    submission_type: null,
+    submission_guid: null,
+    submitted_at: '2026-04-29 07:41:28',
+    filled_at: '2026-04-29 07:41:28',
+    accepted_at: null,
+    form_count: 2,
+    matched_forms: 2,
+    actions: { A3: 2 },
+    people: [
+      { employee_id: 3, employment_id: 30, name: 'Syntetická První', code: 'S1', action: 'A3', effective_on: '2026-03-27' },
+      { employee_id: 4, employment_id: 40, name: 'Syntetická Druhá', code: 'S2', action: 'A3', effective_on: '2026-03-27' },
+    ],
+    effective_from: '2026-03-27',
+    effective_to: '2026-03-27',
+    ...overrides,
+  })
+}
+
+async function openMenuAndRemove(wrapper: ReturnType<typeof mountPanel>, index = 0) {
+  await wrapper.findAll('[data-test="external-jmhz-row"]')[index].get('button[aria-haspopup="menu"]').trigger('click')
+  const item = [...document.querySelectorAll<HTMLElement>('[data-menu-item]')].find(el => el.textContent?.includes('payroll.external_jmhz.remove'))
+  item?.click()
+  await flushPromises()
 }
 
 describe('PayrollExternalJmhzSubmissionsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite = true
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    m.query = {}
+    document.body.innerHTML = ''
+  })
+
+  it('registrace seskupí po měsíci a řekne, kdo v nich byl a jakou akcí', async () => {
+    m.list.mockResolvedValue({ environment: 'production', items: [row(), registration()] })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const group = wrapper.get('[data-test="external-jmhz-group-registration-2026-04"]')
+    expect(group.text()).toContain('Syntetická První')
+    expect(group.text()).toContain('Syntetická Druhá')
+    expect(group.get('[data-test="external-jmhz-action"]').text()).toContain('payroll.external_jmhz.action.A3')
+    expect(group.text()).toContain('payroll.external_jmhz.effective')
+    expect(wrapper.find('[data-test="external-jmhz-group-monthly-2026-02"]').exists()).toBe(true)
+  })
+
+  it('detail ukáže všechny formuláře s osobou, akcí a účinností; odkaz z dohlášení ho otevře rovnou', async () => {
+    m.query = { external: '20' }
+    m.list.mockResolvedValue({ environment: 'production', items: [registration()] })
+    m.detail.mockResolvedValue({
+      ...registration(),
+      corrects: null,
+      forms: [
+        { position: 1, employee_id: 3, employment_id: 30, name: 'Syntetická První', code: 'S1', action: 'A3', form_type: 'existing', effective_on: '2026-03-27', source_relation_ref: '1', unreadable: false },
+        { position: 2, employee_id: null, employment_id: null, name: null, code: null, action: 'A2', form_type: 'end', effective_on: '2026-04-30', source_relation_ref: '77', unreadable: false },
+      ],
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(m.detail).toHaveBeenCalledWith(20, 'production')
+    const forms = wrapper.findAll('[data-test="external-jmhz-detail-form"]')
+    expect(forms).toHaveLength(2)
+    expect(forms[0].text()).toContain('Syntetická První')
+    expect(forms[0].text()).toContain('payroll.external_jmhz.action.A3')
+    expect(forms[1].text()).toContain('payroll.external_jmhz.unmatched_form 77')
   })
 
   it('firma bez převodu z jiného programu panel nevidí', async () => {
@@ -115,33 +192,33 @@ describe('PayrollExternalJmhzSubmissionsPanel', () => {
     expect(wrapper.findAll('[data-test="external-jmhz-unsent"]')).toHaveLength(0)
   })
 
-  it('záznam, který neodpovídá, jde po potvrzení odebrat', async () => {
+  it('odebrání je schované v „…“ a po vysvětlení v dialogu aplikace odebere záznam', async () => {
     m.list.mockResolvedValue({ environment: 'production', items: [row(), row({ id: 2, period: '2026-03' })] })
-    m.remove.mockResolvedValue({ deleted: true, id: 1 })
+    m.remove.mockResolvedValue({ deleted: true, id: 2 })
 
     const wrapper = mountPanel()
     await flushPromises()
-    await wrapper.findAll('[data-test="external-jmhz-remove"]')[0].trigger('click')
+    expect(wrapper.findAll('[data-test="external-jmhz-row"]')[0].text()).not.toContain('payroll.external_jmhz.remove')
+    await openMenuAndRemove(wrapper, 0)
+
+    const dialog = wrapper.get('[data-test="external-jmhz-remove-dialog"]')
+    expect(dialog.text()).toContain('payroll.external_jmhz.remove_dialog.when')
+    expect(dialog.text()).toContain('payroll.external_jmhz.remove_dialog.monthly_sent')
+    expect(m.remove).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="external-jmhz-remove-confirm"]').trigger('click')
     await flushPromises()
 
-    expect(window.confirm).toHaveBeenCalled()
-    expect(m.remove).toHaveBeenCalledWith(1, 'production')
+    expect(m.remove).toHaveBeenCalledWith(2, 'production')
     expect(wrapper.findAll('[data-test="external-jmhz-row"]')).toHaveLength(1)
   })
 
-  it('bez potvrzení nic neodebere a bez práva zápisu tlačítko nenabídne', async () => {
+  it('bez práva zápisu odebrání nenabídne', async () => {
+    m.canWrite = false
     m.list.mockResolvedValue({ environment: 'production', items: [row()] })
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
 
     const wrapper = mountPanel()
     await flushPromises()
-    await wrapper.get('[data-test="external-jmhz-remove"]').trigger('click')
-    expect(m.remove).not.toHaveBeenCalled()
-
-    m.canWrite = false
-    const readOnly = mountPanel()
-    await flushPromises()
-    expect(readOnly.find('[data-test="external-jmhz-remove"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="external-jmhz-row"] button[aria-haspopup="menu"]').exists()).toBe(false)
   })
 
   it('chybu načtení ukáže, místo aby panel tiše zmizel', async () => {

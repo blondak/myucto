@@ -55,8 +55,11 @@ final readonly class PayrollTakeoverPolicy
     ) {}
 
     /** Začátek poznámky u převzatého údaje. */
+    /** Začátek poznámky každého převzatého záznamu; podle něj se převzatý záznam pozná. */
+    public const NOTE_PREFIX = 'Převzato z ';
+
     public function note(string $text): string
     {
-        return 'Převzato z ' . $this->label . ': ' . $text;
+        return self::NOTE_PREFIX . $this->label . ': ' . $text;
     }
 }

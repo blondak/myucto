@@ -252,6 +252,7 @@ export interface AverageEarningCandidatesPage {
 
 export interface LeaveEntitlementCandidate {
   employment_id: number
+  employee_id?: number
   employee_name: string
   employment_code: string
   relation_type: string
@@ -265,6 +266,22 @@ export interface LeaveEntitlementCandidate {
   ready: boolean
   blockers: string[]
   input_version: string
+  /** Nárok roku určil předchozí program; zůstatek přišel převodem a znovu se nepočítá. */
+  takeover?: { minutes: number, effective_date: string, reason: string } | null
+  /** Jiné schválené absence, o jejichž započtení musí rozhodnout účetní. */
+  assessment_absences?: LeaveAssessmentAbsence[]
+  /** Absence z doby před MyÚčtem, které posoudil předchozí program. */
+  predecessor_absences?: number
+}
+
+export type LeaveAbsenceDecision = 'include' | 'exclude'
+
+export interface LeaveAssessmentAbsence {
+  id: number
+  row_version: number
+  absence_type: string
+  date_from: string
+  date_to: string
 }
 
 export interface LeaveEntitlementCandidatesPage {
@@ -404,6 +421,8 @@ export const payrollAbsenceApi = {
     year: number
     through: string
     items: Array<{ employment_id: number, input_version: string }>
+    /** Hromadné posouzení jiných absencí: druh => započítat / nezapočítat. */
+    absence_decisions?: Record<string, LeaveAbsenceDecision>
   }) => api.post<{ entitlements: unknown[] }>('/payroll/time/leave-entitlements/bulk', payload)
     .then(response => response.data.entitlements),
   averageCandidates: (

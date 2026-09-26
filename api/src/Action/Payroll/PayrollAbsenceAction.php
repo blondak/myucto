@@ -771,12 +771,17 @@ final class PayrollAbsenceAction
             if (!is_array($items) || !array_is_list($items)) {
                 throw new \InvalidArgumentException('Výběr pracovních vztahů není platný.');
             }
+            $decisions = $body['absence_decisions'] ?? [];
+            if (!is_array($decisions) || ($decisions !== [] && array_is_list($decisions))) {
+                throw new \InvalidArgumentException('Posouzení absencí musí být mapa druh absence => započítat / nezapočítat.');
+            }
             $entitlements = $this->automaticLeaveEntitlements->calculateBatch(
                 $this->currentSupplierId($request),
                 $year,
                 $through,
                 $items,
                 $this->userId($request),
+                $decisions,
             );
         } catch (AutomaticLeaveEntitlementConflictException $exception) {
             return Json::error(

@@ -7,6 +7,9 @@ namespace MyInvoice\Service\Payroll\Absence;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
 use MyInvoice\Repository\Payroll\PayrollLeaveRepository;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPolicy;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
+use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Time\CzechHolidayCalendar;
@@ -20,6 +23,19 @@ final class AutomaticLeaveEntitlementService
 
     private readonly PayrollWorkCalendarSchedule $schedule;
 
+    /** Rozhodnutí účetní o započtení jiné absence do odpracované doby (§ 216 odst. 2, § 348 odst. 1 ZP). */
+    public const DECISION_INCLUDE = 'include';
+    public const DECISION_EXCLUDE = 'exclude';
+
+    /**
+     * Pracovní neschopnost a karanténa se pro dovolenou započítají nejvýše
+     * v rozsahu 20násobku týdenní pracovní doby (§ 216 odst. 2 ZP; pracovní
+     * úraz a nemoc z povolání bez omezení - ty automat nerozliší, proto
+     * limit hlídá vždy a výjimku řeší ruční výpočet).
+     */
+    private const SICKNESS_WEEKS_CAP = 20;
+    private const SICKNESS_TYPES = ['dpn', 'quarantine'];
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollRulesetProvider $rulesets,
@@ -27,6 +43,7 @@ final class AutomaticLeaveEntitlementService
         private readonly LeaveEntitlementCalculator $calculator,
         private readonly PayrollLeaveRepository $leave,
         private readonly PayrollAbsenceRepository $absences,
+        private readonly PayrollHistoricalPeriodService $historicalPeriods,
         private readonly CzechHolidayCalendar $holidayCalendar = new CzechHolidayCalendar(),
     ) {
         $this->schedule = new PayrollWorkCalendarSchedule($db);
@@ -84,6 +101,9 @@ final class AutomaticLeaveEntitlementService
 
     /**
      * @param list<array{employment_id:int,input_version:string}> $requested
+     * @param array<string,string> $absenceDecisions druh absence => include|exclude;
+     *        rozhodnutí účetní, jestli se jiná schválená absence počítá do
+     *        odpracované doby. Platí pro všechny vztahy dávky (hromadné posouzení).
      * @return list<array<string,mixed>>
      */
     public function calculateBatch(
@@ -92,8 +112,16 @@ final class AutomaticLeaveEntitlementService
         string $through,
         array $requested,
         ?int $userId,
+        array $absenceDecisions = [],
     ): array {
         $this->assertPeriod($year, $through);
+        foreach ($absenceDecisions as $type => $decision) {
+            if (!is_string($type) || $type === '' || $type === 'vacation'
+                || !in_array($decision, [self::DECISION_INCLUDE, self::DECISION_EXCLUDE], true)
+            ) {
+                throw new \InvalidArgumentException('Posouzení absencí má neplatný druh nebo rozhodnutí (započítat / nezapočítat).');
+            }
+        }
         if ($requested === [] || count($requested) > self::MAX_LIMIT) {
             throw new \InvalidArgumentException('Dávka musí obsahovat 1 až 100 pracovních vztahů.');
         }
@@ -120,7 +148,7 @@ final class AutomaticLeaveEntitlementService
             $candidates = [];
             foreach ($ids as $employmentId => $expectedVersion) {
                 $employment = $this->employmentForUpdate($supplierId, (int) $employmentId);
-                $candidate = $this->candidate($supplierId, $year, $through, $employment);
+                $candidate = $this->candidate($supplierId, $year, $through, $employment, $absenceDecisions);
                 if (!hash_equals($expectedVersion, (string) $candidate['input_version'])) {
                     throw new AutomaticLeaveEntitlementConflictException((int) $employmentId);
                 }
@@ -135,6 +163,22 @@ final class AutomaticLeaveEntitlementService
             $results = [];
             foreach ($candidates as $candidate) {
                 $rationale = 'Automaticky z účinné firemní politiky, smluvní týdenní doby a schválené docházky.';
+                if ($candidate['absence_assessments'] !== []) {
+                    $parts = [];
+                    foreach ($candidate['absence_assessments'] as $assessed) {
+                        $parts[] = sprintf(
+                            '%s %s až %s %s',
+                            $assessed['absence_type'],
+                            $assessed['date_from'],
+                            $assessed['date_to'],
+                            $assessed['decision'] === self::DECISION_INCLUDE
+                                ? 'započteno ' . intdiv((int) $assessed['credited_minutes'], 60) . ' h'
+                                : 'nezapočteno',
+                        );
+                    }
+                    $rationale .= ' Posouzení jiných absencí (§ 216 odst. 2 a § 348 odst. 1 ZP): ' . implode('; ', $parts) . '.';
+                    $rationale = mb_substr($rationale, 0, 1000);
+                }
                 $calculated = $this->calculator->calculate(
                     sprintf('%04d-01-01', $year),
                     (string) $candidate['relation_type'],
@@ -146,6 +190,7 @@ final class AutomaticLeaveEntitlementService
                 );
                 $trace = $calculated->trace;
                 $trace['automatic_sources'] = $candidate['sources'];
+                $trace['absence_assessments'] = $candidate['absence_assessments'];
                 $trace['through'] = $through;
                 $supported = new LeaveEntitlementResult(
                     $calculated->weeklyMinutes,
@@ -182,8 +227,12 @@ final class AutomaticLeaveEntitlementService
         }
     }
 
-    /** @param array<string,mixed> $employment @return array<string,mixed> */
-    private function candidate(int $supplierId, int $year, string $through, array $employment): array
+    /**
+     * @param array<string,mixed> $employment
+     * @param array<string,string> $absenceDecisions {@see self::calculateBatch()}
+     * @return array<string,mixed>
+     */
+    private function candidate(int $supplierId, int $year, string $through, array $employment, array $absenceDecisions = []): array
     {
         $start = max(
             sprintf('%04d-01-01', $year),
@@ -193,6 +242,35 @@ final class AutomaticLeaveEntitlementService
             $through,
             (string) ($employment['end_date'] ?? sprintf('%04d-12-31', $year)),
         );
+        $startPeriod = $this->historicalPeriods->startPeriod($supplierId);
+        $takeover = $this->takeoverBalance($supplierId, (int) $employment['id'], $year, $start, $startPeriod);
+        if ($takeover !== null) {
+            // Nárok roku určil předchozí program: převedený zůstatek už obsahuje
+            // roční nárok po krácení a čerpání. Druhý výpočet by nárok započetl
+            // dvakrát, proto se vztah nenabízí a jen se vysvětlí.
+            return [
+                'employment_id' => (int) $employment['id'],
+                'employee_id' => (int) $employment['employee_id'],
+                'employee_name' => (string) $employment['full_name'],
+                'employment_code' => (string) $employment['code'],
+                'relation_type' => (string) $employment['relation_type'],
+                'period_from' => $start,
+                'period_to' => $end,
+                'weekly_minutes' => null,
+                'entitlement_weeks' => null,
+                'allowance_source' => null,
+                'continuous_calendar_days' => 0,
+                'worked_equivalent_minutes' => 0,
+                'ready' => false,
+                'blockers' => [],
+                'takeover' => $takeover,
+                'assessment_absences' => [],
+                'absence_assessments' => [],
+                'predecessor_absences' => 0,
+                'input_version' => hash('sha256', CanonicalJson::encode(['takeover' => $takeover, 'employment' => (int) $employment['id']])),
+                'sources' => ['takeover' => $takeover],
+            ];
+        }
         $terms = $this->terms($supplierId, (int) $employment['id'], $start, $end);
         $policies = $this->policies($supplierId, $start, $end);
         $agreementMinutes = AbsenceRuleset::forYear($this->rulesets, $year)
@@ -245,6 +323,8 @@ final class AutomaticLeaveEntitlementService
         $approvedAbsences = $this->approvedAbsences($supplierId, (int) $employment['id'], $start, $end);
         $substituteMinutes = 0;
         $absenceSources = [];
+        $assessmentAbsences = [];
+        $predecessorAbsences = 0;
         foreach ($approvedAbsences as $absence) {
             // Neomluvené zameškání není podle § 348 odst. 1 výkon práce ani
             // podle § 216 odst. 2 započitatelná překážka — nemá tedy do
@@ -255,8 +335,23 @@ final class AutomaticLeaveEntitlementService
             if ($absence['absence_type'] === 'unexcused') {
                 continue;
             }
+            // Absenci, která celá leží před prvním mzdovým obdobím v MyÚčtu,
+            // posuzoval předchozí program; ruční posouzení nevyžaduje.
+            if ($absence['absence_type'] !== 'vacation'
+                && PayrollPredecessorObligationScope::eventHandledByPredecessor($startPeriod, (string) $absence['date_to'])
+            ) {
+                $predecessorAbsences++;
+                continue;
+            }
             if ($absence['absence_type'] !== 'vacation') {
-                $blockers['absence_legal_assessment_required'] = true;
+                $assessmentAbsences[] = [
+                    'id' => (int) $absence['id'],
+                    'row_version' => (int) $absence['row_version'],
+                    'absence_type' => (string) $absence['absence_type'],
+                    'date_from' => (string) $absence['date_from'],
+                    'date_to' => (string) $absence['date_to'],
+                    'raw' => $absence,
+                ];
                 continue;
             }
             if (!$this->allMonthsApproved(
@@ -296,7 +391,53 @@ final class AutomaticLeaveEntitlementService
             $timeEntries,
         );
         $holidayMinutes = $holidayCredit['minutes'];
-        $workedEquivalent = $workedMinutes + $substituteMinutes + $holidayMinutes;
+
+        // Jiná schválená absence: bez rozhodnutí účetní blokuje, s rozhodnutím
+        // (hromadně po druhu) přinese do odpracované doby své směny, nebo nic.
+        $absenceAssessments = [];
+        $assessedMinutes = 0;
+        $sicknessMinutes = 0;
+        $sicknessCap = is_int($resolved['weekly_minutes'] ?? null)
+            ? self::SICKNESS_WEEKS_CAP * (int) $resolved['weekly_minutes']
+            : null;
+        foreach ($assessmentAbsences as $assessed) {
+            $decision = $absenceDecisions[$assessed['absence_type']] ?? null;
+            if ($decision === null) {
+                $blockers['absence_legal_assessment_required'] = true;
+                continue;
+            }
+            $credited = 0;
+            if ($decision === self::DECISION_INCLUDE) {
+                if (!$this->allMonthsApproved(
+                    max($start, $assessed['date_from']),
+                    min($end, $assessed['date_to']),
+                    $approvedPeriods,
+                )) {
+                    $blockers['absence_time_month_missing'] = true;
+                    continue;
+                }
+                $segments = $this->absences->publishedShiftSegments(
+                    $assessed['raw'],
+                    false,
+                    AbsenceHolidayTreatment::ExcludeFromLeave,
+                );
+                $credited = array_sum(array_column($segments, 'eligible_minutes'));
+                if (in_array($assessed['absence_type'], self::SICKNESS_TYPES, true) && $sicknessCap !== null) {
+                    $credited = max(0, min($credited, $sicknessCap - $sicknessMinutes));
+                    $sicknessMinutes += $credited;
+                }
+            }
+            $assessedMinutes += $credited;
+            $absenceAssessments[] = [
+                'id' => $assessed['id'],
+                'absence_type' => $assessed['absence_type'],
+                'date_from' => $assessed['date_from'],
+                'date_to' => $assessed['date_to'],
+                'decision' => $decision,
+                'credited_minutes' => $credited,
+            ];
+        }
+        $workedEquivalent = $workedMinutes + $substituteMinutes + $holidayMinutes + $assessedMinutes;
         if ($workedEquivalent <= 0) {
             $blockers['worked_equivalent_time_missing'] = true;
         }
@@ -326,11 +467,17 @@ final class AutomaticLeaveEntitlementService
             'approved_vacations' => $absenceSources,
             'holidays' => $holidayCredit['days'],
             'existing_entitlement' => $existingEntitlement,
+            'assessment_absences' => array_map(
+                static fn (array $assessed): array => array_diff_key($assessed, ['raw' => true]),
+                $assessmentAbsences,
+            ),
+            'predecessor_absences' => $predecessorAbsences,
         ];
         $inputVersion = hash('sha256', CanonicalJson::encode($sources));
 
         return [
             'employment_id' => (int) $employment['id'],
+            'employee_id' => (int) $employment['employee_id'],
             'employee_name' => (string) $employment['full_name'],
             'employment_code' => (string) $employment['code'],
             'relation_type' => (string) $employment['relation_type'],
@@ -343,8 +490,46 @@ final class AutomaticLeaveEntitlementService
             'worked_equivalent_minutes' => $workedEquivalent,
             'ready' => $blockers === [],
             'blockers' => array_keys($blockers),
+            'takeover' => null,
+            'assessment_absences' => $sources['assessment_absences'],
+            'absence_assessments' => $absenceAssessments,
+            'predecessor_absences' => $predecessorAbsences,
             'input_version' => $inputVersion,
             'sources' => $sources,
+        ];
+    }
+
+    /**
+     * Zůstatek dovolené převzatý z předchozího programu pro rok, jehož část
+     * vedl předchozí program: položka `carryover`, kterou zapsal převod
+     * ({@see \MyInvoice\Service\Payroll\Migration\PayrollTakeoverAbsenceWriter::leaveCarryover()},
+     * poznámka {@see PayrollTakeoverPolicy::NOTE_PREFIX}). Zůstatek obsahuje
+     * roční nárok po krácení a čerpání. Ručně zapsaný převod z minulého roku
+     * se sem nepočítá: nárok roku pak dál počítá MyÚčto.
+     *
+     * @return array{minutes:int,effective_date:string,reason:string}|null
+     */
+    private function takeoverBalance(int $supplierId, int $employmentId, int $year, string $start, ?string $startPeriod): ?array
+    {
+        if ($startPeriod === null || !PayrollHistoricalPeriodService::precedesStart($startPeriod, $start)) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT minutes_delta, effective_date, reason FROM payroll_leave_ledger
+              WHERE supplier_id = ? AND employment_id = ? AND leave_year = ?
+                AND entry_type = 'carryover' AND reason LIKE ?
+              ORDER BY effective_date, id LIMIT 1",
+        );
+        $stmt->execute([$supplierId, $employmentId, $year, PayrollTakeoverPolicy::NOTE_PREFIX . '%']);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'minutes' => (int) $row['minutes_delta'],
+            'effective_date' => (string) $row['effective_date'],
+            'reason' => (string) $row['reason'],
         ];
     }
 
