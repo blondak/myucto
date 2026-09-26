@@ -76,6 +76,9 @@ final class PayrollRunReadinessImpact
         'draft_inputs_present' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'time_month_not_approved' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'time_month_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        // § 75 ZP — roční limit DPP 300 h včetně převzatých hodin. Výpočet běží,
+        // ale smluvní vztah se musí upravit.
+        'dpp_annual_hours_exceeded' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'employment_without_inputs' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'missing_effective_employment_term' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'part_time_discount_intent_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],

@@ -45,6 +45,12 @@ Na přehledu mezd vás tímto pořadím provede **Průvodce prvním nastavením 
 3. **První mzdový měsíc** — jediný krok, kterým průvodce předá štafetu běžnému
    měsíčnímu zpracování.
 
+Když první mzdové období neleží v lednu, přibude před první mzdový měsíc
+skupina **Přechod v průběhu roku** se sedmi kroky: převzaté mzdy, počáteční
+stavy, děti a prohlášení od ledna, identifikátory pro ČSSZ, průměrný výdělek,
+zůstatek dovolené a kontrola převzaté části roku. Podrobně je popisuje
+kapitola [Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md).
+
 Každý krok vede přímo na obrazovku, kde se údaj vyplňuje, a dá se odškrtnout.
 Kroky, na které nemáte oprávnění, se nenabízejí; prázdná skupina se skryje.
 Odškrtnuté kroky a případné skrytí průvodce se ukládají k vašemu uživatelskému
@@ -454,6 +460,7 @@ kapitole
 17. [Legislativní pravidla mezd](92_Legislativni_pravidla_mezd.md)
 18. [Retenční lhůty](93_Retencni_lhuty.md)
 19. [Výmaz osobních údajů](94_Vymaz_osobnich_udaju.md)
+20. [Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md)
 
 ## 75.8 Společná bezpečnostní pravidla
 

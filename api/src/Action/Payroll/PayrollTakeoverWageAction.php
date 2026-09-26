@@ -8,6 +8,9 @@ use MyInvoice\Http\Json;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\Import\Takeover\TakeoverTabularImportService;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverLayerCheck;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverManualEntryService;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -28,7 +31,98 @@ final class PayrollTakeoverWageAction
         private readonly PayrollTakeoverReader $reader,
         private readonly TakeoverTabularImportService $imports,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollTakeoverCoverage $coverage,
+        private readonly PayrollTakeoverLayerCheck $layers,
+        private readonly PayrollTakeoverManualEntryService $manual,
     ) {}
+
+    /**
+     * Kontrola převzaté části roku: komu chybí počáteční stavy a kde si
+     * počáteční stavy s převzatými mzdami odporují.
+     *
+     * @param array{year:string} $args
+     */
+    public function check(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $error;
+        }
+        try {
+            $supplierId = $this->currentSupplierId($request);
+            $year = self::year($args['year']);
+
+            return Json::ok($response, ['check' => [
+                'takeover_months' => $this->coverage->takeoverMonths($supplierId, $year),
+                'missing_openings' => $this->coverage->gaps($supplierId, $year),
+                ...$this->layers->check($supplierId, $year),
+            ]]);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+    }
+
+    /**
+     * Formulář ručního zadání převzatých mezd jedné osoby.
+     *
+     * @param array{year:string,employeeId:string} $args
+     */
+    public function manualForm(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $error;
+        }
+        try {
+            return Json::ok($response, ['entry' => $this->manual->form(
+                $this->currentSupplierId($request),
+                (int) $args['employeeId'],
+                self::year($args['year']),
+            )]);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+    }
+
+    /**
+     * Uloží ručně zadané převzaté měsíce do obou vrstev najednou.
+     *
+     * @param array{year:string,employeeId:string} $args
+     */
+    public function manualSave(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $rows = $body['rows'] ?? null;
+            if (!is_array($rows) || !array_is_list($rows)) {
+                throw new \InvalidArgumentException('Řádky převzatých mezd musí být seznam.');
+            }
+
+            return Json::ok($response, ['entry' => $this->manual->save(
+                $this->currentSupplierId($request),
+                (int) $args['employeeId'],
+                self::year($args['year']),
+                $rows,
+                is_string($body['source_reference'] ?? null) ? $body['source_reference'] : '',
+                $this->userId($request),
+            )]);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'takeover_conflict', $e->getMessage(), 409);
+        }
+    }
+
+    private static function year(string $value): int
+    {
+        $year = (int) $value;
+        if ($year < 2000 || $year > 2200) {
+            throw new \InvalidArgumentException('Mzdový rok musí být v rozsahu 2000 až 2200.');
+        }
+
+        return $year;
+    }
 
     /** Přehled za firmu: které měsíce, kolik osob, z jakého zdroje. @param array{year:string} $args */
     public function overview(Request $request, Response $response, array $args): Response

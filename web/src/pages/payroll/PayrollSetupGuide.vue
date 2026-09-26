@@ -27,7 +27,32 @@ import { preferencesApi } from '@/api/preferences'
 const { t } = useI18n()
 const auth = useAuthStore()
 
+const props = withDefaults(defineProps<{
+  /** První měsíc, který počítá MyÚčto (`YYYY-MM-01`); podle něj se ukáže skupina přechodu. */
+  startPeriod?: string | null
+}>(), { startPeriod: null })
+
 const emit = defineEmits<{ 'update:visible': [boolean] }>()
+
+/*
+ * Přechod v průběhu roku: firma začíná jinak než lednem, takže měsíce leden až
+ * „před začátkem“ zpracoval předchozí program. Roční agendy (vyúčtování daně,
+ * roční zúčtování, potvrzení o zdanitelných příjmech, průměry, limit DPP) je
+ * potřebují — bez jejich převzetí aplikace roční výstupy zablokuje.
+ */
+const transitionMonth = computed(() => {
+  const match = /^(\d{4})-(\d{2})/.exec(props.startPeriod ?? '')
+  if (match === null) return null
+  const month = Number(match[2])
+  return month > 1 ? { year: Number(match[1]), month } : null
+})
+
+const hintParams = computed(() => transitionMonth.value === null ? {} : {
+  year: transitionMonth.value.year,
+  last: transitionMonth.value.month - 1,
+})
+
+const TRANSITION_MANUAL = '/manual?ch=113_Prechod_mezd_v_prubehu_roku'
 
 const PREF_KEY = 'payroll.guide'
 
@@ -49,6 +74,13 @@ const ICONS: Record<string, string> = {
   evidence:      'M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z',
   components:    'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
   first_run:     'M4 4v5h5M4 9a8 8 0 0 1 14.13-4.06M20 20v-5h-5M20 15a8 8 0 0 1-14.13 4.06',
+  takeover_wages:       'M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-8-4-4m0 0L8 8m4-4v12',
+  takeover_openings:    'M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z',
+  takeover_evidence:    'M12 4.354a4 4 0 1 1 0 5.292M15 21H3v-1a6 6 0 0 1 12 0v1zm0 0h6v-1a6 6 0 0 0-9-5.197M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0z',
+  takeover_identifiers: 'M10 6H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-5m-4 0V5a2 2 0 1 1 4 0v1m-4 0a2 2 0 1 0 4 0m-5 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 0 0-2.83 2M15 11h3m-3 4h2',
+  takeover_averages:    'M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z',
+  takeover_leave:       'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z',
+  takeover_check:       'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-6 9 2 2 4-4',
   check:         'M5 13l4 4L19 7',
 }
 
@@ -66,6 +98,8 @@ interface Step {
 interface Group {
   key: string
   accent: Accent
+  /** Skupina se ukáže jen firmě, která s mzdami začíná v průběhu roku. */
+  onlyForTransition?: boolean
   steps: Step[]
 }
 
@@ -100,6 +134,25 @@ const GROUPS: Group[] = [
       { id: 'components', to: { name: 'payroll-components' },                visible: () => auth.canWrite('payroll.inputs.write') },
     ],
   },
+  /*
+   * Jen pro firmu, která začíná jinak než lednem. Stojí za lidmi (převzaté mzdy
+   * se váží na osobu a vztah) a před prvním měsícem (průměry pro první čtvrtletí
+   * se počítají z převzatých mezd).
+   */
+  {
+    key: 'transition',
+    accent: 'accent',
+    onlyForTransition: true,
+    steps: [
+      { id: 'takeover_wages',       to: { name: 'payroll-imports', query: { tab: 'takeover' } },       cta: 'takeover_wages', visible: () => auth.canRead('payroll.reports') && auth.canWrite('payroll.employment.write') },
+      { id: 'takeover_openings',    to: { name: 'payroll-people' },                                                           visible: () => auth.canWrite('payroll.employment.write') },
+      { id: 'takeover_evidence',    to: { name: 'payroll-people' },                                                           visible: () => auth.canWrite('payroll.person.write') },
+      { id: 'takeover_identifiers', to: { name: 'payroll-people' },                                                           visible: () => auth.canWrite('payroll.person.write') },
+      { id: 'takeover_averages',    to: { name: 'payroll-absences', query: { tab: 'averages' } },                             visible: () => auth.canRead('payroll') },
+      { id: 'takeover_leave',       to: { name: 'payroll-absences', query: { tab: 'leave' } },                                visible: () => auth.canRead('payroll') },
+      { id: 'takeover_check',       to: { name: 'payroll-imports', query: { tab: 'reconciliation' } },                        visible: () => auth.canRead('payroll.reports') },
+    ],
+  },
   {
     key: 'start',
     accent: 'success',
@@ -110,6 +163,7 @@ const GROUPS: Group[] = [
 ]
 
 const groups = computed(() => GROUPS
+  .filter(g => !g.onlyForTransition || transitionMonth.value !== null)
   .map(g => ({ ...g, steps: g.steps.filter(s => s.visible()) }))
   .filter(g => g.steps.length > 0))
 
@@ -230,6 +284,14 @@ const TINT: Record<Accent, { tile: string; icon: string; ring: string }> = {
               </svg>
               {{ t('payroll.setup_guide.manual') }}
             </a>
+            <a v-if="transitionMonth !== null" :href="TRANSITION_MANUAL" target="_blank" rel="noopener"
+              data-test="payroll-setup-guide-transition-manual"
+              class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md border border-accent-500/40 text-accent-700 hover:bg-accent-50 text-sm font-medium whitespace-nowrap">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0-4-4m4 4-4 4m0 6H4m0 0 4 4m-4-4 4-4" />
+              </svg>
+              {{ t('payroll.setup_guide.transition_manual') }}
+            </a>
             <button type="button" data-test="payroll-setup-guide-hide" @click="hide"
               class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-50 text-sm font-medium whitespace-nowrap">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -263,7 +325,7 @@ const TINT: Record<Accent, { tile: string; icon: string; ring: string }> = {
     <section v-for="g in groups" :key="g.key" class="space-y-3">
       <h3 class="rule-label">
         <span>{{ t(`payroll.setup_guide.groups.${g.key}.title`) }}</span>
-        <span class="normal-case tracking-normal font-normal text-[11px] text-neutral-400">{{ t(`payroll.setup_guide.groups.${g.key}.hint`) }}</span>
+        <span class="normal-case tracking-normal font-normal text-[11px] text-neutral-400">{{ t(`payroll.setup_guide.groups.${g.key}.hint`, hintParams) }}</span>
       </h3>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">

@@ -1108,6 +1108,20 @@ final class Routes
                 '/takeover-wages/{year:[0-9]{4}}/people/{employeeId:[0-9]+}',
                 [PayrollTakeoverWageAction::class, 'person'],
             );
+            // Kontrola převzaté části roku a ruční zadání převzatých mezd,
+            // které plní počáteční stavy i převzaté mzdy jedním zápisem.
+            $g->get(
+                '/takeover-wages/{year:[0-9]{4}}/check',
+                [PayrollTakeoverWageAction::class, 'check'],
+            );
+            $g->get(
+                '/takeover-wages/{year:[0-9]{4}}/manual/{employeeId:[0-9]+}',
+                [PayrollTakeoverWageAction::class, 'manualForm'],
+            );
+            $g->put(
+                '/takeover-wages/{year:[0-9]{4}}/manual/{employeeId:[0-9]+}',
+                [PayrollTakeoverWageAction::class, 'manualSave'],
+            );
             // Žádosti o poukázání chybějící částky na daňovém bonusu
             // (§ 35d odst. 5 = DPZMB1, odst. 9 = DPZDB1). Vyplacené bonusy nad
             // rámec sražených záloh doplácí zaměstnavatel ze svého a bez téhle

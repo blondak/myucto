@@ -52,7 +52,7 @@ final class TaxStatementCalculator
             if ($overpayment > 0) {
                 $payouts[] = ['month' => $month->month, 'amount' => $overpayment];
             }
-            if (!$month->hasApprovedRun) {
+            if (!$month->hasSource()) {
                 continue;
             }
             $advance = $this->toCzk(
@@ -115,6 +115,8 @@ final class TaxStatementCalculator
             $bonusTopUpTotal,
             $basis->nonResidentCount,
             array_values(array_unique($warnings)),
+            $basis->blockers,
+            $basis->takenOverMonths(),
         );
     }
 
@@ -130,7 +132,7 @@ final class TaxStatementCalculator
 
         $months = [];
         foreach ($basis->months as $month) {
-            if (!$month->hasApprovedRun) {
+            if (!$month->hasSource()) {
                 continue;
             }
             $row = new WithholdingTaxRow(
@@ -158,6 +160,8 @@ final class TaxStatementCalculator
             WithholdingTaxStatement::DRUH_PRIJMU_FO,
             $months,
             array_values(array_unique($warnings)),
+            $basis->blockers,
+            $basis->takenOverMonths(),
         );
     }
 
@@ -182,7 +186,10 @@ final class TaxStatementCalculator
         }
         $missing = [];
         foreach ($basis->months as $month) {
-            if (!$month->hasApprovedRun) {
+            // Měsíc před začátkem vedení mezd se neschvaluje — jeho podklad jsou
+            // převzaté počáteční stavy a chybějící převzetí hlásí překážka,
+            // ne výzva ke schválení běhu, který za něj založit nejde.
+            if (!$month->hasSource() && !in_array($month->month, $basis->monthsBeforeStart, true)) {
                 $missing[] = $month->month;
             }
         }
@@ -191,6 +198,23 @@ final class TaxStatementCalculator
                 'Měsíce %s nemají schválený mzdový běh a ve vyúčtování zůstaly '
                 . 'prázdné. Pokud v nich mzdy byly, nejdřív je schvalte.',
                 implode(', ', $missing),
+            );
+        }
+        $takenOver = $basis->takenOverMonths();
+        if ($takenOver !== []) {
+            // Převzatý měsíc nemá platební ledger MyÚčta — odvod za něj zaplatil
+            // předchozí program. Sloupec „odvedeno" je proto odvozený a musí to
+            // být vidět, stejně jako to, co převzatá data vůbec nenesou.
+            $warnings[] = sprintf(
+                'Měsíce %s předcházejí začátku vedení mezd v MyÚčtu; jejich úhrny jsou '
+                . 'z počátečních stavů převzatých z předchozího programu (tytéž, ze kterých '
+                . 'počítá roční zúčtování i potvrzení o zdanitelných příjmech). Skutečně '
+                . 'odvedenou daň za ně aplikace odvodila jako sražené zálohy snížené '
+                . 'o vyplacené bonusy — ověřte ji proti osobnímu daňovému účtu. Přeplatky '
+                . 'z ročního zúčtování za předchozí rok, které v těchto měsících vyplatil '
+                . 'předchozí program, v převzatých datech nejsou; pokud nějaké byly, doplňte je '
+                . 'po stažení XML ručně v EPO podle výplatních listin předchozího programu.',
+                implode(', ', $takenOver),
             );
         }
     }

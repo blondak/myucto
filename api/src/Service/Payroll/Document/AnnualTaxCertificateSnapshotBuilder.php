@@ -6,11 +6,18 @@ namespace MyInvoice\Service\Payroll\Document;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAnnualDocumentRepository;
+use MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementClaimMonths;
 use MyInvoice\Service\Payroll\IncomeTax\EuropeanEconomicAreaCountries;
+use MyInvoice\Service\Payroll\IncomeTax\EvidenceInterval;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
+use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationStatus;
+use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverTaxEvidence;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -29,9 +36,12 @@ class AnnualTaxCertificateSnapshotBuilder
      * revize NENAJDE dřívější revize a doklad se vydá jako další revize
      * v řetězu. Dřívější revize ani jejich archivovaná PDF se tím nemění —
      * roční revize jsou append-only a kotvené otiskem.
+     *
+     * Schéma v7 rozšiřuje řádky 3, 11 a 12 (Prohlášení, děti, invalidita) i na
+     * převzaté měsíce ({@see carriedEvidence()}).
      */
-    public const SCHEMA_VERSION = 'annual-tax-certificate-snapshot.v6';
-    public const MAPPING_VERSION = 'annual-tax-certificate-2026-mapping.v6';
+    public const SCHEMA_VERSION = 'annual-tax-certificate-snapshot.v7';
+    public const MAPPING_VERSION = 'annual-tax-certificate-2026-mapping.v7';
 
     public function __construct(
         private readonly Connection $db,
@@ -42,6 +52,8 @@ class AnnualTaxCertificateSnapshotBuilder
         private readonly PayrollSensitiveData $sensitiveData,
         private readonly SecretEncryption $encryption,
         private readonly PayrollCarriedOverPeriodReader $carriedOverPeriods,
+        private readonly PayrollAnnualSettlementRepository $settlements,
+        private readonly AnnualSettlementClaimMonths $claimMonths,
     ) {}
 
     /**
@@ -96,6 +108,7 @@ class AnnualTaxCertificateSnapshotBuilder
             'tax_declaration' => $taxDeclaration,
             'tax_residence' => $taxResidence,
             'disability_tax_credits' => $disabilityTaxCredits,
+            'credit_months' => $creditMonths,
             'child_claim_months' => $childClaimMonths,
             'nonresident_insurance_minor_units' => $nonresidentInsuranceMinorUnits,
         ] = $this->certificateAmounts(
@@ -133,6 +146,22 @@ class AnnualTaxCertificateSnapshotBuilder
         $incomeMinorUnits = $this->add($incomeMinorUnits, $carriedIncome);
         $taxMinorUnits = $this->add($taxMinorUnits, $carriedTax);
         $taxBonusMinorUnits = $this->add($taxBonusMinorUnits, $carriedTaxBonus);
+        if ($carried !== null
+            && $carriedSnapshot !== null
+            && $kind === PayrollDocumentKind::TaxableIncomeAdvanceCertificate
+        ) {
+            [$taxDeclaration, $childClaimMonths, $creditMonths] = $this->carriedEvidence(
+                $supplierId,
+                $employeeId,
+                $taxYear,
+                $carried,
+                $months,
+                $taxDeclaration,
+                $childClaimMonths,
+                $creditMonths,
+            );
+            $disabilityTaxCredits = self::disabilityTaxCredits($creditMonths);
+        }
         $profile = $this->profileSnapshot(
             $supplierId,
             $employeeId,
@@ -378,18 +407,210 @@ class AnnualTaxCertificateSnapshotBuilder
     }
 
     /**
+     * Prohlášení poplatníka, děti a invalidita za PŘEVZATÉ měsíce.
+     *
+     * Počáteční stav nese jen částky, ne evidenci. Dokud se měsíce řádků 3,
+     * 11 a 12 skládaly jen ze snapshotů vlastních běhů, potvrzení u zaměstnance,
+     * který celý rok podepsané prohlášení měl a celý rok uplatňoval dítě, tvrdilo
+     * „prohlášení učiněno jen po část období" a dítě uvádělo jen od října —
+     * přestože úhrny na témž dokladu zahrnovaly zvýhodnění za celý rok.
+     *
+     * Zdroj je evidence zaměstnance v MyÚčtu zadaná zpětně (od prvního
+     * převzatého měsíce), vyhodnocená TÍMŽ testem počátku měsíce jako roční
+     * zúčtování. Kde evidence s převzatými úhrny nesouhlasí — prohlášení za
+     * převzatý měsíc chybí, nebo se v něm uplatnilo zvýhodnění na dítě, na které
+     * evidence nárok nemá —, doklad se nevystaví: napsal by o převzatém měsíci
+     * něco, co nikdo nedoložil.
+     *
+     * @param list<int> $ownMonths
+     * @param array{status:string,signed_months:list<int>,monthly_evidence:list<array<string,mixed>>}|null $taxDeclaration
+     * @param array<string,array<int,array{order:int,ztp_p:bool}>> $childClaimMonths
+     * @param array<string,array<int,bool>> $creditMonths
+     * @return array{0:array<string,mixed>|null,1:array<string,array<int,array{order:int,ztp_p:bool}>>,2:array<string,array<int,bool>>}
+     */
+    private function carriedEvidence(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        PayrollCarriedOverPeriod $carried,
+        array $ownMonths,
+        ?array $taxDeclaration,
+        array $childClaimMonths,
+        array $creditMonths,
+    ): array {
+        $carriedMonths = $carried->months;
+        $label = PayrollTakeoverCoverage::monthRanges($carriedMonths);
+        $statutory = $this->settlements->statutoryEvidenceForYear($supplierId, $employeeId, $taxYear);
+
+        // Řádek 3 — prohlášení za každý převzatý měsíc.
+        $monthly = $taxDeclaration['monthly_evidence'] ?? [];
+        $missing = [];
+        foreach ($carriedMonths as $month) {
+            $row = self::coveringRow($statutory['declarations'], $taxYear, $month);
+            $status = TaxDeclarationStatus::tryFrom((string) ($row['status'] ?? ''));
+            if ($row === null || $status === null || $status === TaxDeclarationStatus::Unverified) {
+                $missing[] = $month;
+                continue;
+            }
+            $monthly[] = [
+                'month' => $month,
+                'status' => $status->value,
+                'effective_from' => (string) $row['effective_from'],
+                'effective_to' => isset($row['effective_to']) && $row['effective_to'] !== ''
+                    ? (string) $row['effective_to']
+                    : null,
+            ];
+        }
+        if ($missing !== []) {
+            throw new \DomainException(sprintf(
+                'Potvrzení nelze vystavit: za převzaté měsíce %s chybí v evidenci zaměstnance '
+                . 'doložené Prohlášení poplatníka. Zadejte prohlášení zpětně od prvního převzatého '
+                . 'měsíce (podepsané i nepodepsané), aby řádek 3 uváděl pravdu za celý rok.',
+                PayrollTakeoverCoverage::monthRanges($missing),
+            ));
+        }
+        usort($monthly, static fn (array $left, array $right): int => $left['month'] <=> $right['month']);
+        $signed = array_values(array_map(
+            static fn (array $row): int => (int) $row['month'],
+            array_filter($monthly, static fn (array $row): bool => $row['status'] === 'signed'),
+        ));
+        $reported = PayrollCarriedOverPeriod::mergeMonths($ownMonths, $carriedMonths);
+        $openingRows = [];
+        foreach ($carried->monthRows as $row) {
+            $openingRows[(int) $row['month']] = $row;
+        }
+        $creditsWithoutDeclaration = array_values(array_filter(
+            $carriedMonths,
+            static fn (int $month): bool => ($openingRows[$month]['applied_non_refundable_credits_minor_units'] ?? 0) > 0
+                && !in_array($month, $signed, true),
+        ));
+        if ($creditsWithoutDeclaration !== []) {
+            throw new \DomainException(sprintf(
+                'Potvrzení nelze vystavit: v převzatých měsících %s se podle počátečních stavů '
+                . 'uplatnily slevy na dani, ale evidence zaměstnance pro ně podepsané Prohlášení '
+                . 'poplatníka nemá. Slevy se bez prohlášení uplatnit nedají — opravte evidenci '
+                . 'prohlášení, nebo počáteční stavy.',
+                PayrollTakeoverCoverage::monthRanges($creditsWithoutDeclaration),
+            ));
+        }
+        $taxDeclaration = [
+            'status' => match (count($signed)) {
+                0 => 'not-signed',
+                count($reported) => 'signed',
+                default => 'mixed',
+            },
+            'signed_months' => $signed,
+            'monthly_evidence' => $monthly,
+        ];
+
+        // Řádek 11 — děti; pořadí a ZTP/P z téže evidence jako roční zúčtování.
+        $children = $this->claimMonths->children(
+            $this->settlements->childClaimsForYear($supplierId, $employeeId, $taxYear),
+            $taxYear,
+        );
+        $claimedCarried = [];
+        foreach ($children['children'] as $child) {
+            foreach ($child->claimedMonths as $month) {
+                if (!in_array($month, $carriedMonths, true)) {
+                    continue;
+                }
+                if (isset($childClaimMonths[$child->childReference][$month])) {
+                    throw new \DomainException(
+                        'Dítě je v jednom měsíci daňového potvrzení uplatněno vícekrát.',
+                    );
+                }
+                $childClaimMonths[$child->childReference][$month] = [
+                    'order' => $child->order,
+                    'ztp_p' => in_array($month, $child->ztpPClaimedMonths, true),
+                ];
+                $claimedCarried[$month] = $month;
+            }
+        }
+        $withoutClaim = PayrollTakeoverTaxEvidence::childMonthsWithoutClaim(
+            $openingRows,
+            array_values($claimedCarried),
+        );
+        if ($withoutClaim !== []) {
+            throw new \DomainException(sprintf(
+                'Potvrzení nelze vystavit: v převzatých měsících %s zaměstnanec uplatňoval daňové '
+                . 'zvýhodnění na dítě, ale evidence dětí na ně nárok nemá. Zadejte nárok na dítě '
+                . 'zpětně od prvního měsíce, kdy ho uplatňoval (převzaté měsíce %s).',
+                PayrollTakeoverCoverage::monthRanges($withoutClaim),
+                $label,
+            ));
+        }
+
+        // Řádek 12 — invalidita a ZTP/P za převzaté měsíce z doložených nároků.
+        $disabilityKinds = [
+            TaxCreditKind::DisabilityBasic->value,
+            TaxCreditKind::DisabilityExtended->value,
+            TaxCreditKind::ZtpP->value,
+        ];
+        foreach ($this->settlements->creditClaimsForYear($supplierId, $employeeId, $taxYear) as $claim) {
+            $kind = (string) ($claim['credit_kind'] ?? '');
+            if (!in_array($kind, $disabilityKinds, true)
+                || TaxEvidenceStatus::tryFrom((string) ($claim['evidence_status'] ?? '')) !== TaxEvidenceStatus::Verified
+            ) {
+                continue;
+            }
+            foreach ($carriedMonths as $month) {
+                if (self::coveringRow([$claim], $taxYear, $month) !== null) {
+                    $creditMonths[$kind][$month] = true;
+                }
+            }
+        }
+
+        return [$taxDeclaration, $childClaimMonths, $creditMonths];
+    }
+
+    /**
+     * Řádek evidence účinný na počátku měsíce — týž test jako roční zúčtování
+     * ({@see \MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementEvidenceMonths}).
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return array<string,mixed>|null
+     */
+    private static function coveringRow(array $rows, int $taxYear, int $month): ?array
+    {
+        $covering = null;
+        foreach ($rows as $row) {
+            $from = (string) ($row['effective_from'] ?? '');
+            $to = $row['effective_to'] ?? null;
+            $to = is_string($to) && $to !== '' ? substr($to, 0, 10) : null;
+            if ($from === '') {
+                continue;
+            }
+            try {
+                $covers = EvidenceInterval::includesMonthStart(
+                    substr($from, 0, 10),
+                    $to,
+                    sprintf('%04d-%02d-01', $taxYear, $month),
+                );
+            } catch (\InvalidArgumentException) {
+                continue;
+            }
+            if ($covers) {
+                $covering = $row;
+            }
+        }
+
+        return $covering;
+    }
+
+    /**
      * Co se z počátečního stavu bere do potvrzení § 38j odst. 3 — a co ne.
      *
      * BERE se roční úhrn zdanitelného příjmu, skutečně sražené daně a u
      * zálohového potvrzení i vyplacených měsíčních bonusů. Jsou to přesně ta
      * tři čísla, která opening o dani nese a která tvoří řádky 1, 2, 6, 8 a 9.
      *
-     * NEBERE se nic dalšího, protože to opening nemá: Prohlášení poplatníka
-     * a daňová rezidence po měsících (řádek 3 a hlavička), uplatněné děti
-     * (řádek 11), invalidita a ZTP/P (řádek 12), povinné pojistné nerezidenta
-     * (řádek 14) ani platební důkaz. Tyhle údaje proto zůstávají výhradně za
-     * měsíce, které spočítalo MyÚčto, a doklad to musí říct — dělá to poznámka
-     * o převzatém období, kterou plní {@see PayrollCarriedOverPeriod}.
+     * Evidence k převzatým měsícům (Prohlášení, děti, invalidita — řádky 3, 11
+     * a 12) se z počátečního stavu nebere, protože ji nenese; doplňuje ji
+     * {@see carriedEvidence()} ze zpětně zadané evidence zaměstnance. Daňová
+     * rezidence, povinné pojistné nerezidenta (řádek 14) ani platební důkaz
+     * za převzaté měsíce nejsou — to zůstává za měsíce, které spočítalo MyÚčto,
+     * a doklad to říká poznámkou o převzatém období
+     * ({@see PayrollCarriedOverPeriod}).
      *
      * Zdravotní ani sociální pojištění se sem nepromítá: potvrzení podle
      * § 38j odst. 3 je vykazuje jen u nerezidenta (řádek 14) a ten se z cizího
@@ -475,6 +696,7 @@ class AnnualTaxCertificateSnapshotBuilder
      *   },
      *   tax_residence:?array{status:string,country_code:string},
      *   disability_tax_credits:list<array{period:string,degree:string}>,
+     *   credit_months:array<string,array<int,bool>>,
      *   child_claim_months:array<string,array<int,array{order:int,ztp_p:bool}>>,
      *   nonresident_insurance_minor_units:?int
      * }
@@ -697,6 +919,7 @@ class AnnualTaxCertificateSnapshotBuilder
             'tax_residence' => $taxResidence,
             'disability_tax_credits' =>
                 self::disabilityTaxCredits($creditMonths),
+            'credit_months' => $creditMonths,
             'child_claim_months' => $childClaimMonths,
             'nonresident_insurance_minor_units' =>
                 $kind === PayrollDocumentKind::TaxableIncomeAdvanceCertificate

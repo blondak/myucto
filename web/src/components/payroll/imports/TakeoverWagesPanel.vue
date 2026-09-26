@@ -23,6 +23,9 @@ import { useMigrationWorkspace } from './migrationWorkspace'
 import { useAuthStore } from '@/stores/auth'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
+import type { TakeoverCheck } from '@/api/payrollTakeover'
+import TakeoverCheckSection from '@/components/payroll/takeover/TakeoverCheckSection.vue'
+import TakeoverManualEntry from '@/components/payroll/takeover/TakeoverManualEntry.vue'
 import MigrationYearFilter from './MigrationYearFilter.vue'
 
 const { t } = useI18n()
@@ -82,6 +85,27 @@ async function loadTakeover(): Promise<void> {
   } finally {
     takeoverLoading.value = false
   }
+}
+
+/**
+ * Úplnost a shoda převzatých vrstev. Záložka Kontrola se ukáže, až jsou
+ * převzaté mzdy nahrané — tady musí být vidět i u firmy, která zatím zadala
+ * jen počáteční stavy.
+ */
+const check = ref<TakeoverCheck | null>(null)
+
+async function loadCheck(): Promise<void> {
+  if (!canRead.value) return
+  try {
+    check.value = await payrollTakeoverWagesApi.check(workspace.year.value)
+  } catch {
+    check.value = null
+  }
+}
+
+async function onManualSaved(): Promise<void> {
+  await Promise.all([loadTakeover(), loadCheck()])
+  workspace.markImported()
 }
 
 function onImportFile(event: Event): void {
@@ -144,7 +168,7 @@ async function runImportApply(): Promise<void> {
     })
     importPreview.value = null
     importFile.value = null
-    await loadTakeover()
+    await Promise.all([loadTakeover(), loadCheck()])
     // Kontrola i Kontace čtou tatáž data; po nahrání se musí přepočítat, i když
     // je uživatel zrovna nemá otevřené.
     workspace.markImported()
@@ -156,7 +180,11 @@ async function runImportApply(): Promise<void> {
 }
 
 watch([workspace.year, workspace.source], () => { void loadTakeover() })
-onMounted(() => { void loadTakeover() })
+watch(workspace.year, () => { void loadCheck() })
+onMounted(() => {
+  void loadTakeover()
+  void loadCheck()
+})
 </script>
 
 <template>
@@ -353,5 +381,9 @@ onMounted(() => { void loadTakeover() })
         </template>
       </div>
     </section>
+
+    <TakeoverCheckSection v-if="check" :check="check" />
+
+    <TakeoverManualEntry :year="workspace.year.value" :can-write="canImport" @saved="onManualSaved" />
   </div>
 </template>

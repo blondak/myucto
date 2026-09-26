@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Migration\PayrollEmploymentMonths;
 use PDO;
 use PDOException;
 
@@ -808,40 +809,27 @@ final class PayrollAnnualSettlementRepository
         int $employeeId,
         int $taxYear,
     ): array {
-        $statement = $this->db->pdo()->prepare(
+        $statement = $this->db->pdo()->prepare(sprintf(
             'SELECT start_date, end_date
                FROM payroll_employments
               WHERE supplier_id = ? AND employee_id = ?
-                AND status IN (\'active\', \'ended\')
+                AND status IN (%s)
                 AND (start_date IS NULL OR start_date <= ?)
-                AND (end_date IS NULL OR end_date >= ?)'
-        );
+                AND (end_date IS NULL OR end_date >= ?)',
+            implode(', ', array_fill(0, count(PayrollEmploymentMonths::STATUSES), '?')),
+        ));
         $statement->execute([
             $supplierId,
             $employeeId,
+            ...PayrollEmploymentMonths::STATUSES,
             sprintf('%04d-12-31', $taxYear),
             sprintf('%04d-01-01', $taxYear),
         ]);
 
-        $months = [];
-        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
-            $start = is_string($row['start_date'] ?? null) && $row['start_date'] !== ''
-                ? $row['start_date']
-                : sprintf('%04d-01-01', $taxYear);
-            $end = is_string($row['end_date'] ?? null) && $row['end_date'] !== ''
-                ? $row['end_date']
-                : sprintf('%04d-12-31', $taxYear);
-            for ($month = 1; $month <= 12; $month++) {
-                $monthStart = sprintf('%04d-%02d-01', $taxYear, $month);
-                $monthEnd = date('Y-m-t', (int) strtotime($monthStart));
-                if ($start <= $monthEnd && $end >= $monthStart) {
-                    $months[$month] = true;
-                }
-            }
-        }
-        ksort($months);
-
-        return array_map('intval', array_keys($months));
+        return PayrollEmploymentMonths::covered(
+            $statement->fetchAll(PDO::FETCH_ASSOC) ?: [],
+            $taxYear,
+        );
     }
 
     /**

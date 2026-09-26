@@ -1028,6 +1028,50 @@ final class PayrollStatutoryAccumulatorRepository
     }
 
     /**
+     * Aktuální (nenahrazené) počáteční stavy CELÉ firmy za rok, podle osob.
+     *
+     * Totéž „aktuální" jako {@see openingBalance()} — nenahrazený článek
+     * řetězu oprav —, jen dávkově. Čte z toho převzatou část roku vyúčtování
+     * daně, kontrola úplnosti převzetí i kontrola shody s převzatými mzdami,
+     * takže vidí PŘESNĚ ta čísla, ze kterých počítá roční zúčtování
+     * ({@see stateForYear()}) a potvrzení o zdanitelných příjmech.
+     *
+     * @return array<int,array<string,mixed>> employee_id => opening
+     */
+    public function currentOpeningsForSupplier(
+        int $supplierId,
+        int $year,
+        string $calculationKind,
+    ): array {
+        if ($supplierId <= 0 || $year < 2000 || $year > 2200) {
+            throw new \InvalidArgumentException(
+                'Firma nebo rok zákonné kumulace nejsou platné.',
+            );
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT opening.*
+               FROM payroll_statutory_accumulator_openings opening
+              WHERE opening.supplier_id = ?
+                AND opening.tax_year = ?
+                AND opening.calculation_kind = ?
+                AND NOT EXISTS (
+                  SELECT 1
+                    FROM payroll_statutory_accumulator_openings successor
+                   WHERE successor.supplier_id = opening.supplier_id
+                     AND successor.replaces_opening_id = opening.id
+                )
+              ORDER BY opening.employee_id, opening.id'
+        );
+        $stmt->execute([$supplierId, $year, $calculationKind]);
+        $openings = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $openings[(int) $row['employee_id']] ??= $this->castOpening($row);
+        }
+
+        return $openings;
+    }
+
+    /**
      * Období roku, za která už zaměstnanec má schválený zákonný výsledek.
      *
      * Není to zámek — je to seznam měsíců, které se počítaly NAD tehdejším

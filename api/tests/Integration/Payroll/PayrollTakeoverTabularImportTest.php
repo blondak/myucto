@@ -87,6 +87,57 @@ final class PayrollTakeoverTabularImportTest extends TestCase
         self::assertLessThanOrEqual(24, count($header), 'Parser přijímá nejvýš 24 sloupců.');
     }
 
+    /**
+     * Vzorový soubor je lidský: osoba jménem a označením vztahu, částky
+     * v korunách. Interní id ani haléře nikdo ze sestavy předchozího programu
+     * neopíše.
+     */
+    public function testHumanColumnsIdentifyThePersonByNameAndTakeCrowns(): void
+    {
+        $header = explode(';', explode("\r\n", TakeoverTabularImportService::template())[0]);
+        $header[0] = preg_replace('/^\xEF\xBB\xBF/', '', $header[0]) ?? $header[0];
+        self::assertContains('employee_name', $header);
+        self::assertContains('gross', $header);
+        self::assertNotContains('employee_id', $header);
+        self::assertNotContains('gross_minor', $header);
+
+        $columns = TakeoverTabularImportService::columns();
+        $row = [
+            'employee_name' => ' převzatá OSOBA ',
+            'employment_code' => self::CODE,
+            'period' => '2026-06',
+            'pension_participation' => '1',
+            'insurance_days' => '30',
+            'excluded_days' => '0',
+            'worked_days' => '21',
+            'gross' => '40 000,50',
+            'advance_tax' => '3000',
+            'net_payable' => '30800.5',
+            'payout_date' => '2026-07-10',
+        ];
+        $csv = implode(';', $columns) . "\r\n" . implode(';', array_map(
+            static fn (string $column): string => $row[$column] ?? '0',
+            $columns,
+        )) . "\r\n";
+
+        $result = $this->imports->apply($this->supplierId, 'other', 'csv', 'prevzate.csv', $csv);
+
+        self::assertSame(1, $result['written']);
+        $stored = $this->storedRow('2026-06');
+        self::assertSame($this->employeeId, (int) $stored['employee_id']);
+        self::assertSame(4_000_050, (int) $stored['gross_minor']);
+        self::assertSame(300_000, (int) $stored['advance_tax_minor']);
+        self::assertSame(3_080_050, (int) $stored['net_payable_minor']);
+
+        $row['employee_name'] = 'Někdo Jiný';
+        $unknown = implode(';', $columns) . "\r\n" . implode(';', array_map(
+            static fn (string $column): string => $row[$column] ?? '0',
+            $columns,
+        )) . "\r\n";
+        $preview = $this->imports->preview($this->supplierId, 'other', 'csv', 'prevzate.csv', $unknown);
+        self::assertStringContainsString('„Někdo Jiný" s pracovním vztahem', $preview['errors'][0]['error_message']);
+    }
+
     /** Import naplní i nové sloupce — doby, srážky a čistou mzdu k výplatě. */
     public function testImportFillsDurationAndPaymentColumns(): void
     {
@@ -260,10 +311,22 @@ final class PayrollTakeoverTabularImportTest extends TestCase
         ];
     }
 
-    /** @param list<array<string,string>> $rows */
+    /**
+     * Starší tvar souboru: interní `employee_id` a částky v celých haléřích.
+     * Import ho přijímá dál, aby fungovaly exporty připravené podle dřívějšího vzoru.
+     *
+     * @param list<array<string,string>> $rows
+     */
     private function csv(array $rows): string
     {
-        $columns = TakeoverTabularImportService::columns();
+        $columns = [
+            'employee_id', 'employment_code', 'period', 'pension_participation', 'insurance_days',
+            'excluded_days', 'worked_days', 'gross_minor', 'net_minor', 'deductions_minor',
+            'net_payable_minor', 'social_base_minor', 'health_base_minor', 'employee_social_minor',
+            'employee_health_minor', 'employer_social_minor', 'employer_health_minor',
+            'advance_tax_minor', 'withholding_tax_minor', 'tax_bonus_minor', 'payout_date',
+            'worked_hours', 'activity_code', 'external_relationship_ref',
+        ];
         $lines = [implode(';', $columns)];
         foreach ($rows as $row) {
             $lines[] = implode(';', array_map(

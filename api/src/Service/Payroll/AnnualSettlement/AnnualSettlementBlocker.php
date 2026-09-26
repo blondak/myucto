@@ -182,6 +182,17 @@ enum AnnualSettlementBlocker: string
      */
     case ChildJmhzEvidenceIncomplete = 'child_jmhz_evidence_incomplete';
 
+    /**
+     * V měsících převzatých z předchozího mzdového programu se uplatnilo
+     * daňové zvýhodnění na dítě (sleva nebo bonus), ale evidence dětí v MyÚčtu
+     * na ně nárok nemá — typicky proto, že dítě je zadané až od měsíce, kdy
+     * firma začala vést mzdy v MyÚčtu. Roční nárok se počítá z evidence
+     * (§ 35c odst. 10), takže by zúčtování zvýhodnění, které zaměstnanec
+     * u předchozího programu dostal, vyrovnalo jako neoprávněné. Náprava je
+     * zpětné zadání nároku od prvního měsíce, kdy ho zaměstnanec uplatňoval.
+     */
+    case TakeoverChildClaimMissing = 'takeover_child_claim_missing';
+
     /** Roční zúčtování už za tento rok proběhlo (§ 38ch odst. 4 — jednou ročně). */
     case AlreadySettled = 'already_settled';
 

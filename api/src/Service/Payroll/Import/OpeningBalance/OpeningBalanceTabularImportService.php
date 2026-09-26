@@ -190,6 +190,8 @@ final class OpeningBalanceTabularImportService
                 continue;
             }
             try {
+                // Měsíce jsou po normalizaci bez příznaku potvrzené nuly; úplnost
+                // i potvrzení už prověřil náhled nad řádky souboru.
                 $this->openings->save(
                     $supplierId,
                     (int) $person['employee_id'],
@@ -232,7 +234,7 @@ final class OpeningBalanceTabularImportService
             'status' => 'blocked',
             'reason' => null,
         ];
-        $reason = $this->openings->rejectReason($supplierId, $employeeId, $year, $rows);
+        $reason = $this->openings->rejectReason($supplierId, $employeeId, $year, $rows, true);
         if ($reason !== null) {
             return ['reason' => $reason] + $public;
         }
@@ -248,7 +250,7 @@ final class OpeningBalanceTabularImportService
 
     /**
      * @param array<string,string|int> $raw
-     * @return array{employee_id:int,year:int,month:int,month_row:array<string,int>}
+     * @return array{employee_id:int,year:int,month:int,month_row:array<string,int|bool>}
      */
     private function validateRow(int $supplierId, array $raw): array
     {
@@ -285,8 +287,22 @@ final class OpeningBalanceTabularImportService
         }
 
         $row = ['month' => $month];
+        $filled = false;
         foreach (PayrollOpeningBalanceService::monthFields() as $field) {
+            $filled = $filled || trim((string) ($raw[$field] ?? '')) !== '';
             $row[$field] = self::amount($raw, $field);
+        }
+        // Prázdný řádek není nula. Kdo chce doložit měsíc bez příjmu, napíše
+        // nuly — to je výslovné tvrzení, prázdné buňky ne.
+        if (!$filled) {
+            throw new \InvalidArgumentException(sprintf(
+                'Měsíc %d nemá vyplněnou žádnou částku. Prázdný řádek není nula — pokud zaměstnanec '
+                    . 'v měsíci opravdu neměl žádný příjem, napište do částek 0.',
+                $month,
+            ));
+        }
+        if (OpeningBalanceMonthValidator::isAllZero($row)) {
+            $row[OpeningBalanceMonthValidator::CONFIRMED_ZERO] = true;
         }
         OpeningBalanceMonthValidator::assertValid($row);
 

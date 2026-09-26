@@ -14,6 +14,8 @@ import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/butt
 import { formatDateTime, formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
 import { useRoute } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
+import TakeoverGapList from '@/components/payroll/takeover/TakeoverGapList.vue'
+import TakeoverLayerFindings from '@/components/payroll/takeover/TakeoverLayerFindings.vue'
 
 const props = defineProps<{ initialYear: number }>()
 const { t, te } = useI18n()
@@ -102,6 +104,7 @@ function blockerText(blocker: PayrollYearCloseBlocker): string {
  */
 const BLOCKER_TARGETS: Record<string, RouteLocationRaw> = {
   missing_months: { name: 'payroll-runs' },
+  takeover_months_missing: { name: 'payroll-imports', query: { tab: 'takeover' } },
   open_corrections: { name: 'payroll-runs' },
   open_submissions: { name: 'payroll-submissions-tab', params: { tab: 'monthly' } },
   open_liabilities: { name: 'payroll-payments' },
@@ -112,6 +115,13 @@ const BLOCKER_TARGETS: Record<string, RouteLocationRaw> = {
 
 function blockerTarget(blocker: PayrollYearCloseBlocker): RouteLocationRaw | null {
   return BLOCKER_TARGETS[blocker.code] ?? null
+}
+
+/** Rozchod převzatých vrstev se řeší v kontrole převzetí, odvody v platbách. */
+function warningTarget(warning: PayrollYearCloseWarning): RouteLocationRaw {
+  return warning.code === 'takeover_layers_mismatch'
+    ? { name: 'payroll-imports', query: { tab: 'takeover' } }
+    : { name: 'payroll-payments' }
 }
 
 async function load(): Promise<void> {
@@ -234,6 +244,11 @@ onMounted(load)
               </svg>
               {{ t('payroll.year_close.blocker_open') }}
             </RouterLink>
+            <TakeoverGapList
+              v-if="blocker.code === 'takeover_months_missing' && (blocker.people ?? []).length > 0"
+              class="w-full pl-2 text-xs"
+              :gaps="blocker.people ?? []"
+            />
           </li>
         </ul>
       </div>
@@ -257,7 +272,7 @@ onMounted(load)
             <div class="flex flex-wrap items-center gap-2">
               <span>{{ warningText(warning) }}</span>
               <RouterLink
-                :to="{ name: 'payroll-payments' }"
+                :to="warningTarget(warning)"
                 :class="btnOutlineSm('neutral')"
                 :data-test="`year-close-warning-link-${warning.code}`"
               >
@@ -267,7 +282,14 @@ onMounted(load)
                 {{ t('payroll.year_close.blocker_open') }}
               </RouterLink>
             </div>
-            <ul class="mt-1 space-y-0.5 pl-4 text-xs text-neutral-600">
+            <TakeoverLayerFindings
+              v-if="warning.code === 'takeover_layers_mismatch'"
+              class="mt-2 pl-4"
+              :differences="warning.differences ?? []"
+              :opening-only="warning.opening_only ?? []"
+              :takeover-only="warning.takeover_only ?? []"
+            />
+            <ul v-else class="mt-1 space-y-0.5 pl-4 text-xs text-neutral-600">
               <li v-for="item in warning.items" :key="item.liability_id">{{ warningItemText(item) }}</li>
               <li v-if="warning.truncated">{{ t('payroll.year_close.warning_truncated', { count: warning.count - warning.items.length }) }}</li>
             </ul>

@@ -36,15 +36,34 @@ use MyInvoice\Service\Payroll\Migration\PayrollMigrationTakeoverFacts;
  * v původním systému se odvozuje z `employee_id`; identita vztahu jde přebít
  * volitelným sloupcem, když si ji zákazník chce zachovat.
  *
+ * ── Lidské sloupce ──────────────────────────────────────────────────────────
+ * Vzorový soubor identifikuje osobu JMÉNEM a označením vztahu (tak, jak je
+ * vidí na kartě) a částky jsou v KORUNÁCH (`12 345,50`). Interní `employee_id`
+ * a částky v haléřích (`*_minor`) import přijímá dál, aby fungovaly exporty
+ * připravené podle dřívějšího vzoru — v jednom souboru jde použít jen jedno
+ * z obojího, jinak by se nedalo poznat, které číslo platí.
+ *
  * ── Jednotky ────────────────────────────────────────────────────────────────
- * Částky v CELÝCH HALÉŘÍCH (stejně jako import počátečních stavů), dny
- * a hodiny desetinně s maximálně dvěma místy (`21,5` i `21.5`) — půlden je
- * u odpracované doby běžný a vynucovat setiny by uživatele nutilo počítat.
+ * Částky v korunách s nejvýše dvěma desetinnými místy (nebo v celých haléřích
+ * ve sloupcích `*_minor`), dny a hodiny desetinně s maximálně dvěma místy
+ * (`21,5` i `21.5`) — půlden je u odpracované doby běžný a vynucovat setiny by
+ * uživatele nutilo počítat.
  */
 final class TakeoverTabularImportService
 {
-    /** Identifikace řádku. */
-    private const KEY_COLUMNS = ['employee_id', 'employment_code', 'period'];
+    /** Identifikace řádku ve vzorovém souboru. */
+    private const KEY_COLUMNS = ['employee_name', 'employment_code', 'period'];
+
+    /** Sloupce, které musí mít každý soubor bez ohledu na variantu. */
+    private const REQUIRED_COLUMNS = [
+        'employment_code',
+        'period',
+        'pension_participation',
+        'insurance_days',
+        'excluded_days',
+        'worked_days',
+        'payout_date',
+    ];
 
     /** Doby a účast na pojištění (ELDP). */
     private const DURATION_COLUMNS = [
@@ -86,34 +105,44 @@ final class TakeoverTabularImportService
         private readonly RegistrationImportLookup $lookup,
     ) {}
 
-    /** @return list<string> povinné sloupce v pořadí vzorového souboru */
+    /** @return list<string> sloupce, které musí mít každý soubor */
     public static function requiredColumns(): array
+    {
+        return self::REQUIRED_COLUMNS;
+    }
+
+    /**
+     * Sloupec částky v korunách k haléřovému (`gross_minor` → `gross`).
+     */
+    public static function crownColumn(string $minorColumn): string
+    {
+        return substr($minorColumn, 0, -strlen('_minor'));
+    }
+
+    /** @return list<string> celá hlavička vzorového souboru (jméno, Kč) včetně nepovinných */
+    public static function columns(): array
     {
         return [
             ...self::KEY_COLUMNS,
             ...self::DURATION_COLUMNS,
-            ...self::AMOUNT_COLUMNS,
+            ...array_map(self::crownColumn(...), self::AMOUNT_COLUMNS),
             'payout_date',
+            ...self::OPTIONAL_COLUMNS,
         ];
-    }
-
-    /** @return list<string> celá hlavička vzorového souboru včetně nepovinných */
-    public static function columns(): array
-    {
-        return [...self::requiredColumns(), ...self::OPTIONAL_COLUMNS];
     }
 
     /**
      * Vzorový soubor se správnou hlavičkou a jedním ukázkovým řádkem.
      *
      * Oddělovač `;` a BOM kvůli Excelu v českém prostředí — jinak Excel rozhodí
-     * diakritiku i sloupce.
+     * diakritiku i sloupce. Osoba jménem a označením vztahu, částky v korunách:
+     * tak je účetní opíše ze sestavy předchozího programu bez přepočtu.
      */
     public static function template(): string
     {
         $columns = self::columns();
         $example = [
-            'employee_id' => '1',
+            'employee_name' => 'Jana Vzorová',
             'employment_code' => 'HPP-001',
             'period' => sprintf('%04d-01', (int) date('Y')),
             'pension_participation' => '1',
@@ -121,6 +150,7 @@ final class TakeoverTabularImportService
             'excluded_days' => '0',
             'worked_days' => '21',
             'worked_hours' => '168',
+            'gross' => '40000',
             'payout_date' => sprintf('%04d-02-10', (int) date('Y')),
             'activity_code' => '1',
             'external_relationship_ref' => '',
@@ -269,7 +299,7 @@ final class TakeoverTabularImportService
         $source = self::source($source);
         $format = self::format($format);
         $sourceName = self::sourceName($sourceName);
-        $parsed = $this->parser->parse($format, $content, self::requiredColumns());
+        $parsed = $this->parser->parse($format, $content, self::requiredColumns(), decimals: true);
 
         $errors = $parsed['errors'];
         $totals = [];
@@ -324,11 +354,11 @@ final class TakeoverTabularImportService
      */
     private function buildRow(int $supplierId, array $raw): array
     {
-        $employeeId = self::positiveInt($raw, 'employee_id');
         $code = trim((string) ($raw['employment_code'] ?? ''));
         if ($code === '') {
             throw new \InvalidArgumentException('Sloupec employment_code je prázdný.');
         }
+        $employeeId = $this->employeeId($supplierId, $raw, $code);
         $employments = $this->lookup->employments($supplierId, $employeeId);
         if ($employments === []) {
             throw new \InvalidArgumentException(
@@ -410,9 +440,73 @@ final class TakeoverTabularImportService
         return $value;
     }
 
-    /** @param array<string,string|int> $raw */
+    /**
+     * Osoba řádku: jménem a označením vztahu (vzorový soubor), nebo interním
+     * `employee_id` (starší vzor). Obojí je párovací dvojice s označením vztahu —
+     * samotné jméno ani samotné id by se dalo splést a měsíc by se zapsal jinému.
+     *
+     * @param array<string,string|int> $raw
+     */
+    private function employeeId(int $supplierId, array $raw, string $code): int
+    {
+        $id = trim((string) ($raw['employee_id'] ?? ''));
+        $name = trim((string) ($raw['employee_name'] ?? ''));
+        if ($id !== '') {
+            return self::positiveInt($raw, 'employee_id');
+        }
+        if ($name === '') {
+            throw new \InvalidArgumentException(
+                'Řádek nemá jméno zaměstnance (sloupec employee_name) ani jeho číslo (employee_id).',
+            );
+        }
+        $matches = $this->lookup->employeesByNameAndEmploymentCode($supplierId, $name, $code);
+        if ($matches === []) {
+            throw new \InvalidArgumentException(sprintf(
+                'Zaměstnanec „%s" s pracovním vztahem „%s" v této firmě není. Zkontrolujte jméno '
+                    . 'a označení vztahu v kartě zaměstnance.',
+                $name,
+                $code,
+            ));
+        }
+        if (count($matches) > 1) {
+            throw new \InvalidArgumentException(sprintf(
+                'Jméno „%s" se vztahem „%s" má ve firmě víc zaměstnanců; odlište je sloupcem employee_id.',
+                $name,
+                $code,
+            ));
+        }
+
+        return $matches[0];
+    }
+
+    /**
+     * Částka řádku v haléřích. Vzorový soubor ji nese v korunách (`gross`),
+     * starší v celých haléřích (`gross_minor`); oba sloupce najednou nejdou,
+     * protože by nebylo poznat, které číslo platí.
+     *
+     * @param array<string,string|int> $raw
+     */
     private static function amount(array $raw, string $column): int
     {
+        $crown = self::crownColumn($column);
+        $hasCrown = array_key_exists($crown, $raw);
+        $hasMinor = array_key_exists($column, $raw);
+        if ($hasCrown && $hasMinor) {
+            throw new \InvalidArgumentException(sprintf(
+                'Soubor má sloupec „%s" v korunách i „%s" v haléřích; ponechte jen jeden.',
+                $crown,
+                $column,
+            ));
+        }
+        if (!$hasCrown && !$hasMinor) {
+            throw new \InvalidArgumentException(sprintf(
+                'Soubor nemá sloupec „%s" (částka v korunách). Stáhněte si vzor, ať sedí hlavička.',
+                $crown,
+            ));
+        }
+        if ($hasCrown) {
+            return self::crowns($raw, $crown);
+        }
         $value = trim((string) ($raw[$column] ?? ''));
         if ($value === '') {
             return 0;
@@ -425,6 +519,29 @@ final class TakeoverTabularImportService
         }
 
         return (int) $value;
+    }
+
+    /**
+     * Koruny na haléře bez plovoucí řádové čárky: `12 345,50`, `12345.5`,
+     * `12345` i `-120`. Mezery a pevné mezery jako oddělovač tisíců se vynechají.
+     *
+     * @param array<string,string|int> $raw
+     */
+    private static function crowns(array $raw, string $column): int
+    {
+        $value = str_replace([' ', "\u{00A0}", "\u{202F}"], '', trim((string) ($raw[$column] ?? '')));
+        if ($value === '') {
+            return 0;
+        }
+        if (preg_match('/^(-?)([0-9]{1,13})(?:[.,]([0-9]{1,2}))?$/D', $value, $match) !== 1) {
+            throw new \InvalidArgumentException(sprintf(
+                'Sloupec „%s" musí být částka v korunách s nejvýše dvěma desetinnými místy (např. 12 345,50).',
+                $column,
+            ));
+        }
+        $minor = (int) $match[2] * 100 + (int) str_pad($match[3] ?? '', 2, '0');
+
+        return $match[1] === '-' ? -$minor : $minor;
     }
 
     /** @param array<string,string|int> $raw */

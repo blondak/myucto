@@ -703,6 +703,80 @@ final class AnnualSettlementIntegrationTest extends TestCase
         }
     }
 
+    /**
+     * Počáteční stav nese zvýhodnění na dítě uplatněné u předchozího programu,
+     * evidence dětí ho ale nezná (dítě zadané až od začátku vedení mezd). Roční
+     * nárok by vyšel nižší než už poskytnuté zvýhodnění a zúčtování by ho
+     * vyrovnalo jako neoprávněné — musí proto stát na překážce.
+     */
+    public function testTakenOverChildBenefitWithoutClaimBlocksTheSettlement(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $connection = $container->get(Connection::class);
+        $service = $container->get(AnnualTaxSettlementService::class);
+        $sensitive = $container->get(PayrollSensitiveData::class);
+        self::assertInstanceOf(AnnualTaxSettlementService::class, $service);
+        self::assertInstanceOf(PayrollSensitiveData::class, $sensitive);
+
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $pdo->beginTransaction();
+        try {
+            [$supplierId, $employeeId] = $this->fixture(
+                $pdo,
+                $sourceSupplierId,
+                $sensitive,
+                openingEvidenceJson: json_encode(['months' => [[
+                    'month' => 1,
+                    'advance_base_minor_units' => 4_000_000,
+                    'advance_tax_minor_units' => 100_000,
+                    'applied_child_credit_minor_units' => 126_700,
+                    'tax_bonus_minor_units' => 0,
+                ]]], JSON_THROW_ON_ERROR),
+            );
+            $pdo->prepare(
+                'INSERT INTO payroll_dependants
+                    (supplier_id, employee_id, relation, full_name, given_name,
+                     family_name, birth_date, ztp_p, student, existence_from)
+                 VALUES (?, ?, "child_own", "Eva Syntetická", "Eva",
+                         "Syntetická", "2018-04-12", 0, 0, "2018-04-12")',
+            )->execute([$supplierId, $employeeId]);
+            $dependantId = (int) $pdo->lastInsertId();
+            $pdo->prepare(
+                'UPDATE payroll_annual_settlement_requests
+                    SET other_household_caregiver_status = "none"
+                  WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?',
+            )->execute([$supplierId, $employeeId, self::YEAR]);
+            $claim = $pdo->prepare(
+                'INSERT INTO payroll_person_tax_child_claims
+                    (supplier_id, employee_id, dependant_id, child_reference,
+                     child_order, ztp_p, evidence_status, evidence_reference,
+                     shared_household_confirmed, other_claimant_excluded,
+                     effective_from, effective_to)
+                 VALUES (?, ?, ?, ?, 1, 0, "verified", "synthetic-child", 1, 1, ?, NULL)',
+            );
+            // Dítě zadané až od října — převzatý leden nárok nemá.
+            $claim->execute([$supplierId, $employeeId, $dependantId, 'dependant-' . $dependantId, self::YEAR . '-10-01']);
+
+            $today = new DateTimeImmutable((self::YEAR + 1) . '-03-10');
+            $blocked = $service->preview($supplierId, $employeeId, self::YEAR, $today)['result'];
+            self::assertContains('takeover_child_claim_missing', $blocked->blockerCodes());
+
+            // Zpětné zadání nároku od ledna překážku odstraní.
+            $pdo->prepare(
+                'UPDATE payroll_person_tax_child_claims SET effective_from = ?
+                  WHERE supplier_id = ? AND employee_id = ?',
+            )->execute([self::YEAR . '-01-01', $supplierId, $employeeId]);
+            $fixed = $service->preview($supplierId, $employeeId, self::YEAR, $today)['result'];
+            self::assertNotContains('takeover_child_claim_missing', $fixed->blockerCodes());
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $connection->close();
+        }
+    }
+
     public function testChildIdentityMonthsAndOtherCaregiverAreFrozenForJmhz(): void
     {
         $container = Bootstrap::buildContainer();
@@ -899,6 +973,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
         bool $withRequest = true,
         ?array $monthlyIncomeMinor = null,
         ?array $monthlyTaxBonusMinor = null,
+        string $openingEvidenceJson = '[]',
     ): array {
         $supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
         $pdo->prepare(
@@ -1011,12 +1086,13 @@ final class AnnualSettlementIntegrationTest extends TestCase
                 (supplier_id, employee_id, tax_year, calculation_kind,
                  values_json, source_reference, evidence_json,
                  idempotency_key_hash, record_hash)
-             VALUES (?, ?, ?, "income_tax", ?, "synthetic-opening", "[]", ?, ?)',
+             VALUES (?, ?, ?, "income_tax", ?, "synthetic-opening", ?, ?, ?)',
         )->execute([
             $supplierId,
             $employeeId,
             self::YEAR,
             $openingValues,
+            $openingEvidenceJson,
             random_bytes(32),
             hash('sha256', "synthetic-opening-{$supplierId}-{$employeeId}"),
         ]);

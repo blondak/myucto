@@ -15,7 +15,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import {
   payrollApi,
   type PayrollAnnualSettlementAnnualClaims,
@@ -202,6 +202,9 @@ const BLOCKER_FIELDS: Record<string, () => HTMLElement | null> = {
   annual_only_claims_unsupported: () => annualClaimsField.value,
   child_jmhz_evidence_incomplete: () => caregiverStatusField.value,
 }
+
+/** Překážky, které se opravují v kartě zaměstnance (evidence dětí). */
+const CARD_BLOCKERS: readonly string[] = ['takeover_child_claim_missing']
 
 function blockerHasField(code: string): boolean {
   return BLOCKER_FIELDS[code] !== undefined
@@ -1300,7 +1303,7 @@ onMounted(async () => {
                   {{ t('payroll.annual_settlement.blockers_title') }}
                 </p>
                 <ul class="mt-2 space-y-1.5 text-sm text-neutral-700">
-                  <li v-for="code in blockers" :key="code" class="flex gap-2">
+                  <li v-for="code in blockers" :key="code" class="flex flex-wrap items-start gap-2">
                     <span aria-hidden="true">•</span>
                     <button
                       v-if="blockerHasField(code)"
@@ -1312,6 +1315,19 @@ onMounted(async () => {
                       {{ t(`payroll.annual_settlement.blocker.${code}`) }}
                     </button>
                     <span v-else>{{ t(`payroll.annual_settlement.blocker.${code}`) }}</span>
+                    <!--
+                      Nárok na dítě se zadává v kartě zaměstnance, ne tady —
+                      proklik vede rovnou tam, kde se doplní zpětně od ledna.
+                    -->
+                    <RouterLink
+                      v-if="CARD_BLOCKERS.includes(code) && selectedEmployeeId !== null"
+                      :to="{ name: 'payroll-person', params: { id: selectedEmployeeId } }"
+                      :class="[btnOutline('warning'), 'shrink-0 whitespace-nowrap']"
+                      :data-test="`annual-settlement-blocker-card-${code}`"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                      {{ t('payroll.annual_settlement.open_employee_card') }}
+                    </RouterLink>
                   </li>
                 </ul>
               </div>

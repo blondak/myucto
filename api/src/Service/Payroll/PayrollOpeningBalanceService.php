@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Service\Payroll\Import\OpeningBalance\OpeningBalanceMonthValidator;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
 
 /**
  * Počáteční stavy mzdových kumulací.
@@ -73,6 +74,7 @@ final readonly class PayrollOpeningBalanceService
     public function __construct(
         private PayrollStatutoryAccumulatorRepository $accumulators,
         private Connection $db,
+        private PayrollTakeoverCoverage $coverage,
     ) {}
 
     /**
@@ -297,6 +299,10 @@ final readonly class PayrollOpeningBalanceService
      * Uloží počáteční stavy. Opakované uložení TÝCHŽ čísel je replay (repozitář
      * vrátí původní řádek), změna čísel je oprava navázaná na aktuální verzi.
      *
+     * `$requireExplicitMonths` zapínají cesty, kde čísla zadává člověk (mřížka,
+     * tabulkový import): každý převzatý měsíc, ve kterém trval vztah, musí být
+     * vyplněný nebo výslovně potvrzený jako nulový ({@see explicitMonthsReason()}).
+     *
      * @param list<OpeningMonth> $months
      * @return array{year:int,months:list<OpeningMonth>,openings:array<string,?int>,
      *   source_reference:string,locked:bool,lock_reason:?string,approved_periods:list<string>}
@@ -308,12 +314,20 @@ final readonly class PayrollOpeningBalanceService
         array $months,
         string $sourceReference,
         ?int $actorUserId,
+        bool $requireExplicitMonths = false,
     ): array {
         $sourceReference = trim($sourceReference);
+        $entered = $months;
         $months = self::normalizedMonths($months);
         $lockReason = $this->lockReason($supplierId, $employeeId, $year);
         if ($lockReason !== null) {
             throw new \DomainException($lockReason);
+        }
+        if ($requireExplicitMonths) {
+            $reason = $this->explicitMonthsReason($supplierId, $employeeId, $year, $entered);
+            if ($reason !== null) {
+                throw new \InvalidArgumentException($reason);
+            }
         }
 
         $evidence = ['months' => array_values($months)];
@@ -485,6 +499,9 @@ final readonly class PayrollOpeningBalanceService
                 );
             }
             OpeningBalanceMonthValidator::assertValid($row);
+            // Potvrzení nulového měsíce je tvrzení při zadání, ne údaj
+            // kumulace — uložený nulový řádek už JE doložená nula.
+            unset($row[OpeningBalanceMonthValidator::CONFIRMED_ZERO]);
             $byMonth[$month] = $row;
         }
         if ($byMonth === []) {
@@ -524,15 +541,65 @@ final readonly class PayrollOpeningBalanceService
      *
      * @param list<array<string,mixed>> $months
      */
-    public function rejectReason(int $supplierId, int $employeeId, int $year, array $months): ?string
-    {
+    public function rejectReason(
+        int $supplierId,
+        int $employeeId,
+        int $year,
+        array $months,
+        bool $requireExplicitMonths = false,
+    ): ?string {
         try {
             self::normalizedMonths($months);
         } catch (\InvalidArgumentException $e) {
             return $e->getMessage();
         }
 
-        return $this->lockReason($supplierId, $employeeId, $year);
+        return $this->lockReason($supplierId, $employeeId, $year)
+            ?? ($requireExplicitMonths
+                ? $this->explicitMonthsReason($supplierId, $employeeId, $year, $months)
+                : null);
+    }
+
+    /**
+     * Prázdné není nula: každý převzatý měsíc, ve kterém zaměstnanci trval
+     * pracovní vztah, musí být v rozpisu — vyplněný, nebo výslovně potvrzený
+     * jako nulový.
+     *
+     * Dřív mřížka i tabulka převedly nevyplněné na nulu a chybějící měsíc
+     * prostě nechaly chybět. Obojí prošlo bez varování a roční zúčtování,
+     * vyúčtování daně i roční maximum pojistného pak pracovaly s „doloženým"
+     * rokem, ve kterém nikdo nic nedoložil. Které měsíce se čekají, říká
+     * {@see PayrollTakeoverCoverage} — tentýž výklad používá vyúčtování daně
+     * a uzávěrka mzdového roku.
+     *
+     * @param list<array<string,mixed>> $months
+     */
+    public function explicitMonthsReason(int $supplierId, int $employeeId, int $year, array $months): ?string
+    {
+        $present = [];
+        foreach ($months as $row) {
+            $reason = OpeningBalanceMonthValidator::rejectUnconfirmedZero($row);
+            if ($reason !== null) {
+                return $reason;
+            }
+            if (is_int($row['month'] ?? null)) {
+                $present[$row['month']] = true;
+            }
+        }
+        $missing = array_values(array_filter(
+            $this->coverage->expectedMonthsForEmployee($supplierId, $employeeId, $year),
+            static fn (int $month): bool => !isset($present[$month]),
+        ));
+        if ($missing === []) {
+            return null;
+        }
+
+        return sprintf(
+            'Zaměstnanci trval pracovní vztah i v měsících %s, které vedl předchozí program, ale '
+                . 'v počátečních stavech chybí. Doplňte je, nebo je zadejte jako potvrzenou nulu '
+                . '(měsíc bez příjmu, třeba neplacené volno).',
+            PayrollTakeoverCoverage::monthRanges($missing),
+        );
     }
 
     /** @param callable():void $callback */

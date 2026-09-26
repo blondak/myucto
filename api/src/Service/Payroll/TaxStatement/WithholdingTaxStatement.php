@@ -40,6 +40,8 @@ final readonly class WithholdingTaxStatement
     /**
      * @param array<int,WithholdingTaxRow> $months Klíč = číslo měsíce.
      * @param list<string> $warnings
+     * @param list<string> $blockers Proč se tiskopis sestavit nesmí; XML se nevydá.
+     * @param list<int> $takenOverMonths Měsíce s úhrny z převzatých počátečních stavů.
      */
     public function __construct(
         public int $year,
@@ -47,6 +49,8 @@ final readonly class WithholdingTaxStatement
         public string $incomeKind,
         public array $months,
         public array $warnings = [],
+        public array $blockers = [],
+        public array $takenOverMonths = [],
     ) {
         if (!in_array($variant, self::TYPY, true)) {
             throw new \InvalidArgumentException(
@@ -97,7 +101,10 @@ final readonly class WithholdingTaxStatement
     {
         $months = [];
         foreach ($this->months as $month => $row) {
-            $months[] = ['month' => $month] + $row->toSummary();
+            $months[] = [
+                'month' => $month,
+                'taken_over' => in_array($month, $this->takenOverMonths, true),
+            ] + $row->toSummary();
         }
 
         return [
@@ -109,6 +116,8 @@ final readonly class WithholdingTaxStatement
             'total' => $this->total()->toSummary(),
             'balance_minor' => $this->balanceMinor(),
             'warnings' => $this->warnings,
+            'blockers' => $this->blockers,
+            'taken_over_months' => $this->takenOverMonths,
         ];
     }
 }

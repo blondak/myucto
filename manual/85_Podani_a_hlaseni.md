@@ -1256,7 +1256,8 @@ zúčtováním a roční uzávěrkou. Vybíráš rok (výchozí je loňský) a t
 řádné, řádné opravné, dodatečné nebo dodatečné opravné. U obou dodatečných
 variant se navíc zadává datum zjištění důvodů (§ 141 odst. 5 daňového řádu).
 Víc se ručně vyplnit nedá: **žádnou částku ani řádek nelze přepsat**, podklad
-je jen průmět schválených mzdových běhů.
+je průmět schválených mzdových běhů a v roce přechodu i počátečních stavů za
+převzaté měsíce.
 
 Panel ukazuje tři dlaždice (zálohy, které měly být sraženy, skutečně odvedeno
 finančnímu úřadu, srážková daň celkem), tabulku po měsících, přílohu č. 1 se
@@ -1265,7 +1266,18 @@ osobní identifikátory. Měsíc bez schváleného mzdového běhu **není měs�
 nulami** - řádek se prostě nevytvoří a dostaneš na to varování. Pokud v takovém
 měsíci mzdy byly, schval je nejdřív.
 
-Podklad je vždy zmrazený výsledek schválených revizí, nikdy nový výpočet.
+**Rok přechodu.** Měsíce před začátkem vedení mezd v MyÚčtu zpracoval
+předchozí program. Jejich řádky se naplní z počátečních stavů ročních součtů
+(základ a záloha daně, slevy, bonus, srážková daň) a v tabulce nesou značku
+*převzato*; odvedená záloha je u nich odvozená jako záloha po odečtení bonusu.
+Když některému zaměstnanci v převzatém měsíci trval pracovní vztah a počáteční
+stav za ten měsíc chybí, vyúčtování se nesestaví: panel vypíše, komu a za
+které měsíce chybí, s odkazem na kartu zaměstnance. Jak převzaté měsíce
+doplnit, popisuje kapitola
+[Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md).
+
+Podklad je vždy zmrazený výsledek schválených revizí nebo uložené počáteční
+stavy, nikdy nový výpočet.
 Do přílohy č. 1 se počítají zaměstnanci podle obce místa výkonu práce k 1. 12.;
 komu obec u vztahu chybí, ten se do přílohy nedostane a aplikace to spočítá do
 varování. Okres se dopočítá z číselníku obcí, a co číselník nepokrývá, zůstane

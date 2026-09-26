@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\TaxStatement;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollTaxStatementRepository;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
 
@@ -31,6 +32,7 @@ final class TaxStatementService
         private readonly TaxStatementCalculator $calculator,
         private readonly TaxStatementXmlBuilder $xmlBuilder,
         private readonly JmhzExternalCodebookCatalog $codebook,
+        private readonly PayrollTakeoverCoverage $takeover,
     ) {}
 
     /**
@@ -42,12 +44,15 @@ final class TaxStatementService
     public function preview(int $supplierId, int $year, array $meta = []): array
     {
         $basis = $this->basis($supplierId, $year);
+        // Kdo převzaté úhrny nemá, se ukazuje jen v náhledu — s proklikem na
+        // kartu, kde se doplňují. Do tiskopisu jména nepatří.
+        $gaps = ['takeover_gaps' => $basis->takeoverGaps];
 
         return [
             self::FORM_DEPENDENT_ACTIVITY =>
-                $this->calculator->dependentActivity($basis, $meta)->toSummary(),
+                $this->calculator->dependentActivity($basis, $meta)->toSummary() + $gaps,
             self::FORM_WITHHOLDING_TAX =>
-                $this->calculator->withholdingTax($basis, $meta)->toSummary(),
+                $this->calculator->withholdingTax($basis, $meta)->toSummary() + $gaps,
         ];
     }
 
@@ -69,6 +74,9 @@ final class TaxStatementService
             );
         }
         $basis = $this->basis($supplierId, $year);
+        if ($basis->blockers !== []) {
+            throw new \DomainException(implode(' ', $basis->blockers));
+        }
         $supplier = EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $supplierId);
 
         if ($formCode === self::FORM_DEPENDENT_ACTIVITY) {
@@ -150,6 +158,14 @@ final class TaxStatementService
                 + (int) $row['settled_minor'];
         }
 
+        [$takenOver, $blockers, $gaps] = $this->takeoverMonths(
+            $supplierId,
+            $year,
+            $byMonth,
+            $remitted,
+            $warnings,
+        );
+
         $months = [];
         foreach ($byMonth as $month => $values) {
             $months[] = new TaxStatementMonth(
@@ -163,6 +179,7 @@ final class TaxStatementService
                 max(0, $remitted['advance_tax'][$month] ?? 0),
                 max(0, $remitted['withholding_tax'][$month] ?? 0),
                 $values['has_run'],
+                isset($takenOver[$month]),
             );
         }
 
@@ -172,7 +189,122 @@ final class TaxStatementService
             $this->workplaces($supplierId, $year),
             $this->repository->nonResidentEmployeeCount($supplierId, $year),
             $warnings,
+            $blockers,
+            $this->takeover->takeoverMonths($supplierId, $year),
+            $gaps,
         );
+    }
+
+    /**
+     * Doplní měsíce před začátkem vedení mezd z převzatých počátečních stavů.
+     *
+     * Zdroj je TÝŽ, ze kterého počítá roční zúčtování ({@see
+     * \MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository::stateForYear()})
+     * a potvrzení o zdanitelných příjmech: rozpis měsíců aktuálního počátečního
+     * stavu. Vyúčtování tak nemůže vykázat jiný roční úhrn záloh, než s jakým
+     * pracovalo roční zúčtování.
+     *
+     * Převzatý měsíc nemá v MyÚčtu platební ledger — odvod za něj zaplatil
+     * předchozí program. „Skutečně odvedeno" se proto odvozuje jako zálohy
+     * snížené o vyplacené bonusy (záporný rozdíl vrátil finanční úřad, odvedeno
+     * nic nebylo) a srážková daň v plné výši; kalkulačka to v náhledu řekne.
+     *
+     * Chybí-li za převzatý měsíc počáteční stav osobě, které v něm trval vztah,
+     * je to PŘEKÁŽKA: tiskopis by vykázal nižší úhrn záloh, než jaký se srazil,
+     * a nikdo by to nepoznal.
+     *
+     * @param array<int,array{headcount:int,advance:int,bonus:int,withholding:int,has_run:bool}> $byMonth
+     * @param array{advance_tax:array<int,int>,withholding_tax:array<int,int>} $remitted
+     * @param list<string> $warnings
+     * @return array{0:array<int,true>,1:list<string>,2:list<array{employee_id:int,employee_name:string,missing_months:list<int>}>}
+     */
+    private function takeoverMonths(
+        int $supplierId,
+        int $year,
+        array &$byMonth,
+        array &$remitted,
+        array &$warnings,
+    ): array {
+        $takeoverMonths = $this->takeover->takeoverMonths($supplierId, $year);
+        if ($takeoverMonths === []) {
+            return [[], [], []];
+        }
+
+        $takenOver = [];
+        $doubled = [];
+        $openings = $this->takeover->openingMonths($supplierId, $year);
+        foreach ($takeoverMonths as $month) {
+            $rows = [];
+            foreach ($openings as $employeeMonths) {
+                if (isset($employeeMonths[$month])) {
+                    $rows[] = $employeeMonths[$month];
+                }
+            }
+            if ($rows === []) {
+                continue;
+            }
+            if ($byMonth[$month]['has_run']) {
+                // Běh za měsíc před začátkem vedení mezd vzniknout nemá; když
+                // přesto je (hranice se posunula dodatečně), bere se běh a převzatý
+                // stav se nepřičítá — jinak by měsíc byl ve vyúčtování dvakrát.
+                $doubled[] = $month;
+                continue;
+            }
+            $advance = 0;
+            $bonus = 0;
+            $withholding = 0;
+            $headcount = 0;
+            foreach ($rows as $row) {
+                $advance += $this->amount($row['advance_tax_minor_units'] ?? 0, 'převzatá záloha na daň');
+                $bonus += $this->amount($row['tax_bonus_minor_units'] ?? 0, 'převzatý daňový bonus');
+                $withholding += $this->amount($row['withholding_tax_minor_units'] ?? 0, 'převzatá srážková daň');
+                if (($row['advance_base_minor_units'] ?? 0) > 0
+                    || ($row['withholding_base_minor_units'] ?? 0) > 0
+                ) {
+                    ++$headcount;
+                }
+            }
+            $byMonth[$month]['headcount'] += $headcount;
+            $byMonth[$month]['advance'] += $advance;
+            $byMonth[$month]['bonus'] += $bonus;
+            $byMonth[$month]['withholding'] += $withholding;
+            $remitted['advance_tax'][$month] = ($remitted['advance_tax'][$month] ?? 0)
+                + max(0, $advance - $bonus);
+            $remitted['withholding_tax'][$month] = ($remitted['withholding_tax'][$month] ?? 0)
+                + $withholding;
+            $takenOver[$month] = true;
+        }
+        if ($doubled !== []) {
+            $warnings[] = sprintf(
+                'Měsíce %s mají schválený mzdový běh i převzatý počáteční stav. Ve vyúčtování '
+                . 'je jen běh; zkontrolujte začátek vedení mezd v nastavení.',
+                implode(', ', $doubled),
+            );
+        }
+
+        $blockers = [];
+        $gaps = $this->takeover->gaps($supplierId, $year);
+        if ($gaps !== []) {
+            // Jména do textu nepatří — tiskopis je souhrnný. Koho se mezera týká,
+            // nese náhled zvlášť (`takeover_gaps`) s proklikem na kartu osoby.
+            $missing = [];
+            foreach ($gaps as $gap) {
+                foreach ($gap['missing_months'] as $month) {
+                    $missing[$month] = $month;
+                }
+            }
+            $blockers[] = sprintf(
+                'Za měsíce %s (před začátkem vedení mezd v MyÚčtu) chybí u %d zaměstnanců '
+                . 'převzaté úhrny, přestože jim v nich trval pracovní vztah. Bez nich by '
+                . 'vyúčtování vykázalo nižší úhrn záloh, než jaký se skutečně srazil. Doplňte '
+                . 'počáteční stavy v kartě zaměstnance (Počáteční stavy) nebo v Importech → '
+                . 'Převzaté mzdy; měsíc bez příjmu potvrďte jako nulový.',
+                PayrollTakeoverCoverage::monthRanges(array_values($missing)),
+                count($gaps),
+            );
+        }
+
+        return [$takenOver, $blockers, $gaps];
     }
 
     /**

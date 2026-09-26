@@ -298,16 +298,22 @@ Měsíce před zahájením vedení mezd v MyÚčtu se nepřepočítávají — j
 výsledky se uloží jako počáteční stavy ročních kumulací (§ 108.2, Začátek
 vedení mezd) a jako **převzaté mzdy** po měsících.
 
-Z převzatých mezd MyÚčto sestaví i to, co dřív za rok přechodu sestavit nešlo:
+Obě vrstvy mají jiný účel. Z **počátečních stavů** vychází roční zúčtování,
 potvrzení o zdanitelných příjmech ze závislé činnosti (§ 38j odst. 3 zákona
-o daních z příjmů), roční mzdový list a evidenční list důchodového pojištění.
-Převzatá část je v dokladu vždy označená — není to výpočet MyÚčta. Chybí-li
-převzatému měsíci údaj, který doklad potřebuje, doklad se raději nevystaví
-a řekne, co doplnit.
+o daních z příjmů), roční mzdový list i vyúčtování záloh a srážkové daně.
+**Převzaté mzdy** čte evidenční list důchodového pojištění, převzatý běh,
+kontrolní sestava, návrh průměrného výdělku pro první čtvrtletí po přechodu
+a hlídání ročního limitu dohod o provedení práce. Převzatá část je v dokladu vždy označená —
+není to výpočet MyÚčta. Chybí-li převzatému měsíci údaj, který doklad
+potřebuje, doklad se raději nevystaví a řekne, co doplnit.
 
-Převzaté mzdy plní převod z PAMICA sám. Zákazník, který přichází odjinud, je
-nahraje z CSV nebo XLSX v `Mzdy → Importy → Převzaté mzdy`; vzorový soubor je
-ke stažení tamtéž.
+Obě vrstvy plní převod z PAMICA sám. Zákazník, který přichází odjinud,
+postupuje podle kapitoly
+[Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md): převzaté
+mzdy zadá ručně po měsících, nebo je nahraje z CSV či XLSX v
+`Mzdy → Importy → Převzaté mzdy`. Ruční zadání plní obě vrstvy najednou.
+Import souboru plní jen převzaté mzdy; počáteční stavy se pak doplní na kartě
+pracovního vztahu a **Kontrola převzetí** ukáže, kde se vrstvy rozcházejí.
 
 Celá agenda přechodu žije v `Mzdy → Importy` jako záložky **Převzaté mzdy**,
 **Kontrola převzetí** a **Kontace z převzetí**. Poslední dvě se nabízí, až

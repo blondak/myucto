@@ -1787,6 +1787,87 @@
     "license_required_title": "Modul Mzdy není v licenci aktivní",
     "license_required_description": "Po skončení zkušební doby je pro modul Mzdy potřeba samostatný doplněk.",
     "license_required_action": "Objednat modul Mzdy",
+    "takeover_check": {
+      "title": "Kontrola převzaté části roku",
+      "hint": "Měsíce {months} vedl předchozí mzdový program. Každý z nich musí mít počáteční stav (z něj počítá roční zúčtování, vyúčtování daně a potvrzení o příjmech) i převzatou mzdu (z ní vzniká evidenční list důchodového pojištění) a obě musí tvrdit totéž.",
+      "all_ok": "Převzaté měsíce jsou úplné a počáteční stavy se s převzatými mzdami shodují.",
+      "gaps_title": "Chybí počáteční stavy",
+      "gaps_hint": "Těmto zaměstnancům v převzatých měsících trval pracovní vztah, ale počáteční stav za ně nic neříká. Doplňte úhrny z předchozího programu, nebo měsíc bez příjmu potvrďte jako nulový.",
+      "gap_person": "{name} — měsíce {months}",
+      "open_person": "Otevřít kartu",
+      "open_takeover": "Zadat převzaté mzdy",
+      "differences_title": "Počáteční stavy a převzaté mzdy si odporují",
+      "differences_hint": "Opravte tu stranu, která neodpovídá podkladům předchozího programu. U základu daně může být rozdíl oprávněný (osvobozený příjem je v hrubé mzdě, ne v základu daně).",
+      "person": "Zaměstnanec",
+      "period": "Měsíc",
+      "metric_column": "Veličina",
+      "opening": "Počáteční stav",
+      "takeover": "Převzatá mzda",
+      "difference": "Rozdíl",
+      "metric": {
+        "tax_base": "Základ daně / hrubá mzda",
+        "advance_tax": "Záloha na daň",
+        "withholding_tax": "Srážková daň",
+        "tax_bonus": "Daňový bonus",
+        "social_base": "Vyměřovací základ SP",
+        "health_base": "Vyměřovací základ ZP"
+      },
+      "opening_only_title": "Chybí převzaté mzdy",
+      "opening_only_hint": "Počáteční stav měsíc má, převzatá mzda ne. Bez ní nevznikne evidenční list důchodového pojištění za rok přechodu.",
+      "takeover_only_title": "Převzatá mzda bez počátečního stavu",
+      "takeover_only_hint": "Převzatá mzda měsíc má, počáteční stav ne — roční zúčtování ani vyúčtování daně s ním nepočítají."
+    },
+    "takeover_manual": {
+      "title": "Ruční zadání převzatých mezd",
+      "hint": "Pro měsíce, které vedl předchozí program a ze kterých nemáte export ani hlášení. Každý měsíc zadejte jednou, po pracovních vztazích a v korunách — uložení naplní počáteční stavy (roční zúčtování, vyúčtování daně, potvrzení o příjmech) i převzaté mzdy (evidenční list důchodového pojištění).",
+      "employee": "Zaměstnanec",
+      "employee_placeholder": "Vyberte zaměstnance",
+      "no_takeover_months": "Rok {year} nemá převzaté měsíce: začátek vedení mezd v MyÚčtu v něm neleží. Nastavte první mzdové období v nastavení mezd.",
+      "no_employment": "Zaměstnanec nemá v převzatých měsících ({months}) žádný trvající pracovní vztah.",
+      "months_hint": "Převzaté měsíce: {months}. Vyplňte každý měsíc, ve kterém vztah trval; měsíc bez příjmu potvrďte jako nulový.",
+      "per_person_hint": "Základ daně, slevy, zvýhodnění na děti a dopočet do minima se sčítají za osobu: u souběžných vztahů je stačí uvést v jednom řádku měsíce.",
+      "month": "Měsíc",
+      "employment": "Vztah",
+      "group": {
+        "wage": "Mzda",
+        "insurance": "Pojištění",
+        "tax": "Daň",
+        "durations": "Doby"
+      },
+      "field": {
+        "gross_minor": "Hrubá mzda",
+        "net_minor": "Čistá mzda",
+        "deductions_minor": "Srážky",
+        "net_payable_minor": "K výplatě",
+        "payout_date": "Datum výplaty",
+        "social_base_minor": "Základ SP",
+        "health_base_minor": "Základ ZP",
+        "employee_social_minor": "SP zaměstnanec",
+        "employee_health_minor": "ZP zaměstnanec",
+        "employer_social_minor": "SP zaměstnavatel",
+        "employer_health_minor": "ZP zaměstnavatel",
+        "health_minimum_top_up_minor": "Dopočet ZP do minima",
+        "advance_base_minor": "Základ zálohové daně",
+        "advance_tax_minor": "Záloha na daň",
+        "withholding_base_minor": "Základ srážkové daně",
+        "withholding_tax_minor": "Srážková daň",
+        "applied_credits_minor": "Uplatněné slevy",
+        "applied_child_credit_minor": "Sleva na děti",
+        "tax_bonus_minor": "Daňový bonus",
+        "pension_participation": "Účast na DP",
+        "insurance_days": "Dny pojištění",
+        "excluded_days": "Vyloučené dny",
+        "worked_days": "Odpracované dny",
+        "worked_hours": "Odpracované hodiny"
+      },
+      "amount_invalid": "V měsíci {month} není „{field}“ platná částka v korunách (např. 12 345,50).",
+      "days_invalid": "V měsíci {month} nejsou platné doby: dny pojištění a vyloučené dny jsou celé číslo 0–31, odpracované dny a hodiny nejvýš se dvěma desetinnými místy.",
+      "empty_month": "Měsíc {month} vztahu {employment} nemá vyplněnou žádnou částku. Vyplňte úhrny z předchozího programu, nebo zaškrtněte „Opravdu nula“.",
+      "save": "Uložit převzaté měsíce",
+      "saved": "Převzaté měsíce jsou uložené v počátečních stavech i v převzatých mzdách.",
+      "load_failed": "Převzaté měsíce zaměstnance se nepodařilo načíst.",
+      "save_failed": "Převzaté měsíce se nepodařilo uložit."
+    },
     "year_close": {
       "title": "Roční uzávěrka mezd",
       "description": "Uzavřete rok až po dokončení všech dvanácti mzdových období, oprav a podání. Odvody, ke kterým ještě nedorazil výpis, uzavření nebrání — jen se vypíšou.",
@@ -1801,6 +1882,7 @@
         "schema_unavailable": "Potřebná mzdová evidence není v databázi dostupná.",
         "unknown": "Uzavření brání další překážka, kterou tahle verze aplikace neumí pojmenovat. Ozvěte se prosím podpoře.",
         "missing_months": "Chybí uzavřená období: {months}.",
+        "takeover_months_missing": "U {count} zaměstnanců chybí převzaté úhrny za měsíce před začátkem vedení mezd v MyÚčtu, přestože jim v nich trval pracovní vztah. Doplňte je (u koho a za které měsíce, je vypsané níže) v kartě zaměstnance nebo v Importech → Převzaté mzdy.",
         "open_corrections": "Čekají {count} otevřené opravy mzdových běhů.",
         "open_submissions": "Čeká {count} neukončených zákonných podání.",
         "open_liabilities": "Zůstává {count} neuhrazených mzdových závazků.",
@@ -1811,7 +1893,8 @@
       "warnings_title": "Na co upozornit (uzavření to nebrání)",
       "warning": {
         "unknown": "Zůstává {count} nálezů, které tahle verze aplikace neumí pojmenovat.",
-        "open_liabilities": "Zůstává {count} mzdových závazků bez doloženého bankovního pohybu. Doloží se samy, až dorazí a spáruje se výpis."
+        "open_liabilities": "Zůstává {count} mzdových závazků bez doloženého bankovního pohybu. Doloží se samy, až dorazí a spáruje se výpis.",
+        "takeover_layers_mismatch": "Převzatá část roku má {count} nálezů: počáteční stavy (z nich počítá roční zúčtování a vyúčtování daně) a převzaté mzdy (z nich vzniká evidenční list důchodového pojištění) si za týž měsíc odporují, nebo měsíc má jen jedna z nich."
       },
       "warning_truncated": "a další ({count})",
       "close": "Uzavřít mzdový rok",
@@ -1922,7 +2005,7 @@
         "missing": "Bez podkladu z kterékoli strany: {periods}",
         "overlapping": "Z obou stran (k porovnání v sestavě níž): {periods}",
         "upload_title": "Nahrát převzaté mzdy",
-        "upload_hint": "CSV nebo XLSX se sloupci ze vzorového souboru. Částky v celých haléřích, dny a hodiny desetinně. Trvání a druh pracovního vztahu se berou z evidence, ne ze souboru. Opakované nahrání týchž dat řádky nezdvojí, přepíše je.",
+        "upload_hint": "CSV nebo XLSX se sloupci ze vzorového souboru: zaměstnanec jménem (employee_name) a označením vztahu z karty (employment_code), částky v korunách (12 345,50), dny a hodiny desetinně. Trvání a druh pracovního vztahu se berou z evidence, ne ze souboru. Opakované nahrání týchž dat řádky nezdvojí, přepíše je. Tabulka plní převzaté mzdy; počáteční stavy pro daň doplníte ručním zadáním níže nebo v kartě zaměstnance.",
         "import_source": "Původní systém",
         "file": "Soubor",
         "preview": "Zkontrolovat",
@@ -2037,7 +2120,13 @@
       "annex_one": "Příloha č. 1 — počet zaměstnanců k 1. prosinci",
       "annex_one_empty": "Žádný vztah nemá vyplněnou obec místa výkonu práce, příloha č. 1 by zůstala prázdná.",
       "privacy_hint": "Podklad neobsahuje jména, osobní identifikátory ani detail jednotlivých zaměstnanců.",
-      "validation_failed": "Stažené XML neprošlo kontrolou proti schématu — podatelna EPO ho v tomhle stavu odmítne. Soubor je uložený, ale před podáním doplňte, co chybí."
+      "validation_failed": "Stažené XML neprošlo kontrolou proti schématu — podatelna EPO ho v tomhle stavu odmítne. Soubor je uložený, ale před podáním doplňte, co chybí.",
+      "takeover": {
+        "blockers_title": "Vyúčtování zatím nejde sestavit",
+        "download_blocked": "Za některé převzaté měsíce chybí úhrny z předchozího programu. Nejdřív je doplňte.",
+        "badge": "převzato",
+        "badge_hint": "Měsíc před začátkem vedení mezd v MyÚčtu; úhrny jsou z počátečních stavů převzatých z předchozího programu."
+      }
     },
     "payments": {
       "title": "Mzdové příkazy a úhrady",
@@ -2495,6 +2584,7 @@
       "takeover": {
         "title": "Převzaté měsíce roku přechodu",
         "subtitle": "Měsíce, které zpracoval předchozí mzdový program. Převzatý běh je jejich zrcadlo: nepočítá se, neschvaluje a znovu se nezaúčtovává.",
+        "jmhz_note": "Hlášení JMHZ za tyto měsíce podal předchozí program a MyÚčto k nim opravné hlášení nesestaví. Opravu podejte tam, odkud šlo řádné hlášení (předchozí program nebo portál ČSSZ), a opravené úhrny promítněte do převzatých mezd i počátečních stavů.",
         "boundary": "MyÚčto počítá mzdy od {period}",
         "loading": "Načítám převzaté měsíce…",
         "rows": "{count} řádků převodu",
@@ -4015,6 +4105,7 @@
         "child_evidence_unverified": "Nárok na daňové zvýhodnění na dítě není doložený.",
         "child_claim_conflict": "Nároky na děti si odporují — zkontrolujte pořadí dětí, potvrzení o společné domácnosti a vyloučení druhého poplatníka.",
         "child_jmhz_evidence_incomplete": "Doplňte na kartě dítěte jméno a datum narození a v podkladech ročního zúčtování zodpovězte, zda dítě uplatňovala i jiná osoba ve společné domácnosti.",
+        "takeover_child_claim_missing": "V měsících převzatých z předchozího mzdového programu zaměstnanec uplatňoval daňové zvýhodnění na dítě (slevu nebo bonus), ale v evidenci dětí na ně nárok není. Zadejte nárok na dítě v kartě zaměstnance zpětně od prvního měsíce, kdy ho uplatňoval (typicky od ledna) — jinak by zúčtování zvýhodnění, které už dostal, vyrovnalo jako neoprávněné.",
         "already_settled": "Roční zúčtování za tento rok už proběhlo. Provádí se jednou ročně.",
         "ruleset_year_not_covered": "Pro tento rok nemáme účinná daňová pravidla na celý rok, takže roční částky nelze odvodit.",
         "tax_year_not_finished": "Zdaňovací období ještě neskončilo. Roční zúčtování jde provést až od 1. ledna následujícího roku.",
@@ -4022,6 +4113,7 @@
         "request_date_missing": "U podané žádosti chybí datum podání. Bez něj nejde doložit, že žádost přišla do 15. února. Podklady jsou uložené, doplňte datum v poli Datum žádosti.",
         "prior_documents_date_missing": "U doložených dokladů předchozích zaměstnavatelů chybí datum převzetí. Bez něj nejde doložit lhůtu do 15. února. Podklady jsou uložené, doplňte datum v poli Datum převzetí dokladů."
       },
+      "open_employee_card": "Otevřít kartu zaměstnance",
       "settle_read_only": "Provést zúčtování může jen uživatel s právem schvalovat mzdy.",
       "settle_unavailable": "Náhled zúčtování zatím neprošel. Načtěte ho znovu, nebo zkontrolujte podklady zaměstnance.",
       "save_request_read_only": "Evidenci podkladů může měnit jen uživatel s právem zapisovat mzdové doklady."
@@ -5062,7 +5154,7 @@
         "done": "Počáteční stav je potvrzený — výpočet i roční zúčtování s ním počítají. Zkontrolovat nebo opravit jej můžete níže.",
         "panel_title": "Počáteční stavy za rok {year}",
         "panel_hint": "Úhrny za měsíce, které jste zpracovali jinde. Opište je ze sestavy předchozího programu; částky zadávejte v korunách.",
-        "zero_hint": "Pokud zaměstnanec u této firmy v předchozích měsících neměl žádnou mzdu, ponechte všechny částky nulové a formulář uložte. Zdroj není povinný.",
+        "zero_hint": "Vyplňte každý měsíc, ve kterém zaměstnanci trval pracovní vztah. Prázdný měsíc není nula: pokud v něm zaměstnanec opravdu neměl žádný příjem (třeba neplacené volno), zaškrtněte u něj „Opravdu nula“. Zdroj není povinný.",
         "new_hire_zero_hint": "Jde o nový nástup bez předchozí mzdy u této firmy. Uložte nulový počáteční stav; zdroj není povinný.",
         "nothing_to_fill": "Nejsou žádné dříve zpracované měsíce. Uložte níže nulový počáteční stav.",
         "month": "Měsíc",
@@ -5078,7 +5170,7 @@
         "save_failed": "Počáteční stavy se nepodařilo uložit.",
         "import": {
           "title": "Import z tabulky (CSV/XLSX)",
-          "hint": "Jeden soubor za celou firmu. Každý řádek je jeden měsíc jednoho zaměstnance, částky v celých haléřích. Stáhněte si vzor, ať sedí hlavička.",
+          "hint": "Jeden soubor za celou firmu. Každý řádek je jeden měsíc jednoho zaměstnance, částky v celých haléřích. Uveďte každý převzatý měsíc, ve kterém vztah trval; měsíc bez příjmu zapište nulami (prázdný řádek nula není). Stáhněte si vzor, ať sedí hlavička.",
           "template": "Stáhnout vzor",
           "preview": "Náhled",
           "apply": "Naimportovat",
@@ -5115,6 +5207,12 @@
           "applied_child_credit_minor_units": "Daňové zvýhodnění",
           "tax_bonus_minor_units": "Vyplacený bonus",
           "bonus_qualifying_income_minor_units": "Příjem pro bonus"
+        },
+        "explicit": {
+          "confirm": "Opravdu nula",
+          "confirm_hint": "Zaškrtněte jen u měsíce, ve kterém zaměstnanec opravdu neměl žádný příjem. Prázdný měsíc se jako nula neuloží.",
+          "confirm_aria": "Měsíc {month} je opravdu nulový",
+          "empty_month": "Měsíc {month} nemá vyplněnou žádnou částku. Vyplňte úhrny z předchozího programu, nebo zaškrtněte „Opravdu nula“."
         }
       },
       "statutory_evidence": {
@@ -8118,7 +8216,12 @@
       "mark_done": "Označit jako hotové",
       "marked_done": "Hotovo",
       "footnote": "Průvodce se ukazuje, dokud nemáte první schválený mzdový běh. Odškrtnutí je vaše poznámka — aplikace podle něj nic nemění ani nekontroluje.",
+      "transition_manual": "Přechod v průběhu roku",
       "groups": {
+        "transition": {
+          "title": "Přechod v průběhu roku",
+          "hint": "měsíce 1–{last}/{year} zpracoval předchozí program; bez jejich převzetí nevyjde roční zúčtování, potvrzení o příjmech ani vyúčtování daně"
+        },
         "employer": {
           "title": "Nastavení zaměstnavatele",
           "hint": "údaje, bez kterých nejde spočítat ani odvést mzdu"
@@ -8133,6 +8236,35 @@
         }
       },
       "steps": {
+        "takeover_wages": {
+          "title": "Převezměte mzdy za měsíce před přechodem",
+          "text": "Každému zaměstnanci zadejte po měsících a vztazích úhrny z předchozího programu v korunách: hrubou mzdu, pojistné, zálohu a slevy. Ruční zadání naplní převzaté mzdy i počáteční stavy najednou; import CSV nebo XLSX plní jen převzaté mzdy.",
+          "cta": "Zadat převzaté mzdy"
+        },
+        "takeover_openings": {
+          "title": "Zkontrolujte počáteční stavy",
+          "text": "Na kartě pracovního vztahu v sekci Počáteční stavy musí mít každý převzatý měsíc úhrny, nebo zaškrtnuté „Opravdu nula“. Prázdný měsíc není nula — vyúčtování daně i uzávěrka roku na něm skončí."
+        },
+        "takeover_evidence": {
+          "title": "Děti a prohlášení od začátku roku",
+          "text": "Prohlášení poplatníka, děti a invaliditu zaevidujte s platností od ledna, ne od přechodu. Bez nich roční zúčtování převzatou slevu na děti neuzná a potvrzení o příjmech nevyjde."
+        },
+        "takeover_identifiers": {
+          "title": "Identifikátory pro ČSSZ",
+          "text": "OIČ a ID pojistného vztahu přepište u každého vztahu z předchozího programu, případně je načtěte v Importech. Bez nich první hlášení JMHZ nenaváže na hlášení, která podal předchozí program."
+        },
+        "takeover_averages": {
+          "title": "Průměrný výdělek pro první čtvrtletí",
+          "text": "Průměr pro náhrady v prvním čtvrtletí po přechodu se počítá z převzatých mezd předchozího čtvrtletí. Aplikace ho navrhne, pokud převzaté mzdy mají odpracované hodiny; návrh schválíte v Nepřítomnostech."
+        },
+        "takeover_leave": {
+          "title": "Zůstatek dovolené",
+          "text": "Nárok a vyčerpanou dovolenou za část roku v předchozím programu zadejte v knize dovolené, ať zůstatek sedí od prvního měsíce."
+        },
+        "takeover_check": {
+          "title": "Kontrola převzaté části roku",
+          "text": "Sestava ukáže, komu chybí převzatý měsíc a kde si počáteční stavy a převzaté mzdy odporují. Stejné kontroly později zastaví vyúčtování daně i uzávěrku roku."
+        },
         "employer": {
           "title": "Zaměstnavatel a mzdové účtárny",
           "text": "Registrační číslo u ČSSZ, kontakt pro mzdy a alespoň jedna aktivní mzdová účtárna s variabilním symbolem. Bez účtárny nejde založit pracovní vztah."
@@ -24618,6 +24750,7 @@
       "suggestion_ready": "Předvyplněno z uzavřených mzdových běhů za rozhodné období {from} až {to}.",
       "suggestion_sources": "Započitatelná mzda je součet základů průměrného výdělku ze schválených revizí běhů; odpracované hodiny jsou potvrzený pracovní souhrn docházky a odpracované dny jsou dny se směnou z téže evidence.",
       "suggestion_confirm": "Čísla zkontrolujte a potvrďte odesláním — snapshot vznikne až tím.",
+      "suggestion_takeover": "Měsíce {periods} vedl předchozí program: mzda i hodiny jsou z převzatých mezd. Převzatá hrubá mzda může obsahovat náhrady mzdy (dovolená, svátek), které do průměrného výdělku nepatří — před potvrzením ji upravte na započitatelnou mzdu.",
       "suggestion_edited": "Některé z předvyplněných čísel jste změnili; údaj o původu už pro ně neplatí.",
       "suggestion_reload": "Načíst znovu z běhů",
       "suggestion_blocked": "Z uzavřených běhů se podklady odvodit nedají, zadejte je ručně. Důvod:",
@@ -24659,6 +24792,9 @@
         "worked_time_not_derivable": "Evidované směny nelze sečíst bez posouzení (překryv, interval přes hranici měsíce nebo záporná doba)",
         "worked_time_not_whole_minutes": "Odpracovaná doba nevyšla v celých minutách; je nutné ruční posouzení",
         "worked_time_missing": "Rozhodné období nemá kladnou započitatelnou mzdu a odpracovanou dobu",
+        "takeover_worked_time_missing": "Převzatá mzda za měsíc rozhodného období nemá odpracované hodiny; doplňte je v Importech → Převzaté mzdy (ruční zadání)",
+        "takeover_gross_invalid": "Převzatá hrubá mzda za měsíc rozhodného období je záporná; opravte ji v Importech → Převzaté mzdy",
+        "takeover_needs_review": "Průměr vychází z převzatých mezd předchozího programu; hromadně se neschvaluje — založte ho jednotlivě a zkontrolujte započitatelnou mzdu",
         "worked_days_not_provided": "Počet odpracovaných dnů se nepodařilo zjistit",
         "probable_earning_required": "V rozhodném období nebyl odpracován zákonný minimální počet dnů; průměr se stanovuje jako pravděpodobný výdělek (§ 355 ZP)",
         "average_already_exists": "Průměr pro toto čtvrtletí už existuje; návrh jej nepřepíše",

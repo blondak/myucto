@@ -16,6 +16,7 @@ use MyInvoice\Service\Payroll\IncomeTax\ExternalEmployerTaxCertificate;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverTaxEvidence;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
@@ -416,6 +417,23 @@ final class AnnualTaxSettlementService
             $taxYear,
         );
         $blockers = [...$blockers, ...$credits['blockers'], ...$children['blockers']];
+        // Převzaté měsíce: počáteční stav nese uplatněné zvýhodnění, evidence
+        // dětí nárok. Nesmí si odporovat, jinak by zúčtování vzalo zpět to, co
+        // zaměstnanec u předchozího programu oprávněně dostal.
+        $claimedChildMonths = [];
+        foreach ($children['children'] as $child) {
+            foreach ($child->claimedMonths as $month) {
+                $claimedChildMonths[$month] = $month;
+            }
+        }
+        if (PayrollTakeoverTaxEvidence::childMonthsWithoutClaim(
+            PayrollTakeoverTaxEvidence::openingMonthRows(
+                $this->accumulators->openingBalance($supplierId, $employeeId, $taxYear, 'income_tax'),
+            ),
+            array_values($claimedChildMonths),
+        ) !== []) {
+            $blockers[] = AnnualSettlementBlocker::TakeoverChildClaimMissing;
+        }
         if (!$this->settlements->childJmhzEvidenceIsComplete(
             $supplierId,
             $employeeId,

@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Payroll\Absence;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
 use MyInvoice\Service\Payroll\Document\AverageEarningsMonthlyMath;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverMonth;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
@@ -173,6 +175,7 @@ final class AverageEarningDerivationService
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollRulesetProvider $rulesets,
+        private readonly PayrollTakeoverReader $takeover,
     ) {}
 
     /**
@@ -210,12 +213,26 @@ final class AverageEarningDerivationService
         $decisiveStart = $applicationStart->modify('-3 months');
 
         $months = [];
+        $takeover = null;
         foreach ([0, 1, 2] as $offset) {
             $periodStart = $decisiveStart->modify("+{$offset} months")->format('Y-m-d');
-            $months[] = ['period_start' => $periodStart] + self::monthFromRow(
-                $this->latestRunResult($supplierId, $employmentId, $periodStart),
-                $periodStart,
-            );
+            $run = $this->latestRunResult($supplierId, $employmentId, $periodStart);
+            if ($run === null) {
+                // Měsíc bez běhu, který vedl předchozí program: průměr se navrhne
+                // z převzaté mzdy (hrubá mzda a odpracované hodiny), jinak by
+                // první čtvrtletí po přechodu skončilo u ručního opisu.
+                $takeover ??= $this->takeover->forEmployment(
+                    $supplierId,
+                    $employmentId,
+                    (int) $decisiveStart->format('Y'),
+                );
+                $takenOver = self::takeoverMonthFor($takeover, $periodStart);
+                if ($takenOver !== null) {
+                    $months[] = ['period_start' => $periodStart] + self::monthFromTakeover($takenOver);
+                    continue;
+                }
+            }
+            $months[] = ['period_start' => $periodStart] + self::monthFromRow($run, $periodStart);
         }
         $minimumWorkedDays = AbsenceRuleset::forDate($this->rulesets, $applicationStart->format('Y-m-d'))
             ->averageEarningMinimumWorkedDays();
@@ -603,6 +620,7 @@ final class AverageEarningDerivationService
         $workedMinutes = 0;
         $workedDays = 0;
         $sources = [];
+        $takeoverPeriods = [];
 
         foreach ($months as $month) {
             foreach ((array) $month['blockers'] as $code) {
@@ -615,6 +633,9 @@ final class AverageEarningDerivationService
                 'work_summary_sha256' => $month['work_summary_sha256'] ?? null,
                 'time_month_row_version' => $month['time_month_row_version'] ?? null,
             ];
+            if (($month['takeover'] ?? false) === true) {
+                $takeoverPeriods[] = substr((string) ($month['period_start'] ?? ''), 0, 7);
+            }
             if ($month['blockers'] !== []) {
                 continue;
             }
@@ -693,6 +714,10 @@ final class AverageEarningDerivationService
             'longer_period_allocated_minor' => null,
             'worked_minutes' => $actual ? $workedMinutes : null,
             'worked_days' => $actual ? $workedDays : null,
+            // Měsíce vzaté z převzatých mezd předchozího programu. Jejich hrubá
+            // mzda není započitatelná mzda podle § 354 ZP — účetní ji musí před
+            // schválením zkontrolovat (náhrady mzdy do průměru nepatří).
+            'takeover_periods' => $takeoverPeriods,
             'months' => array_map(
                 static fn (array $month): array => [
                     'period_start' => $month['period_start'] ?? null,
@@ -703,6 +728,7 @@ final class AverageEarningDerivationService
                     'worked_minutes' => $month['worked_minutes'] ?? null,
                     'worked_days' => $month['worked_days'] ?? null,
                     'work_summary_id' => $month['work_summary_id'] ?? null,
+                    'takeover' => ($month['takeover'] ?? false) === true,
                     'blockers' => $month['blockers'],
                 ],
                 $months,
@@ -714,6 +740,64 @@ final class AverageEarningDerivationService
                 'probable' => $probable,
             ])),
         ];
+    }
+
+    /**
+     * Převzatý měsíc vztahu za dané období — jen když leží před začátkem vedení
+     * mezd v MyÚčtu. Měsíc, který MyÚčto počítá, se z převzatých dat nebere
+     * nikdy: chybějící běh tam je vadná evidence, ne přechod.
+     */
+    public static function takeoverMonthFor(
+        \MyInvoice\Service\Payroll\Migration\PayrollTakeoverYear $year,
+        string $periodStart,
+    ): ?PayrollTakeoverMonth {
+        $period = substr($periodStart, 0, 7);
+        if (!$year->isHistorical($period)) {
+            return null;
+        }
+        $rows = $year->forPeriod($period);
+
+        return count($rows) === 1 ? $rows[0] : null;
+    }
+
+    /**
+     * Podklady měsíce rozhodného období z převzaté mzdy předchozího programu.
+     *
+     * Převzatá data nenesou započitatelnou mzdu podle § 354 ZP, jen hrubou
+     * mzdu. Ta může obsahovat náhrady mzdy (dovolená, svátek), které do průměru
+     * nepatří — proto je měsíc označený `takeover` a návrh to uživateli řekne.
+     * Průměr z něj vznikne až potvrzením účetní, stejně jako z vlastních běhů.
+     *
+     * @return array<string,mixed>
+     */
+    public static function monthFromTakeover(PayrollTakeoverMonth $month): array
+    {
+        $context = [
+            'blockers' => [],
+            'run_id' => null,
+            'revision_id' => null,
+            'revision_no' => null,
+            'gross_earnings_minor' => $month->grossMinor,
+            'worked_minutes' => $month->workedMinutes,
+            // Půldny se do zákonného minima počítají dolů; rozhodující je
+            // celý odpracovaný den.
+            'worked_days' => intdiv($month->workedDaysHundredths, 100),
+            'work_summary_id' => null,
+            'work_summary_sha256' => null,
+            'result_hash' => hash('sha256', CanonicalJson::encode($month->toArray())),
+            'time_month_row_version' => null,
+            'takeover' => true,
+        ];
+        if ($month->grossMinor < 0) {
+            return ['blockers' => ['takeover_gross_invalid']] + $context;
+        }
+        if ($month->workedMinutes <= 0) {
+            // Bez odpracovaných hodin se hodinový průměr spočítat nedá — a nula
+            // by tiše poslala návrh na pravděpodobný výdělek.
+            return ['blockers' => ['takeover_worked_time_missing']] + $context;
+        }
+
+        return $context;
     }
 
     /**

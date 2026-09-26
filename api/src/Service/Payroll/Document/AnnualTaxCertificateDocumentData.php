@@ -11,8 +11,9 @@ final readonly class AnnualTaxCertificateDocumentData
     /**
      * v4 přidává převzatou část roku — měsíce, které MyÚčto nepočítalo a jejichž
      * úhrny jdou z počátečních stavů kumulací ({@see PayrollCarriedOverPeriod}).
+     * v5 vede Prohlášení (a děti a invaliditu) i za převzaté měsíce.
      */
-    public const SCHEMA_VERSION = 'annual-tax-certificate-document.v4';
+    public const SCHEMA_VERSION = 'annual-tax-certificate-document.v5';
 
     /**
      * @param array{
@@ -74,11 +75,11 @@ final readonly class AnnualTaxCertificateDocumentData
          * Doklad je ale musí umět pojmenovat, protože nevznikly výpočtem
          * MyÚčta; proto tu jsou vedle úhrnů zvlášť.
          *
-         * `$months` naopak převzaté měsíce NEOBSAHUJE. Váže se na ně evidence,
-         * kterou opening nemá — podepsané měsíce Prohlášení, rezidence, děti
-         * a invalidita. Kdyby se do nich převzaté měsíce přimíchaly, doklad by
-         * o nich tvrdil věci, které nikdo nedoložil (třeba že Prohlášení
-         * podepsané nebylo, jen proto, že o něm MyÚčto neví).
+         * `$months` naopak převzaté měsíce NEOBSAHUJE — váže se na něj platební
+         * důkaz a rezidence ze snapshotů vlastních běhů. Podepsané měsíce
+         * Prohlášení, děti a invalidita převzaté měsíce obsahovat SMÍ: builder
+         * je bere ze zpětně zadané evidence zaměstnance a doklad bez ní
+         * nevystaví, takže o převzatém měsíci netvrdí nic nedoloženého.
          *
          * @var ?array<string,mixed>
          */
@@ -177,9 +178,18 @@ final readonly class AnnualTaxCertificateDocumentData
                 'Srážkové potvrzení lze vystavit jen rezidentovi ČR nebo nerezidentovi EU/EHP.',
             );
         }
+        // Prohlášení se posuzuje za všechny vykázané měsíce, tedy i převzaté.
+        $reportedMonths = $months;
+        $carriedList = is_array($carriedOver['months'] ?? null) ? $carriedOver['months'] : [];
+        foreach ($carriedList as $month) {
+            if (is_int($month) && !in_array($month, $reportedMonths, true)) {
+                $reportedMonths[] = $month;
+            }
+        }
+        sort($reportedMonths, SORT_NUMERIC);
         $signedMonths = [];
         foreach ($taxDeclarationSignedMonths as $month) {
-            if (!in_array($month, $months, true)
+            if (!in_array($month, $reportedMonths, true)
                 || isset($signedMonths[$month])
             ) {
                 throw new \InvalidArgumentException(
@@ -206,12 +216,12 @@ final readonly class AnnualTaxCertificateDocumentData
                 );
             }
             if (($taxDeclarationStatus === 'signed'
-                    && $taxDeclarationSignedMonths !== $months)
+                    && $taxDeclarationSignedMonths !== $reportedMonths)
                 || ($taxDeclarationStatus === 'not-signed'
                     && $taxDeclarationSignedMonths !== [])
                 || ($taxDeclarationStatus === 'mixed'
                     && ($taxDeclarationSignedMonths === []
-                        || count($taxDeclarationSignedMonths) >= count($months)))
+                        || count($taxDeclarationSignedMonths) >= count($reportedMonths)))
             ) {
                 throw new \InvalidArgumentException(
                     'Stav Prohlášení neodpovídá podepsaným měsícům.',

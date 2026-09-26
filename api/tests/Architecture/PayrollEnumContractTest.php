@@ -85,6 +85,9 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Report\PayrollMigrationReconciliationBuilder::STATUSES',
         'payrollMigrationReconciliation.ts::PayrollMigrationRowMetric'
             => 'const:MyInvoice\Service\Payroll\Report\PayrollMigrationReconciliationBuilder::ROW_METRICS',
+        // Veličiny kontroly shody počátečních stavů s převzatými mzdami.
+        'payrollTakeover.ts::TakeoverLayerMetric'
+            => 'const:MyInvoice\Service\Payroll\Migration\PayrollTakeoverLayerCheck::METRIC_NAMES',
         // Odkud je měsíc roku přechodu. `none` je díra v roce, ne prázdná hodnota —
         // klient, který ji nezná, by ji nakreslil jako „v pořádku".
         'payrollMigrationReconciliation.ts::PayrollTakeoverPresence'

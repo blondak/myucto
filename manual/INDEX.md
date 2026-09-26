@@ -145,6 +145,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 92. [Legislativní pravidla mezd](92_Legislativni_pravidla_mezd.md)
 93. [Retenční lhůty](93_Retencni_lhuty.md)
 94. [Výmaz osobních údajů](94_Vymaz_osobnich_udaju.md)
+113. [Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md)
 
 ### Firma
 

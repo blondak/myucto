@@ -23,6 +23,18 @@ use MyInvoice\Service\Payroll\PayrollOpeningBalanceService;
 final class OpeningBalanceMonthValidator
 {
     /**
+     * Příznak řádku rozpisu „v tomhle měsíci opravdu nebyl žádný příjem".
+     *
+     * Prázdný měsíc není nula. Mřížka i tabulkový import dřív převáděly
+     * nevyplněné buňky na nulu, takže měsíc, na který účetní zapomněla, prošel
+     * jako doložený nulový měsíc — a roční zúčtování, vyúčtování daně i roční
+     * maximum pojistného s ním počítaly jako s měsícem bez příjmu. Nulový měsíc
+     * se proto musí výslovně potvrdit. Příznak je jen vstupní tvrzení: do
+     * evidence se neukládá, protože uložený nulový řádek už je doložená nula.
+     */
+    public const CONFIRMED_ZERO = 'confirmed_zero';
+
+    /**
      * Částka vlevo nemůže být kladná, když je částka vpravo nulová.
      *
      * Záloha i srážková daň se počítají ZE základu, bonus náleží jen k příjmu
@@ -75,6 +87,44 @@ final class OpeningBalanceMonthValidator
         }
 
         return $labels;
+    }
+
+    /**
+     * Nese měsíc rozpisu jen nuly (nebo nic)?
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function isAllZero(array $row): bool
+    {
+        foreach (PayrollOpeningBalanceService::monthFields() as $field) {
+            if (($row[$field] ?? 0) !== 0) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Důvod odmítnutí nulového měsíce, který nikdo nepotvrdil, nebo `null`.
+     *
+     * Platí pro cesty, kde čísla zadává člověk (mřížka, tabulka). Import
+     * hlášení a převody z předchozího programu nesou měsíc proto, že ho zdroj
+     * vykázal — to je doložení samo o sobě.
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function rejectUnconfirmedZero(array $row): ?string
+    {
+        if (!self::isAllZero($row) || ($row[self::CONFIRMED_ZERO] ?? false) === true) {
+            return null;
+        }
+
+        return sprintf(
+            'Měsíc %d nemá vyplněnou žádnou částku. Prázdný měsíc není nula — vyplňte úhrny '
+                . 'z předchozího programu, nebo potvrďte, že v něm zaměstnanec opravdu neměl žádný příjem.',
+            (int) ($row['month'] ?? 0),
+        );
     }
 
     /**

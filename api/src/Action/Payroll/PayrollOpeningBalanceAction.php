@@ -71,6 +71,7 @@ final class PayrollOpeningBalanceAction
                 $this->months($body['months'] ?? null),
                 $reference,
                 $this->userId($request),
+                true,
             )]);
         } catch (\Throwable $e) {
             return $this->failure($response, $e);
@@ -160,7 +161,7 @@ final class PayrollOpeningBalanceAction
         return $decoded;
     }
 
-    /** @return list<array<string,int>> */
+    /** @return list<array<string,int|bool>> */
     private function months(mixed $value): array
     {
         if (!is_array($value)) {
@@ -194,6 +195,10 @@ final class PayrollOpeningBalanceAction
                     ));
                 }
                 $row[$field] = $amount;
+            }
+            // Nulový měsíc se musí potvrdit; prázdná mřížka nula není.
+            if (($item[OpeningBalanceMonthValidator::CONFIRMED_ZERO] ?? false) === true) {
+                $row[OpeningBalanceMonthValidator::CONFIRMED_ZERO] = true;
             }
             $months[] = $row;
         }

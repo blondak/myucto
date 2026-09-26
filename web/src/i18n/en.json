@@ -1787,8 +1787,89 @@
     "license_required_title": "Payroll is not active in your licence",
     "license_required_description": "After the trial period, Payroll requires a separate add-on.",
     "license_required_action": "Buy the Payroll add-on",
+    "takeover_check": {
+      "title": "Check of the taken-over part of the year",
+      "hint": "Months {months} were processed by the previous payroll program. Each of them needs an opening balance (used by the annual settlement, the tax statement and the income certificate) and taken-over wages (used by the pension insurance record sheet), and both must say the same.",
+      "all_ok": "The taken-over months are complete and the opening balances agree with the taken-over wages.",
+      "gaps_title": "Opening balances missing",
+      "gaps_hint": "These employees' employment lasted in taken-over months, but the opening balance says nothing about them. Enter the totals from the previous program, or confirm a month without income as zero.",
+      "gap_person": "{name} — months {months}",
+      "open_person": "Open card",
+      "open_takeover": "Enter taken-over wages",
+      "differences_title": "Opening balances and taken-over wages disagree",
+      "differences_hint": "Fix the side that does not match the previous program's records. For the tax base a difference can be legitimate (exempt income is in gross pay, not in the tax base).",
+      "person": "Employee",
+      "period": "Month",
+      "metric_column": "Item",
+      "opening": "Opening balance",
+      "takeover": "Taken-over wages",
+      "difference": "Difference",
+      "metric": {
+        "tax_base": "Tax base / gross pay",
+        "advance_tax": "Tax advance",
+        "withholding_tax": "Withholding tax",
+        "tax_bonus": "Tax bonus",
+        "social_base": "Social insurance base",
+        "health_base": "Health insurance base"
+      },
+      "opening_only_title": "Taken-over wages missing",
+      "opening_only_hint": "The opening balance has the month, the taken-over wages do not. Without them the pension insurance record sheet for the transition year cannot be produced.",
+      "takeover_only_title": "Taken-over wages without an opening balance",
+      "takeover_only_hint": "The taken-over wages have the month, the opening balance does not — the annual settlement and the tax statement do not count it."
+    },
+    "takeover_manual": {
+      "title": "Manual entry of taken-over wages",
+      "hint": "For months processed by the previous program for which you have no export or report. Enter each month once, per employment and in crowns — saving fills both the opening balances (annual settlement, tax statement, income certificate) and the taken-over wages (pension insurance record sheet).",
+      "employee": "Employee",
+      "employee_placeholder": "Choose an employee",
+      "no_takeover_months": "Year {year} has no taken-over months: payroll in MyÚčto did not start in it. Set the first payroll period in the payroll settings.",
+      "no_employment": "The employee has no employment lasting in the taken-over months ({months}).",
+      "months_hint": "Taken-over months: {months}. Fill in every month in which the employment lasted; confirm a month without income as zero.",
+      "per_person_hint": "The tax base, credits, child benefit and the health minimum top-up are summed per person: with concurrent employments enter them in one row of the month.",
+      "month": "Month",
+      "employment": "Employment",
+      "group": {
+        "wage": "Pay",
+        "insurance": "Insurance",
+        "tax": "Tax",
+        "durations": "Periods"
+      },
+      "field": {
+        "gross_minor": "Gross pay",
+        "net_minor": "Net pay",
+        "deductions_minor": "Deductions",
+        "net_payable_minor": "Payable",
+        "payout_date": "Pay date",
+        "social_base_minor": "Social ins. base",
+        "health_base_minor": "Health ins. base",
+        "employee_social_minor": "Social ins. employee",
+        "employee_health_minor": "Health ins. employee",
+        "employer_social_minor": "Social ins. employer",
+        "employer_health_minor": "Health ins. employer",
+        "health_minimum_top_up_minor": "Health minimum top-up",
+        "advance_base_minor": "Advance tax base",
+        "advance_tax_minor": "Tax advance",
+        "withholding_base_minor": "Withholding base",
+        "withholding_tax_minor": "Withholding tax",
+        "applied_credits_minor": "Applied credits",
+        "applied_child_credit_minor": "Child credit",
+        "tax_bonus_minor": "Tax bonus",
+        "pension_participation": "Pension ins.",
+        "insurance_days": "Insured days",
+        "excluded_days": "Excluded days",
+        "worked_days": "Days worked",
+        "worked_hours": "Hours worked"
+      },
+      "amount_invalid": "In month {month}, “{field}” is not a valid amount in crowns (e.g. 12 345,50).",
+      "days_invalid": "In month {month} the periods are invalid: insured and excluded days are whole numbers 0–31, days and hours worked have at most two decimals.",
+      "empty_month": "Month {month} of employment {employment} has no amount filled in. Enter the totals from the previous program, or tick “Really zero”.",
+      "save": "Save taken-over months",
+      "saved": "The taken-over months are saved in the opening balances and in the taken-over wages.",
+      "load_failed": "The employee's taken-over months could not be loaded.",
+      "save_failed": "The taken-over months could not be saved."
+    },
     "year_close": {
-      "title": "Payroll year close",
+      "title":"Payroll year close",
       "description": "Close the year only after all twelve payroll periods, corrections and submissions are complete. Liabilities still waiting for a bank statement do not prevent closing — they are only listed.",
       "year": "Year",
       "status": {
@@ -1801,6 +1882,7 @@
         "schema_unavailable": "The required payroll records are unavailable in the database.",
         "unknown": "Another blocker prevents closing that this version cannot name. Please contact support.",
         "missing_months": "Missing closed periods: {months}.",
+        "takeover_months_missing": "{count} employees have no taken-over totals for months before payroll started in MyÚčto, although their employment lasted in them. Fill them in (who and which months is listed below) on the employee card or in Imports → Taken-over wages.",
         "open_corrections": "{count} payroll run corrections are still open.",
         "open_submissions": "{count} statutory submissions are not finished.",
         "open_liabilities": "{count} payroll payment liabilities remain unpaid.",
@@ -1811,7 +1893,8 @@
       "warnings_title": "Worth knowing (does not prevent closing)",
       "warning": {
         "unknown": "{count} findings remain that this version cannot name.",
-        "open_liabilities": "{count} payroll liabilities have no bank movement on record yet. They settle themselves once the statement arrives and is matched."
+        "open_liabilities": "{count} payroll liabilities have no bank movement on record yet. They settle themselves once the statement arrives and is matched.",
+        "takeover_layers_mismatch": "The taken-over part of the year has {count} findings: opening balances (used by the annual settlement and the tax statement) and taken-over wages (used by the pension insurance record sheet) disagree for the same month, or the month exists in only one of them."
       },
       "warning_truncated": "and {count} more",
       "close": "Close payroll year",
@@ -1922,7 +2005,7 @@
         "missing": "No source on either side: {periods}",
         "overlapping": "From both sides (compared in the table below): {periods}",
         "upload_title": "Upload taken-over payroll",
-        "upload_hint": "CSV or XLSX with the columns from the sample file. Amounts in whole minor units, days and hours as decimals. The duration and type of the employment relationship come from the records, not from the file. Uploading the same data again overwrites the rows instead of duplicating them.",
+        "upload_hint": "CSV or XLSX with the columns from the sample file: the employee by name (employee_name) and the employment code from the card (employment_code), amounts in crowns (12 345,50), days and hours as decimals. The duration and type of the employment relationship come from the records, not from the file. Uploading the same data again overwrites the rows instead of duplicating them. The file fills taken-over wages; add the opening balances for tax with the manual entry below or on the employee card.",
         "import_source": "Previous system",
         "file": "File",
         "preview": "Check",
@@ -2037,7 +2120,13 @@
       "annex_one": "Annex 1 - headcount as of 1 December",
       "annex_one_empty": "No employment has a place-of-work municipality filled in, so annex 1 would be empty.",
       "privacy_hint": "The data contains no names, personal identifiers or per-employee detail.",
-      "validation_failed": "The downloaded XML failed schema validation — the EPO filing desk will reject it as it stands. The file is saved, but fill in what is missing before filing."
+      "validation_failed": "The downloaded XML failed schema validation — the EPO filing desk will reject it as it stands. The file is saved, but fill in what is missing before filing.",
+      "takeover": {
+        "blockers_title": "The statement cannot be built yet",
+        "download_blocked": "Totals from the previous payroll program are missing for some taken-over months. Fill them in first.",
+        "badge": "taken over",
+        "badge_hint": "A month before payroll started in MyÚčto; totals come from the opening balances taken over from the previous program."
+      }
     },
     "payments": {
       "title": "Payroll payment orders and settlement",
@@ -2495,6 +2584,7 @@
       "takeover": {
         "title": "Taken-over months of the transition year",
         "subtitle": "Months processed by the previous payroll program. A taken-over run mirrors them: it is not calculated, not approved and never posted again.",
+        "jmhz_note": "The previous program filed the JMHZ reports for these months and MyÚčto does not build corrective reports for them. File the correction where the regular report came from (the previous program or the ČSSZ portal) and carry the corrected totals over to the taken-over wages and the opening balances.",
         "boundary": "MyÚčto calculates payroll from {period}",
         "loading": "Loading taken-over months…",
         "rows": "{count} migration rows",
@@ -4015,6 +4105,7 @@
         "child_evidence_unverified": "A child tax benefit claim has no supporting evidence.",
         "child_claim_conflict": "The child claims contradict each other — check the child order, the shared-household confirmation and the exclusion of the other taxpayer.",
         "child_jmhz_evidence_incomplete": "Complete the child's name and date of birth on the child card, then state in the annual settlement documents whether another person in the shared household claimed the child.",
+        "takeover_child_claim_missing": "In the months taken over from the previous payroll program the employee claimed the child tax benefit (credit or bonus), but the child records have no entitlement for them. Enter the child entitlement on the employee card retroactively from the first month it was claimed (typically January) — otherwise the settlement would reclaim a benefit the employee already received as unjustified.",
         "already_settled": "The annual settlement for this year has already been performed. It is done once a year.",
         "ruleset_year_not_covered": "We have no effective tax rules covering the whole of this year, so annual amounts cannot be derived.",
         "tax_year_not_finished": "The tax year has not ended yet. The annual settlement can only be performed from 1 January of the following year.",
@@ -4022,6 +4113,7 @@
         "request_date_missing": "The request is recorded as submitted but has no submission date. Without it there is no proof the request arrived by 15 February. The record is saved — fill in the request date.",
         "prior_documents_date_missing": "The prior employers' documents are recorded as provided but have no receipt date. Without it the 15 February deadline cannot be evidenced. The record is saved — fill in the receipt date."
       },
+      "open_employee_card": "Open employee card",
       "settle_read_only": "Only a user allowed to approve payroll can perform the settlement.",
       "settle_unavailable": "The settlement preview did not go through. Reload it or check the employee's documents.",
       "save_request_read_only": "Only a user allowed to write payroll documents can change these records."
@@ -5062,7 +5154,7 @@
         "done": "The opening state is confirmed — the calculation and annual settlement use it. You can review or correct it below.",
         "panel_title": "Opening balances for {year}",
         "panel_hint": "Totals for the months processed elsewhere. Copy them from the previous system's report; enter amounts in whole currency units.",
-        "zero_hint": "If the employee had no payroll with this company in the preceding months, leave every amount at zero and save the form. A source reference is optional.",
+        "zero_hint": "Fill in every month in which the employment lasted. An empty month is not zero: if the employee really had no income in it (e.g. unpaid leave), tick “Really zero” for it. A source reference is optional.",
         "new_hire_zero_hint": "This is a new hire with no previous payroll at this company. Save a zero opening state; a source reference is optional.",
         "nothing_to_fill": "There are no previously processed months. Save the zero opening state below.",
         "month": "Month",
@@ -5078,7 +5170,7 @@
         "save_failed": "Opening balances could not be saved.",
         "import": {
           "title": "Import from a spreadsheet (CSV/XLSX)",
-          "hint": "One file for the whole company. Each row is one month of one employee, amounts in whole minor units. Download the template so the header matches.",
+          "hint": "One file for the whole company. Each row is one month of one employee, amounts in whole minor units. List every taken-over month in which the employment lasted; write a month without income as zeros (an empty row is not zero). Download the template so the header matches.",
           "template": "Download template",
           "preview": "Preview",
           "apply": "Import",
@@ -5115,6 +5207,12 @@
           "applied_child_credit_minor_units": "Child credit",
           "tax_bonus_minor_units": "Tax bonus paid",
           "bonus_qualifying_income_minor_units": "Bonus-qualifying income"
+        },
+        "explicit": {
+          "confirm": "Really zero",
+          "confirm_hint": "Tick only for a month in which the employee really had no income. An empty month is not saved as zero.",
+          "confirm_aria": "Month {month} is really zero",
+          "empty_month": "Month {month} has no amount filled in. Enter the totals from the previous program, or tick “Really zero”."
         }
       },
       "statutory_evidence": {
@@ -8118,7 +8216,12 @@
       "mark_done": "Mark as done",
       "marked_done": "Done",
       "footnote": "The guide is shown until you have your first approved payroll run. Ticking a step off is your own note — the application neither changes nor checks anything based on it.",
+      "transition_manual": "Mid-year transition",
       "groups": {
+        "transition": {
+          "title": "Mid-year transition",
+          "hint": "months 1–{last}/{year} were processed by the previous program; without taking them over the annual settlement, income certificate and tax statement cannot be produced"
+        },
         "employer": {
           "title": "Employer setup",
           "hint": "details without which payroll cannot be calculated or paid"
@@ -8133,6 +8236,35 @@
         }
       },
       "steps": {
+        "takeover_wages": {
+          "title": "Take over wages for the months before the switch",
+          "text": "For each employee enter the totals from the previous program per month and employment, in CZK: gross wage, insurance, tax advance and credits. Manual entry fills the taken-over wages and the opening balances at once; a CSV or XLSX import fills the taken-over wages only.",
+          "cta": "Enter taken-over wages"
+        },
+        "takeover_openings": {
+          "title": "Check the opening balances",
+          "text": "On the employment card, in the Opening balances section, every taken-over month needs its totals or a ticked “Really zero”. An empty month is not zero — the tax statement and the year close stop on it."
+        },
+        "takeover_evidence": {
+          "title": "Children and declaration from January",
+          "text": "Record the taxpayer declaration, children and disability as valid from January, not from the switch. Without them the annual settlement will not accept the child credit applied earlier and the income certificate cannot be issued."
+        },
+        "takeover_identifiers": {
+          "title": "ČSSZ identifiers",
+          "text": "Copy the OIČ and the insurance relationship ID of each employment from the previous program, or load them in Imports. Without them the first JMHZ report does not link to the reports filed by the previous program."
+        },
+        "takeover_averages": {
+          "title": "Average earnings for the first quarter",
+          "text": "The average for compensations in the first quarter after the switch comes from the taken-over wages of the previous quarter. The application suggests it when the taken-over wages carry worked hours; you approve the suggestion in Absences."
+        },
+        "takeover_leave": {
+          "title": "Leave balance",
+          "text": "Enter the entitlement and the leave taken while the previous program ran in the leave book, so the balance is right from the first month."
+        },
+        "takeover_check": {
+          "title": "Check the taken-over part of the year",
+          "text": "The report shows who is missing a taken-over month and where the opening balances contradict the taken-over wages. The same checks later stop the tax statement and the year close."
+        },
         "employer": {
           "title": "Employer and payroll offices",
           "text": "Social security registration number, the payroll contact and at least one active payroll office with its variable symbol. Without an office you cannot create an employment."
@@ -24618,6 +24750,7 @@
       "suggestion_ready": "Prefilled from closed payroll runs for the decisive period {from} to {to}.",
       "suggestion_sources": "Qualifying earnings are the sum of average earning bases from approved run revisions; hours worked come from the confirmed attendance work summary and days worked are the days with a shift in the same records.",
       "suggestion_confirm": "Check the numbers and confirm by submitting — the snapshot is created only then.",
+      "suggestion_takeover": "Months {periods} were processed by the previous program: pay and hours come from the taken-over wages. Taken-over gross pay may include wage compensations (holiday, public holiday) that do not belong in average earnings — adjust it to the qualifying pay before confirming.",
       "suggestion_edited": "You changed some of the prefilled numbers; the provenance note no longer applies to them.",
       "suggestion_reload": "Reload from runs",
       "suggestion_blocked": "The source data cannot be derived from closed runs, enter it manually. Reason:",
@@ -24659,6 +24792,9 @@
         "worked_time_not_derivable": "Recorded shifts cannot be summed without review (overlap, interval crossing a month boundary or negative duration)",
         "worked_time_not_whole_minutes": "The worked time did not come out in whole minutes; manual review is required",
         "worked_time_missing": "The decisive period has no positive qualifying earnings and time worked",
+        "takeover_worked_time_missing": "The taken-over wages for a month of the decisive period have no hours worked; add them in Imports → Taken-over wages (manual entry)",
+        "takeover_gross_invalid": "The taken-over gross pay for a month of the decisive period is negative; fix it in Imports → Taken-over wages",
+        "takeover_needs_review": "The average is based on wages taken over from the previous program; it is not approved in bulk — create it individually and check the qualifying pay",
         "worked_days_not_provided": "The number of days worked could not be determined",
         "probable_earning_required": "The statutory minimum number of days was not worked in the decisive period; the average is set as probable earnings (§ 355 of the Labour Code)",
         "average_already_exists": "An average for this quarter already exists; the suggestion will not overwrite it",

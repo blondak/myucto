@@ -14,6 +14,7 @@ use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
+use MyInvoice\Service\Payroll\PayrollOpeningBalanceService;
 use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use MyInvoice\Service\Payroll\PayrollYearCloseBlockedException;
 use MyInvoice\Service\Payroll\PayrollYearCloseService;
@@ -121,6 +122,86 @@ final class PayrollYearCloseTest extends TestCase
         ));
 
         self::assertSame([], $missing);
+    }
+
+    /**
+     * Rok přechodu: měsíce před začátkem vedení mezd se neuzavírají během,
+     * ale bez převzatých úhrnů by uzávěrka zamkla neúplný rok — roční
+     * zúčtování, vyúčtování i roční doklady by stály na pěti chybějících měsících.
+     */
+    public function testTakeoverMonthsWithoutOpeningBlockCloseAndLayersAreCompared(): void
+    {
+        $this->moduleState->setActivation($this->supplierId, true, '2026-06-01', 0, $this->userId);
+        $this->seedClosedMonths($this->supplierId, 2026, [1, 2, 3, 4, 5]);
+        [$employeeId, $employmentId] = $this->seedEmployment($this->supplierId);
+
+        try {
+            $this->service->close($this->supplierId, 2026, 0, $this->userId);
+            self::fail('Uzávěrka roku přechodu bez převzatých úhrnů musí být odmítnutá.');
+        } catch (PayrollYearCloseBlockedException $exception) {
+            $blocker = array_values(array_filter(
+                $exception->blockers,
+                static fn (array $blocker): bool => $blocker['code'] === 'takeover_months_missing',
+            ))[0] ?? null;
+            self::assertNotNull($blocker);
+            self::assertSame([1, 2, 3, 4, 5], $blocker['people'][0]['missing_months']);
+            self::assertSame($employeeId, $blocker['people'][0]['employee_id']);
+        }
+
+        $openings = Bootstrap::buildContainer()->get(PayrollOpeningBalanceService::class);
+        $months = [];
+        for ($month = 1; $month <= 5; ++$month) {
+            $months[] = [
+                'month' => $month,
+                'social_assessment_base_minor_units' => 40_000_00,
+                'advance_base_minor_units' => 40_000_00,
+                'advance_tax_minor_units' => 3_430_00,
+                'withholding_base_minor_units' => 0,
+                'withholding_tax_minor_units' => 0,
+                'applied_non_refundable_credits_minor_units' => 2_570_00,
+                'applied_child_credit_minor_units' => 0,
+                'tax_bonus_minor_units' => 0,
+                'bonus_qualifying_income_minor_units' => 40_000_00,
+            ];
+        }
+        $openings->save($this->supplierId, $employeeId, 2026, $months, 'test', null);
+        // Převzatá mzda za leden tvrdí jinou zálohu než počáteční stav.
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_migration_reference_totals
+                (supplier_id, source, period_start, external_person_ref, external_relationship_ref,
+                 employee_id, employment_id, gross_minor, social_base_minor, advance_tax_minor)
+             VALUES (?, "other", "2026-01-01", ?, ?, ?, ?, 4000000, 4000000, 300000)',
+        )->execute([
+            $this->supplierId,
+            'employee:' . $employeeId,
+            'employment:' . $employmentId,
+            $employeeId,
+            $employmentId,
+        ]);
+
+        $status = $this->service->status($this->supplierId, 2026);
+        self::assertSame([], array_values(array_filter(
+            $status['blockers'],
+            static fn (array $blocker): bool => $blocker['code'] === 'takeover_months_missing',
+        )));
+        $warning = array_values(array_filter(
+            $status['warnings'],
+            static fn (array $warning): bool => $warning['code'] === 'takeover_layers_mismatch',
+        ))[0] ?? null;
+        self::assertNotNull($warning);
+        self::assertSame(
+            [['metric' => 'advance_tax', 'period' => '2026-01', 'difference_minor' => 43_000]],
+            array_map(
+                static fn (array $row): array => [
+                    'metric' => $row['metric'],
+                    'period' => $row['period'],
+                    'difference_minor' => $row['difference_minor'],
+                ],
+                $warning['differences'],
+            ),
+        );
+        // Únor až květen převzaté mzdy nemají — bez nich nevznikne ELDP za rok přechodu.
+        self::assertSame(['2026-02', '2026-03', '2026-04', '2026-05'], $warning['opening_only'][0]['periods']);
     }
 
     public function testClosedYearBlocksRunMutationUntilReopened(): void

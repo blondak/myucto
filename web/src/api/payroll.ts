@@ -4,6 +4,11 @@ import { downloadApiFile } from '@/utils/downloadFile'
 // certifikátu je rozhodnutí stejné třídy jako správa klíče samotného, takže
 // kódování důkazu se nesmí rozejít se zbytkem aplikace.
 import { stepUpProofBody, type EpoStepUpProof } from './epoSubmissions'
+import type {
+  TakeoverGap,
+  TakeoverLayerDifference,
+  TakeoverLayerOneSided,
+} from './payrollTakeover'
 
 /** Stránka seznamu. Bez hodnot platí serverový výchozí strop, ne „všechno". */
 export interface PayrollPageParams {
@@ -639,6 +644,8 @@ export interface PayrollOpeningMonth {
   applied_child_credit_minor_units: number
   tax_bonus_minor_units: number
   bonus_qualifying_income_minor_units: number
+  /** Výslovné potvrzení nulového měsíce; prázdný měsíc není nula. Jen při ukládání. */
+  confirmed_zero?: boolean
 }
 
 export interface PayrollOpeningBalances {
@@ -5028,6 +5035,7 @@ export type PayrollYearCloseStatus = 'open' | 'closed'
 export type PayrollYearCloseBlockerCode =
   | 'schema_unavailable'
   | 'missing_months'
+  | 'takeover_months_missing'
   | 'open_corrections'
   | 'open_submissions'
   | 'open_leave'
@@ -5039,7 +5047,7 @@ export type PayrollYearCloseBlockerCode =
  * doloženého bankovního pohybu; příkaz odešel v den výplaty, výpis dorazí
  * o týdny později. Rozhodnutí zavřít rok patří účetní.
  */
-export type PayrollYearCloseWarningCode = 'open_liabilities'
+export type PayrollYearCloseWarningCode = 'open_liabilities' | 'takeover_layers_mismatch'
 
 export interface PayrollYearCloseWarningItem {
   liability_id: number
@@ -5058,6 +5066,10 @@ export interface PayrollYearCloseWarning {
   count: number
   items: PayrollYearCloseWarningItem[]
   truncated: boolean
+  /** Jen u `takeover_layers_mismatch`: rozdíly počátečních stavů a převzatých mezd. */
+  differences?: TakeoverLayerDifference[]
+  opening_only?: TakeoverLayerOneSided[]
+  takeover_only?: TakeoverLayerOneSided[]
 }
 
 export interface PayrollYearCloseBlocker {
@@ -5065,6 +5077,8 @@ export interface PayrollYearCloseBlocker {
   count?: number
   months?: string[]
   tables?: string[]
+  /** Jen u `takeover_months_missing`: komu chybí převzaté úhrny a za které měsíce. */
+  people?: TakeoverGap[]
 }
 
 export interface PayrollYearClose {
@@ -5117,6 +5131,8 @@ export type PayrollTaxStatementForm = 'dpzvd6' | 'dpsvd2'
 export interface PayrollDependentActivityMonth {
   month: number
   headcount: number
+  /** Úhrny měsíce jsou z počátečních stavů převzatých z předchozího programu. */
+  taken_over?: boolean
   advance_due: number
   advance_withheld: number
   prescribed: number
@@ -5142,7 +5158,7 @@ export interface PayrollDependentActivityStatement {
   year: number
   variant: PayrollTaxStatementVariant
   months: PayrollDependentActivityMonth[]
-  total: Omit<PayrollDependentActivityMonth, 'month' | 'headcount'>
+  total: Omit<PayrollDependentActivityMonth, 'month' | 'headcount' | 'taken_over'>
   annual_overpayment_total: number
   annual_bonus_top_up_total: number
   overpayment_payouts: { month: number; amount: number }[]
@@ -5150,11 +5166,17 @@ export interface PayrollDependentActivityStatement {
   /** Nenulový počet = povinná příloha č. 2, kterou aplikace neumí naplnit. */
   non_resident_count: number
   warnings: string[]
+  /** Proč XML nejde sestavit (chybějící převzaté měsíce); prázdné = lze. */
+  blockers?: string[]
+  taken_over_months?: number[]
+  /** U koho převzaté úhrny chybí — jen náhled, do tiskopisu nejde. */
+  takeover_gaps?: TakeoverGap[]
 }
 
 /** Část I. vyúčtování srážkové daně — částky v HALÉŘÍCH (schéma má 2 des. místa). */
 export interface PayrollWithholdingTaxMonth {
   month: number
+  taken_over?: boolean
   tax_due_minor: number
   tax_withheld_minor: number
   due_with_return_minor: number
@@ -5173,10 +5195,12 @@ export interface PayrollWithholdingTaxStatement {
   /** 772 = příjmy fyzických osob, 771 = právnických. */
   income_kind: string
   months: PayrollWithholdingTaxMonth[]
-  total: Omit<PayrollWithholdingTaxMonth, 'month'>
+  total: Omit<PayrollWithholdingTaxMonth, 'month' | 'taken_over'>
   /** Ř. 5 části II. = odvedeno − mělo být sraženo. Záporná = zbývá doplatit. */
   balance_minor: number
   warnings: string[]
+  blockers?: string[]
+  taken_over_months?: number[]
 }
 
 export interface PayrollTaxStatementPreview {
@@ -5267,6 +5291,7 @@ export type PayrollAnnualSettlementBlocker =
   | 'child_evidence_unverified'
   | 'child_claim_conflict'
   | 'child_jmhz_evidence_incomplete'
+  | 'takeover_child_claim_missing'
   | 'already_settled'
   | 'ruleset_year_not_covered'
   | 'request_date_missing'

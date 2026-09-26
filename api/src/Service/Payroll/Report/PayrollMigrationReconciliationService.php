@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Payroll\Report;
 
 use MyInvoice\Repository\Payroll\PayrollMigrationReconciliationRepository;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverLayerCheck;
 
 /**
  * Kontrolní sestava „naše přepočtená mzda vs. mzda převzatá z původního systému".
@@ -20,6 +22,8 @@ final class PayrollMigrationReconciliationService
 
     public function __construct(
         private readonly PayrollMigrationReconciliationRepository $repository,
+        private readonly PayrollTakeoverCoverage $coverage,
+        private readonly PayrollTakeoverLayerCheck $layers,
         ?PayrollMigrationReconciliationBuilder $builder = null,
     ) {
         $this->builder = $builder ?? new PayrollMigrationReconciliationBuilder();
@@ -56,6 +60,15 @@ final class PayrollMigrationReconciliationService
         );
         $report['sources'] = $this->repository->referenceSources($supplierId, $year);
         $report['source'] = $source;
+        // Převzatá část roku stojí na dvou vrstvách: počátečních stavech (čte
+        // roční zúčtování a vyúčtování daně) a převzatých mzdách (čte ELDP).
+        // Sestava převzetí je místo, kde se má ukázat, že si odporují nebo že
+        // některý převzatý měsíc chybí úplně.
+        $report['takeover_check'] = [
+            'takeover_months' => $this->coverage->takeoverMonths($supplierId, $year),
+            'missing_openings' => $this->coverage->gaps($supplierId, $year),
+            ...$this->layers->check($supplierId, $year),
+        ];
 
         return $report;
     }
