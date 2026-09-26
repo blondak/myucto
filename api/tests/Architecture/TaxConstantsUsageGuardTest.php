@@ -55,7 +55,7 @@ final class TaxConstantsUsageGuardTest extends TestCase
 
     public function testEveryTaxConstantHasAConsumer(): void
     {
-        $sources = $this->sourceCorpus();
+        $literals = $this->sourceLiterals();
         $dead = [];
 
         foreach (self::YEARS as $year) {
@@ -64,7 +64,7 @@ final class TaxConstantsUsageGuardTest extends TestCase
                     continue;
                 }
                 // Klíč se čte jako řetězec: $c['klic'], ?? $c['klic'], 'klic' => …
-                if (!str_contains($sources, "'" . $key . "'") && !str_contains($sources, '"' . $key . '"')) {
+                if (!isset($literals[$key])) {
                     $dead[$key] = $year;
                 }
             }
@@ -313,7 +313,14 @@ final class TaxConstantsUsageGuardTest extends TestCase
     /**
      * Zdrojový korpus BEZ míst, která klíče jen vyjmenovávají (viz NOT_A_CONSUMER).
      */
-    private function sourceCorpus(): string
+    /**
+     * Množina všech jednoduchých řetězcových literálů ('klic' i "klic") ve zdrojích.
+     * Dřív se celý strom slepil do jednoho řetězce a každý klíč každého ročníku se
+     * v něm hledal dvakrát — test pak v paralelním běhu padal na paměť.
+     *
+     * @return array<string, true>
+     */
+    private function sourceLiterals(): array
     {
         $srcDir = dirname(__DIR__, 2) . '/src';
         $skip = [];
@@ -321,16 +328,22 @@ final class TaxConstantsUsageGuardTest extends TestCase
             $skip[str_replace('\\', '/', $srcDir . '/' . $rel)] = true;
         }
 
-        $buffer = '';
+        $literals = [];
+        $files = 0;
         foreach (SourceCorpus::files($srcDir) as $path) {
             if (isset($skip[$path])) {
                 continue;
             }
-            $buffer .= SourceCorpus::read($path);
+            $files++;
+            if (preg_match_all('/([\'"])([A-Za-z0-9_]+)\1/', SourceCorpus::read($path), $m) > 0) {
+                foreach ($m[2] as $literal) {
+                    $literals[$literal] = true;
+                }
+            }
         }
 
-        self::assertNotSame('', $buffer, 'Zdrojový korpus je prázdný — guard by nekontroloval nic.');
+        self::assertGreaterThan(0, $files, 'Zdrojový korpus je prázdný — guard by nekontroloval nic.');
 
-        return $buffer;
+        return $literals;
     }
 }
