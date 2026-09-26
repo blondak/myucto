@@ -286,15 +286,15 @@ final class StatementOverridesTest extends TestCase
     {
         $this->overrides->save($this->supplierId, $this->versionId, [
             ['account_prefix' => '365.', 'row_code' => self::LONG_TERM],
-            ['account_prefix' => '379.400', 'row_code' => self::LONG_TERM],
+            ['account_prefix' => '379.900', 'row_code' => self::LONG_TERM],
         ], $this->userId);
         $parent = $this->db->pdo()->prepare("SELECT id FROM chart_of_accounts WHERE supplier_id = ? AND account_code = '379'");
         $parent->execute([$this->supplierId]);
         $this->db->pdo()->prepare(
             "INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active)
-             VALUES (?, '379.400', 'Jiné závazky dlouhodobé', 'liability', 'credit', 0, ?, 1)"
+             VALUES (?, '379.900', 'Jiné závazky dlouhodobé', 'liability', 'credit', 0, ?, 1)"
         )->execute([$this->supplierId, (int) $parent->fetchColumn()]);
-        $this->post($this->supplierId, '311', '379.400', 70_000.00);
+        $this->post($this->supplierId, '311', '379.900', 70_000.00);
 
         $filed = $this->suggester->appAppendix($this->supplierId, $this->periodId, 'full');
         $this->overrides->save($this->supplierId, $this->versionId, [], $this->userId);
@@ -308,7 +308,7 @@ final class StatementOverridesTest extends TestCase
         }
 
         self::assertSame(self::LONG_TERM, $prefixes['365.'] ?? null, 'Obě analytiky 365 jako jeden prefix.');
-        self::assertSame(self::LONG_TERM, $prefixes['379.400'] ?? null, 'Druhý přesun do stejného řádku.');
+        self::assertSame(self::LONG_TERM, $prefixes['379.900'] ?? null, 'Druhý přesun do stejného řádku.');
     }
 
     // ── fixtures ─────────────────────────────────────────────────────────────
