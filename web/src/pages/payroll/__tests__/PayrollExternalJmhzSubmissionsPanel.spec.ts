@@ -180,6 +180,19 @@ describe('PayrollExternalJmhzSubmissionsPanel', () => {
     expect(unsent[0].get('a').attributes('data-to')).toContain('imports-pamica')
   })
 
+  /** Q15-17: převzatý měsíc bez jakéhokoli hlášení v historii. */
+  it('upozorní na převzatý měsíc, za který v historii žádné hlášení není', async () => {
+    m.list.mockResolvedValue({ environment: 'production', items: [row()], missing_periods: ['2026-08'] })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const missing = wrapper.findAll('[data-test="external-jmhz-missing"]')
+    expect(missing).toHaveLength(1)
+    expect(missing[0].text()).toContain('payroll.external_jmhz.missing_title')
+    expect(missing[0].text()).toContain('payroll.external_jmhz.missing_hint')
+  })
+
   it('neodeslaný měsíc, za který jiné podání odešlo, neupozorňuje', async () => {
     m.list.mockResolvedValue({
       environment: 'production',

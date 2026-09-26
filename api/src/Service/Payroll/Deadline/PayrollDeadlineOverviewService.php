@@ -8,6 +8,8 @@ use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementStatute;
 use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectFormatter;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
@@ -191,6 +193,7 @@ final readonly class PayrollDeadlineOverviewService
         private PayrollSicknessCaseRepository $sicknessCases,
         private SicknessDeadlinePolicy $sicknessDeadlines,
         private ClockInterface $clock,
+        private ?JmhzPredecessorGapService $predecessorGaps = null,
     ) {}
 
     /**
@@ -457,6 +460,7 @@ final readonly class PayrollDeadlineOverviewService
 
         $items = [
             ...$this->submissionItems($supplierId, $environment, $from, $to),
+            ...$this->predecessorJmhzItems($supplierId, $environment, $from, $to),
             ...$this->levyItems($supplierId, $from, $to),
             ...$this->checklistItems($supplierId, $from, $to),
             ...$this->registrationChangeItems($supplierId, $environment, $from, $to),
@@ -709,6 +713,47 @@ final readonly class PayrollDeadlineOverviewService
                 'submission_status' => $row['submission_status'],
                 'ruleset_id' => (string) $row['ruleset_id'],
                 'path' => '/payroll/submissions',
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * Nepodané hlášení JMHZ za převzatý měsíc ({@see JmhzPredecessorGapService}).
+     * Pramen `submission`, protože jde o tutéž agendu jako podání z evidence —
+     * Měsíční přehled ho tím nepřevezme podruhé (má vlastní bohatší řádek).
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function predecessorJmhzItems(
+        int $supplierId,
+        string $environment,
+        string $from,
+        string $to,
+    ): array {
+        if ($this->predecessorGaps === null) {
+            return [];
+        }
+        $items = [];
+        foreach ($this->predecessorGaps->missing($supplierId, $environment) as $gap) {
+            if ($gap['due_on'] < $from || $gap['due_on'] > $to || $gap['phase'] === 'not_open') {
+                continue;
+            }
+            $items[] = [
+                'source' => 'submission',
+                'reference' => 'predecessor_jmhz:' . $gap['period'],
+                'title' => JmhzSubmissionBridgeService::AGENDA_CODE,
+                'subject' => 'převzatý měsíc – hlášení nebylo podáno předchozím programem',
+                'period' => $gap['period'],
+                'due_on' => $gap['due_on'],
+                'phase' => $gap['phase'],
+                'days_to_due' => $gap['days_to_due'],
+                'is_overdue' => $gap['is_overdue'],
+                'status' => 'open',
+                'submission_status' => null,
+                'ruleset_id' => '',
+                'path' => '/payroll/submissions/jmhz',
             ];
         }
 

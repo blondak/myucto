@@ -3279,7 +3279,8 @@ export interface PayrollMonthlyChecklistAction {
  * (JMHZ, přehled o platbě pojistného za pojišťovnu). Ostatní hodnoty sdílí
  * doménu s {@see PayrollDeadlineSource}.
  */
-export type PayrollMonthlyChecklistSource = PayrollDeadlineSource | 'agenda_duty'
+/** `predecessor_jmhz` = převzatý měsíc, za který nikdo nepodal JMHZ (Q15-17). */
+export type PayrollMonthlyChecklistSource = PayrollDeadlineSource | 'agenda_duty' | 'predecessor_jmhz'
 
 export interface PayrollMonthlyChecklistItem {
   key: string
@@ -9790,7 +9791,12 @@ export const payrollApi = {
    * nahrané XML hlášení). Bez obsahu podání — ten leží zapečetěný na serveru.
    */
   jmhzExternalSubmissions: (environment: PayrollJmhzTransportEnvironment) =>
-    api.get<{ environment: PayrollJmhzTransportEnvironment; items: PayrollJmhzExternalSubmission[] }>(
+    api.get<{
+      environment: PayrollJmhzTransportEnvironment
+      items: PayrollJmhzExternalSubmission[]
+      /** Převzaté měsíce, za které v historii není žádné hlášení (`YYYY-MM`). */
+      missing_periods?: string[]
+    }>(
       '/payroll/submissions/jmhz-external',
       { params: { environment } },
     ).then(response => response.data),

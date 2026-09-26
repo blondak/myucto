@@ -11405,6 +11405,8 @@
       "load_failed": "Submissions by the previous program could not be loaded.",
       "open_history": "Open submissions by the previous program",
       "open_migration": "Open the PAMICA migration",
+      "missing_title": "The report for {period} has not been filed",
+      "missing_hint": "The previous payroll program processed this month, but the submission history holds no JMHZ report for it. MyÚčto does not calculate taken-over months, so it will not prepare the report: file it from the previous program. If it was already sent, repeat the migration with a new export or upload the sent report (XML) in Payroll → Imports and the status will be filled in.",
       "unsent_title": "The previous program did not send the report for {period}",
       "unsent_hint": "PAMICA prepared the report, but ČSSZ never received it. Send it from the previous program (MyÚčto does not calculate months before payroll started in MyÚčto). If it has been sent since, repeat the PAMICA migration with a new export and the status will be updated.",
       "col_source": "Source",

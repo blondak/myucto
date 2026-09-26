@@ -10,6 +10,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -33,6 +34,7 @@ final class PayrollJmhzExternalSubmissionAction
         private readonly JmhzExternalSubmissionStore $store,
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $activity,
+        private readonly JmhzPredecessorGapService $gaps,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -45,9 +47,20 @@ final class PayrollJmhzExternalSubmissionAction
             return $this->invalid($response, 'Prostředí musí být test nebo production.');
         }
 
+        $supplierId = $this->currentSupplierId($request);
+
         return $this->noStore(Json::ok($response, [
             'environment' => $environment,
-            'items' => $this->store->overview($this->currentSupplierId($request), $environment),
+            'items' => $this->store->overview($supplierId, $environment),
+            // Převzaté měsíce, za které v historii není ŽÁDNÉ hlášení (Q15-17);
+            // připravené a neodeslané panel pozná sám z `items`.
+            'missing_periods' => array_values(array_map(
+                static fn (array $gap): string => $gap['period'],
+                array_filter(
+                    $this->gaps->missing($supplierId, $environment),
+                    static fn (array $gap): bool => !$gap['prepared_not_sent'],
+                ),
+            )),
         ]));
     }
 
