@@ -97,6 +97,26 @@ final readonly class JmhzSubmissionBridgeService
             );
         }
         $document = $resolution->requireResolvedDocument();
+        /*
+         * Nad 1500 formulářů se hlášení dělí do dílčích balíků. Test hlášení
+         * je sestaví a ověří (JmhzScenario1XmlValidator::dryRunPackages),
+         * zmrazení k odeslání ale zatím staví jen jediný artefakt a jediný
+         * pokus o odeslání. Radši to říct hned, než zmrazit podání, které by
+         * transport odeslal jen z části.
+         */
+        $formCount = $document->payload['header']['individual_form_count'] ?? 0;
+        if (is_int($formCount) && $formCount > JmhzScenario1XmlSerializer::PACKAGE_FORM_LIMIT) {
+            throw new JmhzXmlException(
+                'jmhz_submission_split_unsupported',
+                sprintf(
+                    'Hlášení má %d formulářů a musí se rozdělit do %d dílčích balíků. Test hlášení'
+                        . ' balíky sestaví a ověří; zmrazení a odeslání dílčích balíků aplikace zatím'
+                        . ' neumí, podejte je ručně přes ePortál ČSSZ.',
+                    $formCount,
+                    (int) ceil($formCount / JmhzScenario1XmlSerializer::PACKAGE_FORM_LIMIT),
+                ),
+            );
+        }
         $snapshotHash = self::snapshotHash($document);
         $runId = self::runId($document);
         $periodStart = self::periodStart($document);

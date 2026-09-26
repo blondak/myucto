@@ -37,6 +37,9 @@ final readonly class JmhzDeferralService
 {
     private const REGULAR_DONE = ['accepted', 'partially_accepted'];
 
+    /** Stav odložení pro UI; páruje ho `PayrollEnumContractTest`. */
+    public const STATES = ['pending', 'omitted', 'to_complete', 'completing', 'completed', 'revoked', 'stale'];
+
     public function __construct(
         private JmhzDeferralRepository $repository,
         private JmhzPreparationSnapshotService $preparations,
@@ -245,6 +248,9 @@ final readonly class JmhzDeferralService
         int $userId,
     ): array {
         $reason = self::reason($reason);
+        if ($userId <= 0) {
+            throw new \InvalidArgumentException('Odložení může zrušit jen přihlášený uživatel.');
+        }
 
         return $this->repository->transaction(function () use (
             $supplierId,
@@ -331,6 +337,9 @@ final readonly class JmhzDeferralService
         int $userId,
     ): array {
         self::assertEnvironment($environment);
+        if ($userId <= 0) {
+            throw new \InvalidArgumentException('Opravné hlášení může připravit jen přihlášený uživatel.');
+        }
         $deferral = $this->repository->find($supplierId, $deferralId);
         if ($deferral === null) {
             throw new \DomainException('Odložení nebylo nalezeno.');

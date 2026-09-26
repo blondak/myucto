@@ -6,6 +6,10 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
+use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -36,6 +40,9 @@ final class PayrollJmhzCorrectionAction
         private readonly JmhzCorrectiveSubmissionService $corrections,
         private readonly JmhzContentCorrectionSubmissionService $contentCorrections,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollSensitiveData $sensitiveData,
+        private readonly PayrollRegistrationIdentityRepository $identities,
+        private readonly PayrollPeopleRepository $people,
     ) {
     }
 
@@ -174,9 +181,52 @@ final class PayrollJmhzCorrectionAction
         return Json::ok($response, [
             'environment' => $environment,
             'submission_id' => $submissionId,
-            'components' => $components,
+            'components' => $this->withEmployeeNames(
+                $this->currentSupplierId($request),
+                $environment,
+                $components,
+            ),
         ])->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
+    }
+
+    /**
+     * Jméno zaměstnance k formuláři, aby účetní při stornu vybírala lidi,
+     * ne třináctimístná ID PPV. Vztah se dohledá podle ID PPV v evidenci
+     * identifikátorů; nenajde-li se (převzatá data), jméno zůstane prázdné.
+     *
+     * @param list<array{form_guid:string,person_external_identifier:string,employment_external_identifier:string}> $components
+     * @return list<array<string,mixed>>
+     */
+    private function withEmployeeNames(int $supplierId, string $environment, array $components): array
+    {
+        $employees = [];
+        foreach ($components as $index => $component) {
+            try {
+                $hash = $this->sensitiveData->lookupHash(
+                    $component['employment_external_identifier'],
+                    PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                    $supplierId,
+                );
+            } catch (\InvalidArgumentException) {
+                continue;
+            }
+            $link = $this->identities->employmentByExternalIdValueHash($supplierId, $environment, 'id_ppv', $hash);
+            if ($link !== null) {
+                $employees[$index] = $link['employee_id'];
+            }
+        }
+        $names = $employees === []
+            ? []
+            : $this->people->namesForTenant($supplierId, array_values(array_unique($employees)));
+        $rows = [];
+        foreach ($components as $index => $component) {
+            $rows[] = $component + [
+                'employee_name' => isset($employees[$index]) ? ($names[$employees[$index]] ?? null) : null,
+            ];
+        }
+
+        return $rows;
     }
 
     /** @param array{submissionId:string} $args */

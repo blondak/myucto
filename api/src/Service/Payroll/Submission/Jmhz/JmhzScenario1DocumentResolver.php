@@ -226,19 +226,14 @@ final class JmhzScenario1DocumentResolver
             $officeId,
             $blockers,
         );
-        // Formulář osoby vzniká za každý pracovněprávní vztah, ne za osobu —
-        // limit balíku se proto počítá ze vztahů.
+        // Formulář osoby vzniká za každý pracovněprávní vztah, ne za osobu.
+        // Nad 1500 formulářů se hlášení nedělá chybou dokumentu: serializér ho
+        // rozdělí do dílčích balíků (JmhzScenario1XmlSerializer::serializePackages)
+        // a test ho celé ověří. Zmrazení k odeslání dílčí balíky zatím nepodporuje
+        // a řekne to samo (JmhzSubmissionBridgeService).
         $formCount = 0;
         foreach ($people as $person) {
             $formCount += count($this->rows($person['employments'] ?? null));
-        }
-        if ($formCount > 1500) {
-            $blockers[] = $this->blocker(
-                'jmhz_scenario1_form_limit_exceeded',
-                'revision',
-                $preparation->sourceRevisionId,
-                ['10015', '10488'],
-            );
         }
         $month = (int) substr($preparation->periodStart, 5, 2);
         $employerAnnual = $this->employerAnnual(

@@ -1227,6 +1227,26 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
     }
 
     /**
+     * Nad 1500 formulářů test hlášení balíky sestaví, zmrazení k odeslání je
+     * ale zatím neumí — musí to říct dřív, než cokoli založí.
+     */
+    public function testSubmissionOverOneBatchIsRefusedBeforeAnythingIsFrozen(): void
+    {
+        $payload = $this->resolution()->requireResolvedDocument()->payload;
+        $payload['header']['individual_form_count'] = 1501;
+        $bridge = $this->bridge(new JmhzScenario1Resolution(new JmhzScenario1NormalizedDocument($payload), []));
+
+        try {
+            $bridge->bridge($this->supplierId, self::PREPARATION_ID, $this->registerObligation(), self::ENVIRONMENT, $this->userId);
+            self::fail('Hlášení nad jeden balík se nesmí zmrazit jako jediný balík.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame('jmhz_submission_split_unsupported', $exception->validationCode);
+            self::assertStringContainsString('2 dílčích balíků', $exception->getMessage());
+        }
+        self::assertSame(0, $this->countRows('payroll_submissions'));
+    }
+
+    /**
      * Souběh: pojistné osoby a souhrnná data nese jediný formulář, takže
      * odložit jen jeden ze souběžných vztahů by změnilo, co vykazuje druhý.
      */

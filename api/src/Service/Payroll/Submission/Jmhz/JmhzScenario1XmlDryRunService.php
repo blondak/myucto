@@ -98,7 +98,7 @@ final readonly class JmhzScenario1XmlDryRunService
         }
 
         $document = $resolution->requireResolvedDocument();
-        $result = $this->validator->dryRun(
+        $result = $this->validator->dryRunPackages(
             $resolution,
             JmhzSubmissionEnvelope::create(
                 $this->guids->next(),
@@ -112,21 +112,49 @@ final readonly class JmhzScenario1XmlDryRunService
         // XSD hlídá tvar, katalog kontrol obsah. Teprve oboje dohromady říká,
         // jestli by ČSSZ podání přijala — a mezera v pokrytí katalogu se musí
         // projevit jako nepřipravenost, ne jako zelený test.
-        $controls = $this->controls->validate(
-            $result['xml'],
-            JmhzControlContext::today(schemaValidated: true),
+        $reports = [];
+        foreach ($result['packages'] as $package) {
+            $reports[] = $this->controls->validate(
+                $package['xml'],
+                JmhzControlContext::today(schemaValidated: true),
+            );
+        }
+        $controls = $reports[0];
+        $submittable = array_reduce(
+            $reports,
+            static fn (bool $carry, JmhzControlEvaluationReport $report): bool
+                => $carry && $report->submittable(),
+            true,
         );
+        $first = $result['packages'][0];
 
         return [
-            'status' => $controls->submittable() ? 'dry_run_valid' : 'dry_run_incomplete',
+            'status' => $submittable ? 'dry_run_valid' : 'dry_run_incomplete',
             'preparation_id' => $preparationId,
             'office_id' => $officeId,
             'blockers' => [],
             'deferred' => self::deferred($resolution, $controls),
             'controls' => $controls->toArray(),
+            // Nad 1500 formulářů je hlášení rozdělené do dílčích balíků; každý
+            // se ověřuje zvlášť a kontroly souhrnu a pojistné části jsou
+            // v prvním.
+            'packages' => count($result['packages']) === 1 ? [] : array_map(
+                static fn (array $package, JmhzControlEvaluationReport $report): array => [
+                    'ordinal' => $package['ordinal'],
+                    'xml' => $package['xml'],
+                    'xml_sha256' => $package['sha256'],
+                    'submittable' => $report->submittable(),
+                    'blocking' => array_map(
+                        static fn (JmhzControlFinding $finding): array => $finding->toArray(),
+                        [...$report->blocking(), ...$report->coverageGaps()],
+                    ),
+                ],
+                $result['packages'],
+                $reports,
+            ),
             'deadline' => $this->deadline($document),
-            'xml' => $result['xml'],
-            'xml_sha256' => $result['sha256'],
+            'xml' => $first['xml'],
+            'xml_sha256' => $first['sha256'],
             'schema' => $result['schema'],
             'guids' => [
                 'scope' => 'preview_only',
