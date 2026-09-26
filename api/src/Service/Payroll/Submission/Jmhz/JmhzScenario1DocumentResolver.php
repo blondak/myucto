@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
+use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxRegime;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
@@ -2529,11 +2530,15 @@ final class JmhzScenario1DocumentResolver
         if ($claimed === 0 && $applied === 0) {
             return $empty;
         }
+        // Klíče rozpadu jsou hodnoty TaxCreditKind (`disability-basic`, `ztp-p`),
+        // tak jak je zapisuje výpočet daně. Dřív se tu hledaly s podtržítkem,
+        // takže každá sleva na invaliditu nebo ZTP/P zablokovala hlášení
+        // jako „rozpad nesedí na úhrn".
         $kindsByKey = [
-            'basic' => 'taxpayer',
-            'disability_basic' => 'disability_basic',
-            'disability_extended' => 'disability_extended',
-            'ztp_p' => 'ztp_p',
+            'basic' => TaxCreditKind::Taxpayer->value,
+            'disability_basic' => TaxCreditKind::DisabilityBasic->value,
+            'disability_extended' => TaxCreditKind::DisabilityExtended->value,
+            'ztp_p' => TaxCreditKind::ZtpP->value,
         ];
         /*
          * 10299–10302 nesou NÁROK na slevu podle prohlášení, ne částku, která

@@ -190,9 +190,10 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         $payload = $this->partialCreditPayload();
         $tax = &$payload['people'][0]['person_summary']['statutory']['income_tax'];
         $tax['claimed_non_refundable_credits_minor_units'] = 300_000;
+        // Klíče jsou hodnoty TaxCreditKind, jak je zapisuje výpočet daně.
         $tax['claimed_non_refundable_credit_breakdown'] = [
             'taxpayer' => 257_000,
-            'disability_basic' => 43_000,
+            'disability-basic' => 43_000,
         ];
         $tax['advance_tax']['non_refundable_credits_minor_units'] = 300_000;
         unset($tax);

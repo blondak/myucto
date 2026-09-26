@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotException;
@@ -809,9 +810,11 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         $resolution = (new JmhzScenario1DocumentResolver())->resolve(
             $this->withPayload(
                 $this->preparation(),
+                // Klíče rozpadu jsou hodnoty TaxCreditKind, tak jak je zapisuje
+                // výpočet daně (MonthlyEmploymentIncomeTaxResult) — s pomlčkou.
                 $this->payloadWithCredits(300_000, 150_00, [
-                    'taxpayer' => 257_000,
-                    'disability_basic' => 43_000,
+                    TaxCreditKind::Taxpayer->value => 257_000,
+                    TaxCreditKind::DisabilityBasic->value => 43_000,
                 ]),
             ),
             $this->pvpoj(),
