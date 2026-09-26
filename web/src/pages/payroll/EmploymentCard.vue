@@ -22,7 +22,7 @@ import CzIscoPicker from '@/components/payroll/CzIscoPicker.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { loadPayrollOffices } from '@/composables/usePayrollOffices'
@@ -48,6 +48,7 @@ import {
   transitionPresentation,
 } from './employmentLifecycleUi'
 import DateInput from '@/components/ui/DateInput.vue'
+import Modal from '@/components/ui/Modal.vue'
 import { usePersonCardSaveSection } from './personCardSave'
 
 const props = defineProps<{
@@ -798,14 +799,48 @@ async function saveCode() {
  * Potvrzení nástupu použije datum nástupu, ne dnešek — jinak by se do evidence
  * zapsalo, že člověk nastoupil ve chvíli, kdy si toho někdo všiml.
  */
+/*
+ * Potvrzovací dialog aplikace místo `window.confirm`. Nativní dialog blokuje
+ * celou záložku, nejde nastylovat ani automatizovaně otestovat a u ukončení
+ * vztahu neuměl říct, co se stane dál.
+ */
+interface CardConfirm {
+  title: string
+  message: string
+  hint?: string
+  confirmLabel: string
+  tone: 'danger' | 'warning' | 'primary'
+  icon?: string
+}
+const cardConfirm = ref<CardConfirm | null>(null)
+let cardConfirmResolve: ((ok: boolean) => void) | null = null
+
+function askConfirm(options: CardConfirm): Promise<boolean> {
+  cardConfirmResolve?.(false)
+  cardConfirm.value = options
+  return new Promise(resolve => { cardConfirmResolve = resolve })
+}
+
+function settleConfirm(ok: boolean) {
+  const resolve = cardConfirmResolve
+  cardConfirmResolve = null
+  cardConfirm.value = null
+  resolve?.(ok)
+}
+
 async function confirmStart() {
   const on = startDate.value
   if (on === null) return
   if (needsZeroOpening.value) {
-    if (!window.confirm(t('payroll.people.openings.confirm_start_zero', {
-      date: formatDate(on),
-      year: openingStartPeriod.value!.slice(0, 4),
-    }))) return
+    if (!await askConfirm({
+      title: t('payroll.people.card_confirm.start_title'),
+      message: t('payroll.people.openings.confirm_start_zero', {
+        date: formatDate(on),
+        year: openingStartPeriod.value!.slice(0, 4),
+      }),
+      confirmLabel: t('payroll.people.card_confirm.start_confirm'),
+      tone: 'primary',
+    })) return
     if (!await saveZeroOpening()) return
   }
   transitionDate.value = on
@@ -874,11 +909,17 @@ async function transition(target: PayrollEmploymentStatus) {
   // jich stojí pod sebou víc a liší se jen kódem.
   if (props.employment.status !== 'archived'
       && ['ended', 'archived', 'no_show'].includes(target)
-      && !window.confirm(t('payroll.people.transition_confirm_for', {
-        question: t(`payroll.people.transition_confirm.${target}`),
-        code: props.employment.code,
-        date: formatDate(transitionDate.value),
-      }))) return
+      && !await askConfirm({
+        title: t(`payroll.people.card_confirm.transition_title.${target}`),
+        message: t('payroll.people.transition_confirm_for', {
+          question: t(`payroll.people.transition_confirm.${target}`),
+          code: props.employment.code,
+          date: formatDate(transitionDate.value),
+        }),
+        hint: target === 'ended' ? t('payroll.people.card_confirm.end_hint') : undefined,
+        confirmLabel: t(`payroll.people.card_confirm.transition_confirm.${target}`),
+        tone: 'danger',
+      })) return
 
   busy.value = true
   try {
@@ -888,6 +929,13 @@ async function transition(target: PayrollEmploymentStatus) {
     })
     emit('updated', updated)
     toast.success(t('payroll.people.transition_saved'))
+    // Ukončením práce nekončí: způsob a důvod skončení, dohoda, odstupné
+    // a potvrzení pro úřad práce se zadávají v panelu Skončení vztahu, který
+    // se objeví až teď — karta na něj rovnou sjede.
+    if (target === 'ended') {
+      await nextTick()
+      void focusSection('termination')
+    }
   } catch (error) {
     // Server jmenuje překážku („ukončení nesmí předcházet nástupu", „období je
     // už zúčtované"). Obecné „nepovedlo se" ji zakrylo a uživatel neměl podle
@@ -966,7 +1014,13 @@ async function removeEmployment() {
   const question = summary === ''
     ? t('payroll.people.delete.confirm_empty', { code: props.employment.code })
     : t('payroll.people.delete.confirm', { summary, code: props.employment.code })
-  if (!window.confirm(question)) return
+  if (!await askConfirm({
+    title: t('payroll.people.card_confirm.delete_title'),
+    message: question,
+    confirmLabel: t('payroll.people.card_confirm.delete_confirm'),
+    tone: 'danger',
+    icon: ICONS.trash,
+  })) return
 
   busy.value = true
   try {
@@ -2020,5 +2074,27 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       </div>
     </div>
     </template>
+
+    <Modal
+      v-if="cardConfirm"
+      :title="cardConfirm.title"
+      width-class="max-w-lg"
+      @close="settleConfirm(false)"
+    >
+      <p class="whitespace-pre-line text-sm text-neutral-700" data-test="employment-confirm-message">{{ cardConfirm.message }}</p>
+      <p v-if="cardConfirm.hint" class="mt-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800" data-test="employment-confirm-hint">
+        {{ cardConfirm.hint }}
+      </p>
+      <div class="mt-4 flex flex-wrap justify-end gap-2">
+        <button type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']" data-test="employment-confirm-cancel" @click="settleConfirm(false)">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+          {{ t('common.cancel') }}
+        </button>
+        <button type="button" :class="[btnFilled(cardConfirm.tone), 'whitespace-nowrap']" data-test="employment-confirm-ok" @click="settleConfirm(true)">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="cardConfirm.icon ?? ICONS.check" /></svg>
+          {{ cardConfirm.confirmLabel }}
+        </button>
+      </div>
+    </Modal>
   </article>
 </template>

@@ -5648,6 +5648,23 @@
         "no_show": "Confirm that the worker did not start?"
       },
       "transition_confirm_for": "{question}\n\nEmployment: {code}, effective {date}",
+      "card_confirm": {
+        "start_title": "Confirm start",
+        "start_confirm": "Save zero balances and confirm start",
+        "transition_title": {
+          "ended": "End the employment",
+          "archived": "Archive the employment",
+          "no_show": "Mark as not started"
+        },
+        "transition_confirm": {
+          "ended": "End employment",
+          "archived": "Archive",
+          "no_show": "Did not start"
+        },
+        "end_hint": "After ending, the card scrolls to the Termination panel. There you enter the manner and reason of termination (notice, agreement, § 52), severance pay, leave compensation and the data for the labour office confirmation.",
+        "delete_title": "Delete employment",
+        "delete_confirm": "Delete employment"
+      },
       "insurance_mode": {
         "automatic": "Automatic from rules",
         "included": "Participating",

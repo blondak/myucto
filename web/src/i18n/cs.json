@@ -5648,6 +5648,23 @@
         "no_show": "Potvrdit, že pracovník nenastoupil?"
       },
       "transition_confirm_for": "{question}\n\nVztah: {code}, k datu {date}",
+      "card_confirm": {
+        "start_title": "Potvrdit nástup",
+        "start_confirm": "Uložit nulový stav a potvrdit nástup",
+        "transition_title": {
+          "ended": "Ukončit pracovní vztah",
+          "archived": "Archivovat pracovní vztah",
+          "no_show": "Označit, že zaměstnanec nenastoupil"
+        },
+        "transition_confirm": {
+          "ended": "Ukončit vztah",
+          "archived": "Archivovat",
+          "no_show": "Nenastoupil"
+        },
+        "end_hint": "Po ukončení karta sjede na panel Skončení vztahu. Tam zadáte způsob a důvod skončení (výpověď, dohoda, § 52), odstupné, proplacení dovolené a podklady pro potvrzení pro úřad práce.",
+        "delete_title": "Smazat pracovní vztah",
+        "delete_confirm": "Smazat vztah"
+      },
       "insurance_mode": {
         "automatic": "Automaticky podle pravidel",
         "included": "Účast vzniká",
