@@ -811,14 +811,13 @@ final class EldpAnnualStatementBuilder
             $insuranceFrom,
             $insuranceTo,
         );
-        if ($monthStatus === EldpExcludedPeriodDeriver::MONTH_MIXED
-            || $monthStatus === EldpExcludedPeriodDeriver::MONTH_UNEXPLAINED
-        ) {
+        if ($monthStatus === EldpExcludedPeriodDeriver::MONTH_UNEXPLAINED) {
             $blockers[] = [
                 'code' => 'eldp_insurance_month_without_income',
-                'message' => "Za {$label} nebyl zúčtován započitatelný příjem a § 11 odst. 2"
-                    . ' zákona č. 155/1995 Sb. z evidovaných nepřítomností nerozhodne,'
-                    . ' zda je měsíc dobou pojištění.',
+                'message' => "Za {$label} nebyl zúčtován započitatelný příjem a evidované"
+                    . ' nepřítomnosti to nevysvětlí, takže podle § 11 odst. 2 zákona'
+                    . ' č. 155/1995 Sb. nejde určit, zda je měsíc dobou pojištění.'
+                    . ' Doplňte mzdu nebo nepřítomnost v Mzdy → Nepřítomnosti.',
                 'detail' => ['period_start' => $periodStart],
             ];
 

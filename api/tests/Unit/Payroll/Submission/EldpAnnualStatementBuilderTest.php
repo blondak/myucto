@@ -227,6 +227,43 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         self::assertStringContainsString('<penezitaPomocMaterstvi>47</penezitaPomocMaterstvi>', $xml);
     }
 
+    /**
+     * Metodická pomůcka ČSSZ k ELDP, příklad 5: neplacené volno celý srpen
+     * a od 7. 8. pracovní neschopnost. „Srpen je měsícem pojištěným",
+     * vyloučenou dobou je jen pracovní neschopnost (25 dnů). Dřív souběh
+     * omluvného důvodu s neplaceným volnem zastavil celý roční list.
+     */
+    public function testUnpaidLeaveMonthWithSicknessIsInsuredMonth(): void
+    {
+        $revisions = $this->wholeYear(2025);
+        $revisions[7] = $this->revision(
+            2025,
+            8,
+            absences: [
+                [
+                    'id' => 9300,
+                    'absence_type' => 'unpaid_leave',
+                    'date_from' => '2025-08-01',
+                    'date_to' => '2025-08-06',
+                ],
+                [
+                    'id' => 9301,
+                    'absence_type' => 'dpn',
+                    'date_from' => '2025-08-07',
+                    'date_to' => '2025-08-31',
+                ],
+            ],
+            baseMinor: 0,
+        );
+
+        $statement = $this->build($revisions);
+
+        $sections = $statement->sections();
+        self::assertCount(1, $sections);
+        self::assertSame(365, $sections[0]['insurance_days']);
+        self::assertSame(25, $sections[0]['excluded_days']['docasNeschopnost']);
+    }
+
     /** @return list<array<string,mixed>> */
     private function maternityYear(): array
     {
@@ -352,7 +389,12 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         self::assertSame(0, $sections[0]['excluded_days_total']);
     }
 
-    public function testMonthWithoutIncomeMixingSicknessAndUnpaidLeaveBlocks(): void
+    /**
+     * Neplacené volno vedle dovolené v měsíci s nulovým příjmem si odporuje
+     * (dovolená by příjem založila) a omluvný důvod podle § 16 odst. 4
+     * písm. a) v měsíci není: měsíc zůstává nevysvětlený a list se zastaví.
+     */
+    public function testMonthWithoutIncomeMixingPaidAbsenceAndUnpaidLeaveBlocks(): void
     {
         $revisions = $this->wholeYear(2025);
         $revisions[5] = $this->revision(
@@ -367,7 +409,7 @@ final class EldpAnnualStatementBuilderTest extends TestCase
                 ],
                 [
                     'id' => 9312,
-                    'absence_type' => 'dpn',
+                    'absence_type' => 'vacation',
                     'date_from' => '2025-06-16',
                     'date_to' => '2025-06-30',
                 ],

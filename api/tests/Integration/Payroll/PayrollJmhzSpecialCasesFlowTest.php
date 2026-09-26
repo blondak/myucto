@@ -88,6 +88,45 @@ final class PayrollJmhzSpecialCasesFlowTest extends TestCase
     }
 
     /**
+     * Měsíc porodu bez příjmu, který začíná neplaceným volnem (1.–5. 7.),
+     * pak peněžitá pomoc v mateřství (od 6. 7., porod 21. 7.).
+     *
+     * Omluvný důvod (doba před porodem) stačí k tomu, aby byl celý měsíc
+     * dobou pojištění (Metodická pomůcka ČSSZ k ELDP, př. 5); vyloučenou
+     * dobou 10359 jsou jen dny PPM před porodem (6.–20. 7.), neplacené volno
+     * je vyloučeným dnem § 18 odst. 7 bez náhrady příjmu (10473). Dřív
+     * souběh zastavil hlášení `jmhz_eldp_insurance_month_without_income`.
+     */
+    public function testChildbirthMonthStartingWithUnpaidLeaveIsInsured(): void
+    {
+        $person = $this->hire('Petra Porodní', 'female', '1992-09-09', healthTopUpResponsibility: 'employee');
+        $this->createApprovedAbsence($person['employment_id'], 'unpaid_leave', '2026-07-01', '2026-07-05');
+        $this->createApprovedAbsence(
+            $person['employment_id'],
+            'ppm',
+            '2026-07-06',
+            '2026-12-31',
+            extra: ['expected_childbirth_date' => '2026-07-21', 'childbirth_date' => '2026-07-21'],
+        );
+        $this->approveMonth($person['employment_id'], []);
+
+        $xml = $this->submission('childbirth-unpaid-leave');
+
+        self::assertStringContainsString('<form:kod>1++</form:kod>', $xml);
+        self::assertStringContainsString('<form:pocetDnu>31</form:pocetDnu>', $xml);
+        self::assertStringContainsString(
+            '<form:vylouceneDobyCelkem>15</form:vylouceneDobyCelkem><form:docasNeschopnost>0</form:docasNeschopnost>'
+                . '<form:penezitaPomocMaterstvi>15</form:penezitaPomocMaterstvi>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<form:vyloucenePar18>31</form:vyloucenePar18><form:omluvenaNepritomnost>5</form:omluvenaNepritomnost>'
+                . '<form:pracovniNeschopnost>0</form:pracovniNeschopnost><form:vyplaceniDavek>26</form:vyplaceniDavek>',
+            $xml,
+        );
+    }
+
+    /**
      * Osoba s úplnou evidencí pro JMHZ, zveřejněnými směnami na pracovní dny
      * měsíce a schváleným průměrem za 3. čtvrtletí.
      *

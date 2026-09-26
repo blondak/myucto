@@ -283,7 +283,11 @@ volna i rodičovské dovolené uvede jako vyloučené dny pro nemocenské dávky
 kdy začala nebo skončila, pro její dny uvnitř měsíce. Roční evidenční list
 takový měsíc započítá stejně, tedy s nulou dnů pojištění. Celý měsíc nemoci nebo
 ošetřovného je naopak omluvný důvod, takže zůstává dobou pojištění s plným
-počtem dnů a nulovým základem.
+počtem dnů a nulovým základem. Stačí i jediný omluvný důvod v měsíci: když
+k neplacenému volnu přibude nemoc, ošetřovné nebo doba před porodem, je celý
+měsíc dobou pojištění a vyloučenou dobou jsou jen dny toho omluvného důvodu
+(Metodická pomůcka ČSSZ k vyplňování ELDP, příklad 5). Neplacené volno se
+dál uvede jako vyloučené dny pro nemocenské dávky.
 
 Do mzdových vstupů se za takový měsíc nic nezadává, ani nulová mzda. Mzdový
 běh vztah spočítá i bez jediné mzdové složky, pokud v měsíci leží schválená

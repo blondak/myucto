@@ -1213,11 +1213,11 @@ final class JmhzEldpEvidenceBuilder
      * § 16 odst. 4 věty třetí písm. a), takže měsíc dobou pojištění zůstává
      * i bez příjmu, s plným počtem dnů a nulovým základem.
      *
-     * Dvě situace zákon z podkladů jednoznačně nerozhodne, a proto zastaví:
-     * nula bez jakékoli nepřítomnosti (chybí důvod, proč příjem nevznikl)
-     * a souběh omluvné nepřítomnosti s nepřítomností bez příjmu v témž měsíci
-     * (§ 11 odst. 2 zná jen celý měsíc). Peněžitá pomoc v mateřství je omluvná
-     * jen před porodem, takže měsíc porodu bez příjmu je právě takový souběh.
+     * Zastaví jen měsíc, který podklady nevysvětlí: nula bez jakékoli
+     * nepřítomnosti (chybí důvod, proč příjem nevznikl). Souběh omluvného
+     * důvodu s neplaceným volnem je pojištěný měsíc (Metodická pomůcka ČSSZ
+     * k ELDP, příklad 5), viz
+     * {@see EldpExcludedPeriodDeriver::insuranceMonthStatus()}.
      *
      * @param list<array<string,mixed>> $absences
      */
@@ -1237,17 +1237,11 @@ final class JmhzEldpEvidenceBuilder
             $intervalFrom,
             $intervalTo,
         );
-        if ($status === EldpExcludedPeriodDeriver::MONTH_MIXED
-            || $status === EldpExcludedPeriodDeriver::MONTH_UNEXPLAINED
-        ) {
+        if ($status === EldpExcludedPeriodDeriver::MONTH_UNEXPLAINED) {
             $this->invalid(
                 'jmhz_eldp_insurance_month_without_income',
-                $status === EldpExcludedPeriodDeriver::MONTH_MIXED
-                    ? 'Měsíc bez započitatelného příjmu kombinuje omluvnou'
-                        . ' nepřítomnost s nepřítomností bez příjmu; § 11 odst. 2'
-                        . ' zákona č. 155/1995 Sb. rozhoduje jen o celém měsíci.'
-                    : 'Účastný vztah nemá v měsíci započitatelný příjem ani'
-                        . ' evidovanou nepřítomnost, která by to vysvětlila.',
+                'Účastný vztah nemá v měsíci započitatelný příjem ani'
+                    . ' evidovanou nepřítomnost, která by to vysvětlila.',
             );
         }
 
