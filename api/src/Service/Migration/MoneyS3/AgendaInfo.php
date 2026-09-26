@@ -112,6 +112,29 @@ final class AgendaInfo
         );
     }
 
+    /**
+     * Náhled agendy z `meta.json` ({@see toArray()}), který spočítal job nahrání - náhled
+     * průvodce tak zálohu znovu nečte.
+     *
+     * @param array<string,mixed> $data
+     */
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            (string) ($data['name'] ?? ''),
+            (string) ($data['ico'] ?? ''),
+            (string) ($data['dic'] ?? ''),
+            (string) ($data['street'] ?? ''),
+            (string) ($data['city'] ?? ''),
+            (string) ($data['zip'] ?? ''),
+            (string) ($data['version'] ?? ''),
+            (string) ($data['backup_at'] ?? ''),
+            array_values((array) ($data['years'] ?? [])),
+            (int) ($data['partners'] ?? 0),
+            array_values((array) ($data['warnings'] ?? [])),
+        );
+    }
+
     /** @return list<int> */
     public function fiscalYears(): array
     {

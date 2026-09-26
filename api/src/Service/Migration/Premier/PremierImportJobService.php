@@ -157,7 +157,7 @@ final class PremierImportJobService extends AbstractImportJobService
                 if ($agenda === null) {
                     throw new PremierException('agenda_not_found', "Záloha neobsahuje účetní rok {$year} této firmy.");
                 }
-                $backup = PremierBackup::open(PremierUploads::backupDir($supplierId, $token));
+                $backup = PremierBackup::open(PremierUploads::backupDir($supplierId, $token))->withOverview((array) ($meta['agendas'] ?? []));
                 $runId = $this->runs->startRun($supplierId, $jobId, $mode, [
                     'ico' => $backup->ico,
                     'year' => $year,

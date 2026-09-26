@@ -519,18 +519,7 @@ final class PayrollImporter
     /** Poslední měsíc zpracovaných mezd v záloze (`MZDY`, `YYYY-MM`), nebo `null`. */
     public static function lastPayrollPeriod(PremierBackup $backup): ?string
     {
-        if (!$backup->hasRows('MZDY')) {
-            return null;
-        }
-        $last = 0;
-        foreach ($backup->rows('MZDY') as $row) {
-            $year = (int) ($row['ROK'] ?? 0);
-            $month = (int) ($row['MESIC'] ?? 0);
-            if ($year >= 1990 && $month >= 1 && $month <= 12) {
-                $last = max($last, $year * 100 + $month);
-            }
-        }
-        return $last === 0 ? null : sprintf('%04d-%02d', intdiv($last, 100), $last % 100);
+        return $backup->lastPayrollPeriod();
     }
 
     /** Konec dat zálohy: prosinec posledního účetního roku. */
