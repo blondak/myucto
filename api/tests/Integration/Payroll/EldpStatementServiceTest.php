@@ -382,6 +382,61 @@ final class EldpStatementServiceTest extends TestCase
         }
     }
 
+    /**
+     * Změněný podklad po zmrazení: řádná příprava ho odmítne a opravný list
+     * ho zapíše jako nový list s odkazem na opravovaný. Dřív služba uměla
+     * jen odmítnout („vyžaduje opravné podání") a opravný list postavit nešlo.
+     */
+    public function testChangedSourceIsFiledAsCorrectiveStatement(): void
+    {
+        $original = $this->prepare();
+        $this->postTerminationIncome();
+
+        try {
+            $this->prepare('synthetic-eldp-statement-again');
+            self::fail('Zmrazený list se nesmí přepsat řádnou přípravou.');
+        } catch (EldpValidationException $exception) {
+            self::assertSame('eldp_scope_already_frozen', $exception->validationCode);
+            self::assertStringContainsString('opravný evidenční list', $exception->getMessage());
+        }
+
+        $corrective = $this->prepare('synthetic-eldp-correction', true);
+
+        self::assertTrue($corrective['created']);
+        self::assertNotSame($original['statement_id'], $corrective['statement_id']);
+        self::assertSame('52', $corrective['eldp_type']);
+        self::assertSame($original['statement_id'], $corrective['corrects_statement_id']);
+        self::assertSame(2, $corrective['section_count']);
+
+        $replay = $this->prepare('synthetic-eldp-correction', true);
+        self::assertFalse($replay['created']);
+        self::assertSame($corrective['statement_id'], $replay['statement_id']);
+
+        $latest = $this->service->statement($this->supplierId, 'test', $this->employmentId, 2025);
+        self::assertIsArray($latest);
+        self::assertSame($corrective['statement_id'], $latest['id']);
+        self::assertSame(2, $latest['statement_sequence']);
+        self::assertSame($original['statement_id'], $latest['corrects_statement_id']);
+        self::assertSame('52', $latest['payload']['form']['eldp_type']);
+        self::assertSame('1P+', $latest['payload']['eldp_sections'][1]['code']);
+    }
+
+    public function testCorrectionWithoutChangedSourceIsRefused(): void
+    {
+        $this->prepare();
+
+        $this->expectException(EldpValidationException::class);
+        $this->expectExceptionMessage('nezměnil');
+        $this->prepare('synthetic-eldp-correction', true);
+    }
+
+    public function testCorrectionWithoutOriginalIsRefused(): void
+    {
+        $this->expectException(EldpValidationException::class);
+        $this->expectExceptionMessage('není co opravovat');
+        $this->prepare('synthetic-eldp-correction', true);
+    }
+
     public function testManualCompletionRequiresSessionAndBothPermissions(): void
     {
         $bearer = $this->action->complete(
@@ -407,8 +462,10 @@ final class EldpStatementServiceTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function prepare(): array
-    {
+    private function prepare(
+        string $idempotencyKey = 'synthetic-eldp-statement',
+        bool $correction = false,
+    ): array {
         return $this->service->prepare(
             $this->supplierId,
             $this->employmentId,
@@ -419,9 +476,29 @@ final class EldpStatementServiceTest extends TestCase
                 'deducted_days_none' => true,
                 'requested_by_authority' => false,
                 'note' => 'Syntetický evidenční list pro integrační test.',
+                'correction' => $correction,
             ],
-            'synthetic-eldp-statement',
+            $idempotencyKey,
             $this->createdBy,
+        );
+    }
+
+    /** Doplatek zúčtovaný v prosinci, po skončení vztahu 20. 11. */
+    private function postTerminationIncome(): void
+    {
+        $pdo = $this->db->pdo();
+        $employeeId = (int) $pdo->query(
+            'SELECT employee_id FROM payroll_employments WHERE id = ' . $this->employmentId,
+        )->fetchColumn();
+        $this->revision(
+            $pdo,
+            $employeeId,
+            $this->employmentId,
+            '2025-12-01',
+            '2026-01-10',
+            [],
+            'regular',
+            250_000,
         );
     }
 
@@ -535,6 +612,7 @@ final class EldpStatementServiceTest extends TestCase
         string $paymentDate,
         array $absences,
         string $revisionKind,
+        int $baseMinor = 1_000_000,
     ): void {
         $pdo->prepare(
             'INSERT INTO payroll_runs
@@ -588,8 +666,8 @@ final class EldpStatementServiceTest extends TestCase
                                 'relationship_id' => "employment:{$employmentId}",
                                 'status' => 'participates',
                             ],
-                            'assessment_base_minor_units' => 1_000_000,
-                            'capped_assessment_base_minor_units' => 1_000_000,
+                            'assessment_base_minor_units' => $baseMinor,
+                            'capped_assessment_base_minor_units' => $baseMinor,
                         ]],
                     ],
                 ],

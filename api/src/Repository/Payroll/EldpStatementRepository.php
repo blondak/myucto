@@ -192,7 +192,12 @@ final class EldpStatementRepository
         ]);
     }
 
-    /** @return array<string,mixed>|null */
+    /**
+     * Poslední list rozsahu — původní, nebo nejnovější opravný. Opravný list
+     * nahrazuje předchozí, takže „list za rok a vztah" je vždy ten poslední.
+     *
+     * @return array<string,mixed>|null
+     */
     public function findByScopeForUpdate(
         int $supplierId,
         string $environment,
@@ -203,6 +208,8 @@ final class EldpStatementRepository
             'SELECT * FROM payroll_eldp_statements
               WHERE supplier_id = ? AND environment = ?
                 AND employment_id = ? AND statement_year = ?
+              ORDER BY statement_sequence DESC
+              LIMIT 1
               FOR UPDATE'
         );
         $statement->execute([$supplierId, $environment, $employmentId, $year]);
@@ -272,10 +279,16 @@ final class EldpStatementRepository
             'id', 'supplier_id', 'employee_id', 'employment_id',
             'statement_year', 'section_count', 'insurance_days',
             'excluded_days_total', 'deducted_days_total', 'created_by',
+            'statement_sequence',
         ] as $field) {
             if (array_key_exists($field, $row)) {
                 $row[$field] = (int) $row[$field];
             }
+        }
+        if (array_key_exists('corrects_statement_id', $row)) {
+            $row['corrects_statement_id'] = $row['corrects_statement_id'] === null
+                ? null
+                : (int) $row['corrects_statement_id'];
         }
 
         return $row;

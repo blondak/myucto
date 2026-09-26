@@ -193,6 +193,42 @@ final class EldpDeadlinePolicy
     }
 
     /**
+     * Evidenční list jen s příjmem zúčtovaným po skončení zaměstnání (kód
+     * „P+"), když zaměstnání skončilo už v předchozím roce.
+     *
+     * Je to tatáž zákonná mez jako u skončení v průběhu roku — údaje se
+     * zapisují do jednoho měsíce po KONEČNÉM vyúčtování příjmů, nejpozději do
+     * 31. ledna následujícího roku (§ 38 odst. 4 ve znění do 31. 12. 2025).
+     * Konečným vyúčtováním je tu měsíc dodatečného zúčtování, protože skončení
+     * vztahu do vykazovaného roku nespadá.
+     */
+    public function forPostTerminationIncome(
+        int $year,
+        string $finalSettlementOn,
+    ): EldpDeadlineWindow {
+        self::assertYear($year);
+        $settlement = self::date($finalSettlementOn, 'Konečné vyúčtování příjmů');
+        if ($settlement->format('Y') !== (string) $year) {
+            throw new \InvalidArgumentException(
+                'Dodatečné zúčtování příjmu musí ležet ve vykazovaném roce.',
+            );
+        }
+        $oneMonthAfter = self::addMonthClamped($settlement)->format('Y-m-d');
+
+        return $this->window(
+            $settlement->format('Y-m-d'),
+            min($oneMonthAfter, sprintf('%04d-01-31', $year + 1)),
+            self::TERMINATION_RULESET,
+            'post_termination_income_one_month_after_settlement_capped_31_january',
+            'termination',
+            'Zákon č. 582/1991 Sb., § 38 odst. 4 ve znění účinném do 31. 12. 2025 — '
+                . 'příjem zúčtovaný po skončení zaměstnání se do evidenčního listu '
+                . 'zapisuje do jednoho měsíce po konečném vyúčtování příjmů, '
+                . 'nejpozději do 31. ledna následujícího roku.',
+        );
+    }
+
+    /**
      * Evidenční list vyžádaný ČSSZ/ÚSSZ za rok 2026.
      */
     public function forAuthorityRequest(string $requestReceivedOn): EldpDeadlineWindow
@@ -266,15 +302,48 @@ final class EldpDeadlinePolicy
         return [
             'allowed' => false,
             'routine' => false,
-            'reason' => 'Zaměstnavatel evidenční list nevyhotovuje ani nepředkládá — '
-                . 'údaje pro důchodové pojištění sděluje jednotným měsíčním hlášením '
-                . 'a evidenční list z nich sestaví ČSSZ (§ 38 odst. 1 a 2 zákona '
-                . 'č. 582/1991 Sb.). Zaměstnanci je dostupný na ePortálu ČSSZ '
-                . '(§ 39 odst. 1). Samostatný list se vyhotovuje jen za období před '
-                . 'rokem 2026, u zaměstnání skončených před 1. 4. 2026 a na výzvu '
-                . 'ČSSZ/ÚSSZ podle § 38a odst. 2 a 3.',
+            'reason' => self::notApplicableReason($year, $participationEndOn),
             'rule' => 'assembled_by_cssz_from_monthly_report',
         ];
+    }
+
+    /**
+     * Proč TENHLE rozsah evidenční list nemá — konkrétně, ne výčtem pravidel.
+     *
+     * Obecná věta „samostatný list se vyhotovuje jen …" nutila účetní dohledat,
+     * kterou výjimku jejich vztah nesplňuje. Věta proto jmenuje rok, a u roku
+     * 2026 i to, zda zaměstnání trvá, nebo skončilo až po 31. 3. 2026 —
+     * přesně ten údaj, na kterém přechodné ustanovení stojí.
+     */
+    private static function notApplicableReason(int $year, ?string $participationEndOn): string
+    {
+        // Rok přechodného ustanovení se odvozuje od posledního ročního roku,
+        // ne zadrátovaným letopočtem (PayrollCalendarYearPinGuardTest).
+        $transitionYear = self::LAST_ANNUAL_YEAR + 1;
+        $why = match (true) {
+            $year > $transitionYear => "Za rok {$year} žádná výjimka z měsíčního hlášení neplatí.",
+            $participationEndOn !== null => 'Zaměstnání skončilo ' . self::czechDate($participationEndOn)
+                . ", tedy až po 31. 3. {$transitionYear}, takže na ně přechodné ustanovení nedopadá.",
+            default => "Zaměstnání v roce {$transitionYear} trvá (neskončilo před 1. 4. "
+                . "{$transitionYear}), takže na ně přechodné ustanovení nedopadá.",
+        };
+
+        return "Za rok {$year} zaměstnavatel evidenční list nevyhotovuje ani nepředkládá. "
+            . $why
+            . ' Údaje pro důchodové pojištění jdou jednotným měsíčním hlášením a evidenční '
+            . 'list z nich sestaví ČSSZ (§ 38 odst. 1 a 2 zákona č. 582/1991 Sb.); '
+            . 'zaměstnanci je dostupný na ePortálu ČSSZ (§ 39 odst. 1). Chybí-li v něm '
+            . 'údaje, opravte je opravným měsíčním hlášením. Samostatný list připravíte '
+            . 'jen na výzvu ČSSZ/ÚSSZ podle § 38a odst. 2 a 3.';
+    }
+
+    private static function czechDate(string $date): string
+    {
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+
+        return $parsed instanceof \DateTimeImmutable
+            ? $parsed->format('j. n. Y')
+            : $date;
     }
 
     /**
