@@ -1937,7 +1937,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
 
     /**
      * Vada formuláře, kterou pozná až serializér, se od resolveru vrací jako
-     * nález NA VZTAHU — aby šel vztah odložit z řádného hlášení a proklik vedl
+     * nález NA VZTAHU - aby šel vztah odložit z řádného hlášení a proklik vedl
      * na něj. Serializér ji dál odmítá sám, kdyby se k němu dokument dostal
      * jinou cestou; vrátí se jeho výjimka.
      *

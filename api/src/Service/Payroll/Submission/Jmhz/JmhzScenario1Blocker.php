@@ -23,7 +23,7 @@ final readonly class JmhzScenario1Blocker
      * Nález s tím, co účetní potřebuje k nápravě: důvod, krok a kam jít.
      *
      * Dřív nesl jen kód a UI u kódů, které nemělo v překladech, ukazovalo
-     * „neznámá blokace" s odkazem na podporu — přestože server věděl přesně,
+     * „neznámá blokace" s odkazem na podporu - přestože server věděl přesně,
      * co chybí i kde se to doplňuje.
      *
      * @return array{
@@ -52,7 +52,7 @@ final readonly class JmhzScenario1Blocker
      *
      * Jen nález na konkrétním vztahu nebo osobě. Firemní nález (účtárna a její
      * variabilní symbol, revize, pojistná část, souhrn, mzdová složka) se
-     * odložením jednoho vztahu nevyřeší — hlášení by bez něj nešlo sestavit
+     * odložením jednoho vztahu nevyřeší - hlášení by bez něj nešlo sestavit
      * ani za ostatní.
      */
     public function deferrable(): bool

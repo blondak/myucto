@@ -15,7 +15,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { apiErrorMessage } from '@/api/errors'
+import { usePayrollServerMessage } from './payrollServerMessage'
 import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
 import {
   payrollHealthNotificationApi,
@@ -75,6 +75,7 @@ const COLUMNS: ColumnDef[] = [
 const PAGE_SIZE = 50
 
 const { t } = useI18n()
+const { errorMessage: serverErrorMessage, reasonText } = usePayrollServerMessage()
 const { submissionStatusLabel } = usePayrollLabels()
 const auth = useAuthStore()
 const tbl = useTablePrefs('payroll-health-notifications', COLUMNS)
@@ -267,7 +268,7 @@ async function load() {
     loadFailed.value = false
   } catch (exception) {
     loadFailed.value = true
-    error.value = apiErrorMessage(
+    error.value = serverErrorMessage(
       exception,
       t('payroll.health_notifications.load_failed'),
     )
@@ -326,7 +327,7 @@ async function prepare() {
     // Konkrétní věta ze serveru, ne „nepodařilo se". Doména jich vydává celou
     // řadu (haléře v pojistném, chybějící IČO, neznámý kód pojišťovny) a
     // každá vede k jinému kroku.
-    prepareError.value = apiErrorMessage(
+    prepareError.value = serverErrorMessage(
       exception,
       t('payroll.health_notifications.prepare.failed'),
     )
@@ -351,7 +352,7 @@ async function prepareBulk() {
       prepareBulkInsurer.value,
     )
   } catch (exception) {
-    prepareBulkError.value = apiErrorMessage(
+    prepareBulkError.value = serverErrorMessage(
       exception,
       t('payroll.health_notifications.prepare_bulk.failed'),
     )
@@ -377,7 +378,7 @@ async function downloadBulk() {
       result.insurer_code,
     )
   } catch (exception) {
-    downloadBulkError.value = apiErrorMessage(
+    downloadBulkError.value = serverErrorMessage(
       exception,
       t('payroll.health_notifications.prepare_bulk.download_failed'),
     )
@@ -408,14 +409,14 @@ async function enqueueIsds() {
       try {
         isdsGateway.value = await dataBoxApi.gatewayStartPayroll(queued.outbox_id)
       } catch (exception) {
-        isdsError.value = apiErrorMessage(
+        isdsError.value = serverErrorMessage(
           exception,
           t('payroll.health_notifications.prepare.gateway_failed'),
         )
       }
     }
   } catch (exception) {
-    isdsError.value = apiErrorMessage(
+    isdsError.value = serverErrorMessage(
       exception,
       t('payroll.health_notifications.prepare.isds_failed'),
     )
@@ -447,14 +448,14 @@ async function enqueueBulkIsds() {
       try {
         isdsBulkGateway.value = await dataBoxApi.gatewayStartPayroll(queued.outbox_id)
       } catch (exception) {
-        isdsBulkError.value = apiErrorMessage(
+        isdsBulkError.value = serverErrorMessage(
           exception,
           t('payroll.health_notifications.prepare.gateway_failed'),
         )
       }
     }
   } catch (exception) {
-    isdsBulkError.value = apiErrorMessage(
+    isdsBulkError.value = serverErrorMessage(
       exception,
       t('payroll.health_notifications.prepare.isds_failed'),
     )
@@ -488,7 +489,7 @@ async function synchronizeObligations() {
     synchronizedObligationCount.value = result.total
     await load()
   } catch (exception) {
-    obligationSyncError.value = apiErrorMessage(
+    obligationSyncError.value = serverErrorMessage(
       exception,
       t('payroll.health_notifications.hoz_sync.failed'),
     )
@@ -542,7 +543,7 @@ async function downloadArtifact() {
       artifact,
     )
   } catch (exception) {
-    downloadError.value = apiErrorMessage(
+    downloadError.value = serverErrorMessage(
       exception,
       t('payroll.health_notifications.prepare.download_failed'),
     )
@@ -795,7 +796,7 @@ onMounted(() => {
       </h3>
       <ul class="mt-3 space-y-1 text-sm text-danger-700">
         <li v-for="row in unresolved" :key="row.employment_id">
-          <span class="font-medium">{{ row.full_name }}</span> — {{ row.reason }}
+          <span class="font-medium">{{ row.full_name }}</span> — {{ reasonText(row.reason_code, row.reason) }}
         </li>
       </ul>
     </section>
@@ -1161,7 +1162,7 @@ onMounted(() => {
           </div>
         </dl>
         <p class="mt-3 text-xs text-neutral-600">
-          {{ prepared.dispatch.reason }}
+          {{ reasonText(prepared.dispatch.reason_code, prepared.dispatch.reason) }}
         </p>
         <p
           v-if="downloadError"

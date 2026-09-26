@@ -514,7 +514,11 @@ watch(requestedByAuthority, value => {
             <p class="font-medium">{{ t(eldpRemediation(blocker, employmentId, year).problemKey) }}</p>
             <p class="mt-1">{{ t(eldpRemediation(blocker, employmentId, year).stepKey) }}</p>
             <p class="mt-1 text-xs">{{ t('payroll.remediation.eldp.period', { period: eldpRemediation(blocker, employmentId, year).period ?? String(year) }) }}</p>
-            <RouterLink :to="eldpRemediation(blocker, employmentId, year).path" :class="[btnOutline('warning'), 'mt-2 whitespace-nowrap']">
+            <RouterLink
+              v-if="eldpRemediation(blocker, employmentId, year).path !== null"
+              :to="eldpRemediation(blocker, employmentId, year).path!"
+              :class="[btnOutline('warning'), 'mt-2 whitespace-nowrap']"
+            >
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>
               {{ t(eldpRemediation(blocker, employmentId, year).actionKey) }}
             </RouterLink>

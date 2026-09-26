@@ -1383,7 +1383,7 @@ trait PayrollFullFlowTrait
     }
 
     /**
-     * Zmrazení řádného hlášení z přípravy (testovací prostředí) — cesta
+     * Zmrazení řádného hlášení z přípravy (testovací prostředí) - cesta
      * tlačítka Odeslat, bez samotného odeslání.
      *
      * @return array{status:int,body:array<string,mixed>}

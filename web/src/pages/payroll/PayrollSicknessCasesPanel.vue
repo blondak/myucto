@@ -28,9 +28,9 @@
  * u připraveného podání.
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import { personalNumberLabel } from './employmentLifecycleUi'
+import { usePayrollServerMessage } from './payrollServerMessage'
 import {
   payrollSicknessCasesApi,
   type PayrollSicknessBenefitKind,
@@ -58,6 +58,7 @@ import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConf
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 
 const { t } = useI18n()
+const { errorMessage: serverErrorMessage } = usePayrollServerMessage()
 const auth = useAuthStore()
 const {
   request: sendConfirmRequest,
@@ -136,12 +137,13 @@ const editing = computed(() =>
 const draftHasUnpaidLeaveSection = computed(() =>
   editing.value?.benefit_kind === 'NEM')
 
+/*
+ * Chyba serveru: `{ error: { code, message } }`. Dřív se četlo `data.error`
+ * jako text, takže se místo věty ukázalo „[object Object]". V jiném jazyce
+ * se místo české věty serveru ukáže překlad kódu.
+ */
 function message(err: unknown): string {
-  if (isAxiosError(err)) {
-    const data = err.response?.data as { message?: string, error?: string } | undefined
-    return data?.message || data?.error || t('payroll.sicknessCases.errors.generic')
-  }
-  return t('payroll.sicknessCases.errors.generic')
+  return serverErrorMessage(err, t('payroll.sicknessCases.errors.generic'))
 }
 
 async function load(): Promise<void> {

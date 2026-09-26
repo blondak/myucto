@@ -9,15 +9,15 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
  *
  * Dva důvody se stejnou mechanikou:
  *
- *  - `deferral` — účetní vztah výslovně odložila z řádného hlášení
+ *  - `deferral` - účetní vztah výslovně odložila z řádného hlášení
  *    (payroll_jmhz_deferrals), protože u něj chybí data; formulář se doplní
  *    opravným hlášením,
- *  - `correction_scope` — obsahová oprava nese jen vybrané formuláře, takže
+ *  - `correction_scope` - obsahová oprava nese jen vybrané formuláře, takže
  *    nález na jiném vztahu ji nesmí zastavit.
  *
  * V obou případech zůstávají pojistná část a souhrn za VŠECHNY zaměstnance.
  * ČSSZ to u řádného hlášení s částí formulářů výslovně dovoluje a pojistné
- * i sleva zaměstnavatele se musí uplatnit do dne splatnosti — dodatečně už
+ * i sleva zaměstnavatele se musí uplatnit do dne splatnosti - dodatečně už
  * slevu navýšit nelze (§ 7c odst. 2 zák. 589/1992 Sb.). Nesoulad pojistné
  * části se součtem podaných formulářů hlídají propustné kontroly (1, 7, 12,
  * 207, 213, 297 …), takže podání projde a nesoulad je očekávaný.

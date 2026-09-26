@@ -14,7 +14,7 @@ use PHPUnit\Framework\TestCase;
  * Server píše důvody česky. V anglickém prostředí UI místo české věty ukáže
  * překlad kódu (`payroll.server_codes.<kód>`, viz
  * `web/src/pages/payroll/payrollServerMessage.ts`). Nový kód bez překladu by
- * v angličtině tiše zobrazil češtinu — proto se výčet kódů a slovník potkávají
+ * v angličtině tiše zobrazil češtinu - proto se výčet kódů a slovník potkávají
  * tady.
  */
 #[Group('architecture')]

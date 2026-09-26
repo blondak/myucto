@@ -1180,7 +1180,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
                 $partial->excludedBlockers,
             ),
         );
-        // Souhrn daní zahrne i odloženou osobu — její záloha je spočtená.
+        // Souhrn daní zahrne i odloženou osobu - její záloha je spočtená.
         self::assertSame(
             ['advance_tax_after_credits' => 450, 'tax_bonus' => 0],
             $document->payload['employer']['summary_totals'],
@@ -1228,7 +1228,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
 
     /**
      * Nad 1500 formulářů test hlášení balíky sestaví, zmrazení k odeslání je
-     * ale zatím neumí — musí to říct dřív, než cokoli založí.
+     * ale zatím neumí - musí to říct dřív, než cokoli založí.
      */
     public function testSubmissionOverOneBatchIsRefusedBeforeAnythingIsFrozen(): void
     {
@@ -1295,7 +1295,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
 
     /**
      * Po změně variabilního symbolu účtárny se oprava musí dál spárovat
-     * s řádným hlášením — hlavička opravy nese VS ze ZMRAZENÉHO řádného
+     * s řádným hlášením - hlavička opravy nese VS ze ZMRAZENÉHO řádného
      * hlášení (kontrola 22 ČSSZ). Dřív oprava spadla na „jiná registrace".
      */
     public function testContentCorrectionKeepsFrozenVariableSymbolAfterOfficeSymbolChange(): void

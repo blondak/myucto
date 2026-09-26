@@ -213,7 +213,7 @@ final class JmhzScenario1XmlSerializer
      * Zkusí sestavit každý formulář zvlášť a vrátí vady s vazbou na vztah.
      *
      * Používá ji resolver: vadu, kterou pozná až serializér, tak převede na
-     * nález u konkrétního pracovního vztahu — dá se na něj prokliknout
+     * nález u konkrétního pracovního vztahu - dá se na něj prokliknout
      * a vztah se dá odložit z řádného hlášení. Celé XML by spadlo na první
      * vadě a neřeklo by, u koho.
      *

@@ -49,7 +49,44 @@ export const eldpRemediationCodes: Record<string, string> = {
   eldp_takeover_excluded_days_breakdown_missing: 'takeover',
   eldp_takeover_assessment_base_missing: 'takeover',
   eldp_takeover_assessment_base_not_whole_czk: 'takeover',
+  // Potvrzení, dokument a rok bez pojištění se řeší přímo ve formuláři
+  // evidenčního listu; proklik jinam by účetní odvedl od místa, kde je pole.
+  eldp_excluded_days_not_confirmed: 'confirmation',
+  eldp_authority_request_date_invalid: 'confirmation',
+  eldp_confirmation_invalid: 'confirmation',
+  eldp_confirmation_note_invalid: 'confirmation',
+  eldp_manual_date_future: 'confirmation',
+  eldp_manual_date_invalid: 'confirmation',
+  eldp_manual_reference_invalid: 'confirmation',
+  eldp_manual_status_invalid: 'confirmation',
+  eldp_confirmation_document_required: 'confirmation_document',
+  eldp_confirmation_document_missing: 'confirmation_document',
+  eldp_confirmation_document_corrupt: 'confirmation_document',
+  eldp_no_insurance_period: 'no_insurance',
+  eldp_standalone_statement_not_applicable: 'not_applicable',
+  eldp_manual_already_fulfilled: 'manual_state',
+  eldp_manual_completion_frozen: 'manual_state',
+  eldp_manual_submitted_frozen: 'manual_state',
+  eldp_excluded_days_sum_mismatch: 'absence_overlap',
+  eldp_deducted_days_unsupported: 'unsupported',
+  eldp_employment_scope_mismatch: 'integrity',
+  eldp_environment_invalid: 'integrity',
+  eldp_hash_mismatch: 'integrity',
+  eldp_idempotency_payload_mismatch: 'integrity',
+  eldp_idempotency_scope_mismatch: 'integrity',
+  eldp_scope_already_frozen: 'integrity',
+  eldp_submission_replay_mismatch: 'integrity',
+  eldp_submission_replay_state_invalid: 'integrity',
+  eldp_control_submission_state_invalid: 'integrity',
+  eldp_manual_statement_not_found: 'integrity',
+  eldp_schema_integrity_failed: 'integrity',
+  eldp_submission_schema_unavailable: 'integrity',
+  eldp_xml_source_invalid: 'integrity',
+  eldp_xsd_validation_failed: 'integrity',
 }
+
+/** Kinds, jejichž náprava je ve formuláři evidenčního listu samotném. */
+const ELDP_LOCAL_KINDS = ['confirmation', 'confirmation_document', 'no_insurance', 'not_applicable', 'manual_state']
 
 export function eldpRemediation(blocker: EldpBlocker, selectedEmploymentId: number | null, year: number) {
   const kind = Object.hasOwn(eldpRemediationCodes, blocker.code) ? eldpRemediationCodes[blocker.code]! : 'unknown'
@@ -57,9 +94,12 @@ export function eldpRemediation(blocker: EldpBlocker, selectedEmploymentId: numb
   const hasEmployment = Number.isInteger(employmentId) && Number(employmentId) > 0
   const period = /^\d{4}-(0[1-9]|1[0-2])-01$/.test(blocker.detail?.period_start ?? '')
     ? blocker.detail!.period_start!.slice(0, 7) : null
-  let path = '/admin/support'
+  let path: string | null = '/admin/support'
   let action = 'support'
-  if (['missing_month', 'revision', 'missing_employment', 'social', 'no_revisions', 'takeover_revision'].includes(kind)) {
+  if (ELDP_LOCAL_KINDS.includes(kind)) {
+    path = null
+    action = 'form'
+  } else if (['missing_month', 'revision', 'missing_employment', 'social', 'no_revisions', 'takeover_revision'].includes(kind)) {
     path = '/payroll/runs' + (period ? `?period=${period}` : '')
     action = 'runs'
   } else if (kind === 'takeover') {

@@ -119,7 +119,7 @@ final readonly class JmhzScenario1DocumentService
      * opravu nezastaví.
      *
      * Posuzují se jen vybrané formuláře a firemní části (pojistná část,
-     * souhrn). Zbylé vztahy s nálezem se z formulářů vynechají — u ČSSZ zůstává
+     * souhrn). Zbylé vztahy s nálezem se z formulářů vynechají - u ČSSZ zůstává
      * jejich dřív přijatý formulář, nebo (u odloženého vztahu) dál chybí.
      * Vrátí-li se blokované rozhodnutí, je blokující nález firemní nebo leží
      * přímo na vybraném vztahu.

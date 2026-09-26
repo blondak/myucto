@@ -312,7 +312,7 @@ final class JmhzBlockerExplainer
 
     /**
      * Důvod nálezu. Konkrétní věta zdroje (např. serializéru formuláře) má
-     * přednost před obecnou „chybí zákonný údaj" — obecná věta nic neřekne.
+     * přednost před obecnou „chybí zákonný údaj" - obecná věta nic neřekne.
      */
     public static function reason(string $code, ?string $message = null): string
     {

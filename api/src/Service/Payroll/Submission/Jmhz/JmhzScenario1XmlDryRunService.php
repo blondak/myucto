@@ -168,7 +168,7 @@ final readonly class JmhzScenario1XmlDryRunService
      * Propustné kontroly, které porovnávají pojistnou část se SOUČTEM
      * podaných formulářů. Pojistná část nese pojistné a slevu za všechny
      * zaměstnance včetně odložených (jinak by se sleva po splatnosti už
-     * uplatnit nedala), takže při odložení se musí rozejít — a ČSSZ to tak
+     * uplatnit nedala), takže při odložení se musí rozejít - a ČSSZ to tak
      * výslovně připouští. Varování z nich jsou očekávaná, ne chyba.
      */
     public const DEFERRAL_EXPECTED_CONTROL_IDS = [1, 7, 9, 12, 142, 207, 209, 213, 227, 269, 297, 298];

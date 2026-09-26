@@ -2,7 +2,8 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { apiErrorCode, apiErrorMessage } from '@/api/errors'
+import { apiErrorCode } from '@/api/errors'
+import { usePayrollServerMessage } from './payrollServerMessage'
 import {
   payrollApi,
   type PayrollJmhzTransportAttempt,
@@ -43,6 +44,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const { errorMessage: serverErrorMessage } = usePayrollServerMessage()
 const {
   request: sendConfirmRequest,
   confirmProductionSend,
@@ -613,7 +615,7 @@ async function loadA1Profile(): Promise<void> {
       ? local
       : null
   } catch (exception) {
-    a1ProfileError.value = apiErrorMessage(
+    a1ProfileError.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.a1.load_failed'),
     )
@@ -679,7 +681,7 @@ async function saveA1Profile(): Promise<void> {
     }
   } catch (exception) {
     a1ProfileErrorCode.value = apiErrorCode(exception)
-    a1ProfileError.value = apiErrorMessage(
+    a1ProfileError.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.a1.save_failed'),
     )
@@ -721,7 +723,7 @@ async function checkA1Profile(): Promise<void> {
       })
   } catch (exception) {
     a1ProfileErrorCode.value = apiErrorCode(exception)
-    a1ProfileError.value = apiErrorMessage(
+    a1ProfileError.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.a1.check_failed'),
     )
@@ -936,7 +938,7 @@ async function writeA1MasterData(fields: string[]): Promise<void> {
   } catch (exception) {
     a1WritebackProblems.value = [{
       label: t('payroll.people.registration.a1.master_data_title'),
-      reason: apiErrorMessage(
+      reason: serverErrorMessage(
         exception,
         t('payroll.people.registration.a1.master_data_failed'),
       ),
@@ -1189,7 +1191,7 @@ async function loadEvents(): Promise<void> {
       selectedEventId.value = null
     }
   } catch (exception) {
-    eventError.value = apiErrorMessage(
+    eventError.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.event.load_failed'),
     )
@@ -1327,7 +1329,7 @@ async function saveEvent(): Promise<void> {
     resetEventForm()
     await run('preview')
   } catch (exception) {
-    eventError.value = apiErrorMessage(
+    eventError.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.event.save_failed'),
     )
@@ -1354,7 +1356,7 @@ async function loadChangeDetection(): Promise<void> {
       environment.value,
     )
   } catch (exception) {
-    changeError.value = apiErrorMessage(
+    changeError.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.changes.load_failed'),
     )
@@ -1374,7 +1376,7 @@ async function fileProposal(proposalId: number): Promise<void> {
     )
     await Promise.all([loadChangeDetection(), loadEvents()])
   } catch (exception) {
-    changeError.value = apiErrorMessage(
+    changeError.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.changes.file_failed'),
     )
@@ -1399,7 +1401,7 @@ async function dismissProposal(proposalId: number): Promise<void> {
     dismissOpenFor.value = null
     await loadChangeDetection()
   } catch (exception) {
-    changeError.value = apiErrorMessage(
+    changeError.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.changes.dismiss_failed'),
     )
@@ -1522,7 +1524,7 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
   } catch (exception) {
     // Hláška ze serveru jmenuje konkrétní chybějící údaj — nesmí ji přebít
     // obecný text, jinak uživatel neví, co doplnit.
-    error.value = apiErrorMessage(
+    error.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.failed'),
     )
@@ -1554,7 +1556,7 @@ async function send(): Promise<void> {
       report: null,
     }
   } catch (exception) {
-    error.value = apiErrorMessage(
+    error.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.send_failed'),
     )
@@ -1574,7 +1576,7 @@ async function poll(): Promise<void> {
       environment.value,
     )
   } catch (exception) {
-    error.value = apiErrorMessage(
+    error.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.poll_failed'),
     )
@@ -1601,7 +1603,7 @@ async function close(): Promise<void> {
       id: result.attempt.id,
     })
   } catch (exception) {
-    error.value = apiErrorMessage(
+    error.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.close_failed'),
     )

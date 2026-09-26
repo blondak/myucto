@@ -784,7 +784,7 @@ final class JmhzScenario1DocumentResolver
      *
      * Serializér dřív tyhle vady (přesčas nad odpracovanými hodinami, bonus
      * bez prohlášení, rozpad mzdy bez mzdy …) hlásil výjimkou až při sestavení
-     * XML. Hlášení tím spadlo jako celek a účetní nevěděla, u koho — vztah
+     * XML. Hlášení tím spadlo jako celek a účetní nevěděla, u koho - vztah
      * nešlo odložit ani se na něj prokliknout.
      *
      * @param array<int,string> $testVariableSymbols
@@ -1007,7 +1007,7 @@ final class JmhzScenario1DocumentResolver
     }
 
     /**
-     * Příprava bez vynechaných vztahů — vstup pro sestavení zbytku hlášení.
+     * Příprava bez vynechaných vztahů - vstup pro sestavení zbytku hlášení.
      *
      * Nálezy připravenosti vynechaných vztahů a osob odejdou s nimi. Když tím
      * zmizí všechny, příprava je pro zbytek hlášení úplná; jinak by resolver
@@ -1085,7 +1085,7 @@ final class JmhzScenario1DocumentResolver
      *
      * Serializér dřív tyhle vady (přesčas nad odpracovanými hodinami, bonus
      * bez prohlášení, rozpad mzdy bez mzdy …) hlásil výjimkou až při sestavení
-     * XML. Hlášení tím spadlo jako celek a účetní nevěděla, u koho — nešlo
+     * XML. Hlášení tím spadlo jako celek a účetní nevěděla, u koho - nešlo
      * vztah ani odložit, ani se na něj prokliknout. Zkusí se proto sestavit
      * každý formulář zvlášť a vada se vrátí jako nález s `employment_id`.
      *

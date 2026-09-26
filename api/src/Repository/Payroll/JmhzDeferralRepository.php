@@ -241,7 +241,7 @@ final class JmhzDeferralRepository
 
     /**
      * Řádné hlášení JMHZ za mzdový běh a registraci, které už je zmrazené
-     * a nebylo zrušené ani nahrazené. Odložení se po zmrazení nemění — co
+     * a nebylo zrušené ani nahrazené. Odložení se po zmrazení nemění - co
      * hlášení vynechalo, doplní opravné.
      *
      * @return array{id:int,status:string}|null
@@ -303,7 +303,7 @@ final class JmhzDeferralRepository
     }
 
     /**
-     * Aktuální schválená revize běhu — nad ní se po vyřešení vztahu staví
+     * Aktuální schválená revize běhu - nad ní se po vyřešení vztahu staví
      * nová příprava pro opravné hlášení.
      */
     public function currentApprovedRevisionId(int $supplierId, int $runId): ?int

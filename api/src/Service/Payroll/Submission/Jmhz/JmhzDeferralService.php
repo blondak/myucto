@@ -15,7 +15,7 @@ use Psr\Clock\ClockInterface;
  * Když jeden zaměstnanec nemá úplná data, nesmí kvůli němu zůstat nepodané
  * hlášení za ostatní. Účetní u blokovaného vztahu rozhodne „odložit": řádné
  * hlášení se podá bez jeho formuláře a formulář se po doplnění dat pošle
- * opravným hlášením. Do té doby je to NESPLNĚNÁ POVINNOST — lhůta je stejná
+ * opravným hlášením. Do té doby je to NESPLNĚNÁ POVINNOST - lhůta je stejná
  * jako u řádného hlášení (20. den následujícího měsíce) a ČSSZ na chybějící
  * součást vyzve (kontrola 226: počet součástí proti registru).
  *
@@ -27,7 +27,7 @@ use Psr\Clock\ClockInterface;
  *     data zaměstnance nese jediný formulář, takže vynechat jeden ze
  *     souběžných vztahů by změnilo, co vykazují ostatní (souběh).
  *  3. Firemní nález (účtárna, variabilní symbol, pojistná část, souhrn)
- *     odložit nejde — bez něj hlášení nesestavíme ani za ostatní.
+ *     odložit nejde - bez něj hlášení nesestavíme ani za ostatní.
  *  4. Po zmrazení řádného hlášení se odložení nemění. Co hlášení vynechalo,
  *     doplní opravné.
  *  5. Rozhodnutí je vázané na revizi běhu a přípravu, nad kterou vzniklo; nová
@@ -51,7 +51,7 @@ final readonly class JmhzDeferralService
     ) {}
 
     /**
-     * Odložení za mzdový běh revize — aktivní i odvolaná, s vazbou na podání.
+     * Odložení za mzdový běh revize - aktivní i odvolaná, s vazbou na podání.
      *
      * @return array<string,mixed>
      */
@@ -151,7 +151,7 @@ final readonly class JmhzDeferralService
         if ($codes === []) {
             throw new JmhzXmlException(
                 'jmhz_deferral_not_blocked',
-                'Vztah v přípravě nemá žádný nález, který by bránil podání — podá se'
+                'Vztah v přípravě nemá žádný nález, který by bránil podání - podá se'
                     . ' v řádném hlášení a odkládat ho není důvod.',
             );
         }
@@ -236,7 +236,7 @@ final readonly class JmhzDeferralService
 
     /**
      * Zruší odložení (celé osoby v registraci). Po zmrazení řádného hlášení
-     * nejde — hlášení vztah vynechalo a doplní ho jen opravné.
+     * nejde - hlášení vztah vynechalo a doplní ho jen opravné.
      *
      * @return array<string,mixed>
      */
@@ -323,8 +323,8 @@ final readonly class JmhzDeferralService
     /**
      * Doplní formulář odloženého vztahu opravným hlášením.
      *
-     * Nad aktuální schválenou revizí běhu se připraví hlášení znovu — data
-     * vztahu už musí být doplněná — a z něj se zmrazí opravné hlášení nesoucí
+     * Nad aktuální schválenou revizí běhu se připraví hlášení znovu - data
+     * vztahu už musí být doplněná - a z něj se zmrazí opravné hlášení nesoucí
      * formuláře odložených vztahů osoby. Ostatní vztahy s nálezem opravu
      * nezastaví (obsahová oprava posuzuje jen vybrané formuláře).
      *

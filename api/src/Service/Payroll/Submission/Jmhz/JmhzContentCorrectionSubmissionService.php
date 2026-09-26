@@ -422,7 +422,7 @@ final readonly class JmhzContentCorrectionSubmissionService
         if ($resolution->status() !== 'resolved') {
             throw new JmhzXmlException(
                 'jmhz_content_correction_preparation_blocked',
-                'Opravu nelze sestavit — nález leží na vybraném vztahu nebo v pojistné části '
+                'Opravu nelze sestavit - nález leží na vybraném vztahu nebo v pojistné části '
                     . 'a souhrnu: ' . JmhzBlockerExplainer::describe($resolution->blockers),
             );
         }
@@ -460,7 +460,7 @@ final readonly class JmhzContentCorrectionSubmissionService
          * opravu s původním podáním přes GUID a variabilní symbol (kontrola 22:
          * „idPodani je již použito s jiným variabilním symbolem"). Když se VS
          * účtárny mezitím změnil (oprava překlepu, nová registrace), nesmí se
-         * do opravy propsat nový — oprava by se k řádnému hlášení nepřiřadila.
+         * do opravy propsat nový - oprava by se k řádnému hlášení nepřiřadila.
          * Registrace je tatáž, to hlídá kontrola účtárny výš.
          */
         if (($header['variable_symbol'] ?? null) !== $identity->variableSymbol) {

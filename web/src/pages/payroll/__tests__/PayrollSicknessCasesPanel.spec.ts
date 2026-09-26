@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
   recordReceipt: vi.fn(),
   person: vi.fn(),
   gatewayStartPayroll: vi.fn(),
+  locale: { value: 'cs' },
 }))
 
 vi.mock('@/api/payrollSicknessCases', () => ({
@@ -70,7 +71,8 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string) => key,
-    locale: { value: 'cs' },
+    te: (key: string) => key.startsWith('payroll.server_codes.'),
+    locale: m.locale,
   }),
 }))
 
@@ -325,9 +327,14 @@ describe('PayrollSicknessCasesPanel', () => {
   })
 
   it('ukáže chybu ze serveru místo obecné hlášky', async () => {
+    // Skutečný tvar odpovědi serveru (Json::error). Dřív panel četl
+    // `data.error` jako text a ukázal „[object Object]".
     m.prepare.mockRejectedValue({
       isAxiosError: true,
-      response: { data: { message: 'Firma nemá vyplněný variabilní symbol ČSSZ.' } },
+      response: { data: { error: {
+        code: 'sickness_variable_symbol_missing',
+        message: 'Firma nemá vyplněný variabilní symbol ČSSZ.',
+      } } },
     })
     const wrapper = await mountPanel()
 
@@ -338,6 +345,30 @@ describe('PayrollSicknessCasesPanel', () => {
 
     expect(wrapper.find('[data-test="sickness-case-error"]').text())
       .toContain('Firma nemá vyplněný variabilní symbol ČSSZ.')
+  })
+
+  it('v angličtině místo české věty serveru ukáže překlad kódu', async () => {
+    m.locale.value = 'en'
+    try {
+      m.prepare.mockRejectedValue({
+        isAxiosError: true,
+        response: { data: { error: {
+          code: 'sickness_variable_symbol_missing',
+          message: 'Firma nemá vyplněný variabilní symbol ČSSZ.',
+        } } },
+      })
+      const wrapper = await mountPanel()
+
+      await wrapper.findAll('button')
+        .find(button => button.text().includes('actions.prepareNempri'))!
+        .trigger('click')
+      await flushPromises()
+
+      expect(wrapper.find('[data-test="sickness-case-error"]').text())
+        .toBe('payroll.server_codes.sickness_variable_symbol_missing')
+    } finally {
+      m.locale.value = 'cs'
+    }
   })
   /**
    * Jádro celé opravy: připravené NEMPRI se DÁ odeslat rovnou tady.
