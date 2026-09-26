@@ -405,12 +405,13 @@ final class IsdocExporter
         $advance = (float) ($invoice['advance_paid_amount'] ?? 0);
         $payable = (float) ($invoice['amount_to_pay'] ?? $tot);
         $rounding = (float) ($totals['rounding'] ?? 0);
+        $taxInclusive = ($invoice['_direction'] ?? 'sale') === 'purchase' ? $tot : round($tot - $rounding, 2);
 
         // LegalMonetaryTotal řadí <…Curr> AŽ ZA base sourozence (opačně než
         // InvoiceLine / TaxTotal — viz XSD sekvence).
         $mon = $dom->createElementNS(self::NS, 'LegalMonetaryTotal');
         $this->elAmountCurr($dom, $mon, 'TaxExclusiveAmount', $base, false);
-        $this->elAmountCurr($dom, $mon, 'TaxInclusiveAmount', $tot, false);
+        $this->elAmountCurr($dom, $mon, 'TaxInclusiveAmount', $taxInclusive, false);
         // Záloha je NEDAŇOVÁ proforma — DPH se přiznává až na tomto konečném dokladu,
         // takže `AlreadyClaimed*` (= již daňově zúčtováno z daňových záloh) jsou 0 a
         // `Difference*` = plná hodnota dokladu. Odečtení uhrazené zálohy se komunikuje
@@ -420,7 +421,7 @@ final class IsdocExporter
         $this->elAmountCurr($dom, $mon, 'AlreadyClaimedTaxExclusiveAmount', 0.0, false);
         $this->elAmountCurr($dom, $mon, 'AlreadyClaimedTaxInclusiveAmount', 0.0, false);
         $this->elAmountCurr($dom, $mon, 'DifferenceTaxExclusiveAmount', $base, false);
-        $this->elAmountCurr($dom, $mon, 'DifferenceTaxInclusiveAmount', $tot, false);
+        $this->elAmountCurr($dom, $mon, 'DifferenceTaxInclusiveAmount', $taxInclusive, false);
         $this->elAmountCurr($dom, $mon, 'PayableRoundingAmount', $rounding, false);
         $this->elAmountCurr($dom, $mon, 'PaidDepositsAmount', $advance, false);
         $this->elAmountCurr($dom, $mon, 'PayableAmount', $payable, false);

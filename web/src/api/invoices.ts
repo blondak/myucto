@@ -161,6 +161,8 @@ export interface InvoiceTotals {
   discount_amount?: number
 }
 
+export type InvoiceRoundingMode = 'auto' | 'none' | 'whole_czk'
+
 /**
  * Forma úhrady (migrace 1128) — sdílená doména pro vydané i přijaté faktury,
  * zrcadlí PHP `MyInvoice\Support\PaymentMethods`. `direct_debit` (inkaso/SIPO) je
@@ -255,6 +257,7 @@ export interface Invoice {
   advance_paid_amount: number
   discount_percent: number
   payment_method: PaymentMethod
+  rounding_mode?: InvoiceRoundingMode
   /**
    * Hotovostní vyrovnání (migrace 1327): pokladna, do které se doklad inkasuje.
    * Platí jen s `payment_method = 'cash'`; při vystavení z ní vznikne zaúčtovaný
@@ -506,6 +509,7 @@ export interface InvoicePayload {
   advance_paid_amount?: number
   discount_percent?: number
   payment_method?: PaymentMethod
+  rounding_mode?: InvoiceRoundingMode
   /**
    * Hotovostní vyrovnání (migrace 1327) — pokladna pro inkaso hotově.
    * Zapisuje se jen když je klíč přítomen; null volbu i dřív založený PPD zruší.

@@ -81,7 +81,7 @@ final class UpdateInvoiceAction
     private const FINANCIAL_FIELDS = [
         'client_id', 'currency_id', 'revenue_category_id',
         'issue_date', 'tax_date', 'due_date', 'varsymbol',
-        'invoice_type', 'payment_method', 'discount_percent', 'advance_paid_amount',
+        'invoice_type', 'payment_method', 'rounding_mode', 'discount_percent', 'advance_paid_amount',
         'reverse_charge', 'prices_include_vat', 'vat_classification_code', 'income_tax_exempt',
         'is_simplified',
         // Volba hotovostního vyrovnání (migrace 1327) zakládá/ruší ZAÚČTOVANÝ pokladní
@@ -655,7 +655,7 @@ final class UpdateInvoiceAction
         $columns = [
             'client_id', 'currency_id', 'project_id', 'revenue_category_id', 'branding_profile_id',
             'issue_date', 'tax_date', 'due_date', 'varsymbol', 'payment_variable_symbol',
-            'invoice_type', 'payment_method', 'supplier_order_number', 'note_above_items', 'note_below_items',
+            'invoice_type', 'payment_method', 'rounding_mode', 'supplier_order_number', 'note_above_items', 'note_below_items',
             'discount_percent', 'advance_paid_amount', 'reverse_charge',
             'prices_include_vat', 'vat_classification_code', 'income_tax_exempt', 'language',
             'is_simplified', 'price_level_id',

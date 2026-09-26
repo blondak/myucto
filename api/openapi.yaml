@@ -26747,9 +26747,13 @@ components:
         total_without_vat: { type: number, format: float }
         total_vat: { type: number, format: float }
         total_with_vat: { type: number, format: float }
-        rounding: { type: number, format: float, description: "Zaokrouhlení (CZK)" }
+        rounding_mode:
+          type: string
+          enum: [auto, none, whole_czk]
+          description: "Režim zaokrouhlení; auto jen hotovost v CZK. Podporuje faktury a dobropisy, nikdy platby kartou."
+        rounding: { type: number, format: float, description: "Zaokrouhlovací rozdíl, již zahrnutý v total_with_vat; nemění základ ani DPH." }
         advance_paid_amount: { type: number, format: float, description: "Záloha k odečtení (u faktury vystavované po proforme)" }
-        amount_to_pay: { type: number, format: float, description: "total_with_vat + rounding − advance_paid_amount" }
+        amount_to_pay: { type: number, format: float, description: "total_with_vat − advance_paid_amount (total_with_vat již zahrnuje rounding)" }
         paid_total: { type: number, format: float, description: "Suma evidovaných plateb (invoice_payments, #89); zbývá k úhradě = amount_to_pay − paid_total" }
         discount_percent: { type: number, format: float, description: "Procentuální sleva z celé faktury (0 = žádná). Materializuje se jako záporná položka „Sleva X %\" v `items`." }
         totals:
@@ -26980,6 +26984,16 @@ components:
           description: |
             Způsob úhrady (doména `Support\PaymentMethods::ALL`, migrace 1128).
             Pro card/cash se v PDF/emailu nevygeneruje QR ani bankovní spojení.
+        rounding_mode:
+          type: string
+          enum: [auto, none, whole_czk]
+          default: auto
+          description: |
+            Nové faktury mají auto: hotovost v CZK na nejbližší celou korunu.
+            none zaokrouhlení vypne, whole_czk ho zapne i pro dobírku nebo převod.
+            Platí jen pro invoice/credit_note v CZK, nikdy pro card. Zaokrouhluje
+            částku po odečtení zálohy, rozdíl je součást total_with_vat, mimo základ a DPH.
+            PUT bez klíče zachová uložený režim. Pole rounding je pouze vypočtený výstup.
         cash_register_id:
           type: [integer, "null"]
           description: |

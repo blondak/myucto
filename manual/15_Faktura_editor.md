@@ -58,6 +58,22 @@ neopravíte. Platí to stejně ve všech agendách, viz [§ 1.1](01_Uvod.md).
 - **Reverse charge** — checkbox; pokud zatržené, faktura bude bez DPH s textem
   „Daň přiznává odběratel". Předvyplní se z klienta.
 
+### Zaokrouhlení úhrady
+
+U způsobu úhrady lze zvolit **Automaticky (hotově v CZK)**, **Nezaokrouhlovat**
+nebo **Na celé koruny**. Nová faktura má automatický režim. Pro dobírku nebo
+převod lze celé koruny zapnout ručně; u dobírky tuto volbu používejte pouze při
+hotovostní úhradě. Platba kartou se nezaokrouhluje.
+
+Zaokrouhlení platí pro faktury a dobropisy v CZK, nikoli pro zálohové faktury
+a daňové doklady k přijaté platbě. Při každém uložení se částka po odečtení
+zálohy matematicky zaokrouhlí na nejbližší korunu: 916,44 Kč na 916 Kč,
+9,70 Kč na 10 Kč. Rozdíl je uveden samostatně v sumáři i PDF a je zahrnut
+v celkové částce. Základy položek, DPH a výkazy DPH se nemění.
+
+Režim je uložený na faktuře a přenáší se při kopírování i tvorbě dobropisu.
+Existující doklady mají zaokrouhlení vypnuté, dokud ho výslovně nezměníte.
+
 ### 15.2.5 Číslo dokladu — ruční override (volitelné)
 
 V hlavičce konceptu je pole **Číslo faktury** (resp. „Číslo zálohové faktury" /

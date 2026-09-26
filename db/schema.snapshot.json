@@ -882,7 +882,8 @@
         "1895_journal_line_pairings.sql",
         "1896_bank_document_series.sql",
         "1898_card_clearing_restore.sql",
-        "1899_journal_red_storno.sql"
+        "1899_journal_red_storno.sql",
+        "1900_invoice_rounding_mode.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -5899,6 +5900,7 @@
                 "revenue_rule_key": "varchar(64) NULL DEFAULT NULL",
                 "reverse_charge": "tinyint(1) NOT NULL DEFAULT 0",
                 "rounding": "decimal(6,2) NOT NULL DEFAULT 0.00",
+                "rounding_mode": "enum('auto','none','whole_czk') NOT NULL DEFAULT 'none'",
                 "sent_at": "timestamp NULL DEFAULT NULL",
                 "status": "enum('draft','issued','sent','reminded','paid','cancelled') NOT NULL DEFAULT 'draft'",
                 "supplier_id": "int(10) unsigned NOT NULL",

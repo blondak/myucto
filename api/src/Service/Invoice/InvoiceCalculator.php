@@ -32,7 +32,9 @@ final class InvoiceCalculator
         $pdo = $this->db->pdo();
 
         // Načti hlavičku (pro reverse_charge + režim cen s DPH)
-        $stmt = $pdo->prepare('SELECT reverse_charge, prices_include_vat FROM invoices WHERE id = ?');
+        $stmt = $pdo->prepare('SELECT i.reverse_charge, i.prices_include_vat, i.rounding_mode,
+                                     i.advance_paid_amount, i.payment_method, i.invoice_type, c.code AS currency
+                                FROM invoices i JOIN currencies c ON c.id = i.currency_id WHERE i.id = ?');
         $stmt->execute([$invoiceId]);
         $header = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$header) {
@@ -61,15 +63,26 @@ final class InvoiceCalculator
             $updateItem->execute([$r['base'], $r['vat'], $r['with'], (int) $item['id']]);
         }
 
+        $rounding = InvoiceRounding::adjustment(
+            $computed['totals']['with_vat'] - (float) $header['advance_paid_amount'],
+            (string) $header['rounding_mode'],
+            (string) $header['currency'],
+            (string) $header['payment_method'],
+            (string) $header['invoice_type'],
+        );
+        $computed['totals']['rounding'] = $rounding;
+        $computed['totals']['with_vat'] = round($computed['totals']['with_vat'] + $rounding, 2);
+
         // Persist invoice totals (amount_to_pay je generated column)
         $stmt = $pdo->prepare(
-            'UPDATE invoices SET total_without_vat = ?, total_vat = ?, total_with_vat = ?, rounding = 0
+            'UPDATE invoices SET total_without_vat = ?, total_vat = ?, total_with_vat = ?, rounding = ?
              WHERE id = ?'
         );
         $stmt->execute([
             $computed['totals']['without_vat'],
             $computed['totals']['vat'],
             $computed['totals']['with_vat'],
+            $rounding,
             $invoiceId,
         ]);
 

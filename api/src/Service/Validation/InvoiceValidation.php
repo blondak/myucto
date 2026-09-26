@@ -8,6 +8,7 @@ use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Oss\OssItemDecision;
 use MyInvoice\Service\Oss\OssPeriod;
 use MyInvoice\Support\PaymentMethods;
+use MyInvoice\Service\Invoice\InvoiceRounding;
 
 final class InvoiceValidation
 {
@@ -54,6 +55,11 @@ final class InvoiceValidation
             if (!PaymentMethods::isValid($data['payment_method'])) {
                 $err['payment_method'][] = 'Neplatný způsob úhrady';
             }
+        }
+
+        if (array_key_exists('rounding_mode', $data)
+            && (!is_string($data['rounding_mode']) || !in_array($data['rounding_mode'], InvoiceRounding::MODES, true))) {
+            $err['rounding_mode'][] = 'Neplatný způsob zaokrouhlení faktury';
         }
 
         if (empty($data['client_id']) || !is_numeric($data['client_id'])) {
