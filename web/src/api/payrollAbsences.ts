@@ -135,6 +135,11 @@ export interface AverageEarningSuggestion {
   longer_period_allocated_minor: null
   worked_minutes: number | null
   worked_days: number | null
+  /**
+   * Měsíce (`YYYY-MM`) vzaté z převzatých mezd předchozího programu. Jejich
+   * hrubá mzda může obsahovat náhrady mzdy, které do průměru nepatří.
+   */
+  takeover_periods?: string[]
   months: Array<{
     period_start: string
     run_id: number | null
@@ -144,6 +149,7 @@ export interface AverageEarningSuggestion {
     worked_minutes: number | null
     worked_days: number | null
     work_summary_id: number | null
+    takeover?: boolean
     blockers: string[]
   }>
   input_version: string

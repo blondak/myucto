@@ -658,6 +658,35 @@ describe('AbsenceManagement', () => {
     wrapper.unmount()
   })
 
+  /*
+   * První čtvrtletí po přechodu: rozhodné období vedl předchozí program. Návrh
+   * vzniká z převzatých mezd a musí říct, že převzatá hrubá mzda není
+   * započitatelná mzda — náhrady mzdy do průměru nepatří.
+   */
+  it('marks a suggestion taken from the previous program so the accountant reviews it', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({
+      ready: true,
+      blockers: [],
+      source_kind: 'actual',
+      actual_blockers: [],
+      gross_earnings_minor: 12_000_000,
+      worked_minutes: 30_240,
+      worked_days: 63,
+      takeover_periods: ['2026-07', '2026-08', '2026-09'],
+    }))
+
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+
+    expect(wrapper.get('[data-test="average-suggestion-takeover"]').text())
+      .toContain('payroll_absence.averages.suggestion_takeover')
+    expect((wrapper.find('[data-test="average-gross-czk"]').element as HTMLInputElement).value)
+      .toBe('120000')
+    expect(m.createAverage).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('drops the provenance note once the accountant overwrites a derived number', async () => {
     m.averageSuggestion.mockResolvedValue(averageSuggestion({
       ready: true,

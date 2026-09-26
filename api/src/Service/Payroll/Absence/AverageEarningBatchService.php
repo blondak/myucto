@@ -167,6 +167,13 @@ final class AverageEarningBatchService
                         implode(', ', (array) $suggestion['blockers']),
                     ));
                 }
+                if (self::needsIndividualReview($suggestion)) {
+                    throw new \InvalidArgumentException(sprintf(
+                        'Pracovní vztah %d má průměr z převzatých mezd předchozího programu; '
+                        . 'potvrďte ho jednotlivě v Nepřítomnostech → Průměrné výdělky.',
+                        $employmentId,
+                    ));
+                }
                 $approved[] = $this->createAndApprove(
                     $supplierId,
                     $employmentId,
@@ -263,20 +270,35 @@ final class AverageEarningBatchService
      * @param array<string,mixed>|null $existing
      * @return array<string,mixed>
      */
+    /**
+     * Průměr z převzatých mezd se hromadně neschvaluje: převzatá hrubá mzda
+     * není započitatelná mzda § 354 ZP a účetní ji musí posoudit sama.
+     *
+     * @param array<string,mixed> $suggestion
+     */
+    private static function needsIndividualReview(array $suggestion): bool
+    {
+        return (array) ($suggestion['takeover_periods'] ?? []) !== [];
+    }
+
     private function candidate(
         array $suggestion,
         string $employeeName,
         string $employmentCode,
         ?array $existing,
     ): array {
+        $takeover = self::needsIndividualReview($suggestion);
+
         return [
             'employment_id' => (int) $suggestion['employment_id'],
             'employee_name' => $employeeName,
             'employment_code' => $employmentCode,
             'decisive_from' => $suggestion['decisive_from'],
             'decisive_to' => $suggestion['decisive_to'],
-            'ready' => $suggestion['ready'],
-            'blockers' => $suggestion['blockers'],
+            'ready' => $suggestion['ready'] && !$takeover,
+            'blockers' => $takeover
+                ? [...$suggestion['blockers'], 'takeover_needs_review']
+                : $suggestion['blockers'],
             'source_kind' => $suggestion['source_kind'],
             'probable_source' => $suggestion['probable_source'],
             'probable_hourly_minor' => $suggestion['probable_hourly_minor'],

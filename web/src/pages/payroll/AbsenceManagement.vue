@@ -1868,6 +1868,20 @@ onMounted(async () => {
             {{ t('payroll_absence.averages.suggestion_probable') }}
           </p>
           <p v-else class="mt-1 text-xs text-success-700">{{ t('payroll_absence.averages.suggestion_sources') }}</p>
+          <!--
+            Převzatá hrubá mzda není započitatelná mzda § 354 ZP — náhrady mzdy
+            (dovolená, svátek) do průměru nepatří. Účetní to musí vidět dřív,
+            než návrh potvrdí.
+          -->
+          <p
+            v-if="(averageSuggestion.takeover_periods ?? []).length > 0"
+            data-test="average-suggestion-takeover"
+            class="mt-2 rounded-md bg-warning-50 px-2 py-1 text-xs font-medium text-warning-800"
+          >
+            {{ t('payroll_absence.averages.suggestion_takeover', {
+              periods: (averageSuggestion.takeover_periods ?? []).join(', '),
+            }) }}
+          </p>
           <p class="mt-1 text-xs text-success-700">{{ t('payroll_absence.averages.suggestion_confirm') }}</p>
           <p
             v-if="averageSuggestionEdited"
