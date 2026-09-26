@@ -21,6 +21,7 @@ use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\License\LicenseService;
+use MyInvoice\Service\Submission\SubmissionEnvironmentPolicy;
 use Psr\Clock\ClockInterface;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -255,6 +256,9 @@ final class MeAction
             'idle_expires_at'     => $idleExpiresAt,
             // Stav licence (E4) pro FE bannery (trial odpočet, overage, degraded).
             'license'             => $licenseSummary,
+            // Výběr testovacího prostředí podání úřadům (ČSSZ, ZP, ISDS). Mimo
+            // vývojovou instalaci ho UI skryje a backend test odmítne.
+            'submission_test_environment_allowed' => (new SubmissionEnvironmentPolicy($this->config))->testAllowed(),
         ]);
     }
 

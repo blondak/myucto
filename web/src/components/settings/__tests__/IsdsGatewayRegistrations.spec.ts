@@ -118,14 +118,15 @@ describe('registrace odesílací brány — založení', () => {
     await findButton(wrapper, 'common.save')!.trigger('click')
     await flushPromises()
 
+    // Výchozí prostředí nové registrace je produkce (politika prostředí podání).
     expect(m.saveGatewayRegistration).toHaveBeenCalledWith(expect.objectContaining({
-      environment: 'test',
+      environment: 'production',
       ats_id: 'ATS-42',
       label: 'Provozní brána',
       return_url: `${window.location.origin}/isds-gateway/callback`,
       concept_ttl_seconds: 600,
-      portal_host: 'datovka-test.gov.cz',
-      service_host: 'cert.datovka-test.gov.cz',
+      portal_host: 'datovka.gov.cz',
+      service_host: 'cert.datovka.gov.cz',
       user_login_policy: 'unknown',
       certificate: file,
       certificate_password: 'tajne-heslo',

@@ -20,6 +20,7 @@ import {
 } from '@/api/payrollImports'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
+import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import { formatDate, formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
 import { BTN_DISABLED_NOTE, btnFilled, btnOutline, btnOutlineSm, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
 import ImportFilesDropzone from './ImportFilesDropzone.vue'
@@ -58,7 +59,8 @@ const toast = useToast()
 const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 bg-surface px-2 text-sm disabled:bg-neutral-100'
 
 const environment = ref<RegistrationEnvironment>('production')
-const files = ref<File[]>([])
+const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
+const files =ref<File[]>([])
 const preview = ref<RegistrationPreview | null>(null)
 const previewFingerprint = ref('')
 const selected = ref<string[]>([])
@@ -414,7 +416,7 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
     </p>
 
     <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
-      <fieldset class="mb-4">
+      <fieldset v-if="submissionTestAllowed" class="mb-4">
         <legend class="mb-2 text-xs font-medium text-neutral-600">{{ t('payroll_imports.registration.environment') }}</legend>
         <div class="flex flex-wrap gap-4">
           <label v-for="env in (['production', 'test'] as const)" :key="env" class="inline-flex items-center gap-2 text-sm text-neutral-700">

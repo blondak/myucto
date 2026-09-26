@@ -18696,7 +18696,8 @@
       "production": "Production",
       "test": "Test environment",
       "productionHint": "You are working with live data and live credentials.",
-      "testHint": "Careful: test environment. Neither the data nor the credentials are live."
+      "testHint": "Careful: test environment. Neither the data nor the credentials are live.",
+      "productionOnlyHint": "Submissions always go to the authority's live service. The test environment is available only in a development installation."
     },
     "storage_quota": {
       "warning": "The storage allowance for this installation is running out ({percent} %).",
@@ -23254,11 +23255,11 @@
       "direct_reason_validation": "The XML failed local XSD validation. Fix the data and regenerate the snapshot first.",
       "direct_reason_already_submitted": "This XML snapshot has already been filed. Submitting again would create a duplicate.",
       "direct_reason_unresolved": "A previous direct attempt has an unresolved outcome. Refresh or resolve its status in the “…” menu first.",
-      "direct_reason_test_missing": "Run “Test in EPO” first — live submission unlocks only after a successful test.",
+      "direct_reason_test_missing": "Run “Check on EPO” first — live submission unlocks only after a successful test.",
       "direct_reason_test_required": "The latest direct attempt is in state “{status}”. Live submission unlocks only after a successful EPO test.",
       "direct_reason_handoff_active": "After the successful test you started an assisted EPO handoff (state “{status}”, link valid until {until}). Finish it or wait for the link to expire — otherwise you risk filing twice.",
       "assisted_alternative": "Assisted opening always uses the live interactive MOJE daně form and does not submit anything by itself. Manual receipt upload remains a separate alternative.",
-      "run_direct_test": "Test in EPO",
+      "run_direct_test": "Check on EPO",
       "submit_direct": "Sign and submit",
       "submit_direct_sandbox": "Sign and submit to sandbox",
       "epo_test_environment_title": "Direct EPO is using the sandbox environment",
@@ -23344,7 +23345,7 @@
       "direct_submitted": "The filing was accepted and its P7S confirmation was archived.",
       "direct_sandbox_submitted": "The sandbox filing was accepted and its confirmation archived. No real tax filing was created.",
       "status_refreshed": "The filing status was loaded from EPO and stored.",
-      "direct_test_title": "Sign and test in EPO",
+      "direct_test_title": "Sign and check on EPO",
       "direct_test_reauth_hint": "Using your personal private key requires a fresh identity verification.",
       "direct_test_signature_warning": "An electronically signed package will be created solely for the EPO test endpoint. The test does not file the return and the package will not be available for download.",
       "submit_direct_title": "Legally effective EPO submission",

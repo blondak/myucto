@@ -11,6 +11,7 @@ import {
 } from '@/api/payrollImports'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
+import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import { formatDate } from '@/composables/useFormat'
 import { personalNumberLabel } from '@/pages/payroll/employmentLifecycleUi'
 import { BTN_DISABLED_NOTE, btnFilled, btnOutline, btnOutlineSm, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
@@ -35,6 +36,7 @@ const toast = useToast()
 const SUMMARY_ITEMS = ['total', 'ready', 'already_stored', 'conflict', 'blocked'] as const
 
 const environment = ref<RegistrationEnvironment>('production')
+const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
 const files = ref<File[]>([])
 const preview = ref<PohodaOicPreview | null>(null)
 const previewFingerprint = ref('')
@@ -146,7 +148,7 @@ function employmentText(row: PohodaOicRow): string {
     </p>
 
     <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
-      <fieldset class="mb-4">
+      <fieldset v-if="submissionTestAllowed" class="mb-4">
         <legend class="mb-2 text-xs font-medium text-neutral-600">{{ t('payroll_imports.registration.environment') }}</legend>
         <div class="flex flex-wrap gap-4">
           <label v-for="env in (['production', 'test'] as const)" :key="env" class="inline-flex items-center gap-2 text-sm text-neutral-700">

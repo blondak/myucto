@@ -122,6 +122,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canWrite: (permission: string) => permission === 'payroll.submissions',
+    submissionTestEnvironmentAllowed: true,
   }),
 }))
 

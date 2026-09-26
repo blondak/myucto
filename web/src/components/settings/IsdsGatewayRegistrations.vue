@@ -59,7 +59,7 @@ const defaultHosts = ref<Record<Environment, IsdsGatewayHosts>>({
 const returnUrl = computed(() => `${window.location.origin}/isds-gateway/callback`)
 
 const form = ref({
-  environment: 'test' as Environment,
+  environment: 'production' as Environment,
   label: '',
   ats_id: '',
   return_url: '',

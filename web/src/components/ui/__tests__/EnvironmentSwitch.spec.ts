@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { useAuthStore } from '@/stores/auth'
 
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
@@ -15,7 +17,32 @@ function mountSwitch(props: Record<string, unknown> = {}) {
 const production = '[data-test="environment-switch-production"]'
 const test = '[data-test="environment-switch-test"]'
 
+describe('EnvironmentSwitch mimo vývojovou instalaci', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('výběr prostředí nenabídne a ukáže jen ostrý provoz', () => {
+    const wrapper = mountSwitch()
+
+    expect(wrapper.find('[role="radiogroup"]').exists()).toBe(false)
+    expect(wrapper.find(test).exists()).toBe(false)
+    expect(wrapper.get('[data-test="environment-switch-production-only"]').text()).toBe('common.environmentSwitch.production')
+  })
+
+  it('uložený test přepne zpět na produkci', () => {
+    const wrapper = mountSwitch({ modelValue: 'test' })
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([['production']])
+  })
+})
+
 describe('EnvironmentSwitch', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    useAuthStore().submissionTestEnvironmentAllowed = true
+  })
+
   it('nabídne obě prostředí viditelně vedle sebe, ne v rozbalovacím seznamu', () => {
     const wrapper = mountSwitch()
 

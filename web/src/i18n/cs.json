@@ -18696,7 +18696,8 @@
       "production": "Ostrý provoz",
       "test": "Testovací prostředí",
       "productionHint": "Pracujete s ostrými daty a ostrými přihlašovacími údaji.",
-      "testHint": "Pozor: testovací prostředí. Data ani přihlašovací údaje nejsou ostré."
+      "testHint": "Pozor: testovací prostředí. Data ani přihlašovací údaje nejsou ostré.",
+      "productionOnlyHint": "Podání jde vždy do ostrého provozu úřadu. Testovací prostředí je dostupné jen ve vývojové instalaci."
     },
     "storage_quota": {
       "warning": "Přidělený prostor instalace se blíží ke konci ({percent} %).",
@@ -23254,11 +23255,11 @@
       "direct_reason_validation": "XML neprošlo lokální XSD validací. Nejdřív opravte data a vygenerujte snapshot znovu.",
       "direct_reason_already_submitted": "Tento XML snapshot už je podaný. Další odeslání by vytvořilo duplicitu.",
       "direct_reason_unresolved": "Předchozí přímý pokus má nedořešený výsledek. Nejdřív obnovte jeho stav nebo ho vyřešte v nabídce „…“.",
-      "direct_reason_test_missing": "Nejdřív spusťte „Otestovat v EPO“ — ostré odeslání se odemkne až po úspěšném testu.",
+      "direct_reason_test_missing": "Nejdřív spusťte „Zkontrolovat na EPO“ — ostré odeslání se odemkne až po úspěšném testu.",
       "direct_reason_test_required": "Poslední přímý pokus je ve stavu „{status}“. Ostré odeslání se odemkne až po úspěšném testu v EPO.",
       "direct_reason_handoff_active": "Po úspěšném testu jste založili asistované předání do EPO (stav „{status}“, odkaz platí do {until}). Dokončete ho, nebo počkejte na vypršení odkazu — jinak hrozí dvojí podání.",
       "assisted_alternative": "Asistované otevření vždy používá ostrý interaktivní formulář MOJE daně; samo nic neodesílá. Ruční nahrání doručenky zůstává samostatnou alternativou.",
-      "run_direct_test": "Otestovat v EPO",
+      "run_direct_test": "Zkontrolovat na EPO",
       "submit_direct": "Podepsat a podat",
       "submit_direct_sandbox": "Podepsat a podat do testu",
       "epo_test_environment_title": "Přímé EPO běží ve zkušebním prostředí",
@@ -23344,7 +23345,7 @@
       "direct_submitted": "Podání bylo přijato a P7S potvrzení uloženo do archivu.",
       "direct_sandbox_submitted": "Zkušební podání bylo přijato a potvrzení uloženo do archivu. Skutečné daňové podání nevzniklo.",
       "status_refreshed": "Stav podání byl načten z EPO a uložen.",
-      "direct_test_title": "Podepsat a otestovat v EPO",
+      "direct_test_title": "Podepsat a zkontrolovat na EPO",
       "direct_test_reauth_hint": "Použití osobního soukromého klíče vyžaduje nové ověření vaší identity.",
       "direct_test_signature_warning": "Vznikne elektronicky podepsaný balíček určený výhradně pro testovací endpoint EPO. Test daňové podání nevytvoří a balíček nebude nabídnut ke stažení.",
       "submit_direct_title": "Právně účinné odeslání do EPO",

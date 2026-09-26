@@ -46,6 +46,7 @@ import { fieldSelector, revealField } from '@/utils/revealField'
 import DateInput from '@/components/ui/DateInput.vue'
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
+import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 
 const props = defineProps<{
   employmentId: number
@@ -86,7 +87,8 @@ const showXml = ref(false)
  * zato zřetelně vidět u tlačítek i v oznámení pod hlavičkou.
  */
 const environment = ref<PayrollJmhzTransportEnvironment>('production')
-const transport = ref<PayrollJmhzTransportPoll | null>(null)
+const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
+const transport =ref<PayrollJmhzTransportPoll | null>(null)
 const transportBusy = ref<'send' | 'poll' | 'close' | null>(null)
 const transportMessage = ref('')
 const changeDetection = ref<PayrollRegistrationChangeDetection | null>(null)
@@ -1985,16 +1987,19 @@ async function copyXml(): Promise<void> {
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <label class="flex items-center gap-2 text-xs text-neutral-600">
+        <label v-if="submissionTestAllowed" class="flex items-center gap-2 text-xs text-neutral-600">
           <span>{{ t('payroll.people.registration.environment_label') }}</span>
           <select
             v-model="environment"
-            class="rounded-md border border-neutral-300 bg-surface px-2 py-1.5 text-xs text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+            class="rounded-md border px-2 py-1.5 text-xs focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+            :class="environment === 'test'
+              ? 'border-warning-500 bg-warning-50 font-semibold text-warning-800'
+              : 'border-neutral-300 bg-surface text-neutral-900'"
             :disabled="busy || submission !== null"
             data-test="registration-environment"
           >
-            <option value="test">{{ t('payroll.people.registration.environment.test') }}</option>
             <option value="production">{{ t('payroll.people.registration.environment.production') }}</option>
+            <option value="test">{{ t('payroll.people.registration.environment.test') }}</option>
           </select>
         </label>
         <label

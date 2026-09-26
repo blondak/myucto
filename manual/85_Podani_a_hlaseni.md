@@ -8,6 +8,8 @@ Agenda připravuje vybraná mzdová hlášení, provádí formální kontroly a 
 
 Je nutné oprávnění `payroll.submissions`, způsobilý uzavřený běh nebo schválená revize, úplné identifikátory a správně oddělené TEST/produkční prostředí. Pro ČSSZ TEST použijte pouze testovací profil a certifikát v určeném bezpečném úložišti. ISDS musí být nastaveno pro správnou firmu a prostředí.
 
+**Prostředí podání.** Podání ČSSZ, zdravotním pojišťovnám i datovou schránkou jdou vždy do ostrého provozu úřadu; výchozí volba je všude **Ostrý provoz**. Výběr testovacího prostředí se nabízí jen ve vývojové instalaci (v `cfg.php` `app.env = development`), jinde se místo přepínače zobrazí jen štítek ostrého provozu a server požadavek na test odmítne. Zvolený test je na obrazovce zvýrazněný varovnou barvou. Výjimkou je daňové podání na EPO: akce **Zkontrolovat na EPO** pošle výkaz jen ke kontrole chyb a je dostupná vždy.
+
 ## 85.3 Měsíční přehled — co následuje
 
 Záložka **Měsíční přehled** (a tentýž panel pod uzavřeným mzdovým během) skládá

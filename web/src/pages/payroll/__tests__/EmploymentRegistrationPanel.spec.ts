@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { useAuthStore } from '@/stores/auth'
 
 const m = vi.hoisted(() => ({
   preview: vi.fn(),
@@ -273,6 +275,9 @@ describe('EmploymentRegistrationPanel', () => {
     resetPayrollJmhzOptions()
     vi.clearAllMocks()
     localStorage.clear()
+    // Vývojová instalace: výběr testovacího prostředí je dostupný.
+    setActivePinia(createPinia())
+    useAuthStore().submissionTestEnvironmentAllowed = true
     vi.stubGlobal('crypto', {
       randomUUID: vi.fn(() => '00000000-0000-4000-8000-000000000001'),
     })
