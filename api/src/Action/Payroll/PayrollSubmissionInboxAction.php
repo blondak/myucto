@@ -13,7 +13,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
-use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectFormatter;
+use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectResolver;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionInboxService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -28,6 +28,7 @@ final class PayrollSubmissionInboxAction
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollObligationSubjectResolver $subjects,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -72,17 +73,13 @@ final class PayrollSubmissionInboxAction
         );
 
         // `subject_reference` je interní složený klíč — účetní s ním nic
-        // neudělá. `subject_label` dodává jen to, co jde ověřit ze sdíleného
-        // formátovače (viz jeho docblock); zbytek zůstává `null`, ne hádaný.
-        $items = array_map(
-            static fn (array $item): array => $item + [
-                'subject_label' => PayrollObligationSubjectFormatter::humanSubject(
-                    $item['agenda_code'],
-                    $item['subject_reference'],
-                ),
-            ],
-            $page['items'],
-        );
+        // neudělá. `subject_label` dodává jen to, co jde ověřit (jméno osoby
+        // k vztahu, účtárna, pojišťovna); zbytek zůstává `null`, ne hádaný.
+        $items = array_values($page['items']);
+        $subjects = $this->subjects->resolve($supplierId, $items);
+        foreach ($items as $index => $item) {
+            $items[$index] = $item + $subjects[$index];
+        }
 
         // `summary` se počítá nad celým inboxem, ne nad stránkou — jinak by
         // „kolik toho čeká" záviselo na tom, kde uživatel v seznamu je.

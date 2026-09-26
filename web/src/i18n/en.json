@@ -7525,6 +7525,9 @@
           "control_versions": "Validation rules: saved version {old}, current version {current}."
         }
       },
+      "subject": {
+        "open_person": "Employee card"
+      },
       "queue": {
         "title": "To send",
         "subtitle": "Everything prepared that has not been sent yet, across all agendas and employees. Sorted by deadline, overdue first. Items that cannot be sent show the reason.",

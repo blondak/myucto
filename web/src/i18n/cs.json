@@ -7525,6 +7525,9 @@
           "control_versions": "Kontrolní pravidla: uložená verze {old}, aktuální verze {current}."
         }
       },
+      "subject": {
+        "open_person": "Karta zaměstnance"
+      },
       "queue": {
         "title": "K odeslání",
         "subtitle": "Všechno připravené, co ještě neodešlo — napříč agendami i zaměstnanci. Řazeno podle lhůty, po lhůtě nahoře. U položek, které odeslat nejde, je uvedený důvod.",

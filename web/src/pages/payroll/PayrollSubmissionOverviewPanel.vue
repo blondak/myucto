@@ -23,6 +23,7 @@ import {
   type PayrollSubmissionOverviewItem,
 } from '@/api/payroll'
 import DateInput from '@/components/ui/DateInput.vue'
+import PayrollSubmissionSubject from '@/components/payroll/PayrollSubmissionSubject.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue'
@@ -838,7 +839,14 @@ onMounted(load)
                 <template v-for="item in items" :key="item.id">
                 <tr :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
                   <td v-if="tbl.isVisible('agenda')" class="px-4 py-3 font-medium text-neutral-900">{{ submissionAgendaLabel(item.agenda_code) }}</td>
-                  <td v-if="tbl.isVisible('subject')" class="px-4 py-3 text-neutral-700">{{ item.subject_label ?? '—' }}</td>
+                  <td v-if="tbl.isVisible('subject')" class="px-4 py-3 text-neutral-700">
+                    <PayrollSubmissionSubject
+                      v-if="item.subject_label || item.subject_employee_id"
+                      :label="item.subject_label"
+                      :employee-id="item.subject_employee_id"
+                    />
+                    <template v-else>—</template>
+                  </td>
                   <td v-if="tbl.isVisible('due_on')" class="px-4 py-3 text-neutral-700">
                     <span class="block">{{ formatDate(item.due_on) }}</span>
                     <span
@@ -941,7 +949,9 @@ onMounted(load)
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <h3 class="font-semibold text-neutral-900">{{ submissionAgendaLabel(item.agenda_code) }}</h3>
-                <p v-if="item.subject_label" class="mt-1 text-xs text-neutral-500">{{ item.subject_label }}</p>
+                <p v-if="item.subject_label || item.subject_employee_id" class="mt-1 text-xs text-neutral-500">
+                  <PayrollSubmissionSubject :label="item.subject_label" :employee-id="item.subject_employee_id" />
+                </p>
               </div>
               <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
                 {{ submissionStatusLabel(item.status) }}
@@ -1073,7 +1083,12 @@ onMounted(load)
               </span>
             </div>
             <p class="mt-1 text-sm text-neutral-500">
-              <template v-if="detail.submission.subject_label">{{ detail.submission.subject_label }} · </template>
+              <template v-if="detail.submission.subject_label || detail.submission.subject_employee_id">
+                <PayrollSubmissionSubject
+                  :label="detail.submission.subject_label"
+                  :employee-id="detail.submission.subject_employee_id"
+                /> ·
+              </template>
               {{ formatDate(detail.submission.period_start) }} – {{ formatDate(detail.submission.period_end) }}
             </p>
           </div>

@@ -2953,6 +2953,8 @@ export interface PayrollSubmissionOverviewItem {
   subject_reference: string
   /** Lidsky čitelný `subject_reference`, jen tam, kde jde ověřit — jinak `null`. */
   subject_label: string | null
+  /** Osoba, které se povinnost týká (vztah → zaměstnanec); proklik na kartu. */
+  subject_employee_id?: number | null
   period_start: string
   period_end: string
   obligation_kind: string
@@ -3588,6 +3590,8 @@ export interface PayrollSubmissionDetail {
     subject_reference: string
     /** Lidsky čitelný `subject_reference`, jen tam, kde jde ověřit — jinak `null`. */
     subject_label: string | null
+    /** Osoba, které se podání týká (vztah → zaměstnanec); proklik na kartu. */
+    subject_employee_id?: number | null
     period_start: string
     period_end: string
     submission_kind: string
@@ -3675,6 +3679,8 @@ export interface PayrollSubmissionInboxItem {
   subject_reference: string
   /** Lidsky čitelný `subject_reference`, jen tam, kde jde ověřit — jinak `null`. */
   subject_label: string | null
+  /** Osoba, které se povinnost týká (vztah → zaměstnanec); proklik na kartu. */
+  subject_employee_id?: number | null
   period_start: string
   period_end: string
   due_on: string

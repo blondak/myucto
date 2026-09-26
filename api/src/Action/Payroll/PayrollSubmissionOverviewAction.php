@@ -12,7 +12,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
-use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectFormatter;
+use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectResolver;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDeliveryProof;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionSettlementPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -28,6 +28,7 @@ final class PayrollSubmissionOverviewAction
         private readonly PayrollDeadlineAssessmentService $deadlines,
         private readonly PayrollSubmissionSettlementPolicy $settlements,
         private readonly PayrollDispatchCapabilityCatalog $capabilities,
+        private readonly PayrollObligationSubjectResolver $subjects,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -155,22 +156,22 @@ final class PayrollSubmissionOverviewAction
             ))),
         );
 
+        // `subject_reference` je interní složený klíč — účetní s ním nic
+        // neudělá. `subject_label` dodává jen to, co jde ověřit (jméno osoby
+        // k vztahu, účtárna, pojišťovna); zbytek zůstává `null`, ne hádaný.
+        $subjects = $this->subjects->resolve($supplierId, $items);
+
         // Posouzení termínu u ZOBRAZENÝCH řádků — tady kvůli tomu, co uživatel
         // u řádku vidí, ne kvůli souhrnu.
-        foreach ($items as &$item) {
+        foreach ($items as $index => &$item) {
             $item['deadline'] = $this->deadlines->assess(
                 $item['earliest_submission_on'],
                 $item['due_on'],
                 $item['status'],
                 $item['latest_submission']['status'] ?? null,
             )->toArray();
-            // `subject_reference` je interní složený klíč — účetní s ním nic
-            // neudělá. `subject_label` dodává jen to, co jde ověřit ze
-            // sdíleného formátovače; zbytek zůstává `null`, ne hádaný.
-            $item['subject_label'] = PayrollObligationSubjectFormatter::humanSubject(
-                $item['agenda_code'],
-                $item['subject_reference'],
-            );
+            $item['subject_label'] = $subjects[$index]['subject_label'];
+            $item['subject_employee_id'] = $subjects[$index]['subject_employee_id'];
             $item['settlement'] = $this->settlement($item, $outboxes);
         }
         unset($item);

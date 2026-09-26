@@ -11,6 +11,7 @@ import {
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import Modal from '@/components/ui/Modal.vue'
+import PayrollSubmissionSubject from '@/components/payroll/PayrollSubmissionSubject.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
@@ -405,7 +406,9 @@ defineExpose({ reload: load })
                 <tr data-test="inbox-row" :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
                     <td v-if="tbl.isVisible('agenda')" class="px-4 py-3">
                       <span class="block font-medium text-neutral-900">{{ submissionAgendaLabel(item.agenda_code) }}</span>
-                      <span v-if="item.subject_label" class="block text-xs text-neutral-500">{{ item.subject_label }}</span>
+                      <span v-if="item.subject_label || item.subject_employee_id" class="block text-xs text-neutral-500">
+                        <PayrollSubmissionSubject :label="item.subject_label" :employee-id="item.subject_employee_id" />
+                      </span>
                     </td>
                     <td v-if="tbl.isVisible('due_on')" class="px-4 py-3 text-neutral-700">{{ formatDate(item.due_on) }}</td>
                     <td v-if="tbl.isVisible('problem')" class="px-4 py-3">
@@ -488,7 +491,9 @@ defineExpose({ reload: load })
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <h3 class="font-semibold text-neutral-900">{{ submissionAgendaLabel(item.agenda_code) }}</h3>
-                <p v-if="item.subject_label" class="mt-1 text-xs text-neutral-500">{{ item.subject_label }}</p>
+                <p v-if="item.subject_label || item.subject_employee_id" class="mt-1 text-xs text-neutral-500">
+                  <PayrollSubmissionSubject :label="item.subject_label" :employee-id="item.subject_employee_id" />
+                </p>
               </div>
               <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
                 {{ statusLabel(item.status) }}
