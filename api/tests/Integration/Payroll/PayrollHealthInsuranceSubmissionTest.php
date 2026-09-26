@@ -205,6 +205,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
             [
                 'employment_start',
                 'employment_end',
+                'single_day_employment',
                 'maternity_leave_start',
                 'parental_leave_start',
                 'maternity_or_parental_leave_end',
@@ -1071,6 +1072,120 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         } catch (HealthNotificationException $e) {
             self::assertSame('zp_bulk_notification_empty', $e->errorCode);
         }
+    }
+
+    /**
+     * Zaměstnání, které vzniklo a zaniklo týž den, jde pojišťovně jedinou
+     * větou „Q". Dřív z něj vznikla přihláška „P" a odhláška „O".
+     */
+    public function testSingleDayEmploymentIsReportedWithCodeQ(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET end_date = start_date
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $artifact = $this->service->bulkNotificationDownload(
+            $this->supplierId,
+            '2026-03',
+            '111',
+        );
+
+        self::assertStringContainsString('<kodzmeny>Q</kodzmeny>', $artifact['bytes']);
+        self::assertStringNotContainsString('<kodzmeny>P</kodzmeny>', $artifact['bytes']);
+        self::assertStringNotContainsString('<kodzmeny>O</kodzmeny>', $artifact['bytes']);
+        self::assertSame(1, substr_count($artifact['bytes'], '<zmenaZamestance>'));
+    }
+
+    /**
+     * Občan EU bez přiděleného čísla pojištěnce se poprvé přihlašuje kódem
+     * „E" a číslem pojištěnce ve tvaru pohlaví + datum narození.
+     */
+    public function testFirstRegistrationOfEuCitizenUsesCodeEAndBirthDateNumber(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_person_identity_history
+                SET citizenship_country_code = "SK", sex = "male",
+                    birth_date = "1980-07-05"
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $pdo->prepare(
+            'DELETE FROM payroll_person_identifiers
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $this->insertIdentifier($pdo, $this->employeeId, 'ecp', '1234567890');
+
+        $artifact = $this->service->bulkNotificationDownload(
+            $this->supplierId,
+            '2026-03',
+            '111',
+        );
+
+        self::assertStringContainsString('<kodzmeny>E</kodzmeny>', $artifact['bytes']);
+        self::assertStringContainsString(
+            '<cisloPojistence>M05071980</cisloPojistence>',
+            $artifact['bytes'],
+        );
+    }
+
+    /**
+     * První přihlášení bez pohlaví na kartě osoby se nevymýšlí; hláška řekne
+     * u koho a kde údaj doplnit.
+     */
+    public function testFirstRegistrationWithoutSexNamesThePersonAndWhereToFixIt(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_person_identity_history
+                SET citizenship_country_code = "SK", sex = NULL,
+                    birth_date = "1980-07-05"
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $pdo->prepare(
+            'DELETE FROM payroll_person_identifiers
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        try {
+            $this->service->bulkNotificationDownload($this->supplierId, '2026-03', '111');
+            self::fail('Bez pohlaví se číslo pojištěnce prvního přihlášení nevymýšlí.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_first_registration_identity_missing', $e->errorCode);
+            self::assertStringContainsString('Jana Nováková', $e->getMessage());
+            self::assertStringContainsString(
+                '/payroll/people?person=' . $this->employeeId,
+                $e->getMessage(),
+            );
+        }
+    }
+
+    /** Cizinec ze třetí země bez čísla pojištěnce se přihlašuje kódem „C". */
+    public function testFirstRegistrationOfThirdCountryNationalUsesCodeC(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_person_identity_history
+                SET citizenship_country_code = "UA", sex = "female",
+                    birth_date = "1982-10-12"
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $pdo->prepare(
+            'DELETE FROM payroll_person_identifiers
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        $artifact = $this->service->bulkNotificationDownload(
+            $this->supplierId,
+            '2026-03',
+            '111',
+        );
+
+        self::assertStringContainsString('<kodzmeny>C</kodzmeny>', $artifact['bytes']);
+        self::assertStringContainsString(
+            '<cisloPojistence>Z12101982</cisloPojistence>',
+            $artifact['bytes'],
+        );
     }
 
     public function testBulkNotificationFailsClosedWithoutIdentityFirstAndLastName(): void

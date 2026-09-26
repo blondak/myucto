@@ -121,6 +121,12 @@ final class HealthNotificationDutyCatalog
                 'Odhláška zaměstnance.',
             ),
             $employment(
+                HealthNotificationDutyKind::SingleDayEmployment,
+                'Jednodenní zaměstnání',
+                'Zaměstnání vzniklo a zaniklo v jeden den; oznamuje se jedinou '
+                . 'větou místo přihlášky a odhlášky.',
+            ),
+            $employment(
                 HealthNotificationDutyKind::EmployeeDataChange,
                 'Změna údajů oznámených pojišťovně',
                 'Změna jména, příjmení, adresy nebo čísla pojištěnce už '

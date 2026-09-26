@@ -69,8 +69,21 @@ final readonly class HealthNotificationDutyResolver
             }
         };
 
-        $add(HealthNotificationDutyKind::EmploymentStart, $facts->startedOn);
-        $add(HealthNotificationDutyKind::EmploymentEnd, $facts->endedOn);
+        /*
+         * Vznik a zánik v tentýž den je jedna skutečnost s vlastním kódem „Q"
+         * („jednodenní zaměstnání. Použije se v případě, kdy zaměstnání vznikne
+         * a zanikne v jeden den" — `kodZmenyZamestnaceTyp` v HOZ XSD). Přihláška
+         * „P" a odhláška „O" téhož dne by ji rozložily na dvě věty.
+         */
+        if ($facts->startedOn !== null
+            && $facts->startedOn !== ''
+            && $facts->startedOn === $facts->endedOn
+        ) {
+            $add(HealthNotificationDutyKind::SingleDayEmployment, $facts->startedOn);
+        } else {
+            $add(HealthNotificationDutyKind::EmploymentStart, $facts->startedOn);
+            $add(HealthNotificationDutyKind::EmploymentEnd, $facts->endedOn);
+        }
         $add(
             HealthNotificationDutyKind::EmployeeDataChange,
             $facts->dataChangedOn,
