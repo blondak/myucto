@@ -468,7 +468,7 @@ final class PayrollPersonStatutoryEvidenceRepository
                 ),
                 [$supplierId, $employeeId],
             ),
-            'blockers' => $this->blockers($snapshot),
+            'blockers' => $this->blockers($snapshot, $effectiveOn),
         ];
     }
 
@@ -1265,7 +1265,7 @@ final class PayrollPersonStatutoryEvidenceRepository
      * @param array<string,mixed>|null $snapshot snímek k datu; null = rozporný
      * @return list<string>
      */
-    private function blockers(?array $snapshot): array
+    private function blockers(?array $snapshot, string $effectiveOn): array
     {
         if ($snapshot === null) {
             return ['statutory_evidence_snapshot_missing_or_mismatched'];
@@ -1297,10 +1297,10 @@ final class PayrollPersonStatutoryEvidenceRepository
                 $blockers[] = 'social_a1_expired';
             }
         }
+        // Chybějící záznam slevy pracujícího důchodce = sleva neuplatněná,
+        // stejně jako v PayrollRunStatutoryInputAssembler::socialPerson().
         $discount = $snapshot['social']['working_pensioner_discount'] ?? null;
-        if (!is_array($discount)) {
-            $blockers[] = 'working_pensioner_discount_evidence_missing';
-        } elseif (($discount['status'] ?? null) === 'unverified') {
+        if (is_array($discount) && ($discount['status'] ?? null) === 'unverified') {
             $blockers[] = 'working_pensioner_discount_evidence_unverified';
         }
         $coverage = $snapshot['health']['coverage'] ?? null;

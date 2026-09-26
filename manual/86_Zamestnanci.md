@@ -380,7 +380,9 @@ Tlačítko **Přidat záznam** předvyplní běžný český případ: daňový 
 český sociální i zdravotní režim, formulář A1 se netýká, sleva pracujícího
 důchodce se neuplatňuje a zdravotní pojišťovna je ta, u které je osoba dosud
 vedená (jinak výchozí pojišťovna zaměstnavatele z nastavení mezd). U běžného
-zaměstnance tak není co vyplňovat — stačí zkontrolovat a uložit.
+zaměstnance tak není co vyplňovat — stačí zkontrolovat a uložit. Sekce slevy
+pracujícího důchodce je nepovinná: bez záznamu se sleva neuplatňuje a výpočet ani
+podání to nezastaví. Záznam je potřeba jen u zaměstnance, který slevu uplatnil.
 
 Na co se evidence neptá, to si odvodí: u českého daňového rezidenta je stát vždy
 ČR, u českého sociálního režimu je A1 vždy „netýká se". Tato pole se proto

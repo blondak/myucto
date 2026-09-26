@@ -5354,6 +5354,7 @@
         "currency_czk": "Kč",
         "current_no_exemption": "Bez výjimky",
         "current_no_other_employer": "Bez jiného zaměstnavatele",
+        "current_discount_not_claimed": "Neuplatňuje se (bez záznamu)",
         "blocked_badge": "vše doplněno | 1 chybějící údaj | {count} chybějící údaje | {count} chybějících údajů",
         "blockers_title": "K tomuto měsíci chybí:",
         "blockers_consequence": "Dokud tyto údaje chybí, mzdový běh zákonný výpočet této osoby nespočítá a skončí v ručním posouzení.",

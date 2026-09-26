@@ -139,9 +139,10 @@ historický snapshot se zpětně nemění.
 
 ### 80.8.1 Hromadné doplnění výchozí zákonné evidence
 
-Po převzetí zaměstnanců z importu nemají osoby daňovou rezidenci, příslušnost
-k pojištění ani údaj o slevě pracujícího důchodce a běh proto hlásí nedokončený
-zákonný výpočet u většiny lidí. U této blokace nabízí karta běhu tlačítko
+Po převzetí zaměstnanců z importu nemají osoby daňovou rezidenci ani příslušnost
+k pojištění a běh proto hlásí nedokončený zákonný výpočet u většiny lidí.
+Chybějící záznam o slevě pracujícího důchodce výpočet nezastaví: slevu uplatňuje
+zaměstnanec sám, takže bez záznamu se neuplatňuje. U této blokace nabízí karta běhu tlačítko
 **Doplnit výchozí údaje (N osob)**. Stejná akce je na seznamu **Mzdy →
 Zaměstnanci** jako **Doplnit výchozí zákonné údaje**; tam zvolíte měsíc, od
 kterého údaje platí. Náhled bere všechny osoby, které by vzal mzdový běh za

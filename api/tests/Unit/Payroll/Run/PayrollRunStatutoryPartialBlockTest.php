@@ -34,7 +34,6 @@ final class PayrollRunStatutoryPartialBlockTest extends TestCase
         'income_tax:tax_declaration_evidence_missing:employee:43',
         'income_tax:tax_residence_evidence_missing:employee:43',
         'social_insurance:social_jurisdiction_evidence_missing:employee:43',
-        'social_insurance:working_pensioner_discount_evidence_missing:employee:43',
     ];
 
     public function testAssemblerSetsAsideOnlyThePersonWithoutEvidence(): void
@@ -69,8 +68,6 @@ final class PayrollRunStatutoryPartialBlockTest extends TestCase
             ),
         );
         self::assertSame([43], array_keys($bundle->blockedPeople));
-        // Chybějící příslušnost nesmí zakrýt chybějící slevu důchodce — editor
-        // evidence hlásí obě a výpočet musí říct totéž.
         self::assertSame(
             self::MISSING_EVIDENCE_43,
             array_map(
@@ -207,7 +204,30 @@ final class PayrollRunStatutoryPartialBlockTest extends TestCase
             $rows,
         ));
         ksort($perEmployee);
-        self::assertSame(['employee:43' => 5, 'employee:44' => 1], $perEmployee);
+        self::assertSame(['employee:43' => 4, 'employee:44' => 1], $perEmployee);
+    }
+
+    /**
+     * Slevu pracujícího důchodce uplatňuje zaměstnanec sám. Bez záznamu se
+     * osoba spočítá stejně, jako by měla „neuplatňuje se", a nekončí
+     * v ručním posouzení.
+     */
+    public function testMissingWorkingPensionerDiscountIsTreatedAsNotClaimed(): void
+    {
+        $withoutRecord = $this->person(42, 84);
+        $withoutRecord['statutory_evidence']['social']['working_pensioner_discount'] = null;
+
+        $assembler = new PayrollRunStatutoryInputAssembler();
+        $missing = $assembler->assemble($this->snapshot([$withoutRecord]));
+        $notClaimed = $assembler->assemble($this->snapshot([$this->person(42, 84)]));
+
+        self::assertSame([], $missing->blockedPeople);
+        self::assertSame([], $missing->globalIssues());
+        self::assertEquals(
+            $notClaimed->socialInsurance?->people,
+            $missing->socialInsurance?->people,
+        );
+        self::assertCount(1, $missing->socialInsurance?->people ?? []);
     }
 
     /**

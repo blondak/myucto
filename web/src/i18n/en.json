@@ -5354,6 +5354,7 @@
         "currency_czk": "CZK",
         "current_no_exemption": "No exception",
         "current_no_other_employer": "No other employer",
+        "current_discount_not_claimed": "Not claimed (no record)",
         "blocked_badge": "all filled in | 1 missing item | {count} missing items | {count} missing items",
         "blockers_title": "Missing for this month:",
         "blockers_consequence": "Until these are filled in, the payroll run cannot compute the statutory part for this person and ends in manual review.",
