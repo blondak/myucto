@@ -66,6 +66,8 @@ const previewFingerprint = ref('')
 const selected = ref<string[]>([])
 const pairs = ref<RegistrationPairMap>({})
 const relationChoices = ref<RegistrationRelationChoiceMap>({})
+/** Klíče vět s potvrzeným „Ukončit vztah" podle konce pojištění z exportu. */
+const terminations = ref<string[]>([])
 const evidenceConfirmed = ref(false)
 const applyOpenings = ref(false)
 const applyAverages = ref(false)
@@ -143,6 +145,7 @@ watch(fingerprint, value => {
     selected.value = []
     pairs.value = {}
     relationChoices.value = {}
+    terminations.value = []
     evidenceConfirmed.value = false
     openingsTouched.value = false
     averagesTouched.value = false
@@ -167,12 +170,16 @@ async function runPreview(options: { keepResult?: boolean; select?: string[] } =
       files: await filesToPayload(files.value),
       ...(pairList.length > 0 ? { pairs: pairList } : {}),
       ...(choiceList.length > 0 ? { relation_types: choiceList } : {}),
+      ...(terminations.value.length > 0 ? { terminations: [...terminations.value] } : {}),
     }
     const response = await payrollImportsApi.previewRegistrations(payload)
     preview.value = response
     previewFingerprint.value = current
     pairs.value = pruneRegistrationPairs(pairs.value, response.records, response.employment_options ?? [])
     relationChoices.value = pruneRelationChoices(relationChoices.value, response.records)
+    terminations.value = terminations.value.filter(key => response.records.some(
+      record => record.key === key && record.termination_offer,
+    ))
     const wanted = [...selected.value, ...(options.select ?? []).filter(key => !selected.value.includes(key))]
     selected.value = pruneRegistrationSelection(wanted, response.records)
     // Předvýběr jen u čerstvého náhledu; po zápisu se znovu vybírá vědomě.
@@ -207,6 +214,7 @@ async function runApply() {
       auto_approve_averages: applyAverages.value && averagesReady.value && autoApproveAverages.value,
       apply_takeover: applyTakeover.value && takeoverReady.value,
       relation_types: buildRelationChoices(relationChoices.value),
+      terminations: [...terminations.value],
     })
     result.value = response
     const summary = response.summary
@@ -230,6 +238,18 @@ async function runApply() {
   } finally {
     busy.value = null
   }
+}
+
+/**
+ * Export ČSSZ uvádí konec pojistného vztahu u vztahu, který evidence vede jako
+ * trvající. Ukončení se zapíše jen po výslovném potvrzení; náhled se přepočítá,
+ * aby u věty bylo vidět „Skončení vztahu" jako změna.
+ */
+async function toggleTermination(record: RegistrationRecord, checked: boolean) {
+  terminations.value = checked
+    ? [...terminations.value.filter(key => key !== record.key), record.key]
+    : terminations.value.filter(key => key !== record.key)
+  await runPreview({ keepResult: true, select: checked ? [record.key] : [] })
 }
 
 async function pairRecord(record: RegistrationRecord, value: string) {
@@ -578,6 +598,14 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                     </select>
                     <span class="mt-0.5 block text-[11px] text-neutral-500">{{ t('payroll_imports.registration.import_review.relation_choice_hint') }}</span>
                   </label>
+                  <label v-if="record.termination_offer" class="mt-1 flex max-w-xs items-start gap-2 text-[11px] text-neutral-700">
+                    <input type="checkbox" class="mt-0.5" data-testid="registration-termination" :checked="terminations.includes(record.key)" :disabled="!canWrite || busy !== null"
+                      @change="toggleTermination(record, ($event.target as HTMLInputElement).checked)">
+                    <span>
+                      <span class="block font-medium">{{ t('payroll_imports.registration.termination.label', { date: dateText(record.termination_offer.end_on) }) }}</span>
+                      <span class="block text-neutral-500">{{ t('payroll_imports.registration.termination.hint') }}</span>
+                    </span>
+                  </label>
                   <template v-if="record.employment.start_estimated">
                     <span data-testid="registration-start-estimated" class="mt-1 inline-block whitespace-nowrap rounded-full bg-warning-50 px-2 py-0.5 text-[11px] font-medium text-warning-700">{{ t('payroll_imports.registration.import_review.start_estimated') }}</span>
                     <p class="mt-0.5 max-w-xs text-[11px] text-neutral-500">{{ t('payroll_imports.registration.import_review.start_estimated_hint') }}</p>
@@ -670,6 +698,14 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                     <option v-for="option in record.employment.relation_type_options" :key="option" :value="option">{{ t(`payroll_imports.relation_types.${option}`) }}</option>
                   </select>
                   <span class="mt-0.5 block text-xs text-neutral-500">{{ t('payroll_imports.registration.import_review.relation_choice_hint') }}</span>
+                </label>
+                <label v-if="record.termination_offer" class="mt-2 flex items-start gap-2 text-xs text-neutral-700">
+                  <input type="checkbox" class="mt-0.5" :checked="terminations.includes(record.key)" :disabled="!canWrite || busy !== null"
+                    @change="toggleTermination(record, ($event.target as HTMLInputElement).checked)">
+                  <span>
+                    <span class="block font-medium">{{ t('payroll_imports.registration.termination.label', { date: dateText(record.termination_offer.end_on) }) }}</span>
+                    <span class="block text-neutral-500">{{ t('payroll_imports.registration.termination.hint') }}</span>
+                  </span>
                 </label>
                 <p v-if="record.employment.start_estimated" class="mt-2 text-xs text-warning-700">
                   <span class="font-medium">{{ t('payroll_imports.registration.import_review.start_estimated') }}:</span>

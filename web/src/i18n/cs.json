@@ -29134,6 +29134,10 @@
       "end_on": "Ukončení {date}",
       "has_oic": "nese OIČ",
       "has_id_ppv": "nese ID PPV",
+      "termination": {
+        "label": "Ukončit vztah k {date}",
+        "hint": "Export ČSSZ uvádí konec pojištění, v evidenci vztah trvá. Po zaškrtnutí se skončení zapíše; důvod skončení doplňte na kartě vztahu."
+      },
       "match": {
         "new": "Nová osoba",
         "matched": "Spárováno",

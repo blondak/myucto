@@ -29134,6 +29134,10 @@
       "end_on": "End {date}",
       "has_oic": "carries OIČ",
       "has_id_ppv": "carries ID PPV",
+      "termination": {
+        "label": "End the employment on {date}",
+        "hint": "The ČSSZ export shows the end of insurance while the employment is still open in the records. Once ticked, the end is recorded; add the termination reason on the employment card."
+      },
       "match": {
         "new": "New person",
         "matched": "Matched",
