@@ -2195,7 +2195,10 @@ final class JmhzScenario1XmlSerializer
          * a jeho tři složky jsou uvnitř povinné, takže je to celý blok, nebo nic.
          * Nenulová složka při nulovém úhrnu je rozpor ve zdrojových datech.
          */
-        $surcharges = $this->wageSurcharges($earnings);
+        $surcharges = $this->wageSurcharges(
+            $earnings,
+            $this->reportsOvertime($this->workSummaryValues($employment)),
+        );
         if ($wageTotal === 0) {
             foreach ([...array_values($components), ...array_values($surcharges)] as $amount) {
                 if ($amount !== 0) {
@@ -2260,10 +2263,18 @@ final class JmhzScenario1XmlSerializer
      * detailů se s úhrnem NEporovnává: datový slovník mezi nimi žádný vzorec
      * nemá a v přijatých hlášeních se rozchází.
      *
+     * Výjimkou je přesčas. Kontrola 36 (blokující) chce při 10269 > 0 vyplněný
+     * i příplatek za práci přesčas 10333 a pokyny MPSV u něj říkají, že
+     * „pokud nebyly v daném měsíci příplatky proplaceny, je nutné uvést 0".
+     * Firma bez složky příplatku za přesčas (přesčas zahrnutý ve mzdě podle
+     * § 114 odst. 3 ZP, nebo náhradní volno) proto dostane 10333 = 0, a protože
+     * `celkem` je v `priplatkyType` povinný, i úhrn 10332 = 0, pokud ho vektor
+     * nenese. Nula tu není dopočet, ale předepsaný zápis „nic se neproplatilo".
+     *
      * @param array<array-key,mixed> $earnings
      * @return array<string,int>
      */
-    private function wageSurcharges(array $earnings): array
+    private function wageSurcharges(array $earnings, bool $overtimeReported = false): array
     {
         $surcharges = [];
         foreach ([
@@ -2278,6 +2289,15 @@ final class JmhzScenario1XmlSerializer
                 continue;
             }
             $surcharges[$element] = $this->int($value, $attributeId);
+        }
+        if ($overtimeReported && !array_key_exists('form:prescas', $surcharges)) {
+            if ($surcharges === []) {
+                $surcharges['form:celkem'] = 0;
+            }
+            // Pořadí prvků určuje `priplatkyType`: úhrn, přesčas, zbytek.
+            $surcharges = array_slice($surcharges, 0, 1, true)
+                + ['form:prescas' => 0]
+                + array_slice($surcharges, 1, null, true);
         }
         if ($surcharges === []) {
             return [];
@@ -2406,6 +2426,22 @@ final class JmhzScenario1XmlSerializer
         return array_key_exists($attributeId, $earnings)
             ? $earnings[$attributeId]
             : null;
+    }
+
+    /**
+     * Vykáže formulář kladné přesčasové hodiny (10269)? Táž podmínka jako
+     * zápis rozpadu v {@see workMonth()}, aby kontrola 36 a příplatek četly
+     * jeden údaj.
+     *
+     * @param array<string,mixed> $values
+     */
+    private function reportsOvertime(array $values): bool
+    {
+        $overtime = $values['overtime_millihours'] ?? null;
+
+        return is_int($overtime)
+            && $overtime > 0
+            && ($values['worked_millihours'] ?? null) !== 0;
     }
 
     /**

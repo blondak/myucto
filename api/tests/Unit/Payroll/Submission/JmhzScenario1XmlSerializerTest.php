@@ -1660,6 +1660,70 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
     }
 
     /**
+     * Kontrola 36: přesčas bez složky příplatku za přesčas. Pokyny MPSV u 10333
+     * chtějí „pokud nebyly příplatky proplaceny, uvést 0"; bez zápisu nuly
+     * blokující kontrola 36 podání odmítne.
+     */
+    public function testOvertimeWithoutSurchargeComponentReportsZeroSurcharge(): void
+    {
+        $payload = $this->payload();
+        $values = &$payload['people'][0]['employments'][0]['work_month']
+            ['jmhz_work_summary']['values'];
+        $values['worked_days'] = 16;
+        $values['overtime_millihours'] = 3_000;
+        unset($values);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+        $xml = preg_replace('/>\s+</', '><', $result['xml']) ?? '';
+
+        self::assertStringContainsString(
+            '<form:odmenyNepravidelne>0</form:odmenyNepravidelne>'
+                . '<form:priplatky><form:celkem>0</form:celkem>'
+                . '<form:prescas>0</form:prescas></form:priplatky></form:mzdaRozpad>',
+            $xml,
+        );
+        self::assertSame([], $this->failedControls($result['xml'], [36]));
+    }
+
+    /**
+     * Firma se složkou příplatku za noc, ale bez příplatku za přesčas: úhrn
+     * zůstává ze zdroje a doplní se jen nulový příplatek za přesčas na jeho
+     * místo v sekvenci `priplatkyType`.
+     */
+    public function testOvertimeKeepsFrozenSurchargeTotalAndAddsZeroOvertimeSurcharge(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['earnings_by_attribute_minor'] = [
+            '10328' => 100_000,
+            '10329' => 90_000,
+            '10330' => 0,
+            '10331' => 0,
+            '10332' => 10_000,
+            '10334' => 10_000,
+        ];
+        $values = &$payload['people'][0]['employments'][0]['work_month']
+            ['jmhz_work_summary']['values'];
+        $values['worked_days'] = 16;
+        $values['overtime_millihours'] = 3_000;
+        unset($values);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:priplatky><form:celkem>100</form:celkem>'
+                . '<form:prescas>0</form:prescas><form:nocni>100</form:nocni></form:priplatky>',
+            preg_replace('/>\s+</', '><', $result['xml']) ?? '',
+        );
+        self::assertSame([], $this->failedControls($result['xml'], [29, 36]));
+    }
+
+    /**
      * Řez zmrazený dřív, než se úhrn osvobozených příjmů odvozoval, ho nenese.
      * Nula by tvrdila, že zaměstnanec žádný osvobozený příjem neměl — a to
      * z takového řezu neplyne, takže se element vynechá.
