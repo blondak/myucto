@@ -95,11 +95,13 @@ const canWrite = computed(() => auth.canWrite('payroll.submissions'))
  */
 const route = useRoute() as ReturnType<typeof useRoute> | undefined
 const routedPeriod = route?.query?.period
-const period = ref(
-  typeof routedPeriod === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(routedPeriod)
+// Záložka ZP předává období sdílené s přehledem o platbě a hlášeními.
+const period = defineModel<string>('period', { default: '' })
+if (period.value === '') {
+  period.value = typeof routedPeriod === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(routedPeriod)
     ? routedPeriod
-    : payrollWorkingPeriod(),
-)
+    : payrollWorkingPeriod()
+}
 const filterInsurer = ref<string | null>(null)
 const filterKind = ref<HealthDutyKind | null>(null)
 const filterReported = ref<'all' | 'employer' | 'insured'>('all')
