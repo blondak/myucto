@@ -7523,6 +7523,8 @@
         "summary_overdue": "Po lhůtě",
         "col_agenda": "Agenda",
         "col_subject": "Koho se týká",
+        "show_detail": "Co se odesílá",
+        "open_person": "Karta zaměstnance",
         "col_period": "Období",
         "col_due": "Podat do",
         "col_status": "Stav",

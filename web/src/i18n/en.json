@@ -7523,6 +7523,8 @@
         "summary_overdue": "Overdue",
         "col_agenda": "Agenda",
         "col_subject": "Concerns",
+        "show_detail": "What is being sent",
+        "open_person": "Employee card",
         "col_period": "Period",
         "col_due": "Due by",
         "col_status": "Status",

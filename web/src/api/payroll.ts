@@ -3048,6 +3048,8 @@ export interface PayrollSubmissionQueueItem {
   subject_reference: string
   /** Jméno zaměstnance / účtárna / pojišťovna; `null`, když se ověřit nedá. */
   subject_label: string | null
+  /** Osoba, které se podání týká (vztah → zaměstnanec); proklik na kartu. */
+  subject_employee_id?: number | null
   period_start: string
   period_end: string
   obligation_kind: string
