@@ -128,6 +128,21 @@ describe('validace běhu', () => {
     expect(firstStatutoryReviewId(validations)).toBe(6)
     expect(firstStatutoryReviewId([validations[0]])).toBeNull()
   })
+
+  it('chybějící mzdovou složku k doplnění zákonné evidence nepočítá', () => {
+    const componentMissing = [
+      validation({ id: 20, entity_id: 30, remediation_path: '/payroll/quick-inputs?employment=31' }),
+      validation({ id: 21, entity_id: 32, remediation_path: '/payroll/quick-inputs?employment=33' }),
+    ]
+    expect(statutoryReviewEmployeeIds(componentMissing)).toEqual([])
+    expect(firstStatutoryReviewId(componentMissing)).toBeNull()
+    const mixed = [
+      ...componentMissing,
+      validation({ id: 22, entity_id: 34, remediation_path: '/payroll/people?person=34&panel=statutory_evidence' }),
+    ]
+    expect(statutoryReviewEmployeeIds(mixed)).toEqual([34])
+    expect(firstStatutoryReviewId(mixed)).toBe(22)
+  })
 })
 
 describe('evidenceRefreshCommand', () => {
