@@ -41,6 +41,35 @@ final class PayrollRegistrationBusinessMatrix
         8 => [self::VARIANT_OST],
     ];
 
+    /**
+     * Varianta plné registrace A1 z uloženého profilu. Jediné místo pro
+     * resolver, serializér i validátor.
+     *
+     * UI-25: bez uloženého profilu tu dřív padala hláška „druh činnosti
+     * chybí" a posílala na sjednané podmínky vztahu, kde už vyplněný byl.
+     * Ve skutečnosti chybí profil A1, ze kterého se přihláška staví.
+     */
+    public static function requireA1Variant(
+        ?PayrollRegistrationA1Snapshot $a1,
+    ): string {
+        if ($a1 === null) {
+            throw new PayrollRegistrationXmlException(
+                'registration_regzec_a1_profile_missing',
+                'Profil REGZEC A1 pro tento vztah není uložený — z něj se '
+                    . 'plná přihláška staví. Na kartě vztahu v části '
+                    . 'Registrace vztahu na ČSSZ klikněte na „Doplnit '
+                    . 'profil“, zkontrolujte předvyplněné údaje a profil '
+                    . 'uložte.',
+            );
+        }
+
+        return self::requireActionVariant(
+            1,
+            $a1->employment['activity_code'] ?? null,
+            $a1->employment['relationship_detail_code'] ?? null,
+        );
+    }
+
     public static function requireActionVariant(
         int $actionCode,
         ?string $activityCode,

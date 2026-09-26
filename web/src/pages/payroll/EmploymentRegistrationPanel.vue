@@ -55,6 +55,8 @@ const props = defineProps<{
   canWrite: boolean
   /** Podklady A2 odvozené ze záznamu „Skončení vztahu" na kartě vztahu. */
   a2Prefill?: PayrollTerminationA2Prefill | null
+  /** Zvýší se po každém uložení kmenových dat osoby nebo vztahu (UI-26). */
+  masterDataVersion?: number
 }>()
 
 const { t, te } = useI18n()
@@ -66,6 +68,7 @@ const {
 } = useProductionSendConfirm()
 const busy = ref(false)
 const error = ref('')
+const errorCode = ref('')
 /**
  * Všechny chybějící údaje z odmítnuté přípravy — server je posílá najednou,
  * každý s adresou pole. Seznam nahrazuje dřívější jednu větu, po jejímž
@@ -812,7 +815,7 @@ async function saveA1Profile(): Promise<void> {
     a1ProfileMessage.value = profile.status === 'draft'
       ? t('payroll.people.registration.a1.saved_draft', {
         count: a1Problems.value.length,
-      })
+      }, a1Problems.value.length)
       : t('payroll.people.registration.a1.saved')
     resetPreparedFiling()
     await loadA1Profile()
@@ -874,7 +877,7 @@ async function checkA1Profile(): Promise<void> {
       ? t('payroll.people.registration.a1.check_complete')
       : t('payroll.people.registration.a1.check_incomplete', {
         count: result.problems.length,
-      })
+      }, result.problems.length)
   } catch (exception) {
     a1ProfileErrorCode.value = apiErrorCode(exception)
     a1ProfileError.value = serverErrorMessage(
@@ -1810,6 +1813,13 @@ watch(eventInteraction, () => {
 watch(employmentType, value => {
   settlementAmountKind.value = value === '2' ? 'severance_pay' : 'replacement'
 })
+// UI-26: po uložení kmenových dat na kartě osoby (občanství, rodné příjmení,
+// podmínky vztahu) se profil A1 načte znovu. Dřív držel stav z načtení karty
+// a doplněné údaje hlásil jako chybějící až do obnovení stránky. Neuložené
+// úpravy formuláře nezmizí: zůstávají v lokálním konceptu, který se nabídne.
+watch(() => props.masterDataVersion ?? 0, (version, previous) => {
+  if (version !== previous) void loadA1Profile()
+})
 watch(environment, async () => {
   selectedEventId.value = null
   resetPreparedFiling()
@@ -1863,9 +1873,18 @@ function problemTarget(
  */
 const nothingSentYet = computed(() => transportAttempt.value === null)
 
+/** UI-25: chybějící profil A1 se opravuje tady na kartě, ne v podmínkách vztahu. */
+async function openA1ProfileFromError(): Promise<void> {
+  a1ProfileOpen.value = true
+  await nextTick()
+  document.querySelector('[data-test="registration-a1-profile"]')
+    ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 async function run(action: 'preview' | 'prepare'): Promise<void> {
   busy.value = true
   error.value = ''
+  errorCode.value = ''
   errorProblems.value = []
   try {
     if (action === 'preview') {
@@ -1924,6 +1943,7 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
     // obecný text, jinak uživatel neví, co doplnit.
     errorProblems.value = registrationMissingItems(exception)
     const code = apiErrorCode(exception)
+    errorCode.value = code
     if (code === 'registration_already_prepared' || code === 'registration_already_filed') {
       void loadCurrentRegistration()
     }
@@ -4405,6 +4425,18 @@ async function copyXml(): Promise<void> {
       data-test="registration-error"
     >
       <p>{{ error }}</p>
+      <button
+        v-if="errorCode === 'registration_regzec_a1_profile_missing'"
+        type="button"
+        :class="[btnFilled('success'), 'mt-2']"
+        data-test="registration-error-open-a1"
+        @click="openA1ProfileFromError"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path :d="ICONS.eye" />
+        </svg>
+        {{ t('payroll.people.registration.a1.show') }}
+      </button>
       <ul v-if="errorProblems.length > 0" class="mt-2 space-y-1.5" data-test="registration-missing-list">
         <li
           v-for="problem in errorProblems"

@@ -1992,6 +1992,34 @@ describe('EmploymentRegistrationPanel', () => {
     expect(wrapper.find('[data-test="registration-deadline-overdue"]').exists()).toBe(false)
   })
 
+  it('UI-25: chybějící profil A1 nabídne jeho doplnění přímo na kartě', async () => {
+    m.preview.mockRejectedValue(rejection(
+      'registration_regzec_a1_profile_missing',
+      'Profil REGZEC A1 pro tento vztah není uložený.',
+    ))
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="registration-error"]').text()).toContain('Profil REGZEC A1')
+    await wrapper.get('[data-test="registration-error-open-a1"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-a1-toggle"]').text()).toContain('a1.hide')
+  })
+
+  it('UI-26: po uložení kmenových dat se profil A1 načte znovu', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    const loads = m.a1Profile.mock.calls.length
+
+    await wrapper.setProps({ masterDataVersion: 1 })
+    await flushPromises()
+
+    expect(m.a1Profile.mock.calls.length).toBe(loads + 1)
+  })
+
   it('UI-27: prošlou lhůtu označí červeným upozorněním', async () => {
     m.preview.mockResolvedValue(preview)
     const wrapper = mountPanel()

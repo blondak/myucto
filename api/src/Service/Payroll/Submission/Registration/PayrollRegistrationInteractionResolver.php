@@ -290,13 +290,7 @@ final class PayrollRegistrationInteractionResolver
     private function assertA1Snapshot(
         PayrollRegistrationIdentitySnapshot $snapshot,
     ): void {
-        $a1 = $snapshot->regzecA1;
-        PayrollRegistrationBusinessMatrix::requireActionVariant(
-            1,
-            $a1?->employment['activity_code'] ?? null,
-            $a1?->employment['relationship_detail_code'] ?? null,
-            $a1 !== null,
-        );
+        PayrollRegistrationBusinessMatrix::requireA1Variant($snapshot->regzecA1);
     }
 
     /**

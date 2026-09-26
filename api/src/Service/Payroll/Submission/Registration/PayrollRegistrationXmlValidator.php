@@ -183,12 +183,8 @@ final readonly class PayrollRegistrationXmlValidator
                     ),
             );
         } elseif ($payload->interaction->actionCode === 1) {
-            $a1 = $payload->identity->regzecA1;
-            PayrollRegistrationBusinessMatrix::requireActionVariant(
-                1,
-                $a1?->employment['activity_code'] ?? null,
-                $a1?->employment['relationship_detail_code'] ?? null,
-                $a1 !== null,
+            PayrollRegistrationBusinessMatrix::requireA1Variant(
+                $payload->identity->regzecA1,
             );
             $this->validateA1BeforeStartWindow($payload);
         } elseif ($payload->interaction->actionCode >= 2) {

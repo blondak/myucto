@@ -214,7 +214,7 @@ final class PayrollRegistrationActionTest extends TestCase
 
         self::assertSame(422, $response->getStatusCode(), (string) json_encode($body));
         self::assertSame(
-            'registration_regzec_a1_activity_missing',
+            'registration_regzec_a1_profile_missing',
             $body['error']['code'],
         );
         self::assertSame(0, $this->countSubmissions());
@@ -1877,7 +1877,7 @@ final class PayrollRegistrationActionTest extends TestCase
 
         self::assertSame(422, $response->getStatusCode());
         self::assertSame(
-            'registration_regzec_a1_activity_missing',
+            'registration_regzec_a1_profile_missing',
             $body['error']['code'],
         );
     }
@@ -2214,7 +2214,7 @@ final class PayrollRegistrationActionTest extends TestCase
 
         self::assertSame(422, $response->getStatusCode());
         self::assertSame(
-            'registration_regzec_a1_activity_missing',
+            'registration_regzec_a1_profile_missing',
             $this->json($response)['error']['code'],
         );
     }
