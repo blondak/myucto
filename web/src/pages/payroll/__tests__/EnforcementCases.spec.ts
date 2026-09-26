@@ -32,6 +32,9 @@ const m = vi.hoisted(() => ({
   deleteCase: vi.fn(),
   updateClaim: vi.fn(),
   deleteClaim: vi.fn(),
+  transition: vi.fn(),
+  terminationNotices: vi.fn(),
+  recipients: vi.fn(),
   canRead: vi.fn(),
   canWrite: vi.fn(),
   error: vi.fn(),
@@ -70,7 +73,8 @@ vi.mock('@/api/payrollEnforcement', () => ({
     updateClaim: m.updateClaim,
     deleteClaim: m.deleteClaim,
     updateEvidence: vi.fn(),
-    transition: vi.fn(),
+    transition: m.transition,
+    terminationNotices: m.terminationNotices,
     deleteCase: m.deleteCase,
     monthEvidence: m.monthEvidence,
     saveMonthEvidence: vi.fn(),
@@ -87,6 +91,10 @@ vi.mock('@/api/payroll', () => ({
     person: m.person,
     institutionAccounts: m.institutionAccounts,
   },
+}))
+
+vi.mock('@/api/dataBox', () => ({
+  dataBoxApi: { recipients: m.recipients },
 }))
 
 vi.mock('@/api/documents', () => ({
@@ -157,6 +165,7 @@ function detailOf(item: EnforcementCaseSummary): EnforcementCaseDetail {
       original_minor: 0,
       withheld_minor: 0,
       held_minor: 0,
+      administrator_minor: 0,
       liability_minor: 0,
       settled_minor: 0,
       outstanding_minor: 0,
@@ -281,6 +290,8 @@ describe('EnforcementCases', () => {
     })
     m.monthEvidence.mockResolvedValue(monthEvidenceOf())
     m.dependants.mockResolvedValue([])
+    m.terminationNotices.mockResolvedValue({ notices: [], preview: null, blocked_reason: 'Poměr trvá.' })
+    m.recipients.mockResolvedValue([])
   })
 
   it('shows documented parties and the immutable claim breakdown in the case detail', async () => {
@@ -753,6 +764,78 @@ describe('EnforcementCases', () => {
     expect(m.person).toHaveBeenCalledWith(87)
     expect((wrapper.get('[data-test="enforcement-employee-filter"] input').element as HTMLInputElement).value)
       .toBe('Povinný z odkazu')
+    wrapper.unmount()
+  })
+
+  it('vydá depozit insolvenčnímu správci s rozhodnutím, účtem správce a důvodem', async () => {
+    const remitting = summary({ status: 'remit', evidence_complete: true, recipient_verified: true })
+    m.casesPage.mockResolvedValue(page([remitting]))
+    m.detail.mockResolvedValue({
+      ...detailOf(remitting),
+      settlement: { ...detailOf(remitting).settlement, held_minor: 381_200 },
+    })
+    m.institutionAccounts.mockResolvedValue([{
+      id: 91,
+      institution_id: 9,
+      institution_type: 'other_recipient',
+      institution_code: 'ISPRAVCE',
+      institution_name: 'Syntetický insolvenční správce',
+      bank_account: '1000000005/0100',
+      bank_account_masked: '****0005/0100',
+      variable_symbol: null,
+      specific_symbol: null,
+      constant_symbol: null,
+    }])
+    m.documentSearch.mockResolvedValue([{ id: 83, title: 'Schválení oddlužení', doc_type: 'pdf' }])
+    m.transition.mockResolvedValue({ ...detailOf(remitting), status: 'deferred_no_withholding' })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+    await wrapper.get('[data-test="enforcement-state-actions-toggle"]').trigger('click')
+    const handover = wrapper.findAll('[data-test="enforcement-state-actions"] button')
+      .find(button => button.text().includes('payroll.enforcement.commands.release_to_administrator'))
+    expect(handover).toBeDefined()
+    await handover!.trigger('click')
+
+    const apply = wrapper.get('[data-test="transition-apply"]')
+    expect(apply.attributes('disabled')).toBeDefined()
+    await wrapper.get('form input[type="search"]').setValue('Schválení')
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushPromises()
+    await wrapper.get('form ul button').trigger('click')
+    await wrapper.get('form textarea').setValue('Schváleno oddlužení.')
+    expect(wrapper.get('[data-test="transition-apply-blocked"]').text())
+      .toBe('payroll.enforcement.administrator_account_missing')
+    await wrapper.get('[data-test="administrator-account"]').setValue(91)
+    await wrapper.get('[data-test="transition-apply"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.transition).toHaveBeenCalledWith(11, 'release_to_administrator', expect.objectContaining({
+      decision_document_id: 83,
+      reason: 'Schváleno oddlužení.',
+      administrator_account_id: 91,
+    }))
+    wrapper.unmount()
+  })
+
+  it('ukáže oznámení o skončení poměru v detailu exekuce', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    expect(m.terminationNotices).toHaveBeenCalledWith(11)
+    expect(wrapper.get('[data-test="termination-notice-blocked"]').text()).toBe('Poměr trvá.')
+    wrapper.unmount()
+  })
+
+  it('otevře detail případu z prokliku varování mzdového běhu', async () => {
+    m.routeQuery = { person: '3', case: '11' }
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.casesPage).toHaveBeenCalledWith({ employee_id: 3, limit: 20, offset: 0 })
+    expect(m.detail).toHaveBeenCalledWith(11)
     wrapper.unmount()
   })
 

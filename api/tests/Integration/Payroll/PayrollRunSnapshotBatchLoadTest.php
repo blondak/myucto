@@ -199,11 +199,17 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         // proto rozpočet roste o dva round-tripy (prepare + execute), ne
         // s počtem zaměstnanců.
         //
+        // Od balíku exekucí (9/2026) je v rozpočtu ještě jedna množinová dávka:
+        // doručené, ale nepřevedené exekuční případy (stav `received`), které
+        // běh hlásí varováním (§ 282 odst. 3 o. s. ř.) —
+        // PayrollEnforcementRepository::receivedCaseIdsForMany(). Jeden dotaz
+        // na běh (prepare + execute), ne na osobu.
+        //
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
         self::assertLessThanOrEqual(
-            80,
+            82,
             $counts[500],
-            'Snapshot pěti set osob se musí vejít do 80 round-tripů.',
+            'Snapshot pěti set osob se musí vejít do 82 round-tripů.',
         );
     }
 

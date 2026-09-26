@@ -472,6 +472,9 @@ final class PayrollEnumContractTest extends TestCase
         'payrollEnforcement.ts::EnforcementClaimCategory'
             => 'enum:MyInvoice\Service\Payroll\Garnishment\ClaimCategory',
         'payrollEnforcement.ts::EnforcementCaseKind' => 'db:payroll_enforcement_cases.case_kind',
+        // Způsob odeslání oznámení o skončení poměru (§ 295 odst. 2 o. s. ř.).
+        'payrollEnforcement.ts::EnforcementTerminationNoticeChannel'
+            => 'db:payroll_enforcement_termination_notices.sent_channel',
         // Doložení důchodu, které od 1. 1. 2025 podmiňuje čtvrtinu na
         // manžela/partnera (nař. vlády č. 441/2024 Sb.). Hodnota chodí po drátě
         // OBĚMA směry: klient ji u manžela posílá při zakládání vyživované osoby

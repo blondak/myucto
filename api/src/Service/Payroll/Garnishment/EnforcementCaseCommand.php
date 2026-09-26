@@ -14,6 +14,14 @@ enum EnforcementCaseCommand: string
     case ResumeRemittance = 'resume_remittance';
     case MarkPaid = 'mark_paid';
     case Stop = 'stop';
+    /**
+     * Vydání depozita insolvenčnímu správci po schválení oddlužení nebo
+     * prohlášení konkursu. Exekuce se od téhož rozhodnutí nevykonává, proto
+     * případ přejde do odkladu bez srážení.
+     */
+    case ReleaseToAdministrator = 'release_to_administrator';
+    /** Skončení srážek u tohoto plátce po skončení pracovního poměru. */
+    case EndAtPayer = 'end_at_payer';
 
     public function requiresDecisionDocument(): bool
     {
@@ -25,6 +33,7 @@ enum EnforcementCaseCommand: string
             self::ResumeHolding,
             self::ResumeRemittance,
             self::Stop,
+            self::ReleaseToAdministrator,
         ], true);
     }
 
@@ -33,7 +42,8 @@ enum EnforcementCaseCommand: string
         return match ($this) {
             self::MarkFinal => 'initial_order',
             self::AuthorizeRemittance => 'remittance',
-            self::DeferNoWithholding, self::DeferHold => 'deferment',
+            self::DeferNoWithholding, self::DeferHold,
+            self::ReleaseToAdministrator => 'deferment',
             self::ResumeHolding, self::ResumeRemittance => 'resumption',
             self::Stop => 'termination',
             default => null,

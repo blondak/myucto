@@ -526,6 +526,33 @@ final class PayrollPostingLineBuilder
                 "employee:{$employeeId}:enforcement",
                 'Exekuční a insolvenční srážky',
             );
+            // Paušální náhrada nákladů plátce mzdy (§ 270 odst. 2 o. s. ř.)
+            // je v sražené částce, ale oprávněnému se neposílá — plátce si ji
+            // odečte (§ 3 nař. vlády č. 595/2006 Sb.). Bez převodu zůstávala
+            // na 379.200 a účet se žádnou platbou nevyrovnal. Převádí se jen
+            // u snapshotu, který výnosový účet nese — starší revize se
+            // zaúčtují byte-identicky jako dřív.
+            //
+            // Strana MD nese TUTÉŽ analytickou dimenzi (`MZ-EX-…`) jako
+            // závazek exekučních srážek, aby se na ní saldo vyrovnalo; výnos
+            // ji nenese (klíč bez `:enforcement:`), středisko do výnosů nepatří.
+            if (PayrollAccountingDefaults::snapshotAllowsSplit(
+                $configuredAccounts,
+                'enforcement_fee_revenue_credit',
+            )) {
+                $this->addPair(
+                    $allocations,
+                    "employee:{$employeeId}:enforcement-fee",
+                    $this->enforcementAccount($accounts, $configuredAccounts),
+                    $accounts['enforcement_fee_revenue_credit'],
+                    $this->nonNegativeInt(
+                        $enforcementResult + ['employer_flat_fee_minor_units' => 0],
+                        'employer_flat_fee_minor_units',
+                    ),
+                    'Paušální náhrada nákladů plátce mzdy (§ 270 odst. 2 o. s. ř.)',
+                    $this->deductionDimension("employee:{$employeeId}:enforcement:liability"),
+                );
+            }
 
             $expectedNet = $cashByEmployee[$employeeId];
             foreach ([

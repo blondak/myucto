@@ -115,6 +115,8 @@ final class PayrollEmployerSettingsApiTest extends TestCase
             'withholding_tax_credit' => '342.200',
             'other_deductions_credit' => '379.100',
             'enforcement_deductions_credit' => '379.200',
+            // Výnos z paušálu plátce mzdy — osnova firmy 648 má.
+            'enforcement_fee_revenue_credit' => '648',
             'partner_settlement_credit' => '365',
             'risky_savings_debit' => '527',
             'risky_savings_credit' => '379.300',
@@ -122,6 +124,26 @@ final class PayrollEmployerSettingsApiTest extends TestCase
             'non_deductible_benefit_debit' => '528',
             'travel_expense_debit' => '512',
         ], $settings['accounts']);
+    }
+
+    /**
+     * Firma, která výnosový účet 648 v osnově nemá, nesmí kvůli nové
+     * předkontaci přijít o možnost uložit nastavení mezd: paušál plátce mzdy
+     * zůstane nenastavený a účtuje se jako dřív.
+     */
+    public function testFeeRevenueAccountStaysEmptyWithoutRevenueAccountInChart(): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE chart_of_accounts SET is_active = 0
+              WHERE supplier_id = ? AND account_code = '648'"
+        )->execute([$this->supplierId]);
+
+        $response = $this->action->get(
+            $this->request('GET', $this->supplierId),
+            new Response(),
+        );
+
+        self::assertSame('', $this->json($response)['settings']['accounts']['enforcement_fee_revenue_credit']);
     }
 
     public function testSettingsAreSavedAndTenantIsolated(): void

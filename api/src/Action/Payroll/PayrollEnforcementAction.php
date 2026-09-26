@@ -404,6 +404,10 @@ final class PayrollEnforcementAction
                     'Tento přechod nepřijímá rozhodnutí z dokumentů.',
                 );
             }
+            $administratorAccountId = $this->optionalPositiveInt(
+                $body['administrator_account_id'] ?? null,
+                'administrator_account_id',
+            );
             $reason = $this->optionalString($body['reason'] ?? null);
             if ($reason !== null && mb_strlen($reason) > 500) {
                 throw new \InvalidArgumentException('Důvod může mít nejvýše 500 znaků.');
@@ -433,6 +437,7 @@ final class PayrollEnforcementAction
                     $command,
                     $decisionDocumentId,
                     $reason,
+                    $administratorAccountId,
                 ): array {
                     $decisionDocument = null;
                     if ($decisionDocumentId !== null) {
@@ -460,6 +465,7 @@ final class PayrollEnforcementAction
                         $decisionDocument,
                         $this->userId($request),
                         $this->lifecycle,
+                        $administratorAccountId,
                     );
                     $this->audit(
                         $request,

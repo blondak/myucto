@@ -47,16 +47,24 @@ vyživovaných osob spravuje jen při vzniku, zániku nebo ověření nároku; v
 měsíci se celý seznam znovu nevyplňuje.
 
 Volby insolvenčního režimu u každé možnosti popisují dopad na výpočet. Režim
-**Schválené oddlužení — srážet a deponovat** vypočte celou zabavitelnou část,
-ale částku zatím nezařadí do automatické platební dávky; účetní ji odešle
-insolvenčnímu správci ručně a úhradu doloží. Režim **Soudem určená jiná výše
+**Schválené oddlužení — srážet a deponovat** vypočte celou zabavitelnou část a po schválení mzdy z ní
+akce **Připravit závazky** v **Mzdy → Mzdové příkazy a úhrady** vytvoří platební
+závazek na ověřený účet insolvenčního správce. Režim **Soudem určená jiná výše
 měsíčních splátek** funguje stejně, jen se místo zákonné srážky srazí částka
 z výroku usnesení — nejvýše však do zákonné zabavitelné části, takže v měsíci
 s nižším příjmem vyjde méně. Splátka je u tohoto režimu povinný údaj a stejně
 jako u schváleného oddlužení k němu patří pracovní vztah, ověřený účet správce
-a rozhodnutí. Volba **Pouze evidovat upozornění** vyvolá ruční kontrolu a sama
-částku nepoužije ani neodešle. Potvrzení příjemce v měsíčních podkladech
-nenahrazuje rozhodnutí ani ověřený platební účet.
+a rozhodnutí.
+
+Režim **Zahájené řízení — srážet a deponovat** platí od vyhlášky o zahájení řízení do
+rozhodnutí o úpadku a způsobu jeho řešení. Exekuce se v té době nesmí provést
+(§ 109 odst. 1 písm. c) insolvenčního zákona), srážet se ale dál má. Aplikace
+proto srazí částku v rozsahu dosavadních exekucí (pořadí, třetiny i paušální
+náhrada beze změny) a celou ji ponechá v depozitu — oprávněným se nic neodešle,
+ani u případu, který jinak odesílá. Dohody o srážkách ze mzdy se v tomto režimu
+nesrážejí. Stačí ověřit vyhlášku o zahájení řízení; příjemce se neověřuje.
+Potvrzení příjemce v měsíčních podkladech nenahrazuje rozhodnutí ani ověřený
+platební účet.
 
 Exekuce evidované vedle schváleného oddlužení se po dobu oddlužení
 nevykonávají — zůstanou v rejstříku, srážka jde celá insolvenčnímu správci
@@ -67,7 +75,7 @@ ručním posouzení a je nutné ho vyřešit podle konkrétních usnesení.
 
 ## 88.4 Stavy
 
-Případ může být evidovaný, aktivní, pozastavený, čekající v pořadí, doplacený nebo ukončený. Samotné vložení rozhodnutí nezaručuje srážku v uzavřeném běhu; rozhodují účinnost, pořadí a disponibilní částka.
+Případ může být evidovaný, aktivní, pozastavený, čekající v pořadí, doplacený, ukončený, nebo ukončený u vás po skončení pracovního poměru (exekuce pak pokračuje u dalšího plátce). Samotné vložení rozhodnutí nezaručuje srážku v uzavřeném běhu; rozhodují účinnost, pořadí a disponibilní částka.
 
 ## 88.5 Oprava omylem založeného případu
 
@@ -203,3 +211,62 @@ bylo sraženo, kolik drží depozitum, kolik je připraveno k úhradě, kolik u�
 příjemce dostal a kolik na pohledávce zbývá. Poslední dva údaje se mění až
 po spárování skutečné bankovní nebo pokladní platby v **Mzdy → Mzdové příkazy a úhrady →
 Spárování úhrad**.
+
+### 88.9.3 Doručený případ, který se ještě nesráží
+
+Srážet se má ode dne, kdy plátci mzdy doručili exekuční příkaz nebo usnesení.
+Případ ve stavu **Přijato — čeká na ověření** se ale do výpočtu nedostane, dokud
+podklady neověříte a srážení nezahájíte. Mzdový běh na každý takový případ
+upozorní varováním u konkrétního zaměstnance; varování je nutné vědomě potvrdit
+a jeho odkaz otevře přímo detail případu. Případ účinný až po dni výplaty běh
+nehlásí.
+
+### 88.9.4 Vydání depozita insolvenčnímu správci
+
+Po schválení oddlužení nebo prohlášení konkursu patří částky sražené
+a deponované za zahájeného insolvenčního řízení insolvenčnímu správci. V detailu
+exekučního případu zvolte **Vydat depozit insolvenčnímu správci**, vyberte
+rozhodnutí insolvenčního soudu, ověřený účet správce (typ *ostatní příjemce*
+z **Mzdy → Nastavení mezd → Účty institucí**) a uveďte důvod. Aplikace zapíše
+vydání celého depozita, případ odloží bez dalšího srážení a akce **Připravit
+závazky** vytvoří platební závazek na účet správce splatný dnem vydání. Pohledávce
+oprávněného se vydaná částka nezapočítá; depozitum, uzávěrka roku i zápočtový
+list s ní počítají stejně jako s vrácením zaměstnanci.
+
+### 88.9.5 Skončení pracovního poměru povinného
+
+Skončí-li povinnému u vás pracovní poměr, musíte do jednoho týdne oznámit soudu
+nebo exekutorovi, že u vás přestal pracovat, a zaslat vyúčtování provedených
+a vyplacených srážek s pořadím pohledávek (§ 295 odst. 2 o. s. ř.). Lhůtu hlídá
+položka **Exekuce a insolvence: oznámení soudu / exekutorovi do 7 dnů**
+v kontrolním seznamu skončení vztahu a přehled termínů.
+
+V detailu případu je po skončení vztahu blok **Skončení pracovního poměru —
+oznámení soudu / exekutorovi**. Ukazuje datum skončení, lhůtu a u každé
+pohledávky, kolik bylo sraženo, vyplaceno oprávněnému, drží depozitum a zbývá.
+Pokud víte, kam povinný nastoupil, doplňte nového plátce mzdy. Tlačítko
+**Vystavit oznámení** obsah zmrazí a připraví PDF; změnu údajů vyřešíte
+vystavením nové verze. Oznámení můžete **Připravit k odeslání** jako koncept do
+datové schránky (adresát musí být v číselníku příjemců), nebo ho odeslat jinak.
+Odeslání pak zaznamenejte datem a způsobem. Jakmile má oznámení každý běžící
+případ zaměstnance, položka kontrolního seznamu se odškrtne sama.
+
+Samotné skončení poměru exekuci nezastavuje — pokračuje u dalšího plátce.
+U vás případ ukončíte volbou **Ukončit u nás (skončil poměr)**. Jde to až po
+skončení všech pracovních vztahů zaměstnance, schválení jeho poslední mzdy,
+vystavení oznámení a jen tehdy, když případ nemá nevydané depozitum.
+
+### 88.9.6 Paušální náhrada plátce mzdy v účetnictví
+
+Plátce mzdy si ze sražené částky ponechá paušální náhradu nákladů (§ 270
+odst. 2 o. s. ř.) a oprávněnému pošle jen zbytek. Mzdový předpis proto sraženou
+částku zaúčtuje na závazek exekučních srážek (obvykle 379.200) a paušál z něj
+převede na výnos podle předkontace **Paušální náhrada plátce mzdy** v **Mzdy →
+Nastavení mezd → Účetní předkontace** (obvykle 648 Ostatní provozní výnosy).
+Závazek exekučních srážek tak po úhradě oprávněným vyjde na nulu.
+
+Předkontace je nepovinná. Firma, která výnosový účet v osnově nemá, ji má
+prázdnou a paušál zůstává na závazku. Převod se uplatní u mezd, jejichž podklady
+se uzamknou po nastavení předkontace; už zaúčtované měsíce se nemění. Zůstatek
+paušálů z dřívějších měsíců na závazku exekučních srážek je nutné jednorázově
+přeúčtovat ručně.

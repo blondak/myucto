@@ -123,7 +123,8 @@ final class PayrollEnforcementRepository implements
                       c.effective_to, c.evidence_complete, c.recipient_verified,
                       c.row_version, c.created_at, c.updated_at, e.full_name
              ORDER BY FIELD(c.status, 'received', 'withhold_and_hold', 'remit',
-                            'deferred_hold', 'deferred_no_withholding', 'paid', 'stopped'),
+                            'deferred_hold', 'deferred_no_withholding', 'paid', 'stopped',
+                            'ended_at_payer'),
                       c.effective_from, c.id
              LIMIT ? OFFSET ?
             SQL;
@@ -766,7 +767,17 @@ final class PayrollEnforcementRepository implements
         ?EnforcementDecisionDocumentReference $decisionDocument,
         ?int $userId,
         EnforcementCaseLifecycle $lifecycle,
+        ?int $administratorAccountId = null,
     ): array {
+        if (($command === EnforcementCaseCommand::ReleaseToAdministrator)
+            !== ($administratorAccountId !== null)
+        ) {
+            throw new \InvalidArgumentException(
+                $command === EnforcementCaseCommand::ReleaseToAdministrator
+                    ? 'Vyberte účet insolvenčního správce, kterému se depozitum vydá.'
+                    : 'Účet insolvenčního správce patří jen k vydání depozita.',
+            );
+        }
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
@@ -843,7 +854,17 @@ final class PayrollEnforcementRepository implements
                 (int) $outstandingStmt->fetchColumn(),
                 $decisionEvidenceHash !== null,
                 $reason,
+                $this->heldDepositForCase($supplierId, $caseId),
+                $command === EnforcementCaseCommand::EndAtPayer
+                    && $this->employmentExitSettled(
+                        $supplierId,
+                        $caseId,
+                        PayrollTimeValue::int($case['employee_id'] ?? null, 'employee_id'),
+                    ),
             ));
+            if ($administratorAccountId !== null) {
+                $this->assertAdministratorAccount($supplierId, $administratorAccountId);
+            }
             $update = $pdo->prepare(
                 'UPDATE payroll_enforcement_cases
                     SET status = ?, row_version = row_version + 1, updated_by = ?
@@ -888,6 +909,17 @@ final class PayrollEnforcementRepository implements
                     $caseId,
                     $eventId,
                     $userId,
+                );
+            }
+            if ($command === EnforcementCaseCommand::ReleaseToAdministrator
+                && $administratorAccountId !== null
+            ) {
+                $this->releaseHeldToAdministrator(
+                    $supplierId,
+                    $caseId,
+                    $eventId,
+                    $userId,
+                    $administratorAccountId,
                 );
             }
             if ($ownsTransaction) {
@@ -1783,6 +1815,56 @@ final class PayrollEnforcementRepository implements
     }
 
     /**
+     * Případy, které plátci mzdy už DORUČILI, ale v agendě pořád čekají ve stavu
+     * `received` — mzdový běh je nesráží.
+     *
+     * § 282 odst. 3 o. s. ř. (shodně § 60 exekučního řádu): povinný ztrácí právo
+     * na vyplacení části mzdy odpovídající srážkám dnem, kdy bylo nařízení
+     * doručeno plátci mzdy. Výběr pohledávek do běhu ({@see activeClaimRows()})
+     * ale bere jen případy, které účetní převedla dál, takže doručený a jen
+     * zaevidovaný příkaz propadl tiše: zaměstnanec dostal celou mzdu a plátce
+     * mzdy ručí oprávněnému za nesraženou částku (§ 291 o. s. ř.).
+     *
+     * Běh proto potřebuje vědět, že takový případ existuje. Okno účinnosti je
+     * totéž jako u pohledávek v běhu, aby se hlásil přesně ten případ, který by
+     * po převedení do srážení do běhu vstoupil.
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,list<int>> employee_id => ID případů ve stavu `received`
+     */
+    public function receivedCaseIdsForMany(
+        int $supplierId,
+        array $employeeIds,
+        string $paymentDate,
+    ): array {
+        self::assertDate($paymentDate, 'payment_date');
+        $unique = array_values(array_unique($employeeIds));
+        $grouped = [];
+        foreach (array_chunk($unique, self::CHUNK_SIZE) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(sprintf(
+                "SELECT c.id, c.employee_id
+                   FROM payroll_enforcement_cases c
+                  WHERE c.supplier_id = ? AND c.employee_id IN (%s)
+                    AND c.status = 'received'
+                    AND c.effective_from <= ?
+                    AND (c.effective_to IS NULL OR c.effective_to >= ?)
+                  ORDER BY c.employee_id, c.effective_from, c.id",
+                implode(', ', array_fill(0, count($chunk), '?')),
+            ));
+            $stmt->execute([$supplierId, ...$chunk, $paymentDate, $paymentDate]);
+            foreach (PayrollTimeValue::rows(
+                $stmt->fetchAll(PDO::FETCH_ASSOC),
+                'enforcement_received_cases',
+            ) as $row) {
+                $grouped[PayrollTimeValue::int($row['employee_id'] ?? null, 'employee_id')][] =
+                    PayrollTimeValue::int($row['id'] ?? null, 'id');
+            }
+        }
+
+        return $grouped;
+    }
+
+    /**
      * @param array<string,mixed>|null $evidence
      * @param list<array<string,mixed>> $claimRows
      * @param list<array<string,mixed>> $dependantRows
@@ -1952,7 +2034,12 @@ final class PayrollEnforcementRepository implements
                                 CASE
                                     WHEN ledger.entry_kind = 'withheld'
                                         THEN ledger.amount_minor_units
-                                    WHEN ledger.entry_kind = 'released_to_employee'
+                                    -- Vrácené zaměstnanci i vydané insolvenčnímu
+                                    -- správci pohledávku oprávněného neumořilo.
+                                    WHEN ledger.entry_kind IN (
+                                        'released_to_employee',
+                                        'released_to_administrator'
+                                    )
                                         THEN -ledger.amount_minor_units
                                     WHEN ledger.entry_kind = 'adjustment'
                                         THEN ledger.amount_minor_units
@@ -1971,6 +2058,7 @@ final class PayrollEnforcementRepository implements
                                AND ledger.entry_kind IN (
                                    'withheld',
                                    'released_to_employee',
+                                   'released_to_administrator',
                                    'adjustment'
                                )
                                AND prior_result.period_start < ?
@@ -2300,6 +2388,7 @@ final class PayrollEnforcementRepository implements
         $totals = [
             'withheld_minor' => 0,
             'held_minor' => 0,
+            'administrator_minor' => 0,
             'liability_minor' => 0,
             'settled_minor' => 0,
             'original_minor' => 0,
@@ -2313,6 +2402,7 @@ final class PayrollEnforcementRepository implements
             }
             $totals['withheld_minor'] += $claim['withheld_minor'];
             $totals['held_minor'] += $claim['held_minor'];
+            $totals['administrator_minor'] += $claim['administrator_minor'];
             $totals['liability_minor'] += $claim['liability_minor'];
             $totals['settled_minor'] += $claim['settled_minor'];
             $totals['original_minor'] += $claim['original_minor'];
@@ -3160,10 +3250,15 @@ final class PayrollEnforcementRepository implements
                 $allocation->totalMinorUnits,
                 "{$idempotencyKey}:withheld:{$allocation->claimId}",
             );
-            if (PayrollTimeValue::string(
-                $claim['status'] ?? null,
-                'status',
-            ) !== EnforcementCaseStatus::Remit->value) {
+            // Zahájené insolvenční řízení deponuje VŠE, i u případu, který
+            // jinak odesílá (§ 109 odst. 1 písm. c) IZ, R 4/2020) — viz
+            // InsolvencyMode::depositsEnforcementDeductions().
+            if ($insolvency->mode->depositsEnforcementDeductions()
+                || PayrollTimeValue::string(
+                    $claim['status'] ?? null,
+                    'status',
+                ) !== EnforcementCaseStatus::Remit->value
+            ) {
                 $this->insertLedger(
                     $supplierId,
                     PayrollTimeValue::int($claim['case_id'] ?? null, 'case_id'),
@@ -3198,28 +3293,37 @@ final class PayrollEnforcementRepository implements
         string $idempotencyKey,
         ?int $actorUserId = null,
         ?int $decisionEventId = null,
+        ?int $recipientAccountId = null,
     ): void {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO payroll_enforcement_ledger
                 (supplier_id, case_id, claim_id, month_result_id, entry_kind,
                  amount_minor_units, idempotency_key_hash, actor_user_id,
-                 decision_event_id)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 decision_event_id, recipient_account_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $supplierId, $caseId, $claimId, $resultId, $entryKind, $amount,
             hash('sha256', $idempotencyKey, true),
             $actorUserId,
             $decisionEventId,
+            $recipientAccountId,
         ]);
     }
 
-    private function releaseHeldForRemittance(
-        int $supplierId,
-        int $caseId,
-        int $decisionEventId,
-        ?int $actorUserId,
-    ): void {
+    /**
+     * Nevydané depozitum případu po jednotlivých výsledcích a pohledávkách.
+     *
+     * JEDINÉ místo, kde se v PHP počítá zůstatek depozita: deponováno minus
+     * vráceno zaměstnanci, minus vydáno insolvenčnímu správci, minus uvolněno
+     * oprávněnému (resp. odesláno, je-li víc). Tentýž vzorec drží trigger
+     * `trg_payroll_enforcement_ledger_consistency_insert` (migrace 1926)
+     * a SQL rozpadu případu v PayrollEnforcementPaymentRepository.
+     *
+     * @return list<array{result_id:int,claim_id:int,amount:int}>
+     */
+    private function heldBalances(int $supplierId, int $caseId): array
+    {
         $statement = $this->db->pdo()->prepare(
             "SELECT ledger.month_result_id, ledger.claim_id, ledger.entry_kind,
                     ledger.amount_minor_units
@@ -3236,7 +3340,8 @@ final class PayrollEnforcementRepository implements
               WHERE ledger.supplier_id = ? AND ledger.case_id = ?
                 AND ledger.claim_id IS NOT NULL
                 AND ledger.entry_kind IN (
-                  'held','released_for_remittance','remitted','released_to_employee'
+                  'held','released_for_remittance','remitted',
+                  'released_to_employee','released_to_administrator'
                 )
                 AND revision.status = 'approved'
                 AND revision.revision_no = run.current_revision_no
@@ -3266,6 +3371,7 @@ final class PayrollEnforcementRepository implements
                 'released' => 0,
                 'remitted' => 0,
                 'returned' => 0,
+                'handed' => 0,
             ];
             $bucket = match (PayrollTimeValue::string(
                 $row['entry_kind'] ?? null,
@@ -3275,6 +3381,7 @@ final class PayrollEnforcementRepository implements
                 'released_for_remittance' => 'released',
                 'remitted' => 'remitted',
                 'released_to_employee' => 'returned',
+                'released_to_administrator' => 'handed',
                 default => throw new \UnexpectedValueException(
                     'Neznámý druh pohybu depozita exekuce.',
                 ),
@@ -3282,25 +3389,158 @@ final class PayrollEnforcementRepository implements
             $balances[$key][$bucket] += $amount;
         }
 
+        $result = [];
         foreach ($balances as $balance) {
-            $amount = $balance['held'] - $balance['returned']
+            $amount = $balance['held'] - $balance['returned'] - $balance['handed']
                 - max($balance['released'], $balance['remitted']);
-            if ($amount <= 0) {
-                continue;
+            if ($amount > 0) {
+                $result[] = [
+                    'result_id' => $balance['result_id'],
+                    'claim_id' => $balance['claim_id'],
+                    'amount' => $amount,
+                ];
             }
+        }
+
+        return $result;
+    }
+
+    private function heldDepositForCase(int $supplierId, int $caseId): int
+    {
+        return array_sum(array_column($this->heldBalances($supplierId, $caseId), 'amount'));
+    }
+
+    private function releaseHeldForRemittance(
+        int $supplierId,
+        int $caseId,
+        int $decisionEventId,
+        ?int $actorUserId,
+    ): void {
+        foreach ($this->heldBalances($supplierId, $caseId) as $balance) {
             $this->insertLedger(
                 $supplierId,
                 $caseId,
                 $balance['claim_id'],
                 $balance['result_id'],
                 'released_for_remittance',
-                $amount,
+                $balance['amount'],
                 "deposit-release:event:{$decisionEventId}:result:{$balance['result_id']}"
                     . ":claim:{$balance['claim_id']}",
                 $actorUserId,
                 $decisionEventId,
             );
         }
+    }
+
+    /**
+     * Vydání celého nevydaného depozita insolvenčnímu správci.
+     *
+     * Po schválení oddlužení nebo prohlášení konkursu patří částky sražené
+     * a deponované za zahájeného řízení do majetkové podstaty (§ 109 odst. 1
+     * písm. c) IZ, R 4/2020) — oprávněný z exekuce je nedostane. Pohyb nese
+     * účet správce z katalogu příjemců; platební závazek z něj vytvoří
+     * {@see \MyInvoice\Service\Payroll\Payment\PayrollEnforcementLiabilityMaterializer}.
+     */
+    private function releaseHeldToAdministrator(
+        int $supplierId,
+        int $caseId,
+        int $decisionEventId,
+        ?int $actorUserId,
+        int $administratorAccountId,
+    ): void {
+        foreach ($this->heldBalances($supplierId, $caseId) as $balance) {
+            $this->insertLedger(
+                $supplierId,
+                $caseId,
+                $balance['claim_id'],
+                $balance['result_id'],
+                'released_to_administrator',
+                $balance['amount'],
+                "deposit-administrator:event:{$decisionEventId}:result:{$balance['result_id']}"
+                    . ":claim:{$balance['claim_id']}",
+                $actorUserId,
+                $decisionEventId,
+                $administratorAccountId,
+            );
+        }
+    }
+
+    /**
+     * Účet insolvenčního správce musí být v katalogu příjemců firmy, ověřený
+     * a vedený jako „jiný příjemce" — stejná brána jako u platebního pokynu
+     * oddlužení.
+     */
+    private function assertAdministratorAccount(int $supplierId, int $accountId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT account.id
+               FROM payroll_institution_accounts account
+               JOIN payroll_institutions institution
+                 ON institution.supplier_id = account.supplier_id
+                AND institution.id = account.institution_id
+              WHERE account.supplier_id = ? AND account.id = ?
+                AND institution.institution_type = 'other_recipient'
+                AND account.verified_by IS NOT NULL"
+        );
+        $stmt->execute([$supplierId, $accountId]);
+        if ($stmt->fetchColumn() === false) {
+            throw new \DomainException(
+                'Účet insolvenčního správce není v katalogu příjemců ověřený jako jiný příjemce.',
+            );
+        }
+    }
+
+    /**
+     * Je povinnému u tohoto plátce skončení poměru VYŘÍZENÉ?
+     *
+     *  • žádný jeho pracovní vztah neběží (vše `ended` / `no_show` / `archived`),
+     *  • mzda za měsíc skončení je v aktuální schválené revizi — jinak by
+     *    ukončený případ z posledního výpočtu vypadl a mzda by se nesrazila,
+     *  • k případu je vystavené oznámení podle § 295 odst. 2 o. s. ř. právě
+     *    k tomuto dni skončení.
+     */
+    private function employmentExitSettled(int $supplierId, int $caseId, int $employeeId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT MAX(employment.end_date) AS ended_on,
+                    SUM(employment.status NOT IN ('ended', 'no_show', 'archived')) AS running
+               FROM payroll_employments employment
+              WHERE employment.supplier_id = ? AND employment.employee_id = ?"
+        );
+        $stmt->execute([$supplierId, $employeeId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row) || $row['ended_on'] === null || (int) $row['running'] > 0) {
+            return false;
+        }
+        $endedOn = (string) $row['ended_on'];
+        $check = $this->db->pdo()->prepare(
+            "SELECT
+               EXISTS(
+                 SELECT 1
+                   FROM payroll_run_persons person
+                   JOIN payroll_run_revisions revision
+                     ON revision.supplier_id = person.supplier_id
+                    AND revision.id = person.revision_id
+                   JOIN payroll_runs run
+                     ON run.supplier_id = revision.supplier_id
+                    AND run.id = revision.run_id
+                  WHERE person.supplier_id = ? AND person.employee_id = ?
+                    AND run.period_start = DATE_FORMAT(?, '%Y-%m-01')
+                    AND revision.status = 'approved'
+                    AND revision.revision_no = run.current_revision_no
+               ) AS final_payroll,
+               EXISTS(
+                 SELECT 1 FROM payroll_enforcement_termination_notices notice
+                  WHERE notice.supplier_id = ? AND notice.case_id = ?
+                    AND notice.employment_ended_on = ?
+               ) AS noticed"
+        );
+        $check->execute([$supplierId, $employeeId, $endedOn, $supplierId, $caseId, $endedOn]);
+        $flags = $check->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($flags)
+            && (int) $flags['final_payroll'] === 1
+            && (int) $flags['noticed'] === 1;
     }
 
     private function assertStoredResultIntegrity(

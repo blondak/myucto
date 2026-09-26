@@ -220,6 +220,19 @@ final class PayrollEmployerSettingsValidator
             // Předkontace, které do sady přibyly později, starší klient
             // neposílá. Doplní se výchozím účtem ze směrné osnovy — jinak by
             // přidání nové předkontace znemožnilo uložit nastavení mezd.
+            // Předkontaci, kterou smí firma nechat nenastavenou, nevynucujeme:
+            // prázdná hodnota znamená „účtovat jako dřív" (viz
+            // PayrollAccountingDefaults::NULLABLE_ACCOUNTS). Výchozí účet se
+            // doplní jen klientovi, který klíč vůbec neposlal — a jen když ho
+            // firma v osnově má.
+            if ($code === ''
+                && PayrollAccountingDefaults::isNullable($key)
+                && (array_key_exists($key, $value)
+                    || ($available[$definition['code']]['is_active'] ?? false) !== true)
+            ) {
+                $result[$key] = '';
+                continue;
+            }
             if ($code === '' && PayrollAccountingDefaults::isOptional($key)) {
                 $code = $definition['code'];
                 // Výchozí účet už nemusí být SYNTETIKA: od Ú-08 (336.100/336.200)

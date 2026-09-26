@@ -338,7 +338,7 @@ final class PayrollYearCloseRepository
                FROM payroll_enforcement_cases enforcement_case
               WHERE enforcement_case.supplier_id = ?
                 AND enforcement_case.case_kind = 'enforcement'
-                AND enforcement_case.status NOT IN ('paid', 'stopped')
+                AND enforcement_case.status NOT IN ('paid', 'stopped', 'ended_at_payer')
                 AND enforcement_case.effective_from < ?
                 AND (enforcement_case.effective_to IS NULL OR enforcement_case.effective_to >= ?)
                 AND (
@@ -351,7 +351,9 @@ final class PayrollYearCloseRepository
                             0,
                             COALESCE(SUM(CASE WHEN ledger.entry_kind = 'held'
                                 THEN ledger.amount_minor_units ELSE 0 END), 0)
-                            - COALESCE(SUM(CASE WHEN ledger.entry_kind = 'released_to_employee'
+                            - COALESCE(SUM(CASE WHEN ledger.entry_kind IN (
+                                    'released_to_employee', 'released_to_administrator'
+                                )
                                 THEN ledger.amount_minor_units ELSE 0 END), 0)
                             - GREATEST(
                                 COALESCE(SUM(CASE WHEN ledger.entry_kind = 'released_for_remittance'

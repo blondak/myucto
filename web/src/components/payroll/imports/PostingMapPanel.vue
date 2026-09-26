@@ -55,6 +55,7 @@ const ACCOUNT_GROUPS: Record<PayrollPostingMapKey, string> = {
   withholding_tax_credit: 'withholding_tax',
   other_deductions_credit: 'other_deductions',
   enforcement_deductions_credit: 'enforcement_deductions',
+  enforcement_fee_revenue_credit: 'enforcement_fee_revenue',
   partner_settlement_credit: 'partner_settlement',
   risky_savings_debit: 'risky_savings',
   risky_savings_credit: 'risky_savings',

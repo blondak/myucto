@@ -5542,7 +5542,7 @@
         "termination_document": "Doklad o skončení",
         "health_insurance_deregistration": "Odhlášení zdravotní pojišťovny",
         "social_jmhz_deregistration": "Odhlášení ČSSZ / JMHZ",
-        "enforcement_insolvency_review": "Kontrola exekucí a insolvence",
+        "enforcement_insolvency_review": "Exekuce a insolvence: oznámení soudu / exekutorovi do 7 dnů",
         "later_income_review": "Kontrola pozdějšího doplatku",
         "eldp_submission": "Evidenční list důchodového pojištění (ELDP)",
         "taxable_income_confirmation": "Potvrzení o zdanitelných příjmech"
@@ -7931,8 +7931,10 @@
       "account_type": {
         "expense": "nákladový účet",
         "liability": "závazkový účet",
-        "asset": "účet pohledávek"
+        "asset": "účet pohledávek",
+        "revenue": "výnosový účet"
       },
+      "account_not_set": "Nenastaveno — paušál plátce mzdy zůstává na závazku exekučních srážek",
       "accounting": {
         "employment_gross": "Mzda zaměstnance mimo výkon funkce",
         "partner_gross": "Závislý příjem společníka",
@@ -7944,6 +7946,7 @@
         "withholding_tax": "Srážková daň ze závislé činnosti",
         "other_deductions": "Ostatní srážky ze mzdy",
         "enforcement_deductions": "Exekuční a insolvenční srážky",
+        "enforcement_fee_revenue": "Paušální náhrada plátce mzdy",
         "partner_settlement": "Zápočet na účet společníka",
         "risky_savings": "Povinné spoření u rizikové práce",
         "employee_receivable": "Pohledávka za zaměstnancem",
@@ -8033,7 +8036,8 @@
         "employee_receivable": "Kam se překlopí záporná čistá mzda — typicky doplatek zdravotního pojištění do minimálního vyměřovacího základu v měsíci bez peněžního příjmu. Zaměstnanec dluží zaměstnavateli, takže jde o pohledávku (335), ne o závazek.",
         "non_deductible_benefit": "Osvobozená část nepeněžního benefitu (rekreace, sport, kultura, zdraví, tištěné knihy). Podle § 25 odst. 1 písm. h) ZDP je nedaňová právě ta OSVOBOZENÁ část; nadlimitní část se zaměstnanci zdaní a nákladem zůstává. Účet 528 se sám propíše do nedaňových nákladů v přiznání k dani z příjmů.",
         "travel_expense": "Cestovní náhrada je náhrada výdaje podle části sedmé zákoníku práce, ne odměna za práci — do mzdových nákladů nepatří. Protiúčtem zůstává závazkový účet pracovního vztahu, protože se náhrada vyplácí spolu se mzdou.",
-        "enforcement_deductions": "Srážky nařízené soudem, exekutorem nebo insolvenčním správcem. Oddělené od ostatních srážek proto, že se u nich vede pořadí pohledávek a posílají se jinému příjemci než dobrovolné srážky — na společném účtu se saldo obou skupin slije a nejde dohledat."
+        "enforcement_deductions": "Srážky nařízené soudem, exekutorem nebo insolvenčním správcem. Oddělené od ostatních srážek proto, že se u nich vede pořadí pohledávek a posílají se jinému příjemci než dobrovolné srážky — na společném účtu se saldo obou skupin slije a nejde dohledat.",
+        "enforcement_fee_revenue": "Paušál 50 Kč měsíčně, který si plátce mzdy ponechá ze sražené částky jako náhradu nákladů (§ 270 odst. 2 o. s. ř.). Zaměstnanci se srazí, oprávněnému se ale neposílá — bez převodu na výnos by na závazku exekučních srážek zůstával každý měsíc zůstatek. Obvykle 648 Ostatní provozní výnosy. Nechte prázdné, pokud má paušál zůstat na závazku."
       },
       "registration_source_reference_hint": "Nepovinné. Odkaz na výměr nebo rozhodnutí, ze kterého jste variabilní symbol opsali."
     },
@@ -8528,12 +8532,12 @@
       "mode": "Režim oddlužení",
       "mode_none": "Oddlužení se tento měsíc neuplatní",
       "mode_standard": "Schválené standardní oddlužení",
-      "mode_alert": "Pouze upozornění — ruční posouzení",
+      "mode_alert": "Zahájené insolvenční řízení — srážet a deponovat",
       "mode_court": "Soudem určená jiná výše měsíčních splátek",
       "impact": {
         "none": "Bez insolvenční srážky. Již schválený pokyn tímto režimem nezrušíte; použijte výslovné zrušení.",
         "approved_standard": "Aplikace vytvoří neměnný platební pokyn, vypočte standardní srážku a po schválení mzdy připraví skutečný závazek. Evidované nepřednostní exekuce se po dobu oddlužení nevykonávají.",
-        "alert_only": "Režim zůstává fail-closed: uloží upozornění, ale částku automaticky nevypočte ani neodešle.",
+        "alert_only": "Insolvenční řízení je zahájené, o oddlužení ještě nerozhodnuto (§ 109 odst. 1 IZ). Exekuční srážky se dál počítají v dosavadním rozsahu, ale celá sražená částka zůstane v depozitu — oprávněným se nic neodešle a dohody o srážkách se nesrážejí. Po schválení oddlužení nebo prohlášení konkursu depozit vydáte insolvenčnímu správci v detailu exekučního případu.",
         "court_determined_amount": "Aplikace vytvoří neměnný platební pokyn a srazí částku určenou soudem, nejvýše však zákonnou zabavitelnou část. Evidované nepřednostní exekuce se po dobu oddlužení nevykonávají."
       },
       "employment": "Účinný pracovní vztah",
@@ -8876,14 +8880,14 @@
         "protected_override_verified": "Určená nezabavitelná částka je ověřená",
         "insolvency_mode": "Insolvenční režim",
         "insolvency_none": "Oddlužení se tento měsíc neuplatní",
-        "insolvency_alert": "Pouze evidovat upozornění",
+        "insolvency_alert": "Zahájené řízení — srážet a deponovat",
         "insolvency_standard": "Schválené oddlužení — srážet a deponovat",
         "insolvency_court": "Soudem určená jiná výše měsíčních splátek",
         "insolvency_impact": {
           "none": "Bez insolvenční výjimky. Výpočet se řídí běžnými podklady zaměstnance.",
-          "alert_only": "Upozornění se pouze eviduje. Výpočet vyžádá ruční kontrolu a žádnou insolvenční částku automaticky neodešle.",
-          "approved_standard": "Srážka se vypočte podle režimu oddlužení, ale zatím zůstane v depozitu. Úhradu insolvenčnímu správci je nutné provést a doložit ručně.",
-          "court_determined_amount": "Srazí se měsíční splátka určená soudem, nejvýše však zákonná zabavitelná část. Úhradu insolvenčnímu správci je nutné provést a doložit ručně."
+          "alert_only": "Srážky podle dosavadních exekucí se provedou a zůstanou v depozitu (§ 109 odst. 1 písm. c) IZ). Dohody o srážkách se nesrážejí. Stačí ověřit vyhlášku o zahájení řízení; příjemce se neověřuje, nic se neodesílá.",
+          "approved_standard": "Srážka se vypočte podle režimu oddlužení. Po schválení mzdy z ní akce Připravit závazky vytvoří platební závazek na ověřený účet insolvenčního správce.",
+          "court_determined_amount": "Srazí se měsíční splátka určená soudem, nejvýše však zákonná zabavitelná část. Po schválení mzdy z ní akce Připravit závazky vytvoří platební závazek na ověřený účet insolvenčního správce."
         },
         "court_amount_czk": "Měsíční splátka určená soudem (Kč)",
         "insolvency_decision": "Insolvenční rozhodnutí je ověřené",
@@ -8900,7 +8904,8 @@
         "deferred_no_withholding": "Odloženo bez srážení",
         "deferred_hold": "Odloženo — deponovat",
         "paid": "Uhrazeno",
-        "stopped": "Zastaveno"
+        "stopped": "Zastaveno",
+        "ended_at_payer": "Ukončeno u nás — poměr skončil"
       },
       "categories": {
         "current_maintenance": "Běžné výživné",
@@ -8928,6 +8933,8 @@
         "resume_remittance": "Obnovit odesílání",
         "mark_paid": "Označit za uhrazené",
         "stop": "Zastavit",
+        "release_to_administrator": "Vydat depozit insolvenčnímu správci",
+        "end_at_payer": "Ukončit u nás (skončil poměr)",
         "confirm": {
           "mark_final": "Zahájit srážení a částky do ověření příjemce deponovat?",
           "authorize_remittance": "Povolit odesílání sražených částek ověřenému příjemci?",
@@ -8936,9 +8943,58 @@
           "resume_holding": "Obnovit srážení s deponováním částek?",
           "resume_remittance": "Obnovit srážení a odesílání částek?",
           "mark_paid": "Označit případ s nulovým zůstatkem za uhrazený?",
-          "stop": "Vyberte rozhodnutí a uveďte důvod zastavení případu."
+          "stop": "Vyberte rozhodnutí a uveďte důvod zastavení případu.",
+          "release_to_administrator": "Po schválení oddlužení nebo prohlášení konkursu patří částky sražené a deponované za zahájeného insolvenčního řízení insolvenčnímu správci (§ 109 odst. 1 písm. c) IZ). Vyberte rozhodnutí insolvenčního soudu, účet správce a uveďte důvod. Vznikne platební závazek na účet správce a exekuce se dál nevykonává.",
+          "end_at_payer": "Ukončit srážení u nás? Jde to až po skončení všech pracovních vztahů, schválení poslední mzdy a vystavení oznámení soudu nebo exekutorovi (§ 295 odst. 2 o. s. ř.). Exekuce tím zastavena není — pokračuje u dalšího plátce."
         },
         "confirm_for": "{question}\n\nPřípad: {name}"
+      },
+      "administrator_account": "Účet insolvenčního správce",
+      "administrator_account_hint": "Ověřený účet typu „ostatní příjemce\" z Nastavení mezd → Platební účty institucí.",
+      "administrator_account_missing": "Vyberte účet insolvenčního správce.",
+      "termination_notice": {
+        "title": "Skončení pracovního poměru — oznámení soudu / exekutorovi",
+        "hint": "Plátce mzdy musí do jednoho týdne oznámit soudu (exekutorovi), že u něj povinný přestal pracovat, a zaslat vyúčtování provedených a vyplacených srážek s pořadím pohledávek (§ 295 odst. 2 o. s. ř.). Obsah oznámení se při vystavení zmrazí.",
+        "load_failed": "Oznámení o skončení poměru se nenačetlo.",
+        "ended_on": "Poměr skončil",
+        "due_on": "Oznámit do",
+        "overdue": "Po lhůtě",
+        "authority": {
+          "court": "Soud",
+          "executor": "Soudní exekutor"
+        },
+        "withheld_paid": "Sraženo / vyplaceno oprávněnému",
+        "new_payer_name": "Nový plátce mzdy (je-li znám)",
+        "new_payer_hint": "Nepovinné. Uveďte, pokud víte, kam povinný nastoupil — soud ho pak vyrozumí podle § 294 odst. 3 o. s. ř.",
+        "new_payer_reference": "IČO nebo adresa nového plátce",
+        "generate": "Vystavit oznámení",
+        "regenerate": "Vystavit znovu (nová verze)",
+        "generated": "Oznámení je vystavené.",
+        "generate_failed": "Oznámení se nepodařilo vystavit.",
+        "revision": "Oznámení, verze {revision}",
+        "not_sent": "Neodesláno",
+        "sent": "Odesláno {date} ({channel})",
+        "download": "Stáhnout PDF",
+        "download_failed": "PDF oznámení se nepodařilo stáhnout.",
+        "isds_title": "Odeslat datovou schránkou (koncept)",
+        "recipient_placeholder": "Vyberte soud / exekutora z číselníku",
+        "recipient_missing": "Adresát s ID datové schránky není v číselníku příjemců. Doplňte ho v agendě Datová schránka → Příjemci, nebo oznámení odešlete jinak a zaznamenejte odeslání.",
+        "enqueue": "Připravit k odeslání",
+        "queued": "Oznámení je ve frontě datové schránky.",
+        "queued_hint": "Zprávu odešlete v agendě Datová schránka, pak zde zaznamenejte odeslání.",
+        "open_databox": "Otevřít datovou schránku",
+        "enqueue_failed": "Oznámení se nepodařilo zařadit do fronty.",
+        "mark_sent_title": "Zaznamenat odeslání",
+        "sent_on": "Datum odeslání",
+        "mark_sent": "Zaznamenat odeslání",
+        "marked_sent": "Odeslání je zaznamenané.",
+        "mark_failed": "Odeslání se nepodařilo zaznamenat.",
+        "channels": {
+          "isds": "datová schránka",
+          "post": "pošta",
+          "personal": "osobně",
+          "other": "jinak"
+        }
       },
       "recipient_account": "Příjemce srážky (katalog platebních účtů)",
       "recipient_account_none": "Nezvoleno",
@@ -8949,6 +9005,7 @@
         "original": "Původní výše",
         "withheld": "Sraženo zaměstnanci",
         "held": "Drženo v depozitu",
+        "administrator": "Vydáno insolvenčnímu správci",
         "liability": "Připraveno k úhradě",
         "remitted": "Odesláno příjemci",
         "remaining_to_withhold": "Zbývá srazit",
@@ -8965,7 +9022,8 @@
         "remitted": "Odesláno příjemci",
         "released_to_employee": "Vráceno zaměstnanci",
         "employer_fee": "Paušální náhrada zaměstnavatele",
-        "adjustment": "Opravný pohyb"
+        "adjustment": "Opravný pohyb",
+        "released_to_administrator": "Vydáno insolvenčnímu správci"
       },
       "validation": {
         "amount": "Částku zadejte jako nezáporné číslo nejvýše se dvěma desetinnými místy."

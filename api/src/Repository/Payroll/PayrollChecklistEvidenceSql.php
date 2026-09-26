@@ -34,6 +34,7 @@ final class PayrollChecklistEvidenceSql
         'social_jmhz_deregistration' => 'deregistration_obligation',
         'health_insurance_registration' => 'health_start_obligation',
         'health_insurance_deregistration' => 'health_end_obligation',
+        'enforcement_insolvency_review' => 'enforcement_termination_notice',
     ];
 
     private const DONE = "obligation.status IN ('submitted', 'fulfilled')
@@ -101,6 +102,32 @@ final class PayrollChecklistEvidenceSql
                      'payroll_health_notification:', item.employment_id, ':employment_end:%'
                    )
                AND {$done}
+          )
+          -- § 295 odst. 2 o. s. ř.: ke každému případu, který u osoby ke dni
+          -- skončení běžel, je vystavené oznámení soudu / exekutorovi. Bez
+          -- jediného případu se položka sama neodškrtne — insolvenci posoudí člověk.
+          WHEN 'enforcement_insolvency_review' THEN (
+            SELECT COUNT(*) > 0
+                   AND SUM(NOT EXISTS (
+                     SELECT 1
+                       FROM payroll_enforcement_termination_notices notice
+                      WHERE notice.supplier_id = enforcement_case.supplier_id
+                        AND notice.case_id = enforcement_case.id
+                        AND notice.employment_ended_on = evidence_employment.end_date
+                   )) = 0
+              FROM payroll_employments evidence_employment
+              JOIN payroll_enforcement_cases enforcement_case
+                ON enforcement_case.supplier_id = evidence_employment.supplier_id
+               AND enforcement_case.employee_id = evidence_employment.employee_id
+             WHERE evidence_employment.supplier_id = item.supplier_id
+               AND evidence_employment.id = item.employment_id
+               AND evidence_employment.end_date IS NOT NULL
+               AND enforcement_case.effective_from <= evidence_employment.end_date
+               AND enforcement_case.status IN (
+                     'received', 'withhold_and_hold', 'remit',
+                     'deferred_no_withholding', 'deferred_hold',
+                     'ended_at_payer'
+                   )
           )
           ELSE 0
         END";

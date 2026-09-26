@@ -43,7 +43,10 @@ use Psr\Log\LoggerInterface;
  */
 final readonly class SubmissionOutboxService
 {
-    private const ARTIFACT_KINDS = ['payroll_submission', 'tax_submission', 'document', 'payroll_xmlzam'];
+    private const ARTIFACT_KINDS = [
+        'payroll_submission', 'tax_submission', 'document', 'payroll_xmlzam',
+        'payroll_enforcement_notice',
+    ];
     private const ENVIRONMENTS = ['production', 'test'];
 
     /**

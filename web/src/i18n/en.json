@@ -5542,7 +5542,7 @@
         "termination_document": "Termination document",
         "health_insurance_deregistration": "Health insurer deregistration",
         "social_jmhz_deregistration": "Social security / JMHZ deregistration",
-        "enforcement_insolvency_review": "Enforcement and insolvency review",
+        "enforcement_insolvency_review": "Enforcement and insolvency: notify the court / bailiff within 7 days",
         "later_income_review": "Later-payment review",
         "eldp_submission": "Pension insurance record (ELDP)",
         "taxable_income_confirmation": "Confirmation of taxable income"
@@ -7931,8 +7931,10 @@
       "account_type": {
         "expense": "an expense account",
         "liability": "a liability account",
-        "asset": "receivable account"
+        "asset": "receivable account",
+        "revenue": "a revenue account"
       },
+      "account_not_set": "Not set — the payer's flat fee stays on the garnishment liability",
       "accounting": {
         "employment_gross": "Employee wages outside statutory office",
         "partner_gross": "Partner's dependent income",
@@ -7944,6 +7946,7 @@
         "withholding_tax": "Withholding tax on employment",
         "other_deductions": "Other payroll deductions",
         "enforcement_deductions": "Garnishment and insolvency deductions",
+        "enforcement_fee_revenue": "Wage payer's flat fee",
         "partner_settlement": "Set-off against shareholder account",
         "risky_savings": "Risk-work retirement savings",
         "employee_receivable": "Receivable from the employee",
@@ -8033,7 +8036,8 @@
         "employee_receivable": "Where a negative net wage is reclassified — typically health insurance topped up to the minimum assessment base in a month with no cash income. The employee owes the employer, so this is a receivable (335), not a payable.",
         "non_deductible_benefit": "The tax-exempt part of a non-cash benefit (recreation, sport, culture, health care, printed books). Under Section 25(1)(h) of the Income Tax Act it is precisely the EXEMPT part that is non-deductible; the part above the cap is taxed at the employee and stays deductible. Account 528 flows automatically into non-deductible expenses in the corporate income tax return.",
         "travel_expense": "A travel allowance reimburses an expense under Part Seven of the Labour Code; it is not remuneration for work and does not belong in wage expenses. The contra account stays the payable account of the employment relationship, because the allowance is paid together with the wage.",
-        "enforcement_deductions": "Deductions ordered by a court, a bailiff or an insolvency administrator. Kept apart from other deductions because they carry a claim ranking and go to a different recipient than voluntary deductions — on a shared account the two balances merge and cannot be traced."
+        "enforcement_deductions": "Deductions ordered by a court, a bailiff or an insolvency administrator. Kept apart from other deductions because they carry a claim ranking and go to a different recipient than voluntary deductions — on a shared account the two balances merge and cannot be traced.",
+        "enforcement_fee_revenue": "The CZK 50 monthly flat fee the wage payer keeps from the deducted amount to cover its costs (Section 270(2) of the Civil Procedure Code). It is deducted from the employee but not sent to the creditor — without moving it to revenue, a balance would build up on the garnishment liability every month. Usually 648 Other operating revenue. Leave empty to keep the fee on the liability."
       },
       "registration_source_reference_hint": "Optional. A reference to the notice or decision you copied the variable symbol from."
     },
@@ -8528,12 +8532,12 @@
       "mode": "Debt-relief mode",
       "mode_none": "Debt relief does not apply this month",
       "mode_standard": "Approved standard debt relief",
-      "mode_alert": "Alert only — manual review",
+      "mode_alert": "Insolvency proceedings commenced — withhold and hold",
       "mode_court": "Court-determined monthly instalment",
       "impact": {
         "none": "No debt-relief deduction. This mode does not cancel an approved instruction; use explicit cancellation.",
         "approved_standard": "The application creates an immutable payment instruction, calculates the standard deduction and prepares a real liability after payroll approval. Recorded non-priority enforcements are not carried out while debt relief runs.",
-        "alert_only": "This mode stays fail-closed: it records an alert but does not calculate or remit an amount automatically.",
+        "alert_only": "Insolvency proceedings have commenced and debt relief has not been decided yet (Section 109(1) of the Insolvency Act). Enforcement deductions keep being calculated in their existing scope, but the whole withheld amount stays on deposit — nothing is remitted to creditors and deduction agreements are not withheld. Once debt relief is approved or bankruptcy is declared, hand the deposit over to the insolvency administrator in the enforcement case detail.",
         "court_determined_amount": "The application creates an immutable payment instruction and withholds the court-determined amount, capped by the statutory attachable part. Recorded non-priority enforcements are not carried out while debt relief runs."
       },
       "employment": "Effective employment",
@@ -8876,14 +8880,14 @@
         "protected_override_verified": "The protected amount is verified",
         "insolvency_mode": "Insolvency mode",
         "insolvency_none": "Debt relief does not apply this month",
-        "insolvency_alert": "Record an alert only",
+        "insolvency_alert": "Proceedings commenced — withhold and hold",
         "insolvency_standard": "Approved debt relief — withhold and hold",
         "insolvency_court": "Court-determined monthly instalment",
         "insolvency_impact": {
           "none": "No insolvency exception. The calculation follows the employee's ordinary evidence.",
-          "alert_only": "The alert is recorded only. Payroll requires manual review and does not automatically remit an insolvency amount.",
-          "approved_standard": "The deduction is calculated under the debt-relief regime but remains on hold for now. Payment to the insolvency administrator must be made and documented manually.",
-          "court_determined_amount": "The court-determined monthly instalment is withheld, capped by the statutory attachable part. Payment to the insolvency administrator must be made and documented manually."
+          "alert_only": "Deductions under the existing enforcements are made and kept on deposit (Section 109(1)(c) of the Insolvency Act). Deduction agreements are not withheld. Only the notice of commencement needs to be verified; no recipient is checked because nothing is remitted.",
+          "approved_standard": "The deduction is calculated under the debt-relief regime. After payroll approval, Prepare liabilities creates a payment liability to the insolvency administrator's verified account.",
+          "court_determined_amount": "The court-determined monthly instalment is withheld, capped by the statutory attachable part. After payroll approval, Prepare liabilities creates a payment liability to the insolvency administrator's verified account."
         },
         "court_amount_czk": "Court-determined monthly instalment (CZK)",
         "insolvency_decision": "The insolvency decision is verified",
@@ -8900,7 +8904,8 @@
         "deferred_no_withholding": "Deferred without withholding",
         "deferred_hold": "Deferred — hold funds",
         "paid": "Paid",
-        "stopped": "Stopped"
+        "stopped": "Stopped",
+        "ended_at_payer": "Ended with us — employment ended"
       },
       "categories": {
         "current_maintenance": "Current maintenance",
@@ -8928,6 +8933,8 @@
         "resume_remittance": "Resume remittance",
         "mark_paid": "Mark as paid",
         "stop": "Stop",
+        "release_to_administrator": "Hand the deposit over to the insolvency administrator",
+        "end_at_payer": "End with us (employment ended)",
         "confirm": {
           "mark_final": "Start withholding and hold funds until the recipient is verified?",
           "authorize_remittance": "Allow remittance of withheld funds to the verified recipient?",
@@ -8936,9 +8943,58 @@
           "resume_holding": "Resume withholding and holding funds?",
           "resume_remittance": "Resume withholding and remittance?",
           "mark_paid": "Mark the zero-balance case as paid?",
-          "stop": "Select the decision and provide a reason for stopping the case."
+          "stop": "Select the decision and provide a reason for stopping the case.",
+          "release_to_administrator": "Once debt relief is approved or bankruptcy is declared, amounts withheld and held during the commenced insolvency proceedings belong to the insolvency administrator (Section 109(1)(c) of the Insolvency Act). Select the insolvency court's decision, the administrator's account and give a reason. A payment liability to the administrator is created and the enforcement is no longer carried out.",
+          "end_at_payer": "End withholding with us? This is only possible once all employments have ended, the final payroll is approved and the notice to the court or bailiff has been issued (Section 295(2) of the Civil Procedure Code). The enforcement is not stopped — it continues with the next payer."
         },
         "confirm_for": "{question}\n\nCase: {name}"
+      },
+      "administrator_account": "Insolvency administrator's account",
+      "administrator_account_hint": "A verified “other recipient” account from Payroll settings → Institution payment accounts.",
+      "administrator_account_missing": "Select the insolvency administrator's account.",
+      "termination_notice": {
+        "title": "End of employment — notice to the court / bailiff",
+        "hint": "The payer must notify the court (bailiff) within one week that the debtor stopped working for them and send a statement of deductions made and paid out, with the order of the claims (Section 295(2) of the Civil Procedure Code). The notice content is frozen when issued.",
+        "load_failed": "The end-of-employment notice could not be loaded.",
+        "ended_on": "Employment ended",
+        "due_on": "Notify by",
+        "overdue": "Overdue",
+        "authority": {
+          "court": "Court",
+          "executor": "Court bailiff"
+        },
+        "withheld_paid": "Withheld / paid to creditor",
+        "new_payer_name": "New payer (if known)",
+        "new_payer_hint": "Optional. Fill in if you know where the debtor started working — the court then notifies them under Section 294(3) of the Civil Procedure Code.",
+        "new_payer_reference": "New payer's company ID or address",
+        "generate": "Issue notice",
+        "regenerate": "Issue again (new version)",
+        "generated": "The notice has been issued.",
+        "generate_failed": "The notice could not be issued.",
+        "revision": "Notice, version {revision}",
+        "not_sent": "Not sent",
+        "sent": "Sent {date} ({channel})",
+        "download": "Download PDF",
+        "download_failed": "The notice PDF could not be downloaded.",
+        "isds_title": "Send via data box (draft)",
+        "recipient_placeholder": "Select the court / bailiff from the codebook",
+        "recipient_missing": "No recipient with a data box ID is in the recipient codebook. Add it under Data box → Recipients, or send the notice another way and record the dispatch.",
+        "enqueue": "Prepare for sending",
+        "queued": "The notice is in the data box queue.",
+        "queued_hint": "Send the message in the Data box section, then record the dispatch here.",
+        "open_databox": "Open data box",
+        "enqueue_failed": "The notice could not be queued.",
+        "mark_sent_title": "Record dispatch",
+        "sent_on": "Dispatch date",
+        "mark_sent": "Record dispatch",
+        "marked_sent": "The dispatch has been recorded.",
+        "mark_failed": "The dispatch could not be recorded.",
+        "channels": {
+          "isds": "data box",
+          "post": "post",
+          "personal": "in person",
+          "other": "other"
+        }
       },
       "recipient_account": "Deduction recipient (payment account catalogue)",
       "recipient_account_none": "Not selected",
@@ -8949,6 +9005,7 @@
         "original": "Original amount",
         "withheld": "Withheld from employee",
         "held": "Held in deposit",
+        "administrator": "Handed over to the insolvency administrator",
         "liability": "Prepared for payment",
         "remitted": "Remitted to recipient",
         "remaining_to_withhold": "Remaining to withhold",
@@ -8965,7 +9022,8 @@
         "remitted": "Remitted to recipient",
         "released_to_employee": "Released to employee",
         "employer_fee": "Employer flat fee",
-        "adjustment": "Adjustment"
+        "adjustment": "Adjustment",
+        "released_to_administrator": "Handed over to the insolvency administrator"
       },
       "validation": {
         "amount": "Enter a non-negative amount with no more than two decimal places."

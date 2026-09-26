@@ -24,6 +24,7 @@ final class PayrollEmployerSettingsRepository
         'withholding_tax_credit' => 'withholding_tax_credit_account',
         'other_deductions_credit' => 'other_deductions_credit_account',
         'enforcement_deductions_credit' => 'enforcement_deductions_credit_account',
+        'enforcement_fee_revenue_credit' => 'enforcement_fee_revenue_credit_account',
         'partner_settlement_credit' => 'partner_settlement_credit_account',
         'risky_savings_debit' => 'risky_savings_debit_account',
         'risky_savings_credit' => 'risky_savings_credit_account',
@@ -73,8 +74,8 @@ final class PayrollEmployerSettingsRepository
     {
         $codes = PayrollAccountingDefaults::codes();
         $analytics = [];
-        foreach ($codes as $code) {
-            if (str_contains($code, '.')) {
+        foreach ($codes as $key => $code) {
+            if (str_contains($code, '.') || PayrollAccountingDefaults::isNullable($key)) {
                 $analytics[$code] = true;
             }
         }
@@ -98,7 +99,11 @@ final class PayrollEmployerSettingsRepository
 
         foreach ($codes as $key => $code) {
             if (isset($analytics[$code]) && !isset($available[$code])) {
-                $codes[$key] = substr($code, 0, 3);
+                // Nenastavitelná předkontace bez účtu v osnově zůstává prázdná
+                // (účtuje se jako dřív), analytika degraduje na syntetiku.
+                $codes[$key] = PayrollAccountingDefaults::isNullable($key)
+                    ? ''
+                    : substr($code, 0, 3);
             }
         }
 
