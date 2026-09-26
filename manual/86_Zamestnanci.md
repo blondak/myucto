@@ -268,9 +268,13 @@ dni** určuje, který měsíc se kontroluje.
 
 Měsíční evidence zdravotního minima je **nepovinná**. Není-li za měsíc zadaná,
 platí zákonný výchozí stav podle § 3 odst. 10 zákona č. 592/1992 Sb.: doplatek
-do minimálního vyměřovacího základu hradí zaměstnanec. Zadává se tedy jen tehdy,
-když je skutečnost jiná — doplatek jde k tíži zaměstnavatele, protože nižší
-základ způsobily překážky na jeho straně, nebo si zaměstnanec
+do minimálního vyměřovacího základu hradí zaměstnanec. Výjimkou je měsíc se
+schválenou překážkou na straně zaměstnavatele se sníženou náhradou (prostoj,
+počasí, částečná nezaměstnanost): tehdy doplatek hradí zaměstnavatel a běh to
+odvodí z nepřítomnosti sám. Zadává se tedy jen tehdy, když je skutečnost jiná —
+doplatek jde k tíži zaměstnavatele z důvodu, který evidence nepřítomností nezná,
+v měsíci je vedle překážky zaměstnavatele i neplacená nepřítomnost (běh se pak
+zastaví a zeptá), nebo si zaměstnanec
 při souběhu zvolil pro doplatek jiného zaměstnavatele. Rozklad pojistného u
 schválené mzdy pak ukazuje i to, jestli hodnota vznikla zápisem, nebo odvozením
 ze zákona. Volba **neověřeno** dál znamená ruční posouzení.
