@@ -35,6 +35,7 @@ import {
   registrationMissingItems,
 } from './registrationMissingItems'
 import { registrationA1FieldLabel } from './registrationA1FieldLabels'
+import { usePersonCardSaveSection } from './personCardSave'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -805,8 +806,9 @@ function a1ResetToSuggestion(): void {
   a1ProfileMessage.value = ''
 }
 
-async function saveA1Profile(): Promise<void> {
-  if (!props.canWrite || a1ProfileSaving.value) return
+async function saveA1Profile(): Promise<boolean> {
+  if (!props.canWrite || a1ProfileSaving.value) return false
+  let succeeded = false
   a1ProfileSaving.value = true
   a1ProfileError.value = ''
   a1ProfileErrorCode.value = ''
@@ -851,6 +853,7 @@ async function saveA1Profile(): Promise<void> {
       const writable = a1WritebackWritable.value.map(item => item.field)
       if (writable.length > 0) await writeA1MasterData(writable)
     }
+    succeeded = true
   } catch (exception) {
     a1ProfileErrorCode.value = apiErrorCode(exception)
     a1ProfileError.value = serverErrorMessage(
@@ -868,7 +871,24 @@ async function saveA1Profile(): Promise<void> {
   } finally {
     a1ProfileSaving.value = false
   }
+  return succeeded
 }
+
+/*
+ * Na kartě osoby se profil A1 ukládá společnou lištou dole jako každá jiná
+ * sekce; Kontrola a Vrátit návrh zůstávají u formuláře, protože nic neukládají.
+ */
+const { managed: a1Managed } = usePersonCardSaveSection({
+  label: () => t('payroll.people.card_save.a1_profile'),
+  dirty: () => props.canWrite
+    && a1ProfileOpen.value
+    && !a1ProfileLoading.value
+    && a1Baseline.value !== ''
+    && a1Comparable(a1Form.value) !== a1Baseline.value,
+  save: saveA1Profile,
+  discard: () => { void loadA1Profile() },
+  focus: () => a1ErrorPanel.value?.scrollIntoView?.({ behavior: 'smooth', block: 'center' }),
+})
 
 /**
  * Kontrola úplnosti. Nic neukládá a nic neblokuje — jen označí pole, na
@@ -3691,7 +3711,8 @@ async function copyXml(): Promise<void> {
              dílčí uložení, které neexistuje. -->
         <div
           v-if="canWrite"
-          class="sticky bottom-0 -mx-3 -mb-3 flex flex-wrap items-center justify-end gap-2 border-t border-neutral-200 bg-surface px-3 py-2"
+          class="-mx-3 -mb-3 flex flex-wrap items-center justify-end gap-2 border-t border-neutral-200 bg-surface px-3 py-2"
+          :class="a1Managed ? '' : 'sticky bottom-0'"
         >
           <span v-if="a1ProfileMessage" class="mr-auto text-xs text-success-700" data-test="registration-a1-saved">
             {{ a1ProfileMessage }}
@@ -3758,6 +3779,7 @@ async function copyXml(): Promise<void> {
               : t('payroll.people.registration.a1.check') }}
           </button>
           <button
+            v-if="!a1Managed"
             type="button"
             :class="btnFilled('success')"
             :disabled="a1Busy"

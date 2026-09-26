@@ -4763,7 +4763,8 @@
         "discard_confirm": "The card has unsaved changes ({sections}). Discard them?",
         "collapse_confirm": "The full personal record has unsaved changes. Collapsing it discards them. Continue?",
         "stopped": "Saving stopped at section {section}. Fix what the section points out and save again; the other edited sections remain unsaved.",
-        "statutory_defaults": "Fill in standard records (Czech resident)"
+        "statutory_defaults": "Fill in standard records (Czech resident)",
+        "a1_profile": "REGZEC A1 profile"
       },
       "quick_edit": {
         "title": "Common employee details",

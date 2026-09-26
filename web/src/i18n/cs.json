@@ -4763,7 +4763,8 @@
         "discard_confirm": "Na kartě jsou neuložené změny ({sections}). Zahodit je?",
         "collapse_confirm": "Úplná osobní evidence má neuložené změny. Sbalením se zahodí. Pokračovat?",
         "stopped": "Uložení se zastavilo u sekce {section}. Opravte údaje, na které sekce upozorňuje, a uložte znovu; ostatní rozepsané sekce zůstaly neuložené.",
-        "statutory_defaults": "Doplnit běžné údaje (rezident ČR)"
+        "statutory_defaults": "Doplnit běžné údaje (rezident ČR)",
+        "a1_profile": "Profil REGZEC A1"
       },
       "quick_edit": {
         "title": "Běžné údaje zaměstnance",
