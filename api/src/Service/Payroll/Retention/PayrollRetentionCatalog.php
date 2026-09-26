@@ -237,6 +237,9 @@ final class PayrollRetentionCatalog
                 'payroll_inputs',
                 'payroll_run_employments',
                 'payroll_run_persons',
+                // Odložení vztahu z řádného hlášení visí na revizi běhu (ne na
+                // řádku osoby), takže lhůtu běhu musí nést samo.
+                'payroll_jmhz_deferrals',
                 'payroll_net_results',
                 'payroll_annual_settlement_outcomes',
             ],
@@ -599,6 +602,7 @@ final class PayrollRetentionCatalog
                 'payroll_enforcement_person_month_evidence',
                 'payroll_insolvency_payment_instructions',
                 'payroll_enforcement_xmlzam_requests',
+                'payroll_enforcement_termination_notices',
                 'payroll_deduction_agreements',
             ],
             'employment_tables' => [],
