@@ -104,6 +104,22 @@ final class JournalRedStornoActionTest extends TestCase
         self::assertSame([true, true], array_column($payload['lines'], 'is_red_storno'));
     }
 
+    public function testPostingPreviewPreservesRedFlagAndUsesSignedBalance(): void
+    {
+        $lines = [
+            ['account_code' => '501', 'side' => 'debit', 'amount' => 100.0],
+            ['account_code' => '501', 'side' => 'debit', 'amount' => 20.0, 'is_red_storno' => true],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 80.0],
+        ];
+        $describe = new \ReflectionMethod(JournalAction::class, 'describeLines');
+        $preview = $describe->invoke($this->action, $this->supplierId, $lines);
+        self::assertSame([false, true, false], array_column($preview, 'is_red_storno'));
+        $balanced = new \ReflectionMethod(JournalAction::class, 'linesBalanced');
+        self::assertTrue($balanced->invoke(null, $lines));
+        $lines[2]['amount'] = 120.0;
+        self::assertFalse($balanced->invoke(null, $lines));
+    }
+
     private function create(array $lines): \Psr\Http\Message\ResponseInterface
     {
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/accounting/journal')

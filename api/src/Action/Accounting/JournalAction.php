@@ -27,6 +27,7 @@ use MyInvoice\Service\Accounting\JournalEntryDeletionRules;
 use MyInvoice\Service\Accounting\JournalHistoryService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\JournalLinkService;
+use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\PostingOriginService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -944,6 +945,7 @@ final class JournalAction
                 'account_name' => $names[$code] ?? null,
                 'side'         => (string) $l['side'],
                 'amount'       => round((float) $l['amount'], 2),
+                'is_red_storno' => (bool) ($l['is_red_storno'] ?? false),
                 'cost_center'  => $l['cost_center'] ?? null,
             ];
         }, $lines);
@@ -954,7 +956,7 @@ final class JournalAction
     {
         $delta = 0;
         foreach ($lines as $l) {
-            $cents = (int) round(((float) $l['amount']) * 100);
+            $cents = JournalLineAmount::signedCents($l);
             $delta += (string) $l['side'] === 'debit' ? $cents : -$cents;
         }
 

@@ -34,4 +34,4 @@ ALTER TABLE journal_entry_lines
     ADD CONSTRAINT chk_jel_red_storno_boolean CHECK (is_red_storno IN (0, 1));
 
 -- Úklid názvu použitého v dosud nevydané pracovní větvi.
-DELETE FROM migrations WHERE filename = '1866_journal_red_storno.sql';
+DELETE FROM migrations WHERE filename IN ('1866_journal_red_storno.sql', '1893_journal_red_storno.sql');

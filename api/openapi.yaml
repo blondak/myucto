@@ -9843,6 +9843,7 @@ paths:
                       account_code: { type: string }
                       side: { type: string, enum: [debit, credit] }
                       amount: { type: number, format: float, exclusiveMinimum: 0 }
+                      is_red_storno: { type: boolean, default: false, description: "Červené storno snižující původní stranu MD/Dal." }
       responses:
         '200':
           description: OK
