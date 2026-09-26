@@ -445,6 +445,49 @@ const a1InsurerOptions = computed(() => {
   return options
 })
 
+/**
+ * Postavení v zaměstnání — jen čtyřmístné kódy NKPZ (ČSSZ kratší odmítá).
+ * U druhu činnosti 15 a 16 číselník podle EDV zužuje na 1341 a 1342. Uložený
+ * kód mimo nabídku (dřív se ukládaly dva znaky) se ukáže označený, aby ho
+ * první uložení tiše nesmazalo.
+ */
+const a1EmploymentStatusOptions = computed(() => {
+  const activity = a1Form.value.employment.activity_code
+  const restricted = activity === '15' || activity === '16' ? ['1341', '1342'] : null
+  const options = (jmhzOptions.value?.employment_status_codes ?? [])
+    .filter(option => restricted === null || restricted.includes(option.code))
+    .map(option => ({ code: option.code, label: `${option.code} · ${option.label}` }))
+  const current = a1Form.value.employment.employment_status_code?.trim() ?? ''
+  if (current !== '' && !options.some(option => option.code === current)) {
+    options.unshift({
+      code: current,
+      label: t('payroll.people.registration.a1.code_unknown', { code: current }),
+    })
+  }
+  return options
+})
+
+/**
+ * Bližší určení PPV: vybírat mezi 1–3 jde jen u druhu činnosti 1 až 9, jinde
+ * je „1 (žádné)" a u druhu 10 se neuvádí vůbec.
+ */
+const a1RelationshipDetailOptions = computed(() => {
+  const all = jmhzOptions.value?.relationship_detail_codes ?? []
+  const activity = a1Form.value.employment.activity_code
+  if (activity === null || activity === '') return all
+  if (activity === '10') return []
+  return /^[1-9]$/.test(activity) ? all : all.filter(option => option.code === '1')
+})
+
+/**
+ * „Práce probíhá převážně" (10258) patří jen zaměstnavateli na chráněném trhu
+ * práce a zaměstnanci se zdravotním omezením; jinde ji ČSSZ nepřijme.
+ */
+const a1PrevailingWorkplaceApplies = computed(
+  () => a1Draft.value?.protected_labor_market === true
+    && (a1Form.value.facts?.health_restrictions.length ?? 0) > 0,
+)
+
 const a1AddressFields: {
   key: keyof PayrollRegistrationA1Address
   label: string
@@ -2260,7 +2303,7 @@ async function copyXml(): Promise<void> {
               >
                 <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
                 <option
-                  v-for="option in jmhzOptions?.relationship_detail_codes ?? []"
+                  v-for="option in a1RelationshipDetailOptions"
                   :key="option.code"
                   :value="option.code"
                 >{{ option.code }} · {{ option.label }}</option>
@@ -2329,21 +2372,19 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.employment.employment_status_code') }}
               </span>
-              <input
+              <select
                 v-model="a1Form.employment.employment_status_code"
-                type="text"
                 v-bind="a1FieldAttrs('employment.employment_status_code')"
                 :disabled="a1Busy"
                 data-test="a1-employment-status-code"
               >
-              <!--
-                Číselník existuje (ČSÚ, Klasifikace postavení v zaměstnání /
-                NKPZ, číselník `klasif_postaveni_v_zamestn` v připnutém
-                datovém slovníku JMHZ), ale je hierarchický až na 4 znaky
-                (např. 1111), zatímco tohle pole ukládá nejvýš 2 — nabídnout
-                by ho šlo jen osekaný na nejvyšší úroveň. Radši volný text
-                s odkazem na zdroj než tichá ztráta hloubky klasifikace.
-              -->
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option
+                  v-for="option in a1EmploymentStatusOptions"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.label }}</option>
+              </select>
               <span class="mt-1 block text-xs text-neutral-500">
                 {{ t('payroll.people.registration.a1.employment.employment_status_code_hint') }}
               </span>
@@ -2399,7 +2440,7 @@ async function copyXml(): Promise<void> {
                 {{ a1NoteText('employment.continuous_operation') }}
               </span>
             </label>
-            <label class="block">
+            <label v-if="a1PrevailingWorkplaceApplies" class="block">
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.employment.prevailing_workplace_code') }}
               </span>
@@ -3560,7 +3601,12 @@ async function copyXml(): Promise<void> {
       <p class="font-medium text-neutral-900">
         {{ agendaLabel }} · {{ interactionLabel }}
       </p>
-      <p class="mt-1">
+      <p v-if="deadline.derived === false" class="mt-1 text-warning-700" data-test="registration-deadline-not-derived">
+        {{ t('payroll.people.registration.registration_window.not_derived', {
+          start: formatDate(deadline.due_on),
+        }) }}
+      </p>
+      <p v-else class="mt-1">
         {{ t('payroll.people.registration.window', {
           from: formatDate(deadline.earliest_registration_on),
           to: formatDate(deadline.due_on),

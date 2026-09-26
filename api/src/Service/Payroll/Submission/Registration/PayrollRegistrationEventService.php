@@ -1414,21 +1414,23 @@ final readonly class PayrollRegistrationEventService
             'activity_code',
             2,
         );
-        if ($activity === '10') {
-            return [
-                'activity_code' => $activity,
-                'relationship_detail_code' => null,
-            ];
+        $detail = $context['jmhz_relationship_detail_code'] ?? null;
+        try {
+            // Dohody bližší určení v evidenci nemají, REGZEC ho chce jako „1".
+            $detail = PayrollRegistrationRelationshipDetailPolicy::requireForActivity(
+                $activity,
+                is_string($detail) && $detail !== '' ? $detail : null,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            throw new PayrollRegistrationXmlException(
+                'registration_event_relationship_detail_invalid',
+                $exception->getMessage(),
+            );
         }
 
         return [
             'activity_code' => $activity,
-            'relationship_detail_code' => $this->requiredDigits(
-                $context['jmhz_relationship_detail_code'] ?? null,
-                'relationship_detail_code',
-                1,
-                1,
-            ),
+            'relationship_detail_code' => $detail,
         ];
     }
 

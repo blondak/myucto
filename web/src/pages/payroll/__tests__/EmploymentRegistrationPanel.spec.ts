@@ -91,6 +91,10 @@ function jmhzOptions() {
     ],
     education_levels: [{ code: 'M', label: 'Úplné střední odborné vzdělání s maturitou' }],
     work_mode_codes: [{ code: '1', label: 'Jednosměnný pracovní režim' }],
+    employment_status_codes: [
+      { code: '1111', label: 'Zaměstnanci v pracovním poměru na dobu neurčitou' },
+      { code: '1341', label: 'Ostatní zaměstnanci ve služebním poměru na dobu neurčitou' },
+    ],
     workplace_progress_codes: [{ code: '1', label: 'V prostorách zaměstnavatele' }],
     pension_type_codes: [{ code: '1', label: 'starobní' }],
     proof_identity_type_codes: [{ code: 'I', label: 'Průkaz totožnosti' }],
@@ -1047,18 +1051,23 @@ describe('EmploymentRegistrationPanel', () => {
   })
 
   /**
-   * Postavení zaměstnance zůstává volný text: existující číselník ČSÚ je
-   * hierarchický až na 4 znaky, zatímco pole ukládá nejvýš 2 — nabízet
-   * hodnoty, které aplikace sama odmítne, je horší než volný text. Aspoň
-   * ale musí být vidět, odkud kód vzít.
+   * Postavení v zaměstnání je výběr čtyřmístných kódů NKPZ — ČSSZ kratší
+   * kód nepřijme a všechny přijaté přihlášky z cizích programů nesou čtyři
+   * číslice. Uložený kód mimo číselník se nesmí tiše ztratit.
    */
-  it('keeps the employment status code as free text with a source hint', async () => {
+  it('offers four-digit employment status codes and keeps an unknown stored code', async () => {
     const wrapper = mountPanel()
     await flushPromises()
     await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await flushPromises()
 
     const field = wrapper.get('[data-test="a1-employment-status-code"]')
-    expect(field.element.tagName).toBe('INPUT')
+    expect(field.element.tagName).toBe('SELECT')
+    const values = field.findAll('option').map(option => option.attributes('value'))
+    expect(values).toContain('1111')
+    const codes = values.filter((value): value is string => value !== undefined && value !== '')
+    expect(codes.length).toBeGreaterThan(0)
+    expect(codes.every(value => /^\d{4}$/.test(value))).toBe(true)
     expect(wrapper.text()).toContain('employment_status_code_hint')
   })
 

@@ -1847,6 +1847,8 @@ export interface PayrollEmploymentJmhzEvidenceOptions {
   tax_identifier_types: Array<{ code: string; label: string }>
   education_levels: Array<{ code: string; label: string }>
   work_mode_codes: Array<{ code: string; label: string }>
+  /** Čtyřmístné kódy NKPZ — postavení v zaměstnání (REGZEC 10249). */
+  employment_status_codes?: Array<{ code: string; label: string }>
   workplace_progress_codes: Array<{ code: string; label: string }>
   pension_type_codes: Array<{ code: string; label: string }>
   proof_identity_type_codes: Array<{ code: string; label: string }>
@@ -4000,6 +4002,9 @@ export interface PayrollRegistrationDeadline {
   due_on: string
   calendar_basis: string
   ruleset_id: string
+  /** `false` = lhůta se podle dnešních pravidel neodvozuje (nástup před 1. 7. 2026). */
+  derived?: boolean
+  notice?: string | null
 }
 
 export interface PayrollRegistrationEmployerDeadline {
@@ -4209,6 +4214,8 @@ export interface PayrollRegistrationA1Draft {
   writeback: PayrollRegistrationA1DraftDivergence[]
   /** Totéž, ale jen u ODESLANÉ registrace — podklad pro upozornění na A3. */
   diverged: PayrollRegistrationA1DraftDivergence[]
+  /** Zaměstnavatel na chráněném trhu práce — jen tam se vyplňuje 10258. */
+  protected_labor_market?: boolean
 }
 
 export interface PayrollRegistrationA1View {

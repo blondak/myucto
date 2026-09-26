@@ -238,6 +238,23 @@ final class PayrollRegistrationIdentityRepository
         return $statement->fetchColumn() !== false;
     }
 
+    /**
+     * Je zaměstnavatel uznaný na chráněném trhu práce (REGZEL, ID 10211)?
+     * Bez profilu REGZEL se bere „ne" — tak se hlásí naprostá většina firem.
+     */
+    public function protectedLaborMarket(int $supplierId): bool
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT protected_labor_market
+               FROM payroll_regzel_employer_profiles
+              WHERE supplier_id = ?',
+        );
+        $statement->execute([$supplierId]);
+        $value = $statement->fetchColumn();
+
+        return $value !== false && (int) $value === 1;
+    }
+
     /** @return array<string,mixed>|null */
     public function latestA1Profile(
         int $supplierId,
@@ -547,7 +564,7 @@ final class PayrollRegistrationIdentityRepository
             'SELECT activity_code, jmhz_relationship_detail_code,
                     planned_start_on, actual_start_on, work_place,
                     jmhz_workplace_municipality_code, cz_isco_code,
-                    foreign_legislation_country_code
+                    foreign_legislation_country_code, fixed_term_end_on
                FROM payroll_employment_terms
               WHERE supplier_id = ?
                 AND employment_id = ?
@@ -581,6 +598,7 @@ final class PayrollRegistrationIdentityRepository
                 $row,
                 'foreign_legislation_country_code',
             ),
+            'fixed_term_end_on' => $this->nullableString($row, 'fixed_term_end_on'),
         ];
     }
 

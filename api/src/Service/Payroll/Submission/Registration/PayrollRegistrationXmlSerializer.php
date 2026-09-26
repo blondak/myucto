@@ -448,7 +448,10 @@ final class PayrollRegistrationXmlSerializer
         if ($action === 2) {
             $job->setAttribute('to', $this->eventText($data, 'end_on'));
             $job->setAttribute('rel', $this->eventText($data, 'activity_code'));
-            $detail = $this->eventNullableText($data, 'relationship_detail_code');
+            $detail = $this->regzecRelationshipDetail(
+                $this->eventText($data, 'activity_code'),
+                $this->eventNullableText($data, 'relationship_detail_code'),
+            );
             if ($detail !== null) {
                 $job->setAttribute('relDetail', $detail);
             }
@@ -461,7 +464,11 @@ final class PayrollRegistrationXmlSerializer
             $job->setAttribute('rel', $this->eventText($data, 'activity_code'));
             $detail = $delta['relationship_detail_code']
                 ?? ($data['relationship_detail_code'] ?? null);
-            if (is_string($detail) && $detail !== '') {
+            $detail = $this->regzecRelationshipDetail(
+                $this->eventText($data, 'activity_code'),
+                is_string($detail) && $detail !== '' ? $detail : null,
+            );
+            if ($detail !== null) {
                 $job->setAttribute('relDetail', $detail);
             }
             if ($action === 4 && isset($delta['contract_start_on'])) {
@@ -503,6 +510,28 @@ final class PayrollRegistrationXmlSerializer
         $root->appendChild($employees);
 
         return $this->save($document);
+    }
+
+    /**
+     * 10502 v navazujících akcích. Starší události u dohod nesou `null`
+     * (evidence ho nevede), REGZEC ho ale chce jako „1" — rozhoduje politika,
+     * ne uložená hodnota.
+     */
+    private function regzecRelationshipDetail(
+        string $activityCode,
+        ?string $detail,
+    ): ?string {
+        try {
+            return PayrollRegistrationRelationshipDetailPolicy::requireForActivity(
+                $activityCode,
+                $detail,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            throw new PayrollRegistrationXmlException(
+                'registration_regzec_relationship_detail_invalid',
+                $exception->getMessage(),
+            );
+        }
     }
 
     /** @param array<string,mixed> $data */

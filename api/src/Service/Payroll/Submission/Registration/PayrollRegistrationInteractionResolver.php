@@ -7,12 +7,14 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
 final class PayrollRegistrationInteractionResolver
 {
     /**
-     * Připnutá schémata (PREZEC26 1.2, REGZEC25 1.4.0.4) popisují režim platný
-     * od spuštění registrační agendy. Pro starší rozhodné datum se neodvozuje
-     * nic — resolver raději nevrátí interakci, než aby hádal starý formulář.
+     * Částečné přihlášení PREZEC P1 jde podat nejdřív osm dnů před účinností
+     * povinnosti od 1. 7. 2026, tedy od 23. 6. 2026 (metodika PREZEC 1.4).
      *
-     * ČSSZ umožnila podat P1 už osm dnů před účinností povinnosti od 1. 7. 2026,
-     * tedy od 23. 6. 2026. Datum je ověřené oficiální metodikou PREZEC 1.4.
+     * Plná registrace REGZEC takovou hranici NEMÁ: podle „Pravidel pro
+     * REGZEC" (ČSSZ, 30. 1. 2026) se událost, která nastala do 31. 3. 2026
+     * a nebyla do té doby ohlášena, od 1. 4. 2026 hlásí jen přes REGZEC.
+     * Cizí programy takové přihlášky s nástupem od ledna 2026 podávaly a ČSSZ
+     * je přijala; lhůtu u nich jen neodvozujeme.
      */
     private const SUPPORTED_FROM = '2026-06-23';
 
@@ -30,19 +32,22 @@ final class PayrollRegistrationInteractionResolver
         array $context,
     ): PayrollRegistrationInteraction {
         $eventInteraction = $context['event_interaction'] ?? null;
+        $citizenship = $snapshot->identity['citizenship_country_code'] ?? null;
         if (!is_string($eventInteraction)
             && $snapshot->scope['effective_on'] < self::SUPPORTED_FROM
+            && $this->agendaFor(
+                is_string($citizenship) ? $citizenship : null,
+                $context,
+            ) === 'PREZEC26'
         ) {
             $this->invalid(
                 'registration_interaction_before_supported_window',
-                'Registrace přes ČSSZ jde v appce podat až od 23. 6. 2026 — dřív '
-                    . 'povinnost neplatila a formuláře PREZEC/REGZEC pro '
-                    . 'starší dny neexistují. Tenhle pracovní vztah začíná '
-                    . 'dřív; přihlaste zaměstnance způsobem platným pro tehdejší '
-                    . 'období.',
+                'Částečné přihlášení před nástupem (PREZEC P1) jde podat až '
+                    . 'od 23. 6. 2026. Tenhle pracovní vztah začíná dřív, takže '
+                    . 'se zaměstnanec přihlašuje plnou registrací REGZEC A1 — '
+                    . 'vyplňte profil registrace a podejte ji.',
             );
         }
-        $citizenship = $snapshot->identity['citizenship_country_code'] ?? null;
         if (!is_string($citizenship)) {
             $this->invalid(
                 'registration_interaction_citizenship_unverified',

@@ -1088,7 +1088,7 @@ final readonly class PayrollRegistrationSubmissionService
 
     /**
      * @return array{earliest_registration_on:string,due_on:string,
-     *   calendar_basis:string,ruleset_id:string}
+     *   calendar_basis:string,ruleset_id:string,derived:bool,notice:?string}
      */
     private function describeDeadline(
         PayrollEmployeeRegistrationDeadlineWindow $window,
@@ -1098,6 +1098,8 @@ final readonly class PayrollRegistrationSubmissionService
             'due_on' => $window->dueOn,
             'calendar_basis' => $window->calendarBasis,
             'ruleset_id' => $window->rulesetId,
+            'derived' => $window->derived,
+            'notice' => $window->notice,
         ];
     }
 

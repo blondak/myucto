@@ -100,15 +100,43 @@ final class PayrollEmployeeRegistrationDeadlinePolicyTest extends TestCase
     }
 
     /**
-     * Před účinností povinnosti se lhůta neodvozuje. Vrátit nějaké datum
-     * „aby to nespadlo" znamená tvrdit termín, který ze zákona neplyne.
+     * Před účinností povinnosti se lhůta neodvozuje, podání se ale NEBLOKUJE.
+     *
+     * Podle Pravidel pro REGZEC se událost do 31. 3. 2026 neohlášená do té
+     * doby hlásí od 1. 4. 2026 jen přes REGZEC; cizí programy přihlášky
+     * s nástupem od ledna 2026 podávaly a ČSSZ je přijala. Termínem je den
+     * nástupu (podání je po lhůtě) a okno nese vysvětlení.
      */
-    public function testStartBeforeTheEffectiveDateIsRefused(): void
+    public function testStartBeforeTheEffectiveDateIsFiledLateWithoutDerivedDeadline(): void
+    {
+        $window = $this->policy->forEmploymentStart('2026-02-15');
+
+        self::assertFalse($window->derived);
+        self::assertSame('2026-02-15', $window->dueOn);
+        self::assertSame('2026-02-07', $window->earliestRegistrationOn);
+        self::assertStringContainsString('1. 7. 2026', (string) $window->notice);
+        // Ruleset zůstává přihláškový — podle něj se v doručence poznává
+        // přijatá registrace a přebírá OIČ a ID PPV.
+        self::assertSame(
+            PayrollEmployeeRegistrationDeadlinePolicy::REGISTRATION_RULESET_ID,
+            $window->rulesetId,
+        );
+        self::assertNotSame(
+            $this->policy->forEmploymentStart('2026-07-01')->rulesetHash,
+            $window->rulesetHash,
+        );
+        self::assertTrue($this->policy->forEmploymentStart('2026-07-01')->derived);
+        self::assertFalse(
+            $this->policy->forFullRegistrationAfterPreRegistration('2025-11-03')->derived,
+        );
+    }
+
+    public function testNoShowBeforeTheEffectiveDateIsStillRefused(): void
     {
         $this->expectException(PayrollRegistrationXmlException::class);
         $this->expectExceptionMessage('1. 7. 2026');
 
-        $this->policy->forEmploymentStart('2026-06-30');
+        $this->policy->forNoShow('2026-06-30');
     }
 
     /**

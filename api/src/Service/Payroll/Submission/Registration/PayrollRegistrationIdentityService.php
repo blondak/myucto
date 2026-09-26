@@ -179,6 +179,9 @@ final readonly class PayrollRegistrationIdentityService
                     $employmentId,
                 ),
             );
+            // Formulář podle toho ukazuje „práce probíhá převážně" (10258).
+            $draft['protected_labor_market'] =
+                $this->repository->protectedLaborMarket($supplierId);
 
             return ['profile' => $profile, 'draft' => $draft];
         });
@@ -359,6 +362,9 @@ final readonly class PayrollRegistrationIdentityService
                 ...$scope,
             ]]);
             $builder = new PayrollRegistrationA1SnapshotBuilder();
+            $protectedLaborMarket = $this->repository->protectedLaborMarket(
+                $supplierId,
+            );
             if ($identity === null) {
                 $problems = [[
                     'field' => 'identity',
@@ -374,6 +380,7 @@ final readonly class PayrollRegistrationIdentityService
                         $provisional,
                         $identity,
                         $scope,
+                        $protectedLaborMarket,
                     ));
                     $status = 'verified';
                 } catch (PayrollRegistrationIdentitySnapshotException $exception) {
@@ -381,6 +388,7 @@ final readonly class PayrollRegistrationIdentityService
                         $provisional,
                         $identity,
                         $scope,
+                        $protectedLaborMarket,
                     );
                     if ($problems === []) {
                         $problems = [[
@@ -568,6 +576,7 @@ final readonly class PayrollRegistrationIdentityService
                 ]]),
                 $identity,
                 $scope,
+                $this->repository->protectedLaborMarket($supplierId),
             );
 
             return ['complete' => $problems === [], 'problems' => $problems];
@@ -746,6 +755,8 @@ final readonly class PayrollRegistrationIdentityService
                     $this->decodeA1Profile($a1Stored),
                     ['source' => $this->a1Source($a1Stored)],
                 );
+                $result['employer_protected_labor_market'] =
+                    $this->repository->protectedLaborMarket($supplierId);
             }
 
             return $result;
@@ -2352,7 +2363,7 @@ final readonly class PayrollRegistrationIdentityService
             'actual_start_on' => 'text:10',
             'contract_start_on' => 'text:10',
             'small_scale' => 'bool',
-            'employment_status_code' => 'text:2',
+            'employment_status_code' => 'text:4',
             'work_mode_code' => 'text:2',
             'continuous_operation' => 'bool',
             'prevailing_workplace_code' => 'text:2',

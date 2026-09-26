@@ -325,7 +325,7 @@ final class PayrollEmploymentValidator
             $this->jmhzEvidence->requireRelationshipDetailCode($relationshipDetailCode);
         }
         if ($activityCode !== null) {
-            $relationshipDetailCode = PayrollRegistrationRelationshipDetailPolicy::requireForActivity(
+            $relationshipDetailCode = PayrollRegistrationRelationshipDetailPolicy::requireForEvidence(
                 $activityCode,
                 $relationshipDetailCode,
             );

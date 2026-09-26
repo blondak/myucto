@@ -2573,7 +2573,7 @@ final class PayrollRegistrationActionTest extends TestCase
                 'actual_start_on' => self::START_ON,
                 'contract_start_on' => self::START_ON,
                 'small_scale' => false,
-                'employment_status_code' => '1',
+                'employment_status_code' => '1111',
                 'work_mode_code' => '1',
                 'continuous_operation' => false,
                 'prevailing_workplace_code' => '1',

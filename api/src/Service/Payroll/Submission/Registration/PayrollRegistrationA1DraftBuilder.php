@@ -511,12 +511,26 @@ final class PayrollRegistrationA1DraftBuilder
             );
         }
 
+        $employmentStatusCode = $variant === PayrollRegistrationBusinessMatrix::VARIANT_OST
+            ? PayrollRegistrationEmploymentStatusCodebook::suggest(
+                $relationType,
+                $activityCode,
+                $terms !== null && $this->text($terms['fixed_term_end_on'] ?? null) !== null,
+            )
+            : null;
+        if ($employmentStatusCode !== null) {
+            $this->source(
+                'employment.employment_status_code',
+                'Návrh podle druhu pracovního vztahu a doby určité v evidenci — '
+                . 'zkontrolujte ho proti smlouvě.',
+            );
+        }
+
         $untracked = match ($variant) {
             PayrollRegistrationBusinessMatrix::VARIANT_OST => [
-                'employment_status_code' => 'postavení zaměstnance',
+                'employment_status_code' => 'postavení v zaměstnání',
                 'work_mode_code' => 'režim práce',
                 'continuous_operation' => 'nepřetržitý provoz',
-                'prevailing_workplace_code' => 'převažující pracoviště',
                 'workplace_city' => 'obec pracoviště',
                 'position_name' => 'název pracovní pozice',
                 'leadership' => 'vedoucí pozice',
@@ -526,6 +540,9 @@ final class PayrollRegistrationA1DraftBuilder
             ],
             default => [],
         };
+        if ($employmentStatusCode !== null) {
+            unset($untracked['employment_status_code']);
+        }
         foreach ($untracked as $field => $label) {
             $this->miss(
                 "employment.{$field}",
@@ -540,7 +557,7 @@ final class PayrollRegistrationA1DraftBuilder
             'actual_start_on' => $effectiveOn,
             'contract_start_on' => $contractStartOn,
             'small_scale' => $smallScale,
-            'employment_status_code' => null,
+            'employment_status_code' => $employmentStatusCode,
             'work_mode_code' => null,
             'continuous_operation' => null,
             'prevailing_workplace_code' => null,
