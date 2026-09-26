@@ -114,6 +114,56 @@ describe('useMigrationWizard', () => {
     expect(sessionStorage.getItem('test.migration.token')).toBeNull()
   })
 
+  it('průběh zpracování na serveru předá stránce', async () => {
+    vi.useFakeTimers()
+    sessionStorage.setItem('test.migration.token', 'tok')
+    const client = api([])
+    client.show.mockResolvedValueOnce({ token: 'tok', status: 'processing', error: null, progress: { step: 'Připravuji náhled', processed: 1, total: 3 } })
+    const { wizard } = mountWizard(true, client)
+    await flushPromises()
+
+    expect(wizard().processing.value).toBe(true)
+    expect(wizard().processingProgress.value).toEqual({ step: 'Připravuji náhled', processed: 1, total: 3 })
+  })
+
+  it('chyba požadavku na náhled token nezahodí a nabídne zkusit znovu', async () => {
+    sessionStorage.setItem('test.migration.token', 'tok')
+    const client = api([])
+    client.show
+      .mockRejectedValueOnce({ response: { status: 500, data: {} } })
+      .mockResolvedValueOnce({ token: 'tok', agendas: [2026] })
+    const { wizard } = mountWizard(true, client, { inlineLoadError: true })
+    await flushPromises()
+
+    expect(wizard().loadError.value).toEqual({ message: 'src.preview_failed' })
+    expect(wizard().processing.value).toBe(false)
+    expect(sessionStorage.getItem('test.migration.token')).toBe('tok')
+    expect(m.toastError).not.toHaveBeenCalled()
+
+    await wizard().retryUpload()
+
+    expect(client.show).toHaveBeenLastCalledWith('tok', { retry: true })
+    expect(wizard().loadError.value).toBeNull()
+    expect(wizard().currentStep.value).toBe(2)
+  })
+
+  it('selhání přípravy náhledu, které jde zopakovat, ukáže bez zahození exportu', async () => {
+    sessionStorage.setItem('test.migration.token', 'tok')
+    const client = api([])
+    client.show.mockResolvedValueOnce({ token: 'tok', status: 'failed', error: 'Náhled selhal.', retryable: true })
+    const { wizard } = mountWizard(true, client)
+    await flushPromises()
+
+    expect(wizard().loadError.value).toEqual({ message: 'Náhled selhal.' })
+    expect(sessionStorage.getItem('test.migration.token')).toBe('tok')
+    // Stránka bez vlastního bloku chyby ji dostane upozorněním.
+    expect(m.toastError).toHaveBeenCalledWith('Náhled selhal.')
+
+    wizard().abandonUpload()
+    expect(wizard().loadError.value).toBeNull()
+    expect(sessionStorage.getItem('test.migration.token')).toBeNull()
+  })
+
   it('smaže protokol zkoušky po potvrzení a přehled načte znovu', async () => {
     const run: Run = { id: 9, job_id: 1, mode: 'dry_run', status: 'completed', agenda_year: 2024 }
     const client = api([run])

@@ -6,13 +6,21 @@ import { uploadChunked, type ChunkedUploadProgress } from './chunkedUpload'
  * Server pod `{base}` nabízí nahrání po částech, stav nahraného souboru, spuštění převodu
  * na pozadí a protokoly běhů; zdroj si ke klientovi přidá vlastní volání.
  */
-export function createMigrationApi<TUpload, TPending, TRun, TStart>(base: string) {
+export function createMigrationApi<TUpload, TPending, TRun, TStart>(base: string, config: { showTimeout?: number } = {}) {
   return {
     /** Soubor se posílá po částech (chunkedUpload.ts); po poslední části ho server zpracuje na pozadí. */
     uploadChunked: (file: File, onProgress?: ChunkedUploadProgress, onStarted?: (token: string) => void): Promise<{ token: string; job_id: number | null }> =>
       uploadChunked(base, file, onProgress, onStarted),
-    show: (token: string): Promise<TUpload | TPending> =>
-      api.get<TUpload | TPending>(`${base}/uploads/${token}`).then(r => r.data),
+    /**
+     * Stav a náhled nahraného souboru. `retry` zopakuje selhanou přípravu náhledu na serveru.
+     * Zdroj, jehož server náhled jen čte (těžkou práci dělá job na pozadí), si dá kratší
+     * `showTimeout`: visící požadavek průvodce pak ukáže jako chybu se „Zkusit znovu".
+     */
+    show: (token: string, options?: { retry?: boolean }): Promise<TUpload | TPending> =>
+      api.get<TUpload | TPending>(`${base}/uploads/${token}`, {
+        ...(config.showTimeout ? { timeout: config.showTimeout } : {}),
+        ...(options?.retry ? { params: { retry: 1 } } : {}),
+      }).then(r => r.data),
     start: (token: string, params: TStart): Promise<{ job_id: number; status: string; mode: string }> =>
       api.post(`${base}/uploads/${token}/start`, params).then(r => r.data),
     runs: (): Promise<{ items: TRun[] }> =>
