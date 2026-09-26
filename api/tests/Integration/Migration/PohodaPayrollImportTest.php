@@ -568,6 +568,33 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertSame('2026-02-01', (string) $start->fetchColumn());
     }
 
+    /**
+     * Volba „docházku a vstupy rovnou schválit" musí být v protokolu vidět: u prvního
+     * převodu hlásil protokol 0 schválených měsíců docházky (počítal je jen opakovaný
+     * převod) a u opakovaného 0 všeho, protože všechno schválené už bylo.
+     */
+    public function testApproveOptionIsReportedOnFirstAndRepeatedRun(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+
+        $first = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        $counts = self::stepCounts($first, PohodaPayrollImporter::STEP_MONTHS);
+        self::assertGreaterThan(0, ($counts['time_months_approved'] ?? 0) + ($counts['time_months_not_approved'] ?? 0), $this->explain($first));
+        self::assertGreaterThan(0, $counts['inputs_approved'] ?? 0, $this->explain($first));
+
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true);
+        $counts = self::stepCounts($again, PohodaPayrollImporter::STEP_MONTHS);
+        self::assertSame(0, $counts['inputs_approved'] ?? 0, $this->explain($again));
+        self::assertGreaterThan(0, $counts['inputs_already_approved'] ?? 0, $this->explain($again));
+        self::assertSame(
+            (int) (self::stepCounts($first, PohodaPayrollImporter::STEP_MONTHS)['time_months_approved'] ?? 0),
+            (int) ($counts['time_months_already_approved'] ?? 0),
+            $this->explain($again),
+        );
+    }
+
     /** Izolovaná firma se zapnutými mzdami a výchozí účtárnou (stejně jako test importu docházky). */
     private function payrollSupplier(): int
     {

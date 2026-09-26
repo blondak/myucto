@@ -441,6 +441,7 @@ final class PohodaPayrollImporter
                     );
                     $skipped = count($applied['skipped'] ?? []);
                     if ($approveTakenOver) {
+                        $this->reportTimeApproval($period, is_array($applied['time_approval'] ?? null) ? $applied['time_approval'] : null, $protocol);
                         $this->approveTakenOverInputs($supplierId, $userOrNull, $period, (int) ($applied['inputs']['import_id'] ?? 0), $protocol);
                     }
                     $this->map->put($supplierId, PohodaImportRepository::KIND_PAYROLL_MONTH, $key, (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0), $runId);
@@ -627,8 +628,43 @@ final class PohodaPayrollImporter
                 "{$period}: převzatou docházku se nepodařilo dodatečně schválit - " . $e->getMessage(), ['period' => $period]);
             return;
         }
-        $protocol->count(self::STEP_MONTHS, 'time_months_approved', (int) ($result['time']['approved'] ?? 0));
+        $this->reportTimeApproval($period, $result['time'] ?? null, $protocol);
         $this->approveTakenOverInputs($supplierId, $userId, $period, (int) $result['input_import_id'], $protocol);
+    }
+
+    /**
+     * Výsledek schválení převzaté docházky do protokolu — stejně u nového i už
+     * převedeného měsíce.
+     *
+     * Dřív se počítal jen u opakovaného převodu a jen „nově schválené": u prvního
+     * převodu protokol tvrdil 0 schválených měsíců, u opakovaného taky 0 (všechno
+     * už schválené bylo), a měsíce, které schválit nešlo, zmizely beze slova.
+     *
+     * @param array<string,mixed>|null $time {@see \MyInvoice\Service\Payroll\Time\PayrollTimeImportApprovalService::applyBatch()}
+     */
+    private function reportTimeApproval(string $period, ?array $time, ImportProtocol $protocol): void
+    {
+        if ($time === null) {
+            return;
+        }
+        $protocol->count(self::STEP_MONTHS, 'time_months_approved', (int) ($time['approved'] ?? 0));
+        $protocol->count(self::STEP_MONTHS, 'time_months_already_approved', (int) ($time['already_approved'] ?? 0));
+        $exceptions = is_array($time['exceptions'] ?? null) ? $time['exceptions'] : [];
+        if ($exceptions === []) {
+            return;
+        }
+        $protocol->count(self::STEP_MONTHS, 'time_months_not_approved', count($exceptions));
+        $names = array_map(
+            static fn (array $row): string => trim((string) ($row['name'] ?? '')) . ': ' . (string) ($row['message'] ?? ''),
+            array_slice($exceptions, 0, 5),
+        );
+        $protocol->warn(self::STEP_MONTHS, 'time_months_not_approved', sprintf(
+            '%s: docházku %d vztahů převod neschválil, protože souhrn měsíce nesedí (%s%s). Schvalte ji v Mzdy → Docházka a směny.',
+            $period,
+            count($exceptions),
+            implode('; ', $names),
+            count($exceptions) > 5 ? '; …' : '',
+        ), ['period' => $period]);
     }
 
     private function approveTakenOverInputs(int $supplierId, ?int $userId, string $period, int $importId, ImportProtocol $protocol): void
@@ -651,6 +687,14 @@ final class PohodaPayrollImporter
             $afterId = (int) $result['next_after_id'];
         }
         $protocol->count(self::STEP_MONTHS, 'inputs_approved', $approved);
+        // Kolik vstupů dávky už schválených bylo: u opakovaného převodu jinak
+        // protokol hlásil „schváleno 0" a vypadalo to, že volba nic neudělala.
+        $already = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_inputs
+              WHERE supplier_id = ? AND import_id = ? AND status IN ("approved", "locked")'
+        );
+        $already->execute([$supplierId, $importId]);
+        $protocol->count(self::STEP_MONTHS, 'inputs_already_approved', max(0, (int) $already->fetchColumn() - $approved));
         if ($failed > 0) {
             $protocol->warn(self::STEP_MONTHS, 'inputs_approve_failed',
                 "{$period}: {$failed} převzatých mzdových vstupů se nepodařilo schválit, zůstávají jako koncept.", ['period' => $period]);
