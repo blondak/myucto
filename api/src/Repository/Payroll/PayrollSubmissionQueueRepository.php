@@ -6,6 +6,7 @@ namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
 use PDO;
 
 /**
@@ -358,6 +359,13 @@ final class PayrollSubmissionQueueRepository
                     obligation.period_end,
                     obligation.obligation_kind,
                     obligation.status AS obligation_status,
+                    obligation.source_event_reference,
+                    (SELECT snapshot.action_code
+                       FROM payroll_registration_event_snapshots snapshot
+                      WHERE snapshot.supplier_id = obligation.supplier_id
+                        AND obligation.source_event_reference
+                            = CONCAT("payroll_registration_event:", snapshot.id)
+                    ) AS registration_event_action,
                     deadline.earliest_submission_on,
                     deadline.due_on,
                     attempt.id AS attempt_id,
@@ -397,6 +405,7 @@ final class PayrollSubmissionQueueRepository
                 'period_end' => (string) $row['period_end'],
                 'obligation_kind' => (string) $row['obligation_kind'],
                 'obligation_status' => (string) $row['obligation_status'],
+                'registration_action' => self::registrationAction($row),
                 'earliest_submission_on' => (string) $row['earliest_submission_on'],
                 'due_on' => (string) $row['due_on'],
                 'attempt' => $row['attempt_id'] === null ? null : [
@@ -515,6 +524,34 @@ final class PayrollSubmissionQueueRepository
         }
 
         return $names;
+    }
+
+    /**
+     * Akce registrace ČSSZ (A1 přihláška, A2 odhláška, A3 změna, A4 oprava).
+     * Agenda REGZEC nese všechny, takže samotný název „Změna v registraci"
+     * u nového nástupu mátl (Q15-28). Podání bez události je prvotní
+     * registrace vztahu, tedy přihláška; u události rozhoduje její kód.
+     *
+     * @param array<string,mixed> $row
+     */
+    private static function registrationAction(array $row): ?string
+    {
+        $agenda = (string) $row['agenda_code'];
+        if (!in_array($agenda, [
+            PayrollRegistrationSubmissionService::AGENDA_REGZEC,
+            PayrollRegistrationSubmissionService::AGENDA_PREZEC,
+        ], true)) {
+            return null;
+        }
+        if ($row['registration_event_action'] !== null) {
+            return 'A' . (int) $row['registration_event_action'];
+        }
+        $reference = (string) ($row['source_event_reference'] ?? '');
+
+        return $agenda === PayrollRegistrationSubmissionService::AGENDA_REGZEC
+            && str_starts_with($reference, 'payroll_employment_registration:')
+            ? 'A1'
+            : null;
     }
 
     private static function nullableInt(mixed $value): ?int

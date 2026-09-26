@@ -7733,6 +7733,12 @@
       "queue": {
         "title": "To send",
         "subtitle": "Everything prepared that has not been sent yet, across all agendas and employees. Sorted by deadline, overdue first. Items that cannot be sent show the reason.",
+        "registration_action": {
+          "A1": "Employee registration (A1)",
+          "A2": "Employee deregistration (A2)",
+          "A3": "Change of details (A3)",
+          "A4": "Registration correction (A4)"
+        },
         "load_failed": "The outgoing submission queue could not be loaded.",
         "send_failed": "The submission could not be sent.",
         "send": "Send",

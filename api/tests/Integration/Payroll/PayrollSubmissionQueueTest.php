@@ -375,6 +375,29 @@ final class PayrollSubmissionQueueTest extends TestCase
         self::assertSame($employeeId, $row['subject_employee_id']);
     }
 
+    /**
+     * Q15-28: prvotní registrace vztahu jde agendou REGZEC, jejíž název
+     * („Změna v registraci") u nového nástupu mátl. Fronta proto nese akci:
+     * podání bez události je přihláška A1.
+     */
+    public function testInitialRegistrationIsMarkedAsA1(): void
+    {
+        $submissionId = $this->seed(
+            PayrollDispatchCapabilityCatalog::canonical('REGZEC25'),
+            'ready',
+            dueOn: '2026-09-01',
+            subjectReference: 'payroll_employment:991',
+            sourceEventReference: 'payroll_employment_registration:991',
+        );
+        $other = $this->seed(PayrollDispatchCapabilityCatalog::canonical('JMHZ25'), 'ready', dueOn: '2026-08-20');
+
+        self::assertSame('A1', $this->row($submissionId)['registration_action'] ?? null);
+        $otherRow = $this->row($other);
+        self::assertIsArray($otherRow);
+        self::assertArrayHasKey('registration_action', $otherRow);
+        self::assertNull($otherRow['registration_action']);
+    }
+
     private function key(): string
     {
         return 'queue-test-' . bin2hex(random_bytes(8));
@@ -399,6 +422,7 @@ final class PayrollSubmissionQueueTest extends TestCase
         string $status,
         string $dueOn,
         ?string $subjectReference = null,
+        ?string $sourceEventReference = null,
     ): int {
         $suffix = bin2hex(random_bytes(4));
         $this->pdo->prepare(
@@ -415,7 +439,7 @@ final class PayrollSubmissionQueueTest extends TestCase
             $this->supplierId,
             $agendaCode,
             $subjectReference ?? 'queue-test-' . $suffix,
-            'queue-event-' . $suffix,
+            $sourceEventReference ?? 'queue-event-' . $suffix,
             str_repeat('c', 64),
             str_repeat('a', 64),
             random_bytes(32),

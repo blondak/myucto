@@ -3099,6 +3099,8 @@ export interface PayrollSubmissionQueueItem {
   subject_employee_id?: number | null
   period_start: string
   period_end: string
+  /** Akce registrace ČSSZ (A1 přihláška, A2 odhláška, A3 změna, A4 oprava); jinak `null`. */
+  registration_action?: string | null
   obligation_kind: string
   obligation_status: PayrollSubmissionObligationStatus
   earliest_submission_on: string

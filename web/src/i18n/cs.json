@@ -7733,6 +7733,12 @@
       "queue": {
         "title": "K odeslání",
         "subtitle": "Všechno připravené, co ještě neodešlo — napříč agendami i zaměstnanci. Řazeno podle lhůty, po lhůtě nahoře. U položek, které odeslat nejde, je uvedený důvod.",
+        "registration_action": {
+          "A1": "Přihláška zaměstnance (A1)",
+          "A2": "Odhláška zaměstnance (A2)",
+          "A3": "Změna údajů (A3)",
+          "A4": "Oprava registrace (A4)"
+        },
         "load_failed": "Frontu odchozích podání se nepodařilo načíst.",
         "send_failed": "Podání se nepodařilo odeslat.",
         "send": "Odeslat",
