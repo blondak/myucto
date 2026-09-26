@@ -75,6 +75,11 @@ vi.mock('@/pages/payroll/EmploymentAgendaPanel.vue', () => ({
   default: { template: '<div data-test="employment-agendas-stub" />' },
 }))
 
+// Panel odloženého příjmu má vlastní test (EmploymentDeferredIncomePanel.spec.ts).
+vi.mock('@/pages/payroll/EmploymentDeferredIncomePanel.vue', () => ({
+  default: { template: '<div data-test="deferred-income" />' },
+}))
+
 const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 
 vi.mock('@/composables/useToast', () => ({

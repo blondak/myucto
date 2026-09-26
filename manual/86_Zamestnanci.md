@@ -398,6 +398,17 @@ kroku nebo návrat ze skončeného vztahu aplikace odmítne.
 Skončení vztah nemaže. Zůstává dostupný pro pozdější doplatek, opravu, podání a
 dohledání tehdy platných údajů. Archivace jej pouze odklidí z aktivního workflow.
 
+**Odložený příjem po skončení.** Doplatek zúčtovaný v měsíci po skončení
+pracovního poměru (typicky odměna) potvrďte na kartě skončeného vztahu v části
+**Odložený příjem po skončení vztahu**: zvolte měsíc zúčtování a druh
+*Příjem po skončení zaměstnání (1)*. Mzdový běh pak příjem přijme, pojistné
+vypočte za měsíc zúčtování a měsíční hlášení JMHZ ho vykáže samostatným
+formulářem Odložený příjem s ELDP za tento měsíc (0 dnů, kód s „P“ na druhé
+pozici). Bez potvrzení běh příjem po skončení odmítne a z kontroly vás pošle
+přímo sem. Ostatní druhy odloženého příjmu (například doplatek za dřívější
+měsíce trvajícího vztahu) a odložený příjem z dohod podejte opravným hlášením
+na ePortálu ČSSZ.
+
 Oznamovací povinnosti vůči zdravotní pojišťovně se odvozují od **skutečného**
 nástupu, je-li vyplněný; teprve když není, použije se plánovaný. Vztah označený
 jako **Nenastoupil** ani archivovaný vztah už žádnou oznamovací povinnost

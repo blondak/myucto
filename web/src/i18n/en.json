@@ -4949,6 +4949,26 @@
         "hint": "For this rate the monthly report states the risk work hours and the risk categorisation code; the hours are the hours worked in the relationship.",
         "auto_category_4": "For risk employment the monthly report states risk categorisation 1 (category 4 work) and the risk work hours from the hours worked in the relationship."
       },
+      "deferred_income": {
+        "title": "Deferred income after the relationship ended",
+        "hint": "Income settled in a month after the relationship ended (for example a bonus paid later) is reported in the monthly report on the Deferred income form. Confirm it here for the settlement month, otherwise the payroll run rejects the income.",
+        "add": "Confirm deferred income",
+        "empty": "No deferred income is confirmed.",
+        "period": "Settlement month",
+        "period_hint": "The month in which you settle the income in the payroll run. Insurance is paid for this month.",
+        "period_invalid": "Deferred income belongs to a month after the relationship ended, {first} at the earliest.",
+        "type_label": "Kind of deferred income",
+        "type_hint": "The application handles income after the employment ended. Other kinds (for example back pay for earlier months of an ongoing relationship) are filed as a corrective report on the CSSZ ePortal.",
+        "type_1": "Income after the employment ended (1)",
+        "type_other": "Kind {code}",
+        "note": "Note",
+        "confirm": "Confirm",
+        "remove": "Cancel the confirmation",
+        "saved": "Deferred income is confirmed.",
+        "removed": "The deferred income confirmation is cancelled.",
+        "load_failed": "The deferred income confirmations could not be loaded.",
+        "save_failed": "The deferred income confirmation could not be saved."
+      },
       "jmhz_questions": {
         "title": "Questions for the monthly CSSZ report",
         "hint": "For the vast majority of employees the answer is no three times. You do not need to open this section.",

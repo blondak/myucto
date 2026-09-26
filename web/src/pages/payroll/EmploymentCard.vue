@@ -28,6 +28,7 @@ import { loadPayrollJmhzOptions } from '@/composables/usePayrollJmhzOptions'
 import { useToast } from '@/composables/useToast'
 import EmploymentAgendaPanel from './EmploymentAgendaPanel.vue'
 import EmploymentDimensionsPanel from './EmploymentDimensionsPanel.vue'
+import EmploymentDeferredIncomePanel from './EmploymentDeferredIncomePanel.vue'
 import EmploymentSurchargePolicyPanel from './EmploymentSurchargePolicyPanel.vue'
 import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
 import EmploymentJmhzIdentityPanel from './EmploymentJmhzIdentityPanel.vue'
@@ -240,13 +241,14 @@ const expanded = ref(!isClosed.value)
 const cardRoot = ref<HTMLElement | null>(null)
 
 async function focusSection(panel: string, field?: string): Promise<void> {
-  if (!['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist'].includes(panel)) return
+  if (!['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'deferred_income'].includes(panel)) return
   expanded.value = true
   await nextTick()
   const root = cardRoot.value
   if (!root) return
   if (field && revealField(fieldSelector(field), root)) return
   const selector = panel === 'employment_checklist' ? '[data-test="employment-checklist"]'
+    : panel === 'deferred_income' ? '[data-test="deferred-income"]'
     : panel === 'employment_terms' ? '[data-test="terms-office"]'
     : panel === 'jmhz_profile' ? '[data-test="jmhz-ordinary-profile"]'
       : '[data-panel-anchor="jmhz_identity"]'
@@ -1823,6 +1825,13 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
 
     <EmploymentSurchargePolicyPanel
       :employment-id="employment.id"
+      :can-write="canWrite"
+    />
+
+    <EmploymentDeferredIncomePanel
+      v-if="employment.end_date"
+      :employment-id="employment.id"
+      :end-date="employment.end_date"
       :can-write="canWrite"
     />
 

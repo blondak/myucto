@@ -200,6 +200,7 @@ final class PayrollRunSnapshotBuilder
             $employeeIds,
             $periodEnd,
         );
+        $deferredIncomes = $this->deferredIncomes($supplierId, $periodStart);
         $payoutRuleRows = $this->batch->payoutRules($supplierId, $employeeIds);
         $payoutAccountRows = $this->batch->payoutAccounts(
             $supplierId,
@@ -297,7 +298,12 @@ final class PayrollRunSnapshotBuilder
              * ale vztah, u kterého se docházka opravdu nevede (dohoda bez
              * evidence), tím běh nezastaví.
              */
-            if ($timeMonth === null) {
+            $deferredIncome = $deferredIncomes[$employmentId] ?? null;
+            // Odložený příjem se vyplácí po skončení vztahu, kdy žádná pracovní
+            // doba neexistuje; formulář JMHZ pro něj průběh zaměstnání nemá.
+            if ($deferredIncome !== null) {
+                // Bez kontroly pracovní doby, viz výše.
+            } elseif ($timeMonth === null) {
                 $validations[] = new PayrollRunValidation(
                     'warning',
                     'time_month_missing',
@@ -559,6 +565,9 @@ final class PayrollRunSnapshotBuilder
                 'inputs' => $inputs,
                 'risky_savings_evidence' => $riskySavingsEvidence,
                 'dimensions' => $this->dimensions($dimensionRows[$employmentId] ?? []),
+                // Potvrzený odložený příjem (JMHZ 10548) za tento měsíc; jen
+                // tam, kde ho účetní potvrdila, ostatní vstup se nemění.
+                ...($deferredIncome === null ? [] : ['deferred_income' => $deferredIncome]),
             ];
         }
         ksort($people, SORT_NUMERIC);
@@ -729,6 +738,21 @@ final class PayrollRunSnapshotBuilder
         }
 
         return (bool) $row['tax_declaration_signed'];
+    }
+
+    /**
+     * Potvrzení odloženého příjmu (JMHZ scénář 8) za měsíc po vztazích.
+     *
+     * @return array<int,array{deferred_type:string,note:?string,row_version:int}>
+     */
+    private function deferredIncomes(int $supplierId, string $periodStart): array
+    {
+        if (!$this->db->hasTable('payroll_employment_deferred_incomes')) {
+            return [];
+        }
+
+        return (new \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository($this->db))
+            ->forPeriod($supplierId, $periodStart);
     }
 
     /**

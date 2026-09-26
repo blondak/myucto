@@ -4949,6 +4949,26 @@
         "hint": "Měsíční hlášení vykazuje u této sazby hodiny rizikové práce a kód kategorizace rizika; hodiny se berou z odpracovaných hodin vztahu.",
         "auto_category_4": "Měsíční hlášení u rizikového zaměstnání vykáže kategorizaci rizika 1 (práce kategorie 4) a hodiny rizikové práce z odpracovaných hodin vztahu."
       },
+      "deferred_income": {
+        "title": "Odložený příjem po skončení vztahu",
+        "hint": "Příjem zúčtovaný v měsíci po skončení vztahu (například doplatek odměny) vykáže měsíční hlášení formulářem Odložený příjem. Potvrďte ho tady za měsíc zúčtování, jinak mzdový běh příjem odmítne.",
+        "add": "Potvrdit odložený příjem",
+        "empty": "Žádný odložený příjem není potvrzený.",
+        "period": "Měsíc zúčtování",
+        "period_hint": "Měsíc, ve kterém příjem zúčtujete ve mzdovém běhu. Pojistné se platí za tento měsíc.",
+        "period_invalid": "Odložený příjem patří až do měsíce po skončení vztahu, nejdřív {first}.",
+        "type_label": "Druh odloženého příjmu",
+        "type_hint": "Aplikace zpracuje příjem po skončení zaměstnání. Ostatní druhy (například doplatek za dřívější měsíce trvajícího vztahu) podejte opravným hlášením na ePortálu ČSSZ.",
+        "type_1": "Příjem po skončení zaměstnání (1)",
+        "type_other": "Druh {code}",
+        "note": "Poznámka",
+        "confirm": "Potvrdit",
+        "remove": "Zrušit potvrzení",
+        "saved": "Odložený příjem je potvrzený.",
+        "removed": "Potvrzení odloženého příjmu je zrušené.",
+        "load_failed": "Potvrzení odloženého příjmu se nepodařilo načíst.",
+        "save_failed": "Potvrzení odloženého příjmu se nepodařilo uložit."
+      },
       "jmhz_questions": {
         "title": "Otázky pro měsíční hlášení ČSSZ",
         "hint": "U drtivé většiny zaměstnanců je odpověď třikrát ne. Nemusíte tuhle část otevírat.",

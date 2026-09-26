@@ -38,6 +38,7 @@ use MyInvoice\Service\Payroll\SocialInsurance\SocialIncomeAttribution;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceRelationshipInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialJurisdictionEvidence;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialParticipationAggregationGroup;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPersonMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialRelationshipKindMapper;
@@ -593,6 +594,20 @@ final class PayrollRunStatutoryInputAssembler
             ) {
                 $attribution =
                     SocialIncomeAttribution::PostTerminationEndMonthVerified;
+            } elseif ($employmentTo !== null
+                && $employmentTo < $periodStart
+                && $mapping->aggregationGroup
+                    === SocialParticipationAggregationGroup::RegularRelationship
+                && self::deferredIncomeType($snapshot) === '1'
+            ) {
+                /*
+                 * Odložený příjem typu 1 potvrzený účetní (JMHZ scénář 8):
+                 * pravidla podání JMHZ, kap. 6 bod 1: pojistné se platí za
+                 * měsíc, kdy byl příjem zúčtován. U pracovního poměru účast
+                 * na výši příjmu nestojí, takže se nic zpětně nezakládá.
+                 */
+                $attribution =
+                    SocialIncomeAttribution::PostTerminationPaymentMonthVerified;
             } else {
                 $this->issue(
                     'social_insurance',
@@ -2423,6 +2438,20 @@ final class PayrollRunStatutoryInputAssembler
             }
         }
         return $result;
+    }
+
+    /**
+     * Typ odloženého příjmu (JMHZ 10548) potvrzený za vztah a měsíc,
+     * zmrazený ve vstupu běhu; `null` = nepotvrzeno.
+     *
+     * @param array<string,mixed> $snapshot
+     */
+    private static function deferredIncomeType(array $snapshot): ?string
+    {
+        $deferred = $snapshot['deferred_income'] ?? null;
+        $type = is_array($deferred) ? ($deferred['deferred_type'] ?? null) : null;
+
+        return is_string($type) ? $type : null;
     }
 
     /**

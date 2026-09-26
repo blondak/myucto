@@ -136,6 +136,14 @@ final class PayrollRunValidationDetailsTest extends TestCase
         }
     }
 
+    public function testPostTerminationIncomeLeadsToDeferredIncomeOnEmploymentCard(): void
+    {
+        $detail = PayrollRunIssueGuidance::describe('post_termination_income_attribution_unverified', 7, 9);
+
+        self::assertSame('/payroll/people?person=7&employment=9&panel=deferred_income', $detail['remediation_path']);
+        self::assertStringContainsString('Odložený příjem', $detail['message']);
+    }
+
     /**
      * Assembler hlásí tentýž problém vztahu v každé ze tří domén. Uložené
      * řádky se lišily jen neuloženým prefixem domény — účetní viděla tři

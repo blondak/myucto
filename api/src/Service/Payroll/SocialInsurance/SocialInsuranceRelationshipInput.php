@@ -65,7 +65,10 @@ final readonly class SocialInsuranceRelationshipInput
         }
         if (
             $activeInParticipationMonth
-            && $incomeAttribution === SocialIncomeAttribution::PostTerminationEndMonthVerified
+            && in_array($incomeAttribution, [
+                SocialIncomeAttribution::PostTerminationEndMonthVerified,
+                SocialIncomeAttribution::PostTerminationPaymentMonthVerified,
+            ], true)
         ) {
             throw new InvalidArgumentException(
                 'Post-termination attribution cannot be used for an active relationship.',

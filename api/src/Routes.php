@@ -107,6 +107,7 @@ use MyInvoice\Action\Payroll\PayrollOperationalHealthAction;
 use MyInvoice\Action\Payroll\PayrollOperationalReconciliationAction;
 use MyInvoice\Action\Payroll\PayrollJmhzEmployerAnnualEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
+use MyInvoice\Action\Payroll\PayrollDeferredIncomeAction;
 use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAgendaSummaryAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentDimensionAction;
@@ -1385,6 +1386,19 @@ final class Routes
             $g->patch(
                 '/employments/{id:[0-9]+}/terms/current',
                 [PayrollEmploymentAction::class, 'correctTerms'],
+            );
+            // Odložený příjem (JMHZ scénář 8) za skončený vztah a měsíc zúčtování.
+            $g->get(
+                '/employments/{id:[0-9]+}/deferred-income',
+                [PayrollDeferredIncomeAction::class, 'list'],
+            );
+            $g->put(
+                '/employments/{id:[0-9]+}/deferred-income/{period:[0-9]{4}-[0-9]{2}}',
+                [PayrollDeferredIncomeAction::class, 'save'],
+            );
+            $g->delete(
+                '/employments/{id:[0-9]+}/deferred-income/{period:[0-9]{4}-[0-9]{2}}',
+                [PayrollDeferredIncomeAction::class, 'delete'],
             );
             $g->patch('/employments/{id:[0-9]+}/code', [PayrollEmploymentAction::class, 'rename']);
             $g->patch('/employments/{id:[0-9]+}/meal-entitlement-basis', [PayrollEmploymentAction::class, 'setMealEntitlementBasis']);

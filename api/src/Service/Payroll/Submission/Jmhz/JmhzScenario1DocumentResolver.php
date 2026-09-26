@@ -139,7 +139,7 @@ final class JmhzScenario1DocumentResolver
                 || !array_is_list($scenarioSet)
                 || $scenarioSet === []
                 || array_values(array_unique($scenarioSet)) !== $scenarioSet
-                || array_diff($scenarioSet, ['scenario_1', 'scenario_3']) !== []
+                || array_diff($scenarioSet, ['scenario_1', 'scenario_3', 'scenario_8']) !== []
             ) {
                 return new JmhzScenario1Resolution(null, [
                     $this->blocker(
@@ -149,7 +149,9 @@ final class JmhzScenario1DocumentResolver
                     ),
                 ]);
             }
-            $scope['scenario_key'] = count($scenarioSet) === 1
+            // Odložený příjem (scénář 8) je jen jiný druh formuláře téhož
+            // řádného podání, dokument zůstává běžného profilu.
+            $scope['scenario_key'] = count($scenarioSet) === 1 && $scenarioSet[0] !== 'scenario_8'
                 ? $scenarioSet[0]
                 : 'scenario_1';
         } elseif (($scope['scenario_key'] ?? null) !== 'scenario_1') {

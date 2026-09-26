@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Action\Payroll\PayrollDeferredIncomeAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
@@ -13,6 +14,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Http\Message\ResponseInterface;
 use Slim\Psr7\Response;
 
 /**
@@ -233,6 +235,97 @@ final class PayrollJmhzConcurrencyFlowTest extends TestCase
         self::assertContains(
             'jmhz_temporary_assignment_user_missing',
             $this->preparationIssues('temporary-assignment-missing'),
+        );
+    }
+
+    /**
+     * Odložený příjem typu 1 (scénář 8): pracovní poměr skončil v červnu,
+     * v červenci se zúčtuje doplatek odměny. Pojistné se platí za měsíc
+     * zúčtování, ELDP má 0 dnů a kód s „P" na druhé pozici, formulář je
+     * `odlozenyPrijem` s typem 1 a obdobím hlášeného měsíce.
+     */
+    public function testPostTerminationBonusIsReportedAsDeferredIncome(): void
+    {
+        $person = $this->hire('Bohdan Odešlý', 'male', '1975-01-20');
+        $this->endEmployment($person['employment_id'], '2026-06-30');
+        $this->declareDeferredIncome($person['employment_id'], '1');
+        $this->pay($person, 1_500_000);
+
+        $xml = $this->submission('deferred-bonus');
+
+        self::assertSame(1, substr_count($xml, '</formularOsoby>'));
+        self::assertSame(1, preg_match('#<form:odlozenyPrijem[^>]*><form:typ>1</form:typ><form:identifikace>#', $xml));
+        self::assertStringContainsString(
+            '<form:eldpObdobi><form:obdobi><form:mesic>7</form:mesic><form:rok>2026</form:rok>'
+                . '<form:eldpSeznam><form:eldp><form:kod>1P+</form:kod>',
+            $xml,
+        );
+        self::assertStringContainsString('<form:pocetDnu>0</form:pocetDnu><form:vymerovaciZaklad>15000</form:vymerovaciZaklad>', $xml);
+        self::assertStringContainsString('<form:castkaOdvodPojistneho>15000</form:castkaOdvodPojistneho>', $xml);
+        // 7,1 % z 15 000 Kč = 1 065 Kč.
+        self::assertStringContainsString(
+            '<form:pojisteniZamestnanec><form:socialniPojisteni>1065</form:socialniPojisteni></form:pojisteniZamestnanec>',
+            $xml,
+        );
+        self::assertStringNotContainsString('<form:prubehZamestnani>', $xml);
+    }
+
+    /**
+     * Bez potvrzení druhu odloženého příjmu zůstává původní cesta: běh příjem
+     * po skončení vztahu odmítne a pošle účetní na kartu vztahu.
+     */
+    public function testPostTerminationBonusWithoutDeclarationStopsTheRun(): void
+    {
+        $person = $this->hire('Blahoslav Nepotvrzený', 'male', '1976-02-21');
+        $this->endEmployment($person['employment_id'], '2026-06-30');
+        $this->pay($person, 1_500_000);
+
+        $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, 'concurrency-deferred-missing');
+
+        self::assertNull($run['approved']);
+        self::assertSame(['statutory_calculation_manual_review'], array_column($run['blockers'], 'code'));
+        self::assertStringContainsString('v části Odložený příjem', (string) $run['blockers'][0]['message']);
+    }
+
+    public function testDeferredIncomeIsRefusedForRunningEmploymentAndUnsupportedType(): void
+    {
+        $running = $this->hire('Bořek Trvající', 'male', '1977-03-22');
+        self::assertSame(422, $this->saveDeferredIncome($running['employment_id'], '1')->getStatusCode());
+
+        $ended = $this->hire('Bronislav Skončený', 'male', '1978-04-23');
+        $this->endEmployment($ended['employment_id'], '2026-06-30');
+        self::assertSame(422, $this->saveDeferredIncome($ended['employment_id'], '2')->getStatusCode());
+        self::assertSame(0, (int) $this->scalar(
+            'SELECT COUNT(*) FROM payroll_employment_deferred_incomes WHERE supplier_id = ?',
+            [$this->supplierId],
+        ));
+    }
+
+    private function endEmployment(int $employmentId, string $endDate): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET status = "ended", end_date = ?
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$endDate, $this->supplierId, $employmentId]);
+    }
+
+    private function declareDeferredIncome(int $employmentId, string $type): void
+    {
+        $response = $this->saveDeferredIncome($employmentId, $type);
+        self::assertSame(200, $response->getStatusCode(), 'Zaseknutí: odložený příjem. ' . (string) $response->getBody());
+    }
+
+    private function saveDeferredIncome(int $employmentId, string $type): ResponseInterface
+    {
+        $action = $this->container->get(PayrollDeferredIncomeAction::class);
+        self::assertInstanceOf(PayrollDeferredIncomeAction::class, $action);
+
+        return $action->save(
+            $this->request('PUT', "/api/payroll/employments/{$employmentId}/deferred-income/" . self::PERIOD)
+                ->withParsedBody(['deferred_type' => $type, 'note' => 'Syntetický doplatek odměny.']),
+            new Response(),
+            ['id' => (string) $employmentId, 'period' => self::PERIOD],
         );
     }
 

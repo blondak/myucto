@@ -214,8 +214,8 @@ final class JmhzScenario1ControlEvaluator
             191, 192, 193, 211, 216, 227, 229, 232, 233, 235,
             236, 237, 240, 244, 248, 251,
             253, 255, 260, 265, 267, 269, 270, 271, 272, 273, 275, 282, 283, 284, 286,
-            296, 297, 298, 299, 300, 301, 302, 303, 304, 306, 307, 309, 310, 315, 328, 329, 330, 332,
-            335, 341, 342, 343, 354, 355,
+            296, 297, 298, 299, 300, 301, 302, 303, 304, 306, 307, 309, 310, 315, 328, 329, 330, 331, 332,
+            335, 336, 337, 338, 339, 341, 342, 343, 354, 355,
         ];
     }
 
@@ -343,6 +343,27 @@ final class JmhzScenario1ControlEvaluator
             137 => $this->discountReasonRequired($projection),
             138 => $this->shorterWorkingTimeRequiredForReason($projection),
             156 => $this->riskCategorizationFromCodebook($projection),
+            331 => $this->deferredIncomeTypeFromCodebook($projection),
+            336 => $this->deferredIncomeRegistryCheck(
+                $projection,
+                ['1', '2', '4', '5', '6'],
+                'Že je pracovněprávní vztah v rozhodném období již ukončený, ověří'
+                    . ' cJMHZ proti registru; aplikace odložený příjem připouští jen'
+                    . ' u vztahu skončeného před vykazovaným měsícem.',
+            ),
+            337 => $this->deferredIncomeRegistryCheck(
+                $projection,
+                ['3'],
+                'Že pracovněprávní vztah k poslednímu dni měsíce trvá, ověří cJMHZ'
+                    . ' proti registru.',
+            ),
+            338 => $this->deferredIncomeEldpCodeSecondPosition($projection),
+            339 => $this->deferredIncomeRegistryCheck(
+                $projection,
+                ['2', '3', '6'],
+                'Existenci pracovněprávního vztahu v měsíci odloženého příjmu'
+                    . ' ověří cJMHZ proti registru.',
+            ),
             158 => $this->discountReasonFromCodebook($projection),
             188 => $this->employerDiscountOnlyOnOneEmployment($projection),
             191 => $this->annualSettlementMonths($projection),
@@ -963,6 +984,96 @@ final class JmhzScenario1ControlEvaluator
                 );
             },
         );
+    }
+
+    /**
+     * Kontrola 331: typ odloženého příjmu (10548) z číselníku
+     * `typ_odlozeneho_prijmu` (1 až 6).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function deferredIncomeTypeFromCodebook(JmhzAttributeProjection $projection): array
+    {
+        return $this->againstCodebook(
+            $projection,
+            function (JmhzAttributeProjection $p): array {
+                $catalog = $this->codebooks;
+                if ($catalog === null) {
+                    return [JmhzControlVerdict::unverifiable(
+                        JmhzAttributeProjection::PART_FORM,
+                        'Číselník typů odloženého příjmu není k dispozici.',
+                    )];
+                }
+
+                return $this->perForm(
+                    $p,
+                    static function (JmhzAttributeScope $form) use ($catalog): ?string {
+                        $type = $form->value('10548');
+                        if ($type === null) {
+                            return null;
+                        }
+                        try {
+                            $catalog->requireValue('typ_odlozeneho_prijmu', $type);
+                        } catch (JmhzCodebookValueException | JmhzCodebookUnavailableException $exception) {
+                            return $exception->getMessage();
+                        }
+
+                        return null;
+                    },
+                );
+            },
+        );
+    }
+
+    /**
+     * Kontroly 336, 337 a 339: vazba odloženého příjmu na stav pracovněprávního
+     * vztahu v registru ČSSZ (ukončený, trvající, existující v měsíci). Stav
+     * registru v hlášení není, rozhodne cJMHZ. Kontrola se týká jen typů
+     * 10548, které katalog vyjmenovává; u ostatních se neuplatní.
+     *
+     * @param list<string> $types
+     * @return list<JmhzControlVerdict>
+     */
+    private function deferredIncomeRegistryCheck(
+        JmhzAttributeProjection $projection,
+        array $types,
+        string $reason,
+    ): array {
+        foreach ($projection->forms() as $form) {
+            if (in_array($form->value('10548'), $types, true)) {
+                return [JmhzControlVerdict::notEvaluable(JmhzAttributeProjection::PART_FORM, $reason)];
+            }
+        }
+
+        return [JmhzControlVerdict::notApplicable(
+            JmhzAttributeProjection::PART_FORM,
+            'Podání neobsahuje odložený příjem typu, kterého se kontrola týká.',
+        )];
+    }
+
+    /**
+     * Kontrola 338: u odloženého příjmu typu 1 má kód ELDP (10240) na druhé
+     * pozici „P" (dodatečné zúčtování příjmů po skončení výdělečné činnosti),
+     * nebo kód chybí. První pozice je druh činnosti o jednom nebo dvou znacích
+     * („1P+", „ZAP+"), druhá je proto vždy předposlední znak.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function deferredIncomeEldpCodeSecondPosition(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            if ($form->value('10548') !== '1') {
+                return null;
+            }
+            foreach ($form->all('10240') as $occurrence) {
+                $code = (string) $occurrence->value;
+                if (strlen($code) < 3 || $code[strlen($code) - 2] !== 'P') {
+                    return "Kód ELDP {$code} odloženého příjmu typu 1 nemá na druhé pozici „P“.";
+                }
+            }
+
+            return null;
+        });
     }
 
     /**

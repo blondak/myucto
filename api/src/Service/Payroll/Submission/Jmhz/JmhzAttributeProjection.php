@@ -244,6 +244,15 @@ final class JmhzAttributeProjection
      */
     private function pathToAttributeOrNull(string $path): ?string
     {
+        /*
+         * Formulář odloženého příjmu nese ELDP po obdobích
+         * (`pojisteni.eldpObdobi.obdobi.eldpSeznam…`), slovník ale atributy
+         * ELDP vede jedinou cestou `pojisteni.eldpSeznam…`. Období je jen obal
+         * se svým měsícem a rokem (10537/10538); atribut uvnitř je tentýž.
+         */
+        if (str_contains($path, 'eldpObdobi.obdobi.eldpSeznam.')) {
+            $path = str_replace('eldpObdobi.obdobi.eldpSeznam.', 'eldpSeznam.', $path);
+        }
         $segments = explode('.', $path);
         for ($offset = 0; $offset < count($segments); ++$offset) {
             $candidate = implode('.', array_slice($segments, $offset));

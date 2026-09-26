@@ -439,7 +439,7 @@ final readonly class JmhzPreparationSnapshotService
                         $employeeId,
                         $employmentId,
                         $environment,
-                        $periodEnd,
+                        self::identityDate($employment, $periodEnd),
                     );
                     if (is_string($identity)) {
                         $issues[] = self::identityIssue($employmentId, $identity);
@@ -540,7 +540,7 @@ final readonly class JmhzPreparationSnapshotService
                         $employeeId,
                         $employmentId,
                         $environment,
-                        $periodEnd,
+                        self::identityDate($employment, $periodEnd),
                     );
                     if (is_string($identity)) {
                         $issues[] = self::identityIssue($employmentId, $identity);
@@ -673,6 +673,21 @@ final readonly class JmhzPreparationSnapshotService
             'person_external_identifier' => $jmhz['person_external_identifier'],
             'jmhz_employment_external_identifier' => $jmhz['employment_external_identifier'],
         ];
+    }
+
+    /**
+     * Rozhodné datum identity vztahu: konec měsíce, nebo den skončení vztahu,
+     * skončil-li dřív. Registrační identita platí jen v trvání vztahu, takže
+     * vztah skončený v měsíci nebo před ním (odložený příjem, JMHZ scénář 8)
+     * by se ke konci měsíce ověřit nedal.
+     */
+    private static function identityDate(mixed $employment, string $periodEnd): string
+    {
+        $endDate = is_array($employment) ? ($employment['end_date'] ?? null) : null;
+
+        return is_string($endDate) && $endDate !== '' && $endDate < $periodEnd
+            ? $endDate
+            : $periodEnd;
     }
 
     /** @return array<string,mixed>|null */

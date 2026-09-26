@@ -745,11 +745,48 @@ final class JmhzScenario1XmlSerializer
         return match ($selector['scenario_key'] ?? null) {
             'scenario_1' => $this->bezPriznaku($dom, $summary, $employment),
             'scenario_3' => $this->cinnostKs($dom, $summary, $employment),
+            'scenario_8' => $this->odlozenyPrijem($dom, $summary, $employment),
             default => $this->invalid(
                 'jmhz_xml_scenario_unsupported',
                 'Součást nepatří do podporovaného scénáře JMHZ.',
             ),
         };
+    }
+
+    /**
+     * Odložený příjem (scénář 8, `formOdlozenyPrijem.xsd`): příjem zúčtovaný
+     * po skončení pracovního vztahu. Formulář nemá vykonávanou pozici, průběh
+     * zaměstnání ani mzdu; souhrnná data (na primárním formuláři), pojištění
+     * s ELDP po obdobích (10537/10538) a daň ano. Typ 10548 je první element.
+     *
+     * @param array<string,mixed> $summary
+     * @param array<string,mixed> $employment
+     */
+    private function odlozenyPrijem(
+        DOMDocument $dom,
+        array $summary,
+        array $employment,
+    ): DOMElement {
+        $deferred = $this->object(
+            $this->object($employment['eldp'] ?? null)['deferred_income'] ?? null,
+        );
+        $type = $this->string($deferred['type'] ?? null, '10548');
+        if (!in_array($type, ['1', '2', '3', '4', '5', '6'], true)) {
+            $this->invalid(
+                'jmhz_xml_deferred_income_type_invalid',
+                'Typ odloženého příjmu musí být z číselníku ČSSZ (1 až 6).',
+            );
+        }
+        $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:odlozenyPrijem');
+        $this->text($dom, $node, JmhzSchemaCatalog::NS_FORM, 'form:typ', $type);
+        $node->appendChild($this->identification($dom, $employment));
+        if ($this->bool($employment['primary'] ?? null, '10495')) {
+            $node->appendChild($this->employeeSummary($dom, $summary));
+        }
+        $node->appendChild($this->insurance($dom, $summary, $employment, false, $deferred));
+        $node->appendChild($this->income($dom, $summary, $employment));
+
+        return $node;
     }
 
     /**
@@ -1552,32 +1589,37 @@ final class JmhzScenario1XmlSerializer
     /**
      * @param array<string,mixed> $summary
      * @param array<string,mixed> $employment
+     * @param array<string,mixed>|null $deferred odložený příjem (scénář 8)
      */
     private function insurance(
         DOMDocument $dom,
         array $summary,
         array $employment,
         bool $cinnostKs = false,
+        ?array $deferred = null,
     ): DOMElement {
         $eldp = $this->object($employment['eldp'] ?? null);
-        $interval = $this->object($eldp['insurance_interval'] ?? null);
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:pojisteni');
-        $duration = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:trvani');
-        $this->text(
-            $dom,
-            $duration,
-            JmhzSchemaCatalog::NS_FORM,
-            'form:pojisteniOd',
-            $this->date($interval['insurance_from'] ?? null, '10354'),
-        );
-        $this->text(
-            $dom,
-            $duration,
-            JmhzSchemaCatalog::NS_FORM,
-            'form:pojisteniDo',
-            $this->date($interval['insurance_to'] ?? null, '10355'),
-        );
-        $node->appendChild($duration);
+        // Odložený příjem trvání pojištění nevykazuje: vztah v měsíci netrvá.
+        if ($deferred === null) {
+            $interval = $this->object($eldp['insurance_interval'] ?? null);
+            $duration = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:trvani');
+            $this->text(
+                $dom,
+                $duration,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:pojisteniOd',
+                $this->date($interval['insurance_from'] ?? null, '10354'),
+            );
+            $this->text(
+                $dom,
+                $duration,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:pojisteniDo',
+                $this->date($interval['insurance_to'] ?? null, '10355'),
+            );
+            $node->appendChild($duration);
+        }
 
         $social = $this->object($employment['social_base'] ?? null);
         $amount = is_int($social['assessment_base_czk'] ?? null)
@@ -1688,7 +1730,42 @@ final class JmhzScenario1XmlSerializer
             $this->appendEldpExcludedDays($dom, $entry, $section, $code);
             $list->appendChild($entry);
         }
-        $node->appendChild($list);
+        if ($deferred === null) {
+            $node->appendChild($list);
+        } else {
+            /*
+             * Odložený příjem vykazuje ELDP po obdobích: měsíc (10537) a rok
+             * (10538), za který je hlášeno, a jeho ELDP. Typ 1 má jediné
+             * období, měsíc zúčtování (pravidla podání JMHZ, kap. 6).
+             */
+            $periods = $this->rows($deferred['periods'] ?? null);
+            if (count($periods) !== 1) {
+                $this->invalid(
+                    'jmhz_xml_deferred_income_periods_unsupported',
+                    'Odložený příjem typu 1 nese právě jedno období ELDP.',
+                );
+            }
+            $block = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:eldpObdobi');
+            $period = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:obdobi');
+            $month = $this->int($periods[0]['month'] ?? null, '10537');
+            if ($month < 1 || $month > 12) {
+                $this->invalid(
+                    'jmhz_xml_deferred_income_period_invalid',
+                    'Měsíc odloženého příjmu musí být 1 až 12.',
+                );
+            }
+            $this->text($dom, $period, JmhzSchemaCatalog::NS_FORM, 'form:mesic', (string) $month);
+            $this->text(
+                $dom,
+                $period,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:rok',
+                (string) $this->int($periods[0]['year'] ?? null, '10538'),
+            );
+            $period->appendChild($list);
+            $block->appendChild($period);
+            $node->appendChild($block);
+        }
 
         // Výsledek s pojistným po vztazích: každý účastný vztah nese své
         // pojistné na svém formuláři (`social_contributions`), kontrola 12 pak

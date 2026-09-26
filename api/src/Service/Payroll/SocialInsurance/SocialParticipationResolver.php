@@ -213,7 +213,11 @@ final class SocialParticipationResolver
         }
 
         return $fact->relationship->incomeAttribution ===
-            SocialIncomeAttribution::PostTerminationEndMonthVerified;
+            SocialIncomeAttribution::PostTerminationEndMonthVerified
+            || ($fact->relationship->incomeAttribution
+                    === SocialIncomeAttribution::PostTerminationPaymentMonthVerified
+                && $fact->relationship->participationAggregationGroup
+                    === SocialParticipationAggregationGroup::RegularRelationship);
     }
 
     /** @param list<SocialRelationshipFacts> $facts */
