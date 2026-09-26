@@ -252,8 +252,10 @@ final class JmhzExternalCodebookCatalog
      * Kdyby si pravidlo každý opsal, mohl by náhled slibovat „ověřeno" tam,
      * kde příprava podání zastaví.
      *
-     * Uložená provenience u podmínek je doklad navíc: když je, musí být
-     * načtitelná (a úplná — půl provenience není provenience). Když není,
+     * Uložená provenience u podmínek je doklad navíc: když je, musí patřit
+     * registrovanému balíčku (a být úplná — půl provenience není provenience);
+     * zastaralý otisk téhož balíčku po připnutí nové verze specifikace ověření
+     * pro období neruší. Když není,
      * rozhoduje jen platnost obce a státu v číselníku pro začátek i konec
      * období; vztah starší než číselníky ČSSZ ji mít nemůže.
      *
@@ -274,7 +276,14 @@ final class JmhzExternalCodebookCatalog
         if (($overlayKey === null) !== ($manifestSha256 === null)) {
             return null;
         }
+        // Otisk balíčku se mění s každým připnutím nové verze specifikace
+        // (řetěz otisků manifestů), obsah číselníku ne. Provenience, kterou
+        // zapsal starší otisk TÉHOŽ registrovaného balíčku, proto není podvrh,
+        // jen zastaralý otisk — a ověření pro období níž proběhne stejně
+        // proti číselníku, který období pokrývá. Jinak by každé přepnutí verze
+        // specifikace zablokovalo měsíční hlášení všem převzatým vztahům.
         if ($overlayKey !== null && $manifestSha256 !== null
+            && !isset(self::PACKAGES[$overlayKey])
             && !$this->hasLoadableIdentity($overlayKey, $manifestSha256)
         ) {
             return null;

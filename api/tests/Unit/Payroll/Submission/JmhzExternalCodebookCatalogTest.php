@@ -100,6 +100,35 @@ final class JmhzExternalCodebookCatalogTest extends TestCase
         ));
     }
 
+    /**
+     * Připnutí nové verze specifikace mění otisk manifestu registrovaného
+     * balíčku. Pracoviště převzaté dřív (se starším otiskem) muselo dál projít
+     * ověřením pro období — jinak by každé přepnutí verze zablokovalo měsíční
+     * hlášení všem převzatým vztahům. Neznámý balíček ani neplatná obec projít
+     * nesmí.
+     */
+    public function testStaleManifestHashOfRegisteredPackageStillVerifiesThePeriod(): void
+    {
+        $catalog = $this->catalog();
+        $stale = str_repeat('3', 64);
+
+        self::assertNotNull($catalog->workplaceProvenanceForPeriod(
+            '554782', 'Hlavní město Praha', 'CZ',
+            JmhzExternalCodebookCatalog::AUGUST_2026_OVERLAY_KEY, $stale,
+            '2026-09-01', '2026-09-30',
+        ));
+        self::assertNull($catalog->workplaceProvenanceForPeriod(
+            '554782', 'Hlavní město Praha', 'CZ',
+            'jmhz-external-codebooks-neexistujici-v1', $stale,
+            '2026-09-01', '2026-09-30',
+        ));
+        self::assertNull($catalog->workplaceProvenanceForPeriod(
+            '554782', 'Praha', 'CZ',
+            JmhzExternalCodebookCatalog::AUGUST_2026_OVERLAY_KEY, $stale,
+            '2026-09-01', '2026-09-30',
+        ));
+    }
+
     public function testKnownValueRejectsTermBeforeOverlayEffectivity(): void
     {
         $this->expectException(JmhzCodebookUnavailableException::class);
