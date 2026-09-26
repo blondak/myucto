@@ -68,7 +68,7 @@ function mountPanel() {
     props: { environment: 'production' },
     global: {
       stubs: {
-        RouterLink: { props: ['to'], template: '<a :data-to="to"><slot /></a>' },
+        RouterLink: { props: ['to'], template: '<a :data-to="typeof to === \'string\' ? to : JSON.stringify(to)"><slot /></a>' },
       },
     },
   })
@@ -510,6 +510,7 @@ describe('PayrollMonthlyChecklistPanel', () => {
     expect(wrapper.find('[data-test="monthly-checklist-error"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="monthly-checklist-prepare-error"]').text())
       .toContain('nope')
+    expect(wrapper.find('[data-test="monthly-checklist-external-link"]').exists()).toBe(false)
     expect(m.push).not.toHaveBeenCalled()
   })
 
@@ -550,5 +551,32 @@ describe('PayrollMonthlyChecklistPanel', () => {
       confirm_late_discount: true,
     })
     expect(m.push).toHaveBeenCalledWith('/payroll/submissions/jmhz')
+    expect(wrapper.find('[data-test="monthly-checklist-external-link"]').exists()).toBe(false)
+  })
+
+  /*
+   * Měsíc, za který řádné hlášení podal předchozí program: hláška serveru říká
+   * CO a PROČ, odkaz vede tam, kde se záznam ověří a případně odebere.
+   */
+  it('u měsíce podaného předchozím programem nabídne odkaz na převzatá podání', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({
+      summary: { total: 1, send: 0, generate: 1, manual: 0, done: 0 },
+      items: [agendaDutyItem()],
+    }))
+    m.prepareItem.mockRejectedValue({
+      response: { data: { error: { code: 'jmhz_period_submitted_externally', message: 'Za období 07/2026 už řádné měsíční hlášení podal předchozí mzdový program.' } } },
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('tbody [data-test="monthly-checklist-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="monthly-checklist-late-discount"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="monthly-checklist-prepare-error"]').text())
+      .toContain('podal předchozí mzdový program')
+    const link = wrapper.get('[data-test="monthly-checklist-external-link"]')
+    expect(link.text()).toContain('payroll.external_jmhz.open_history')
+    expect(link.attributes('data-to')).toContain('external-submissions')
   })
 })

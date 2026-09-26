@@ -883,7 +883,8 @@
         "1896_bank_document_series.sql",
         "1898_card_clearing_restore.sql",
         "1899_journal_red_storno.sql",
-        "1900_invoice_rounding_mode.sql"
+        "1900_invoice_rounding_mode.sql",
+        "1901_payroll_external_jmhz_submissions.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -10238,6 +10239,91 @@
             },
             "checks": {
                 "chk_payroll_erasure_revocation": "`revoked_at` is null and `revoked_by` is null or `revoked_at` is not null"
+            }
+        },
+        "payroll_external_jmhz_submission_forms": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "employee_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "employment_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "form_guid": "char(36) NULL DEFAULT NULL COLLATE ascii_bin",
+                "form_type": "varchar(16) NULL DEFAULT NULL COLLATE ascii_bin",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "payload_ciphertext": "longtext NOT NULL",
+                "payload_hash": "binary(32) NOT NULL",
+                "payload_sha256": "char(64) NOT NULL COLLATE ascii_bin",
+                "position": "int(10) unsigned NOT NULL",
+                "source_relation_ref": "varchar(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "submission_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_external_jmhz_form_employee": "BTREE (employee_id)",
+                "fk_payroll_external_jmhz_form_employment": "BTREE (employment_id)",
+                "idx_payroll_external_jmhz_form_employment": "BTREE (supplier_id, employment_id)",
+                "idx_payroll_external_jmhz_form_supplier": "BTREE (supplier_id, submission_id)",
+                "uq_payroll_external_jmhz_form_position": "UNIQUE BTREE (submission_id, position)"
+            },
+            "foreign_keys": {
+                "fk_payroll_external_jmhz_form_employee": "(employee_id) -> payroll_employees (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_external_jmhz_form_employment": "(employment_id) -> payroll_employments (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_external_jmhz_form_submission": "(supplier_id, submission_id) -> payroll_external_jmhz_submissions (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_payroll_external_jmhz_form_guid": "`form_guid` is null or `form_guid` regexp '^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$'",
+                "chk_payroll_external_jmhz_form_payload": "`payload_sha256` regexp '^[0-9a-f]{64}$' and char_length(`payload_ciphertext`) > 0"
+            }
+        },
+        "payroll_external_jmhz_submissions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "accepted_at": "datetime NULL DEFAULT NULL",
+                "corrected_source_key": "varchar(191) NULL DEFAULT NULL COLLATE ascii_bin",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "document_kind": "enum('monthly','registration') NOT NULL DEFAULT 'monthly'",
+                "environment": "enum('production','test') NOT NULL DEFAULT 'production'",
+                "file_name": "varchar(255) NULL DEFAULT NULL",
+                "filled_at": "datetime NULL DEFAULT NULL",
+                "form_count": "int(10) unsigned NOT NULL DEFAULT 0",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "imported_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "payload_ciphertext": "longtext NOT NULL",
+                "payload_hash": "binary(32) NOT NULL",
+                "payload_sha256": "char(64) NOT NULL COLLATE ascii_bin",
+                "period": "char(7) NULL DEFAULT NULL COLLATE ascii_bin",
+                "program": "varchar(100) NULL DEFAULT NULL",
+                "source": "enum('pamica','jmhz_xml') NOT NULL",
+                "source_key": "varchar(191) NOT NULL COLLATE ascii_bin",
+                "status": "enum('sent','not_sent') NOT NULL",
+                "submission_guid": "char(36) NULL DEFAULT NULL COLLATE ascii_bin",
+                "submission_type": "char(1) NULL DEFAULT NULL COLLATE ascii_bin",
+                "submitted_at": "datetime NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_external_jmhz_importer": "BTREE (imported_by)",
+                "idx_payroll_external_jmhz_period": "BTREE (supplier_id, environment, document_kind, period)",
+                "uq_payroll_external_jmhz_source": "UNIQUE BTREE (supplier_id, environment, source, source_key)",
+                "uq_payroll_external_jmhz_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_external_jmhz_importer": "(imported_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_external_jmhz_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_payroll_external_jmhz_guid": "`submission_guid` is null or `submission_guid` regexp '^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$'",
+                "chk_payroll_external_jmhz_kind_period": "`document_kind` = 'registration' or `period` is not null",
+                "chk_payroll_external_jmhz_payload": "`payload_sha256` regexp '^[0-9a-f]{64}$' and char_length(`payload_ciphertext`) > 0",
+                "chk_payroll_external_jmhz_period": "`period` is null or `period` regexp '^[0-9]{4}-(0[1-9]|1[0-2])$'",
+                "chk_payroll_external_jmhz_type": "`submission_type` is null or `submission_type` in ('R','O','S')"
             }
         },
         "payroll_generated_document_hidden": {

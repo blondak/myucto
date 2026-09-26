@@ -20,6 +20,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelationshipDetailPolicy;
 
 /**
  * Zápis převzatého PRACOVNÍHO VZTAHU ({@see PayrollTakeoverEmployment}): sjednaná mzda
@@ -315,6 +316,84 @@ final class PayrollTakeoverEmploymentWriter
         }
         $this->correctTerms($supplierId, $employmentId, $current, $changes, $userId, $policy);
         return ['workplace' => 1];
+    }
+
+    /** Pole podmínek, která doplní {@see self::fillTerms()}; stav `unverified` se bere jako nevyplněný. */
+    private const FILLABLE_STATUS_TERMS = [
+        'jmhz_apz_contribution_status',
+        'jmhz_functional_benefits_status',
+        'jmhz_temporary_assignment_status',
+    ];
+    private const FILLABLE_TEXT_TERMS = ['cz_isco_code', 'activity_code', 'jmhz_relationship_detail_code', 'regular_workplace'];
+
+    /**
+     * Údaje podmínek vztahu, které zdroj dokládá z podaných hlášení a registrací (vykonávaná
+     * pozice, úvazek, druh činnosti, CZ-ISCO), do platné verze podmínek - jen pole, která
+     * verze ještě nemá. Vyplněné pole se nepřepisuje: stav příznaku JMHZ jen z `unverified`,
+     * týdenní doba s úvazkem jen tam, kde týdenní doba chybí, pracoviště jen bez kódu obce
+     * a se shodným místem výkonu práce (jako {@see self::workplace()}).
+     *
+     * @param array<string,?string> $desired pole `payroll_employment_terms` => hodnota
+     * @return array<string,int> doplněná pole => 1
+     */
+    public function fillTerms(int $supplierId, int $employmentId, array $desired, ?int $userId, PayrollTakeoverPolicy $policy): array
+    {
+        if ($desired === []) {
+            return [];
+        }
+        $current = $this->employments->currentTerms($supplierId, $employmentId)
+            ?? throw new \DomainException('pracovní vztah nemá verzi sjednaných podmínek.');
+        $empty = static fn (mixed $value): bool => $value === null || trim((string) $value) === '';
+        $changes = [];
+        foreach (self::FILLABLE_STATUS_TERMS as $field) {
+            if (isset($desired[$field]) && in_array($desired[$field], ['yes', 'no'], true)
+                && ($current[$field] ?? 'unverified') === 'unverified'
+            ) {
+                $changes[$field] = $desired[$field];
+                if ($field === 'jmhz_apz_contribution_status') {
+                    $changes['jmhz_apz_instrument_code'] = $desired['jmhz_apz_instrument_code'] ?? null;
+                }
+            }
+        }
+        foreach (self::FILLABLE_TEXT_TERMS as $field) {
+            if (!$empty($desired[$field] ?? null) && $empty($current[$field] ?? null)) {
+                $changes[$field] = $desired[$field];
+            }
+        }
+        // Upřesnění vztahu jen u druhu činnosti, který ho připouští (jediné pravidlo,
+        // podle kterého ho kontroluje i karta vztahu a registrace).
+        $activity = (string) ($changes['activity_code'] ?? $current['activity_code'] ?? '');
+        if (isset($changes['jmhz_relationship_detail_code'])
+            && ($activity === '' || PayrollRegistrationRelationshipDetailPolicy::modeForActivity($activity)
+                === PayrollRegistrationRelationshipDetailPolicy::MODE_FORBIDDEN)
+        ) {
+            unset($changes['jmhz_relationship_detail_code']);
+        }
+        if (!$empty($desired['weekly_hours'] ?? null) && $empty($current['weekly_hours'] ?? null)) {
+            $changes['weekly_hours'] = $desired['weekly_hours'];
+            if (!$empty($desired['workload_basis_points'] ?? null)) {
+                $changes['workload_basis_points'] = (int) $desired['workload_basis_points'];
+            }
+        }
+        $place = trim((string) ($current['work_place'] ?? ''));
+        if (!$empty($desired['jmhz_workplace_municipality_code'] ?? null) && !$empty($desired['work_place'] ?? null)
+            && $empty($current['jmhz_workplace_municipality_code'] ?? null)
+            && ($place === '' || mb_strtolower($place) === mb_strtolower((string) $desired['work_place']))
+        ) {
+            $changes['work_place'] = $place !== '' ? $place : $desired['work_place'];
+            $changes['jmhz_workplace_municipality_code'] = $desired['jmhz_workplace_municipality_code'];
+            $changes['jmhz_workplace_country_code'] = $desired['jmhz_workplace_country_code'] ?? 'CZ';
+        }
+        if ($changes === []) {
+            return [];
+        }
+        $this->correctTerms($supplierId, $employmentId, $current, $changes, $userId, $policy);
+        $counts = [];
+        foreach (array_keys($changes) as $field) {
+            $counts['terms_' . $field] = 1;
+        }
+
+        return $counts;
     }
 
     /**

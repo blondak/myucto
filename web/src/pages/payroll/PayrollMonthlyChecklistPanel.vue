@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { apiErrorCode, apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage, externalJmhzSubmissionTarget } from '@/api/errors'
 import { PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION } from '@/api/payrollTransportCodes'
 import {
   payrollApi,
@@ -65,6 +65,8 @@ const preparing = ref('')
 const prepareError = ref<Record<string, string>>({})
 /** Varování kontroly 290 čekající na potvrzení, klíčované položkou. */
 const lateDiscount = ref<Record<string, string>>({})
+/** Proklik k chybě přípravy (měsíc podaný předchozím programem → přehled převzatých podání). */
+const prepareErrorTarget = ref<Record<string, ReturnType<typeof externalJmhzSubmissionTarget>>>({})
 
 const items = computed(() => response.value?.items ?? [])
 const summary = computed(() => response.value?.summary ?? {
@@ -173,6 +175,7 @@ async function prepare(item: PayrollMonthlyChecklistItem, confirmLateDiscount = 
   preparing.value = item.key
   prepareError.value = { ...prepareError.value, [item.key]: '' }
   lateDiscount.value = { ...lateDiscount.value, [item.key]: '' }
+  prepareErrorTarget.value = { ...prepareErrorTarget.value, [item.key]: null }
   try {
     const result = await payrollApi.prepareMonthlyChecklistItem(
       props.environment,
@@ -190,6 +193,7 @@ async function prepare(item: PayrollMonthlyChecklistItem, confirmLateDiscount = 
       }
       return
     }
+    prepareErrorTarget.value = { ...prepareErrorTarget.value, [item.key]: externalJmhzSubmissionTarget(exception) }
     prepareError.value = {
       ...prepareError.value,
       [item.key]: apiErrorMessage(
@@ -427,6 +431,14 @@ onMounted(load)
                       data-test="monthly-checklist-prepare-error"
                     >
                       {{ prepareError[item.key] }}
+                      <RouterLink
+                        v-if="prepareErrorTarget[item.key]"
+                        :to="prepareErrorTarget[item.key]!"
+                        class="mt-1 block font-medium text-payroll-600 underline hover:text-payroll-700"
+                        data-test="monthly-checklist-external-link"
+                      >
+                        {{ t('payroll.external_jmhz.open_history') }}
+                      </RouterLink>
                     </p>
                     <PayrollLateDiscountConfirm
                       v-if="lateDiscount[item.key]"
@@ -507,6 +519,13 @@ onMounted(load)
                   role="alert"
                 >
                   {{ prepareError[item.key] }}
+                  <RouterLink
+                    v-if="prepareErrorTarget[item.key]"
+                    :to="prepareErrorTarget[item.key]!"
+                    class="mt-1 block font-medium text-payroll-600 underline hover:text-payroll-700"
+                  >
+                    {{ t('payroll.external_jmhz.open_history') }}
+                  </RouterLink>
                 </p>
                 <PayrollLateDiscountConfirm
                   v-if="lateDiscount[item.key]"

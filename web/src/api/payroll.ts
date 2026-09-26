@@ -9171,4 +9171,38 @@ export const payrollApi = {
       },
     ).then(response => response.data)
   },
+  /**
+   * Podání, která za firmu podal předchozí mzdový program (převod z PAMICA,
+   * nahrané XML hlášení). Bez obsahu podání — ten leží zapečetěný na serveru.
+   */
+  jmhzExternalSubmissions: (environment: PayrollJmhzTransportEnvironment) =>
+    api.get<{ environment: PayrollJmhzTransportEnvironment; items: PayrollJmhzExternalSubmission[] }>(
+      '/payroll/submissions/jmhz-external',
+      { params: { environment } },
+    ).then(response => response.data),
+  /** Odebere záznam z historie převzatých podání (neodpovídá skutečnosti). */
+  deleteJmhzExternalSubmission: (id: number, environment: PayrollJmhzTransportEnvironment) =>
+    api.delete<{ deleted: boolean; id: number }>(
+      `/payroll/submissions/jmhz-external/${id}`,
+      { params: { environment } },
+    ).then(response => response.data),
+}
+
+/** Podání ČSSZ předchozím mzdovým programem (historie převzatých podání). */
+export interface PayrollJmhzExternalSubmission {
+  id: number
+  source: 'pamica' | 'jmhz_xml'
+  document_kind: 'monthly' | 'registration'
+  period: string | null
+  submission_type: 'R' | 'O' | 'S' | null
+  submission_guid: string | null
+  status: 'sent' | 'not_sent'
+  filled_at: string | null
+  submitted_at: string | null
+  accepted_at: string | null
+  form_count: number
+  matched_forms: number
+  program: string | null
+  file_name: string | null
+  updated_at: string | null
 }

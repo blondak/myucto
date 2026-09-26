@@ -98,7 +98,13 @@ final class PayrollMonthlyChecklistPrepareAction
                 ($body['confirm_late_discount'] ?? false) === true,
             );
         } catch (JmhzXmlException $exception) {
-            $code = $exception->validationCode === JmhzSubmissionBridgeService::LATE_DISCOUNT_CONFIRMATION_CODE
+            // Potvrzení slevy po lhůtě a měsíc podaný předchozím programem nesou
+            // vlastní kód: přehled podle něj nabídne potvrzení, resp. odkaz na
+            // historii převzatých podání.
+            $code = in_array($exception->validationCode, [
+                JmhzSubmissionBridgeService::LATE_DISCOUNT_CONFIRMATION_CODE,
+                'jmhz_period_submitted_externally',
+            ], true)
                 ? $exception->validationCode
                 : 'conflict';
 

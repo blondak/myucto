@@ -42,6 +42,7 @@ final class PohodaPayrollImporter
     public const STEP_PROFILE = 'payroll_profile';
     public const STEP_MONTHS = 'payroll_months';
     public const STEP_PEOPLE = 'payroll_people';
+    public const STEP_JMHZ = 'payroll_jmhz';
     public const STEP_DEDUCTIONS = 'payroll_deductions';
     public const STEP_SICKNESS = 'payroll_sickness';
     public const STEP_POSTING_MAP = 'payroll_posting_map';
@@ -60,6 +61,7 @@ final class PohodaPayrollImporter
         private readonly PayrollMigrationReferenceTotalsWriter $referenceTotals,
         private readonly PayrollPostingMapProposalService $postingMap,
         private readonly PayrollMigrationModuleSetup $moduleSetup,
+        private readonly PohodaPayrollJmhzWriter $jmhz,
     ) {}
 
     /**
@@ -87,8 +89,8 @@ final class PohodaPayrollImporter
     /** @return list<string> */
     public static function stepKeys(): array
     {
-        return [self::STEP_PREFLIGHT, self::STEP_PROFILE, self::STEP_MONTHS, self::STEP_PEOPLE, self::STEP_DEDUCTIONS,
-            self::STEP_SICKNESS, self::STEP_POSTING_MAP];
+        return [self::STEP_PREFLIGHT, self::STEP_PROFILE, self::STEP_MONTHS, self::STEP_PEOPLE, self::STEP_JMHZ,
+            self::STEP_DEDUCTIONS, self::STEP_SICKNESS, self::STEP_POSTING_MAP];
     }
 
     /**
@@ -198,6 +200,9 @@ final class PohodaPayrollImporter
             // Údaje osob a vztahů se čtou jednou: krok měsíců z nich zapisuje pracoviště
             // průběžně a krok osob pak zbytek.
             $records = PohodaPayrollPeople::read($file, $year);
+            // Podání z PAMICA (hlášení JMHZ, registrace) se čtou taky jednou: podmínky
+            // vztahů z nich se doplňují po měsících, zbytek po údajích osob.
+            $jmhz = PohodaPayrollJmhzWriter::read($file, $year);
 
             $protocol->begin(self::STEP_PROFILE);
             $profile = PohodaPayrollConverter::profile($months);
@@ -348,6 +353,7 @@ final class PohodaPayrollImporter
                     // ta poslední; další verze si je pak opíší. Po všech měsících už by je
                     // dostala jen verze poslední a starší měsíce by zůstaly bez pracoviště.
                     $this->people->writeWorkplaces($supplierId, $userOrNull, $records, $protocol, self::STEP_MONTHS);
+                    $this->jmhz->monthTerms($supplierId, $userOrNull, $records, $jmhz, $period, $protocol, self::STEP_MONTHS);
                     $protocol->count(self::STEP_MONTHS, 'months');
                     $protocol->count(self::STEP_MONTHS, 'payslips', $month['totals']['rows']);
                     $protocol->count(self::STEP_MONTHS, 'persons_created', $created);
@@ -374,6 +380,18 @@ final class PohodaPayrollImporter
                     PohodaPayrollPeople::institutions($file));
                 $this->storeReferenceTotals($supplierId, $file, $year, $protocol);
                 $protocol->finish(self::STEP_PEOPLE);
+            }
+
+            // Odeslaná hlášení JMHZ a registrace z PAMICA: historie podání a doplnění toho,
+            // co karty nenesou. Až po osobách: potřebuje párování vztahů a přepisovat nemá co.
+            if (!$protocol->failed()) {
+                $protocol->begin(self::STEP_JMHZ);
+                if ($progress !== null) {
+                    $progress(self::STEP_JMHZ, 0, 1);
+                }
+                $this->jmhz->write($supplierId, $userOrNull, $file, $year, $records, $jmhz, $this->people->matchedRelations(),
+                    $confirmIdentifiers, $protocol, self::STEP_JMHZ);
+                $protocol->finish(self::STEP_JMHZ);
             }
 
             // Trvalé srážky, exekuce a insolvence z karet zaměstnanců. Až po osobách:

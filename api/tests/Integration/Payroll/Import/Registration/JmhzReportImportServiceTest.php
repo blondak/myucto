@@ -405,6 +405,43 @@ final class JmhzReportImportServiceTest extends TestCase
         self::assertSame('Ostrava', $terms[0]['work_place']);
     }
 
+    /**
+     * Nahraná hlášení jdou do téže historie podání předchozím programem jako hlášení
+     * z PAMICA (zdroj `jmhz_xml`): opakované použití nezdvojí, platný formulář nese vztah
+     * a příprava vlastního řádného hlášení za měsíc pak ví, že už odešlo.
+     */
+    public function testUploadedReportsLandInExternalSubmissionHistory(): void
+    {
+        [, $employmentId] = $this->registerEmployee(withIdentifiers: true);
+        $person = ['oic' => $this->oic, 'id_ppv' => $this->idPpv];
+        $files = [
+            $this->file('radne.xml', JmhzReportFixtures::report([JmhzReportFixtures::person($person)], 2026, 1)),
+            $this->file('opravne.xml', JmhzReportFixtures::report([JmhzReportFixtures::person($person)], 2026, 1,
+                ['type' => 'O', 'filled_at' => '2026-02-20T08:00:00Z'])),
+        ];
+        $keys = array_column($this->imports->preview($this->supplierId, 'test', $files)['records'], 'key');
+
+        $this->apply($files, $keys);
+        $this->apply($files, $keys);
+
+        $rows = $this->db->pdo()->prepare(
+            "SELECT s.environment, s.period, s.submission_type, s.status, s.file_name, s.form_count,
+                    (SELECT COUNT(*) FROM payroll_external_jmhz_submission_forms f
+                      WHERE f.supplier_id = s.supplier_id AND f.submission_id = s.id AND f.employment_id = ?) AS linked
+               FROM payroll_external_jmhz_submissions s
+              WHERE s.supplier_id = ? AND s.source = 'jmhz_xml' ORDER BY s.file_name"
+        );
+        $rows->execute([$employmentId, $this->supplierId]);
+        self::assertSame([
+            ['environment' => 'test', 'period' => '2026-01', 'submission_type' => 'O', 'status' => 'sent', 'file_name' => 'opravne.xml', 'form_count' => 1, 'linked' => 1],
+            ['environment' => 'test', 'period' => '2026-01', 'submission_type' => 'R', 'status' => 'sent', 'file_name' => 'radne.xml', 'form_count' => 1, 'linked' => 0],
+        ], array_map(static fn (array $r): array => array_merge($r, ['form_count' => (int) $r['form_count'], 'linked' => (int) $r['linked']]),
+            $rows->fetchAll(\PDO::FETCH_ASSOC)));
+        $store = $this->container->get(\MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore::class);
+        self::assertSame('O', $store->sentMonthly($this->supplierId, 'test', '2026-01')['submission_type'] ?? null);
+        self::assertNull($store->sentMonthly($this->supplierId, 'production', '2026-01'));
+    }
+
     public function testCancelledFormImportsNothing(): void
     {
         [$employeeId] = $this->registerEmployee(withIdentifiers: true);

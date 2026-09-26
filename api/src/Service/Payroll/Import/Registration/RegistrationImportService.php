@@ -12,6 +12,7 @@ use MyInvoice\Service\Payroll\Import\Jmhz\JmhzBatch;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzBatchItem;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzDerivedRegistrations;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzEmploymentHistory;
+use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzOpeningBalancePlanner;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportFile;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportForm;
@@ -59,6 +60,7 @@ final class RegistrationImportService
         private readonly JmhzReportLookup $jmhzLookup,
         private readonly PayrollEmploymentRepository $employments,
         private readonly RegistrationImportLookup $lookup,
+        private readonly JmhzExternalSubmissionStore $externalSubmissions,
     ) {}
 
     /** @return array<string,mixed> */
@@ -263,6 +265,10 @@ final class RegistrationImportService
             } catch (\Exception $e) {
                 $results[$key] = $this->result($key, 'failed', $e->getMessage(), $plan);
             }
+        }
+
+        if ($read['reports'] !== []) {
+            $this->recordHistory($supplierId, $environment, $read['reports'], $this->planJmhz($supplierId, $environment, $batch, $pairMap), $userId);
         }
 
         $checklist = ['completed' => 0, 'failed' => []];
@@ -526,11 +532,13 @@ final class RegistrationImportService
         }
 
         $foreign = $this->foreignReports($supplierId, $reports);
+        $accepted = [];
         foreach ($reports as ['file' => $file, 'index' => $index, 'report' => $report]) {
             if (isset($foreign['errors'][$index])) {
                 $fileRows[$index] = $this->fileRow($file, 'JMHZ', count($report->forms), $foreign['errors'][$index], [], $report->period(), $report->submissionType);
                 continue;
             }
+            $accepted[] = ['file' => $file, 'report' => $report];
             $warnings = [...$report->warnings, ...$foreign['warnings']];
             if ($report->submissionType === 'S' && $report->forms === []) {
                 $stornos[] = ['file' => $report, 'name' => $file['name']];
@@ -586,7 +594,57 @@ final class RegistrationImportService
             'batch' => $batch,
             'history' => $history,
             'has_jmhz' => $hasJmhz,
+            'reports' => $accepted,
         ];
+    }
+
+    /**
+     * Nahraná hlášení jdou do historie podání předchozím programem (zdroj `jmhz_xml`),
+     * stejnou cestou jako hlášení převzatá z PAMICA: příprava vlastního hlášení pak ví,
+     * že za měsíc řádné hlášení už odešlo. Obsah je celé XML, formuláře nesou vazbu
+     * na vztah, se kterým je import spároval.
+     *
+     * @param list<array{file:array<string,mixed>,report:JmhzReportFile}> $reports
+     * @param array<string,array<string,mixed>> $plans plány formulářů podle klíče
+     */
+    private function recordHistory(int $supplierId, string $environment, array $reports, array $plans, ?int $userId): void
+    {
+        foreach ($reports as ['file' => $file, 'report' => $report]) {
+            $forms = [];
+            foreach ($report->forms as $form) {
+                $plan = $plans[RegistrationImportPlanner::key((string) $file['sha256'], $form->position)] ?? [];
+                $forms[] = [
+                    'position' => $form->position,
+                    'form_guid' => $form->formGuid,
+                    'form_type' => $form->formType,
+                    'source_relation_ref' => null,
+                    'employee_id' => isset($plan['_employee_id']) ? (int) $plan['_employee_id'] : null,
+                    'employment_id' => isset($plan['_employment_id']) ? (int) $plan['_employment_id'] : null,
+                    'payload' => get_object_vars($form),
+                ];
+            }
+            $this->externalSubmissions->store($supplierId, $environment, JmhzExternalSubmissionStore::SOURCE_JMHZ_XML, [
+                'source_key' => 'guid:' . $report->submissionGuid . ':' . $report->submissionType . ':' . $report->period() . ':' . ($report->packageOrdinal ?? 1),
+                'document_kind' => 'monthly',
+                'period' => $report->period(),
+                'submission_type' => $report->submissionType,
+                'submission_guid' => $report->submissionGuid,
+                'corrected_source_key' => null,
+                'status' => JmhzExternalSubmissionStore::STATUS_SENT,
+                'filled_at' => $report->filledAt,
+                'submitted_at' => null,
+                'accepted_at' => null,
+                'program' => $report->vendor,
+                'file_name' => (string) $file['name'],
+                'payload' => [
+                    'file_name' => (string) $file['name'],
+                    'file_sha256' => (string) $file['sha256'],
+                    'vendor' => $report->vendor,
+                    'warnings' => $report->warnings,
+                    'xml' => (string) $file['content'],
+                ],
+            ], $forms, $userId);
+        }
     }
 
     /**

@@ -14,4 +14,12 @@ enum PayrollSensitiveField: string
     case CONTACT_EMAIL = 'contact_email';
     case CONTACT_PHONE = 'contact_phone';
     case REGISTRATION_A1_PROFILE = 'registration_a1_profile';
+    /** Obsah podání ČSSZ, které podal předchozí mzdový program (atributy JMHZ jako JSON). */
+    case EXTERNAL_JMHZ_PAYLOAD = 'external_jmhz_payload';
+
+    /** Strukturovaný dokument (JSON) místo jednoho identifikátoru: nenormalizuje se a nemaskuje. */
+    public function isDocument(): bool
+    {
+        return $this === self::REGISTRATION_A1_PROFILE || $this === self::EXTERNAL_JMHZ_PAYLOAD;
+    }
 }

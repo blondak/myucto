@@ -123,6 +123,7 @@ use MyInvoice\Action\Payroll\PayrollInsuranceBreakdownAction;
 use MyInvoice\Action\Payroll\PayrollJmhzCorrectionAction;
 use MyInvoice\Action\Payroll\PayrollJmhzIdentityAction;
 use MyInvoice\Action\Payroll\PayrollJmhzProtocolImportAction;
+use MyInvoice\Action\Payroll\PayrollJmhzExternalSubmissionAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
 use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPreparationAction;
@@ -1931,6 +1932,15 @@ final class Routes
             $g->get(
                 '/submissions/jmhz-protocol-import/{id:[0-9]+}/errors',
                 [PayrollJmhzProtocolImportAction::class, 'errors'],
+            );
+            // Podání předchozím programem (PAMICA, nahrané XML hlášení).
+            $g->get(
+                '/submissions/jmhz-external',
+                [PayrollJmhzExternalSubmissionAction::class, 'list'],
+            );
+            $g->delete(
+                '/submissions/jmhz-external/{id:[0-9]+}',
+                [PayrollJmhzExternalSubmissionAction::class, 'delete'],
             );
             $g->get(
                 '/submissions/{submissionId:[0-9]+}',

@@ -103,7 +103,7 @@ final class PayrollSensitiveData
     private function normalize(string $plaintext, PayrollSensitiveField $field): string
     {
         $plaintext = $this->validatePlaintext($plaintext, $field);
-        if ($field === PayrollSensitiveField::REGISTRATION_A1_PROFILE) {
+        if ($field->isDocument()) {
             return $plaintext;
         }
         $value = match ($field) {
@@ -123,7 +123,8 @@ final class PayrollSensitiveData
             PayrollSensitiveField::CONTACT_EMAIL => $value,
             PayrollSensitiveField::CONTACT_PHONE =>
                 preg_replace('/[\s()\/.\-]+/u', '', $value),
-            PayrollSensitiveField::REGISTRATION_A1_PROFILE => $value,
+            PayrollSensitiveField::REGISTRATION_A1_PROFILE,
+            PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD => $value,
         };
         if (!is_string($value) || $value === '') {
             throw new \InvalidArgumentException('Citlivou hodnotu nelze normalizovat.');
@@ -138,7 +139,7 @@ final class PayrollSensitiveData
     ): string
     {
         $value = trim($plaintext);
-        $maximumLength = $field === PayrollSensitiveField::REGISTRATION_A1_PROFILE
+        $maximumLength = $field?->isDocument() === true
             ? 10_000_000
             : 191;
         if ($value === '' || mb_strlen($value, 'UTF-8') > $maximumLength) {
@@ -206,7 +207,7 @@ final class PayrollSensitiveData
 
     private function maskNormalized(string $normalized, PayrollSensitiveField $field): string
     {
-        if ($field === PayrollSensitiveField::REGISTRATION_A1_PROFILE) {
+        if ($field->isDocument()) {
             return '••••••••';
         }
         $length = mb_strlen($normalized, 'UTF-8');

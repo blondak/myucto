@@ -180,6 +180,26 @@ final class JmhzReportReader
     }
 
     /**
+     * Formulář osoby z dokumentu, který složil {@see JmhzAttributeDocument} z atributů
+     * jiného mzdového programu (PAMICA). Soubor tu není, takže se nic neověřuje proti
+     * XSD; mapa elementů na vlastnosti formuláře je ale tatáž jako u nahraného hlášení.
+     *
+     * @throws RegistrationImportFileException formulář nemá platné GUID, typ nebo hodnotu
+     */
+    public function formFromDocument(DOMDocument $document, int $position): JmhzReportForm
+    {
+        $xpath = new DOMXPath($document);
+        $xpath->registerNamespace('p', JmhzSchemaCatalog::NS_PODANI);
+        $xpath->registerNamespace('f', JmhzSchemaCatalog::NS_FORM);
+        $root = $document->documentElement
+            ?? throw new RegistrationImportFileException('Hlášení je prázdné.');
+        $node = $this->element($xpath, 'p:formulareOsob/p:formularOsoby', $root)
+            ?? throw new RegistrationImportFileException('Hlášení nemá formulář osoby.');
+
+        return $this->form($xpath, $node, $position);
+    }
+
+    /**
      * @return list<string> varování měkkého režimu (prázdné = soubor prošel XSD)
      */
     private function validate(DOMDocument $document): array

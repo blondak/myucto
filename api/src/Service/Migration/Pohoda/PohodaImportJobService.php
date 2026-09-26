@@ -53,6 +53,7 @@ final class PohodaImportJobService extends AbstractImportJobService
         'payroll_profile' => 'Profil importu mezd',
         'payroll_months' => 'Mzdy po měsících',
         'payroll_people' => 'Údaje osob a vztahů',
+        'payroll_jmhz' => 'Podaná hlášení a registrace',
         'payroll_deductions' => 'Srážky, exekuce a insolvence',
         'payroll_sickness' => 'Nemocenská a náhrady mzdy',
         'payroll_posting_map' => 'Kontace z původního programu',

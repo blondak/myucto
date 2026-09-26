@@ -33,7 +33,8 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({ locale: { value: 'cs' }, t: (key: string, params?: Record<string, unknown>) =>
     params ? `${key}:${JSON.stringify(params)}` : key }),
 }))
-vi.mock('@/api/errors', () => ({
+vi.mock('@/api/errors', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/errors')>()),
   apiErrorMessage: (error: unknown, fallback = '') => {
     const message = (error as { response?: { data?: { error?: { message?: string } } } })
       ?.response?.data?.error?.message
@@ -151,6 +152,29 @@ describe('PayrollJmhzDispatchPanel', () => {
     )
     await continueButton!.trigger('click')
     expect(assign).toHaveBeenCalledWith('https://www.datovka.gov.cz/as/login')
+  })
+
+  /*
+   * Měsíc, za který řádné hlášení podal předchozí program: zmrazení skončí
+   * chybou s kódem a panel k hlášce nabídne odkaz na převzatá podání.
+   */
+  it('u měsíce podaného předchozím programem nabídne odkaz na převzatá podání', async () => {
+    m.freezeSubmission.mockRejectedValue({
+      response: { data: { error: { code: 'jmhz_period_submitted_externally', message: 'Podal předchozí program.' } } },
+    })
+    const wrapper = mount(PayrollJmhzDispatchPanel, {
+      props: { environment: 'test', previews: [preview], obligations: [] },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+    })
+
+    await wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').trigger('click')
+    await wrapper.get('[data-test="jmhz-dispatch-confirm-yes-7:3"]').trigger('click')
+    await flushPromises()
+
+    const link = wrapper.get('[data-test="jmhz-dispatch-external-link"]')
+    expect(link.text()).toContain('payroll.external_jmhz.open_history')
+    expect(link.attributes('data-to')).toContain('external-submissions')
+    expect(m.sendTransport).not.toHaveBeenCalled()
   })
 
   it('před otevřením ostré lhůty odeslání nenabídne', async () => {

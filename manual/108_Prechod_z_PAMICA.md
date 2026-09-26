@@ -56,8 +56,18 @@ Export jen čte. Do datového souboru nic nezapisuje.
 ### 108.1.3 Co je v exportu
 
 ZIP obsahuje podsložky `<IČO>_<rok>` se souborem `91_mzdy.xml` — zaměstnanci,
-pracovní poměry, zpracované mzdy a číselníky mezd. IČO ve jménu složky určí
-firmu, do které průvodce mzdy nabídne; podle roku ve jménu složky pak měsíce.
+pracovní poměry, zpracované mzdy, srážky, podání pro ČSSZ a pojišťovny, platby
+a číselníky mezd. IČO ve jménu složky určí firmu, do které průvodce mzdy
+nabídne; podle roku ve jménu složky pak měsíce.
+
+Tabulky jdou do exportu celé, vynechají se jen čistě systémové sloupce (kdo
+záznam označil a zamkl, výběr, ruční pořadí). Obsah odeslaných hlášení
+a registrací drží PAMICA v binárních sloupcích; nástroj ho rozepíše na
+jednotlivé údaje datového slovníku JMHZ, takže převod převezme i to, co
+PAMICA za firmu podala (§ 108.12). Binární sloupec, který nejde přečíst
+(obrázek, doručenka datové schránky), nástroj vynechá. Souhrn exportu vedle
+ZIPu vypíše počty řádků po tabulkách, kolik podání se přečetlo a které tabulky
+s daty export vědomě nebere (protokoly změn, odeslané e-maily, nastavení oken).
 
 V náhledu exportu je u agendy sloupec **Mzdy** s počtem zaměstnanců a měsíců.
 Firma musí v MyÚčtu existovat a mít vyplněné stejné IČO. Nahraný soubor
@@ -177,9 +187,7 @@ a záloha daně, uplatněné slevy, bonus, srážková daň) převod zapíše za
 roku před začátkem vedení mezd v MyÚčtu, jen za souvislou řadu měsíců
 a jen osobě, která stavy ještě nemá.
 
-Exportní nástroj bere z podání pro ČSSZ a pojišťovny jen vazbu na pracovní
-poměr, druh, data a stav odeslání; jména, rodná čísla a adresy z nich
-nevytahuje.
+Co převod doplní z odeslaných hlášení JMHZ a registrací, popisuje § 108.12.
 
 Klasifikace složek odpovídá katalogu PAMICA / POHODA Mzdy: časová a úkolová
 mzda, příplatky, odměny, proplacená dovolená a obědy (srážka ze mzdy).
@@ -396,3 +404,46 @@ vybrali; ostatní plnění zůstanou na dosavadní hodnotě. Zápis jde stejnou
 cestou jako obrazovka `Mzdy → Nastavení`, takže platí stejné kontroly osnovy
 i typu účtu. Obrazovku vidí uživatel s oprávněním k nastavení mezd
 (`payroll.settings`).
+
+## 108.12 Odeslaná hlášení JMHZ a registrace
+
+Po údajích osob a vztahů projde převod podání, která PAMICA za firmu podala:
+měsíční hlášení JMHZ převáděného roku a registrace zaměstnanců (přihlášky,
+odhlášky, registrace trvajících vztahů). V protokolu je to krok **Podaná
+hlášení a registrace**.
+
+**Zpracované mzdy zůstávají zdrojem převzatých mezd.** Z hlášení se nic
+nepřepisuje. Doplní se jen údaje, které po převodu karet a mezd v MyÚčtu
+chybí, a to stejnými zápisy jako údaje z karet:
+
+| Z odeslaného hlášení nebo registrace | Do MyÚčta |
+|---|---|
+| příspěvek APZ, funkční požitky, dočasné přidělení | podmínky vztahu, jen dosud neověřený příznak |
+| fond pracovní doby a stanovená týdenní doba | týdenní pracovní doba a úvazek, jen vztahu bez týdenní doby |
+| druh činnosti, upřesnění vztahu, CZ-ISCO | podmínky vztahu, jen prázdná pole |
+| obec, kód obce a stát pracoviště, sjednané místo výkonu práce | pracoviště JMHZ, jen vztahu bez kódu obce a se shodným místem výkonu práce |
+| OIČ a ID PPV | identifikátory ČSSZ, jen s potvrzením v průvodci a jen chybějící |
+| průměrný hodinový výdělek | schválený průměr čtvrtletí, které průměr ze zpracovaných mezd nemá |
+| vyživované děti z prohlášení poplatníka | vyživované osoby, jen osobě, která žádnou nemá |
+
+Podmínky vztahu doplní převod po každém převedeném měsíci z hlášení za ten
+měsíc, stejně jako pracoviště z karet. Dny důchodového pojištění a vyloučené
+doby z hlášení převod porovná se dny, které převzaté mzdy odvodily ze
+zpracované mzdy; rozdíl vypíše po osobních číslech a měsících, nic nemění.
+
+**Platí poslední odeslané podání za měsíc.** Opravné hlášení nahrazuje řádné
+téhož měsíce. Hlášení, které PAMICA připravila, ale neodeslala, se nepoužije;
+protokol na něj upozorní větou *Hlášení za MM/RRRR nebylo odesláno*.
+
+**Historie podání.** Každé hlášení a registrace (i neodeslané) se uloží do
+historie podání předchozím programem: období, druh, GUID podání a formulářů,
+stav odeslání, časy odeslání a přijetí, vazba formulářů na vztahy a úplný
+obsah po údajích. Opakovaný převod záznamy aktualizuje, nezdvojí. Přehled je
+v `Mzdy → Podání → JMHZ`, oddíl *Podání předchozím programem*
+([§ 85.7.4](85_Podani_a_hlaseni.md#8574-podani-predchozim-programem)); za měsíc,
+za který řádné hlášení odešlo, MyÚčto řádné hlášení znovu nepřipraví.
+
+Prohlášení poplatníka, slevy na dani a sleva pracujícího důchodce se z hlášení
+nepřebírají: nesou je už zpracované mzdy. Údaje registrace, které evidence
+bere z karty zaměstnance (adresy, doklad totožnosti, vzdělání), a údaje, pro
+které nemá místo, zůstávají v obsahu uloženém v historii podání.

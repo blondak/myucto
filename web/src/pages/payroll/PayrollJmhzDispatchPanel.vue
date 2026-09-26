@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { apiErrorCode, apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage, externalJmhzSubmissionTarget } from '@/api/errors'
 import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
 import { PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION } from '@/api/payrollTransportCodes'
 import {
@@ -38,6 +38,8 @@ interface DispatchState {
    */
   confirming: 'isds' | 'vrep' | null
   error: string
+  /** Proklik k chybě (měsíc podaný předchozím programem → přehled převzatých podání). */
+  errorTarget?: ReturnType<typeof externalJmhzSubmissionTarget>
   isds: PayrollJmhzIsdsEnqueueResult | null
   vrep: PayrollJmhzTransportPoll | null
   gateway: GatewayStart | null
@@ -250,6 +252,7 @@ async function dispatch(
     busy: channel,
     confirming: null,
     error: '',
+    errorTarget: null,
     gateway: null,
     lateDiscount: null,
   })
@@ -306,6 +309,7 @@ async function dispatch(
         exception,
         t('payroll.submissions.overview.jmhz_dispatch_failed'),
       ),
+      errorTarget: externalJmhzSubmissionTarget(exception),
     })
   }
 }
@@ -483,6 +487,14 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
           role="alert"
         >
           {{ state(preview).error }}
+          <RouterLink
+            v-if="state(preview).errorTarget"
+            :to="state(preview).errorTarget!"
+            class="mt-1 block font-medium text-payroll-600 underline hover:text-payroll-700"
+            data-test="jmhz-dispatch-external-link"
+          >
+            {{ t('payroll.external_jmhz.open_history') }}
+          </RouterLink>
         </p>
 
         <div

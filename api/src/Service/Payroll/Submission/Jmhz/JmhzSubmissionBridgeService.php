@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
+use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
@@ -58,7 +59,45 @@ final readonly class JmhzSubmissionBridgeService
         private ClockInterface $clock,
         private PayrollObligationService $obligations,
         private JmhzDeadlinePolicy $deadlines,
+        /**
+         * Historie podání předchozím programem. Volitelná jako ostatní rozšíření
+         * platformy: testy mostu ji stavět nemusí a bez ní se nic nekontroluje.
+         */
+        private ?JmhzExternalSubmissionStore $external = null,
     ) {}
+
+    /**
+     * Řádné hlášení za měsíc, za který řádné (nebo opravné) hlášení už podal předchozí
+     * mzdový program, ČSSZ zamítne jako duplicitní (kontrola č. 22 katalogu kontrol).
+     * Proto se takové podání nezmrazí vůbec; hláška říká, kde se to dá ověřit a opravit.
+     */
+    private function assertNotSubmittedExternally(int $supplierId, string $environment, string $periodStart): void
+    {
+        if ($this->external === null) {
+            return;
+        }
+        $period = substr($periodStart, 0, 7);
+        $sent = $this->external->sentMonthly($supplierId, $environment, $period);
+        if ($sent === null) {
+            return;
+        }
+        $when = $sent['submitted_at'] !== null
+            ? ', odesláno ' . (new \DateTimeImmutable((string) $sent['submitted_at']))->format('j. n. Y')
+            : '';
+        throw new JmhzXmlException(
+            'jmhz_period_submitted_externally',
+            sprintf(
+                'Za období %s už %s měsíční hlášení podal předchozí mzdový program (%s%s). Druhé řádné hlášení za stejný '
+                . 'měsíc ČSSZ zamítne (kontrola č. 22 katalogu kontrol), proto se nepřipraví. Opravu za tento měsíc pošlete '
+                . 'jako opravné podání z programu, který hlášení podal. Pokud záznam neodpovídá (hlášení ve skutečnosti '
+                . 'neodešlo), odeberte ho v Mzdy → Podání → JMHZ, oddíl Podání předchozím programem, a přípravu zopakujte.',
+                substr($period, 5, 2) . '/' . substr($period, 0, 4),
+                $sent['submission_type'] === 'O' ? 'opravné' : 'řádné',
+                $sent['program'] ?? ($sent['source'] === JmhzExternalSubmissionStore::SOURCE_PAMICA ? 'PAMICA' : 'nahrané XML hlášení'),
+                $when,
+            ),
+        );
+    }
 
     /**
      * @return array{
@@ -178,6 +217,9 @@ final readonly class JmhzSubmissionBridgeService
                     $keys['artifact'],
                 );
             }
+            // Až za opakováním: už zmrazené podání se vrací beze změny, nové řádné
+            // za měsíc podaný předchozím programem nevznikne (výjimka vrátí transakci).
+            $this->assertNotSubmittedExternally($supplierId, $environment, $periodStart);
 
             // Odsud dál se mrazí. GUIDy vznikají právě tady a nikde jinde.
             $result = $this->validator->dryRun(

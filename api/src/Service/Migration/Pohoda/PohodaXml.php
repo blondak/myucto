@@ -201,6 +201,36 @@ final class PohodaXml
         return is_array($value) && array_is_list($value) ? $value : [$value];
     }
 
+    /**
+     * Atributová data podání, která export PAMICA rozepsal z binárního sloupce
+     * (`<Data v="1"><a id="10228" t="9" f="1" i="1">hodnota</a>…</Data>`), v pořadí
+     * ze zdroje. `id` je atribut datového slovníku JMHZ, `section` oddíl PAMICA,
+     * `flag` příznak záznamu, `order` a `order2` pořadí v opakované skupině (dítě,
+     * sekce ELDP); prázdná hodnota je prázdný řetězec. Sloupec bez atributů (nečitelný
+     * blob se neexportuje) dává prázdný seznam.
+     *
+     * @return list<array{id:int,section:int,flag:int,order:int,order2:int,value:string}>
+     */
+    public static function attributes(mixed $node, string $path): array
+    {
+        $out = [];
+        foreach (self::all($node, $path . '/a') as $item) {
+            if (!is_array($item) || !isset($item['@id']) || preg_match('/^\d{1,9}$/D', (string) $item['@id']) !== 1) {
+                continue;
+            }
+            $value = $item['#'] ?? '';
+            $out[] = [
+                'id' => (int) $item['@id'],
+                'section' => (int) ($item['@t'] ?? 0),
+                'flag' => (int) ($item['@f'] ?? 1),
+                'order' => (int) ($item['@i'] ?? 0),
+                'order2' => (int) ($item['@j'] ?? 0),
+                'value' => is_string($value) ? trim($value) : '',
+            ];
+        }
+        return $out;
+    }
+
     private static function toArray(\DOMElement $el): array|string
     {
         $out = [];
