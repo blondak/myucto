@@ -109,7 +109,7 @@ function fixture(): PayrollRunResultPerson[] {
       statutory: {
         person_reference: 'employee:32',
         status: 'manual_review',
-        issues: ['tax-residence-unverified'],
+        issues: ['tax-residence-unverified', 'health_insurance:payroll_component_missing:employee:32:employment:201'],
         income_tax: {
           status: 'manual-review',
           calculation_date: '2026-08-31',
@@ -211,6 +211,11 @@ describe('PayrollIncomeTaxBreakdown', () => {
     expect(reasons).toContain('payroll.runs.tax.issues.tax-residence-unverified')
     expect(reasons).toContain('payroll.runs.tax.issues.unknown')
     expect(reasons.match(/tax-residence-unverified/g)).toHaveLength(1)
+    // Q8-33: složený klíč se přeloží, surové id se nevypisuje.
+    expect(reasons).toContain('payroll.runs.tax.structured_issues.payroll_component_missing')
+    expect(reasons).not.toContain('employment:201')
+    expect(wrapper.text()).toContain('payroll.runs.tax.relationship_number')
+    expect(wrapper.text()).not.toContain('employment:201')
     expect(wrapper.text()).toContain('payroll.runs.tax.relationship_kind.statutory-body')
     expect(wrapper.text()).toContain('payroll.runs.tax.not_calculated')
   })

@@ -2784,7 +2784,7 @@
           "error": "The calculation contains an error"
         },
         "unavailable": {
-          "result_set_missing": "This revision has no stored statutory insurance result, so there is nothing to evidence the calculation with. The breakdown appears for revisions calculated by the current version of the module.",
+          "result_set_missing": "This revision has no stored statutory insurance result, so there is nothing to evidence the calculation with. The result is stored only when the statutory calculation finishes — if the revision reports findings such as \"cannot be closed safely\" or \"requires manual review\", fix them and recalculate. Revisions calculated by an older version of the module have no breakdown.",
           "schema_unsupported": "The statutory result of this revision uses a schema version the breakdown cannot read. We would rather show nothing than interpret the amounts incorrectly.",
           "person_missing": "This person is not part of the revision's stored statutory result, so their contributions cannot be explained."
         },
@@ -2989,7 +2989,22 @@
           "tax-residence-unverified": "Tax residence is not verified.",
           "unsupported-tax-year": "No supported tax ruleset is available for the calculation year.",
           "unknown": "The calculation requires review: {code}"
-        }
+        },
+        "issue_domains": {
+          "social_insurance": "Social insurance",
+          "health_insurance": "Health insurance",
+          "income_tax": "Income tax",
+          "income": "Income",
+          "other": "Statutory calculation"
+        },
+        "structured_issues": {
+          "payroll_component_missing": "an approved payroll component is missing. Add and approve it in the monthly inputs.",
+          "annual_accumulator_missing": "the employee's opening or running annual totals are missing.",
+          "tax_declaration_term_conflict": "the tax declaration record does not match the employment settings.",
+          "employment_term_missing": "valid employment terms for the period are missing.",
+          "other": "{domain}: the calculation needs more supporting data."
+        },
+        "relationship_number": "Employment no. {id}"
       },
       "commands": {
         "lock_inputs": "Lock inputs",

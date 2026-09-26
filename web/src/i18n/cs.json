@@ -2784,7 +2784,7 @@
           "error": "Výpočet obsahuje chybu"
         },
         "unavailable": {
-          "result_set_missing": "Tato revize nemá uložený zákonný výsledek pojistného, takže není z čeho výpočet doložit. Rozklad se zobrazí až u revize spočtené současnou verzí modulu.",
+          "result_set_missing": "Tato revize nemá uložený zákonný výsledek pojistného, takže není z čeho výpočet doložit. Výsledek se ukládá jen tehdy, když zákonný výpočet doběhne — pokud revize hlásí nálezy „nelze bezpečně uzavřít“ nebo „vyžaduje ruční kontrolu“, opravte je a přepočítejte. Revize spočtené starší verzí modulu rozklad nemají.",
           "schema_unsupported": "Zákonný výsledek této revize je v jiné verzi schématu, než kterou umí rozklad přečíst. Radši nezobrazujeme nic, než abychom částky vyložili špatně.",
           "person_missing": "Tato osoba v uloženém zákonném výsledku revize není, takže její pojistné nemáme z čeho vysvětlit."
         },
@@ -2989,7 +2989,22 @@
           "tax-residence-unverified": "Daňová rezidence není ověřena.",
           "unsupported-tax-year": "Pro rok výpočtu není dostupný podporovaný daňový ruleset.",
           "unknown": "Výpočet vyžaduje kontrolu: {code}"
-        }
+        },
+        "issue_domains": {
+          "social_insurance": "Sociální pojištění",
+          "health_insurance": "Zdravotní pojištění",
+          "income_tax": "Daň z příjmů",
+          "income": "Příjem",
+          "other": "Zákonný výpočet"
+        },
+        "structured_issues": {
+          "payroll_component_missing": "chybí schválená mzdová složka. Doplňte a schvalte ji v měsíčních vstupech.",
+          "annual_accumulator_missing": "chybí počáteční nebo průběžné roční součty zaměstnance.",
+          "tax_declaration_term_conflict": "evidence daňového prohlášení neodpovídá nastavení pracovního vztahu.",
+          "employment_term_missing": "chybí platné podmínky pracovního vztahu k období.",
+          "other": "{domain}: výpočet vyžaduje doplnění podkladů."
+        },
+        "relationship_number": "Pracovní vztah č. {id}"
       },
       "commands": {
         "lock_inputs": "Uzamknout vstupy",

@@ -348,10 +348,15 @@ final class PayrollRunJmhzReadinessProbe
     }
 
     /**
+     * Popisky vztahů „Jméno (kód)" pro nálezy předběžné kontroly. Veřejné,
+     * protože stejné popisky potřebují i nálezy ze snímku běhu
+     * ({@see PayrollRunReadinessService}) — bez nich se tam vypisovalo jen
+     * „Otevřít místo k opravě" bez jména.
+     *
      * @param list<int> $ids
      * @return array<int,string>
      */
-    private function employmentLabels(int $supplierId, array $ids): array
+    public function employmentLabels(int $supplierId, array $ids): array
     {
         if ($ids === []) {
             return [];

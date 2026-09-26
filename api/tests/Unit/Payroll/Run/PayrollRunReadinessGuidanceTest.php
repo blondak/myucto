@@ -26,6 +26,19 @@ final class PayrollRunReadinessGuidanceTest extends TestCase
         self::assertNotSame($first->message, $findings[0]['message']);
     }
 
+    /** Q8-32: u každého záznamu je jméno, ne jen „Otevřít místo k opravě". */
+    public function testGroupedEntitiesCarryTheEmploymentLabel(): void
+    {
+        $first = new PayrollRunValidation('warning', 'time_month_missing', 'employment', 11, 'Docházka chybí.', '/payroll/time?employment=11');
+        $second = new PayrollRunValidation('warning', 'time_month_missing', 'employment', 22, 'Docházka chybí.', '/payroll/time?employment=22');
+        $findings = self::invoke(PayrollRunReadinessService::class, 'groupValidations', [
+            [$first, $second],
+            [11 => 'Syntetická osoba (HPP-1)'],
+        ]);
+        self::assertSame('Syntetická osoba (HPP-1)', $findings[0]['entities'][0]['label']);
+        self::assertNull($findings[0]['entities'][1]['label']);
+    }
+
     public function testSingleFindingKeepsItsDirectDestination(): void
     {
         $finding = new PayrollRunValidation('warning', 'time_month_missing', 'employment', 11, 'Docházka chybí.', '/payroll/time?employment=11');
