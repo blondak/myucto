@@ -52,7 +52,7 @@ describe('OtherItems actions', () => {
   it('ukáže detail, úpravu a smazání konceptu a po smazání znovu načte seznam', async () => {
     m.list.mockResolvedValueOnce({ items: [item('draft')], sources: [], total: 1, per_page: 50 })
     m.list.mockResolvedValueOnce({ items: [], sources: [], total: 0, per_page: 50 })
-    const wrapper = shallowMount(OtherItems)
+    const wrapper = shallowMount(OtherItems, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
     await flushPromises()
 
     expect(wrapper.text()).toContain('common.detail')
@@ -69,7 +69,7 @@ describe('OtherItems actions', () => {
 
   it('u zaúčtované položky nenabídne úpravu ani smazání', async () => {
     m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
-    const wrapper = shallowMount(OtherItems)
+    const wrapper = shallowMount(OtherItems, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
     await flushPromises()
 
     expect(wrapper.text()).toContain('common.detail')
