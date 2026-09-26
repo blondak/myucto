@@ -1,4 +1,7 @@
--- MyÚčto.cz — hodiny svátků v jinak pracovní dny v pracovním souhrnu (v7, v8).
+-- MyÚčto.cz — měsíční hlášení JMHZ: svátky v neodpracovaných hodinách
+-- a podpůrčí doba ošetřovného osamělého zaměstnance.
+--
+-- 1) Hodiny svátků v jinak pracovní dny v pracovním souhrnu (v7, v8).
 --
 -- Pokyny MPSV k vyplnění MH 1.4.13 zahrnují svátky v jinak pracovní dny do
 -- celkového počtu neodpracovaných hodin (10275) i do hodin s náhradou či
@@ -186,4 +189,22 @@ ALTER TABLE payroll_jmhz_work_month_revisions
       AND control_manifest_sha256 IS NOT NULL
       AND control_manifest_sha256 REGEXP '^[0-9a-f]{64}$'
     )
+  );
+
+-- 2) Osamělý zaměstnanec pečující o dítě do 16 let (§ 40 odst. 1 písm. b)
+-- zákona č. 187/2006 Sb.): podpůrčí doba ošetřovného je 16 kalendářních dnů
+-- místo 9. Pokyny MPSV k 10360 omezují vyloučenou dobu ošetřování právě
+-- podpůrčí dobou a vyloučené dny § 18 odst. 7 (10475 × 10473) se dělí podle
+-- ní. Příznak se zadává u nepřítomnosti druhu ošetřování člena rodiny.
+
+ALTER TABLE payroll_absences
+  ADD COLUMN IF NOT EXISTS lone_carer TINYINT(1) NOT NULL DEFAULT 0
+    AFTER childbirth_date;
+
+ALTER TABLE payroll_absences
+  DROP CONSTRAINT IF EXISTS chk_payroll_absence_lone_carer_care_only;
+
+ALTER TABLE payroll_absences
+  ADD CONSTRAINT chk_payroll_absence_lone_carer_care_only CHECK (
+    lone_carer IN (0, 1) AND (absence_type = 'ocr' OR lone_carer = 0)
   );

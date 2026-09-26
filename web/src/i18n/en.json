@@ -24165,6 +24165,8 @@
       "childbirth": "Date of birth",
       "childbirth_hint": "Only the part of maternity benefit before the birth is an excluded period of the insurance record. You can add the date of birth later, once it happens.",
       "childbirth_missing": "Not filled in",
+      "lone_carer": "Single employee caring for a child under 16",
+      "lone_carer_hint": "Nursing benefit is then paid for up to 16 calendar days instead of 9 (Section 40(1) of the Sickness Insurance Act). The monthly report uses it for the excluded care period (10360) and the benefit days (10475); days beyond the support period are reported as excused absence without compensation (10473).",
       "record_childbirth": "Add date of birth",
       "record_childbirth_save": "Save date of birth",
       "record_childbirth_once": "The date of birth can be added only once. To correct a wrong date, cancel the absence and record it again.",

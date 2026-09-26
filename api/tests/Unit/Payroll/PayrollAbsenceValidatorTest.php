@@ -234,6 +234,23 @@ final class PayrollAbsenceValidatorTest extends TestCase
         ]);
     }
 
+    /** § 40 odst. 1 písm. b) zákona č. 187/2006 Sb.: jen u ošetřování člena rodiny. */
+    public function testLoneCarerIsKeptOnlyOnCare(): void
+    {
+        $care = [
+            'employment_id' => 1,
+            'absence_type' => 'ocr',
+            'date_from' => '2026-07-06',
+            'date_to' => '2026-07-20',
+        ];
+        self::assertTrue($this->validator()->absence($care + ['lone_carer' => true])['lone_carer']);
+        self::assertFalse($this->validator()->absence($care)['lone_carer']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('jen u ošetřování člena rodiny');
+        $this->validator()->absence(['absence_type' => 'unpaid_leave', 'lone_carer' => true] + $care);
+    }
+
     public function testRecordedChildbirthMustBeAValidDateOnMaternity(): void
     {
         $absence = ['absence_type' => 'ppm', 'expected_childbirth_date' => '2026-06-20'];

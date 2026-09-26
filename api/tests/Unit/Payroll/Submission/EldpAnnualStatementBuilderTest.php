@@ -211,15 +211,20 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         (new EldpXmlValidator())->validate($statement, $xml);
     }
 
-    /** Měsíc porodu bez příjmu je souběh omluvné a neomluvné části. */
-    public function testMaternityBirthMonthWithoutIncomeBlocks(): void
+    /**
+     * Měsíc porodu bez příjmu zůstává dobou pojištění (omluvné dny před
+     * porodem) — stejné rozhodnutí jako v měsíčním hlášení, jediné místo
+     * `EldpExcludedPeriodDeriver::insuranceMonthStatus()`.
+     */
+    public function testMaternityBirthMonthWithoutIncomeStaysInsured(): void
     {
         $revisions = $this->maternityYear();
         $revisions[4] = $this->revision(2025, 5, absences: [$this->maternityAbsence()], baseMinor: 0);
 
-        $this->expectException(EldpValidationException::class);
-        $this->expectExceptionMessage('§ 11 odst. 2');
-        $this->build($revisions);
+        $statement = $this->build($revisions);
+
+        $xml = (new EldpXmlSerializer())->serialize($statement);
+        self::assertStringContainsString('<penezitaPomocMaterstvi>47</penezitaPomocMaterstvi>', $xml);
     }
 
     /** @return list<array<string,mixed>> */

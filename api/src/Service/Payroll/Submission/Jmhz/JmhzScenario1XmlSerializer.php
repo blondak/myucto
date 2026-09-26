@@ -2471,9 +2471,10 @@ final class JmhzScenario1XmlSerializer
     /**
      * Vyloučené doby ELDP podle § 16 odst. 4 písm. a) zákona č. 155/1995 Sb.
      *
-     * Blok se zapisuje jen tam, kde sekce nese kód ELDP: bez kódu ho kontrola
-     * ČSSZ (atributy 10357 a 10358–10536 bez 10240) odmítne — vyloučená doba
-     * bez doby pojištění nedává smysl.
+     * Vyloučené doby se zapisují jen tam, kde sekce nese kód ELDP: bez kódu je
+     * kontrola 307 ČSSZ (atributy 10357 a 10358–10536 bez 10240) odmítne —
+     * vyloučená doba bez doby pojištění nedává smysl. Vyloučené dny § 18
+     * odst. 7 do výčtu kontroly 307 nepatří a sekce bez kódu je nese také.
      *
      * Rozpad na složky se uvádí jen při nenulovém úhrnu. Kontrola 329 říká, že
      * při 10357 = 0 nesmí být složky vyplněné nenulově, a nulový rozpad nenese
@@ -2507,12 +2508,16 @@ final class JmhzScenario1XmlSerializer
         // § 16 odst. 4), je proto pořád řez, který má co vykázat.
         $hasSection18 = ($section['section18_days_total'] ?? null) !== null;
         if ($total === null && ($components === null || $components === [])) {
-            if (!$hasSection18) {
+            // Bez vyloučených dob a bez vyloučeného dne není co uvést; nulový
+            // blok by v sekci bez kódu nic netvrdil.
+            if (!$hasSection18 || $section['section18_days_total'] === 0) {
                 return;
             }
-            if (!is_string($code) || $code === '') {
-                return;
-            }
+            // Sekce bez kódu ELDP (poživatel starobního důchodu) nese § 18
+            // dál: jsou to údaje nemocenského pojištění, ne třída ELDP, a
+            // kontrola 307 je v sekci bez kódu nezakazuje (MPSV v diskuzi
+            // k JMHZ: u důchodce „vyloučené dny § 18 pro nemocenské se mají
+            // uvádět").
             $block = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vylouceneDny');
             $this->appendEldpSection18Days($dom, $block, $section);
             $entry->appendChild($block);

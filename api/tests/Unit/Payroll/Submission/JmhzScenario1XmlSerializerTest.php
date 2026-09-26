@@ -231,6 +231,47 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
     }
 
     /**
+     * Sekce bez kódu ELDP (poživatel starobního důchodu) vyloučené doby § 16
+     * nenese (kontrola 307), vyloučené dny § 18 odst. 7 ale ano — jsou to
+     * údaje nemocenského pojištění. Dřív je serializér v sekci bez kódu tiše
+     * zahodil.
+     */
+    public function testCodelessSectionStillCarriesSection18Days(): void
+    {
+        $payload = $this->payload();
+        $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+        $section['code'] = null;
+        $section['valid_from'] = null;
+        $section['valid_to'] = null;
+        $section['insurance_days'] = 0;
+        $section['assessment_base_czk'] = null;
+        $section['excluded_days'] = null;
+        $section['excluded_days_total'] = null;
+        $section['section18_days'] = [
+            'omluvenaNepritomnost' => 0,
+            'pracovniNeschopnost' => 12,
+            'vyplaceniDavek' => 0,
+        ];
+        $section['section18_days_total'] = 12;
+        unset($section);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:eldp><form:pocetDnu>0</form:pocetDnu><form:vylouceneDny>'
+                . '<form:vyloucenePar18>12</form:vyloucenePar18>'
+                . '<form:omluvenaNepritomnost>0</form:omluvenaNepritomnost>'
+                . '<form:pracovniNeschopnost>12</form:pracovniNeschopnost>'
+                . '<form:vyplaceniDavek>0</form:vyplaceniDavek></form:vylouceneDny></form:eldp>',
+            preg_replace('/>\s+</', '><', $result['xml']) ?? '',
+        );
+        self::assertSame([], $this->failedControls($result['xml'], [307, 330]));
+    }
+
+    /**
      * `null` v řezu znamená NEUVEDENO. Datový slovník předepisuje
      * 10366 = 10473 + 10474 + 10475, takže vykázat část rozpadu by tvrdilo,
      * že zbytek je nula — a to je stejná chyba jako mlčení, jen hůř

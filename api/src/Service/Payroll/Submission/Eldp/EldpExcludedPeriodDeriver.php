@@ -69,16 +69,16 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  *   {@see ppmPreBirthWindow()}.
  * - `other` — nerozlišený druh.
  *
+ * Ošetřovné je vyloučenou dobou jen v rozsahu podpůrčí doby: pokyny MPSV
+ * k 10360 „nejvýše však v rozsahu prvních 9 kalendářních dnů potřeby
+ * ošetřování …, popřípadě prvních 16 kalendářních dnů, jde-li o osamělého
+ * zaměstnance" (§ 40 odst. 1 zákona č. 187/2006 Sb.), u dlouhodobého
+ * ošetřovného nejdéle 90 dnů (§ 41e odst. 1). Viz {@see careSupportEnd()}.
+ *
  * ## Co se z principu nevyplňuje
  *
- * - **10536** (§ 16 odst. 4 písm. j)) a **10366** (§ 18 odst. 7 zákona
- *   č. 187/2006 Sb.) — modul pro ně nemá žádný vstup, drží se na nule a je to
- *   vidět v součtovém pravidle.
- * - **10474 / 10475** — rozpad nemoci na dny s náhradou příjmu od
- *   zaměstnavatele a na dny s vyplacenou dávkou. Okno prvních čtrnácti dnů
- *   sice `payroll_sickness_events` zná, ale ve zmrazeném snapshotu mzdové
- *   revize není; a jestli dávku ČSSZ skutečně přiznala, zaměstnavatel neví
- *   vůbec. Oba atributy jsou nepovinné, takže se neuvádějí.
+ * - **10536** (§ 16 odst. 4 písm. j)) — modul pro něj nemá žádný vstup,
+ *   drží se na nule a je to vidět v součtovém pravidle.
  * - **Odečítané doby (10375 a 10462–10469)** se týkají výhradně dob po
  *   dosažení důchodového věku. Modul důchodový věk nezná — nepočítá ho ani
  *   ho neeviduje — takže odečítané doby nedopočítává. Nula na řádku je proto
@@ -104,6 +104,18 @@ final class EldpExcludedPeriodDeriver
      * odst. 1 písm. a) zákona č. 187/2006 Sb.
      */
     public const PPM_PRE_BIRTH_DAYS = 56;
+
+    /**
+     * Podpůrčí doba ošetřovného: § 40 odst. 1 písm. a) zákona č. 187/2006 Sb.
+     * 9 kalendářních dnů, písm. b) 16 dnů u osamělého zaměstnance s dítětem
+     * do 16 let, které neukončilo povinnou školní docházku (příznak
+     * `lone_carer` u nepřítomnosti). Dlouhodobé ošetřovné nejdéle 90 dnů
+     * (§ 41e odst. 1). Zákonné lhůty jako {@see PPM_PRE_BIRTH_DAYS}: modul je
+     * čistý a ruleset nemá, stejná čísla vede i ruleset nemocenského pojištění.
+     */
+    public const CARE_SUPPORT_DAYS = 9;
+    public const CARE_SUPPORT_DAYS_LONE_CARER = 16;
+    public const LONG_TERM_CARE_SUPPORT_DAYS = 90;
 
     /**
      * Nepřítomnosti BEZ započitatelného příjmu, u kterých měsíc bez příjmu
@@ -136,8 +148,12 @@ final class EldpExcludedPeriodDeriver
      * porodu (tentýž odkaz § 11 odst. 2 na § 16 odst. 4 písm. a)); den porodu
      * a doba po něm jsou nepřítomnost bez příjmu. Proto se rozhoduje nad
      * intervalem měsíce `[$intervalFrom, $intervalTo]` týmž výpočtem, který
-     * odvozuje atribut 10359 ({@see ppmPreBirthWindow()}). Měsíc, ve kterém se
-     * porod stal, obsahuje obojí a zastaví se jako souběh.
+     * odvozuje atribut 10359 ({@see ppmPreBirthWindow()}). Měsíc celý po porodu
+     * je mimo dobu pojištění. Měsíc, ve kterém se porod stal, omluvné dny má,
+     * a proto dobou pojištění zůstává celý: tak ho vykázal jiný mzdový systém
+     * a ČSSZ přijala řádné i opravné hlášení (10356 = celý měsíc, 10357 =
+     * 10359 = dny před porodem). Porod sám tedy souběh netvoří; souběh je až
+     * s jinou nepřítomností bez příjmu.
      *
      * PPM, u které se předporodní část určit nedá (chybí očekávaný den porodu
      * nebo nevyplněný den porodu), se tu počítá jako omluvná: odvození
@@ -162,7 +178,7 @@ final class EldpExcludedPeriodDeriver
             if ($type === 'ppm') {
                 [$preBirth, $postBirth] = self::ppmExcusedSplit($absence, $intervalFrom, $intervalTo);
                 $excused = $excused || $preBirth;
-                $incomeLess = $incomeLess || $postBirth;
+                $incomeLess = $incomeLess || ($postBirth && !$preBirth);
                 continue;
             }
             if (in_array($type, self::INCOME_LESS_TYPES, true)) {
@@ -294,6 +310,22 @@ final class EldpExcludedPeriodDeriver
     ];
 
     /**
+     * Dávky, které ČSSZ vyplácí po celou nepřítomnost: peněžitá pomoc
+     * v mateřství (před porodem i po něm) a otcovská. Celé dny → 10475
+     * („dny, za které bylo zaměstnanci vypláceno … peněžitá pomoc
+     * v mateřství, otcovská").
+     *
+     * @var list<string>
+     */
+    private const SECTION18_BENEFIT_TYPES = ['ppm', 'paternity'];
+
+    /** Ošetřovné a dlouhodobé ošetřovné: dávka jen v rozsahu podpůrčí doby. */
+    private const CARE_TYPES = ['ocr', 'long_term_care'];
+
+    /** Nemoc a karanténa: okno náhrady mzdy (§ 192 ZP) a za ním nemocenské. */
+    private const SICKNESS_TYPES = ['dpn', 'quarantine'];
+
+    /**
      * Druhy nepřítomnosti, které vyloučený den podle § 18 odst. 7 netvoří.
      *
      * - `vacation`, `employer_obstacle`, `employee_obstacle` — náhrada příjmu
@@ -408,6 +440,14 @@ final class EldpExcludedPeriodDeriver
                 }
                 [$countedFrom, $countedTo] = $preBirth['window'];
             }
+            if (in_array($type, self::CARE_TYPES, true)) {
+                // Za podpůrčí dobou ošetřovné nenáleží a den vyloučenou dobou
+                // podle pokynů k 10360 není.
+                $countedTo = min($countedTo, self::careSupportEnd($absence, $from));
+                if ($countedFrom > $countedTo) {
+                    continue;
+                }
+            }
             $days = self::inclusiveDays($countedFrom, $countedTo);
             $overlap = self::claim($claimedDays, $countedFrom, $days);
             if ($overlap !== null) {
@@ -460,29 +500,32 @@ final class EldpExcludedPeriodDeriver
      * kterém zaměstnanec kvůli neplacenému volnu nebo nemoci nevydělával, a
      * dávka vyjde nižší, než na jakou má nárok.
      *
+     * ## Rozpad podle druhu nepřítomnosti (pokyny MPSV k 10473–10475)
+     *
+     * - neplacené volno, náhradní volno, rodičovská → 10473;
+     * - nemoc a karanténa: dny uvnitř okna náhrady mzdy (§ 192 ZP, prvních
+     *   14 kalendářních dnů, `compensation_window_from/to` ze schváleného
+     *   výpočtu náhrady) → 10474; dny za oknem → 10475, jen když účetní při
+     *   schválení potvrdila účast na nemocenském pojištění
+     *   (`insurance_eligibility_confirmed`); DPN bez nároku na nemocenské
+     *   nepatří nikam (pokyny k 10473 ji výslovně vylučují). Den před oknem
+     *   (první den nemoci odpracovaný celý) vyloučeným dnem není;
+     * - peněžitá pomoc v mateřství (celá, i po porodu) a otcovská → 10475;
+     * - ošetřovné a dlouhodobé ošetřovné: dny v podpůrčí době → 10475, dny za
+     *   ní jsou omluvená nepřítomnost bez náhrady příjmu → 10473.
+     *
      * ## Proč se rozpad buď vykáže celý, nebo vůbec
      *
      * Datový slovník předepisuje `10366 = 10473 + 10474 + 10475`. Vykázat jen
      * část by bylo tvrzení, že zbytek je nula — a to by dávku podhodnotilo
-     * úplně stejně jako mlčení, jenom by se to nedalo poznat. Proto se
-     * `derivable` obrací na `false`, jakmile je v intervalu nepřítomnost,
-     * jejíž zacházení v § 18 odst. 7 ze zmrazeného snapshotu neplyne:
+     * úplně stejně jako mlčení, jenom by se to nedalo poznat. `derivable` se
+     * proto obrací na `false` jen u nepřítomnosti, o které snapshot nerozhodne:
+     * nemoc zmrazená dřív, než snapshot nesl okno náhrady mzdy, vadný řádek,
+     * neznámý druh a souběh dvou nepřítomností v jednom dni.
      *
-     * - `dpn`, `quarantine` — rozpad na dny s náhradou příjmu (10474, prvních
-     *   čtrnáct kalendářních dnů podle § 192 zákoníku práce) a na dny
-     *   s vyplacenou dávkou (10475) závisí na skutečném začátku dočasné
-     *   pracovní neschopnosti. `payroll_absences` drží interval nepřítomnosti,
-     *   ne běh podpůrčí doby, takže navazující neschopnost nebo neschopnost
-     *   zapsanou po měsících by čtrnáctidenní okno posunulo.
-     * - `ocr`, `long_term_care`, `paternity`, `ppm` — dny s vyplacenou dávkou
-     *   (10475) tvrdí, že dávku ČSSZ opravdu vyplatila. Zaměstnavatel to neví;
-     *   ví jen, že o ni bylo požádáno.
-     * - neznámý druh — fail-closed stejně jako u vyloučených dob.
-     *
-     * Vynechání je legální: matice povinností JMHZ 1.4.0.2 vede 10366 jako
-     * podmíněně nepovinný („nepovinné, pokud je vyplněn 10357 > 0"), a každý
-     * z nederivovatelných druhů vyloučenou dobu podle § 16 odst. 4 tvoří,
-     * takže 10357 > 0 nastane s ním.
+     * Vynechání je legální jen při 10357 > 0 (matice povinností JMHZ 1.4.0.2:
+     * „nepovinné, pokud je vyplněn 10357 > 0"); v měsíci bez vyloučených dob
+     * musí volající nederivovatelný rozpad zastavit.
      *
      * @param list<array<string,mixed>> $absences absence ze zmrazeného snapshotu
      * @return array{
@@ -530,36 +573,53 @@ final class EldpExcludedPeriodDeriver
             if (in_array($type, self::SECTION18_NEUTRAL_TYPES, true)) {
                 continue;
             }
-            $attribute = self::SECTION18_ATTRIBUTES[$type] ?? null;
-            if ($attribute === null) {
+            $classify = self::section18Classifier($type, $absence, $from);
+            if ($classify === null) {
                 $undecidable[] = $type;
                 continue;
             }
-            $days = self::inclusiveDays($countedFrom, $countedTo);
-            if (self::claim($claimedDays, $countedFrom, $days) !== null) {
+            /** @var array<string,array{from:string,to:string,days:list<string>}> $segments */
+            $segments = [];
+            for ($day = $countedFrom; $day <= $countedTo; $day = self::nextDay($day)) {
+                $attribute = $classify($day);
+                if ($attribute === null) {
+                    continue;
+                }
+                $segments[$attribute] ??= ['from' => $day, 'to' => $day, 'days' => []];
+                $segments[$attribute]['to'] = $day;
+                $segments[$attribute]['days'][] = $day;
+            }
+            $allDays = array_merge(...array_values(array_map(
+                static fn (array $segment): array => $segment['days'],
+                $segments,
+            )));
+            if (self::claimDays($claimedDays, $allDays) !== null) {
                 // Souběh by tentýž den započítal dvakrát. Souběh hlásí
                 // blokátorem derive(); tady se jen přestane tvrdit součet.
                 $undecidable[] = $type;
                 continue;
             }
-            $components[$attribute] += $days;
-            $provenance[] = [
-                'absence_id' => $absenceId,
-                'absence_type' => $type,
-                'attribute' => $attribute,
-                'absence_from' => $from,
-                'absence_to' => $to,
-                'counted_from' => $countedFrom,
-                'counted_to' => $countedTo,
-                'days' => $days,
-            ];
+            foreach ($segments as $attribute => $segment) {
+                $days = count($segment['days']);
+                $components[$attribute] += $days;
+                $provenance[] = [
+                    'absence_id' => $absenceId,
+                    'absence_type' => $type,
+                    'attribute' => $attribute,
+                    'absence_from' => $from,
+                    'absence_to' => $to,
+                    'counted_from' => $segment['from'],
+                    'counted_to' => $segment['to'],
+                    'days' => $days,
+                ];
+            }
         }
 
         usort(
             $provenance,
             static fn (array $left, array $right): int =>
-                [$left['counted_from'], $left['absence_id']]
-                <=> [$right['counted_from'], $right['absence_id']],
+                [$left['counted_from'], $left['absence_id'], $left['attribute']]
+                <=> [$right['counted_from'], $right['absence_id'], $right['attribute']],
         );
         $undecidable = array_values(array_unique($undecidable));
         sort($undecidable);
@@ -571,6 +631,89 @@ final class EldpExcludedPeriodDeriver
             'undecidable_types' => $undecidable,
             'provenance' => $provenance,
         ];
+    }
+
+    /**
+     * Den nepřítomnosti → složka § 18 odst. 7, nebo `null` (vyloučeným dnem
+     * není). `null` místo funkce znamená, že o druhu snapshot nerozhodne.
+     *
+     * @param array<string,mixed> $absence
+     * @return (\Closure(string):?string)|null
+     */
+    private static function section18Classifier(string $type, array $absence, string $from): ?\Closure
+    {
+        $simple = self::SECTION18_ATTRIBUTES[$type] ?? null;
+        if ($simple !== null) {
+            return static fn (string $day): string => $simple;
+        }
+        if (in_array($type, self::SECTION18_BENEFIT_TYPES, true)) {
+            return static fn (string $day): string => 'vyplaceniDavek';
+        }
+        if (in_array($type, self::CARE_TYPES, true)) {
+            $supportEnd = self::careSupportEnd($absence, $from);
+
+            return static fn (string $day): string => $day <= $supportEnd
+                ? 'vyplaceniDavek'
+                : 'omluvenaNepritomnost';
+        }
+        if (in_array($type, self::SICKNESS_TYPES, true)) {
+            $windowFrom = self::date($absence['compensation_window_from'] ?? null);
+            $windowTo = self::date($absence['compensation_window_to'] ?? null);
+            $eligible = $absence['insurance_eligibility_confirmed'] ?? null;
+            if ($windowFrom === null || $windowTo === null || $windowFrom > $windowTo || !is_bool($eligible)) {
+                return null;
+            }
+
+            return static fn (string $day): ?string => match (true) {
+                $day < $windowFrom => null,
+                $day <= $windowTo => 'pracovniNeschopnost',
+                $eligible => 'vyplaceniDavek',
+                default => null,
+            };
+        }
+
+        return null;
+    }
+
+    /**
+     * Poslední den podpůrčí doby ošetřovného nebo dlouhodobého ošetřovného
+     * počítaný od prvního dne nepřítomnosti (viz {@see CARE_SUPPORT_DAYS}).
+     *
+     * @param array<string,mixed> $absence
+     */
+    public static function careSupportEnd(array $absence, string $from): string
+    {
+        $days = match (true) {
+            ($absence['absence_type'] ?? null) === 'long_term_care' => self::LONG_TERM_CARE_SUPPORT_DAYS,
+            ($absence['lone_carer'] ?? false) === true => self::CARE_SUPPORT_DAYS_LONE_CARER,
+            default => self::CARE_SUPPORT_DAYS,
+        };
+
+        return (new \DateTimeImmutable($from))->modify('+' . ($days - 1) . ' days')->format('Y-m-d');
+    }
+
+    private static function nextDay(string $day): string
+    {
+        return (new \DateTimeImmutable($day))->modify('+1 day')->format('Y-m-d');
+    }
+
+    /**
+     * @param array<string,true> $claimed
+     * @param list<string> $days
+     * @return string|null první den, který už patřil jiné nepřítomnosti
+     */
+    private static function claimDays(array &$claimed, array $days): ?string
+    {
+        foreach ($days as $day) {
+            if (isset($claimed[$day])) {
+                return $day;
+            }
+        }
+        foreach ($days as $day) {
+            $claimed[$day] = true;
+        }
+
+        return null;
     }
 
     /**

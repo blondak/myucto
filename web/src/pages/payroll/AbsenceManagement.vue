@@ -153,6 +153,7 @@ const absenceForm = reactive({
   date_to: monthStart,
   expected_childbirth_date: '',
   childbirth_date: '',
+  lone_carer: false,
   timezone_name: 'Europe/Prague',
   partial_first_hours: null as number | null,
   partial_last_hours: null as number | null,
@@ -626,6 +627,7 @@ async function createAbsence() {
       date_to: absenceForm.date_to,
       expected_childbirth_date: isMaternity.value ? (absenceForm.expected_childbirth_date || null) : null,
       childbirth_date: isMaternity.value ? (absenceForm.childbirth_date || null) : null,
+      lone_carer: absenceForm.absence_type === 'ocr' && absenceForm.lone_carer,
       timezone_name: absenceForm.timezone_name,
       partial_first_minutes: hoursToMinutes(absenceForm.partial_first_hours, {
         nullable: true,
@@ -1381,6 +1383,18 @@ onMounted(async () => {
               {{ t('payroll_absence.absences.childbirth_hint') }}
             </p>
           </template>
+          <label v-if="absenceForm.absence_type === 'ocr'" class="flex items-start gap-2 sm:col-span-2">
+            <input
+              v-model="absenceForm.lone_carer"
+              data-test="absence-lone-carer"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 rounded border-neutral-300"
+            >
+            <span class="text-sm text-neutral-700">
+              {{ t('payroll_absence.absences.lone_carer') }}
+              <span class="block text-xs text-neutral-500">{{ t('payroll_absence.absences.lone_carer_hint') }}</span>
+            </span>
+          </label>
           <div v-if="needsAverage">
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.absences.average') }}</span>
             <SearchableSelect

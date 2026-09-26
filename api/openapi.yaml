@@ -24001,6 +24001,10 @@ components:
           type: [string, "null"]
           format: date
           description: Den porodu. Jen u `ppm`, nepovinný; lze ho doplnit později.
+        lone_carer:
+          type: boolean
+          default: false
+          description: Jen u `ocr` — osamělý zaměstnanec pečující o dítě do 16 let; podpůrčí doba ošetřovného je 16 dnů místo 9.
         timezone_name: { type: string, default: Europe/Prague }
         partial_first_minutes: { type: [integer, "null"], minimum: 0 }
         partial_last_minutes: { type: [integer, "null"], minimum: 0 }
