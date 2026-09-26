@@ -336,6 +336,15 @@ final class PayrollEnumContractTest extends TestCase
         // zákoníku práce. Doménu drží doklad, protože právě on ji tiskne.
         'payroll.ts::PayrollTerminationReasonKind'
             => 'const:MyInvoice\Service\Payroll\Document\AverageEarningsCertificateDocumentData::TERMINATION_REASONS',
+        // Záznam o skončení vztahu na kartě vztahu: způsob a zákonný důvod drží
+        // PayrollTerminationReason (z něj se odvozuje kód pro Úřad práce u A2),
+        // vztah pozůstalého jen sloupec tabulky.
+        'payroll.ts::PayrollTerminationMethod'
+            => 'const:MyInvoice\Service\Payroll\Termination\PayrollTerminationReason::METHODS',
+        'payroll.ts::PayrollTerminationGround'
+            => 'const:MyInvoice\Service\Payroll\Termination\PayrollTerminationReason::GROUNDS',
+        'payroll.ts::PayrollTerminationSurvivorRelationship'
+            => 'db:payroll_employment_survivors.relationship',
 
         // Roční zúčtování (§ 38ch ZDP). Všech šest hodnot chodí po drátě —
         // stav evidence i důvod odmítnutí musí obrazovka umět vypsat větou.
