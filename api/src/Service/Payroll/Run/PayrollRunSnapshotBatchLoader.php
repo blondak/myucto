@@ -111,6 +111,47 @@ final class PayrollRunSnapshotBatchLoader
     }
 
     /**
+     * Počty pravidelných složek účinných v měsíci, ze kterých za měsíc ještě
+     * nevznikl žádný nezrušený vstup. Běh je nevidí: počítá jen ze vstupů.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,int>
+     */
+    public function pendingRecurringCounts(
+        int $supplierId,
+        array $employmentIds,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        $counts = [];
+        foreach ($this->fetch(
+            'SELECT recurring.employment_id AS ' . self::GROUP_KEY . ', COUNT(*) AS pending_count
+               FROM payroll_recurring_components recurring
+              WHERE recurring.supplier_id = ?
+                AND recurring.employment_id IN (%s)
+                AND recurring.is_active = 1
+                AND recurring.valid_from <= ?
+                AND (recurring.valid_to IS NULL OR recurring.valid_to >= ?)
+                AND NOT EXISTS (
+                    SELECT 1
+                      FROM payroll_inputs input
+                     WHERE input.supplier_id = recurring.supplier_id
+                       AND input.recurring_component_id = recurring.id
+                       AND input.period_start = ?
+                       AND input.status <> "cancelled"
+                )
+              GROUP BY recurring.employment_id',
+            [$supplierId],
+            $employmentIds,
+            [$periodEnd, $periodStart, $periodStart],
+        ) as $row) {
+            $counts[(int) $row[self::GROUP_KEY]] = (int) $row['pending_count'];
+        }
+
+        return $counts;
+    }
+
+    /**
      * Počty neschválených vstupů podle pracovního vztahu.
      *
      * @param list<int> $employmentIds

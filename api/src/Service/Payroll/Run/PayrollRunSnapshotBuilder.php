@@ -179,6 +179,12 @@ final class PayrollRunSnapshotBuilder
             $employmentIds,
             $periodStart,
         );
+        $pendingRecurringCounts = $this->batch->pendingRecurringCounts(
+            $supplierId,
+            $employmentIds,
+            $periodStart,
+            $periodEnd,
+        );
         $inputRows = $this->batch->inputs($supplierId, $employmentIds, $periodStart);
         $dimensionRows = $this->batch->employmentDimensions(
             $supplierId,
@@ -394,26 +400,40 @@ final class PayrollRunSnapshotBuilder
             }
             $absences = $this->absences($absenceRows[$employmentId] ?? []);
             if ($inputs === []) {
-                // JEDINÉ místo v modulu, které si žádá ruční override. Vztah bez
-                // složky je většinou chyba zadání (zapomenutá mzda), takže ho
-                // musí odklepnout člověk přes
-                // {@see \MyInvoice\Service\Payroll\Run\PayrollRunValidationOverrideService}.
-                // Když měsíc bez vstupu vysvětluje schválená nepřítomnost bez
-                // náhrady od zaměstnavatele (celé neplacené volno, PPM, nemoc za
-                // oknem náhrady), rozhodla už evidence absencí: varování zůstává
-                // vidět, ale potvrzovat ho znovu by byl krok navíc bez informace.
-                // Pravidlo je totéž, podle kterého výpočet takový vztah pustí.
+                // Vztah bez složky je většinou chyba zadání (zapomenutá mzda).
+                // Výjimku (override) tu NEnabízíme: když měsíc bez vstupu
+                // nevysvětluje schválená nepřítomnost, zastaví vztah zákonný
+                // výpočet (`payroll_component_missing`) podle téhož pravidla
+                // {@see PayrollRunStatutoryInputAssembler::monthWithoutInputsExplained()}
+                // a schválená výjimka by se po přepočtu vrátila jako blokátor.
+                // Dřív ji šlo „schválit u všech", běh přesto neprošel a výjimka
+                // jen klamala. Náprava je vstup, ne podpis — proto proklik.
+                $pendingRecurring = $pendingRecurringCounts[$employmentId] ?? 0;
                 $validations[] = new PayrollRunValidation(
                     'warning',
                     'employment_without_inputs',
                     'employment',
                     $employmentId,
-                    sprintf(
-                        '%s: pracovní vztah nemá v období žádnou schválenou mzdovou složku.',
-                        (string) $row['full_name'],
-                    ),
-                    '/payroll/components',
-                    !PayrollRunStatutoryInputAssembler::monthWithoutInputsExplained($absences),
+                    $pendingRecurring > 0
+                        // Pravidelná složka (typicky převzatá měsíční mzda) se do
+                        // běhu dostane až jako schválený vstup. Výjimka tu nic
+                        // nevyřeší — výpočet by vztah stejně zastavil — takže
+                        // proklik vede rovnou na hromadné vytvoření vstupů.
+                        ? sprintf(
+                            '%s: pravidelná mzdová složka za období ještě nemá vytvořený a schválený vstup. '
+                            . 'V Rychlém zadání mezd použijte „Vytvořit a schválit vstupy z pravidelných složek" '
+                            . 'a pak obnovte podklady běhu.',
+                            (string) $row['full_name'],
+                        )
+                        : sprintf(
+                            '%s: pracovní vztah nemá v období žádnou schválenou mzdovou složku.',
+                            (string) $row['full_name'],
+                        ),
+                    $pendingRecurring > 0
+                        ? '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7)
+                        : '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7)
+                            . '&employment=' . $employmentId,
+                    false,
                 );
             }
             foreach ($this->discountValidations(

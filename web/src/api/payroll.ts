@@ -2348,6 +2348,8 @@ export interface PayrollQuickInputRow {
   away_in_month?: boolean
   base_amount_minor: number
   base_managed_elsewhere: boolean
+  /** Pravidelné složky vztahu, ze kterých za měsíc ještě nevznikl vstup. */
+  recurring_pending_count?: number
   base_conflict: boolean
   partial_month: boolean
   base_requires_entry: boolean
@@ -2407,6 +2409,8 @@ export interface PayrollQuickInputMonth extends PayrollHistoricalPeriodInfo {
   total: number
   columns?: PayrollQuickComponentColumn[]
   totals?: PayrollQuickInputTotals
+  /** Pravidelné složky účinné v měsíci, ze kterých ještě nevznikl vstup (celý měsíc). */
+  recurring_pending?: { employments: number; assignments: number }
 }
 
 export type PayrollEmployeeCardStatusFilter = 'active' | 'away' | 'attention' | 'all'
@@ -2601,6 +2605,8 @@ export interface PayrollRecurringMaterialization {
     employment_id: number
     component_id: number
     reason: string
+    employee_id?: number | null
+    full_name?: string | null
   }>
 }
 

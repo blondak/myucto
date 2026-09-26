@@ -117,6 +117,7 @@ final class PayrollRecurringMaterializer
             $this->rollbackOwned($pdo, $ownsTransaction);
             throw $e;
         }
+        $manualReview = $this->withNames($supplierId, $manualReview);
 
         return [
             'period' => substr($periodStart, 0, 7),
@@ -263,6 +264,44 @@ final class PayrollRecurringMaterializer
             ),
             'reason' => $reason,
         ];
+    }
+
+    /**
+     * Jméno osoby k předpisům, které šly k ručnímu posouzení. Bez něj by výsledek
+     * říkal jen „3 předpisy nešly", a u koho, by účetní musela hledat po id.
+     *
+     * @param list<array{recurring_component_id:int,employment_id:int,component_id:int,reason:string}> $items
+     * @return list<array{recurring_component_id:int,employment_id:int,component_id:int,reason:string,employee_id:?int,full_name:?string}>
+     */
+    private function withNames(int $supplierId, array $items): array
+    {
+        if ($items === []) {
+            return [];
+        }
+        $ids = array_values(array_unique(array_column($items, 'employment_id')));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employment.id, employee.id AS employee_id, employee.full_name
+               FROM payroll_employments employment
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = employment.supplier_id
+                AND employee.id = employment.employee_id
+              WHERE employment.supplier_id = ?
+                AND employment.id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, ...$ids]);
+        $names = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $names[(int) $row['id']] = [
+                'employee_id' => (int) $row['employee_id'],
+                'full_name' => (string) $row['full_name'],
+            ];
+        }
+
+        return array_map(
+            static fn (array $item): array => $item + ($names[$item['employment_id']]
+                ?? ['employee_id' => null, 'full_name' => null]),
+            $items,
+        );
     }
 
     private function rollbackOwned(\PDO $pdo, bool $ownsTransaction): void

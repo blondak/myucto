@@ -244,12 +244,26 @@ final class PayrollQuickInputRepository
             $cursor += count($batch['items']);
         } while ($cursor < $total && $batch['items'] !== []);
 
+        $recurringPending = array_values(array_filter(
+            $all,
+            static fn (array $item): bool => (int) ($item['recurring_pending_count'] ?? 0) > 0,
+        ));
+
         return [
             'period' => $period,
             'items' => array_slice($all, $offset, $limit),
             'total' => $total,
             'columns' => $this->componentColumns($supplierId, $period . '-01', $all),
             'totals' => self::periodTotals($all),
+            // Za celý zúžený měsíc, ne za stránku: akce „vytvořit vstupy
+            // z pravidelných složek" jde přes celý měsíc najednou.
+            'recurring_pending' => [
+                'employments' => count($recurringPending),
+                'assignments' => array_sum(array_map(
+                    static fn (array $item): int => (int) $item['recurring_pending_count'],
+                    $recurringPending,
+                )),
+            ],
         ];
     }
 
@@ -828,6 +842,7 @@ final class PayrollQuickInputRepository
             'SELECT input.id, input.employment_id, input.component_id, input.amount_minor,
                     input.quantity_milliunits, input.source_kind, input.external_id,
                     input.status, input.row_version, input.source_snapshot_json,
+                    input.recurring_component_id,
                     component.code AS component_code,
                     component.component_kind, component.value_kind,
                     component.tax_treatment
@@ -1626,7 +1641,23 @@ final class PayrollQuickInputRepository
             }
         }
 
+        // Předpis, ze kterého už za měsíc vznikl vstup, se podruhé nesčítá: jeho
+        // částku nese ten vstup. Dokud tu kontrola chyběla, ukazoval řádek po
+        // vytvoření vstupů z pravidelných složek dvojnásobnou základní mzdu.
+        $materializedRecurring = [];
+        foreach ($inputs as $input) {
+            if (($input['status'] ?? null) !== 'cancelled'
+                && ($input['recurring_component_id'] ?? null) !== null
+            ) {
+                $materializedRecurring[(int) $input['recurring_component_id']] = true;
+            }
+        }
+        $recurringPending = 0;
         foreach ($recurring as $assignment) {
+            if (isset($materializedRecurring[(int) ($assignment['id'] ?? 0)])) {
+                continue;
+            }
+            ++$recurringPending;
             $code = PayrollTimeValue::string(
                 $assignment['component_code'] ?? null,
                 'component_code',
@@ -1942,6 +1973,9 @@ final class PayrollQuickInputRepository
             'away_in_month' => $awayInMonth,
             'base_amount_minor' => $base,
             'base_managed_elsewhere' => $managed['base'],
+            // Pravidelné složky účinné v měsíci, ze kterých ještě nevznikl vstup.
+            // Mzdový běh je nevidí, dokud je někdo nevytvoří a neschválí.
+            'recurring_pending_count' => $recurringPending,
             'base_conflict' => $conflicts['base'],
             'partial_month' => $partialMonth,
             'base_requires_entry' => $baseRequiresEntry,
