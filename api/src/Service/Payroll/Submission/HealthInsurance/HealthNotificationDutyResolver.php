@@ -34,16 +34,16 @@ final readonly class HealthNotificationDutyResolver
         }
 
         $resolved = [];
-        foreach ($this->occurrences($facts) as [$kind, $occurredOn, $insurer]) {
-            $resolved[] = $this->duty($facts, $kind, $occurredOn, $insurer);
+        foreach ($this->occurrences($facts) as [$kind, $occurredOn, $insurer, $direction]) {
+            $resolved[] = $this->duty($facts, $kind, $occurredOn, $insurer, $direction);
         }
         usort(
             $resolved,
             static fn (
                 HealthNotificationDuty $a,
                 HealthNotificationDuty $b,
-            ): int => [$a->occurredOn, $a->kind->value]
-                <=> [$b->occurredOn, $b->kind->value],
+            ): int => [$a->occurredOn, $a->kind->value, $a->insurerDirection === HealthNotificationDuty::DIRECTION_INCOMING]
+                <=> [$b->occurredOn, $b->kind->value, $b->insurerDirection === HealthNotificationDuty::DIRECTION_INCOMING],
         );
 
         return $resolved;
@@ -54,7 +54,7 @@ final readonly class HealthNotificationDutyResolver
      * jako dvě povinnosti — sloučit je do jedné by znamenalo, že se jedna
      * z nich neoznámí.
      *
-     * @return list<array{0:HealthNotificationDutyKind,1:string,2:?string}>
+     * @return list<array{0:HealthNotificationDutyKind,1:string,2:?string,3:?string}>
      */
     private function occurrences(HealthNotificationFacts $facts): array
     {
@@ -63,9 +63,10 @@ final readonly class HealthNotificationDutyResolver
             HealthNotificationDutyKind $kind,
             ?string $on,
             ?string $insurer = null,
+            ?string $direction = null,
         ) use (&$occurrences): void {
             if ($on !== null && $on !== '') {
-                $occurrences[] = [$kind, $on, $insurer];
+                $occurrences[] = [$kind, $on, $insurer, $direction];
             }
         };
 
@@ -95,11 +96,13 @@ final readonly class HealthNotificationDutyResolver
                 HealthNotificationDutyKind::InsurerChange,
                 $facts->insurerChangedOn,
                 $facts->previousInsurerCode,
+                HealthNotificationDuty::DIRECTION_OUTGOING,
             );
             $add(
                 HealthNotificationDutyKind::InsurerChange,
                 $facts->insurerChangedOn,
                 $facts->insurerCode,
+                HealthNotificationDuty::DIRECTION_INCOMING,
             );
         }
         $add(
@@ -127,6 +130,7 @@ final readonly class HealthNotificationDutyResolver
         HealthNotificationDutyKind $kind,
         string $occurredOn,
         ?string $insurerOverride,
+        ?string $direction,
     ): HealthNotificationDuty {
         $rule = $this->duties->ruleFor($kind, $occurredOn);
         $insurer = $insurerOverride ?? $facts->insurerCode;
@@ -153,6 +157,7 @@ final readonly class HealthNotificationDutyResolver
                     $facts->relationType,
                 )
                 : null,
+            insurerDirection: $direction,
         );
     }
 }

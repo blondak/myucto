@@ -168,10 +168,13 @@ final class PayrollHealthNotificationPeriodTest extends TestCase
     }
 
     /**
-     * Přestup se oznamuje OBĚMA pojišťovnám a ani u jedné z toho neplyne kód
-     * změny — schéma ho váže na směr přestupu, který doména nezná.
+     * Přestup se oznamuje OBĚMA pojišťovnám a každé jiným kódem: dosavadní
+     * odhláškou „O" k poslednímu dni u ní, nová přihláškou „P" ke dni změny
+     * (`kodZmenyZamestnaceTyp` v připnutém HOZ XSD). Dřív byl kód fail-closed
+     * a obě povinnosti sdílely referenci, takže evidence povinností jednu
+     * z nich přepsala.
      */
-    public function testInsurerChangeYieldsTwoDutiesAndNamesTheMissingCode(): void
+    public function testInsurerChangeYieldsOutgoingAndIncomingDutiesWithCodes(): void
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -189,21 +192,41 @@ final class PayrollHealthNotificationPeriodTest extends TestCase
         );
 
         self::assertSame(2, $page['total']);
-        $codes = array_column($page['items'], 'insurer_code');
-        sort($codes);
-        self::assertSame(['111', '205'], $codes);
-        foreach ($page['items'] as $item) {
-            self::assertFalse($item['change_code']['documented']);
-            self::assertNull($item['change_code']['code']);
-            self::assertNotNull(
-                $item['change_code']['reason'],
-                'Nedoložený kód musí mít KONKRÉTNÍ důvod, ne prázdno.',
-            );
-            self::assertStringContainsString(
-                'přestup',
-                mb_strtolower($item['change_code']['reason']),
-            );
-        }
+        $byInsurer = array_column($page['items'], null, 'insurer_code');
+        ksort($byInsurer);
+        self::assertSame(['111', '205'], array_map('strval', array_keys($byInsurer)));
+
+        $outgoing = $byInsurer['111'];
+        self::assertSame('outgoing', $outgoing['insurer_direction']);
+        self::assertTrue($outgoing['change_code']['documented']);
+        self::assertSame('O', $outgoing['change_code']['code']);
+        self::assertSame('2026-06-09', $outgoing['reported_change_on']);
+
+        $incoming = $byInsurer['205'];
+        self::assertSame('incoming', $incoming['insurer_direction']);
+        self::assertTrue($incoming['change_code']['documented']);
+        self::assertSame('P', $incoming['change_code']['code']);
+        self::assertSame('2026-06-10', $incoming['reported_change_on']);
+
+        // Osmidenní lhůta běží od změny u obou pojišťoven.
+        self::assertSame('2026-06-18', $outgoing['deadline']['due_on']);
+        self::assertSame('2026-06-18', $incoming['deadline']['due_on']);
+        self::assertNotSame($outgoing['id'], $incoming['id']);
+
+        $registered = $this->service->registerPeriodObligations(
+            $this->supplierId,
+            'production',
+            '2026-06',
+        );
+        $insurerChangeObligations = array_filter(
+            $registered['items'],
+            static fn (array $item): bool => str_contains((string) $item['duty_id'], ':insurer_change:'),
+        );
+        self::assertCount(
+            2,
+            $insurerChangeObligations,
+            'Každá pojišťovna musí mít vlastní povinnost v evidenci.',
+        );
     }
 
     /** Filtr i stránka platí na serveru — `total` popisuje filtrovaný seznam. */

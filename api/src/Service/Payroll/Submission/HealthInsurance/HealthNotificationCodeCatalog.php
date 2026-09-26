@@ -13,8 +13,9 @@ namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
  * schéma v repu nebylo, katalog kód odmítal vyrobit. Odblokovaly se jen ty
  * druhy povinnosti, kde schéma určuje JEDINÝ kód
  * ({@see self::DOCUMENTED_CODE_FOR_DUTY}); tam, kde by kód závisel na
- * opravované položce nebo na směru přestupu, zůstává metoda fail-closed
- * i s XSD ({@see self::UNMAPPED_DUTY_REASON}).
+ * opravované položce, zůstává metoda fail-closed i s XSD
+ * ({@see self::UNMAPPED_DUTY_REASON}). Přestup mezi pojišťovnami kód dostane
+ * až povinnost se směrem ({@see self::codeForDuty()}).
  *
  * Co katalog naopak umí i bez významu písmen: **odmítnout kód, který
  * zaměstnavatel po 1. 1. 2026 podat nesmí.** Skupinová příslušnost na to
@@ -201,6 +202,43 @@ final class HealthNotificationCodeCatalog
         HealthNotificationDutyKind $kind,
     ): bool {
         return isset(self::DOCUMENTED_CODE_FOR_DUTY[$kind->value]);
+    }
+
+    /**
+     * Kód změny pro KONKRÉTNÍ povinnost.
+     *
+     * Přestup mezi pojišťovnami druh povinnosti sám neurčí, ale povinnost se
+     * směrem ano. Doslovné znění `kodZmenyZamestnaceTyp` v připnutém HOZ XSD:
+     * - `O` — „Použije se v případech ukončení zaměstnání, přestupu k jiné
+     *   zdravotní pojišťovně či ukončení pojištění v ČR" → dosavadní pojišťovna,
+     * - `P` — nástup „… a při přestupu od jiné zdravotní pojišťovny" → nová
+     *   pojišťovna.
+     */
+    public function codeForDuty(HealthNotificationDuty $duty): string
+    {
+        if ($duty->kind === HealthNotificationDutyKind::InsurerChange) {
+            return match ($duty->insurerDirection) {
+                HealthNotificationDuty::DIRECTION_OUTGOING => 'O',
+                HealthNotificationDuty::DIRECTION_INCOMING => 'P',
+                default => $this->codeFor($duty->kind),
+            };
+        }
+
+        return $this->codeFor($duty->kind);
+    }
+
+    /** Dá se z téhle povinnosti doloženě vyrobit kód změny? */
+    public function isDutyCodeDocumented(HealthNotificationDuty $duty): bool
+    {
+        if ($duty->kind === HealthNotificationDutyKind::InsurerChange) {
+            return in_array(
+                $duty->insurerDirection,
+                [HealthNotificationDuty::DIRECTION_OUTGOING, HealthNotificationDuty::DIRECTION_INCOMING],
+                true,
+            );
+        }
+
+        return $this->isCodeMappingDocumented($duty->kind);
     }
 
     /**

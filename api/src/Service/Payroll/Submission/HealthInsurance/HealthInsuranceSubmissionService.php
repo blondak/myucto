@@ -148,10 +148,13 @@ final readonly class HealthInsuranceSubmissionService
                     HealthNotificationDutyCatalog::NARROWING_EFFECTIVE_FROM,
                 // Mapování je doložené anotací připnutého XSD, ale jen tam,
                 // kde schéma určuje jediný kód; zbytek zůstává fail-closed.
+                // Přestup kód určuje až směrem (odhláška „O" u dosavadní,
+                // přihláška „P" u nové pojišťovny), a ten povinnost nese vždy.
                 'mapping_from_duty_documented' => array_values(array_filter(
                     array_map(
                         fn (HealthNotificationDutyKind $kind): ?string =>
                             $this->codes->isCodeMappingDocumented($kind)
+                            || $kind === HealthNotificationDutyKind::InsurerChange
                                 ? $kind->value
                                 : null,
                         HealthNotificationDutyKind::cases(),
@@ -1634,7 +1637,7 @@ final readonly class HealthInsuranceSubmissionService
         HealthNotificationDuty $duty,
         string $fullName,
     ): array {
-        $documented = $this->codes->isCodeMappingDocumented($duty->kind);
+        $documented = $this->codes->isDutyCodeDocumented($duty);
         $code = null;
         $codeReason = null;
         try {
@@ -1672,6 +1675,8 @@ final readonly class HealthInsuranceSubmissionService
             'kind' => $duty->kind->value,
             'label' => $duty->rule->label,
             'insurer_code' => $duty->insurerCode,
+            'insurer_direction' => $duty->insurerDirection,
+            'reported_change_on' => $duty->reportedChangeOn(),
             'occurred_on' => $duty->occurredOn,
             'reported_by_employer' => $duty->reportedByEmployer,
             'rule' => $duty->rule->toArray(),
@@ -1777,8 +1782,10 @@ final readonly class HealthInsuranceSubmissionService
     /**
      * Sestaví HOZ pro JEDNU pojišťovnu a JEDNO období z povinností, které
      * hlásí zaměstnavatel a mají kód změny doložený anotací XSD
-     * ({@see HealthNotificationCodeCatalog::isCodeMappingDocumented()}).
-     * Nedoložené kódy (oprava, přestup, změna údajů) se do dávky nezahrnují —
+     * ({@see HealthNotificationCodeCatalog::isDutyCodeDocumented()}).
+     * Přestup mezi pojišťovnami se do dávky dostane u OBOU pojišťoven: dávka
+     * dosavadní pojišťovny nese odhlášku „O", dávka nové přihlášku „P".
+     * Nedoložené kódy (oprava, změna údajů) se do dávky nezahrnují —
      * aplikace pro ně kód vyrobit neumí, ne že by je zapomněla.
      *
      * @return array{
@@ -1809,7 +1816,7 @@ final readonly class HealthInsuranceSubmissionService
             $duty = $entry['duty'];
             if (!$duty->reportedByEmployer
                 || $duty->insurerCode !== $insurerCode
-                || !$this->codes->isCodeMappingDocumented($duty->kind)
+                || !$this->codes->isDutyCodeDocumented($duty)
             ) {
                 continue;
             }
@@ -1935,7 +1942,7 @@ final readonly class HealthInsuranceSubmissionService
 
         return new HealthNotificationChange(
             changeCode: $code,
-            changedOn: $duty->occurredOn,
+            changedOn: $duty->reportedChangeOn(),
             insuranceNumber: $firstRegistrationNumber !== null
                 ? $firstRegistrationNumber
                 : $this->insuranceNumberFor(
@@ -1961,7 +1968,7 @@ final readonly class HealthInsuranceSubmissionService
         ?array $identity,
     ): string {
         if ($duty->kind !== HealthNotificationDutyKind::EmploymentStart) {
-            return $this->codes->codeFor($duty->kind);
+            return $this->codes->codeForDuty($duty);
         }
         $identity ??= $this->identities->identityAt(
             $supplierId,
