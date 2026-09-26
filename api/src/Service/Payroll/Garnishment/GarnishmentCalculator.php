@@ -23,6 +23,9 @@ final class GarnishmentCalculator
 
     public function calculate(GarnishmentInput $input): GarnishmentResult
     {
+        if ($input->severanceMultiples !== []) {
+            return $this->calculateWithSeverance($input);
+        }
         $scope = $this->evidenceScope($input);
         $policy = null;
         $rulesetId = null;
@@ -211,6 +214,7 @@ final class GarnishmentCalculator
             $excess,
             $fourRule,
             $policy,
+            !self::isSeveranceMultipleIncome($input),
         );
         if ($allocation['voluntary_reserved'] > 0) {
             $roundingTrace[] = [
@@ -256,6 +260,260 @@ final class GarnishmentCalculator
             $policy->rulesetHash(),
             $scope,
         );
+    }
+
+    /**
+     * Měsíc, ve kterém se spolu se mzdou vyplácí odstupné.
+     *
+     * § 299 odst. 4 věta první o. s. ř.: „Z odstupného se srážky vypočítávají
+     * zvlášť z každého násobku průměrného výdělku, měsíčního platu … ze kterých
+     * byla odvozena výše nebo minimální výše odstupného stanovená jinými
+     * právními předpisy." Odstupné 3× průměr jsou tedy tři samostatné měsíční
+     * příjmy, každý se svou nezabavitelnou částkou (§ 278 o. s. ř.) a svými
+     * třetinami (§ 279), ne jedna trojnásobná mzda. Dřív se odstupné přičetlo
+     * ke mzdě posledního měsíce a z celku se odečetla JEDNA nezabavitelná
+     * částka — povinnému se srazilo víc, než zákon dovoluje (nález CYK-B16a).
+     *
+     * Postup:
+     *  1. Mzda měsíce výplaty se spočítá jako obvykle (i s paušálem plátce
+     *     mzdy a s dohodami o srážkách, které se berou jen ze mzdy).
+     *  2. Každý násobek se spočítá jako samostatný měsíc v pořadí doby
+     *     poskytování odstupného. Zůstatky pohledávek se mezi nimi snižují
+     *     o to, co předchozí výpočet přiznal (§ 276 o. s. ř.), stejně jako
+     *     v {@see GarnishmentBatchCalculator}.
+     *  3. Z násobku se paušální náhrada nákladů neodečítá: plátce odstupného
+     *     na ni podle § 301 odst. 2 o. s. ř. nemá nárok („Osoba … vůči které má
+     *     povinný nárok … na příjmy podle § 299 odst. 1 písm. b) až d) a f)
+     *     až l), nemá nárok na paušálně stanovenou náhradu nákladů"); odstupné
+     *     je písm. g).
+     *  4. Výsledky se sečtou do jednoho výsledku osoby a měsíce — sražená
+     *     částka, nezabavitelné částky, třetiny i rozdělení mezi pohledávky.
+     *     Strop § 281 o. s. ř. drží každý dílčí výpočet sám, takže drží
+     *     i součet.
+     *
+     * Věta druhá § 299 odst. 4: nastoupí-li povinný v době poskytování
+     * odstupného do práce nebo mu vznikne jiný příjem podle odst. 1 až 3,
+     * „považují se jednotlivé násobky … za měsíční příjem, na který se vztahují
+     * ustanovení o výkonu rozhodnutí srážkami ze mzdy" — násobek se v takovém
+     * měsíci sčítá s druhým příjmem a vlastní nezabavitelná částka mu nenáleží.
+     * Plátce odstupného druhý příjem nezná; počítá proto násobek s nulovou
+     * nezabavitelnou částkou jen tehdy, když účetní potvrdí, že ji za ten měsíc
+     * započítává druhý plátce (stejně jako u souběhu plátců, § 293 odst. 4).
+     * Bez potvrzení se výpočet zastaví a nic se neodhaduje.
+     *
+     * Soudem určenou měsíční splátku v oddlužení (§ 398 odst. 5 IZ) nejde
+     * na násobky přenést bez výkladu výroku soudu — zastaví se na ručním
+     * posouzení.
+     */
+    private function calculateWithSeverance(GarnishmentInput $input): GarnishmentResult
+    {
+        $wage = $this->calculate($input->withoutSeverance());
+        $multiples = GarnishmentInput::sortedMultiples($input->severanceMultiples);
+        $totalIncome = $wage->garnishableIncomeMinorUnits;
+        foreach ($multiples as $multiple) {
+            $totalIncome = self::addExactly($totalIncome, $multiple->amountMinorUnits);
+        }
+        $issues = $wage->status === GarnishmentStatus::Supported ? [] : $wage->issues;
+        if ($input->insolvency->mode === InsolvencyMode::CourtDeterminedAmount) {
+            $issues[] = 'severance_with_court_determined_insolvency_installment';
+        }
+        $carried = [];
+        foreach ($input->claims as $claim) {
+            $carried[$claim->id] = $claim->outstandingMinorUnits;
+        }
+        self::reduceCarried($carried, $wage);
+        /** @var list<array{0:SeveranceMultiple,1:GarnishmentResult}> $segments */
+        $segments = [];
+        if ($issues === []) {
+            foreach ($multiples as $multiple) {
+                if ($multiple->otherIncomeOverlap && !$multiple->otherPayerAppliesProtectedAmount) {
+                    $issues[] = 'severance_multiple_other_income_unresolved';
+                    continue;
+                }
+                $segment = $this->calculate($this->severanceSegmentInput($input, $multiple, $carried));
+                if ($segment->status !== GarnishmentStatus::Supported) {
+                    array_push($issues, ...$segment->issues);
+                    continue;
+                }
+                self::reduceCarried($carried, $segment);
+                $segments[] = [$multiple, $segment];
+            }
+        }
+        if ($issues !== []) {
+            sort($issues, SORT_STRING);
+
+            return new GarnishmentResult(
+                $input->period,
+                GarnishmentStatus::ManualReview,
+                $totalIncome,
+                0,
+                0,
+                0,
+                0,
+                0,
+                $totalIncome,
+                false,
+                false,
+                [],
+                array_values(array_unique($issues)),
+                [],
+                $wage->rulesetId,
+                $wage->rulesetHash,
+                $wage->evidenceSource,
+            );
+        }
+
+        $protected = $wage->protectedAmountMinorUnits;
+        $third = $wage->thirdMinorUnits;
+        $excess = $wage->fullyAttachableExcessMinorUnits;
+        $withheld = $wage->totalWithheldMinorUnits;
+        $payment = $wage->employeePaymentMinorUnits;
+        /** @var array<string,array{0:int,1:int}> $pools */
+        $pools = [];
+        foreach ($wage->allocations as $allocation) {
+            $pools[$allocation->claimId] = [
+                $allocation->firstPoolMinorUnits,
+                $allocation->secondPoolMinorUnits,
+            ];
+        }
+        $trace = $wage->roundingTrace;
+        foreach ($segments as [$multiple, $segment]) {
+            $protected = self::addExactly($protected, $segment->protectedAmountMinorUnits);
+            $third = self::addExactly($third, $segment->thirdMinorUnits);
+            $excess = self::addExactly($excess, $segment->fullyAttachableExcessMinorUnits);
+            $withheld = self::addExactly($withheld, $segment->totalWithheldMinorUnits);
+            $payment = self::addExactly($payment, $segment->employeePaymentMinorUnits);
+            foreach ($segment->allocations as $allocation) {
+                $current = $pools[$allocation->claimId] ?? [0, 0];
+                $pools[$allocation->claimId] = [
+                    self::addExactly($current[0], $allocation->firstPoolMinorUnits),
+                    self::addExactly($current[1], $allocation->secondPoolMinorUnits),
+                ];
+            }
+            $trace[] = [
+                'step' => 'severance_multiple',
+                'legal_basis' => 'osr-299-4',
+                'multiple_index' => $multiple->index,
+                'multiples' => count($multiples),
+                'income_minor_units' => $segment->garnishableIncomeMinorUnits,
+                'protected_amount_minor_units' => $segment->protectedAmountMinorUnits,
+                'third_minor_units' => $segment->thirdMinorUnits,
+                'fully_attachable_excess_minor_units' =>
+                    $segment->fullyAttachableExcessMinorUnits,
+                'withheld_minor_units' => $segment->totalWithheldMinorUnits,
+                'employer_flat_fee_minor_units' => $segment->employerFlatFeeMinorUnits,
+                'other_income_overlap' => $multiple->otherIncomeOverlap,
+            ];
+        }
+        $allocations = [];
+        foreach ($pools as $claimId => [$first, $second]) {
+            if ($first === 0 && $second === 0) {
+                continue;
+            }
+            $allocations[] = new GarnishmentAllocation((string) $claimId, $first, $second);
+        }
+        usort(
+            $allocations,
+            static fn (GarnishmentAllocation $a, GarnishmentAllocation $b): int =>
+                $a->claimId <=> $b->claimId,
+        );
+
+        return new GarnishmentResult(
+            $input->period,
+            GarnishmentStatus::Supported,
+            $totalIncome,
+            $protected,
+            $third,
+            $excess,
+            $wage->employerFlatFeeMinorUnits,
+            $withheld,
+            $payment,
+            $wage->fourEnforcementRuleApplied,
+            $wage->insolvencyApplied,
+            $allocations,
+            [],
+            $trace,
+            $wage->rulesetId,
+            $wage->rulesetHash,
+            $wage->evidenceSource,
+        );
+    }
+
+    /** @param array<string,int> $carried */
+    private function severanceSegmentInput(
+        GarnishmentInput $input,
+        SeveranceMultiple $multiple,
+        array $carried,
+    ): GarnishmentInput {
+        $claims = [];
+        foreach ($input->claims as $claim) {
+            $claims[] = $claim->withOutstanding(
+                min($claim->outstandingMinorUnits, $carried[$claim->id] ?? $claim->outstandingMinorUnits),
+            );
+        }
+        $otherPayer = $multiple->otherIncomeOverlap;
+
+        return new GarnishmentInput(
+            $input->period,
+            $input->paymentDate,
+            new GarnishableIncomeResult(
+                GarnishmentStatus::Supported,
+                $multiple->amountMinorUnits,
+                0,
+                [],
+                [[
+                    'id' => "severance-multiple-{$multiple->index}",
+                    'kind' => GarnishableIncomeKind::SeveranceMultiple->value,
+                    'amount_minor_units' => $multiple->amountMinorUnits,
+                    'payer_id' => 'severance',
+                    'treatment' => 'garnishable',
+                ]],
+            ),
+            $claims,
+            $input->eligibleDependants,
+            $input->dependantsEvidenceComplete,
+            $input->eligibleSpouse,
+            $input->spouseEvidenceComplete,
+            $input->pensionEvidence,
+            $otherPayer ? true : $input->hasMultiplePayers,
+            $otherPayer ? 0 : $input->protectedAmountOverrideMinorUnits,
+            $input->insolvency,
+            $otherPayer ? true : $input->protectedAmountOverrideVerified,
+            $input->claimRegisterEvidenceComplete,
+            $input->spousePensionEvidence,
+        );
+    }
+
+    /** @param array<string,int> $carried */
+    private static function reduceCarried(array &$carried, GarnishmentResult $result): void
+    {
+        foreach ($result->allocations as $allocation) {
+            if (!isset($carried[$allocation->claimId])) {
+                continue;
+            }
+            $carried[$allocation->claimId] = max(
+                0,
+                $carried[$allocation->claimId] - $allocation->totalMinorUnits,
+            );
+        }
+    }
+
+    /**
+     * Příjem je jeden násobek odstupného — plátce z něj nemá nárok na paušální
+     * náhradu nákladů (§ 301 odst. 2 o. s. ř.).
+     */
+    private static function isSeveranceMultipleIncome(GarnishmentInput $input): bool
+    {
+        if ($input->income->trace === []) {
+            return false;
+        }
+        foreach ($input->income->trace as $item) {
+            if ($item['kind'] !== GarnishableIncomeKind::SeveranceMultiple->value) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -445,6 +703,7 @@ final class GarnishmentCalculator
         int $excess,
         bool $fourRule,
         EnforcementDeductionPolicy2026 $policy,
+        bool $employerFeeAllowed = true,
     ): array {
         $balances = [];
         foreach ([...$claims, ...$agreements] as $claim) {
@@ -491,7 +750,9 @@ final class GarnishmentCalculator
         // Sražená částka. Paušál ji nezvyšuje ani nesnižuje — jen se z ní bere.
         $withheld = self::addExactly(self::sumExactly($first), $priorityUsed);
 
-        $fee = $this->hasEligibleFeeClaim($claims, $policy) && $withheld > 0
+        $fee = $employerFeeAllowed
+            && $this->hasEligibleFeeClaim($claims, $policy)
+            && $withheld > 0
             ? min(
                 // 50 Kč za kalendářní měsíc, a jen jednou na jednoho povinného
                 // i při souběhu více pohledávek (§ 3 nař. vlády č. 595/2006 Sb.).

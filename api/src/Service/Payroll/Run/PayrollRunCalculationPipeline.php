@@ -56,11 +56,12 @@ final class PayrollRunCalculationPipeline
                 $actorUserId,
                 $snapshot,
                 $result,
-                fn (array $netBeforeDeductions): array =>
+                fn (array $netBeforeDeductions, array $statutoryShares = []): array =>
                     $this->garnishments->voluntaryDeductionCapacities(
                         $snapshot,
                         $baseResult,
                         $netBeforeDeductions,
+                        $statutoryShares,
                     ),
             );
             $result = $this->attachStatutoryPeople($result);

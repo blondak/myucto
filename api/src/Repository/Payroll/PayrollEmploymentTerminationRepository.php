@@ -51,6 +51,8 @@ final class PayrollEmploymentTerminationRepository
             'SELECT id, employment_id, termination_method, legal_ground,
                     employee_stated_reason, severance_multiple_override,
                     severance_override_reason, working_time_account_applies,
+                    other_income_from, other_payer_applies_protected_amount,
+                    work_injury_compensation_payer, work_injury_compensation_paid_on,
                     death_tax_assessment, death_tax_assessed_by,
                     death_tax_assessed_at, row_version, updated_at
                FROM payroll_employment_terminations
@@ -71,6 +73,7 @@ final class PayrollEmploymentTerminationRepository
             ? null
             : (int) $row['death_tax_assessed_by'];
         $row['working_time_account_applies'] = (bool) $row['working_time_account_applies'];
+        $row['other_payer_applies_protected_amount'] = (bool) $row['other_payer_applies_protected_amount'];
 
         return $row;
     }
@@ -82,7 +85,8 @@ final class PayrollEmploymentTerminationRepository
      * @param array{
      *   termination_method:string,legal_ground:string,
      *   employee_stated_reason:?string,severance_multiple_override:?int,
-     *   severance_override_reason:?string,working_time_account_applies:bool
+     *   severance_override_reason:?string,working_time_account_applies:bool,
+     *   other_income_from:?string,other_payer_applies_protected_amount:bool
      * } $data
      */
     public function save(
@@ -99,8 +103,9 @@ final class PayrollEmploymentTerminationRepository
                     (supplier_id, employment_id, termination_method, legal_ground,
                      employee_stated_reason, severance_multiple_override,
                      severance_override_reason, working_time_account_applies,
+                     other_income_from, other_payer_applies_protected_amount,
                      created_by, updated_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -111,6 +116,8 @@ final class PayrollEmploymentTerminationRepository
                 $data['severance_multiple_override'],
                 $data['severance_override_reason'],
                 $data['working_time_account_applies'] ? 1 : 0,
+                $data['other_income_from'],
+                $data['other_payer_applies_protected_amount'] ? 1 : 0,
                 $userId,
                 $userId,
             ]);
@@ -129,6 +136,7 @@ final class PayrollEmploymentTerminationRepository
                 SET termination_method = ?, legal_ground = ?,
                     employee_stated_reason = ?, severance_multiple_override = ?,
                     severance_override_reason = ?, working_time_account_applies = ?,
+                    other_income_from = ?, other_payer_applies_protected_amount = ?,
                     death_tax_assessment = IF(? = "death", death_tax_assessment, NULL),
                     death_tax_assessed_by = IF(? = "death", death_tax_assessed_by, NULL),
                     death_tax_assessed_at = IF(? = "death", death_tax_assessed_at, NULL),
@@ -142,6 +150,8 @@ final class PayrollEmploymentTerminationRepository
             $data['severance_multiple_override'],
             $data['severance_override_reason'],
             $data['working_time_account_applies'] ? 1 : 0,
+            $data['other_income_from'],
+            $data['other_payer_applies_protected_amount'] ? 1 : 0,
             $data['termination_method'],
             $data['termination_method'],
             $data['termination_method'],
@@ -154,6 +164,30 @@ final class PayrollEmploymentTerminationRepository
             throw new PayrollEmploymentConflictException(
                 (int) ($this->find($supplierId, $employmentId)['row_version'] ?? $expectedVersion),
             );
+        }
+    }
+
+    /**
+     * Kdo vyplácí jednorázovou náhradu podle § 271ca ZP a kdy. Zapisuje se
+     * jednou, při založení náhrady; změnu řeší zpětvzetí vstupu.
+     */
+    public function saveWorkInjuryCompensation(
+        int $supplierId,
+        int $employmentId,
+        string $payer,
+        string $paidOn,
+        ?int $userId,
+    ): void {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terminations
+                SET work_injury_compensation_payer = ?,
+                    work_injury_compensation_paid_on = ?,
+                    updated_by = ?, row_version = row_version + 1
+              WHERE supplier_id = ? AND employment_id = ?'
+        );
+        $stmt->execute([$payer, $paidOn, $userId, $supplierId, $employmentId]);
+        if ($stmt->rowCount() !== 1) {
+            throw new \DomainException('Záznam o skončení vztahu nebyl nalezen.');
         }
     }
 

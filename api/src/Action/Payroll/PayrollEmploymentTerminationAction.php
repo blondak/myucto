@@ -64,7 +64,33 @@ final class PayrollEmploymentTerminationAction
     public function createSeverance(Request $request, Response $response, array $args): Response
     {
         return $this->run($request, $response, AccessLevel::WRITE, 'payroll.employment.termination_severance_created', fn (int $supplierId, int $employmentId): array =>
-            $this->service->createSeveranceInput($supplierId, $employmentId, $this->userId($request)), $args);
+            $this->service->createSeveranceInput(
+                $supplierId,
+                $employmentId,
+                $this->userId($request),
+                self::optionalInt($this->body($request)['garnishment_multiple'] ?? null, 'Počet násobků pro srážky'),
+            ), $args);
+    }
+
+    /** @param array<string,string> $args */
+    public function createWorkInjuryCompensation(Request $request, Response $response, array $args): Response
+    {
+        return $this->run($request, $response, AccessLevel::WRITE, 'payroll.employment.termination_work_injury_compensation_created', fn (int $supplierId, int $employmentId): array =>
+            $this->service->createWorkInjuryCompensation($supplierId, $employmentId, $this->body($request), $this->userId($request)), $args);
+    }
+
+    private static function optionalInt(mixed $value, string $label): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_int($value)) {
+            return $value;
+        }
+        if (is_string($value) && ctype_digit($value)) {
+            return (int) $value;
+        }
+        throw new \InvalidArgumentException("{$label} musí být celé číslo.");
     }
 
     /** @param array<string,string> $args */

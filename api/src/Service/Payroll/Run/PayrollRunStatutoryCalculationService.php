@@ -177,6 +177,11 @@ final class PayrollRunStatutoryCalculationService
         $netByEmployee = [];
         $prepared = [];
         $netBeforeDeductions = [];
+        // Daň a pojistné osoby pro přiřazení k odstupnému: srážky z odstupného
+        // se počítají z jeho ČISTÉ částky zvlášť po násobcích (§ 299 odst. 4
+        // o. s. ř.), takže kapacita dohod potřebuje totéž rozdělení jako
+        // výpočet exekuce po zákonném výsledku.
+        $statutoryShares = [];
         foreach (self::rows($snapshot['people'] ?? null, 'snapshot.people') as $person) {
             $employee = self::object($person['employee'] ?? null, 'employee');
             $employeeId = self::positiveInt($employee, 'id');
@@ -223,6 +228,12 @@ final class PayrollRunStatutoryCalculationService
                 );
             }
             $advanceTax = $taxPerson->advanceTax;
+            $statutoryShares[$employeeId] = [
+                'advance_tax_minor_units' => $advanceTax === null ? 0 : $advanceTax->taxAfterCreditsMinorUnits,
+                'withholding_tax_minor_units' => $taxPerson->withholdingTaxMinorUnits,
+                'employee_social_minor_units' => $socialPerson->employeeContributionMinorUnits ?? 0,
+                'employee_health_minor_units' => $healthPerson->employeeContributionMinorUnits ?? 0,
+            ];
             $netBeforeDeductions[$employeeId] = $this->netBeforeDeductions(
                 $relationships,
                 $socialPerson->employeeContributionMinorUnits ?? 0,
@@ -243,7 +254,7 @@ final class PayrollRunStatutoryCalculationService
 
         $capacities = $voluntaryDeductionCapacities === null || $prepared === []
             ? []
-            : $voluntaryDeductionCapacities($netBeforeDeductions);
+            : $voluntaryDeductionCapacities($netBeforeDeductions, $statutoryShares);
         foreach ($prepared as $employeeId => $entry) {
             $capacity = $capacities[$employeeId] ?? 0;
             if (!is_int($capacity) || $capacity < 0) {

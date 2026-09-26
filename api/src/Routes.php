@@ -2138,6 +2138,7 @@ final class Routes
             $g->post('/employments/{id:[0-9]+}/termination/leave-settlement', [PayrollEmploymentTerminationAction::class, 'settleLeave']);
             $g->post('/employments/{id:[0-9]+}/termination/leave-settlement/reverse', [PayrollEmploymentTerminationAction::class, 'reverseLeave']);
             $g->post('/employments/{id:[0-9]+}/termination/severance-input', [PayrollEmploymentTerminationAction::class, 'createSeverance']);
+            $g->post('/employments/{id:[0-9]+}/termination/work-injury-compensation', [PayrollEmploymentTerminationAction::class, 'createWorkInjuryCompensation']);
             $g->post('/employments/{id:[0-9]+}/termination/survivors', [PayrollEmploymentTerminationAction::class, 'addSurvivor']);
             $g->delete('/employments/{id:[0-9]+}/termination/survivors/{survivorId:[0-9]+}', [PayrollEmploymentTerminationAction::class, 'removeSurvivor']);
             $g->post('/employments/{id:[0-9]+}/termination/death-tax-assessment', [PayrollEmploymentTerminationAction::class, 'assessDeathTax']);

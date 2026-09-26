@@ -580,6 +580,16 @@ final class PayrollRunSnapshotBuilder
                 // Potvrzený odložený příjem (JMHZ 10548) za tento měsíc; jen
                 // tam, kde ho účetní potvrdila, ostatní vstup se nemění.
                 ...($deferredIncome === null ? [] : ['deferred_income' => $deferredIncome]),
+                // Jiný příjem povinného v době poskytování odstupného (§ 299
+                // odst. 4 věta druhá o. s. ř.) zadaný v kartě Skončení vztahu;
+                // jen tam, kde je vyplněný, ostatní vstup se nemění.
+                ...(($row['severance_other_income_from'] ?? null) === null ? [] : [
+                    'severance_garnishment' => [
+                        'other_income_from' => (string) $row['severance_other_income_from'],
+                        'other_payer_applies_protected_amount' =>
+                            (bool) $row['severance_other_payer_applies_protected_amount'],
+                    ],
+                ]),
             ];
         }
         ksort($people, SORT_NUMERIC);
@@ -1157,7 +1167,10 @@ final class PayrollRunSnapshotBuilder
                     risky_savings.status AS risky_savings_status,
                     risky_savings.row_version AS risky_savings_row_version,
                     risky_savings.approved_at AS risky_savings_approved_at,
-                    risky_savings.approved_by AS risky_savings_approved_by
+                    risky_savings.approved_by AS risky_savings_approved_by,
+                    termination.other_income_from AS severance_other_income_from,
+                    termination.other_payer_applies_protected_amount
+                        AS severance_other_payer_applies_protected_amount
                FROM effective_employment employment
                JOIN payroll_employees employee
                  ON employee.supplier_id = employment.supplier_id
@@ -1235,6 +1248,9 @@ final class PayrollRunSnapshotBuilder
                     risky_savings.supplier_id
                 AND risky_savings_account.id =
                     risky_savings.institution_account_id
+          LEFT JOIN payroll_employment_terminations termination
+                 ON termination.supplier_id = employment.supplier_id
+                AND termination.employment_id = employment.id
               WHERE employment.effective_status IS NOT NULL
                 AND employment.effective_status NOT IN ("archived", "no_show")
                 AND COALESCE(
