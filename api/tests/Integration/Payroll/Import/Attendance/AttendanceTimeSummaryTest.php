@@ -302,7 +302,9 @@ final class AttendanceTimeSummaryTest extends TestCase
     public function testFundMismatchIsOnlyAWarning(): void
     {
         $employmentId = $this->employment('ZAM-13', 'employment', '2026-01-01', '40.00');
-        $importId = $this->batch([$this->hoursRows($employmentId, 160_500, 184_000)]);
+        // Červenec 2026: kalendář 176 h, se svátkem 6. 7. 184 h (to je týž rozvrh,
+        // kontrola ho uzná). Skutečný nesoulad je fond, který nesedí ani se svátkem.
+        $importId = $this->batch([$this->hoursRows($employmentId, 160_500, 192_000)]);
 
         $result = $this->writer->writeFromBatch($this->supplierId, $importId, $this->userId);
 
