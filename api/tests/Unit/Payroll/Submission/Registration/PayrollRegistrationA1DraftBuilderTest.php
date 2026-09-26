@@ -66,9 +66,57 @@ final class PayrollRegistrationA1DraftBuilderTest extends TestCase
             $draft['suggested']['permanent_address']['house_number'],
         );
         // Varianta OST vyžaduje údaje, které aplikace vůbec nevede.
-        self::assertContains('employment.employment_status_code', $missing);
         self::assertContains('employment.position_name', $missing);
         self::assertContains('facts.highest_education_code', $missing);
+        // „Práce probíhá převážně" je jen pro chráněný trh práce, nechybí.
+        self::assertNotContains('employment.prevailing_workplace_code', $missing);
+    }
+
+    /**
+     * Postavení v zaměstnání se navrhne z druhu vztahu a doby určité jako
+     * čtyřmístný kód NKPZ — dvoumístný kód ČSSZ nepřijímá.
+     */
+    public function testSuggestsFourDigitEmploymentStatusFromRelationType(): void
+    {
+        $build = static function (string $relationType, ?string $fixedTermEndOn, string $activity): array {
+            $sources = self::sources();
+            $sources['employment']['relation_type'] = $relationType;
+            $sources['terms']['activity_code'] = $activity;
+            $sources['terms']['relationship_detail_code'] = $activity === '1' ? '1' : null;
+            $sources['terms']['fixed_term_end_on'] = $fixedTermEndOn;
+
+            return (new PayrollRegistrationA1DraftBuilder())->build(
+                $sources,
+                self::identity(),
+                null,
+                null,
+                '2026-08-14',
+                0,
+                null,
+            );
+        };
+
+        foreach ([
+            ['employment', null, '1', '1111'],
+            ['employment', '2026-12-31', '1', '1112'],
+            ['dpc', null, 'A', '1211'],
+            ['dpp', '2026-10-31', 'T', '1222'],
+        ] as [$relationType, $fixedTermEndOn, $activity, $expected]) {
+            $draft = $build($relationType, $fixedTermEndOn, $activity);
+            self::assertSame(
+                $expected,
+                $draft['suggested']['employment']['employment_status_code'],
+                $relationType,
+            );
+            self::assertNotContains(
+                'employment.employment_status_code',
+                self::missingFields($draft),
+            );
+            self::assertArrayHasKey(
+                'employment.employment_status_code',
+                $draft['sources'],
+            );
+        }
     }
 
     public function testForeignerRequiresIdentityDocumentTheApplicationDoesNotTrack(): void

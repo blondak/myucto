@@ -448,7 +448,10 @@ final class PayrollRegistrationXmlSerializer
         if ($action === 2) {
             $job->setAttribute('to', $this->eventText($data, 'end_on'));
             $job->setAttribute('rel', $this->eventText($data, 'activity_code'));
-            $detail = $this->eventNullableText($data, 'relationship_detail_code');
+            $detail = $this->regzecRelationshipDetail(
+                $this->eventText($data, 'activity_code'),
+                $this->eventNullableText($data, 'relationship_detail_code'),
+            );
             if ($detail !== null) {
                 $job->setAttribute('relDetail', $detail);
             }
@@ -461,12 +464,17 @@ final class PayrollRegistrationXmlSerializer
             $job->setAttribute('rel', $this->eventText($data, 'activity_code'));
             $detail = $delta['relationship_detail_code']
                 ?? ($data['relationship_detail_code'] ?? null);
-            if (is_string($detail) && $detail !== '') {
+            $detail = $this->regzecRelationshipDetail(
+                $this->eventText($data, 'activity_code'),
+                is_string($detail) && $detail !== '' ? $detail : null,
+            );
+            if ($detail !== null) {
                 $job->setAttribute('relDetail', $detail);
             }
             if ($action === 4 && isset($delta['contract_start_on'])) {
                 $job->setAttribute('contractfro', (string) $delta['contract_start_on']);
             }
+            $this->regzecDeltaJob($document, $namespace, $job, $delta);
         } elseif ($action === 8) {
             $job->setAttribute('notstart', ($data['not_started'] ?? false) ? 'A' : 'N');
         }
@@ -483,21 +491,13 @@ final class PayrollRegistrationXmlSerializer
                 $data['unemployment'],
             );
         }
-        if ($action === 3) {
-            $delta = $this->eventObject($data, 'delta');
-            if (isset($delta['health_insurance_code'])) {
-                $insurance = $this->element($document, $namespace, 'insh');
-                $insurance->setAttribute('cnr', (string) $delta['health_insurance_code']);
-                $employee->appendChild($insurance);
-            }
-        }
-        if ($action === 4) {
-            $delta = $this->eventObject($data, 'delta');
-            if (isset($delta['highest_education_code'])) {
-                $fact = $this->element($document, $namespace, 'fact');
-                $fact->setAttribute('highedu', (string) $delta['highest_education_code']);
-                $employee->appendChild($fact);
-            }
+        if (in_array($action, [3, 4], true)) {
+            $this->regzecDeltaEmployeeData(
+                $document,
+                $namespace,
+                $employee,
+                $this->eventObject($data, 'delta'),
+            );
         }
         $employees->appendChild($employee);
         $root->appendChild($employees);
@@ -505,7 +505,38 @@ final class PayrollRegistrationXmlSerializer
         return $this->save($document);
     }
 
-    /** @param array<string,mixed> $data */
+    /**
+     * 10502 v navazujících akcích. Starší události u dohod nesou `null`
+     * (evidence ho nevede), REGZEC ho ale chce jako „1" — rozhoduje politika,
+     * ne uložená hodnota.
+     */
+    private function regzecRelationshipDetail(
+        string $activityCode,
+        ?string $detail,
+    ): ?string {
+        try {
+            return PayrollRegistrationRelationshipDetailPolicy::requireForActivity(
+                $activityCode,
+                $detail,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            throw new PayrollRegistrationXmlException(
+                'registration_regzec_relationship_detail_invalid',
+                $exception->getMessage(),
+            );
+        }
+    }
+
+    /**
+     * Klientská část změny (A3) a opravy (A4) v pořadí `clientType`:
+     * name, birth, stat, adr, fdr, cdr, rdr, taxidrezid, proofid.
+     *
+     * Delta nese buď jednotlivé změněné údaje, nebo — u dohlášení údajů
+     * zaměstnance přihlášeného dřív přes ONZ — celý profil. ČSSZ přijímá
+     * obojí (Všeobecné zásady REGZEC, akce 3).
+     *
+     * @param array<string,mixed> $data
+     */
     private function regzecDeltaClient(
         DOMDocument $document,
         string $namespace,
@@ -513,32 +544,243 @@ final class PayrollRegistrationXmlSerializer
         array $data,
     ): void {
         $delta = $this->eventObject($data, 'delta');
-        if (isset($delta['title_prefix'])) {
+        if (isset($delta['birth_number'])) {
+            $client->setAttribute('bno', (string) $delta['birth_number']);
+        }
+        $identity = is_array($delta['identity'] ?? null) ? $delta['identity'] : [];
+        $nameAttributes = array_filter([
+            'sur' => $identity['last_name'] ?? null,
+            'fir' => $identity['first_name'] ?? null,
+            'tit' => $delta['title_prefix'] ?? ($identity['title_prefix'] ?? null),
+        ], static fn (mixed $value): bool => $value !== null);
+        if ($nameAttributes !== []) {
             $name = $this->element($document, $namespace, 'name');
-            $name->setAttribute('tit', (string) $delta['title_prefix']);
+            foreach ($nameAttributes as $attribute => $value) {
+                $name->setAttribute($attribute, (string) $value);
+            }
             $client->appendChild($name);
         }
-        if (is_array($delta['contact_address'] ?? null)) {
-            $address = $delta['contact_address'];
-            $node = $this->element($document, $namespace, 'cdr');
-            foreach ([
-                'street' => 'str', 'house_number' => 'num',
-                'orientation_number' => 'onum', 'postal_code' => 'pnu',
-                'city' => 'cit', 'country_code' => 'cnt',
-                'ruian_point' => 'ruianpoint',
-            ] as $key => $attribute) {
-                if (isset($address[$key])) {
-                    $node->setAttribute($attribute, (string) $address[$key]);
-                }
-            }
-            $client->appendChild($node);
+        if (isset($identity['birth_date'])) {
+            $birth = $this->element($document, $namespace, 'birth');
+            $birth->setAttribute('dat', (string) $identity['birth_date']);
+            $client->appendChild($birth);
         }
-        if (is_array($delta['tax_residency'] ?? null)) {
-            $residency = $delta['tax_residency'];
+        if (isset($identity['sex']) || isset($identity['citizenship_country_code'])) {
+            $stat = $this->element($document, $namespace, 'stat');
+            if (isset($identity['sex'])) {
+                $stat->setAttribute('mal', match ($identity['sex']) {
+                    'male' => 'M',
+                    'female' => 'Ž',
+                    default => throw new PayrollRegistrationXmlException(
+                        'registration_identity_invalid',
+                        PayrollRegistrationFieldVocabulary::label('sex')
+                            . ' musí být muž, nebo žena — ČSSZ jinou hodnotu '
+                            . 'nepřijímá. '
+                            . PayrollRegistrationFieldVocabulary::describe('sex'),
+                    ),
+                });
+            }
+            if (isset($identity['citizenship_country_code'])) {
+                $stat->setAttribute('cnt', (string) $identity['citizenship_country_code']);
+            }
+            $client->appendChild($stat);
+        }
+        foreach ([
+            'permanent_address' => ['adr', true],
+            'czech_residence_address' => ['fdr', false],
+            'contact_address' => ['cdr', true],
+        ] as $key => [$element, $withCountry]) {
+            if (is_array($delta[$key] ?? null)) {
+                $this->appendDeltaAddress(
+                    $document,
+                    $namespace,
+                    $client,
+                    $element,
+                    $delta[$key],
+                    $withCountry,
+                );
+            }
+        }
+        $residency = is_array($delta['tax_residency'] ?? null)
+            ? $delta['tax_residency']
+            : null;
+        if (is_array($residency['residence_address'] ?? null)) {
+            $this->appendDeltaAddress(
+                $document,
+                $namespace,
+                $client,
+                'rdr',
+                $residency['residence_address'],
+                true,
+            );
+        }
+        if ($residency !== null) {
             $node = $this->element($document, $namespace, 'taxidrezid');
             $node->setAttribute('stat', (string) $residency['country_code']);
             $node->setAttribute('statchang', (string) $residency['changed_on']);
+            $this->setMappedAttributes($node, $residency, [
+                'identifier_type' => 'type',
+                'identifier' => 'num',
+            ]);
             $client->appendChild($node);
+        }
+        if (is_array($delta['proof_identity'] ?? null)) {
+            $proof = $this->element($document, $namespace, 'proofid');
+            $this->setMappedAttributes($proof, $delta['proof_identity'], [
+                'type_code' => 'type',
+                'number' => 'num',
+                'foreign_issuer' => 'foreigninst',
+                'country_code' => 'stat',
+            ]);
+            $client->appendChild($proof);
+        }
+    }
+
+    /** @param array<string,mixed> $address */
+    private function appendDeltaAddress(
+        DOMDocument $document,
+        string $namespace,
+        DOMElement $client,
+        string $element,
+        array $address,
+        bool $withCountry,
+    ): void {
+        $node = $this->element($document, $namespace, $element);
+        $mapping = [
+            'street' => 'str', 'house_number' => 'num',
+            'orientation_number' => 'onum', 'postal_code' => 'pnu',
+            'city' => 'cit',
+        ];
+        if ($withCountry) {
+            $mapping['country_code'] = 'cnt';
+        }
+        $mapping['ruian_point'] = 'ruianpoint';
+        foreach ($mapping as $key => $attribute) {
+            if (isset($address[$key])) {
+                $node->setAttribute($attribute, (string) $address[$key]);
+            }
+        }
+        $client->appendChild($node);
+    }
+
+    /**
+     * Pracovní část změny: atributy `job` a vnořené `prof` a `position`.
+     *
+     * @param array<string,mixed> $delta
+     */
+    private function regzecDeltaJob(
+        DOMDocument $document,
+        string $namespace,
+        DOMElement $job,
+        array $delta,
+    ): void {
+        $employment = is_array($delta['employment'] ?? null)
+            ? $delta['employment']
+            : null;
+        if ($employment === null) {
+            return;
+        }
+        $this->setMappedAttributes($job, $employment, [
+            'actual_start_on' => 'fro',
+            'end_on' => 'to',
+            'contract_start_on' => 'contractfro',
+            'employment_status_code' => 'relat',
+            'work_mode_code' => 'workmode',
+            'continuous_operation' => 'cont',
+            'prevailing_workplace_code' => 'place',
+            'expected_workplaces' => 'preplace',
+            'contract_workplace' => 'contractplace',
+            'workplace_city' => 'cit',
+            'workplace_municipality_code' => 'municode',
+        ]);
+        if (isset($employment['profession_code'])
+            || isset($employment['required_education_code'])
+        ) {
+            $profession = $this->element($document, $namespace, 'prof');
+            $this->setMappedAttributes($profession, $employment, [
+                'profession_code' => 'clas',
+                'required_education_code' => 'edu',
+            ]);
+            $job->appendChild($profession);
+        }
+        if (isset($employment['position_name']) || isset($employment['leadership'])) {
+            $position = $this->element($document, $namespace, 'position');
+            $this->setMappedAttributes($position, $employment, [
+                'position_name' => 'name',
+                'leadership' => 'lead',
+            ]);
+            $job->appendChild($position);
+        }
+    }
+
+    /**
+     * Části změny za `job` v pořadí `employeeType`: pens, insh, fact,
+     * nocitizen, forinreg.
+     *
+     * @param array<string,mixed> $delta
+     */
+    private function regzecDeltaEmployeeData(
+        DOMDocument $document,
+        string $namespace,
+        DOMElement $employee,
+        array $delta,
+    ): void {
+        if (is_array($delta['pension'] ?? null)) {
+            $pension = $this->element($document, $namespace, 'pens');
+            $this->setMappedAttributes($pension, $delta['pension'], [
+                'type_code' => 'typ',
+                'received_from' => 'tak',
+                'early_retirement' => 'early',
+                'reduced_retirement_age' => 'reducedAge',
+            ]);
+            $employee->appendChild($pension);
+        }
+        if (isset($delta['health_insurance_code'])) {
+            $insurance = $this->element($document, $namespace, 'insh');
+            $insurance->setAttribute('cnr', (string) $delta['health_insurance_code']);
+            $employee->appendChild($insurance);
+        }
+        $facts = is_array($delta['facts'] ?? null) ? $delta['facts'] : [];
+        if (isset($delta['highest_education_code'])) {
+            $facts['highest_education_code'] = $delta['highest_education_code'];
+        }
+        if ($facts !== []) {
+            $fact = $this->element($document, $namespace, 'fact');
+            foreach ($facts['health_restrictions'] ?? [] as $restriction) {
+                if (!is_array($restriction)) {
+                    continue;
+                }
+                $health = $this->element($document, $namespace, 'healtrest');
+                $this->setMappedAttributes($health, $restriction, [
+                    'type_code' => 'type', 'from' => 'fro', 'to' => 'to',
+                ]);
+                $fact->appendChild($health);
+            }
+            $this->setMappedAttributes($fact, $facts, [
+                'disability_card' => 'ztp',
+                'highest_education_code' => 'highedu',
+            ]);
+            $employee->appendChild($fact);
+        }
+        if (is_array($delta['foreign_worker'] ?? null)) {
+            $foreign = $this->element($document, $namespace, 'nocitizen');
+            $this->setMappedAttributes($foreign, $delta['foreign_worker'], [
+                'free_access' => 'freeacc',
+                'free_access_reason_code' => 'perm',
+                'permit_type_code' => 'permtype',
+                'issuing_labour_office_code' => 'issue',
+                'permit_identifier' => 'permid',
+                'permit_from' => 'permfro',
+                'permit_to' => 'permto',
+            ]);
+            $employee->appendChild($foreign);
+        }
+        if (is_array($delta['foreign_legislation'] ?? null)) {
+            $legislation = $this->element($document, $namespace, 'forinreg');
+            $this->setMappedAttributes($legislation, $delta['foreign_legislation'], [
+                'applies' => 'juris', 'country_code' => 'state',
+            ]);
+            $employee->appendChild($legislation);
         }
     }
 

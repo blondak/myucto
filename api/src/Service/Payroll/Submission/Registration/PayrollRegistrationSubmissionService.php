@@ -359,7 +359,9 @@ final readonly class PayrollRegistrationSubmissionService
                 (int) $validated['row_version'],
                 'ready',
             );
-            if ($eventId === null) {
+            // Neodvozená lhůta (nástup před 1. 7. 2026) do checklistu nejde —
+            // checklist pro ni termín záměrně nevede (PayrollChecklistDeadlinePolicy).
+            if ($eventId === null && $frozen['deadline']->derived) {
                 $this->registrations->setChecklistDueDate(
                     $supplierId,
                     $employmentId,
@@ -469,12 +471,21 @@ final readonly class PayrollRegistrationSubmissionService
             $context,
             $event,
         );
+        // Dohlášení údajů jde i za vztah, který už skončil: do 10009 patří den
+        // odeslání, identita se ale čte ke dni skončení (dál vztah neexistuje).
+        $sourceOn = $effectiveOn;
+        if ($event !== null
+            && is_string($context['end_date'] ?? null)
+            && $effectiveOn > $context['end_date']
+        ) {
+            $sourceOn = $context['end_date'];
+        }
         $source = $this->identities->sensitiveSnapshotSourceAt(
             $supplierId,
             $context['employee_id'],
             $employmentId,
             $environment,
-            $effectiveOn,
+            $sourceOn,
         );
         if ($event !== null
             && is_array($event['employment_external_identifier'] ?? null)
@@ -1088,7 +1099,7 @@ final readonly class PayrollRegistrationSubmissionService
 
     /**
      * @return array{earliest_registration_on:string,due_on:string,
-     *   calendar_basis:string,ruleset_id:string}
+     *   calendar_basis:string,ruleset_id:string,derived:bool,notice:?string}
      */
     private function describeDeadline(
         PayrollEmployeeRegistrationDeadlineWindow $window,
@@ -1098,6 +1109,8 @@ final readonly class PayrollRegistrationSubmissionService
             'due_on' => $window->dueOn,
             'calendar_basis' => $window->calendarBasis,
             'ruleset_id' => $window->rulesetId,
+            'derived' => $window->derived,
+            'notice' => $window->notice,
         ];
     }
 

@@ -29,6 +29,13 @@ final class PayrollRegistrationA1SnapshotBuilder
     private string $prefix = '';
 
     /**
+     * Zaměstnavatel uznaný na chráněném trhu práce (ID 10211). Jen u něj se
+     * vyplňuje „práce probíhá převážně" (10258), a to u zaměstnance se
+     * zdravotním omezením; jinde je údaj podle EDV zakázaný.
+     */
+    private bool $protectedLaborMarket = false;
+
+    /**
      * @param array<string,mixed> $input
      * @param array<string,mixed> $identity
      * @param array<string,mixed> $scope
@@ -37,9 +44,11 @@ final class PayrollRegistrationA1SnapshotBuilder
         array $input,
         array $identity,
         array $scope,
+        bool $protectedLaborMarket = false,
     ): PayrollRegistrationA1Snapshot {
         $this->problems = null;
         $this->prefix = '';
+        $this->protectedLaborMarket = $protectedLaborMarket;
         $snapshot = $this->assemble($input, $identity, $scope);
         if ($snapshot === null) {
             throw new \LogicException(
@@ -62,9 +71,11 @@ final class PayrollRegistrationA1SnapshotBuilder
         array $input,
         array $identity,
         array $scope,
+        bool $protectedLaborMarket = false,
     ): array {
         $this->problems = [];
         $this->prefix = '';
+        $this->protectedLaborMarket = $protectedLaborMarket;
         $this->assemble($input, $identity, $scope);
         $problems = $this->problems;
         $this->problems = null;
@@ -129,6 +140,26 @@ final class PayrollRegistrationA1SnapshotBuilder
             // znamenalo označit červeně pole, která tahle A1 vůbec nemá.
             return null;
         }
+        // U dohod evidence bližší určení nevede, REGZEC ho ale chce jako „1".
+        $employment['relationship_detail_code'] =
+            PayrollRegistrationRelationshipDetailPolicy::requireForActivity(
+                $employment['activity_code'],
+                $employment['relationship_detail_code'],
+            );
+        // EDV 1.4.0.6, ID 10223: u druhu činnosti 10 až 16 a u výkonu trestu
+        // (10502 = 2) nesmí být nástup dřív než 1. 1. 2026.
+        if ($this->startsBeforeSpecialActivityEvidence($employment)) {
+            $this->invalid(
+                'registration_regzec_a1_start_before_2026',
+                'Datum nástupu ' . $employment['actual_start_on'] . ' je dřívější '
+                    . 'než 1. 1. 2026. U druhu činnosti „'
+                    . $employment['activity_code'] . '" (a u výkonu trestu) ČSSZ '
+                    . 'přijme přihlášku jen s nástupem od 1. 1. 2026 — tyto '
+                    . 'vztahy se dřív neevidovaly. Zkontrolujte datum nástupu '
+                    . 'na kartě pracovního vztahu.',
+                'employment.actual_start_on',
+            );
+        }
 
         $permanentInput = $this->object($input, 'permanent_address');
         $permanentAddress = $this->within(
@@ -169,8 +200,10 @@ final class PayrollRegistrationA1SnapshotBuilder
             );
         }
         $employment = $this->validateEmploymentVariant($employment, $variant);
+        $employment = $this->workplaceProgress($employment, $variant, $facts);
 
         $citizenship = $this->country($identity, 'citizenship_country_code');
+        $this->identityPresent($identity);
         $proofIdentity = $this->optionalObject($input, 'proof_identity');
         $foreignWorker = $this->optionalObject($input, 'foreign_worker');
         // Prázdné občanství je už nahlášené výš; brát ho jako cizinu by k tomu
@@ -342,7 +375,7 @@ final class PayrollRegistrationA1SnapshotBuilder
             'actual_start_on' => $actualStart,
             'contract_start_on' => $this->optionalDate($input, 'contract_start_on'),
             'small_scale' => $this->optionalBool($input, 'small_scale'),
-            'employment_status_code' => $this->optionalText($input, 'employment_status_code', 2),
+            'employment_status_code' => $this->employmentStatus($input),
             'work_mode_code' => $this->optionalText($input, 'work_mode_code', 2),
             'continuous_operation' => $this->optionalBool($input, 'continuous_operation'),
             'prevailing_workplace_code' => $this->optionalText($input, 'prevailing_workplace_code', 2),
@@ -364,7 +397,7 @@ final class PayrollRegistrationA1SnapshotBuilder
             PayrollRegistrationBusinessMatrix::VARIANT_OST => [
                 'contract_start_on', 'small_scale', 'employment_status_code',
                 'work_mode_code', 'continuous_operation',
-                'prevailing_workplace_code', 'contract_workplace',
+                'contract_workplace',
                 'workplace_city', 'workplace_municipality_code',
                 'profession_code', 'position_name', 'leadership',
             ],
@@ -379,8 +412,140 @@ final class PayrollRegistrationA1SnapshotBuilder
                 $this->missing("employment.{$field}");
             }
         }
+        $allowed = PayrollRegistrationEmploymentStatusCodebook::restrictedFor(
+            $employment['activity_code'],
+        );
+        if ($allowed !== null
+            && $employment['employment_status_code'] !== null
+            && !in_array($employment['employment_status_code'], $allowed, true)
+        ) {
+            $this->malformed(
+                'employment.employment_status_code',
+                'u druhu činnosti „' . $employment['activity_code'] . '" smí být '
+                    . 'jen ' . implode(' nebo ', $allowed) . ', teď je „'
+                    . $employment['employment_status_code'] . '".',
+            );
+        }
 
         return $employment;
+    }
+
+    /**
+     * Druh činnosti 10 až 16 a výkon trestu (10502 = 2) se v registru vedou
+     * teprve od 1. 1. 2026 — EDV 1.4.0.6 u 10223: „Datum nástupu nemůže být
+     * v těchto případech dříve než 1.1.2026". Datum je pevná hranice
+     * z datové věty ČSSZ, ne podporovaný rok mzdového modulu.
+     *
+     * @param array<string,mixed> $employment
+     */
+    private function startsBeforeSpecialActivityEvidence(array $employment): bool
+    {
+        return $employment['actual_start_on'] !== ''
+            && $employment['actual_start_on'] < '2026-01-01'
+            && (in_array(
+                $employment['activity_code'],
+                ['10', '11', '12', '13', '14', '15', '16'],
+                true,
+            ) || $employment['relationship_detail_code'] === '2');
+    }
+
+    /**
+     * Osobní údaje, které přihláška A1 povinně nese (EDV 10053–10066, 10059).
+     *
+     * Dřív je hlídal až serializér při přípravě podání, takže „Kontrola"
+     * profilu prošla a účetní se o chybějícím místě narození dozvěděla až
+     * výjimkou. Stejnou chybu vracela ČSSZ cizímu programu u ONZ. Cesta
+     * `identity.*` vede formulář na kartu osoby, kde se údaj zadává.
+     *
+     * @param array<string,mixed> $identity
+     */
+    private function identityPresent(array $identity): void
+    {
+        foreach ([
+            'first_name', 'last_name', 'birth_surname', 'birth_date',
+            'birth_place', 'birth_country_code', 'sex',
+        ] as $key) {
+            $value = $identity[$key] ?? null;
+            if (is_string($value) && trim($value) !== '') {
+                continue;
+            }
+            $this->fail(
+                'registration_regzec_a1_required_field_missing',
+                PayrollRegistrationFieldVocabulary::label($key)
+                    . ' chybí — registraci na ČSSZ (REGZEC A1) bez toho podat '
+                    . 'nejde. ' . PayrollRegistrationFieldVocabulary::describe($key),
+                'identity.' . $key,
+            );
+        }
+    }
+
+    /**
+     * „Práce probíhá převážně" (10258) je podle EDV 1.4.0.6 povinná jen
+     * u zaměstnavatele uznaného na chráněném trhu práce (10211) a zároveň
+     * u zaměstnance s vyplněným typem zdravotního omezení (10085). Jinde je
+     * vyplnění ZAKÁZANÉ a podání by ČSSZ odmítla — proto se hodnota ze
+     * snímku zahodí, ne jen přestane vyžadovat. Cizí programy ji u běžných
+     * zaměstnanců neposílají vůbec.
+     *
+     * @param array<string,mixed> $employment
+     * @param array<string,mixed>|null $facts
+     * @return array<string,mixed>
+     */
+    private function workplaceProgress(
+        array $employment,
+        string $variant,
+        ?array $facts,
+    ): array {
+        $applies = $variant === PayrollRegistrationBusinessMatrix::VARIANT_OST
+            && $this->protectedLaborMarket
+            && $facts !== null
+            && ($facts['health_restrictions'] ?? []) !== [];
+        if (!$applies) {
+            $employment['prevailing_workplace_code'] = null;
+
+            return $employment;
+        }
+        if ($employment['prevailing_workplace_code'] === null) {
+            $this->missing('employment.prevailing_workplace_code');
+        }
+
+        return $employment;
+    }
+
+    /**
+     * Postavení v zaměstnání: čtyřmístný kód NKPZ. Kratší kód (dřív se sem
+     * vešly jen dva znaky) ČSSZ odmítá, takže se hlásí jako vadná hodnota.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function employmentStatus(array $input): ?string
+    {
+        $value = $this->optionalText($input, 'employment_status_code', 16);
+        if ($value === null) {
+            return null;
+        }
+        if (preg_match('/^\d{4}$/D', $value) !== 1) {
+            $this->malformed(
+                'employment_status_code',
+                'musí být čtyřmístný kód z číselníku Klasifikace postavení '
+                    . 'v zaměstnání (NKPZ), například 1111 pro pracovní poměr '
+                    . 'na dobu neurčitou; kratší kód ČSSZ nepřijme. Teď je „'
+                    . $value . '".',
+            );
+
+            return null;
+        }
+        if (!PayrollRegistrationEmploymentStatusCodebook::isKnown($value)) {
+            $this->malformed(
+                'employment_status_code',
+                'není v číselníku Klasifikace postavení v zaměstnání (NKPZ), '
+                    . 'teď je „' . $value . '". Vyberte kód z nabídky.',
+            );
+
+            return null;
+        }
+
+        return $value;
     }
 
     /** @param array<string,mixed> $input @return array<string,mixed> */

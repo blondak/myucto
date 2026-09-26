@@ -57,7 +57,8 @@ nezáleží). U každé osoby je termín, počet dnů po termínu a odkaz na jej
 Nevyřízené položky checklistu, u kterých zákon lhůtu neukládá nebo ji aplikace
 neodvozuje, jsou ve vlastní sekci **Bez termínu** na konci panelu. Patří sem
 například **Registrace ČSSZ / JMHZ** u nástupu před 1. 7. 2026 (registrační
-povinnost zaměstnance platí až od tohoto dne, takže termín se nedopočítává),
+povinnost zaměstnance platí až od tohoto dne, takže termín se nedopočítává;
+přihlášku REGZEC ale podat jde, viz [Registrace zaměstnance](#85111-registrace-zamestnance-prezec-a-regzec)),
 potvrzení o zdanitelných příjmech nebo kontrola exekucí a insolvence. Tyto
 položky se nezapočítávají do fáze **Po termínu** ani do ostatních počtů
 termínů; skupiny jsou seřazené od největší a rozbalují se stejně jako ostatní.
@@ -383,6 +384,45 @@ nemá zmrazený povinný druh činnosti a úplnou datovou sadu odpovídající v
 OST, 10 nebo SPEC. Navazující akce A5 až A8 jsou dostupné pouze pro variantu
 OST; u variant 10 a SPEC je aplikace odmítne ještě před schválením události.
 
+**Nástup před 1. 7. 2026.** Událost, která nastala do 31. 3. 2026 a do té doby
+nebyla ČSSZ ohlášená, se od 1. 4. 2026 hlásí už jen přes REGZEC (Pravidla pro
+REGZEC). Přihlášku A1 proto aplikace připraví i u staršího nástupu, třeba
+s datem 15. 2. 2026. Lhůtu podle tehdejších pravidel ale neodvozuje: termínem
+je den nástupu, podání je vedené jako po lhůtě a nad podáním je vysvětlení.
+Podejte ho bez zbytečného odkladu. Částečné přihlášení PREZEC P1 jde podat až
+od 23. 6. 2026 — u staršího nástupu aplikace rovnou nabídne plnou registraci.
+Druh činnosti 10 až 16 a výkon trestu jde přihlásit jen s nástupem od
+1. 1. 2026; dřívější datum ohlásí kontrola profilu.
+
+**Postavení v zaměstnání** se vybírá ze seznamu čtyřmístných kódů Klasifikace
+postavení v zaměstnání (NKPZ), kratší kód ČSSZ nepřijme. Aplikace kód navrhne
+podle druhu vztahu a doby určité (1111 a 1112 pracovní poměr na dobu neurčitou
+a určitou, 1211 a 1212 DPČ, 1221 a 1222 DPP); návrh zkontrolujte proti smlouvě.
+U druhu činnosti 15 a 16 nabídka obsahuje jen 1341 a 1342.
+
+**Bližší určení pracovněprávního vztahu** má tři hodnoty: 1 = žádné,
+2 = výkon trestu odnětí svobody nebo zabezpečovací detence, 3 = pracovní vztah
+specifické skupiny (soudce, poslanec, člen vlády a podobně). Vybírá se jen
+u druhu činnosti 1 až 9. U dohod (A až J, T až ZC) a u 15 a 16 evidence
+bližší určení nevede a do přihlášky, změny i odhlášky jde automaticky
+hodnota 1; u druhu činnosti 10 se neuvádí vůbec.
+
+**Práce probíhá převážně** se vyplňuje jen u zaměstnavatele uznaného na
+chráněném trhu práce (zaškrtnutého v profilu registrace zaměstnavatele) a jen
+u zaměstnance s vyplněným zdravotním omezením. Jinde ji ČSSZ nepřijímá, proto
+se pole ve formuláři vůbec neukáže a do podání nejde.
+
+Tlačítko **Kontrola** v profilu hlídá i osobní údaje, které přihláška nese —
+jméno, příjmení, rodné příjmení, datum, místo a stát narození a pohlaví. U každé
+vady je tlačítko, které otevře kartu osoby přímo u chybějícího údaje. Má-li
+zaměstnanec u firmy další vztah se stejným druhem činnosti a stejným příznakem
+zaměstnání malého rozsahu, který se s tímto časově překrývá, ukáže profil žluté
+**Upozornění před podáním**: ČSSZ by přihlášku odmítla (chyba 603 nebo 604).
+U navazujícího vztahu nejdřív odhlaste ten předchozí, jinak změňte druh
+činnosti (například 2 místo 1); obě karty vztahů jsou v upozornění prokliknuté.
+Navazující vztahy se od 1. 4. 2026 hlásí každý zvlášť — odhláškou prvního
+a přihláškou druhého.
+
 Úplný podklad zadáte na kartě pracovního vztahu v části **Registrace vztahu na
 ČSSZ → Autoritativní profil REGZEC A1**, tlačítkem **Doplnit profil**. Profil
 obsahuje rozhodné datum a druh činnosti, trvalou adresu, variantní údaje
@@ -419,7 +459,7 @@ aplikace o osobě nevede** a u každého dotčeného pole je místo zdroje žlut
 poznámka, **která rovnou říká, kde se údaj doplňuje** - třeba na kartě osoby
 v Adresách nebo v Zákonné evidenci, případně na kartě vztahu. Údaje, které
 aplikace nevede vůbec (číslo popisné zvlášť, typ a číslo dokladu totožnosti,
-typ zahraničního daňového identifikátoru, postavení zaměstnance, režim práce,
+typ zahraničního daňového identifikátoru, režim práce,
 vzdělání, průkaz osoby se zdravotním postižením, důchodové údaje a povolení
 k práci), o sobě řeknou právě to a vyžádají si ruční opis z personálního
 podkladu. Průkaz OZP pro registr přitom není totéž co sleva ZTP/P z daňových
@@ -660,14 +700,55 @@ Schválením ale **nic neodchází**. Vznikne registrační událost; podání s
 připravuje samostatným krokem a odeslání na ČSSZ je krok další. Postup
 odesílání je stejný jako u prvotní registrace.
 
-Datová věta A3 nese v tomto vydání jen část katalogu: **titul před jménem,
-doručovací adresu, daňovou rezidenci a kód zdravotní pojišťovny**. Změna jména,
-adresy pobytu, důchodu, profese, místa výkonu práce a další se proto ohlásí
-větou „Tenhle údaj datová věta A3 v aplikaci nenese - podejte ho jinou cestou
-a návrh pak uzavřete ručně." Nález se nezahazuje: povinnost i lhůta existují
-dál a zůstávají vidět. Jedním kliknutím nelze podat ani vymazání hodnoty, ani
-neúplnou doručovací adresu, ani vznik či zánik příslušnosti k cizím předpisům,
-který má vlastní akci.
+Jedním kliknutím se ohlásí **titul před jménem, doručovací adresa, daňová
+rezidence, kód zdravotní pojišťovny, nejvyšší dosažené vzdělání a pracovní
+údaje** — postavení v zaměstnání, režim práce, nepřetržitý provoz, místo výkonu
+práce, profese, požadované vzdělání a pozice. Změní-li se kterýkoli pracovní
+údaj, odejde celý pracovní blok v aktuální podobě. Změna jména, adresy pobytu,
+důchodu a dalších údajů se ohlásí větou „Tenhle údaj datová věta A3 v aplikaci
+nenese - podejte ho jinou cestou a návrh pak uzavřete ručně." Nález se
+nezahazuje: povinnost i lhůta existují dál a zůstávají vidět. Jedním kliknutím
+nelze podat ani vymazání hodnoty, ani neúplnou doručovací adresu, ani vznik či
+zánik příslušnosti k cizím předpisům, který má vlastní akci.
+
+Ruční změnu založíte v části **Registrace vztahu na ČSSZ** tlačítkem **Nová
+událost A2–A8**, druh **A3 · změna údajů** a rozsah **Změna jednoho údaje**.
+Nejvyšší vzdělání se tam vybírá ze seznamu.
+
+#### Dohlášení údajů zaměstnanců přihlášených přes ONZ
+
+Zaměstnance přihlášené do 31. 3. 2026 přes ONZ zná ČSSZ bez údajů, které ONZ
+nevedla: postavení v zaměstnání, režim práce, nepřetržitý provoz, místo výkonu
+práce, profese, pozice, nejvyšší vzdělání a stát daňové rezidence. Zákon je
+ukládá doplnit akcí A3. Dokud ČSSZ dohlášení nepřijme, nemá aplikace čím doložit
+ručně zapsané OIČ a ID PPV, a odhlášku A2 takového zaměstnance proto nepřipraví.
+Přijaté dohlášení čísla potvrdí stejně jako protokol k přihlášce.
+
+Postup u jednoho zaměstnance:
+
+1. Na kartě pracovního vztahu otevřete **Registrace vztahu na ČSSZ → profil
+   A1**, doplňte ho a uložte jako ověřený (tlačítko **Kontrola** ukáže, co
+   chybí).
+2. Stiskněte **Dohlásit údaje (A3)**. Formulář předvyplní dnešní den — do
+   údaje „platnost od" patří u dohlášení den, kdy podání odchází, a hlásí se
+   poslední stav údajů.
+3. Vyberte rozsah: **Dohlášení údajů – celý profil** (vedle pracovních údajů
+   i identita, adresy, pojišťovna, důchod a doklady cizince; tak podávají
+   i jiné mzdové programy), nebo **jen údaje, které ONZ nevedla**.
+4. **Schválit zdroj a zobrazit náhled**, pak **Připravit podání** a odeslat
+   jako každé jiné registrační podání.
+
+Hromadně to jde v **Mzdy → Mzdová podání → Dohlášení údajů (A3)**. Seznam
+ukazuje vztahy s přiděleným ID PPV, za které aplikace nepodávala přihlášku A1
+a které trvaly v roce 2026, spolu se stavem profilu A1 a stavem dohlášení.
+Vybrat jde jen vztahy s ověřeným profilem; u ostatních je tlačítko **Otevřít
+profil registrace**, které vede rovnou na kartu vztahu. Zvolte rozsah a den
+odeslání a stiskněte **Dohlásit vybrané**. Vada u jednoho vztahu ostatní
+nezastaví — důvod se ukáže v jeho řádku. Připravená podání pak odešlete ze
+záložky **K odeslání**.
+
+Dohlášení jde i za vztah, který už skončil. Údaje se pak čtou ke dni skončení
+a podání nese i datum skončení, jak to ČSSZ u ukončených vztahů vyžaduje.
 
 Ruční uzavření návrhu tlačítkem vedle **vyžaduje důvod** (1 až 500 znaků). Je to
 jediná stopa, proč se touto cestou nehlásilo, takže ji napište věcně.

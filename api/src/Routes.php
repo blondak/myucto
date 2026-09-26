@@ -1739,6 +1739,15 @@ final class Routes
                 '/submissions/registration/{employmentId:[0-9]+}/changes/{proposalId:[0-9]+}/dismiss',
                 [PayrollRegistrationAction::class, 'dismissChange'],
             );
+            // Dohlášení údajů zaměstnanců přihlášených dřív přes ONZ (A3).
+            $g->get(
+                '/submissions/registration-completion',
+                [\MyInvoice\Action\Payroll\PayrollRegistrationCompletionAction::class, 'candidates'],
+            );
+            $g->post(
+                '/submissions/registration-completion',
+                [\MyInvoice\Action\Payroll\PayrollRegistrationCompletionAction::class, 'complete'],
+            );
             $g->post(
                 '/submissions/registration-transport/{submissionId:[0-9]+}',
                 [PayrollRegistrationTransportAction::class, 'send'],

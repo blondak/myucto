@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Registration\Change;
 
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelationshipDetailPolicy;
 
 /**
  * Průmět hlásitelných údajů ze zdrojů, které aplikace opravdu má.
@@ -146,8 +147,32 @@ final class PayrollRegistrationReportableProfileBuilder
         foreach (['small_scale', 'continuous_operation', 'leadership'] as $field) {
             $values["employment.{$field}"] = $this->bool($employment[$field] ?? null);
         }
+        $values['employment.relationship_detail_code'] = $this->relationshipDetail(
+            $values['employment.activity_code'],
+            $values['employment.relationship_detail_code'],
+        );
 
         return $values;
+    }
+
+    /**
+     * Starší profil dohody nese bližší určení `null`, novější „1" — pro ČSSZ
+     * je to totéž. Bez sjednocení by se po novém uložení profilu hlásila
+     * změna, která žádnou není.
+     */
+    private function relationshipDetail(?string $activity, ?string $detail): ?string
+    {
+        if ($activity === null) {
+            return $detail;
+        }
+        try {
+            return PayrollRegistrationRelationshipDetailPolicy::requireForActivity(
+                $activity,
+                $detail,
+            );
+        } catch (\InvalidArgumentException) {
+            return $detail;
+        }
     }
 
     /**

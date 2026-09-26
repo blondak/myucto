@@ -20,6 +20,7 @@ import {
   type PayrollRegistrationA1ProfilePayload,
   type PayrollRegistrationChangeDetection,
   type PayrollRegistrationChangeProposal,
+  type PayrollRegistrationWarning,
   type PayrollEmploymentJmhzEvidenceOptions,
   type PayrollJmhzMunicipalityOption,
 } from '@/api/payroll'
@@ -119,6 +120,8 @@ const a1Checking = ref(false)
  * klávesnice, tedy dřív, než účetní stihne projít zbytek seznamu.
  */
 const a1Problems = ref<PayrollRegistrationA1Problem[]>([])
+/** Varování, která podání neblokují — překryv vztahů se stejným druhem činnosti. */
+const a1Warnings = ref<PayrollRegistrationWarning[]>([])
 const a1Checked = ref(false)
 const a1ProfileError = ref('')
 const a1ProfileErrorCode = ref('')
@@ -445,6 +448,49 @@ const a1InsurerOptions = computed(() => {
   return options
 })
 
+/**
+ * Postavení v zaměstnání — jen čtyřmístné kódy NKPZ (ČSSZ kratší odmítá).
+ * U druhu činnosti 15 a 16 číselník podle EDV zužuje na 1341 a 1342. Uložený
+ * kód mimo nabídku (dřív se ukládaly dva znaky) se ukáže označený, aby ho
+ * první uložení tiše nesmazalo.
+ */
+const a1EmploymentStatusOptions = computed(() => {
+  const activity = a1Form.value.employment.activity_code
+  const restricted = activity === '15' || activity === '16' ? ['1341', '1342'] : null
+  const options = (jmhzOptions.value?.employment_status_codes ?? [])
+    .filter(option => restricted === null || restricted.includes(option.code))
+    .map(option => ({ code: option.code, label: `${option.code} · ${option.label}` }))
+  const current = a1Form.value.employment.employment_status_code?.trim() ?? ''
+  if (current !== '' && !options.some(option => option.code === current)) {
+    options.unshift({
+      code: current,
+      label: t('payroll.people.registration.a1.code_unknown', { code: current }),
+    })
+  }
+  return options
+})
+
+/**
+ * Bližší určení PPV: vybírat mezi 1–3 jde jen u druhu činnosti 1 až 9, jinde
+ * je „1 (žádné)" a u druhu 10 se neuvádí vůbec.
+ */
+const a1RelationshipDetailOptions = computed(() => {
+  const all = jmhzOptions.value?.relationship_detail_codes ?? []
+  const activity = a1Form.value.employment.activity_code
+  if (activity === null || activity === '') return all
+  if (activity === '10') return []
+  return /^[1-9]$/.test(activity) ? all : all.filter(option => option.code === '1')
+})
+
+/**
+ * „Práce probíhá převážně" (10258) patří jen zaměstnavateli na chráněném trhu
+ * práce a zaměstnanci se zdravotním omezením; jinde ji ČSSZ nepřijme.
+ */
+const a1PrevailingWorkplaceApplies = computed(
+  () => a1Draft.value?.protected_labor_market === true
+    && (a1Form.value.facts?.health_restrictions.length ?? 0) > 0,
+)
+
 const a1AddressFields: {
   key: keyof PayrollRegistrationA1Address
   label: string
@@ -599,6 +645,7 @@ async function loadA1Profile(): Promise<void> {
     const view = await payrollApi.employmentRegistrationA1Profile(props.employmentId)
     a1Draft.value = view.draft
     a1Stored.value = view.profile
+    a1Warnings.value = view.warnings ?? []
     // Formulář dostane VLASTNÍ kopii: psaní do sdílené odpovědi přepisovalo
     // i návrh z kmenových dat, na který se vrací „Vrátit návrh z kmenových dat".
     a1Form.value = JSON.parse(JSON.stringify(
@@ -713,6 +760,7 @@ async function checkA1Profile(): Promise<void> {
       blankToNull(a1Form.value),
     )
     a1Problems.value = result.problems
+    a1Warnings.value = result.warnings ?? a1Warnings.value
     a1Checked.value = true
     a1ProfileMessage.value = result.complete
       ? t('payroll.people.registration.a1.check_complete')
@@ -838,6 +886,17 @@ const A1_GAP_ALIAS: Record<string, string> = {
   permanent_address: 'permanent_address.street',
 }
 
+/** Sjednané podmínky vztahu — tam se mění druh činnosti. */
+function warningEmploymentTarget(employmentId: number) {
+  const query: Record<string, string> = {
+    employment: String(employmentId),
+    panel: 'employment_terms',
+  }
+  if (props.personId !== undefined) query.person = String(props.personId)
+
+  return { name: 'payroll-people', query }
+}
+
 /** Panel karty osoby pro položky, které na tomhle formuláři nejsou. */
 function a1GapPanel(field: string): string | null {
   if (field === 'identity' || field.startsWith('identity.')) {
@@ -948,13 +1007,46 @@ async function writeA1MasterData(fields: string[]): Promise<void> {
 
 const deltaFieldOptions = computed(() => eventInteraction.value === 'correction'
   ? ['title_prefix', 'tax_residency', 'relationship_detail_code', 'highest_education_code']
-  : ['title_prefix', 'contact_address', 'tax_residency', 'relationship_detail_code', 'health_insurance_code'])
+  : [
+      'title_prefix', 'contact_address', 'tax_residency', 'relationship_detail_code',
+      'health_insurance_code', 'highest_education_code',
+    ])
+
+/**
+ * Rozsah změny A3. `single` = jeden změněný údaj (formulář níž), `full` a
+ * `minimal` = dohlášení údajů zaměstnance přihlášeného dřív přes ONZ — skládá
+ * se na serveru z uloženého profilu A1, formulář nic dalšího nevyplňuje.
+ * Do 10009 jde den odeslání, proto se datum předvyplní dneškem.
+ */
+const changeScope = ref<'single' | 'full' | 'minimal'>('single')
+const isCompletion = computed(
+  () => eventInteraction.value === 'change' && changeScope.value !== 'single',
+)
+
+function localToday(): string {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}
+
+async function openCompletion(): Promise<void> {
+  eventInteraction.value = 'change'
+  // Změna druhu události formulář vynuluje (watch níž) — předvyplnit až po něm.
+  await nextTick()
+  resetEventForm()
+  changeScope.value = 'full'
+  effectiveOn.value = localToday()
+  eventFormOpen.value = true
+}
 
 const selectedEvent = computed(() => events.value.find(
   event => event.id === selectedEventId.value,
 ) ?? null)
 
-const sourceReferenceRequired = computed(() => eventInteraction.value !== 'termination')
+const sourceReferenceRequired = computed(
+  () => eventInteraction.value !== 'termination' && !isCompletion.value,
+)
 
 const deltaValueReady = computed(() => {
   if (deltaField.value === 'contact_address') {
@@ -1000,6 +1092,7 @@ const eventCanSave = computed(() => {
   ) return false
   if (sourceReferenceRequired.value && sourceReference.value.trim() === '') return false
   if (eventInteraction.value === 'termination') return a2Ready.value
+  if (isCompletion.value) return true
   if (eventInteraction.value === 'change') return deltaValueReady.value
   if (eventInteraction.value === 'correction') {
     return deltaValueReady.value
@@ -1136,6 +1229,7 @@ function resetEventForm(): void {
     ? 'title_prefix'
     : 'title_prefix'
   deltaValue.value = ''
+  changeScope.value = 'single'
   addressStreet.value = ''
   addressHouseNumber.value = ''
   addressOrientationNumber.value = ''
@@ -1293,7 +1387,12 @@ function eventPayload(): PayrollRegistrationEventInput {
   }
   if (sourceReferenceRequired.value) payload.source_reference = sourceReference.value.trim()
   if (eventInteraction.value === 'termination') Object.assign(payload, a2Payload())
-  if (eventInteraction.value === 'change') payload.changes = deltaPayload()
+  if (isCompletion.value) {
+    // Stejný klíč jako u hromadného dohlášení — opakované schválení téhož
+    // dne vrátí tutéž událost místo duplicity.
+    payload.source_reference = `dohlaseni:${changeScope.value}:${effectiveOn.value}`
+    payload.completion = changeScope.value as 'full' | 'minimal'
+  } else if (eventInteraction.value === 'change') payload.changes = deltaPayload()
   if (eventInteraction.value === 'correction') {
     payload.corrections = deltaPayload()
     payload.discovered_on = discoveredOn.value
@@ -1738,6 +1837,51 @@ async function copyXml(): Promise<void> {
               {{ t('payroll.people.registration.a1.error_person_link') }}
             </RouterLink>
           </template>
+        </div>
+
+        <div
+          v-if="a1Warnings.length > 0"
+          class="rounded-md border border-warning-300 bg-warning-50 p-3"
+          role="status"
+          data-test="registration-warnings"
+        >
+          <h6 class="text-sm font-semibold text-warning-800">
+            {{ t('payroll.people.registration.warnings.title') }}
+          </h6>
+          <ul class="mt-1 space-y-2">
+            <li
+              v-for="warning in a1Warnings"
+              :key="`${warning.code}-${warning.employment_id}`"
+              class="text-xs text-warning-800"
+              :data-test="`registration-warning-${warning.code}`"
+            >
+              <p>{{ warning.message }}</p>
+              <div class="mt-1 flex flex-wrap gap-2">
+                <RouterLink
+                  :to="warningEmploymentTarget(warning.employment_id)"
+                  :class="btnOutline('warning')"
+                  class="whitespace-nowrap"
+                  data-test="registration-warning-open-other"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.eye" />
+                  </svg>
+                  {{ t('payroll.people.registration.warnings.open_other') }}
+                </RouterLink>
+                <RouterLink
+                  :to="warningEmploymentTarget(employmentId)"
+                  :class="btnOutline('neutral')"
+                  class="whitespace-nowrap"
+                  data-test="registration-warning-open-own"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.eye" />
+                  </svg>
+                  {{ t('payroll.people.registration.warnings.open_own') }}
+                </RouterLink>
+              </div>
+            </li>
+          </ul>
         </div>
 
         <div
@@ -2260,7 +2404,7 @@ async function copyXml(): Promise<void> {
               >
                 <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
                 <option
-                  v-for="option in jmhzOptions?.relationship_detail_codes ?? []"
+                  v-for="option in a1RelationshipDetailOptions"
                   :key="option.code"
                   :value="option.code"
                 >{{ option.code }} · {{ option.label }}</option>
@@ -2329,21 +2473,19 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.employment.employment_status_code') }}
               </span>
-              <input
+              <select
                 v-model="a1Form.employment.employment_status_code"
-                type="text"
                 v-bind="a1FieldAttrs('employment.employment_status_code')"
                 :disabled="a1Busy"
                 data-test="a1-employment-status-code"
               >
-              <!--
-                Číselník existuje (ČSÚ, Klasifikace postavení v zaměstnání /
-                NKPZ, číselník `klasif_postaveni_v_zamestn` v připnutém
-                datovém slovníku JMHZ), ale je hierarchický až na 4 znaky
-                (např. 1111), zatímco tohle pole ukládá nejvýš 2 — nabídnout
-                by ho šlo jen osekaný na nejvyšší úroveň. Radši volný text
-                s odkazem na zdroj než tichá ztráta hloubky klasifikace.
-              -->
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option
+                  v-for="option in a1EmploymentStatusOptions"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.label }}</option>
+              </select>
               <span class="mt-1 block text-xs text-neutral-500">
                 {{ t('payroll.people.registration.a1.employment.employment_status_code_hint') }}
               </span>
@@ -2399,7 +2541,7 @@ async function copyXml(): Promise<void> {
                 {{ a1NoteText('employment.continuous_operation') }}
               </span>
             </label>
-            <label class="block">
+            <label v-if="a1PrevailingWorkplaceApplies" class="block">
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.employment.prevailing_workplace_code') }}
               </span>
@@ -3300,6 +3442,20 @@ async function copyXml(): Promise<void> {
             ? t('payroll.people.registration.event.cancel_new')
             : t('payroll.people.registration.event.new') }}
         </button>
+        <button
+          v-if="!eventFormOpen"
+          type="button"
+          :class="btnOutline('success')"
+          class="whitespace-nowrap"
+          :disabled="!canWrite || busy || submission !== null"
+          data-test="registration-completion-open"
+          @click="openCompletion"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.plus" />
+          </svg>
+          {{ t('payroll.people.registration.completion.action') }}
+        </button>
       </div>
       <p v-if="selectedEvent" class="mt-2 text-xs text-neutral-600" data-test="registration-event-selected">
         {{ t('payroll.people.registration.event.selected', {
@@ -3460,7 +3616,29 @@ async function copyXml(): Promise<void> {
           </div>
         </div>
 
-        <div v-if="eventInteraction === 'change' || eventInteraction === 'correction'" class="mt-4 space-y-4" data-test="registration-event-delta">
+        <div v-if="eventInteraction === 'change'" class="mt-4 space-y-2" data-test="registration-event-change-scope-box">
+          <label class="block text-xs font-medium text-neutral-700">
+            {{ t('payroll.people.registration.completion.scope_label') }}
+            <select
+              v-model="changeScope"
+              class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md"
+              data-test="registration-event-change-scope"
+            >
+              <option value="single">{{ t('payroll.people.registration.completion.scope_single') }}</option>
+              <option value="full">{{ t('payroll.people.registration.completion.scope_full') }}</option>
+              <option value="minimal">{{ t('payroll.people.registration.completion.scope_minimal') }}</option>
+            </select>
+          </label>
+          <p
+            v-if="isCompletion"
+            class="rounded-md border border-primary-200 bg-primary-50 p-3 text-xs text-primary-800"
+            data-test="registration-completion-hint"
+          >
+            {{ t('payroll.people.registration.completion.hint') }}
+          </p>
+        </div>
+
+        <div v-if="(eventInteraction === 'change' && !isCompletion) || eventInteraction === 'correction'" class="mt-4 space-y-4" data-test="registration-event-delta">
           <div v-if="eventInteraction === 'correction'" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.source_submission_id') }}
@@ -3500,6 +3678,21 @@ async function copyXml(): Promise<void> {
               {{ t('payroll.people.registration.event.tax_residency_latency_hint') }}
             </p>
           </div>
+          <label v-else-if="deltaField === 'highest_education_code'" class="block text-xs font-medium text-neutral-700">
+            {{ t('payroll.people.registration.event.delta.highest_education_code') }}
+            <select
+              v-model="deltaValue"
+              class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md"
+              data-test="registration-event-delta-education"
+            >
+              <option value="">{{ t('payroll.people.registration.event.select_placeholder') }}</option>
+              <option
+                v-for="option in jmhzOptions?.education_levels ?? []"
+                :key="option.code"
+                :value="option.code"
+              >{{ option.code }} · {{ option.label }}</option>
+            </select>
+          </label>
           <label v-else class="block text-xs font-medium text-neutral-700">
             {{ t(`payroll.people.registration.event.delta.${deltaField}`) }}
             <input v-model="deltaValue" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md" />
@@ -3560,7 +3753,12 @@ async function copyXml(): Promise<void> {
       <p class="font-medium text-neutral-900">
         {{ agendaLabel }} · {{ interactionLabel }}
       </p>
-      <p class="mt-1">
+      <p v-if="deadline.derived === false" class="mt-1 text-warning-700" data-test="registration-deadline-not-derived">
+        {{ t('payroll.people.registration.registration_window.not_derived', {
+          start: formatDate(deadline.due_on),
+        }) }}
+      </p>
+      <p v-else class="mt-1">
         {{ t('payroll.people.registration.window', {
           from: formatDate(deadline.earliest_registration_on),
           to: formatDate(deadline.due_on),

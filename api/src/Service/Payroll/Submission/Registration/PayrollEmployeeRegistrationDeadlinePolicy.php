@@ -98,6 +98,10 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
     public function forEmploymentStart(
         string $startOn,
     ): PayrollEmployeeRegistrationDeadlineWindow {
+        $transitional = $this->transitional($startOn);
+        if ($transitional !== null) {
+            return $transitional;
+        }
         $start = $this->supportedDate($startOn);
         $earliest = $start->modify(
             '-' . self::EARLIEST_DAYS_BEFORE_START . ' days',
@@ -132,6 +136,10 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
     public function forFullRegistrationAfterPreRegistration(
         string $startOn,
     ): PayrollEmployeeRegistrationDeadlineWindow {
+        $transitional = $this->transitional($startOn);
+        if ($transitional !== null) {
+            return $transitional;
+        }
         $start = $this->supportedDate($startOn);
         $earliest = $start->modify(
             '-' . self::EARLIEST_DAYS_BEFORE_START . ' days',
@@ -205,6 +213,52 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
                 'notification_calendar_days' => 8,
                 'window_opens_on' => 'registration_event_effective_on',
             ]),
+        );
+    }
+
+    /**
+     * Přihláška za nástup PŘED 1. 7. 2026.
+     *
+     * Podle „Pravidel pro REGZEC" (ČSSZ, 30. 1. 2026) se událost, která
+     * nastala do 31. 3. 2026 a nebyla do té doby ohlášena, od 1. 4. 2026
+     * hlásí už jen přes REGZEC — týká se to i nástupů před 1. 1. 2026.
+     * Podání proto blokovat nesmíme: cizí programy takové přihlášky podávaly
+     * a ČSSZ je přijala. Lhůtu ale podle dnešních pravidel NEODVOZUJEME —
+     * termínem je den nástupu, podání se tedy ukáže jako opožděné a důvod
+     * nese `notice`. Ruleset zůstává přihláškový, protože podle něj se
+     * v doručence poznává přijatá registrace (OIČ a ID PPV).
+     */
+    private function transitional(
+        string $startOn,
+    ): ?PayrollEmployeeRegistrationDeadlineWindow {
+        $start = $this->date($startOn);
+        if ($startOn >= self::SUPPORTED_FROM) {
+            return null;
+        }
+        $earliest = $start->modify(
+            '-' . self::EARLIEST_DAYS_BEFORE_START . ' days',
+        );
+
+        return new PayrollEmployeeRegistrationDeadlineWindow(
+            $earliest->format('Y-m-d'),
+            $start->format('Y-m-d'),
+            'calendar_days',
+            self::REGISTRATION_RULESET_ID,
+            $this->rulesetHash(self::REGISTRATION_RULESET_ID, [
+                'earliest_days_before_start' =>
+                    self::EARLIEST_DAYS_BEFORE_START,
+                'due_on' => 'not_derived_before_supported_window',
+                'transitional_source' =>
+                    'Pravidla pro REGZEC (ČSSZ, 30. 1. 2026) — události do '
+                    . '31. 3. 2026 neohlášené do té doby se od 1. 4. 2026 '
+                    . 'hlásí jen přes REGZEC',
+            ]),
+            false,
+            'Nástup je dřívější než 1. 7. 2026, kdy začala platit dnešní '
+                . 'registrační povinnost. Přihlášku REGZEC podat jde a je '
+                . 'potřeba ji podat bez zbytečného odkladu, lhůtu ale '
+                . 'aplikace podle tehdejších pravidel neodvozuje — podání '
+                . 'je vedené jako po lhůtě.',
         );
     }
 

@@ -230,7 +230,7 @@ const expanded = ref(!isClosed.value)
 const cardRoot = ref<HTMLElement | null>(null)
 
 async function focusSection(panel: string, field?: string): Promise<void> {
-  if (!['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist'].includes(panel)) return
+  if (!['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration'].includes(panel)) return
   expanded.value = true
   await nextTick()
   const root = cardRoot.value
@@ -239,6 +239,7 @@ async function focusSection(panel: string, field?: string): Promise<void> {
   const selector = panel === 'employment_checklist' ? '[data-test="employment-checklist"]'
     : panel === 'employment_terms' ? '[data-test="terms-office"]'
     : panel === 'jmhz_profile' ? '[data-test="jmhz-ordinary-profile"]'
+    : panel === 'registration' ? '[data-test="employment-registration"]'
       : '[data-panel-anchor="jmhz_identity"]'
   revealField(selector, root)
 }

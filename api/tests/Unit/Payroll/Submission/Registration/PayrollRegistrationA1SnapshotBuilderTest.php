@@ -253,6 +253,140 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
         }
     }
 
+    /**
+     * EDV REGZEC 1.4.0.6, ID 10249: „musí jít o 4místný kód, kratší nejsou
+     * akceptovány". Všech 39 přijatých A1 z cizích programů nese 1111–1222;
+     * dřív se do pole vešly jen dva znaky.
+     */
+    public function testEmploymentStatusMustBeFourDigitCodebookCode(): void
+    {
+        $builder = new PayrollRegistrationA1SnapshotBuilder();
+        foreach (['11' => 'čtyřmístný', '9999' => 'není v číselníku'] as $code => $expected) {
+            $source = self::source('1', '1');
+            $source['employment']['employment_status_code'] = (string) $code;
+            $problems = array_column(
+                $builder->problems($source, self::identity(), self::scope()),
+                'message',
+                'field',
+            );
+            self::assertArrayHasKey('employment.employment_status_code', $problems, (string) $code);
+            self::assertStringContainsString(
+                $expected,
+                $problems['employment.employment_status_code'],
+            );
+        }
+
+        $customs = self::source('15', null);
+        $customs['employment']['employment_status_code'] = '1111';
+        $problems = array_column(
+            $builder->problems($customs, self::identity(), self::scope()),
+            'message',
+            'field',
+        );
+        self::assertStringContainsString(
+            '1341 nebo 1342',
+            $problems['employment.employment_status_code'] ?? '',
+        );
+    }
+
+    public function testFourDigitEmploymentStatusReachesXmlAndPassesXsd(): void
+    {
+        $source = self::source('1', '1');
+        $source['employment']['employment_status_code'] = '1112';
+        $xml = self::serialize((new PayrollRegistrationA1SnapshotBuilder())->build(
+            $source,
+            self::identity(),
+            self::scope(),
+        ));
+
+        self::assertStringContainsString(' relat="1112"', $xml);
+    }
+
+    /**
+     * 10258 „práce probíhá převážně" je podle EDV povinná jen na chráněném
+     * trhu práce u zaměstnance se zdravotním omezením, jinde je zakázaná.
+     */
+    public function testPrevailingWorkplaceOnlyOnProtectedLabourMarket(): void
+    {
+        $builder = new PayrollRegistrationA1SnapshotBuilder();
+        $plain = self::source('1', '1');
+        $plain['employment']['prevailing_workplace_code'] = null;
+        self::assertSame([], $builder->problems($plain, self::identity(), self::scope()));
+        $xml = self::serialize($builder->build(self::source('1', '1'), self::identity(), self::scope()));
+        self::assertStringNotContainsString(' place=', $xml);
+
+        $restricted = self::source('1', '1');
+        $restricted['facts']['health_restrictions'] = [
+            ['type_code' => '1', 'from' => '2025-01-01', 'to' => null],
+        ];
+        $restricted['employment']['prevailing_workplace_code'] = null;
+        self::assertSame([], $builder->problems($restricted, self::identity(), self::scope()));
+        self::assertContains(
+            'employment.prevailing_workplace_code',
+            array_column(
+                $builder->problems($restricted, self::identity(), self::scope(), true),
+                'field',
+            ),
+        );
+
+        $restricted['employment']['prevailing_workplace_code'] = '2';
+        $xml = self::serialize($builder->build($restricted, self::identity(), self::scope(), true));
+        self::assertStringContainsString(' place="2"', $xml);
+    }
+
+    /**
+     * Chybějící místo narození vracela ČSSZ cizímu programu už u ONZ; u nás
+     * na něj přišla až výjimka při přípravě. Kontrola profilu ho musí hlásit
+     * i s cestou na kartu osoby.
+     */
+    public function testMissingBirthDataIsReportedByTheProfileCheck(): void
+    {
+        $identity = self::identity();
+        $identity['birth_place'] = null;
+        $identity['birth_surname'] = ' ';
+
+        $problems = array_column(
+            (new PayrollRegistrationA1SnapshotBuilder())->problems(
+                self::source('1', '1'),
+                $identity,
+                self::scope(),
+            ),
+            'message',
+            'field',
+        );
+
+        self::assertArrayHasKey('identity.birth_place', $problems);
+        self::assertArrayHasKey('identity.birth_surname', $problems);
+        self::assertStringStartsWith('Místo narození', $problems['identity.birth_place']);
+    }
+
+    private static function serialize(
+        \MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationA1Snapshot $a1,
+    ): string {
+        $payload = new PayrollRegistrationXmlPayload(
+            identity: self::snapshot($a1),
+            interaction: new PayrollRegistrationInteraction(
+                'REGZEC25',
+                'direct_full_registration',
+                1,
+            ),
+            sequenceNumber: 1,
+            formGuid: '12345678-1234-1234-1234-123456789ABC',
+            preparedOn: '2026-08-04',
+            expectedStartOn: null,
+            actualStartOn: '2026-08-05',
+            employerVariableSymbol: '1234567890',
+            employerName: 'Syntetický zaměstnavatel s.r.o.',
+            csszWorkplaceCode: '110',
+        );
+        $xml = (new PayrollRegistrationXmlSerializer())->serialize($payload);
+        (new PayrollRegistrationXmlValidator(
+            new PayrollRegistrationSchemaCatalog(),
+        ))->validate($payload, $xml);
+
+        return $xml;
+    }
+
     public function testForeignIdentityRequiresProofAndLabourMarketDecision(): void
     {
         $identity = self::identity();
@@ -368,7 +502,7 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
                 'actual_start_on' => '2026-08-05',
                 'contract_start_on' => '2026-08-05',
                 'small_scale' => false,
-                'employment_status_code' => '1',
+                'employment_status_code' => '1111',
                 'work_mode_code' => '1',
                 'continuous_operation' => false,
                 'prevailing_workplace_code' => '1',

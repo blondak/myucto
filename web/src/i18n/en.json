@@ -5678,6 +5678,22 @@
         "preview": "Show again",
         "window": "Can be filed from {from}, no later than {to}.",
         "employer_window": "Note: this is the first employee. File the employer's own registration no later than {to} — after that date the employer status is presumed by law.",
+        "registration_window": {
+          "not_derived": "The start date {start} precedes 1 July 2026, when the current registration duty took effect. File the registration without undue delay — the app does not derive a deadline under the former rules and treats the filing as late."
+        },
+        "completion": {
+          "action": "Supplement data (A3)",
+          "scope_label": "Scope of the change",
+          "scope_single": "Change of a single item",
+          "scope_full": "Data supplement – full profile",
+          "scope_minimal": "Data supplement – only items the ONZ form did not carry",
+          "hint": "The supplement is for employees registered earlier via the ONZ form. The filing is built from the saved registration profile (A1) — status in employment, work mode, place of work, occupation, position, education, country of residence; the full profile adds addresses, health insurer and pension. The date is the day of sending (ČSSZ takes it as \"valid from\"). It works for a relationship that has already ended too — the filing then carries the end date. If the profile is missing or incomplete, open it above and complete it."
+        },
+        "warnings": {
+          "title": "Before you file",
+          "open_other": "Open the overlapping relationship",
+          "open_own": "Change the activity type of this relationship"
+        },
         "prepared": "{agenda} is ready to be sent.",
         "not_sent_yet": "Not sent yet. The employee is registered only once the social security administration confirms it.",
         "environment_label": "Environment",
@@ -5792,11 +5808,11 @@
             "actual_start_on": "Start date",
             "contract_start_on": "Contractual start date",
             "small_scale": "Small-scale employment",
-            "employment_status_code": "Employee status",
-            "employment_status_code_hint": "ČSÚ classification of employment status (NKPZ) — look up the code at https://csu.gov.cz; the field only fits the two-character top level (e.g. 11, 21).",
+            "employment_status_code": "Status in employment",
+            "employment_status_code_hint": "Four-digit code from the ČSÚ classification of status in employment (NKPZ), e.g. 1111 open-ended employment, 1112 fixed-term, 1211/1212 DPČ agreement, 1221/1222 DPP agreement. ČSSZ rejects shorter codes.",
             "work_mode_code": "Work mode",
             "continuous_operation": "Continuous operation",
-            "prevailing_workplace_code": "Prevailing workplace",
+            "prevailing_workplace_code": "Work takes place mostly",
             "expected_workplaces": "Expected workplaces",
             "contract_workplace": "Contractual place of work",
             "workplace_city": "Workplace city",
@@ -6054,6 +6070,7 @@
         "queue": "To send",
         "transport": "Submission status",
         "regzel": "Employer registration",
+        "registration_completion": "Data supplement (A3)",
         "jmhz": "JMHZ",
         "discount_intents": "Discount intent",
         "eldp": "Pension record sheet",
@@ -9117,6 +9134,51 @@
         "tax_year": "The limit applies per tax period.",
         "calendar_month": "The limit applies per calendar month.",
         "per_shift": "The limit is per single shift, not per month — a monthly total cannot be measured against it. The figure says how much was provided during the month, not that the limit was met."
+      }
+    },
+    "registrationCompletion": {
+      "title": "Supplementing employee data (REGZEC action 3)",
+      "intro": "Employees registered via the ONZ form by 31 March 2026 are known to ČSSZ without the items ONZ did not carry — status in employment, work mode, continuous operation, place of work, occupation, position, highest education and country of residence. Supplement them here in bulk. Each filing is built from the relationship's registration profile (A1); where it is not verified, open and complete it. Then send the prepared filings from the To send queue.",
+      "legal": "The supplement also works for a relationship that has already ended, and only an accepted supplement lets the app file a deregistration (A2) with a manually entered OIČ and ID PPV. The list shows relationships with an assigned ID PPV that the app did not register with action A1 and that lasted into 2026.",
+      "mode": "Scope of the supplement",
+      "effective_on": "Day of sending (valid from)",
+      "effective_hint": "For a supplement ČSSZ takes the day the filing is sent as \"valid from\" and expects the latest state of the data. The date must not be in the future.",
+      "submit": "Supplement selected ({count})",
+      "reload": "Reload",
+      "select_all": "Select all ready ones",
+      "select_one": "Select {name}",
+      "open_profile": "Open registration profile",
+      "open_queue": "Open the To send queue",
+      "open_ended": "ongoing",
+      "empty": "No relationship needs a supplement — all were registered from the app or have no ID PPV assigned.",
+      "load_failed": "The list of relationships to supplement could not be loaded.",
+      "submit_failed": "The supplement could not be prepared.",
+      "done": "Prepared: {prepared}, with a problem: {failed}. The reason is shown in the row.",
+      "col": {
+        "person": "Employee",
+        "period": "Duration",
+        "profile": "Registration profile (A1)",
+        "completion": "Supplement"
+      },
+      "profile": {
+        "verified": "Verified",
+        "draft": "In progress",
+        "missing": "Missing"
+      },
+      "profile_hint": {
+        "draft": "The profile has gaps — open it, press Check and fill in what is missing.",
+        "missing": "There is no registration profile yet — open it at the relationship, fill it in and save."
+      },
+      "state": {
+        "none": "Not filed",
+        "approved": "Event approved, filing not prepared",
+        "ready": "Ready to send",
+        "submitted": "Sent",
+        "processing": "Processing",
+        "accepted": "Accepted by ČSSZ",
+        "partially_accepted": "Partially accepted",
+        "rejected": "Rejected",
+        "other": "Other filing state"
       }
     },
     "discountIntents": {

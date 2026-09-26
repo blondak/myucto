@@ -99,6 +99,7 @@ final class PayrollRegistrationIdentitySnapshotBuilder
                 $this->object($source['regzec_a1'], 'regzec_a1'),
                 $identity,
                 $normalizedScope,
+                ($source['employer_protected_labor_market'] ?? false) === true,
             );
         }
 

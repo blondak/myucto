@@ -9,6 +9,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookValueException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEmploymentStatusCodebook;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelationshipDetailPolicy;
 
 final class PayrollEmploymentJmhzEvidenceCatalog
@@ -122,7 +123,7 @@ final class PayrollEmploymentJmhzEvidenceCatalog
         ];
     }
 
-    /** @return array{package_key:string,manifest_sha256:string,external_codebooks:array<string,string|null>,activity_codes:list<array{code:string,label:string,relationship_detail_mode:string}>,relationship_detail_codes:list<array{code:string,label:string}>,apz_instruments:list<array{code:string,label:string}>,countries:list<array{code:string,label:string}>,tax_identifier_types:list<array{code:string,label:string}>,education_levels:list<array{code:string,label:string}>,work_mode_codes:list<array{code:string,label:string}>,workplace_progress_codes:list<array{code:string,label:string}>,pension_type_codes:list<array{code:string,label:string}>,proof_identity_type_codes:list<array{code:string,label:string}>,health_restriction_type_codes:list<array{code:string,label:string}>,foreign_worker_free_access_reason_codes:list<array{code:string,label:string}>,foreign_worker_permit_type_codes:list<array{code:string,label:string}>,labour_office_codes:list<array{code:string,label:string}>} */
+    /** @return array{package_key:string,manifest_sha256:string,external_codebooks:array<string,string|null>,activity_codes:list<array{code:string,label:string,relationship_detail_mode:string}>,relationship_detail_codes:list<array{code:string,label:string}>,apz_instruments:list<array{code:string,label:string}>,countries:list<array{code:string,label:string}>,tax_identifier_types:list<array{code:string,label:string}>,education_levels:list<array{code:string,label:string}>,work_mode_codes:list<array{code:string,label:string}>,employment_status_codes:list<array{code:string,label:string}>,workplace_progress_codes:list<array{code:string,label:string}>,pension_type_codes:list<array{code:string,label:string}>,proof_identity_type_codes:list<array{code:string,label:string}>,health_restriction_type_codes:list<array{code:string,label:string}>,foreign_worker_free_access_reason_codes:list<array{code:string,label:string}>,foreign_worker_permit_type_codes:list<array{code:string,label:string}>,labour_office_codes:list<array{code:string,label:string}>} */
     public function options(): array
     {
         $apzOptions = [];
@@ -160,6 +161,8 @@ final class PayrollEmploymentJmhzEvidenceCatalog
             'tax_identifier_types' => $this->codebookOptions('typ_danove_identifikace'),
             'education_levels' => $this->codebookOptions('kategorie_dosazeneho_vzdela'),
             'work_mode_codes' => $this->codebookOptions('pracovni_rezim'),
+            // Jen čtyřmístné listy NKPZ — kratší kód ČSSZ nepřijme (EDV 10249).
+            'employment_status_codes' => PayrollRegistrationEmploymentStatusCodebook::options(),
             'workplace_progress_codes' => $this->codebookOptions('prubeh_prace'),
             'pension_type_codes' => $this->codebookOptions('druh_duchodu'),
             'proof_identity_type_codes' => $this->codebookOptions('typ_dokladu'),

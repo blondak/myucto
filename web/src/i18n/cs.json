@@ -5678,6 +5678,22 @@
         "preview": "Zobrazit znovu",
         "window": "Podat lze od {from}, nejpozději {to}.",
         "employer_window": "Pozor: jde o prvního zaměstnance. Přihlášku zaměstnavatele do evidence ČSSZ podejte nejpozději {to} — po tomto termínu vzniká fikce zaměstnavatele.",
+        "registration_window": {
+          "not_derived": "Nástup {start} je dřívější než 1. 7. 2026, kdy začala platit dnešní registrační povinnost. Přihlášku podejte bez zbytečného odkladu — lhůtu podle tehdejších pravidel aplikace neodvozuje a podání vede jako po lhůtě."
+        },
+        "completion": {
+          "action": "Dohlásit údaje (A3)",
+          "scope_label": "Rozsah změny",
+          "scope_single": "Změna jednoho údaje",
+          "scope_full": "Dohlášení údajů – celý profil",
+          "scope_minimal": "Dohlášení údajů – jen údaje, které ONZ nevedla",
+          "hint": "Dohlášení je pro zaměstnance přihlášeného dřív přes ONZ. Podání se složí z uloženého profilu registrace (A1) — postavení v zaměstnání, režim, místo výkonu, profese, pozice, vzdělání, stát rezidence; u celého profilu i adresy, pojišťovna a důchod. Datum je den odeslání (ČSSZ ho bere jako „platnost od“). Jde i za vztah, který už skončil — podání pak nese i datum skončení. Když profil chybí nebo není úplný, otevřete ho nahoře a doplňte."
+        },
+        "warnings": {
+          "title": "Upozornění před podáním",
+          "open_other": "Otevřít překrývající se vztah",
+          "open_own": "Upravit druh činnosti tohoto vztahu"
+        },
         "prepared": "{agenda} je připravená k odeslání.",
         "not_sent_yet": "Zatím neodesláno. Zaměstnanec bude přihlášený až potvrzením od ČSSZ.",
         "environment_label": "Prostředí",
@@ -5792,11 +5808,11 @@
             "actual_start_on": "Datum nástupu",
             "contract_start_on": "Sjednaný den nástupu",
             "small_scale": "Zaměstnání malého rozsahu",
-            "employment_status_code": "Postavení zaměstnance",
-            "employment_status_code_hint": "Číselník ČSÚ Klasifikace postavení v zaměstnání (NKPZ) — kód najdete na https://csu.gov.cz, do pole se vejdou nejvýš dva znaky nejvyšší úrovně (např. 11, 21).",
+            "employment_status_code": "Postavení v zaměstnání",
+            "employment_status_code_hint": "Čtyřmístný kód z číselníku ČSÚ Klasifikace postavení v zaměstnání (NKPZ), například 1111 pracovní poměr na dobu neurčitou, 1112 na dobu určitou, 1211/1212 DPČ, 1221/1222 DPP. Kratší kód ČSSZ nepřijme.",
             "work_mode_code": "Režim práce",
             "continuous_operation": "Nepřetržitý provoz",
-            "prevailing_workplace_code": "Převažující pracoviště",
+            "prevailing_workplace_code": "Práce probíhá převážně",
             "expected_workplaces": "Předpokládaná pracoviště",
             "contract_workplace": "Místo výkonu práce dle smlouvy",
             "workplace_city": "Obec pracoviště",
@@ -6054,6 +6070,7 @@
         "queue": "K odeslání",
         "transport": "Stav odeslání",
         "regzel": "Registrace zaměstnavatele",
+        "registration_completion": "Dohlášení údajů (A3)",
         "jmhz": "JMHZ",
         "discount_intents": "Záměr slevy",
         "eldp": "Evidenční list DP",
@@ -9117,6 +9134,51 @@
         "tax_year": "Limit platí za zdaňovací období.",
         "calendar_month": "Limit platí za kalendářní měsíc.",
         "per_shift": "Limit je za jednu směnu, ne za měsíc — měsíční součet se proti němu poměřit nedá. Údaj říká, kolik se za měsíc poskytlo, ne že se limit dodržel."
+      }
+    },
+    "registrationCompletion": {
+      "title": "Dohlášení údajů zaměstnanců (REGZEC akce 3)",
+      "intro": "Zaměstnance přihlášené do 31. 3. 2026 přes ONZ zná ČSSZ bez údajů, které ONZ nevedla — postavení v zaměstnání, režim práce, nepřetržitý provoz, místo výkonu, profese, pozice, nejvyšší vzdělání a stát rezidence. Tady je dohlásíte hromadně. Podání se skládá z profilu registrace (A1) u každého vztahu; kdo ho nemá ověřený, otevřete a doplňte ho. Připravená podání pak odešlete ve frontě K odeslání.",
+      "legal": "Dohlášení jde i za vztah, který už skončil, a teprve s přijatým dohlášením aplikace přijme odhlášku A2 u ručně zapsaného OIČ a ID PPV. Seznam ukazuje vztahy s přiděleným ID PPV, za které aplikace nepodala přihlášku A1, trvající v roce 2026.",
+      "mode": "Rozsah dohlášení",
+      "effective_on": "Den odeslání (platnost od)",
+      "effective_hint": "ČSSZ bere u dohlášení jako „platnost od“ den, kdy podání odchází, a hlásí se poslední stav údajů. Datum nesmí být v budoucnu.",
+      "submit": "Dohlásit vybrané ({count})",
+      "reload": "Načíst znovu",
+      "select_all": "Vybrat všechny připravené",
+      "select_one": "Vybrat {name}",
+      "open_profile": "Otevřít profil registrace",
+      "open_queue": "Otevřít frontu K odeslání",
+      "open_ended": "trvá",
+      "empty": "Žádný vztah dohlášení nepotřebuje — všichni jsou přihlášení z aplikace, nebo nemají přidělené ID PPV.",
+      "load_failed": "Seznam vztahů k dohlášení se nepodařilo načíst.",
+      "submit_failed": "Dohlášení se nepodařilo připravit.",
+      "done": "Připraveno: {prepared}, s vadou: {failed}. U vadných je důvod v řádku.",
+      "col": {
+        "person": "Zaměstnanec",
+        "period": "Trvání vztahu",
+        "profile": "Profil registrace (A1)",
+        "completion": "Dohlášení"
+      },
+      "profile": {
+        "verified": "Ověřený",
+        "draft": "Rozpracovaný",
+        "missing": "Chybí"
+      },
+      "profile_hint": {
+        "draft": "Profil má vady — otevřete ho, stiskněte Kontrola a doplňte, co chybí.",
+        "missing": "Profil registrace zatím neexistuje — otevřete ho u vztahu, vyplňte a uložte."
+      },
+      "state": {
+        "none": "Nepodáno",
+        "approved": "Schválená událost, podání nepřipravené",
+        "ready": "Připraveno k odeslání",
+        "submitted": "Odesláno",
+        "processing": "Zpracovává se",
+        "accepted": "Přijato ČSSZ",
+        "partially_accepted": "Přijato částečně",
+        "rejected": "Odmítnuto",
+        "other": "Jiný stav podání"
       }
     },
     "discountIntents": {
