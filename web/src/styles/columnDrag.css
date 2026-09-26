@@ -1,0 +1,12 @@
+th[data-column-key][draggable="true"] {
+  cursor: grab;
+}
+th[data-column-key][draggable="true"]:active {
+  cursor: grabbing;
+}
+th[data-column-drop="before"] {
+  box-shadow: inset 3px 0 var(--color-primary-500);
+}
+th[data-column-drop="after"] {
+  box-shadow: inset -3px 0 var(--color-primary-500);
+}

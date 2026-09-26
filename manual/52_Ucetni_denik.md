@@ -161,6 +161,20 @@ V nabídce **Sloupce** je sestava **Výchozí** se stručným seznamem a sestava
 Přepínačem **Hustota** zvolíš kompaktnější nebo prostornější tabulku. Nastavené
 kombinace filtrů lze uložit a znovu použít přes **Uložené filtry**.
 
+Sloupce lze přetahovat myší za záhlaví s tečkovanou ikonou. Barevná čára ukáže,
+kam se sloupec přesune. Pořadí záhlaví i buněk se změní společně, také ve
+víceřádkovém zobrazení. Pořadí se automaticky ukládá do profilu přihlášeného
+uživatele pro tento seznam a platí ve všech jeho firmách. V nabídce **Sloupce**
+je tlačítko **Obnovit pořadí sloupců**, které jedním kliknutím vrátí původní
+pořadí a zachová vybrané sloupce, barvy i filtry.
+
+Nabídka **Barvy položek** s ikonou palety umožňuje nastavit vlastní podklad buněk
+jednotlivých sloupců. Písmo se automaticky přepne na černé nebo bílé podle kontrastu,
+takže zůstává čitelné ve světlém i tmavém režimu. Volby se ukládají automaticky
+pro přihlášeného uživatele, zvlášť pro každý seznam, a platí ve všech jeho firmách.
+Tlačítko **Obnovit výchozí barvy** vrátí všechny barvy jedním kliknutím; šipka
+u sloupce obnoví jen jeho barvu. Výběr sloupců, filtry a hustota se přitom nemění.
+
 ### 52.2.1 Drill-down na zdrojový doklad
 
 Kliknutí na **Zdroj** otevře read-only postranní panel se souhrnem zdroje, aniž by

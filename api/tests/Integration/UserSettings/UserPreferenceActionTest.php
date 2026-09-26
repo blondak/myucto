@@ -95,6 +95,27 @@ final class UserPreferenceActionTest extends TestCase
         self::assertArrayNotHasKey('table.journal', $get['body']);
     }
 
+    public function testColumnColorsRoundTripAndReset(): void
+    {
+        foreach (['invoices', 'purchase_invoices', 'journal'] as $page) {
+            $key = 'table.' . $page;
+            $payload = ['density' => 'compact', 'hidden' => ['status'], 'column_order' => ['amount', 'date'], 'column_colors' => ['amount' => '#123456', 'date' => '#aabbcc']];
+            $put = $this->call('put', 'PUT', ['args' => ['key' => $key], 'body' => $payload]);
+            self::assertSame(200, $put['status']);
+            $get = $this->call('list', 'GET', ['query' => ['keys' => $key]]);
+            self::assertSame($payload, $get['body'][$key]);
+
+            $other = $this->call('list', 'GET', ['query' => ['keys' => $key], 'user' => $this->userId + 999000]);
+            self::assertArrayNotHasKey($key, $other['body']);
+
+            $payload['column_colors'] = null;
+            $reset = $this->call('put', 'PUT', ['args' => ['key' => $key], 'body' => $payload]);
+            self::assertSame(200, $reset['status']);
+            $get = $this->call('list', 'GET', ['query' => ['keys' => $key]]);
+            self::assertSame($payload, $get['body'][$key]);
+        }
+    }
+
     public function testDeleteResetsKey(): void
     {
         $this->call('put', 'PUT', ['args' => ['key' => 'table.invoices'], 'body' => ['density' => 'compact']]);

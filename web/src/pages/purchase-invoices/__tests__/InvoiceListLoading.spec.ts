@@ -19,7 +19,7 @@ vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({}) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
 vi.mock('@/composables/useYearOptions', () => ({ useYearOptions: () => [] }))
 vi.mock('@/composables/useListKeyboard', () => ({ useListKeyboard: () => ({ activeIndex: -1 }) }))
-vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined), getPagePrefs: () => ref({}) }))
 vi.mock('@/composables/useTablePrefs', () => ({ useTablePrefs: () => ({
   sort: ref(null), flag: () => true, isVisible: () => false,
 }) }))
