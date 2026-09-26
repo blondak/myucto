@@ -51,6 +51,15 @@ final class PayrollPredecessorObligationScope
     /** Poznámka k položce, kterou převzetí odškrtne jako vyřízenou jinde. */
     public const NOTE = 'Vyřízeno předchozím programem před začátkem vedení mezd v MyÚčtu.';
 
+    /**
+     * Lhůta jednorázového dohlášení údajů (REGZEC A3) u zaměstnanců, které ČSSZ
+     * k 31. 3. 2026 vedla v registru pojištěnců z ONZ (vysvětlivky ČSSZ k REGZEC).
+     */
+    public const ONZ_COMPLETION_DUE_ON = '2026-04-30';
+
+    /** Poslední den, kdy se zaměstnanec přihlašoval přes ONZ. */
+    private const ONZ_LAST_DAY = '2026-03-31';
+
     /** @var list<string> */
     private const ALWAYS_RELEVANT = ['legacy_start_date', 'takeover_deductions_review'];
 
@@ -101,6 +110,23 @@ final class PayrollPredecessorObligationScope
 
         return $anchor !== null
             && PayrollHistoricalPeriodService::precedesStart($startPeriod, $anchor);
+    }
+
+    /**
+     * Dohlášení údajů (A3) vztahu přihlášeného dřív než z MyÚčta: u vztahu z doby
+     * ONZ rozhoduje lhůta dohlášení, u pozdějšího nástupu den nástupu (přihlášku
+     * pak podal ten, kdo tehdy mzdy vedl).
+     */
+    public static function registrationCompletionHandledByPredecessor(
+        ?string $startPeriod,
+        ?string $startOn,
+        ?string $endOn,
+    ): bool {
+        if ($startOn !== null && $startOn > self::ONZ_LAST_DAY) {
+            return self::handledByPredecessor($startPeriod, 'registration_completion', 'onboarding', null, $startOn, $endOn);
+        }
+
+        return self::handledByPredecessor($startPeriod, 'registration_completion', 'change', self::ONZ_COMPLETION_DUE_ON, $startOn, $endOn);
     }
 
     /**

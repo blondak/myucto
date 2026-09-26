@@ -134,4 +134,58 @@ describe('PayrollRegistrationCompletionPanel', () => {
     expect(wrapper.get('[data-test="registration-completion-success"]').text())
       .toContain('"failed":1')
   })
+
+  it('převzatá firma: dohlášení vyřízená předchozím programem skryje, na přepnutí je ukáže s odkazem na podání', async () => {
+    m.candidates.mockResolvedValue({
+      today: '2026-09-26',
+      items: [
+        candidate({
+          employment_id: 7,
+          profile_status: null,
+          predecessor_reason: 'registration',
+          predecessor_submission_id: 122,
+          predecessor_submitted_at: '2026-04-29 07:41:28',
+          predecessor_action: 'A3',
+          predecessor_program: 'PAMICA',
+        }),
+        candidate({ employment_id: 8, profile_status: null, predecessor_reason: 'deadline' }),
+        candidate({ employment_id: 9, profile_status: null }),
+      ],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="registration-completion-row-7"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="registration-completion-row-8"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="registration-completion-row-9"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="registration-completion-filter"]').text()).toContain('"pending":1')
+
+    await wrapper.get('[data-test="registration-completion-show-all"]').setValue(true)
+    expect(wrapper.get('[data-test="registration-completion-predecessor-7"]').text())
+      .toContain('payroll.registrationCompletion.predecessor.badge')
+    expect(JSON.parse(wrapper.get('[data-test="registration-completion-predecessor-link-7"]').attributes('data-to') ?? '{}'))
+      .toEqual({
+        name: 'payroll-submissions-tab',
+        params: { tab: 'jmhz' },
+        query: { external: '122' },
+        hash: '#external-submissions',
+      })
+    expect(wrapper.get('[data-test="registration-completion-predecessor-8"]').text())
+      .toContain('payroll.registrationCompletion.predecessor.deadline')
+    expect(wrapper.find('[data-test="registration-completion-predecessor-9"]').exists()).toBe(false)
+  })
+
+  it('když nic nechybí, řekne to a nechá ukázat všechny vztahy', async () => {
+    m.candidates.mockResolvedValue({
+      today: '2026-09-26',
+      items: [candidate({ predecessor_reason: 'deadline' })],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="registration-completion-nothing-pending"]').exists()).toBe(true)
+    await wrapper.get('[data-test="registration-completion-show-all"]').setValue(true)
+    const select = wrapper.get('[data-test="registration-completion-select-5"]').element as HTMLInputElement
+    expect(select.disabled).toBe(false)
+  })
 })

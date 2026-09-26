@@ -4633,6 +4633,16 @@ export interface PayrollRegistrationCompletionCandidate {
   completion_effective_on: string | null
   completion_submission_id: number | null
   completion_submission_status: string | null
+  /**
+   * Dohlášení vyřídil předchozí program: `registration` = odeslaná registrace
+   * v historii podání předchozím programem, `deadline` = lhůta uplynula před
+   * začátkem vedení mezd v MyÚčtu.
+   */
+  predecessor_reason?: 'registration' | 'deadline' | null
+  predecessor_submission_id?: number | null
+  predecessor_submitted_at?: string | null
+  predecessor_action?: 'A1' | 'A3' | null
+  predecessor_program?: string | null
 }
 
 export interface PayrollRegistrationCompletionCandidates {

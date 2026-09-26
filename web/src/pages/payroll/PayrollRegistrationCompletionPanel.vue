@@ -54,7 +54,34 @@ function isSelectable(item: PayrollRegistrationCompletionCandidate): boolean {
   return item.profile_status === 'verified' && !isDone(item)
 }
 
-const selectable = computed(() => items.value.filter(isSelectable))
+/**
+ * Dohlášení vyřídil předchozí program (registrace v převzaté historii, nebo
+ * lhůta uplynula před začátkem vedení mezd v MyÚčtu). Vztah nic nepotřebuje,
+ * ruční dohlášení ale zůstává možné.
+ */
+function handledByPredecessor(item: PayrollRegistrationCompletionCandidate): boolean {
+  return !!item.predecessor_reason && !isDone(item)
+}
+
+function needsAction(item: PayrollRegistrationCompletionCandidate): boolean {
+  return !isDone(item) && !item.predecessor_reason
+}
+
+const showAll = ref(false)
+const pendingCount = computed(() => items.value.filter(needsAction).length)
+const predecessorCount = computed(() => items.value.filter(handledByPredecessor).length)
+const visibleItems = computed(() => showAll.value ? items.value : items.value.filter(needsAction))
+
+function predecessorTarget(item: PayrollRegistrationCompletionCandidate) {
+  return {
+    name: 'payroll-submissions-tab',
+    params: { tab: 'jmhz' },
+    query: item.predecessor_submission_id ? { external: String(item.predecessor_submission_id) } : {},
+    hash: '#external-submissions',
+  }
+}
+
+const selectable = computed(() => visibleItems.value.filter(isSelectable))
 const allSelected = computed(
   () => selectable.value.length > 0
     && selectable.value.every(item => selected.value.includes(item.employment_id)),
@@ -80,6 +107,7 @@ function profileState(item: PayrollRegistrationCompletionCandidate): 'verified' 
 
 function profileBadge(item: PayrollRegistrationCompletionCandidate): string {
   const state = profileState(item)
+  if (state !== 'verified' && handledByPredecessor(item)) return 'bg-neutral-100 text-neutral-600 ring-neutral-300'
   if (state === 'verified') return 'bg-success-50 text-success-700 ring-success-500/30'
   if (state === 'draft') return 'bg-warning-50 text-warning-800 ring-warning-500/30'
   return 'bg-danger-50 text-danger-700 ring-danger-500/30'
@@ -259,6 +287,23 @@ onMounted(() => {
       </p>
     </div>
 
+    <div
+      v-if="!loading && items.length > 0"
+      class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-neutral-200 bg-surface px-4 py-3 text-sm text-neutral-700"
+      data-test="registration-completion-filter"
+    >
+      <p>
+        {{ t('payroll.registrationCompletion.filter.summary', { pending: pendingCount, total: items.length }) }}
+        <template v-if="predecessorCount > 0">
+          · {{ t('payroll.registrationCompletion.filter.predecessor', { count: predecessorCount }) }}
+        </template>
+      </p>
+      <label class="inline-flex items-center gap-2 whitespace-nowrap text-sm">
+        <input v-model="showAll" type="checkbox" data-test="registration-completion-show-all">
+        {{ t('payroll.registrationCompletion.filter.show_all') }}
+      </label>
+    </div>
+
     <div v-if="loading" class="h-40 animate-pulse rounded-xl bg-neutral-100" />
     <div
       v-else-if="items.length === 0"
@@ -266,6 +311,13 @@ onMounted(() => {
       data-test="registration-completion-empty"
     >
       {{ t('payroll.registrationCompletion.empty') }}
+    </div>
+    <div
+      v-else-if="visibleItems.length === 0"
+      class="rounded-xl border border-success-500/30 bg-success-50 p-4 text-sm text-success-700"
+      data-test="registration-completion-nothing-pending"
+    >
+      {{ t('payroll.registrationCompletion.filter.nothing_pending') }}
     </div>
     <div v-else class="overflow-x-auto rounded-xl border border-neutral-200 bg-surface">
       <table class="min-w-full divide-y divide-neutral-200 text-sm" data-test="registration-completion-table">
@@ -289,7 +341,7 @@ onMounted(() => {
         </thead>
         <tbody class="divide-y divide-neutral-100">
           <tr
-            v-for="item in items"
+            v-for="item in visibleItems"
             :key="item.employment_id"
             :data-test="`registration-completion-row-${item.employment_id}`"
           >
@@ -321,14 +373,14 @@ onMounted(() => {
                 {{ t(`payroll.registrationCompletion.profile.${profileState(item)}`) }}
               </span>
               <p
-                v-if="profileState(item) !== 'verified'"
+                v-if="profileState(item) !== 'verified' && !handledByPredecessor(item)"
                 class="mt-1 max-w-xs text-xs text-neutral-600"
               >
                 {{ t(`payroll.registrationCompletion.profile_hint.${profileState(item)}`) }}
               </p>
               <RouterLink
                 :to="registrationTarget(item)"
-                :class="btnOutline(profileState(item) === 'verified' ? 'neutral' : 'warning')"
+                :class="btnOutline(profileState(item) === 'verified' || handledByPredecessor(item) ? 'neutral' : 'warning')"
                 class="mt-1 whitespace-nowrap"
                 :data-test="`registration-completion-open-${item.employment_id}`"
               >
@@ -339,7 +391,33 @@ onMounted(() => {
               </RouterLink>
             </td>
             <td class="px-3 py-2 align-top text-xs">
-              <p class="text-neutral-700">
+              <div
+                v-if="handledByPredecessor(item)"
+                class="max-w-md"
+                :data-test="`registration-completion-predecessor-${item.employment_id}`"
+              >
+                <span class="inline-flex rounded-full bg-success-50 px-2 py-0.5 text-xs font-medium text-success-700 ring-1 ring-success-500/30">
+                  {{ t('payroll.registrationCompletion.predecessor.badge') }}
+                </span>
+                <p v-if="item.predecessor_reason === 'registration'" class="mt-1 text-neutral-600">
+                  {{ t('payroll.registrationCompletion.predecessor.registration', {
+                    action: item.predecessor_action ?? '',
+                    program: item.predecessor_program ?? t('payroll.registrationCompletion.predecessor.program'),
+                    date: item.predecessor_submitted_at ? formatDate(item.predecessor_submitted_at) : '—',
+                  }) }}
+                  <RouterLink
+                    :to="predecessorTarget(item)"
+                    class="ml-1 font-medium text-payroll-600 underline underline-offset-2 hover:text-payroll-700"
+                    :data-test="`registration-completion-predecessor-link-${item.employment_id}`"
+                  >
+                    {{ t('payroll.registrationCompletion.predecessor.open') }}
+                  </RouterLink>
+                </p>
+                <p v-else class="mt-1 text-neutral-600">
+                  {{ t('payroll.registrationCompletion.predecessor.deadline') }}
+                </p>
+              </div>
+              <p v-else class="text-neutral-700">
                 {{ t(`payroll.registrationCompletion.state.${completionState(item)}`) }}
                 <template v-if="item.completion_effective_on">
                   · {{ formatDate(item.completion_effective_on) }}

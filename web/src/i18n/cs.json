@@ -10005,6 +10005,19 @@
         "partially_accepted": "Přijato částečně",
         "rejected": "Odmítnuto",
         "other": "Jiný stav podání"
+      },
+      "filter": {
+        "summary": "Dohlášení potřebuje {pending} z {total} vztahů",
+        "predecessor": "{count} vyřídil předchozí program",
+        "show_all": "Zobrazit všechny vztahy",
+        "nothing_pending": "Žádný vztah dohlášení nepotřebuje. Vztahy, které vyřídil předchozí program nebo MyÚčto, ukáže volba Zobrazit všechny vztahy; ručně dohlásit je jde i tak."
+      },
+      "predecessor": {
+        "badge": "Dohlášeno předchozím programem",
+        "registration": "{program} podal registraci {action} dne {date}.",
+        "program": "Předchozí program",
+        "open": "Zobrazit podání",
+        "deadline": "Lhůta dohlášení (30. 4. 2026) uplynula před začátkem vedení mezd v MyÚčtu, dohlášení tedy vyřídil předchozí program. Když ho ČSSZ nemá, dohlaste ho ručně."
       }
     },
     "discountIntents": {

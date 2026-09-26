@@ -10005,6 +10005,19 @@
         "partially_accepted": "Partially accepted",
         "rejected": "Rejected",
         "other": "Other filing state"
+      },
+      "filter": {
+        "summary": "{pending} of {total} relationships need the completion",
+        "predecessor": "{count} handled by the previous program",
+        "show_all": "Show all relationships",
+        "nothing_pending": "No relationship needs the completion. Relationships handled by the previous program or MyÚčto appear under Show all relationships; you can still file them manually."
+      },
+      "predecessor": {
+        "badge": "Filed by the previous program",
+        "registration": "{program} filed registration {action} on {date}.",
+        "program": "The previous program",
+        "open": "Show filing",
+        "deadline": "The completion deadline (30 April 2026) passed before payroll started in MyÚčto, so the previous program handled it. If ČSSZ does not have it, file it manually."
       }
     },
     "discountIntents": {

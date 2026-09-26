@@ -952,6 +952,16 @@ odeslání a stiskněte **Dohlásit vybrané**. Vada u jednoho vztahu ostatní
 nezastaví — důvod se ukáže v jeho řádku. Připravená podání pak odešlete ze
 záložky **K odeslání**.
 
+U firmy převedené z jiného mzdového programu seznam ve výchozím stavu ukazuje
+jen vztahy, které dohlášení opravdu potřebují. Vztah, za který předchozí
+program registraci podal (v historii **Podání předchozím programem** je
+odeslaná přihláška A1 nebo dohlášení A3), má štítek **Dohlášeno předchozím
+programem** a odkaz na to podání. Stejně se čte vztah, u kterého lhůta
+dohlášení (30. 4. 2026) uplynula před prvním mzdovým obdobím v MyÚčtu, a vztah,
+který nastoupil po 31. 3. 2026, ale před tímto obdobím: přihlášku i dohlášení
+tehdy vyřizoval předchozí program. Volba **Zobrazit všechny vztahy** je ukáže
+a ručně dohlásit je jde i tak, třeba když ČSSZ dohlášení nemá.
+
 Dohlášení jde i za vztah, který už skončil. Údaje se pak čtou ke dni skončení
 a podání nese i datum skončení, jak to ČSSZ u ukončených vztahů vyžaduje.
 
