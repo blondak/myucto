@@ -16,11 +16,15 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
  * atribut 10370 základu 10477".
  *
  * **Fail-open, a to schválně.** Prostor chybových kódů ČSSZ je širší než náš
- * katalog: skutečný protokol vrátil kód 20022, jehož kontrola ve slovníku
- * 1.4.1.6 vůbec není. Kdyby se doplnění dělalo fail-closed, shodil by takový
+ * katalog: skutečný protokol vrátil kód 20022 dřív, než katalog 1.4.2.10
+ * kontrolu 22 zveřejnil. Kdyby se doplnění dělalo fail-closed, shodil by takový
  * protokol celé zpracování odpovědi — tedy přesně ve chvíli, kdy uživatel
  * potřebuje vědět, proč mu podání neprošlo. Neznámá kontrola proto zůstane
  * nedoplněná a hláška z protokolu se ukáže tak, jak přišla.
+ *
+ * Chyba 20022 ve variantě „shodné R nebo S už existuje" nese příznak
+ * `original_at_cssz`: neznamená zamítnutí, ale to, že originál podání u ČSSZ
+ * je ({@see JmhzProtocolError::reportsExistingIdenticalSubmission()}).
  *
  * Doplňuje se jen to, co je doložené. Nic se nedopočítává a nic se nehádá:
  * u platformních kódů (odmítnutí na vstupu, obálka, podpis) žádná kontrola
@@ -82,6 +86,7 @@ final readonly class JmhzProtocolExplainer
             'ik_mpsv' => $ikMpsv,
             'id_ppv' => $idPpv,
             'control' => null,
+            'original_at_cssz' => $error->reportsExistingIdenticalSubmission(),
         ];
         if ($error->controlId === null) {
             return $described;

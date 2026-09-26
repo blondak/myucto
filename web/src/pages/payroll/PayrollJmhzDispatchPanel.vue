@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
+import { PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION } from '@/api/payrollTransportCodes'
 import {
   payrollApi,
   type PayrollJmhzIsdsEnqueueResult,
@@ -13,6 +14,7 @@ import {
 } from '@/api/payroll'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue'
+import PayrollLateDiscountConfirm from '@/components/payroll/PayrollLateDiscountConfirm.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{
@@ -40,6 +42,11 @@ interface DispatchState {
   vrep: PayrollJmhzTransportPoll | null
   gateway: GatewayStart | null
   mobileKeySent: boolean
+  /**
+   * Varování kontroly 290 čekající na potvrzení účetní (hlášení po splatnosti
+   * se slevou). Nese větu ze serveru a kanál, kterým se po potvrzení pokračuje.
+   */
+  lateDiscount: { message: string; channel: 'isds' | 'vrep' } | null
 }
 
 const states = ref<Record<string, DispatchState>>({})
@@ -82,6 +89,7 @@ function state(preview: PayrollJmhzPvpojPreview): DispatchState {
     vrep: null,
     gateway: null,
     mobileKeySent: false,
+    lateDiscount: null,
   }
 }
 
@@ -108,6 +116,8 @@ function cancelConfirm(preview: PayrollJmhzPvpojPreview) {
  */
 const ABANDONABLE_STATUSES = ['submitted', 'processing', 'waiting_for_identity', 'rejected']
 const abandoning = ref<string | null>(null)
+/** Po zahození zamítnutého řádného podání: znovu zmrazeno s novým GUID. */
+const refreezeNotices = ref<Record<string, string>>({})
 
 function canAbandon(preview: PayrollJmhzPvpojPreview): boolean {
   const item = obligation(preview)
@@ -136,12 +146,21 @@ async function abandon(preview: PayrollJmhzPvpojPreview) {
   abandoning.value = key(preview)
   setState(preview, { ...state(preview), error: '' })
   try {
-    await payrollApi.abandonSubmissionInQueue(
+    const result = await payrollApi.abandonSubmissionInQueue(
       props.environment,
       latest.id,
       latest.row_version,
       reason.trim(),
     )
+    refreezeNotices.value = {
+      ...refreezeNotices.value,
+      [key(preview)]: result.refreeze?.refrozen
+        ? t('payroll.transport_delivery.refrozen', {
+            guid: result.refreeze.submission_guid,
+            previous: result.refreeze.previous_submission_guid,
+          })
+        : '',
+    }
     emit('refresh')
   } catch (e) {
     setState(preview, {
@@ -192,7 +211,10 @@ function unavailableReason(preview: PayrollJmhzPvpojPreview): string | null {
   return null
 }
 
-async function submissionId(preview: PayrollJmhzPvpojPreview): Promise<number> {
+async function submissionId(
+  preview: PayrollJmhzPvpojPreview,
+  confirmLateDiscount: boolean,
+): Promise<number> {
   const item = obligation(preview)
   if (item?.latest_submission?.status === 'ready') return item.latest_submission.id
 
@@ -206,18 +228,34 @@ async function submissionId(preview: PayrollJmhzPvpojPreview): Promise<number> {
     item?.id ?? null,
     props.environment,
     preview.office.office_id,
+    confirmLateDiscount,
   )
 
   return frozen.submission_id
 }
 
-async function dispatch(preview: PayrollJmhzPvpojPreview, channel: 'isds' | 'vrep') {
+function cancelLateDiscount(preview: PayrollJmhzPvpojPreview) {
+  setState(preview, { ...state(preview), lateDiscount: null })
+}
+
+async function dispatch(
+  preview: PayrollJmhzPvpojPreview,
+  channel: 'isds' | 'vrep',
+  confirmLateDiscount = false,
+) {
   if (!canWrite.value || unavailableReason(preview)) return
   const current = state(preview)
-  setState(preview, { ...current, busy: channel, confirming: null, error: '', gateway: null })
+  setState(preview, {
+    ...current,
+    busy: channel,
+    confirming: null,
+    error: '',
+    gateway: null,
+    lateDiscount: null,
+  })
 
   try {
-    const id = await submissionId(preview)
+    const id = await submissionId(preview, confirmLateDiscount)
     if (channel === 'vrep') {
       const result = await payrollApi.sendJmhzTransport(
         id,
@@ -248,6 +286,19 @@ async function dispatch(preview: PayrollJmhzPvpojPreview, channel: 'isds' | 'vre
     }
     emit('refresh')
   } catch (exception) {
+    // Kontrola 290 nezakazuje, ale chce vědomé potvrzení účetní. Nabídne se
+    // na místě i s tím, kde sleva ověřit a kde ji případně opravit.
+    if (apiErrorCode(exception) === PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION) {
+      setState(preview, {
+        ...state(preview),
+        busy: null,
+        lateDiscount: {
+          message: apiErrorMessage(exception, t('payroll.transport_delivery.late_discount_title')),
+          channel,
+        },
+      })
+      return
+    }
     setState(preview, {
       ...state(preview),
       busy: null,
@@ -409,6 +460,23 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
             </span>
           </div>
         </div>
+        <p
+          v-if="refreezeNotices[key(preview)]"
+          class="mt-3 rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-800"
+          role="status"
+          :data-test="`jmhz-refreeze-${key(preview)}`"
+        >
+          {{ refreezeNotices[key(preview)] }}
+        </p>
+        <PayrollLateDiscountConfirm
+          v-if="state(preview).lateDiscount"
+          class="mt-3"
+          :message="state(preview).lateDiscount!.message"
+          :busy="state(preview).busy !== null"
+          :test-id="`jmhz-late-discount-${key(preview)}`"
+          @confirm="dispatch(preview, state(preview).lateDiscount!.channel, true)"
+          @cancel="cancelLateDiscount(preview)"
+        />
         <p
           v-if="state(preview).error"
           class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"

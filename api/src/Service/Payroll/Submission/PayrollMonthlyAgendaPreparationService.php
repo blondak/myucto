@@ -61,6 +61,7 @@ final readonly class PayrollMonthlyAgendaPreparationService
         string $agendaCode,
         ?string $insurerCode,
         ?int $userId,
+        bool $lateDiscountConfirmed = false,
     ): array {
         if (!in_array($environment, ['production', 'test'], true)) {
             throw new \InvalidArgumentException(
@@ -76,6 +77,7 @@ final readonly class PayrollMonthlyAgendaPreparationService
                 $period,
                 (int) $duty['revision_id'],
                 $userId,
+                $lateDiscountConfirmed,
             ),
             HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW =>
                 $this->prepareHealthPaymentOverview(
@@ -113,6 +115,7 @@ final readonly class PayrollMonthlyAgendaPreparationService
         string $period,
         int $revisionId,
         ?int $userId,
+        bool $lateDiscountConfirmed,
     ): array {
         $preparation = $this->jmhzPreparations->freeze(
             $supplierId,
@@ -150,6 +153,7 @@ final readonly class PayrollMonthlyAgendaPreparationService
                 $environment,
                 $userId,
                 $office === null ? null : (int) $office['office_id'],
+                $lateDiscountConfirmed,
             );
             $submissionIds[] = (int) $frozen['submission_id'];
         }

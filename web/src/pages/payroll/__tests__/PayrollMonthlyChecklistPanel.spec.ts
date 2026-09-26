@@ -512,4 +512,43 @@ describe('PayrollMonthlyChecklistPanel', () => {
       .toContain('nope')
     expect(m.push).not.toHaveBeenCalled()
   })
+
+  /**
+   * Kontrola 290: příprava hlášení po splatnosti se slevou čeká na vědomé
+   * potvrzení účetní přímo u položky. Po potvrzení jde táž příprava znovu
+   * s `confirm_late_discount` a otevře hotové podání.
+   */
+  it('u slevy po lhůtě se u položky zeptá na potvrzení a po něm připraví podání', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({
+      summary: { total: 1, send: 0, generate: 1, manual: 0, done: 0 },
+      items: [agendaDutyItem()],
+    }))
+    m.prepareItem
+      .mockRejectedValueOnce({ response: { data: { error: {
+        code: 'jmhz_submission_late_discount_confirmation_required',
+        message: 'Hlášení se podává po lhůtě a uplatňuje slevu.',
+      } } } })
+      .mockResolvedValueOnce({ path: '/payroll/submissions/jmhz', prepared: 1 })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('tbody [data-test="monthly-checklist-prepare"]').trigger('click')
+    await flushPromises()
+
+    const confirm = wrapper.get('[data-test="monthly-checklist-late-discount"]')
+    expect(confirm.text()).toContain('Hlášení se podává po lhůtě a uplatňuje slevu.')
+    expect(wrapper.find('[data-test="monthly-checklist-prepare-error"]').exists()).toBe(false)
+    expect(m.push).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="monthly-checklist-late-discount-yes"]').trigger('click')
+    await flushPromises()
+
+    expect(m.prepareItem).toHaveBeenLastCalledWith('production', {
+      agenda_code: 'PPZ_2026',
+      period: '2026-08',
+      insurer_code: '111',
+      confirm_late_discount: true,
+    })
+    expect(m.push).toHaveBeenCalledWith('/payroll/submissions/jmhz')
+  })
 })

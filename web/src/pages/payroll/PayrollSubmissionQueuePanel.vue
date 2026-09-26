@@ -46,12 +46,19 @@ import { usePayrollLabels } from '@/composables/usePayrollLabels'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate, formatDateTime, formatPeriod, formatUtcDateTime } from '@/composables/useFormat'
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
+import PayrollPossiblyDeliveredNotice from '@/components/payroll/PayrollPossiblyDeliveredNotice.vue'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 
 const props = defineProps<{ environment: PayrollRegzelEnvironment }>()
 const emit = defineEmits<{ 'update:environment': [PayrollRegzelEnvironment] }>()
 
 const { t } = useI18n()
+/*
+ * Fronta nabízí odeslání i zahození bez dalšího rozlišení práv: záložka je
+ * přístupná jen s právem zápisu k podáním a server ho u každé akce ověřuje.
+ * Potvrzení opakování se chová stejně.
+ */
+const canWrite = true
 const { submissionAgendaLabel, submissionStatusLabel, submissionKindLabel } = usePayrollLabels()
 const {
   request: sendConfirmRequest,
@@ -178,6 +185,7 @@ async function sendOne(item: PayrollSubmissionQueueItem): Promise<void> {
  * a rozhodne účetní — proto to potvrzení i předvyplněný důvod.
  */
 const abandoning = ref<number | null>(null)
+const refreezeNotice = ref('')
 
 /** Zahodit smí jen podání, které úřad nepřijal — přijaté se opravuje opravným podáním. */
 const ABANDONABLE_STATUSES = ['submitted', 'processing', 'waiting_for_identity', 'rejected']
@@ -203,13 +211,22 @@ async function abandon(item: PayrollSubmissionQueueItem): Promise<void> {
 
   abandoning.value = item.submission_id
   error.value = ''
+  refreezeNotice.value = ''
   try {
-    await payrollApi.abandonSubmissionInQueue(
+    const result = await payrollApi.abandonSubmissionInQueue(
       props.environment,
       item.submission_id,
       item.submission_row_version,
       reason.trim(),
     )
+    // Řádné podání zamítnuté zpracováním dostalo nový GUID; účetní to musí
+    // vidět, jinak by protokol k novému odeslání nepárovala s původním.
+    if (result.refreeze?.refrozen) {
+      refreezeNotice.value = t('payroll.transport_delivery.refrozen', {
+        guid: result.refreeze.submission_guid,
+        previous: result.refreeze.previous_submission_guid,
+      })
+    }
     await load()
   } catch (e) {
     error.value = apiErrorMessage(e, t('payroll.submissions.queue.abandon_failed'))
@@ -385,6 +402,14 @@ void load()
 
     <div v-if="error" class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
       {{ error }}
+    </div>
+    <div
+      v-if="refreezeNotice"
+      class="rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-800"
+      data-test="queue-refreeze-notice"
+      role="status"
+    >
+      {{ refreezeNotice }}
     </div>
 
     <div
@@ -609,6 +634,17 @@ void load()
                     reason: item.attempt.error_message,
                   }) }}
                 </p>
+                <PayrollPossiblyDeliveredNotice
+                  v-if="item.attempt?.status === 'possibly_delivered'"
+                  class="mt-2 max-w-xl"
+                  :environment="environment"
+                  :submission-id="item.submission_id"
+                  :error-code="item.attempt.error_code"
+                  :correlation-reference="item.attempt.correlation_reference"
+                  :can-write="canWrite"
+                  import-mode="link"
+                  @confirmed="load()"
+                />
               </td>
               <td class="px-3 py-2 align-top text-right">
                 <div class="flex flex-wrap items-center justify-end gap-2">
@@ -698,6 +734,17 @@ void load()
           <p v-if="item.dispatch.blocked_reason" class="mt-2 text-xs text-neutral-600">
             {{ item.dispatch.blocked_reason }}
           </p>
+          <PayrollPossiblyDeliveredNotice
+            v-if="item.attempt?.status === 'possibly_delivered'"
+            class="mt-2"
+            :environment="environment"
+            :submission-id="item.submission_id"
+            :error-code="item.attempt.error_code"
+            :correlation-reference="item.attempt.correlation_reference"
+            :can-write="canWrite"
+            import-mode="link"
+            @confirmed="load()"
+          />
           <button
             type="button"
             :class="[btnFilledSm('primary'), 'mt-3 w-full justify-center']"

@@ -9,7 +9,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 final class JmhzScenarioRequirementSourceCatalog
 {
     public const CATALOG_KEY = 'jmhz-scenario-requirements-1.4.0.2-source-v1';
-    public const MANIFEST_SHA256 = '31d8b0f859ab0ac197e08d08b0b7d9c4814b8bba62a5ef3c287e7122978aa0e1';
+    public const MANIFEST_SHA256 = 'e73c6e96bafe3b2c36ebfc96f299d64e83df2b1deeb0910df42ca7299c452aa7';
     public const SOURCE_SHA256 = 'cc282115d58a3744348b500a2dcc6eec4a5899b12753ec756f01fe261fd7ff37';
 
     private const EXPECTED_COUNTS = [

@@ -2,7 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
+import { PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION } from '@/api/payrollTransportCodes'
 import {
   payrollApi,
   type PayrollMonthlyChecklistItem,
@@ -10,6 +11,7 @@ import {
   type PayrollRegzelEnvironment,
 } from '@/api/payroll'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
+import PayrollLateDiscountConfirm from '@/components/payroll/PayrollLateDiscountConfirm.vue'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate, formatPeriod } from '@/composables/useFormat'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
@@ -61,6 +63,8 @@ const response = ref<PayrollMonthlyChecklistResponse | null>(null)
 /** Klíč položky, jejíž podání se právě zakládá — ať nejde kliknout dvakrát. */
 const preparing = ref('')
 const prepareError = ref<Record<string, string>>({})
+/** Varování kontroly 290 čekající na potvrzení, klíčované položkou. */
+const lateDiscount = ref<Record<string, string>>({})
 
 const items = computed(() => response.value?.items ?? [])
 const summary = computed(() => response.value?.summary ?? {
@@ -163,16 +167,29 @@ function actionIcon(item: PayrollMonthlyChecklistItem): string {
  * U TÉ POLOŽKY — nesmí spadnout do společného pruhu nahoře, kde by vypadala
  * jako výpadek celého přehledu.
  */
-async function prepare(item: PayrollMonthlyChecklistItem) {
+async function prepare(item: PayrollMonthlyChecklistItem, confirmLateDiscount = false) {
   const request = item.action.prepare
   if (!request || preparing.value) return
   preparing.value = item.key
   prepareError.value = { ...prepareError.value, [item.key]: '' }
+  lateDiscount.value = { ...lateDiscount.value, [item.key]: '' }
   try {
-    const result = await payrollApi.prepareMonthlyChecklistItem(props.environment, request)
+    const result = await payrollApi.prepareMonthlyChecklistItem(
+      props.environment,
+      confirmLateDiscount ? { ...request, confirm_late_discount: true } : request,
+    )
     await load()
     await router.push(result.path)
   } catch (exception) {
+    // Kontrola 290: hlášení po splatnosti se slevou. Nezakazuje, ale chce
+    // vědomé potvrzení účetní, a to přímo u položky.
+    if (apiErrorCode(exception) === PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION) {
+      lateDiscount.value = {
+        ...lateDiscount.value,
+        [item.key]: apiErrorMessage(exception, t('payroll.transport_delivery.late_discount_title')),
+      }
+      return
+    }
     prepareError.value = {
       ...prepareError.value,
       [item.key]: apiErrorMessage(
@@ -411,6 +428,15 @@ onMounted(load)
                     >
                       {{ prepareError[item.key] }}
                     </p>
+                    <PayrollLateDiscountConfirm
+                      v-if="lateDiscount[item.key]"
+                      class="mt-2 max-w-md text-left"
+                      :message="lateDiscount[item.key]!"
+                      :busy="preparing === item.key"
+                      test-id="monthly-checklist-late-discount"
+                      @confirm="prepare(item, true)"
+                      @cancel="lateDiscount = { ...lateDiscount, [item.key]: '' }"
+                    />
                   </template>
                 </td>
               </tr>
@@ -482,6 +508,15 @@ onMounted(load)
                 >
                   {{ prepareError[item.key] }}
                 </p>
+                <PayrollLateDiscountConfirm
+                  v-if="lateDiscount[item.key]"
+                  class="mt-2"
+                  :message="lateDiscount[item.key]!"
+                  :busy="preparing === item.key"
+                  test-id="monthly-checklist-late-discount-mobile"
+                  @confirm="prepare(item, true)"
+                  @cancel="lateDiscount = { ...lateDiscount, [item.key]: '' }"
+                />
               </template>
             </div>
           </article>

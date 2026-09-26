@@ -42,6 +42,46 @@ final readonly class JmhzProtocolReport
         public ?string $submittedDate = null,
     ) {}
 
+    /**
+     * Protokol, jehož JEDINOU chybou je kontrola 22 ve variantě „shodné R nebo
+     * S už existuje", není zamítnutí. Podání, na které odpovídá, je duplikát
+     * originálu, který ČSSZ už má, typicky opakované odeslání po ztracené
+     * odpovědi. Vzít ho jako zamítnutí by vedlo k zahození a novému podání
+     * s novým GUID, tedy k opravdové duplicitě.
+     */
+    public function originalAlreadyAtCssz(): bool
+    {
+        $errors = $this->errors;
+        foreach ($this->parts as $part) {
+            $errors = [...$errors, ...$part->errors];
+        }
+        if ($errors === []) {
+            return false;
+        }
+        foreach ($errors as $error) {
+            if (!$error->reportsExistingIdenticalSubmission()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Stav podání, který protokol platformě podání sděluje. Jediné místo, kudy
+     * se z protokolu ČSSZ bere `remote_status`: VREP, protokol z datové
+     * schránky i znovu ověřovaný protokol.
+     *
+     * Protokol „originál je u ČSSZ" podání neposouvá ({@see self::originalAlreadyAtCssz()}):
+     * zůstává odeslané, dokud se nedoloží protokol originálu.
+     */
+    public function payrollRemoteStatus(): string
+    {
+        return $this->originalAlreadyAtCssz()
+            ? 'submitted'
+            : $this->status->payrollRemoteStatus();
+    }
+
     /** @return list<JmhzProtocolError> */
     public function errorsForForm(string $formGuid): array
     {

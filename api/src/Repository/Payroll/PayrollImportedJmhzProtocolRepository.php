@@ -48,6 +48,38 @@ final class PayrollImportedJmhzProtocolRepository
 
     public function __construct(private readonly Connection $db) {}
 
+    /**
+     * Načtené protokoly o zpracování podání s daným GUID (`idPodani`).
+     *
+     * Slouží k dohledání originálu po odeslání, na které se nevrátila
+     * odpověď: GUID podání generujeme my a ČSSZ ho v protokolu vrací, takže
+     * je to jediná vazba, která nezávisí na ztraceném CorrelationID.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function findBySubmissionGuid(int $supplierId, string $environment, string $submissionGuid): array
+    {
+        if (!$this->isAvailable()) {
+            return [];
+        }
+        self::assertEnvironment($environment);
+        $statement = $this->db->pdo()->prepare(
+            'SELECT ' . self::LIST_COLUMNS . '
+               FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ? AND submission_guid = ?
+              ORDER BY id DESC',
+        );
+        $statement->execute([$supplierId, $environment, strtoupper($submissionGuid)]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (is_array($row)) {
+                $rows[] = self::normalize($row);
+            }
+        }
+
+        return $rows;
+    }
+
     public function isAvailable(): bool
     {
         return $this->db->hasTable(self::TABLE);

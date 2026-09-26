@@ -31,6 +31,8 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         '1912_payroll_component_jmhz_compensation_detail_mappings.sql',
     ];
 
+    private const PACKAGE_TRANSITION = '1905_payroll_component_jmhz_catalog_1_4_2_10_package.sql';
+
     /** @var list<string> component_kind z payroll_component_definitions (migrace 1501) */
     private const KINDS = [
         'base_wage', 'hourly_wage', 'task_wage', 'bonus', 'premium', 'commission',
@@ -183,6 +185,31 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         }
     }
 
+    /**
+     * Přechod na balík s katalogem 1.4.2.10 (migrace 1905) doplňuje výchozí
+     * zařazení znovu, do nového balíku. Pravidlo musí být doslova totéž jako
+     * v 1839 a 1847, jinak by firmy zařazené před přechodem a po něm dostaly
+     * různé cíle.
+     */
+    public function testPackageTransitionRepeatsTheSameDefaultRule(): void
+    {
+        $transition = self::sql([self::PACKAGE_TRANSITION]);
+        $original = self::sql(self::MIGRATIONS);
+
+        preg_match_all("/SELECT '([A-Z0-9_]+)'(?: AS code)?, '(\\d+)'/", $transition, $matches, PREG_SET_ORDER);
+        $codes = [];
+        foreach ($matches as $match) {
+            $codes[$match[1]] = $match[2];
+        }
+        $expected = PayrollComponentJmhzMappingDefaults::all();
+        ksort($codes);
+        ksort($expected);
+        self::assertSame($expected, $codes);
+        self::assertSame(self::kindClauses($original), self::kindClauses($transition));
+        self::assertStringContainsString('existing.component_definition_id = target.id', $transition);
+        self::assertStringContainsString("controls-source-1.4.2.10_manifest-v1", $transition);
+    }
+
     public function testMigrationIsIdempotentAndNeverTouchesExistingChoice(): void
     {
         $sql = self::sql();
@@ -211,9 +238,9 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
     }
 
     /** @return list<array{kinds:list<string>,frequency:?string,tax:?string,target:string}> */
-    private static function kindClauses(): array
+    private static function kindClauses(?string $sql = null): array
     {
-        preg_match_all('/WHEN\s+(.*?)\s+THEN\s+\'(\d+)\'/s', self::sql(), $matches, PREG_SET_ORDER);
+        preg_match_all('/WHEN\s+(.*?)\s+THEN\s+\'(\d+)\'/s', $sql ?? self::sql(), $matches, PREG_SET_ORDER);
         $clauses = [];
         foreach ($matches as $match) {
             $condition = $match[1];
@@ -233,10 +260,11 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         return $clauses;
     }
 
-    private static function sql(): string
+    /** @param list<string>|null $migrations */
+    private static function sql(?array $migrations = null): string
     {
         $sql = '';
-        foreach (self::MIGRATIONS as $migration) {
+        foreach ($migrations ?? self::MIGRATIONS as $migration) {
             $part = file_get_contents(dirname(__DIR__, 4) . '/db/migrations/' . $migration);
             self::assertIsString($part, "Migrace {$migration} chybí.");
             $sql .= $part . "\n";

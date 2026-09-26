@@ -16,6 +16,8 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlEvaluator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use PHPUnit\Framework\TestCase;
 
 final class JmhzScenario1ControlValidatorTest extends TestCase
@@ -1323,6 +1325,94 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
                 $this->finding($report, $controlId)->outcome,
             );
         }
+    }
+
+    /**
+     * Kontrola 22 (katalog 1.4.2.10) je nepropustná DIS kontrola bez
+     * atributu, který by v podání chyběl, takže dopadá na KAŽDÉ podání. Bez
+     * vědomého zařazení mezi lokálně neověřitelné by skončila jako nepokrytá
+     * a zablokovala by odeslání všeho.
+     */
+    public function testDuplicateSubmissionGuidControlIsLeftToTheCsszRegistry(): void
+    {
+        $report = $this->validate(
+            JmhzXmlSample::minimal(),
+            new JmhzControlContext('2026-08-14', schemaValidated: true),
+        );
+        $finding = $this->finding($report, 22);
+
+        self::assertSame(JmhzControlOutcome::NotEvaluable, $finding->outcome);
+        self::assertSame(JmhzControlPassability::Blocking, $finding->passability);
+        self::assertSame(20022, $finding->errorCode);
+        self::assertNotContains($finding, $report->coverageGaps());
+        self::assertTrue($report->submittable());
+    }
+
+    /**
+     * Kontrola 290 (katalog 1.4.2.10) dopadá na jakékoli hlášení po splatnosti
+     * pojistného. V lhůtě projde, po ní se sleva hlásí jako varování, které
+     * podání neblokuje, ale před zmrazením se musí potvrdit.
+     */
+    public function testLateSubmissionWithEmployerDiscountWarnsAboutControl290(): void
+    {
+        $inTime = $this->validate(
+            JmhzXmlSample::withEmployerDiscount(),
+            new JmhzControlContext('2026-08-14'),
+        );
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($inTime, 290)->outcome);
+
+        $late = $this->validate(
+            JmhzXmlSample::withEmployerDiscount(),
+            new JmhzControlContext('2026-09-25'),
+        );
+        $finding = $this->finding($late, 290);
+        self::assertSame(JmhzControlOutcome::Failed, $finding->outcome);
+        self::assertTrue($finding->warnsOnly());
+        self::assertContains($finding, $late->warnings());
+        self::assertStringContainsString('po lhůtě', $finding->message);
+        self::assertNotContains(290, $this->blockingIds($late));
+    }
+
+    /**
+     * Varování 290 se nesmí zmrazit mlčky: zmrazení bez výslovného potvrzení
+     * skončí kódem, podle kterého obrazovka nabídne potvrzení, s potvrzením
+     * projde. Hlášení v lhůtě ani bez slevy se na nic neptá.
+     */
+    public function testFreezingLateDiscountRequiresExplicitConfirmation(): void
+    {
+        $late = $this->validate(
+            JmhzXmlSample::withEmployerDiscount(),
+            new JmhzControlContext('2026-09-25', schemaValidated: true),
+        );
+        try {
+            JmhzSubmissionBridgeService::assertLateDiscountConfirmed($late, false);
+            self::fail('Sleva po lhůtě se nesmí zmrazit bez potvrzení.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame(
+                JmhzSubmissionBridgeService::LATE_DISCOUNT_CONFIRMATION_CODE,
+                $exception->validationCode,
+            );
+            self::assertStringContainsString('po lhůtě', $exception->getMessage());
+        }
+        JmhzSubmissionBridgeService::assertLateDiscountConfirmed($late, true);
+
+        $inTime = $this->validate(
+            JmhzXmlSample::withEmployerDiscount(),
+            new JmhzControlContext('2026-08-14', schemaValidated: true),
+        );
+        JmhzSubmissionBridgeService::assertLateDiscountConfirmed($inTime, false);
+        self::assertTrue($inTime->submittable());
+    }
+
+    public function testLateSubmissionWithoutEmployerDiscountDoesNotWarn(): void
+    {
+        $report = $this->validate(
+            JmhzXmlSample::minimal(),
+            new JmhzControlContext('2026-09-25'),
+        );
+
+        self::assertNotSame(JmhzControlOutcome::Failed, $this->finding($report, 290)->outcome);
+        self::assertNotContains(290, $this->failedIds($report));
     }
 
     /**

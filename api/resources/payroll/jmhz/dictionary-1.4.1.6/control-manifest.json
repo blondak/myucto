@@ -1,22 +1,22 @@
 {
-    "manifest_sha256": "65ccaa12d3ac0485f5b901f91b8a7a4398486aadafc3b33fe6a79bd30a76c2e7",
+    "manifest_sha256": "565bfb145efd1e7c0893e81c26b3d865c486929dc44cef72620340b663b4e493",
     "payload": {
         "schema_version": "jmhz-control-source-catalog.v4",
-        "catalog_key": "jmhz-controls-1.4.2.9-source-v4",
-        "version": "1.4.2.9",
-        "spec_package_key": "jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.9_manifest-v1",
-        "spec_manifest_sha256": "3d8b45317198db8d21d1eda6aed304ad70bdf8448bc4a118d7092c7bd5a05fe3",
+        "catalog_key": "jmhz-controls-1.4.2.10-source-v4",
+        "version": "1.4.2.10",
+        "spec_package_key": "jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.10_manifest-v1",
+        "spec_manifest_sha256": "de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d",
         "source": {
-            "filename": "Katalog kontrol MH(public)_1.4.2.9.xlsx",
-            "sha256": "94ce830c8c70ba99235cb6af663f4f14464911df2b127e2e53ff180e112dcb8f",
+            "filename": "Katalog kontrol MH(public)_1.4.2.10.xlsx",
+            "sha256": "38a8eaf2d399feaeb92616b5244c0133b9d4acc0c087fa095dda4d75bc83f7b2",
             "sheets": [
                 "MH",
                 "Parametrické konstanty"
             ]
         },
         "counts": {
-            "controls": 199,
-            "attribute_refs": 825,
+            "controls": 200,
+            "attribute_refs": 827,
             "unique_attributes": 219,
             "symbolic_attribute_refs": 1,
             "source_anomalies": 1,
@@ -25,7 +25,7 @@
             "unique_parameter_controls": 19,
             "missing_parameter_control_refs": 10,
             "parameter_values": 50,
-            "blocking_remote_controls": 177,
+            "blocking_remote_controls": 178,
             "passable_remote_controls": 18,
             "unavailable_remote_controls": 4
         },
@@ -455,8 +455,42 @@
                 "row_hash": "6dd344432f29fc5b12cdca9b46d375dfb02c9f29a1590f1b120505d8bc6e5690"
             },
             {
-                "control_id": 23,
+                "control_id": 22,
                 "source_row": 13,
+                "name": "Kontrola duplicitních GUID podání",
+                "attribute_refs_raw": "10001\n10007",
+                "symbolic_attribute_refs": [],
+                "area": "Meta atributy",
+                "scope": "global",
+                "owner": "Vlastník JMHZ",
+                "portal_system": "unavailable",
+                "portal_passability": "unavailable",
+                "remote_system": "dis",
+                "remote_passability": "blocking",
+                "category": "T5",
+                "detail_text": "Kontrola duplicity GUID podání:\n 1) ID podání (10001) je již použito s jiným variabilním symbolem,\n 2) ID podání (10001) je již použito pro jiné období,\n 3) Shodné podání typu řádné (10007) = „R“ již existuje nebo\n 4) Shodné podání typu storno (10007) = „S“ již existuje.\nVýchozí stav: Neznámý typ duplicity podání.\n---\n10001 GUID podání\n10007 Typ podání",
+                "detail_formula": null,
+                "error_message": "chybová hláška varaintně:\n \"Toto idPodani je již použito s jiným variabilním symbolem\",\n \"Toto idPodaní je již použito pro jiné období\",\n \"Podání typu R se stejným idPodani, variabilním symbolem, obdobím a balík pořadí již existuje\",\n \"Podání typu S se stejným idPodani, variabilním symbolem a obdobím již existuje\" nebo\n \"JMHZ: neznámý kód duplicity (kód-duplicity).\"",
+                "error_message_formula": null,
+                "source_label": "nová",
+                "note": null,
+                "attribute_refs": [
+                    {
+                        "attribute_id": "10001",
+                        "ordinal": 1,
+                        "row_hash": "0abcbf086cb749ffeefdeb98c806d736e928e1abe25f5ca2278cd97fc2c533db"
+                    },
+                    {
+                        "attribute_id": "10007",
+                        "ordinal": 2,
+                        "row_hash": "f8ac4a710fd25956a1e3cf88edbe04ca9963f5a26336d843c798389531c96a3c"
+                    }
+                ],
+                "row_hash": "b4e49ecdd1cb272a337333a3e308b8c0dc4f105e3507a6c5a81437d6572c5b47"
+            },
+            {
+                "control_id": 23,
+                "source_row": 14,
                 "name": "Složení počtu neodpracovaných hodin s náhradou či nekrácením mzdy",
                 "attribute_refs_raw": "10276\n10279",
                 "symbolic_attribute_refs": [],
@@ -486,11 +520,11 @@
                         "row_hash": "cc7a3523317ed4774f8827b1263b59adc35db6dcf1a1ded47591bd71d946f23b"
                     }
                 ],
-                "row_hash": "3b1c3fdadc104fe70cfdb660578aa6760623e1d2774b7eef7a537a1b2a52b73d"
+                "row_hash": "c3789602b5c028213261008e0629c1f67767cf835a4f2d94a9dcb1a4b2fd5760"
             },
             {
                 "control_id": 29,
-                "source_row": 14,
+                "source_row": 15,
                 "name": "Příplatky",
                 "attribute_refs_raw": "10332\n10334\n10335\n10336",
                 "symbolic_attribute_refs": [],
@@ -530,11 +564,11 @@
                         "row_hash": "5437844ded8762f083eba055e90cda9592d462a6335592b8dbdf5ea91dcccd8c"
                     }
                 ],
-                "row_hash": "0fd6b27a655c278e5ba5a1bce6733ca8a3ee94fd133b418d6b231150a3edd5c3"
+                "row_hash": "afd59f42a10859c193602114ef37a8b1c72d79802e1095fdf173efa64ff76c5b"
             },
             {
                 "control_id": 31,
-                "source_row": 15,
+                "source_row": 16,
                 "name": "Kontrola období pro měsíční podání",
                 "attribute_refs_raw": "10010\n10011",
                 "symbolic_attribute_refs": [],
@@ -564,11 +598,11 @@
                         "row_hash": "4b1dbaebe42bde1d79a77937e6452f6af0ed2d765a555ce58dab1cc2f7962a28"
                     }
                 ],
-                "row_hash": "0498e3fb4f075c5de5acd914d1a5f1335df0f6e3b0f23dbbf82b545e0f45e3b2"
+                "row_hash": "0f077e9e03216e47c915454fcb0cd24dbe20060c5f7f7252d9c8982ac2939460"
             },
             {
                 "control_id": 36,
-                "source_row": 16,
+                "source_row": 17,
                 "name": "Počet přesčasových hodin x příplatky za práci přesčas",
                 "attribute_refs_raw": "10333\n10269",
                 "symbolic_attribute_refs": [],
@@ -598,11 +632,11 @@
                         "row_hash": "aca47c7389dfead15f49b29fbc1e8d0fe609aea3e9c84d9df113d87fcabb29a4"
                     }
                 ],
-                "row_hash": "df04118f19eb84162658c38560382e1a5917bf315e80fef9bcb97ddaf288461e"
+                "row_hash": "07f0420bfcb398445adc24b1a660fbebe2756db026143faef5cc2d479350becb"
             },
             {
                 "control_id": 37,
-                "source_row": 17,
+                "source_row": 18,
                 "name": "Formát IK MPSV",
                 "attribute_refs_raw": "10051",
                 "symbolic_attribute_refs": [],
@@ -627,11 +661,11 @@
                         "row_hash": "b8d0058306153aba9857d091ed470a2369415d16c3e05c66168e3a50acbe27db"
                     }
                 ],
-                "row_hash": "98d040847f2581b7c4b0027bb9d9053df8f3f90691c9ebd83978cf758b400954"
+                "row_hash": "39428bbb9a4baeee1816ef256e10e60e45541afe08af4ab8d9ed101b4e133c0a"
             },
             {
                 "control_id": 42,
-                "source_row": 18,
+                "source_row": 19,
                 "name": "Kontrola atributů v rámci slev na pojistném jsou vázany k druhu činnosti v rozsahu 1 až 9",
                 "attribute_refs_raw": "10372\n10239\n10502",
                 "symbolic_attribute_refs": [],
@@ -666,11 +700,11 @@
                         "row_hash": "a544facb42384aee51a1505940407aeb6e01512a7dd36464bafa2d69fc9eff33"
                     }
                 ],
-                "row_hash": "b8692d85bc1628f2e96b17a606a8ef1a694186269ab7b571e2e3c5caed6d07b9"
+                "row_hash": "fb287baa58bbc8712653f77032deada3c4da23304276701e92f152b04a33bb18"
             },
             {
                 "control_id": 43,
-                "source_row": 19,
+                "source_row": 20,
                 "name": "Pojištění od",
                 "attribute_refs_raw": "10354\n10355\n10005",
                 "symbolic_attribute_refs": [],
@@ -705,11 +739,11 @@
                         "row_hash": "08ee9683e8c387d8c585b0302f200dd36a0565f0e9f1fc2e0961066cc52576e5"
                     }
                 ],
-                "row_hash": "88c7c485112c8ae4dadec8e5d741d2e34be43c65f1cbca33adc19d451e979d5c"
+                "row_hash": "8e40d98fa39daab3cd7054de7fa4ea4bf870e0dbe88f43fb38ed22ece5d9fa58"
             },
             {
                 "control_id": 44,
-                "source_row": 20,
+                "source_row": 21,
                 "name": "Pojištění do",
                 "attribute_refs_raw": "10355\n10354\n10005",
                 "symbolic_attribute_refs": [],
@@ -744,11 +778,11 @@
                         "row_hash": "08ee9683e8c387d8c585b0302f200dd36a0565f0e9f1fc2e0961066cc52576e5"
                     }
                 ],
-                "row_hash": "a5cdc24b242b9d677c3a396a21be6e868035568726d3e01ed548d6072e4f243a"
+                "row_hash": "adc489d5af63f27fc97ffc697831b10e05cfadc2bd4481708e3289d7edbc9531"
             },
             {
                 "control_id": 45,
-                "source_row": 21,
+                "source_row": 22,
                 "name": "Rozsah kratší pracovní/služební doby",
                 "attribute_refs_raw": "10373",
                 "symbolic_attribute_refs": [],
@@ -773,11 +807,11 @@
                         "row_hash": "eb52fbd7dd5e9e73beb5f4ae76f8e285a89605d34b99dde4aa8d2492a2315de6"
                     }
                 ],
-                "row_hash": "ac84f8ac700d08f38800fc03d4e3727c41d8160006dd8dc4bffab210f6767add"
+                "row_hash": "afefcde442547e33e0910e3d21a7267aa02a0d324e5c3144b60c893941f973d7"
             },
             {
                 "control_id": 50,
-                "source_row": 22,
+                "source_row": 23,
                 "name": "Vyměřovací základ není vyplněn",
                 "attribute_refs_raw": "10245",
                 "symbolic_attribute_refs": [],
@@ -802,11 +836,11 @@
                         "row_hash": "02c097973e0a5c47eca23b4a7e34f20883c885599d1ddc60353c48412bae3eb7"
                     }
                 ],
-                "row_hash": "f087ce2a2038ac43b1c5f1f97234f401af11fee9549c04d838abeb9b76d777fd"
+                "row_hash": "613ad05aba17363cc89ab8980116dca23bc05445df822594089df85ddc402a4e"
             },
             {
                 "control_id": 56,
-                "source_row": 23,
+                "source_row": 24,
                 "name": "Datum dosažení expozice NPE",
                 "attribute_refs_raw": "10272\n10005",
                 "symbolic_attribute_refs": [],
@@ -836,11 +870,11 @@
                         "row_hash": "c7082ae02cbb1b84f48887cd7cc8065dd671eb91fca49259ffb8bef80ab16485"
                     }
                 ],
-                "row_hash": "9fe46427f4860f6d173f45ab0c0cac24750d0ea40bc155d11c2272173ec7e1d5"
+                "row_hash": "c1d9fb0acb8d4ecc37e62c85d2872e15ff9fcccb1ba52eb905b4539de3205bbc"
             },
             {
                 "control_id": 57,
-                "source_row": 24,
+                "source_row": 25,
                 "name": "Počet odpracovaných hodin v rámci rizikové práce (§ 37d odst. 2 ZDP), práce zdravotnického záchranáře (§ 37d odst. 3) a práce člena jednotky HZS podniku (§ 37d odst. 3) není větší než počet odpracovaných hodin",
                 "attribute_refs_raw": "10273\n10268",
                 "symbolic_attribute_refs": [],
@@ -870,11 +904,11 @@
                         "row_hash": "260ca9cebd00e5eb8047a02e981e6fc7529ba0561e2a6c4467fd18bbb5c98c0c"
                     }
                 ],
-                "row_hash": "4ff5152228764fba9d3112e7c9ffe1756436550521b083423cc1f69f7d2d0b5c"
+                "row_hash": "233e3d703f7395222dd1d2e027634bc82f395aad2d0cb5091b0680a209390ca1"
             },
             {
                 "control_id": 58,
-                "source_row": 25,
+                "source_row": 26,
                 "name": "Počet kalendářních dnů trvání pojištění v daném kalendářním měsíci",
                 "attribute_refs_raw": "10356\n10010\n10011\n10537\n10538",
                 "symbolic_attribute_refs": [],
@@ -919,11 +953,11 @@
                         "row_hash": "b855acd59530d4b599d005eee2c8468b3570cc40582e46be9e8df60ed528c964"
                     }
                 ],
-                "row_hash": "4a3a5fd0b94c45ccc131445f5d3f7aa24edacaceb3cc72875e17f97a7aa1e4d8"
+                "row_hash": "a279f546b7e0bbe347725a2c99648a848696c86e5cf249911b2758ccd77d0524"
             },
             {
                 "control_id": 59,
-                "source_row": 26,
+                "source_row": 27,
                 "name": "Vyměřovací základ s podmínkami",
                 "attribute_refs_raw": "10240\n10245\n10356\n10357\n10375\n10241\n10242",
                 "symbolic_attribute_refs": [],
@@ -978,11 +1012,11 @@
                         "row_hash": "c29524001ea48ca90d23e8a866aa6e10106fac616e46f8ad22a939481d7e141f"
                     }
                 ],
-                "row_hash": "e0889d3872e6be71faa64db1354e0793ef85d8c790888a64cae4f4a5fbfba7c5"
+                "row_hash": "9befe6f56db6388d8de0ca429673f7eff49d5a44d20b05ba0f24474259cc156a"
             },
             {
                 "control_id": 60,
-                "source_row": 27,
+                "source_row": 28,
                 "name": "Datum nastání specifické právní skutečnosti",
                 "attribute_refs_raw": "10409\n10005",
                 "symbolic_attribute_refs": [],
@@ -1012,11 +1046,11 @@
                         "row_hash": "c7082ae02cbb1b84f48887cd7cc8065dd671eb91fca49259ffb8bef80ab16485"
                     }
                 ],
-                "row_hash": "8c7a624ae95f75b12de1816a346145d4ff5844e45c1f8090c5e94aa8787a959c"
+                "row_hash": "c1f0ae7635820d11ae04ae99ef1762ea8ef530d4df286e9930bcb34fc06c33a7"
             },
             {
                 "control_id": 61,
-                "source_row": 28,
+                "source_row": 29,
                 "name": "Globální kontrola XSD schématu",
                 "attribute_refs_raw": null,
                 "symbolic_attribute_refs": [],
@@ -1035,11 +1069,11 @@
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [],
-                "row_hash": "e10f3f1ef7031a0b120eabe5fdefe57e6ac9a2dc0e063f7ff3a5fe96b258cc22"
+                "row_hash": "d001463456c3a1e127ad5e03df07218ac0c54588a9efabfee38fb0973d7a83a4"
             },
             {
                 "control_id": 62,
-                "source_row": 29,
+                "source_row": 30,
                 "name": "Formulářová kontrola XSD schématu",
                 "attribute_refs_raw": null,
                 "symbolic_attribute_refs": [],
@@ -1058,11 +1092,11 @@
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [],
-                "row_hash": "94311b5777199352e2094522528970433aa2b1cab52d025555420b650703ba95"
+                "row_hash": "397ffca3456ec8a2f72d662962d4cee98eaf08f283b44c59493eff5933efecbb"
             },
             {
                 "control_id": 72,
-                "source_row": 30,
+                "source_row": 31,
                 "name": "Vyplnění položky Zúčtovaný příjem - celkem",
                 "attribute_refs_raw": "10286",
                 "symbolic_attribute_refs": [],
@@ -1087,11 +1121,11 @@
                         "row_hash": "bccd7a65263eaa500a60a8f2687321796861e0ccbac7f31e85afbdc5060dbac4"
                     }
                 ],
-                "row_hash": "7a7a50ef61791d09464f5cbace5c6dbf462937f909fd6af957ae5032163fc262"
+                "row_hash": "69b8f484c6d1c4cbbc647466d182acd76ddebbb4d82b236d16acff0c05fe6c42"
             },
             {
                 "control_id": 74,
-                "source_row": 31,
+                "source_row": 32,
                 "name": "Výše vyplaceného měsíčního daňového bonusu",
                 "attribute_refs_raw": "10306",
                 "symbolic_attribute_refs": [],
@@ -1116,11 +1150,11 @@
                         "row_hash": "811e967aecbc92cb407296e6ca132182b1fb01627991bc9f601b260117a4624a"
                     }
                 ],
-                "row_hash": "8b764d61f8140607425c690274fc82cb259ebddbf3f996ad0bed85f38ce1e6bc"
+                "row_hash": "746ce69ef776d26ba444072b4c8f6d20e8f0638b5a8718093215615c879d698d"
             },
             {
                 "control_id": 78,
-                "source_row": 32,
+                "source_row": 33,
                 "name": "Přeplatek nebo nedoplatek z ročního zúčtování je roven součtu příslušných položek",
                 "attribute_refs_raw": "10321\n10322\n10323\n10239",
                 "symbolic_attribute_refs": [],
@@ -1160,11 +1194,11 @@
                         "row_hash": "9148a7c97a95f559d929141def792fcab82a0a024d2a271ded19dcc11546f05f"
                     }
                 ],
-                "row_hash": "0ca68c7255b40d5c9f994875ff525850dd7413a462a778ee2923d2554e92e958"
+                "row_hash": "764b26a8cafbb110d9e8afec70844f9a584e84e723879de711765c226f38c5ef"
             },
             {
                 "control_id": 79,
-                "source_row": 33,
+                "source_row": 34,
                 "name": "Roční zúčtování záloh - Přeplatek nebo nedoplatek z ročního zúčtování",
                 "attribute_refs_raw": "10321\n10322\n10323\n10420\n10454\n10320",
                 "symbolic_attribute_refs": [],
@@ -1214,11 +1248,11 @@
                         "row_hash": "d3bef46a0f6a3603ca4c13d5f1358aa7a98d2d183389051c812a5b6948cd27b6"
                     }
                 ],
-                "row_hash": "39afcc63b7d503a48d4b992fbca7b053f673c2f0f5446fa6a9628ef0b0dfc122"
+                "row_hash": "d7a7fa499eedab7f72f6da9f5ad69e53522405add18a9420490c6df37ce9fc06"
             },
             {
                 "control_id": 81,
-                "source_row": 34,
+                "source_row": 35,
                 "name": "Rodné číslo splňuje modulo",
                 "attribute_refs_raw": "10457",
                 "symbolic_attribute_refs": [],
@@ -1243,11 +1277,11 @@
                         "row_hash": "432846d6a54947c23ea90903f25808a6493ea91064194a03d5d90e259ddf3918"
                     }
                 ],
-                "row_hash": "edaa645620f02112ffc2084d86d561abccaa0e02663c4a4ed7a941fc293c28c7"
+                "row_hash": "1a3eade6228f32824ceaea36f3e0178f6f228435f3a7d1e67df7aa9dc7e8c44d"
             },
             {
                 "control_id": 82,
-                "source_row": 35,
+                "source_row": 36,
                 "name": "Vyplnění položky Výplatní termín při nastání specifické právní skutečnosti",
                 "attribute_refs_raw": "10410\n10408",
                 "symbolic_attribute_refs": [],
@@ -1277,11 +1311,11 @@
                         "row_hash": "12d66f9634fba399b3623fe4e21f21abe190617772c400aafbea3ea27f258dc1"
                     }
                 ],
-                "row_hash": "9ae3e1e6a36f4084a027c0f7cdbd4a80e711092746265c9e299b29bcb52212b3"
+                "row_hash": "ed53f7c82ee29bb5366ce2c1da52bbb77f64a88af0af27e87f930dff1f1f2ee9"
             },
             {
                 "control_id": 84,
-                "source_row": 36,
+                "source_row": 37,
                 "name": "Pořadí balíku dat",
                 "attribute_refs_raw": "10002\n10003",
                 "symbolic_attribute_refs": [],
@@ -1311,11 +1345,11 @@
                         "row_hash": "e24a20a209c8b4291fef862fd07a526adb856e3040582b13d5e5cb96159d7f59"
                     }
                 ],
-                "row_hash": "1d645edf02201ed5f57a102701d70ab1bcabd828dfe87e21c8a57c5460e9add3"
+                "row_hash": "8e7d4cdf2b187a7c7b816991e9a74c612ddfd01d09d5a07419164519c22ff9d0"
             },
             {
                 "control_id": 87,
-                "source_row": 37,
+                "source_row": 38,
                 "name": "Správnost kódu ELDP",
                 "attribute_refs_raw": "10240\n10239",
                 "symbolic_attribute_refs": [],
@@ -1345,11 +1379,11 @@
                         "row_hash": "200a4429016707acf9b8163a68dcaa089f75858aa5b7d4b85d38c8916b552c8d"
                     }
                 ],
-                "row_hash": "1e749b429849598d818c29b055c4e6c058e707ffe04ec5aa6b05cbe9faaece2c"
+                "row_hash": "c8a12a1e557afd48fc0384f1b9a692f24edf03e1e9e87d0e757ed5a8f92fc333"
             },
             {
                 "control_id": 88,
-                "source_row": 38,
+                "source_row": 39,
                 "name": "Datum a čas vyplnění podání",
                 "attribute_refs_raw": "10005",
                 "symbolic_attribute_refs": [],
@@ -1374,11 +1408,11 @@
                         "row_hash": "62d115ba2e28a3323b350b0375c4bbe693b270e2fea75d8247c64b6d8c41ff62"
                     }
                 ],
-                "row_hash": "ef404f1019a1a7e8e30df9a1f6b01d63d2727e980a95d5a6bbdc7d232ba7bb14"
+                "row_hash": "1dbe5856b52b0115b2859f25025f728b7bb815ef834771de73cedc159fcba782"
             },
             {
                 "control_id": 90,
-                "source_row": 39,
+                "source_row": 40,
                 "name": "Měsíc",
                 "attribute_refs_raw": "10010",
                 "symbolic_attribute_refs": [],
@@ -1403,11 +1437,11 @@
                         "row_hash": "2e7fd320efec56f37ab8aa4c67a6f31b2437f283d6dd12f1134bb4d4ee686f66"
                     }
                 ],
-                "row_hash": "45dee8bbb49a14c6726acd86f1f179f00941d01eb287d1fc492ca491781904ea"
+                "row_hash": "aef73e252d32f340d1962f23d5f7c6050d0ccbf8c0774575fa104583a5e3523c"
             },
             {
                 "control_id": 93,
-                "source_row": 40,
+                "source_row": 41,
                 "name": "Počet formulářů v balíků musí být maximálně jako Počet formulářů celkem",
                 "attribute_refs_raw": "10015\n10488",
                 "symbolic_attribute_refs": [],
@@ -1437,11 +1471,11 @@
                         "row_hash": "a706db6feb5c04c9664b50e95abc85d7a2173ea70a11d172e179f1cee5d99d64"
                     }
                 ],
-                "row_hash": "f370c7463e90f121348514716522416dfbecbf644d745ed8e868cc5a6534a87c"
+                "row_hash": "3d3df703c3c4c53761cd6baf6ecc129b9a9cf337a5a777fba376fcd50072bb79"
             },
             {
                 "control_id": 94,
-                "source_row": 41,
+                "source_row": 42,
                 "name": "Stanovený fond pro danou profesi (v hodinách měsíčně)",
                 "attribute_refs_raw": "10259",
                 "symbolic_attribute_refs": [],
@@ -1466,11 +1500,11 @@
                         "row_hash": "1d659c5849100a0855a31875ffb1b9277a89532a5eb67b8768f5ed41351ee571"
                     }
                 ],
-                "row_hash": "afe9160857e3908d64fb344f2dd4958e2b98052fa61a625f8ddf3f30309ab036"
+                "row_hash": "3ba4a5a09bb50e16b674a2e4fb27efd09948b1d72af380e06c1e68e51ca63d82"
             },
             {
                 "control_id": 95,
-                "source_row": 42,
+                "source_row": 43,
                 "name": "Sjednaný fond pracovní doby (v hodinách měsíčně)",
                 "attribute_refs_raw": "10260",
                 "symbolic_attribute_refs": [],
@@ -1495,11 +1529,11 @@
                         "row_hash": "e99d8b256626820d708e16e22955d30e15e3128176c81f64e1e8fd69826b0577"
                     }
                 ],
-                "row_hash": "fe7c27ce1bccef543073706378203d96461c5687d5cc4c1fbc8fa11c5f162f6b"
+                "row_hash": "f656c4bfb0ad46284db2bfdc35c2b7efde8c84fa703f7cbdab68733fa3166616"
             },
             {
                 "control_id": 96,
-                "source_row": 43,
+                "source_row": 44,
                 "name": "Stanovená týdenní pracovní doba zaměstnance (§ 79 zákoníku práce)",
                 "attribute_refs_raw": "10261",
                 "symbolic_attribute_refs": [],
@@ -1524,11 +1558,11 @@
                         "row_hash": "dcdcb49a88e26f6d5d5122dbfd1932ccfdf03475bc9f94e023936f1d501c3d42"
                     }
                 ],
-                "row_hash": "bca81216cf30bdbc398e0d4bd7ee6e925f048ac6db914143ea6972a5463a831c"
+                "row_hash": "19e9dedd2934ae3b3f42cc805193905a7e3ba7e649a60beb74d9ff9724f40f87"
             },
             {
                 "control_id": 97,
-                "source_row": 44,
+                "source_row": 45,
                 "name": "Osvobozené příjmy ze zúčtovaných příjmů - celkem",
                 "attribute_refs_raw": "10289\n10286",
                 "symbolic_attribute_refs": [],
@@ -1558,11 +1592,11 @@
                         "row_hash": "b3bf87e713a8a999865cd7990b8636fea4e609b56e080ae238c0b469f08869e5"
                     }
                 ],
-                "row_hash": "d0a78b28b914eaf0f96ff8d572f2e0a88746bbe4f57ca357ce546f2ed931450e"
+                "row_hash": "b675febe60e2c2c17cafdd66635bcafebac58a9cbcb049a49ec14fb98a720d26"
             },
             {
                 "control_id": 98,
-                "source_row": 45,
+                "source_row": 46,
                 "name": "Počet dní nesmí být vyšší než počet kalendářních dní v daném měsíci",
                 "attribute_refs_raw": "10357\n10358\n10359\n10360\n10362\n10536\n10366\n10473\n10474\n10475\n10375\n10462\n10463\n10464\n10465\n10466\n10468\n10469\n10010\n10011\n10537\n10538",
                 "symbolic_attribute_refs": [],
@@ -1692,11 +1726,11 @@
                         "row_hash": "83422a1550adb490100d1c11bf4f4b2cc9bc6cfc72bd28f68908d3284c86f275"
                     }
                 ],
-                "row_hash": "b80b30954ace75b6efc6d82f56880489ee5a05eb1a4436c1e96a8d9ee5edce36"
+                "row_hash": "348de557db818dcf73bceb75861e5cd2bf569fa7752e53e6436ed638b98b8369"
             },
             {
                 "control_id": 99,
-                "source_row": 46,
+                "source_row": 47,
                 "name": "\"Platnost kódu od/do\" se týká aktuálního měsíce",
                 "attribute_refs_raw": "10241\n10242\n10537\n10538\n10010\n10011",
                 "symbolic_attribute_refs": [],
@@ -1746,11 +1780,11 @@
                         "row_hash": "2e65d9c66af76a2fbb7d0e22519635996e9a59127205b8432cf3bb7e0c846ef7"
                     }
                 ],
-                "row_hash": "7d335065b1c6a6e6e77125158b424d877096129d0a8eff9b4965334c9fcc5858"
+                "row_hash": "c8ee343742f81198e50a507aa5963350249e997f0b2b6193c2aa34c1e461bcfa"
             },
             {
                 "control_id": 100,
-                "source_row": 47,
+                "source_row": 48,
                 "name": "Platnost kódu od je menší než Platnost kódu do",
                 "attribute_refs_raw": "10241\n10242",
                 "symbolic_attribute_refs": [],
@@ -1780,11 +1814,11 @@
                         "row_hash": "c79e18b12362d02a2187d96353d0a35612fd37da643f89e914c9d3324f90ec8d"
                     }
                 ],
-                "row_hash": "3708f29ff6a2bba7fe0584fd9943d05d3e627d098bf69dcd1d42b1bceaca65ff"
+                "row_hash": "9990d4662b1ce5e3036a4e5987a534f28149475ab4cfbbf47ea53e0f6143a2bd"
             },
             {
                 "control_id": 103,
-                "source_row": 48,
+                "source_row": 49,
                 "name": "Uvedení identifikace dočasného přidělení",
                 "attribute_refs_raw": "10251\n10252\n10457\n10492\n10493\n10494",
                 "symbolic_attribute_refs": [],
@@ -1834,11 +1868,11 @@
                         "row_hash": "8d47b7bb775d5bde624dcb2317d8e9b9d61f2d964f07c7636994a43f5113ca0b"
                     }
                 ],
-                "row_hash": "601ae82b8b96ff7b86900f554adecb8174b3c629e1b48b1f31f70ac3086bdc8e"
+                "row_hash": "b5f8e820f7358f24d8ab2cb41fad4b100717f35cbf9b50a3fd0d20197498635a"
             },
             {
                 "control_id": 109,
-                "source_row": 49,
+                "source_row": 50,
                 "name": "Kontrola na Zúčtovaný příjem - z toho odměny členů orgánů právnických osob, kteří jsou daňovými nerezidenty ČR",
                 "attribute_refs_raw": "10416\n10286",
                 "symbolic_attribute_refs": [],
@@ -1868,11 +1902,11 @@
                         "row_hash": "b3bf87e713a8a999865cd7990b8636fea4e609b56e080ae238c0b469f08869e5"
                     }
                 ],
-                "row_hash": "7d84ca377e28d1eff7554ce3b85e6754da6f7852448231ac770eb9453714bf58"
+                "row_hash": "0afb8c8935808706ae70f2a1717b85795026849db084f22918bff91d2dca801b"
             },
             {
                 "control_id": 110,
-                "source_row": 50,
+                "source_row": 51,
                 "name": "Pořadí pro určení výše daňového zvýhodnění tvoří řadu",
                 "attribute_refs_raw": "10440",
                 "symbolic_attribute_refs": [],
@@ -1897,11 +1931,11 @@
                         "row_hash": "98547a629722d8ece8da0374c83e9912f38bf032cf5bb945b5e0780efcddb5a3"
                     }
                 ],
-                "row_hash": "538fe594e0bf1eea4adc5f8bc098413d0b7d3b0520f694111f3b9761f006581d"
+                "row_hash": "c58625c5fd03edf8e1c01dc537667a7b861c9cacd1bf7636c191d3b168583603"
             },
             {
                 "control_id": 111,
-                "source_row": 51,
+                "source_row": 52,
                 "name": "Počet měsíců uplatnění slevy souhlasí s možným počtem uplatnění",
                 "attribute_refs_raw": "10430\n10425",
                 "symbolic_attribute_refs": [],
@@ -1931,11 +1965,11 @@
                         "row_hash": "7716141133b23de76b8ab153e53bdb33ff56cdadb97be6bb3aebe81f90851809"
                     }
                 ],
-                "row_hash": "daa581c71421fd77b977d5d0ff35185cc4fca06040e49755dfc016e3ef507940"
+                "row_hash": "3dd1611d98b7d3666350f9bae18f7b531d0422fde66b62cb40709f4cfe84e830"
             },
             {
                 "control_id": 112,
-                "source_row": 52,
+                "source_row": 53,
                 "name": "Při uplatnění daňového zvýhodnění na děti je vyplněno alespoň 1 dítě (roční zúčtování)",
                 "attribute_refs_raw": "10446\n10447\n10448\n10451\n10454",
                 "symbolic_attribute_refs": [],
@@ -1980,11 +2014,11 @@
                         "row_hash": "ea2a7881f7debc6b0734d145f67ef4a6c630e05118f7238c6a33cfeb2f4ef3d2"
                     }
                 ],
-                "row_hash": "9b830f7b94cce15af94ca221ad3a8eeadd6f960c931a9573b11b08ec0eaeafca"
+                "row_hash": "5e97857742bb14e302d0a933ec42790c102e526082cb95406f39a10c5cd7c62d"
             },
             {
                 "control_id": 113,
-                "source_row": 53,
+                "source_row": 54,
                 "name": "Povinné RČ nebo datum narození jiné vyživující osoby ve společně hospodařící domácnosti",
                 "attribute_refs_raw": "10433\n10434",
                 "symbolic_attribute_refs": [],
@@ -2014,11 +2048,11 @@
                         "row_hash": "12a939ce9d79128ea2a59e8bad1478de084b5764e355cf5b31fba0a715f7ba4b"
                     }
                 ],
-                "row_hash": "80e83ca6bc3f058d3eea30637d57e9773b505e5735de66bbc0abc28f2b7b2fac"
+                "row_hash": "9414aef19b8558839f3cdf10321a999f4437833e835de99839a08b4281dd3b60"
             },
             {
                 "control_id": 114,
-                "source_row": 54,
+                "source_row": 55,
                 "name": "Povinné RČ nebo datum narození vyživovaného dítěte",
                 "attribute_refs_raw": "10437\n10438",
                 "symbolic_attribute_refs": [],
@@ -2048,11 +2082,11 @@
                         "row_hash": "a73e15d06ba887f192e8eed7fdc62ee1d9e55e1322a397d7d677482a822e1601"
                     }
                 ],
-                "row_hash": "66fa2860bb1bd704da97a4eebaf19ca3dcf9f8ab1801d16b1e407031846144e5"
+                "row_hash": "97703bd0a70b5feb46d48cd735bc1c5186ab248b178f0ee5fb32791e232db909"
             },
             {
                 "control_id": 115,
-                "source_row": 55,
+                "source_row": 56,
                 "name": "Povinné RČ nebo datum narození manžela/manželky",
                 "attribute_refs_raw": "10424\n10423",
                 "symbolic_attribute_refs": [],
@@ -2082,11 +2116,11 @@
                         "row_hash": "8232666d0fd94ffcdb2b7fcba05f991cbfb86c90e145544cb11913387393d58d"
                     }
                 ],
-                "row_hash": "1c9e2604ffbf5298871f94f2790d2f1bee0ea0e63f50fd54274bd4edb5c3486c"
+                "row_hash": "857671350d3e3cf040243d554198d281ea79e38a631afacec70874f5688ce48c"
             },
             {
                 "control_id": 118,
-                "source_row": 56,
+                "source_row": 57,
                 "name": "Pojistné za zaměstnance",
                 "attribute_refs_raw": "10370\n10477",
                 "symbolic_attribute_refs": [],
@@ -2116,11 +2150,11 @@
                         "row_hash": "8eb6e4e0ed99dfd0a50cad3f6deb4d2a208c80895227a6657ba23d2d96ad657d"
                     }
                 ],
-                "row_hash": "cd9fb5e4c64bee833af1bfa8f86dce6d32b99873cc9f9bd82402ab1cdac6bdd5"
+                "row_hash": "2ab7741d9bb1bdbe4a96c6f84f95f59963f5bae131a829bc3f64858470590485"
             },
             {
                 "control_id": 121,
-                "source_row": 57,
+                "source_row": 58,
                 "name": "Kontrola vyplnění vyloučených dob dle § 16 odst. 4 písm",
                 "attribute_refs_raw": "10357\n10358\n10359\n10360\n10362\n10536",
                 "symbolic_attribute_refs": [],
@@ -2170,11 +2204,11 @@
                         "row_hash": "7b09a8f7cda71215f639d5d4a0e46722e8c0da31eaa832110c364978d8db6473"
                     }
                 ],
-                "row_hash": "7e11ac35c7e46ede2e03e6ef121cce0d516853c35fea85d3ead33494b009dab6"
+                "row_hash": "59cc235b4fc55f69a184050e045d0e5ec37621de42fbef9af981336cfb247373"
             },
             {
                 "control_id": 123,
-                "source_row": 58,
+                "source_row": 59,
                 "name": "Kontrola vyplnění data nastání specifické právní skutečnosti",
                 "attribute_refs_raw": "10408\n10409",
                 "symbolic_attribute_refs": [],
@@ -2204,11 +2238,11 @@
                         "row_hash": "8b8774023df142df8949f236b2895d46ddfb0ba8cd14da951487d8b30abdc04a"
                     }
                 ],
-                "row_hash": "66de359f5fdcad2fc52c9e83b203e9acbb7c5827505a2887cfd79e0089160f66"
+                "row_hash": "52c2de789ab2128b1fe1200532eae423eed3664217305b3826f56bfb1e80a6d8"
             },
             {
                 "control_id": 124,
-                "source_row": 59,
+                "source_row": 60,
                 "name": "Kontrola vyplnění údaje za manžela / manželku (roční zúčtování)",
                 "attribute_refs_raw": "10420\n10421\n10422\n10423\n10424\n10425\n10426",
                 "symbolic_attribute_refs": [],
@@ -2263,11 +2297,11 @@
                         "row_hash": "2660f30beb1c33f98f6473dad5a3b2f0a8307b0517777172c59d1ef43d0a4bdd"
                     }
                 ],
-                "row_hash": "4e8b8a78057746202f6741c23d8fa6cc7fb7065c47aa8a9d10a6de47855259f3"
+                "row_hash": "a5f27c5b4b886367073e0fd5bb2ca10ae57608aaee6033b9c3658c611e6689d0"
             },
             {
                 "control_id": 126,
-                "source_row": 60,
+                "source_row": 61,
                 "name": "Kontrola na vyplnění údajů další vyživující osoby (roční zúčtování)",
                 "attribute_refs_raw": "10441\n10442\n10443\n10444\n10445\n10455",
                 "symbolic_attribute_refs": [],
@@ -2317,11 +2351,11 @@
                         "row_hash": "9e0ef71b234763183b82a797c6dfcc4bff8b6a566d01dd627c80a88fea601bfc"
                     }
                 ],
-                "row_hash": "c018cabf4c588190ea45d11c4910684af4348c43a352f006fd9fde48d3fc7122"
+                "row_hash": "77505bfa3f086d186c9037bb2327359e6ef0206f07e44b43707d67363ab6a470"
             },
             {
                 "control_id": 127,
-                "source_row": 61,
+                "source_row": 62,
                 "name": "Kontrola na vyplnění údajů další vyživující osoby",
                 "attribute_refs_raw": "10453\n10431\n10432\n10433\n10434",
                 "symbolic_attribute_refs": [],
@@ -2366,11 +2400,11 @@
                         "row_hash": "97a56a14b82fc554f09965df34c7341301e2323797a7afc3edda83d134e94427"
                     }
                 ],
-                "row_hash": "b9af7a1a3ef0481b60d66022660e8779621aff330a7dd1fae43f6b5000e84808"
+                "row_hash": "84313a471c3c87e38ba73cdefb4a9968338f34b9e32dc4bf758d882f5c35c3e4"
             },
             {
                 "control_id": 128,
-                "source_row": 62,
+                "source_row": 63,
                 "name": "Při uplatnění daňového zvýhodnění na děti je vyplněno alespoň 1 dítě",
                 "attribute_refs_raw": "10303\n10435\n10436\n10437\n10438\n10440\n10439",
                 "symbolic_attribute_refs": [],
@@ -2425,11 +2459,11 @@
                         "row_hash": "c9c259b0529fe6433e53c52262ac17345d8be3636003103a9fd486fdf47a2116"
                     }
                 ],
-                "row_hash": "57407e34882d8bb53cd5d12045499337fad0c5d889b39c205d030943b354c7c2"
+                "row_hash": "a0a1c25434d11ef9e561fd43a4044b42e6df3ebfa69b748512a4f21c8f39579c"
             },
             {
                 "control_id": 129,
-                "source_row": 63,
+                "source_row": 64,
                 "name": "Číslo měsíce",
                 "attribute_refs_raw": "10010",
                 "symbolic_attribute_refs": [],
@@ -2454,11 +2488,11 @@
                         "row_hash": "2e7fd320efec56f37ab8aa4c67a6f31b2437f283d6dd12f1134bb4d4ee686f66"
                     }
                 ],
-                "row_hash": "5c68758da491fab3e3cc979637c0a8e41e530daee92809b0ee05073c725fe68e"
+                "row_hash": "fab9d8bc19417fdcdd359f0c5de50187035f19f461e52036bec0c89da9cb4773"
             },
             {
                 "control_id": 130,
-                "source_row": 64,
+                "source_row": 65,
                 "name": "Kontrola, že datum od je nižší nebo roven než datum do (průběh studia)",
                 "attribute_refs_raw": "10263\n10264",
                 "symbolic_attribute_refs": [],
@@ -2488,11 +2522,11 @@
                         "row_hash": "8f7a95633fea75bc4d00f5141783022483ab1fd70b40014861c0539b749c793f"
                     }
                 ],
-                "row_hash": "b6948e525e334f1d8720472c1091026606ad5417d07d4871860396cda7d56c87"
+                "row_hash": "afc1eabc11d61a99143db9dfc8fb71890988e11da3d31ea77d4ce90076a674a2"
             },
             {
                 "control_id": 131,
-                "source_row": 65,
+                "source_row": 66,
                 "name": "Rok",
                 "attribute_refs_raw": "10011\n10010",
                 "symbolic_attribute_refs": [],
@@ -2522,11 +2556,11 @@
                         "row_hash": "401856d0f8b6e4ee5fc339c34a704607ec55f412640f41ff52e8e3db8bf3d0ef"
                     }
                 ],
-                "row_hash": "4eadf9d90cbaa38a3d3a2a32952e5c4a9c80a7b7e37afb1a5cff6ab5e39b1092"
+                "row_hash": "8e26e4ff3b5d0ef7a36b71b704aa666fc263e3dbd0c1c44c93dd4473c72874a3"
             },
             {
                 "control_id": 132,
-                "source_row": 66,
+                "source_row": 67,
                 "name": "Kontrola roku pro podání opravného hlášení.",
                 "attribute_refs_raw": "10011",
                 "symbolic_attribute_refs": [],
@@ -2551,11 +2585,11 @@
                         "row_hash": "a845881c43dd46161b14020a5bbe4582d547c8c6b26e8560801e84fc1589d4a6"
                     }
                 ],
-                "row_hash": "3d2a97be48deb055c46ef7d4a2e29ca6a24a85e559bf167dfcdf2910acb780d7"
+                "row_hash": "726127bf323784f88ee2b4ca446df3644fba7dc6a58754f9d8ae7f4caa393a9d"
             },
             {
                 "control_id": 133,
-                "source_row": 67,
+                "source_row": 68,
                 "name": "Kontrola správnosti Kódu ELDP při zaměstnání malého rozsahu",
                 "attribute_refs_raw": "10240\n10243",
                 "symbolic_attribute_refs": [],
@@ -2585,11 +2619,11 @@
                         "row_hash": "9125e04f090cad056a9883227ac7ab489192ab5b9f07733142ba983a1309add8"
                     }
                 ],
-                "row_hash": "d7fd7143ef5bdaefc9b10401c30d0e986e0c34d8818953728f8cc6f3ee609b65"
+                "row_hash": "72a1ced364836a848ed02e21a1baf7b5b1a7fdb5d0ab08d5fdf42aada5db7980"
             },
             {
                 "control_id": 134,
-                "source_row": 68,
+                "source_row": 69,
                 "name": "Počet kalendářních dnů trvání pojištění v daném kalendářním měsíci - interval",
                 "attribute_refs_raw": "10356\n10355\n10354",
                 "symbolic_attribute_refs": [],
@@ -2624,11 +2658,11 @@
                         "row_hash": "ae3363c2778197e4e33956c84069ed4f0cf1f3119513f4b85ad46bcad1039557"
                     }
                 ],
-                "row_hash": "74e75c70f7ae7926d5dcdaa9bd14c126871e290f468af3b8f2e7613d4aaf6223"
+                "row_hash": "bc0b4d24f8406253c39d52908a784404ed17a1f82f97b30d5e03a14eda0960ef"
             },
             {
                 "control_id": 135,
-                "source_row": 69,
+                "source_row": 70,
                 "name": "Uvedení trvání pojištění v daném měsíci",
                 "attribute_refs_raw": "10356\n10375\n10240\n10354\n10355",
                 "symbolic_attribute_refs": [],
@@ -2673,11 +2707,11 @@
                         "row_hash": "3fc9a2be3485ff4510c351fa30e9e5441276d9fda5c2de757ebed3a34afd3e5d"
                     }
                 ],
-                "row_hash": "2902adc8d9582eb48d798f04abf202abf66648cadc0f6d067b945b8c9a43501e"
+                "row_hash": "cbc7f5b1fd790551a9ca620d0c3c929297b62e25f4ef85bb8570022bd8f17ecf"
             },
             {
                 "control_id": 137,
-                "source_row": 70,
+                "source_row": 71,
                 "name": "Vyplnění důvodu uplatnění slevy",
                 "attribute_refs_raw": "10374\n10372",
                 "symbolic_attribute_refs": [],
@@ -2707,11 +2741,11 @@
                         "row_hash": "a74ac441d5fab08c3dbc25e6aa016b5a1c932097fef6a7ce4ab451a371573b56"
                     }
                 ],
-                "row_hash": "36dfc32cba9de5e2c25070a7a8974be59763540b689edfc612406d940d8a5db0"
+                "row_hash": "dfec43b6d0a48e8efc342869af73e79a90b5f481ca35a41eacebf8ada2b9a1a4"
             },
             {
                 "control_id": 138,
-                "source_row": 71,
+                "source_row": 72,
                 "name": "Kratší rozsah pracovní/služební doby musí být vyplněn",
                 "attribute_refs_raw": "10373\n10372\n10374",
                 "symbolic_attribute_refs": [],
@@ -2746,11 +2780,11 @@
                         "row_hash": "b54278195305c00bd81e66bcc68c4ebac0e0898ade540b34cacc98de43ddb02f"
                     }
                 ],
-                "row_hash": "ca6f43d0723bc893b4eb23b74fba5eff7fc149848fed55475811e1ebb4d54f35"
+                "row_hash": "d13b1d4c2145cc3f7dd7e20b356318d4d99b0a4e6f43476214a5f1c2ead6f162"
             },
             {
                 "control_id": 142,
-                "source_row": 72,
+                "source_row": 73,
                 "name": "Úhrn vyměřovacích základů zaměstnanců zaměstnavatele, kteří vykonávají činnost v rizikovém zaměstnání",
                 "attribute_refs_raw": "10483\n10480",
                 "symbolic_attribute_refs": [],
@@ -2780,11 +2814,11 @@
                         "row_hash": "1a6527a984cf648235219cfc8d3590b146d8ce35d7d60defc1b7ead4d5fdc604"
                     }
                 ],
-                "row_hash": "0e45cbb31a7a5a157d19642393d85cd3d3e2188d37f9f6b9debf0d3aa60548fd"
+                "row_hash": "8ea79c91876dfb076335719eb5fa287043f054ae9cbfec9f0dabacaf4b65d121"
             },
             {
                 "control_id": 143,
-                "source_row": 73,
+                "source_row": 74,
                 "name": "Variabilní symbol zaměstnavatele",
                 "attribute_refs_raw": "10221",
                 "symbolic_attribute_refs": [],
@@ -2809,11 +2843,11 @@
                         "row_hash": "5d2d7e8bfd87f723c2f1ffeda2ac5ede949b6845f509cec3b593547e356431b7"
                     }
                 ],
-                "row_hash": "6afa0e7665a131a2e0da407f234a8feb2d300849516aaea24c9c8f938940c530"
+                "row_hash": "dd8b31492c2724fb05b3ff052389e4c76d2bcf7be17338b7a702f864332c7cae"
             },
             {
                 "control_id": 144,
-                "source_row": 74,
+                "source_row": 75,
                 "name": "Překážky na straně zaměstnance s náhradou mzdy/platu - počet neodpracovaných hodin",
                 "attribute_refs_raw": "10471\n10260",
                 "symbolic_attribute_refs": [],
@@ -2843,11 +2877,11 @@
                         "row_hash": "651138400d833e9d542ad39fc2dca3a8b6a6ffbc8788cda290c949a8c9867776"
                     }
                 ],
-                "row_hash": "c7651c6147e0672e28d5d6e07506a5cd14948ab981f9508e0b074bf4251c90dd"
+                "row_hash": "f325936ba311f47f5014f82f1ce07a96ddfcace8d556a751ed18050083bc0b3f"
             },
             {
                 "control_id": 145,
-                "source_row": 75,
+                "source_row": 76,
                 "name": "Překážky na straně zaměstnavatele - počet neodpracovaných hodin",
                 "attribute_refs_raw": "10472\n10260",
                 "symbolic_attribute_refs": [],
@@ -2877,11 +2911,11 @@
                         "row_hash": "651138400d833e9d542ad39fc2dca3a8b6a6ffbc8788cda290c949a8c9867776"
                     }
                 ],
-                "row_hash": "ce19092dabd3f657391b3376a8f6a1f6f3a3d748c274518fbc2e06509bb81072"
+                "row_hash": "75922c8d7e4cbf4d7237c4637f20f515722bd28927d003e9c85ea07ff5c49237"
             },
             {
                 "control_id": 148,
-                "source_row": 76,
+                "source_row": 77,
                 "name": "Specifická právní skutečnost",
                 "attribute_refs_raw": "10408",
                 "symbolic_attribute_refs": [],
@@ -2896,7 +2930,7 @@
                 "detail_text": "Hodnota musí být z číselníku.\n---\n10408 Specifická právní skutečnost",
                 "detail_formula": null,
                 "error_message": "Hodnota Specifická právní skutečnost neodpovídá číselníku.",
-                "error_message_formula": "=\"Hodnota \" & B76 & \" neodpovídá číselníku.\"",
+                "error_message_formula": "=\"Hodnota \" & B77 & \" neodpovídá číselníku.\"",
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [
@@ -2906,11 +2940,11 @@
                         "row_hash": "8dc5eba70f69618091e0b5b9fc2679feb9270ee0e4fed0c24d4f8f1372ec3ffe"
                     }
                 ],
-                "row_hash": "2ec549c10861e2a087032174085c819cd570ad63d3062a0e8e591c77cc9bb368"
+                "row_hash": "59e714a901ca37a65c36e5925fb67541c10994b32d391eacb7a8250fb035b828"
             },
             {
                 "control_id": 150,
-                "source_row": 77,
+                "source_row": 78,
                 "name": "Typ kolektivní smlouvy/dohody",
                 "attribute_refs_raw": "10214",
                 "symbolic_attribute_refs": [],
@@ -2925,7 +2959,7 @@
                 "detail_text": "Hodnota musí být z číselníku\n---\n10214 Kolektivní smlouva/dohoda",
                 "detail_formula": null,
                 "error_message": "Hodnota Typ kolektivní smlouvy/dohody neodpovídá číselníku.",
-                "error_message_formula": "=\"Hodnota \" & B77 & \" neodpovídá číselníku.\"",
+                "error_message_formula": "=\"Hodnota \" & B78 & \" neodpovídá číselníku.\"",
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [
@@ -2935,11 +2969,11 @@
                         "row_hash": "872fc3befaa519038b9e58a37382b26a5a9a331be8b412b9f8f3cbe43ab7927d"
                     }
                 ],
-                "row_hash": "e56da004167c80b4557969e7c75bb9e86cf98352a7ab4a2f047e5cdb4b47b354"
+                "row_hash": "1ab75d2982a4447bf99f4a9f0a139aee557614a02c4d99e18f1d868e76eda529"
             },
             {
                 "control_id": 151,
-                "source_row": 78,
+                "source_row": 79,
                 "name": "Forma vlastnictví",
                 "attribute_refs_raw": "10220",
                 "symbolic_attribute_refs": [],
@@ -2954,7 +2988,7 @@
                 "detail_text": "Hodnota musí být z číselníku\n---\n10220 Forma",
                 "detail_formula": null,
                 "error_message": "Hodnota Forma vlastnictví neodpovídá číselníku.",
-                "error_message_formula": "=\"Hodnota \" & B78 & \" neodpovídá číselníku.\"",
+                "error_message_formula": "=\"Hodnota \" & B79 & \" neodpovídá číselníku.\"",
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [
@@ -2964,11 +2998,11 @@
                         "row_hash": "008518eb06c72e107c862d75b583ca804e8e61902165194f3ea05fb44649e09b"
                     }
                 ],
-                "row_hash": "88769bffdd23d882c4eb413826e60b649598fcbed6d4489abb38e43865fd2543"
+                "row_hash": "12fe2a573e506d3660f99ad3008ac8c85aa5985e719c60e87496989e5052a3ef"
             },
             {
                 "control_id": 152,
-                "source_row": 79,
+                "source_row": 80,
                 "name": "Kód obce",
                 "attribute_refs_raw": "10230",
                 "symbolic_attribute_refs": [],
@@ -2983,7 +3017,7 @@
                 "detail_text": "Hodnota musí být z číselníku\n---\n10230 Kód obce",
                 "detail_formula": null,
                 "error_message": "Hodnota Kód obce neodpovídá číselníku.",
-                "error_message_formula": "=\"Hodnota \" & B79 & \" neodpovídá číselníku.\"",
+                "error_message_formula": "=\"Hodnota \" & B80 & \" neodpovídá číselníku.\"",
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [
@@ -2993,11 +3027,11 @@
                         "row_hash": "6621c729bc4e6340273247ed3313b03cdce399969435509aa26882ec935b8143"
                     }
                 ],
-                "row_hash": "e2775f5c64452845a753761f5cb85a3ca53b7310b2a42a4102b5b7f56a85b7ec"
+                "row_hash": "4dd38b1e0d91a6dfb7c3ef839e732ebb2c2698ae524a2339ebf1b00c44076f8d"
             },
             {
                 "control_id": 153,
-                "source_row": 80,
+                "source_row": 81,
                 "name": "Kód státu",
                 "attribute_refs_raw": "10231",
                 "symbolic_attribute_refs": [],
@@ -3012,7 +3046,7 @@
                 "detail_text": "Hodnota musí být z číselníku\n---\n10231 Stát",
                 "detail_formula": null,
                 "error_message": "Hodnota Kód státu neodpovídá číselníku.",
-                "error_message_formula": "=\"Hodnota \" & B80 & \" neodpovídá číselníku.\"",
+                "error_message_formula": "=\"Hodnota \" & B81 & \" neodpovídá číselníku.\"",
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [
@@ -3022,11 +3056,11 @@
                         "row_hash": "81102b55c265861faf437e4c68a508e9b9b50498a583196d262a41cd83941ebc"
                     }
                 ],
-                "row_hash": "dece2387d1e254d9f59137f1cdd86a158392119c3b4e7c1b95827ae55d1c7b0f"
+                "row_hash": "1e6fe7c2325d43e4a62e1039a62e3811aaa897a65958cd22e6fefd1cd31f051b"
             },
             {
                 "control_id": 154,
-                "source_row": 81,
+                "source_row": 82,
                 "name": "Nástroj opatření - APZ",
                 "attribute_refs_raw": "10233",
                 "symbolic_attribute_refs": [],
@@ -3041,7 +3075,7 @@
                 "detail_text": "Hodnota musí být z číselníku\n---\n10233 Nástroj (opatření)",
                 "detail_formula": null,
                 "error_message": "Hodnota Nástroj opatření - APZ neodpovídá číselníku.",
-                "error_message_formula": "=\"Hodnota \" & B81 & \" neodpovídá číselníku.\"",
+                "error_message_formula": "=\"Hodnota \" & B82 & \" neodpovídá číselníku.\"",
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [
@@ -3051,11 +3085,11 @@
                         "row_hash": "0f421cde8c4ca494023141ca6d2297e89f5435723a917396da1aae62f6d277c3"
                     }
                 ],
-                "row_hash": "e755d6d54d3c07a017bd32f91aab3f1bd54bdf8e878f2248143a99d5ef66f748"
+                "row_hash": "999d606e893acb56d0581420b5ff95ee342fda069710785321d50daf91ec9728"
             },
             {
                 "control_id": 155,
-                "source_row": 82,
+                "source_row": 83,
                 "name": "Druh činnosti",
                 "attribute_refs_raw": "10239",
                 "symbolic_attribute_refs": [],
@@ -3070,7 +3104,7 @@
                 "detail_text": "Hodnota musí být z číselníku\n---\n10239 Druh činnosti",
                 "detail_formula": null,
                 "error_message": "Hodnota Druh činnosti neodpovídá číselníku.",
-                "error_message_formula": "=\"Hodnota \" & B82 & \" neodpovídá číselníku.\"",
+                "error_message_formula": "=\"Hodnota \" & B83 & \" neodpovídá číselníku.\"",
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [
@@ -3080,11 +3114,11 @@
                         "row_hash": "37e291c3ab0d2768067c7d5d2ebcb1e85f49b3c5557cec0bece7a5c87e3c7e39"
                     }
                 ],
-                "row_hash": "5e7ad901f9be6d73ddbc5900d6ba00c5f944fffc12fc7054e49e5bff50343a42"
+                "row_hash": "e69775a45a64cab8c47d23e165d1efc3b955b63f3c33aef4748a36a336e9a6cc"
             },
             {
                 "control_id": 156,
-                "source_row": 83,
+                "source_row": 84,
                 "name": "Kategorizace rizika",
                 "attribute_refs_raw": "10274",
                 "symbolic_attribute_refs": [],
@@ -3099,7 +3133,7 @@
                 "detail_text": "Hodnota musí být z číselníku\n---\n10274 Kategorizace rizika",
                 "detail_formula": null,
                 "error_message": "Hodnota Kategorizace rizika neodpovídá číselníku.",
-                "error_message_formula": "=\"Hodnota \" & B83 & \" neodpovídá číselníku.\"",
+                "error_message_formula": "=\"Hodnota \" & B84 & \" neodpovídá číselníku.\"",
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [
@@ -3109,11 +3143,11 @@
                         "row_hash": "40e59d0e1640601afcdbc6faaf593f8dc401ea3bfe89b99d82a7d1de7a58ca20"
                     }
                 ],
-                "row_hash": "06c0e057d4ccf126714cf10214b30ca3b51f0c12e71e1fe2d01d5b6179105aed"
+                "row_hash": "eb255822569ee161192309dd3a39d510fbb03dbe10510322939000396b3a6b16"
             },
             {
                 "control_id": 157,
-                "source_row": 84,
+                "source_row": 85,
                 "name": "Kód ELDP",
                 "attribute_refs_raw": "10240",
                 "symbolic_attribute_refs": [],
@@ -3128,7 +3162,7 @@
                 "detail_text": "Hodnota musí být z číselníku\n---\n10240 Kód ELDP",
                 "detail_formula": null,
                 "error_message": "Hodnota Kód ELDP neodpovídá číselníku.",
-                "error_message_formula": "=\"Hodnota \" & B84 & \" neodpovídá číselníku.\"",
+                "error_message_formula": "=\"Hodnota \" & B85 & \" neodpovídá číselníku.\"",
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [
@@ -3138,11 +3172,11 @@
                         "row_hash": "bf856b33f300e6f37affaa9e8f371171a5feaa73ad3c97ef277e1d85447a2b7c"
                     }
                 ],
-                "row_hash": "7a1cd44a4db7ec5d4ac87427728310cf7a1107bddde8c8baea8b1b7e618595c0"
+                "row_hash": "aee9755e7f1a03f49e8db988a9f43d232d8870ee42f15c9b06115ff3c22bc7ad"
             },
             {
                 "control_id": 158,
-                "source_row": 85,
+                "source_row": 86,
                 "name": "Důvod uplatnění slevy",
                 "attribute_refs_raw": "10374",
                 "symbolic_attribute_refs": [],
@@ -3157,7 +3191,7 @@
                 "detail_text": "Hodnota musí být z číselníku\n---\n10374 Důvod uplatnění slevy",
                 "detail_formula": null,
                 "error_message": "Hodnota Důvod uplatnění slevy neodpovídá číselníku.",
-                "error_message_formula": "=\"Hodnota \" & B85 & \" neodpovídá číselníku.\"",
+                "error_message_formula": "=\"Hodnota \" & B86 & \" neodpovídá číselníku.\"",
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [
@@ -3167,11 +3201,11 @@
                         "row_hash": "41032d06a9da322ba6f67f37e6a648e40f3e8fefc7ffe5f98fe89928d1d31712"
                     }
                 ],
-                "row_hash": "9be5959bcb0e6b91193f54dd812eb54d31b492b7ab0262285840c3e72741c47c"
+                "row_hash": "081bce047c812dcfb93cf8a72d6471c656588e4d16044290e4da301463ee03f2"
             },
             {
                 "control_id": 159,
-                "source_row": 86,
+                "source_row": 87,
                 "name": "Mzdový příspěvek v rámci nástrojů APZ",
                 "attribute_refs_raw": "10232\n10233",
                 "symbolic_attribute_refs": [],
@@ -3201,11 +3235,11 @@
                         "row_hash": "38e6dcf0d04d3191f67cb3b7489b202f36b3d71aea138343831060a79abb6cc0"
                     }
                 ],
-                "row_hash": "19d2e7fd0810edf39308bc6ed6da344fdbe4d903bb19eb2b4deb44154406cb10"
+                "row_hash": "eff4757b7be8426d0e78f977900ba83288428e9c9e0ed2c9cd479d127bed5769"
             },
             {
                 "control_id": 162,
-                "source_row": 87,
+                "source_row": 88,
                 "name": "Pokud vznikla účast na pojistném, je třeba vyplnit alespoň jeden typ vyměřovacího základu zaměstnavatele podle § 5a odst. 1 písm. a, b nebo c",
                 "attribute_refs_raw": "10023\n10025\n10483",
                 "symbolic_attribute_refs": [],
@@ -3240,11 +3274,11 @@
                         "row_hash": "de57210b0cbbc199a55dbf7d8a5a7c07bc1546b2aeb513d70010a3aae115288e"
                     }
                 ],
-                "row_hash": "250756bb5b45f40cc684ade69da5f27187ae89e469762a4bbd9465eac01c88b9"
+                "row_hash": "bdbd7825fb9d81a86cf0c98635c7524da241ba4b0c2e8c9ef0a8f17828de867d"
             },
             {
                 "control_id": 164,
-                "source_row": 88,
+                "source_row": 89,
                 "name": "Kontrola na uplatnění slevy na pojistném zaměstnavatele v rámci splatnosti pojistného",
                 "attribute_refs_raw": "10032\n10006\n10010\n10011",
                 "symbolic_attribute_refs": [],
@@ -3284,11 +3318,11 @@
                         "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
                     }
                 ],
-                "row_hash": "9fdc6cc127d226c834b38f4d1abff3064ff703fa03b025d1dfe3569ad8135b57"
+                "row_hash": "89b17e4c14c08c1c116efc5060e60ee9a636f5b50fdaff0a63fd29c096177a82"
             },
             {
                 "control_id": 165,
-                "source_row": 89,
+                "source_row": 90,
                 "name": "Kontrola vyplnění vyloučených dob dle  § 18 odst. 7",
                 "attribute_refs_raw": "10366\n10473\n10474\n10475",
                 "symbolic_attribute_refs": [],
@@ -3328,11 +3362,11 @@
                         "row_hash": "872c6c42fe5b7ea55e11f3b2ed8032b1b3e5afb351457cd3342c3c613973b04b"
                     }
                 ],
-                "row_hash": "0717ef90a8b2d12dfebb61b2972797287723e485ec90966d5eedf318a0850510"
+                "row_hash": "7e461257609a21ff11820bd18c4990ed7ca44205cf60d0f031dff3a642b0d89b"
             },
             {
                 "control_id": 167,
-                "source_row": 90,
+                "source_row": 91,
                 "name": "Pojistné za zaměstnavatele u zaměstnanců, kteří vykonávají rizikové zaměstnání",
                 "attribute_refs_raw": "10484\n10483",
                 "symbolic_attribute_refs": [],
@@ -3362,11 +3396,11 @@
                         "row_hash": "b505f94fb3f18cd5609bd0b7c5a4bd3a0d83a12b367518798eb1ed1ef5df420f"
                     }
                 ],
-                "row_hash": "54df7ba83849b757af6290f974ffbc59e6855224124b7b2c4d9ceca461fac209"
+                "row_hash": "9210a0b9e381297f35ad0a6205afadb6d58b3c2781ccd190a67c2b9cc4c332e6"
             },
             {
                 "control_id": 168,
-                "source_row": 91,
+                "source_row": 92,
                 "name": "Pojistné za zaměstnance",
                 "attribute_refs_raw": "10028\n10023\n10025\n10483",
                 "symbolic_attribute_refs": [],
@@ -3406,11 +3440,11 @@
                         "row_hash": "abeba6ecd3b1163945c69eceb82a423b2e56631e269ee3443326d253b32b93f2"
                     }
                 ],
-                "row_hash": "574ed7e51eb9caa5929170b434d364fa7bbeece338e1cae211e3c28a1fbac2fa"
+                "row_hash": "6c7a77acc1663e7f71fc58a5750a885e6fa7176ac7d5aba88a6e03f638356bea"
             },
             {
                 "control_id": 170,
-                "source_row": 92,
+                "source_row": 93,
                 "name": "Úhrn slev na pojistném zaměstnanců",
                 "attribute_refs_raw": "10487\n10486",
                 "symbolic_attribute_refs": [],
@@ -3440,11 +3474,11 @@
                         "row_hash": "db1319592dd5ff63beaaea65c36c9f46a53f765ae1d29930371091896527ec24"
                     }
                 ],
-                "row_hash": "3b33f33dec11e76cf896803242424a32dba02b3499c66cf28d3ad324afcd7c09"
+                "row_hash": "71cbe7e706c521eef4216c4233826fa8e2d59e7b7d6db4fc4ff7682053748776"
             },
             {
                 "control_id": 188,
-                "source_row": 93,
+                "source_row": 94,
                 "name": "Sleva na pojistném zaměstnavatele jen z jednoho zaměstnání zaměstnance",
                 "attribute_refs_raw": "10372",
                 "symbolic_attribute_refs": [],
@@ -3469,11 +3503,11 @@
                         "row_hash": "4ca9fbd67bc301a8d5608ab1e500842be7a97c7c95df277d577d632700ec5851"
                     }
                 ],
-                "row_hash": "d754fb01eb03791a3b1f98a575837f79ec12d3679d891944c7327bdabadee61f"
+                "row_hash": "d0e0210f7d95ab4b43d15e4d87de69c18999319fbc24610d3a9ae6ef4e044f0a"
             },
             {
                 "control_id": 190,
-                "source_row": 94,
+                "source_row": 95,
                 "name": "Stornování celého řádného podání",
                 "attribute_refs_raw": "10007\n10010\n10011",
                 "symbolic_attribute_refs": [],
@@ -3508,11 +3542,11 @@
                         "row_hash": "9a2f99811f84b2ce408ab27a555b078465a1c840531c498253836aca6c1d7a8a"
                     }
                 ],
-                "row_hash": "3bcfa4b293175bb74f03130c0194f5243135863e43fa7a3c8a18e0f927b29097"
+                "row_hash": "ed5ffbc7f740baa56f28d28db19b4730142bfedcd534f011fe1e44370f2ed2c5"
             },
             {
                 "control_id": 191,
-                "source_row": 95,
+                "source_row": 96,
                 "name": "Kontrola na atributy uváděné jen v lednovém, únorovém nebo březnovém podání",
                 "attribute_refs_raw": "10036\n10037\n10320\n10321\n10322\n10323\n10420\n10421\n10422\n10423\n10424\n10425\n10426\n10430\n10454\n10455\n10441\n10442\n10443\n10444\n10445\n10446\n10447\n10448\n10449\n10450\n10451",
                 "symbolic_attribute_refs": [],
@@ -3667,11 +3701,11 @@
                         "row_hash": "194e9e3d86cf4b9d344d909b43a74342a3cd8a9da5fb3b020f7e7b7ca1569bfe"
                     }
                 ],
-                "row_hash": "4a2fe6d9fcd0c08a5fc1e908a59e1277031c3a9b0ab7d2a9349daa1f0a880a65"
+                "row_hash": "095fa22b14c68f91a49556964d4c17d5690a379b037229dc2a937f362e7069bb"
             },
             {
                 "control_id": 192,
-                "source_row": 96,
+                "source_row": 97,
                 "name": "Kontrola na atributy uváděné jen v lednovém nebo únorovém podání",
                 "attribute_refs_raw": "10319",
                 "symbolic_attribute_refs": [],
@@ -3696,11 +3730,11 @@
                         "row_hash": "e0392645173788a35600a30818832263420ed76390bdb34dfe9069c0633b3bc3"
                     }
                 ],
-                "row_hash": "36272de279fae59a71cc5f35d73dcc09671b2db205c11c3a2b3c3d0fa2e46ae3"
+                "row_hash": "31fc23420140abcb5f8dcd749d2693b2e7c5011af199a98d3979b00a0e3a8c08"
             },
             {
                 "control_id": 193,
-                "source_row": 97,
+                "source_row": 98,
                 "name": "Kontrola na atributy uváděné jen v lednovém podání",
                 "attribute_refs_raw": "10313\n10317\n10316\n10318\n10311\n10312",
                 "symbolic_attribute_refs": [],
@@ -3750,11 +3784,11 @@
                         "row_hash": "1aa226d4548122af0926a646d979ae1a9e6829f5152c1dcfcdcff8cd786b0400"
                     }
                 ],
-                "row_hash": "96f95cbdae539c66dc8086690b45259e6b58fcec65ebaf0e8b59bf21331abe8a"
+                "row_hash": "0e7b1409a222b29a8966e9a0aab839c766db9d7e8ad7beb8bedc7db18dfbe279"
             },
             {
                 "control_id": 194,
-                "source_row": 98,
+                "source_row": 99,
                 "name": "Kontrola na atributy uváděné jen prosincovém podání",
                 "attribute_refs_raw": "10452\n10038\n10039\n10220\n10214",
                 "symbolic_attribute_refs": [],
@@ -3799,11 +3833,11 @@
                         "row_hash": "178418fe71d0edbb2b30ead6cb8b50d2c6d46144b27c9123b1eb08fe651e2e8a"
                     }
                 ],
-                "row_hash": "736794d95efcedc67e7482f1b3036ff478904d048dce4192354d01f853621fc4"
+                "row_hash": "f3faa5f7cfcfa45be3494eadc31049093627c93bf7bc3af2c2a5beec9d0ec609"
             },
             {
                 "control_id": 204,
-                "source_row": 99,
+                "source_row": 100,
                 "name": "Stornování součástí individualizované části",
                 "attribute_refs_raw": "10007\n10010\n10011",
                 "symbolic_attribute_refs": [],
@@ -3838,11 +3872,11 @@
                         "row_hash": "9a2f99811f84b2ce408ab27a555b078465a1c840531c498253836aca6c1d7a8a"
                     }
                 ],
-                "row_hash": "12e3924b72ef11edb42bb4ac5445e74eeb61fa300bd1f3b822b2d04c7cdbb357"
+                "row_hash": "90f781abd7d8cdd1aac533ae867d28f8a96ee093f76103d385736c17fc6e51da"
             },
             {
                 "control_id": 207,
-                "source_row": 100,
+                "source_row": 101,
                 "name": "Úhrn vyměřovacích základů zaměstnanců, za které zaměstnavatel uplatňuje slevu na pojistném zaměstnavatele",
                 "attribute_refs_raw": "10477\n10372\n10031",
                 "symbolic_attribute_refs": [],
@@ -3877,11 +3911,11 @@
                         "row_hash": "d855fbcb0ce1e60e8facd172336255d28b6a0272f7409b48033ea944953d638c"
                     }
                 ],
-                "row_hash": "b8b3e7ba09b43b9871e1e617c90f9daf44a06341c9581ecfa4aa2a9cecaf7f6a"
+                "row_hash": "d4c4c5768fa9e7c1833941c00de7b655f8ac20caabeec95cf08d8b44b9625dbc"
             },
             {
                 "control_id": 208,
-                "source_row": 101,
+                "source_row": 102,
                 "name": "Výše slevy na pojistném zaměstnance",
                 "attribute_refs_raw": "10490\n10491",
                 "symbolic_attribute_refs": [],
@@ -3911,11 +3945,11 @@
                         "row_hash": "959486e0bd336cc6a8414b098e934753a701b820946bcef37889c0f2d82e3d93"
                     }
                 ],
-                "row_hash": "90dc46a906ccb54280457f63fe796f59b656693c017a73ca21a53796e5973105"
+                "row_hash": "4aa0a920f026cc880c8ee9d0470a5c58d38b98c03befc7e1207b2bdc1816f5bc"
             },
             {
                 "control_id": 209,
-                "source_row": 102,
+                "source_row": 103,
                 "name": "Úhrn slev na pojistném zaměstnanců",
                 "attribute_refs_raw": "10487\n10491",
                 "symbolic_attribute_refs": [],
@@ -3945,11 +3979,11 @@
                         "row_hash": "959486e0bd336cc6a8414b098e934753a701b820946bcef37889c0f2d82e3d93"
                     }
                 ],
-                "row_hash": "92ebe4b282bd68bf2a2c04bd0b776f6bf9504e279412b4c18afbf14047b617dd"
+                "row_hash": "cf5e7ea230748867af8589b88c61d337cbdcf2f09b99fc8595cd5742f7852a1f"
             },
             {
                 "control_id": 211,
-                "source_row": 103,
+                "source_row": 104,
                 "name": "Stornování součástí individualizované části - kontrola kompletnosti řádného podání",
                 "attribute_refs_raw": "10016",
                 "symbolic_attribute_refs": [],
@@ -3974,11 +4008,11 @@
                         "row_hash": "8292898c6ac413b69261b6d3d3cead5a8e3de1e2381cc2bf4cefa7f77ec121c5"
                     }
                 ],
-                "row_hash": "8f98499666b08eae65b3223d2c8829f70c3818a1c6730848ea21d661d4521fcc"
+                "row_hash": "e4e5f3286741f324d047a8dc128858b5f2491a68ed5baa1bde1987b28157ad81"
             },
             {
                 "control_id": 213,
-                "source_row": 104,
+                "source_row": 105,
                 "name": "Kontrola Úhrn vyměřovacích základů zaměstnanců, kteří mají nárok na slevu na pojistném zaměstnance",
                 "attribute_refs_raw": "10486\n10477\n10490",
                 "symbolic_attribute_refs": [],
@@ -4013,11 +4047,11 @@
                         "row_hash": "48308bc18e786781947451e79c1ac3d6d0371e59d81ac220698b902a37844d65"
                     }
                 ],
-                "row_hash": "ca44ddedad4e36e6b28092fd077c701c96f90622e03bbf8e10678516fdb2ecbd"
+                "row_hash": "70bf234ca5e9fd3618efe5471050ca0752cf252be2255858c71dda6f3e2f6bfc"
             },
             {
                 "control_id": 214,
-                "source_row": 105,
+                "source_row": 106,
                 "name": "Kontrola věku dítěte pro uplatnění slevy (roční zúčtovaní)",
                 "attribute_refs_raw": "10451\n10448\n10449",
                 "symbolic_attribute_refs": [],
@@ -4052,11 +4086,11 @@
                         "row_hash": "237dddc72a041a1f99100a479ee83dcec302c33efeed61a1fe485d341d1a7c77"
                     }
                 ],
-                "row_hash": "df3916f267a037666bc3266bb66b3355a321c3f7533d831ffe5f653c9ae64fec"
+                "row_hash": "0d541abf83b766e0cf77b4f4c70e0778d08384789f46f608240163f17f2c8784"
             },
             {
                 "control_id": 215,
-                "source_row": 106,
+                "source_row": 107,
                 "name": "Kontrola věku dítěte pro uplatnění slevy (měsíční zúčtovaní)",
                 "attribute_refs_raw": "10440\n10437\n10438",
                 "symbolic_attribute_refs": [],
@@ -4091,11 +4125,11 @@
                         "row_hash": "16f6ccf03ba8e566d56f7351821b62cca92556fd2534a973220afff47f3b79bd"
                     }
                 ],
-                "row_hash": "c3b4e779a1cbe1a12401aec46934ed0c8121dfa3b876e20b80a88413f1136eda"
+                "row_hash": "c10510e19b6ac60ff858838a3125387b0144c4910f0e51f6c904c1f14c01dd47"
             },
             {
                 "control_id": 216,
-                "source_row": 107,
+                "source_row": 108,
                 "name": "Kontrola součtů vyměřovacího základu zaměstnance",
                 "attribute_refs_raw": "10477\n10478\n10479\n10480",
                 "symbolic_attribute_refs": [],
@@ -4135,11 +4169,11 @@
                         "row_hash": "ce6e945c92e51cbda40b98ea1dc6ca9bf90c813ec9b2e28019fa6050eccbddef"
                     }
                 ],
-                "row_hash": "8d5a779c4a62484487149c6e07a9d2a396cf332378ad9457dd7be947c647ec5f"
+                "row_hash": "0a43338a6d4dac9e2dbd5c3108fc1fd9213b5caa6f8885dccc1ba97a94f36a72"
             },
             {
                 "control_id": 217,
-                "source_row": 108,
+                "source_row": 109,
                 "name": "Chybný GUID podání.",
                 "attribute_refs_raw": "10001",
                 "symbolic_attribute_refs": [],
@@ -4164,11 +4198,11 @@
                         "row_hash": "0abcbf086cb749ffeefdeb98c806d736e928e1abe25f5ca2278cd97fc2c533db"
                     }
                 ],
-                "row_hash": "09409213abe534fe27c988145ae16aba4683585b2ce707f8aa2d8770ae74cb98"
+                "row_hash": "957ca66f1c3b79cefa71982a520ab095d65d19ea10fadee4fad7cae0e8475ae1"
             },
             {
                 "control_id": 218,
-                "source_row": 109,
+                "source_row": 110,
                 "name": "Chybný GUID storno podání.",
                 "attribute_refs_raw": "10001",
                 "symbolic_attribute_refs": [],
@@ -4193,11 +4227,11 @@
                         "row_hash": "0abcbf086cb749ffeefdeb98c806d736e928e1abe25f5ca2278cd97fc2c533db"
                     }
                 ],
-                "row_hash": "02155c5d87419efdaa9211594400ced9e9b2f5d05cf101bdb6f3491d2bb30a3d"
+                "row_hash": "8de2baf86094bb5d4d0e6a3971c60e6bdf0cbd8f096af5878e458654fb93d727"
             },
             {
                 "control_id": 220,
-                "source_row": 110,
+                "source_row": 111,
                 "name": "Chybný GUID storno součásti",
                 "attribute_refs_raw": "10012",
                 "symbolic_attribute_refs": [],
@@ -4222,11 +4256,11 @@
                         "row_hash": "1d2502d8fe5312348b671a554a7391a2c648951ac6b7f1c3b351bc143046c2ff"
                     }
                 ],
-                "row_hash": "fb53d462b4309e37d397aeaea2129ac66e90e917a7cb0ce0ad6a3c5a426d1d4d"
+                "row_hash": "be87364ca93206d42cdad98f90a0fac8a051968e1651ff014b23051d8131adaa"
             },
             {
                 "control_id": 221,
-                "source_row": 111,
+                "source_row": 112,
                 "name": "Kontrola na zamítnutí podání při absenci nebo zamítnutí všech jeho součástí",
                 "attribute_refs_raw": null,
                 "symbolic_attribute_refs": [],
@@ -4245,11 +4279,11 @@
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [],
-                "row_hash": "330be0e445608a44c9dd9ac4fb2826bfe64bdd457218a10f6b02ece1fda42ce9"
+                "row_hash": "2c9a149b7d434d579e2ff55fee1876e0bc0ce32745d492287fe1e7685cfce564"
             },
             {
                 "control_id": 225,
-                "source_row": 112,
+                "source_row": 113,
                 "name": "Chybějící 1. dílčí podání",
                 "attribute_refs_raw": "10002\n10003",
                 "symbolic_attribute_refs": [],
@@ -4279,11 +4313,11 @@
                         "row_hash": "e24a20a209c8b4291fef862fd07a526adb856e3040582b13d5e5cb96159d7f59"
                     }
                 ],
-                "row_hash": "f4079a01ac5488e669e11c6afe3a177afbb2b1d4698b5b2f01529ae9383246f8"
+                "row_hash": "8bc7c633de0e453db34fed6a4f27505b7a3a2fd3cd3cad388350b51c7d52b31f"
             },
             {
                 "control_id": 226,
-                "source_row": 113,
+                "source_row": 114,
                 "name": "Neodpovídá počet individualizovaných součástí měsíčního hlášení registru zaměstnanců",
                 "attribute_refs_raw": null,
                 "symbolic_attribute_refs": [],
@@ -4302,11 +4336,11 @@
                 "source_label": "nová",
                 "note": "Měsíční podání JMHZ (nezařazeno) - tzn. při vyhodnocení této nepropustné kontroly dojde k částečnému přijetí podání, které musí zaměstnavatel doplnit formou opravného hlášení. Pokud zaměstnavatel opravné hlášení nepodá do 20. dne rozhodného období, bude mu doručena formální výzva k podání opravného hlášení.",
                 "attribute_refs": [],
-                "row_hash": "0b1e3d0fe86b2f108e5e9be1ff034925a11802fcadbcdcf71718574eed0fd4b5"
+                "row_hash": "8c269d7596a6f9c280a14638a2c82e78a96561c59bb76dcd5508aa5d6f928468"
             },
             {
                 "control_id": 227,
-                "source_row": 114,
+                "source_row": 115,
                 "name": "Neodpovídá počet individualizovaných součástí měsíčního hlášení celkovému počtu",
                 "attribute_refs_raw": "10488",
                 "symbolic_attribute_refs": [],
@@ -4331,11 +4365,11 @@
                         "row_hash": "d0fb19e604bdf5740a6dd5f7ea4cf7223ecfd85fced0f1af870fc393ac8e6fa3"
                     }
                 ],
-                "row_hash": "bfe70580f75982d60bb2e9c1e7a052a185c5a087d22ffd33b9d2feb5df9295f1"
+                "row_hash": "f86836f57201594f0914f89d42c838801733dfc5d6417cd59d25800e1243a818"
             },
             {
                 "control_id": 228,
-                "source_row": 115,
+                "source_row": 116,
                 "name": "Neodpovídá počet dílčích podání celkovému počtu balíků",
                 "attribute_refs_raw": "10003",
                 "symbolic_attribute_refs": [],
@@ -4360,11 +4394,11 @@
                         "row_hash": "94794af2a7b8790035c8d424b303352d0ccb7de0d6598de422ebe35e3008d596"
                     }
                 ],
-                "row_hash": "25dde6bb9638361d752b1a447ce2630656a3b2ea12a68061b5abc6aa64f510d1"
+                "row_hash": "3b2c3231b63b0e3967ef4436575309684393f94870f51ba184d30358556791d8"
             },
             {
                 "control_id": 229,
-                "source_row": 116,
+                "source_row": 117,
                 "name": "Kontrola kolize pořadí dítěte v měsíci (měsíční zúčtovaní)",
                 "attribute_refs_raw": "10440",
                 "symbolic_attribute_refs": [],
@@ -4389,11 +4423,11 @@
                         "row_hash": "98547a629722d8ece8da0374c83e9912f38bf032cf5bb945b5e0780efcddb5a3"
                     }
                 ],
-                "row_hash": "704795b5114826eb85d0dcf07799a7095a9a24c4fed7e507085d6ff58539529f"
+                "row_hash": "416e89c317df18146b33f5cc94ea1635cef0ff3fc399711e6bd22b1ec4d59b1c"
             },
             {
                 "control_id": 230,
-                "source_row": 117,
+                "source_row": 118,
                 "name": "Kontrola kolize pořadí dítěte v měsíci (roční zúčtovaní)",
                 "attribute_refs_raw": "10451",
                 "symbolic_attribute_refs": [],
@@ -4418,11 +4452,11 @@
                         "row_hash": "77edc46c70479484f42acada0527a1daa94761880bcfab4ecf93ddcecb65ba11"
                     }
                 ],
-                "row_hash": "46c07c0089a0c17c2da0d7920b9fcd49e8643c14f96ced51ac6d9273b7baaaaf"
+                "row_hash": "6d06c5f0b24c504f555c71b753cbaf0b5b2c9e09c0edc68d244adb006417d8d4"
             },
             {
                 "control_id": 232,
-                "source_row": 118,
+                "source_row": 119,
                 "name": "Struktura řádného měsíčního hlášení",
                 "attribute_refs_raw": null,
                 "symbolic_attribute_refs": [],
@@ -4441,11 +4475,11 @@
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [],
-                "row_hash": "f08623c2a40899bf8187174e7f5ce4cfb99c1808408a2c1128587bdf4ad4117e"
+                "row_hash": "34c601566db03487d1540a5858c214677ee4d285c7c4e24621e0012f9bdc6709"
             },
             {
                 "control_id": 233,
-                "source_row": 119,
+                "source_row": 120,
                 "name": "Struktura opravného hlášení",
                 "attribute_refs_raw": null,
                 "symbolic_attribute_refs": [],
@@ -4464,11 +4498,11 @@
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [],
-                "row_hash": "dd9b1dda34108d4828f7da9784606039f1654bfabd67cdb2f3f91246707d3d38"
+                "row_hash": "2575dcacd2e486a69df33e649a2cb1df1dcc684c59e23ee6327a607e1bc2a06b"
             },
             {
                 "control_id": 235,
-                "source_row": 120,
+                "source_row": 121,
                 "name": "Neodpovídá skutečný počet formulářů",
                 "attribute_refs_raw": "10015",
                 "symbolic_attribute_refs": [],
@@ -4493,11 +4527,11 @@
                         "row_hash": "818626776569df8896d19a4c01a457b0b7135ec4f9a13f8dfa5fb85464795bd0"
                     }
                 ],
-                "row_hash": "4496c389a77b91522ab69c197704aa72bd1d4edcfc060c4b607a566924f56652"
+                "row_hash": "08aeeaf2afaae5a38a7dc30fd2d5f05ebff9e57db8f4ec3a269f578e2eccd685"
             },
             {
                 "control_id": 236,
-                "source_row": 121,
+                "source_row": 122,
                 "name": "Kontrola formulářů v řádném měsíčním hlášení",
                 "attribute_refs_raw": "10016",
                 "symbolic_attribute_refs": [],
@@ -4522,11 +4556,11 @@
                         "row_hash": "8292898c6ac413b69261b6d3d3cead5a8e3de1e2381cc2bf4cefa7f77ec121c5"
                     }
                 ],
-                "row_hash": "9431ea5b94863b2221817a6137f1e02484025c7ecdf325da2de4506780d93293"
+                "row_hash": "42967427c643d4eb1eb2f5ffa279be2d9e6ea45a391026a429a721243c067844"
             },
             {
                 "control_id": 237,
-                "source_row": 122,
+                "source_row": 123,
                 "name": "Kontrola formulářů v opravném měsíčním hlášení pro indiv. části",
                 "attribute_refs_raw": "10016\n10007",
                 "symbolic_attribute_refs": [],
@@ -4556,11 +4590,11 @@
                         "row_hash": "f8ac4a710fd25956a1e3cf88edbe04ca9963f5a26336d843c798389531c96a3c"
                     }
                 ],
-                "row_hash": "46a83527b0eb5306bd12d00522c4fa536bcc75221fa90ca10931b493be8ef09f"
+                "row_hash": "7488579b9a58c42c2c5ba2face3f48f5f35d92544e152417f2919df6baf09a3b"
             },
             {
                 "control_id": 238,
-                "source_row": 123,
+                "source_row": 124,
                 "name": "Kontrola konzistence klíčů GUID, ikmpsv, idppv v části individualizované součásti při změně dat",
                 "attribute_refs_raw": "10012\n10016\n10051\n10228",
                 "symbolic_attribute_refs": [],
@@ -4600,11 +4634,11 @@
                         "row_hash": "2dadc73feb24b06f6a53bf0ffda1ff9f4b9b06aa253ff84291fa47eb5feb6cd9"
                     }
                 ],
-                "row_hash": "890b2b0476adf54cd2a40a1b73875ddeb28246b02aa09a51deaf472d90850f5c"
+                "row_hash": "075025b36520ccdf4bab0170c9b4ce596e36696ce0fc913dee7f9254b6ad14c2"
             },
             {
                 "control_id": 240,
-                "source_row": 124,
+                "source_row": 125,
                 "name": "Kontrola metaatributů pro řádné a opravného podání",
                 "attribute_refs_raw": "10002\n10003\n10015\n10488\n10007",
                 "symbolic_attribute_refs": [],
@@ -4649,11 +4683,11 @@
                         "row_hash": "a64ce8a544dd725f2109840e76bfc796df8840b756f082016235bb3be59ed258"
                     }
                 ],
-                "row_hash": "9ec070b6841889e14b6637822592da6922eacc368c0cb32dfec6cc414575114b"
+                "row_hash": "b81521b10e5d3269a323f0bbd50dce34cba5b8614db9483304d24025282a506f"
             },
             {
                 "control_id": 241,
-                "source_row": 125,
+                "source_row": 126,
                 "name": "Kontrola konzistence metatributů GUID pro celé podání",
                 "attribute_refs_raw": "10221\n10010\n10011\n10001\n10007",
                 "symbolic_attribute_refs": [],
@@ -4698,11 +4732,11 @@
                         "row_hash": "a64ce8a544dd725f2109840e76bfc796df8840b756f082016235bb3be59ed258"
                     }
                 ],
-                "row_hash": "5ec9b3b5975d31bb4314f83d6e43398d6e317ad2baaa5dd6ed461e36285119e7"
+                "row_hash": "03aff1f0b747cbf45bb53ab65ea55357837c37b59335452ca1cf410b94659c6a"
             },
             {
                 "control_id": 242,
-                "source_row": 126,
+                "source_row": 127,
                 "name": "Kontrola adekvátních atributů pro výpočet zálohy na daň rezidentů s prohlášením poplatníka daně",
                 "attribute_refs_raw": "10307\n10309\n10416\n10310\n10419\n10068",
                 "symbolic_attribute_refs": [],
@@ -4752,11 +4786,11 @@
                         "row_hash": "6fbbe4232d41bd1bc586acb1298ed1b3724a80f26632034a95223ec2fc45d9a4"
                     }
                 ],
-                "row_hash": "f14752919adc6cc9c48bd51b4eb50abc99a79e22628944e2c3e6035039a65948"
+                "row_hash": "7baa4615a3ee9376e308f97c570fae5bfce4553a939cfa5f8962db8fb896b9c0"
             },
             {
                 "control_id": 243,
-                "source_row": 127,
+                "source_row": 128,
                 "name": "Kontrola adekvátních atributů pro výpočet zálohy na daň nerezidentů  s prohlášením poplatníka daně",
                 "attribute_refs_raw": "10300\n10301\n10302\n10303\n10453\n10431\n10432\n10433\n10434\n10435\n10436\n10437\n10438\n10439\n10440\n10304\n10306\n10419\n10307\n10309\n10310\n10068",
                 "symbolic_attribute_refs": [],
@@ -4886,11 +4920,11 @@
                         "row_hash": "4cd5e1bd966ec13f5eac5604c7a7dc0c19bfe5812cc131d37a6e143062280448"
                     }
                 ],
-                "row_hash": "44235c61a917081ee16b77605f3120cf8a6a1bcfc97cc5a7d4fe5872c1bb17ba"
+                "row_hash": "0611dfb2ae2fa623c4e1a5c869a7af16c07b1e16ad689ca7197e8c097e7a26a7"
             },
             {
                 "control_id": 244,
-                "source_row": 128,
+                "source_row": 129,
                 "name": "Kontrola neuplatnění daňových slev a zvýhodnění rezidentů bez prohlášení poplatníka",
                 "attribute_refs_raw": "10299\n10300\n10301\n10302\n10303\n10453\n10431\n10432\n10433\n10434\n10435\n10436\n10437\n10438\n10439\n10440\n10304\n10306\n10419",
                 "symbolic_attribute_refs": [],
@@ -5005,11 +5039,11 @@
                         "row_hash": "89545b8ff0ec5c37af11f082673e34d07efffd014eeb15c340445196d4ce8041"
                     }
                 ],
-                "row_hash": "6c374c63d02f7e4e8aa3fbf80ac18ab14ad7096b2d6c581f5913d8cbe05fa764"
+                "row_hash": "12f37ac6047baae9c7981c0a44119a6b6a8afde425bf7ec1d8be3e07443c2309"
             },
             {
                 "control_id": 245,
-                "source_row": 129,
+                "source_row": 130,
                 "name": "Kontrola adekvátních atributů pro výpočet srážkové daně bez prohlášení poplatníka - srážková daň",
                 "attribute_refs_raw": "10297\n10298\n10299\n10300\n10301\n10302\n10303\n10306\n10453\n10431\n10432\n10433\n10434\n10435\n10436\n10437\n10438\n10439\n10440\n10304\n10305\n10419\n10416\n10286\n10239\n10535",
                 "symbolic_attribute_refs": [],
@@ -5159,11 +5193,11 @@
                         "row_hash": "b6a61a386cb5b0e4c99b31a65b0bbae3bbca4455c102f5039b2d4b06d1a44c2a"
                     }
                 ],
-                "row_hash": "2310b9df928a3e6c32f43940590c6e6cbb4c5e05c6a54db7b0130572ae4d93c3"
+                "row_hash": "fe2da2c2aa17ea5dfda4a307928927cb17370b8bfb564a25740b4e6ce4c058e4"
             },
             {
                 "control_id": 248,
-                "source_row": 130,
+                "source_row": 131,
                 "name": "Kontrola vyplnění dat souhrnné vrstvy za zaměstnance jen pro primární pracovněprávní vztah zaměstnance",
                 "attribute_refs_raw": "10286\n10416\n10289\n10417\n10292\n10293\n10294\n10295\n10296\n10418\n10419\n10297\n10298\n10299\n10300\n10301\n10302\n10303\n10453\n10431\n10432\n10433\n10434\n10435\n10436\n10437\n10438\n10439\n10440\n10304\n10305\n10306\n10307\n10308\n10309\n10310\n10313\n10317\n10316\n10318\n10311\n10312\n10319\n10320\n10321\n10322\n10323\n10420\n10421\n10422\n10423\n10424\n10425\n10426\n10430\n10539\n10540\n10541\n10542\n10454\n10455\n10441\n10442\n10443\n10444\n10445\n10446\n10447\n10448\n10449\n10450\n10451\n10344\n10116\n10348\n10349\n10347\n10350\n10351\n10352\n10353\n10482\n10371\n10495",
                 "symbolic_attribute_refs": [],
@@ -5603,11 +5637,11 @@
                         "row_hash": "c852c7936f459d3aa2f7cebd0657a5599514f71d85ed316390df9e85896f8ea4"
                     }
                 ],
-                "row_hash": "d2a3d4589bb652e012a8dfb38a52f6f5764c38e18d0c93c7946fcf239d97890a"
+                "row_hash": "99f88aada14d7dce07f5cf5a1960752b74b6910e0086f216e9150d20e32be77d"
             },
             {
                 "control_id": 251,
-                "source_row": 131,
+                "source_row": 132,
                 "name": "Kontrola vícečetnosti stejných IDPPV v součástí individualizovaných částí.",
                 "attribute_refs_raw": "10228\n10548",
                 "symbolic_attribute_refs": [],
@@ -5637,11 +5671,11 @@
                         "row_hash": "c31159c8bf7997325edf9afe6f163fcdbf52dba87ca42646b51f0465ef2d3e0f"
                     }
                 ],
-                "row_hash": "bcc142629c523752505f77dce78c2631e826486d4c866cc91de1b688ff2478bf"
+                "row_hash": "bd420fc1aa1fb42dddb2898d6c87c9b1b6d1dfdf2c9ac70f0d317e65ee5fd04c"
             },
             {
                 "control_id": 253,
-                "source_row": 132,
+                "source_row": 133,
                 "name": "Kontrola unikátnosti ID PPV v rámci dílčího podání",
                 "attribute_refs_raw": "10228",
                 "symbolic_attribute_refs": [],
@@ -5666,11 +5700,11 @@
                         "row_hash": "e389fe76376c7338dd3f13f891ea7e68e5013c99afad2b4220bd8ea9301ce33d"
                     }
                 ],
-                "row_hash": "e3b5e9971aac83e98f227af40a76401f29a65fe5e54a23425e8e156d27c4df11"
+                "row_hash": "5dff91c8e4c42f87f0d29e5465053ec29c4543361b7b9d22bd54132452270017"
             },
             {
                 "control_id": 255,
-                "source_row": 133,
+                "source_row": 134,
                 "name": "Kontrola existence min. jednoho primárního PPV za OIČ v rámci podání.",
                 "attribute_refs_raw": "10495",
                 "symbolic_attribute_refs": [],
@@ -5695,11 +5729,11 @@
                         "row_hash": "8ed7c0a54fe016a28f001b022018d437ef0022c318e3d4e48a234b515e7fd38c"
                     }
                 ],
-                "row_hash": "dcad109bd8ab52dd33c84293f0c1f4c9769796b909825ba4653174f0b0730403"
+                "row_hash": "52b3ed86f9cca13018f132a653c30692b791b9580c2cca78182411e00a5851aa"
             },
             {
                 "control_id": 258,
-                "source_row": 134,
+                "source_row": 135,
                 "name": "Kontrola srážek ze mzdy nebo platu",
                 "attribute_refs_raw": "10349\n10350\n10351\n10352\n10353",
                 "symbolic_attribute_refs": [],
@@ -5744,11 +5778,11 @@
                         "row_hash": "2e8047905fd0c7e5dc35e5c4b83570d8f64ddbfb22010c2679041dc0ffdb2ce8"
                     }
                 ],
-                "row_hash": "bf3f58ad30b875f8f3923f5ff30cc34cde59e0148f1855598b73e62c9e1b71e0"
+                "row_hash": "41fe004331b5fe1ca36a72acab0fd6b3fca1870d50beb20c88d0f231ae58a02b"
             },
             {
                 "control_id": 259,
-                "source_row": 135,
+                "source_row": 136,
                 "name": "Kontrola směn v hlubinném hornictví.",
                 "attribute_refs_raw": "10270\n10272\n10271",
                 "symbolic_attribute_refs": [],
@@ -5783,11 +5817,11 @@
                         "row_hash": "7fc3d76a763faf2146e1573eaca80ac9b6614524aa119b411fc1fe60799459f8"
                     }
                 ],
-                "row_hash": "cd8180ffcede89654853ec8fea6aa979a0f1809697a6b0ef7840692053b75347"
+                "row_hash": "1f01f6909461dd819dae53fb95c7c8fe0afada377f3cc98c33b67fbd2646656f"
             },
             {
                 "control_id": 260,
-                "source_row": 136,
+                "source_row": 137,
                 "name": "Kontrola existence max. jednoho primárního PPV za OIČ v rámci podání.",
                 "attribute_refs_raw": "10495",
                 "symbolic_attribute_refs": [],
@@ -5812,11 +5846,11 @@
                         "row_hash": "8ed7c0a54fe016a28f001b022018d437ef0022c318e3d4e48a234b515e7fd38c"
                     }
                 ],
-                "row_hash": "0698e63f976f6da92a4ae82ec5d67362cc2b50d8162e4e2940cdc84b117213f7"
+                "row_hash": "7dea839b50986d3cdbe70a481bbcff6cf803c2e34a493c709b511beaa6fcfa07"
             },
             {
                 "control_id": 261,
-                "source_row": 137,
+                "source_row": 138,
                 "name": "Kontrola odpovídajícího  ID PPV a VS v systémech ČSSZ",
                 "attribute_refs_raw": "10228\n10221",
                 "symbolic_attribute_refs": [],
@@ -5846,11 +5880,11 @@
                         "row_hash": "9fe82e684d5a43e6fa875d4e6ba73b69f5877a300167bf1a295a558ca6622a7a"
                     }
                 ],
-                "row_hash": "455daf7bffe0aab2efb5ec665523b06e92bdb82630e30c44b3743a9ce17b05e2"
+                "row_hash": "76b7c160393e03907df42b3a320414a5e863803eb0d6cf20b643b385d8cbb9ec"
             },
             {
                 "control_id": 262,
-                "source_row": 138,
+                "source_row": 139,
                 "name": "Kontrola existence ID PPV v systémech ČSSZ",
                 "attribute_refs_raw": "10228",
                 "symbolic_attribute_refs": [],
@@ -5875,11 +5909,11 @@
                         "row_hash": "e389fe76376c7338dd3f13f891ea7e68e5013c99afad2b4220bd8ea9301ce33d"
                     }
                 ],
-                "row_hash": "f9f3f8ce899c91b6df69ed17f914478ddd7f9280b1598194ebbfc92dbd151f88"
+                "row_hash": "83906079ac499a1fcf1a211e898d58e1242bbf466afd260fd305ad591c69f53e"
             },
             {
                 "control_id": 263,
-                "source_row": 139,
+                "source_row": 140,
                 "name": "Kontrola existence IK MPSV v systémech ČSSZ",
                 "attribute_refs_raw": "10051",
                 "symbolic_attribute_refs": [],
@@ -5904,11 +5938,11 @@
                         "row_hash": "b8d0058306153aba9857d091ed470a2369415d16c3e05c66168e3a50acbe27db"
                     }
                 ],
-                "row_hash": "1f87f9008c6c7a313f130475595736644bc33da8b8f3586ee4571720afddd827"
+                "row_hash": "23c109d28273925ad01e7ef2516c86b3d3283b950a5c167e54b8d8406bcaee9b"
             },
             {
                 "control_id": 264,
-                "source_row": 140,
+                "source_row": 141,
                 "name": "Kontrola existence IK MPSV a ID PPV v systémech ČSSZ",
                 "attribute_refs_raw": "10051\n10228",
                 "symbolic_attribute_refs": [],
@@ -5938,11 +5972,11 @@
                         "row_hash": "fcc45a746b364a5ff1cc1d870836a4ab97567a7eacfe12996a5a1fe4525680df"
                     }
                 ],
-                "row_hash": "84a220efbbd012f8558d69aaef4cbdb4ddbf808467b13df1b3023331b48713c6"
+                "row_hash": "8115901e6d0b3b9784dc398858d3f87ddd03332f49f40e5967c484453eae67da"
             },
             {
                 "control_id": 265,
-                "source_row": 141,
+                "source_row": 142,
                 "name": "Pořadí pro určení výše daňového zvýhodnění",
                 "attribute_refs_raw": "10440",
                 "symbolic_attribute_refs": [],
@@ -5957,7 +5991,7 @@
                 "detail_text": "Hodnota musí být z číselníku.\n---\n10440 Pořadí pro určení výše daňového zvýhodnění",
                 "detail_formula": null,
                 "error_message": "Hodnota Pořadí pro určení výše daňového zvýhodnění neodpovídá číselníku.",
-                "error_message_formula": "=\"Hodnota \" & B141 & \" neodpovídá číselníku.\"",
+                "error_message_formula": "=\"Hodnota \" & B142 & \" neodpovídá číselníku.\"",
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [
@@ -5967,11 +6001,11 @@
                         "row_hash": "98547a629722d8ece8da0374c83e9912f38bf032cf5bb945b5e0780efcddb5a3"
                     }
                 ],
-                "row_hash": "9448721eb210734a7c5ed9791cc429c1eb336c4011635c224b4e1788455d83f2"
+                "row_hash": "c3af5c29c8f3d2855426e266453ce6ab96281b41877acc1e4bfeed11d26dded7"
             },
             {
                 "control_id": 267,
-                "source_row": 142,
+                "source_row": 143,
                 "name": "Kontrola nevyplnění dat pro rozklad při nulovém atributu Mzda za práci zúčtovaná",
                 "attribute_refs_raw": "10329\n10330\n10331\n10332\n10333\n10334\n10335\n10336\n10328",
                 "symbolic_attribute_refs": [],
@@ -6036,11 +6070,11 @@
                         "row_hash": "2e130ade4d1cd1a87edee901940efe41dab437f3bc8c145b32596ac8a1b73484"
                     }
                 ],
-                "row_hash": "c2e506de52ccdc7998ee8b44d21b1866b101b503dbcdde2d96bc3229449ce33a"
+                "row_hash": "4e8360793032ebf51dc0393f6781262d367a8db428a0c187d6edd586da4d999c"
             },
             {
                 "control_id": 269,
-                "source_row": 143,
+                "source_row": 144,
                 "name": "Kontrola Úhrn vyměřovacích základů zaměstnanců, kteří mají nárok na slevu na pojistném zaměstnance",
                 "attribute_refs_raw": "10544\n10477\n10546",
                 "symbolic_attribute_refs": [],
@@ -6075,11 +6109,11 @@
                         "row_hash": "3482b3151433ff72e6ce89202103cc2ce366500eec5b1e59b8cba4c0d02bb227"
                     }
                 ],
-                "row_hash": "5b28e7336d30b07ae92fbb84ef54c419695ab93634a5403ce5de1687b32d376b"
+                "row_hash": "c032352cd693e09d07ce81957f67faa1dbb9a2faca76da9d8c581e3ef6497fb5"
             },
             {
                 "control_id": 270,
-                "source_row": 144,
+                "source_row": 145,
                 "name": "Úhrn slev na pojistném zaměstnanců",
                 "attribute_refs_raw": "10545\n10544",
                 "symbolic_attribute_refs": [],
@@ -6109,11 +6143,11 @@
                         "row_hash": "48338fa69a41568747e26f471e730e2edc92c63bb894c1be18f648d4d61cf31e"
                     }
                 ],
-                "row_hash": "a4cdf83d48c35af9a3634f9424b8f028a35ae2dae97fffdaf64bdeefdc76fdcc"
+                "row_hash": "80817bd48d878222a5e420a55bb0699cbd2506c81ae2bb1eebff161c88a2ea5d"
             },
             {
                 "control_id": 271,
-                "source_row": 145,
+                "source_row": 146,
                 "name": "Kontrola uplatnění slevy pro ovocnáře",
                 "attribute_refs_raw": "10546\n10477",
                 "symbolic_attribute_refs": [],
@@ -6143,11 +6177,11 @@
                         "row_hash": "8eb6e4e0ed99dfd0a50cad3f6deb4d2a208c80895227a6657ba23d2d96ad657d"
                     }
                 ],
-                "row_hash": "c98d0986622c896a608cdfbd00922f455c84626122f29aea2122df7025acb0cf"
+                "row_hash": "3be84e4ad9d9fb137e7f47a1df23a5082895d1d8343755afb90747924cc6dd6c"
             },
             {
                 "control_id": 272,
-                "source_row": 146,
+                "source_row": 147,
                 "name": "Vylpnění výše slevy na pojistném zaměstnance pro ovocnářství a pěstování zeleniny",
                 "attribute_refs_raw": "10547\n10546",
                 "symbolic_attribute_refs": [],
@@ -6177,11 +6211,11 @@
                         "row_hash": "7c57b13d23d0de5bdd19781ff286e3f6f8b0f9e5ad787e1e7aad3806687a7100"
                     }
                 ],
-                "row_hash": "1bc9b07e1db937c5c284172ff1bff27ca14680db2a12f067687f9c6fd38b13c0"
+                "row_hash": "aba1da2304ce3549e950c82cb7a2f9c02b570d121f27ea3dc4667ffdae96f609"
             },
             {
                 "control_id": 273,
-                "source_row": 147,
+                "source_row": 148,
                 "name": "Kontrola slevy a pojištění pro ovocnářství a pěstování zeleniny",
                 "attribute_refs_raw": "10547\n10370\n10546",
                 "symbolic_attribute_refs": [],
@@ -6216,11 +6250,11 @@
                         "row_hash": "3482b3151433ff72e6ce89202103cc2ce366500eec5b1e59b8cba4c0d02bb227"
                     }
                 ],
-                "row_hash": "6dd4e1cf3be75fb392135414ccfa2dcd0df203e983c713a5902042c6d72d107b"
+                "row_hash": "914310611499e0025489ae4f5206c105c65bbbebf194bee04da224909e829775"
             },
             {
                 "control_id": 275,
-                "source_row": 148,
+                "source_row": 149,
                 "name": "Kontrola výlučnosti uplatnění slevy",
                 "attribute_refs_raw": "10490\n10546\n10228",
                 "symbolic_attribute_refs": [],
@@ -6255,11 +6289,11 @@
                         "row_hash": "a6eea43a28bc6835b09332f8038203f83a40f7e0c9c6c6986d6cdb79c067a824"
                     }
                 ],
-                "row_hash": "5f4661e2f83e1d153116b1fc84b2234d9ec6c4b14edcc7f56dc10035f2421262"
+                "row_hash": "e0b4af154e770925b2c043d96c4dd8d8442f5dd124618321b7567aecd537a56f"
             },
             {
                 "control_id": 276,
-                "source_row": 149,
+                "source_row": 150,
                 "name": "Počet měsíců uplatnění slevy souhlasí s možným počtem uplatnění",
                 "attribute_refs_raw": "10426",
                 "symbolic_attribute_refs": [],
@@ -6284,11 +6318,11 @@
                         "row_hash": "063cd8365bad340f94b2164733de08c7aa8690845a3eea0b14d0029239fc81e2"
                     }
                 ],
-                "row_hash": "a704f3d29ac29d211bfdd15a23f5a6323664061eefcd20477912dd6fc105919d"
+                "row_hash": "61b176e53abf3b128ffec563375ecb86b5bb469f8e4bcf741d7d635daa619678"
             },
             {
                 "control_id": 277,
-                "source_row": 150,
+                "source_row": 151,
                 "name": "Povinné RČ nebo datum narození při uplatnění slevy  podle § 35bb zákona o daních z příjmů (ZDP)",
                 "attribute_refs_raw": "10541\n10542",
                 "symbolic_attribute_refs": [],
@@ -6318,11 +6352,11 @@
                         "row_hash": "f91620f6e6fa01ac7c7faecfd77775044fc800055aa036e3648966fd0b0af6dd"
                     }
                 ],
-                "row_hash": "7b9438830f6489d2f0883920a66ea94e3aa8a7201e645fbf86175780b61943af"
+                "row_hash": "b5c28fa4c4a45245fe41420cc42a87bea0cb7f5f1f1a595e6f47f93825889e30"
             },
             {
                 "control_id": 278,
-                "source_row": 151,
+                "source_row": 152,
                 "name": "Kontrola věku dítěte pro uplatnění - I (výsledek ročního zúčtování sleva na manžela/manželku)",
                 "attribute_refs_raw": "10541\n10542\n10011",
                 "symbolic_attribute_refs": [],
@@ -6357,11 +6391,11 @@
                         "row_hash": "9a2f99811f84b2ce408ab27a555b078465a1c840531c498253836aca6c1d7a8a"
                     }
                 ],
-                "row_hash": "35a43eb392e9d9056054bd9bd8cf6f4203b169472d5481fcd2efa2fe31bb89fd"
+                "row_hash": "055e93dbc313e5924a34a9ef01037e16b34d1e023244b5e851b6c5c879807057"
             },
             {
                 "control_id": 280,
-                "source_row": 152,
+                "source_row": 153,
                 "name": "Úhrn slev na pojistném zaměstnanců",
                 "attribute_refs_raw": "10545\n10547",
                 "symbolic_attribute_refs": [],
@@ -6391,11 +6425,11 @@
                         "row_hash": "1129e3c471767defb6d5552839bd4510388a6376651d45175eb62ae79929f64b"
                     }
                 ],
-                "row_hash": "e8493e244d71c4f09f604b03504d6479bd0c473940aaee8dcc9833a4e082695e"
+                "row_hash": "1bc948c2f570af6bffc35adfd02be3fd991766d8ec085db2a891d916def6f43a"
             },
             {
                 "control_id": 282,
-                "source_row": 153,
+                "source_row": 154,
                 "name": "Kontrola nevyplnění dat odpracovaných hodin pro zaměstnání v hlubinném hornictví a rizikové práci",
                 "attribute_refs_raw": "10269\n10270\n10271\n10272\n10273\n10274\n10268",
                 "symbolic_attribute_refs": [],
@@ -6450,11 +6484,11 @@
                         "row_hash": "02d3366ca4d68fc37d0d47c6b2e031ae28df22efb6b417aba4967a14f4fd7070"
                     }
                 ],
-                "row_hash": "ce007b6bdc7248a3c43a1d47ed8d11034a5648829011dfdd3c5fd63145f51fec"
+                "row_hash": "710f810bc2b47a396da098cd531b20c8a3ff26aff03b091e6a0d2eb580fd7c1b"
             },
             {
                 "control_id": 283,
-                "source_row": 154,
+                "source_row": 155,
                 "name": "Kontrola nevyplnění dat pro zúčtovaný příjem - celkem",
                 "attribute_refs_raw": "10416\n10289\n10417\n10292\n10293\n10294\n10295\n10296\n10418\n10308\n10309\n10310\n10286",
                 "symbolic_attribute_refs": [],
@@ -6539,11 +6573,11 @@
                         "row_hash": "12d238bc224eed5b7b4162e90d967f90b701d5240132a4d4dbfe19e9602bb730"
                     }
                 ],
-                "row_hash": "b4a2e0ef346a0db715782cdd6e838b7e888196ef18c763b590262e598a9ed04c"
+                "row_hash": "e754a83aed589e797c85908c50fac7071e34d2242baf8ad0357b7762f3e3f645"
             },
             {
                 "control_id": 284,
-                "source_row": 155,
+                "source_row": 156,
                 "name": "Kontrola vyplnění min. jednoho atributu pro částku vyměřovacího základu zaměstnance, ze které je odváděno pojistné",
                 "attribute_refs_raw": "10478\n10479\n10480\n10477",
                 "symbolic_attribute_refs": [],
@@ -6583,11 +6617,11 @@
                         "row_hash": "d6225829d1dd05e67c838b8c536f0b796d1032ed866a69af974c433d04a3ce7b"
                     }
                 ],
-                "row_hash": "51076fef77fd3dbe1776c258edf7075c85bd3dbdcd57dea75ee00fbc5675ba13"
+                "row_hash": "fc2296dc222979afdf99ead312fc6cc4f6bc5d80abf440b0d23e91b6e96c2702"
             },
             {
                 "control_id": 286,
-                "source_row": 156,
+                "source_row": 157,
                 "name": "Kontrola nevyplnění atributů neodpracovaných hodin.",
                 "attribute_refs_raw": "10276\n10278\n10277\n10279\n10280\n10471\n10472\n10275",
                 "symbolic_attribute_refs": [],
@@ -6647,11 +6681,11 @@
                         "row_hash": "db98f4192432211521b3c029e995919ff45a86e52452c68cb6249ea3c2a1fec7"
                     }
                 ],
-                "row_hash": "dcfa526205d3dc42e5e21387d97fa9f1d1982da2821baf42af0b94346e1d9b4e"
+                "row_hash": "b8285e8e69f06bb2996c32eee58b5799f32c08c6081d8cd445a3a6c41b8f07d2"
             },
             {
                 "control_id": 290,
-                "source_row": 157,
+                "source_row": 158,
                 "name": "Kontrola na výši slevy na pojistném zaměstnavatele uplatněné v opravném hlášení podaném po zákonné lhůtě",
                 "attribute_refs_raw": "10032\n10006\n10010\n10011",
                 "symbolic_attribute_refs": [],
@@ -6663,9 +6697,9 @@
                 "remote_system": "cjmhz",
                 "remote_passability": "passable",
                 "category": "F5",
-                "detail_text": "U opravného podání (10007) = \"O\" poslaného po zákonné lhůtě se ověřuje, že hodnota atributu (10032) není vyšší než hodnota atributu (10032) uvedená v posledním hlášení doručeném v zákonné lhůtě, jehož pojistná část byla akceptována.\nPro hlášení za měsíce 01-03/2026 poslané po 30. 6. 2026 se ověřuje, že hodnota atributu (10032) není vyšší než hodnota atributu (10032) uvedená v posledním hlášení doručeném nejpozději 30. 6. 2026, jehož pojistná část byla akceptována.\n---\n10007\n10032 Sleva na pojistném zaměstnavatele (Přehled o výši pojistného)\n10006 Datum a čas přijetí podání\n10010 Měsíc\n10011 Rok",
+                "detail_text": "U podání poslaného po zákonné lhůtě se ověřuje, že hodnota atributu (10032) není vyšší než hodnota atributu (10032) uvedená v posledním hlášení doručeném v zákonné i po zákonné lhůtě, jehož pojistná část byla akceptována.\nPro hlášení za měsíce 01-03/2026 poslané po 30. 6. 2026 se ověřuje, že hodnota atributu (10032) není vyšší než hodnota atributu (10032) uvedená v posledním doručeném hlášení, jehož pojistná část byla akceptována.\n---\n10032 Sleva na pojistném zaměstnavatele (Přehled o výši pojistného)\n10006 Datum a čas přijetí podání\n10010 Měsíc\n10011 Rok",
                 "detail_formula": null,
-                "error_message": "Hlášením podaným po datu splatnosti pojistného nelze dodatečně uplatnit slevu na pojistném zaměstnavatele (zkrácené úvazky), resp. nelze uplatnit slevu ve vyšší výši, než v jaké byla uplatněna v posledním hlášení podaném v zákonné lhůtě.",
+                "error_message": "Hlášením podaným po datu splatnosti pojistného nelze dodatečně uplatnit slevu na pojistném zaměstnavatele (zkrácené úvazky), resp. nelze uplatnit slevu ve vyšší výši, než v jaké byla uplatněna v posledním hlášení podaném v zákonné lhůtě. \nPokud po uplynutí zákonné lhůty, zaměstnavatel v opravném hlášením snížil uplatněnou slevu, nelze již v následném opravném podání vykázat vyšší slevu, než v předchozím hlášení, jehož pojistná část byla akceptována.",
                 "error_message_formula": null,
                 "source_label": "nová",
                 "note": null,
@@ -6691,11 +6725,11 @@
                         "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
                     }
                 ],
-                "row_hash": "260c1846730c9d796537f0ed374424bff518ce2038bd3641c643c89012664f58"
+                "row_hash": "a7903fe03dc8433d8f8e94e04a9b5b494b941479484d776ed14bc85e44bea207"
             },
             {
                 "control_id": 291,
-                "source_row": 158,
+                "source_row": 159,
                 "name": "Kontrola platnosti záměru ve vztahu k zaměstnání, z něhož je sleva na pojistném zaměstnavatele za zaměstnance uplatňována",
                 "attribute_refs_raw": "10372\n10010\n10011\n10223\n10224\n10006\n+atr. OZUSPOJ",
                 "symbolic_attribute_refs": [
@@ -6747,11 +6781,11 @@
                         "row_hash": "5e88a50b6459dea3fc708a6d6cd0beead6979f6a72be16c52d1e7eca62ce0b11"
                     }
                 ],
-                "row_hash": "9665276f522658497e6a406668520a28d5aa4848711eb1c422f3ca5812136924"
+                "row_hash": "e66fd43e7baf65373a59f0773c2b00ffe0b6fd8d189f47f34d0333d9dd6f4800"
             },
             {
                 "control_id": 292,
-                "source_row": 159,
+                "source_row": 160,
                 "name": "Kontrola věku dítěte pro uplatnění - II (výsledek ročního zúčtování sleva na manžela/manželku)",
                 "attribute_refs_raw": "10426\n10541\n10542\n10011",
                 "symbolic_attribute_refs": [],
@@ -6791,11 +6825,11 @@
                         "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
                     }
                 ],
-                "row_hash": "e9181688ea6785d8f6cd59a54c569d6bd44ea5807939f2aa52f0444d314fa68a"
+                "row_hash": "a09af1702ee5fc25373e3e37a74639f07affa1f59b82cb449c2ef65f25380ef8"
             },
             {
                 "control_id": 293,
-                "source_row": 160,
+                "source_row": 161,
                 "name": "Kontrola na datum od a do (průběh studia) jsou v rámci vykazovaného měsíce",
                 "attribute_refs_raw": "10263\n10264\n10010\n10011",
                 "symbolic_attribute_refs": [],
@@ -6835,11 +6869,11 @@
                         "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
                     }
                 ],
-                "row_hash": "f90521a072a2293c705c6a91d431bdc8f63a09025726a0cd8b7a3cc32d73b34e"
+                "row_hash": "4fcda8e12eb72fda7a57de12fe8de7478d0b0609b66f7a44859ee615023de931"
             },
             {
                 "control_id": 296,
-                "source_row": 161,
+                "source_row": 162,
                 "name": "Sleva na pojistném zaměstnanců v ovocnářství jen z DPP",
                 "attribute_refs_raw": "10546\n10239",
                 "symbolic_attribute_refs": [],
@@ -6869,11 +6903,11 @@
                         "row_hash": "200a4429016707acf9b8163a68dcaa089f75858aa5b7d4b85d38c8916b552c8d"
                     }
                 ],
-                "row_hash": "e432906af3dc53e2c05bdc6fea1b47b7e4523912c22d8dc1710bb323092e3492"
+                "row_hash": "874244c166b3f566c1c377a7e9b4e7c5405aa201cf1c6f09f5568c3dccc78d02"
             },
             {
                 "control_id": 297,
-                "source_row": 162,
+                "source_row": 163,
                 "name": "Počet zaměstnanců se slevou – pracující důchodci",
                 "attribute_refs_raw": "10485\n10490",
                 "symbolic_attribute_refs": [],
@@ -6903,11 +6937,11 @@
                         "row_hash": "d37ae9f8328dadca3fe240a159ab758697604ac49d7f18bbe52ec1c693115a95"
                     }
                 ],
-                "row_hash": "2df0f5925bc63b61c784390cf5a68042cafabb4eedea1b205ba19800be3f6d6c"
+                "row_hash": "5d13179becd32e32fda1522fea34ebbab63e23f740a28a10a7d10699003f0db2"
             },
             {
                 "control_id": 298,
-                "source_row": 163,
+                "source_row": 164,
                 "name": "Počet zaměstnanců se slevou – ovocnáři",
                 "attribute_refs_raw": "10543\n10546",
                 "symbolic_attribute_refs": [],
@@ -6937,11 +6971,11 @@
                         "row_hash": "7c57b13d23d0de5bdd19781ff286e3f6f8b0f9e5ad787e1e7aad3806687a7100"
                     }
                 ],
-                "row_hash": "4c547c54ea46d3d5c21bc782a3c07537b80af9117dd0a440d2812aed7cfce7ed"
+                "row_hash": "324d1b60fc2816553d4b9ce370e193efccd37caa303c5e2fde3701097773294d"
             },
             {
                 "control_id": 299,
-                "source_row": 164,
+                "source_row": 165,
                 "name": "Kontrola datumu pojištění od a do v průběhu pojištění v měsíci",
                 "attribute_refs_raw": "10354\n10355\n10011\n10010",
                 "symbolic_attribute_refs": [],
@@ -6981,11 +7015,11 @@
                         "row_hash": "0e7daa864119dd7553c958a69d6fb30d219bd1c0cdbff977964e8ba4c5188cf2"
                     }
                 ],
-                "row_hash": "4cb172194bfb0ab531fa882e2b34648c93c75bd903940ccf8beb6cb642e28619"
+                "row_hash": "86de76017437e179538665697a5a1c6a026b59998292daaeee75c6ab4e802d48"
             },
             {
                 "control_id": 300,
-                "source_row": 165,
+                "source_row": 166,
                 "name": "Kontrola na celkový počet formulářů v prvním dílčím podání",
                 "attribute_refs_raw": "10015",
                 "symbolic_attribute_refs": [],
@@ -7010,11 +7044,11 @@
                         "row_hash": "818626776569df8896d19a4c01a457b0b7135ec4f9a13f8dfa5fb85464795bd0"
                     }
                 ],
-                "row_hash": "f52ca9a2a3b91a390e98a5306224f7b33b220de5bee83ede5a323f601cc824a4"
+                "row_hash": "bf14108bf6362aa62c050c5f87694410d09810ebe2529890f1200414c9a900c2"
             },
             {
                 "control_id": 301,
-                "source_row": 166,
+                "source_row": 167,
                 "name": "Kontrola na celkový počet formulářů v druhém a dalších dílčích podáních",
                 "attribute_refs_raw": "10015",
                 "symbolic_attribute_refs": [],
@@ -7039,11 +7073,11 @@
                         "row_hash": "818626776569df8896d19a4c01a457b0b7135ec4f9a13f8dfa5fb85464795bd0"
                     }
                 ],
-                "row_hash": "a91e95d691d6d73fa1268935d8fb3bdeedf20dbbf3ad7a4296ca3e95cb3502dc"
+                "row_hash": "e95f1517c01c3c17d82b7a069dfcadfd318caef706ce7a3886771dc97fbcd63b"
             },
             {
                 "control_id": 302,
-                "source_row": 167,
+                "source_row": 168,
                 "name": "Kód státu zahraniční právnické osoby nebo zahraniční fyzické osoby",
                 "attribute_refs_raw": "10492",
                 "symbolic_attribute_refs": [],
@@ -7058,7 +7092,7 @@
                 "detail_text": "Hodnota musí být z číselníku\n---\n10492 Kód státu zahraniční právnické osoby nebo zahraniční fyzické osoby",
                 "detail_formula": null,
                 "error_message": "Hodnota Kód státu zahraniční právnické osoby nebo zahraniční fyzické osoby neodpovídá číselníku.",
-                "error_message_formula": "=\"Hodnota \" & B167 & \" neodpovídá číselníku.\"",
+                "error_message_formula": "=\"Hodnota \" & B168 & \" neodpovídá číselníku.\"",
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [
@@ -7068,11 +7102,11 @@
                         "row_hash": "1c0e72b5056838e68a3390ea388c9bec6c13141b47e26c69ff4e79c10e0134b0"
                     }
                 ],
-                "row_hash": "9317ca27b5f961fa5faf8435fa4470184e0803f39b4046a7c45b086e4890b98f"
+                "row_hash": "865d7d4759b7bfdc6c6cab34e701dbac8f4f54c30b3413891f48965c573efc55"
             },
             {
                 "control_id": 303,
-                "source_row": 168,
+                "source_row": 169,
                 "name": "Kontrola na typ formuláře v součásti indiv. části",
                 "attribute_refs_raw": "10016",
                 "symbolic_attribute_refs": [],
@@ -7097,11 +7131,11 @@
                         "row_hash": "8292898c6ac413b69261b6d3d3cead5a8e3de1e2381cc2bf4cefa7f77ec121c5"
                     }
                 ],
-                "row_hash": "ade2bbac48fc8e45d4544cfffd1e44b97b7fcf5f8e4c9d45e18e6708a4aaf7ab"
+                "row_hash": "95a68f55fec545bb60aec21e54ee2e4b539ccd4426c65c263e7778a3a2c05d77"
             },
             {
                 "control_id": 304,
-                "source_row": 169,
+                "source_row": 170,
                 "name": "Vyplnění položky Základ pro výpočet daně",
                 "attribute_refs_raw": "10535",
                 "symbolic_attribute_refs": [],
@@ -7126,11 +7160,11 @@
                         "row_hash": "d67e51b6e55cd9f02df41d72b6e00f8a4232bc3574ac5769771e34f9f76b23c8"
                     }
                 ],
-                "row_hash": "41c48c0df1f4d37e9a7a086896a4a9afac42b301d85ab3ee01b009e2e55dfc0d"
+                "row_hash": "2eedbc6c502caadc07714939d0b53dcd2961c102355968db96e501cded95d134"
             },
             {
                 "control_id": 305,
-                "source_row": 170,
+                "source_row": 171,
                 "name": "Jedinečnost GUID podání",
                 "attribute_refs_raw": "10001\n10010\n10011\n10221",
                 "symbolic_attribute_refs": [],
@@ -7170,11 +7204,11 @@
                         "row_hash": "a0eba463b23a28a0a7f011df03b874d2eb8be1ceb670547a64a3c07f724dc3ea"
                     }
                 ],
-                "row_hash": "d127115ba4f57978331d4d5e5609ff932e0593aea231cb76d116e94d9b97429d"
+                "row_hash": "983cd3d4f075d296207299147c81070ffb6aba5b153c9218cd08dd97b10b8231"
             },
             {
                 "control_id": 306,
-                "source_row": 171,
+                "source_row": 172,
                 "name": "Jedinečnost GUID formuláře",
                 "attribute_refs_raw": "10012\n10010\n10011\n10221\n10228",
                 "symbolic_attribute_refs": [],
@@ -7219,11 +7253,11 @@
                         "row_hash": "fabb0c4bd0ab59a513f24a452adc4cc72316546bbbfd87e87840763424e4fb0f"
                     }
                 ],
-                "row_hash": "57f057897989084923424757cad550e0b8a1cee79cb3078cb927816e36d249e1"
+                "row_hash": "03907b415e69001aa29093fe4733f41c0dabb8c5ea96840b5bae17ffce1d470f"
             },
             {
                 "control_id": 307,
-                "source_row": 172,
+                "source_row": 173,
                 "name": "Kontrola vyplnění dat ELDP",
                 "attribute_refs_raw": "10241\n10242\n10245\n10357\n10358\n10359\n10360\n10362\n10536\n10375\n10462\n10463\n10464\n10465\n10466\n10468\n10469\n10240",
                 "symbolic_attribute_refs": [],
@@ -7333,11 +7367,11 @@
                         "row_hash": "cb8743851e9c93d21fd93f6de43e49a869d1f270a716223d86dc5b1b69df81b0"
                     }
                 ],
-                "row_hash": "4481c89e301982dbdd9492b09f58243700611c593141910300c3761a9e3f5523"
+                "row_hash": "b742e50a70f9671fe6df81d33be8ce5b6d6f309651d2b3bd0bb33f2055424cc6"
             },
             {
                 "control_id": 308,
-                "source_row": 173,
+                "source_row": 174,
                 "name": "Kontrola částí podání ve stronovaném měsíčním hlášení",
                 "attribute_refs_raw": "10007",
                 "symbolic_attribute_refs": [],
@@ -7362,11 +7396,11 @@
                         "row_hash": "334f645a5c679a91a832581bced2be002b336e9cd1c11df95817395b5dba8895"
                     }
                 ],
-                "row_hash": "f263cf38a6c7f7c68a3ed406494d0bf16a078c5918bdb46dd027e56ae5dbda6f"
+                "row_hash": "b4a8416a4fbd9cf5550d9a7b5def85b88f4fddca64a9f2502be69661263fb9b9"
             },
             {
                 "control_id": 309,
-                "source_row": 174,
+                "source_row": 175,
                 "name": "Uvedení trvání pojištění v daném měsíci",
                 "attribute_refs_raw": "10356\n10375\n10240\n10354\n10355\n10243",
                 "symbolic_attribute_refs": [],
@@ -7416,11 +7450,11 @@
                         "row_hash": "76be9157473abd2479e00a1154fe0d7e409f4ed20a3b340bf7c33f963c47b1c6"
                     }
                 ],
-                "row_hash": "bbe2e3ea746141f3f2ef5fca1e56c85def82fa26f373b50b1f586ae0e1ded77c"
+                "row_hash": "c56006a5c8625c2cbdd360708602e224e9b42f55a8b51cf4153c8a130a51e628"
             },
             {
                 "control_id": 310,
-                "source_row": 175,
+                "source_row": 176,
                 "name": "Roční zúčtování záloh bylo provedeno",
                 "attribute_refs_raw": "10321\n10322\n10323\n10420\n10421\n10422\n10423\n10424\n10425\n10426\n10430\n10539\n10540\n10541\n10542\n10454\n10455\n10441\n10442\n10443\n10444\n10445\n10446\n10447\n10448\n10449\n10450\n10451\n10320",
                 "symbolic_attribute_refs": [],
@@ -7585,11 +7619,11 @@
                         "row_hash": "b2ec98c698f891bd55e4efbf424066cc28175ef8ba7b0b5c8d2ac091b275eebc"
                     }
                 ],
-                "row_hash": "ca3af0cd92e0dbdb474fe9349dd03c2e892167b0e8ce988ff9fdf4058b27167d"
+                "row_hash": "51f98d8836fc70d0b92f65e68a7fffa0ea18470af92e673e3f7133d7544233fa"
             },
             {
                 "control_id": 311,
-                "source_row": 176,
+                "source_row": 177,
                 "name": "Roční zúčtování záloh bylo provedeno v jednom měsíci",
                 "attribute_refs_raw": "10320\n10010\n10011",
                 "symbolic_attribute_refs": [],
@@ -7624,11 +7658,11 @@
                         "row_hash": "9a2f99811f84b2ce408ab27a555b078465a1c840531c498253836aca6c1d7a8a"
                     }
                 ],
-                "row_hash": "ee24cb733df80e7b74e6c36c658ed89e81bae6d43df0b04b83c27e5568f2d7da"
+                "row_hash": "6a5475711ad50aaaf5f9b0dba936ad9aa6d3a2ec7f417c8a8783587684723cd2"
             },
             {
                 "control_id": 312,
-                "source_row": 177,
+                "source_row": 178,
                 "name": "Pořadí pro určení výše daňového zvýhodnění tvoří řadu ve výsledku ročního zúčtování",
                 "attribute_refs_raw": "10451",
                 "symbolic_attribute_refs": [],
@@ -7653,11 +7687,11 @@
                         "row_hash": "77edc46c70479484f42acada0527a1daa94761880bcfab4ecf93ddcecb65ba11"
                     }
                 ],
-                "row_hash": "68c59ac1d5896de8825a1ac2b5c87562c140b85a685c77a88371a7a901bfb007"
+                "row_hash": "11176836675f395b50c3161f3b5390c531a39909e474c198b72b6896f8848ec5"
             },
             {
                 "control_id": 315,
-                "source_row": 178,
+                "source_row": 179,
                 "name": "Vypočitané pojistné na soc. zabezpečení neodpovídá úhrnu vyměřovacích základů zaměstnanců.",
                 "attribute_refs_raw": "10481\n10477\n10478\n10479\n10480",
                 "symbolic_attribute_refs": [],
@@ -7702,11 +7736,11 @@
                         "row_hash": "335be6fee65d3792ad5fe88b707ec0b38c471370b873a3cbb6daef7d0b32da70"
                     }
                 ],
-                "row_hash": "39dff21a3f527bda0eab2425ce05bfc2b6c914530f625898a6f047e0e7468af0"
+                "row_hash": "b83c26b0202dc78d8463a598c86db2cc099f2c41d562e59be020b81c12087bfc"
             },
             {
                 "control_id": 321,
-                "source_row": 179,
+                "source_row": 180,
                 "name": "Pozitivní kontrola na vyplnění adekvátních atributů v souhrnné vrstvě zaměstnance",
                 "attribute_refs_raw": "10286\n10416\n10289\n10417\n10292\n10293\n10294\n10295\n10296\n10418\n10419\n10297\n10298\n10299\n10300\n10301\n10302\n10303\n10453\n10431\n10432\n10433\n10434\n10435\n10436\n10437\n10438\n10439\n10440\n10304\n10305\n10306\n10307\n10308\n10309\n10310\n10313\n10317\n10316\n10318\n10311\n10312\n10319\n10320\n10321\n10322\n10323\n10420\n10421\n10422\n10423\n10424\n10425\n10426\n10430\n10539\n10540\n10541\n10542\n10454\n10455\n10441\n10442\n10443\n10444\n10445\n10446\n10447\n10448\n10449\n10450\n10451\n10344\n10116\n10348\n10349\n10347\n10351\n10352\n10353\n10482\n10371\n10495",
                 "symbolic_attribute_refs": [],
@@ -8141,11 +8175,11 @@
                         "row_hash": "8a3e674e90fc28809a575248908d721140911734237c91b3c779f18cb00cd859"
                     }
                 ],
-                "row_hash": "111914542f59909d6a8454ba5f53053bf158241e1b64053ce1bce9a79ba8e364"
+                "row_hash": "e7af4daa35d9fef4e6cb213c399f029c9546bbb1b552b4dbe60fcabb4d9989b6"
             },
             {
                 "control_id": 323,
-                "source_row": 180,
+                "source_row": 181,
                 "name": "Kontrola datové integrity podání",
                 "attribute_refs_raw": null,
                 "symbolic_attribute_refs": [],
@@ -8164,11 +8198,11 @@
                 "source_label": "nová",
                 "note": "Kontrola ověřuje, zda nebylo podání do systému přijato duplicitně. Kontroluje jedinečnost interního identifikátoru podání (disMsgCid) a data/času přijetí podání (10006). Jedná se o systémovou technickou kontrolu sloužící k detekci duplicitních podání. Při zjištění duplicity je zamítnuto celé podání.",
                 "attribute_refs": [],
-                "row_hash": "767764675c6a0dd42b7eff28703ca6a8f97406ce2ef1159d3ce04e48302ba552"
+                "row_hash": "10d5f7042825954d2f3891b1f91f9e1f16370418257623473a0a17fc70a509fe"
             },
             {
                 "control_id": 325,
-                "source_row": 181,
+                "source_row": 182,
                 "name": "Kontrola adekvátních atributů pro výpočet zálohy na daň rezidentů - zálohová daň",
                 "attribute_refs_raw": "10307\n10309\n10416\n10535\n10239",
                 "symbolic_attribute_refs": [],
@@ -8213,11 +8247,11 @@
                         "row_hash": "8bb3bd8a789c39b42c534dd6926e1ca837206d015cd3eefd2be5fd7b0a73b531"
                     }
                 ],
-                "row_hash": "7c2b7152e991251e7612bca3c89fcc221935597d40c713375e0f9775ed95e74b"
+                "row_hash": "0084841ae01d57be77a641220c8f48bdacd55c477d5085017ef6a1ca5a07e6ca"
             },
             {
                 "control_id": 326,
-                "source_row": 182,
+                "source_row": 183,
                 "name": "Kontrola právě jednoho řádného podání",
                 "attribute_refs_raw": "10010\n10011\n10221",
                 "symbolic_attribute_refs": [],
@@ -8252,11 +8286,11 @@
                         "row_hash": "652085f60f98f85029387e9a04f9b7311287ea1cf87e1f58536c255bcc3c9c8e"
                     }
                 ],
-                "row_hash": "ee7849165e463a26bd389e896c29071b6fa59d3cfd20424cef5357d7fc04d366"
+                "row_hash": "4f0ad1fbe52fdd809c8e57dc08b5d716ea1c977db38e488918a2d6d2f7d3395e"
             },
             {
                 "control_id": 328,
-                "source_row": 183,
+                "source_row": 184,
                 "name": "Kontrola nevyplnění údajů při nulovém počtu dnů doby odečítané po dosažení důchodového věku",
                 "attribute_refs_raw": "10462\n10463\n10464\n10465\n10466\n10468\n10469\n10375",
                 "symbolic_attribute_refs": [],
@@ -8316,11 +8350,11 @@
                         "row_hash": "05a10f6bc3abe9d2a621815cb0c9403aca24947358963c0f1419a33c5fb9579a"
                     }
                 ],
-                "row_hash": "4513ed5adb620e40bc5d9f986a1943a6ca5327fcfff1445e0dd24bbc4109880f"
+                "row_hash": "1e94cd924521f3f2dd83c7cd875b29eb8f96fee5e0d68eb96143667c2df1f12b"
             },
             {
                 "control_id": 329,
-                "source_row": 184,
+                "source_row": 185,
                 "name": "Kontrola nevyplnění údajů důvodů při nulové době vyloučených dob",
                 "attribute_refs_raw": "10358\n10359\n10360\n10362\n10536\n10357",
                 "symbolic_attribute_refs": [],
@@ -8370,11 +8404,11 @@
                         "row_hash": "2780775f4bae2247a9bf7c65c8fd65846743224187c6f1eefbfcbefc2b70cc91"
                     }
                 ],
-                "row_hash": "06a2fcf276ac49d704ab0e802882df791908ba8aa5e770cdb4096df6dad9c35c"
+                "row_hash": "a5b6dd4d36a44bd88514ea96a8cc6b07f0eefdff9e3592c8ee18fcac20e9e810"
             },
             {
                 "control_id": 330,
-                "source_row": 185,
+                "source_row": 186,
                 "name": "Kontrola povinnosti uvedení kódu ELDP při započtených dnech důchodového pojištění",
                 "attribute_refs_raw": null,
                 "symbolic_attribute_refs": [],
@@ -8393,11 +8427,11 @@
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [],
-                "row_hash": "6110f9402b6a2e97af5eed752d61cfbcf730f820ed77910e867aa0f4529665e1"
+                "row_hash": "06c460e3986eb7ebf3d724c15daf795eaeb0e4b7074aa89aec24fe17deea97c9"
             },
             {
                 "control_id": 331,
-                "source_row": 186,
+                "source_row": 187,
                 "name": "Typ Odloženého příjmu",
                 "attribute_refs_raw": "10548",
                 "symbolic_attribute_refs": [],
@@ -8412,7 +8446,7 @@
                 "detail_text": "Hodnota musí být z číselníku.\n---\n10548 Typ Odloženého příjmu",
                 "detail_formula": null,
                 "error_message": "Hodnota Typ Odloženého příjmu neodpovídá číselníku.",
-                "error_message_formula": "=\"Hodnota \" & B186 & \" neodpovídá číselníku.\"",
+                "error_message_formula": "=\"Hodnota \" & B187 & \" neodpovídá číselníku.\"",
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [
@@ -8422,11 +8456,11 @@
                         "row_hash": "98fe0713b31a738e567ad4939bdc11334d9f8ff6e8476ee53beb733d87f1ae95"
                     }
                 ],
-                "row_hash": "124ab989cffaed02df6acc469256019133b8b7dd9bbdf5d5e304442360a13ccb"
+                "row_hash": "ea032b04ad207be15c799992c069af975005f21b4d49329f1753d484da2b0f81"
             },
             {
                 "control_id": 332,
-                "source_row": 187,
+                "source_row": 188,
                 "name": "Povinnost atributu primární pracovněprávní vztah zaměstnance v jednotlivých dat. scénářích",
                 "attribute_refs_raw": "10495\n10016",
                 "symbolic_attribute_refs": [],
@@ -8456,11 +8490,11 @@
                         "row_hash": "b64b2f24105d69aff9e0013fe905df13b29584ade16ef56b19f88f8c4629a60a"
                     }
                 ],
-                "row_hash": "fe59f3785724cba94c1106d6b09f983a3c521e950a67bd793ca17b77cd604570"
+                "row_hash": "6aeb7917d25b3b3d59c3c15450913de0ba18fbc087c8c6157f2ef89e8c34f452"
             },
             {
                 "control_id": 333,
-                "source_row": 188,
+                "source_row": 189,
                 "name": "Časové omezení uplatnění slevy na pojistném (01–03/2026)",
                 "attribute_refs_raw": "10006\n10032\n10010\n10011",
                 "symbolic_attribute_refs": [],
@@ -8481,10 +8515,10 @@
                 "source_anomaly": {
                     "code": "official_detail_attribute_mismatch",
                     "source_cells": [
-                        "B188",
-                        "C188",
-                        "L188",
-                        "M188"
+                        "B189",
+                        "C189",
+                        "L189",
+                        "M189"
                     ],
                     "declared_attribute_ids": [
                         "10006",
@@ -8520,11 +8554,11 @@
                         "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
                     }
                 ],
-                "row_hash": "9766e4b851c0456fcbf9031fa90e413a741ccaa596f228a2dfc847a27efb8c6b"
+                "row_hash": "0e019679efd0fb4cf07bca8be906669df513abb87a6258f6a078252da80f4360"
             },
             {
                 "control_id": 334,
-                "source_row": 189,
+                "source_row": 190,
                 "name": "Kontrola ztotožnění",
                 "attribute_refs_raw": "10053\n10054\n10056\n10223\n10239\n10221",
                 "symbolic_attribute_refs": [],
@@ -8574,11 +8608,11 @@
                         "row_hash": "c62cc5492e614a087cc37fbced104fcec77385a78068630722d7b382d2d649d8"
                     }
                 ],
-                "row_hash": "513c7f731cede5a1a110adf68cc4cf1acba8f1db1da543aca544447908aa3546"
+                "row_hash": "d35bfb80920f91fdf909f8fe03ffe2ab52c55da6d60db9665e86ff774833ee05"
             },
             {
                 "control_id": 335,
-                "source_row": 190,
+                "source_row": 191,
                 "name": "Kontrola správnosti atributu Obec",
                 "attribute_refs_raw": "10229",
                 "symbolic_attribute_refs": [],
@@ -8603,11 +8637,11 @@
                         "row_hash": "b90bdce5eef375273c53d7709b9c0b808ccea2a8497fe1f47f5ccab9299a3ecf"
                     }
                 ],
-                "row_hash": "2cecb7d7d11bc7e96573d483a85f239c70cd490309d518241a77b118d55dc3f7"
+                "row_hash": "113035490c4844616d2c2623b62f98d363a5dc4c0f40fceb7b154aeaa5942486"
             },
             {
                 "control_id": 336,
-                "source_row": 191,
+                "source_row": 192,
                 "name": "Kontrola vazby odloženého příjmu na ukončený pracovněprávní vztah",
                 "attribute_refs_raw": "10548\n10228\n10010\n10011",
                 "symbolic_attribute_refs": [],
@@ -8647,11 +8681,11 @@
                         "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
                     }
                 ],
-                "row_hash": "9a54077a5126764db14359d1a9d4ff69b38f515326c26be341af6581f12777a6"
+                "row_hash": "e82361a070ff09bb83322af7107aaa6f0cd43c2d470a638c4443a2c79be0b275"
             },
             {
                 "control_id": 337,
-                "source_row": 192,
+                "source_row": 193,
                 "name": "Kontrola vazby odloženého příjmu na otevřený pracovněprávní vztah",
                 "attribute_refs_raw": "10548\n10228\n10010\n10011",
                 "symbolic_attribute_refs": [],
@@ -8691,11 +8725,11 @@
                         "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
                     }
                 ],
-                "row_hash": "e7b940a60139c27b90ffdb08ebca00106f611a70bdfdeb2cdab97e7ee933eef2"
+                "row_hash": "ff2e4685295cf968005d91d7d8e84f40df76d772f3262b55c4f5f8ef25d6013b"
             },
             {
                 "control_id": 338,
-                "source_row": 193,
+                "source_row": 194,
                 "name": "Kontrola druhé pozice kódu ELDP pro odložený příjem",
                 "attribute_refs_raw": "10240\n10548",
                 "symbolic_attribute_refs": [],
@@ -8725,11 +8759,11 @@
                         "row_hash": "c31159c8bf7997325edf9afe6f163fcdbf52dba87ca42646b51f0465ef2d3e0f"
                     }
                 ],
-                "row_hash": "66f7074045fbf73a89daf63c0a7b4e12c90485209be1c882dc4fdbf7836096a8"
+                "row_hash": "6a19d49743d1fa71cc752df21f4d1b36317397a7abe6cc44cdc2b5581902a69f"
             },
             {
                 "control_id": 339,
-                "source_row": 194,
+                "source_row": 195,
                 "name": "Kontrola existence pracovněprávního vztahu u zaměstnavatele pro odložený příjem",
                 "attribute_refs_raw": "10548\n10228\n10537\n10538",
                 "symbolic_attribute_refs": [],
@@ -8769,11 +8803,11 @@
                         "row_hash": "ae92abcd22522cea53b05f970adbb92f8dea8e4b143bc33bf375ac8bdf54aa1b"
                     }
                 ],
-                "row_hash": "0e3dcaca194d3feb74cd522d03c98d344a3936602a543830e9777f92b4168ed0"
+                "row_hash": "7f9d76c12e54607000152e642bc518a18a9377b1de3736db3a990507ddd4ea30"
             },
             {
                 "control_id": 341,
-                "source_row": 195,
+                "source_row": 196,
                 "name": "Obecná kontrola povinnosti vyplnění položky pro",
                 "attribute_refs_raw": "n/a",
                 "symbolic_attribute_refs": [],
@@ -8792,11 +8826,11 @@
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [],
-                "row_hash": "df66ae2fc3c5789287ef19e2ebb723d2e1db2bef94306d09b10cb94a0755d04a"
+                "row_hash": "8509231cf7c16238e952e0f2d0527f6b5c109c2d047a5397cef5cb7fe95a8c11"
             },
             {
                 "control_id": 342,
-                "source_row": 196,
+                "source_row": 197,
                 "name": "Obecná kontrola u všech editovatelných položek dle definovaných datových typů",
                 "attribute_refs_raw": "n/a",
                 "symbolic_attribute_refs": [],
@@ -8815,11 +8849,11 @@
                 "source_label": "nová",
                 "note": null,
                 "attribute_refs": [],
-                "row_hash": "f6e8435292b56c007c5f54592a5edae79b10c58ba450f75fe534d3d30209867c"
+                "row_hash": "02a4c485ae2c206ff8f4870e2935ff4a296a2db9e222f81cbf1222500194536e"
             },
             {
                 "control_id": 343,
-                "source_row": 197,
+                "source_row": 198,
                 "name": "Kontrola použití odpovídající součásti individualizované části vůči druhu činnosti",
                 "attribute_refs_raw": "10239\n10502",
                 "symbolic_attribute_refs": [],
@@ -8849,11 +8883,11 @@
                         "row_hash": "aa2bc97aed5dd089ef4b51326158481261bb7e500d7a3ed8a4a52d298a4c5589"
                     }
                 ],
-                "row_hash": "2e2d92f0405edea5382529d4e1814799d37a5a7fc121e1d40b4fbda06a29bfcc"
+                "row_hash": "15a4dbd784d020f68f36d64f7d125a7ff03716490bca9b1285fae1f11bc9c2ba"
             },
             {
                 "control_id": 348,
-                "source_row": 198,
+                "source_row": 199,
                 "name": "Nekritická kontrola datové integrity podání",
                 "attribute_refs_raw": null,
                 "symbolic_attribute_refs": [],
@@ -8872,11 +8906,11 @@
                 "source_label": "nová",
                 "note": "Kontrola sdružuje technické a systémové validace, které nelze zařadit pod běžné věcné kontroly formuláře. Slouží zejména k ověření konzistence dat vůči registrům, správnosti technického zpracování a zachycení neočekávaných chyb během zpracování. Kontrola vždy zamítá pouze formulář, ověřuje:\n1) existenci IKMPSV (10051), zda je atribut IKMPSV ve formuláři vyplněn\n2) existenci osoby v registru subjektů, zda je možné podle IKMPSV dohledat osobu v registru, před vyhodnocením se čeká standardně 4 dny na případné doplnění dat\n3) existenci PPV v registru, zda existuje PPV pro kombinaci IKMPSV a ID zaměstnání (IDPPV), před vyhodnocením se čeká standardně 4 dny na doplnění dat\n4) platnost PPV vůči vykazovanému období, zda PPV existuje v období, za které je podání odesláno, kontrola se provádí pouze pro běžná podání (nikoliv odložené příjmy)\n5) shodu variabilního symbolu, porovnání variabilního symbolu evidovaného u PPV s atributem 10221 ve formuláři\n6) technickou správnost ukládaných dat, kontrola hodnot ukládaných do databáze, ověření dodržení omezení precision/scale, zachycení chyb mapování datových typů\n7) neošetřené chyby během zpracování, zachycení runtime výjimek a technických chyb aplikace, např. chybná konverze datového typu, chybné mapování dat nebo systémová výjimka",
                 "attribute_refs": [],
-                "row_hash": "3c801b8cec3ab4f56a053b817a1182ac7c4c9e7b4effc397c7f038063b69751d"
+                "row_hash": "76a4aa278bd2532e4b81fd3c5f3b34b73370067ea7d70d2f04c94baa7622ad4f"
             },
             {
                 "control_id": 354,
-                "source_row": 199,
+                "source_row": 200,
                 "name": "Jedinečnost GUID formuláře (DIS)",
                 "attribute_refs_raw": "10012\n10010\n10011",
                 "symbolic_attribute_refs": [],
@@ -8911,11 +8945,11 @@
                         "row_hash": "9a2f99811f84b2ce408ab27a555b078465a1c840531c498253836aca6c1d7a8a"
                     }
                 ],
-                "row_hash": "367910d53e106a20fb843034f34b36f630db26a3e1c4f7e101be752a794d333c"
+                "row_hash": "4d3c5d5cf32cb30f4b3259816071e049e51d71c103b129c0dabb307a188adffa"
             },
             {
                 "control_id": 355,
-                "source_row": 200,
+                "source_row": 201,
                 "name": "Kontrola na shodu variabilního symbolu mezi GovTalk obálkou a formulářem",
                 "attribute_refs_raw": "10221",
                 "symbolic_attribute_refs": [],
@@ -8940,7 +8974,7 @@
                         "row_hash": "5d2d7e8bfd87f723c2f1ffeda2ac5ede949b6845f509cec3b593547e356431b7"
                     }
                 ],
-                "row_hash": "c11ea89a91309de42cd8d594f0d1242237c5bfc392f43d8f389b575e0e8ebd56"
+                "row_hash": "158765c2f48fbf70fccd1768c0360e727410e7fe95feec2278bd01c0c6cc82a4"
             }
         ],
         "parameters": [

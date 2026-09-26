@@ -24,7 +24,10 @@ final class JmhzOfficialSourceMonitor
     private const MAX_INDEX_BYTES = 2 * 1024 * 1024;
     private const MAX_DOCUMENT_BYTES = 32 * 1024 * 1024;
 
-    /** @var array<string,array{label:string,index_url:string,index_format:string,document_hosts:list<string>,document_path_prefixes:list<string>,document_extensions:list<string>,api_slug?:string,documentation_title?:string}> */
+    private const NEWS_KEY_PREFIX_CHARS = 40;
+    private const ADF_INLINE_TYPES = ['text', 'hardBreak', 'mention', 'emoji', 'inlineCard', 'mediaInline', 'date', 'status', 'placeholder'];
+
+    /** @var array<string,array{label:string,index_url:string,index_format:string,document_hosts:list<string>,document_path_prefixes:list<string>,document_extensions:list<string>,api_slug?:string,documentation_title?:string,documentation_titles?:'*'|list<string>,news_titles?:list<string>}> */
     private array $sources;
 
     /** @var Closure(string,int):string */
@@ -103,7 +106,7 @@ final class JmhzOfficialSourceMonitor
             $hosts = $source['document_hosts'] ?? null;
             $prefixes = $source['document_path_prefixes'] ?? null;
             $extensions = $source['document_extensions'] ?? null;
-            if (!is_string($label) || $label === '' || !is_string($indexUrl) || !in_array($indexFormat, ['html', 'mpsv_api', 'article_list', 'epo_structures'], true) || !is_array($hosts) || !is_array($prefixes) || !is_array($extensions)) {
+            if (!is_string($label) || $label === '' || !is_string($indexUrl) || !in_array($indexFormat, ['html', 'mpsv_api', 'mpsv_api_pages', 'article_list', 'epo_structures'], true) || !is_array($hosts) || !is_array($prefixes) || !is_array($extensions)) {
                 throw new RuntimeException("Monitor oficiálních zdrojů JMHZ má neplatný zdroj {$id}.");
             }
             $this->assertHttpsUrl($indexUrl, []);
@@ -133,6 +136,21 @@ final class JmhzOfficialSourceMonitor
                 $validatedSource['api_slug'] = $apiSlug;
                 $validatedSource['documentation_title'] = trim($documentationTitle);
             }
+            if ($indexFormat === 'mpsv_api_pages') {
+                $apiSlug = $source['api_slug'] ?? null;
+                if (!is_string($apiSlug) || preg_match('/\A[a-z0-9][a-z0-9-]*\z/D', $apiSlug) !== 1) {
+                    throw new RuntimeException("Monitor oficiálních zdrojů JMHZ má neplatný MPSV zdroj {$id}.");
+                }
+                $titles = $source['documentation_titles'] ?? (isset($source['documentation_title']) ? [$source['documentation_title']] : null);
+                $validatedSource['api_slug'] = $apiSlug;
+                $validatedSource['documentation_titles'] = $titles === '*'
+                    ? '*'
+                    : $this->validateTitleList($titles, "Zdroj {$id} má neplatný výčet stránek dokumentace.", false);
+                $validatedSource['news_titles'] = $this->validateTitleList($source['news_titles'] ?? [], "Zdroj {$id} má neplatný výčet stránek s aktualitami.", true);
+                if ($validatedSource['documentation_titles'] !== '*' && array_diff($validatedSource['news_titles'], $validatedSource['documentation_titles']) !== []) {
+                    throw new RuntimeException("Zdroj {$id} hlídá aktuality na stránce, kterou nesleduje.");
+                }
+            }
             $validated[$id] = $validatedSource;
         }
 
@@ -156,6 +174,27 @@ final class JmhzOfficialSourceMonitor
         return $result;
     }
 
+    /** @return list<string> */
+    private function validateTitleList(mixed $values, string $message, bool $allowEmpty): array
+    {
+        if (!is_array($values) || !array_is_list($values)) {
+            throw new RuntimeException($message);
+        }
+        $result = [];
+        foreach ($values as $value) {
+            $title = is_string($value) ? $this->normalizeText($value) : '';
+            if ($title === '') {
+                throw new RuntimeException($message);
+            }
+            $result[] = $title;
+        }
+        if ((!$allowEmpty && $result === []) || count($result) !== count(array_unique($result))) {
+            throw new RuntimeException($message);
+        }
+
+        return $result;
+    }
+
     /** @param array{label:string,index_url:string,index_format:string,document_hosts:list<string>,document_path_prefixes:list<string>,document_extensions:list<string>,api_slug?:string,documentation_title?:string} $source */
     private function observeSource(string $id, array $source): array
     {
@@ -164,6 +203,13 @@ final class JmhzOfficialSourceMonitor
             $pageUrl = $this->mpsvDocumentationPageUrl($index, $source);
             $page = ($this->fetch)($pageUrl, self::MAX_INDEX_BYTES);
             $documents = $this->extractMpsvDocuments($page, $source);
+        } elseif ($source['index_format'] === 'mpsv_api_pages') {
+            $documents = [];
+            foreach ($this->mpsvSelectedPages($index, $source) as $page) {
+                $json = ($this->fetch)($page['api_url'], self::MAX_INDEX_BYTES);
+                $documents = [...$documents, ...$this->extractMpsvPageDocuments($json, $page, $source)];
+            }
+            usort($documents, static fn (array $a, array $b): int => strcmp($a['key'], $b['key']));
         } elseif ($source['index_format'] === 'article_list') {
             $documents = $this->extractArticles($index, $source);
         } elseif ($source['index_format'] === 'epo_structures') {
@@ -171,11 +217,13 @@ final class JmhzOfficialSourceMonitor
         } else {
             $documents = $this->extractDocuments($index, $source);
         }
-        if (!in_array($source['index_format'], ['article_list', 'epo_structures'], true)) {
+        if (!in_array($source['index_format'], ['article_list', 'epo_structures', 'mpsv_api_pages'], true)) {
             // Články se po jednom NESTAHUJÍ. Jde o provozní oznámení, kde je
             // signálem to, že přibyla položka — a stránka článku nese menu,
             // patičku a další volatilní obsah, takže by se hlásila změna
             // pokaždé. Otisk se proto počítá z názvu a odkazu.
+            // Přílohy všech stránek MPSV mají desítky MB; u nich stačí název
+            // a odkaz, obsah hlídá zdroj `mpsv_api` u hlavní dokumentace.
             foreach ($documents as &$document) {
                 $contents = ($this->fetch)($document['url'], self::MAX_DOCUMENT_BYTES);
                 $document['sha256'] = hash('sha256', $contents);
@@ -463,6 +511,91 @@ final class JmhzOfficialSourceMonitor
      */
     private function mpsvDocumentationPageUrl(string $json, array $source): string
     {
+        $candidates = array_values(array_filter(
+            $this->mpsvDocumentationCandidates($json, $source),
+            static fn (array $candidate): bool => $candidate['title'] === $source['documentation_title'],
+        ));
+        if ($candidates === []) {
+            throw new RuntimeException("Katalog {$source['index_url']} neobsahuje veřejnou dokumentaci {$source['documentation_title']}.");
+        }
+        usort($candidates, static fn (array $a, array $b): int => version_compare($b['version'], $a['version']));
+
+        return $this->mpsvPageApiUrl($source, $candidates[0]['api_id'], $candidates[0]['page_id']);
+    }
+
+    /**
+     * Stránky dokumentace ze VŠECH schválených verzí API. Z každého názvu se
+     * vybírá nejvyšší verze, která ho obsahuje, stejně jako u `mpsv_api`.
+     *
+     * @param array{index_url:string,api_slug?:string,documentation_titles?:'*'|list<string>,news_titles?:list<string>} $source
+     * @return list<array{title:string,slug:string,news:bool,api_url:string,url:string}>
+     */
+    private function mpsvSelectedPages(string $json, array $source): array
+    {
+        $wanted = $source['documentation_titles'] ?? '*';
+        $selected = [];
+        foreach ($this->mpsvDocumentationCandidates($json, $source) as $candidate) {
+            if ($candidate['visibility'] !== null && $candidate['visibility'] !== 'PUBLIC') {
+                continue;
+            }
+            $title = $this->normalizeText($candidate['title']);
+            if ($title === '' || ($wanted !== '*' && !in_array($title, $wanted, true))) {
+                continue;
+            }
+            if (!isset($selected[$title]) || version_compare($candidate['version'], $selected[$title]['version']) > 0) {
+                $selected[$title] = $candidate;
+            }
+        }
+        foreach ($wanted === '*' ? [] : $wanted as $title) {
+            if (!isset($selected[$title])) {
+                throw new RuntimeException("Katalog {$source['index_url']} neobsahuje veřejnou dokumentaci {$title}.");
+            }
+        }
+        if ($selected === []) {
+            throw new RuntimeException("Katalog {$source['index_url']} neobsahuje žádnou veřejnou stránku dokumentace.");
+        }
+
+        $pages = [];
+        foreach ($selected as $title => $candidate) {
+            // Klíčem je název stránky, ne její identifikátor: nová verze API
+            // dostává nové identifikátory, a stránka by pak vypadala jako
+            // odebraná a znovu přidaná i se všemi přílohami a aktualitami.
+            $slug = $this->slug((string) $title);
+            if ($slug === '' || isset($pages[$slug])) {
+                throw new RuntimeException("Katalog {$source['index_url']} uvádí stránku dokumentace {$title} víceznačně.");
+            }
+            $host = $this->host($source['index_url']);
+            $url = "https://{$host}/api-list/{$source['api_slug']}/documentation/{$candidate['page_id']}";
+            $this->assertHttpsUrl($url, [$host]);
+            $pages[$slug] = [
+                'title' => (string) $title,
+                'slug' => $slug,
+                'news' => in_array($title, $source['news_titles'] ?? [], true),
+                'api_url' => $this->mpsvPageApiUrl($source, $candidate['api_id'], $candidate['page_id']),
+                'url' => $this->canonicalUrl($url),
+            ];
+        }
+        ksort($pages, SORT_STRING);
+
+        return array_values($pages);
+    }
+
+    /** @param array{index_url:string} $source */
+    private function mpsvPageApiUrl(array $source, string $apiId, string $pageId): string
+    {
+        $host = $this->host($source['index_url']);
+        $url = "https://{$host}/api/apiversion/{$apiId}/documentationPage/{$pageId}";
+        $this->assertHttpsUrl($url, [$host]);
+
+        return $this->canonicalUrl($url);
+    }
+
+    /**
+     * @param array{index_url:string,api_slug?:string} $source
+     * @return list<array{version:string,api_id:string,page_id:string,title:string,visibility:?string}>
+     */
+    private function mpsvDocumentationCandidates(string $json, array $source): array
+    {
         try {
             $catalog = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
         } catch (\JsonException $e) {
@@ -498,26 +631,24 @@ final class JmhzOfficialSourceMonitor
             // hlásil, že dokumentace v katalogu není. Čteme obojí, ať přežijeme i návrat.
             $pages = $version['documentationPages'] ?? $version['documentationPageItems'] ?? null;
             foreach (is_array($pages) ? $pages : [] as $page) {
-                if (!is_array($page) || ($page['title'] ?? null) !== $source['documentation_title']) {
+                if (!is_array($page) || !is_string($page['title'] ?? null)) {
                     continue;
                 }
                 $pageId = $page['apiVersionDocumentationId'] ?? null;
                 if (!is_string($pageId) || preg_match('/\A[0-9a-f-]{36}\z/D', $pageId) !== 1) {
                     continue;
                 }
-                $candidates[] = ['version' => $versionNumber, 'api_id' => $apiId, 'page_id' => $pageId];
+                $candidates[] = [
+                    'version' => $versionNumber,
+                    'api_id' => $apiId,
+                    'page_id' => $pageId,
+                    'title' => $page['title'],
+                    'visibility' => is_string($page['visibility'] ?? null) ? $page['visibility'] : null,
+                ];
             }
         }
-        if ($candidates === []) {
-            throw new RuntimeException("Katalog {$source['index_url']} neobsahuje veřejnou dokumentaci {$source['documentation_title']}.");
-        }
-        usort($candidates, static fn (array $a, array $b): int => version_compare($b['version'], $a['version']));
-        $selected = $candidates[0];
-        $host = $this->host($source['index_url']);
-        $url = "https://{$host}/api/apiversion/{$selected['api_id']}/documentationPage/{$selected['page_id']}";
-        $this->assertHttpsUrl($url, [$host]);
 
-        return $this->canonicalUrl($url);
+        return $candidates;
     }
 
     /**
@@ -545,11 +676,31 @@ final class JmhzOfficialSourceMonitor
             throw new RuntimeException("Tělo dokumentace {$source['index_url']} není platný JSON.", previous: $e);
         }
         $referencedMediaIds = [];
-        $this->collectMediaIds($bodyTree, $referencedMediaIds);
+        $this->walkAdf($bodyTree, $referencedMediaIds);
         if ($referencedMediaIds === []) {
             throw new RuntimeException("Dokumentace {$source['index_url']} neodkazuje žádné přílohy.");
         }
 
+        $documents = $this->mpsvAttachments($attachments, $referencedMediaIds, $source, "Dokumentace {$source['index_url']}");
+        if ($documents === []) {
+            throw new RuntimeException("Dokumentace {$source['index_url']} nemá žádnou rozpoznatelnou aktuální přílohu.");
+        }
+        ksort($documents, SORT_STRING);
+
+        return array_values($documents);
+    }
+
+    /**
+     * Přílohy, na které tělo stránky SKUTEČNĚ odkazuje. Pole `attachments`
+     * nese i historické soubory, které ze stránky dávno zmizely.
+     *
+     * @param array<mixed> $attachments
+     * @param array<string,true> $referencedMediaIds
+     * @param array{document_hosts:list<string>,document_path_prefixes:list<string>,document_extensions:list<string>} $source
+     * @return array<string,array{key:string,title:string,version:?string,url:string}>
+     */
+    private function mpsvAttachments(array $attachments, array $referencedMediaIds, array $source, string $context): array
+    {
         $documents = [];
         foreach ($attachments as $attachment) {
             if (!is_array($attachment)) {
@@ -578,25 +729,205 @@ final class JmhzOfficialSourceMonitor
             ];
             if (isset($documents[$key])) {
                 if ($documents[$key]['url'] !== $document['url']) {
-                    throw new RuntimeException("Dokumentace {$source['index_url']} uvádí dokument {$title} víceznačně.");
+                    throw new RuntimeException("{$context} uvádí dokument {$title} víceznačně.");
                 }
                 continue;
             }
             $documents[$key] = $document;
         }
-        if ($documents === []) {
-            throw new RuntimeException("Dokumentace {$source['index_url']} nemá žádnou rozpoznatelnou aktuální přílohu.");
+
+        return $documents;
+    }
+
+    /**
+     * Stránka dokumentace MPSV jako několik sledovaných položek: stránka sama
+     * (verzí je `updatedDate`), přílohy (jen název a odkaz), záznamy stránek
+     * typu katalog a u stránek s aktualitami jednotlivá oznámení.
+     *
+     * @param array{title:string,slug:string,news:bool,api_url:string,url:string} $page
+     * @param array{document_hosts:list<string>,document_path_prefixes:list<string>,document_extensions:list<string>} $source
+     * @return list<array{key:string,title:string,version:?string,url:string,sha256:string,byte_length:int}>
+     */
+    private function extractMpsvPageDocuments(string $json, array $page, array $source): array
+    {
+        try {
+            $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            throw new RuntimeException("Dokumentace {$page['api_url']} není platný JSON.", previous: $e);
         }
-        ksort($documents, SORT_STRING);
+        if (!is_array($decoded)) {
+            throw new RuntimeException("Dokumentace {$page['api_url']} nemá očekávaný tvar.");
+        }
+        $content = is_array($decoded['payload'] ?? null) ? $decoded['payload'] : $decoded;
+        $updatedDate = $decoded['updatedDate'] ?? $content['updatedDate'] ?? null;
+        $version = is_string($updatedDate) ? $this->normalizeTimestamp($updatedDate) : null;
+
+        $blocks = [];
+        $mediaIds = [];
+        $body = $content['body'] ?? null;
+        if (is_string($body)) {
+            try {
+                $tree = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException $e) {
+                throw new RuntimeException("Tělo dokumentace {$page['api_url']} není platný JSON.", previous: $e);
+            }
+            $children = is_array($tree) && is_array($tree['content'] ?? null) ? $tree['content'] : [$tree];
+            foreach ($children as $child) {
+                $blocks[] = [
+                    is_array($child) && is_string($child['type'] ?? null) ? $child['type'] : '',
+                    $this->normalizeText($this->walkAdf($child, $mediaIds)),
+                ];
+            }
+        }
+        $bodyText = implode("\n", array_filter(array_column($blocks, 1), static fn (string $text): bool => $text !== ''));
+
+        $documents = [[
+            'key' => "stranka:{$page['slug']}",
+            'title' => $page['title'],
+            'version' => $version,
+            'url' => $page['url'],
+            'sha256' => hash('sha256', $bodyText),
+            'byte_length' => strlen($json),
+        ]];
+
+        $attachments = $content['attachments'] ?? null;
+        foreach ($this->mpsvAttachments(is_array($attachments) ? $attachments : [], $mediaIds, $source, "Dokumentace {$page['api_url']}") as $attachment) {
+            $fingerprint = $attachment['title'] . "\n" . $attachment['url'];
+            $documents[] = [
+                ...$attachment,
+                'key' => "priloha:{$page['slug']}:{$attachment['key']}",
+                'sha256' => hash('sha256', $fingerprint),
+                'byte_length' => strlen($fingerprint),
+            ];
+        }
+
+        $entries = $content['entries'] ?? null;
+        $documents = [...$documents, ...$this->mpsvEntries(is_array($entries) ? $entries : [], $page)];
+        if ($page['news']) {
+            $documents = [...$documents, ...$this->mpsvNews($blocks, $page)];
+        }
+
+        return $documents;
+    }
+
+    /**
+     * Záznamy stránek typu katalog (pokyny k vyplnění, otázky a odpovědi,
+     * katalog kontrol). Identitou je jejich vlastní ID, otiskem obsah hodnot;
+     * `updatedDate` záznamu se nesleduje, protože ho MPSV přepisuje hromadně
+     * při každém importu katalogu.
+     *
+     * @param array<mixed> $entries
+     * @param array{title:string,slug:string,url:string} $page
+     * @return list<array{key:string,title:string,version:?string,url:string,sha256:string,byte_length:int}>
+     */
+    private function mpsvEntries(array $entries, array $page): array
+    {
+        $documents = [];
+        foreach ($entries as $entry) {
+            $values = is_array($entry) ? ($entry['values'] ?? null) : null;
+            if (!is_array($values)) {
+                continue;
+            }
+            $entryId = $values['id'] ?? $entry['id'] ?? null;
+            $entryId = is_string($entryId) || is_int($entryId) ? $this->normalizeText((string) $entryId) : '';
+            $entrySlug = $this->slug($entryId);
+            if ($entrySlug === '') {
+                continue;
+            }
+            $baseKey = "zaznam:{$page['slug']}:{$entrySlug}";
+            $key = $baseKey;
+            for ($n = 2; isset($documents[$key]); $n++) {
+                $key = "{$baseKey}:{$n}";
+            }
+            $name = $values['name'] ?? $values['question'] ?? '';
+            ksort($values, SORT_STRING);
+            $fingerprint = json_encode($values, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            $documents[$key] = [
+                'key' => $key,
+                'title' => $this->shorten("{$page['title']}: {$entryId} " . (is_string($name) ? $this->normalizeText($name) : '')),
+                'version' => null,
+                'url' => $page['url'],
+                'sha256' => hash('sha256', $fingerprint),
+                'byte_length' => strlen($fingerprint),
+            ];
+        }
 
         return array_values($documents);
     }
 
-    /** @param array<string,true> $mediaIds */
-    private function collectMediaIds(mixed $node, array &$mediaIds): void
+    /**
+     * Oznámení na stránce aktualit. Každé začíná odstavcem s datem
+     * („13.8.2026" i „13. 8. 2026") a pokračuje až k dalšímu datu.
+     *
+     * Klíčem je datum a začátek textu, otiskem celý text: oprava překlepu dál
+     * v textu je tak změnou obsahu, ne novým oznámením. Stejný den může nést
+     * více oznámení, proto samotné datum jako klíč nestačí.
+     *
+     * @param list<array{0:string,1:string}> $blocks
+     * @param array{slug:string,url:string} $page
+     * @return list<array{key:string,title:string,version:?string,url:string,sha256:string,byte_length:int}>
+     */
+    private function mpsvNews(array $blocks, array $page): array
+    {
+        $items = [];
+        $current = null;
+        foreach ($blocks as [$type, $text]) {
+            if ($type === 'paragraph'
+                && preg_match('/\A(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})(?!\d)(.*)\z/su', $text, $matches) === 1
+                && checkdate((int) $matches[2], (int) $matches[1], (int) $matches[3])
+            ) {
+                if ($current !== null) {
+                    $items[] = $current;
+                }
+                $current = [
+                    'date' => sprintf('%04d-%02d-%02d', (int) $matches[3], (int) $matches[2], (int) $matches[1]),
+                    'label' => sprintf('%d.%d.%d', (int) $matches[1], (int) $matches[2], (int) $matches[3]),
+                    'parts' => [$matches[4]],
+                ];
+                continue;
+            }
+            if ($current !== null && $text !== '') {
+                $current['parts'][] = $text;
+            }
+        }
+        if ($current !== null) {
+            $items[] = $current;
+        }
+
+        $documents = [];
+        foreach ($items as $item) {
+            $text = $this->normalizeText(implode(' ', $item['parts']));
+            $prefix = $this->slug(mb_substr($text, 0, self::NEWS_KEY_PREFIX_CHARS, 'UTF-8'));
+            $baseKey = "aktualita:{$page['slug']}:{$item['date']}" . ($prefix === '' ? '' : ":{$prefix}");
+            $key = $baseKey;
+            for ($n = 2; isset($documents[$key]); $n++) {
+                $key = "{$baseKey}:{$n}";
+            }
+            $fullText = trim("{$item['label']} {$text}");
+            $documents[$key] = [
+                'key' => $key,
+                'title' => $this->shorten($fullText),
+                'version' => null,
+                'url' => $page['url'],
+                'sha256' => hash('sha256', $fullText),
+                'byte_length' => strlen($fullText),
+            ];
+        }
+
+        return array_values($documents);
+    }
+
+    /**
+     * Jediný průchod stromem Atlassian ADF: vrací text uzlu a zároveň sbírá
+     * přílohy, na které uzel odkazuje. Blokové uzly se oddělují mezerou,
+     * sousední textové uzly jednoho odstavce ne (formátování dělí i slova).
+     *
+     * @param array<string,true> $mediaIds
+     */
+    private function walkAdf(mixed $node, array &$mediaIds): string
     {
         if (!is_array($node)) {
-            return;
+            return '';
         }
         $type = $node['type'] ?? null;
         $attributes = $node['attrs'] ?? null;
@@ -604,9 +935,18 @@ final class JmhzOfficialSourceMonitor
         if (in_array($type, ['media', 'mediaInline'], true) && is_string($id) && preg_match('/\A[0-9a-f-]{36}\z/Di', $id) === 1) {
             $mediaIds[strtolower($id)] = true;
         }
-        foreach ($node as $child) {
-            $this->collectMediaIds($child, $mediaIds);
+        if ($type === 'text') {
+            return is_string($node['text'] ?? null) ? $node['text'] : '';
         }
+        if ($type === 'hardBreak') {
+            return ' ';
+        }
+        $text = '';
+        foreach ($node as $child) {
+            $text .= $this->walkAdf($child, $mediaIds);
+        }
+
+        return is_string($type) && !in_array($type, self::ADF_INLINE_TYPES, true) ? $text . ' ' : $text;
     }
 
     /** @param array{document_hosts:list<string>,document_path_prefixes:list<string>,document_extensions:list<string>} $source */
@@ -636,8 +976,15 @@ final class JmhzOfficialSourceMonitor
     {
         $baseline = $previous === null;
         $changes = [];
+        $baselineSources = [];
         foreach ($current['sources'] as $sourceId => $source) {
             $oldSource = $previous['sources'][$sourceId] ?? null;
+            // Zdroj přidaný do konfigurace po prvním běhu je pro sebe baseline.
+            // Jinak by první běh po nasazení nahlásil každou jeho položku jako přidanou.
+            $sourceBaseline = $baseline || !is_array($oldSource);
+            if ($sourceBaseline && !$baseline) {
+                $baselineSources[] = (string) $sourceId;
+            }
             $oldDocuments = is_array($oldSource['documents'] ?? null) ? $oldSource['documents'] : [];
             $oldByKey = [];
             foreach ($oldDocuments as $document) {
@@ -652,7 +999,7 @@ final class JmhzOfficialSourceMonitor
             foreach ($newByKey as $key => $document) {
                 $old = $oldByKey[$key] ?? null;
                 if ($old === null) {
-                    if (!$baseline) {
+                    if (!$sourceBaseline) {
                         $changes[] = $this->change('added', $sourceId, null, $document);
                     }
                     continue;
@@ -663,7 +1010,7 @@ final class JmhzOfficialSourceMonitor
                     $changes[] = $this->change('content_changed', $sourceId, $old, $document);
                 }
             }
-            if (!$baseline) {
+            if (!$sourceBaseline) {
                 foreach ($oldByKey as $key => $old) {
                     if (!isset($newByKey[$key])) {
                         $changes[] = $this->change('removed', $sourceId, $old, null);
@@ -677,6 +1024,7 @@ final class JmhzOfficialSourceMonitor
             'schema_version' => self::STATE_SCHEMA_VERSION,
             'observed_at' => $current['observed_at'],
             'baseline_created' => $baseline,
+            'baseline_sources' => $baselineSources,
             'changed' => $changes !== [],
             'change_count' => count($changes),
             'changes' => $changes,
@@ -855,8 +1203,30 @@ final class JmhzOfficialSourceMonitor
         $key = (string) preg_replace('/\b\d+(?:[.,]\d+)?\s*(?:kb|mb|gb)\b/ui', '', $key);
         $key = (string) preg_replace('/\b(?:verze?|v)\s*\d+(?:\.\d+){1,4}\b/ui', '', $key);
         $key = (string) preg_replace('/\b\d+(?:\.\d+){1,4}\b/u', '', $key);
-        $key = (string) preg_replace('/[^\p{L}\p{N}]+/u', '-', $key);
-        return trim($key, '-');
+        return $this->slug($key);
+    }
+
+    private function slug(string $value): string
+    {
+        return trim((string) preg_replace('/[^\p{L}\p{N}]+/u', '-', mb_strtolower($value, 'UTF-8')), '-');
+    }
+
+    private function shorten(string $value): string
+    {
+        return mb_strimwidth($this->normalizeText($value), 0, 200, '…', 'UTF-8');
+    }
+
+    /**
+     * Zlomek sekundy zapisuje MPSV s proměnným počtem číslic (koncové nuly
+     * vypouští). Porovnává se proto na sekundy.
+     */
+    private function normalizeTimestamp(string $value): string
+    {
+        try {
+            return (new \DateTimeImmutable($value))->format('Y-m-d\TH:i:sP');
+        } catch (\Exception) {
+            return $this->normalizeText($value);
+        }
     }
 
     private function versionFrom(string $value): ?string

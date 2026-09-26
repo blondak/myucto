@@ -70,6 +70,9 @@ final class PayrollDispatchGate
 
         // 5. Už se odesílalo.
         $attempt = $row['attempt'] ?? null;
+        if (is_array($attempt) && ($possiblyDelivered = self::possiblyDeliveredReason($attempt)) !== null) {
+            return $possiblyDelivered;
+        }
         if (is_array($attempt) && !self::attemptAllowsRetry($attempt)) {
             return sprintf(
                 'Podání už bylo odesláno (pokus č. %d, stav „%s"). Znovu se'
@@ -118,9 +121,48 @@ final class PayrollDispatchGate
     public const ABANDONED_ERROR_CODE = 'abandoned_by_user';
 
     /**
+     * Kód, kterým se značí pokus „možná doručeno", u kterého účetní VÝSLOVNĚ
+     * potvrdila opakování ({@see PayrollSubmissionRetryConfirmationService}).
+     */
+    public const RETRY_CONFIRMED_ERROR_CODE = 'retry_confirmed_by_user';
+
+    /** Požadavek odešel, odpověď nepřišla; opakovat jen po potvrzení. */
+    public const POSSIBLY_DELIVERED_STATUS = 'possibly_delivered';
+
+    /**
+     * Kód pokusu, na který ČSSZ odpověděla kontrolou 22 „shodné podání už
+     * existuje": originál je u ČSSZ a opakovat nemá smysl ani s potvrzením.
+     */
+    public const ORIGINAL_AT_CSSZ_ERROR_CODE = 'jmhz_original_at_cssz';
+
+    /**
+     * Věta pro účetní u pokusu „možná doručeno", nebo `null`.
+     *
+     * @param array<string,mixed> $attempt
+     */
+    public static function possiblyDeliveredReason(array $attempt): ?string
+    {
+        if ((string) ($attempt['status'] ?? '') !== self::POSSIBLY_DELIVERED_STATUS) {
+            return null;
+        }
+        if ((string) ($attempt['error_code'] ?? '') === self::ORIGINAL_AT_CSSZ_ERROR_CODE) {
+            return 'Originál podání je u ČSSZ: odpověď na opakované odeslání'
+                . ' hlásí, že shodné podání už existuje. Znovu neodesílejte;'
+                . ' doložte nebo načtěte protokol originálu.';
+        }
+
+        return 'Podání možná doručeno: požadavek odešel, ale odpověď ČSSZ'
+            . ' nedorazila. Nejdřív dohledejte protokol (datová schránka, portál'
+            . ' ČSSZ) a načtěte ho. Znovu odeslat lze až po výslovném potvrzení,'
+            . ' a to se stejným GUID podání.';
+    }
+
+    /**
      * Neúspěšný pokus BEZ `sent_at` znamená, že se odeslání nepovedlo dřív,
      * než cokoli opustilo aplikaci — u úřadu po něm nic nezůstalo, takže druhý
-     * pokus nemůže nic zdvojit.
+     * pokus nemůže nic zdvojit. Selhání PO odeslání požadavku (vypršený čas,
+     * ztracená nebo nečitelná odpověď) se od migrace 1906 zapisuje jako
+     * `possibly_delivered`, takže sem nepropadne.
      *
      * Druhá povolená cesta je pokus, který účetní VĚDOMĚ ZAHODILA poté, co viděla,
      * co úřad odpověděl ({@see \MyInvoice\Service\Payroll\Submission\PayrollSubmissionService::abandonAndReopen()}).
@@ -148,6 +190,10 @@ final class PayrollDispatchGate
         }
 
         return $status === 'expired'
-            && (string) ($attempt['error_code'] ?? '') === self::ABANDONED_ERROR_CODE;
+            && in_array(
+                (string) ($attempt['error_code'] ?? ''),
+                [self::ABANDONED_ERROR_CODE, self::RETRY_CONFIRMED_ERROR_CODE],
+                true,
+            );
     }
 }

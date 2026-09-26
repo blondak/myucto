@@ -8,8 +8,8 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class JmhzControlSourceCatalog
 {
-    public const CATALOG_KEY = 'jmhz-controls-1.4.2.9-source-v4';
-    public const MANIFEST_SHA256 = '65ccaa12d3ac0485f5b901f91b8a7a4398486aadafc3b33fe6a79bd30a76c2e7';
+    public const CATALOG_KEY = 'jmhz-controls-1.4.2.10-source-v4';
+    public const MANIFEST_SHA256 = '565bfb145efd1e7c0893e81c26b3d865c486929dc44cef72620340b663b4e493';
 
     /** @var array<int, JmhzControlDefinition> */
     private array $definitions = [];
@@ -184,7 +184,7 @@ final class JmhzControlSourceCatalog
             $anomaly = $row['source_anomaly'] ?? null;
             $expectedAnomaly = $id === 333 ? [
                 'code' => 'official_detail_attribute_mismatch',
-                'source_cells' => ['B188', 'C188', 'L188', 'M188'],
+                'source_cells' => ['B189', 'C189', 'L189', 'M189'],
                 'declared_attribute_ids' => ['10006', '10032', '10010', '10011'],
                 'detail_attribute_ids' => ['10016', '10495'],
                 'resolution' => 'fail_closed_not_evaluable',

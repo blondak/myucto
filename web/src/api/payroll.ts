@@ -3110,6 +3110,18 @@ export interface PayrollSubmissionAbandonResult {
   submission: { id: number; status: string; row_version: number }
   /** ID pokusů, které se tímhle uzavřely. */
   abandoned_attempts: number[]
+  /**
+   * Řádné podání JMHZ zamítnuté zpracováním se znovu zmrazí s novým GUID.
+   * `null` = GUID se neměnil (jiná agenda nebo podání bez výsledku zpracování).
+   */
+  refreeze?: {
+    refrozen: boolean
+    submission_guid: string
+    previous_submission_guid: string
+    renewed_form_guids: number
+    artifact_id: number | null
+    submission_row_version: number
+  } | null
 }
 
 /**
@@ -3157,6 +3169,8 @@ export interface PayrollMonthlyChecklistPreparation {
   agenda_code: string
   period: string
   insurer_code: string | null
+  /** Vědomé potvrzení varování kontroly 290 (sleva po splatnosti pojistného). */
+  confirm_late_discount?: boolean
 }
 
 export interface PayrollMonthlyChecklistAction {
@@ -6285,9 +6299,12 @@ export interface PayrollSigningProfilePayload {
 export type PayrollJmhzTransportEnvironment = 'test' | 'production'
 
 /**
- * Šest stavů pokusu. `awaiting_protocol` NENÍ přijaté podání: ČSSZ potvrzuje
+ * Stavy pokusu. `awaiting_protocol` NENÍ přijaté podání: ČSSZ potvrzuje
  * převzetí okamžitě a o výsledku rozhoduje až později. Hotovo znamená teprve
  * `completed`, tedy „dotáhli jsme protokol o zpracování".
+ *
+ * `possibly_delivered`: požadavek odešel, odpověď nedorazila. Opakovat jde
+ * jen po dohledání protokolu a výslovném potvrzení, se stejným GUID.
  */
 export type PayrollJmhzTransportStatus =
   | 'prepared'
@@ -6296,6 +6313,12 @@ export type PayrollJmhzTransportStatus =
   | 'completed'
   | 'failed'
   | 'expired'
+  | 'possibly_delivered'
+
+export interface PayrollSubmissionRetryConfirmation {
+  confirmed_attempts: number[]
+  submission_guid: string | null
+}
 
 export interface PayrollJmhzTransportAttempt {
   id: number
@@ -6512,6 +6535,11 @@ export interface PayrollJmhzProtocolError {
    * Taková chyba se ukazuje syrová, nikdy se neskrývá.
    */
   control: PayrollJmhzProtocolControl | null
+  /**
+   * Kontrola 22 ve variantě „shodné R nebo S už existuje": nejde o zamítnutí,
+   * originál podání je u ČSSZ.
+   */
+  original_at_cssz?: boolean
 }
 
 /** `status` je jméno případu výčtu na backendu, tedy PascalCase. */
@@ -6525,6 +6553,8 @@ export type PayrollJmhzProtocolStatus =
 
 export interface PayrollJmhzProtocolReport {
   status: PayrollJmhzProtocolStatus
+  /** Jediná chyba „shodné podání už existuje": originál je u ČSSZ, podání se nezamítlo. */
+  original_at_cssz?: boolean
   errors: PayrollJmhzProtocolError[]
 }
 
@@ -7186,6 +7216,21 @@ export const payrollApi = {
       { environment, row_version: rowVersion, reason },
     ).then(response => response.data),
   /**
+   * Výslovné potvrzení opakování u podání „možná doručeno" (požadavek odešel,
+   * odpověď nedorazila). Samo nic neodesílá, jen uvolní odeslání se stejným
+   * GUID. Server ho odmítne, pokud je k podání načtený protokol se stejným
+   * GUID (originál je u ČSSZ). `reason` je povinný a jde do ledgeru.
+   */
+  confirmSubmissionRetry: (
+    environment: PayrollRegzelEnvironment,
+    submissionId: number,
+    reason: string,
+  ) =>
+    api.post<PayrollSubmissionRetryConfirmation>(
+      `/payroll/submissions/queue/${submissionId}/confirm-retry`,
+      { environment, reason },
+    ).then(response => response.data),
+  /**
    * Potvrdí, že je povinnost vyřízená, protože od úřadu už nic nepřijde.
    *
    * Zdravotní pojišťovna na přehled o platbě pojistného neodpovídá ničím, co
@@ -7486,17 +7531,24 @@ export const payrollApi = {
         : { environment, office: officeId },
     },
   ).then(response => response.data),
+  /**
+   * `confirmLateDiscount`: účetní vědomě potvrdila varování kontroly 290
+   * (hlášení po splatnosti se slevou na pojistném). Bez potvrzení server
+   * vrátí 409 s kódem {@link PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION}.
+   */
   freezeJmhzSubmission: (
     preparationId: number,
     obligationId: number | null,
     environment: PayrollJmhzTransportEnvironment,
     officeId?: number | null,
+    confirmLateDiscount = false,
   ) => api.post<PayrollJmhzFrozenSubmission>(
     `/payroll/submissions/jmhz-freeze/${preparationId}`,
     {
       environment,
       ...(obligationId == null ? {} : { obligation_id: obligationId }),
       ...(officeId == null ? {} : { office: officeId }),
+      ...(confirmLateDiscount ? { confirm_late_discount: true } : {}),
     },
   ).then(response => response.data),
   previewEmploymentRegistration: (

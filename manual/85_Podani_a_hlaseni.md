@@ -113,6 +113,16 @@ uzavře a podání vrátí do stavu k odeslání, takže je lze podat znovu. Pů
 pokus z historie nezmizí — jen přestane bránit dalšímu odeslání. Totéž
 tlačítko je i v záložce **JMHZ** u připraveného hlášení.
 
+Řádné měsíční hlášení, které ČSSZ **zpracovala a zamítla**, se po zahození
+samo znovu zmrazí s **novým GUID podání** i novými GUID součástí. Pravidla
+podání to vyžadují: shodné řádné podání se stejným GUID, variabilním symbolem,
+obdobím a balíkem ČSSZ odmítne kontrolou 22. Variabilní symbol, období i obsah
+zůstávají stejné a aplikace nový GUID po zahození ukáže. Původní dokument
+zůstává v archivu podání jako doklad prvního odeslání. Opravné a stornovací
+podání nesou GUID řádného podání, ten se nemění; nový GUID dostanou jen nové
+součásti uvnitř opravného podání. Podání, které čeká na odpověď a výsledek
+zpracování nemá, si po zahození GUID ponechá.
+
 Zahodit nejde podání, které úřad přijal nebo přijal částečně. Tam už u úřadu
 něco je a opakované odeslání by vyrobilo duplicitu; opravuje se opravným
 podáním (viz § 85.9).
@@ -126,6 +136,31 @@ podání se ve frontě „K odeslání" ani neukazuje: není z čeho vést cestu
 Z fronty zmizí i podání pod povinností, která je už uzavřená. Připravená
 podání tam ale zůstávají vždy, i k uzavřené povinnosti — opravné hlášení se
 odesílá pořád odtud.
+
+#### Podání „možná doručeno"
+
+Když požadavek na ČSSZ odejde, ale odpověď nedorazí (vyprší čas, spadne
+spojení, brána vrátí chybu serveru nebo nečitelnou odpověď), nedá se poznat,
+jestli ČSSZ zprávu převzala. Pokus proto dostane stav **Možná doručeno**
+a podání se samo znovu neodešle: druhé odeslání by u ČSSZ mohlo založit
+duplicitu. Tlačítko **Odeslat** je u něj nedostupné a fronta i **Stav
+odeslání** ukážou u podání postup:
+
+1. **Dohledejte protokol.** Hledejte zprávu od ČSSZ v datové schránce firmy
+   (tlačítko **Otevřít datovou schránku**) nebo přehled podání na ePortálu
+   ČSSZ. Protokol načtěte tlačítkem **Načíst protokol**; aplikace ho s podáním
+   spáruje podle GUID podání. Nese-li pokus CorrelationID (potvrzení převzetí
+   dorazilo a selhal až zápis), aplikace se na výsledek doptává sama.
+2. **Potvrďte opakování**, jen když protokol nikde není. Vyplňte, jak jste
+   ho hledali, a zaškrtněte potvrzení. Potvrzení samo nic neodesílá; podání
+   se vrátí mezi připravená a odejde **tentýž zmrazený dokument se stejným
+   GUID**. Je-li k podání načtený protokol se stejným GUID, aplikace opakování
+   odmítne, protože originál je u ČSSZ.
+
+Kdyby originál u ČSSZ přece jen byl, odpoví ČSSZ na opakované odeslání chybou
+**20022** („shodné podání už existuje"). Aplikace ji nebere jako zamítnutí:
+podání zůstane odeslané, u pokusu se ukáže **Originál podání je u ČSSZ**
+a úkolem je doložit nebo načíst protokol originálu. Znovu se neodesílá.
 
 ### 85.5.2 Hromadné odeslání
 
@@ -601,7 +636,18 @@ Výsledek proto rozlišuje tři stavy: dokument nejde postavit, XML vzniklo
 a prošlo schématem, ale katalog kontrol není celý vykonaný, a konečně podání
 připravené k odeslání. Prostřední stav je varovný, ne zelený. Část kontrol
 rozhoduje až ČSSZ proti svému registru — ty se nikdy nevykazují jako splněné,
-jen se počítají zvlášť. Panel zároveň ukazuje lhůtu pro podání za vykazované
+jen se počítají zvlášť. Patří sem i kontrola 22 (duplicitní GUID podání):
+jestli ČSSZ už má podání se stejným GUID, ví jen její evidence.
+
+Hlášení, které se podává **po splatnosti pojistného** a uplatňuje **slevu na
+pojistném zaměstnavatele**, dostane varování kontroly 290. ČSSZ slevu porovná
+se slevou v posledním hlášení s akceptovanou pojistnou částí a vyšší slevu po
+lhůtě neuzná. Varování zmrazení nezakazuje, ale vyžaduje výslovné potvrzení:
+panel **Zmrazení a odeslání JMHZ** i **Měsíční přehled** ukážou větu
+s datem splatnosti a výší slevy, odkaz na protokoly ve **Stavu odeslání** (kde
+najdete poslední akceptovanou slevu) a na **Mzdové běhy** (kde se sleva
+opravuje). Tlačítkem **Sleva nepřevyšuje poslední akceptovanou, zmrazit**
+hlášení zmrazíte. Panel zároveň ukazuje lhůtu pro podání za vykazované
 období, včetně posunu na nejbližší pracovní den.
 
 Panel **Zmrazení a odeslání JMHZ** navazuje až na schválenou revizi, úplné
@@ -825,6 +871,7 @@ Jsou na to dvě cesty a liší se tím, co po nich zůstane:
 |---|---|---|
 | **Zahodit** (Fronta „K odeslání") | u podání | Pokus dostane konečný stav a přestane blokovat další odeslání. V historii zůstane i s tím, co úřad odpověděl. |
 | **Smazat pokus** | u pokusu v historii | Řádek z historie zmizí úplně. Zůstane po něm jen záznam v auditním logu. |
+| **Potvrdit opakování** | u pokusu „Možná doručeno" (fronta i Stav odeslání) | Po dohledání protokolu uvolní odeslání téhož dokumentu se stejným GUID. Pokus zůstane v historii i s důvodem. |
 
 Zahození je běžná cesta — historie pokusů je záměrně úplná, aby šlo dohledat,
 co se kdy komu odeslalo. Smazání je pro záznam, který **nic nedokládá** a jen

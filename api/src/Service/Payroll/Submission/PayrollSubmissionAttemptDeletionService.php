@@ -53,6 +53,13 @@ final readonly class PayrollSubmissionAttemptDeletionService
             return 'Pokus dostal od úřadu protokol o zpracování — je to doklad o odeslání'
                 . ' a z historie se nemaže. Použijte zahození pokusu.';
         }
+        // Smazáním by zmizela jediná stopa, že požadavek odešel, a podání by
+        // šlo odeslat znovu bez potvrzení. Tudy se obejít nedá.
+        if ((string) ($attempt['status'] ?? '') === PayrollDispatchGate::POSSIBLY_DELIVERED_STATUS) {
+            return 'Požadavek možná došel k ČSSZ. Pokus je jediný doklad, že odešel,'
+                . ' a z historie se nemaže. Dohledejte protokol, případně potvrďte'
+                . ' opakování odeslání.';
+        }
 
         $correlation = trim((string) ($attempt['correlation_reference'] ?? ''));
         if ($correlation === '') {

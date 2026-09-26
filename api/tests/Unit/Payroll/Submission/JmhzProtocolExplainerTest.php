@@ -36,12 +36,28 @@ final class JmhzProtocolExplainerTest extends TestCase
     }
 
     /**
-     * Regrese na skutečnou odpověď z testovacího prostředí: ČSSZ vrátila kód
-     * 20022, jehož kontrola ve slovníku 1.4.1.6 vůbec není. Fail-closed by
+     * Prostor kódů ČSSZ je širší než náš katalog: skutečný protokol vrátil
+     * 20022 dřív, než katalog 1.4.2.10 kontrolu 22 zveřejnil. Fail-closed by
      * shodilo zpracování celé odpovědi právě ve chvíli, kdy uživatel potřebuje
      * vědět, proč mu podání neprošlo.
      */
     public function testUnknownControlDoesNotBreakTheExplanation(): void
+    {
+        $explained = $this->explain(
+            'JMHZ25_LT_G: 20999 - Kontrola, kterou katalog nezná',
+            '20999',
+        );
+
+        self::assertNotSame([], $explained);
+        self::assertSame(999, $explained[0]['control_id']);
+        self::assertNull($explained[0]['control']);
+    }
+
+    /**
+     * Regrese na skutečnou odpověď z testovacího prostředí. Od katalogu
+     * 1.4.2.10 je kontrola 22 připnutá, takže se hláška doplní z katalogu.
+     */
+    public function testDuplicateSubmissionGuidIsEnrichedFromControl22(): void
     {
         $explained = $this->explain(
             'JMHZ25_LT_G: 20022 - Podání typu R se stejným idPodani,'
@@ -49,10 +65,42 @@ final class JmhzProtocolExplainerTest extends TestCase
             '20022',
         );
 
-        self::assertNotSame([], $explained);
         self::assertSame(22, $explained[0]['control_id']);
-        self::assertNull($explained[0]['control']);
+        self::assertIsArray($explained[0]['control']);
+        self::assertSame(['10001', '10007'], $explained[0]['control']['attribute_ids']);
         self::assertStringContainsString('již existuje', $explained[0]['message']);
+        self::assertTrue($explained[0]['original_at_cssz']);
+    }
+
+    /**
+     * Protokol, jehož jedinou chybou je „shodné podání už existuje", není
+     * zamítnutí: originál je u ČSSZ a podání zůstává odeslané. Varianta
+     * „idPodani je již použito s jiným variabilním symbolem" je naopak
+     * skutečná chyba a zamítnutím zůstává.
+     */
+    public function testOnlyIdenticalSubmissionVariantMeansTheOriginalIsAtCssz(): void
+    {
+        $identical = (new JmhzProtocolParser())->parse(JmhzTransportSample::partialProtocol(
+            'ERROR',
+            [],
+            'error',
+            'JMHZ25_LT_G: 20022 - Podání typu S se stejným idPodani, variabilním'
+                . ' symbolem a obdobím již existuje',
+            '20022',
+        ));
+        self::assertTrue($identical->originalAlreadyAtCssz());
+        self::assertSame('submitted', $identical->payrollRemoteStatus());
+
+        $reused = (new JmhzProtocolParser())->parse(JmhzTransportSample::partialProtocol(
+            'ERROR',
+            [],
+            'error',
+            'JMHZ25_LT_G: 20022 - Toto idPodani je již použito s jiným variabilním symbolem',
+            '20022',
+        ));
+        self::assertFalse($reused->originalAlreadyAtCssz());
+        self::assertSame($reused->status->payrollRemoteStatus(), $reused->payrollRemoteStatus());
+        self::assertFalse((new JmhzProtocolExplainer())->explain($reused)[0]['original_at_cssz']);
     }
 
     /**

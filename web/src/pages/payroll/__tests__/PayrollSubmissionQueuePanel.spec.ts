@@ -109,6 +109,54 @@ describe('PayrollSubmissionQueuePanel', () => {
   })
 
   /**
+   * Podání „možná doručeno" nejde odeslat, a fronta u něj proto musí říct
+   * celý postup: co se stalo, kde protokol hledat (proklik na Stav odeslání
+   * a do datové schránky) a jak opakování vědomě potvrdit.
+   */
+  it('u podání „možná doručeno" ukáže postup a proklik na načtení protokolu', async () => {
+    m.submissionQueue.mockResolvedValue(queueResponse([
+      item({
+        submission_id: 3,
+        agenda_code: 'JMHZ25',
+        dispatch: {
+          mode: 'vrep_jmhz',
+          alternate_mode: null,
+          dispatchable: false,
+          blocked_reason: 'Podání možná doručeno: požadavek odešel, ale odpověď ČSSZ nedorazila.',
+        },
+        attempt: {
+          id: 9,
+          attempt_no: 1,
+          status: 'possibly_delivered',
+          channel: 'vrep_apep',
+          error_code: 'jmhz_vrep_response_lost',
+          error_message: 'Odpověď nedorazila.',
+          sent_at: null,
+          correlation_reference: null,
+        },
+      }),
+    ]))
+    const wrapper = mount(PayrollSubmissionQueuePanel, {
+      props: { environment: 'test' },
+      global: {
+        stubs: {
+          EnvironmentSwitch: true,
+          PaginationBar: true,
+          EmptyState: true,
+          RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
+        },
+      },
+    })
+    await flushPromises()
+
+    const notice = wrapper.get('[data-test="possibly-delivered-3"]')
+    expect(notice.text()).toContain('payroll.transport_delivery.possibly_where')
+    expect(notice.get('[data-test="possibly-delivered-import-link-3"]').attributes('data-to'))
+      .toContain('"tab":"transport"')
+    expect(notice.find('[data-test="possibly-delivered-confirm-open-3"]').exists()).toBe(true)
+  })
+
+  /**
    * Položka, kterou odeslat nejde, se z fronty NESMÍ ztratit — musí být vidět
    * i s důvodem. Mlčky vynechaná položka je horší než položka s důvodem.
    */

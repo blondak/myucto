@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\NetworkTimeoutException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
@@ -143,6 +144,43 @@ final class JmhzVrepClientTest extends TestCase
             self::fail('Selhání spojení musí skončit výjimkou.');
         } catch (JmhzTransportException $e) {
             self::assertSame('jmhz_vrep_unavailable', $e->errorCode);
+        }
+    }
+
+    /**
+     * Vypršení času až po odeslání požadavku není „nedostupné": ČSSZ zprávu
+     * mohla převzít a opakování by založilo duplicitu.
+     */
+    public function testTimeoutAfterTheRequestWentOutIsPossiblyDelivered(): void
+    {
+        $client = $this->client([
+            new NetworkTimeoutException('čas vypršel', new Request('POST', 'https://example.invalid')),
+        ]);
+
+        try {
+            $client->submit('<GovTalkMessage/>');
+            self::fail('Vypršení času musí skončit výjimkou.');
+        } catch (JmhzTransportException $e) {
+            self::assertSame('jmhz_vrep_response_lost', $e->errorCode);
+            self::assertTrue($e->possiblyDelivered);
+        }
+    }
+
+    public function testServerErrorIsPossiblyDeliveredButClientErrorIsNot(): void
+    {
+        $client = $this->client([
+            new Response(503, ['Content-Type' => 'text/html'], 'nedostupné'),
+            new Response(400, ['Content-Type' => 'text/html'], 'špatný požadavek'),
+        ]);
+
+        foreach ([[503, true], [400, false]] as [$status, $possiblyDelivered]) {
+            try {
+                $client->submit('<GovTalkMessage/>');
+                self::fail('Chyba HTTP musí skončit výjimkou.');
+            } catch (JmhzTransportException $e) {
+                self::assertSame($status, $e->remoteHttpStatus);
+                self::assertSame($possiblyDelivered, $e->possiblyDelivered);
+            }
         }
     }
 

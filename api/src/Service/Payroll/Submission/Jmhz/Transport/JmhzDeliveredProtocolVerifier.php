@@ -87,7 +87,7 @@ final readonly class JmhzDeliveredProtocolVerifier implements PayrollReceiptVeri
         // platforma vyhodnotila jako protokol cizího podání. Vazbu tady nese
         // shoda identity ze zmrazené datové věty, ne correlation.
         return new PayrollVerifiedReceipt(
-            $report->status->payrollRemoteStatus(),
+            $report->payrollRemoteStatus(),
             null,
             $this->partStatuses($formOutcomes),
             $formOutcomes,

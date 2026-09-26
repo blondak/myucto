@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
 
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\GuzzleException;
 
 /**
@@ -152,10 +153,21 @@ final class JmhzVrepClient
                 ],
                 'body' => $body,
             ]);
-        } catch (GuzzleException) {
+        } catch (GuzzleException $exception) {
+            if (self::provablyNotSent($exception)) {
+                throw new JmhzTransportException(
+                    'jmhz_vrep_unavailable',
+                    'VREP je dočasně nedostupné; spojení se nenavázalo a nic se'
+                        . ' neodeslalo.',
+                );
+            }
+
             throw new JmhzTransportException(
-                'jmhz_vrep_unavailable',
-                'VREP je dočasně nedostupné nebo odpověď nebyla doručena.',
+                'jmhz_vrep_response_lost',
+                'Požadavek na VREP odešel, ale odpověď nedorazila. ČSSZ ho mohla'
+                    . ' převzít.',
+                null,
+                true,
             );
         }
 
@@ -166,13 +178,17 @@ final class JmhzVrepClient
                 'jmhz_vrep_invalid_response',
                 'VREP vrátilo prázdnou nebo příliš velkou odpověď.',
                 $status,
+                $status >= 200 && $status < 300 || $status >= 500 || $status === 408,
             );
         }
         if ($status < 200 || $status >= 300) {
+            // 5xx a 408 znamenají, že brána požadavek přijala a o jeho osudu
+            // nic neřekla. Ostatní 4xx je odmítnutí požadavku jako celku.
             throw new JmhzTransportException(
                 'jmhz_vrep_http_error',
                 'VREP vrátilo chybu HTTP.',
                 $status,
+                $status >= 500 || $status === 408,
             );
         }
 
@@ -181,6 +197,21 @@ final class JmhzVrepClient
             'http_status' => $status,
             'content_type' => strtolower($response->getHeaderLine('Content-Type')),
         ];
+    }
+
+    /**
+     * Neodeslalo se prokazatelně nic? Jen tehdy smí transport pokus uzavřít
+     * jako „selhal dřív, než cokoli opustilo aplikaci".
+     *
+     * Guzzle rozlišuje selhání navázání spojení (`ConnectException` včetně
+     * vypršení času spojování) od selhání po odeslání požadavku
+     * (`NetworkTimeoutException` před hlavičkami odpovědi, `ResponseException`
+     * po nich, přerušené spojení). Jen to první znamená, že k ČSSZ nedorazil
+     * ani bajt; cokoli jiného je „možná doručeno".
+     */
+    private static function provablyNotSent(GuzzleException $exception): bool
+    {
+        return $exception instanceof ConnectException;
     }
 
     private function endpoint(string $operation): string

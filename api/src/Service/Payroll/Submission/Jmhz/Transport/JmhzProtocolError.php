@@ -114,6 +114,31 @@ final readonly class JmhzProtocolError
             : JmhzControlPassability::Passable;
     }
 
+    /** Kód chyby DIS kontroly 22 (katalog 1.4.2.10), duplicita GUID podání. */
+    public const DUPLICATE_SUBMISSION_CODE = 20_022;
+
+    /**
+     * Kontrola 22 ve variantě 3 nebo 4: shodné řádné (GUID, VS, období a balík)
+     * nebo stornovací podání už ČSSZ MÁ. Taková „chyba" neříká, že podání
+     * neprošlo, ale že jeho originál u ČSSZ je; typicky po opakování odeslání,
+     * na které se nevrátila odpověď.
+     *
+     * Varianty 1 a 2 (idPodani použité s jiným VS nebo za jiné období) jsou
+     * skutečné chyby a sem nepatří. Rozlišují se jen textem hlášky, strukturovaný
+     * kód varianty protokol nenese; katalog u nich píše „je již použito",
+     * u shodného podání „se stejným idPodani … již existuje".
+     */
+    public function reportsExistingIdenticalSubmission(): bool
+    {
+        if ($this->code !== self::DUPLICATE_SUBMISSION_CODE) {
+            return false;
+        }
+        $message = mb_strtolower($this->message, 'UTF-8');
+
+        return str_contains($message, 'již existuje')
+            && preg_match('/se\s+stejným\s+idpodan[ií]/u', $message) === 1;
+    }
+
     public function requireControlId(): JmhzControlId
     {
         if ($this->controlId === null) {

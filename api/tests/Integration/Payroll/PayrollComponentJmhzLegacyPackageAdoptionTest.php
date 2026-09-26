@@ -21,7 +21,8 @@ use PHPUnit\Framework\TestCase;
  * zařazení se nedoplnilo, protože složka nějaký záznam zařazení měla.
  *
  * Rozhodnutí účetní ze staršího balíku se převezme do aktuálního, pokud tam
- * cílový atribut existuje. Migrace 1840 dělá u existujících instalací totéž
+ * cílový atribut existuje. Migrace 1840 (balík 1.4.2.9) a 1905 (balík 1.4.2.10)
+ * dělají u existujících instalací totéž
  * co aplikace — shodu hlídá {@see self::testMigrationDoesExactlyWhatTheApplicationDoes()}.
  */
 #[Group('integration')]
@@ -29,7 +30,7 @@ final class PayrollComponentJmhzLegacyPackageAdoptionTest extends TestCase
 {
     use IsolatedSupplierTrait;
 
-    private const MIGRATION = '1840_payroll_component_jmhz_legacy_package_adoption.sql';
+    private const MIGRATION = '1905_payroll_component_jmhz_catalog_1_4_2_10_package.sql';
 
     /** Cíle, které aplikace umí; synthetický starší balík je musí znát, jinak FK zařazení neprojde. */
     private const TARGETS = [
@@ -158,7 +159,7 @@ final class PayrollComponentJmhzLegacyPackageAdoptionTest extends TestCase
 
         $this->runMigration();
         $migration = $this->mappingRows();
-        self::assertSame($application, $migration, 'Migrace 1840 a aplikace převzaly zařazení různě.');
+        self::assertSame($application, $migration, 'Migrace a aplikace převzaly zařazení různě.');
         $this->runMigration();
         self::assertSame($migration, $this->mappingRows(), 'Opakovaný běh migrace nesmí nic změnit.');
         self::assertSame('10329', $this->mappings->snapshot($this->supplierId, $this->componentId('MZDA_MESICNI'))['target_attribute_id']);

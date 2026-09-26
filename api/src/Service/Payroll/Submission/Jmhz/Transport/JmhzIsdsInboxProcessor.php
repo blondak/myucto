@@ -112,7 +112,7 @@ final readonly class JmhzIsdsInboxProcessor implements SubmissionInboxMessagePro
             );
         }
 
-        $declaredStatus = $report->status->payrollRemoteStatus();
+        $declaredStatus = $report->payrollRemoteStatus();
         $idempotencyKey = 'jmhz-isds-inbox:' . $inboxMessageId
             . ':' . hash('sha256', $bytes);
         $verifier = $this->verifierFor($report, $supplierId, $environment, $submissionId, $identity);

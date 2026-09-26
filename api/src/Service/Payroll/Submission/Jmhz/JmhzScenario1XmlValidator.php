@@ -86,6 +86,24 @@ final readonly class JmhzScenario1XmlValidator
         ];
     }
 
+    /**
+     * Ověření HOTOVÉ datové věty proti připnutému XSD, bez serializace. Pro
+     * znovu zmrazené podání, u kterého se měnily jen GUIDy a čas vyplnění.
+     *
+     * @return array{package_key:string,data_version:string,bundle_sha256:string}
+     */
+    public function validateFrozen(string $xml): array
+    {
+        $schema = $this->schemas->entryPoint();
+        $this->assertSchemaValid($xml, $schema['path']);
+
+        return [
+            'package_key' => $schema['package_key'],
+            'data_version' => $schema['data_version'],
+            'bundle_sha256' => $schema['bundle_sha256'],
+        ];
+    }
+
     private function assertByteStable(
         JmhzScenario1NormalizedDocument $document,
         JmhzSubmissionEnvelope $envelope,
