@@ -13,6 +13,8 @@ export interface SavedFilter {
 export interface SortPref { key: string; dir: 'asc' | 'desc' }
 
 export interface TablePrefs {
+  column_colors?: Record<string, string> | null
+  column_order?: string[] | null
   hidden?: string[] | null               // SKRYTÉ sloupce (R9); absence/null = default stránky
   shown?: string[] | null                // explicitně ODKRYTÉ doplňkové (defaultHidden) sloupce
   sort?: SortPref | null
