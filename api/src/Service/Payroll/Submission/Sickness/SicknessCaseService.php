@@ -98,6 +98,7 @@ final readonly class SicknessCaseService
 
     public function __construct(
         private PayrollSicknessCaseRepository $cases,
+        private SicknessProtectionPeriodPolicy $protection,
     ) {}
 
     /** @return list<array<string,mixed>> */
@@ -113,9 +114,65 @@ final readonly class SicknessCaseService
         );
         foreach ($rows as $index => $row) {
             $rows[$index] = $this->decorate($supplierId, $environment, $row);
+            $rows[$index]['protection_period'] = $this->protectionStatus($row);
         }
 
         return $rows;
+    }
+
+    /**
+     * Vznikla sociální událost za trvání vztahu, nebo v ochranné lhůtě podle
+     * § 15 zák. č. 187/2006 Sb.? Mimo obojí nárok z tohoto vztahu nevznikl
+     * a politika to odmítne s konkrétní větou.
+     *
+     * @param array<string,mixed> $context
+     * @param array<string,mixed> $row
+     * @return array{status:string,employment_end:?string,protection_until:?string,legal_reference:string}
+     */
+    public function assertEventCovered(
+        SicknessBenefitKind $kind,
+        string $eventFrom,
+        array $context,
+        array $row,
+    ): array {
+        return $this->protection->assess($kind, $eventFrom, $context, $row);
+    }
+
+    /**
+     * Stav ochranné lhůty pro seznam. Případ mimo ochrannou lhůtu se tu
+     * neodmítá — už existuje a obrazovka musí říct PROČ z něj podání nepůjde.
+     *
+     * @param array<string,mixed> $row řádek seznamu s `employment_*` sloupci
+     * @return array<string,mixed>
+     */
+    private function protectionStatus(array $row): array
+    {
+        $kind = SicknessBenefitKind::tryFrom((string) ($row['benefit_kind'] ?? ''));
+        if ($kind === null) {
+            return ['status' => 'unknown'];
+        }
+        try {
+            return $this->protection->assess(
+                $kind,
+                (string) $row['incapacity_from'],
+                [
+                    'start_date' => $row['employment_start_date'] ?? null,
+                    'actual_start_date' => $row['employment_actual_start_date'] ?? null,
+                    'end_date' => $row['employment_end_date'] ?? null,
+                    'relation_type' => $row['employment_relation_type'] ?? null,
+                ],
+                $row,
+            );
+        } catch (SicknessException $exception) {
+            return [
+                'status' => 'outside',
+                'employment_end' => $row['employment_end_date'] ?? null,
+                'protection_until' => null,
+                'legal_reference' => SicknessProtectionPeriodPolicy::LEGAL_REFERENCE,
+                'reason_code' => $exception->validationCode,
+                'message' => $exception->getMessage(),
+            ];
+        }
     }
 
     /**
@@ -167,6 +224,7 @@ final readonly class SicknessCaseService
             $employmentId,
             $incapacityFrom,
         );
+        $this->protection->assess($kind, $incapacityFrom, $context, $values);
         $overlapping = $this->cases->overlappingForEmployment(
             $supplierId,
             $environment,
@@ -251,10 +309,20 @@ final readonly class SicknessCaseService
             );
         }
         $values = $this->normalize($input, false);
-        $this->assertCodebooks(
-            SicknessBenefitKind::from((string) $row['benefit_kind']),
-            $values,
-        );
+        $kind = SicknessBenefitKind::from((string) $row['benefit_kind']);
+        $this->assertCodebooks($kind, $values);
+        if (array_key_exists('incapacity_from', $values) && $values['incapacity_from'] !== null) {
+            $this->protection->assess(
+                $kind,
+                (string) $values['incapacity_from'],
+                $this->requireContext(
+                    $supplierId,
+                    (int) $row['employment_id'],
+                    (string) $values['incapacity_from'],
+                ),
+                [...$row, ...$values],
+            );
+        }
         $this->assertCaredDependant($supplierId, (int) $row['employee_id'], $values);
         $decisiveMonths = $this->decisiveMonthsInput($input);
         if ($values !== []) {

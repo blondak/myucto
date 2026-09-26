@@ -54,7 +54,9 @@ final readonly class PayrollSicknessCaseRepository
             'SELECT sickness.*, employee.full_name,
                     employment.code AS employment_code,
                     employment.start_date AS employment_start_date,
+                    employment.actual_start_date AS employment_actual_start_date,
                     employment.end_date AS employment_end_date,
+                    employment.relation_type AS employment_relation_type,
                     (SELECT terms.monthly_gross_minor
                        FROM payroll_employment_terms terms
                       WHERE terms.supplier_id = sickness.supplier_id
@@ -203,6 +205,9 @@ final readonly class PayrollSicknessCaseRepository
                     sickness.status,
                     sickness.nempri_submission_id,
                     sickness.hzupn_submission_id,
+                    sickness.returned_on,
+                    sickness.lone_caregiver,
+                    sickness.payroll_payment_date,
                     employee.full_name
                FROM payroll_sickness_cases sickness
                JOIN payroll_employees employee
