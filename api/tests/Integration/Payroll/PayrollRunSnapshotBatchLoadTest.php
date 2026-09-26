@@ -205,11 +205,15 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         // PayrollEnforcementRepository::receivedCaseIdsForMany(). Jeden dotaz
         // na běh (prepare + execute), ne na osobu.
         //
+        // Od balíku souběhu vztahů (9/2026) přibyla další množinová dávka:
+        // potvrzení odloženého příjmu za měsíc po vztazích (JMHZ scénář 8) —
+        // PayrollDeferredIncomeRepository::forPeriod(). Opět jeden dotaz na běh.
+        //
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
         self::assertLessThanOrEqual(
-            82,
+            84,
             $counts[500],
-            'Snapshot pěti set osob se musí vejít do 82 round-tripů.',
+            'Snapshot pěti set osob se musí vejít do 84 round-tripů.',
         );
     }
 

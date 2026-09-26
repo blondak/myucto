@@ -763,14 +763,14 @@ final class PayrollRunSnapshotBuilder
     /**
      * Potvrzení odloženého příjmu (JMHZ scénář 8) za měsíc po vztazích.
      *
+     * Bez sondy na existenci tabulky: tu zakládá migrace 1917 a snapshot běhu
+     * nesmí stát víc dotazů podle toho, jestli je schéma v cache
+     * (PayrollRunSnapshotBatchLoadTest).
+     *
      * @return array<int,array{deferred_type:string,note:?string,row_version:int}>
      */
     private function deferredIncomes(int $supplierId, string $periodStart): array
     {
-        if (!$this->db->hasTable('payroll_employment_deferred_incomes')) {
-            return [];
-        }
-
         return (new \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository($this->db))
             ->forPeriod($supplierId, $periodStart);
     }
