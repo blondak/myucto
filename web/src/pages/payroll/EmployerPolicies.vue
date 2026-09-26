@@ -224,10 +224,18 @@ const optionalPolicyOptions = computed(() => options<PayrollOptionalPolicyState>
   'optional_policy',
   ['not_used', 'manual_review', 'configured'],
 ))
+/*
+ * Šifrovaný e-mail (S/MIME) se nenabízí: odesílání ho neumí a server ho
+ * odmítne uložit. Ukáže se jen u politiky, která ho má uložený z dřívějška,
+ * aby šlo vidět, co v ní je — a hned vedle upozornění, že je potřeba ho změnit.
+ */
 const deliveryOptions = computed(() => options<PayrollDeliveryChannel>(
   'delivery',
-  ['disabled', 'employee_portal', 'smime_email', 'manual_handover'],
+  form.value.delivery_channel === 'smime_email'
+    ? ['disabled', 'employee_portal', 'smime_email', 'manual_handover']
+    : ['disabled', 'employee_portal', 'manual_handover'],
 ))
+const deliveryChannelUnsupported = computed(() => form.value.delivery_channel === 'smime_email')
 /**
  * Co brání uložení, pojmenované po polích. Jedna společná věta „zkontrolujte
  * období platnosti, výplatní den, ověření kanálu a délku reference" nutila
@@ -1031,6 +1039,12 @@ onMounted(async () => {
             data-test="policy-delivery-channel"
             @update:model-value="form.delivery_channel = $event ?? 'disabled'; normalizeDelivery()"
           />
+          <span
+            v-if="deliveryChannelUnsupported"
+            class="mt-1 block text-xs text-warning-700"
+            role="alert"
+            data-test="policy-delivery-unsupported"
+          >{{ t('payroll.employer.policies.delivery_smime_unsupported') }}</span>
         </div>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">

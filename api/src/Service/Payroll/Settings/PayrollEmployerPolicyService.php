@@ -53,6 +53,9 @@ final class PayrollEmployerPolicyService
      * `balance_rounding_mode` tady schválně NENÍ: zaokrouhlení je peněžní
      * rozhodnutí zaměstnavatele a aplikace ho za něj vybírat nebude.
      */
+    /** Kanál, který výčet zná, ale odesílání ho neumí. */
+    public const UNIMPLEMENTED_DELIVERY_CHANNEL = 'smime_email';
+
     private const ENUM_DEFAULTS = [
         'payday_business_day_rule' => 'none',
         'home_office_policy' => 'not_used',
@@ -214,6 +217,20 @@ final class PayrollEmployerPolicyService
             );
         }
         $result['delivery_verified_on'] = $deliveryVerifiedOn;
+
+        /*
+         * Šifrovaný e-mail (S/MIME) je ve výčtu kanálu jen kvůli dřív uloženým
+         * politikám — odesílání ho neumí a
+         * {@see \MyInvoice\Service\Payroll\Document\Delivery\PayrollSecureDeliveryPolicy}
+         * každý dokument s ním odmítne. Uložit ho znovu by znamenalo tvrdit
+         * zaměstnancům doručení, které se nikdy nestane.
+         */
+        if ($result['delivery_channel'] === self::UNIMPLEMENTED_DELIVERY_CHANNEL) {
+            throw new \InvalidArgumentException(
+                'Šifrovaný e-mail (S/MIME) zatím mzdové dokumenty neodesílá. '
+                . 'Zvolte portál zaměstnance (zabezpečený odkaz), nebo auditované ruční předání.',
+            );
+        }
 
         /*
          * Výchozí sazby příplatků § 114 až § 118 (migrace 1846).

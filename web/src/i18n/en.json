@@ -7447,7 +7447,8 @@
           "source_reference": "The source reference may be at most 255 characters long.",
           "delivery_verified_on": "The delivery channel verification date is not a valid date."
         },
-        "delivery_verified_on_hint": "Optional. Until you fill the date in, the policy saves, but payslips will not be sent through this channel."
+        "delivery_verified_on_hint": "Optional. Until you fill the date in, the policy saves, but payslips will not be sent through this channel.",
+        "delivery_smime_unsupported": "Encrypted e-mail does not send payroll documents yet, so employees would receive nothing. Choose the employee portal or an audited manual handover; the policy cannot be saved with this channel."
       },
       "health_accounts": {
         "title": "Institution payment accounts",

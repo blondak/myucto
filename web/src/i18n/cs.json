@@ -7447,7 +7447,8 @@
           "source_reference": "Reference zdroje smí mít nejvýše 255 znaků.",
           "delivery_verified_on": "Datum ověření doručovacího kanálu není platné datum."
         },
-        "delivery_verified_on_hint": "Nepovinné. Dokud datum nedoplníte, politika se uloží, ale výplatnice se tímto kanálem neodešlou."
+        "delivery_verified_on_hint": "Nepovinné. Dokud datum nedoplníte, politika se uloží, ale výplatnice se tímto kanálem neodešlou.",
+        "delivery_smime_unsupported": "Šifrovaný e-mail zatím mzdové dokumenty neodesílá, zaměstnancům by nic nepřišlo. Zvolte portál zaměstnance, nebo auditované ruční předání; s tímto kanálem politiku uložit nelze."
       },
       "health_accounts": {
         "title": "Platební účty institucí",

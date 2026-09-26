@@ -380,6 +380,31 @@ describe('EmployerPolicies', () => {
     wrapper.unmount()
   })
 
+  /*
+   * Šifrovaný e-mail odesílání neumí: nabídnout ho znamenalo slíbit
+   * zaměstnancům výplatnici, která nikdy nepřijde. U dřív uložené politiky se
+   * ukáže, ale s výzvou ke změně.
+   */
+  it('nenabízí šifrovaný e-mail a u uložené politiky ho označí', async () => {
+    const fresh = await mountComponent(true, [])
+    const freshChannel = fresh.findAllComponents(SearchableSelect)
+      .find(select => select.attributes('data-test') === 'policy-delivery-channel')
+    expect((freshChannel!.props('options') as { value: string }[]).map(option => option.value))
+      .not.toContain('smime_email')
+    expect(fresh.find('[data-test="policy-delivery-unsupported"]').exists()).toBe(false)
+    fresh.unmount()
+
+    const legacy = await mountComponent(true, [policy({ delivery_channel: 'smime_email' })])
+    await legacy.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    const legacyChannel = legacy.findAllComponents(SearchableSelect)
+      .find(select => select.attributes('data-test') === 'policy-delivery-channel')
+    expect((legacyChannel!.props('options') as { value: string }[]).map(option => option.value))
+      .toContain('smime_email')
+    expect(legacy.find('[data-test="policy-delivery-unsupported"]').exists()).toBe(true)
+    legacy.unmount()
+  })
+
   it('vadné pole pojmenuje, místo jedné společné věty', async () => {
     const wrapper = await mountComponent(true, [])
 
