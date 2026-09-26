@@ -307,9 +307,10 @@ final class PohodaExport
      * Přehled agend v rozbaleném exportu pro náhled průvodce: IČO, rok, název jednotky
      * (z přehledu účetních jednotek), verze Pohody, počty záznamů a stav souborů.
      *
+     * @param (callable(string,int,int):void)|null $progress složka agendy, pořadí od nuly, počet složek
      * @return list<array<string,mixed>>
      */
-    public static function overview(string $root): array
+    public static function overview(string $root, ?callable $progress = null): array
     {
         $root = rtrim($root, '/\\');
         $names = [];
@@ -321,9 +322,12 @@ final class PohodaExport
             }
         }
         $out = [];
-        foreach (glob($root . '/*', GLOB_ONLYDIR) ?: [] as $dir) {
-            if (preg_match('/^(\d{6,8})_(\d{4})$/', basename($dir), $m) !== 1) {
-                continue;
+        $dirs = array_values(array_filter(glob($root . '/*', GLOB_ONLYDIR) ?: [],
+            static fn (string $dir): bool => preg_match('/^\d{6,8}_\d{4}$/', basename($dir)) === 1));
+        foreach ($dirs as $index => $dir) {
+            preg_match('/^(\d{6,8})_(\d{4})$/', basename($dir), $m);
+            if ($progress !== null) {
+                $progress(basename($dir), $index, count($dirs));
             }
             $payrollFile = $dir . '/' . self::FILES['payroll'];
             $payroll = null;
@@ -385,27 +389,41 @@ final class PohodaExport
     /**
      * Přehled mezd z datového souboru (`91_mzdy.xml`) za rok agendy: zaměstnanci v exportu,
      * měsíce a počet zpracovaných mezd, IČO z hlavičky exportu (může chybět).
+     * `last_overall` = poslední zpracovaný měsíc exportu přes všechny roky; podle něj
+     * kontrola před převodem mezd plánuje nastavení modulu Mzdy.
      *
-     * @return array{ico:string,employees:int,months:int,payslips:int,first:?string,last:?string}
+     * Přehled se počítá v jobu nahrání a z `meta.json` ho čte náhled průvodce, takže
+     * kontrola před převodem soubor mezd znovu nečte. Jeden průchod souborem.
+     *
+     * @return array{ico:string,employees:int,months:int,payslips:int,first:?string,last:?string,last_overall:?string}
      */
     public static function payrollSummary(string $file, int $year): array
     {
         $info = PohodaXml::packInfo($file);
         $periods = [];
-        foreach (PohodaXml::records($file, 'MZ') as $row) {
-            if ((int) PohodaXml::text($row, 'Rok') === $year) {
-                $period = sprintf('%04d-%02d', $year, (int) PohodaXml::text($row, 'RelMes'));
+        $lastOverall = null;
+        $employees = 0;
+        foreach (PohodaXml::scan($file, ['MZ', 'ZAM']) as $tag => $row) {
+            if ($tag === 'ZAM') {
+                $employees++;
+                continue;
+            }
+            $rowYear = (int) PohodaXml::text($row, 'Rok');
+            $period = sprintf('%04d-%02d', $rowYear, (int) PohodaXml::text($row, 'RelMes'));
+            $lastOverall = $lastOverall === null || $period > $lastOverall ? $period : $lastOverall;
+            if ($rowYear === $year) {
                 $periods[$period] = ($periods[$period] ?? 0) + 1;
             }
         }
         ksort($periods);
         return [
             'ico' => (string) preg_replace('/\D/', '', $info['ico']),
-            'employees' => PohodaXml::count($file, 'ZAM'),
+            'employees' => $employees,
             'months' => count($periods),
             'payslips' => array_sum($periods),
             'first' => $periods === [] ? null : (string) array_key_first($periods),
             'last' => $periods === [] ? null : (string) array_key_last($periods),
+            'last_overall' => $lastOverall,
         ];
     }
 

@@ -14,7 +14,6 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Migration\ImportYears;
-use MyInvoice\Service\Migration\Pohoda\ChartJournalImporter;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollImporter;
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
@@ -114,10 +113,17 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             return Json::error($response, $e->errorCode, $e->getMessage(), 404);
         }
         $supplierIco = $this->supplierIco($supplierId);
+        // Náhled soubory exportu nečte: co z nich potřebuje (přehled mezd, pozdější roky
+        // deníku), spočítal job nahrání do `meta.json`. Přehled nahraný před tím ho nemá -
+        // pak ho dopočítá job na pozadí a průvodce mezitím ukazuje jeho průběh. Synchronně
+        // by čtení 50MB souboru mezd přesáhlo timeout webserveru.
+        if (!self::metaHasFacts($meta, $supplierIco)) {
+            return Json::ok($response, $this->describeInBackground($request, $supplierId, $token));
+        }
         $preflight = [];
         $payrollPreflight = [];
         $defaultYear = null;
-        foreach ((array) ($meta['agendas'] ?? []) as $i => $agenda) {
+        foreach ((array) ($meta['agendas'] ?? []) as $agenda) {
             if ($supplierIco === '' || (string) $agenda['ico'] !== $supplierIco) {
                 continue;
             }
@@ -126,7 +132,8 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             $agendaDir = PohodaUploads::exportDir($supplierId, $token) . DIRECTORY_SEPARATOR . $agenda['dir'];
             if ((bool) ($agenda['has_payroll'] ?? false)) {
                 try {
-                    $payrollPreflight[(string) $year] = $this->payroll->preflight($supplierId, $agendaDir . DIRECTORY_SEPARATOR . PohodaExport::FILES['payroll'], $year);
+                    $payrollPreflight[(string) $year] = $this->payroll->preflight($supplierId, $agendaDir . DIRECTORY_SEPARATOR . PohodaExport::FILES['payroll'], $year,
+                        (array) $agenda['payroll']);
                 } catch (\Throwable $e) {
                     error_log(sprintf('POHODA: náhled mezd exportu %s firmy %d selhal: %s', $token, $supplierId, (string) $e));
                     $payrollPreflight[(string) $year] = [['level' => 'error', 'code' => 'payroll_unreadable', 'message' => 'Mzdy v exportu nejde přečíst.', 'context' => []]];
@@ -136,12 +143,8 @@ final class PohodaMigrationAction extends AbstractMigrationAction
                 continue;
             }
             try {
-                $export = PohodaExport::open(PohodaUploads::exportDir($supplierId, $token) . DIRECTORY_SEPARATOR . $agenda['dir']);
-                // Přehled nahraný před výběrem roků pozdější roky agendy nemá.
-                if (!is_array($agenda['counts']['later_years'] ?? null)) {
-                    $meta['agendas'][$i]['counts']['later_years'] = ChartJournalImporter::laterYears($export);
-                }
-                $preflight[(string) $year] = $this->importer->preflight($supplierId, $export);
+                $export = PohodaExport::open($agendaDir);
+                $preflight[(string) $year] = $this->importer->preflight($supplierId, $export, [], array_map('intval', (array) $agenda['counts']['later_years']));
             } catch (\Throwable $e) {
                 if (!$e instanceof PohodaException) {
                     error_log(sprintf('POHODA: náhled exportu %s firmy %d selhal: %s', $token, $supplierId, (string) $e));
@@ -157,6 +160,78 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             'preflight' => (object) $preflight,
             'payroll_preflight' => (object) $payrollPreflight,
         ]);
+    }
+
+    /**
+     * `meta.json` nese všechno, co náhled z exportu potřebuje, u každé agendy s IČO firmy:
+     * úplný přehled mezd ({@see PohodaPayrollImporter::summaryComplete()}) a pozdější roky deníku.
+     *
+     * @param array<string,mixed> $meta
+     */
+    public static function metaHasFacts(array $meta, string $supplierIco): bool
+    {
+        foreach ((array) ($meta['agendas'] ?? []) as $agenda) {
+            if ($supplierIco === '' || (string) ($agenda['ico'] ?? '') !== $supplierIco) {
+                continue;
+            }
+            if ((bool) ($agenda['has_payroll'] ?? false) && !PohodaPayrollImporter::summaryComplete($agenda['payroll'] ?? null)) {
+                return false;
+            }
+            if ((bool) ($agenda['has_accounting'] ?? true) && !is_array($agenda['counts']['later_years'] ?? null)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Přehled exportu dopočítá job na pozadí ({@see PohodaImportJobService::MODE_DESCRIBE});
+     * průvodce dostane stav `processing` s průběhem jobu a dotazuje se znovu. Běžící job se
+     * znovu nezakládá; doběhlý job, po kterém přehled pořád chybí, se hlásí jako chyba,
+     * kterou jde zopakovat (`?retry=1`).
+     *
+     * @return array<string,mixed>
+     */
+    private function describeInBackground(Request $request, int $supplierId, string $token): array
+    {
+        $retry = (string) ($request->getQueryParams()['retry'] ?? '') === '1';
+        $userId = self::userId($request);
+        $this->jobs->reapStale($supplierId, PohodaImportJobService::SOURCE);
+        $result = PohodaUploads::withUploadLock($supplierId, $token, function () use ($supplierId, $token, $retry, $userId): array {
+            $state = PohodaUploads::state($supplierId, $token) ?? [];
+            $jobId = isset($state['describe_job_id']) ? (int) $state['describe_job_id'] : null;
+            $job = $jobId !== null ? $this->jobs->find($jobId, $supplierId) : null;
+            if ($job !== null && in_array($job['status'], ['queued', 'running'], true)) {
+                return ['job' => $job, 'spawn' => false];
+            }
+            if ($job !== null && !$retry) {
+                return ['job' => $job, 'spawn' => false];
+            }
+            $jobId = $this->jobs->create($supplierId, PohodaImportJobService::SOURCE, [
+                'token' => $token,
+                'mode' => PohodaImportJobService::MODE_DESCRIBE,
+            ], $userId);
+            PohodaUploads::updateState($supplierId, $token, ['describe_job_id' => $jobId]);
+            return ['job' => $this->jobs->find($jobId, $supplierId), 'spawn' => true];
+        });
+        $job = $result['job'];
+        if ($result['spawn'] && $job !== null) {
+            $this->spawnWorker((int) $job['id']);
+        }
+        $meta = PohodaUploads::meta($supplierId, $token);
+        $running = $job !== null && in_array($job['status'], ['queued', 'running'], true);
+        return [
+            'token' => $token,
+            'status' => $running ? PohodaUploads::STATUS_PROCESSING : PohodaUploads::STATUS_FAILED,
+            'file_name' => (string) ($meta['file_name'] ?? ''),
+            'size' => 0,
+            'received' => 0,
+            'job_id' => $job !== null ? (int) $job['id'] : null,
+            'progress' => $job !== null ? self::jobProgress($job) : null,
+            'error' => $running ? null : (trim((string) ($job['last_error'] ?? '')) ?: 'Náhled exportu se nepodařilo připravit.'),
+            // Export na serveru zůstává, chyba přípravy náhledu jde zopakovat.
+            'retryable' => !$running,
+        ];
     }
 
     /** @param array<string,string> $args */

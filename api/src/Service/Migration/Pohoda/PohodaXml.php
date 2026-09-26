@@ -23,6 +23,25 @@ final class PohodaXml
      */
     public static function records(string $file, string $tag): \Generator
     {
+        foreach (self::scan($file, [$tag]) as $record) {
+            yield $record;
+        }
+    }
+
+    /**
+     * Záznamy několika elementů v JEDNOM průchodu souborem, v pořadí ze souboru; klíč
+     * generátoru je jméno elementu (opakuje se, takže ne přes `iterator_to_array`).
+     *
+     * Průchod 50MB souborem stojí sekundy bez ohledu na to, kolik záznamů se rozvine.
+     * Kdo z jednoho souboru potřebuje víc tabulek (mzdy z PAMICA), čte je tudy, ne
+     * opakovaným {@see records()}.
+     *
+     * @param list<string> $tags
+     * @return \Generator<string,array<string,mixed>>
+     */
+    public static function scan(string $file, array $tags): \Generator
+    {
+        $wanted = array_fill_keys($tags, true);
         $reader = self::open($file);
         if ($reader === null) {
             throw new PohodaException('export_unreadable', 'Soubor exportu ' . basename($file) . ' nejde otevřít jako XML.');
@@ -30,11 +49,12 @@ final class PohodaXml
         try {
             $ok = self::read($reader, $file);
             while ($ok) {
-                if ($reader->nodeType === \XMLReader::ELEMENT && $reader->localName === $tag) {
+                if ($reader->nodeType === \XMLReader::ELEMENT && isset($wanted[$reader->localName])) {
+                    $tag = $reader->localName;
                     $node = $reader->expand();
                     if ($node instanceof \DOMElement) {
                         $value = self::toArray($node);
-                        yield is_array($value) ? $value : ['#' => $value];
+                        yield $tag => is_array($value) ? $value : ['#' => $value];
                     }
                     $ok = $reader->next();
                     continue;
@@ -128,6 +148,11 @@ final class PohodaXml
                     $out['ico'] = (string) $reader->getAttribute('ico');
                     $out['program'] = (string) $reader->getAttribute('programVersion');
                     $out['state'] = (string) $reader->getAttribute('state');
+                    // Datový soubor (`mdbExport`) má celou hlavičku v kořeni a žádnou
+                    // `responsePackItem`; bez konce tady by se dočetl celý soubor.
+                    if ($reader->localName === 'mdbExport') {
+                        break;
+                    }
                 } elseif ($reader->localName === 'responsePackItem') {
                     $out['item_state'] = (string) $reader->getAttribute('state');
                     $out['note'] = (string) $reader->getAttribute('note');
