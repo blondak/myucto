@@ -56,6 +56,9 @@ export const eldpRemediationCodes: Record<string, string> = {
   eldp_scope_already_frozen: 'correction',
   eldp_correction_without_change: 'correction',
   eldp_correction_without_original: 'correction',
+  // Opravný list bez platného odkazu na zmrazený opravovaný list: interní
+  // nesoulad podkladu, účetní ho ve formuláři opravit nemůže.
+  eldp_correction_reference_invalid: 'integrity',
   // Potvrzení, dokument a rok bez pojištění se řeší přímo ve formuláři
   // evidenčního listu; proklik jinam by účetní odvedl od místa, kde je pole.
   eldp_excluded_days_not_confirmed: 'confirmation',
