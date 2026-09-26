@@ -19,6 +19,14 @@ final class PayrollTakeoverRunState
     public array $foreignLegislation = [];
     public int $accountsToVerify = 0;
     public int $accountsVerified = 0;
+    /** Aktivní účty ověřené už dřívějším během (opakovaný převod je jinak hlásil jako nic). */
+    public int $accountsAlreadyVerified = 0;
+    /** @var list<int> osoby s aktivním neověřeným účtem, na který zdroj výplatu nedoložil */
+    public array $accountsWithoutPayout = [];
+    /** Neaktivní účty ze zdroje (mzda na ně nechodila); k rozhodnutí účetní. */
+    public int $accountsInactive = 0;
+    /** Karty, kterým převod opravil podíl hotovosti u výplaty na účet (součet přes 100 %). */
+    public int $cashShareRepaired = 0;
     public int $hourlyWageRelations = 0;
     /** @var list<string> příjemci odvodů, pro které zdroj nedal účet */
     public array $institutionGaps = [];

@@ -342,6 +342,36 @@ final class PohodaPayrollImportTest extends TestCase
     }
 
     /**
+     * Výplata na účet celým podílem nesmí mít zároveň 100 % v hotovosti. Nová karta
+     * z převodu má hotovost 0; kartu, kterou tak nechal starší převod, opakovaný převod
+     * opraví a řekne to. Jinak nastavené rozdělení (vědomá volba) nechá být.
+     */
+    public function testBankPayoutGetsZeroCashShareAndOldCardsAreRepaired(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+        $cashShares = fn (): array => array_map('intval', $this->db->pdo()->query(
+            'SELECT cash_allocation_basis_points FROM payroll_employee_profiles WHERE supplier_id = ' . $supplierId
+            . ' AND payout_method = "bank" ORDER BY employee_id'
+        )->fetchAll(\PDO::FETCH_COLUMN));
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $shares = $cashShares();
+        self::assertNotSame([], $shares, $this->explain($protocol));
+        self::assertSame(array_fill(0, count($shares), 0), $shares);
+
+        // Stav po starším převodu: na účet celým podílem a k tomu hotovost 100 %.
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employee_profiles SET cash_allocation_basis_points = 10000 WHERE supplier_id = ? AND payout_method = "bank"'
+        )->execute([$supplierId]);
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame(array_fill(0, count($shares), 0), $cashShares(), $this->explain($again));
+        self::assertSame(count($shares), self::stepCounts($again, PohodaPayrollImporter::STEP_PEOPLE)['payout_cash_share_repaired'] ?? 0);
+    }
+
+    /**
      * Měsíc s nemocí musí po převodu jít schválit. Nemoc, ošetřovné, otcovská, neplacené
      * volno a neomluvená absence rozhodují o náhradě mzdy i vyloučené době, takže je
      * evidence vede jedině s daty od a do: dokud šly hodiny měsíčním souhrnem z importu

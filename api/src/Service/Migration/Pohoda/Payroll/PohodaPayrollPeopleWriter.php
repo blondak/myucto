@@ -313,16 +313,28 @@ final class PohodaPayrollPeopleWriter
                 $state->hourlyWageRelations,
             ));
         }
+        if ($state->cashShareRepaired > 0) {
+            $protocol->count($step, 'payout_cash_share_repaired', $state->cashShareRepaired);
+            $protocol->info($step, 'payout_cash_share_repaired', sprintf(
+                'U %d karet s výplatou na účet opravil převod podíl hotovosti ze 100 %% na 0 %% (dřívější převod ho ponechal '
+                . 'z výchozí hotovostní karty a rozdělení výplaty dávalo dohromady 200 %%).',
+                $state->cashShareRepaired,
+            ));
+        }
         if ($state->accountsVerified > 0 || $state->accountsToVerify > 0) {
+            $protocol->count($step, 'payout_accounts_already_verified', $state->accountsAlreadyVerified);
+            $withoutPayout = count(array_unique($state->accountsWithoutPayout));
             $protocol->warn($step, 'payout_accounts_unverified', sprintf(
-                'Výplatních účtů převzatých z PAMICA: %d, z toho ověřených %d a k ověření %d. Za ověřený se bere účet, '
-                . 'na který předchozí mzdový systém opakovaně vyplácel mzdu: to je věcný doklad, ne domněnka. Datem '
-                . 'ověření je den poslední výplaty z PAMICA a původ nese popisek účtu. Neověřený zůstává účet, který '
-                . 'PAMICA vede jako neaktivní (mzda na něj nechodila) nebo u kterého výplatu nedoložila; ty ověřte '
-                . 'v kartě osoby.',
-                $state->accountsVerified + $state->accountsToVerify,
+                'Výplatní účty z PAMICA: nově ověřeno %d, ověřených už z dřívějška %d, k ověření %d. Za ověřený se bere '
+                . 'účet, na který PAMICA opakovaně vyplácela mzdu; datem ověření je den poslední výplaty. K ověření '
+                . 'zůstávají účty, které PAMICA vede jako neaktivní (%d), a aktivní účty osob, u kterých PAMICA žádnou '
+                . 'výplatu na účet nedoložila (%d osob). Ověřte je v kartě osoby v části Výplata; na neověřený účet '
+                . 'nejde připravit výplatní příkaz.',
                 $state->accountsVerified,
+                $state->accountsAlreadyVerified,
                 $state->accountsToVerify,
+                $state->accountsInactive,
+                $withoutPayout,
             ));
         }
         if ($state->foreignLegislation !== []) {

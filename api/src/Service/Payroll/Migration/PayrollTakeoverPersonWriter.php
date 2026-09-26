@@ -444,6 +444,7 @@ final class PayrollTakeoverPersonWriter
         // firmou ověření NIKDY nedoplnil: krok skončil dřív, než se k němu dostal. Přesně
         // to potkalo instalace, kde účty založil starší běh, který ověřovat ještě neuměl.
         if ($current['accounts'] !== []) {
+            $this->repairCashShare($supplierId, $employeeId, $current, $userId, $state);
             return $policy->verifyPayoutAccounts ? $this->verifyAccounts($supplierId, $employeeId, $paidOn, $userId, $state) : [];
         }
         $from = min(is_string($start) ? $start : $today, $today);
@@ -465,12 +466,17 @@ final class PayrollTakeoverPersonWriter
                 'is_active' => $primary,
             ];
         }
+        $method = $current['payout_method'] === 'cash' ? 'bank' : $current['payout_method'];
+        $hasPrimary = array_filter($rows, static fn (array $row): bool => $row['is_active'] && $row['allocation_basis_points'] === 10000) !== [];
         $this->profiles->save($supplierId, $employeeId, $this->profileValidator->validate([
             'row_version' => $current['row_version'],
             'profile_status' => $current['profile_status'] === 'missing' ? 'setup' : $current['profile_status'],
-            'payout_method' => $current['payout_method'] === 'cash' ? 'bank' : $current['payout_method'],
+            'payout_method' => $method,
             'partner_settlement_account_code' => $current['partner_settlement_account_code'],
-            'cash_allocation_basis_points' => $current['cash_allocation_basis_points'],
+            // Výplata na účet celým podílem: hotovost je nula. Dřív zůstal podíl
+            // hotovosti z výchozí hotovostní karty (100 %) a karta hlásila rozdělení
+            // výplaty přes 100 %.
+            'cash_allocation_basis_points' => $method === 'bank' && $hasPrimary ? 0 : $current['cash_allocation_basis_points'],
             'payout_effective_on' => $current['payout_effective_on'] ?? $today,
             'secure_delivery_channel' => $current['secure_delivery_channel'],
             'identity_history' => [],
@@ -487,6 +493,48 @@ final class PayrollTakeoverPersonWriter
     }
 
     /**
+     * Oprava karty, kterou založil starší běh převodu: výplata na účet celým podílem
+     * a k tomu podíl hotovosti 100 % z výchozí hotovostní karty. Součet 200 % karta
+     * hlásí jako chybné rozdělení výplaty. Opravuje se jen přesně tahle kombinace —
+     * jiné rozdělení mohla účetní nastavit vědomě.
+     *
+     * @param array<string,mixed> $current
+     */
+    private function repairCashShare(int $supplierId, int $employeeId, array $current, ?int $userId, PayrollTakeoverRunState $state): void
+    {
+        if ($current['payout_method'] !== 'bank' || (int) $current['cash_allocation_basis_points'] !== 10000) {
+            return;
+        }
+        $today = date('Y-m-d');
+        $bankShare = 0;
+        foreach ($current['accounts'] as $account) {
+            if ($account['is_active'] === true && (string) $account['effective_from'] <= $today
+                && ($account['effective_to'] === null || (string) $account['effective_to'] >= $today)
+            ) {
+                $bankShare += (int) $account['allocation_basis_points'];
+            }
+        }
+        if ($bankShare !== 10000) {
+            return;
+        }
+        $this->profiles->save($supplierId, $employeeId, $this->profileValidator->validate([
+            'row_version' => $current['row_version'],
+            'profile_status' => $current['profile_status'],
+            'payout_method' => 'bank',
+            'partner_settlement_account_code' => $current['partner_settlement_account_code'],
+            'cash_allocation_basis_points' => 0,
+            'payout_effective_on' => $current['payout_effective_on'] ?? $today,
+            'secure_delivery_channel' => $current['secure_delivery_channel'],
+            'identity_history' => [],
+            'addresses' => [],
+            'contacts' => [],
+            'identifiers' => [],
+            'accounts' => [],
+        ]), $current['row_version'], $userId, null, null);
+        $state->cashShareRepaired++;
+    }
+
+    /**
      * Ověření účtu: na účet předchozí mzdový systém opakovaně vyplácel mzdu, a to je
      * věcný doklad, ne domněnka. Zdroj `user_verified` je z přípustných hodnot nejbližší
      * (převod ani migrace mezi nimi nejsou) a původ nese popisek účtu, protože pole pro
@@ -500,6 +548,10 @@ final class PayrollTakeoverPersonWriter
     private function verifyAccounts(int $supplierId, int $employeeId, ?string $paidOn, ?int $userId, PayrollTakeoverRunState $state): array
     {
         $saved = $this->profiles->get($supplierId, $employeeId);
+        $state->accountsAlreadyVerified += count(array_filter(
+            $saved['accounts'] ?? [],
+            static fn (array $account): bool => $account['verification_source'] !== null && $account['is_active'] === true,
+        ));
         $unverified = array_values(array_filter(
             $saved['accounts'] ?? [],
             static fn (array $account): bool => $account['verification_source'] === null,
@@ -507,9 +559,17 @@ final class PayrollTakeoverPersonWriter
         if ($unverified === []) {
             return [];
         }
+        foreach ($unverified as $account) {
+            if ($account['is_active'] !== true) {
+                $state->accountsInactive++;
+            }
+        }
         // Bez přihlášeného uživatele nebo bez dokladu o výplatě ověřit nejde: `verified_by`
         // i `verified_on` jsou povinné společně (trigger z migrace 1271).
         if ($userId === null || $paidOn === null) {
+            if ($paidOn === null && array_filter($unverified, static fn (array $a): bool => $a['is_active'] === true) !== []) {
+                $state->accountsWithoutPayout[] = $employeeId;
+            }
             $state->accountsToVerify += count($unverified);
             return [];
         }
