@@ -214,7 +214,7 @@ async function saveAll() {
       </table>
     </div>
 
-    <div v-if="canWrite" class="sticky bottom-0 mt-4 py-3 bg-surface/95 border-t border-neutral-200 flex justify-end">
+    <div v-if="canWrite" class="sticky bottom-[var(--app-footer-height,0px)] mt-4 py-3 bg-surface/95 border-t border-neutral-200 flex justify-end">
       <button @click="saveAll" :disabled="saving || !dirtyRows.length" :class="btnFilled('primary')">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
         {{ saving ? t('common.saving') : t('common.save') }}

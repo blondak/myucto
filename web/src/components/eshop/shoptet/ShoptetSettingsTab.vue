@@ -140,7 +140,7 @@ async function removeUrl() {
       <p class="text-xs text-neutral-500">{{ t('shoptet.settings.matching_hint') }}</p>
     </section>
 
-    <div v-if="canWrite" class="sticky bottom-0 z-10 bg-surface/95 backdrop-blur border-t border-neutral-200 py-3 flex flex-wrap gap-2 justify-end">
+    <div v-if="canWrite" class="sticky bottom-[var(--app-footer-height,0px)] z-10 bg-surface/95 backdrop-blur border-t border-neutral-200 py-3 flex flex-wrap gap-2 justify-end">
       <button :class="btnFilled('primary')" :disabled="busy || !dirty" data-test="save-settings" @click="save">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
         {{ busy ? t('shoptet.saving') : t('shoptet.save') }}

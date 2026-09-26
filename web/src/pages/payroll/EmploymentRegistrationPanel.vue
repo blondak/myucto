@@ -3712,7 +3712,7 @@ async function copyXml(): Promise<void> {
         <div
           v-if="canWrite"
           class="-mx-3 -mb-3 flex flex-wrap items-center justify-end gap-2 border-t border-neutral-200 bg-surface px-3 py-2"
-          :class="a1Managed ? '' : 'sticky bottom-0'"
+          :class="a1Managed ? '' : 'sticky bottom-[var(--app-footer-height,0px)]'"
         >
           <span v-if="a1ProfileMessage" class="mr-auto text-xs text-success-700" data-test="registration-a1-saved">
             {{ a1ProfileMessage }}

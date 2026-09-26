@@ -1190,7 +1190,7 @@ onMounted(() => {
         <div
           v-if="canWrite"
           class="-mx-3 -mb-3 mt-4 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface px-3 py-2"
-          :class="managed ? '' : 'sticky bottom-0'"
+          :class="managed ? '' : 'sticky bottom-[var(--app-footer-height,0px)]'"
         >
           <button
             v-if="defaultsAvailable"

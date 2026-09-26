@@ -2572,7 +2572,7 @@ onMounted(() => {
         Jedno společné Uložit dole, ne tlačítko u každého řádku — mřížka je
         jeden formulář o sedmi stech políčkách, ne dvacet pět formulářů.
       -->
-      <div class="sticky bottom-0 flex flex-wrap items-center justify-end gap-3 border-t border-neutral-200 bg-surface/95 px-4 py-3">
+      <div class="sticky bottom-[var(--app-footer-height,0px)] flex flex-wrap items-center justify-end gap-3 border-t border-neutral-200 bg-surface/95 px-4 py-3">
         <p class="mr-auto text-xs text-neutral-500">{{ t('payroll.time.grid.keyboard_hint', { primary: primaryModifierLabel }) }}</p>
         <div class="flex flex-col items-end gap-1.5">
           <button

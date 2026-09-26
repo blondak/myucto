@@ -1719,7 +1719,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
         v-if="canEditTerms && dirty"
         ref="saveBar"
         class="mt-3 rounded-md border border-neutral-200 bg-surface px-3 py-3"
-        :class="managed ? 'border-warning-500/40' : 'sticky bottom-0 z-10 shadow-[0_-2px_10px_rgba(21,19,29,0.08)]'"
+        :class="managed ? 'border-warning-500/40' : 'sticky bottom-[var(--app-footer-height,0px)] z-10 shadow-[0_-2px_10px_rgba(21,19,29,0.08)]'"
         data-test="terms-save-bar"
       >
         <p

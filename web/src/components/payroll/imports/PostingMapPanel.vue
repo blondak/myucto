@@ -379,7 +379,7 @@ onMounted(() => void load())
       </section>
 
       <div
-        class="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200 bg-surface/95 px-4 py-3 backdrop-blur"
+        class="sticky bottom-[var(--app-footer-height,0px)] z-10 flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200 bg-surface/95 px-4 py-3 backdrop-blur"
       >
         <p class="text-sm text-neutral-600">
           {{ t('payroll.posting_map.pending', { count: confirmedCount }) }}

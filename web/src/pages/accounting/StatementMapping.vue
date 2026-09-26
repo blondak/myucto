@@ -879,7 +879,7 @@ onMounted(async () => {
 
     <!-- Jedno společné Uložit -->
     <div v-if="dirty && canWrite" data-test="save-bar"
-         class="sticky bottom-0 z-10 mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-neutral-200 bg-surface/95 py-3">
+         class="sticky bottom-[var(--app-footer-height,0px)] z-10 mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-neutral-200 bg-surface/95 py-3">
       <span class="text-sm text-neutral-600">{{ t('accounting.statements.mapping.dirty_hint', { count: dirtyCount }) }}</span>
       <div class="flex flex-wrap gap-2">
         <button type="button" :class="btnOutline('neutral')" data-test="discard" :disabled="saving" @click="discard">

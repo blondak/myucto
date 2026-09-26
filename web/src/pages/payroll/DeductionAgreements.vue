@@ -754,7 +754,7 @@ onMounted(load)
           {{ formError }}
         </p>
 
-        <div class="sticky bottom-0 -mx-4 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-neutral-50/95 px-4 py-3 sm:-mx-6 sm:px-6">
+        <div class="sticky bottom-[var(--app-footer-height,0px)] -mx-4 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-neutral-50/95 px-4 py-3 sm:-mx-6 sm:px-6">
           <button type="button" :class="btnOutline('neutral')" @click="creating = false; expandedId = null; detail = null; formError = ''">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}

@@ -1127,7 +1127,7 @@ onMounted(load)
         {{ formError }}
       </p>
 
-      <div class="sticky bottom-0 mt-6 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface py-3">
+      <div class="sticky bottom-[var(--app-footer-height,0px)] mt-6 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface py-3">
         <button :class="btnOutline('neutral')" class="whitespace-nowrap" @click="closeEditor">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
           {{ t('common.cancel') }}

@@ -1523,7 +1523,7 @@ onMounted(() => void load())
             znamenalo, že se dá uložit půlka případu.
           -->
           <div
-            class="sticky bottom-0 -mx-4 mt-4 border-t border-neutral-200 bg-surface px-4 py-3"
+            class="sticky bottom-[var(--app-footer-height,0px)] -mx-4 mt-4 border-t border-neutral-200 bg-surface px-4 py-3"
             data-test="sickness-case-save-bar"
           >
             <ActionBar :actions="saveActions" />
