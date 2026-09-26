@@ -64,6 +64,9 @@ final class PayrollRunsAction
         // a doložení jeho plateb (PAM-18). Vědomě mimo `PayrollRunCommandService`:
         // převzatý běh neprochází workflow.
         private readonly PayrollTakeoverRunService $takeoverRuns,
+        // Nabídka posunout začátek vedení mezd za měsíce zpracované předchozím
+        // programem, když seznam běhů hlásí díru před zvoleným obdobím.
+        private readonly \MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup $migrationSetup,
     ) {}
 
     /**
@@ -485,12 +488,32 @@ final class PayrollRunsAction
                 "{$period}-01",
             );
 
+        $missingPeriods = $period === null
+            ? []
+            : $this->runs->missingPreviousPeriods($this->currentSupplierId($request), "{$period}-01");
+
         return Json::ok($response, [
             'runs' => $items,
             'total' => $page['total'],
             'limit' => $limit,
             'offset' => $offset,
             'suggested_payment_date' => $suggestedPaymentDate,
+            /*
+             * Měsíce od začátku vedení mezd před dotázaným obdobím, za které
+             * neexistuje žádný běh (ani převzatý). Běh staví na předchozích
+             * měsících — roční kumulace, průměry, zálohová daň — a převod, který
+             * nastavil začátek vedení mezd dřív, než skončil předchozí program,
+             * nechal mezi převzatými měsíci a prvním během díru, o které
+             * obrazovka mlčela.
+             */
+            'missing_previous_periods' => $missingPeriods,
+            // Zvolené období, na které jde začátek vedení mezd posunout, protože
+            // všechny chybějící měsíce před ním zpracoval předchozí program a
+            // MyÚčto za ně vlastní běh nemá. `null` = posun nenabízet.
+            'advance_start_to' => $missingPeriods !== []
+                && $this->migrationSetup->advanceStartProblem($this->currentSupplierId($request), (string) $period) === null
+                ? $period
+                : null,
             /*
              * KONTROLA PŘED ZAHÁJENÍM. Čtecí, nic neukládá, nic neblokuje —
              * stejný vzor jako `GET /payroll/year-close/{year}`, který vrací

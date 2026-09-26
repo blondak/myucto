@@ -10,9 +10,11 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Service\Payroll\Component\PayrollRecurringMaterializer;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Container\ContainerInterface;
 use Psr\Http\Message\ResponseInterface;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
@@ -23,6 +25,7 @@ final class PayrollQuickInputsApiTest extends TestCase
     use IsolatedSupplierTrait;
 
     private Connection $db;
+    private ContainerInterface $container;
     private PayrollQuickInputsAction $action;
     private int $supplierId;
     private int $otherSupplierId;
@@ -36,6 +39,7 @@ final class PayrollQuickInputsApiTest extends TestCase
         if ($container === null) {
             throw new \RuntimeException('DI kontejner není dostupný.');
         }
+        $this->container = $container;
         $this->db = $container->get(Connection::class);
         $this->action = $container->get(PayrollQuickInputsAction::class);
         $pdo = $this->db->pdo();
@@ -547,6 +551,53 @@ final class PayrollQuickInputsApiTest extends TestCase
             new Response(),
         );
         self::assertSame(409, $saved->getStatusCode());
+    }
+
+    /**
+     * Převzatá měsíční mzda jako pravidelná složka: dokud z ní za měsíc nevznikl
+     * vstup, hlásí ji měsíc jako čekající (běh ji nevidí). Po vytvoření vstupu se
+     * částka NESMÍ sečíst podruhé — řádek dřív ukazoval dvojnásobnou mzdu.
+     */
+    public function testMaterializedRecurringBaseIsNotCountedTwiceAndPendingIsReported(): void
+    {
+        $component = $this->db->pdo()->prepare(
+            'SELECT id FROM payroll_component_definitions
+              WHERE supplier_id = ? AND code = "MZDA_MESICNI"'
+        );
+        $this->action->list(
+            $this->request('GET')->withQueryParams(['period' => '2026-06']),
+            new Response(),
+        );
+        $component->execute([$this->supplierId]);
+        $componentId = (int) $component->fetchColumn();
+        self::assertGreaterThan(0, $componentId);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_recurring_components
+                (supplier_id, employment_id, component_id, calculation_kind,
+                 amount_minor, valid_from, allocation_rule, is_active)
+             VALUES (?, ?, ?, "fixed_amount", 4100000, "2026-01-01", "full_month", 1)'
+        )->execute([$this->supplierId, $this->employmentId, $componentId]);
+
+        $before = PayrollTimeValue::row($this->json($this->action->list(
+            $this->request('GET')->withQueryParams(['period' => '2026-06']),
+            new Response(),
+        ))['month'] ?? null, 'month');
+        self::assertSame(['employments' => 1, 'assignments' => 1], $before['recurring_pending']);
+        self::assertSame(1, $before['items'][0]['recurring_pending_count']);
+
+        $materialized = $this->container->get(PayrollRecurringMaterializer::class)
+            ->materialize($this->supplierId, '2026-06', $this->userId);
+        self::assertSame(1, $materialized['created_count'], json_encode($materialized['manual_review'], JSON_UNESCAPED_UNICODE) ?: '');
+
+        $after = PayrollTimeValue::row($this->json($this->action->list(
+            $this->request('GET')->withQueryParams(['period' => '2026-06']),
+            new Response(),
+        ))['month'] ?? null, 'month');
+        $item = PayrollTimeValue::row($after['items'][0] ?? null, 'item');
+        self::assertSame(['employments' => 0, 'assignments' => 0], $after['recurring_pending']);
+        self::assertSame(0, $item['recurring_pending_count']);
+        self::assertSame(4_100_000, $item['base_amount_minor']);
+        self::assertSame(4_100_000, $item['gross_preview_minor']);
     }
 
     public function testPartialMonthRequiresExplicitBaseInsteadOfPrefillingFullMonthlyWage(): void

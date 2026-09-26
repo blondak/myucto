@@ -151,16 +151,15 @@ final class PayrollRunValidationOverrideTest extends TestCase
     /**
      * REGRESNÍ TEST NA TU PAST.
      *
-     * Zaměstnanec bez schválené mzdové složky vyrábí ve snapshotu varování
-     * `employment_without_inputs` s `requires_override = 1` — tedy přesně tu
-     * validaci, která doteď běh zablokovala natrvalo. Test tvrdí dvě věci:
-     * takové varování v modulu SKUTEČNĚ vzniká, a jde odklidit.
+     * Zaměstnanec bez podané přihlášky vyrábí ve snapshotu varování
+     * s `requires_override = 1` — tedy přesně ten druh validace, který doteď
+     * běh zablokoval natrvalo. Test tvrdí dvě věci: takové varování v modulu
+     * SKUTEČNĚ vzniká, a jde odklidit.
      */
     public function testWarningRequiringOverrideCanBeCleared(): void
     {
-        // Druhý pracovní vztah bez jediné schválené složky = přirozený zdroj
-        // varování s požadavkem na override.
-        $this->employment('SYN-NOINPUT');
+        [, $employmentId] = $this->employment('SYN-NOREG-CLR');
+        $this->pendingOnboardingChecklist($employmentId);
         $locked = $this->lockedRun();
         $revisionId = (int) $locked['revision_id'];
 
@@ -170,7 +169,7 @@ final class PayrollRunValidationOverrideTest extends TestCase
             $pending,
             'Modul vyrábí varování s requires_override — musí pro ně existovat cesta ven.',
         );
-        self::assertSame('employment_without_inputs', $pending[0]['code']);
+        self::assertContains('employment_social_registration_missing', array_column($pending, 'code'));
         self::assertSame(
             count($pending),
             $this->runs->validationCounts($this->supplierId, $revisionId)['unresolved_overrides'],
@@ -195,6 +194,30 @@ final class PayrollRunValidationOverrideTest extends TestCase
             0,
             $this->runs->validationCounts($this->supplierId, $revisionId)['unresolved_overrides'],
             'Po schválení výjimky nesmí zůstat nevyřešené varování — jinak je běh zase v pasti.',
+        );
+    }
+
+    /**
+     * Vztah bez schválené mzdové složky výjimku NEnabízí: zákonný výpočet ho
+     * podle téhož pravidla zastaví jako blokátor, takže schválená výjimka by se
+     * po přepočtu vrátila jako `statutory_calculation_manual_review` a jen
+     * klamala. Varování zůstává vidět a vede na zadání mzdy za ten měsíc.
+     */
+    public function testEmploymentWithoutInputsDoesNotOfferUselessOverride(): void
+    {
+        [, $employmentId] = $this->employment('SYN-NOINPUT');
+        $locked = $this->lockedRun();
+
+        $rows = array_values(array_filter(
+            $this->runs->validations($this->supplierId, (int) $locked['revision_id']),
+            static fn (array $row): bool => $row['code'] === 'employment_without_inputs'
+                && (int) $row['entity_id'] === $employmentId,
+        ));
+        self::assertCount(1, $rows);
+        self::assertFalse($rows[0]['requires_override']);
+        self::assertSame(
+            '/payroll/quick-inputs?period=2026-06&employment=' . $employmentId,
+            $rows[0]['remediation_path'],
         );
     }
 
@@ -271,6 +294,37 @@ final class PayrollRunValidationOverrideTest extends TestCase
 
         self::assertNotContains('employment_social_registration_missing', $codes);
         self::assertNotContains('employment_health_registration_missing', $codes);
+    }
+
+    /**
+     * DPČ se sjednanou odměnou nad rozhodným příjmem výpočet pojistí vždy, takže
+     * chybějící přihláška se hlásí stejně jako u pracovního poměru — dřív se
+     * u všech dohod mlčelo a oznámení nástupu šlo připravit až po běhu.
+     */
+    public function testAgreementWithAgreedIncomeAboveThresholdIsWarnedAbout(): void
+    {
+        [, $employmentId] = $this->employment('SYN-DPC');
+        $this->pendingOnboardingChecklist($employmentId);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET relation_type = "dpc"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET monthly_gross_minor = 1200000
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $locked = $this->lockedRun();
+
+        $codes = array_column(
+            array_filter(
+                $this->requiresOverrideValidations((int) $locked['revision_id']),
+                static fn (array $row): bool => (int) $row['entity_id'] === $employmentId,
+            ),
+            'code',
+        );
+
+        self::assertContains('employment_social_registration_missing', $codes);
+        self::assertContains('employment_health_registration_missing', $codes);
     }
 
     private function pendingOnboardingChecklist(int $employmentId): void

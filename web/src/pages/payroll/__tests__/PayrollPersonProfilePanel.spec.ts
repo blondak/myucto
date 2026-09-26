@@ -636,6 +636,21 @@ describe('PayrollPersonProfilePanel', () => {
     expect(mocks.applyPersonPayoutRuleDefaults).toHaveBeenCalledWith(17)
   })
 
+  it('výchozí pravidlo nenabízí nad neuloženou kartou, ale řekne proč', async () => {
+    mocks.personPayoutRules.mockResolvedValue(payoutRulesResponse([]))
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+
+    await wrapper.get('[data-test="cash-allocation"]').setValue('25')
+    await flushPromises()
+
+    const apply = wrapper.get<HTMLButtonElement>('[data-test="apply-payout-defaults"]')
+    expect(apply.element.disabled).toBe(true)
+    expect(wrapper.find('[data-test="payout-defaults-save-first"]').exists()).toBe(true)
+    await apply.trigger('click')
+    expect(mocks.applyPersonPayoutRuleDefaults).not.toHaveBeenCalled()
+  })
+
   it('nedává pravidlům vlastní Uložit — ukládá se jedním tlačítkem panelu', async () => {
     const wrapper = await mountedPanel()
     await openPayout(wrapper)

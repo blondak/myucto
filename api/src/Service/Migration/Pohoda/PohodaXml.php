@@ -139,11 +139,11 @@ final class PohodaXml
     /**
      * Hlavička balíku: IČO a verze Pohody z kořene, stav odpovědi a text chyby z položky.
      *
-     * @return array{ico:string,program:string,state:string,item_state:string,note:string,timestamp:string}
+     * @return array{ico:string,program:string,state:string,item_state:string,note:string,timestamp:string,created:string}
      */
     public static function packInfo(string $file): array
     {
-        $out = ['ico' => '', 'program' => '', 'state' => '', 'item_state' => '', 'note' => '', 'timestamp' => ''];
+        $out = ['ico' => '', 'program' => '', 'state' => '', 'item_state' => '', 'note' => '', 'timestamp' => '', 'created' => ''];
         $reader = self::open($file);
         if ($reader === null) {
             return $out;
@@ -160,6 +160,9 @@ final class PohodaXml
                     // Datový soubor (`mdbExport`) má celou hlavičku v kořeni a žádnou
                     // `responsePackItem`; bez konce tady by se dočetl celý soubor.
                     if ($reader->localName === 'mdbExport') {
+                        // Okamžik exportu: podle něj se pozná měsíc, který
+                        // v předchozím programu ještě neskončil.
+                        $out['created'] = (string) $reader->getAttribute('created');
                         break;
                     }
                 } elseif ($reader->localName === 'responsePackItem') {

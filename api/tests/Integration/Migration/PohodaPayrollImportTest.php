@@ -335,6 +335,36 @@ final class PohodaPayrollImportTest extends TestCase
     }
 
     /**
+     * Výplata na účet celým podílem nesmí mít zároveň 100 % v hotovosti. Nová karta
+     * z převodu má hotovost 0; kartu, kterou tak nechal starší převod, opakovaný převod
+     * opraví a řekne to. Jinak nastavené rozdělení (vědomá volba) nechá být.
+     */
+    public function testBankPayoutGetsZeroCashShareAndOldCardsAreRepaired(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+        $cashShares = fn (): array => array_map('intval', $this->db->pdo()->query(
+            'SELECT cash_allocation_basis_points FROM payroll_employee_profiles WHERE supplier_id = ' . $supplierId
+            . ' AND payout_method = "bank" ORDER BY employee_id'
+        )->fetchAll(\PDO::FETCH_COLUMN));
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $shares = $cashShares();
+        self::assertNotSame([], $shares, $this->explain($protocol));
+        self::assertSame(array_fill(0, count($shares), 0), $shares);
+
+        // Stav po starším převodu: na účet celým podílem a k tomu hotovost 100 %.
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employee_profiles SET cash_allocation_basis_points = 10000 WHERE supplier_id = ? AND payout_method = "bank"'
+        )->execute([$supplierId]);
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame(array_fill(0, count($shares), 0), $cashShares(), $this->explain($again));
+        self::assertSame(count($shares), self::stepCounts($again, PohodaPayrollImporter::STEP_PEOPLE)['payout_cash_share_repaired'] ?? 0);
+    }
+
+    /**
      * Měsíc s nemocí musí po převodu jít schválit. Nemoc, ošetřovné, otcovská, neplacené
      * volno a neomluvená absence rozhodují o náhradě mzdy i vyloučené době, takže je
      * evidence vede jedině s daty od a do: dokud šly hodiny měsíčním souhrnem z importu
@@ -531,6 +561,85 @@ final class PohodaPayrollImportTest extends TestCase
         $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
         self::assertFalse($again->hasErrors(), $this->explain($again));
         self::assertSame(1, $this->rows('payroll_offices', $supplierId));
+    }
+
+    /**
+     * Export uprostřed února nese i únorové mzdy, které v předchozím programu teprve
+     * běží. Převod je nepřevezme ani jako měsíc, ani jako srovnávací úhrny, a začátek
+     * vedení mezd nové firmy nastaví na únor — měsíc, který MyÚčto musí spočítat.
+     */
+    public function testMonthStillRunningOnExportDayIsNotTakenOver(): void
+    {
+        $supplierId = $this->createIsolatedSupplier($this->db->pdo(), $this->sourceSupplierId);
+        $this->db->pdo()->prepare('UPDATE supplier SET payroll_enabled = 0 WHERE id = ?')->execute([$supplierId]);
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+        file_put_contents($file, str_replace('<mdbExport ', '<mdbExport created="2026-02-15T10:00:00" ', (string) file_get_contents($file)));
+
+        $preflight = $this->importer->preflight($supplierId, $file, SyntheticPohodaPayroll::YEAR);
+        self::assertContains('payroll_open_months', array_column($preflight, 'code'));
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, self::stepCounts($protocol, PohodaPayrollImporter::STEP_MONTHS)['months'] ?? 0, $this->explain($protocol));
+        self::assertSame(1, $this->rows('payroll_attendance_imports', $supplierId));
+        self::assertSame(0, $this->scalar(
+            "SELECT COUNT(*) FROM payroll_migration_reference_totals WHERE supplier_id = ? AND period_start = '2026-02-01'",
+            [$supplierId],
+        ));
+        $start = $this->db->pdo()->prepare('SELECT start_period FROM payroll_module_state WHERE supplier_id = ?');
+        $start->execute([$supplierId]);
+        self::assertSame('2026-02-01', (string) $start->fetchColumn());
+    }
+
+    /**
+     * Volba „docházku a vstupy rovnou schválit" musí být v protokolu vidět: u prvního
+     * převodu hlásil protokol 0 schválených měsíců docházky (počítal je jen opakovaný
+     * převod) a u opakovaného 0 všeho, protože všechno schválené už bylo.
+     */
+    public function testApproveOptionIsReportedOnFirstAndRepeatedRun(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+
+        $first = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        $counts = self::stepCounts($first, PohodaPayrollImporter::STEP_MONTHS);
+        self::assertGreaterThan(0, ($counts['time_months_approved'] ?? 0) + ($counts['time_months_not_approved'] ?? 0), $this->explain($first));
+        self::assertGreaterThan(0, $counts['inputs_approved'] ?? 0, $this->explain($first));
+
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true);
+        $counts = self::stepCounts($again, PohodaPayrollImporter::STEP_MONTHS);
+        self::assertSame(0, $counts['inputs_approved'] ?? 0, $this->explain($again));
+        self::assertGreaterThan(0, $counts['inputs_already_approved'] ?? 0, $this->explain($again));
+        self::assertSame(
+            (int) (self::stepCounts($first, PohodaPayrollImporter::STEP_MONTHS)['time_months_approved'] ?? 0),
+            (int) ($counts['time_months_already_approved'] ?? 0),
+            $this->explain($again),
+        );
+    }
+
+    /**
+     * Převzaté měsíce nezakládají dohodu o srážkách za každý měsíc: na kartě jich
+     * bylo tolik, kolik převedených měsíců. Měsíce, které MyÚčto počítá, je dál mají.
+     */
+    public function testTakenOverMonthsDoNotCreateMonthlyDeductionAgreements(): void
+    {
+        $attendanceAgreements = fn (int $supplierId): int => $this->scalar(
+            "SELECT COUNT(*) FROM payroll_deduction_agreements WHERE supplier_id = ? AND agreement_reference LIKE 'attendance:%'",
+            [$supplierId],
+        );
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+
+        $counted = $this->payrollSupplier();
+        $this->importer->run($counted, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertGreaterThan(0, $attendanceAgreements($counted), 'Syntetický export musí nést srážku ze mzdy.');
+
+        $takenOver = $this->payrollSupplier();
+        $this->db->pdo()->prepare("UPDATE payroll_module_state SET start_period = '2026-03-01' WHERE supplier_id = ?")
+            ->execute([$takenOver]);
+        $protocol = $this->importer->run($takenOver, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(0, $attendanceAgreements($takenOver), $this->explain($protocol));
     }
 
     /** Izolovaná firma se zapnutými mzdami a výchozí účtárnou (stejně jako test importu docházky). */

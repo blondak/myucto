@@ -20,6 +20,9 @@ const m = vi.hoisted(() => ({
   total: vi.fn(),
   suggestedPaymentDate: vi.fn(),
   readiness: vi.fn(),
+  missing: vi.fn(),
+  advanceTo: vi.fn(),
+  advanceStart: vi.fn(),
   monthlyChecklist: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
@@ -47,7 +50,10 @@ vi.mock('@/api/payroll', () => ({
         suggested_payment_date: m.suggestedPaymentDate?.() ?? null,
         // Kontrola před zahájením běhu; scénáře, které ji neřeší, dostanou `null`.
         readiness: m.readiness?.() ?? null,
+        missing_previous_periods: m.missing?.() ?? [],
+        advance_start_to: m.advanceTo?.() ?? null,
       })),
+    advancePayrollStart: m.advanceStart,
     run: m.runDetail,
     runHistory: m.runHistory,
     peopleOptions: m.peopleOptions,
@@ -1414,6 +1420,62 @@ describe('PayrollRuns', () => {
     expect(wrapper.find('[data-testid="payroll-run-15-review"]').exists()).toBe(false)
     const approve = wrapper.get('[data-testid="payroll-run-15-approve"]')
     expect(approve.classes().join(' ')).toContain('bg-')
+
+    wrapper.unmount()
+  })
+
+  it('ukáže chybějící běhy před obdobím a nabídne posun začátku za měsíce předchozího programu', async () => {
+    m.missing.mockReturnValue(['2026-06', '2026-07', '2026-08'])
+    m.advanceTo.mockReturnValue('2026-09')
+    m.advanceStart.mockImplementation(async () => {
+      m.missing.mockReturnValue([])
+      m.advanceTo.mockReturnValue(null)
+      return { state: {}, moved: { from: '2026-06', to: '2026-09' } }
+    })
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const banner = wrapper.get('[data-testid="payroll-runs-missing-previous"]')
+    expect(banner.findAll('[data-testid^="payroll-runs-missing-2026-"]')).toHaveLength(3)
+    expect(banner.text()).toContain('payroll.runs.missing_previous.hint_takeover')
+    await wrapper.get('[data-testid="payroll-runs-advance-start"]').trigger('click')
+    await flushPromises()
+
+    expect(m.advanceStart).toHaveBeenCalledWith('2026-09')
+    expect(m.success).toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="payroll-runs-missing-previous"]').exists()).toBe(false)
+
+    wrapper.unmount()
+    m.missing.mockReset()
+    m.advanceTo.mockReset()
+  })
+
+  it('s blokujícími kontrolami schválení nepustí, řekne kolik jich je a ukáže je', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      revision_id: 40,
+      available_commands: ['calculate', 'review', 'approve', 'cancel'],
+      validations: [
+        validation({ id: 1, severity: 'blocker', code: 'statutory_calculation_manual_review', requires_override: false }),
+        validation({ id: 2, requires_override: true }),
+        validation({ id: 3, requires_override: true, overridden_at: '2026-09-20 10:00:00' }),
+        validation({ id: 4, requires_override: false }),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const approve = wrapper.get('[data-testid="payroll-run-15-approve"]')
+    expect(approve.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="payroll-run-15-approve-blocker-count"]').text()).toBe('(2)')
+    await approve.trigger('click')
+    expect(m.commandRun).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="payroll-run-15-approve-blocked"]').text())
+      .toContain('payroll.runs.approve_blocked.hint')
+    expect(wrapper.find('[data-testid="payroll-run-15-validations-section"]').exists()).toBe(true)
 
     wrapper.unmount()
   })

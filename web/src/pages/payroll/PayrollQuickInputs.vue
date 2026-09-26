@@ -14,6 +14,7 @@ import {
   type PayrollQuickComponentCell,
   type PayrollQuickComponentColumn,
   type PayrollQuickInputTotals,
+  type PayrollRecurringMaterialization,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
@@ -1265,6 +1266,7 @@ async function load(): Promise<void> {
     total.value = month.total
     componentColumns.value = month.columns ?? []
     periodTotals.value = month.totals ?? null
+    recurringPending.value = month.recurring_pending ?? { employments: 0, assignments: 0 }
     // Měsíc, který zpracoval předchozí program. Zadávat se v něm dá dál, jen
     // se to nikde nepoužije — mzdový běh za takové období nejde založit.
     historicalMonth.value = month.historical === true
@@ -1370,13 +1372,38 @@ function componentPayload(row: UiRow): Pick<
   return Object.keys(components).length === 0 ? {} : { components }
 }
 
+/**
+ * Řádky ostatních stránek téhož zúžení, jak je server právě spočítal.
+ *
+ * „Uložit měsíční podklady" slibuje celý měsíc (souhrn pod tabulkou mluví
+ * o všech vztazích včetně dalších stránek), jenže ukládalo jen zobrazenou
+ * stránku a rozepsané řádky. U firmy s osmi stránkami to bylo osm uložení
+ * a přelistování. Nepřečtené stránky se proto dotáhnou těsně před uložením
+ * (se stejným zúžením a hledáním) a jdou s ním.
+ */
+async function otherPageRows(requestedPeriod: string): Promise<UiRow[]> {
+  if (total.value <= rows.value.length) return []
+  const onPage = new Set(rows.value.map(row => row.employment_id))
+  const collected: UiRow[] = []
+  for (let from = 0; from < total.value; from += FULL_MONTH_PAGE) {
+    const month = await payrollApi.quickInputs(
+      requestedPeriod,
+      { limit: FULL_MONTH_PAGE, offset: from },
+      focusEmploymentId.value ?? undefined,
+      appliedSearch.value || undefined,
+    )
+    for (const row of month.items) {
+      if (!onPage.has(row.employment_id)) collected.push(applyPending(row))
+    }
+    if (month.items.length === 0) break
+  }
+  return collected
+}
+/** Strop jedné stránky seznamu na serveru (PayrollQuickInputRepository::LIST_MAX_LIMIT). */
+const FULL_MONTH_PAGE = 200
+
 async function save(): Promise<void> {
   if (loadedPeriod.value !== period.value || rows.value.length === 0) {
-    return
-  }
-  const batch = savableRows.value
-  if (batch.length === 0) {
-    toast.error(t('payroll.quick_inputs.validation_failed'))
     return
   }
   const requestedPeriod = period.value
@@ -1385,6 +1412,27 @@ async function save(): Promise<void> {
   saveError.value = null
   saveConflict.value = false
   fieldErrors.value = {}
+  let batch: UiRow[]
+  try {
+    const others = await otherPageRows(requestedPeriod)
+    const onPage = new Set(rows.value.map(row => row.employment_id))
+    const pendingIds = new Set(pendingElsewhere.value.map(row => row.employment_id))
+    batch = [
+      ...savableRows.value,
+      ...others.filter(row => !onPage.has(row.employment_id) && !pendingIds.has(row.employment_id)
+        && !rowInvalid(row)),
+    ]
+  } catch (error) {
+    saving.value = false
+    saveError.value = apiErrorMessage(error, t('payroll.quick_inputs.save_failed'))
+    toast.error(saveError.value)
+    return
+  }
+  if (batch.length === 0) {
+    saving.value = false
+    toast.error(t('payroll.quick_inputs.validation_failed'))
+    return
+  }
   try {
     // Server bere nejvýše 500 vztahů na požadavek. U větší firmy se dávka
     // rozdělí, ale zůstává to JEDNO uložení z pohledu uživatele — ne dvacet
@@ -1459,6 +1507,49 @@ function errorCode(error: unknown): string {
     ?.response?.data?.error?.code ?? ''
 }
 
+/*
+ * Pravidelné složky, ze kterých za měsíc ještě nevznikl vstup.
+ *
+ * Typicky převzatá měsíční mzda z předchozího programu: řádek ji ukazuje jako
+ * hodnotu, kterou „spravuje jiný vstup", jenže mzdový běh počítá jen ze
+ * schválených vstupů a předpis sám nevidí. Dokud se vstupy nevytvořily, stál
+ * běh na „nemá žádnou schválenou mzdovou složku" a cesta z blokátoru vedla do
+ * prázdného seznamu. Akce vytvoří vstupy za celý měsíc a s právem schvalovat
+ * je rovnou schválí — tatáž práce, kterou jinak dělají dvě jiné obrazovky.
+ */
+const recurringPending = ref<{ employments: number; assignments: number }>({ employments: 0, assignments: 0 })
+const materializingRecurring = ref(false)
+const RECURRING_APPROVE_CHUNK = 200
+const recurringManualReview = ref<PayrollRecurringMaterialization['manual_review']>([])
+
+async function materializeRecurring(): Promise<void> {
+  if (materializingRecurring.value || !canWrite.value) return
+  materializingRecurring.value = true
+  recurringManualReview.value = []
+  try {
+    const result = await payrollApi.materializeRecurringComponents(period.value)
+    recurringManualReview.value = result.manual_review
+    const ids = [...result.created, ...result.replayed].map(item => item.input_id)
+    let approved = 0
+    if (canApprove.value) {
+      for (let from = 0; from < ids.length; from += RECURRING_APPROVE_CHUNK) {
+        const batch = await payrollApi.approveInputsBatch({ ids: ids.slice(from, from + RECURRING_APPROVE_CHUNK) })
+        approved += batch.approved.length
+      }
+    }
+    toast.success(t('payroll.quick_inputs.recurring_pending.done', {
+      created: result.created_count + result.replayed_count,
+      approved,
+      manual: result.manual_review_count,
+    }))
+    await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.quick_inputs.recurring_pending.failed')))
+  } finally {
+    materializingRecurring.value = false
+  }
+}
+
 onMounted(() => {
   void load()
 })
@@ -1519,6 +1610,64 @@ onMounted(() => {
     <div v-if="!historyMode" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
       <p>{{ t('payroll.quick_inputs.info') }}</p>
       <p class="mt-1 font-medium text-payroll-800">{{ t('payroll.quick_inputs.gross_preview_hint') }}</p>
+    </div>
+
+    <div
+      v-if="!historyMode && !historicalMonth && recurringPending.employments > 0"
+      data-testid="quick-recurring-pending"
+      class="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-neutral-700"
+      role="status"
+    >
+      <p class="font-medium text-warning-900">
+        {{ t('payroll.quick_inputs.recurring_pending.title', { count: recurringPending.employments }) }}
+      </p>
+      <p class="mt-1">
+        {{ t(canApprove ? 'payroll.quick_inputs.recurring_pending.hint_approve' : 'payroll.quick_inputs.recurring_pending.hint_draft') }}
+      </p>
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          v-if="canWrite"
+          type="button"
+          :class="[btnFilled('success'), 'whitespace-nowrap']"
+          :disabled="loading || saving || materializingRecurring"
+          data-testid="quick-recurring-materialize"
+          @click="materializeRecurring"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+          <!-- Akce jde vždy přes celý měsíc; u zúžení na jednoho člověka by počet za něj klamal. -->
+          {{ focusEmploymentId !== null
+            ? t(canApprove ? 'payroll.quick_inputs.recurring_pending.action_approve_month' : 'payroll.quick_inputs.recurring_pending.action_draft_month')
+            : t(canApprove ? 'payroll.quick_inputs.recurring_pending.action_approve' : 'payroll.quick_inputs.recurring_pending.action_draft', { count: recurringPending.assignments }) }}
+        </button>
+        <RouterLink
+          :to="{ name: 'payroll-components', query: { tab: 'recurring', period } }"
+          :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+          data-testid="quick-recurring-open"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>
+          {{ t('payroll.quick_inputs.recurring_pending.open') }}
+        </RouterLink>
+      </div>
+    </div>
+
+    <div
+      v-if="recurringManualReview.length > 0"
+      data-testid="quick-recurring-manual-review"
+      class="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800"
+      role="alert"
+    >
+      <p class="font-medium">{{ t('payroll.quick_inputs.recurring_pending.manual_title', { count: recurringManualReview.length }) }}</p>
+      <ul class="mt-2 space-y-1">
+        <li v-for="item in recurringManualReview" :key="item.recurring_component_id">
+          <RouterLink
+            v-if="item.employee_id"
+            :to="{ name: 'payroll-people', query: { person: String(item.employee_id) } }"
+            class="font-medium underline decoration-dotted underline-offset-2"
+          >{{ item.full_name }}</RouterLink>
+          <span v-else class="font-medium">{{ t('payroll.quick_inputs.recurring_pending.unknown_person') }}</span>:
+          {{ item.reason }}
+        </li>
+      </ul>
     </div>
 
     <div

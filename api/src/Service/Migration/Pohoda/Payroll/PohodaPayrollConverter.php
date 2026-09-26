@@ -61,7 +61,11 @@ final class PohodaPayrollConverter
     /** @var array<string,int> číslo složky => počet složek katalogu s tím číslem */
     private array $numberUse = [];
 
-    private function __construct(public readonly string $ico) {}
+    /**
+     * @param ?string $exportedOn den exportu `Y-m-d` (atribut `created` datového souboru),
+     *        `null` u exportu, který ho nenese
+     */
+    private function __construct(public readonly string $ico, public readonly ?string $exportedOn = null) {}
 
     public static function read(string $file): self
     {
@@ -69,7 +73,7 @@ final class PohodaPayrollConverter
             throw new PohodaException('payroll_missing', 'Export neobsahuje mzdy (91_mzdy.xml).');
         }
         $info = PohodaXml::packInfo($file);
-        $self = new self(preg_replace('/\D/', '', $info['ico']) ?? '');
+        $self = new self(preg_replace('/\D/', '', $info['ico']) ?? '', self::exportDate($info['created'] ?? ''));
         $byId = ['sMZslozky', 'sMZneprit', 'sMZsrazky', 'sMzPoj', 'sSTR', 'PracMista', 'ZAM', 'ZAMpomer'];
         $items = ['MZslozky', 'MZneprit', 'MZsrazky'];
         $byIdTables = array_fill_keys($byId, true);
@@ -97,10 +101,59 @@ final class PohodaPayrollConverter
         return $self;
     }
 
-    /** @return list<string> období `Y-m`, pro která jsou zpracované mzdy */
+    /** @return list<string> období `Y-m`, pro která jsou v exportu mzdy (i rozpracované) */
     public function periods(?int $year = null): array
     {
         return array_values(array_filter(array_keys($this->mz), static fn (string $p): bool => $year === null || str_starts_with($p, $year . '-')));
+    }
+
+    /**
+     * Uzavřené měsíce: mzdy, které předchozí program zpracoval za měsíc, jenž
+     * v den exportu už skončil. Jen ty se převádějí a jen podle nich se určuje
+     * začátek vedení mezd v MyÚčtu.
+     *
+     * @return list<string>
+     */
+    public function closedPeriods(?int $year = null): array
+    {
+        return array_values(array_filter($this->periods($year), fn (string $p): bool => !self::openPeriod($p, $this->exportedOn)));
+    }
+
+    /**
+     * Rozpracované měsíce s počtem mezd: export z 26. 9. nese i září a říjen,
+     * které v předchozím programu teprve běží (typicky pár výstupních mezd).
+     *
+     * @return array<string,int> období `Y-m` => počet mezd
+     */
+    public function openPeriods(?int $year = null): array
+    {
+        $open = [];
+        foreach ($this->periods($year) as $period) {
+            if (self::openPeriod($period, $this->exportedOn)) {
+                $open[$period] = count($this->mz[$period] ?? []);
+            }
+        }
+        return $open;
+    }
+
+    /**
+     * Neskončil měsíc v den exportu? Takový měsíc předchozí program nemohl
+     * uzavřít ani podat, takže ho MyÚčto nepřebírá a spočítá ho samo.
+     * Bez data exportu se nic za rozpracované nepovažuje (starší exporty).
+     */
+    public static function openPeriod(string $period, ?string $exportedOn): bool
+    {
+        if ($exportedOn === null || preg_match('/^\d{4}-\d{2}$/D', $period) !== 1) {
+            return false;
+        }
+        $lastDay = (new \DateTimeImmutable($period . '-01'))->modify('last day of this month')->format('Y-m-d');
+        return $lastDay >= $exportedOn;
+    }
+
+    /** Den exportu z atributu `created` (`Y-m-dTH:i:s`), nebo `null`. */
+    public static function exportDate(string $created): ?string
+    {
+        return preg_match('/^(\d{4}-\d{2}-\d{2})/', trim($created), $m) === 1 ? $m[1] : null;
     }
 
     public function employees(): int

@@ -72,6 +72,46 @@ const paymentDate = ref(fallbackPaymentDate(period.value))
  * nouzový termín.
  */
 const suggestedPaymentDate = ref<string | null>(null)
+/*
+ * Měsíce od začátku vedení mezd před zvoleným obdobím, za které nemá firma
+ * žádný běh. Běh staví na předchozích měsících (roční kumulace, průměry,
+ * zálohová daň); díra po převodu z jiného programu se dřív nikde neukázala.
+ */
+const missingPreviousPeriods = ref<string[]>([])
+
+function openMissingPeriod(next: string) {
+  period.value = next
+  offset.value = 0
+  void load()
+}
+
+/*
+ * Chybějící měsíce zpracoval předchozí program: jedním krokem se začátek
+ * vedení mezd posune za ně a panel převzatých měsíců je nabídne k převzetí.
+ */
+const advanceStartTo = ref<string | null>(null)
+const canSettings = computed(() => auth.canWrite('payroll.settings'))
+const advancingStart = ref(false)
+const takeoverPanelKey = ref(0)
+
+async function advanceStart() {
+  const target = advanceStartTo.value
+  if (target === null || advancingStart.value) return
+  advancingStart.value = true
+  try {
+    const result = await payrollApi.advancePayrollStart(target)
+    toast.success(t('payroll.runs.missing_previous.advanced', {
+      from: formatPeriod(result.moved.from),
+      to: formatPeriod(result.moved.to),
+    }))
+    takeoverPanelKey.value++
+    await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.runs.missing_previous.advance_failed')))
+  } finally {
+    advancingStart.value = false
+  }
+}
 /** Ručně přepsané datum se návrhem ze serveru nepřepisuje zpátky. */
 const paymentDateTouched = ref(false)
 const runs = ref<PayrollRun[]>([])
@@ -646,6 +686,28 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
   }).sort((a, b) => commandWeight(run, a) - commandWeight(run, b))
 }
 
+/*
+ * Co brání schválení běhu, spočítané z validací, které karta už má.
+ *
+ * Schválení s blokátorem server odmítne — jenže až po půlminutě práce a jen
+ * větou „obsahuje blokující validace", bez seznamu. Tlačítko proto čeká,
+ * dokud jsou blokátory nebo varování bez výjimky, a místo zbytečného pokusu
+ * říká kolik jich je a posune na jejich seznam.
+ */
+function approveBlockerCount(run: PayrollRun): number {
+  return run.validations.filter(validation => validation.severity === 'blocker'
+    || (validation.requires_override && !validation.overridden_at)).length
+}
+
+function commandDisabled(run: PayrollRun, command: PayrollRunCommand): boolean {
+  return command === 'approve' && approveBlockerCount(run) > 0
+}
+
+function showValidations(run: PayrollRun): void {
+  document.querySelector(`[data-testid="payroll-run-${run.id}-validations-section"]`)
+    ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 /** Primární akce vlevo, zrušení běhu vždy až úplně vpravo. */
 function commandWeight(run: PayrollRun, command: PayrollRunCommand): number {
   if (primaryCommand(run) === command) return 0
@@ -695,6 +757,8 @@ async function load() {
     total.value = page.total
     suggestedPaymentDate.value = page.suggested_payment_date ?? null
     readiness.value = page.readiness ?? null
+    missingPreviousPeriods.value = page.missing_previous_periods ?? []
+    advanceStartTo.value = page.advance_start_to ?? null
     // Termín ze sjednané politiky se do formuláře propíše, jen dokud za období
     // žádný běh není a uživatel datum sám nepřepsal — existující běh si svoje
     // datum drží (viz `watch(periodRun)`).
@@ -1552,11 +1616,59 @@ onMounted(load)
       </div>
     </section>
 
+    <div
+      v-if="missingPreviousPeriods.length > 0"
+      data-testid="payroll-runs-missing-previous"
+      class="flex items-start gap-3 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800"
+      role="alert"
+    >
+      <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path :d="ICONS.bell" />
+      </svg>
+      <div class="flex-1 space-y-2">
+        <p class="font-medium">
+          {{ t('payroll.runs.missing_previous.title', { count: missingPreviousPeriods.length, period: formatPeriod(period) }) }}
+        </p>
+        <p>{{ t(advanceStartTo !== null ? 'payroll.runs.missing_previous.hint_takeover' : 'payroll.runs.missing_previous.hint') }}</p>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-if="advanceStartTo !== null && canSettings"
+            type="button"
+            :class="[btnFilled('primary'), 'whitespace-nowrap']"
+            :disabled="advancingStart || loading"
+            data-testid="payroll-runs-advance-start"
+            @click="advanceStart"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.download" /></svg>
+            {{ t('payroll.runs.missing_previous.advance', { period: formatPeriod(advanceStartTo) }) }}
+          </button>
+          <button
+            v-for="missing in missingPreviousPeriods"
+            :key="missing"
+            type="button"
+            :class="[btnOutlineSm('warning'), 'whitespace-nowrap']"
+            :data-testid="`payroll-runs-missing-${missing}`"
+            @click="openMissingPeriod(missing)"
+          >
+            {{ formatPeriod(missing) }}
+          </button>
+          <RouterLink
+            :to="{ name: 'payroll-settings' }"
+            :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+            {{ t('payroll.runs.missing_previous.settings') }}
+          </RouterLink>
+        </div>
+      </div>
+    </div>
+
     <!--
       Rok přechodu z jiného mzdového programu. Panel se sám schová u firmy,
       která žádné převzaté historické měsíce nemá.
     -->
     <PayrollTakeoverRunsPanel
+      :key="takeoverPanelKey"
       :year="takeoverYear"
       :can-write="canWrite"
       @changed="load"
@@ -1634,13 +1746,18 @@ onMounted(load)
               :data-testid="`payroll-run-${run.id}-${command}`"
               class="cursor-pointer"
               :class="commandClass(run, command)"
-              :disabled="saving"
+              :disabled="saving || commandDisabled(run, command)"
+              :title="commandDisabled(run, command) ? t('payroll.runs.approve_blocked.title', { count: approveBlockerCount(run) }) : undefined"
               @click="runCommand(run, command)"
             >
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path :d="commandIcon(command)" />
               </svg>
               {{ commandLabel(command, run) }}
+              <span
+                v-if="commandDisabled(run, command)"
+                :data-testid="`payroll-run-${run.id}-approve-blocker-count`"
+              >({{ approveBlockerCount(run) }})</span>
             </button>
             <button
               v-if="canWrite && run.can_delete"
@@ -1667,6 +1784,21 @@ onMounted(load)
           class="mt-3 max-w-3xl text-sm text-neutral-600"
         >
           {{ commandHint(run) }}
+        </p>
+        <p
+          v-if="visibleCommands(run).includes('approve') && commandDisabled(run, 'approve')"
+          :data-testid="`payroll-run-${run.id}-approve-blocked`"
+          class="mt-2 flex max-w-3xl flex-wrap items-center gap-x-2 gap-y-1 text-sm text-warning-800"
+        >
+          <span>{{ t('payroll.runs.approve_blocked.hint', { count: approveBlockerCount(run) }) }}</span>
+          <button
+            type="button"
+            class="cursor-pointer whitespace-nowrap font-medium text-primary-600 hover:underline"
+            :data-testid="`payroll-run-${run.id}-approve-blocked-show`"
+            @click="showValidations(run)"
+          >
+            {{ t('payroll.runs.approve_blocked.show') }}
+          </button>
         </p>
         <!--
           Otevřená revize počítá ze snímku, který mezitím zastaral. Bez tohohle
@@ -1997,7 +2129,11 @@ onMounted(load)
           :person-names="personNames"
         />
 
-        <div v-if="run.validations.length" class="mt-4 space-y-2">
+        <div
+          v-if="run.validations.length"
+          class="mt-4 scroll-mt-24 space-y-2"
+          :data-testid="`payroll-run-${run.id}-validations-section`"
+        >
           <p class="text-sm font-medium text-warning-700">{{ t('payroll.runs.validations') }}</p>
           <!--
             Nesloučené validace chodí po osobách; u 226 lidí by jich tu viselo

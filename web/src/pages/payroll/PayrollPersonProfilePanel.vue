@@ -655,6 +655,12 @@ const rulesBaseline = ref('')
 const dirty = computed(() => !loading.value
   && profile.value !== null
   && (formFingerprint() !== formBaseline.value || rulesFingerprint() !== rulesBaseline.value))
+/*
+ * Výchozí pravidlo výplaty počítá server z ULOŽENÉHO způsobu výplaty a účtů.
+ * S rozepsaným „Na účet" by založil „zbytek → hotově" podle starého stavu,
+ * takže se nabízí až po uložení karty.
+ */
+const payoutDefaultsNeedSave = computed(() => profile.value !== null && formFingerprint() !== formBaseline.value)
 const { managed } = usePersonCardSaveSection({
   key: 'advanced_profile',
   label: () => t('payroll.people.profile.title'),
@@ -1890,12 +1896,15 @@ onMounted(load)
                 <p v-else-if="payoutProposal.blocked_reason" class="mt-1 text-xs text-neutral-600" data-test="payout-defaults-blocked">
                   {{ payoutProposal.blocked_reason }}
                 </p>
+                <p v-if="payoutProposal.applicable && payoutDefaultsNeedSave" class="mt-1 text-xs text-warning-700" data-test="payout-defaults-save-first">
+                  {{ t('payroll.people.profile.payout_rules.defaults_save_first') }}
+                </p>
               </div>
               <button
                 v-if="canWrite && payoutProposal.applicable"
                 type="button"
                 :class="btnOutline('primary')"
-                :disabled="applyingPayoutDefaults || saving"
+                :disabled="applyingPayoutDefaults || saving || payoutDefaultsNeedSave"
                 data-test="apply-payout-defaults"
                 @click="applyPayoutDefaults"
               >

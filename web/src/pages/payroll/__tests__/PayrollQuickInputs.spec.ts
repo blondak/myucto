@@ -20,6 +20,8 @@ const m = vi.hoisted(() => ({
   // Stav preferencí tabulky; nastaví ho mock `useUserPrefs` níže.
   pagePrefs: null as unknown as { value: Record<string, unknown> },
   save: vi.fn(),
+  materialize: vi.fn(),
+  approveBatch: vi.fn(),
   canWrite: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
@@ -37,6 +39,8 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: {
     quickInputs: m.load,
     saveQuickInputs: m.save,
+    materializeRecurringComponents: m.materialize,
+    approveInputsBatch: m.approveBatch,
   },
 }))
 vi.mock('@/api/preferences', () => ({
@@ -243,6 +247,80 @@ describe('PayrollQuickInputs', () => {
       .toBe('payroll.quick_inputs.income_labels.statutory_body')
     expect(wrapper.find('[data-testid="overtime-mode-hours-13"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('payroll.quick_inputs.amount_only_relation_hint')
+  })
+
+  it('creates and approves inputs from pending recurring components for the whole month', async () => {
+    let materialized = false
+    m.load.mockImplementation(async period => ({
+      period,
+      items: [fixture({ base_managed_elsewhere: true, recurring_pending_count: materialized ? 0 : 1 })],
+      total: 1,
+      recurring_pending: materialized
+        ? { employments: 0, assignments: 0 }
+        : { employments: 72, assignments: 72 },
+    }))
+    m.materialize.mockImplementation(async () => {
+      materialized = true
+      return {
+        period: '2026-09',
+        created_count: 2,
+        replayed_count: 0,
+        manual_review_count: 1,
+        created: [
+          { recurring_component_id: 1, input_id: 501, amount_minor: 1 },
+          { recurring_component_id: 2, input_id: 502, amount_minor: 1 },
+        ],
+        replayed: [],
+        manual_review: [{
+          recurring_component_id: 3,
+          employment_id: 30,
+          component_id: 9,
+          reason: 'Chybí kalendář.',
+          employee_id: 31,
+          full_name: 'Syntetická osoba B',
+        }],
+      }
+    })
+    m.approveBatch.mockResolvedValue({ approved: [501, 502], skipped: [], failed: [], remaining: 0, complete: true, next_after_id: 0 })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="quick-recurring-pending"]').text())
+      .toContain('payroll.quick_inputs.recurring_pending.title')
+    await wrapper.get('[data-testid="quick-recurring-materialize"]').trigger('click')
+    await flushPromises()
+
+    expect(m.materialize).toHaveBeenCalledTimes(1)
+    expect(m.approveBatch).toHaveBeenCalledWith({ ids: [501, 502] })
+    expect(wrapper.find('[data-testid="quick-recurring-pending"]').exists()).toBe(false)
+    const manual = wrapper.get('[data-testid="quick-recurring-manual-review"]')
+    expect(manual.text()).toContain('Syntetická osoba B')
+    expect(manual.text()).toContain('Chybí kalendář.')
+  })
+
+  it('uloží měsíční podklady celého měsíce, ne jen zobrazenou stránku', async () => {
+    const all = [
+      fixture({ employment_id: 12 }),
+      fixture({ employment_id: 13, employee_id: 9, full_name: 'Syntetická osoba 2' }),
+      fixture({ employment_id: 14, employee_id: 10, full_name: 'Syntetická osoba 3' }),
+    ]
+    m.load.mockImplementation(async (period: string, page?: { limit?: number, offset?: number }) => {
+      const limit = page?.limit ?? 25
+      const offset = page?.offset ?? 0
+      // Stránka obrazovky má jen jeden řádek, celý měsíc tři.
+      const size = limit === 25 ? 1 : limit
+      return { period, items: all.slice(offset, offset + size), total: all.length }
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.save).toHaveBeenCalledTimes(1)
+    expect(m.save.mock.calls[0][0].rows.map((row: { employment_id: number }) => row.employment_id))
+      .toEqual([12, 13, 14])
   })
 
   it('keeps partner dependent income amount-only as well', async () => {

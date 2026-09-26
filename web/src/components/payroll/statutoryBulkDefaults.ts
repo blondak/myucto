@@ -90,11 +90,26 @@ export function effectiveBasisCounts(
   return [...counts].map(([basis, count]) => ({ basis, count }))
 }
 
+/*
+ * Nedokončený zákonný výpočet, který výchozí evidence opravdu řeší.
+ *
+ * Tentýž kód nese i „chybí schválená mzdová složka" (proklik na rychlé zadání)
+ * a další příčiny mimo zákonnou evidenci. Dialog doplnění rezidence,
+ * příslušnosti a slevy s nimi nic neudělá, a když se nabízel u 182 lidí bez
+ * mzdové složky, vedl do slepé uličky „0 osob k doplnění". Rozhoduje cíl
+ * nápravy: zákonná evidence osoby, nebo nic konkrétního (starší záznam).
+ */
+function isStatutoryEvidenceReview(validation: PayrollRunValidation): boolean {
+  if (validation.code !== STATUTORY_REVIEW_CODE) return false
+  const path = validation.remediation_path
+  return path === null || path === undefined || path === '' || path.includes('panel=statutory_evidence')
+}
+
 /** Osoby, u kterých běh hlásí nedokončený zákonný výpočet (jen záznamy vázané na osobu). */
 export function statutoryReviewEmployeeIds(validations: PayrollRunValidation[]): number[] {
   const ids = new Set<number>()
   for (const validation of validations) {
-    if (validation.code !== STATUTORY_REVIEW_CODE) continue
+    if (!isStatutoryEvidenceReview(validation)) continue
     if (validation.entity_type === 'employee' && validation.entity_id !== null) {
       ids.add(validation.entity_id)
     }
@@ -104,7 +119,7 @@ export function statutoryReviewEmployeeIds(validations: PayrollRunValidation[]):
 
 /** První validace skupiny: akce se u běhu kreslí jednou, ne u každé osoby. */
 export function firstStatutoryReviewId(validations: PayrollRunValidation[]): number | null {
-  return validations.find(validation => validation.code === STATUTORY_REVIEW_CODE)?.id ?? null
+  return validations.find(isStatutoryEvidenceReview)?.id ?? null
 }
 
 /*

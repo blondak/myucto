@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollStateLockedException;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup;
 use MyInvoice\Service\Payroll\PayrollCompanyCapabilityService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollProductionQualificationException;
@@ -31,7 +32,48 @@ final class PayrollActivationAction
         private readonly PayrollModuleAccess $access,
         private readonly PayrollProductionQualificationService $qualification,
         private readonly PayrollCompanyCapabilityService $companyCapability,
+        private readonly PayrollMigrationModuleSetup $migrationSetup,
     ) {}
+
+    /**
+     * Posun začátku vedení mezd za měsíce zpracované předchozím programem
+     * ({@see PayrollMigrationModuleSetup::advanceStartTo()}): jeden krok z upozornění
+     * na chybějící běhy místo hledání v nastavení. Podmínky hlídá služba.
+     */
+    public function advanceStart(Request $request, Response $response): Response
+    {
+        if (!$this->requirePermission($request, $response, 'payroll.settings', AccessLevel::WRITE, $error)) {
+            return $error;
+        }
+        if (!$this->requirePayrollEnabled($request, $response, $this->access, $error)) {
+            return $error;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $target = trim((string) ($body['start_period'] ?? ''));
+        if (preg_match('/^[0-9]{4}-(0[1-9]|1[0-2])$/D', $target) !== 1) {
+            return Json::error($response, 'validation_failed', 'Nový začátek musí mít formát YYYY-MM.', 422);
+        }
+        $supplierId = $this->currentSupplierId($request);
+        try {
+            $moved = $this->migrationSetup->advanceStartTo($supplierId, $this->userId($request), $target);
+        } catch (PayrollStateConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409);
+        } catch (\DomainException|\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+        $this->logger->log(
+            'payroll.activation.start_advanced',
+            $this->userId($request),
+            'payroll_module_state',
+            $supplierId,
+            $moved,
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+
+        return Json::ok($response, ['state' => $this->state->get($supplierId), 'moved' => $moved]);
+    }
 
     public function get(Request $request, Response $response): Response
     {

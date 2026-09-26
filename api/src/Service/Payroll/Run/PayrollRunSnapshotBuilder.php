@@ -19,6 +19,7 @@ use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
@@ -179,6 +180,12 @@ final class PayrollRunSnapshotBuilder
             $supplierId,
             $employmentIds,
             $periodStart,
+        );
+        $pendingRecurringCounts = $this->batch->pendingRecurringCounts(
+            $supplierId,
+            $employmentIds,
+            $periodStart,
+            $periodEnd,
         );
         $inputRows = $this->batch->inputs($supplierId, $employmentIds, $periodStart);
         $dimensionRows = $this->batch->employmentDimensions(
@@ -395,26 +402,40 @@ final class PayrollRunSnapshotBuilder
             }
             $absences = $this->absences($absenceRows[$employmentId] ?? []);
             if ($inputs === []) {
-                // JEDINÉ místo v modulu, které si žádá ruční override. Vztah bez
-                // složky je většinou chyba zadání (zapomenutá mzda), takže ho
-                // musí odklepnout člověk přes
-                // {@see \MyInvoice\Service\Payroll\Run\PayrollRunValidationOverrideService}.
-                // Když měsíc bez vstupu vysvětluje schválená nepřítomnost bez
-                // náhrady od zaměstnavatele (celé neplacené volno, PPM, nemoc za
-                // oknem náhrady), rozhodla už evidence absencí: varování zůstává
-                // vidět, ale potvrzovat ho znovu by byl krok navíc bez informace.
-                // Pravidlo je totéž, podle kterého výpočet takový vztah pustí.
+                // Vztah bez složky je většinou chyba zadání (zapomenutá mzda).
+                // Výjimku (override) tu NEnabízíme: když měsíc bez vstupu
+                // nevysvětluje schválená nepřítomnost, zastaví vztah zákonný
+                // výpočet (`payroll_component_missing`) podle téhož pravidla
+                // {@see PayrollRunStatutoryInputAssembler::monthWithoutInputsExplained()}
+                // a schválená výjimka by se po přepočtu vrátila jako blokátor.
+                // Dřív ji šlo „schválit u všech", běh přesto neprošel a výjimka
+                // jen klamala. Náprava je vstup, ne podpis — proto proklik.
+                $pendingRecurring = $pendingRecurringCounts[$employmentId] ?? 0;
                 $validations[] = new PayrollRunValidation(
                     'warning',
                     'employment_without_inputs',
                     'employment',
                     $employmentId,
-                    sprintf(
-                        '%s: pracovní vztah nemá v období žádnou schválenou mzdovou složku.',
-                        (string) $row['full_name'],
-                    ),
-                    '/payroll/components',
-                    !PayrollRunStatutoryInputAssembler::monthWithoutInputsExplained($absences),
+                    $pendingRecurring > 0
+                        // Pravidelná složka (typicky převzatá měsíční mzda) se do
+                        // běhu dostane až jako schválený vstup. Výjimka tu nic
+                        // nevyřeší — výpočet by vztah stejně zastavil — takže
+                        // proklik vede rovnou na hromadné vytvoření vstupů.
+                        ? sprintf(
+                            '%s: pravidelná mzdová složka za období ještě nemá vytvořený a schválený vstup. '
+                            . 'V Rychlém zadání mezd použijte „Vytvořit a schválit vstupy z pravidelných složek" '
+                            . 'a pak obnovte podklady běhu.',
+                            (string) $row['full_name'],
+                        )
+                        : sprintf(
+                            '%s: pracovní vztah nemá v období žádnou schválenou mzdovou složku.',
+                            (string) $row['full_name'],
+                        ),
+                    $pendingRecurring > 0
+                        ? '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7)
+                        : '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7)
+                            . '&employment=' . $employmentId,
+                    false,
                 );
             }
             foreach ($this->discountValidations(
@@ -1404,10 +1425,11 @@ final class PayrollRunSnapshotBuilder
      * Koho se to týká, rozhoduje ÚČAST NA POJIŠTĚNÍ, ne druh vztahu sám:
      * `included` se hlásí vždy, `excluded` a `foreign` (cizinec pod cizí
      * legislativou s A1) nikdy. `automatic` znamená „rozhodne výpočet podle
-     * prahu příjmu" — u dohod se proto mlčí, protože DPP pod rozhodným
+     * prahu příjmu" — u DPP se proto mlčí, protože DPP pod rozhodným
      * příjmem se u ČSSZ nehlásí a hlásit ji „pro jistotu" by bylo varování
-     * u každé brigády. Totéž pravidlo drží
-     * {@see \MyInvoice\Repository\Payroll\PayrollHealthNotificationRepository}.
+     * u každé brigády; DPČ a další vztahy malého rozsahu se sjednaným příjmem
+     * nad rozhodným příjmem výpočet pojistí vždy, takže se hlásí. Pravidlo drží
+     * {@see PayrollExpectedParticipation} i pro oznámení zdravotní pojišťovně.
      *
      * @param array<string,mixed> $row
      * @param array{social:bool,health:bool}|null $gap
@@ -1440,6 +1462,8 @@ final class PayrollRunSnapshotBuilder
         if ($gap['social'] && $this->participatesInLevy(
             $row['social_insurance_participation'],
             $relationType,
+            $row,
+            $periodEnd,
         )) {
             $validations[] = new PayrollRunValidation(
                 'warning',
@@ -1461,6 +1485,8 @@ final class PayrollRunSnapshotBuilder
         if ($gap['health'] && $this->participatesInLevy(
             $row['health_insurance_participation'],
             $relationType,
+            $row,
+            $periodEnd,
         )) {
             $validations[] = new PayrollRunValidation(
                 'warning',
@@ -1483,19 +1509,24 @@ final class PayrollRunSnapshotBuilder
         return $validations;
     }
 
+    /**
+     * Stejné pravidlo jako oznámení nástupu zdravotní pojišťovně:
+     * {@see PayrollExpectedParticipation}.
+     *
+     * @param array<string,mixed> $row
+     */
     private function participatesInLevy(
         mixed $participation,
         string $relationType,
+        array $row,
+        string $periodEnd,
     ): bool {
-        $value = is_string($participation) ? $participation : 'automatic';
-        if ($value === 'included') {
-            return true;
-        }
-        if ($value === 'excluded' || $value === 'foreign') {
-            return false;
-        }
-
-        return $relationType === 'employment';
+        return PayrollExpectedParticipation::expected(
+            is_string($participation) ? $participation : null,
+            $relationType,
+            ($row['monthly_gross_minor'] ?? null) === null ? null : (int) $row['monthly_gross_minor'],
+            PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $periodEnd),
+        );
     }
 
     /** @return array<string,mixed>|null */

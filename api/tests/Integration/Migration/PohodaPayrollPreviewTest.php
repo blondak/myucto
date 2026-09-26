@@ -97,7 +97,8 @@ final class PohodaPayrollPreviewTest extends TestCase
     public function testShowTakesPayrollPreflightFromMetaWithoutReadingTheFile(): void
     {
         $token = $this->upload(['ico' => SyntheticPohodaPayroll::ICO, 'employees' => 248, 'months' => 10, 'payslips' => 1644,
-            'first' => '2026-01', 'last' => '2026-10', 'last_overall' => '2026-10'], null);
+            'first' => '2026-01', 'last' => '2026-10', 'last_overall' => '2026-10',
+            'exported_on' => '2026-11-02', 'open' => ['2026-11' => 3]], null);
 
         $body = $this->show($token);
 
@@ -107,6 +108,10 @@ final class PohodaPayrollPreviewTest extends TestCase
         self::assertNotContains('payroll_missing', $codes, 'Náhled nesmí číst soubor mezd, přehled má v meta.json.');
         self::assertContains('payroll_summary', $codes);
         self::assertContains('payroll_module_will_enable', $codes);
+        // Rozpracovaný měsíc exportu kontrola pojmenuje dřív, než se převod spustí.
+        $open = $messages[array_search('payroll_open_months', $codes, true)];
+        self::assertSame('warning', $open['level']);
+        self::assertStringContainsString('2026-11 (3 mezd)', $open['message']);
         $summary = $messages[array_search('payroll_summary', $codes, true)];
         self::assertSame('Mzdy za 10 měsíců (2026-01 až 2026-10), zaměstnanců v exportu 248.', $summary['message']);
         self::assertSame(0, $this->describeJobs(), 'S úplným přehledem se job na pozadí nezakládá.');

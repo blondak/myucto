@@ -2377,6 +2377,64 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame(3, $retried->revision['revision_no']);
     }
 
+    /**
+     * Vztah s pravidelnou složkou, ze které za měsíc nevznikl vstup (převzatá
+     * měsíční mzda): kontrola to musí pojmenovat a vést na hromadné vytvoření
+     * vstupů, ne do seznamu mzdových vstupů, který je pro ten měsíc prázdný.
+     */
+    public function testEmploymentWithPendingRecurringComponentPointsToQuickInputs(): void
+    {
+        $pdo = $this->db->pdo();
+        $componentId = (int) $pdo->query(
+            'SELECT component_id FROM payroll_inputs WHERE id = ' . $this->inputId
+        )->fetchColumn();
+        $pdo->prepare('DELETE FROM payroll_inputs WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $this->inputId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_recurring_components
+                (supplier_id, employment_id, component_id, calculation_kind,
+                 amount_minor, valid_from, allocation_rule, is_active)
+             VALUES (?, ?, ?, "fixed_amount", 120000, "2026-01-01", "full_month", 1)'
+        )->execute([$this->supplierId, $this->employmentId, $componentId]);
+
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'lock-pending-recurring',
+            $this->actors[0],
+        );
+        $validations = array_values(array_filter(
+            $this->runs->validations($this->supplierId, (int) $locked->revision['id']),
+            static fn (array $row): bool => $row['code'] === 'employment_without_inputs',
+        ));
+
+        self::assertCount(1, $validations);
+        self::assertSame('/payroll/quick-inputs?period=2026-06', $validations[0]['remediation_path']);
+        self::assertStringContainsString('pravidelná mzdová složka', (string) $validations[0]['message']);
+    }
+
+    /**
+     * Díra mezi začátkem vedení mezd a zvoleným obdobím: měsíce bez jakéhokoli
+     * nezrušeného běhu. Seznam běhů je ukazuje, aby běh nevznikl nad dírou.
+     */
+    public function testMissingPreviousPeriodsListsMonthsWithoutRunSinceStart(): void
+    {
+        self::assertSame(
+            ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05'],
+            $this->runs->missingPreviousPeriods($this->supplierId, '2026-06-01'),
+        );
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_runs (supplier_id, period_start, payment_date) VALUES (?, "2026-03-01", "2026-04-15")'
+        )->execute([$this->supplierId]);
+        self::assertSame(
+            ['2026-01', '2026-02', '2026-04', '2026-05'],
+            $this->runs->missingPreviousPeriods($this->supplierId, '2026-06-01'),
+        );
+        self::assertSame([], $this->runs->missingPreviousPeriods($this->supplierId, '2026-01-01'));
+    }
+
     public function testSnapshotValidationBlocksApprovalWithoutChangingReviewedRun(): void
     {
         $this->db->pdo()->prepare(

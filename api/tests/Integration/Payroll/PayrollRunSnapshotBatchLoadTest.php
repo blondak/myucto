@@ -209,11 +209,15 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         // potvrzení odloženého příjmu za měsíc po vztazích (JMHZ scénář 8) —
         // PayrollDeferredIncomeRepository::forPeriod(). Opět jeden dotaz na běh.
         //
+        // Q11 (9/2026) přidal množinovou dávku počtu pravidelných složek bez
+        // schváleného vstupu (PayrollRunSnapshotBatchLoader::pendingRecurringCounts,
+        // prepare + execute) — převzatá měsíční mzda z PAMICA. Jeden dotaz na běh.
+        //
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
         self::assertLessThanOrEqual(
-            84,
+            86,
             $counts[500],
-            'Snapshot pěti set osob se musí vejít do 84 round-tripů.',
+            'Snapshot pěti set osob se musí vejít do 86 round-tripů.',
         );
     }
 
