@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h, ref } from 'vue'
 
 const m = vi.hoisted(() => ({
   loadCountries: vi.fn(),
@@ -68,6 +69,77 @@ describe('CountrySelect', () => {
 
     await input.setValue('nemecko')
     expect(optionTexts().some(text => text.includes('Německo'))).toBe(true)
+  })
+
+  /**
+   * Q15-32: „Česko" + Enter nad už vybraným Českem vybralo první zemi
+   * nabídky (Afghánistán), protože přepsaný text ukáže celou nabídku a
+   * zvýraznění skočilo na první řádek. Enter bez shody nesmí odeslat
+   * okolní formulář.
+   */
+  describe('Enter', () => {
+    const countries = [
+      { id: 9, iso2: 'AF', iso3: 'AFG', name_cs: 'Afghánistán', name_en: 'Afghanistan', is_eu: false },
+      { id: 1, iso2: 'CZ', iso3: 'CZE', name_cs: 'Česká republika', name_en: 'Czech Republic', is_eu: true },
+      { id: 2, iso2: 'SK', iso3: 'SVK', name_cs: 'Slovensko', name_en: 'Slovakia', is_eu: true },
+    ]
+
+    it('po přepsání na název vybrané země ponechá vybranou zemi', async () => {
+      m.loadCountries.mockResolvedValue(countries)
+      const wrapper = mount(CountrySelect, { props: { modelValue: 'CZ' }, attachTo: document.body })
+      await flushPromises()
+      const input = wrapper.get<HTMLInputElement>('input[role="combobox"]')
+
+      await input.trigger('focus')
+      await input.setValue('Česko')
+      await input.trigger('keydown', { key: 'Enter' })
+
+      expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['CZ'])
+      expect(input.element.value).toBe('Česko')
+      wrapper.unmount()
+    })
+
+    it('vybere jedinou nalezenou zemi', async () => {
+      m.loadCountries.mockResolvedValue(countries)
+      const wrapper = mount(CountrySelect, { props: { modelValue: '' }, attachTo: document.body })
+      await flushPromises()
+      const input = wrapper.get<HTMLInputElement>('input[role="combobox"]')
+
+      await input.trigger('focus')
+      await input.setValue('cesko')
+      await input.trigger('keydown', { key: 'Enter' })
+
+      expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['CZ'])
+      expect(wrapper.find('[role="listbox"]').exists()).toBe(false)
+      wrapper.unmount()
+    })
+
+    it('bez shody nic nevybere, nabídku zavře a formulář neodešle', async () => {
+      m.loadCountries.mockResolvedValue(countries)
+      const submitted = vi.fn()
+      const Host = defineComponent(() => {
+        const code = ref('')
+        return () => h('form', { onSubmit: (e: Event) => { e.preventDefault(); submitted() } }, [
+          h(CountrySelect, { 'modelValue': code.value, 'onUpdate:modelValue': (v: string) => { code.value = v } }),
+          h('button', { type: 'submit' }, 'ok'),
+        ])
+      })
+      const wrapper = mount(Host, { attachTo: document.body })
+      await flushPromises()
+      const input = wrapper.get<HTMLInputElement>('input[role="combobox"]')
+
+      await input.trigger('focus')
+      await input.setValue('xyz')
+      const event = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true, bubbles: true })
+      input.element.dispatchEvent(event)
+      await flushPromises()
+
+      expect(event.defaultPrevented).toBe(true)
+      expect(submitted).not.toHaveBeenCalled()
+      expect(wrapper.find('[role="listbox"]').exists()).toBe(false)
+      expect(input.element.value).toBe('')
+      wrapper.unmount()
+    })
   })
 
   it('při výpadku číselníku dovolí ručně zadat ISO kód', async () => {
