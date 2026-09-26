@@ -26039,6 +26039,10 @@
       "rewrap_failed": "Selhalo",
       "rewrap_remaining": "Zbývá",
       "rewrap_done": "Starým klíčem už není zašifrováno nic. Požádejte správce serveru o odebrání starého klíče z app.secret_encryption_previous_keys.",
+      "measured_at": "Úplné měření klíčů mzdových dat proběhlo {at}. Mezi měřeními Diagnostika kontroluje jen nejstarší a nejnovější šifrované záznamy.",
+      "measured_never": "Úplné měření klíčů mzdových dat zatím neproběhlo. Diagnostika kontroluje jen nejstarší a nejnovější šifrované záznamy.",
+      "measure": "Změřit úplně",
+      "measure_hint": "Projde všechny šifrované mzdové údaje i exporty a ověří, že je konfigurace umí přečíst. U velké databáze může trvat několik minut.",
       "status": {
         "encrypted": "Zašifrováno",
         "would_encrypt": "Zašifruje se",

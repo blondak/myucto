@@ -61,6 +61,9 @@ final class PayrollKeyRotationService
     private const STALE_PATTERN = 'enc:v2:________________:%';
     private const BATCH = 50;
 
+    /** @var array<string,true> neznámé id klíčů posledního {@see status()} */
+    private array $unknownKeyIds = [];
+
     public function __construct(
         private readonly Connection $db,
         private readonly SecretEncryption $encryption,
@@ -75,11 +78,13 @@ final class PayrollKeyRotationService
      *   current_key_id:string,
      *   stale_total:int,
      *   unknown_total:int,
-     *   targets:list<array{name:string,stale:int,unknown:int}>
+     *   targets:list<array{name:string,stale:int,unknown:int}>,
+     *   unknown_key_ids:list<string>
      * }
      */
     public function status(?int $supplierId = null): array
     {
+        $this->unknownKeyIds = [];
         $current = $this->encryption->currentKeyId();
         $targets = [];
         $staleTotal = 0;
@@ -143,6 +148,100 @@ final class PayrollKeyRotationService
             'current_key_id' => $current,
             'stale_total' => $staleTotal,
             'unknown_total' => $unknownTotal,
+            'targets' => $targets,
+            // Id klíčů (ne klíče) — podle nich Diagnostika pozná, že uložené
+            // měření zastaralo, když správce chybějící klíč doplnil.
+            'unknown_key_ids' => array_map('strval', array_keys($this->unknownKeyIds)),
+        ];
+    }
+
+    /** Zná konfigurace (aktuální nebo předchozí klíče) klíč s tímto id? */
+    public function isKnownKeyId(string $keyId): bool
+    {
+        return $this->encryption->hasKeyId($keyId);
+    }
+
+    /**
+     * Levná kontrola, zda data nenesou klíč, který konfigurace nezná.
+     *
+     * Plný průchod {@see status()} se nevyplatí pouštět při každém otevření
+     * Diagnostiky, jenže nebezpečný je právě stav BEZ rozpracované rotace:
+     * správce vymění klíč a starý do `previous_keys` nedá, nebo obnoví
+     * databázi z jiné instance. Proto se vždy změří:
+     *
+     * - všechny datové klíče dokumentů (`payroll_document_data_keys` je malá),
+     * - u každé šifrované tabulky jen NEJSTARŠÍ a NEJNOVĚJŠÍ šifrovaný řádek
+     *   (dva dotazy po primárním klíči).
+     *
+     * Tím se chytí obě typické chyby: výměna klíče bez předchozího (neznámé
+     * jsou nejstarší řádky) i cizí databáze (neznámé je všechno). Soubory
+     * exportů se tu nečtou.
+     *
+     * @return array{
+     *   current_key_id:string,
+     *   sampled:int,
+     *   unknown_total:int,
+     *   unknown_key_ids:list<string>,
+     *   targets:list<array{name:string,unknown:int}>
+     * }
+     */
+    public function quickStatus(): array
+    {
+        $unknownKeyIds = [];
+        $targets = [];
+        $sampled = 0;
+        $unknownTotal = 0;
+        $record = function (string $name, array $keyIds) use (&$unknownKeyIds, &$targets, &$sampled, &$unknownTotal): void {
+            $unknown = 0;
+            foreach ($keyIds as $keyId) {
+                ++$sampled;
+                if (!$this->encryption->hasKeyId($keyId)) {
+                    ++$unknown;
+                    $unknownKeyIds[$keyId] = true;
+                }
+            }
+            if ($unknown > 0) {
+                $targets[] = ['name' => $name, 'unknown' => $unknown];
+                $unknownTotal += $unknown;
+            }
+        };
+
+        if ($this->db->hasTable('payroll_document_data_keys')) {
+            $keys = $this->db->pdo()->prepare(
+                'SELECT DISTINCT SUBSTRING(wrapped_key, 8, 16)
+                   FROM payroll_document_data_keys
+                  WHERE destroyed_at IS NULL AND wrapped_key LIKE ?',
+            );
+            $keys->execute([self::STALE_PATTERN]);
+            $record('payroll_document_data_keys.wrapped_key', array_map('strval', $keys->fetchAll(PDO::FETCH_COLUMN)));
+        }
+
+        foreach (self::targets() as $target) {
+            if (!$this->db->hasTable($target['table'])) {
+                continue;
+            }
+            $column = $target['column'];
+            $keyIds = [];
+            foreach (['ASC', 'DESC'] as $direction) {
+                $stmt = $this->db->pdo()->prepare(
+                    "SELECT SUBSTRING({$column}, 8, 16) FROM {$target['table']}
+                      WHERE {$column} LIKE ? ORDER BY id {$direction} LIMIT 1",
+                );
+                $stmt->execute([self::STALE_PATTERN]);
+                $keyId = $stmt->fetchColumn();
+                if (is_string($keyId) && $keyId !== '') {
+                    $keyIds[] = $keyId;
+                }
+            }
+            $record($target['table'] . '.' . $column, array_values(array_unique($keyIds)));
+        }
+
+        return [
+            'current_key_id' => $this->encryption->currentKeyId(),
+            'sampled' => $sampled,
+            'unknown_total' => $unknownTotal,
+            // Hexadecimální id z číslic by se jako klíč pole změnilo na int.
+            'unknown_key_ids' => array_map('strval', array_keys($unknownKeyIds)),
             'targets' => $targets,
         ];
     }
@@ -433,6 +532,7 @@ final class PayrollKeyRotationService
             $stale += (int) $count;
             if (!$this->encryption->hasKeyId((string) $keyId)) {
                 $unknown += (int) $count;
+                $this->unknownKeyIds[(string) $keyId] = true;
             }
         }
         $targets[] = ['name' => $name, 'stale' => $stale, 'unknown' => $unknown];

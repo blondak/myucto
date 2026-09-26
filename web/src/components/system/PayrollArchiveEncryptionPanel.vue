@@ -52,6 +52,30 @@ const unknownValues = computed(() => Number(rotationCheck.value?.meta?.unknown_t
 
 const showArchive = computed(() => legacyFiles.value > 0)
 const showRewrap = computed(() => staleValues.value > 0)
+/*
+ * Kontrola klíčů se měří vždy levně (krajní řádky); úplný průchod jen za
+ * rotace nebo na tlačítko. Sekce s tlačítkem je proto vidět vždy, když
+ * Diagnostika kontrolu klíčů vrátila, a říká, jak staré je úplné měření.
+ */
+const showMeasure = computed(() => rotationCheck.value !== undefined)
+const measuredAt = computed(() => {
+  const value = rotationCheck.value?.meta?.measured_at
+  return typeof value === 'string' && value !== '' ? value.slice(0, 16).replace('T', ' ') : null
+})
+const measuring = ref(false)
+
+async function measure() {
+  measuring.value = true
+  errorMsg.value = null
+  try {
+    await diagnosticsApi.payrollKeyMeasure()
+    emit('changed')
+  } catch (e) {
+    errorMsg.value = (e as Error)?.message ?? t('diagnostics.payroll_archive.failed')
+  } finally {
+    measuring.value = false
+  }
+}
 
 // ── Přešifrování archivu ────────────────────────────────────────────────────
 const archiveOpen = ref(false)
@@ -193,7 +217,7 @@ function supplierLabel(row: SupplierFiles): string {
 
 <template>
   <section
-    v-if="showArchive || showRewrap"
+    v-if="showArchive || showRewrap || showMeasure"
     class="rounded-lg border border-warning-300 bg-warning-50/40 p-5"
     data-testid="payroll-archive-panel"
   >
@@ -247,6 +271,31 @@ function supplierLabel(row: SupplierFiles): string {
           {{ t('diagnostics.payroll_archive.rewrap') }}
         </button>
       </div>
+    </div>
+
+    <!-- Úplné měření klíčů -->
+    <div v-if="showMeasure" class="mt-4" data-testid="payroll-key-measure">
+      <p v-if="!showRewrap && unknownValues > 0" class="text-sm text-danger-600">
+        {{ t('diagnostics.payroll_archive.unknown_key', { count: unknownValues }) }}
+      </p>
+      <p class="text-sm text-neutral-700">
+        {{ measuredAt ? t('diagnostics.payroll_archive.measured_at', { at: measuredAt }) : t('diagnostics.payroll_archive.measured_never') }}
+      </p>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+          :disabled="measuring"
+          data-testid="payroll-key-measure-run"
+          @click="measure"
+        >
+          <svg class="w-4 h-4" :class="{ 'animate-spin': measuring }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" />
+          </svg>
+          {{ measuring ? t('diagnostics.payroll_archive.running') : t('diagnostics.payroll_archive.measure') }}
+        </button>
+      </div>
+      <p class="mt-1 text-xs text-neutral-500">{{ t('diagnostics.payroll_archive.measure_hint') }}</p>
     </div>
 
     <p v-if="errorMsg && !archiveOpen && !rewrapOpen" class="mt-3 text-sm text-danger-600">{{ errorMsg }}</p>

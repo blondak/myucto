@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Payroll\Document;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Security\PayrollKeyRotationService;
+use MyInvoice\Service\Payroll\Security\PayrollKeyRotationStatusCache;
+use Psr\Clock\ClockInterface;
 
 /**
  * Kontroly šifrování mzdového archivu pro Systém → Diagnostika.
@@ -19,9 +21,17 @@ use MyInvoice\Service\Payroll\Security\PayrollKeyRotationService;
  *
  * - `payroll_archive_encryption`: počet nešifrovaných dokumentů z doby před
  *   šifrováním (jen čtení disku, levné).
- * - `payroll_key_rotation`: rozpracovaná rotace master klíče. Měří se jen
- *   tehdy, když je v konfiguraci nějaký předchozí klíč; bez rotace by šlo
- *   o zbytečný průchod všemi šifrovanými sloupci.
+ * - `payroll_key_rotation`: data pod klíčem, který konfigurace nezná, a
+ *   rozpracovaná rotace master klíče. Ve třech vrstvách:
+ *   1. VŽDY levně ({@see PayrollKeyRotationService::quickStatus()}): datové
+ *      klíče dokumentů a nejstarší a nejnovější šifrovaný řádek každé tabulky.
+ *      Chytí výměnu klíče bez předchozího i databázi z jiné instance, tedy
+ *      přesně stavy, kdy `previous_keys` bývá prázdné a dřív se nic neměřilo.
+ *   2. Za rotace (neprázdné `previous_keys`) plný průchod, výsledek se drží
+ *      v cache ({@see PayrollKeyRotationStatusCache}) a obnovuje nejvýš
+ *      jednou za hodinu.
+ *   3. Ručně tlačítkem „Změřit úplně" ({@see measureRotation()}) kdykoli,
+ *      výsledek do téže cache. Stáří měření je v `meta.measured_at`.
  */
 final class PayrollArchiveDiagnostics
 {
@@ -34,7 +44,22 @@ final class PayrollArchiveDiagnostics
         private readonly PayrollKeyRotationService $rotation,
         private readonly Config $config,
         private readonly Connection $db,
+        private readonly PayrollKeyRotationStatusCache $rotationCache,
+        private readonly ClockInterface $clock,
     ) {}
+
+    /**
+     * Plné měření na žádost (Diagnostika, tlačítko „Změřit úplně"): projde
+     * všechny šifrované hodnoty i soubory exportů a výsledek uloží do cache.
+     *
+     * @return array<string,mixed> kontrola ve tvaru reportu
+     */
+    public function measureRotation(): array
+    {
+        $this->rotationCache->put($this->rotation->status(), $this->now());
+
+        return $this->rotationCheck();
+    }
 
     /**
      * Připojí kontroly k reportu Diagnostiky a přepočítá souhrn.
@@ -92,31 +117,75 @@ final class PayrollArchiveDiagnostics
     /** @return array<string,mixed> */
     private function rotationCheck(): array
     {
-        if (!$this->rotationInProgress()) {
-            return self::check(self::CHECK_ROTATION, 'skip', 'no_rotation', '0');
-        }
         try {
-            $status = $this->rotation->status();
+            $quick = $this->rotation->quickStatus();
         } catch (\Throwable) {
             return self::check(self::CHECK_ROTATION, 'skip', '?', '0');
         }
-        $meta = [
-            'stale_total' => $status['stale_total'],
-            'unknown_total' => $status['unknown_total'],
-            'targets' => array_values(array_filter(
-                $status['targets'],
-                static fn (array $t): bool => $t['stale'] > 0,
-            )),
-        ];
-        if ($status['unknown_total'] > 0) {
-            return self::check(self::CHECK_ROTATION, 'fail', (string) $status['unknown_total'], '0', $meta, 'unknown_key');
+        $rotation = $this->rotationInProgress();
+        $full = $this->rotationCache->get();
+        if ($rotation && ($full === null || !PayrollKeyRotationStatusCache::isFresh($full, $this->now()))) {
+            try {
+                $full = $this->rotationCache->put($this->rotation->status(), $this->now());
+            } catch (\Throwable) {
+                $full = null;
+            }
         }
-        if ($status['stale_total'] > 0) {
-            return self::check(self::CHECK_ROTATION, 'warn', (string) $status['stale_total'], '0', $meta);
+        $status = $full['status'] ?? null;
+        // Uložené měření platí jen pro klíče, které konfigurace pořád nezná.
+        // Doplní-li správce chybějící klíč, starý nález nesmí dál svítit.
+        $fullUnknown = 0;
+        if (is_array($status)) {
+            $stillUnknown = array_filter(
+                array_map('strval', (array) ($status['unknown_key_ids'] ?? [])),
+                fn (string $keyId): bool => !$this->rotation->isKnownKeyId($keyId),
+            );
+            $fullUnknown = $stillUnknown === [] ? 0 : (int) ($status['unknown_total'] ?? 0);
+        }
+        $stale = $rotation && is_array($status) ? (int) ($status['stale_total'] ?? 0) : 0;
+        $meta = [
+            'mode' => $rotation ? 'full' : 'quick',
+            'measured_at' => $full['measured_at'] ?? null,
+            'sampled' => $quick['sampled'],
+            'quick_unknown' => $quick['unknown_total'],
+            'stale_total' => $stale,
+            'unknown_total' => max($fullUnknown, $quick['unknown_total']),
+            'targets' => $rotation && is_array($status)
+                ? array_values(array_filter(
+                    (array) ($status['targets'] ?? []),
+                    static fn (array $t): bool => (int) ($t['stale'] ?? 0) > 0,
+                ))
+                : [],
+            'unknown_targets' => $quick['targets'],
+        ];
+        if ($quick['unknown_total'] > 0 || $fullUnknown > 0) {
+            return self::check(
+                self::CHECK_ROTATION,
+                'fail',
+                (string) max($fullUnknown, $quick['unknown_total']),
+                '0',
+                $meta,
+                'unknown_key',
+            );
+        }
+        if (!$rotation) {
+            // Bez rotace stačí, že levná kontrola nenašla cizí klíč.
+            return self::check(self::CHECK_ROTATION, 'ok', '0', '0', $meta, 'quick');
+        }
+        if ($status === null) {
+            return self::check(self::CHECK_ROTATION, 'skip', '?', '0', $meta);
+        }
+        if ($stale > 0) {
+            return self::check(self::CHECK_ROTATION, 'warn', (string) $stale, '0', $meta);
         }
 
         // Přebaleno je všechno, rotace ale skončí až odebráním starého klíče.
         return self::check(self::CHECK_ROTATION, 'warn', '0', '0', $meta, 'retire_old_key');
+    }
+
+    private function now(): \DateTimeImmutable
+    {
+        return \DateTimeImmutable::createFromInterface($this->clock->now());
     }
 
     /**

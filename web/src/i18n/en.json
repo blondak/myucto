@@ -26039,6 +26039,10 @@
       "rewrap_failed": "Failed",
       "rewrap_remaining": "Remaining",
       "rewrap_done": "Nothing is encrypted with the old key any more. Ask the server administrator to remove the old key from app.secret_encryption_previous_keys.",
+      "measured_at": "The full measurement of payroll data keys ran at {at}. Between measurements Diagnostics checks only the oldest and newest encrypted records.",
+      "measured_never": "The payroll data keys have not been fully measured yet. Diagnostics checks only the oldest and newest encrypted records.",
+      "measure": "Measure fully",
+      "measure_hint": "Reads every encrypted payroll value and export and verifies the configuration can decrypt them. On a large database it may take several minutes.",
       "status": {
         "encrypted": "Encrypted",
         "would_encrypt": "Will be encrypted",
