@@ -74,21 +74,14 @@ final class PayrollJmhzSubmissionFreezeAction
                 ($body['confirm_late_discount'] ?? false) === true,
             );
         } catch (JmhzXmlException $exception) {
-            // Potvrzení slevy po lhůtě nese vlastní kód, aby obrazovka poznala,
-            // že nejde o chybu, ale o dotaz na vědomé rozhodnutí.
-            $code = $exception->validationCode === JmhzSubmissionBridgeService::LATE_DISCOUNT_CONFIRMATION_CODE
-                ? $exception->validationCode
-                : 'conflict';
-
-            return Json::error($response, $code, $exception->getMessage(), 409);
+            return Json::error(
+                $response,
+                JmhzSubmissionBridgeService::clientErrorCode($exception),
+                $exception->getMessage(),
+                409,
+            );
         } catch (\DomainException $exception) {
-            // Měsíc podaný předchozím programem má vlastní kód: obrazovka k němu
-            // nabídne odkaz na historii převzatých podání, kde se dá ověřit a opravit.
-            $code = $exception instanceof JmhzXmlException && $exception->validationCode === 'jmhz_period_submitted_externally'
-                ? $exception->validationCode
-                : 'conflict';
-
-            return Json::error($response, $code, $exception->getMessage(), 409);
+            return Json::error($response, 'conflict', $exception->getMessage(), 409);
         } catch (\InvalidArgumentException $exception) {
             return $this->invalid($response, $exception->getMessage());
         }

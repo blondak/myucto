@@ -49,6 +49,24 @@ final readonly class JmhzSubmissionBridgeService
     public const LATE_DISCOUNT_CONFIRMATION_CODE = 'jmhz_submission_late_discount_confirmation_required';
     private const LATE_DISCOUNT_CONTROL_ID = 290;
 
+    /** Měsíc, za který řádné hlášení už podal předchozí mzdový program. */
+    public const EXTERNAL_SUBMISSION_CODE = 'jmhz_period_submitted_externally';
+
+    /**
+     * Kód chyby 409 pro obrazovku. Potvrzení slevy po lhůtě a měsíc podaný
+     * předchozím programem nesou vlastní kód (obrazovka nabídne potvrzení,
+     * resp. odkaz na historii převzatých podání); ostatní je obecný konflikt.
+     * Sdílí ho zmrazení hlášení i příprava z měsíčního přehledu.
+     */
+    public static function clientErrorCode(JmhzXmlException $exception): string
+    {
+        return in_array(
+            $exception->validationCode,
+            [self::LATE_DISCOUNT_CONFIRMATION_CODE, self::EXTERNAL_SUBMISSION_CODE],
+            true,
+        ) ? $exception->validationCode : 'conflict';
+    }
+
     public function __construct(
         private JmhzScenario1DocumentService $documents,
         private JmhzScenario1XmlValidator $validator,
@@ -85,7 +103,7 @@ final readonly class JmhzSubmissionBridgeService
             ? ', odesláno ' . (new \DateTimeImmutable((string) $sent['submitted_at']))->format('j. n. Y')
             : '';
         throw new JmhzXmlException(
-            'jmhz_period_submitted_externally',
+            self::EXTERNAL_SUBMISSION_CODE,
             sprintf(
                 'Za období %s už %s měsíční hlášení podal předchozí mzdový program (%s%s). Druhé řádné hlášení za stejný '
                 . 'měsíc ČSSZ zamítne (kontrola č. 22 katalogu kontrol), proto se nepřipraví. Opravu za tento měsíc pošlete '

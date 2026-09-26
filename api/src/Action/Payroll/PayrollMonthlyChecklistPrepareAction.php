@@ -98,17 +98,12 @@ final class PayrollMonthlyChecklistPrepareAction
                 ($body['confirm_late_discount'] ?? false) === true,
             );
         } catch (JmhzXmlException $exception) {
-            // Potvrzení slevy po lhůtě a měsíc podaný předchozím programem nesou
-            // vlastní kód: přehled podle něj nabídne potvrzení, resp. odkaz na
-            // historii převzatých podání.
-            $code = in_array($exception->validationCode, [
-                JmhzSubmissionBridgeService::LATE_DISCOUNT_CONFIRMATION_CODE,
-                'jmhz_period_submitted_externally',
-            ], true)
-                ? $exception->validationCode
-                : 'conflict';
-
-            return Json::error($response, $code, $exception->getMessage(), 409);
+            return Json::error(
+                $response,
+                JmhzSubmissionBridgeService::clientErrorCode($exception),
+                $exception->getMessage(),
+                409,
+            );
         } catch (\DomainException $exception) {
             return Json::error($response, 'conflict', $exception->getMessage(), 409);
         } catch (\InvalidArgumentException $exception) {
