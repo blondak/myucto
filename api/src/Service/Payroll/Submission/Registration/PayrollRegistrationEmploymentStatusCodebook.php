@@ -35,7 +35,9 @@ final class PayrollRegistrationEmploymentStatusCodebook
     {
         $options = [];
         foreach (self::entries() as $code => $label) {
-            $options[] = ['code' => $code, 'label' => $label];
+            // Čtyřmístný klíč PHP drží jako int; bez přetypování by šel do JSON
+            // jako číslo a formulář by uložený kód „1111" v nabídce nenašel.
+            $options[] = ['code' => (string) $code, 'label' => $label];
         }
 
         return $options;
