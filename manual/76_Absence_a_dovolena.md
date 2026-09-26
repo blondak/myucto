@@ -268,7 +268,11 @@ takže běžný měsíc žádné pole navíc nemá.
 
 Projde i **náhradní volno za přesčas**. Za dobu jeho čerpání mzda nepřísluší
 (§ 114 odst. 1 zákoníku práce), takže jeho hodiny vstupují jen do celkového
-počtu neodpracovaných hodin, ne mezi hodiny s náhradou mzdy. Vyloučenou dobou
+počtu neodpracovaných hodin, ne mezi hodiny s náhradou mzdy. Podle pokynů MPSV
+k vyplnění hlášení se v měsíci čerpání hodiny volna zároveň odečtou od
+vykázaného přesčasu (nejvýše do nuly) i od odpracovaných hodin; v aplikaci
+zůstávají skutečně odpracované hodiny beze změny, převod udělá až hlášení.
+Vyloučenou dobou
 evidenčního listu není, celé dny náhradního volna se ale vykazují jako
 vyloučené dny pro nemocenské dávky (omluvená nepřítomnost bez náhrady příjmu).
 Platí to pro měsíce, jejichž pracovní doba se potvrdí po zavedení této

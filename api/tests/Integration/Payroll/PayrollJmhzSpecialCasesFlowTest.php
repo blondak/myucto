@@ -171,6 +171,53 @@ final class PayrollJmhzSpecialCasesFlowTest extends TestCase
     }
 
     /**
+     * Přesčas 8 h v sobotu 11. 7. a náhradní volno 8 h 24. 7. v témž měsíci.
+     *
+     * Pokyny MPSV k 10268/10269: v měsíci čerpání se od přesčasu i od
+     * odpracovaných hodin odečtou hodiny, za které bylo poskytnuto náhradní
+     * volno (záporné → 0); hodiny volna zůstávají v úhrnu 10275. Dřív šel
+     * přesčas 8 h i plné odpracované hodiny, takže se čas volna započítal
+     * dvakrát (jednou jako odpracovaný, jednou jako neodpracovaný).
+     */
+    public function testCompensatoryTimeOffReducesReportedOvertime(): void
+    {
+        $person = $this->hire('Hynek Přesčas', 'male', '1985-05-05');
+        $this->createApprovedAbsence($person['employment_id'], 'compensatory_time_off', '2026-07-24', '2026-07-24');
+        $workdays = self::workdays(self::PERIOD, ['2026-07-24']);
+        $this->ensureRegularCalendar($person['employment_id']);
+        $version = $this->recordWorkedDays($person['employment_id'], $workdays);
+        $overtime = $this->time->entry(
+            $this->request('POST', '/api/payroll/time/entries')->withParsedBody([
+                'employment_id' => $person['employment_id'],
+                'starts_at' => '2026-07-11T08:00:00+02:00',
+                'ends_at' => '2026-07-11T16:30:00+02:00',
+                'timezone' => 'Europe/Prague',
+                'category' => 'overtime',
+                'break_minutes' => 30,
+                'row_version' => 0,
+                'month_row_version' => $version,
+                'supersedes_id' => null,
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $overtime->getStatusCode(), (string) $overtime->getBody());
+        $this->approveMonth($person['employment_id'], []);
+        $this->pay($person, 4_200_000);
+
+        $xml = $this->submission('compensatory-overtime');
+
+        $worked = count($workdays) * 8;
+        // Odpracováno 21 dnů po 8 h a 8 h přesčasu; volno 8 h se odečte.
+        self::assertStringContainsString(
+            '<form:odpracovaneHodiny><form:pocet>' . $worked . '.000</form:pocet>'
+                . '<form:rozpad><form:prescas>0.000</form:prescas></form:rozpad></form:odpracovaneHodiny>',
+            $xml,
+        );
+        // Úhrn neodpracovaných: volno 8 h a svátek 6. 7. 8 h.
+        self::assertStringContainsString('<form:hodinyNeodpracCelkem>16.000</form:hodinyNeodpracCelkem>', $xml);
+    }
+
+    /**
      * Osoba s úplnou evidencí pro JMHZ, zveřejněnými směnami na pracovní dny
      * měsíce a schváleným průměrem za 3. čtvrtletí.
      *

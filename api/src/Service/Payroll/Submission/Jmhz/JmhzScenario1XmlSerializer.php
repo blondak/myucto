@@ -2246,7 +2246,9 @@ final class JmhzScenario1XmlSerializer
     /** @param array<string,mixed> $employment */
     private function workMonth(DOMDocument $dom, array $employment): DOMElement
     {
-        $values = $this->reportedUnworkedHours($this->workSummaryValues($employment));
+        $values = self::reportedWorkedHours(
+            $this->reportedUnworkedHours($this->workSummaryValues($employment)),
+        );
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:prubehZamestnani');
         $days = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:odpracovaneDny');
         $this->text(
@@ -2451,6 +2453,48 @@ final class JmhzScenario1XmlSerializer
         $values['unworked_paid_millihours'] = $paid === 0 ? null : $paid;
         $values['employee_obstacle_paid_millihours']
             = ($obstacle === null ? 0 : $this->int($obstacle, '10471')) + $sickness;
+
+        return $values;
+    }
+
+    /**
+     * Odpracované hodiny 10268 a přesčas 10269 v měsíci čerpání náhradního
+     * volna za přesčas (§ 114 odst. 1 ZP).
+     *
+     * Pokyny MPSV k vyplnění MH k 10269: „V měsíci, kdy byly přesčasy
+     * odpracované, se vykáže celkový počet odpracovaných přesčasových hodin
+     * a odečtou se přesčasové hodiny, za které bylo poskytnuto náhradní volno
+     * (bez ohledu na to, zda … za hodiny odpracované v aktuálním měsíci, nebo
+     * … z předchozích měsíců). Stejný princip platí … do 10268. … záporný …
+     * uvedou se nuly." K 10268: „za hodiny odpracované v přesčase se
+     * nepovažují hodiny, za které bylo poskytnuto náhradní volno."
+     *
+     * VÝKLAD POKYNU, dokud MPSV neodpoví na dotaz: hodiny náhradního volna
+     * čerpaného v měsíci se odečtou od přesčasu (záporný → 0) i od
+     * odpracovaných hodin, přičemž 10268 neklesne pod 10269 (kontrola ČSSZ
+     * 10268 ≥ 10269). Hodiny volna zůstávají v úhrnu neodpracovaných 10275
+     * (ne v 10276), takže za měsíc přesčasu a měsíc čerpání dohromady
+     * nevznikne dvojí započtení. Fond 160 h: březen přesčas 8 h → 10268 = 168,
+     * 10269 = 8; duben volno 8 h a v práci 152 h → 10268 = 144, 10269 = 0,
+     * 10275 = 8; úhrn 168 + 144 + 8 = 320 = 2 × 160.
+     *
+     * Jen reportovací převod: pracovní souhrn i výpočet mzdy nesou dál
+     * skutečně odpracované hodiny, stejně jako {@see reportedUnworkedHours()}.
+     *
+     * @param array<string,mixed> $values
+     * @return array<string,mixed>
+     */
+    private static function reportedWorkedHours(array $values): array
+    {
+        $timeOff = $values['compensatory_time_off_millihours'] ?? null;
+        $worked = $values['worked_millihours'] ?? null;
+        if (!is_int($timeOff) || $timeOff <= 0 || !is_int($worked)) {
+            return $values;
+        }
+        $overtime = $values['overtime_millihours'] ?? null;
+        $reportedOvertime = is_int($overtime) ? max(0, $overtime - $timeOff) : null;
+        $values['overtime_millihours'] = $reportedOvertime;
+        $values['worked_millihours'] = max($reportedOvertime ?? 0, $worked - $timeOff);
 
         return $values;
     }
