@@ -32,6 +32,9 @@ use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInstitutionWriter;
 final class PohodaPayrollPeople
 {
     /** Tabulky, které čtení potřebuje (kromě mezd `MZ`). */
+    /** Podání s pracovištěm OSSZ v pořadí, ve kterém se kód a název hledají. */
+    private const OSSZ_COLUMNS = ['ONZpol' => 'OSSZ', 'NEMPRIpol' => 'KodOSSZ', 'HZUPNpol' => 'KodOSSZ'];
+
     private const TABLES = ['ZAM', 'ZAMpomer', 'sMzMist', 'sMzPoj', 'ZAMzp', 'RegZAM', 'RegZAMitems', 'ONZ', 'ONZpol', 'ELDP', 'ELDPpol', 'ZAMpDet',
         'ZAMucet', 'sMZneprit', 'sMZslozky'];
 
@@ -100,17 +103,6 @@ final class PohodaPayrollPeople
     public static function read(string $file, int $year): array
     {
         $byId = [];
-        foreach (self::TABLES as $table) {
-            foreach (PohodaXml::records($file, $table) as $row) {
-                $byId[$table][PohodaXml::text($row, 'ID')] = $row;
-            }
-        }
-        $relationCount = [];
-        foreach ($byId['ZAMpomer'] ?? [] as $relation) {
-            $person = PohodaXml::text($relation, 'RefZAM');
-            $relationCount[$person] = ($relationCount[$person] ?? 0) + 1;
-        }
-
         /** @var array<string,array<string,list<array<string,mixed>>>> $payslips vztah => období => mzdy */
         $payslips = [];
         /** @var array<string,array<int,array<string,int|bool>>> $personMonths osoba => měsíc => úhrny */
@@ -124,7 +116,18 @@ final class PohodaPayrollPeople
         $transferStart = null;
         /** @var array<string,string> $lastPaid osoba => den poslední výplaty (`MZ.Datum` mzdy s výplatou) */
         $lastPaid = [];
-        foreach (PohodaXml::records($file, 'MZ') as $mz) {
+        // Číselníky, karty a mzdy jedním průchodem souborem (desítky MB), nepřítomnosti
+        // a složky mzdy druhým - potřebují už znát mzdy roku.
+        $leaveCards = [];
+        foreach (PohodaXml::scan($file, [...self::TABLES, 'MZ', 'Dovolena']) as $table => $mz) {
+            if ($table === 'Dovolena') {
+                self::leaveCard($leaveCards, $mz, $year);
+                continue;
+            }
+            if ($table !== 'MZ') {
+                $byId[$table][PohodaXml::text($mz, 'ID')] = $mz;
+                continue;
+            }
             if ((int) PohodaXml::text($mz, 'Rok') !== $year) {
                 continue;
             }
@@ -179,6 +182,11 @@ final class PohodaPayrollPeople
             $sums['signed'] = $sums['signed'] || self::bool(PohodaXml::text($mz, 'Prohlas'));
             $personMonths[$person][$month] = $sums;
         }
+        $relationCount = [];
+        foreach ($byId['ZAMpomer'] ?? [] as $relation) {
+            $person = PohodaXml::text($relation, 'RefZAM');
+            $relationCount[$person] = ($relationCount[$person] ?? 0) + 1;
+        }
 
         /** @var array<string,list<array<string,mixed>>> $children osoba => děti s nárokem na zvýhodnění */
         $children = [];
@@ -207,46 +215,47 @@ final class PohodaPayrollPeople
         $absences = [];
         /** @var array<string,int> $undated vztah => nepřítomnosti vyžadující data, které je v exportu nemají */
         $undated = [];
-        foreach (PohodaXml::records($file, 'MZneprit') as $row) {
-            $payslip = $payslipOf[PohodaXml::text($row, 'RefAg')] ?? null;
-            if ($payslip === null) {
-                continue;
-            }
-            $catalog = $byId['sMZneprit'][PohodaXml::text($row, 'RefSlozka')] ?? [];
-            $number = PohodaXml::text($catalog, 'Cislo');
-            $code = strtoupper(trim($number));
-            $childbirth = self::realDate(PohodaXml::date($row, 'DatPorod'));
-            $type = self::ABSENCE_CODES[$code] ?? null;
-            if ($type === null && $childbirth !== null) {
-                $type = 'ppm';
-            }
-            if ($type === null) {
-                continue;
-            }
-            $dates = self::absenceDates($row, $year);
-            if ($dates === null) {
-                // Doba, kterou z hodin dopočítat nejde. U druhu, který evidence vede jedině
-                // s daty, zůstanou hodiny v měsíčním souhrnu (neztratí se) a měsíc si vyžádá
-                // ruční dořešení; protokol ho hlásí s osobním číslem.
-                if (PohodaPayrollCatalog::absenceNeedsDates($number, PohodaXml::text($catalog, 'Nazev'))) {
-                    $undated[$payslip['relation']] = ($undated[$payslip['relation']] ?? 0) + 1;
-                }
-                continue;
-            }
-            $absences[$payslip['relation']][] = [
-                'type' => $type,
-                'from' => $dates['from'],
-                'to' => $dates['to'],
-                'childbirth' => $childbirth,
-                'hours' => PohodaXml::num($row, 'HodPrac'),
-            ];
-        }
-
         /** @var array<string,bool> $hourlyWage vztah => mzda za hodiny nebo úkol (měsíční mzdu nepobírá) */
         $hourlyWage = [];
         /** @var array<string,array<string,int>> $benefitMonths vztah => plnění => počet měsíců s částkou */
         $benefitMonths = [];
-        foreach (PohodaXml::records($file, 'MZslozky') as $item) {
+        foreach (PohodaXml::scan($file, ['MZneprit', 'MZslozky']) as $table => $row) {
+            if ($table === 'MZneprit') {
+                $payslip = $payslipOf[PohodaXml::text($row, 'RefAg')] ?? null;
+                if ($payslip === null) {
+                    continue;
+                }
+                $catalog = $byId['sMZneprit'][PohodaXml::text($row, 'RefSlozka')] ?? [];
+                $number = PohodaXml::text($catalog, 'Cislo');
+                $code = strtoupper(trim($number));
+                $childbirth = self::realDate(PohodaXml::date($row, 'DatPorod'));
+                $type = self::ABSENCE_CODES[$code] ?? null;
+                if ($type === null && $childbirth !== null) {
+                    $type = 'ppm';
+                }
+                if ($type === null) {
+                    continue;
+                }
+                $dates = self::absenceDates($row, $year);
+                if ($dates === null) {
+                    // Doba, kterou z hodin dopočítat nejde. U druhu, který evidence vede jedině
+                    // s daty, zůstanou hodiny v měsíčním souhrnu (neztratí se) a měsíc si vyžádá
+                    // ruční dořešení; protokol ho hlásí s osobním číslem.
+                    if (PohodaPayrollCatalog::absenceNeedsDates($number, PohodaXml::text($catalog, 'Nazev'))) {
+                        $undated[$payslip['relation']] = ($undated[$payslip['relation']] ?? 0) + 1;
+                    }
+                    continue;
+                }
+                $absences[$payslip['relation']][] = [
+                    'type' => $type,
+                    'from' => $dates['from'],
+                    'to' => $dates['to'],
+                    'childbirth' => $childbirth,
+                    'hours' => PohodaXml::num($row, 'HodPrac'),
+                ];
+                continue;
+            }
+            $item = $row;
             $payslip = $payslipOf[PohodaXml::text($item, 'RefAg')] ?? null;
             if ($payslip === null || PohodaXml::num($item, 'KcMzda') <= 0) {
                 continue;
@@ -297,7 +306,6 @@ final class PohodaPayrollPeople
         $health = self::healthNotices($byId);
         $social = self::socialSubmissions($byId);
         $eldp = self::eldp($byId);
-        $leaveCards = self::leaveCards($file, $year);
 
         $records = [];
         foreach ($payslips as $relationId => $periods) {
@@ -465,7 +473,18 @@ final class PohodaPayrollPeople
     public static function institutions(string $file): array
     {
         $out = [];
-        foreach (PohodaXml::records($file, 'sMzPoj') as $row) {
+        // Pojišťovny, závazky i podání s pracovištěm OSSZ jedním průchodem souborem.
+        $documents = [];
+        $offices = [];
+        foreach (PohodaXml::scan($file, ['sMzPoj', 'Doklady', ...array_keys(self::OSSZ_COLUMNS)]) as $table => $row) {
+            if ($table === 'Doklady') {
+                $documents[] = $row;
+                continue;
+            }
+            if ($table !== 'sMzPoj') {
+                $offices[$table][] = $row;
+                continue;
+            }
             $code = PohodaXml::text($row, 'Kod');
             $account = PohodaXml::text($row, 'Ucet');
             $bankCode = PohodaXml::text($row, 'KodBanky');
@@ -487,7 +506,7 @@ final class PohodaPayrollPeople
                 'candidates' => 1,
             ];
         }
-        foreach (self::levyInstitutions($file) as $row) {
+        foreach (self::levyInstitutions($documents, self::socialSecurityOffice($offices)) as $row) {
             $out[] = $row;
         }
         return $out;
@@ -501,11 +520,15 @@ final class PohodaPayrollPeople
      * @return list<array{type:string,code:?string,name:string,account:?string,bank_code:?string,
      *     variable_symbol:?string,data_box:?string,source:?string,issue:?string,candidates:int}>
      */
-    private static function levyInstitutions(string $file): array
+    /**
+     * @param list<array<string,mixed>> $documents řádky `Doklady`
+     * @param array{code:?string,name:?string} $office
+     */
+    private static function levyInstitutions(array $documents, array $office): array
     {
         /** @var array<string,array{accounts:list<string>,variables:list<string>,document:string,count:int}> $found */
         $found = [];
-        foreach (PohodaXml::records($file, 'Doklady') as $document) {
+        foreach ($documents as $document) {
             // Jen vystavený závazek (1); interní doklad (2) cizí účet nenese.
             if (PohodaXml::text($document, 'RelTpDokl') !== '1'
                 || PohodaXml::text($document, 'KodBanky') !== self::CNB_BANK_CODE) {
@@ -531,7 +554,6 @@ final class PohodaPayrollPeople
             $found[$prefix]['count']++;
         }
 
-        $office = self::socialSecurityOffice($file);
         $out = [];
         foreach (self::LEVY_ACCOUNTS as $prefix => [$type, $code, $name]) {
             $hit = $found[(string) $prefix] ?? null;
@@ -569,14 +591,15 @@ final class PohodaPayrollPeople
      * Číselník OSSZ v exportu není a účet pracoviště tady nehledej, ten je jen
      * na závazcích.
      *
+     * @param array<string,list<array<string,mixed>>> $rows řádky tabulek {@see OSSZ_COLUMNS}
      * @return array{code:?string,name:?string}
      */
-    private static function socialSecurityOffice(string $file): array
+    private static function socialSecurityOffice(array $rows): array
     {
         $code = null;
         $name = null;
-        foreach (['ONZpol' => 'OSSZ', 'NEMPRIpol' => 'KodOSSZ', 'HZUPNpol' => 'KodOSSZ'] as $table => $column) {
-            foreach (PohodaXml::records($file, $table) as $row) {
+        foreach (self::OSSZ_COLUMNS as $table => $column) {
+            foreach ($rows[$table] ?? [] as $row) {
                 $value = strtoupper(trim(PohodaXml::text($row, $column)));
                 // Táž podoba kódu, jakou vyžaduje platební cesta u účtu instituce.
                 if ($code === null && preg_match('/^[A-Z0-9][A-Z0-9._-]{0,31}$/D', $value) === 1) {
@@ -595,18 +618,13 @@ final class PohodaPayrollPeople
      * Karty dovolené (`Dovolena`) převáděného roku po osobách. Tabulka je vedená
      * na osobě a roce, ne na pracovním vztahu.
      *
-     * @return array<string,array<string,mixed>>
+     * @param array<string,array<string,mixed>> $cards MĚNÍ SE: osoba => karta
      */
-    private static function leaveCards(string $file, int $year): array
+    private static function leaveCard(array &$cards, array $row, int $year): void
     {
-        $out = [];
-        foreach (PohodaXml::records($file, 'Dovolena') as $row) {
-            if ((int) PohodaXml::text($row, 'Rok') !== $year) {
-                continue;
-            }
-            $out[PohodaXml::text($row, 'RefAg')] = $row;
+        if ((int) PohodaXml::text($row, 'Rok') === $year) {
+            $cards[PohodaXml::text($row, 'RefAg')] = $row;
         }
-        return $out;
     }
 
     /**

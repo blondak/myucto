@@ -17,4 +17,6 @@ enum PayrollDocumentKind: string
     /** § 38ch ZDP — výpočet daně a roční zúčtování záloh a daňového zvýhodnění. */
     case AnnualSettlementResult = 'annual_settlement_result';
     case MonthlyBundle = 'monthly_bundle';
+    /** § 136 ZP — mzdový výměr trvajícího pracovního poměru. */
+    case WageStatement = 'wage_statement';
 }

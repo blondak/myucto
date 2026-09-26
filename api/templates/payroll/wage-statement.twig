@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Mzdový výměr</title>
+<style>
+body { font-family: montserrat, dejavusans, sans-serif; font-size: 8.1pt; color: #211923; line-height: 1.3; }
+.accent { height: 2mm; background: #98466F; margin-bottom: 3mm; }
+.title { font-size: 16pt; font-weight: bold; color: #351C2B; }
+.subtitle { color: #6B5C66; margin-top: 1mm; }
+.section { margin: 3mm 0 1mm; color: #98466F; font-size: 7.8pt; font-weight: bold; text-transform: uppercase; }
+.grid { width: 100%; border-collapse: collapse; }
+.grid td, .grid th { border: 0.3pt solid #DEC8D4; padding: 1.7mm; vertical-align: top; }
+.grid th { background: #FAF1F6; color: #5F515A; text-align: left; font-size: 6.8pt; }
+.label { color: #7D6E78; font-size: 6.3pt; text-transform: uppercase; }
+.value { margin-top: 0.5mm; font-weight: bold; }
+.amount { font-family: geistmono, dejavusans, sans-serif; font-size: 13pt; color: #98466F; font-weight: bold; }
+.right { text-align: right; }
+.note { margin-top: 2mm; border: 0.3pt solid #DEC8D4; background: #F8F5F7; padding: 1.7mm; }
+.signature { margin-top: 5mm; width: 100%; border-collapse: collapse; }
+.signature td { width: 50%; vertical-align: bottom; padding-right: 5mm; }
+.line { border-top: 0.3pt solid #7D6E78; padding-top: 1mm; margin-top: 8mm; }
+.mono { font-family: geistmono, dejavusans, sans-serif; font-size: 5.8pt; color: #7D6E78; }
+</style>
+</head>
+<body>
+{% set relation_labels = {
+  'employment': 'pracovní poměr',
+  'small_scale_employment': 'zaměstnání malého rozsahu'
+} %}
+{% set business_day_labels = {
+  'none': '',
+  'previous_business_day': ', připadne-li na den pracovního klidu, v předcházející pracovní den',
+  'next_business_day': ', připadne-li na den pracovního klidu, v následující pracovní den'
+} %}
+<div class="accent"></div>
+<div class="title">Mzdový výměr</div>
+<div class="subtitle">§ 136 zákoníku práce · platí od {{ effective_from|cz_date }}{% if revision_no > 1 %} · nahrazuje předchozí výměr (verze {{ revision_no }}){% endif %}</div>
+
+<div class="section">I. Smluvní strany</div>
+<table class="grid">
+  <tr>
+    <td style="width:50%">
+      <div class="label">Zaměstnavatel</div>
+      <div class="value">{{ employer.name }}</div>
+      <div>IČ: {{ employer.identification_number }}</div>
+      <div>{{ employer.address.street_line }}, {{ employer.address.postal_code }} {{ employer.address.city }}</div>
+    </td>
+    <td style="width:50%">
+      <div class="label">Zaměstnanec</div>
+      <div class="value">{{ employee.name }}</div>
+      <div>Druh vztahu: {{ relation_labels[relationship_kind] }}</div>
+      <div>Vznik vztahu: {{ employment_from|cz_date }}</div>
+    </td>
+  </tr>
+</table>
+
+<div class="section">II. Mzda a způsob odměňování</div>
+<table class="grid">
+  <tr>
+    <td style="width:34%">
+      <div class="label">Sjednaná měsíční mzda</div>
+      {% if wage.monthly_gross_minor is not null %}
+        <div class="amount">{{ wage.monthly_gross_minor|exact_czk }} Kč</div>
+      {% else %}
+        <div class="value">Mzda se skládá ze složek níže</div>
+      {% endif %}
+    </td>
+    <td style="width:33%">
+      <div class="label">Týdenní pracovní doba</div>
+      <div class="value">{{ wage.weekly_hours is not null ? wage.weekly_hours ~ ' h' : '—' }}</div>
+    </td>
+    <td>
+      <div class="label">Úvazek</div>
+      <div class="value">{{ wage.workload_basis_points|percent_bp }} %</div>
+    </td>
+  </tr>
+</table>
+{% if components|length > 0 %}
+<table class="grid" style="margin-top:2mm">
+  <tr><th>Další složka mzdy</th><th>Způsob stanovení</th><th class="right">Výše</th></tr>
+  {% for component in components %}
+  <tr>
+    <td>{{ component.name }}</td>
+    <td>{{ component.calculation_kind == 'fixed_amount' ? 'pevnou částkou' : (component.calculation_kind == 'employment_gross_basis_points' ? 'podílem ze sjednané mzdy' : 'podle podkladů') }}</td>
+    <td class="right">
+      {% if component.calculation_kind == 'fixed_amount' and component.amount_minor is not null %}{{ component.amount_minor|exact_czk }} Kč
+      {% elseif component.rate_basis_points is not null %}{{ component.rate_basis_points|percent_bp }} %
+      {% else %}—{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+<div class="note">
+  Za práci přesčas, ve svátek, v noci, v sobotu a v neděli, ve ztíženém pracovním
+  prostředí a za pracovní pohotovost náleží příplatky a odměna nejméně v rozsahu
+  § 114 až § 118 a § 140 zákoníku práce.
+</div>
+
+<div class="section">III. Místo výkonu práce, termín a místo výplaty</div>
+<table class="grid">
+  <tr>
+    <td style="width:34%"><div class="label">Místo výkonu práce</div><div class="value">{{ work_place ?? '—' }}</div></td>
+    <td style="width:33%">
+      <div class="label">Termín výplaty</div>
+      <div class="value">
+        {{ payday.day }}. den {{ payday.month_offset == 1 ? 'kalendářního měsíce následujícího po měsíci, za který se mzda vyplácí' : 'téhož kalendářního měsíce' }}{{ business_day_labels[payday.business_day_rule] }}
+      </div>
+    </td>
+    <td><div class="label">Místo a způsob výplaty</div><div class="value">{{ payment_place }}</div></td>
+  </tr>
+</table>
+{% if note is not null %}
+  <div class="note">{{ note }}</div>
+{% endif %}
+
+<table class="signature">
+  <tr>
+    <td>
+      Vystaveno dne {{ issued_at|cz_date }}<br>
+      Zpracoval(a): {{ employer.issuer.name }}<br>
+      Telefon: {{ employer.issuer.phone }}
+    </td>
+    <td><div class="line">Za zaměstnavatele: jméno, funkce a podpis</div></td>
+  </tr>
+  <tr>
+    <td></td>
+    <td><div class="line">Převzal(a) zaměstnanec: datum a podpis</div></td>
+  </tr>
+</table>
+<div class="mono">
+Renderer: {{ renderer_version }}<br>
+SHA-256 zdroje: {{ source_snapshot_sha256 }}
+</div>
+</body>
+</html>

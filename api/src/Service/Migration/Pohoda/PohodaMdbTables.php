@@ -11,13 +11,28 @@ final class PohodaMdbTables
     public readonly string $version;
     private array $tables = [];
     private readonly string $fingerprint;
+    private int $passes = 0;
 
-    public function __construct(private readonly string $path)
+    /**
+     * Úvodní průchod ověří strukturu celého souboru. Řádky tabulek `$inspect` při něm
+     * dostane `$inspector`, takže kontrola obsahu nepotřebuje další průchod.
+     *
+     * @param list<string> $inspect
+     * @param (callable(string,array<string,string>):void)|null $inspector
+     */
+    public function __construct(private readonly string $path, array $inspect = [], ?callable $inspector = null)
     {
         $this->fingerprint = $this->fingerprint();
-        foreach ($this->scan(null, true) as $_) {
+        foreach ($this->scan($inspector === null ? null : array_fill_keys($inspect, true), true) as $table => $row) {
+            $inspector($table, $row);
         }
         $this->unchanged();
+    }
+
+    /** Počet průchodů souborem od otevření (včetně úvodního). */
+    public function passes(): int
+    {
+        return $this->passes;
     }
 
     public function has(string $table): bool
@@ -27,13 +42,30 @@ final class PohodaMdbTables
 
     public function rows(string $table): \Generator
     {
+        foreach ($this->each([$table]) as $row) {
+            yield $row;
+        }
+    }
+
+    /**
+     * Řádky několika tabulek v JEDNOM průchodu souborem, v pořadí ze souboru; klíč
+     * generátoru je jméno tabulky (opakuje se, takže ne přes `iterator_to_array`).
+     * Průchod celým XML stojí stejně bez ohledu na to, kolik tabulek se z něj čte.
+     *
+     * @param list<string> $tables
+     * @return \Generator<string,array<string,string>>
+     */
+    public function each(array $tables): \Generator
+    {
         $this->unchanged();
-        yield from $this->scan($table, false);
+        yield from $this->scan(array_fill_keys($tables, true), false);
         $this->unchanged();
     }
 
-    private function scan(?string $wanted, bool $initialize): \Generator
+    /** @param array<string,true>|null $wanted */
+    private function scan(?array $wanted, bool $initialize): \Generator
     {
+        $this->passes++;
         $reader = new \XMLReader();
         $previous = libxml_use_internal_errors(true);
         try {
@@ -107,7 +139,7 @@ final class PohodaMdbTables
                             if (count($tables) > 64) {
                                 $this->limit();
                             }
-                            if (!$initialize && $table !== $wanted) {
+                            if (!$initialize && !isset($wanted[$table])) {
                                 $advance = !$this->read($reader, true);
                                 $table = null;
                             }
@@ -121,8 +153,8 @@ final class PohodaMdbTables
                             }
                             $row = [];
                             $columns = [];
-                            if ($reader->isEmptyElement && $table === $wanted) {
-                                yield [];
+                            if ($reader->isEmptyElement && isset($wanted[$table])) {
+                                yield $table => [];
                             }
                             break;
                         case 3:
@@ -154,8 +186,8 @@ final class PohodaMdbTables
                         }
                         $field = null;
                     } elseif ($reader->depth === 2) {
-                        if ($table === $wanted) {
-                            yield $row;
+                        if ($table !== null && isset($wanted[$table])) {
+                            yield $table => $row;
                         }
                         $row = null;
                     } elseif ($reader->depth === 1) {

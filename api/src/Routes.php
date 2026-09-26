@@ -94,6 +94,7 @@ use MyInvoice\Action\Payroll\PayrollDocumentDeliveryAction;
 use MyInvoice\Action\Payroll\PublicPayrollDocumentAccessAction;
 use MyInvoice\Action\Payroll\PayrollEldpAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentExitDocumentAction;
+use MyInvoice\Action\Payroll\PayrollWageStatementAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementFactsAction;
 use MyInvoice\Action\Payroll\PayrollXmlzamCooperationAction;
@@ -1347,6 +1348,14 @@ final class Routes
             $g->post(
                 '/employments/{id:[0-9]+}/documents/exit/{kind:employment-certificate|average-earnings-certificate|average-earnings-statement}',
                 [PayrollEmploymentExitDocumentAction::class, 'generate'],
+            );
+            $g->get(
+                '/employments/{id:[0-9]+}/documents/wage-statement',
+                [PayrollWageStatementAction::class, 'list'],
+            );
+            $g->post(
+                '/employments/{id:[0-9]+}/documents/wage-statement',
+                [PayrollWageStatementAction::class, 'generate'],
             );
             $g->post(
                 '/documents/{documentId:[0-9]+}/download-grant',

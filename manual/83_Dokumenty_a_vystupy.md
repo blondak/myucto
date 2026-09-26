@@ -97,6 +97,23 @@ druhu a vyžaduje konkrétní důvod. Nová revize uvádí datum nahrazovaného
 potvrzení a důvod v příloze; původní PDF zůstává beze změny. Opakování stejné
 opravné žádosti bezpečně vrátí již archivovanou revizi.
 
+### Mzdový výměr
+
+Mzdový výměr podle § 136 zákoníku práce se vydává z karty pracovního poměru
+v **Mzdy → Zaměstnanci**, část **Mzdový výměr**. Tlačítko **Vydat mzdový
+výměr** otevře formulář s dnem účinnosti (předvyplněný začátek posledních
+podmínek vztahu) a místem a způsobem výplaty (předvyplněné podle pravidel
+výplaty zaměstnance). Sjednaná měsíční mzda, úvazek, pracoviště a opakující se
+mzdové složky se načtou z podmínek vztahu platných k datu účinnosti, termín
+výplaty z mzdové politiky zaměstnavatele.
+
+Výměr je neměnná revize. Opakované vydání se stejnými podklady vrátí už
+vydaný dokument; změna mzdy, složek, pracoviště nebo termínu výplaty vytvoří
+novou verzi, která předchozí nahradí, a původní PDF zůstává dohledatelné.
+Chybí-li sjednaná mzda, mzdová politika s termínem výplaty nebo údaje
+zaměstnavatele, panel řekne, co doplnit, a u nastavení nabídne proklik.
+U dohod o pracích konaných mimo pracovní poměr se výměr nevydává.
+
 U ukončeného pracovního vztahu otevři v **Mzdy → Zaměstnanci** jeho detail
 a část **Dokumenty při skončení vztahu**. Výstupní checklist vztahu hlídá
 vedle zápočtového listu také **evidenční list důchodového pojištění** a

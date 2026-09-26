@@ -759,6 +759,53 @@ final class JmhzReportImportServiceTest extends TestCase
         ], $claims);
     }
 
+    /**
+     * Výkon: import dávky hlášení nesmí formuláře plánovat znovu a znovu nad
+     * nezměněnou evidencí ani pro každý formulář téže osoby číst tytéž údaje.
+     * Měří se počet dotazů SELECT v relaci, ne čas.
+     */
+    public function testBatchPlanningDoesNotRepeatLookups(): void
+    {
+        $this->registerEmployee(withIdentifiers: true);
+        $files = [];
+        foreach ([1, 2, 3] as $month) {
+            $files[] = $this->file("jmhz-{$month}.xml", JmhzReportFixtures::report([JmhzReportFixtures::person([
+                'oic' => $this->oic,
+                'id_ppv' => $this->idPpv,
+            ])], 2026, $month));
+        }
+
+        $before = $this->selects();
+        $preview = $this->imports->preview($this->supplierId, 'test', $files);
+        $previewSelects = $this->selects() - $before;
+        $keys = array_column($preview['records'], 'key');
+
+        $before = $this->selects();
+        $first = $this->apply($files, $keys, openings: true, averages: true);
+        $applySelects = $this->selects() - $before;
+        self::assertSame('applied', $first['results'][0]['status'], (string) $first['results'][0]['message']);
+
+        $before = $this->selects();
+        $again = $this->apply($files, $keys, openings: true, averages: true);
+        $repeatSelects = $this->selects() - $before;
+        self::assertSame(['skipped', 'skipped', 'skipped'], array_column($again['results'], 'status'));
+        self::assertSame('complete', $again['outcome']);
+
+        // Před opravou: náhled 150, první použití 827, opakované použití 583
+        // (každý formulář naplánovaný 5–6× a pro každý měsíc znovu tytéž vztahy).
+        self::assertLessThan(120, $previewSelects);
+        self::assertLessThan(600, $applySelects);
+        // Opakované použití nemá co zapsat: nesmí stát víc než dva náhledy.
+        self::assertLessThanOrEqual(2 * $previewSelects, $repeatSelects, "náhled {$previewSelects}, opakované použití {$repeatSelects}");
+    }
+
+    private function selects(): int
+    {
+        $row = $this->db->pdo()->query("SHOW SESSION STATUS LIKE 'Com_select'")?->fetch(\PDO::FETCH_NUM);
+
+        return (int) ($row[1] ?? 0);
+    }
+
     /** @return array{0:int,1:int} [employee_id, employment_id] */
     private function registerEmployee(bool $withIdentifiers): array
     {

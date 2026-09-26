@@ -908,7 +908,9 @@
         "1922_payroll_sickness_case_absence_link.sql",
         "1923_payroll_sickness_case_long_term_care_consent.sql",
         "1924_payroll_external_identifier_origin.sql",
-        "1925_payroll_small_lifecycle_deadlines.sql"
+        "1925_payroll_small_lifecycle_deadlines.sql",
+        "1926_payroll_standby_rate.sql",
+        "1927_payroll_wage_statements.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -9500,6 +9502,7 @@
                 "overtime_mode": "enum('surcharge','compensatory_time_off','included_in_wage') NOT NULL DEFAULT 'surcharge'",
                 "overtime_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "standby_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "valid_from": "date NOT NULL",
@@ -9524,7 +9527,8 @@
                 "chk_payroll_surcharge_policy_interval": "`valid_to` is null or `valid_to` >= `valid_from`",
                 "chk_payroll_surcharge_policy_one_form": "(`overtime_rate_bp` is null or `overtime_fixed_hourly_minor` is null) and (`holiday_rate_bp` is null or `holiday_fixed_hourly_minor` is null) and (`night_rate_bp` is null or `night_fixed_hourly_minor` is null) and (`weekend_rate_bp` is null or `weekend_fixed_hourly_minor` is null) and (`difficult_environment_rate_bp` is null or `difficult_environment_fixed_hourly_minor` is null)",
                 "chk_payroll_surcharge_policy_rates": "(`overtime_rate_bp` is null or `overtime_rate_bp` between 1 and 50000) and (`holiday_rate_bp` is null or `holiday_rate_bp` between 1 and 50000) and (`night_rate_bp` is null or `night_rate_bp` between 1 and 50000) and (`weekend_rate_bp` is null or `weekend_rate_bp` between 1 and 50000) and (`difficult_environment_rate_bp` is null or `difficult_environment_rate_bp` between 1 and 50000)",
-                "chk_payroll_surcharge_policy_row_version": "`row_version` > 0"
+                "chk_payroll_surcharge_policy_row_version": "`row_version` > 0",
+                "chk_payroll_surcharge_policy_standby_rate": "`standby_rate_bp` is null or `standby_rate_bp` between 1 and 50000"
             }
         },
         "payroll_employment_survivors": {
@@ -10585,7 +10589,8 @@
                 "suggested_filename": "varchar(160) NOT NULL",
                 "supersedes_document_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
-                "template_version": "varchar(64) NOT NULL"
+                "template_version": "varchar(64) NOT NULL",
+                "wage_statement_revision_id": "bigint(20) unsigned NULL DEFAULT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
@@ -10597,11 +10602,13 @@
                 "idx_payroll_document_revision_employee_kind": "BTREE (supplier_id, revision_id, employee_id, document_kind, document_revision_no)",
                 "idx_payroll_document_revision_fk": "BTREE (supplier_id, revision_id)",
                 "idx_payroll_document_run": "BTREE (supplier_id, run_id, revision_id, document_kind)",
+                "idx_payroll_document_wage_statement_revision": "BTREE (supplier_id, wage_statement_revision_id)",
                 "uq_payroll_document_annual_revision": "UNIQUE BTREE (supplier_id, annual_revision_id, document_kind, employee_scope_id, document_revision_no)",
                 "uq_payroll_document_employment_exit_revision": "UNIQUE BTREE (supplier_id, employment_exit_revision_id, document_kind, employee_scope_id, document_revision_no)",
                 "uq_payroll_document_idempotency": "UNIQUE BTREE (supplier_id, idempotency_key_hash)",
                 "uq_payroll_document_revision": "UNIQUE BTREE (supplier_id, revision_id, document_kind, employee_scope_id, document_revision_no)",
-                "uq_payroll_document_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+                "uq_payroll_document_supplier_id": "UNIQUE BTREE (supplier_id, id)",
+                "uq_payroll_document_wage_statement_revision": "UNIQUE BTREE (supplier_id, wage_statement_revision_id, document_kind, employee_scope_id, document_revision_no)"
             },
             "foreign_keys": {
                 "fk_payroll_document_annual_revision": "(supplier_id, annual_revision_id) -> payroll_annual_document_revisions (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
@@ -10610,13 +10617,14 @@
                 "fk_payroll_document_employment_exit_revision": "(supplier_id, employment_exit_revision_id) -> payroll_employment_exit_revisions (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_payroll_document_revision": "(supplier_id, revision_id) -> payroll_run_revisions (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_payroll_document_run": "(supplier_id, run_id) -> payroll_runs (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "fk_payroll_document_supersedes": "(supplier_id, supersedes_document_id) -> payroll_generated_documents (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "fk_payroll_document_supersedes": "(supplier_id, supersedes_document_id) -> payroll_generated_documents (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_document_wage_statement_revision": "(supplier_id, wage_statement_revision_id) -> payroll_wage_statement_revisions (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
-                "chk_payroll_document_anchor": "`annual_revision_id` is null and `employment_exit_revision_id` is null and `run_id` is not null and `revision_id` is not null or `annual_revision_id` is not null and `employment_exit_revision_id` is null and `run_id` is null and `revision_id` is null or `annual_revision_id` is null and `employment_exit_revision_id` is not null and `run_id` is null and `revision_id` is null",
+                "chk_payroll_document_anchor": "`annual_revision_id` is null and `employment_exit_revision_id` is null and `wage_statement_revision_id` is null and `run_id` is not null and `revision_id` is not null or `annual_revision_id` is not null and `employment_exit_revision_id` is null and `wage_statement_revision_id` is null and `run_id` is null and `revision_id` is null or `annual_revision_id` is null and `employment_exit_revision_id` is not null and `wage_statement_revision_id` is null and `run_id` is null and `revision_id` is null or `annual_revision_id` is null and `employment_exit_revision_id` is null and `wage_statement_revision_id` is not null and `run_id` is null and `revision_id` is null",
                 "chk_payroll_document_filename": "`suggested_filename` regexp '^[a-z0-9][a-z0-9._-]{0,159}$'",
                 "chk_payroll_document_hashes": "`revision_snapshot_hash` regexp '^[0-9a-f]{64}$' and `source_snapshot_hash` regexp '^[0-9a-f]{64}$' and `file_sha256` regexp '^[0-9a-f]{64}$' and `storage_key` = `file_sha256`",
-                "chk_payroll_document_kind": "`document_kind` in ('payslip','payroll_sheet','taxable_income_advance_certificate','taxable_income_withholding_certificate','employment_certificate','average_earnings_certificate','average_earnings_statement','annual_settlement_result','monthly_bundle')",
+                "chk_payroll_document_kind": "`document_kind` in ('payslip','payroll_sheet','taxable_income_advance_certificate','taxable_income_withholding_certificate','employment_certificate','average_earnings_certificate','average_earnings_statement','annual_settlement_result','monthly_bundle','wage_statement')",
                 "chk_payroll_document_revision_no": "`document_revision_no` > 0",
                 "chk_payroll_document_size": "`size_bytes` > 0",
                 "manifest_json": "`manifest_json` is null or json_valid(`manifest_json`)"
@@ -16622,6 +16630,45 @@
             },
             "checks": []
         },
+        "payroll_wage_statement_revisions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "approved_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "approved_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "effective_from": "date NOT NULL",
+                "employee_id": "bigint(20) unsigned NOT NULL",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "previous_revision_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "revision_no": "int(10) unsigned NOT NULL",
+                "snapshot_hash": "char(64) NOT NULL",
+                "snapshot_json": "longtext NOT NULL",
+                "source_manifest_hash": "char(64) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_wage_statement_approver": "BTREE (approved_by)",
+                "fk_payroll_wage_statement_employment": "BTREE (supplier_id, employment_id, employee_id)",
+                "fk_payroll_wage_statement_previous": "BTREE (supplier_id, previous_revision_id)",
+                "uq_payroll_wage_statement_sequence": "UNIQUE BTREE (supplier_id, employment_id, revision_no)",
+                "uq_payroll_wage_statement_source": "UNIQUE BTREE (supplier_id, employment_id, source_manifest_hash)",
+                "uq_payroll_wage_statement_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_wage_statement_approver": "(approved_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_wage_statement_employment": "(supplier_id, employment_id, employee_id) -> payroll_employments (supplier_id, id, employee_id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_wage_statement_previous": "(supplier_id, previous_revision_id) -> payroll_wage_statement_revisions (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_payroll_wage_statement_hashes": "`snapshot_hash` regexp '^[0-9a-f]{64}$' and `source_manifest_hash` regexp '^[0-9a-f]{64}$'",
+                "chk_payroll_wage_statement_revision_number": "`revision_no` > 0",
+                "snapshot_json": "json_valid(`snapshot_json`)"
+            }
+        },
         "payroll_work_calendars": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -22578,7 +22625,7 @@
         "trg_payroll_dimension_overlap_update": "BEFORE UPDATE ON payroll_dimensions #1b9cdf3294679eef72297cbfb282f4d04d061b1a",
         "trg_payroll_document_access_link_immutable_target": "BEFORE UPDATE ON payroll_document_access_links #e8deb3a219036a5bb1223701ca9943e9f81577fd",
         "trg_payroll_document_access_link_tenant_person_insert": "BEFORE INSERT ON payroll_document_access_links #fc629fbe85de837505b8e8828844950e6902dbcb",
-        "trg_payroll_document_approved_revision_insert": "BEFORE INSERT ON payroll_generated_documents #3974e64afcb465123031a2718775b8322fd2536e",
+        "trg_payroll_document_approved_revision_insert": "BEFORE INSERT ON payroll_generated_documents #77002f49bc70b65346d51be6fcc4eb9af0551707",
         "trg_payroll_document_batch_item_source_insert": "BEFORE INSERT ON payroll_document_batch_items #d52bda24e4493504b607eb91b00d3ebefd181ade",
         "trg_payroll_document_batch_source_insert": "BEFORE INSERT ON payroll_document_batches #34ef604082eb5b73a440da62aefea0a0c7c11be2",
         "trg_payroll_document_delivery_immutable_delete": "BEFORE DELETE ON payroll_document_delivery_events #e1feb4ba9be894240786d6b8cd5fb4b0d736eacb",
@@ -22787,6 +22834,9 @@
         "trg_payroll_transport_attempts_insert_guard": "BEFORE INSERT ON payroll_submission_transport_attempts #ea71aad8f3522adadd9f1e9871ec16733bd13ff0",
         "trg_payroll_transport_attempts_no_delete": "BEFORE DELETE ON payroll_submission_transport_attempts #8dec6e775d198fac60f58b8c90b03c28e91b963d",
         "trg_payroll_transport_attempts_update_guard": "BEFORE UPDATE ON payroll_submission_transport_attempts #798b820847a5e8dc75dc1cbadb1bb7b14e5fc4fb",
+        "trg_payroll_wage_statement_revision_immutable_delete": "BEFORE DELETE ON payroll_wage_statement_revisions #fc2d12d6d6e3e9bf896cc2a3b7533b4ccb3e3bd5",
+        "trg_payroll_wage_statement_revision_immutable_update": "BEFORE UPDATE ON payroll_wage_statement_revisions #6e637ef92c51c47f10bad4ee44f0ac4626a7596d",
+        "trg_payroll_wage_statement_revision_validate_insert": "BEFORE INSERT ON payroll_wage_statement_revisions #208a681079139d8f75c95cfa390776724beb9dae",
         "trg_pp_health_coverage_evidence_insert": "BEFORE INSERT ON payroll_person_health_coverage_history #6566c70eddc0ce561d894f5583ef58b7a1b8d725",
         "trg_pp_health_coverage_evidence_update": "BEFORE UPDATE ON payroll_person_health_coverage_history #6566c70eddc0ce561d894f5583ef58b7a1b8d725",
         "trg_submission_defect_notice_guard": "BEFORE INSERT ON submission_defect_notices #a86513c4dc1c74e0b4cbe8de9a1bc593f16b17d9",

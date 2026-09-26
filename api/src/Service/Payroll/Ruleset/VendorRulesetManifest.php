@@ -48,7 +48,7 @@ final class VendorRulesetManifest
         // cz-jmhz-deadlines-2026.transition.v1
         '9e30371cd82fcf6005bee2954c79b8e13b84f0b487b24df12272d4ba9951e999',
         // cz-payroll-2025.compensation-averages.v1
-        'a956014447820b71bc0fd78d322c64a659176b3e31518f5dc9b4f089280f9f01',
+        'cd123a9889377736f0cbfcfb8bd9163163bae6feb31acbbaaab043d187c481e5',
         // cz-payroll-2025.employment-thresholds.v1
         '9d62f5b2a3ddb31f00f2db189c280c41e18c3ca31cfbdb48051926ad694f3e17',
         // cz-payroll-2025.enforcement-deductions.v1
@@ -64,7 +64,7 @@ final class VendorRulesetManifest
         // cz-payroll-2026.codebooks.v1
         'e40864b10491901b346096ebb39b70027a0fc111ea1f0b2208138e7594e2f87c',
         // cz-payroll-2026.compensation-averages.v1
-        'd5d4615f75ff15c5041d51276f00a6d9a6e061f6685d7f5776376cf75d1a04b8',
+        '135d38b40293ab35d441c498dad99bf28b807a72a1369e96f4ea1f5edbbfcde8',
         // cz-payroll-2026.employment-thresholds.v1
         'f48de8bd5f92020c1648f02e2a70290f1d926beb2e6fbb6e0359a8c9aaeff236',
         // cz-payroll-2026.enforcement-deductions.v1

@@ -18,6 +18,8 @@ namespace MyInvoice\Service\Migration\Pohoda;
  */
 final class PohodaXml
 {
+    private static int $passes = 0;
+
     /**
      * @return \Generator<int,array<string,mixed>>
      */
@@ -90,8 +92,15 @@ final class PohodaXml
         return $n;
     }
 
+    /** Počet otevření souboru ke čtení (průchodů) od startu procesu - měřítko výkonu čteček. */
+    public static function passes(): int
+    {
+        return self::$passes;
+    }
+
     private static function open(string $file): ?\XMLReader
     {
+        self::$passes++;
         self::guard($file);
         $reader = new \XMLReader();
         return $reader->open($file, null, LIBXML_NONET) ? $reader : null;

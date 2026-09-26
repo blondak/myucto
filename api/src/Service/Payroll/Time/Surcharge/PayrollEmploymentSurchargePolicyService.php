@@ -115,6 +115,12 @@ final class PayrollEmploymentSurchargePolicyService
                 'difficult_environment_factors' => null,
             ],
             'kinds' => $kinds,
+            'standby' => [
+                'section' => '§ 140',
+                'component_code' => PayrollStandbyInputMaterializer::COMPONENT_CODE,
+                'statutory_rate_basis_points' =>
+                    PayrollSurchargePolicy::basisPointsOf($ruleset->standbyRate()),
+            ],
             'ruleset_id' => $ruleset->version->id,
         ];
     }
@@ -257,7 +263,20 @@ final class PayrollEmploymentSurchargePolicyService
             $fixed,
         );
 
+        // § 140 ZP — odměna za pohotovost NEJMÉNĚ 10 % průměrného výdělku.
+        // Nižší sazbu nelze sjednat, takže se odmítá už při uložení.
+        $standby = self::nullableInt($input, 'standby_rate_bp');
+        $standbyFloor = PayrollSurchargePolicy::basisPointsOf($ruleset->standbyRate());
+        if ($standby !== null && $standby < $standbyFloor) {
+            throw new \InvalidArgumentException(sprintf(
+                'Odměna za pracovní pohotovost musí podle § 140 ZP činit nejméně %s %% '
+                . 'průměrného výdělku.',
+                rtrim(rtrim(number_format($standbyFloor / 100, 2, ',', ''), '0'), ','),
+            ));
+        }
+
         $agreed = [
+            'standby_rate_bp' => $standby,
             'overtime_mode' => $overtime->value,
             'holiday_mode' => $holiday->value,
             'difficult_environment_factors' => $factors,

@@ -476,6 +476,7 @@ final class AnonymizationPolicy
         'payroll_time_month_import_summaries' => ['content_sha256' => 'keep', 'sources_json' => 'json', 'values_json' => 'keep'],
         'payroll_time_months' => ['reopen_reason' => 'text'],
         'payroll_travel_compensation_links' => ['source_reference' => 'text', 'source_system' => 'keep'],
+        'payroll_wage_statement_revisions' => ['snapshot_hash' => 'keep', 'snapshot_json' => 'json', 'source_manifest_hash' => 'keep'],
         'payroll_work_calendars' => ['name' => 'text', 'timezone_name' => 'keep', 'week_pattern' => 'keep'],
         'pdf_signature_output_settings' => ['backend' => 'keep', 'output_type' => 'keep', 'signature_config_json' => 'json'],
         'pohoda_import_map' => ['kind' => 'keep', 'pohoda_key' => 'text'],

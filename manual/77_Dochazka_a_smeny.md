@@ -179,6 +179,22 @@ nelze.
 | § 117 | Příplatek za práci ve ztíženém pracovním prostředí | `PRIPLATEK_ZTIZENE_PROSTREDI` |
 | § 118 | Příplatek za práci v sobotu a v neděli | `PRIPLATEK_VIKEND` |
 
+#### Odměna za pracovní pohotovost (§ 140)
+
+Minuty pracovní pohotovosti se zadávají u směny v poli **Pohotovost**. Při
+schválení měsíce aplikace sečte pohotovost ze zveřejněných směn, jejichž
+začátek padá do měsíce, a založí schválený mzdový vstup složky
+`ODMENA_POHOTOVOST`: hodiny pohotovosti × průměrný hodinový výdělek × sazba.
+Sazba je zákonné minimum 10 % průměrného výdělku, nebo vyšší sazba sjednaná
+na kartě pracovního vztahu v zásadě příplatků (pole *Odměna za pracovní
+pohotovost*). Nižší sazbu aplikace neuloží.
+
+Bez schváleného průměrného výdělku pro čtvrtletí se měsíc s pohotovostí
+neschválí; hláška řekne, který měsíc a kolik minut. V měsíčním hlášení JMHZ
+se odměna vykazuje v bloku *Odměny za pracovní pohotovost* (10343), mimo
+zúčtovanou mzdu. Opakované schválení beze změny nic nepřidá, změna směn
+zapíše jen rozdíl.
+
 #### Za jednu hodinu může náležet víc příplatků
 
 Kategorie `night`, `weekend`, `holiday` a `difficult_environment` jsou

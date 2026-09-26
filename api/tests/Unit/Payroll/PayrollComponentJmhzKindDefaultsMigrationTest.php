@@ -29,7 +29,16 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         '1839_payroll_component_jmhz_kind_default_mappings.sql',
         '1847_payroll_component_jmhz_stravovani_mapping.sql',
         '1905_payroll_component_jmhz_compensation_detail_mappings.sql',
+        '1926_payroll_standby_rate.sql',
     ];
+
+    /**
+     * Kódy, které do výchozího číselníku přibyly až PO přechodu na balík 1903,
+     * a dorovnává je proto vlastní pozdější migrace (viz {@see self::MIGRATIONS}).
+     *
+     * @var list<string>
+     */
+    private const AFTER_PACKAGE_TRANSITION = ['ODMENA_POHOTOVOST'];
 
     private const PACKAGE_TRANSITION = '1903_payroll_component_jmhz_catalog_1_4_2_10_package.sql';
 
@@ -201,7 +210,10 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         foreach ($matches as $match) {
             $codes[$match[1]] = $match[2];
         }
-        $expected = PayrollComponentJmhzMappingDefaults::all();
+        $expected = array_diff_key(
+            PayrollComponentJmhzMappingDefaults::all(),
+            array_flip(self::AFTER_PACKAGE_TRANSITION),
+        );
         ksort($codes);
         ksort($expected);
         self::assertSame($expected, $codes);

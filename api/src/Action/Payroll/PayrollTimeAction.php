@@ -21,6 +21,7 @@ use MyInvoice\Service\Payroll\Time\PayrollTimeCsvImportService;
 use MyInvoice\Service\Payroll\Time\PayrollTimeService;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeException;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeInputMaterializer;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollStandbyInputMaterializer;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -37,6 +38,7 @@ final class PayrollTimeAction
         private readonly Connection $db,
         private readonly PayrollSurchargeInputMaterializer $surchargeInputs,
         private readonly PayrollHistoricalPeriodService $historicalPeriods,
+        private readonly PayrollStandbyInputMaterializer $standbyInputs,
     ) {}
 
     public function month(Request $request, Response $response): Response
@@ -691,6 +693,14 @@ final class PayrollTimeAction
                     PayrollTimeValue::string($month['period_start'] ?? null, 'period_start'),
                     $this->userId($request),
                 );
+                // Odměna za pracovní pohotovost (§ 140 ZP) ze stejného důvodu
+                // a ve stejné transakci jako příplatky.
+                $standby = $this->standbyInputs->materialize(
+                    $supplierId,
+                    PayrollTimeValue::int($month['employment_id'] ?? null, 'employment_id'),
+                    PayrollTimeValue::string($month['period_start'] ?? null, 'period_start'),
+                    $this->userId($request),
+                );
                 if ($ownsTransaction) {
                     $pdo->commit();
                 }
@@ -701,7 +711,11 @@ final class PayrollTimeAction
                 throw $e;
             }
             $this->auditMonth($request, 'payroll.time.month_approved', $month);
-            return Json::ok($response, ['month' => $month, 'surcharges' => $surcharges]);
+            return Json::ok($response, [
+                'month' => $month,
+                'surcharges' => $surcharges,
+                'standby' => $standby,
+            ]);
         } catch (PayrollSurchargeException $e) {
             return Json::error($response, $e->reason, $e->getMessage(), 409);
         } catch (PayrollTimeLockedException $e) {

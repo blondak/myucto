@@ -431,6 +431,11 @@ final class CzechPayrollRulesets2026
                 'surcharge.overtime.basis' => PayrollRuleValue::text('average_earning'),
                 'surcharge.overtime.rate' => PayrollRuleValue::rate('0.25'),
                 'surcharge.overtime.time_off_months' => PayrollRuleValue::integer(3),
+                // § 140 ZP — odměna za pracovní pohotovost nejméně 10 % průměrného
+                // výdělku. Vyšší sjednaná sazba je vlastnost vztahu
+                // (`payroll_employment_surcharge_policies.standby_rate_bp`, migrace 1926).
+                'surcharge.standby.basis' => PayrollRuleValue::text('average_earning'),
+                'surcharge.standby.rate' => PayrollRuleValue::rate('0.10'),
                 'surcharge.weekend.basis' => PayrollRuleValue::text('average_earning'),
                 'surcharge.weekend.rate' => PayrollRuleValue::rate('0.10'),
                 'wage_compensation.compensation_rate' => PayrollRuleValue::rate('0.60'),

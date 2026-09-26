@@ -82,6 +82,7 @@ const showValidation = ref(false)
 const policies = ref<PayrollEmploymentSurchargePolicy[]>([])
 const kinds = ref<PayrollSurchargeKindInfo[]>([])
 const statutoryDefault = ref<PayrollEmploymentSurchargePolicies['statutory_default'] | null>(null)
+const standbyInfo = ref<PayrollEmploymentSurchargePolicies['standby'] | null>(null)
 
 /** Pořadí polí odpovídá payloadu API; klíč je druh příplatku. */
 /*
@@ -170,6 +171,8 @@ interface PolicyForm {
   fixed: Record<PayrollSurchargeKind, string | number>
   /** Který ze dvou způsobů se u druhu sjednává. Obojí naráz server odmítne. */
   forms: Record<PayrollSurchargeKind, SurchargeAgreementForm>
+  /** Sjednaná sazba odměny za pracovní pohotovost § 140 ZP v procentech; prázdno = zákonné minimum. */
+  standby_rate: string | number
   agreement_reference: string
   note: string
 }
@@ -202,6 +205,7 @@ function newForm(): PolicyForm {
       weekend: 'percent',
       difficult_environment: 'percent',
     },
+    standby_rate: '',
     agreement_reference: '',
     note: '',
   }
@@ -297,6 +301,17 @@ const factorsValid = computed(() => {
   return Number.isInteger(value) && value >= 1 && value <= 255
 })
 
+/** Zákonné minimum odměny za pohotovost v bázových bodech (§ 140 ZP, 10 %). */
+const standbyStatutoryBasisPoints = computed(() => standbyInfo.value?.statutory_rate_basis_points ?? 1000)
+
+/** § 140 ZP nedovoluje sjednat méně než zákonné minimum; prázdno = minimum. */
+const standbyValid = computed(() => {
+  const raw = String(form.value.standby_rate ?? '').trim()
+  if (raw === '') return true
+  const agreed = toBasisPoints(raw)
+  return agreed !== null && agreed >= standbyStatutoryBasisPoints.value && agreed <= 50_000
+})
+
 const validFromValid = computed(() => /^\d{4}-\d{2}-\d{2}$/.test(form.value.valid_from))
 /**
  * Konec platnosti nesmí předcházet začátku. Server to hlídá taky (a hlídá navíc
@@ -311,7 +326,8 @@ const validToValid = computed(() => {
 const valid = computed(() => validFromValid.value
   && factorsValid.value
   && validToValid.value
-  && fixedValid.value)
+  && fixedValid.value
+  && standbyValid.value)
 
 const saveDisabled = computed(() => saving.value || !valid.value)
 const saveDisabledReason = computed(() => {
@@ -320,6 +336,11 @@ const saveDisabledReason = computed(() => {
   if (!factorsValid.value) return t('payroll.people.surcharge_policy.factors_invalid')
   if (!validToValid.value) return t('payroll.people.surcharge_policy.valid_to_invalid')
   if (!fixedValid.value) return t('payroll.people.surcharge_policy.fixed_invalid')
+  if (!standbyValid.value) {
+    return t('payroll.people.surcharge_policy.standby.invalid', {
+      rate: toPercent(standbyStatutoryBasisPoints.value),
+    })
+  }
   return ''
 })
 
@@ -380,6 +401,7 @@ function fillFrom(policy: PayrollEmploymentSurchargePolicy) {
     // to je tvar, ve kterém zákon sazbu udává.
     form.value.forms[entry.kind] = fixed === '' ? 'percent' : 'fixed'
   }
+  form.value.standby_rate = toPercent(policy.standby_rate_bp ?? null)
   form.value.agreement_reference = policy.agreement_reference ?? ''
   form.value.note = policy.note ?? ''
 }
@@ -431,6 +453,7 @@ async function load() {
     policies.value = data.policies
     kinds.value = data.kinds
     statutoryDefault.value = data.statutory_default
+    standbyInfo.value = data.standby ?? null
   } catch (error: unknown) {
     loadError.value = apiMessage(error) || t('payroll.people.surcharge_policy.load_failed')
   } finally {
@@ -476,6 +499,7 @@ async function save() {
       overtime_mode: form.value.overtime_mode,
       holiday_mode: form.value.holiday_mode,
       difficult_environment_factors: factors === '' ? null : Number(factors),
+      standby_rate_bp: toBasisPoints(form.value.standby_rate),
       agreement_reference: form.value.agreement_reference.trim() || null,
       note: form.value.note.trim() || null,
     }
@@ -660,6 +684,13 @@ onMounted(load)
       <p v-if="currentPolicy.difficult_environment_factors !== null" class="mt-1 text-neutral-600">
         {{ t('payroll.people.surcharge_policy.factors') }}: {{ currentPolicy.difficult_environment_factors }}
       </p>
+      <p class="mt-1 text-neutral-600" data-test="surcharge-policy-current-standby">
+        {{ t('payroll.people.surcharge_policy.standby.label') }}:
+        <template v-if="currentPolicy.standby_rate_bp !== null && currentPolicy.standby_rate_bp !== undefined">
+          {{ toPercent(currentPolicy.standby_rate_bp) }} %
+        </template>
+        <template v-else>{{ t('payroll.people.surcharge_policy.rate_statutory_used') }}</template>
+      </p>
     </div>
 
     <div v-if="historyPolicies.length > 0" class="mt-2">
@@ -836,6 +867,34 @@ onMounted(load)
       <p class="mt-2 text-xs text-neutral-500">
         {{ t('payroll.people.surcharge_policy.fixed_hint') }}
       </p>
+
+      <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label class="text-xs text-neutral-600">
+          {{ t('payroll.people.surcharge_policy.standby.label') }}
+          <span class="text-neutral-400">({{ standbyInfo?.section ?? '§ 140' }})</span>
+          <input
+            v-model="form.standby_rate"
+            data-test="surcharge-policy-standby-rate"
+            type="number"
+            :min="toPercent(standbyStatutoryBasisPoints)"
+            max="500"
+            step="0.01"
+            :disabled="!canWrite"
+            :placeholder="toPercent(standbyStatutoryBasisPoints)"
+            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+          >
+          <span class="mt-1 block text-neutral-500">
+            {{ t('payroll.people.surcharge_policy.standby.hint', { rate: toPercent(standbyStatutoryBasisPoints) }) }}
+          </span>
+          <span
+            v-if="showValidation && !standbyValid"
+            data-test="surcharge-policy-standby-invalid"
+            class="mt-1 block text-danger-700"
+          >
+            {{ t('payroll.people.surcharge_policy.standby.invalid', { rate: toPercent(standbyStatutoryBasisPoints) }) }}
+          </span>
+        </label>
+      </div>
 
       <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label class="text-xs text-neutral-600">

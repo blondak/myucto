@@ -274,6 +274,7 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'NAHRADA_MZDY_SVATEK',
             'NEPENEZNI_PRIJEM',
             'ODMENA',
+            'ODMENA_POHOTOVOST',
             'ODSTUPNE',
             'PRECHODNE_UBYTOVANI',
             'PREMIE_PRIPLATKY',

@@ -66,10 +66,31 @@ final class PohodaPayrollDeductions
     public static function read(string $file, int $year): array
     {
         $byId = [];
-        foreach (self::TABLES as $table) {
-            foreach (PohodaXml::records($file, $table) as $row) {
-                $byId[$table][PohodaXml::text($row, 'ID')] = $row;
+        /** @var array<string,array{person:string,period:string}> $payslips mzda => osoba a období */
+        $payslips = [];
+        $firstPeriod = null;
+        /** @var array<string,true> $protectedInputs osoby s vlastními podklady pro nezabavitelnou částku */
+        $protectedInputs = [];
+        // Číselníky, karty a mzdy jedním průchodem souborem, srážky ze mzdy druhým -
+        // potřebují už znát mzdy roku.
+        foreach (PohodaXml::scan($file, [...self::TABLES, 'MZ', 'rpZAMprijemSraz']) as $table => $row) {
+            if ($table === 'rpZAMprijemSraz') {
+                if (self::bool(PohodaXml::text($row, 'Pouzito'))) {
+                    $protectedInputs[PohodaXml::text($row, 'RefZAM')] = true;
+                }
+                continue;
             }
+            if ($table !== 'MZ') {
+                $byId[$table][PohodaXml::text($row, 'ID')] = $row;
+                continue;
+            }
+            $month = (int) PohodaXml::text($row, 'RelMes');
+            if ((int) PohodaXml::text($row, 'Rok') !== $year || $month < 1 || $month > 12) {
+                continue;
+            }
+            $period = sprintf('%04d-%02d', $year, $month);
+            $firstPeriod = $firstPeriod === null || $period < $firstPeriod ? $period : $firstPeriod;
+            $payslips[PohodaXml::text($row, 'ID')] = ['person' => PohodaXml::text($row, 'RefZAM'), 'period' => $period];
         }
         $relationCount = [];
         foreach ($byId['ZAMpomer'] ?? [] as $relation) {
@@ -85,19 +106,6 @@ final class PohodaPayrollDeductions
                 continue;
             }
             $personalNumbers[$personId][] = PohodaPayrollPeople::personalNumber($person, $relation, $relationCount[$personId] ?? 1);
-        }
-
-        /** @var array<string,array{person:string,period:string}> $payslips mzda => osoba a období */
-        $payslips = [];
-        $firstPeriod = null;
-        foreach (PohodaXml::records($file, 'MZ') as $mz) {
-            $month = (int) PohodaXml::text($mz, 'RelMes');
-            if ((int) PohodaXml::text($mz, 'Rok') !== $year || $month < 1 || $month > 12) {
-                continue;
-            }
-            $period = sprintf('%04d-%02d', $year, $month);
-            $firstPeriod = $firstPeriod === null || $period < $firstPeriod ? $period : $firstPeriod;
-            $payslips[PohodaXml::text($mz, 'ID')] = ['person' => PohodaXml::text($mz, 'RefZAM'), 'period' => $period];
         }
 
         /** @var array<string,array{withheld:float,periods:array<string,bool>,ids:list<string>}> $fromPayslips karta => sraženo ve mzdách */
@@ -184,7 +192,7 @@ final class PohodaPayrollDeductions
             // MyÚčto vede u měsíce jen přebití nezabavitelné částky, ne jiné příjmy
             // povinného, ze kterých ji PAMICA počítá. Odvozovat jedno z druhého by bylo
             // dopočítání cizího výpočtu, ne převod údaje.
-            'protected_amount_inputs' => self::protectedAmountInputs($file),
+            'protected_amount_inputs' => count($protectedInputs),
         ];
     }
 
@@ -376,19 +384,6 @@ final class PohodaPayrollDeductions
             'specific_symbol' => self::digits(PohodaXml::text($row, 'PlSpecSym'), 10),
             'constant_symbol' => self::constantSymbol(PohodaXml::text($row, 'PlKonstSym')),
         ];
-    }
-
-    /** Osoby, u kterých PAMICA vede vlastní podklady pro nezabavitelnou částku. */
-    private static function protectedAmountInputs(string $file): int
-    {
-        $people = [];
-        foreach (PohodaXml::records($file, 'rpZAMprijemSraz') as $row) {
-            if (self::bool(PohodaXml::text($row, 'Pouzito'))) {
-                $people[PohodaXml::text($row, 'RefZAM')] = true;
-            }
-        }
-
-        return count($people);
     }
 
     private static function constantSymbol(string $value): ?string

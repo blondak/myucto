@@ -486,6 +486,41 @@ final class StatementImporterDuplicateTest extends TestCase
     }
 
     /** @return array{statement_id:int, transactions:int, matched:int, duplicate:bool, parsed_transactions:int, skipped_duplicates:int, warnings:list<array<string,mixed>>} */
+    /**
+     * Výkon: kontrola duplicit se na evidované pohyby ptá po dávkách, ne dotazem na každý
+     * řádek a každý otisk-kandidát. Překrývající se výpis (vše duplicitní) stál dřív
+     * dotaz na každý řádek.
+     */
+    public function testDuplicateCheckDoesNotQueryPerLine(): void
+    {
+        $account = '9990562359';
+        $currencyId = $this->registerCurrency($account, '2010');
+        $docs = array_map(static fn (int $i): string => (string) (27000 + $i), range(1, 40));
+
+        $before = $this->selects();
+        $first = $this->import($this->gpc($account, $docs, stmtNo: '051'), $currencyId);
+        $firstSelects = $this->selects() - $before;
+        self::assertSame(40, $first['transactions']);
+
+        $before = $this->selects();
+        $again = $this->import($this->gpc($account, $docs, stmtNo: '052'), $currencyId);
+        $againSelects = $this->selects() - $before;
+        self::assertSame(0, $again['transactions']);
+        self::assertSame(40, $again['skipped_duplicates']);
+
+        // Nové řádky stojí proti opakovanému importu (párování a zpracování je u obou
+        // stejné) jen svůj INSERT. Před opravou 1030 proti 868 dotazům: každý nový řádek
+        // se ptal zvlášť na všechny čtyři otisky-kandidáty.
+        self::assertLessThanOrEqual($againSelects + 40, $firstSelects, "první import {$firstSelects}, opakovaný {$againSelects}");
+    }
+
+    private function selects(): int
+    {
+        $row = $this->db->pdo()->query("SHOW SESSION STATUS LIKE 'Questions'")?->fetch(PDO::FETCH_NUM);
+
+        return (int) ($row[1] ?? 0);
+    }
+
     private function import(string $content, ?int $currencyId): array
     {
         $r = $this->importer->import($content, self::FILE_NAME, null, $currencyId);

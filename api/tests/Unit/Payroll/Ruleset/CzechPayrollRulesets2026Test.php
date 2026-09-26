@@ -59,7 +59,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * Platí proto pro VÝCHOZÍHO schvalovatele; instalace s jiným provozovatelem má
      * legitimně jiné číslo. Test si default proto vynutí sám.
      */
-    private const EXPECTED_MANIFEST_SHA256 = 'd9ec5ad3ad6f82827f1848f5d7ad555f42082063b3aeb05c17cee3a810972076';
+    private const EXPECTED_MANIFEST_SHA256 = '1a497ca5598fa4fb45e35e4d9907becd7f645ddd1633da3ac75a172506dff3a4';
 
     protected function setUp(): void
     {
