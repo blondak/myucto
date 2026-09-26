@@ -186,6 +186,65 @@ export interface PayrollTakeoverImportResult {
   periods: string[]
 }
 
+/**
+ * Ruční zadání převzatých mezd: jeden řádek = pracovní vztah × převzatý měsíc.
+ * Peníze v haléřích (UI je zadává v korunách), dny v celých dnech, odpracované
+ * dny v setinách dne a hodiny v minutách. Jedno uložení naplní počáteční stav
+ * (roční zúčtování, vyúčtování daně) i převzatou mzdu (ELDP).
+ */
+export interface PayrollTakeoverManualRow {
+  employment_id: number
+  month: number
+  gross_minor: number
+  net_minor: number
+  deductions_minor: number
+  net_payable_minor: number
+  social_base_minor: number
+  health_base_minor: number
+  employee_social_minor: number
+  employee_health_minor: number
+  employer_social_minor: number
+  employer_health_minor: number
+  health_minimum_top_up_minor: number
+  advance_base_minor: number
+  advance_tax_minor: number
+  withholding_base_minor: number
+  withholding_tax_minor: number
+  applied_credits_minor: number
+  applied_child_credit_minor: number
+  tax_bonus_minor: number
+  insurance_days: number
+  excluded_days: number
+  worked_days_hundredths: number
+  worked_minutes: number
+  pension_participation: boolean
+  payout_date: string | null
+  /** Měsíc bez jediné částky se uloží jen s výslovným potvrzením. */
+  confirmed_zero?: boolean
+  /** Jen ve čtení: měsíc už je uložený v některé vrstvě. */
+  stored?: boolean
+}
+
+export interface PayrollTakeoverManualEmployment {
+  id: number
+  code: string
+  relation_type: string | null
+  start_date: string | null
+  end_date: string | null
+  months: number[]
+}
+
+export interface PayrollTakeoverManualEntry {
+  year: number
+  employee_id: number
+  takeover_months: number[]
+  employments: PayrollTakeoverManualEmployment[]
+  rows: PayrollTakeoverManualRow[]
+  source_reference: string
+  locked: boolean
+  lock_reason: string | null
+}
+
 interface PayrollTakeoverImportRequest {
   source: PayrollMigrationSource
   format: 'csv' | 'xlsx'
@@ -213,4 +272,21 @@ export const payrollTakeoverWagesApi = {
       '/payroll/takeover-wages/import/apply',
       payload,
     ).then(response => response.data.import),
+  /** Úplnost a shoda převzatých vrstev roku. */
+  check: (year: number) =>
+    api.get<{ check: TakeoverCheck }>(`/payroll/takeover-wages/${year}/check`)
+      .then(response => response.data.check),
+  manualForm: (year: number, employeeId: number) =>
+    api.get<{ entry: PayrollTakeoverManualEntry }>(
+      `/payroll/takeover-wages/${year}/manual/${employeeId}`,
+    ).then(response => response.data.entry),
+  manualSave: (
+    year: number,
+    employeeId: number,
+    payload: { rows: PayrollTakeoverManualRow[]; source_reference: string },
+  ) =>
+    api.put<{ entry: PayrollTakeoverManualEntry }>(
+      `/payroll/takeover-wages/${year}/manual/${employeeId}`,
+      payload,
+    ).then(response => response.data.entry),
 }

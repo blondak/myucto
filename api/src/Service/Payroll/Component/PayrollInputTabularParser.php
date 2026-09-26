@@ -30,7 +30,12 @@ final class PayrollInputTabularParser
      *   errors:list<array{row_number:int,error_code:string,field_name:?string,error_message:string}>
      * }
      */
-    public function parse(string $format, string $content, ?array $required = null): array
+    /**
+     * @param bool $decimals Přijmout v XLSX desetinná čísla (částky v korunách).
+     *        Výchozí import mzdových vstupů bere jen celé haléře a desetinné
+     *        číslo odmítá — tam je chybou řádu, ne korunami.
+     */
+    public function parse(string $format, string $content, ?array $required = null, bool $decimals = false): array
     {
         if (strlen($content) > self::MAX_BYTES) {
             throw new \InvalidArgumentException('Importní soubor překračuje bezpečný limit 5 MB.');
@@ -41,7 +46,7 @@ final class PayrollInputTabularParser
         }
         return match ($format) {
             'csv' => $this->parseCsv($content, $required),
-            'xlsx' => $this->parseXlsx($content, $required),
+            'xlsx' => $this->parseXlsx($content, $required, $decimals),
             default => throw new \InvalidArgumentException('Formát musí být csv nebo xlsx.'),
         };
     }
@@ -129,7 +134,7 @@ final class PayrollInputTabularParser
      *   errors:list<array{row_number:int,error_code:string,field_name:?string,error_message:string}>
      * }
      */
-    private function parseXlsx(string $content, array $required): array
+    private function parseXlsx(string $content, array $required, bool $decimals = false): array
     {
         if (!str_starts_with($content, "PK\x03\x04")) {
             throw new \InvalidArgumentException('XLSX nemá platnou signaturu OOXML archivu.');
@@ -184,6 +189,7 @@ final class PayrollInputTabularParser
                     for ($column = 1; $column <= $highestColumnIndex; ++$column) {
                         $value = trim($this->cellValue(
                             $sheet->getCell([$column, $rowNumber]),
+                            $decimals,
                         ));
                         $values[] = $value;
                         $hasValue = $hasValue || $value !== '';
@@ -273,7 +279,7 @@ final class PayrollInputTabularParser
         }
     }
 
-    private function cellValue(\PhpOffice\PhpSpreadsheet\Cell\Cell $cell): string
+    private function cellValue(\PhpOffice\PhpSpreadsheet\Cell\Cell $cell, bool $decimals = false): string
     {
         if ($cell->getDataType() === DataType::TYPE_FORMULA) {
             throw new \InvalidArgumentException(
@@ -289,6 +295,13 @@ final class PayrollInputTabularParser
         }
         if (is_bool($value)) {
             return $value ? '1' : '0';
+        }
+        if ($decimals && is_float($value) && is_finite($value)) {
+            // Koruny s haléři; celé číslo bez desetinné části, ať projde i do
+            // sloupců, které čekají celý počet (dny).
+            $formatted = sprintf('%.2F', $value);
+
+            return str_ends_with($formatted, '.00') ? substr($formatted, 0, -3) : $formatted;
         }
         throw new \InvalidArgumentException(
             'XLSX obsahuje nepodporovanou číselnou hodnotu; částky zadejte jako celé haléře.'

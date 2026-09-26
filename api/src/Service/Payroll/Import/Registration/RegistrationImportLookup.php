@@ -99,6 +99,30 @@ final class RegistrationImportLookup
         return null;
     }
 
+    /**
+     * Zaměstnanci podle jména a označení pracovního vztahu — párovací dvojice
+     * lidských sloupců importu převzatých mezd. Jméno se porovnává bez ohledu
+     * na velikost písmen a okrajové mezery.
+     *
+     * @return list<int>
+     */
+    public function employeesByNameAndEmploymentCode(int $supplierId, string $fullName, string $employmentCode): array
+    {
+        return $this->ids(
+            'SELECT DISTINCT employee.id
+               FROM payroll_employees employee
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = employee.supplier_id
+                AND employment.employee_id = employee.id
+                AND employment.is_legacy_projection = 0
+              WHERE employee.supplier_id = ?
+                AND LOWER(TRIM(employee.full_name)) = LOWER(?)
+                AND employment.code = ?
+              ORDER BY employee.id',
+            [$supplierId, trim($fullName), $employmentCode],
+        );
+    }
+
     public function employeeName(int $supplierId, int $employeeId): ?string
     {
         $statement = $this->db->pdo()->prepare(
