@@ -224,7 +224,7 @@ final class RoutePermissionMap
         // na kartu, smí vidět, že agendy existují); citlivější agendy uvnitř si
         // PayrollEmploymentAgendaSummaryAction filtruje po jedné vlastním právem.
         ['GET', '#^/api/payroll/employments/[0-9]+/agenda-summary$#', 'payroll', AccessLevel::READ],
-        ['*', '#^/api/payroll/employments/[0-9]+/(terms|transitions/[a-z_]+|checklist/[a-z0-9_]+)$#', 'payroll.employment.write', AccessLevel::WRITE],
+        ['*', '#^/api/payroll/employments/[0-9]+/(terms|transitions/[a-z_]+|checklist/[a-z0-9_]+|start-confirmation)$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Odložený příjem (JMHZ scénář 8): čtení jako karta vztahu, zápis jako
         // podmínky vztahu.
         ['GET', '#^/api/payroll/employments/[0-9]+/deferred-income$#', 'payroll', AccessLevel::READ],
