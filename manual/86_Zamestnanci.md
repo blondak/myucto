@@ -145,9 +145,14 @@ Při registraci pracovního vztahu proto aplikace použije verzi účinnou k dat
 nástupu, nikoli dnešní nebo poslední zadanou hodnotu. Prázdné nepovinné pole lze
 doplnit později; test registrace pak přesně řekne, který údaj ještě chybí.
 
-Výplatní účet musí mít název, období účinnosti a rozdělení výplaty. Před
-zařazením do platební dávky jej samostatně ověř tlačítkem **Ověřit účet** a
-uveď druh podkladu i datum ověření. Máš-li ve formuláři neuloženou změnu účtu,
+Výplatní účet musí mít název, období účinnosti a rozdělení výplaty; podíly
+účtů a hotovosti se zadávají v procentech a dohromady dávají 100 %. Přepnutí
+způsobu výplaty na **Na účet** samo vynuluje podíl hotovosti a přepne pravidlo
+„zbytek čisté mzdy" z hotovosti na účet. Nový účet jde v pravidle vybrat hned,
+ještě před uložením, a zaškrtnutím **Účet mám ověřený** se při uložení karty
+zapíše i jeho ověření s druhem podkladu a datem. Účet, pravidlo i ověření se
+tak uloží jedním tlačítkem. Už uložený účet se ověřuje tlačítkem **Ověřit účet**
+s druhem podkladu a datem ověření. Máš-li ve formuláři neuloženou změnu účtu,
 ověření je zablokované: nejdříve kartu ulož, aby se nikdy neověřila předchozí
 uložená hodnota pod nově zobrazenými údaji. Každá pozdější změna čísla účtu,
 účinnosti nebo aktivního stavu ověření automaticky zneplatní.
