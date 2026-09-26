@@ -24219,7 +24219,8 @@
       "probable_source": {
         "terms": "zadaný v podmínkách vztahu",
         "achieved_wage": "z mzdy dosažené od nástupu (§ 355 odst. 2 ZP)",
-        "agreed_monthly_gross": "ze sjednané měsíční mzdy (§ 355 odst. 2 ZP)"
+        "agreed_monthly_gross": "ze sjednané měsíční mzdy (§ 355 odst. 2 ZP)",
+        "minimum_wage": "spodní mez, minimální mzda (§ 357 odst. 1 ZP) — vyšší zadejte v podmínkách vztahu"
       },
       "blockers": {
         "run_missing": "Za některý měsíc rozhodného období není mzdový běh; u nově nastoupivšího se průměr stanovuje jako pravděpodobný výdělek (§ 355 ZP)",

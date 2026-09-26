@@ -163,7 +163,7 @@ export interface AverageEarningCandidate {
   ready: boolean
   blockers: string[]
   source_kind: 'actual' | 'probable' | null
-  probable_source: 'terms' | 'achieved_wage' | 'agreed_monthly_gross' | null
+  probable_source: 'terms' | 'achieved_wage' | 'agreed_monthly_gross' | 'minimum_wage' | null
   probable_hourly_minor: number | null
   probable_rationale: string | null
   gross_earnings_minor: number | null

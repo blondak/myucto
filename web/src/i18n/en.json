@@ -24219,7 +24219,8 @@
       "probable_source": {
         "terms": "set in the employment terms",
         "achieved_wage": "from wages achieved since joining (§ 355(2) of the Labour Code)",
-        "agreed_monthly_gross": "from the agreed monthly wage (§ 355(2) of the Labour Code)"
+        "agreed_monthly_gross": "from the agreed monthly wage (§ 355(2) of the Labour Code)",
+        "minimum_wage": "lower limit, the minimum wage (§ 357(1) of the Labour Code) — enter a higher one in the employment terms"
       },
       "blockers": {
         "run_missing": "One month of the decisive period has no payroll run; for a new starter the average is set as probable earnings (§ 355 of the Labour Code)",
