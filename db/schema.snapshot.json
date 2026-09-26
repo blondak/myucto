@@ -910,7 +910,8 @@
         "1924_payroll_external_identifier_origin.sql",
         "1925_payroll_small_lifecycle_deadlines.sql",
         "1926_payroll_standby_rate.sql",
-        "1927_payroll_wage_statements.sql"
+        "1927_payroll_wage_statements.sql",
+        "1930_payroll_employment_start_estimated.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -9730,6 +9731,7 @@
                 "relation_type": "enum('employment','small_scale_employment','dpp','dpc','partner_dependent','statutory_body') NOT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "start_date": "date NULL DEFAULT NULL",
+                "start_estimated": "tinyint(1) NOT NULL DEFAULT 0",
                 "status": "enum('planned','preregistered','active','suspended','ended','archived','no_show') NOT NULL DEFAULT 'planned'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
