@@ -328,3 +328,22 @@ nezapíše nic.
 > nutné vypořádat mimo aplikaci. O nastavení sjednané zásady požádejte
 > provozovatele. Příplatky za přesčas, noční práci a víkend fungují bez tohoto
 > nastavení, protože pro ně platí zákonná sazba a zákonný výchozí režim.
+
+### 77.9.4 Rozsah dohod o provedení práce a o pracovní činnosti
+
+Kontrola mzdového běhu poměřuje odpracované hodiny dohod se zákonným rozsahem:
+
+- **DPP (§ 75)** — nejvýš **300 hodin v kalendářním roce** u téhož
+  zaměstnavatele, sčítají se všechny DPP téže osoby.
+- **DPČ (§ 76 odst. 2)** — v průměru nejvýš **polovina stanovené týdenní
+  pracovní doby**, tedy 20 hodin týdně. Průměr se posuzuje za dobu dohody,
+  nejdéle za 52 týdnů, u každé DPČ zvlášť. Aplikace bere posledních dvanáct
+  kalendářních měsíců včetně měsíce mzdy, u dohody uzavřené později od jejího
+  začátku, a limit krátí poměrně podle počtu dnů.
+
+Podkladem jsou odpracované hodiny ze schválené docházky, u firmy po přechodu
+v průběhu roku i hodiny převzaté z předchozího programu. Překročení se u revize
+běhu objeví jako **upozornění** se jménem, obdobím a průměrem a s odkazem na
+podmínky vztahu na kartě zaměstnance. Výpočet ani schválení nezastaví:
+odpracovanou práci je potřeba zaplatit, jen je třeba upravit rozsah práce nebo
+smluvní vztah.

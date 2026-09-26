@@ -26,6 +26,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojClaimDeadlinePolicy;
 use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 use MyInvoice\Service\Payroll\Time\PayrollAgreementAnnualHours;
+use MyInvoice\Service\Payroll\Time\PayrollAgreementWeeklyAverage;
 use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
 use PDO;
 
@@ -148,6 +149,14 @@ final class PayrollRunSnapshotBuilder
         // z předchozího programu. Varování, ne závora — a jako u přesčasů se
         // do kanonického snapshotu nepíše.
         foreach ((new PayrollAgreementAnnualHours($this->db))->validations(
+            $supplierId,
+            $employments,
+            $periodStart,
+        ) as $validation) {
+            $validations[] = $validation;
+        }
+        // Průměrný týdenní rozsah DPČ (§ 76 odst. 2 ZP), stejně mimo snapshot.
+        foreach ((new PayrollAgreementWeeklyAverage($this->db))->validations(
             $supplierId,
             $employments,
             $periodStart,
