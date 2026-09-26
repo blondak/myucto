@@ -1084,6 +1084,28 @@ describe('PayrollComponents', () => {
     wrapper.unmount()
   })
 
+  /**
+   * Odstupné jde jen do úhrnu příjmu 10286, do rozpadu mzdy nepatří. Štítek
+   * „Chybí mapování" by účetní nutil zařadit ho tam, kam nepatří.
+   */
+  it('složku mimo rozpad mzdy neoznačí jako chybějící zařazení', async () => {
+    m.componentJmhzMappings.mockResolvedValue([{
+      component_id: 5,
+      jmhz_treatment: 'included',
+      status: 'outside_breakdown',
+      mapping: null,
+    }])
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.catalog')!
+      .trigger('click')
+
+    expect(wrapper.text()).toContain('payroll.components.jmhz.status.outside_breakdown')
+    expect(wrapper.text()).not.toContain('payroll.components.jmhz.status.missing')
+    wrapper.unmount()
+  })
+
   it('keeps the payroll catalogue usable when JMHZ configuration cannot load', async () => {
     m.componentJmhzTargets.mockRejectedValue(new Error('synthetic JMHZ failure'))
     const wrapper = mount(PayrollComponents)

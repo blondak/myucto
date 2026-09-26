@@ -165,6 +165,64 @@ final class EldpMaternityExcludedPeriodTest extends TestCase
         );
     }
 
+    /**
+     * Porod a neplacené volno v témž měsíci bez příjmu: omluvný důvod (doba
+     * před porodem) stačí, měsíc je pojištěný celý (Metodická pomůcka ČSSZ
+     * k ELDP, př. 5). Dřív souběh vracel „mixed" a zastavil hlášení.
+     */
+    public function testBirthMonthWithUnpaidLeaveIsInsured(): void
+    {
+        self::assertSame(
+            EldpExcludedPeriodDeriver::MONTH_INSURED,
+            EldpExcludedPeriodDeriver::insuranceMonthStatus(
+                [
+                    ['id' => 9102, 'absence_type' => 'unpaid_leave', 'date_from' => '2026-07-01', 'date_to' => '2026-07-04'],
+                    $this->ppm('2026-07-05', '2026-12-31', '2026-07-15'),
+                ],
+                0,
+                '2026-07-01',
+                '2026-07-31',
+            ),
+        );
+    }
+
+    /** Pomůcka ČSSZ, př. 5: neplacené volno a od 7. dne pracovní neschopnost. */
+    public function testUnpaidLeaveWithSicknessIsInsured(): void
+    {
+        self::assertSame(
+            EldpExcludedPeriodDeriver::MONTH_INSURED,
+            EldpExcludedPeriodDeriver::insuranceMonthStatus(
+                [
+                    ['id' => 9103, 'absence_type' => 'unpaid_leave', 'date_from' => '2026-08-01', 'date_to' => '2026-08-06'],
+                    ['id' => 9104, 'absence_type' => 'dpn', 'date_from' => '2026-08-07', 'date_to' => '2026-08-31'],
+                ],
+                0,
+                '2026-08-01',
+                '2026-08-31',
+            ),
+        );
+    }
+
+    /**
+     * Bez omluvného důvodu: neplacené volno a náhradní volno v měsíci s nulovým
+     * příjmem zůstává nevysvětlené a volající zastaví.
+     */
+    public function testUnpaidLeaveWithCompensatoryTimeOffStaysUnexplained(): void
+    {
+        self::assertSame(
+            EldpExcludedPeriodDeriver::MONTH_UNEXPLAINED,
+            EldpExcludedPeriodDeriver::insuranceMonthStatus(
+                [
+                    ['id' => 9105, 'absence_type' => 'unpaid_leave', 'date_from' => '2026-08-01', 'date_to' => '2026-08-20'],
+                    ['id' => 9106, 'absence_type' => 'compensatory_time_off', 'date_from' => '2026-08-21', 'date_to' => '2026-08-31'],
+                ],
+                0,
+                '2026-08-01',
+                '2026-08-31',
+            ),
+        );
+    }
+
     public function testIncomeKeepsEveryMaternityMonthInsured(): void
     {
         self::assertSame(

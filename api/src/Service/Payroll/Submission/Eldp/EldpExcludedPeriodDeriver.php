@@ -138,7 +138,6 @@ final class EldpExcludedPeriodDeriver
 
     public const MONTH_INSURED = 'insured';
     public const MONTH_OUTSIDE_INSURANCE = 'outside_insurance';
-    public const MONTH_MIXED = 'mixed';
     public const MONTH_UNEXPLAINED = 'unexplained';
 
     /**
@@ -149,11 +148,19 @@ final class EldpExcludedPeriodDeriver
      * kalendářní měsíc, ve kterém nebyly dosaženy příjmy započitatelné do
      * vyměřovacího základu, nešlo-li o omluvné důvody podle § 16 odst. 4
      * věty třetí písm. a). Měsíc s příjmem je dobou pojištění vždy; měsíc bez
-     * příjmu jen tehdy, když ho vysvětlují výhradně omluvné nepřítomnosti
-     * (nemoc, ošetřovné). Výhradně nepřítomnosti bez příjmu = mimo dobu
-     * pojištění. Zákon rozhoduje o CELÉM měsíci, takže jejich souběh
-     * a nulový příjem bez jakékoli nepřítomnosti nerozhodne a volající musí
-     * zastavit.
+     * příjmu tehdy, když v něm nastal ALESPOŇ JEDEN omluvný důvod (nemoc,
+     * ošetřovné, doba před porodem, otcovská). Výhradně nepřítomnosti bez
+     * příjmu = mimo dobu pojištění. Nulový příjem bez jakékoli nepřítomnosti
+     * zákon z podkladů nerozhodne a volající musí zastavit.
+     *
+     * Souběh omluvného důvodu s neplaceným volnem (nebo jinou nepřítomností
+     * bez příjmu) v měsíci bez příjmu je měsícem POJIŠTĚNÝM: Metodická pomůcka
+     * ČSSZ pro vyplňování ELDP, příklad 5 (neplacené volno celý měsíc a od
+     * 7. dne pracovní neschopnost) — „měsíc je měsícem pojištěným", vyloučenou
+     * dobou je jen pracovní neschopnost. Pomůcka to vylučuje u zaměstnání
+     * malého rozsahu a DPP; ty ale bez příjmu v měsíci na pojištění účast
+     * nemají, takže sem vůbec nedojdou (volající rozhoduje jen o účastném
+     * vztahu). Dřív takový měsíc zastavil celé hlášení i roční ELDP.
      *
      * Peněžitá pomoc v mateřství je omluvný důvod jen do dne předcházejícího
      * porodu (tentýž odkaz § 11 odst. 2 na § 16 odst. 4 písm. a)); den porodu
@@ -163,13 +170,12 @@ final class EldpExcludedPeriodDeriver
      * je mimo dobu pojištění. Měsíc, ve kterém se porod stal, omluvné dny má,
      * a proto dobou pojištění zůstává celý: tak ho vykázal jiný mzdový systém
      * a ČSSZ přijala řádné i opravné hlášení (10356 = celý měsíc, 10357 =
-     * 10359 = dny před porodem). Porod sám tedy souběh netvoří; souběh je až
-     * s jinou nepřítomností bez příjmu.
+     * 10359 = dny před porodem). Totéž platí, když k porodu přibude v měsíci
+     * neplacené volno.
      *
      * PPM, u které se předporodní část určit nedá (chybí očekávaný den porodu
      * nebo nevyplněný den porodu), se tu počítá jako omluvná: odvození
      * vyloučených dob ji pak zastaví blokátorem, který účetní řekne, co doplnit.
-     * Tady by stejný stav vyšel jen jako obecný souběh.
      *
      * @param list<array<string,mixed>> $absences
      */
@@ -184,6 +190,7 @@ final class EldpExcludedPeriodDeriver
         }
         $incomeLess = false;
         $excused = false;
+        $other = false;
         foreach ($absences as $absence) {
             $type = is_array($absence) ? ($absence['absence_type'] ?? null) : null;
             if ($type === 'ppm') {
@@ -192,17 +199,27 @@ final class EldpExcludedPeriodDeriver
                 $incomeLess = $incomeLess || ($postBirth && !$preBirth);
                 continue;
             }
-            if (in_array($type, self::INCOME_LESS_TYPES, true)) {
+            if (array_key_exists((string) $type, self::EXCLUDED_ATTRIBUTES)) {
+                $excused = true;
+            } elseif (in_array($type, self::INCOME_LESS_TYPES, true)) {
                 $incomeLess = true;
             } else {
-                $excused = true;
+                $other = true;
             }
         }
 
+        /*
+         * `$other` jsou nepřítomnosti, které omluvným důvodem podle § 16
+         * odst. 4 písm. a) nejsou, ale bez příjmu také nejsou nebo jejich
+         * zařazení zákon neřeší (dovolená, překážky s náhradou, náhradní volno).
+         * Samy dobu pojištění nemění; vedle nepřítomnosti bez příjmu v měsíci
+         * s nulovým příjmem si ale odporují a měsíc zůstává nevysvětlený.
+         */
         return match (true) {
-            $incomeLess && $excused => self::MONTH_MIXED,
-            $incomeLess => self::MONTH_OUTSIDE_INSURANCE,
             $excused => self::MONTH_INSURED,
+            $incomeLess && $other => self::MONTH_UNEXPLAINED,
+            $incomeLess => self::MONTH_OUTSIDE_INSURANCE,
+            $other => self::MONTH_INSURED,
             default => self::MONTH_UNEXPLAINED,
         };
     }

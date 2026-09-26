@@ -674,6 +674,8 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
             'social_insurance|participation_override_unsupported|employee:42|employment:84',
             'social_insurance|prior_period_component_requires_revision|employee:42|employment:84',
             'social_insurance|social_a1_evidence_unverified|employee:42|',
+            // Podmínky vztahu tvrdí českou účast, evidence osoby cizí (DE).
+            'social_insurance|social_jurisdiction_term_conflict|employee:42|employment:84',
         ], array_map(
             static fn ($issue): string => implode('|', [
                 $issue->domain,
@@ -683,6 +685,98 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
             ]),
             $bundle->issues,
         ));
+    }
+
+    /**
+     * A1 končí 15. 6., cizí příslušnost pokračuje celý měsíc: pojistné za
+     * zbytek měsíce by se spočítalo bez dokladu. Zastaví se jen tahle osoba.
+     */
+    public function testA1ExpiringInsideTheMonthBlocksThePerson(): void
+    {
+        $snapshot = $this->foreignSnapshot('2026-06-15', null);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertContains(
+            'social_insurance|social_a1_expired|employee:42|',
+            self::issueKeys($bundle->issues),
+        );
+    }
+
+    /**
+     * Věta cizí příslušnosti končí s A1 (15. 6.), od 16. 6. navazuje česká:
+     * A1 pokrývá celou svou větu, výpočet ho neblokuje.
+     */
+    public function testA1CoveringItsJurisdictionRowPasses(): void
+    {
+        $snapshot = $this->foreignSnapshot('2026-06-15', '2026-06-15');
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNotContains(
+            'social_insurance|social_a1_expired|employee:42|',
+            self::issueKeys($bundle->issues),
+        );
+        self::assertSame([], array_filter(
+            self::issueKeys($bundle->issues),
+            static fn (string $key): bool => str_contains($key, 'social_jurisdiction_term_conflict'),
+        ));
+    }
+
+    /** Podmínky vztahu uvádějí jiný stát cizích předpisů než evidence osoby. */
+    public function testForeignLegislationCountryOnTermMustMatchPersonEvidence(): void
+    {
+        $snapshot = $this->foreignSnapshot('2026-12-31', null);
+        $snapshot['people'][0]['employments'][0]['term']['foreign_legislation_country_code'] = 'AT';
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertContains(
+            'social_insurance|social_jurisdiction_term_conflict|employee:42|employment:84',
+            self::issueKeys($bundle->issues),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function foreignSnapshot(string $a1Until, ?string $rowEnd): array
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['statutory_evidence']['social']['jurisdiction'] = [
+            'id' => 5,
+            'effective_from' => '2026-01-01',
+            'effective_to' => $rowEnd,
+            'row_version' => 1,
+            'jurisdiction' => 'foreign_regime_verified',
+            'foreign_country_code' => 'DE',
+            'jurisdiction_evidence_reference' => 'document:foreign-regime',
+            'a1_status' => 'verified',
+            'a1_certificate_reference' => 'document:a1',
+            'a1_valid_until' => $a1Until,
+        ];
+        $term = &$snapshot['people'][0]['employments'][0]['term'];
+        $term['social_insurance_participation'] = 'foreign';
+        $term['foreign_legislation_country_code'] = 'DE';
+        $term['a1_certificate_until'] = $a1Until;
+        unset($term);
+
+        return $snapshot;
+    }
+
+    /**
+     * @param list<object> $issues
+     * @return list<string>
+     */
+    private static function issueKeys(array $issues): array
+    {
+        return array_map(
+            static fn ($issue): string => implode('|', [
+                $issue->domain,
+                $issue->code,
+                $issue->personReference,
+                $issue->relationshipReference,
+            ]),
+            $issues,
+        );
     }
 
     /**

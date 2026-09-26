@@ -893,6 +893,7 @@ function jmhzBadgeClass(component: PayrollComponent): string {
   return {
     configured: 'bg-success-50 text-success-600',
     missing: 'bg-warning-50 text-warning-700',
+    outside_breakdown: 'bg-neutral-100 text-neutral-600',
     excluded: 'bg-neutral-100 text-neutral-600',
     manual_review: 'bg-warning-50 text-warning-700',
   }[jmhzState(component).status]

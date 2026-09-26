@@ -284,9 +284,19 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      * sjednaný fond 10260 z rozvrhu vztahu. Není to fond TOHOTO zaměstnance
      * (ten je 10260) — je to doba stanovená pro profesi, tedy plný úvazek
      * v daném měsíci.
+     *
+     * Výjimka je člen orgánu a společník (formulář `cinnostKS`, druhy činnosti
+     * K a N až S): pokyny MPSV k 10259 i 10260 doslova „V případě zaměstnanců
+     * s druhem činnosti K–S … se uvede nulová hodnota". Sjednaný fond 10260 už
+     * nulový byl (kalendář se u nich nepočítá), stanovený se dřív navrhoval
+     * plný. Jde o návrh: potvrzení účetní dovolí výjimečně zapsat dobu ze
+     * smlouvy o výkonu funkce.
      */
-    private function standardFundSuggestion(string $periodStart): string
+    private function standardFundSuggestion(string $periodStart, string $relationType): string
     {
+        if (!self::requiresShiftCalendar($relationType)) {
+            return '0';
+        }
         $daily = (int) (self::STATUTORY_WEEKLY_MINUTES / 5);
         $month = $this->fund->month(
             substr($periodStart, 0, 7),
@@ -390,7 +400,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'source_snapshot_json' => $sourceJson,
             'source_snapshot_sha256' => hash('sha256', $sourceJson),
             'suggestions' => [
-                'standard_fund_hours' => $this->standardFundSuggestion($periodStart),
+                'standard_fund_hours' => $this->standardFundSuggestion($periodStart, $employment['relation_type']),
                 'agreed_fund_hours' => self::minutesSuggestion($agreedMinutes),
                 'weekly_work_hours' => self::weeklyWorkMissingValue($employment['relation_type'])
                     ? self::WEEKLY_WORK_MISSING_VALUE
@@ -514,7 +524,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'source_snapshot_json' => $sourceJson,
             'source_snapshot_sha256' => hash('sha256', $sourceJson),
             'suggestions' => [
-                'standard_fund_hours' => $this->standardFundSuggestion($periodStart),
+                'standard_fund_hours' => $this->standardFundSuggestion($periodStart, $employment['relation_type']),
                 'agreed_fund_hours' => $agreedSuggestion,
                 'weekly_work_hours' => self::weeklyWorkMissingValue($employment['relation_type'])
                     ? self::WEEKLY_WORK_MISSING_VALUE

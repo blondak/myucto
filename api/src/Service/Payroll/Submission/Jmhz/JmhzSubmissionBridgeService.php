@@ -165,25 +165,13 @@ final readonly class JmhzSubmissionBridgeService
         }
         $document = $resolution->requireResolvedDocument();
         /*
-         * Nad 1500 formulářů se hlášení dělí do dílčích balíků. Test hlášení
-         * je sestaví a ověří (JmhzScenario1XmlValidator::dryRunPackages),
-         * zmrazení k odeslání ale zatím staví jen jediný artefakt a jediný
-         * pokus o odeslání. Radši to říct hned, než zmrazit podání, které by
-         * transport odeslal jen z části.
+         * Nad 1500 formulářů se hlášení dělí do dílčích balíků
+         * ({@see JmhzScenario1XmlSerializer::serializePackages()}). Všechny
+         * nesou tentýž GUID podání i datum vyplnění, proto se zmrazují naráz:
+         * jedno podání, jedna součást a jeden artefakt na balík. Každý balík
+         * se pak odesílá jako samostatné dílčí podání s vlastním protokolem.
          */
-        $formCount = $document->payload['header']['individual_form_count'] ?? 0;
-        if (is_int($formCount) && $formCount > JmhzScenario1XmlSerializer::PACKAGE_FORM_LIMIT) {
-            throw new JmhzXmlException(
-                'jmhz_submission_split_unsupported',
-                sprintf(
-                    'Hlášení má %d formulářů a musí se rozdělit do %d dílčích balíků. Test hlášení'
-                        . ' balíky sestaví a ověří; zmrazení a odeslání dílčích balíků aplikace zatím'
-                        . ' neumí, podejte je ručně přes ePortál ČSSZ.',
-                    $formCount,
-                    (int) ceil($formCount / JmhzScenario1XmlSerializer::PACKAGE_FORM_LIMIT),
-                ),
-            );
-        }
+        $split = self::formCount($document) > JmhzScenario1XmlSerializer::PACKAGE_FORM_LIMIT;
         $snapshotHash = self::snapshotHash($document);
         $runId = self::runId($document);
         $periodStart = self::periodStart($document);
@@ -219,6 +207,7 @@ final readonly class JmhzSubmissionBridgeService
             $periodStart,
             $keys,
             $lateDiscountConfirmed,
+            $split,
         ): array {
             if (!$this->submissionRepository->lockSupplier($supplierId)) {
                 throw new \DomainException(
@@ -262,16 +251,33 @@ final readonly class JmhzSubmissionBridgeService
             $this->assertNotSubmittedExternally($supplierId, $environment, $periodStart);
 
             // Odsud dál se mrazí. GUIDy vznikají právě tady a nikde jinde.
-            $result = $this->validator->dryRun(
-                $resolution,
-                JmhzSubmissionEnvelope::create(
-                    $this->guids->next(),
-                    $this->formGuids($document),
-                    $this->filledAt(),
-                    self::PRODUCT_NAME,
-                    EpoEnvelope::appVersion() ?? '0',
-                ),
+            $envelope = JmhzSubmissionEnvelope::create(
+                $this->guids->next(),
+                $this->formGuids($document),
+                $this->filledAt(),
+                self::PRODUCT_NAME,
+                EpoEnvelope::appVersion() ?? '0',
             );
+            if ($split) {
+                $frozen = $this->freezePackages(
+                    $supplierId,
+                    $environment,
+                    $preparationId,
+                    $officeId,
+                    $createdBy,
+                    $resolution,
+                    $envelope,
+                    $submission,
+                    $snapshotHash,
+                    $runId,
+                    $keys['artifact'],
+                    $lateDiscountConfirmed,
+                );
+                $this->bindDeferrals($supplierId, $environment, $resolution, $submission['id']);
+
+                return $frozen;
+            }
+            $result = $this->validator->dryRun($resolution, $envelope);
             // XSD hlídá tvar, katalog kontrol obsah. Nepropustná vada nebo
             // nepokrytá kontrola znamená, že by podání ČSSZ neprošlo — a pak
             // se nesmí založit vůbec nic; výjimka vrátí transakci zpět.
@@ -336,20 +342,7 @@ final readonly class JmhzSubmissionBridgeService
                 $validated['row_version'],
                 'ready',
             );
-            // Odložené vztahy se k řádnému hlášení váží v TÉŽE transakci jako
-            // jeho zmrazení: formulář, který hlášení vynechalo, musí mít dohledatelnou
-            // povinnost doplnit ho opravou. Bez vazby by odložení vypadalo jako
-            // vyřízené, jakmile se revize změní.
-            if ($resolution->exclusion?->purpose === JmhzFormExclusion::PURPOSE_DEFERRAL) {
-                foreach ($resolution->exclusion->deferralIds as $deferralId) {
-                    $this->deferrals->insertBinding(
-                        $supplierId,
-                        $deferralId,
-                        $environment,
-                        $submission['id'],
-                    );
-                }
-            }
+            $this->bindDeferrals($supplierId, $environment, $resolution, $submission['id']);
 
             return [
                 'submission_id' => $submission['id'],
@@ -365,6 +358,173 @@ final readonly class JmhzSubmissionBridgeService
                 'variable_symbol' => $identity['variable_symbol'],
             ];
         });
+    }
+
+    /**
+     * Odložené vztahy se k řádnému hlášení váží v TÉŽE transakci jako jeho
+     * zmrazení: formulář, který hlášení vynechalo, musí mít dohledatelnou
+     * povinnost doplnit ho opravou. Bez vazby by odložení vypadalo jako
+     * vyřízené, jakmile se revize změní.
+     */
+    private function bindDeferrals(
+        int $supplierId,
+        string $environment,
+        JmhzScenario1Resolution $resolution,
+        int $submissionId,
+    ): void {
+        if ($resolution->exclusion?->purpose !== JmhzFormExclusion::PURPOSE_DEFERRAL) {
+            return;
+        }
+        foreach ($resolution->exclusion->deferralIds as $deferralId) {
+            $this->deferrals->insertBinding($supplierId, $deferralId, $environment, $submissionId);
+        }
+    }
+
+    /**
+     * Zmrazení hlášení rozděleného do dílčích balíků.
+     *
+     * Balíky se staví z jedné obálky (tentýž GUID podání a datum vyplnění,
+     * pravidla ČSSZ pro dílčí podání), každý projde XSD i katalogem kontrol
+     * a dostane vlastní součást podání (`…:package:N`) s vlastním artefaktem.
+     * Stačí jediný nepropustný nález v kterémkoli balíku a nezmrazí se nic.
+     *
+     * @param array<string,mixed> $submission
+     * @return array{
+     *   submission_id:int,part_id:int,artifact_id:int,
+     *   status:string,row_version:int,environment:string,
+     *   source_snapshot_hash:string,artifact_sha256:string,created:bool,
+     *   submission_guid:string,variable_symbol:string,
+     *   packages:list<array{ordinal:int,part_id:int,artifact_id:int,artifact_sha256:string}>
+     * }
+     */
+    private function freezePackages(
+        int $supplierId,
+        string $environment,
+        int $preparationId,
+        ?int $officeId,
+        ?int $createdBy,
+        JmhzScenario1Resolution $resolution,
+        JmhzSubmissionEnvelope $envelope,
+        array $submission,
+        string $snapshotHash,
+        int $runId,
+        string $artifactKey,
+        bool $lateDiscountConfirmed,
+    ): array {
+        $built = $this->validator->dryRunPackages($resolution, $envelope);
+        $count = count($built['packages']);
+        foreach ($built['packages'] as $package) {
+            $controls = $this->controls->validate(
+                $package['xml'],
+                new JmhzControlContext($this->localDate(), schemaValidated: true),
+            );
+            if (!$controls->submittable()) {
+                throw new JmhzXmlException(
+                    'jmhz_submission_controls_failed',
+                    sprintf(
+                        'Dílčí balík %d z %d neprošel katalogem kontrol, podání se nezakládá: %s',
+                        $package['ordinal'],
+                        $count,
+                        self::describeControls($controls),
+                    ),
+                );
+            }
+            self::assertLateDiscountConfirmed($controls, $lateDiscountConfirmed);
+        }
+        $identity = self::frozenIdentity($built['packages'][0]['xml']);
+        $rowVersion = (int) $submission['row_version'];
+        $packages = [];
+        foreach ($built['packages'] as $package) {
+            $part = $this->submissions->addPart(
+                $supplierId,
+                (int) $submission['id'],
+                $rowVersion,
+                self::packagePartReference($preparationId, $officeId, $package['ordinal']),
+                self::AGENDA_CODE,
+                self::runReference($runId, $officeId),
+                'jmhz_preparation',
+                self::sourceEventReference($preparationId),
+                $snapshotHash,
+            );
+            $artifact = $this->submissions->storeArtifact(
+                $supplierId,
+                (int) $submission['id'],
+                $part['submission_row_version'],
+                $part['id'],
+                'outbound_xml',
+                'outbound',
+                'application/xml',
+                $package['xml'],
+                $built['schema']['package_key'],
+                JmhzControlSourceCatalog::CATALOG_KEY,
+                self::CHANNEL,
+                self::packageArtifactKey($artifactKey, $package['ordinal']),
+                $createdBy,
+            );
+            if (!hash_equals($package['sha256'], $artifact['artifact_sha256'])) {
+                throw new JmhzXmlException(
+                    'jmhz_submission_artifact_mismatch',
+                    'Otisk uloženého artefaktu neodpovídá zmrazenému XML JMHZ.',
+                );
+            }
+            $rowVersion = (int) $artifact['submission_row_version'];
+            $packages[] = [
+                'ordinal' => $package['ordinal'],
+                'part_id' => (int) $part['id'],
+                'artifact_id' => (int) $artifact['id'],
+                'artifact_sha256' => $artifact['artifact_sha256'],
+            ];
+        }
+        $validated = $this->submissions->transition($supplierId, (int) $submission['id'], $rowVersion, 'validated');
+        $ready = $this->submissions->transition(
+            $supplierId,
+            (int) $submission['id'],
+            $validated['row_version'],
+            'ready',
+        );
+
+        return [
+            'submission_id' => (int) $submission['id'],
+            'part_id' => $packages[0]['part_id'],
+            'artifact_id' => $packages[0]['artifact_id'],
+            'status' => $ready['status'],
+            'row_version' => $ready['row_version'],
+            'environment' => $environment,
+            'source_snapshot_hash' => $snapshotHash,
+            'artifact_sha256' => $packages[0]['artifact_sha256'],
+            'created' => true,
+            'submission_guid' => $identity['submission_guid'],
+            'variable_symbol' => $identity['variable_symbol'],
+            'packages' => $packages,
+        ];
+    }
+
+    public static function packagePartReference(int $preparationId, ?int $officeId, int $ordinal): string
+    {
+        if ($ordinal <= 0) {
+            throw new \InvalidArgumentException('Pořadí dílčího balíku musí být kladné.');
+        }
+
+        return self::partReference($preparationId, $officeId) . ":package:{$ordinal}";
+    }
+
+    private static function packageArtifactKey(string $artifactKey, int $ordinal): string
+    {
+        return "{$artifactKey}:package:{$ordinal}";
+    }
+
+    private static function formCount(JmhzScenario1NormalizedDocument $document): int
+    {
+        $declared = $document->payload['header']['individual_form_count'] ?? null;
+        if (is_int($declared)) {
+            return $declared;
+        }
+        $count = 0;
+        foreach ((array) ($document->payload['people'] ?? []) as $person) {
+            $count += is_array($person) ? count((array) ($person['employments'] ?? [])) : 0;
+        }
+
+        return $count;
     }
 
     /**
@@ -536,6 +696,19 @@ final readonly class JmhzSubmissionBridgeService
                 hash('sha256', $artifactKey, true),
                 $environment,
             );
+        // Rozdělené hlášení má artefakt za každý balík; podání zastupuje první.
+        $packages = $this->submissionRepository->listPackageOutboundXmlArtifacts(
+            $supplierId,
+            $environment,
+            $submission['id'],
+        );
+        if ($artifact === null && $packages !== []) {
+            $artifact = $this->submissionRepository->findArtifactByIdempotencyForUpdate(
+                $supplierId,
+                hash('sha256', self::packageArtifactKey($artifactKey, 1), true),
+                $environment,
+            );
+        }
         if ($artifact === null
             || $artifact['submission_id'] !== $submission['id']
             || $artifact['part_id'] === null
@@ -558,7 +731,7 @@ final readonly class JmhzSubmissionBridgeService
             $this->submissions->artifactBytes($supplierId, $artifact['id']),
         );
 
-        return [
+        $result = [
             'submission_id' => $submission['id'],
             'part_id' => $artifact['part_id'],
             'artifact_id' => $artifact['id'],
@@ -571,6 +744,11 @@ final readonly class JmhzSubmissionBridgeService
             'submission_guid' => $identity['submission_guid'],
             'variable_symbol' => $identity['variable_symbol'],
         ];
+        if ($packages !== []) {
+            $result['packages'] = $packages;
+        }
+
+        return $result;
     }
 
     /**

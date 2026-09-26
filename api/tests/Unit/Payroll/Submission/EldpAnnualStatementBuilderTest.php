@@ -227,6 +227,79 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         self::assertStringContainsString('<penezitaPomocMaterstvi>47</penezitaPomocMaterstvi>', $xml);
     }
 
+    /**
+     * Metodická pomůcka ČSSZ k ELDP, příklad 5: neplacené volno celý srpen
+     * a od 7. 8. pracovní neschopnost. „Srpen je měsícem pojištěným",
+     * vyloučenou dobou je jen pracovní neschopnost (25 dnů). Dřív souběh
+     * omluvného důvodu s neplaceným volnem zastavil celý roční list.
+     */
+    public function testUnpaidLeaveMonthWithSicknessIsInsuredMonth(): void
+    {
+        $revisions = $this->wholeYear(2025);
+        $revisions[7] = $this->revision(
+            2025,
+            8,
+            absences: [
+                [
+                    'id' => 9300,
+                    'absence_type' => 'unpaid_leave',
+                    'date_from' => '2025-08-01',
+                    'date_to' => '2025-08-06',
+                ],
+                [
+                    'id' => 9301,
+                    'absence_type' => 'dpn',
+                    'date_from' => '2025-08-07',
+                    'date_to' => '2025-08-31',
+                ],
+            ],
+            baseMinor: 0,
+        );
+
+        $statement = $this->build($revisions);
+
+        $sections = $statement->sections();
+        self::assertCount(1, $sections);
+        self::assertSame(365, $sections[0]['insurance_days']);
+        self::assertSame(25, $sections[0]['excluded_days']['docasNeschopnost']);
+    }
+
+    /**
+     * Pracující důchodce: roční evidenční list (znění do 31. 12. 2025) se
+     * za něj sestavuje dál. Metodická pomůcka ČSSZ k ELDP, příklad 8: po
+     * přiznání starobního důchodu zaměstnavatel „musí založit nový ELDP na
+     * období po odeslání ELDP přiloženého k žádosti o důchod". Doba pojištění
+     * při pobírání důchodu zvyšuje důchod. Měsíční hlášení JMHZ třídu ELDP
+     * u poživatele důchodu neuvádí (metodika MPSV k JMHZ), to je ale jiný
+     * režim; test hlídá, aby se oba nesjednotily.
+     */
+    public function testWorkingPensionerStillGetsAnnualStatementUnderTheOldLaw(): void
+    {
+        $revisions = array_map(function (array $revision): array {
+            $input = json_decode($revision['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+            $input['people'][0]['statutory_evidence'] = [
+                'social' => ['working_pensioner_discount' => ['status' => 'verified']],
+            ];
+            $inputJson = CanonicalJson::encode($input);
+            $result = json_decode($revision['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+            $result['source_snapshot_hash'] = hash('sha256', $inputJson);
+            $resultJson = CanonicalJson::encode($result);
+
+            return [
+                ...$revision,
+                'input_snapshot_json' => $inputJson,
+                'input_snapshot_hash' => hash('sha256', $inputJson),
+                'result_snapshot_json' => $resultJson,
+                'result_snapshot_hash' => hash('sha256', $resultJson),
+            ];
+        }, $this->wholeYear(2025));
+
+        $sections = $this->build($revisions)->sections();
+
+        self::assertCount(1, $sections);
+        self::assertSame(365, $sections[0]['insurance_days']);
+    }
+
     /** @return list<array<string,mixed>> */
     private function maternityYear(): array
     {
@@ -352,7 +425,12 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         self::assertSame(0, $sections[0]['excluded_days_total']);
     }
 
-    public function testMonthWithoutIncomeMixingSicknessAndUnpaidLeaveBlocks(): void
+    /**
+     * Neplacené volno vedle dovolené v měsíci s nulovým příjmem si odporuje
+     * (dovolená by příjem založila) a omluvný důvod podle § 16 odst. 4
+     * písm. a) v měsíci není: měsíc zůstává nevysvětlený a list se zastaví.
+     */
+    public function testMonthWithoutIncomeMixingPaidAbsenceAndUnpaidLeaveBlocks(): void
     {
         $revisions = $this->wholeYear(2025);
         $revisions[5] = $this->revision(
@@ -367,7 +445,7 @@ final class EldpAnnualStatementBuilderTest extends TestCase
                 ],
                 [
                     'id' => 9312,
-                    'absence_type' => 'dpn',
+                    'absence_type' => 'vacation',
                     'date_from' => '2025-06-16',
                     'date_to' => '2025-06-30',
                 ],

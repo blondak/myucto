@@ -133,6 +133,17 @@ final readonly class PayrollIsdsSubmissionService
         $agenda = $this->agendas->require((string) $obligation['agenda_code']);
         $this->assertWithinScope($agenda, $expectedAgendaCodes);
 
+        // Hlášení rozdělené do dílčích balíků jde jen přes VREP: každý balík
+        // je samostatné dílčí podání s vlastním protokolem a fronta datové
+        // schránky by odeslala jen jeden z nich.
+        if ($this->submissions->listPackageOutboundXmlArtifacts($supplierId, $environment, $submissionId) !== []) {
+            throw new SubmissionChannelException(
+                'payroll_isds_split_submission_unsupported',
+                'Hlášení nad 1500 formulářů je rozdělené do dílčích balíků; odešlete ho'
+                    . ' přes VREP tlačítkem Odeslat, balíky odejdou postupně.',
+                422,
+            );
+        }
         $artifactId = $this->submissions->findOutboundXmlArtifactId(
             $supplierId,
             $environment,

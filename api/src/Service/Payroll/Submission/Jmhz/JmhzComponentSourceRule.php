@@ -31,6 +31,47 @@ final class JmhzComponentSourceRule
     ];
 
     /**
+     * Zdaněná plnění, která NEMAJÍ charakter mzdy, a proto do rozpadu mzdy
+     * v měsíčním hlášení nepatří.
+     *
+     * Pokyny MPSV k 10328 (Mzda za práci zúčtovaná): „Nezahrnují se náhrady
+     * mzdy …, odstupné, cestovní náhrady … a obecně mzdová plnění, která
+     * nemají charakter mzdy." Do náhrad mzdy (10337) odstupné také nepatří.
+     * Do zúčtovaného příjmu celkem (10286) a do základu daně ale jde, protože
+     * je to zdanitelný příjem § 6 ZDP; to zajišťuje samotné `jmhz_treatment =
+     * included`, ne zařazení. Údaje o odstupném (10531, 10378) nese až
+     * odhláška REGZEC A2.
+     *
+     * Dřív chybějící zařazení hlásilo `component_jmhz_mapping_missing` a každé
+     * skončení s odstupným zablokovalo hlášení za poslední měsíc, přičemž
+     * katalog cílů správný atribut ani nenabízel.
+     */
+    private const TAXED_KINDS_OUTSIDE_WAGE_BREAKDOWN = [
+        'severance',
+    ];
+
+    /**
+     * Složka se do JMHZ zahrnuje (10286), ale zařazení do rozpadu mzdy nemá
+     * a mít nemusí. Čte ji i obrazovka zařazení, aby u ní neukazovala
+     * „Chybí mapování".
+     */
+    public static function belongsOutsideWageBreakdown(
+        mixed $treatment,
+        mixed $taxTreatment,
+        mixed $componentKind,
+    ): bool {
+        if ($treatment !== 'included') {
+            return false;
+        }
+        if ($taxTreatment === 'exempt' && in_array($componentKind, self::EXEMPT_KINDS_WITHOUT_DETAIL, true)) {
+            return true;
+        }
+
+        return $taxTreatment === 'included'
+            && in_array($componentKind, self::TAXED_KINDS_OUTSIDE_WAGE_BREAKDOWN, true);
+    }
+
+    /**
      * Kód nálezu, nebo `null`, když je složka v pořádku.
      *
      * `$mapping` je snímek zařazení složky; `null` znamená, že složka zařazení
@@ -61,8 +102,7 @@ final class JmhzComponentSourceRule
              * jen s druhy benefitů, pro které detailní atribut neexistuje.
              */
             if ($mapping === null
-                && $taxTreatment === 'exempt'
-                && in_array($componentKind, self::EXEMPT_KINDS_WITHOUT_DETAIL, true)
+                && self::belongsOutsideWageBreakdown($treatment, $taxTreatment, $componentKind)
             ) {
                 return null;
             }

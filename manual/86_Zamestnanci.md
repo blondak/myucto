@@ -252,7 +252,12 @@ skutečnosti, ze kterých vychází zákonný výpočet:
   [§ 86.8.4](#8684-prohlaseni-k-dani-ma-jedine-misto);
 - **daňová rezidence** — rezident, nerezident (se zemí), nebo neověřeno;
 - **příslušnost k sociálnímu pojištění** včetně formuláře A1 u zahraničního
-  režimu;
+  režimu. Podle ní se počítá pojistné. A1 musí platit po celou dobu zahraniční
+  příslušnosti v měsíci; končí-li dřív, mzda dotčené osoby se zastaví, dokud
+  nedoplníte platnost nového A1, nebo nezapíšete od dalšího dne českou
+  příslušnost. Účast „zahraniční", stát cizích předpisů a platnost A1
+  v podmínkách vztahu jí musí odpovídat, jinak výpočet ohlásí rozpor;
+
 - **sleva pro pracujícího poplatníka v důchodu**;
 - **příslušnost ke zdravotnímu pojištění** a zdravotní pojišťovna;
 - **měsíční evidence zdravotního minima** — kdo za daný měsíc doplácí do
@@ -499,8 +504,12 @@ pracovního poměru (typicky odměna) potvrďte na kartě skončeného vztahu v 
 *Příjem po skončení zaměstnání (1)*. Mzdový běh pak příjem přijme, pojistné
 vypočte za měsíc zúčtování a měsíční hlášení JMHZ ho vykáže samostatným
 formulářem Odložený příjem s ELDP za tento měsíc (0 dnů, kód s „P“ na druhé
-pozici). Bez potvrzení běh příjem po skončení odmítne a z kontroly vás pošle
-přímo sem. Ostatní druhy odloženého příjmu (například doplatek za dřívější
+pozici). Záloha na daň zůstává zálohou a hlášení uvádí podepsané prohlášení,
+měsíční slevu na poplatníka ani daňové zvýhodnění na děti ale za měsíc, kdy už
+u vás nepracuje, aplikace neodečte: za kalendářní měsíc je smí poskytnout jen
+jeden plátce a poplatník je mezitím mohl uplatnit u nového zaměstnavatele.
+Nárok si uplatní v ročním zúčtování nebo v přiznání. Bez potvrzení běh příjem
+po skončení odmítne a z kontroly vás pošle přímo sem. Ostatní druhy odloženého příjmu (například doplatek za dřívější
 měsíce trvajícího vztahu) a odložený příjem z dohod podejte opravným hlášením
 na ePortálu ČSSZ.
 
@@ -794,9 +803,10 @@ Vyšší násobek podle kolektivní smlouvy nebo vnitřního předpisu zadejte d
 než zákonný násobek aplikace nepřijme.
 
 **Založit odstupné do posledního běhu** založí schválený vstup složky
-**Odstupné** za měsíc skončení. Složka nemá výchozí zařazení do měsíčního
-hlášení JMHZ; dokud ho v **Mzdové složky** nedoplníte, sekce na to upozorní
-a hlášení za poslední měsíc se nesestaví.
+**Odstupné** za měsíc skončení. V měsíčním hlášení JMHZ je odstupné jen
+v zúčtovaném příjmu celkem a v základu daně; do mzdy za práci ani do náhrad
+mzdy nepatří (pokyny MPSV k vyplnění hlášení), takže složka zařazení do rozpadu
+mzdy nepotřebuje. V **Mzdové složky** má u JMHZ štítek **Jen do úhrnu příjmu**.
 
 U výpovědi nebo dohody pro dlouhodobou zdravotní nezpůsobilost z pracovního
 úrazu nebo nemoci z povolání náleží jednorázová náhrada dvanáctinásobku

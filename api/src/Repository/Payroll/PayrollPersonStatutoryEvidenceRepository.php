@@ -1279,6 +1279,13 @@ final class PayrollPersonStatutoryEvidenceRepository
             $blockers[] = 'social_jurisdiction_evidence_missing';
         } elseif (($jurisdiction['jurisdiction'] ?? null) === 'unverified') {
             $blockers[] = 'social_jurisdiction_evidence_unverified';
+        } elseif (($jurisdiction['jurisdiction'] ?? null) === 'foreign_regime_verified'
+            && ($jurisdiction['a1_status'] ?? null) === 'verified'
+        ) {
+            $monthEnd = (new \DateTimeImmutable($effectiveOn))->modify('last day of this month')->format('Y-m-d');
+            if (!\MyInvoice\Service\Payroll\SocialInsurance\SocialA1Coverage::coversMonth($jurisdiction, $monthEnd)) {
+                $blockers[] = 'social_a1_expired';
+            }
         }
         $discount = $snapshot['social']['working_pensioner_discount'] ?? null;
         if (!is_array($discount)) {

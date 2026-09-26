@@ -6,7 +6,6 @@ namespace MyInvoice\Service\Payroll\Termination;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAverageEarningRepository;
-use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentTerminationRepository;
@@ -50,7 +49,6 @@ final class PayrollEmploymentTerminationService
         private readonly AverageEarningsMonthlyConverter $converter,
         private readonly PayrollComponentRepository $components,
         private readonly PayrollInputRepository $inputs,
-        private readonly PayrollComponentJmhzMappingRepository $jmhzMappings,
         private readonly PayrollDeferredIncomeRepository $deferredIncomes,
     ) {}
 
@@ -868,21 +866,10 @@ final class PayrollEmploymentTerminationService
 
             return $result;
         }
+        // Odstupné ani náhrada § 271ca (obě druhu severance) do rozpadu mzdy
+        // v JMHZ nepatří a zařazení nepotřebují
+        // (JmhzComponentSourceRule::TAXED_KINDS_OUTSIDE_WAGE_BREAKDOWN).
         $result['amount_minor'] = PayrollSeverancePolicy::amount($multiple, $average['monthly_gross']);
-        if ($result['work_injury_payer'] !== 'insurer') {
-            // Složky ODSTUPNE a NAHRADA_271CA nemají výchozí zařazení v JMHZ
-            // (je to úsudek účetní, viz PayrollComponentJmhzMappingDefaults).
-            // Bez zařazení se měsíční hlášení nesestaví — řekne se to tady,
-            // dřív než se na to přijde až u hlášení.
-            $code = $result['kind'] === 'severance' ? self::SEVERANCE_COMPONENT : self::WORK_INJURY_COMPONENT;
-            $period = substr((string) $employment['end_date'], 0, 7) . '-01';
-            $componentId = $this->terminations->componentId($supplierId, $code, $period);
-            if ($componentId === null || $this->jmhzMappings->find($supplierId, $componentId) === null) {
-                $result['issues'][] = self::issue('severance_jmhz_mapping_missing', 'warning', [
-                    'component_code' => $code,
-                ]);
-            }
-        }
         $existing = $this->terminations->liveInput(
             $supplierId,
             $employmentId,

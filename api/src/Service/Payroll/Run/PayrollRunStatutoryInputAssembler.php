@@ -30,6 +30,7 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidenceEvidence;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialA1Coverage;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialDiscountEvidence;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerRateCategory;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialEmploymentKind;
@@ -400,6 +401,26 @@ final class PayrollRunStatutoryInputAssembler
                 'social_a1_evidence_conflict',
                 $personReference,
             );
+        }
+        if ($jurisdiction === SocialJurisdictionEvidence::ForeignRegimeVerified
+            && ($jurisdictionRow['a1_status'] ?? null) === 'verified'
+            && !SocialA1Coverage::coversMonth($jurisdictionRow, $periodEnd)
+        ) {
+            /*
+             * Cizí právní předpisy platí jen po dobu platnosti A1 (čl. 19
+             * nařízení 987/2009). Skončí-li A1 v měsíci a věta příslušnosti
+             * pokračuje, dny po jeho konci by se nulové pojistné spočítalo bez
+             * dokladu. Dřív tenhle stav shodil celý snímek běhu výjimkou
+             * validátoru evidence; teď zastaví jen dotčenou osobu.
+             */
+            $this->issue(
+                'social_insurance',
+                'social_a1_expired',
+                $personReference,
+            );
+        }
+        if ($jurisdiction !== null && $jurisdictionRow !== null) {
+            $this->assertTermLegislationMatches($jurisdiction, $jurisdictionRow, $employments, $personReference);
         }
 
         $discountRow = $this->object(
@@ -1413,6 +1434,23 @@ final class PayrollRunStatutoryInputAssembler
             $taxEvidence['child_claims'] ?? null,
             $personReference,
         );
+        if (!self::employedInPeriod($employments, $periodStart)) {
+            /*
+             * Příjem zúčtovaný až po skončení všech vztahů u plátce (odložený
+             * příjem, JMHZ scénář 8): záloha zůstává zálohou, protože prohlášení
+             * bylo učiněno na zdaňovací období (§ 38h odst. 4 ZDP) a hlášení
+             * ho dál uvádí (10419). Měsíční slevu § 35ba a daňové zvýhodnění
+             * ale za měsíc, ve kterém už u plátce nepracuje, neuplatní: slevu
+             * za kalendářní měsíc smí poskytnout jen jeden plátce (§ 38k
+             * odst. 3 a odst. 4 písm. b) ZDP) a prohlášení u dosavadního
+             * zaměstnavatele skončením pracovního poměru pro další měsíce
+             * končí. Dřív se sleva poskytla znovu a u nového zaměstnavatele
+             * vznikla dvakrát. Nárok si poplatník uplatní v ročním zúčtování
+             * nebo v přiznání.
+             */
+            $creditClaims = [];
+            $childClaims = [];
+        }
         if ($annual === null || $relationships === []) {
             return null;
         }
@@ -2571,6 +2609,76 @@ final class PayrollRunStatutoryInputAssembler
      *
      * @param array<string,mixed> $snapshot
      */
+    /**
+     * Cizí právní předpisy se evidují na dvou místech: v zákonné evidenci
+     * osoby (příslušnost a A1, podle ní se počítá pojistné) a v podmínkách
+     * vztahu (účast „zahraniční", stát cizích předpisů a platnost A1, z nich
+     * vychází REGZEC A1 a odvod na spoření). Výpočet bere jako jediný zdroj
+     * evidenci osoby; podmínky vztahu jí nesmí odporovat, jinak by registrace
+     * tvrdila jiný stát nebo režim, než podle jakého se odvedlo pojistné.
+     *
+     * @param array<string,mixed> $row
+     * @param list<mixed> $employments
+     */
+    private function assertTermLegislationMatches(
+        SocialJurisdictionEvidence $jurisdiction,
+        array $row,
+        array $employments,
+        string $personReference,
+    ): void {
+        if ($jurisdiction === SocialJurisdictionEvidence::Unverified) {
+            return;
+        }
+        $foreign = $jurisdiction === SocialJurisdictionEvidence::ForeignRegimeVerified;
+        $country = $foreign ? ($row['foreign_country_code'] ?? null) : null;
+        $a1Until = $foreign && ($row['a1_status'] ?? null) === 'verified' ? ($row['a1_valid_until'] ?? null) : null;
+        foreach ($employments as $snapshot) {
+            $term = is_array($snapshot) ? ($snapshot['term'] ?? null) : null;
+            $employment = is_array($snapshot) ? ($snapshot['employment'] ?? null) : null;
+            if (!is_array($term)) {
+                continue;
+            }
+            $termForeign = ($term['social_insurance_participation'] ?? null) === 'foreign';
+            $termCountry = $term['foreign_legislation_country_code'] ?? null;
+            $termA1 = $term['a1_certificate_until'] ?? null;
+            $conflict = $termForeign !== $foreign
+                || ($termForeign && is_string($termCountry) && $termCountry !== $country)
+                || (!$foreign && is_string($termA1) && $termA1 !== '')
+                || ($foreign && is_string($termA1) && $termA1 !== '' && $termA1 !== $a1Until);
+            if ($conflict) {
+                $employmentId = is_array($employment) ? $this->positiveInt($employment['id'] ?? null) : null;
+                $this->issue(
+                    'social_insurance',
+                    'social_jurisdiction_term_conflict',
+                    $personReference,
+                    $employmentId === null ? null : "employment:{$employmentId}",
+                );
+            }
+        }
+    }
+
+    /**
+     * Trvá u plátce v měsíci aspoň jeden vztah osoby? Skončený vztah má
+     * `end_date` před začátkem měsíce; vztah bez data skončení trvá.
+     *
+     * @param list<mixed> $employments
+     */
+    private static function employedInPeriod(array $employments, string $periodStart): bool
+    {
+        foreach ($employments as $snapshot) {
+            $employment = is_array($snapshot) ? ($snapshot['employment'] ?? null) : null;
+            if (!is_array($employment)) {
+                return true;
+            }
+            $end = $employment['end_date'] ?? null;
+            if (!is_string($end) || $end >= $periodStart) {
+                return true;
+            }
+        }
+
+        return $employments === [];
+    }
+
     private static function deferredIncomeType(array $snapshot): ?string
     {
         $deferred = $snapshot['deferred_income'] ?? null;

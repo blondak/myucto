@@ -274,7 +274,10 @@ revizi schváleného měsíce; po znovuotevření je nutné vytvořit nové potv
 Evidenční dny aplikace u pracovního poměru sníží o dny mateřské, rodičovské
 a otcovské, protože po tu dobu zaměstnanec není v evidenčním stavu zaměstnanců
 (tak to vykládá MPSV i ČSÚ). Měsíční fondy pracovní doby zůstávají plné
-a nemoc ani neplacené volno evidenční dny nesnižují.
+a nemoc ani neplacené volno evidenční dny nesnižují. U jednatele, společníka
+a člena orgánu (druh činnosti K a N až S) chtějí pokyny MPSV stanovený
+i sjednaný fond nulový; aplikace proto oba navrhne jako 0. Hodnotu ze smlouvy
+o výkonu funkce, která pracovní dobu sjednává, můžeš přepsat.
 
 Součástí potvrzení jsou také dvě povinná rozhodnutí **Ano/Ne**: zda v měsíci
 nastaly neodpracované hodiny (IN07) a zda nastaly překážky v práci (IN08).
@@ -313,7 +316,11 @@ takže běžný měsíc žádné pole navíc nemá.
 
 Projde i **náhradní volno za přesčas**. Za dobu jeho čerpání mzda nepřísluší
 (§ 114 odst. 1 zákoníku práce), takže jeho hodiny vstupují jen do celkového
-počtu neodpracovaných hodin, ne mezi hodiny s náhradou mzdy. Vyloučenou dobou
+počtu neodpracovaných hodin, ne mezi hodiny s náhradou mzdy. Podle pokynů MPSV
+k vyplnění hlášení se v měsíci čerpání hodiny volna zároveň odečtou od
+vykázaného přesčasu (nejvýše do nuly) i od odpracovaných hodin; v aplikaci
+zůstávají skutečně odpracované hodiny beze změny, převod udělá až hlášení.
+Vyloučenou dobou
 evidenčního listu není, celé dny náhradního volna se ale vykazují jako
 vyloučené dny pro nemocenské dávky (omluvená nepřítomnost bez náhrady příjmu).
 Platí to pro měsíce, jejichž pracovní doba se potvrdí po zavedení této
@@ -328,7 +335,11 @@ volna i rodičovské dovolené uvede jako vyloučené dny pro nemocenské dávky
 kdy začala nebo skončila, pro její dny uvnitř měsíce. Roční evidenční list
 takový měsíc započítá stejně, tedy s nulou dnů pojištění. Celý měsíc nemoci nebo
 ošetřovného je naopak omluvný důvod, takže zůstává dobou pojištění s plným
-počtem dnů a nulovým základem.
+počtem dnů a nulovým základem. Stačí i jediný omluvný důvod v měsíci: když
+k neplacenému volnu přibude nemoc, ošetřovné nebo doba před porodem, je celý
+měsíc dobou pojištění a vyloučenou dobou jsou jen dny toho omluvného důvodu
+(Metodická pomůcka ČSSZ k vyplňování ELDP, příklad 5). Neplacené volno se
+dál uvede jako vyloučené dny pro nemocenské dávky.
 
 Do mzdových vstupů se za takový měsíc nic nezadává, ani nulová mzda. Mzdový
 běh vztah spočítá i bez jediné mzdové složky, pokud v měsíci leží schválená

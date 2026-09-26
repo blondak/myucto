@@ -3427,6 +3427,7 @@
         "status": {
           "configured": "Namapováno",
           "missing": "Chybí mapování",
+          "outside_breakdown": "Jen do úhrnu příjmu (bez rozpadu mzdy)",
           "excluded": "Vyloučeno",
           "manual_review": "Ruční posouzení"
         },
@@ -4207,7 +4208,7 @@
         "unworked_question": "Byly v měsíci neodpracované hodiny?",
         "obstacles_question": "Byly v měsíci překážky v práci?",
         "hours_unit": "hodin",
-        "standard_fund_hint": "Kolik hodin má měsíc na plný úvazek: 8 hodin za každý pracovní den včetně svátků v jinak pracovní den (pokyny MPSV). Předvyplněno ze zákonné týdenní doby (40 h) — přepište, pokud u vás platí kratší.",
+        "standard_fund_hint": "Kolik hodin má měsíc na plný úvazek: 8 hodin za každý pracovní den včetně svátků v jinak pracovní den (pokyny MPSV). Předvyplněno ze zákonné týdenní doby (40 h) — přepište, pokud u vás platí kratší. U jednatele, společníka a člena orgánu (druh činnosti K a N až S) je podle pokynů MPSV 0.",
         "agreed_fund_hint": "Kolik hodin má za měsíc odpracovat tenhle člověk podle smlouvy.",
         "holiday_hours_hint": "Svátky v jinak pracovní dny: {hours} h. Nezadávejte je do neodpracovaných hodin níže — aplikace je při schválení přičte k celkovým i placeným neodpracovaným hodinám sama (pokyny MPSV k 10275 a 10276)."
       },
@@ -4220,7 +4221,7 @@
         "title": "Hromadné schválení docházky",
         "hint": "Schválí se {count} vztahů se souhrnem JMHZ. Dohodnutý fond, týdenní doba a odpracované hodiny se berou z návrhu pro každý vztah zvlášť.",
         "confirm": "Schválit ({count})",
-        "standard_fund_hint": "Předvyplněno ze zákonné týdenní doby včetně svátků v jinak pracovní dny — pro všechny schvalované vztahy stejné. Přepište, pokud u vás platí kratší. Svátky přičte aplikace k neodpracovaným hodinám sama.",
+        "standard_fund_hint": "Předvyplněno ze zákonné týdenní doby včetně svátků v jinak pracovní dny — pro všechny schvalované vztahy stejné. Přepište, pokud u vás platí kratší. Svátky přičte aplikace k neodpracovaným hodinám sama. Jednatel, společník a člen orgánu dostanou podle pokynů MPSV fond 0.",
         "blocked_no_candidates": "Ve výběru není žádný vztah, který by šel schválit hromadně.",
         "blocked_no_standard_fund": "Vyplňte stanovený měsíční fond — bez něj by souhrn JMHZ nebyl úplný.",
         "excluded": {
@@ -5385,6 +5386,7 @@
           "tax_residence_evidence_unverified": "daňová rezidence je vedená jako neověřená",
           "social_jurisdiction_evidence_missing": "příslušnost k sociálnímu pojištění",
           "social_jurisdiction_evidence_unverified": "příslušnost k sociálnímu pojištění je vedená jako neověřená",
+          "social_a1_expired": "doklad A1 končí dřív než cizí příslušnost v tomto měsíci — doplňte platnost nového A1, nebo od dalšího dne zapište českou příslušnost",
           "working_pensioner_discount_evidence_missing": "sleva pro pracujícího poplatníka v důchodu",
           "working_pensioner_discount_evidence_unverified": "sleva pro pracujícího poplatníka v důchodu je vedená jako neověřená",
           "health_coverage_evidence_missing": "příslušnost ke zdravotnímu pojištění",

@@ -517,27 +517,6 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         self::assertSame(31, $section['section18_days']['vyplaceniDavek']);
     }
 
-    /** Porod a jiná nepřítomnost bez příjmu v témž měsíci zůstávají souběhem. */
-    public function testBirthMonthMixedWithUnpaidLeaveStops(): void
-    {
-        $source = $this->withZeroAssessmentBase(
-            $this->maternitySource('2026-07-05', '2026-12-31', '2026-07-20', '2026-07-15', 144_000),
-        );
-        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
-        self::assertIsArray($input);
-        $input['people'][0]['employments'][0]['absences'][] = [
-            'id' => 905,
-            'absence_type' => 'unpaid_leave',
-            'date_from' => '2026-07-01',
-            'date_to' => '2026-07-04',
-        ];
-        $source = $this->withInput($source, $input);
-
-        $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('§ 11 odst. 2');
-        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
-    }
-
     /** Bez dne porodu nerozhodne měsíc, který sahá na očekávaný den porodu. */
     public function testMaternityMonthReachingExpectedBirthNeedsTheBirthDate(): void
     {
@@ -792,29 +771,6 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         self::assertSame(0, $section['assessment_base_czk']);
         self::assertSame(31, $section['excluded_days_total']);
         self::assertSame(31, $section['excluded_days']['docasNeschopnost']);
-    }
-
-    public function testMonthWithoutIncomeMixingExcusedAndIncomeLessAbsenceStops(): void
-    {
-        $source = $this->withZeroAssessmentBase($this->absenceSource(
-            'unpaid_leave',
-            '2026-07-01',
-            '2026-07-15',
-            ['unpaid_leave_millihours' => 88_000],
-        ));
-        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
-        self::assertIsArray($input);
-        $input['people'][0]['employments'][0]['absences'][] = [
-            'id' => 911,
-            'absence_type' => 'dpn',
-            'date_from' => '2026-07-16',
-            'date_to' => '2026-07-31',
-        ];
-        $source = $this->withZeroAssessmentBase($this->withInput($source, $input));
-
-        $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('§ 11 odst. 2');
-        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
     }
 
     /**
