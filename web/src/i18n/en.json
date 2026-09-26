@@ -11014,6 +11014,7 @@
       }
     },
     "server_codes": {
+      "nempri_decision_number_missing": "The decision number is missing (for an e-sick-note or eOČR, the number from the doctor's decision). ČSSZ uses it to match the notice to the decision. Fill it in on the benefit case.",
       "nempri_relationship_code_invalid": "The relationship to the cared-for person is not a ČSSZ code-list value for this benefit type. Select it from the list on the benefit case.",
       "nempri_relationship_code_not_in_kind": "The relationship to the cared-for person is only filled in for care benefit and long-term care benefit.",
       "nempri_paternity_reason_invalid": "The paternity benefit reason must be OTC, ZEM or PEC. Select it from the list on the benefit case.",
