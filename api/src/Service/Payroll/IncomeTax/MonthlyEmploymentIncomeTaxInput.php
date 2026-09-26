@@ -16,6 +16,9 @@ final readonly class MonthlyEmploymentIncomeTaxInput
      * @param list<TaxCreditClaim> $creditClaims
      * @param list<TaxChildClaim> $childClaims
      * @param list<ExternalEmployerTaxCertificate> $externalCertificates
+     * @param bool $monthlyCreditsWithheld měsíc bez trvajícího vztahu u plátce
+     *   (odložený příjem po skončení): prohlášení platí, ale měsíční slevu
+     *   ani zvýhodnění plátce neposkytne (§ 38k odst. 3 a 4 písm. b) ZDP)
      */
     public function __construct(
         public string $calculationDate,
@@ -28,6 +31,7 @@ final readonly class MonthlyEmploymentIncomeTaxInput
         public ?AnnualTaxAccumulatorInput $annualAccumulator = null,
         public array $externalCertificates = [],
         ?string $payerReference = null,
+        public bool $monthlyCreditsWithheld = false,
     ) {
         EvidenceInterval::date($calculationDate);
         if (trim($employeeReference) === '') {

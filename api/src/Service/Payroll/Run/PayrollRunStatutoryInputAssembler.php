@@ -1434,7 +1434,8 @@ final class PayrollRunStatutoryInputAssembler
             $taxEvidence['child_claims'] ?? null,
             $personReference,
         );
-        if (!self::employedInPeriod($employments, $periodStart)) {
+        $monthlyCreditsWithheld = !self::employedInPeriod($employments, $periodStart);
+        if ($monthlyCreditsWithheld) {
             /*
              * Příjem zúčtovaný až po skončení všech vztahů u plátce (odložený
              * příjem, JMHZ scénář 8): záloha zůstává zálohou, protože prohlášení
@@ -1446,7 +1447,8 @@ final class PayrollRunStatutoryInputAssembler
              * zaměstnavatele skončením pracovního poměru pro další měsíce
              * končí. Dřív se sleva poskytla znovu a u nového zaměstnavatele
              * vznikla dvakrát. Nárok si poplatník uplatní v ročním zúčtování
-             * nebo v přiznání.
+             * nebo v přiznání. Slevu na poplatníka odvozenou z podepsaného
+             * prohlášení (TaxpayerCreditEntitlement) vypíná příznak vstupu.
              */
             $creditClaims = [];
             $childClaims = [];
@@ -1484,6 +1486,7 @@ final class PayrollRunStatutoryInputAssembler
                 $annual,
                 [],
                 "supplier:{$supplierId}",
+                $monthlyCreditsWithheld,
             );
         } catch (\InvalidArgumentException|\UnexpectedValueException) {
             $this->issue(
