@@ -188,7 +188,7 @@ final class PayrollTakeoverEmploymentWriter
         );
         $existing->execute([$supplierId, $employmentId, $componentId]);
         if ((int) $existing->fetchColumn() > 0) {
-            return $counts;
+            return $counts + $this->repairOwnRecurringWage($supplierId, $employmentId, $componentId, $wages, $userId, $policy);
         }
         $written = 0;
         foreach ($wages as $index => $wage) {
@@ -221,6 +221,83 @@ final class PayrollTakeoverEmploymentWriter
             $written++;
         }
         return $written > 0 ? $counts + ['recurring_wage' => $written] : $counts;
+    }
+
+    /**
+     * Opakovaný převod srovná předpis, který zapsal dřívější převod téhož zdroje, se
+     * sjednanou mzdou zdroje. Předpis zadaný nebo upravený jinak (jiná poznámka) se
+     * nemění. Padne-li do jednoho předpisu víc verzí mzdy zdroje (zvýšení v průběhu
+     * roku), předpis se ukončí den před změnou a další verze dostanou vlastní předpis,
+     * stejně jako při prvním převodu. Začátek předpisu se nemění nikdy.
+     *
+     * @param list<array{from:string,amount:float,prorated:bool}> $wages
+     * @return array<string,int>
+     */
+    private function repairOwnRecurringWage(int $supplierId, int $employmentId, int $componentId, array $wages, ?int $userId, PayrollTakeoverPolicy $policy): array
+    {
+        $note = $policy->note('sjednaná měsíční mzda ze zpracovaných mezd.');
+        $statement = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_recurring_components WHERE supplier_id = ? AND employment_id = ? AND component_id = ? ORDER BY valid_from'
+        );
+        $statement->execute([$supplierId, $employmentId, $componentId]);
+        $rows = $statement->fetchAll(\PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            if ((string) $row['note'] !== $note) {
+                return [];
+            }
+        }
+        $corrected = 0;
+        foreach ($rows as $row) {
+            $from = (string) $row['valid_from'];
+            $to = $row['valid_to'] === null ? null : (string) $row['valid_to'];
+            // Verze mzdy zdroje, které do předpisu padnou, oříznuté na jeho platnost.
+            $segments = [];
+            foreach ($wages as $index => $wage) {
+                $next = $wages[$index + 1]['from'] ?? null;
+                $wageTo = $next === null ? null : (new \DateTimeImmutable($next))->modify('-1 day')->format('Y-m-d');
+                $minor = (int) round($wage['amount'] * 100);
+                if ($minor <= 0 || ($to !== null && $wage['from'] > $to) || ($wageTo !== null && $wageTo < $from)) {
+                    continue;
+                }
+                $segmentTo = $wageTo === null ? $to : ($to === null ? $wageTo : min($to, $wageTo));
+                $segments[] = ['from' => max($from, $wage['from']), 'to' => $segmentTo, 'amount' => $minor];
+            }
+            if ($segments === [] || $segments[0]['from'] !== $from) {
+                continue;
+            }
+            $first = array_shift($segments);
+            if ($first['amount'] !== (int) $row['amount_minor'] || $first['to'] !== $to) {
+                $this->recurring->update($supplierId, (int) $row['id'], $this->recurringData($row, $employmentId, $componentId, $from, $first['to'], $first['amount'], $note), (int) $row['row_version'], $userId);
+                $corrected++;
+            }
+            foreach ($segments as $segment) {
+                $this->recurring->create($supplierId, $this->recurringData($row, $employmentId, $componentId, $segment['from'], $segment['to'], $segment['amount'], $note), $userId);
+                $corrected++;
+            }
+        }
+
+        return $corrected > 0 ? ['recurring_wage_corrected' => $corrected] : [];
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function recurringData(array $row, int $employmentId, int $componentId, string $from, ?string $to, int $amountMinor, string $note): array
+    {
+        return $this->recurringValidator->validate([
+            'employment_id' => $employmentId,
+            'component_id' => $componentId,
+            'calculation_kind' => (string) $row['calculation_kind'],
+            'amount_minor' => $amountMinor,
+            'rate_basis_points' => $row['rate_basis_points'] === null ? null : (int) $row['rate_basis_points'],
+            'valid_from' => $from,
+            'valid_to' => $to,
+            'allocation_rule' => (string) $row['allocation_rule'],
+            'maximum_amount_minor' => $row['maximum_amount_minor'] === null ? null : (int) $row['maximum_amount_minor'],
+            'note' => $note,
+            'is_active' => (int) $row['is_active'] === 1,
+        ]);
     }
 
     /**

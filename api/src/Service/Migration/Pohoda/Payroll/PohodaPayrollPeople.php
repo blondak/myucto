@@ -268,6 +268,13 @@ final class PohodaPayrollPeople
                 continue;
             }
             if (in_array($code, self::WAGE_CODES, true)) {
+                // `Hodnota1` je měsíční sazba, ze které PAMICA základní mzdu krátí na
+                // odpracovanou část; `KcZaklM` nese až krácenou částku.
+                $rate = PohodaXml::num($item, 'Hodnota1');
+                if ($rate > 0 && isset($relationMonths[$payslip['relation']][$payslip['month']])) {
+                    $current = (float) ($relationMonths[$payslip['relation']][$payslip['month']]['rate'] ?? 0);
+                    $relationMonths[$payslip['relation']][$payslip['month']]['rate'] = max($current, $rate);
+                }
                 continue;
             }
             $name = PohodaXml::text($catalog, 'Nazev');
@@ -688,9 +695,12 @@ final class PohodaPayrollPeople
     }
 
     /**
-     * Verze sjednané měsíční mzdy podle historie v PAMICA. Bere se `KcZaklM` jen z měsíce
-     * odpracovaného celý (jinak je částka krácená); vztah bez takového měsíce dostane
-     * nejvyšší hodnotu roku, aby mzda nechyběla úplně.
+     * Verze sjednané měsíční mzdy podle historie v PAMICA. Přednost má měsíční sazba
+     * složky základní mzdy (`M01`/`M09`, `Hodnota1`): je to sjednaná mzda, kterou PAMICA
+     * teprve krátí na odpracovanou část. `KcZaklM` je až krácená částka a nekrácená
+     * nebývá ani v měsíci, kdy `DnyOdpra` = `DnyPrac` (placené svátky, lékař v hodinách).
+     * Bez sazby se bere `KcZaklM` jen z měsíce odpracovaného celý; vztah bez takového
+     * měsíce dostane nejvyšší hodnotu roku, aby mzda nechyběla úplně.
      *
      * @param array<int,array<string,float|bool>> $months
      * @return list<array{from:string,amount:float,prorated:bool}>
@@ -705,6 +715,24 @@ final class PohodaPayrollPeople
         // byla poprvé odpracovaná celá. Jinak by měsíce před ní zůstaly bez sjednané mzdy.
         $first = sprintf('%04d-%02d-01', $year, (int) array_key_first($months));
         $runs = [];
+        $last = null;
+        foreach ($months as $month => $data) {
+            $rate = (float) ($data['rate'] ?? 0);
+            if ($rate <= 0) {
+                continue;
+            }
+            if ($last === null || abs($last - $rate) > 0.5) {
+                $runs[] = [
+                    'from' => $runs === [] ? $first : sprintf('%04d-%02d-01', $year, $month),
+                    'amount' => $rate,
+                    'prorated' => false,
+                ];
+                $last = $rate;
+            }
+        }
+        if ($runs !== []) {
+            return $runs;
+        }
         $last = null;
         foreach ($months as $month => $data) {
             $wage = (float) $data['wage'];
