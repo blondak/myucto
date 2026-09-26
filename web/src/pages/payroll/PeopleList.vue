@@ -1066,6 +1066,8 @@ const FOCUSABLE_PANELS = [
   'jmhz_profile',
   'employment_terms',
   'employment_checklist',
+  // Registrace vztahu u ČSSZ (profil A1, dohlášení A3) — na kartě vztahu.
+  'registration',
   'statutory_evidence',
   'dependants',
   'registration_identity',
@@ -1110,7 +1112,7 @@ async function focusPanel(panel: string) {
   delete query.panel
   delete query.field
   await router.replace({ query })
-  if (['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist'].includes(panel)) {
+  if (['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration'].includes(panel)) {
     await nextTick()
     const cards = employmentCards.value
     const target = Number.isInteger(employmentId) && employmentId > 0

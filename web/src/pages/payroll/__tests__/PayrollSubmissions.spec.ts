@@ -507,9 +507,11 @@ describe('PayrollSubmissions', () => {
     // (OZUSPOJ) — je to podmínka nároku, ne součást měsíčního hlášení.
     // „Další povinnosti" vede explicitní NEMPRI/HZUPN/ELDP/úrazovou matici,
     // zatímco „Ostatní" zůstává záchytná skupina pro neznámé kódy.
+    // Čtrnáctá je Dohlášení údajů (REGZEC A3) za zaměstnance přihlášené přes ONZ.
     const tabs = wrapper.findAll('[role="tab"]')
-    expect(tabs).toHaveLength(13)
+    expect(tabs).toHaveLength(14)
     expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.statutory'))).toBe(true)
+    expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.registration_completion'))).toBe(true)
     await clickTab(wrapper, 'regzel')
     await flushPromises()
     expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(1)

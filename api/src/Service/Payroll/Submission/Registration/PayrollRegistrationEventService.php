@@ -15,6 +15,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDeltaPlanner;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -131,11 +132,34 @@ final readonly class PayrollRegistrationEventService
             ));
         }
         $effectiveOn = $this->date($input['effective_on'] ?? null, 'effective_on');
+        $completion = $interaction === 'change'
+            && array_key_exists('completion', $input)
+            ? PayrollRegistrationProfileCompletion::requireMode($input['completion'])
+            : null;
         $context = $this->events->employmentSourceAt(
             $supplierId,
             $employmentId,
             $effectiveOn,
         );
+        /*
+         * Dohlášení jde i za vztah, který už skončil (MPSV, aktualita
+         * 28. 4. 2026). Do 10009 jde den odeslání, údaje ale platí ke dni
+         * skončení — k tomu dni se čtou podmínky vztahu i identifikátory.
+         */
+        $sourceOn = $effectiveOn;
+        $endDate = is_array($context) ? ($context['end_date'] ?? null) : null;
+        if ($completion !== null
+            && is_string($endDate)
+            && $endDate !== ''
+            && $effectiveOn > $endDate
+        ) {
+            $sourceOn = $endDate;
+            $context = $this->events->employmentSourceAt(
+                $supplierId,
+                $employmentId,
+                $sourceOn,
+            );
+        }
         // Výjimka zůstává: chybějící vztah je chybějící entita v rozsahu
         // firmy, ne nevyplněný údaj formuláře.
         if ($context === null) {
@@ -160,7 +184,7 @@ final readonly class PayrollRegistrationEventService
             $employeeId,
             $employmentId,
             $environment,
-            $effectiveOn,
+            $sourceOn,
             $interaction === 'termination',
         );
         $sourceReference = $this->sourceReference(
@@ -177,16 +201,25 @@ final readonly class PayrollRegistrationEventService
             $identity['employment_external_identifier'] ?? null,
             'employment_external_identifier',
         );
-        $data = $this->data(
-            $supplierId,
-            $environment,
-            $employmentId,
-            $interaction,
-            $effectiveOn,
-            $context,
-            $input,
-            (string) ($employmentExternal['value'] ?? ''),
-        );
+        $data = $completion === null
+            ? $this->data(
+                $supplierId,
+                $environment,
+                $employmentId,
+                $interaction,
+                $effectiveOn,
+                $context,
+                $input,
+                (string) ($employmentExternal['value'] ?? ''),
+            )
+            : $this->profileCompletion(
+                $supplierId,
+                $environment,
+                $employmentId,
+                $context,
+                $completion,
+                $sourceOn,
+            ) + $this->relationIdentity($context);
         $notificationTriggerOn = $this->notificationTriggerOn(
             $interaction,
             $effectiveOn,
@@ -969,6 +1002,93 @@ final readonly class PayrollRegistrationEventService
         return $data;
     }
 
+    /**
+     * Dohlášení údajů (A3) z ověřeného profilu registrace A1.
+     *
+     * Delta se neskládá z toho, co pošle formulář, ale z profilu uloženého
+     * na serveru: jde o prvotní naplnění registru a ČSSZ z něj bere poslední
+     * stav údajů. Profil se proto staví přísně — neúplný nepustíme dál.
+     *
+     * @param array<string,mixed> $context
+     * @return array<string,mixed>
+     */
+    private function profileCompletion(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        array $context,
+        string $mode,
+        string $sourceOn,
+    ): array {
+        $employeeId = (int) ($context['employee_id'] ?? 0);
+        $startOn = $context['actual_start_date'] ?? $context['start_date'] ?? null;
+        if (!is_string($startOn) || $startOn === '') {
+            throw new PayrollRegistrationXmlException(
+                'registration_start_date_missing',
+                'Datum nástupu u pracovního vztahu chybí, takže nejde najít '
+                    . 'profil registrace, ze kterého se dohlášení skládá. '
+                    . PayrollRegistrationFieldVocabulary::describe('contract_start_on'),
+            );
+        }
+        $source = $this->identities->sensitiveSnapshotSourceAt(
+            $supplierId,
+            $employeeId,
+            $employmentId,
+            $environment,
+            $startOn,
+        );
+        $profile = $source['regzec_a1'] ?? null;
+        if (!is_array($profile)) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a3_completion_profile_missing',
+                $this->actionName(3) . ' s dohlášením údajů se skládá z profilu '
+                    . 'registrace (A1), který u tohoto pracovního vztahu chybí. '
+                    . 'Otevřete u vztahu registraci, vyplňte profil A1 a uložte '
+                    . 'ho; potom dohlášení zopakujte.',
+            );
+        }
+        try {
+            $a1 = (new PayrollRegistrationA1SnapshotBuilder())->build(
+                $profile,
+                $source['identity'],
+                [
+                    'supplier_id' => $supplierId,
+                    'employee_id' => $employeeId,
+                    'employment_id' => $employmentId,
+                    'effective_on' => $startOn,
+                ],
+                ($source['employer_protected_labor_market'] ?? false) === true,
+            );
+        } catch (PayrollRegistrationIdentitySnapshotException $exception) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a3_completion_profile_incomplete',
+                'Profil registrace (A1) není úplný, takže z něj dohlášení '
+                    . 'nejde sestavit. Doplňte ho v registraci u pracovního '
+                    . 'vztahu (tlačítko Kontrola ukáže všechno, co chybí). '
+                    . $exception->getMessage(),
+            );
+        }
+        $current = $this->identities->sensitiveIdentityAt(
+            $supplierId,
+            $employeeId,
+            $sourceOn,
+        );
+        $endDate = $context['end_date'] ?? null;
+
+        return [
+            'completion' => $mode,
+            'delta' => PayrollRegistrationProfileCompletion::delta(
+                $a1,
+                $current['identity'],
+                $current['identifiers'],
+                $mode,
+                is_string($endDate) && $endDate !== '' && $endDate <= $sourceOn
+                    ? $endDate
+                    : null,
+            ),
+        ];
+    }
+
     /** @param array<string,mixed> $input @return array<string,mixed> */
     private function delta(array $input, bool $correction): array
     {
@@ -988,7 +1108,11 @@ final readonly class PayrollRegistrationEventService
         }
         $allowed = $correction
             ? ['title_prefix', 'tax_residency', 'relationship_detail_code', 'highest_education_code']
-            : ['title_prefix', 'contact_address', 'tax_residency', 'relationship_detail_code', 'health_insurance_code'];
+            : [
+                'title_prefix', 'contact_address', 'tax_residency',
+                'relationship_detail_code', 'health_insurance_code',
+                'highest_education_code', 'employment',
+            ];
         $this->onlyKeys(
             $raw,
             $allowed,
@@ -1020,6 +1144,7 @@ final readonly class PayrollRegistrationEventService
                 ),
                 'tax_residency' => $this->taxResidency($value),
                 'contact_address' => $this->contactAddress($value),
+                'employment' => $this->employmentChange($value),
                 // Interní kontrakt: klíče už prošly onlyKeys() výš, sem se
                 // uživatelský vstup nedostane. Zůstává technická — akce ji
                 // nechytá, protože jde o chybu programu.
@@ -1448,6 +1573,53 @@ final readonly class PayrollRegistrationEventService
                 'tax_residency.changed_on',
             ),
         ];
+    }
+
+    /**
+     * Pracovní údaje změny A3 (postavení, režim, místo výkonu, profese…).
+     * Hodnoty se kontrolují stejně přísně jako v profilu A1.
+     *
+     * @return array<string,string|bool>
+     */
+    private function employmentChange(mixed $value): array
+    {
+        $raw = $this->object($value, 'employment');
+        $fields = PayrollRegistrationChangeDeltaPlanner::EMPLOYMENT_FIELDS;
+        $this->onlyKeys(
+            $raw,
+            array_keys($fields),
+            'employment.',
+            'v podání „' . $this->actionName(3) . '“',
+        );
+        if ($raw === []) {
+            throw new \InvalidArgumentException($this->note(
+                'employment',
+                'je prázdná. Vyberte aspoň jeden pracovní údaj, který se má '
+                    . 'ohlásit.',
+            ));
+        }
+        $result = [];
+        foreach ($raw as $key => $item) {
+            $path = "employment.{$key}";
+            $result[$key] = match ($fields[$key]) {
+                'bool' => $this->bool($item, $path),
+                'date' => $this->date($item, $path),
+                default => $this->requiredText($item, $path, 100),
+            };
+        }
+        if (isset($result['employment_status_code'])) {
+            $code = (string) $result['employment_status_code'];
+            if (!PayrollRegistrationEmploymentStatusCodebook::isKnown($code)) {
+                throw new \InvalidArgumentException($this->say(
+                    'employment.employment_status_code',
+                    'musí být čtyřmístný kód z číselníku Klasifikace postavení '
+                        . "v zaměstnání (NKPZ), teď je „{$code}“.",
+                ));
+            }
+        }
+        ksort($result, SORT_STRING);
+
+        return $result;
     }
 
     /** @return array<string,string> */

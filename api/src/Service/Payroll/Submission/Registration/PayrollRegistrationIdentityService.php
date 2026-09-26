@@ -183,7 +183,11 @@ final readonly class PayrollRegistrationIdentityService
             $draft['protected_labor_market'] =
                 $this->repository->protectedLaborMarket($supplierId);
 
-            return ['profile' => $profile, 'draft' => $draft];
+            return [
+                'profile' => $profile,
+                'draft' => $draft,
+                'warnings' => $this->registrationWarnings($supplierId, $employmentId),
+            ];
         });
     }
 
@@ -579,7 +583,11 @@ final readonly class PayrollRegistrationIdentityService
                 $this->repository->protectedLaborMarket($supplierId),
             );
 
-            return ['complete' => $problems === [], 'problems' => $problems];
+            return [
+                'complete' => $problems === [],
+                'problems' => $problems,
+                'warnings' => $this->registrationWarnings($supplierId, $employmentId),
+            ];
         });
     }
 
@@ -938,9 +946,9 @@ final readonly class PayrollRegistrationIdentityService
         string $fieldPath,
     ): void {
         $receiptId = $identifier['source_receipt_id'];
-        if ($identifier['source_kind'] !== 'trusted_receipt'
-            || $receiptId === null
-            || !$this->repository->hasAcceptedRegistrationIdentifierReceipt(
+        $fromReceipt = $identifier['source_kind'] === 'trusted_receipt'
+            && $receiptId !== null
+            && $this->repository->hasAcceptedRegistrationIdentifierReceipt(
                 $supplierId,
                 $environment,
                 $receiptId,
@@ -949,8 +957,19 @@ final readonly class PayrollRegistrationIdentityService
                 $identifierType,
                 $identifier['value'],
                 PayrollEmployeeRegistrationDeadlinePolicy::REGISTRATION_RULESET_ID,
-            )
-        ) {
+            );
+        // Zaměstnanec přihlášený přes ONZ: číslo zapsané ručně, ale ČSSZ ho
+        // potvrdila přijetím dohlášení údajů (A3), které ho neslo.
+        $fromChange = !$fromReceipt
+            && $this->repository->hasAcceptedChangeConfirmingIdentifier(
+                $supplierId,
+                $environment,
+                $employmentId,
+                $identifierType,
+                $identifier['id'],
+                $identifier['row_version'],
+            );
+        if (!$fromReceipt && !$fromChange) {
             throw new PayrollRegistrationIdentitySnapshotException(
                 $validationCode,
                 self::fieldNote(
@@ -958,7 +977,10 @@ final readonly class PayrollRegistrationIdentityService
                     'pochází z ručního zápisu. Změnu REGZEC A2 přijme ČSSZ '
                     . 'jen s číslem převzatým z protokolu o přijetí, který '
                     . 'patří téhle firmě a témuž prostředí (ostré, nebo '
-                    . 'testovací). Načtěte protokol a číslo doplňte z něj.',
+                    . 'testovací). Načtěte protokol a číslo doplňte z něj. '
+                    . 'U zaměstnance přihlášeného dřív přes ONZ nejdřív '
+                    . 'podejte dohlášení údajů (REGZEC A3) — jeho přijetím '
+                    . 'ČSSZ číslo potvrdí.',
                 ),
             );
         }
@@ -2279,6 +2301,44 @@ final readonly class PayrollRegistrationIdentityService
             'source_kind' => (string) $stored['source_kind'],
             'row_version' => (int) $stored['row_version'],
         ];
+    }
+
+    /**
+     * Varování před podáním přihlášky, která podání NEBLOKUJÍ.
+     *
+     * Překryv se stejným druhem činnosti a ZMR ČSSZ odmítne (603/604), jenže
+     * aplikace neví, jestli předchozí vztah už ČSSZ neodhlásila jinudy —
+     * proto varování s návodem, ne zákaz.
+     *
+     * @return list<array{code:string,field:string,message:string,employment_id:int}>
+     */
+    public function registrationWarnings(int $supplierId, int $employmentId): array
+    {
+        $warnings = [];
+        foreach ($this->repository->overlappingSameActivityEmployments(
+            $supplierId,
+            $employmentId,
+        ) as $other) {
+            $period = $other['end_on'] === null
+                ? 'od ' . $other['start_on']
+                : $other['start_on'] . ' až ' . $other['end_on'];
+            $warnings[] = [
+                'code' => 'registration_overlap_same_activity',
+                'field' => 'employment.activity_code',
+                'employment_id' => $other['employment_id'],
+                'message' => 'Zaměstnanec má u firmy další pracovní vztah „'
+                    . $other['code'] . '" (' . $period . ') se stejným druhem '
+                    . 'činnosti „' . $other['activity_code'] . '" a stejným '
+                    . 'příznakem zaměstnání malého rozsahu, který se s tímto '
+                    . 'časově překrývá. ČSSZ takovou přihlášku odmítne '
+                    . '(chyba 603 nebo 604). U navazujícího vztahu nejdřív '
+                    . 'odhlaste předchozí (REGZEC A2), jinak u tohoto vztahu '
+                    . 'zvolte jiný kód druhu činnosti (např. 2 místo 1) na '
+                    . 'kartě pracovního vztahu → sjednané podmínky.',
+            ];
+        }
+
+        return $warnings;
     }
 
     /**

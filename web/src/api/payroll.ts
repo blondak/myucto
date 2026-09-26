@@ -4164,6 +4164,7 @@ export interface PayrollRegistrationA1Profile extends PayrollRegistrationA1Profi
 export interface PayrollRegistrationA1Check {
   complete: boolean
   problems: PayrollRegistrationA1Problem[]
+  warnings?: PayrollRegistrationWarning[]
 }
 
 /** Chybějící údaj, který se z kmenových dat odvodit nedá. */
@@ -4221,6 +4222,7 @@ export interface PayrollRegistrationA1Draft {
 export interface PayrollRegistrationA1View {
   profile: PayrollRegistrationA1Profile | null
   draft: PayrollRegistrationA1Draft
+  warnings?: PayrollRegistrationWarning[]
 }
 
 export type PayrollRegistrationEventInteraction =
@@ -4296,11 +4298,59 @@ export interface PayrollRegistrationPensionPeriodInput {
   to: string
 }
 
+/** Vztah přihlášený dřív (ONZ), u kterého chybí nebo čeká dohlášení A3. */
+export interface PayrollRegistrationCompletionCandidate {
+  employment_id: number
+  employee_id: number
+  employee_name: string
+  code: string
+  relation_type: string
+  status: string
+  start_date: string | null
+  end_date: string | null
+  /** Stav profilu A1, ze kterého se dohlášení skládá; `null` = profil chybí. */
+  profile_status: 'draft' | 'verified' | null
+  profile_effective_on: string | null
+  completion_event_id: number | null
+  completion_effective_on: string | null
+  completion_submission_id: number | null
+  completion_submission_status: string | null
+}
+
+export interface PayrollRegistrationCompletionCandidates {
+  items: PayrollRegistrationCompletionCandidate[]
+  today: string
+}
+
+export interface PayrollRegistrationCompletionResult {
+  effective_on: string
+  completion: 'full' | 'minimal'
+  results: Array<{
+    employment_id: number
+    status: 'prepared' | 'failed'
+    event_id: number | null
+    submission_id: number | null
+    created: boolean
+    code: string | null
+    message: string | null
+  }>
+}
+
+/** Varování před podáním, které podání neblokuje (překryv 603/604). */
+export interface PayrollRegistrationWarning {
+  code: string
+  field: string
+  message: string
+  employment_id: number
+}
+
 export interface PayrollRegistrationEventInput {
   environment: PayrollJmhzTransportEnvironment
   interaction: PayrollRegistrationEventInteraction
   effective_on: string
   source_reference?: string
+  /** A3 dohlášení údajů z profilu A1: celý profil, nebo jen co ONZ nevedla. */
+  completion?: 'full' | 'minimal'
   ended_by_death?: boolean
   unemployment?: {
     mode?: 'provided' | 'not_provided_2' | 'not_provided_3'
@@ -7527,6 +7577,21 @@ export const payrollApi = {
     payload: PayrollRegistrationEventInput,
   ) => api.post<PayrollRegistrationEvent>(
     `/payroll/submissions/registration/${employmentId}/events`,
+    payload,
+  ).then(response => response.data),
+  registrationCompletionCandidates: (
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.get<PayrollRegistrationCompletionCandidates>(
+    '/payroll/submissions/registration-completion',
+    { params: { environment } },
+  ).then(response => response.data),
+  completeRegistrationProfiles: (payload: {
+    environment: PayrollJmhzTransportEnvironment
+    employment_ids: number[]
+    completion: 'full' | 'minimal'
+    effective_on?: string
+  }) => api.post<PayrollRegistrationCompletionResult>(
+    '/payroll/submissions/registration-completion',
     payload,
   ).then(response => response.data),
   sendEmploymentRegistrationTransport: (

@@ -27,12 +27,14 @@ import PayrollStatutoryObligationsPanel from './PayrollStatutoryObligationsPanel
 import PayrollSigningCertificatePanel from './PayrollSigningCertificatePanel.vue'
 import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
 import PayrollSubmissionQueuePanel from './PayrollSubmissionQueuePanel.vue'
+import PayrollRegistrationCompletionPanel from './PayrollRegistrationCompletionPanel.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 type SubmissionTab =
-  'monthly' | 'queue' | 'transport' | 'regzel' | 'jmhz' | 'discount_intents' | 'sickness' | 'eldp'
+  'monthly' | 'queue' | 'transport' | 'regzel' | 'registration_completion' | 'jmhz'
+  | 'discount_intents' | 'sickness' | 'eldp'
   | 'health' | 'statutory' | 'other' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
@@ -66,8 +68,11 @@ const activeTab = ref<SubmissionTab>('monthly')
 // tenhle měsíc udělat, fronta odpovídá na navazující „a co z toho mám
 // připravené a ještě to neodešlo" — napříč agendami i zaměstnanci. Bez ní
 // se ta odpověď skládala z pěti různých obrazovek.
+// Dohlášení údajů (A3) stojí hned za registrací zaměstnavatele: obojí je
+// registrační agenda ČSSZ mimo měsíční hlášení.
 const tabs: SubmissionTab[] = [
-  'monthly', 'queue', 'transport', 'regzel', 'jmhz', 'discount_intents', 'sickness', 'eldp',
+  'monthly', 'queue', 'transport', 'regzel', 'registration_completion', 'jmhz',
+  'discount_intents', 'sickness', 'eldp',
   'health', 'statutory', 'other', 'inbox', 'certificate',
 ]
 /*
@@ -370,6 +375,11 @@ onMounted(loadInboxBadge)
 
     <PayrollTransportHistoryPanel
       v-else-if="activeTab === 'transport'"
+      v-model:environment="environment"
+    />
+
+    <PayrollRegistrationCompletionPanel
+      v-else-if="activeTab === 'registration_completion'"
       v-model:environment="environment"
     />
 

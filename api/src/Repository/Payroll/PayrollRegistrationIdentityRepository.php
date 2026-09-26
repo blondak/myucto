@@ -239,6 +239,73 @@ final class PayrollRegistrationIdentityRepository
     }
 
     /**
+     * Jiné pracovní vztahy téže osoby u téže firmy se stejným druhem činnosti
+     * a stejným příznakem zaměstnání malého rozsahu, které se časově
+     * překrývají s tímto. ČSSZ takovou přihlášku odmítá (chyby 603 a 604);
+     * navazující vztahy se od 1. 4. 2026 hlásí každý zvlášť.
+     *
+     * @return list<array{employment_id:int,code:string,start_on:string,end_on:?string,activity_code:string}>
+     */
+    public function overlappingSameActivityEmployments(
+        int $supplierId,
+        int $employmentId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'WITH own AS (
+                SELECT employment.id, employment.employee_id,
+                       COALESCE(employment.actual_start_date, employment.start_date)
+                           AS start_on,
+                       employment.end_date,
+                       employment.relation_type = "small_scale_employment"
+                           AS small_scale,
+                       (SELECT terms.activity_code
+                          FROM payroll_employment_terms terms
+                         WHERE terms.supplier_id = employment.supplier_id
+                           AND terms.employment_id = employment.id
+                         ORDER BY terms.effective_from DESC, terms.id DESC
+                         LIMIT 1) AS activity_code
+                  FROM payroll_employments employment
+                 WHERE employment.supplier_id = ? AND employment.id = ?
+            )
+            SELECT other.id AS employment_id, other.code,
+                   COALESCE(other.actual_start_date, other.start_date) AS start_on,
+                   other.end_date AS end_on, own.activity_code
+              FROM own
+              JOIN payroll_employments other
+                ON other.supplier_id = ?
+               AND other.employee_id = own.employee_id
+               AND other.id <> own.id
+             WHERE own.activity_code IS NOT NULL
+               AND own.start_on IS NOT NULL
+               AND other.status <> "no_show"
+               AND (other.relation_type = "small_scale_employment") = own.small_scale
+               AND (SELECT terms.activity_code
+                      FROM payroll_employment_terms terms
+                     WHERE terms.supplier_id = other.supplier_id
+                       AND terms.employment_id = other.id
+                     ORDER BY terms.effective_from DESC, terms.id DESC
+                     LIMIT 1) = own.activity_code
+               AND COALESCE(other.actual_start_date, other.start_date)
+                   <= COALESCE(own.end_date, "9999-12-31")
+               AND (other.end_date IS NULL OR other.end_date >= own.start_on)
+             ORDER BY start_on, other.id',
+        );
+        $statement->execute([$supplierId, $employmentId, $supplierId]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $rows[] = [
+                'employment_id' => (int) $row['employment_id'],
+                'code' => (string) $row['code'],
+                'start_on' => (string) $row['start_on'],
+                'end_on' => $row['end_on'] === null ? null : (string) $row['end_on'],
+                'activity_code' => (string) $row['activity_code'],
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
      * Je zaměstnavatel uznaný na chráněném trhu práce (REGZEL, ID 10211)?
      * Bez profilu REGZEL se bere „ne" — tak se hlásí naprostá většina firem.
      */
@@ -774,6 +841,70 @@ final class PayrollRegistrationIdentityRepository
             $parameters[] = $employmentId;
         }
         $statement->execute($parameters);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    /**
+     * Potvrdila ČSSZ identifikátor přijetím změny/dohlášení (REGZEC A3)?
+     *
+     * Zaměstnanec přihlášený dřív přes ONZ nemá protokol o přijetí REGZEC
+     * přihlášky, jeho OIČ a ID PPV jsou zapsané ručně. Když ale ČSSZ přijme
+     * A3, které je nese, jsou tím ověřené stejně jako z protokolu. Událost
+     * drží v manifestu id a verzi identifikátoru, se kterým byla schválená.
+     */
+    public function hasAcceptedChangeConfirmingIdentifier(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $identifierType,
+        int $externalId,
+        int $rowVersion,
+    ): bool {
+        [$idPath, $versionPath] = match ($identifierType) {
+            'ik_mpsv' => ['$.person_external_id', '$.person_external_row_version'],
+            'id_ppv' => ['$.employment_external_id', '$.employment_external_row_version'],
+            default => throw new \InvalidArgumentException(
+                'Druh registračního identifikátoru není podporovaný.',
+            ),
+        };
+        $statement = $this->db->pdo()->prepare(
+            'SELECT event.id
+               FROM payroll_registration_event_snapshots event
+               JOIN payroll_submission_parts part
+                 ON part.supplier_id = event.supplier_id
+                AND part.environment = event.environment
+                AND part.source_entity_type = "payroll_registration_event"
+                AND part.source_entity_reference =
+                    CONCAT("payroll_registration_event:", event.id)
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+               JOIN payroll_submission_receipts receipt
+                 ON receipt.supplier_id = submission.supplier_id
+                AND receipt.environment = submission.environment
+                AND receipt.submission_id = submission.id
+              WHERE event.supplier_id = ?
+                AND event.environment = ?
+                AND event.employment_id = ?
+                AND event.action_code = 3
+                AND submission.status = "accepted"
+                AND receipt.verification_status = "trusted"
+                AND receipt.remote_status = "accepted"
+                AND CAST(JSON_VALUE(event.source_manifest_json, ?) AS UNSIGNED) = ?
+                AND CAST(JSON_VALUE(event.source_manifest_json, ?) AS UNSIGNED) = ?
+              LIMIT 1'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $employmentId,
+            $idPath,
+            $externalId,
+            $versionPath,
+            $rowVersion,
+        ]);
 
         return $statement->fetchColumn() !== false;
     }

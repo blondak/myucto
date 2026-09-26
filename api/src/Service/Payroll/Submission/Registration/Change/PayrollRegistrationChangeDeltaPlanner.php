@@ -8,9 +8,10 @@ namespace MyInvoice\Service\Payroll\Submission\Registration\Change;
  * Převod nalezených rozdílů na vstup existujícího schválení události A3.
  *
  * Detekce umí najít víc, než umí tenhle core podat. To není nedodělek, který
- * se má zamlčet: datová věta REGZEC A3 nese dnes v serializéru jen titul,
- * doručovací adresu, daňovou rezidenci a kód zdravotní pojišťovny, a změna
- * bližšího určení vztahu je navíc uzavřená kvůli povinné příloze s vysvětlením
+ * se má zamlčet: změnou (A3) se tu hlásí titul, doručovací adresa, daňová
+ * rezidence, zdravotní pojišťovna, nejvyšší vzdělání a pracovní údaje
+ * (postavení, režim, místo výkonu, profese, pozice…). Změna bližšího určení
+ * vztahu je uzavřená kvůli povinné příloze s vysvětlením
  * ({@see \MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEventService}).
  *
  * Planner proto rozdělí nález na dvě hromádky:
@@ -30,6 +31,42 @@ final class PayrollRegistrationChangeDeltaPlanner
     ];
 
     private const CONTACT_ADDRESS_OPTIONAL = ['orientation_number', 'ruian_point'];
+
+    /**
+     * Pracovní údaje, které A3 nese (EDV 1.4.0.6, sloupec A3-OST). Druh
+     * činnosti měnit nejde a bližší určení vyžaduje přílohu, proto tu nejsou.
+     */
+    public const EMPLOYMENT_FIELDS = [
+        'contract_start_on' => 'date',
+        'employment_status_code' => 'text',
+        'work_mode_code' => 'text',
+        'continuous_operation' => 'bool',
+        'prevailing_workplace_code' => 'text',
+        'expected_workplaces' => 'text',
+        'contract_workplace' => 'text',
+        'workplace_city' => 'text',
+        'workplace_municipality_code' => 'text',
+        'profession_code' => 'text',
+        'required_education_code' => 'text',
+        'position_name' => 'text',
+        'leadership' => 'bool',
+    ];
+
+    private const EMPLOYMENT_PATHS = [
+        'employment.contract_start_on',
+        'employment.employment_status_code',
+        'employment.work_mode_code',
+        'employment.continuous_operation',
+        'employment.prevailing_workplace_code',
+        'employment.expected_workplaces',
+        'employment.contract_workplace',
+        'employment.workplace_city',
+        'employment.workplace_municipality_code',
+        'employment.profession_code',
+        'employment.required_education_code',
+        'employment.position_name',
+        'employment.leadership',
+    ];
 
     /**
      * @param list<PayrollRegistrationChangeFinding> $findings
@@ -114,6 +151,27 @@ final class PayrollRegistrationChangeDeltaPlanner
                     $changes['contact_address'] = $address;
                     break;
 
+                case $finding->path === 'facts.highest_education_code':
+                    $education = $current->get('facts.highest_education_code');
+                    if ($education === null) {
+                        $unsupported[] = [
+                            'path' => $finding->path,
+                            'reason_code' => 'registration_change_value_removal_unsupported',
+                        ];
+                        break;
+                    }
+                    $changes['highest_education_code'] = $education;
+                    break;
+
+                case in_array($finding->path, self::EMPLOYMENT_PATHS, true):
+                    // Mění-li se kterýkoli pracovní údaj, pošle se celý blok
+                    // v aktuální podobě — ČSSZ přijímá i částečný snímek
+                    // a skupina se tak nerozpadne na polovinu.
+                    if (!array_key_exists('employment', $changes)) {
+                        $changes['employment'] = $this->employment($current);
+                    }
+                    break;
+
                 default:
                     $unsupported[] = [
                         'path' => $finding->path,
@@ -128,6 +186,21 @@ final class PayrollRegistrationChangeDeltaPlanner
         );
 
         return ['changes' => $changes, 'unsupported' => array_values($unsupported)];
+    }
+
+    /** @return array<string,string|bool> */
+    private function employment(PayrollRegistrationReportableProfile $current): array
+    {
+        $employment = [];
+        foreach (self::EMPLOYMENT_FIELDS as $field => $kind) {
+            $value = $current->get("employment.{$field}");
+            if ($value === null) {
+                continue;
+            }
+            $employment[$field] = $kind === 'bool' ? $value === '1' : $value;
+        }
+
+        return $employment;
     }
 
     /** @return array<string,string>|null */

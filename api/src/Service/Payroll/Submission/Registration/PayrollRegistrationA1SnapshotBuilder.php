@@ -148,14 +148,7 @@ final class PayrollRegistrationA1SnapshotBuilder
             );
         // EDV 1.4.0.6, ID 10223: u druhu činnosti 10 až 16 a u výkonu trestu
         // (10502 = 2) nesmí být nástup dřív než 1. 1. 2026.
-        if ($employment['actual_start_on'] !== ''
-            && $employment['actual_start_on'] < '2026-01-01'
-            && (in_array(
-                $employment['activity_code'],
-                ['10', '11', '12', '13', '14', '15', '16'],
-                true,
-            ) || $employment['relationship_detail_code'] === '2')
-        ) {
+        if ($this->startsBeforeSpecialActivityEvidence($employment)) {
             $this->invalid(
                 'registration_regzec_a1_start_before_2026',
                 'Datum nástupu ' . $employment['actual_start_on'] . ' je dřívější '
@@ -210,6 +203,7 @@ final class PayrollRegistrationA1SnapshotBuilder
         $employment = $this->workplaceProgress($employment, $variant, $facts);
 
         $citizenship = $this->country($identity, 'citizenship_country_code');
+        $this->identityPresent($identity);
         $proofIdentity = $this->optionalObject($input, 'proof_identity');
         $foreignWorker = $this->optionalObject($input, 'foreign_worker');
         // Prázdné občanství je už nahlášené výš; brát ho jako cizinu by k tomu
@@ -434,6 +428,55 @@ final class PayrollRegistrationA1SnapshotBuilder
         }
 
         return $employment;
+    }
+
+    /**
+     * Druh činnosti 10 až 16 a výkon trestu (10502 = 2) se v registru vedou
+     * teprve od 1. 1. 2026 — EDV 1.4.0.6 u 10223: „Datum nástupu nemůže být
+     * v těchto případech dříve než 1.1.2026". Datum je pevná hranice
+     * z datové věty ČSSZ, ne podporovaný rok mzdového modulu.
+     *
+     * @param array<string,mixed> $employment
+     */
+    private function startsBeforeSpecialActivityEvidence(array $employment): bool
+    {
+        return $employment['actual_start_on'] !== ''
+            && $employment['actual_start_on'] < '2026-01-01'
+            && (in_array(
+                $employment['activity_code'],
+                ['10', '11', '12', '13', '14', '15', '16'],
+                true,
+            ) || $employment['relationship_detail_code'] === '2');
+    }
+
+    /**
+     * Osobní údaje, které přihláška A1 povinně nese (EDV 10053–10066, 10059).
+     *
+     * Dřív je hlídal až serializér při přípravě podání, takže „Kontrola"
+     * profilu prošla a účetní se o chybějícím místě narození dozvěděla až
+     * výjimkou. Stejnou chybu vracela ČSSZ cizímu programu u ONZ. Cesta
+     * `identity.*` vede formulář na kartu osoby, kde se údaj zadává.
+     *
+     * @param array<string,mixed> $identity
+     */
+    private function identityPresent(array $identity): void
+    {
+        foreach ([
+            'first_name', 'last_name', 'birth_surname', 'birth_date',
+            'birth_place', 'birth_country_code', 'sex',
+        ] as $key) {
+            $value = $identity[$key] ?? null;
+            if (is_string($value) && trim($value) !== '') {
+                continue;
+            }
+            $this->fail(
+                'registration_regzec_a1_required_field_missing',
+                PayrollRegistrationFieldVocabulary::label($key)
+                    . ' chybí — registraci na ČSSZ (REGZEC A1) bez toho podat '
+                    . 'nejde. ' . PayrollRegistrationFieldVocabulary::describe($key),
+                'identity.' . $key,
+            );
+        }
     }
 
     /**

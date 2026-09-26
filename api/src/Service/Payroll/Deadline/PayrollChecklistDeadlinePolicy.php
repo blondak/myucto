@@ -187,9 +187,12 @@ final class PayrollChecklistDeadlinePolicy
         try {
             $window = $this->registration->forEmploymentStart($eventOn);
         } catch (\Throwable) {
-            // Nástup před 1. 7. 2026 registrační povinnost zaměstnance nezná;
-            // dohadovat pro něj termín by znamenalo hlásit zpoždění, které
-            // podle tehdejšího práva nenastalo.
+            $window = null;
+        }
+        // Nástup před 1. 7. 2026: přihláška REGZEC jde podat (a podání ji
+        // vede jako opožděnou), termín checklistu se ale neodvozuje — hlásit
+        // zpoždění podle tehdejšího práva by bylo vymyšlené.
+        if ($window === null || !$window->derived) {
             return $this->notDerived(
                 $itemKey,
                 'Registrační povinnost u zaměstnance je účinná od 1. 7. 2026; '

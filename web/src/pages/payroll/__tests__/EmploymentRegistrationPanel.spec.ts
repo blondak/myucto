@@ -867,6 +867,94 @@ describe('EmploymentRegistrationPanel', () => {
     expect(m.preview).toHaveBeenCalledWith(5, 'production', 92)
   })
 
+  /**
+   * Dohlášení údajů (A3) za zaměstnance přihlášeného přes ONZ: jedno kliknutí
+   * otevře formulář s dnešním dnem odeslání, rozsah jde přepnout a podání se
+   * skládá na serveru z profilu A1 — formulář nic dalšího nevyžaduje.
+   */
+  it('opens the A3 data supplement with today and sends only the completion scope', async () => {
+    m.approveEvent.mockResolvedValue({
+      id: 94,
+      employment_id: 5,
+      environment: 'production',
+      interaction: 'change',
+      action_code: 3,
+      effective_on: '2026-09-26',
+      source_kind: 'verified_change',
+      source_reference: 'dohlaseni:minimal:2026-09-26',
+      snapshot_fingerprint: 'c'.repeat(64),
+      approved_at: '2026-09-26 10:00:00',
+      consumed: false,
+      created: true,
+    })
+    m.preview.mockResolvedValue({ ...preview, agenda_code: 'REGZEC25', interaction: 'change', action_code: 3 })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-completion-open"]').trigger('click')
+
+    expect(wrapper.find('[data-test="registration-completion-hint"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="registration-event-delta"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="registration-event-source-reference"]').exists()).toBe(false)
+    const effective = (wrapper.get('[data-test="registration-event-effective-on"]').element as HTMLInputElement)
+    // Den odeslání je předvyplněný (DateInput ukazuje datum česky).
+    expect(effective.value).not.toBe('')
+    await wrapper.get('[data-test="registration-event-effective-on"]').setValue('2026-09-26')
+    await wrapper.get('[data-test="registration-event-change-scope"]').setValue('minimal')
+    await wrapper.get('[data-test="registration-event-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.approveEvent).toHaveBeenCalledWith(5, expect.objectContaining({
+      interaction: 'change',
+      effective_on: '2026-09-26',
+      completion: 'minimal',
+      source_reference: 'dohlaseni:minimal:2026-09-26',
+    }))
+    expect(m.approveEvent.mock.calls[0][1]).not.toHaveProperty('changes')
+  })
+
+  /** Překryv se stejným druhem činnosti: varování s proklikem na oba vztahy. */
+  it('shows overlap warnings with links to both relationships', async () => {
+    m.a1Profile.mockResolvedValue({
+      ...a1View(),
+      warnings: [{
+        code: 'registration_overlap_same_activity',
+        field: 'employment.activity_code',
+        employment_id: 77,
+        message: 'Zaměstnanec má u firmy další pracovní vztah.',
+      }],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await flushPromises()
+
+    const box = wrapper.get('[data-test="registration-warnings"]')
+    expect(box.text()).toContain('Zaměstnanec má u firmy další pracovní vztah.')
+    expect(JSON.parse(box.get('[data-test="registration-warning-open-other"]').attributes('data-to') ?? '{}'))
+      .toEqual({ name: 'payroll-people', query: { employment: '77', panel: 'employment_terms', person: '9' } })
+    expect(JSON.parse(box.get('[data-test="registration-warning-open-own"]').attributes('data-to') ?? '{}'))
+      .toEqual({ name: 'payroll-people', query: { employment: '5', panel: 'employment_terms', person: '9' } })
+  })
+
+  /** Práce probíhá převážně (10258) jen na chráněném trhu práce u zdravotního omezení. */
+  it('hides the prevailing workplace field unless the protected labour market applies', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="a1-employment-prevailing-workplace-code"]').exists()).toBe(false)
+
+    const suggested = a1Suggested()
+    suggested.facts.health_restrictions = [{ type_code: '1', from: '2025-01-01', to: null }] as never
+    m.a1Profile.mockResolvedValue(a1View({ protected_labor_market: true, suggested }))
+    const protectedPanel = mountPanel()
+    await flushPromises()
+    await protectedPanel.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await flushPromises()
+    expect(protectedPanel.find('[data-test="a1-employment-prevailing-workplace-code"]').exists()).toBe(true)
+  })
+
   it('requires an explicit no-show confirmation for A8 and binds the source submission', async () => {
     m.approveEvent.mockResolvedValue({
       id: 93,
