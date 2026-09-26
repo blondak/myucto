@@ -4017,6 +4017,7 @@
         "child_evidence_unverified": "A child tax benefit claim has no supporting evidence.",
         "child_claim_conflict": "The child claims contradict each other — check the child order, the shared-household confirmation and the exclusion of the other taxpayer.",
         "child_jmhz_evidence_incomplete": "Complete the child's name and date of birth on the child card, then state in the annual settlement documents whether another person in the shared household claimed the child.",
+        "takeover_child_claim_missing": "In the months taken over from the previous payroll program the employee claimed the child tax benefit (credit or bonus), but the child records have no entitlement for them. Enter the child entitlement on the employee card retroactively from the first month it was claimed (typically January) — otherwise the settlement would reclaim a benefit the employee already received as unjustified.",
         "already_settled": "The annual settlement for this year has already been performed. It is done once a year.",
         "ruleset_year_not_covered": "We have no effective tax rules covering the whole of this year, so annual amounts cannot be derived.",
         "tax_year_not_finished": "The tax year has not ended yet. The annual settlement can only be performed from 1 January of the following year.",

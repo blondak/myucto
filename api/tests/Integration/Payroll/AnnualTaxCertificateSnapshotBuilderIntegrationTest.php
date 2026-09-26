@@ -18,6 +18,7 @@ use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateService;
 use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateSnapshotBuilder;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentKind;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentService;
+use MyInvoice\Service\Payroll\PayrollOpeningBalanceService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -415,6 +416,125 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
         }
     }
 
+    /**
+     * Přechod v průběhu roku: leden až září vedl předchozí program. Potvrzení
+     * dřív u převzatých měsíců tvrdilo, že prohlášení učiněno nebylo, a dítě
+     * i invaliditu uvádělo jen od října — přestože úhrny zahrnovaly celý rok.
+     */
+    public function testCarriedMonthsCarryDeclarationChildrenAndDisability(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $connection = $container->get(Connection::class);
+        $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
+        $openings = $container->get(PayrollOpeningBalanceService::class);
+        $sensitive = $container->get(PayrollSensitiveData::class);
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $pdo->query(
+            'SELECT id FROM supplier ORDER BY id LIMIT 1',
+        )->fetchColumn();
+        $pdo->beginTransaction();
+        try {
+            [$supplierId, $employeeId] = $this->fixture(
+                $pdo,
+                $sourceSupplierId,
+                $sensitive,
+                'common-variants',
+                '2026-10-01',
+            );
+            $pdo->prepare(
+                'INSERT INTO payroll_module_state (supplier_id, status, start_period)
+                 VALUES (?, "active", "2026-10-01")',
+            )->execute([$supplierId]);
+            $months = [];
+            for ($month = 1; $month <= 9; ++$month) {
+                $months[] = [
+                    'month' => $month,
+                    'social_assessment_base_minor_units' => 40_000_00,
+                    'advance_base_minor_units' => 40_000_00,
+                    'advance_tax_minor_units' => 1_000_00,
+                    'withholding_base_minor_units' => 0,
+                    'withholding_tax_minor_units' => 0,
+                    'applied_non_refundable_credits_minor_units' => 4_000_00,
+                    'applied_child_credit_minor_units' => 1_000_00,
+                    'tax_bonus_minor_units' => 0,
+                    'bonus_qualifying_income_minor_units' => 40_000_00,
+                ];
+            }
+            $openings->save($supplierId, $employeeId, 2026, $months, 'Sestava 1–9', null);
+            $dependantId = (int) $pdo->query(sprintf(
+                'SELECT id FROM payroll_dependants WHERE supplier_id = %d AND employee_id = %d',
+                $supplierId,
+                $employeeId,
+            ))->fetchColumn();
+
+            $this->assertBuildRefused($builder, $supplierId, $employeeId, 'Prohlášení poplatníka');
+
+            $pdo->prepare(
+                'INSERT INTO payroll_person_tax_declarations
+                    (supplier_id, employee_id, status, effective_from, evidence_reference)
+                 VALUES (?, ?, "signed", "2026-01-01", "synthetic")',
+            )->execute([$supplierId, $employeeId]);
+            $this->assertBuildRefused($builder, $supplierId, $employeeId, 'evidence dětí');
+
+            $pdo->prepare(
+                'INSERT INTO payroll_person_tax_child_claims
+                    (supplier_id, employee_id, child_reference, child_order, ztp_p,
+                     evidence_status, shared_household_confirmed, other_claimant_excluded,
+                     effective_from, evidence_reference)
+                 VALUES (?, ?, ?, 1, 1, "verified", 1, 1, "2026-01-01", "synthetic")',
+            )->execute([$supplierId, $employeeId, 'dependant-' . $dependantId]);
+            $pdo->prepare(
+                'INSERT INTO payroll_person_tax_credit_claims
+                    (supplier_id, employee_id, credit_kind, evidence_status, effective_from, evidence_reference)
+                 VALUES (?, ?, "disability-extended", "verified", "2026-01-01", "synthetic")',
+            )->execute([$supplierId, $employeeId]);
+
+            $document = $builder->build(
+                $supplierId,
+                $employeeId,
+                2026,
+                PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+                null,
+            )['document'];
+
+            self::assertSame([10], $document->months);
+            self::assertSame('signed', $document->taxDeclarationStatus);
+            self::assertSame(range(1, 10), $document->taxDeclarationSignedMonths);
+            self::assertSame('1–10', $document->childTaxBenefits[0]['first_child_period']);
+            self::assertSame('1–10', $document->childTaxBenefits[0]['ztpp_period']);
+            self::assertContains(
+                ['period' => '1–10', 'degree' => 'III. stupeň'],
+                $document->disabilityTaxCredits,
+            );
+            $template = $document->toTemplateData();
+            self::assertSame('1–10', $template['months_label']);
+            self::assertSame('1–10', $template['tax_declaration']['signed_months_label']);
+        } finally {
+            $pdo->rollBack();
+            $connection->close();
+        }
+    }
+
+    private function assertBuildRefused(
+        AnnualTaxCertificateSnapshotBuilder $builder,
+        int $supplierId,
+        int $employeeId,
+        string $message,
+    ): void {
+        try {
+            $builder->build(
+                $supplierId,
+                $employeeId,
+                2026,
+                PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+                null,
+            );
+            self::fail('Potvrzení bez evidence za převzaté měsíce se nesmí vystavit.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString($message, $exception->getMessage());
+        }
+    }
+
     public function testBuildsNonresidentAdvanceCertificateFromFrozenInsurance(): void
     {
         $container = Bootstrap::buildContainer();
@@ -553,6 +673,7 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
         int $sourceSupplierId,
         PayrollSensitiveData $sensitive,
         string $variant = 'base',
+        string $runPeriod = '2026-01-01',
     ): array {
         $supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
         $countryId = (int) $pdo->query(
@@ -749,8 +870,8 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
             'INSERT INTO payroll_runs
                 (supplier_id, period_start, payment_date, status,
                  current_revision_no)
-             VALUES (?, "2026-01-01", "2026-02-15", "approved", 1)',
-        )->execute([$supplierId]);
+             VALUES (?, ?, "2026-02-15", "approved", 1)',
+        )->execute([$supplierId, $runPeriod]);
         $runId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO payroll_run_revisions

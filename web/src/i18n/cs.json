@@ -4017,6 +4017,7 @@
         "child_evidence_unverified": "Nárok na daňové zvýhodnění na dítě není doložený.",
         "child_claim_conflict": "Nároky na děti si odporují — zkontrolujte pořadí dětí, potvrzení o společné domácnosti a vyloučení druhého poplatníka.",
         "child_jmhz_evidence_incomplete": "Doplňte na kartě dítěte jméno a datum narození a v podkladech ročního zúčtování zodpovězte, zda dítě uplatňovala i jiná osoba ve společné domácnosti.",
+        "takeover_child_claim_missing": "V měsících převzatých z předchozího mzdového programu zaměstnanec uplatňoval daňové zvýhodnění na dítě (slevu nebo bonus), ale v evidenci dětí na ně nárok není. Zadejte nárok na dítě v kartě zaměstnance zpětně od prvního měsíce, kdy ho uplatňoval (typicky od ledna) — jinak by zúčtování zvýhodnění, které už dostal, vyrovnalo jako neoprávněné.",
         "already_settled": "Roční zúčtování za tento rok už proběhlo. Provádí se jednou ročně.",
         "ruleset_year_not_covered": "Pro tento rok nemáme účinná daňová pravidla na celý rok, takže roční částky nelze odvodit.",
         "tax_year_not_finished": "Zdaňovací období ještě neskončilo. Roční zúčtování jde provést až od 1. ledna následujícího roku.",

@@ -89,22 +89,7 @@ final class PayrollTakeoverCoverage
                 if (isset($result[$employeeId])) {
                     continue;
                 }
-                $rows = [];
-                $months = $opening['evidence']['months'] ?? [];
-                foreach (is_array($months) ? $months : [] as $row) {
-                    if (!is_array($row) || !is_int($row['month'] ?? null)) {
-                        continue;
-                    }
-                    $values = [];
-                    foreach ($row as $field => $value) {
-                        if (is_string($field) && is_int($value)) {
-                            $values[$field] = $value;
-                        }
-                    }
-                    $rows[$row['month']] = $values;
-                }
-                ksort($rows);
-                $result[$employeeId] = $rows;
+                $result[$employeeId] = PayrollTakeoverTaxEvidence::openingMonthRows($opening);
             }
         }
         ksort($result);

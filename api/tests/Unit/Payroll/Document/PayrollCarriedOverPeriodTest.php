@@ -121,6 +121,7 @@ final class PayrollCarriedOverPeriodTest extends TestCase
 
         self::assertSame('1–12', $template['months_label']);
         self::assertSame('8–12', $template['own_months_label']);
+        self::assertSame('1–12', $template['tax_declaration']['signed_months_label']);
         self::assertIsArray($template['carried_over']);
         self::assertSame('1–7', $template['carried_over']['months_label']);
         self::assertSame(
@@ -264,8 +265,9 @@ final class PayrollCarriedOverPeriodTest extends TestCase
             personalIdentifierValue: '0001010009',
             employeeAddress: 'Modelová 2, 602 00 Brno, CZ',
             months: [8, 9, 10, 11, 12],
+            // Prohlášení se vede za všechny vykázané měsíce včetně převzatých.
             taxDeclarationStatus: 'signed',
-            taxDeclarationSignedMonths: [8, 9, 10, 11, 12],
+            taxDeclarationSignedMonths: range(1, 12),
             taxResidenceStatus: 'czech-resident',
             taxResidenceCountryCode: 'CZ',
             issuedAt: '2027-01-20 09:15:00',

@@ -5191,6 +5191,7 @@ export type PayrollAnnualSettlementBlocker =
   | 'child_evidence_unverified'
   | 'child_claim_conflict'
   | 'child_jmhz_evidence_incomplete'
+  | 'takeover_child_claim_missing'
   | 'already_settled'
   | 'ruleset_year_not_covered'
   | 'request_date_missing'
