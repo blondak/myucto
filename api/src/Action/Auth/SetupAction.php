@@ -15,6 +15,10 @@ use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionCookieFactory;
 use MyInvoice\Service\Auth\WebAuthnConfig;
 use MyInvoice\Service\Ares\SupplierRegistryEnricher;
+use MyInvoice\Service\License\LicenseCapacityGate;
+use MyInvoice\Service\License\LicenseState;
+use MyInvoice\Service\License\PayrollUsagePolicy;
+use MyInvoice\Service\License\SeatPolicy;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Config\CfgLocalWriter;
 use MyInvoice\Service\System\ManagedModeGuard;
@@ -44,6 +48,9 @@ final class SetupAction
      * ať se obě cesty nemůžou znovu rozejít.
      */
     private readonly SupplierInitializer $supplierInitializer;
+
+    /** Zapnutí zakoupených Mezd musí projít stejnou kontrolou kapacity jako Nastavení firmy. */
+    private readonly LicenseCapacityGate $licenseCapacity;
 
     /**
      * Závislosti inicializace firmy (enricher … autoPosting) zůstávají v signatuře
@@ -79,7 +86,14 @@ final class SetupAction
         \MyInvoice\Service\Accounting\AutoPostingPolicyService $autoPosting,
         private readonly \MyInvoice\Service\Auth\MfaStepUpService $stepUp,
         ?SupplierInitializer $supplierInitializer = null,
+        ?LicenseCapacityGate $licenseCapacity = null,
     ) {
+        $this->licenseCapacity = $licenseCapacity ?? new LicenseCapacityGate(
+            $db,
+            $license,
+            new SeatPolicy($db),
+            new PayrollUsagePolicy($db),
+        );
         $this->supplierInitializer = $supplierInitializer ?? new SupplierInitializer(
             $db,
             $enricher,
@@ -92,6 +106,36 @@ final class SetupAction
             $autoPosting,
             $log,
         );
+    }
+
+    /**
+     * Zákazník, který si Mzdy koupil spolu s instalací, je má mít na první
+     * firmě rovnou zapnuté - jinak zaplatil modul, který v aplikaci nevidí.
+     *
+     * ⚠️ Rozhoduje podepsaná licence, ne zkušební doba: `hasPayrollFeatures()`
+     * je pravdivé i v trialu, a to by Mzdy zapnulo i tomu, kdo je nekoupil.
+     * Zapnutí jde přes {@see LicenseCapacityGate} jako v Nastavení firmy, protože
+     * superadmin tím začne zabírat mzdové místo. Best-effort: selhání setup
+     * nezahazuje, Mzdy lze zapnout ručně.
+     */
+    private function enablePurchasedPayroll(int $supplierId, mixed $state): void
+    {
+        try {
+            if (!$state instanceof LicenseState) {
+                $state = $this->license->current();
+            }
+            if (!$state->payrollEnabled || $state->payrollUsersLicensed < 1 || !$state->hasPayrollFeatures()) {
+                return;
+            }
+            if (!$this->db->hasColumn('supplier', 'payroll_enabled')) {
+                return;
+            }
+            $this->licenseCapacity->mutateSeats(fn (): bool => $this->db->pdo()
+                ->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')
+                ->execute([$supplierId]));
+        } catch (\Throwable $e) {
+            $this->log->warning('setup: zapnutí Mezd selhalo', ['error' => $e->getMessage()]);
+        }
     }
 
     /**
@@ -381,6 +425,9 @@ final class SetupAction
             } catch (\Throwable $e) {
                 $licenseActivated = false;
                 $this->log->warning('setup: aktivace licence spadla', ['error' => $e->getMessage()]);
+            }
+            if ($licenseActivated && $createdSupplierId !== null) {
+                $this->enablePurchasedPayroll($createdSupplierId, $res['state'] ?? null);
             }
         }
 
