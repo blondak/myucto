@@ -18,6 +18,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzTargetCatalog;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzComponentSourceRule;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -223,7 +224,13 @@ final class PayrollComponentJmhzMappingsAction
         $active = $mapping !== null
             && PayrollTimeValue::bool($mapping['is_active'] ?? null, 'is_active');
         $status = match ($treatment) {
-            'included' => $active ? 'configured' : 'missing',
+            'included' => $active
+                ? 'configured'
+                : (JmhzComponentSourceRule::belongsOutsideWageBreakdown(
+                    $treatment,
+                    $component['tax_treatment'] ?? null,
+                    $component['component_kind'] ?? null,
+                ) ? 'outside_breakdown' : 'missing'),
             'manual_review' => 'manual_review',
             default => 'excluded',
         };

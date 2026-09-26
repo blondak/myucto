@@ -1383,11 +1383,24 @@ const bulkBlockedReason = computed<string | null>(() => {
   return null
 })
 
+/*
+ * Člen orgánu a společník (formulář cinnostKS) mají podle pokynů MPSV
+ * stanovený fond 10259 nulový. Společné pole hromadného schválení je fond
+ * plného úvazku pro ostatní vztahy; u nich se bere vlastní návrh serveru.
+ */
+const CORPORATE_BODY_RELATIONS = ['partner_dependent', 'statutory_body']
+
+function isCorporateBodyRelation(relationType: string | null | undefined): boolean {
+  return CORPORATE_BODY_RELATIONS.includes(relationType ?? '')
+}
+
 function openBulkApproval() {
   if (bulkSelectedItems.value.length === 0) return
   // Návrh serveru je pro celý měsíc stejný, takže stačí vzít ho z prvního
   // způsobilého řádku. Prázdné pole tu dřív znamenalo opsat totéž číslo ručně.
-  bulkStandardFund.value = bulkCandidates.value[0]
+  const fundSource = bulkCandidates.value.find(item => !isCorporateBodyRelation(item.employment.relation_type))
+    ?? bulkCandidates.value[0]
+  bulkStandardFund.value = fundSource
     ?.jmhz_work_summary?.preview?.suggestions.standard_fund_hours ?? ''
   bulkNote.value = ''
   approveFailures.value = []
@@ -1417,7 +1430,9 @@ async function approveSelected() {
         row_version: item.month.row_version,
         jmhz_work_summary: {
           source_snapshot_sha256: preview.source_snapshot_sha256,
-          standard_fund_hours: standardFund,
+          standard_fund_hours: isCorporateBodyRelation(item.employment.relation_type)
+            ? (preview.suggestions.standard_fund_hours ?? '0')
+            : standardFund,
           agreed_fund_hours: preview.suggestions.agreed_fund_hours ?? '',
           weekly_work_hours: preview.suggestions.weekly_work_hours ?? '',
           worked_hours: preview.suggestions.worked_hours ?? '',

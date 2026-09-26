@@ -790,9 +790,10 @@ Vyšší násobek podle kolektivní smlouvy nebo vnitřního předpisu zadejte d
 než zákonný násobek aplikace nepřijme.
 
 **Založit odstupné do posledního běhu** založí schválený vstup složky
-**Odstupné** za měsíc skončení. Složka nemá výchozí zařazení do měsíčního
-hlášení JMHZ; dokud ho v **Mzdové složky** nedoplníte, sekce na to upozorní
-a hlášení za poslední měsíc se nesestaví.
+**Odstupné** za měsíc skončení. V měsíčním hlášení JMHZ je odstupné jen
+v zúčtovaném příjmu celkem a v základu daně; do mzdy za práci ani do náhrad
+mzdy nepatří (pokyny MPSV k vyplnění hlášení), takže složka zařazení do rozpadu
+mzdy nepotřebuje. V **Mzdové složky** má u JMHZ štítek **Jen do úhrnu příjmu**.
 
 U výpovědi nebo dohody pro dlouhodobou zdravotní nezpůsobilost z pracovního
 úrazu nebo nemoci z povolání náleží jednorázová náhrada dvanáctinásobku

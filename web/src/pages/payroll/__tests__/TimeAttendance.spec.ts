@@ -1540,6 +1540,37 @@ describe('TimeAttendance — měsíční mřížka', () => {
   })
 
   /**
+   * Člen orgánu a společník mají podle pokynů MPSV stanovený fond 10259
+   * nulový. Společné pole dávky je fond plného úvazku pro ostatní vztahy;
+   * statutár si nese vlastní nulový návrh serveru, ne 168 h.
+   */
+  it('hromadné schválení nepošle statutárovi fond plného úvazku', async () => {
+    const page = gridPage(['Osoba A', 'Jednatel B'])
+    page.items[1].employment.relation_type = 'statutory_body'
+    Object.assign(page.items[1].jmhz_work_summary.preview.suggestions, {
+      standard_fund_hours: '0',
+      agreed_fund_hours: '0',
+    })
+    m.timeMonth.mockResolvedValue(page)
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    await wrapper.get('[data-test="bulk-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.approveTimeMonth).toHaveBeenCalledTimes(2)
+    expect(m.approveTimeMonth.mock.calls[0][1].jmhz_work_summary.standard_fund_hours).toBe('168')
+    expect(m.approveTimeMonth.mock.calls[1][1]).toMatchObject({
+      employment_id: 13,
+      jmhz_work_summary: { standard_fund_hours: '0', agreed_fund_hours: '0' },
+    })
+    wrapper.unmount()
+  })
+
+  /**
    * Bez zákonného fondu by souhrn nebyl úplný — tlačítko proto drží a věta
    * pod ním říká proč (zašedlé tlačítko bez důvodu je slepá ulička).
    */

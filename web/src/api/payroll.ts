@@ -1946,6 +1946,7 @@ export interface PayrollComponentJmhzMapping {
 export type PayrollComponentJmhzMappingStatus =
   | 'configured'
   | 'missing'
+  | 'outside_breakdown'
   | 'excluded'
   | 'manual_review'
 

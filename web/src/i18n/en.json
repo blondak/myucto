@@ -3425,6 +3425,7 @@
         "status": {
           "configured": "Mapped",
           "missing": "Mapping missing",
+          "outside_breakdown": "Total income only (no wage breakdown)",
           "excluded": "Excluded",
           "manual_review": "Manual review"
         },
@@ -4205,7 +4206,7 @@
         "unworked_question": "Were there unworked hours this month?",
         "obstacles_question": "Were there obstacles to work this month?",
         "hours_unit": "hours",
-        "standard_fund_hint": "How many hours the month has at full time: 8 hours for every working day including public holidays falling on a working day (MPSV instructions). Prefilled from the statutory weekly hours (40 h) — overwrite if yours is shorter.",
+        "standard_fund_hint": "How many hours the month has at full time: 8 hours for every working day including public holidays falling on a working day (MPSV instructions). Prefilled from the statutory weekly hours (40 h) — overwrite if yours is shorter. For an executive, partner or board member (activity K and N to S) the MPSV instructions require 0.",
         "agreed_fund_hint": "How many hours this person is contracted to work this month.",
         "holiday_hours_hint": "Public holidays on working days: {hours} h. Do not enter them in the unworked hours below — on approval the app adds them to the total and the paid unworked hours itself (MPSV instructions for 10275 and 10276)."
       },
@@ -4218,7 +4219,7 @@
         "title": "Bulk attendance approval",
         "hint": "{count} employments will be approved with a JMHZ summary. The agreed fund, weekly hours and hours worked come from each employment's own suggestion.",
         "confirm": "Approve ({count})",
-        "standard_fund_hint": "Prefilled from the statutory weekly hours including public holidays on working days — the same for every relationship being approved. Overwrite if yours is shorter. The app adds holidays to the unworked hours itself.",
+        "standard_fund_hint": "Prefilled from the statutory weekly hours including public holidays on working days — the same for every relationship being approved. Overwrite if yours is shorter. The app adds holidays to the unworked hours itself. Executives, partners and board members get a fund of 0 as the MPSV instructions require.",
         "blocked_no_candidates": "The selection contains no employment that can be approved in bulk.",
         "blocked_no_standard_fund": "Fill in the standard monthly fund — without it the JMHZ summary would be incomplete.",
         "excluded": {

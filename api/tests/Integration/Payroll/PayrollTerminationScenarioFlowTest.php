@@ -106,12 +106,16 @@ final class PayrollTerminationScenarioFlowTest extends TestCase
         self::assertSame('payout', $overview['leave_settlement']['state'], CanonicalJson::encode($overview['issues']));
         self::assertSame('ready', $overview['severance']['state'], CanonicalJson::encode($overview['severance']));
         self::assertSame(1, $overview['severance']['multiple'], 'Poměr trval méně než rok.');
-        // Složka ODSTUPNE nemá výchozí zařazení v JMHZ; karta to hlásí dřív,
-        // než by se hlášení za poslední měsíc zaseklo na chybějícím zařazení.
-        self::assertContains('severance_jmhz_mapping_missing', array_column($overview['issues'], 'code'));
+        // Odstupné do rozpadu mzdy JMHZ nepatří (pokyny MPSV k 10328), takže
+        // chybějící zařazení složky ODSTUPNE není překážka.
+        self::assertNotContains('severance_jmhz_mapping_missing', array_column($overview['issues'], 'code'));
         $overview = $termination->settleLeave($this->supplierId, $person['employment_id'], $this->actors[0]);
         $leaveAmount = (int) $overview['leave_settlement']['amount_minor'];
         self::assertGreaterThan(0, $leaveAmount);
+        $overview = $termination->createSeveranceInput($this->supplierId, $person['employment_id'], $this->actors[0]);
+        self::assertSame('created', $overview['severance']['state'], CanonicalJson::encode($overview['severance']));
+        $severanceAmount = (int) $overview['severance']['amount_minor'];
+        self::assertGreaterThan(0, $severanceAmount);
 
         // 3) Poslední běh a měsíční hlášení.
         $response = $this->approveTimeMonth($person['employment_id'], self::PERIOD, self::workdays(self::PERIOD));
@@ -144,6 +148,14 @@ final class PayrollTerminationScenarioFlowTest extends TestCase
             $xml,
             'Náhrada za nevyčerpanou dovolenou musí jít do 10338.',
         );
+        // Odstupné je v zúčtovaném příjmu celkem (10286), ale ne ve mzdě za
+        // práci (10328) ani v náhradách mzdy (10337).
+        self::assertStringContainsString(
+            '<form:zuctovanoCelkem>' . intdiv(4_500_000 + $leaveAmount + $severanceAmount, 100) . '</form:zuctovanoCelkem>',
+            $xml,
+        );
+        self::assertStringContainsString('<form:mzdaZuctovana>45000</form:mzdaZuctovana>', $xml);
+        self::assertStringNotContainsString('<form:mzdyZuctovane>' . intdiv($leaveAmount + $severanceAmount, 100), $xml);
 
         // 4) Potvrzení pro Úřad práce se způsobem skončení ze záznamu.
         $this->db->pdo()->prepare('UPDATE payroll_employees SET birth_date = "1986-03-14" WHERE supplier_id = ? AND id = ?')

@@ -68,6 +68,23 @@ final class JmhzComponentSourceRuleTest extends TestCase
     }
 
     /**
+     * Odstupné: zdanitelný příjem do 10286, ale pokyny MPSV k 10328 ho z mzdy
+     * za práci výslovně vylučují a náhradou mzdy (10337) také není. Chybějící
+     * zařazení proto nesmí zablokovat hlášení za poslední měsíc.
+     */
+    public function testSeveranceNeedsNoWageBreakdownMapping(): void
+    {
+        self::assertNull(JmhzComponentSourceRule::issueCode('included', null, 'included', 'severance'));
+        self::assertTrue(JmhzComponentSourceRule::belongsOutsideWageBreakdown('included', 'included', 'severance'));
+        self::assertFalse(JmhzComponentSourceRule::belongsOutsideWageBreakdown('excluded', 'included', 'severance'));
+        self::assertFalse(JmhzComponentSourceRule::belongsOutsideWageBreakdown('included', 'included', 'bonus'));
+        self::assertSame(
+            'component_jmhz_mapping_missing',
+            JmhzComponentSourceRule::issueCode('included', null, 'included', 'bonus'),
+        );
+    }
+
+    /**
      * Vyřazená složka nemá co mapovat — chybějící zařazení u ní není nález,
      * je to správný stav.
      */

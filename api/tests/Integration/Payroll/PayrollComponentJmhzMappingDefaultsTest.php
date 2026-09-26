@@ -257,6 +257,15 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
         self::assertSame('missing', $commission['status']);
         self::assertNull($commission['mapping']);
         self::assertNull($commission['suggested_target_attribute_id']);
+
+        // Odstupné do rozpadu mzdy nepatří (pokyny MPSV k 10328), zařazení
+        // nepotřebuje a obrazovka ho nesmí hlásit jako chybějící.
+        $severance = PayrollTimeValue::row(
+            $byComponent[$this->componentIdByCode('ODSTUPNE')] ?? null,
+            'item',
+        );
+        self::assertSame('outside_breakdown', $severance['status']);
+        self::assertNull($severance['mapping']);
     }
 
     /**

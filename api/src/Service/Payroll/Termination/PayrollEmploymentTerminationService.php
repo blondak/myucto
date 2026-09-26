@@ -6,7 +6,6 @@ namespace MyInvoice\Service\Payroll\Termination;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAverageEarningRepository;
-use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentTerminationRepository;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
@@ -47,7 +46,6 @@ final class PayrollEmploymentTerminationService
         private readonly AverageEarningsMonthlyConverter $converter,
         private readonly PayrollComponentRepository $components,
         private readonly PayrollInputRepository $inputs,
-        private readonly PayrollComponentJmhzMappingRepository $jmhzMappings,
     ) {}
 
     /**
@@ -710,20 +708,9 @@ final class PayrollEmploymentTerminationService
 
             return $result;
         }
+        // Odstupné do rozpadu mzdy v JMHZ nepatří a zařazení nepotřebuje
+        // (JmhzComponentSourceRule::TAXED_KINDS_OUTSIDE_WAGE_BREAKDOWN).
         $result['amount_minor'] = PayrollSeverancePolicy::amount($multiple, $average['monthly_gross']);
-        if ($result['kind'] === 'severance') {
-            // Složka ODSTUPNE nemá výchozí zařazení v JMHZ (je to úsudek účetní,
-            // viz PayrollComponentJmhzMappingDefaults). Bez zařazení se měsíční
-            // hlášení za poslední měsíc nesestaví — řekne se to tady, dřív než
-            // se na to přijde až u hlášení.
-            $period = substr((string) $employment['end_date'], 0, 7) . '-01';
-            $componentId = $this->terminations->componentId($supplierId, self::SEVERANCE_COMPONENT, $period);
-            if ($componentId === null || $this->jmhzMappings->find($supplierId, $componentId) === null) {
-                $result['issues'][] = self::issue('severance_jmhz_mapping_missing', 'warning', [
-                    'component_code' => self::SEVERANCE_COMPONENT,
-                ]);
-            }
-        }
         $existing = $this->terminations->liveInput(
             $supplierId,
             $employmentId,

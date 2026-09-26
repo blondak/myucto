@@ -226,7 +226,10 @@ revizi schváleného měsíce; po znovuotevření je nutné vytvořit nové potv
 Evidenční dny aplikace u pracovního poměru sníží o dny mateřské, rodičovské
 a otcovské, protože po tu dobu zaměstnanec není v evidenčním stavu zaměstnanců
 (tak to vykládá MPSV i ČSÚ). Měsíční fondy pracovní doby zůstávají plné
-a nemoc ani neplacené volno evidenční dny nesnižují.
+a nemoc ani neplacené volno evidenční dny nesnižují. U jednatele, společníka
+a člena orgánu (druh činnosti K a N až S) chtějí pokyny MPSV stanovený
+i sjednaný fond nulový; aplikace proto oba navrhne jako 0. Hodnotu ze smlouvy
+o výkonu funkce, která pracovní dobu sjednává, můžeš přepsat.
 
 Součástí potvrzení jsou také dvě povinná rozhodnutí **Ano/Ne**: zda v měsíci
 nastaly neodpracované hodiny (IN07) a zda nastaly překážky v práci (IN08).
