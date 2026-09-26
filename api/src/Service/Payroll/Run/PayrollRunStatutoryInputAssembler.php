@@ -1406,6 +1406,23 @@ final class PayrollRunStatutoryInputAssembler
             $taxEvidence['child_claims'] ?? null,
             $personReference,
         );
+        if (!self::employedInPeriod($employments, $periodStart)) {
+            /*
+             * Příjem zúčtovaný až po skončení všech vztahů u plátce (odložený
+             * příjem, JMHZ scénář 8): záloha zůstává zálohou, protože prohlášení
+             * bylo učiněno na zdaňovací období (§ 38h odst. 4 ZDP) a hlášení
+             * ho dál uvádí (10419). Měsíční slevu § 35ba a daňové zvýhodnění
+             * ale za měsíc, ve kterém už u plátce nepracuje, neuplatní: slevu
+             * za kalendářní měsíc smí poskytnout jen jeden plátce (§ 38k
+             * odst. 3 a odst. 4 písm. b) ZDP) a prohlášení u dosavadního
+             * zaměstnavatele skončením pracovního poměru pro další měsíce
+             * končí. Dřív se sleva poskytla znovu a u nového zaměstnavatele
+             * vznikla dvakrát. Nárok si poplatník uplatní v ročním zúčtování
+             * nebo v přiznání.
+             */
+            $creditClaims = [];
+            $childClaims = [];
+        }
         if ($annual === null || $relationships === []) {
             return null;
         }
@@ -2483,6 +2500,28 @@ final class PayrollRunStatutoryInputAssembler
      *
      * @param array<string,mixed> $snapshot
      */
+    /**
+     * Trvá u plátce v měsíci aspoň jeden vztah osoby? Skončený vztah má
+     * `end_date` před začátkem měsíce; vztah bez data skončení trvá.
+     *
+     * @param list<mixed> $employments
+     */
+    private static function employedInPeriod(array $employments, string $periodStart): bool
+    {
+        foreach ($employments as $snapshot) {
+            $employment = is_array($snapshot) ? ($snapshot['employment'] ?? null) : null;
+            if (!is_array($employment)) {
+                return true;
+            }
+            $end = $employment['end_date'] ?? null;
+            if (!is_string($end) || $end >= $periodStart) {
+                return true;
+            }
+        }
+
+        return $employments === [];
+    }
+
     private static function deferredIncomeType(array $snapshot): ?string
     {
         $deferred = $snapshot['deferred_income'] ?? null;

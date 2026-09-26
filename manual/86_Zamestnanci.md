@@ -495,8 +495,12 @@ pracovního poměru (typicky odměna) potvrďte na kartě skončeného vztahu v 
 *Příjem po skončení zaměstnání (1)*. Mzdový běh pak příjem přijme, pojistné
 vypočte za měsíc zúčtování a měsíční hlášení JMHZ ho vykáže samostatným
 formulářem Odložený příjem s ELDP za tento měsíc (0 dnů, kód s „P“ na druhé
-pozici). Bez potvrzení běh příjem po skončení odmítne a z kontroly vás pošle
-přímo sem. Ostatní druhy odloženého příjmu (například doplatek za dřívější
+pozici). Záloha na daň zůstává zálohou a hlášení uvádí podepsané prohlášení,
+měsíční slevu na poplatníka ani daňové zvýhodnění na děti ale za měsíc, kdy už
+u vás nepracuje, aplikace neodečte: za kalendářní měsíc je smí poskytnout jen
+jeden plátce a poplatník je mezitím mohl uplatnit u nového zaměstnavatele.
+Nárok si uplatní v ročním zúčtování nebo v přiznání. Bez potvrzení běh příjem
+po skončení odmítne a z kontroly vás pošle přímo sem. Ostatní druhy odloženého příjmu (například doplatek za dřívější
 měsíce trvajícího vztahu) a odložený příjem z dohod podejte opravným hlášením
 na ePortálu ČSSZ.
 

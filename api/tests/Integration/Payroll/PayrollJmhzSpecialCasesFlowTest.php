@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Action\Payroll\PayrollDeferredIncomeAction;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Response;
 
 /**
  * Zvláštní případy měsíčního hlášení JMHZ cestou účetní, od založení vztahu
@@ -124,6 +126,48 @@ final class PayrollJmhzSpecialCasesFlowTest extends TestCase
                 . '<form:pracovniNeschopnost>0</form:pracovniNeschopnost><form:vyplaceniDavek>26</form:vyplaceniDavek>',
             $xml,
         );
+    }
+
+    /**
+     * Doplatek odměny zúčtovaný v červenci po skončení pracovního poměru
+     * v červnu (odložený příjem typu 1, scénář 8). Prohlášení bylo učiněno
+     * na zdaňovací období, takže záloha zůstává zálohou a 10419 = ANO; měsíční
+     * slevu na poplatníka za měsíc, kdy už u plátce nepracuje, ale plátce
+     * neposkytne (§ 38k odst. 3 a 4 písm. b) ZDP). Dřív se sleva 2 570 Kč
+     * odečetla a u nového zaměstnavatele vznikla za týž měsíc podruhé.
+     */
+    public function testDeferredIncomeAfterTerminationGetsNoMonthlyTaxCredit(): void
+    {
+        $person = $this->hire('Bohdan Odešlý', 'male', '1975-01-20');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_tax_credit_claims
+                (supplier_id, employee_id, credit_kind, evidence_status, effective_from, effective_to, evidence_reference)
+             VALUES (?, ?, "taxpayer", "verified", "2026-01-01", NULL, "document:synthetic-credit")',
+        )->execute([$this->supplierId, $person['employee_id']]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET status = "ended", end_date = "2026-06-30" WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $person['employment_id']]);
+        $action = $this->container->get(PayrollDeferredIncomeAction::class);
+        self::assertInstanceOf(PayrollDeferredIncomeAction::class, $action);
+        $response = $action->save(
+            $this->request('PUT', "/api/payroll/employments/{$person['employment_id']}/deferred-income/" . self::PERIOD)
+                ->withParsedBody(['deferred_type' => '1', 'note' => 'Syntetický doplatek odměny.']),
+            new Response(),
+            ['id' => (string) $person['employment_id'], 'period' => self::PERIOD],
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $this->pay($person, 1_500_000);
+
+        $xml = $this->submission('deferred-declaration');
+
+        self::assertSame(1, preg_match('#<form:odlozenyPrijem[^>]*><form:typ>1</form:typ>#', $xml));
+        self::assertStringContainsString(
+            '<form:zalohaNaDan><form:zakladDane>15000</form:zakladDane><form:vypoctenaZaloha>2250</form:vypoctenaZaloha>'
+                . '<form:danZalohaPoSleve>2250</form:danZalohaPoSleve>',
+            $xml,
+        );
+        self::assertStringContainsString('<form:prohlaseniPoplatnika>true</form:prohlaseniPoplatnika>', $xml);
+        self::assertStringNotContainsString('<form:zakladniSleva>', $xml);
     }
 
     /**
