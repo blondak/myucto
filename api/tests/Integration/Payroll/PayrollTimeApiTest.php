@@ -615,6 +615,39 @@ final class PayrollTimeApiTest extends TestCase
         self::assertSame(0, $this->countRows('payroll_jmhz_work_month_revisions'));
     }
 
+    /**
+     * 10261 je stanovená týdenní doba podle § 79 zákoníku práce, ne kratší
+     * sjednaná doba podle § 80. Polovina úvazku u zaměstnavatele se 40 h týdně
+     * hlásí 40 (kratší doba je jen ve sjednaném fondu 10260), zaměstnanec
+     * v režimu 37,5 h na plný úvazek hlásí 37,5 a stanovený fond 10259 z 37,5 h.
+     */
+    public function testStatedWeeklyWorkIsFullTimeOfEmployerNotAgreedShorterTime(): void
+    {
+        $terms = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on, weekly_hours, workload_basis_points)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        $terms->execute([$this->supplierId, $this->employmentId, '2026-01-01', '2026-01-01', '20.00', 5000]);
+        $preview = $this->json($this->action->month(
+            $this->request('GET', '/api/payroll/time/month')->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        ))['items'][0]['jmhz_work_summary']['preview'];
+        self::assertSame('40', $preview['suggestions']['weekly_work_hours']);
+        self::assertSame('168', $preview['suggestions']['standard_fund_hours']);
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET weekly_hours = ?, workload_basis_points = ?
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute(['37.50', 10000, $this->supplierId, $this->employmentId]);
+        $preview = $this->json($this->action->month(
+            $this->request('GET', '/api/payroll/time/month')->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        ))['items'][0]['jmhz_work_summary']['preview'];
+        self::assertSame('37.50', $preview['suggestions']['weekly_work_hours']);
+        self::assertSame('157.5', $preview['suggestions']['standard_fund_hours']);
+    }
+
     public function testJmhzConditionalWorkBlocksAreExplicitAndFailClosed(): void
     {
         $calendar = $this->action->calendar(
