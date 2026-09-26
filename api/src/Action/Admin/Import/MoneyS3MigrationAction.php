@@ -164,7 +164,18 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
             }
             $meta = MoneyS3Uploads::meta($supplierId, $token);
             $backup = Ms3Backup::open(MoneyS3Uploads::agendaDir($supplierId, $token));
-            $preflight = $this->importer->preflight($supplierId, $backup, AgendaInfo::fromBackup($backup), new ImportOptions());
+            // Náhled agendy a rozvrh deníku spočítal job nahrání do `meta.json`. Znovu je
+            // číst ze zálohy znamenalo projít deník každého roku čtyřikrát (u gigabajtové
+            // agendy přes deset sekund při každém otevření průvodce). Nahrání před jejich
+            // zavedením je nemá: dočtou se jednou a uloží.
+            if (!MoneyS3Importer::journalPreviewComplete($meta['journal_preview'] ?? null) || !is_array($meta['agenda'] ?? null)) {
+                $meta['agenda'] = AgendaInfo::fromBackup($backup)->toArray();
+                $meta['journal_preview'] = $this->importer->journalPreview($backup);
+                MoneyS3Uploads::writeMeta($supplierId, $token, $meta);
+            }
+            $preflight = $this->importer->preflight($supplierId, $backup, AgendaInfo::fromArray((array) $meta['agenda']), new ImportOptions(),
+                (array) $meta['journal_preview']);
+            unset($meta['journal_preview']);
         } catch (MoneyS3Exception $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), 404);
         }

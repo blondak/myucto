@@ -79,12 +79,38 @@ final class MoneyS3Importer
     }
 
     /**
+     * Rozvrh období a nenavazující roky zálohy při výchozích volbách převodu - to, co
+     * z deníku potřebuje kontrola před převodem v náhledu průvodce. Počítá ho job nahrání
+     * do `meta.json`; náhled pak deníky (u velké agendy gigabajty) znovu nečte.
+     *
+     * @return array{plan:list<array<string,mixed>>,chain_breaks:list<array<string,mixed>>}
+     */
+    public function journalPreview(Ms3Backup $backup): array
+    {
+        $options = new ImportOptions();
+        return ['plan' => $this->journal->plan($backup, $options), 'chain_breaks' => $this->journal->chainBreaks($backup, $options)];
+    }
+
+    /** Náhled deníku z `meta.json` je úplný (nahrání před jeho zavedením ho nemá). */
+    public static function journalPreviewComplete(mixed $preview): bool
+    {
+        return is_array($preview) && is_array($preview['plan'] ?? null) && is_array($preview['chain_breaks'] ?? null);
+    }
+
+    /**
      * Kontrola před převodem — nic nezapisuje. Chyba převod zastaví, upozornění ne.
      *
+     * `$journalPreview` = rozvrh a nenavazující roky z `meta.json` ({@see journalPreview()});
+     * platí jen pro výchozí volby převodu, s jinými se deník čte ze zálohy.
+     *
+     * @param array{plan:list<array<string,mixed>>,chain_breaks:list<array<string,mixed>>}|null $journalPreview
      * @return list<array{level:string,code:string,message:string,context:array<string,mixed>}>
      */
-    public function preflight(int $supplierId, Ms3Backup $backup, AgendaInfo $agenda, ImportOptions $options): array
+    public function preflight(int $supplierId, Ms3Backup $backup, AgendaInfo $agenda, ImportOptions $options, ?array $journalPreview = null): array
     {
+        if ($options->fromYear !== null || $options->firstPeriodStart !== null || !self::journalPreviewComplete($journalPreview)) {
+            $journalPreview = null;
+        }
         $out = [];
         $add = static function (string $level, string $code, string $message, array $context = []) use (&$out): void {
             $out[] = ['level' => $level, 'code' => $code, 'message' => $message, 'context' => $context];
@@ -119,13 +145,16 @@ final class MoneyS3Importer
             $add('warning', $w['code'], $w['message']);
         }
 
-        $plan = $this->journal->plan($backup, $options);
+        $plan = $journalPreview['plan'] ?? $this->journal->plan($backup, $options);
         if ($plan === [] && $options->fromYear !== null) {
             $add('error', 'from_year_empty', "Od roku {$options->fromYear} záloha nemá žádný účetní rok — není co převést.", ['from_year' => $options->fromYear]);
         } elseif ($plan === []) {
             $add('error', 'no_journal', 'Záloha neobsahuje účetní deník — není co převést.');
         }
-        $breaks = $this->journal->chainBreaks($backup, $options);
+        // meta.json ukládá celé částky bez desetinné části jako celá čísla.
+        $breaks = $journalPreview !== null
+            ? array_map(static fn (array $b): array => ['accounts' => array_map('floatval', (array) $b['accounts'])] + $b, $journalPreview['chain_breaks'])
+            : $this->journal->chainBreaks($backup, $options);
         foreach ($breaks as $b) {
             $code = (string) array_key_first($b['accounts']);
             $add('warning', 'opening_chain_break', sprintf(

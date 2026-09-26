@@ -189,6 +189,38 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
     }
 
     /**
+     * Náhled průvodce staví kontrolu před převodem z `meta.json` (náhled agendy a rozvrh
+     * deníku z jobu nahrání). Dřív při každém otevření průvodce prošel deník každého roku
+     * čtyřikrát, u gigabajtové agendy přes deset sekund. Výsledek je stejný jako ze zálohy
+     * i po cestě přes JSON (celé částky bez desetinné části), a to bez deníků v záloze.
+     */
+    public function testPreflightFromMetaPreviewEqualsPreflightFromBackupWithoutReadingJournals(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/meta.lz', SyntheticAgenda::filesWithOpeningReclass());
+        $backup = Ms3Backup::extract($this->tmp . '/meta.lz', $this->tmp . '/meta');
+        $expected = $this->importer->preflight($supplierId, $backup, AgendaInfo::fromBackup($backup), new ImportOptions());
+        self::assertContains('opening_chain_break', array_column($expected, 'code'));
+        $roundTrip = static fn (array $data): array => (array) json_decode((string) json_encode($data), true);
+        $preview = $roundTrip($this->importer->journalPreview($backup));
+        $agenda = AgendaInfo::fromArray($roundTrip(AgendaInfo::fromBackup($backup)->toArray()));
+
+        foreach ($backup->yearDirs() as $dir) {
+            foreach (glob($dir . '/*.[Dd][Aa][Tt]') ?: [] as $table) {
+                if (strcasecmp(pathinfo($table, PATHINFO_FILENAME), 'UcDenik') === 0) {
+                    unlink($table);
+                }
+            }
+        }
+
+        self::assertSame($expected, $this->importer->preflight($supplierId, Ms3Backup::open($backup->dir()), $agenda, new ImportOptions(), $preview));
+        // Jiné volby převodu než výchozí náhled z meta.json nepoužijí.
+        $fromYear = $this->importer->preflight($supplierId, Ms3Backup::open($backup->dir()), $agenda,
+            new ImportOptions(ImportOptions::MODE_DRY_RUN, true, null, [], [], false, 2025), $preview);
+        self::assertContains('from_year_empty', array_column($fromYear, 'code'));
+    }
+
+    /**
      * „Převést od roku": starší roky i jejich doklady se vynechají, první převedený rok
      * s počátečními stavy začíná 1. 1. a převod je bez chyb.
      */
