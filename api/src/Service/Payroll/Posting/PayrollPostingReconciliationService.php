@@ -181,7 +181,9 @@ final class PayrollPostingReconciliationService
          * Závazky, které se PLATÍ, ale ÚČTUJÍ se mimo mzdový můstek: zákonné
          * pojištění odpovědnosti zaměstnavatele (§ 205d zákoníku práce, vyhl.
          * 125/1993 Sb.) a benefity placené třetí straně. Účtují se vlastním
-         * dokladem (přijatá faktura, interní doklad), takže mzdová ani deníková
+         * dokladem (přijatá faktura, interní doklad; pojištění odpovědnosti
+         * vlastním předpisem `payroll_accident_insurance` za čtvrtletí, ne
+         * zápisem revize), takže mzdová ani deníková
          * strana tu být NEMŮŽE — kdyby se doplnila kategorie s porovnáním,
          * vyrobila by trvalý falešný rozdíl. Vykazují se proto jmenovitě jako
          * NEÚČTOVANÉ; účetní tak vidí, že o nich modul ví, a nehledá je jinde.

@@ -68,9 +68,19 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
         private readonly Connection $db,
         private readonly PayrollLevyDeadlinePolicy $deadlines,
         private readonly PayrollAccidentInsuranceCalculator $calculator,
+        private readonly PayrollAccidentInsurancePosting $posting,
     ) {}
 
-    /** @return array{liability_ids:list<int>,created_count:int} */
+    /**
+     * `posting` nese výsledek předpisu do deníku ({@see PayrollAccidentInsurancePosting}):
+     * `null`, když žádný řádek závazku nevznikl ani nepřehrál.
+     *
+     * @return array{
+     *   liability_ids:list<int>,
+     *   created_count:int,
+     *   posting?:array{status:string,journal_entry_id:?int,reason:?string}|null
+     * }
+     */
     public function materialize(
         int $supplierId,
         int $revisionId,
@@ -246,9 +256,20 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                     );
                 }
 
+                // Závazek vzniklý dřív, než se pojistné předepisovalo do deníku
+                // (nebo v zamčeném období), dostane předpis při dalším běhu
+                // přípravy plateb — replay je jediné místo, kde se to dá dohnat.
                 return [
                     'liability_ids' => [$existing['id']],
                     'created_count' => 0,
+                    'posting' => $this->posting->post(
+                        $supplierId,
+                        $existing['id'],
+                        $direction,
+                        $amount,
+                        $periodStart,
+                        $actorUserId,
+                    ),
                 ];
             }
 
@@ -268,7 +289,18 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                 $actorUserId,
             );
 
-            return ['liability_ids' => [$id], 'created_count' => 1];
+            return [
+                'liability_ids' => [$id],
+                'created_count' => 1,
+                'posting' => $this->posting->post(
+                    $supplierId,
+                    $id,
+                    $direction,
+                    $amount,
+                    $periodStart,
+                    $actorUserId,
+                ),
+            ];
         });
     }
 

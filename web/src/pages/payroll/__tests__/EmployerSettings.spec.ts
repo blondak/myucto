@@ -104,6 +104,8 @@ const defaultAccounts: PayrollEmployerAccounts = {
   employee_receivable_debit: '335',
   non_deductible_benefit_debit: '528',
   travel_expense_debit: '512',
+  accident_insurance_debit: '548',
+  accident_insurance_credit: '379',
 }
 
 function chartAccount(
@@ -125,7 +127,7 @@ function chartAccount(
 
 function chartAccounts(): PayrollAccountOption[] {
   return [
-    ...['512', '521', '522', '523', '524', '527', '528'].map(code => chartAccount(code, 'expense')),
+    ...['512', '521', '522', '523', '524', '527', '528', '548'].map(code => chartAccount(code, 'expense')),
     ...['331', '336', '342', '365', '366', '379'].map(code => chartAccount(code, 'liability')),
     // 335 je jediný AKTIVNÍ účet v sadě — přeplatek čisté mzdy je pohledávka
     // za zaměstnancem, ne závazek.
@@ -384,6 +386,9 @@ describe('EmployerSettings — účtová osnova', () => {
     ['employee_receivable_debit', '335'],
     ['non_deductible_benefit_debit', '528'],
     ['travel_expense_debit', '512'],
+    // Zákonné pojištění odpovědnosti — předpis vzniká se čtvrtletním závazkem.
+    ['accident_insurance_debit', '548'],
+    ['accident_insurance_credit', '379'],
     // Ú-13: srážková daň má vlastní předkontaci; firma založená dřív ji má
     // srovnanou na účet zálohové daně, takže se pošle zpátky 342.
     ['withholding_tax_credit', '342'],

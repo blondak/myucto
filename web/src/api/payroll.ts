@@ -2661,6 +2661,9 @@ export interface PayrollEmployerAccounts {
   non_deductible_benefit_debit: string
   /** Cestovní náhrada je náhrada výdaje podle části sedmé ZP, ne mzda. */
   travel_expense_debit: string
+  /** Zákonné pojištění odpovědnosti (vyhl. 125/1993 Sb.) — 548 MD / 379.400 D. */
+  accident_insurance_debit: string
+  accident_insurance_credit: string
 }
 
 export interface PayrollAccountOption {

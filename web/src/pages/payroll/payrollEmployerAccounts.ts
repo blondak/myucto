@@ -28,6 +28,8 @@ export const PAYROLL_ACCOUNT_TYPES: Record<PayrollAccountKey, PayrollAccountOpti
   employee_receivable_debit: 'asset',
   non_deductible_benefit_debit: 'expense',
   travel_expense_debit: 'expense',
+  accident_insurance_debit: 'expense',
+  accident_insurance_credit: 'liability',
 }
 
 export function normalizedPayrollAccountCode(value: string): string {

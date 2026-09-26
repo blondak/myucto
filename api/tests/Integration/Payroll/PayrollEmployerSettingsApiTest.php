@@ -121,7 +121,9 @@ final class PayrollEmployerSettingsApiTest extends TestCase
             'employee_receivable_debit' => '335',
             'non_deductible_benefit_debit' => '528',
             'travel_expense_debit' => '512',
-        ], $settings['accounts']);
+            'accident_insurance_debit' => '548',
+            'accident_insurance_credit' => '379.400',
+        ],$settings['accounts']);
     }
 
     public function testSettingsAreSavedAndTenantIsolated(): void

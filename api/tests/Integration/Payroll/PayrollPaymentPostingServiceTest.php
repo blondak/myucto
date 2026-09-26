@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsurancePosting;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentEvidenceReference;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
@@ -112,6 +113,70 @@ final class PayrollPaymentPostingServiceTest extends TestCase
 
         self::assertSame(
             ['336.100|debit' => '1000.00', '221|credit' => '1000.00'],
+            $this->lines((int) $posting['journal_entry_id']),
+        );
+    }
+
+    /**
+     * Zákonné pojištění odpovědnosti: úhrada se účtuje proti účtu předpisu,
+     * který vznikl se závazkem. Závazek bez předpisu (starší, daňová evidence)
+     * se dál neúčtuje — odúčtovat 379, na které nic není, by ji nechalo
+     * debetní.
+     */
+    public function testAccidentInsurancePaymentClearsTheAccountOfItsPremiumPosting(): void
+    {
+        foreach ([['548', 'expense'], ['379', 'liability']] as [$code, $type]) {
+            $this->pdo->prepare(
+                'INSERT IGNORE INTO chart_of_accounts
+                    (supplier_id, account_code, name, account_type, is_active)
+                 VALUES (?, ?, ?, ?, 1)',
+            )->execute([$this->supplierId, $code, "Účet {$code}", $type]);
+        }
+        $revisionId = (int) $this->pdo->query(
+            "SELECT revision_id FROM payroll_payment_liabilities WHERE id = {$this->liabilityId}",
+        )->fetchColumn();
+        $withoutPremium = $this->insertLiability($revisionId, 'statutory_insurance');
+        $unpostedMatch = $this->service->match(new PayrollPaymentReconciliationCommand(
+            $this->supplierId,
+            $this->insertAllocation($withoutPremium, 100_000),
+            100_000,
+            PayrollPaymentEvidenceReference::bank(
+                $this->statementId,
+                $this->insertBankTransaction('-1000.00', 'pojistne-bez-predpisu'),
+            ),
+            'accident-without-premium',
+            null,
+        ));
+        self::assertSame('liability_posted_elsewhere', $this->posting($unpostedMatch->id)['posting_skipped_reason']);
+
+        $container = Bootstrap::buildContainer();
+
+        $withPremium = $this->insertLiability($revisionId, 'statutory_insurance', '-q1');
+        $premium = $container->get(PayrollAccidentInsurancePosting::class)->post(
+            $this->supplierId,
+            $withPremium,
+            'outgoing',
+            100_000,
+            '2099-03-01',
+            null,
+        );
+        self::assertSame('posted', $premium['status'], (string) json_encode($premium));
+
+        $posted = $this->service->match(new PayrollPaymentReconciliationCommand(
+            $this->supplierId,
+            $this->insertAllocation($withPremium, 100_000),
+            100_000,
+            PayrollPaymentEvidenceReference::bank(
+                $this->statementId,
+                $this->insertBankTransaction('-1000.00', 'pojistne-s-predpisem'),
+            ),
+            'accident-with-premium',
+            null,
+        ));
+        $posting = $this->posting($posted->id);
+        self::assertSame('posted', $posting['posting_status'], (string) json_encode($posting));
+        self::assertSame(
+            ['221|credit' => '1000.00', '379|debit' => '1000.00'],
             $this->lines((int) $posting['journal_entry_id']),
         );
     }
@@ -443,7 +508,7 @@ final class PayrollPaymentPostingServiceTest extends TestCase
         return (int) $this->pdo->lastInsertId();
     }
 
-    private function insertLiability(int $revisionId, string $kind): int
+    private function insertLiability(int $revisionId, string $kind, string $suffix = ''): int
     {
         $snapshot = '{"schema":"synthetic-liability.v1"}';
         $this->pdo->prepare(
@@ -457,11 +522,11 @@ final class PayrollPaymentPostingServiceTest extends TestCase
         )->execute([
             $this->supplierId,
             $revisionId,
-            "liability-{$kind}",
+            "liability-{$kind}{$suffix}",
             $kind,
             $snapshot,
             hash('sha256', $snapshot),
-            hash('sha256', "posting-liability-{$this->supplierId}-{$kind}", true),
+            hash('sha256', "posting-liability-{$this->supplierId}-{$kind}{$suffix}", true),
         ]);
 
         return (int) $this->pdo->lastInsertId();

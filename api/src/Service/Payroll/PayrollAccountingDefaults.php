@@ -144,6 +144,15 @@ final class PayrollAccountingDefaults
         // vyvedla a do rozdělení srážek pustila účet, který se nesráží —
         // rozbor je v migraci 1618.
         'travel_expense_debit' => ['code' => '512', 'type' => 'expense'],
+        // Zákonné pojištění odpovědnosti zaměstnavatele (vyhl. 125/1993 Sb.).
+        // Pojistné si zaměstnavatel počítá sám a pojišťovna žádný doklad
+        // nevystavuje, takže předpis vzniká spolu se čtvrtletním závazkem
+        // ({@see \MyInvoice\Service\Payroll\Payment\PayrollAccidentInsurancePosting}).
+        // Není to mzda ani zákonné sociální pojištění (524) — je to pojistné,
+        // proto 548. Závazek vůči pojistiteli má vlastní analytiku 379.400,
+        // stejně jako ostatní věřitelé na 379 (Ú-14).
+        'accident_insurance_debit' => ['code' => '548', 'type' => 'expense'],
+        'accident_insurance_credit' => ['code' => '379.400', 'type' => 'liability'],
     ];
 
     /**
@@ -167,6 +176,8 @@ final class PayrollAccountingDefaults
         'travel_expense_debit',
         'withholding_tax_credit',
         'enforcement_deductions_credit',
+        'accident_insurance_debit',
+        'accident_insurance_credit',
     ];
 
     /**

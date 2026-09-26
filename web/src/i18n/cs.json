@@ -7592,7 +7592,8 @@
         "risky_savings": "Povinné spoření u rizikové práce",
         "employee_receivable": "Pohledávka za zaměstnancem",
         "non_deductible_benefit": "Nedaňová část benefitu",
-        "travel_expense": "Cestovní náhrady"
+        "travel_expense": "Cestovní náhrady",
+        "accident_insurance": "Zákonné pojištění odpovědnosti"
       },
       "validation": {
         "title": "Před uložením opravte označená pole.",
@@ -7677,7 +7678,8 @@
         "employee_receivable": "Kam se překlopí záporná čistá mzda — typicky doplatek zdravotního pojištění do minimálního vyměřovacího základu v měsíci bez peněžního příjmu. Zaměstnanec dluží zaměstnavateli, takže jde o pohledávku (335), ne o závazek.",
         "non_deductible_benefit": "Osvobozená část nepeněžního benefitu (rekreace, sport, kultura, zdraví, tištěné knihy). Podle § 25 odst. 1 písm. h) ZDP je nedaňová právě ta OSVOBOZENÁ část; nadlimitní část se zaměstnanci zdaní a nákladem zůstává. Účet 528 se sám propíše do nedaňových nákladů v přiznání k dani z příjmů.",
         "travel_expense": "Cestovní náhrada je náhrada výdaje podle části sedmé zákoníku práce, ne odměna za práci — do mzdových nákladů nepatří. Protiúčtem zůstává závazkový účet pracovního vztahu, protože se náhrada vyplácí spolu se mzdou.",
-        "enforcement_deductions": "Srážky nařízené soudem, exekutorem nebo insolvenčním správcem. Oddělené od ostatních srážek proto, že se u nich vede pořadí pohledávek a posílají se jinému příjemci než dobrovolné srážky — na společném účtu se saldo obou skupin slije a nejde dohledat."
+        "enforcement_deductions": "Srážky nařízené soudem, exekutorem nebo insolvenčním správcem. Oddělené od ostatních srážek proto, že se u nich vede pořadí pohledávek a posílají se jinému příjemci než dobrovolné srážky — na společném účtu se saldo obou skupin slije a nejde dohledat.",
+        "accident_insurance": "Čtvrtletní pojistné podle vyhlášky č. 125/1993 Sb. Pojišťovna žádný doklad nevystavuje, takže předpis (MD náklad / D závazek) vzniká v podvojném účetnictví při přípravě plateb za poslední měsíc čtvrtletí a úhrada se pak účtuje proti tomuto závazku."
       },
       "registration_source_reference_hint": "Nepovinné. Odkaz na výměr nebo rozhodnutí, ze kterého jste variabilní symbol opsali."
     },

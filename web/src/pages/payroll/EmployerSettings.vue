@@ -86,6 +86,7 @@ const accountRows: Array<{
   { key: 'employee_receivable', debit: 'employee_receivable_debit', credit: null },
   { key: 'non_deductible_benefit', debit: 'non_deductible_benefit_debit', credit: null },
   { key: 'travel_expense', debit: 'travel_expense_debit', credit: null },
+  { key: 'accident_insurance', debit: 'accident_insurance_debit', credit: 'accident_insurance_credit' },
 ]
 
 const defaultAccounts: PayrollEmployerAccounts = {
@@ -117,6 +118,8 @@ const defaultAccounts: PayrollEmployerAccounts = {
   employee_receivable_debit: '335',
   non_deductible_benefit_debit: '528',
   travel_expense_debit: '512',
+  accident_insurance_debit: '548',
+  accident_insurance_credit: '379',
 }
 
 const form = reactive<EmployerSettingsForm>({
@@ -478,6 +481,7 @@ const ACCOUNT_ROW_HINTS: ReadonlySet<string> = new Set([
   'travel_expense',
   'withholding_tax',
   'enforcement_deductions',
+  'accident_insurance',
 ])
 
 function accountRowHint(key: string): string {
