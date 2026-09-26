@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorMessage, externalJmhzSubmissionTarget } from '@/api/errors'
 import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
 import {
   payrollApi,
@@ -36,6 +36,8 @@ interface DispatchState {
    */
   confirming: 'isds' | 'vrep' | null
   error: string
+  /** Proklik k chybě (měsíc podaný předchozím programem → přehled převzatých podání). */
+  errorTarget?: ReturnType<typeof externalJmhzSubmissionTarget>
   isds: PayrollJmhzIsdsEnqueueResult | null
   vrep: PayrollJmhzTransportPoll | null
   gateway: GatewayStart | null
@@ -214,7 +216,7 @@ async function submissionId(preview: PayrollJmhzPvpojPreview): Promise<number> {
 async function dispatch(preview: PayrollJmhzPvpojPreview, channel: 'isds' | 'vrep') {
   if (!canWrite.value || unavailableReason(preview)) return
   const current = state(preview)
-  setState(preview, { ...current, busy: channel, confirming: null, error: '', gateway: null })
+  setState(preview, { ...current, busy: channel, confirming: null, error: '', errorTarget: null, gateway: null })
 
   try {
     const id = await submissionId(preview)
@@ -255,6 +257,7 @@ async function dispatch(preview: PayrollJmhzPvpojPreview, channel: 'isds' | 'vre
         exception,
         t('payroll.submissions.overview.jmhz_dispatch_failed'),
       ),
+      errorTarget: externalJmhzSubmissionTarget(exception),
     })
   }
 }
@@ -415,6 +418,14 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
           role="alert"
         >
           {{ state(preview).error }}
+          <RouterLink
+            v-if="state(preview).errorTarget"
+            :to="state(preview).errorTarget!"
+            class="mt-1 block font-medium text-payroll-600 underline hover:text-payroll-700"
+            data-test="jmhz-dispatch-external-link"
+          >
+            {{ t('payroll.external_jmhz.open_history') }}
+          </RouterLink>
         </p>
 
         <div

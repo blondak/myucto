@@ -52,6 +52,19 @@ export function yearClosedTarget(err: any):
 }
 
 /**
+ * Měsíc, za který řádné hlášení JMHZ podal předchozí mzdový program — kam se jde
+ * ověřit. Server vlastní řádné hlášení za takový měsíc nezmrazí (ČSSZ by druhé
+ * řádné zamítla) a hláška říká proč; proklik vede na přehled převzatých podání,
+ * kde se záznam dá zkontrolovat a případně odebrat.
+ */
+export function externalJmhzSubmissionTarget(err: any):
+  | { name: 'payroll-submissions-tab', params: { tab: 'jmhz' }, hash: '#external-submissions' }
+  | null {
+  if (apiErrorCode(err) !== 'jmhz_period_submitted_externally') return null
+  return { name: 'payroll-submissions-tab', params: { tab: 'jmhz' }, hash: '#external-submissions' }
+}
+
+/**
  * Chybějící účetní období — kam se jde založit.
  *
  * Hláška uměla říct jen „pro datum X neexistuje účetní období", případně poslat

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorMessage, externalJmhzSubmissionTarget } from '@/api/errors'
 import {
   payrollApi,
   type PayrollMonthlyChecklistItem,
@@ -61,6 +61,8 @@ const response = ref<PayrollMonthlyChecklistResponse | null>(null)
 /** Klíč položky, jejíž podání se právě zakládá — ať nejde kliknout dvakrát. */
 const preparing = ref('')
 const prepareError = ref<Record<string, string>>({})
+/** Proklik k chybě přípravy (měsíc podaný předchozím programem → přehled převzatých podání). */
+const prepareErrorTarget = ref<Record<string, ReturnType<typeof externalJmhzSubmissionTarget>>>({})
 
 const items = computed(() => response.value?.items ?? [])
 const summary = computed(() => response.value?.summary ?? {
@@ -168,11 +170,13 @@ async function prepare(item: PayrollMonthlyChecklistItem) {
   if (!request || preparing.value) return
   preparing.value = item.key
   prepareError.value = { ...prepareError.value, [item.key]: '' }
+  prepareErrorTarget.value = { ...prepareErrorTarget.value, [item.key]: null }
   try {
     const result = await payrollApi.prepareMonthlyChecklistItem(props.environment, request)
     await load()
     await router.push(result.path)
   } catch (exception) {
+    prepareErrorTarget.value = { ...prepareErrorTarget.value, [item.key]: externalJmhzSubmissionTarget(exception) }
     prepareError.value = {
       ...prepareError.value,
       [item.key]: apiErrorMessage(
@@ -410,6 +414,14 @@ onMounted(load)
                       data-test="monthly-checklist-prepare-error"
                     >
                       {{ prepareError[item.key] }}
+                      <RouterLink
+                        v-if="prepareErrorTarget[item.key]"
+                        :to="prepareErrorTarget[item.key]!"
+                        class="mt-1 block font-medium text-payroll-600 underline hover:text-payroll-700"
+                        data-test="monthly-checklist-external-link"
+                      >
+                        {{ t('payroll.external_jmhz.open_history') }}
+                      </RouterLink>
                     </p>
                   </template>
                 </td>
@@ -481,6 +493,13 @@ onMounted(load)
                   role="alert"
                 >
                   {{ prepareError[item.key] }}
+                  <RouterLink
+                    v-if="prepareErrorTarget[item.key]"
+                    :to="prepareErrorTarget[item.key]!"
+                    class="mt-1 block font-medium text-payroll-600 underline hover:text-payroll-700"
+                  >
+                    {{ t('payroll.external_jmhz.open_history') }}
+                  </RouterLink>
                 </p>
               </template>
             </div>

@@ -26,6 +26,7 @@ import PayrollMonthlyChecklistPanel from './PayrollMonthlyChecklistPanel.vue'
 import PayrollStatutoryObligationsPanel from './PayrollStatutoryObligationsPanel.vue'
 import PayrollSigningCertificatePanel from './PayrollSigningCertificatePanel.vue'
 import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
+import PayrollExternalJmhzSubmissionsPanel from './PayrollExternalJmhzSubmissionsPanel.vue'
 import PayrollSubmissionQueuePanel from './PayrollSubmissionQueuePanel.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -673,10 +674,20 @@ onMounted(loadInboxBadge)
       v-model:environment="environment"
     />
 
-    <PayrollSubmissionOverviewPanel
-      v-else
-      v-model:environment="environment"
-      :mode="activeTab === 'other' ? activeTab : 'jmhz'"
-    />
+    <template v-else>
+      <!--
+        Podání předchozím programem stojí nad přehledem JMHZ: měsíc, za který
+        řádné hlášení podal předchozí program, se tu vysvětluje a opravuje.
+        Firma bez převodu z jiného programu panel neuvidí.
+      -->
+      <PayrollExternalJmhzSubmissionsPanel
+        v-if="activeTab === 'jmhz'"
+        :environment="environment"
+      />
+      <PayrollSubmissionOverviewPanel
+        v-model:environment="environment"
+        :mode="activeTab === 'other' ? activeTab : 'jmhz'"
+      />
+    </template>
   </div>
 </template>

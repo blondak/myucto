@@ -9354,6 +9354,41 @@
         "step": "Open Average earnings for this employment. Year {year} and quarter {quarter} are selected as the period in which the average applies; the calculation reference period is the previous quarter. Check the source data, create and approve the average, then refresh the exit documents."
       },
       "technical": "Technical details for support"
+    },
+    "external_jmhz": {
+      "title": "Submissions by the previous program",
+      "description": "Monthly JMHZ reports and registrations filed for the company by the previous payroll program (PAMICA migration or uploaded XML reports). For a month whose regular report has been sent, MyÚčto does not prepare another regular report: ČSSZ rejects a second regular report. Send corrections for such a month as a corrective submission from the program that filed the report.",
+      "load_failed": "Submissions by the previous program could not be loaded.",
+      "open_history": "Open submissions by the previous program",
+      "open_migration": "Open the PAMICA migration",
+      "unsent_title": "The previous program did not send the report for {period}",
+      "unsent_hint": "PAMICA prepared the report, but ČSSZ never received it. Send it from the previous program (MyÚčto does not calculate months before payroll started in MyÚčto). If it has been sent since, repeat the PAMICA migration with a new export and the status will be updated.",
+      "col_period": "Period",
+      "col_type": "Submission",
+      "col_status": "Status",
+      "col_submitted": "Sent",
+      "col_accepted": "Accepted",
+      "col_forms": "Forms",
+      "col_source": "Source",
+      "forms_matched": "{matched} of {total} matched",
+      "remove": "Remove",
+      "remove_confirm": "Remove {what} for {period} from the history? Use this only when the record does not match reality (the report was not actually sent or belongs to another company). MyÚčto then prepares the regular report for a month without a sent report.",
+      "remove_failed": "The record could not be removed.",
+      "type": {
+        "R": "Regular report",
+        "O": "Corrective report",
+        "S": "Cancelling report",
+        "registration": "Employee registrations"
+      },
+      "status": {
+        "sent": "Sent",
+        "not_sent": "Not sent"
+      },
+      "source": {
+        "pamica": "PAMICA",
+        "jmhz_xml": "Uploaded XML report",
+        "jmhz_xml_file": "Uploaded XML ({file})"
+      }
     }
   },
   "foreign_income": {
@@ -25996,7 +26031,7 @@
     "payroll_dry_run_hint": "The whole payroll transfer of the selected years ({years}) runs: missing employees and relations are created and all months are imported. Everything is then rolled back, nothing stays in MyÚčto.",
     "payroll_import_confirm": "I understand: the transfer creates the employees and employment relations missing in this company and imports the payroll of {years} from the agenda {company} as monthly payroll import batches. Repeating the transfer duplicates nothing.",
     "payroll_rights_missing": "The payroll transfer creates employees, employment relations and payroll inputs. You are missing write permission: {rights}. Ask the company administrator.",
-    "payroll_identifiers_confirm": "I confirm that the OIČ and ID PPV numbers kept in PAMICA come from the social security administration protocols. The transfer stores them with the employees and relations, JMHZ reports are matched by them. Without this confirmation these numbers are not transferred.",
+    "payroll_identifiers_confirm": "I confirm that the OIČ and ID PPV numbers kept in PAMICA (on the cards and in the sent JMHZ reports and registrations) come from the social security administration protocols. The transfer stores them with the employees and relations, JMHZ reports are matched by them. Without this confirmation these numbers are not transferred.",
     "open_payroll": "Open payroll imports",
     "other_company": "other company",
     "supplier_ico": "Only an agenda with the company ID of the MyÚčto company ({ico}) can be transferred.",

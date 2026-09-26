@@ -27,6 +27,7 @@ const m = vi.hoisted(() => ({
   jmhzTransportHistory: vi.fn(),
   pollJmhzTransportAttempt: vi.fn(),
   closeJmhzTransportAttempt: vi.fn(),
+  jmhzExternalSubmissions: vi.fn(() => Promise.resolve({ environment: 'production', items: [] })),
   routeParams: {} as Record<string, string>,
   routerReplace: vi.fn(),
 }))
@@ -66,6 +67,7 @@ vi.mock('@/api/payroll', () => ({
     jmhzTransportHistory: m.jmhzTransportHistory,
     pollJmhzTransportAttempt: m.pollJmhzTransportAttempt,
     closeJmhzTransportAttempt: m.closeJmhzTransportAttempt,
+    jmhzExternalSubmissions: m.jmhzExternalSubmissions,
   },
 }))
 
