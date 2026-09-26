@@ -179,9 +179,13 @@ final class PayrollRecurringMaterializer
             ];
         }
         // `amount_minor === null` znamená „v měsíci není co krátit" — celý fond
-        // je odpracovaný. Částka zůstává, jak ji spočítal kalkulátor.
+        // je odpracovaný. Částka zůstává, jak ji spočítal kalkulátor, jen poměrná
+        // část za kalendářní dny se zaokrouhlí na celé koruny nahoru (§ 142 odst. 2
+        // ZP) stejně jako krácení v MonthlyWageProration; haléře by zastavily i
+        // měsíční hlášení, které přijímá jen celé koruny.
         $prorated = $proration['amount_minor'];
         if (!is_int($prorated)) {
+            $calculation['amount_minor'] = intdiv($amount + 99, 100) * 100;
             return $calculation;
         }
 

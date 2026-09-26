@@ -425,6 +425,32 @@ final class PayrollRecurringMaterializerTest extends TestCase
         self::assertStringContainsString('monthly_wage_proration.v1', (string) $input['source_snapshot_json']);
     }
 
+    /**
+     * Předpis základní mzdy od 10. 6.: 21 z 30 dnů z 40 000 Kč je 28 000 Kč přesně, ale
+     * 40 001 Kč dá 28 000,70 Kč. Měsíc bez nepřítomnosti se nekrátí, poměrná část za dny
+     * ale haléře mít nesmí: mzda se zaokrouhluje na celé koruny nahoru (§ 142 odst. 2 ZP)
+     * a měsíční hlášení jiné částky nepřijme.
+     */
+    public function testCalendarDaysBaseWageIsRoundedUpToWholeCrowns(): void
+    {
+        $componentId = $this->createComponent('MZDA_MESICNI_REK', componentKind: 'base_wage');
+        $this->createWorkCalendar();
+        $this->createImportSummaryMonth(['fund_hours' => 176_000, 'worked_hours' => 176_000]);
+        $this->createRecurring($componentId, amountMinor: 4_000_100, allocationRule: 'calendar_days', validFrom: '2026-06-10');
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            self::PERIOD,
+            $this->userId,
+        );
+
+        self::assertSame(1, $result['created_count'], (string) json_encode($result['manual_review']));
+        self::assertSame(
+            2_800_100,
+            PayrollTimeValue::rows($result['created'], 'created')[0]['amount_minor'],
+        );
+    }
+
     /** Odpracovaný celý měsíc se krátit nesmí — sjednaná částka zůstává. */
     public function testFullyWorkedMonthKeepsTheAgreedAmount(): void
     {
