@@ -37,7 +37,7 @@ final class PayrollEmploymentTerminationService
     public const LEAVE_PAYOUT_REASON =
         'Proplacení nevyčerpané dovolené při skončení (§ 222 odst. 2 ZP)';
 
-    private const SEVERANCE_RELATIONS = ['employment', 'small_scale_employment'];
+    private const SEVERANCE_RELATIONS = PayrollTerminationReason::SEVERANCE_RELATIONS;
 
     public function __construct(
         private readonly Connection $db,
@@ -861,13 +861,20 @@ final class PayrollEmploymentTerminationService
                 : (string) intdiv($average['monthly_net'], 100),
         ];
         if ($reason->settlementReportable()) {
-            $entitled = $severance['kind'] !== null && (int) $severance['amount_minor'] > 0;
-            $unemployment['entitlement'] = $entitled;
-            if ($entitled) {
-                $unemployment['settlement_kind'] = $severance['kind'] === 'work_injury_compensation'
-                    ? 'replacement'
-                    : 'golden_handshake';
-                $unemployment['settlement_amount'] = (string) intdiv((int) $severance['amount_minor'], 100);
+            // Nárok (10378) plyne ze záznamu o skončení, ne z toho, jestli se
+            // už podařilo spočítat částku: chybějící průměr dřív udělal
+            // z „náleží" „nenáleží". Do 10531/10530 jde zúčtovaná částka
+            // (vstup posledního běhu), bez něj návrh podle průměru.
+            $kind = $reason->a2SettlementKind((string) $employment['relation_type']);
+            $unemployment['entitlement'] = $kind !== null;
+            if ($kind !== null) {
+                $unemployment['settlement_kind'] = $kind;
+                $amount = is_array($severance['input'] ?? null)
+                    ? (int) $severance['input']['amount_minor']
+                    : (int) $severance['amount_minor'];
+                if ($amount > 0) {
+                    $unemployment['settlement_amount'] = (string) intdiv($amount, 100);
+                }
             }
         }
 

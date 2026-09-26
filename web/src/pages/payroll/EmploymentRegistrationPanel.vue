@@ -1401,9 +1401,11 @@ async function applyA2Prefill(): Promise<void> {
     return
   }
   entitlement.value = unemployment.entitlement ? 'yes' : 'no'
-  if (unemployment.entitlement && unemployment.settlement_kind && unemployment.settlement_amount) {
+  // Druh (odstupné / náhrada § 271ca) je jistý hned ze záznamu, částka až po
+  // výpočtu nebo zúčtování — bez ní ji účetní doplní, nárok ale nezmizí.
+  if (unemployment.entitlement && unemployment.settlement_kind) {
     settlementAmountKind.value = unemployment.settlement_kind
-    settlementAmount.value = unemployment.settlement_amount
+    if (unemployment.settlement_amount) settlementAmount.value = unemployment.settlement_amount
   }
 }
 

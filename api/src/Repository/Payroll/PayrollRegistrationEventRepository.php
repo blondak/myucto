@@ -171,6 +171,7 @@ final class PayrollRegistrationEventRepository
             'SELECT employment.id, employment.employee_id, employment.status,
                     employment.start_date, employment.actual_start_date,
                     employment.end_date, employment.row_version,
+                    employment.relation_type,
                     supplier.company_name,
                     office.social_security_variable_symbol,
                     settings.social_security_office_code,

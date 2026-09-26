@@ -712,7 +712,13 @@ final readonly class PayrollRegistrationEventService
             $endedByDeath,
             $context,
         );
-        $this->assertMatchesTerminationRecord($supplierId, $employmentId, $endedByDeath, $unemployment);
+        $this->assertMatchesTerminationRecord(
+            $supplierId,
+            $employmentId,
+            $endedByDeath,
+            $unemployment,
+            (string) ($context['relation_type'] ?? ''),
+        );
 
         return [
             'end_on' => $effectiveOn,
@@ -738,6 +744,7 @@ final readonly class PayrollRegistrationEventService
         int $employmentId,
         ?bool $endedByDeath,
         ?array $unemployment,
+        string $relationType = '',
     ): void {
         $record = $this->terminations->find($supplierId, $employmentId);
         if ($record === null) {
@@ -756,6 +763,40 @@ final readonly class PayrollRegistrationEventService
             );
         }
         $code = $unemployment['termination_reason'] ?? null;
+        $entitlement = $unemployment['entitlement'] ?? null;
+        if (is_string($code)
+            && $code === $reason->regzecReasonCode()
+            && is_string($entitlement)
+        ) {
+            // Odstupné (10378 náleží, 10531 odstupné / 10530 náhrada § 271ca)
+            // plyne ze záznamu o skončení stejně jako důvod — A2 nesmí
+            // tvrdit „náleží" u skončení, které ho nezakládá, ani ho zamlčet.
+            $expected = $reason->a2SettlementKind($relationType);
+            $claimed = $entitlement === 'A'
+                ? (array_key_exists('golden_handshake', $unemployment)
+                    ? 'golden_handshake'
+                    : (array_key_exists('replacement', $unemployment) ? 'replacement' : null))
+                : null;
+            if (($entitlement === 'A') !== ($expected !== null)
+                || ($claimed !== null && $claimed !== $expected)
+            ) {
+                throw new PayrollRegistrationXmlException(
+                    'registration_a2_settlement_record_mismatch',
+                    'Údaj o odstupném v odhlášce neodpovídá záznamu Skončení vztahu: '
+                        . match ($expected) {
+                            'golden_handshake' => 'podle způsobu a důvodu skončení náleží'
+                                . ' odstupné podle § 67 odst. 1 zákoníku práce.',
+                            'replacement' => 'podle způsobu a důvodu skončení náleží'
+                                . ' jednorázová náhrada podle § 271ca zákoníku práce.',
+                            default => 'podle způsobu a důvodu skončení (a druhu vztahu)'
+                                . ' odstupné nenáleží.',
+                        }
+                        . ' Použijte „Předvyplnit ze skončení vztahu", nebo opravte'
+                        . ' záznam na kartě vztahu.'
+                        . PayrollRegistrationFieldVocabulary::reference('unemployment.entitlement'),
+                );
+            }
+        }
         if (is_string($code) && $code !== $reason->regzecReasonCode()) {
             throw new PayrollRegistrationXmlException(
                 'registration_a2_termination_record_mismatch',

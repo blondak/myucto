@@ -2818,6 +2818,72 @@ final class PayrollRegistrationActionTest extends TestCase
     }
 
     /**
+     * A2 nese 10378 (odstupné náleží) a 10531 (odstupné § 67 odst. 1) podle
+     * záznamu Skončení vztahu. Skončení z organizačních důvodů odstupné
+     * zakládá — odhláška, která ho zamlčí, se neschválí.
+     */
+    public function testA2SettlementMustMatchTheTerminationRecord(): void
+    {
+        $this->seedTrustedReceipt();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25", status = "ended"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
+        $termination = Bootstrap::buildContainer()->get(
+            \MyInvoice\Service\Payroll\Termination\PayrollEmploymentTerminationService::class,
+        );
+        $termination->save($this->supplierId, $this->employmentId, [
+            'termination_method' => 'agreement',
+            'legal_ground' => 'organizational',
+        ], $this->userId);
+        $approve = fn (array $settlement) => ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+                'ended_by_death' => false,
+                'unemployment' => [
+                    'mode' => 'provided',
+                    'average_net_earnings' => '25000',
+                    'pension_periods' => [['from' => self::START_ON, 'to' => '2026-08-25']],
+                    'employment_type' => '1',
+                    'termination_reason' => '4',
+                ] + $settlement,
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        $silenced = $approve(['entitlement' => false]);
+        self::assertSame(422, $silenced->getStatusCode(), (string) $silenced->getBody());
+        self::assertSame(
+            'registration_a2_settlement_record_mismatch',
+            $this->json($silenced)['error']['code'],
+        );
+        $wrongKind = $approve(['entitlement' => true, 'paid_in_full' => true, 'replacement' => '50000']);
+        self::assertSame(
+            'registration_a2_settlement_record_mismatch',
+            $this->json($wrongKind)['error']['code'],
+        );
+
+        $accepted = $approve(['entitlement' => true, 'paid_in_full' => true, 'golden_handshake' => '50000']);
+        self::assertSame(201, $accepted->getStatusCode(), (string) $accepted->getBody());
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $this->json($accepted)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        $xml = $this->storedArtifactXml((int) $this->json($prepared)['submission_id']);
+        self::assertStringContainsString('belong="A"', $xml);
+        self::assertStringContainsString('goldenhandshake="50000"', $xml);
+    }
+
+    /**
      * Předkontrola chyb ČSSZ 603/604: další vztah téže osoby se stejným
      * druhem činnosti a ZMR, který se časově překrývá. Varování, ne zákaz.
      */

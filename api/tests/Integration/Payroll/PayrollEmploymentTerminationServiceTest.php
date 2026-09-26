@@ -106,6 +106,48 @@ final class PayrollEmploymentTerminationServiceTest extends TestCase
         self::assertSame('130440', $a2['settlement_amount']);
     }
 
+    /**
+     * 10378 „odstupné náleží" plyne z důvodu skončení, ne z toho, jestli už
+     * jde spočítat částka. Bez schváleného průměru dřív předvyplnění tvrdilo
+     * „nenáleží"; do 10531 má jít zúčtovaná částka ze vstupu běhu.
+     */
+    public function testA2PrefillKeepsEntitlementWithoutAverageAndUsesBookedAmount(): void
+    {
+        $overview = $this->service->save($this->supplierId, $this->employmentId, [
+            'termination_method' => 'employer_notice',
+            'legal_ground' => 'organizational',
+        ], $this->userId);
+
+        $a2 = $overview['a2_prefill']['unemployment'];
+        self::assertSame('4', $a2['termination_reason']);
+        self::assertTrue($a2['entitlement']);
+        self::assertSame('golden_handshake', $a2['settlement_kind']);
+        self::assertArrayNotHasKey('settlement_amount', $a2);
+
+        $this->averageFor($this->employmentId);
+        $this->service->createSeveranceInput($this->supplierId, $this->employmentId, $this->userId);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_inputs SET amount_minor = 14000000
+              WHERE supplier_id = ? AND employment_id = ? AND external_id = ?',
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            PayrollEmploymentTerminationService::severanceExternalId($this->employmentId),
+        ]);
+        $booked = $this->service->overview($this->supplierId, $this->employmentId)['a2_prefill']['unemployment'];
+        self::assertSame('140000', $booked['settlement_amount']);
+    }
+
+    /** Výpověď zaměstnance odstupné nezakládá — A2 u ní 10378 vůbec nenese. */
+    public function testA2PrefillOmitsSettlementForEmployeeNotice(): void
+    {
+        $overview = $this->service->save($this->supplierId, $this->employmentId, [
+            'termination_method' => 'employee_notice',
+        ], $this->userId);
+
+        self::assertArrayNotHasKey('entitlement', $overview['a2_prefill']['unemployment']);
+    }
+
     public function testSeveranceBecomesApprovedInputOfTheLastRun(): void
     {
         $this->averageFor($this->employmentId);
