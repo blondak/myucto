@@ -43,9 +43,12 @@ const CLAIM_REASONS: PayrollDependantClaimReason[] = [
   'shared_custody',
   'adoption',
   'foster_care',
+  'study_start',
   'study_continues',
   'other',
 ]
+/** Důvody, které otevírají už měsíc začátku vyživování (§ 35c odst. 10 ZDP), pár k ChildCreditClaimWindow. */
+const START_EVENT_REASONS: PayrollDependantClaimReason[] = ['adoption', 'foster_care', 'study_start']
 const CREDIT_STATUSES: PayrollDependantCreditStatus[] = ['claimed', 'claimed_by_other']
 
 const loading = ref(true)
@@ -112,6 +115,17 @@ const caregiverOptions = computed<{ value: PayrollDependantCaregiverStatus; labe
 const editingDependant = computed(() =>
   dependants.value.find(item => item.id === editingDependantId.value) ?? null)
 const claimedByOther = computed(() => claimForm.credit_status === 'claimed_by_other')
+const claimEarliestFrom = computed(() => editingDependant.value === null
+  ? null
+  : earliestClaimFrom(editingDependant.value, claimForm.claim_reason))
+const claimLatestTo = computed(() => editingDependant.value === null
+  ? null
+  : latestClaimTo(editingDependant.value))
+const claimFromTooEarly = computed(() => claimEarliestFrom.value !== null
+  && claimForm.effective_from !== ''
+  && claimForm.effective_from < claimEarliestFrom.value)
+const claimToTooLate = computed(() => claimLatestTo.value !== null
+  && (claimForm.effective_to === '' || claimForm.effective_to > claimLatestTo.value))
 
 const listActions = computed<ActionItem[]>(() => [{
   key: 'add-dependant',
@@ -197,7 +211,7 @@ function openClaimEditor(dependant: PayrollDependant, claim: PayrollDependantCla
   editingClaimId.value = claim?.id ?? null
   claimForm.child_order = claim?.child_order ?? nextOrder()
   claimForm.credit_status = claim?.credit_status ?? 'claimed'
-  claimForm.claim_reason = claim?.claim_reason ?? 'own_household'
+  claimForm.claim_reason = claim?.claim_reason ?? defaultReason(dependant)
   claimForm.evidence_status = claim?.evidence_status ?? 'verified'
   claimForm.evidence_reference = claim?.evidence_reference ?? ''
   claimForm.shared_household_confirmed = claim?.shared_household_confirmed ?? true
@@ -207,8 +221,8 @@ function openClaimEditor(dependant: PayrollDependant, claim: PayrollDependantCla
   claimForm.other_caregiver_family_name = claim?.other_caregiver_family_name ?? ''
   claimForm.other_caregiver_birth_date = claim?.other_caregiver_birth_date ?? ''
   claimForm.ztp_p = claim?.ztp_p ?? dependant.ztp_p
-  claimForm.effective_from = claim?.effective_from ?? monthStart(dependant.existence_from)
-  claimForm.effective_to = claim?.effective_to ?? ''
+  claimForm.effective_from = claim?.effective_from ?? earliestClaimFrom(dependant, claimForm.claim_reason)
+  claimForm.effective_to = claim?.effective_to ?? latestClaimTo(dependant) ?? ''
   claimForm.row_version = claim?.row_version ?? 0
 }
 
@@ -254,6 +268,45 @@ function nextOrder(): number {
 
 function monthStart(date: string): string {
   return date === '' ? '' : `${date.slice(0, 7)}-01`
+}
+
+function monthEnd(date: string): string {
+  const [year, month] = date.slice(0, 7).split('-').map(Number)
+  const day = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  return `${date.slice(0, 7)}-${String(day).padStart(2, '0')}`
+}
+
+function nextMonthStart(date: string): string {
+  const [year, month] = date.slice(0, 7).split('-').map(Number)
+  return month === 12
+    ? `${year + 1}-01-01`
+    : `${year}-${String(month + 1).padStart(2, '0')}-01`
+}
+
+/*
+ * § 35c odst. 10 ZDP: měsíc patří do nároku, když na jeho počátku byly splněny
+ * podmínky, a už v měsíci narození, osvojení, převzetí do péče nebo zahájení
+ * studia. Měsíc, ve kterém vyživování skončí, patří do nároku celý. Server drží
+ * totéž pravidlo (ChildCreditClaimWindow); tady slouží k předvyplnění a nápovědě.
+ */
+function earliestClaimFrom(dependant: PayrollDependant, reason: PayrollDependantClaimReason): string {
+  const start = monthStart(dependant.existence_from)
+  if (dependant.existence_from === start
+    || dependant.existence_from.slice(0, 7) === dependant.birth_date.slice(0, 7)
+    || START_EVENT_REASONS.includes(reason)) {
+    return start
+  }
+  return nextMonthStart(start)
+}
+
+function latestClaimTo(dependant: PayrollDependant): string | null {
+  return dependant.existence_to === null ? null : monthEnd(dependant.existence_to)
+}
+
+function defaultReason(dependant: PayrollDependant): PayrollDependantClaimReason {
+  if (dependant.relation === 'child_adopted') return 'adoption'
+  if (dependant.relation === 'child_in_care') return 'foster_care'
+  return 'own_household'
 }
 
 function dependantPayload(): PayrollDependantPayload {
@@ -671,10 +724,12 @@ function creditLabel(claim: PayrollDependantClaim): string {
         <label :class="labelClass">
           {{ t('payroll.people.dependants.form.existence_from') }} <RequiredMark />
           <DateInput v-model="dependantForm.existence_from" required :class="inputClass" />
+          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.event_month.existence_from_hint') }}</span>
         </label>
         <label :class="labelClass">
           {{ t('payroll.people.dependants.form.existence_to') }}
           <DateInput v-model="dependantForm.existence_to" :class="inputClass" />
+          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.event_month.existence_to_hint') }}</span>
         </label>
         <label class="flex items-center gap-2 text-sm text-neutral-700">
           <input v-model="dependantForm.ztp_p" type="checkbox" class="rounded border-neutral-300 text-payroll-600">
@@ -736,15 +791,34 @@ function creditLabel(claim: PayrollDependantClaim): string {
         <label :class="labelClass">
           {{ t('payroll.people.dependants.form.effective_from') }} <RequiredMark />
           <DateInput v-model="claimForm.effective_from" required :class="inputClass" data-test="claim-effective-from" />
+          <span
+            v-if="claimFromTooEarly"
+            class="mt-1 block rounded-md bg-warning-50 px-2 py-1 text-xs text-warning-700"
+            data-test="claim-from-too-early"
+          >{{ t('payroll.people.dependants.event_month.effective_from_too_early', { date: claimEarliestFrom }) }}</span>
+          <span v-else-if="claimEarliestFrom" class="mt-1 block text-xs text-neutral-500" data-test="claim-from-hint">
+            {{ t('payroll.people.dependants.event_month.effective_from_hint', { date: claimEarliestFrom }) }}
+          </span>
         </label>
         <label :class="labelClass">
           {{ t('payroll.people.dependants.form.effective_to') }}
           <DateInput v-model="claimForm.effective_to" :class="inputClass" data-test="claim-effective-to" />
-          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.form.effective_to_hint') }}</span>
+          <span
+            v-if="claimToTooLate"
+            class="mt-1 block rounded-md bg-warning-50 px-2 py-1 text-xs text-warning-700"
+            data-test="claim-to-too-late"
+          >{{ t('payroll.people.dependants.event_month.effective_to_too_late', { date: claimLatestTo }) }}</span>
+          <span v-else-if="claimLatestTo" class="mt-1 block text-xs text-neutral-500">
+            {{ t('payroll.people.dependants.event_month.effective_to_hint', { date: claimLatestTo }) }}
+          </span>
+          <span v-else class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.form.effective_to_hint') }}</span>
         </label>
-        <label v-if="!claimedByOther" class="flex items-center gap-2 text-sm text-neutral-700">
-          <input v-model="claimForm.ztp_p" type="checkbox" class="rounded border-neutral-300 text-payroll-600">
-          {{ t('payroll.people.dependants.form.claim_ztp_p') }}
+        <label v-if="!claimedByOther" :class="labelClass">
+          <span class="flex items-center gap-2 text-sm text-neutral-700">
+            <input v-model="claimForm.ztp_p" type="checkbox" class="rounded border-neutral-300 text-payroll-600">
+            {{ t('payroll.people.dependants.form.claim_ztp_p') }}
+          </span>
+          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.event_month.ztp_p_hint') }}</span>
         </label>
         <label class="flex items-center gap-2 text-sm text-neutral-700">
           <input v-model="claimForm.shared_household_confirmed" type="checkbox" class="rounded border-neutral-300 text-payroll-600">

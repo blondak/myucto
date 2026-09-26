@@ -300,6 +300,74 @@ describe('PayrollPersonDependantsPanel', () => {
     expect(claim.text()).toContain('payroll.people.dependants.credit_claimed_by_other')
   })
 
+  describe('měsíc události podle § 35c odst. 10 ZDP', () => {
+    function withChild(overrides: Partial<PayrollDependantsResponse['dependants'][number]>) {
+      const base = response()
+      base.dependants[0] = { ...base.dependants[0], ...overrides, claims: [] }
+      mocks.personDependants.mockResolvedValue(base)
+    }
+
+    async function openNewClaim() {
+      mocks.createPersonDependantClaim.mockResolvedValue(response())
+      const wrapper = mountPanel()
+      await flushPromises()
+      await wrapper.find('tbody [aria-expanded]').trigger('click')
+      await wrapper.find('[data-test="add-claim-7"]').trigger('click')
+      return wrapper
+    }
+
+    it('dítě narozené 15. 5. má nárok předvyplněný od května', async () => {
+      withChild({ birth_date: '2026-05-15', existence_from: '2026-05-15' })
+      const wrapper = await openNewClaim()
+
+      expect((wrapper.find('[data-test="claim-effective-from"]').element as HTMLInputElement).value)
+        .toBe('01. 05. 2026')
+      expect(wrapper.find('[data-test="claim-from-too-early"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="claim-from-hint"]').exists()).toBe(true)
+
+      await wrapper.find('[data-test="dependant-editor"]').trigger('submit')
+      await flushPromises()
+      expect(mocks.createPersonDependantClaim).toHaveBeenCalledWith(21, 7, expect.objectContaining({
+        effective_from: '2026-05-01',
+      }))
+    })
+
+    it('osvojené dítě dostane důvod osvojení a nárok od měsíce osvojení', async () => {
+      withChild({ relation: 'child_adopted', existence_from: '2026-05-15' })
+      const wrapper = await openNewClaim()
+
+      expect((wrapper.find('[data-test="claim-effective-from"]').element as HTMLInputElement).value)
+        .toBe('01. 05. 2026')
+      await wrapper.find('[data-test="dependant-editor"]').trigger('submit')
+      await flushPromises()
+      expect(mocks.createPersonDependantClaim).toHaveBeenCalledWith(21, 7, expect.objectContaining({
+        claim_reason: 'adoption',
+        effective_from: '2026-05-01',
+      }))
+    })
+
+    it('přestěhování v průběhu měsíce bez události začíná až dalším měsícem', async () => {
+      withChild({ relation: 'child_of_spouse', existence_from: '2026-05-15' })
+      const wrapper = await openNewClaim()
+
+      expect((wrapper.find('[data-test="claim-effective-from"]').element as HTMLInputElement).value)
+        .toBe('01. 06. 2026')
+      await wrapper.find('[data-test="claim-effective-from"]').setValue('2026-05-01')
+      expect(wrapper.find('[data-test="claim-from-too-early"]').exists()).toBe(true)
+    })
+
+    it('konec studia 15. 6. předvyplní konec nároku koncem června', async () => {
+      withChild({ birth_date: '2004-03-03', existence_from: '2004-03-03', existence_to: '2026-06-15' })
+      const wrapper = await openNewClaim()
+
+      expect((wrapper.find('[data-test="claim-effective-to"]').element as HTMLInputElement).value)
+        .toBe('30. 06. 2026')
+      expect(wrapper.find('[data-test="claim-to-too-late"]').exists()).toBe(false)
+      await wrapper.find('[data-test="claim-effective-to"]').setValue('2026-07-31')
+      expect(wrapper.find('[data-test="claim-to-too-late"]').exists()).toBe(true)
+    })
+  })
+
   it('hides write actions without permission', async () => {
     const wrapper = mountPanel(false)
     await flushPromises()

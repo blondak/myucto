@@ -4551,6 +4551,7 @@
           "shared_custody": "Shared custody",
           "adoption": "Adoption",
           "foster_care": "Foster care",
+          "study_start": "Start of continuous study",
           "study_continues": "Continued study up to age 26",
           "other": "Other documented reason"
         },
@@ -4617,6 +4618,15 @@
           "other_caregiver_family_name": "Other supporting person - family name",
           "other_caregiver_birth_date": "Other supporting person - date of birth",
           "supersede_hint": "If the claim reaches into a period covered by an approved payroll revision, the change is stored as a new effective version and the original record stays in history."
+        },
+        "event_month": {
+          "existence_from_hint": "Date of birth, adoption, placement into care or start of study. If support starts during a month, that month counts only for these events.",
+          "existence_to_hint": "Date of death, end of study or the 26th birthday. The month in which support ends counts in full.",
+          "effective_from_hint": "{date} at the earliest. The month of birth, adoption, placement into care or start of study counts in full (Section 35c(10) of the Income Tax Act).",
+          "effective_from_too_early": "The claim can start on {date} at the earliest. Support starts during a month, which counts only for birth, adoption, placement into care or start of study; choose it as the reason for the claim.",
+          "effective_to_hint": "{date} at the latest, i.e. the end of the month in which support ends.",
+          "effective_to_too_late": "The claim can last until {date} at the latest, the end of the month in which support ends.",
+          "ztp_p_hint": "The double amount applies from the month at whose start the entitlement to the ZTP/P card was granted. If it was granted during a month, end the current claim at the end of that month and enter the ZTP/P claim from the next one."
         }
       },
       "quick_edit": {

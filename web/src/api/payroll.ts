@@ -6019,6 +6019,7 @@ export type PayrollDependantClaimReason =
   | 'shared_custody'
   | 'adoption'
   | 'foster_care'
+  | 'study_start'
   | 'study_continues'
   | 'other'
 

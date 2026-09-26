@@ -202,6 +202,29 @@ osoba, která zvýhodnění uplatňuje (jméno, příjmení, datum narození); t
 v ročním zúčtování s kódem N ve všech měsících. Uvádí-li zaměstnanec jen děti
 s pořadím N, zvýhodnění na děti neuplatňuje vůbec.
 
+**Měsíce nároku.** Nárok se zadává po celých měsících. Zvýhodnění náleží za
+měsíc, na jehož počátku byly splněny podmínky, a podle § 35c odst. 10 zákona
+o daních z příjmů už v měsíci, ve kterém se dítě narodilo, bylo osvojeno nebo
+převzato do péče nahrazující péči rodičů, anebo ve kterém začalo soustavně
+studovat. U osoby proto zadej do pole **Vyživovaná od** den té události
+(narození, osvojení, svěření do péče, zahájení studia) a do pole **Vyživovaná
+do** den, kdy vyživování skončilo (úmrtí, ukončení studia, 26. narozeniny):
+
+- dítě narozené v průběhu měsíce má nárok už od prvního dne měsíce narození;
+- u osvojení, převzetí do péče a zahájení studia v průběhu měsíce zvol stejnou
+  událost jako **důvod uplatnění** a nárok začne prvním dnem toho měsíce;
+- začne-li vyživování v průběhu měsíce z jiného důvodu (například dítě
+  manžela se přistěhuje), nárok začíná až prvním dnem dalšího měsíce;
+- měsíc, ve kterém vyživování skončí, patří do nároku celý, nárok tedy končí
+  posledním dnem toho měsíce.
+
+Formulář nároku datum začátku i konce podle těchto pravidel předvyplní
+a upozorní, když zadané období mimo ně vybočí. Dvojnásobek za dítě s průkazem
+ZTP/P výjimku nemá: náleží od měsíce, na jehož počátku byl nárok na průkaz
+přiznán. Při přiznání v průběhu měsíce ukonči dosavadní nárok koncem měsíce
+a nárok se ZTP/P zadej od dalšího. Stejná pravidla platí pro import měsíčních
+hlášení JMHZ a pro převod z předchozího mzdového systému.
+
 Aplikace nedovolí dvě překrývající se uplatnění na totéž dítě u jednoho
 poplatníka ani uplatnění mimo období, kdy je osoba vedena jako vyživovaná.
 Uplatňuje-li totéž dítě (rozpoznané podle rodného čísla) ve stejném měsíci jiný
