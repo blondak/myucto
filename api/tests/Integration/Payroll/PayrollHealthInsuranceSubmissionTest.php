@@ -152,7 +152,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
              ON DUPLICATE KEY UPDATE payroll_contact_phone = VALUES(payroll_contact_phone)',
         )->execute([$this->supplierId, $officeId]);
 
-        $identification = (new PayrollHealthNotificationRepository($this->db))
+        $identification = (new PayrollHealthNotificationRepository($this->db, null))
             ->findEmployerIdentification($this->supplierId);
 
         self::assertIsArray($identification);
@@ -172,7 +172,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
               WHERE id = ?',
         )->execute([$this->supplierId]);
 
-        $identification = (new PayrollHealthNotificationRepository($this->db))
+        $identification = (new PayrollHealthNotificationRepository($this->db, null))
             ->findEmployerIdentification($this->supplierId);
 
         self::assertIsArray($identification);

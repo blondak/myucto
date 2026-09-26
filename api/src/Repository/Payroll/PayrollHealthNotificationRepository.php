@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
 use PDO;
 
 /**
@@ -16,7 +18,13 @@ use PDO;
  */
 final readonly class PayrollHealthNotificationRepository
 {
-    public function __construct(private Connection $db) {}
+    public function __construct(
+        private Connection $db,
+        // Rozhodný příjem pro očekávanou účast dohod ({@see PayrollExpectedParticipation}).
+        // Bez výchozí hodnoty schválně: nepovinný parametr kontejner nevyplní
+        // a dohody by pak tiše vypadly z oznámení.
+        private ?PayrollRulesetProvider $rulesets,
+    ) {}
 
     /**
      * @return array{
@@ -154,6 +162,8 @@ final readonly class PayrollHealthNotificationRepository
                     employment.end_date,
                     employee.full_name,
                     terms.health_insurance_participation,
+                    COALESCE(terms.monthly_gross_minor, employment.monthly_gross_minor)
+                        AS agreed_monthly_minor,
                     coverage.insurer_code
                FROM payroll_employments employment
                JOIN payroll_employees employee
@@ -216,6 +226,8 @@ final readonly class PayrollHealthNotificationRepository
             'participates' => $this->participates(
                 $this->nullableString($row['health_insurance_participation']),
                 (string) $row['relation_type'],
+                $row['agreed_monthly_minor'] === null ? null : (int) $row['agreed_monthly_minor'],
+                $onDate,
             ),
             'insurer_code' => $this->nullableString($row['insurer_code']),
             'start_date' => $this->nullableString($row['start_date']),
@@ -248,19 +260,21 @@ final readonly class PayrollHealthNotificationRepository
      * `automatic` znamená „rozhodne výpočet", ne „účastní se". Bez výslovného
      * zahrnutí se proto účast NEPŘEDPOKLÁDÁ — oznámit nástup u vztahu, který
      * účast nezakládá, je stejná vada jako neoznámit ten, který ji zakládá.
+     * Výjimkou je dohoda se sjednaným příjmem nad rozhodným příjmem, kterou
+     * výpočet pojistí vždy — pravidlo drží {@see PayrollExpectedParticipation}.
      */
     private function participates(
         ?string $participation,
         string $relationType,
+        ?int $agreedMonthlyMinor,
+        string $onDate,
     ): bool {
-        if ($participation === 'included') {
-            return true;
-        }
-        if ($participation === 'excluded' || $participation === 'foreign') {
-            return false;
-        }
-
-        return $relationType === 'employment';
+        return PayrollExpectedParticipation::expected(
+            $participation,
+            $relationType,
+            $agreedMonthlyMinor,
+            $this->rulesets === null ? null : PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $onDate),
+        );
     }
 
     /**
@@ -308,6 +322,18 @@ final readonly class PayrollHealthNotificationRepository
                              OR terms.effective_to >= ?)
                       ORDER BY terms.effective_from DESC
                       LIMIT 1) AS health_insurance_participation,
+                    COALESCE(
+                      (SELECT terms.monthly_gross_minor
+                         FROM payroll_employment_terms terms
+                        WHERE terms.supplier_id = employment.supplier_id
+                          AND terms.employment_id = employment.id
+                          AND terms.effective_from <= ?
+                          AND (terms.effective_to IS NULL
+                               OR terms.effective_to >= ?)
+                        ORDER BY terms.effective_from DESC
+                        LIMIT 1),
+                      employment.monthly_gross_minor
+                    ) AS agreed_monthly_minor,
                     (SELECT coverage.insurer_code
                        FROM payroll_person_health_coverage_history coverage
                       WHERE coverage.supplier_id = employment.supplier_id
@@ -340,8 +366,11 @@ final readonly class PayrollHealthNotificationRepository
         // nevrátí zpět do `ended`, nemá vyrábět povinnosti. Doména je
         // rozlišit neumí — `HealthNotificationFacts` stav vztahu vůbec nenese.
         $statement->execute([
-            $to, $to, $to, $to, $supplierId, $to, $from,
+            $to, $to, $to, $to, $to, $to, $supplierId, $to, $from,
         ]);
+        $threshold = $this->rulesets === null
+            ? null
+            : PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $to);
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($rows) || $rows === []) {
             return [];
@@ -364,9 +393,11 @@ final readonly class PayrollHealthNotificationRepository
                 'employee_id' => (int) $row['employee_id'],
                 'relation_type' => (string) $row['relation_type'],
                 'status' => (string) $row['status'],
-                'participates' => $this->participates(
+                'participates' => PayrollExpectedParticipation::expected(
                     $this->nullableString($row['health_insurance_participation']),
                     (string) $row['relation_type'],
+                    $row['agreed_monthly_minor'] === null ? null : (int) $row['agreed_monthly_minor'],
+                    $threshold,
                 ),
                 'insurer_code' => $this->nullableString($row['insurer_code']),
                 'start_date' => $this->nullableString($row['start_date']),

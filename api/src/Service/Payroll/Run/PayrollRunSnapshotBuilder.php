@@ -18,6 +18,7 @@ use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
 use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
@@ -1419,10 +1420,11 @@ final class PayrollRunSnapshotBuilder
      * Koho se to týká, rozhoduje ÚČAST NA POJIŠTĚNÍ, ne druh vztahu sám:
      * `included` se hlásí vždy, `excluded` a `foreign` (cizinec pod cizí
      * legislativou s A1) nikdy. `automatic` znamená „rozhodne výpočet podle
-     * prahu příjmu" — u dohod se proto mlčí, protože DPP pod rozhodným
+     * prahu příjmu" — u DPP se proto mlčí, protože DPP pod rozhodným
      * příjmem se u ČSSZ nehlásí a hlásit ji „pro jistotu" by bylo varování
-     * u každé brigády. Totéž pravidlo drží
-     * {@see \MyInvoice\Repository\Payroll\PayrollHealthNotificationRepository}.
+     * u každé brigády; DPČ a další vztahy malého rozsahu se sjednaným příjmem
+     * nad rozhodným příjmem výpočet pojistí vždy, takže se hlásí. Pravidlo drží
+     * {@see PayrollExpectedParticipation} i pro oznámení zdravotní pojišťovně.
      *
      * @param array<string,mixed> $row
      * @param array{social:bool,health:bool}|null $gap
@@ -1455,6 +1457,8 @@ final class PayrollRunSnapshotBuilder
         if ($gap['social'] && $this->participatesInLevy(
             $row['social_insurance_participation'],
             $relationType,
+            $row,
+            $periodEnd,
         )) {
             $validations[] = new PayrollRunValidation(
                 'warning',
@@ -1476,6 +1480,8 @@ final class PayrollRunSnapshotBuilder
         if ($gap['health'] && $this->participatesInLevy(
             $row['health_insurance_participation'],
             $relationType,
+            $row,
+            $periodEnd,
         )) {
             $validations[] = new PayrollRunValidation(
                 'warning',
@@ -1498,19 +1504,24 @@ final class PayrollRunSnapshotBuilder
         return $validations;
     }
 
+    /**
+     * Stejné pravidlo jako oznámení nástupu zdravotní pojišťovně:
+     * {@see PayrollExpectedParticipation}.
+     *
+     * @param array<string,mixed> $row
+     */
     private function participatesInLevy(
         mixed $participation,
         string $relationType,
+        array $row,
+        string $periodEnd,
     ): bool {
-        $value = is_string($participation) ? $participation : 'automatic';
-        if ($value === 'included') {
-            return true;
-        }
-        if ($value === 'excluded' || $value === 'foreign') {
-            return false;
-        }
-
-        return $relationType === 'employment';
+        return PayrollExpectedParticipation::expected(
+            is_string($participation) ? $participation : null,
+            $relationType,
+            ($row['monthly_gross_minor'] ?? null) === null ? null : (int) $row['monthly_gross_minor'],
+            PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $periodEnd),
+        );
     }
 
     /** @return array<string,mixed>|null */

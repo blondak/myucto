@@ -296,6 +296,37 @@ final class PayrollRunValidationOverrideTest extends TestCase
         self::assertNotContains('employment_health_registration_missing', $codes);
     }
 
+    /**
+     * DPČ se sjednanou odměnou nad rozhodným příjmem výpočet pojistí vždy, takže
+     * chybějící přihláška se hlásí stejně jako u pracovního poměru — dřív se
+     * u všech dohod mlčelo a oznámení nástupu šlo připravit až po běhu.
+     */
+    public function testAgreementWithAgreedIncomeAboveThresholdIsWarnedAbout(): void
+    {
+        [, $employmentId] = $this->employment('SYN-DPC');
+        $this->pendingOnboardingChecklist($employmentId);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET relation_type = "dpc"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET monthly_gross_minor = 1200000
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $locked = $this->lockedRun();
+
+        $codes = array_column(
+            array_filter(
+                $this->requiresOverrideValidations((int) $locked['revision_id']),
+                static fn (array $row): bool => (int) $row['entity_id'] === $employmentId,
+            ),
+            'code',
+        );
+
+        self::assertContains('employment_social_registration_missing', $codes);
+        self::assertContains('employment_health_registration_missing', $codes);
+    }
+
     private function pendingOnboardingChecklist(int $employmentId): void
     {
         $insert = $this->db->pdo()->prepare(
