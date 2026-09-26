@@ -440,6 +440,9 @@ final class PayrollPostingService
         // právě tady. Druhá podmínka se do teď ignorovala, takže se sleva uplatnila
         // i bez prohlášení — srazilo se míň a za nesraženou zálohu ručí plátce
         // (§ 38s). Ověřeno proti dokladům účetní za 06/2026: rozdíl 675 Kč.
+        // Mzdový modul odvozuje slevu z podpisu sám (TaxpayerCreditEntitlement);
+        // tahle jednoduchá karta má pro slevu vlastní zaškrtávátko, které se
+        // zakládá zapnuté, proto zůstává čtené odděleně.
         $taxpayerCredit = (bool) $employee['tax_credit_taxpayer']
             && (bool) ($employee['tax_declaration_signed'] ?? 0);
 

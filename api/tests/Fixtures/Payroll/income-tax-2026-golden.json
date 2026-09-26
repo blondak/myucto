@@ -9,13 +9,14 @@
       {"reference": "employment", "kind": "employment", "amount_minor": 2000000}
     ],
     "advance_base_minor": 2449900,
+    "advance_tax_before_credits_minor": 367500,
     "advance_tax_minor": 367500,
     "withholding_base_minor": 1199900,
     "withholding_tax_minor": 179900,
     "relationship_regimes": ["withholding", "advance", "advance"]
   },
   {
-    "id": "signed-declaration-makes-agreements-advance",
+    "id": "signed-declaration-makes-agreements-advance-and-claims-taxpayer-credit",
     "declaration": "signed",
     "residence": "czech-resident",
     "relationships": [
@@ -23,7 +24,8 @@
       {"reference": "dpc", "kind": "dpc", "amount_minor": 449900}
     ],
     "advance_base_minor": 1649800,
-    "advance_tax_minor": 247500,
+    "advance_tax_before_credits_minor": 247500,
+    "advance_tax_minor": 0,
     "withholding_base_minor": 0,
     "withholding_tax_minor": 0,
     "relationship_regimes": ["advance", "advance"]

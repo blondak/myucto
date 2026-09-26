@@ -411,6 +411,7 @@ final class AnnualTaxSettlementService
             $this->settlements->creditClaimsForYear($supplierId, $employeeId, $taxYear),
             $taxYear,
             $declaration === TaxDeclarationStatus::Signed,
+            $statutory['declarations'],
         );
         $children = $this->claimMonths->children(
             $this->settlements->childClaimsForYear($supplierId, $employeeId, $taxYear),

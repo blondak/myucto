@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
+use MyInvoice\Service\Payroll\Document\AverageEarningsMonthlyConverter;
 use MyInvoice\Service\Payroll\Document\AverageEarningsSnapshotBuilder;
 use MyInvoice\Service\Payroll\Document\EmploymentExitDocumentService;
 use MyInvoice\Service\Payroll\Document\EmploymentExitReadinessException;
@@ -22,6 +23,7 @@ final class EmploymentExitDocumentServiceTest extends TestCase
     private Connection $db;
     private EmploymentExitDocumentService $service;
     private PayrollDocumentRepository $documents;
+    private AverageEarningsMonthlyConverter $converter;
     private int $supplierId;
     private int $employeeId;
     private int $employmentId;
@@ -42,6 +44,7 @@ final class EmploymentExitDocumentServiceTest extends TestCase
         $this->db = $container->get(Connection::class);
         $this->service = $container->get(EmploymentExitDocumentService::class);
         $this->documents = $container->get(PayrollDocumentRepository::class);
+        $this->converter = $container->get(AverageEarningsMonthlyConverter::class);
         $pdo = $this->db->pdo();
         $sourceSupplierId = (int) $pdo->query(
             'SELECT id FROM supplier ORDER BY id LIMIT 1',
@@ -549,6 +552,40 @@ final class EmploymentExitDocumentServiceTest extends TestCase
         self::assertSame(
             2026,
             $readiness['average_earnings_certificate']['decisive_year'],
+        );
+    }
+
+    /**
+     * UI-14: čistý průměrný výdělek počítá zálohu se slevou na poplatníka už
+     * z podepsaného prohlášení — stejně jako měsíční výpočet mzdy. Dřív ji
+     * uplatnil jen se zvláštním řádkem nároku, takže potvrzení pro ÚP
+     * vykázalo čistý výdělek o 2 570 Kč nižší.
+     */
+    public function testAverageNetEarningsClaimTaxpayerCreditFromSignedDeclaration(): void
+    {
+        $this->insertTaxDeclaration('signed');
+        $conversion = $this->converter->convert(
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentId,
+            [
+                'average_hourly_minor' => 25000,
+                'decisive_from' => '2026-04-01',
+                'decisive_to' => '2026-06-30',
+            ],
+            '2026-07-31',
+            true,
+        );
+
+        self::assertTrue($conversion->trace['signed_declaration']);
+        self::assertTrue($conversion->trace['taxpayer_credit']);
+        $taxBeforeCredits = intdiv(
+            ((int) ceil($conversion->grossMonthlyMinorUnits / 10000)) * 10000 * 15,
+            100,
+        );
+        self::assertSame(
+            max(0, $taxBeforeCredits - 257_000),
+            $conversion->advanceTaxMinorUnits,
         );
     }
 

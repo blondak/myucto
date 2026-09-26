@@ -87,6 +87,10 @@ final class MonthlyEmploymentIncomeTaxCalculatorTest extends TestCase
         self::assertSame(TaxCalculationStatus::Calculated, $result->status);
         self::assertSame('synthetic-payer', $result->payerReference);
         self::assertSame($case['advance_base_minor'], $result->advanceTax?->taxableIncomeMinorUnits);
+        self::assertSame(
+            $case['advance_tax_before_credits_minor'],
+            $result->advanceTax?->taxBeforeCreditsMinorUnits,
+        );
         self::assertSame($case['advance_tax_minor'], $result->advanceTax?->taxAfterCreditsMinorUnits);
         self::assertSame($case['withholding_base_minor'], $result->withholdingBaseMinorUnits);
         self::assertSame($case['withholding_tax_minor'], $result->withholdingTaxMinorUnits);
@@ -130,6 +134,66 @@ final class MonthlyEmploymentIncomeTaxCalculatorTest extends TestCase
             [TaxRegime::Advance, TaxRegime::Advance, TaxRegime::Advance],
             array_map(static fn ($item): TaxRegime => $item->regime, $result->relationships),
         );
+    }
+
+    /**
+     * UI-14: podepsané prohlášení je uplatněním slevy na poplatníka. Bez
+     * zvláštního řádku nároku se dřív záloha spočítala bez slevy (o 2 570 Kč
+     * vyšší) a výsledek se tvářil jako řádně spočítaný.
+     */
+    public function testSignedDeclarationAloneClaimsTaxpayerCredit(): void
+    {
+        $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
+            calculationDate: '2026-10-31',
+            employeeReference: 'synthetic-employee',
+            relationships: [
+                $this->relationship('employment', EmploymentRelationshipKind::Employment, 4_000_000),
+            ],
+            declarations: [$this->signedDeclaration()],
+            residence: $this->czechResidence(),
+        ));
+
+        self::assertSame(TaxCalculationStatus::Calculated, $result->status);
+        self::assertSame(600_000, $result->advanceTax?->taxBeforeCreditsMinorUnits);
+        self::assertSame(257_000, $result->claimedNonRefundableCreditsMinorUnits);
+        self::assertSame(['taxpayer' => 257_000], $result->claimedNonRefundableCreditBreakdown);
+        self::assertSame(343_000, $result->advanceTax?->taxAfterCreditsMinorUnits);
+
+        $explicit = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
+            calculationDate: '2026-10-31',
+            employeeReference: 'synthetic-employee',
+            relationships: [
+                $this->relationship('employment', EmploymentRelationshipKind::Employment, 4_000_000),
+            ],
+            declarations: [$this->signedDeclaration()],
+            residence: $this->czechResidence(),
+            creditClaims: [$this->credit(TaxCreditKind::Taxpayer)],
+        ));
+        self::assertSame(
+            $result->advanceTax?->taxAfterCreditsMinorUnits,
+            $explicit->advanceTax?->taxAfterCreditsMinorUnits,
+        );
+        self::assertSame(
+            $result->claimedNonRefundableCreditBreakdown,
+            $explicit->claimedNonRefundableCreditBreakdown,
+        );
+    }
+
+    public function testUnsignedDeclarationClaimsNoTaxpayerCredit(): void
+    {
+        $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
+            calculationDate: '2026-10-31',
+            employeeReference: 'synthetic-employee',
+            relationships: [
+                $this->relationship('employment', EmploymentRelationshipKind::Employment, 4_000_000),
+            ],
+            declarations: [$this->unsignedDeclaration()],
+            residence: $this->czechResidence(),
+        ));
+
+        self::assertSame(TaxCalculationStatus::Calculated, $result->status);
+        self::assertSame(0, $result->claimedNonRefundableCreditsMinorUnits);
+        self::assertSame([], $result->claimedNonRefundableCreditBreakdown);
     }
 
     public function testUnsignedThresholdsAggregateByPayerAndGroup(): void

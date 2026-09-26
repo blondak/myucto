@@ -480,11 +480,18 @@ final class MonthlyEmploymentIncomeTaxCalculator
             $issues[] = 'tax-credit-requires-signed-declaration';
         }
 
-        $taxpayer = isset($kinds[TaxCreditKind::Taxpayer->value]);
+        // Sleva na poplatníka plyne z podepsaného prohlášení, ne z řádku nároku
+        // ({@see TaxpayerCreditEntitlement}). Řádek bez podpisu slevu dál
+        // nezakládá — hlásí ho `tax-credit-requires-signed-declaration` výše.
+        $taxpayer = isset($kinds[TaxCreditKind::Taxpayer->value])
+            || TaxpayerCreditEntitlement::fromDeclaration($declaration?->status);
         $other = 0;
         // Rozpad po druzích slevy potřebuje JMHZ (atributy 10299-10302), kde se
         // každá sleva vykazuje samostatně. Úhrn sám o sobě je nerozložitelný.
         $breakdown = [];
+        if ($taxpayer && !isset($kinds[TaxCreditKind::Taxpayer->value])) {
+            $breakdown[TaxCreditKind::Taxpayer->value] = $policy->money('credit.taxpayer.monthly');
+        }
         foreach ($active as $claim) {
             $claimAmount = match ($claim->kind) {
                 TaxCreditKind::Taxpayer

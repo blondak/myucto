@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use InvalidArgumentException;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\IncomeTax\TaxpayerCreditEntitlement;
 use MyInvoice\Service\Payroll\PayrollApprovedPeriodFreeze;
 use MyInvoice\Service\Payroll\PayrollPersonStatutoryEvidenceValidator;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommand;
@@ -432,11 +433,24 @@ final class PayrollPersonStatutoryEvidenceRepository
             $sections[$key] = $this->editorRows($supplierId, $employeeId, $key);
         }
         $frozenThrough = $this->freeze->frozenThrough($supplierId);
+        try {
+            $snapshot = $this->snapshot($supplierId, $employeeId, $effectiveOn);
+        } catch (InvalidArgumentException) {
+            $snapshot = null;
+        }
 
         return [
             'employee_id' => $employeeId,
             'effective_on' => $effectiveOn,
             'frozen_through' => $frozenThrough,
+            // Co z evidence plyne, i když to žádný řádek nenese. Sleva na
+            // poplatníka vzniká podpisem prohlášení — editor ji ukazuje v sekci
+            // slev ze STEJNÉHO pravidla, podle kterého ji počítá mzda.
+            'derived' => [
+                'taxpayer_credit' => TaxpayerCreditEntitlement::fromDeclarationStatus(
+                    $snapshot['income_tax']['declaration']['status'] ?? null,
+                ),
+            ],
             // Bez tohohle editor ví, že je historie zamčená, ale ne ČÍM —
             // uživatel by musel sám najít mzdový běh, který hranici drží,
             // a odejít ho otevřít jinam. Dotaz je stejně tak jako tak jeden.
@@ -454,7 +468,7 @@ final class PayrollPersonStatutoryEvidenceRepository
                 ),
                 [$supplierId, $employeeId],
             ),
-            'blockers' => $this->blockers($supplierId, $employeeId, $effectiveOn),
+            'blockers' => $this->blockers($snapshot),
         ];
     }
 
@@ -1248,15 +1262,11 @@ final class PayrollPersonStatutoryEvidenceRepository
      * naráz (i slevu důchodce vedle chybějící příslušnosti), takže účetní na
      * obou místech vidí týž seznam.
      *
+     * @param array<string,mixed>|null $snapshot snímek k datu; null = rozporný
      * @return list<string>
      */
-    private function blockers(int $supplierId, int $employeeId, string $effectiveOn): array
+    private function blockers(?array $snapshot): array
     {
-        try {
-            $snapshot = $this->snapshot($supplierId, $employeeId, $effectiveOn);
-        } catch (InvalidArgumentException) {
-            return ['statutory_evidence_snapshot_missing_or_mismatched'];
-        }
         if ($snapshot === null) {
             return ['statutory_evidence_snapshot_missing_or_mismatched'];
         }
