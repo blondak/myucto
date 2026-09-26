@@ -463,6 +463,33 @@ final class PayrollMigrationModuleSetup
         return ['from' => $currentPeriod, 'to' => $target, 'blocking_runs' => $blocking];
     }
 
+    /**
+     * Kam posunout začátek vedení mezd: měsíc po posledním měsíci, který
+     * zpracoval předchozí program (poslední úhrny z převodu). Jediné pravidlo
+     * pro obrazovku běhů i pro kontrolu převodu ({@see startAdvance()}) — dřív
+     * běhy nabízely právě zobrazené období (srpen) a převod pak radil září.
+     * `null`, když posun nedává smysl nebo by nesplnil podmínky.
+     */
+    public function suggestedStart(int $supplierId): ?string
+    {
+        if (!$this->schemaAvailable() || !$this->db->hasTable('payroll_migration_reference_totals')) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT DATE_FORMAT(MAX(period_start), "%Y-%m")
+               FROM payroll_migration_reference_totals
+              WHERE supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $last = $stmt->fetchColumn();
+        if (!is_string($last) || $last === '') {
+            return null;
+        }
+        $target = self::startAfter($last);
+
+        return $this->advanceStartProblem($supplierId, $target) === null ? $target : null;
+    }
+
     /** Měsíc po posledních převzatých mzdách (`YYYY-MM`). */
     public static function startAfter(string $lastPayrollPeriod): string
     {
