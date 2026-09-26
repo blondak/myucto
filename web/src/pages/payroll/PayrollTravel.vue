@@ -84,7 +84,15 @@ const pageSize = 20
 const offset = ref(0)
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const employments = ref<PayrollAbsenceEmployment[]>([])
-const period = ref(payrollWorkingPeriod())
+/*
+ * Proklik z hlídače termínů (§ 183 ZP) nese období vyúčtování a cestu
+ * (`?period=2026-09&trip=12`): stránka otevře rovnou její editor, kde se
+ * zapisuje den předložení dokladů.
+ */
+const queryPeriod = typeof route.query.period === 'string' && /^\d{4}-\d{2}$/.test(route.query.period)
+  ? route.query.period
+  : null
+const period = ref(queryPeriod ?? payrollWorkingPeriod())
 const editorOpen = ref(false)
 const editingTrip = ref<TravelTrip | null>(null)
 const formError = ref('')
@@ -127,6 +135,7 @@ const form = reactive({
   meal_rate_band_3: '',
   advance: '',
   advance_settlement: 'payroll' as TravelAdvanceSettlement,
+  documents_submitted_on: '',
   settlement_period: period.value,
 })
 const items = ref<ItemForm[]>([])
@@ -253,6 +262,7 @@ function resetForm(trip: TravelTrip | null) {
     form.meal_rate_band_3 = ''
     form.advance = ''
     form.advance_settlement = 'payroll'
+    form.documents_submitted_on = ''
     form.settlement_period = period.value
     items.value = []
     meals.value = []
@@ -273,6 +283,7 @@ function resetForm(trip: TravelTrip | null) {
   form.meal_rate_band_3 = minorToInput(trip.meal_rate_band_3_minor)
   form.advance = trip.advance_minor > 0 ? minorToInput(trip.advance_minor) : ''
   form.advance_settlement = trip.advance_settlement ?? 'payroll'
+  form.documents_submitted_on = trip.documents_submitted_on ?? ''
   form.settlement_period = trip.settlement_period_start.slice(0, 7)
   items.value = trip.items.map(item => ({
     item_kind: item.item_kind,
@@ -314,6 +325,7 @@ function payload(): TravelTripPayload {
     meal_rate_band_3: form.meal_rate_band_3 || null,
     advance: form.advance || null,
     advance_settlement: form.advance_settlement,
+    documents_submitted_on: form.documents_submitted_on === '' ? null : form.documents_submitted_on,
     settlement_period: form.settlement_period,
     items: items.value.map(itemPayload),
     free_meals: meals.value.map(meal => ({
@@ -366,6 +378,14 @@ async function load() {
     // po kliknutí na „Pracovní cesty" u konkrétního člověka vybíral znovu.
     if (focusEmploymentId.value !== null && form.employment_id === null) {
       selectEmployment(focusEmploymentId.value)
+    }
+    const tripId = payrollQueryId(route.query, 'trip')
+    if (tripId !== null) {
+      const target = trips.value.find(trip => trip.id === tripId)
+      const query = { ...route.query }
+      delete query.trip
+      void router.replace({ query })
+      if (target !== undefined && target.status === 'draft' && canWrite.value) openEditor(target)
     }
   } catch (error: unknown) {
     loadFailed.value = true
@@ -645,6 +665,12 @@ onMounted(load)
                   >
                     {{ t(`payroll_travel.status.${trip.status}`) }}
                   </span>
+                  <div v-if="trip.documents_due_on" class="mt-1 whitespace-nowrap text-xs text-neutral-500" data-test="travel-documents-due">
+                    {{ t('payroll_travel.deadline.documents_due', { date: trip.documents_due_on }) }}
+                  </div>
+                  <div v-else-if="trip.settlement_due_on" class="mt-1 whitespace-nowrap text-xs text-warning-700" data-test="travel-settlement-due">
+                    {{ t('payroll_travel.deadline.settlement_due', { date: trip.settlement_due_on }) }}
+                  </div>
                 </td>
                 <td v-if="tbl.isVisible('actions')" class="px-4 py-3">
                   <div class="flex flex-wrap justify-end gap-2">
@@ -715,6 +741,12 @@ onMounted(load)
               {{ trip.origin_place }} → {{ trip.destination_place }}
             </p>
             <p class="mt-1 break-words text-xs text-neutral-500">{{ trip.purpose }}</p>
+            <p v-if="trip.documents_due_on" class="mt-1 text-xs text-neutral-500">
+              {{ t('payroll_travel.deadline.documents_due', { date: trip.documents_due_on }) }}
+            </p>
+            <p v-else-if="trip.settlement_due_on" class="mt-1 text-xs text-warning-700">
+              {{ t('payroll_travel.deadline.settlement_due', { date: trip.settlement_due_on }) }}
+            </p>
             <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
               <div>
                 <dt class="text-neutral-500">{{ t('payroll_travel.table.interval') }}</dt>
@@ -882,6 +914,11 @@ onMounted(load)
             {{ t(`payroll_travel.settlement.help_${form.advance_settlement}`) }}
           </p>
         </div>
+        <label>
+          <span :class="labelClass">{{ t('payroll_travel.deadline.submitted_on') }}</span>
+          <DateInput v-model="form.documents_submitted_on" data-test="travel-documents-submitted-on" :class="fieldClass" />
+          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll_travel.deadline.submitted_on_hint') }}</span>
+        </label>
       </div>
 
       <!-- Položky vyúčtování -->

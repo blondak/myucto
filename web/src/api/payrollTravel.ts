@@ -125,6 +125,12 @@ export interface TravelTrip {
   meal_rate_band_3_minor: number | null
   advance_minor: number
   advance_settlement: TravelAdvanceSettlement
+  /** Den předložení dokladů k vyúčtování (§ 183 odst. 1 ZP). */
+  documents_submitted_on?: string | null
+  /** Do kdy má zaměstnanec předložit doklady (jen rozpracovaná cesta bez nich). */
+  documents_due_on?: string | null
+  /** Do kdy má zaměstnavatel cestu vyúčtovat (po předložení dokladů). */
+  settlement_due_on?: string | null
   settlement_period_start: string
   status: TravelTripStatus
   entitlement_total_minor: number | null
@@ -169,6 +175,7 @@ export interface TravelTripPayload {
   meal_rate_band_3?: string | null
   advance?: string | null
   advance_settlement?: TravelAdvanceSettlement
+  documents_submitted_on?: string | null
   settlement_period: string
   items: TravelTripItemPayload[]
   free_meals: { meal_date: string; meal_count: number }[]

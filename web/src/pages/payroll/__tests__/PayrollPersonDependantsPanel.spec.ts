@@ -237,6 +237,56 @@ describe('PayrollPersonDependantsPanel', () => {
     }))
   })
 
+  it('u nového držitele ZTP/P vyžaduje den přiznání průkazu a pošle ho', async () => {
+    mocks.createPersonDependant.mockResolvedValue(response())
+    const wrapper = mountWithActions()
+    await flushPromises()
+    await wrapper.find('[data-test="add-dependant"]').trigger('click')
+
+    const dates = wrapper.findAll('[data-test="dependant-editor"] input[type="date"]')
+    await dates[0].setValue('2019-02-02')
+    await wrapper.find('[data-test="dependant-full-name"]').setValue('Adam Testovací')
+    expect(wrapper.find('[data-test="dependant-ztp-p-granted"]').exists()).toBe(false)
+    await wrapper.find('[data-test="dependant-ztp-p"]').setValue(true)
+    expect(wrapper.find('[data-test="dependant-ztp-p-granted-missing"]').exists()).toBe(true)
+
+    await wrapper.find('[data-test="dependant-editor"]').trigger('submit')
+    await flushPromises()
+    expect(mocks.createPersonDependant).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="dependant-error"]').text())
+      .toContain('payroll.people.dependants.ztp_p_grant.required')
+
+    await wrapper.find('[data-test="dependant-ztp-p-granted-on"]').setValue('2026-05-12')
+    await wrapper.find('[data-test="dependant-editor"]').trigger('submit')
+    await flushPromises()
+    expect(mocks.createPersonDependant).toHaveBeenCalledWith(21, expect.objectContaining({
+      ztp_p: true,
+      ztp_p_granted_on: '2026-05-12',
+    }))
+  })
+
+  it('u nároku se ZTP/P před měsícem přiznání předem řekne, že se nárok rozdělí', async () => {
+    const base = response()
+    mocks.personDependants.mockResolvedValue(response({
+      dependants: [{
+        ...base.dependants[0],
+        ztp_p: true,
+        ztp_p_granted_on: '2026-05-12',
+        ztp_p_double_from: '2026-06-01',
+        claims: [],
+      }],
+    }))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('tbody [aria-expanded]').trigger('click')
+    await wrapper.find('[data-test="add-claim-7"]').trigger('click')
+    await wrapper.find('[data-test="claim-effective-from"]').setValue('2026-01-01')
+
+    expect(wrapper.find('[data-test="claim-ztp-p-split"]').exists()).toBe(true)
+    await wrapper.find('[data-test="claim-effective-from"]').setValue('2026-06-01')
+    expect(wrapper.find('[data-test="claim-ztp-p-split"]').exists()).toBe(false)
+  })
+
   it('surfaces the API validation message instead of a generic failure', async () => {
     mocks.createPersonDependantClaim.mockRejectedValue({
       response: { data: { error: { code: 'validation_failed', message: 'Pořadí dítěte 1 už je obsazené.' } } },

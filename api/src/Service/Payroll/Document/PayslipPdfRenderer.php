@@ -28,8 +28,12 @@ final class PayslipPdfRenderer
      *
      * v2: páska tiskne podklad nezdanění (osvobozeno / není předmětem daně)
      * a dva podsoučty.
+     *
+     * v3: patička a auditní řádek tisknou číslo revize běhu (revize č. 2),
+     * ne ID řádku databáze. Pásky archivované ve v2 se vydávají dál ze
+     * souboru beze změny.
      */
-    public const VERSION = 'mz-16-payslip-v2';
+    public const VERSION = 'mz-16-payslip-v3';
 
     private ?Environment $twig = null;
 
@@ -57,22 +61,16 @@ final class PayslipPdfRenderer
             ...MpdfFontConfig::options(),
         ]);
         $mpdf->SetTitle('Výplatní páska ' . $data->period);
-        $mpdf->SetSubject('Výplatní páska, revize ' . $data->revisionId);
+        $mpdf->SetSubject('Výplatní páska, revize ' . $data->revisionLabel());
         $mpdf->SetKeywords('mzdy, výplatní páska, ' . self::VERSION);
         $mpdf->SetCreator('MyÚčto.cz');
         $mpdf->AddCustomProperty('PayrollRevision', $data->revisionId);
+        if ($data->revisionNumber !== null) {
+            $mpdf->AddCustomProperty('PayrollRevisionNumber', (string) $data->revisionNumber);
+        }
         $mpdf->AddCustomProperty('PayrollSourceSnapshotSHA256', $data->sourceSnapshotSha256);
         $mpdf->AddCustomProperty('PayrollRendererVersion', self::VERSION);
-        $footerPeriod = htmlspecialchars($data->period, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        $footerRevision = htmlspecialchars($data->revisionId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        $mpdf->SetHTMLFooter(
-            '<table style="width:100%; border-collapse:collapse; border-top:0.3pt solid #DEC8D4;'
-            . ' font-family:montserrat,dejavusans,sans-serif; font-size:7pt; color:#6B5C66;">'
-            . '<tr><td style="padding-top:1.5mm; text-align:left;">Výplatní páska ' . $footerPeriod
-            . ' | revize ' . $footerRevision . '</td>'
-            . '<td style="padding-top:1.5mm; text-align:center;">Strana {PAGENO} / {nbpg}</td>'
-            . '<td style="padding-top:1.5mm; text-align:right;">MyÚčto.cz</td></tr></table>',
-        );
+        $mpdf->SetHTMLFooter(self::footerHtml($data));
         $mpdf->WriteHTML($body);
         $pdfBytes = $mpdf->Output('', 'S');
         if (!is_string($pdfBytes)) {
@@ -80,6 +78,19 @@ final class PayslipPdfRenderer
         }
 
         return RenderedPayslipDocument::fromPdf($pdfBytes, $data, self::VERSION);
+    }
+
+    public static function footerHtml(PayslipDocumentData $data): string
+    {
+        $footerPeriod = htmlspecialchars($data->period, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $footerRevision = htmlspecialchars($data->revisionLabel(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+        return '<table style="width:100%; border-collapse:collapse; border-top:0.3pt solid #DEC8D4;'
+            . ' font-family:montserrat,dejavusans,sans-serif; font-size:7pt; color:#6B5C66;">'
+            . '<tr><td style="padding-top:1.5mm; text-align:left;">Výplatní páska ' . $footerPeriod
+            . ' | revize ' . $footerRevision . '</td>'
+            . '<td style="padding-top:1.5mm; text-align:center;">Strana {PAGENO} / {nbpg}</td>'
+            . '<td style="padding-top:1.5mm; text-align:right;">MyÚčto.cz</td></tr></table>';
     }
 
     private function twig(): Environment

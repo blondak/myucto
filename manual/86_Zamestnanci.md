@@ -219,11 +219,23 @@ do** den, kdy vyživování skončilo (úmrtí, ukončení studia, 26. narozenin
   posledním dnem toho měsíce.
 
 Formulář nároku datum začátku i konce podle těchto pravidel předvyplní
-a upozorní, když zadané období mimo ně vybočí. Dvojnásobek za dítě s průkazem
-ZTP/P výjimku nemá: náleží od měsíce, na jehož počátku byl nárok na průkaz
-přiznán. Při přiznání v průběhu měsíce ukonči dosavadní nárok koncem měsíce
-a nárok se ZTP/P zadej od dalšího. Stejná pravidla platí pro import měsíčních
-hlášení JMHZ a pro převod z předchozího mzdového systému.
+a upozorní, když zadané období mimo ně vybočí.
+
+**Dvojnásobek za dítě s průkazem ZTP/P** výjimku nemá: náleží od měsíce, na
+jehož počátku průkaz platil. U osoby s průkazem proto zadej i **Průkaz ZTP/P
+přiznán od** (den podle rozhodnutí úřadu práce). Uplatníš-li pak dvojnásobek
+od dřívějšího měsíce, aplikace nárok při uložení sama rozdělí: do konce měsíce
+přiznání v základní výši, od prvního celého měsíce dvojnásobně. Výpočet mzdy,
+roční zúčtování, potvrzení o příjmech i měsíční hlášení tak dvojnásobek
+nedostanou dřív, než náleží. Den přiznání pozdější než už evidovaný
+dvojnásobek aplikace neuloží.
+
+Stejná pravidla platí pro import měsíčních hlášení JMHZ a pro převod
+z předchozího mzdového systému. Je-li dítě v evidenci vedené jako **osvojené**
+nebo **převzaté do péče**, import zapíše nárok i za měsíc, ve kterém
+vyživování začalo, a jako důvod uplatnění uvede osvojení, resp. převzetí do
+péče. Hlášení, které uplatňuje dvojnásobek ZTP/P dřív, než podle dne přiznání
+náleží, import nepřevezme a upozorní na to.
 
 Aplikace nedovolí dvě překrývající se uplatnění na totéž dítě u jednoho
 poplatníka ani uplatnění mimo období, kdy je osoba vedena jako vyživovaná.
@@ -677,6 +689,15 @@ položka termín (den žádosti + 10 dnů) a hlídá ji panel **Zákonné termí
 Dokud den žádosti není zapsaný, položka termín nemá. Povinnost se uzavře sama,
 jakmile se v aplikaci vytvoří potvrzení o zdanitelných příjmech; potvrzení
 vydané před zapsanou žádostí ji neuzavře.
+
+O potvrzení může zaměstnanec požádat kdykoli, i během trvajícího vztahu. Takovou
+žádost zapíšeš na kartě osoby v části **Další údaje → Žádosti o potvrzení
+o zdanitelných příjmech**: den žádosti, rok příjmů a volitelně poznámku. Žádost
+dostane termín (den žádosti + 10 dnů) v panelu **Zákonné termíny**, proklik
+z něj vede zpět na tuto část karty. Vyřídí se sama, jakmile na stránce
+**Dokumenty** vystavíš potvrzení o zdanitelných příjmech (zálohové nebo
+srážkové); předáš-li potvrzení jinak, označ žádost tlačítkem **Vyřízeno mimo
+aplikaci**. Omylem zapsanou žádost lze smazat.
 
 Přihlášky a odhlášky se odškrtnou samy až podle **stavu podání**: splněné jsou,
 když podání odešlo (nebo bylo přijato) v ostrém prostředí. Připravené, ale

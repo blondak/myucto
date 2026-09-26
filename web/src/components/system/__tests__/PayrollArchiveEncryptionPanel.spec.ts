@@ -13,10 +13,12 @@ vi.mock('vue-i18n', () => ({
 
 const reencrypt = vi.fn()
 const rewrap = vi.fn()
+const measure = vi.fn()
 vi.mock('@/api/diagnostics', () => ({
   diagnosticsApi: {
     payrollArchiveReencrypt: (p: unknown) => reencrypt(p),
     payrollKeyRewrap: (p: unknown) => rewrap(p),
+    payrollKeyMeasure: () => measure(),
   },
 }))
 
@@ -56,12 +58,42 @@ describe('PayrollArchiveEncryptionPanel', () => {
     rewrap.mockReset()
   })
 
-  it('bez nálezu se nezobrazí', () => {
+  it('bez kontroly klíčů a bez nálezu se nezobrazí', () => {
     const wrapper = mountPanel([
       check({ id: 'payroll_archive_encryption', status: 'ok', actual: '0', meta: { legacy_files: 0, suppliers: [] } }),
-      check({ id: 'payroll_key_rotation', status: 'skip', actual: 'no_rotation' }),
     ])
     expect(wrapper.find('[data-testid="payroll-archive-panel"]').exists()).toBe(false)
+  })
+
+  /*
+   * Klíče se mezi měřeními kontrolují jen levně (krajní řádky). Úplné měření
+   * musí jít spustit i bez nálezu a panel říká, jak je staré.
+   */
+  it('bez nálezu nabídne jen úplné měření klíčů se stářím posledního měření', async () => {
+    measure.mockResolvedValue(check({ id: 'payroll_key_rotation', status: 'ok', actual: '0' }))
+    const wrapper = mountPanel([
+      check({ id: 'payroll_archive_encryption', status: 'ok', actual: '0', meta: { legacy_files: 0, suppliers: [] } }),
+      check({ id: 'payroll_key_rotation', status: 'ok', actual: '0', meta: { mode: 'quick', measured_at: '2026-09-26T10:00:00+02:00', unknown_total: 0 } }),
+    ])
+    expect(wrapper.find('[data-testid="payroll-archive-legacy"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="payroll-archive-rotation"]').exists()).toBe(false)
+    const section = wrapper.get('[data-testid="payroll-key-measure"]')
+    expect(section.text()).toContain('diagnostics.payroll_archive.measured_at')
+    expect(section.text()).toContain('2026-09-26 10:00')
+
+    await wrapper.get('[data-testid="payroll-key-measure-run"]').trigger('click')
+    await flushPromises()
+    expect(measure).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('changed')).toHaveLength(1)
+  })
+
+  it('cizí klíč bez rotace hlásí i bez přebalení', () => {
+    const wrapper = mountPanel([
+      check({ id: 'payroll_key_rotation', status: 'fail', actual: '2', variant: 'unknown_key', meta: { mode: 'quick', unknown_total: 2, stale_total: 0 } }),
+    ])
+    expect(wrapper.find('[data-testid="payroll-archive-rotation"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="payroll-key-measure"]').text())
+      .toContain('diagnostics.payroll_archive.unknown_key')
   })
 
   it('ukáže počet po firmách s názvem', () => {

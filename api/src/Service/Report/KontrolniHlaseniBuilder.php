@@ -673,15 +673,7 @@ final class KontrolniHlaseniBuilder
      */
     private static function addWorkingDays(string $from, int $days): string
     {
-        $d = new \DateTimeImmutable($from);
-        $added = 0;
-        while ($added < $days) {
-            $d = $d->modify('+1 day');
-            if (CzechWorkingDays::isWorkingDay($d)) {
-                $added++;
-            }
-        }
-        return $d->format('Y-m-d');
+        return CzechWorkingDays::addWorkingDays($from, $days);
     }
 
     /**

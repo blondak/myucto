@@ -238,6 +238,42 @@ describe('PayrollTravel', () => {
     expect(wrapper.find('[data-test="travel-settlement-refund"]').exists()).toBe(true)
   })
 
+  /*
+   * § 183 odst. 1 ZP: proklik z hlídače termínů otevře editor cesty, kde se
+   * zapíše den předložení dokladů; seznam ukazuje, do kdy doklady čekají.
+   */
+  it('opens the trip from the deadline link and sends the documents submission date', async () => {
+    m.routeQuery = { period: '2026-06', trip: '7' }
+    m.listPage.mockResolvedValue(tripsPage([trip({ documents_due_on: '2026-06-24' })]))
+    m.preview.mockResolvedValue({
+      status: 'supported', blockers: [], ruleset_ids: [], meal_days: [], items: [],
+      entitlement_total_minor: 0, exempt_total_minor: 0, taxable_total_minor: 0,
+      advance_minor: 0, settlement_difference_minor: 0, steps: [],
+    })
+    try {
+      const wrapper = mount(PayrollTravel)
+      await flushPromises()
+
+      expect(m.listPage.mock.calls[0][0]).toBe('2026-06')
+      expect(wrapper.get('[data-test="travel-documents-due"]').text())
+        .toContain('payroll_travel.deadline.documents_due')
+      expect(wrapper.find('[data-test="travel-editor"]').exists()).toBe(true)
+      expect(m.routerReplace).toHaveBeenCalledWith({ query: { period: '2026-06' } })
+
+      const field = wrapper.get('[data-test="travel-documents-submitted-on"]')
+      const input = field.element.tagName === 'INPUT' ? field : field.get('input')
+      await input.setValue('2026-06-12')
+      await wrapper.find('[data-test="travel-preview-button"]').trigger('click')
+      await flushPromises()
+
+      expect(m.preview.mock.calls[0][0]).toEqual(expect.objectContaining({
+        documents_submitted_on: '2026-06-12',
+      }))
+    } finally {
+      m.routeQuery = {}
+    }
+  })
+
   it('warns after posting to payroll when the employee has to return part of the advance', async () => {
     m.listPage.mockResolvedValue(tripsPage([trip({ status: 'approved', advance_minor: 30000 })]))
     m.materialize.mockResolvedValue({

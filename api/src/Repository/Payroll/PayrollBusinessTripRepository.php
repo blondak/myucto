@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Deadline\BusinessTripSettlementDeadlinePolicy;
 use PDO;
 
 /**
@@ -153,8 +154,8 @@ final class PayrollBusinessTripRepository
                      origin_place, destination_place,
                      purpose, transport_mode, meal_rate_band_1_minor,
                      meal_rate_band_2_minor, meal_rate_band_3_minor, advance_minor,
-                     advance_settlement, settlement_period_start, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     advance_settlement, documents_submitted_on, settlement_period_start, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -173,6 +174,7 @@ final class PayrollBusinessTripRepository
                 $data['meal_rate_band_3_minor'],
                 $data['advance_minor'],
                 $data['advance_settlement'] ?? 'payroll',
+                $data['documents_submitted_on'] ?? null,
                 $data['settlement_period_start'],
                 $userId,
             ]);
@@ -222,7 +224,8 @@ final class PayrollBusinessTripRepository
                         destination_place = ?, purpose = ?, transport_mode = ?,
                         meal_rate_band_1_minor = ?, meal_rate_band_2_minor = ?,
                         meal_rate_band_3_minor = ?, advance_minor = ?,
-                        advance_settlement = ?, settlement_period_start = ?,
+                        advance_settlement = ?, documents_submitted_on = ?,
+                        settlement_period_start = ?,
                         row_version = row_version + 1
                   WHERE supplier_id = ? AND id = ? AND row_version = ?
                     AND status = "draft"'
@@ -243,6 +246,7 @@ final class PayrollBusinessTripRepository
                 $data['meal_rate_band_3_minor'],
                 $data['advance_minor'],
                 $data['advance_settlement'] ?? 'payroll',
+                $data['documents_submitted_on'] ?? null,
                 $data['settlement_period_start'],
                 $supplierId,
                 $id,
@@ -475,6 +479,15 @@ final class PayrollBusinessTripRepository
                 $timezone,
             );
         }
+        // Lhůty § 183 odst. 1 ZP: předložení dokladů od konce cesty, vyúčtování
+        // od předložení. Obě jen u rozpracované cesty; schválením je vyúčtováno.
+        $submitted = $row['documents_submitted_on'] ?? null;
+        $row['documents_due_on'] = ($row['status'] ?? null) === 'draft' && $submitted === null
+            ? BusinessTripSettlementDeadlinePolicy::documentsDueOn((string) $row['arrival_at_local'])
+            : null;
+        $row['settlement_due_on'] = ($row['status'] ?? null) === 'draft' && $submitted !== null
+            ? BusinessTripSettlementDeadlinePolicy::settlementDueOn((string) $submitted)
+            : null;
         unset($row['calculation_hash']);
         $row['calculation'] = $row['calculation_json'] === null
             ? null

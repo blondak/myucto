@@ -59,8 +59,17 @@ final readonly class PayslipDocumentData
          */
         public int $annualSettlementMinorUnits = 0,
         public string $incomeDetailStatus = self::INCOME_DETAIL_NOT_RECORDED,
+        /**
+         * Pořadové číslo revize běhu (`payroll_run_revisions.revision_no`),
+         * které účetní vidí v aplikaci. `revisionId` zůstává technickou
+         * identitou dokladu; náhled výpočtu číslo revize ještě nemá.
+         */
+        public ?int $revisionNumber = null,
     ) {
         $this->assertText($revisionId, 'Revision ID');
+        if ($revisionNumber !== null && $revisionNumber <= 0) {
+            throw new \InvalidArgumentException('Revision number must be positive.');
+        }
         $this->assertText($employerName, 'Employer name');
         $this->assertText($employerIdentificationNumber, 'Employer identification number');
         $this->assertText($employeeDisplayName, 'Employee display name');
@@ -211,6 +220,17 @@ final readonly class PayslipDocumentData
         }
     }
 
+    /**
+     * Revize, jak ji páska tiskne: „č. 2“ podle pořadí revize běhu, jen bez
+     * čísla (náhled výpočtu) technický identifikátor.
+     */
+    public function revisionLabel(): string
+    {
+        return $this->revisionNumber !== null
+            ? 'č. ' . $this->revisionNumber
+            : $this->revisionId;
+    }
+
     public function incomeDetailRecorded(): bool
     {
         return $this->incomeDetailStatus === self::INCOME_DETAIL_RECORDED;
@@ -277,6 +297,7 @@ final readonly class PayslipDocumentData
     /**
      * @return array{
      *   revision_id:string,
+     *   revision_label:string,
      *   source_snapshot_sha256:string,
      *   employer:array{name:string,identification_number:string},
      *   employee:array{display_name:string},
@@ -314,6 +335,7 @@ final readonly class PayslipDocumentData
     {
         return [
             'revision_id' => $this->revisionId,
+            'revision_label' => $this->revisionLabel(),
             'source_snapshot_sha256' => $this->sourceSnapshotSha256,
             'employer' => [
                 'name' => $this->employerName,

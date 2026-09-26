@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\Document\PayrollArchiveDiagnostics;
 use MyInvoice\Service\Payroll\Document\PayrollArchiveReencryptionService;
 use MyInvoice\Service\Payroll\Security\PayrollKeyRotationService;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -38,7 +39,25 @@ final class PayrollArchiveEncryptionAction
         private readonly PayrollArchiveReencryptionService $archive,
         private readonly PayrollKeyRotationService $rotation,
         private readonly ActivityLogger $activity,
+        private readonly PayrollArchiveDiagnostics $diagnostics,
     ) {}
+
+    /**
+     * POST /api/admin/diagnostics/payroll-archive/measure
+     *
+     * Úplné měření klíčů mzdových dat (všechny šifrované hodnoty a soubory
+     * exportů). Diagnostika jinak měří jen levně; výsledek jde do cache a
+     * Diagnostika ukazuje jeho stáří. Jen čtení, bez potvrzení.
+     */
+    public function measure(Request $request, Response $response): Response
+    {
+        if (!RequestAuthorization::isSuperadmin($request)) {
+            return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        }
+        @set_time_limit(300);
+
+        return Json::ok($response, ['check' => $this->diagnostics->measureRotation()]);
+    }
 
     /** POST /api/admin/diagnostics/payroll-archive/reencrypt */
     public function reencrypt(Request $request, Response $response): Response

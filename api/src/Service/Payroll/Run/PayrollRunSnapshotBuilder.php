@@ -26,6 +26,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojClaimDeadlinePolicy;
 use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 use MyInvoice\Service\Payroll\Time\PayrollAgreementAnnualHours;
+use MyInvoice\Service\Payroll\Time\PayrollAgreementWeeklyAverage;
 use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
 use PDO;
 
@@ -148,6 +149,14 @@ final class PayrollRunSnapshotBuilder
         // z předchozího programu. Varování, ne závora — a jako u přesčasů se
         // do kanonického snapshotu nepíše.
         foreach ((new PayrollAgreementAnnualHours($this->db))->validations(
+            $supplierId,
+            $employments,
+            $periodStart,
+        ) as $validation) {
+            $validations[] = $validation;
+        }
+        // Průměrný týdenní rozsah DPČ (§ 76 odst. 2 ZP), stejně mimo snapshot.
+        foreach ((new PayrollAgreementWeeklyAverage($this->db))->validations(
             $supplierId,
             $employments,
             $periodStart,
@@ -503,8 +512,9 @@ final class PayrollRunSnapshotBuilder
                     'health_insurance_participation' =>
                         (string) $row['health_insurance_participation'],
                     'tax_regime' => (string) $row['tax_regime'],
-                    'other_withholding_eligibility' =>
-                        (string) $row['other_withholding_eligibility'],
+                    // `other_withholding_eligibility` (migrace 1403) do nových
+                    // revizí nepatří: srážku § 6 odst. 4 ZDP určuje výpočet
+                    // z druhu vztahu a úhrnu příjmů. Starší revize klíč nesou dál.
                     'tax_declaration_signed' => $this->taxDeclarationSigned(
                         $statutoryEvidence[$employeeId] ?? null,
                         $row,
@@ -1105,7 +1115,6 @@ final class PayrollRunSnapshotBuilder
                     term.social_insurance_participation,
                     term.health_insurance_participation,
                     term.tax_regime,
-                    term.other_withholding_eligibility,
                     term.tax_declaration_signed,
                     term.is_primary AS term_is_primary,
                     term.risky_work,

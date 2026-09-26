@@ -64,8 +64,12 @@ final class PayrollRunValidationDetailsTest extends TestCase
         $rows = $this->rows();
         self::assertCount(2, $rows);
         self::assertStringContainsString('Sleva pracujícího důchodce', $rows[0]['message']);
-        self::assertSame('/payroll/people?person=7&employment=9&panel=employment_terms&field=other_withholding_eligibility', $rows[1]['remediation_path']);
-        self::assertStringContainsString('účast na nemocenském pojištění', $rows[1]['message']);
+        // Pole prohlášení plátce karta vztahu už nenabízí (srážku určuje výpočet
+        // sám), proklik na něj by vedl do prázdna — kontrola ze staré revize
+        // proto posílá jen na přepočet běhu.
+        self::assertSame('/payroll/runs', $rows[1]['remediation_path']);
+        self::assertStringNotContainsString('other_withholding_eligibility', $rows[1]['remediation_path']);
+        self::assertStringContainsString('starší revize', $rows[1]['message']);
     }
 
     public function testEnforcementKeepsTheClaimAndDoesNotReplaceInsolvencyWithGenericList(): void

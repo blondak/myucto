@@ -153,6 +153,24 @@ final class CzechWorkingDays
         return $d;
     }
 
+    /**
+     * Datum + N pracovních dnů: víkendy a svátky se nepočítají, výsledek je
+     * vždy pracovní den. Lhůty „do N pracovních dnů" (§ 101f odst. 2 ZDPH,
+     * § 183 odst. 1 zákoníku práce).
+     */
+    public static function addWorkingDays(string $from, int $days): string
+    {
+        $d = new \DateTimeImmutable($from);
+        $added = 0;
+        while ($added < $days) {
+            $d = $d->modify('+1 day');
+            if (self::isWorkingDay($d)) {
+                $added++;
+            }
+        }
+        return $d->format('Y-m-d');
+    }
+
     public static function isWorkingDay(\DateTimeImmutable $d): bool
     {
         // N = ISO den v týdnu (6 sobota, 7 neděle)

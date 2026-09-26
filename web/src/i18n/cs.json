@@ -4693,7 +4693,16 @@
           "other_claimant_not_excluded": "Není doloženo, že druhý poplatník zvýhodnění neuplatňuje.",
           "declaration_missing": "K počátku nároku chybí podepsané prohlášení poplatníka.",
           "outside_existence": "Nárok je mimo období, kdy je osoba vedena jako vyživovaná.",
+          "ztp_p_before_grant": "Dvojnásobek ZTP/P začíná dřív, než průkaz platil od počátku měsíce. Nárok ukončete koncem měsíce přiznání a dvojnásobek zadejte od dalšího.",
           "superseded": "Tato verze nároku byla nahrazena novější."
+        },
+        "ztp_p_grant": {
+          "label": "Průkaz ZTP/P přiznán od",
+          "hint": "Den, od kterého byl průkaz přiznán (podle rozhodnutí úřadu práce). Dvojnásobek náleží od prvního měsíce, na jehož počátku průkaz platil.",
+          "required": "Vyplňte den přiznání průkazu ZTP/P. Podle něj aplikace určí, od kterého měsíce náleží dvojnásobné zvýhodnění.",
+          "double_from": "Dvojnásobek náleží od {date} podle dne přiznání průkazu na kartě dítěte.",
+          "split": "Dvojnásobek náleží až od {date}. Nárok se uloží ve dvou částech: do té doby v základní výši, od {date} dvojnásobně.",
+          "too_early": "Dvojnásobek náleží až od {date}. Změňte začátek nároku, nebo ho ukončete koncem předchozího měsíce a dvojnásobek zadejte jako nový nárok od {date}."
         },
         "form": {
           "person_title": "Vyživovaná osoba",
@@ -4742,7 +4751,7 @@
           "effective_from_too_early": "Nárok může začít nejdříve {date}. Vyživování začíná v průběhu měsíce; ten patří do nároku jen při narození, osvojení, převzetí do péče nebo zahájení studia. Událost zvolte jako důvod uplatnění.",
           "effective_to_hint": "Nejpozději {date}, tedy do konce měsíce, ve kterém vyživování končí.",
           "effective_to_too_late": "Nárok může trvat nejdéle do {date}, konce měsíce, ve kterém vyživování končí.",
-          "ztp_p_hint": "Dvojnásobek náleží od měsíce, na jehož počátku byl přiznán nárok na průkaz ZTP/P. Při přiznání v průběhu měsíce ukončete dosavadní nárok koncem měsíce a nárok se ZTP/P zadejte od dalšího."
+          "ztp_p_hint": "Dvojnásobek náleží od měsíce, na jehož počátku byl přiznán nárok na průkaz ZTP/P. Zapište na kartě dítěte den přiznání průkazu, aplikace pak nárok podle něj rozdělí sama."
         }
       },
       "quick_edit": {
@@ -5499,6 +5508,28 @@
         },
         "edit_section": "Upravit",
         "edit_section_aria": "Upravit: {section}"
+      },
+      "taxable_income_requests": {
+        "title": "Žádosti o potvrzení o zdanitelných příjmech",
+        "subtitle": "Potvrzení podle § 38j odst. 3 ZDP se vystavuje na žádost zaměstnance do 10 dnů, i během trvajícího vztahu.",
+        "open_count": "{count} nevyřízená | {count} nevyřízené | {count} nevyřízených",
+        "empty": "Žádná žádost o potvrzení není zapsaná.",
+        "row": "Příjmy za {year} · žádost {requested} · vystavit do {due}",
+        "status": {
+          "open": "Čeká na vystavení",
+          "certificate_issued": "Potvrzení vystaveno",
+          "completed": "Vyřízeno"
+        },
+        "requested_on": "Den žádosti",
+        "income_year": "Rok příjmů",
+        "note": "Poznámka",
+        "hint": "Termín se objeví v hlídači termínů. Žádost se vyřídí sama, jakmile na stránce Dokumenty vystavíte potvrzení; předáte-li ho mimo aplikaci, označte ji jako vyřízenou.",
+        "save": "Zapsat žádost",
+        "saved": "Žádost o potvrzení je zapsaná.",
+        "save_failed": "Žádost se nepodařilo uložit.",
+        "load_failed": "Žádosti o potvrzení se nepodařilo načíst.",
+        "issue": "Vystavit potvrzení",
+        "complete": "Vyřízeno mimo aplikaci"
       },
       "foreign_permits": {
         "title": "Pobytová a pracovní oprávnění",
@@ -8310,7 +8341,10 @@
           "annual_settlement_perform": "Provést roční zúčtování (do 31. 3.)",
           "annual_settlement_refund": "Vrátit přeplatek ze zúčtování se mzdou za březen",
           "foreign_permit_residence": "Končí povolení k pobytu",
-          "foreign_permit_work": "Končí povolení k zaměstnání"
+          "foreign_permit_work": "Končí povolení k zaměstnání",
+          "taxable_income_request": "Vystavit potvrzení o zdanitelných příjmech na žádost (§ 38j)",
+          "business_trip_documents": "Doklady k vyúčtování pracovní cesty (§ 183 ZP)",
+          "business_trip_settlement": "Vyúčtovat pracovní cestu (§ 183 ZP)"
         },
         "annual_settlement_undecided": "{count} lidí s příjmem za rok {year} ještě nemá rozhodnuto, zda o zúčtování žádají"
       },
@@ -25859,6 +25893,12 @@
       "settlement": "Doplatek nebo vratka proti záloze: {amount}",
       "manual_review": "Vyúčtování vyžaduje ruční posouzení a nelze ho schválit:"
     },
+    "deadline": {
+      "submitted_on": "Doklady předloženy dne",
+      "submitted_on_hint": "Zaměstnanec předloží doklady do 10 pracovních dnů po skončení cesty, vy ji vyúčtujete (schválíte) do 10 pracovních dnů od předložení (§ 183 odst. 1 ZP). Obě lhůty hlídá přehled termínů.",
+      "documents_due": "Doklady do {date}",
+      "settlement_due": "Vyúčtovat do {date}"
+    },
     "settlement": {
       "label": "Vypořádání zálohy",
       "mode_payroll": "Mzdou (záloha se odečte ve výplatě)",
@@ -26279,6 +26319,10 @@
       "rewrap_failed": "Selhalo",
       "rewrap_remaining": "Zbývá",
       "rewrap_done": "Starým klíčem už není zašifrováno nic. Požádejte správce serveru o odebrání starého klíče z app.secret_encryption_previous_keys.",
+      "measured_at": "Úplné měření klíčů mzdových dat proběhlo {at}. Mezi měřeními Diagnostika kontroluje jen nejstarší a nejnovější šifrované záznamy.",
+      "measured_never": "Úplné měření klíčů mzdových dat zatím neproběhlo. Diagnostika kontroluje jen nejstarší a nejnovější šifrované záznamy.",
+      "measure": "Změřit úplně",
+      "measure_hint": "Projde všechny šifrované mzdové údaje i exporty a ověří, že je konfigurace umí přečíst. U velké databáze může trvat několik minut.",
       "status": {
         "encrypted": "Zašifrováno",
         "would_encrypt": "Zašifruje se",

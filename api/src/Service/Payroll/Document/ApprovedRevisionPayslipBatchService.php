@@ -283,6 +283,7 @@ final class ApprovedRevisionPayslipBatchService
     /**
      * @param array{
      *   period_start:string,
+     *   revision_no:int,
      *   result_snapshot_json:string,
      *   result_snapshot_hash:string,
      *   people:list<array<string,mixed>>
@@ -377,6 +378,7 @@ final class ApprovedRevisionPayslipBatchService
                     'revision-' . $revisionId,
                     $storedHash,
                     $period,
+                    $source['revision_no'],
                 ),
             ];
         }
@@ -389,6 +391,7 @@ final class ApprovedRevisionPayslipBatchService
     /**
      * @param array{
      *   period_start:string,
+     *   revision_no:int,
      *   result_snapshot_json:string,
      *   result_snapshot_hash:string,
      *   people:list<array<string,mixed>>
@@ -469,6 +472,7 @@ final class ApprovedRevisionPayslipBatchService
                         'revision-' . $revisionId,
                         $storedHash,
                         substr($source['period_start'], 0, 7),
+                        $source['revision_no'],
                     ),
                 ];
             }
@@ -501,6 +505,7 @@ final class ApprovedRevisionPayslipBatchService
     /**
      * @param array{
      *   period_start:string,
+     *   revision_no:int,
      *   result_snapshot_json:string,
      *   result_snapshot_hash:string,
      *   people:list<array<string,mixed>>

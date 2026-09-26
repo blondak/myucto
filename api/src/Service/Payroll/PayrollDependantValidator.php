@@ -17,6 +17,7 @@ use InvalidArgumentException;
  *   birth_number_present:bool,
  *   birth_number:?string,
  *   ztp_p:bool,
+ *   ztp_p_granted_on:?string,
  *   student:bool,
  *   existence_from:string,
  *   existence_to:?string,
@@ -107,6 +108,7 @@ final class PayrollDependantValidator
         'existence_to' => 'Vyživovaná do',
         'note' => 'Poznámka',
         'ztp_p' => 'Držitel průkazu ZTP/P',
+        'ztp_p_granted_on' => 'Průkaz ZTP/P přiznán od',
         'student' => 'Studium',
         'child_order' => 'Pořadí dítěte',
         'credit_status' => 'Zvýhodnění uplatňuje',
@@ -162,6 +164,22 @@ final class PayrollDependantValidator
             }
         }
 
+        // Den přiznání průkazu ZTP/P: od něj se odvíjí první měsíc dvojnásobného
+        // zvýhodnění (ChildCreditClaimWindow::ztpPEarliestFrom). Nevyplněný
+        // zůstává u starších záznamů a u dítěte založeného importem hlášení.
+        $ztpP = $this->bool($input, 'ztp_p');
+        $ztpPGrantedOn = $this->nullableDate($input, 'ztp_p_granted_on');
+        if ($ztpPGrantedOn !== null && !$ztpP) {
+            throw new InvalidArgumentException(
+                'Den přiznání průkazu ZTP/P lze vyplnit jen u držitele průkazu.',
+            );
+        }
+        if ($ztpPGrantedOn !== null && $ztpPGrantedOn < $birthDate) {
+            throw new InvalidArgumentException(
+                'Průkaz ZTP/P nemůže být přiznán před datem narození.',
+            );
+        }
+
         return [
             'relation' => $relation,
             'full_name' => $this->text($input, 'full_name', 191),
@@ -170,7 +188,8 @@ final class PayrollDependantValidator
             'birth_date' => $birthDate,
             'birth_number_present' => $present,
             'birth_number' => $birthNumber,
-            'ztp_p' => $this->bool($input, 'ztp_p'),
+            'ztp_p' => $ztpP,
+            'ztp_p_granted_on' => $ztpPGrantedOn,
             'student' => $this->bool($input, 'student'),
             'existence_from' => $existenceFrom,
             'existence_to' => $existenceTo,

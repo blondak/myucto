@@ -307,6 +307,41 @@ final class PayrollTravelApiTest extends TestCase
         self::assertSame(422, $response->getStatusCode());
     }
 
+    /**
+     * § 183 odst. 1 ZP: cesta končící ve středu 10. 6. má doklady do 24. 6.
+     * (10 pracovních dnů); předložené 12. 6. se vyúčtují do 26. 6. Den
+     * předložení jde zapsat na cestě a před koncem cesty být nemůže.
+     */
+    public function testDocumentsSubmissionDateDrivesTheSettlementDeadline(): void
+    {
+        $trip = $this->createTrip($this->tripPayload());
+        self::assertNull($trip['documents_submitted_on']);
+        self::assertSame('2026-06-24', $trip['documents_due_on']);
+        self::assertNull($trip['settlement_due_on']);
+
+        $payload = $this->tripPayload();
+        $payload['documents_submitted_on'] = '2026-06-12';
+        $payload['row_version'] = $trip['row_version'];
+        $response = $this->travel->update(
+            $this->request('PUT', "/api/payroll/travel/trips/{$trip['id']}")->withParsedBody($payload),
+            new Response(),
+            ['id' => (string) $trip['id']],
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $updated = PayrollTimeValue::row($this->json($response)['trip'] ?? null, 'trip');
+        self::assertSame('2026-06-12', $updated['documents_submitted_on']);
+        self::assertNull($updated['documents_due_on']);
+        self::assertSame('2026-06-26', $updated['settlement_due_on']);
+
+        $early = $this->tripPayload();
+        $early['documents_submitted_on'] = '2026-06-09';
+        $rejected = $this->travel->create(
+            $this->request('POST', '/api/payroll/travel/trips')->withParsedBody($early),
+            new Response(),
+        );
+        self::assertSame(422, $rejected->getStatusCode());
+    }
+
     public function testPreviewShowsTheSettlementAgainstTheAdvance(): void
     {
         $payload = $this->tripPayload(mealRateBand1: '200');

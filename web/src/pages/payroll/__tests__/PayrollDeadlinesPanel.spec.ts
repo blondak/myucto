@@ -470,6 +470,63 @@ describe('PayrollDeadlinesPanel', () => {
       .toContain('Syntetický Cizinec · Syntetická karta')
   })
 
+  /*
+   * § 38j odst. 3 ZDP a § 183 odst. 1 ZP: žádost o potvrzení u trvajícího
+   * vztahu vede na panel žádostí u osoby, lhůta pracovní cesty rovnou do
+   * editoru cesty ve správném měsíci.
+   */
+  it('links taxable income requests and business trips to their screens', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([
+      group({
+        items: [item({
+          reference: 'payroll_taxable_income_request:5',
+          source: 'taxable_income_request',
+          title: 'taxable_income_request',
+          subject: 'Syntetická Žadatelka',
+          period: '2025',
+          due_on: '2026-08-22',
+          employee_id: 61,
+          employment_id: 62,
+          request_id: 5,
+        })],
+      }),
+      group({
+        items: [item({
+          reference: 'payroll_business_trip:9',
+          source: 'business_trip',
+          title: 'business_trip_documents',
+          subject: 'Syntetický Cestovatel',
+          period: null,
+          due_on: '2026-08-28',
+          employee_id: 71,
+          employment_id: 72,
+          trip_id: 9,
+          trip_label: 'Brno',
+          trip_period: '2026-08',
+        })],
+      }),
+    ]))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const link = (reference: string) => JSON.parse(
+      wrapper.get(`[data-test="payroll-deadline-link-${reference}"]`).attributes('data-to') ?? '{}',
+    )
+    expect(link('payroll_taxable_income_request:5')).toEqual({
+      name: 'payroll-people',
+      query: { person: '61', panel: 'taxable_income_requests', employment: '62' },
+    })
+    expect(link('payroll_business_trip:9')).toEqual({
+      name: 'payroll-travel',
+      query: { period: '2026-08', trip: '9' },
+    })
+    expect(wrapper.get('[data-test="payroll-deadline-payroll_business_trip:9"]').text())
+      .toContain('Syntetický Cestovatel · Brno')
+    expect(wrapper.get('[data-test="payroll-deadline-payroll_taxable_income_request:5"]').text())
+      .toContain('payroll.dashboard.deadlines.kind.taxable_income_request')
+  })
+
   it('falls back to the raw code when a source code has no translation', async () => {
     m.deadlineGroups.mockResolvedValue(overview([
       group({ items: [item({ reference: 'x', source: 'levy', title: 'risky_savings' })] }),

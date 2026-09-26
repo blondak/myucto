@@ -394,6 +394,7 @@ final class Routes
         // Šifrování mzdového archivu a rotace klíče: akce z kontrol Diagnostiky.
         $app->post ('/api/admin/diagnostics/payroll-archive/reencrypt', [\MyInvoice\Action\Admin\PayrollArchiveEncryptionAction::class, 'reencrypt']);
         $app->post ('/api/admin/diagnostics/payroll-archive/rewrap',    [\MyInvoice\Action\Admin\PayrollArchiveEncryptionAction::class, 'rewrap']);
+        $app->post ('/api/admin/diagnostics/payroll-archive/measure',   [\MyInvoice\Action\Admin\PayrollArchiveEncryptionAction::class, 'measure']);
 
         $app->get   ('/api/admin/roles',                    [RoleAdminAction::class, 'list']);
         $app->get   ('/api/admin/roles/permissions',        [RoleAdminAction::class, 'permissions']);
@@ -1502,6 +1503,14 @@ final class Routes
             $g->post(
                 '/people/{id:[0-9]+}/foreign-permits',
                 [PayrollForeignPermitAction::class, 'create'],
+            );
+            $g->get(
+                '/people/{id:[0-9]+}/taxable-income-requests',
+                [\MyInvoice\Action\Payroll\PayrollTaxableIncomeConfirmationRequestAction::class, 'show'],
+            );
+            $g->post(
+                '/people/{id:[0-9]+}/taxable-income-requests',
+                [\MyInvoice\Action\Payroll\PayrollTaxableIncomeConfirmationRequestAction::class, 'save'],
             );
             $g->get(
                 '/people/{id:[0-9]+}/statutory-openings',

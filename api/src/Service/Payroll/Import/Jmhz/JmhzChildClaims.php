@@ -74,6 +74,15 @@ final class JmhzChildClaims
                 continue;
             }
             $dependantInput = null;
+            $claims = $dependant === null ? [] : $this->liveClaims($dependant);
+            $covering = JmhzEvidenceTimeline::covering($claims, $monthStart);
+            // Důvod nároku: uložený u pokrývajícího nároku má přednost, jinak ho
+            // dá vztah k dítěti v evidenci (osvojení, převzetí do péče). Dřív
+            // import posílal vždy `null`, osvojené dítě od poloviny měsíce proto
+            // skončilo jen varováním a uložený důvod přepsal.
+            $claimReason = is_string($covering['claim_reason'] ?? null)
+                ? $covering['claim_reason']
+                : ($dependant === null ? null : ChildCreditClaimWindow::reasonForRelation((string) $dependant['relation']));
             if ($dependant === null) {
                 try {
                     $dependantInput = $this->validator->validateDependant([
@@ -104,10 +113,20 @@ final class JmhzChildClaims
                         . 'Opravte kartu dítěte a import zopakujte; nárok se zatím nepřebírá.';
                     continue;
                 }
+                $grantedOn = $dependant['ztp_p_granted_on'] ?? null;
+                if ($child['ztp_p'] && is_string($grantedOn)
+                    && $monthStart < ChildCreditClaimWindow::ztpPEarliestFrom($grantedOn)
+                ) {
+                    $warnings[] = "Dítě {$label} má v hlášení za {$this->month($monthStart)} dvojnásobek ZTP/P, "
+                        . "průkaz je ale v evidenci přiznán až {$grantedOn} a dvojnásobek náleží od "
+                        . ChildCreditClaimWindow::ztpPEarliestFrom($grantedOn) . '. Ověřte den přiznání na kartě '
+                        . 'dítěte; nárok se zatím nepřebírá.';
+                    continue;
+                }
                 if (ChildCreditClaimWindow::earliestFrom(
                     (string) $dependant['birth_date'],
                     (string) $dependant['existence_from'],
-                    null,
+                    $claimReason,
                 ) > $monthStart) {
                     $warnings[] = "Dítě {$label} je vedené jako vyživované až od {$dependant['existence_from']}; "
                         . 'nárok za dřívější měsíc zapište ručně.';
@@ -115,12 +134,10 @@ final class JmhzChildClaims
                 }
             }
 
-            $claims = $dependant === null ? [] : $this->liveClaims($dependant);
-            $covering = JmhzEvidenceTimeline::covering($claims, $monthStart);
             $desired = [
                 'child_order' => $order,
                 'credit_status' => $child['order'] === 'N' ? 'claimed_by_other' : 'claimed',
-                'claim_reason' => null,
+                'claim_reason' => $claimReason,
                 'evidence_status' => 'verified',
                 'evidence_reference' => $reference,
                 'shared_household_confirmed' => true,

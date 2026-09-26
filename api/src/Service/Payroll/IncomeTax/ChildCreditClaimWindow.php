@@ -35,12 +35,32 @@ namespace MyInvoice\Service\Payroll\IncomeTax;
  *    na svém počátku podmínky splňoval, takže do nároku patří celý.
  *
  * Průkaz ZTP/P výjimku nemá: dvojnásobek (§ 35c odst. 7) náleží až za měsíc,
- * na jehož počátku byl nárok na průkaz přiznán.
+ * na jehož počátku byl nárok na průkaz přiznán. Den přiznání se eviduje
+ * u vyživované osoby (`payroll_dependants.ztp_p_granted_on`) a první měsíc
+ * dvojnásobku odvozuje {@see self::ztpPEarliestFrom()}; zápis nároku ho
+ * vynucuje, takže měsíční výpočet, roční zúčtování, potvrzení i hlášení,
+ * které čtou příznak ZTP/P přímo z nároku, dostanou vždy správný interval.
  */
 final class ChildCreditClaimWindow
 {
     /** Důvody nároku, které otevírají už měsíc, ve kterém vyživování začalo. */
     public const START_EVENT_REASONS = ['adoption', 'foster_care', 'study_start'];
+
+    /**
+     * Důvod nároku, který plyne už ze vztahu k dítěti: osvojené dítě
+     * (`child_adopted`) a dítě převzaté do péče nahrazující péči rodičů
+     * (`child_in_care`) otevírají měsíc, ve kterém vyživování začalo. Stejně
+     * důvod předvyplňuje karta vyživovaných osob; import měsíčního hlášení,
+     * který vztah nezná z hlášení, ale z evidence, se ptá tady.
+     */
+    public static function reasonForRelation(string $relation): ?string
+    {
+        return match ($relation) {
+            'child_adopted' => 'adoption',
+            'child_in_care' => 'foster_care',
+            default => null,
+        };
+    }
 
     public static function earliestFrom(
         string $birthDate,
@@ -52,6 +72,22 @@ final class ChildCreditClaimWindow
             || substr($existenceFrom, 0, 7) === substr($birthDate, 0, 7)
             || in_array($claimReason, self::START_EVENT_REASONS, true)
         ) {
+            return $monthStart;
+        }
+
+        return (new \DateTimeImmutable($monthStart))
+            ->modify('+1 month')
+            ->format('Y-m-d');
+    }
+
+    /**
+     * První den měsíce, za který náleží dvojnásobek ZTP/P: měsíc přiznání,
+     * byl-li průkaz přiznán od prvního dne, jinak až následující měsíc.
+     */
+    public static function ztpPEarliestFrom(string $grantedOn): string
+    {
+        $monthStart = substr($grantedOn, 0, 7) . '-01';
+        if ($grantedOn === $monthStart) {
             return $monthStart;
         }
 

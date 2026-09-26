@@ -134,6 +134,11 @@ export const diagnosticsApi = {
     api
       .post<PayrollKeyRewrapResult>('/admin/diagnostics/payroll-archive/rewrap', payload)
       .then((r) => r.data),
+  /** Úplné měření klíčů mzdových dat; výsledek jde do cache Diagnostiky. */
+  payrollKeyMeasure: () =>
+    api
+      .post<{ check: DiagnosticCheck }>('/admin/diagnostics/payroll-archive/measure', {})
+      .then((r) => r.data.check),
 
   /**
    * Kontrola prostředí před prvním setupem. Veřejná, ale jen dokud instalace

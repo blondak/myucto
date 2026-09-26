@@ -8,7 +8,11 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Document\PayrollArchiveDiagnostics;
+use MyInvoice\Service\Payroll\Document\PayrollArchiveReencryptionService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentKeyRing;
+use MyInvoice\Service\Payroll\Security\PayrollKeyRotationStatusCache;
+use Psr\Clock\ClockInterface;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentStorage;
 use MyInvoice\Service\Payroll\Document\PayrollSheetSnapshotBuilder;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportStorage;
@@ -295,6 +299,74 @@ final class PayrollKeyRotationServiceTest extends TestCase
         ));
     }
 
+    /**
+     * Klíč vyměněný bez předchozího v `previous_keys` (nebo databáze z jiné
+     * instance): konfigurace žádnou rotaci nehlásí, a Diagnostika proto dřív
+     * klíče vůbec neměřila (`skip`). Levná kontrola krajních řádků musí cizí
+     * klíč najít i tak a hlásit `fail`.
+     */
+    public function testQuickCheckFindsUnknownKeyWithoutRotation(): void
+    {
+        $check = $this->rotationCheck($this->diagnostics([], new \DateTimeImmutable('2026-09-26 10:00'))->checks());
+
+        self::assertSame('fail', $check['status'], json_encode($check));
+        self::assertSame('unknown_key', $check['variant'] ?? null);
+        self::assertSame('quick', $check['meta']['mode']);
+        self::assertGreaterThan(0, $check['meta']['quick_unknown']);
+        self::assertContains(
+            'payroll_dependants.birth_number_ciphertext',
+            array_column($check['meta']['unknown_targets'], 'name'),
+        );
+
+        $quick = $this->service($this->encryption($this->newKey, []))->quickStatus();
+        self::assertContains($this->oldKeyId(), $quick['unknown_key_ids']);
+        $known = $this->service($this->encryption($this->newKey, [$this->oldKey]))->quickStatus();
+        self::assertNotContains($this->oldKeyId(), $known['unknown_key_ids']);
+    }
+
+    /**
+     * Za rotace se plný průchod pustí a uloží s časem měření; do hodiny se
+     * znovu nepočítá (Diagnostika ho neopakuje při každém otevření), ruční
+     * měření ho obnoví hned.
+     */
+    public function testFullMeasurementDuringRotationIsCachedAndCanBeRefreshed(): void
+    {
+        $now = new \DateTimeImmutable('2026-09-26 10:00:00');
+        $first = $this->rotationCheck($this->diagnostics([$this->oldKey], $now)->checks());
+        self::assertSame('full', $first['meta']['mode'], json_encode($first));
+        self::assertSame('warn', $first['status']);
+        self::assertNotNull($first['meta']['measured_at']);
+        $stale = (int) $first['meta']['stale_total'];
+        self::assertGreaterThanOrEqual(5, $stale);
+
+        // Další hodnota pod starým klíčem; cache do hodiny drží původní počet.
+        $old = $this->encryption($this->oldKey, []);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_dependants (supplier_id, employee_id, relation, full_name, birth_date, existence_from)
+             VALUES (?, ?, "child_own", "Druhé syntetické dítě", "2016-01-01", "2016-01-01")',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $secondId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_dependants
+                SET birth_number_ciphertext = ?, birth_number_hash = ?, birth_number_masked = "••••03"
+              WHERE id = ?',
+        )->execute([
+            $old->encryptFor('1601010003', PayrollSensitiveData::context(PayrollSensitiveField::PERSONAL_IDENTIFIER, $this->supplierId, $secondId)),
+            random_bytes(32),
+            $secondId,
+        ]);
+
+        $cached = $this->rotationCheck($this->diagnostics([$this->oldKey], $now->modify('+30 minutes'))->checks());
+        self::assertSame($stale, (int) $cached['meta']['stale_total']);
+        self::assertSame($first['meta']['measured_at'], $cached['meta']['measured_at']);
+
+        $measured = $this->diagnostics([$this->oldKey], $now->modify('+31 minutes'))->measureRotation();
+        self::assertSame($stale + 1, (int) $measured['meta']['stale_total']);
+
+        $expired = $this->rotationCheck($this->diagnostics([$this->oldKey], $now->modify('+3 hours'))->checks());
+        self::assertNotSame($first['meta']['measured_at'], $expired['meta']['measured_at']);
+    }
+
     public function testLimitStopsEarly(): void
     {
         $service = $this->service($this->encryption($this->newKey, [$this->oldKey]));
@@ -396,6 +468,12 @@ final class PayrollKeyRotationServiceTest extends TestCase
     /** @param list<string> $previous */
     private function encryption(string $key, array $previous): SecretEncryption
     {
+        return new SecretEncryption($this->config($key, $previous));
+    }
+
+    /** @param list<string> $previous */
+    private function config(string $key, array $previous): Config
+    {
         $config = (new \ReflectionClass(Config::class))->newInstanceWithoutConstructor();
         (new \ReflectionProperty($config, 'data'))->setValue($config, [
             'app' => [
@@ -405,7 +483,53 @@ final class PayrollKeyRotationServiceTest extends TestCase
             ],
         ]);
 
-        return new SecretEncryption($config);
+        return $config;
+    }
+
+    /**
+     * Diagnostika nad danou konfigurací klíčů a hodinami. Klíč, kterým jsou
+     * zašifrovaná data sdílené testovací databáze, je v předchozích klíčích,
+     * aby cizí byl jen klíč, se kterým test počítá.
+     *
+     * @param list<string> $previous
+     */
+    private function diagnostics(array $previous, \DateTimeImmutable $now): PayrollArchiveDiagnostics
+    {
+        // Aktuálním klíčem je klíč instalace, ať data sdílené testovací DB
+        // zůstanou známá a cizí je jen klíč, se kterým test počítá.
+        $installed = (string) Bootstrap::buildContainer()->get(Config::class)->get('app.secret_encryption_key', '');
+        if ($installed === '') {
+            self::markTestSkipped('Instalace nemá šifrovací klíč.');
+        }
+        $clock = $this->createStub(ClockInterface::class);
+        $clock->method('now')->willReturn($now);
+
+        return new PayrollArchiveDiagnostics(
+            Bootstrap::buildContainer()->get(PayrollArchiveReencryptionService::class),
+            $this->service($this->encryption($installed, $previous)),
+            $this->config($installed, $previous),
+            $this->db,
+            new PayrollKeyRotationStatusCache($this->db),
+            $clock,
+        );
+    }
+
+    private function oldKeyId(): string
+    {
+        $old = $this->encryption($this->oldKey, []);
+
+        return (string) $old->keyIdOf($old->encryptFor('x', 'synthetic-key-id'));
+    }
+
+    /** @param list<array<string,mixed>> $checks @return array<string,mixed> */
+    private function rotationCheck(array $checks): array
+    {
+        foreach ($checks as $check) {
+            if ($check['id'] === PayrollArchiveDiagnostics::CHECK_ROTATION) {
+                return $check;
+            }
+        }
+        self::fail('Diagnostika nevrátila kontrolu klíčů.');
     }
 
     private function column(string $table, string $column, int $id): ?string

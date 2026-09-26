@@ -71,6 +71,16 @@ Schválené vyúčtování promítneš tlačítkem **Promítnout do mzdy**; zalo
 vstupy na složkách `CESTOVNI_NAHRADA_LIMIT` a `CESTOVNI_NAHRADA_NADLIMIT`
 v období vyúčtování. Opakované promítnutí nevytvoří duplicitu.
 
+### Lhůty vyúčtování
+
+Zaměstnanec předloží doklady k vyúčtování do **10 pracovních dnů** po skončení
+cesty a zaměstnavatel cestu vyúčtuje do **10 pracovních dnů** od jejich
+předložení (§ 183 odst. 1 zákoníku práce). Den předložení zapíšeš u cesty do
+pole **Doklady předloženy dne**. Rozpracovaná cesta v seznamu ukazuje, do kdy
+doklady čekají, a po jejich předložení, do kdy ji je třeba vyúčtovat. Obě lhůty
+hlídá i panel **Zákonné termíny**; proklik otevře editor cesty ve správném
+měsíci. Vyúčtováním se rozumí schválení cesty, schválená cesta termín nemá.
+
 ### Vypořádání zálohy
 
 Vyúčtování cesty je nárok minus poskytnutá záloha (§ 183 zákoníku práce).
