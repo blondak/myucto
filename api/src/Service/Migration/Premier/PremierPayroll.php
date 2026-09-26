@@ -391,12 +391,16 @@ final class PremierPayroll
             'tax_bonus' => $num('MZ_BONUS'),
             'non_refundable' => round($num('NEZD_VLAS') + $num('NEZD_INVA') + $num('NEZD_ZTP') + $num('NEZD_ZACI'), 2),
             'child' => $num('NEZD_DETI'),
-            'signed' => ($row['POD_DAN'] ?? false) === true || ($row['NEZD_A'] ?? false) === true,
+            // Podepsané prohlášení je jen `POD_DAN`. `NEZD_A` nese PREMIER i u řádků
+            // zdaněných srážkou (`SRAZ_DAN`), kde prohlášení podepsané není.
+            'signed' => ($row['POD_DAN'] ?? false) === true,
             // Uplatněná sleva na pojistném pracujícího důchodce (Kč za měsíc).
             'pensioner_discount' => $num('SLEVA_SOC') > 0,
             'pension_participation' => $participates,
             'insurance_days' => $participates ? max(0, min($calendarDays, 31)) : 0,
-            'excluded_days' => max(0, min((int) round($num('VYL_DND')), 31)),
+            // `VYL_DND` je v reálných zálohách vždy prázdný; kalendářní dny nemoci
+            // a neplaceného volna nese `DNY_NEKA`.
+            'excluded_days' => max(0, min((int) round($num('DNY_NEKA')), 31)),
             'worked_days' => max(0.0, $workedDays),
             'worked_minutes' => max(0, (int) round($workedDays * $dailyHours * 60)),
             'insurer_code' => preg_match('/^[0-9]{3}$/D', $insurer) === 1 ? $insurer : null,

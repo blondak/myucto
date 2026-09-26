@@ -527,7 +527,8 @@ final class SyntheticPremierBackup
 
         $statutory = static fn (int $amount, int $soc, int $zdr, int $socF, int $zdrF, int $tax): array => [
             'MZ_ODSTAT' => $amount, 'VYM_SOC' => $amount, 'VYM_ZDR' => $amount, 'MZ_SOC' => $soc, 'MZ_ZDR' => $zdr, 'MZ_SOCF' => $socF, 'MZ_ZDRF' => $zdrF,
-            'MZ_SDANI' => $amount, 'MZ_SDAN' => $tax, 'SRAZ_DAN' => true, 'MZ_CISTA' => $amount - $soc - $zdr - $tax, 'MZ_VYPLATA' => $amount - $soc - $zdr - $tax,
+            // PREMIER nese `NEZD_A` i u zdanění srážkou; prohlášení podepsané není (`POD_DAN`).
+            'MZ_SDANI' => $amount, 'MZ_SDAN' => $tax, 'SRAZ_DAN' => true, 'NEZD_A' => true, 'MZ_CISTA' => $amount - $soc - $zdr - $tax, 'MZ_VYPLATA' => $amount - $soc - $zdr - $tax,
             'POJIS_SO' => true, 'ZKR_POJ' => '111', 'UVA_DOBA' => 8,
         ];
         $months = [];
@@ -580,7 +581,7 @@ final class SyntheticPremierBackup
                 ['MZ_SOC', 'N', 12, 2], ['MZ_ZDR', 'N', 12, 2], ['MZ_SOCF', 'N', 15, 2], ['MZ_ZDRF', 'N', 15, 2], ['MZ_ZDANI', 'N', 15, 2], ['MZ_DAN', 'N', 15, 2],
                 ['MZ_SDANI', 'N', 15, 2], ['MZ_SDAN', 'N', 15, 2], ['MZ_BONUS', 'N', 15, 2], ['NEZD_VLAS', 'N', 12, 2], ['NEZD_DETI', 'N', 12, 2],
                 ['MZ_CISTA', 'N', 15, 2], ['MZ_VYPLATA', 'N', 15, 2], ['SRAZ_DAN', 'L'], ['POD_DAN', 'L'], ['NEZD_A', 'L'], ['POJIS_SO', 'L'],
-                ['KAL_DNY', 'N', 2], ['KAL_DNYPP', 'N', 5, 1], ['DNY_ODPR', 'N', 5, 2], ['UVA_DOBA', 'N', 7, 4], ['VYL_DND', 'N', 6, 2], ['ZKR_POJ', 'C', 3], ['ID', 'C', 36],
+                ['KAL_DNY', 'N', 2], ['KAL_DNYPP', 'N', 5, 1], ['DNY_ODPR', 'N', 5, 2], ['UVA_DOBA', 'N', 7, 4], ['VYL_DND', 'N', 6, 2], ['DNY_NEKA', 'N', 5, 1], ['ZKR_POJ', 'C', 3], ['ID', 'C', 36],
                 ...$mzdyFields],
             $rows,
         ];
