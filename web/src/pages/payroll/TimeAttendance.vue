@@ -24,6 +24,7 @@ import {
   formatPayrollGridHours,
   isWorkedCategory,
   payrollDayPlans,
+  payrollEditorNextWorkday,
   payrollGridCellKey,
   payrollGridCellState,
   payrollGridFlags,
@@ -53,6 +54,7 @@ import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '
 import EmptyState from '@/components/ui/EmptyState.vue'
 import {
   formatPayrollMinutes,
+  payrollIsoToWallTime,
   payrollWallTimeToIso,
 } from '@/pages/payroll/payrollTime'
 import { localPayrollPeriod, payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
@@ -138,8 +140,23 @@ watch([category, recordType], () => { difficultyFactorCount.value = '' })
 const recordBlockedReason = computed<string | null>(() => {
   if (!selected.value) return t('payroll.time.editor.blocked_no_employment')
   if (!startsAt.value || !endsAt.value) return t('payroll.time.editor.blocked_no_range')
+  const minutes = recordWallMinutes.value
+  if (minutes !== null && minutes <= 0) return t('payroll.time.editor.blocked_end_before_start')
+  if (minutes !== null && minutes > 24 * 60) return t('payroll.time.editor.blocked_too_long')
   if (!difficultyFactorsValid.value) return t('payroll.time.editor.blocked_difficulty_factors')
   return null
+})
+/** Délka zápisu podle nástěnného času — stačí na hlídání překlepu v datu. */
+const recordWallMinutes = computed<number | null>(() => {
+  const start = Date.parse(`${startsAt.value}:00Z`)
+  const end = Date.parse(`${endsAt.value}:00Z`)
+  if (Number.isNaN(start) || Number.isNaN(end)) return null
+  return Math.round((end - start) / 60_000)
+})
+const recordLongWarning = computed<string | null>(() => {
+  const minutes = recordWallMinutes.value
+  if (minutes === null || minutes <= 12 * 60 || minutes > 24 * 60) return null
+  return t('payroll.time.editor.long_warning', { hours: formatPayrollMinutes(minutes) })
 })
 const importBlockedReason = computed<string | null>(() =>
   importPreview.value && !importPreview.value.supported
@@ -580,17 +597,130 @@ function setDefaultTimes() {
 
 function openEditor(item?: PayrollTimeOverviewItem) {
   if (item) employmentId.value = item.employment.id
+  editingRecord.value = null
   setDefaultTimes()
   editorOpen.value = true
 }
 
-/** Posun na následující den v témže měsíci; poslední den zůstane, kde je. */
-function nextEditorDay(date: string): string {
-  const parsed = new Date(`${date}T00:00:00Z`)
-  if (Number.isNaN(parsed.getTime())) return date
-  const next = new Date(parsed.getTime() + 86_400_000)
-  const iso = next.toISOString().slice(0, 10)
-  return iso.startsWith(`${period.value}-`) ? iso : date
+/**
+ * Konec už posunul někdo jiný (Uložit a další den, úprava zápisu) — watcher
+ * níž ho nesmí posunout podruhé, jinak směna 08:00–16:30 skončí o den později.
+ */
+let endAlreadyShifted = false
+
+function setEditorRange(start: string, end: string) {
+  if (start !== startsAt.value) endAlreadyShifted = true
+  startsAt.value = start
+  endsAt.value = end
+}
+
+/*
+ * Zápisy vybraného vztahu v měsíci — aby šla chybná směna najít, opravit
+ * (nová revize přes `supersedes_id`) nebo zrušit. Dřív stránka ukazovala jen
+ * souhrn a počet směn, takže 32hodinová směna šla opravit jen v databázi.
+ */
+type TimeRecordKind = 'shift' | 'entry'
+interface TimeRecordRow {
+  kind: TimeRecordKind
+  id: number
+  rowVersion: number
+  startsAt: string
+  endsAt: string
+  timezone: string
+  netMinutes: number
+  label: string
+  tooLong: boolean
+}
+const editingRecord = ref<{ kind: TimeRecordKind; id: number; rowVersion: number } | null>(null)
+const cancelCandidate = ref<TimeRecordRow | null>(null)
+
+const selectedRecords = computed<TimeRecordRow[]>(() => {
+  const item = selected.value
+  if (!item) return []
+  const span = (start: string, end: string) => (Date.parse(end) - Date.parse(start)) / 60_000
+  const rows: TimeRecordRow[] = [
+    ...(item.shifts ?? []).map(shift => ({
+      kind: 'shift' as const,
+      id: shift.id,
+      rowVersion: shift.row_version,
+      startsAt: shift.starts_at,
+      endsAt: shift.ends_at,
+      timezone: shift.timezone_name,
+      netMinutes: shift.net_minutes,
+      label: t('payroll.time.records.shift'),
+      tooLong: span(shift.starts_at, shift.ends_at) > 12 * 60,
+    })),
+    ...(item.entries ?? []).map(entry => ({
+      kind: 'entry' as const,
+      id: entry.id,
+      rowVersion: entry.row_version,
+      startsAt: entry.starts_at,
+      endsAt: entry.ends_at,
+      timezone: entry.timezone_name,
+      netMinutes: entry.net_minutes,
+      label: t(`payroll.time.category.${entry.category}`),
+      tooLong: span(entry.starts_at, entry.ends_at) > 12 * 60,
+    })),
+  ]
+  return rows.sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt))
+})
+
+function formatRecordRange(row: TimeRecordRow): string {
+  const start = payrollIsoToWallTime(row.startsAt, row.timezone)
+  const end = payrollIsoToWallTime(row.endsAt, row.timezone)
+  const day = (value: string) => `${Number(value.slice(8, 10))}. ${Number(value.slice(5, 7))}.`
+  return start.slice(0, 10) === end.slice(0, 10)
+    ? `${day(start)} ${start.slice(11)}–${end.slice(11)}`
+    : `${day(start)} ${start.slice(11)} – ${day(end)} ${end.slice(11)}`
+}
+
+function editRecord(row: TimeRecordRow) {
+  const item = selected.value
+  if (!item) return
+  recordType.value = row.kind
+  timezone.value = row.timezone
+  if (row.kind === 'shift') {
+    const shift = item.shifts.find(candidate => candidate.id === row.id)
+    if (!shift) return
+    breakMinutes.value = shift.break_minutes
+    remoteWork.value = shift.remote_work
+    standbyMinutes.value = shift.standby_minutes
+    publish.value = shift.status === 'published'
+  } else {
+    const entry = item.entries.find(candidate => candidate.id === row.id)
+    if (!entry) return
+    breakMinutes.value = entry.break_minutes
+    category.value = entry.category
+  }
+  setEditorRange(
+    payrollIsoToWallTime(row.startsAt, row.timezone),
+    payrollIsoToWallTime(row.endsAt, row.timezone),
+  )
+  editingRecord.value = { kind: row.kind, id: row.id, rowVersion: row.rowVersion }
+}
+
+async function confirmCancelRecord() {
+  const row = cancelCandidate.value
+  const item = selected.value
+  if (!row || !item) return
+  saving.value = true
+  try {
+    await payrollApi.cancelTimeRecord(row.kind === 'shift' ? 'shifts' : 'entries', row.id, {
+      employment_id: item.employment.id,
+      row_version: row.rowVersion,
+      month_row_version: item.month.row_version,
+    })
+    toast.success(t('payroll.time.records.cancelled'))
+    if (editingRecord.value?.id === row.id && editingRecord.value.kind === row.kind) {
+      editingRecord.value = null
+    }
+    cancelCandidate.value = null
+    await load()
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error?.message || t('payroll.time.records.cancel_failed'))
+  } finally {
+    saving.value = false
+  }
 }
 
 /**
@@ -608,6 +738,10 @@ function nextEditorDay(date: string): string {
 watch(startsAt, (nove, stare) => {
   const novyDen = nove.slice(0, 10)
   const staryDen = stare?.slice(0, 10) ?? ''
+  if (endAlreadyShifted) {
+    endAlreadyShifted = false
+    return
+  }
   if (novyDen === '' || novyDen === staryDen || endsAt.value === '') return
   const posun = dayDifference(staryDen, novyDen)
   if (posun === null) return
@@ -632,26 +766,35 @@ function shiftDay(day: string, days: number): string {
  * o den. Bez toho stálo pět výjimek v měsíci pět otevření editoru.
  */
 async function saveRecordAndContinue() {
-  const before = startsAt.value.slice(0, 10)
-  await saveRecord(true)
-  if (editorOpen.value) {
-    const day = nextEditorDay(before)
-    startsAt.value = `${day}T${startsAt.value.slice(11)}`
-    endsAt.value = `${day}T${endsAt.value.slice(11)}`
+  const beforeStart = startsAt.value
+  const beforeEnd = endsAt.value
+  // Neuložený den se nepřeskakuje: chyba by jinak zmizela spolu s ním.
+  if (!await saveRecord(true)) return
+  if (editorOpen.value && selected.value) {
+    const next = payrollEditorNextWorkday(
+      beforeStart,
+      beforeEnd,
+      period.value,
+      payrollDayPlans(selected.value, payrollMonthDays(period.value), GRID_FALLBACK_MINUTES),
+    )
+    setEditorRange(next.startsAt, next.endsAt)
   }
 }
 
-async function saveRecord(keepOpen = false) {
-  if (!selected.value) return
+async function saveRecord(keepOpen = false): Promise<boolean> {
+  if (!selected.value) return false
+  // Oprava existujícího zápisu je nová revize téhož druhu; při přepnutí druhu
+  // (směna ↔ skutečnost) jde o nový zápis a původní zůstává.
+  const editing = editingRecord.value?.kind === recordType.value ? editingRecord.value : null
   const common = {
     employment_id: selected.value.employment.id,
     starts_at: payrollWallTimeToIso(startsAt.value, timezone.value),
     ends_at: payrollWallTimeToIso(endsAt.value, timezone.value),
     timezone: timezone.value,
     break_minutes: breakMinutes.value,
-    row_version: 0,
+    row_version: editing?.rowVersion ?? 0,
     month_row_version: selected.value.month.row_version,
-    supersedes_id: null,
+    supersedes_id: editing?.id ?? null,
   }
   saving.value = true
   try {
@@ -675,6 +818,7 @@ async function saveRecord(keepOpen = false) {
       })
     }
     toast.success(t('payroll.time.saved'))
+    editingRecord.value = null
     lastEditorTimes.value = {
       date: startsAt.value.slice(0, 10),
       start: startsAt.value.slice(11, 16),
@@ -682,8 +826,10 @@ async function saveRecord(keepOpen = false) {
     }
     if (!keepOpen) editorOpen.value = false
     await load()
+    return true
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('payroll.time.save_failed'))
+    return false
   } finally {
     saving.value = false
   }
@@ -2248,7 +2394,7 @@ onMounted(() => {
 
     <section v-if="editorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 shadow-sm sm:p-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
-        <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.time.editor.title') }}</h2>
+        <h2 class="text-lg font-semibold text-neutral-900">{{ editingRecord ? t('payroll.time.records.editing_title') : t('payroll.time.editor.title') }}</h2>
         <button :class="btnOutline('neutral')" @click="editorOpen = false">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
           {{ t('common.cancel') }}
@@ -2362,10 +2508,72 @@ onMounted(() => {
           <p v-if="recordBlockedReason" :class="BTN_DISABLED_NOTE" data-test="time-record-save-blocked">
             {{ recordBlockedReason }}
           </p>
+          <p v-else-if="recordLongWarning" class="text-xs text-warning-700" data-test="time-record-long-warning">
+            {{ recordLongWarning }}
+          </p>
         </div>
       </div>
       </form>
+
+      <div class="mt-6 border-t border-payroll-500/20 pt-4" data-test="time-records">
+        <h3 class="text-sm font-semibold text-neutral-900">
+          {{ t('payroll.time.records.title', { name: selected?.employment.full_name ?? '' }) }}
+        </h3>
+        <p class="mt-1 max-w-prose text-xs text-neutral-600">{{ t('payroll.time.records.hint') }}</p>
+        <p v-if="selectedRecords.length === 0" class="mt-3 text-sm text-neutral-500">{{ t('payroll.time.records.empty') }}</p>
+        <ul v-else class="mt-3 divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-surface">
+          <li
+            v-for="row in selectedRecords"
+            :key="`${row.kind}-${row.id}`"
+            class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
+            :class="editingRecord?.id === row.id && editingRecord?.kind === row.kind ? 'bg-payroll-50' : ''"
+            :data-test="`time-record-${row.kind}-${row.id}`"
+          >
+            <span class="min-w-0">
+              <span class="font-medium text-neutral-900">{{ formatRecordRange(row) }}</span>
+              <span class="text-neutral-600"> · {{ row.label }} · {{ formatPayrollMinutes(row.netMinutes) }} h</span>
+              <span v-if="row.tooLong" class="ml-2 inline-flex rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700" data-test="time-record-too-long">
+                {{ t('payroll.time.records.too_long') }}
+              </span>
+            </span>
+            <span v-if="canWrite && selected?.month.status === 'open'" class="flex flex-wrap gap-2">
+              <button type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" :disabled="saving" data-test="time-record-edit" @click="editRecord(row)">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                {{ t('payroll.time.records.edit') }}
+              </button>
+              <button type="button" :class="[btnOutline('danger'), 'whitespace-nowrap']" :disabled="saving" data-test="time-record-cancel" @click="cancelCandidate = row">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+                {{ t('payroll.time.records.cancel') }}
+              </button>
+            </span>
+          </li>
+        </ul>
+        <p v-if="selected && selected.month.status !== 'open' && selectedRecords.length > 0" class="mt-2 text-xs text-neutral-500">
+          {{ t('payroll.time.records.month_locked') }}
+        </p>
+      </div>
     </section>
+
+    <Modal
+      v-if="cancelCandidate"
+      :title="t('payroll.time.records.cancel_title')"
+      width-class="max-w-md"
+      @close="cancelCandidate = null"
+    >
+      <p class="text-sm text-neutral-700" data-test="time-record-cancel-text">
+        {{ t('payroll.time.records.cancel_text', { range: formatRecordRange(cancelCandidate), kind: cancelCandidate.label }) }}
+      </p>
+      <div class="mt-4 flex flex-wrap justify-end gap-2">
+        <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="cancelCandidate = null">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+          {{ t('common.cancel') }}
+        </button>
+        <button type="button" :class="btnFilled('danger')" :disabled="saving" data-test="time-record-cancel-confirm" @click="confirmCancelRecord">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+          {{ t('payroll.time.records.cancel_confirm') }}
+        </button>
+      </div>
+    </Modal>
 
     <section v-if="importOpen" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
       <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.time.import.title') }}</h2>

@@ -4255,6 +4255,22 @@
         "holiday": "Práce ve svátek",
         "difficult_environment": "Ztížené prostředí"
       },
+      "records": {
+        "title": "Zápisy v měsíci — {name}",
+        "hint": "Chybnou směnu nebo čas opravte tlačítkem Upravit (uloží se jako nová verze) nebo ho zrušte. Zápis delší než 12 hodin je označený.",
+        "empty": "Vybraný pracovní vztah zatím v tomto měsíci nemá žádnou směnu ani odpracovaný čas.",
+        "shift": "Plánovaná směna",
+        "too_long": "Delší než 12 h",
+        "edit": "Upravit",
+        "editing_title": "Úprava zápisu docházky",
+        "cancel": "Zrušit",
+        "month_locked": "Měsíc je schválený. Zápisy upravíte po jeho znovuotevření.",
+        "cancel_title": "Zrušit zápis docházky",
+        "cancel_text": "Opravdu zrušit zápis {kind} {range}? Přestane se počítat do plánu, fondu i odpracované doby; v historii zůstane.",
+        "cancel_confirm": "Zrušit zápis",
+        "cancelled": "Zápis byl zrušen.",
+        "cancel_failed": "Zápis se nepodařilo zrušit."
+      },
       "editor": {
         "title": "Nový plán nebo skutečnost",
         "employment": "Pracovní vztah",
@@ -4274,6 +4290,9 @@
         "blocked_no_employment": "Vyberte zaměstnance, kterému se záznam zapíše.",
         "blocked_no_range": "Doplňte začátek i konec směny — bez nich se odpracovaná doba nedá spočítat.",
         "blocked_difficulty_factors": "Zadejte počet ztěžujících vlivů od 1 do 255, nebo pole nechte prázdné.",
+        "blocked_end_before_start": "Konec musí být po začátku. U směny přes půlnoc zadejte u konce následující den.",
+        "blocked_too_long": "Zápis by trval déle než 24 hodin. Zkontrolujte datum konce — nejspíš je o den později, než má být.",
+        "long_warning": "Zápis trvá {hours} h, tedy déle než 12 hodin. Zkontrolujte, že datum konce sedí.",
         "save_and_next": "Uložit a další den"
       },
       "grid": {

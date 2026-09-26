@@ -4255,6 +4255,22 @@
         "holiday": "Public holiday work",
         "difficult_environment": "Difficult environment"
       },
+      "records": {
+        "title": "Records this month — {name}",
+        "hint": "Fix a wrong shift or time record with Edit (saved as a new version) or cancel it. Records longer than 12 hours are flagged.",
+        "empty": "The selected employment has no shift or worked time in this month yet.",
+        "shift": "Planned shift",
+        "too_long": "Longer than 12 h",
+        "edit": "Edit",
+        "editing_title": "Edit attendance record",
+        "cancel": "Cancel",
+        "month_locked": "The month is approved. Reopen it to change the records.",
+        "cancel_title": "Cancel attendance record",
+        "cancel_text": "Really cancel the record {kind} {range}? It will no longer count towards the plan, the fund or hours worked; it stays in the history.",
+        "cancel_confirm": "Cancel record",
+        "cancelled": "The record was cancelled.",
+        "cancel_failed": "The record could not be cancelled."
+      },
       "editor": {
         "title": "New schedule or actual time",
         "employment": "Employment",
@@ -4274,6 +4290,9 @@
         "blocked_no_employment": "Pick the employee the record will be written to.",
         "blocked_no_range": "Fill in both the start and the end of the shift — hours worked cannot be calculated without them.",
         "blocked_difficulty_factors": "Enter a number of aggravating factors between 1 and 255, or leave the field empty.",
+        "blocked_end_before_start": "The end must come after the start. For a shift over midnight, set the end to the following day.",
+        "blocked_too_long": "The record would last longer than 24 hours. Check the end date — it is most likely one day later than intended.",
+        "long_warning": "The record lasts {hours} h, i.e. longer than 12 hours. Check that the end date is right.",
         "save_and_next": "Save and next day"
       },
       "grid": {

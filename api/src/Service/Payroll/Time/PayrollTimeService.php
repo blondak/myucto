@@ -750,6 +750,30 @@ final class PayrollTimeService
     }
 
     /**
+     * Zrušení chybné směny (`shift`) nebo záznamu času (`entry`) bez náhrady.
+     *
+     * @param 'shift'|'entry' $kind
+     * @param array<string,mixed> $input
+     * @return array<string,mixed> měsíc po změně
+     */
+    public function cancelRecord(int $supplierId, string $kind, int $id, array $input, ?int $userId): array
+    {
+        if ($kind !== 'shift' && $kind !== 'entry') {
+            throw new \InvalidArgumentException('Neznámý druh záznamu docházky.');
+        }
+
+        return $this->repository->cancelRecord(
+            $supplierId,
+            $kind,
+            $this->positiveInt($input, 'employment_id'),
+            $id,
+            $this->nonNegativeInt($input, 'row_version'),
+            $this->nonNegativeInt($input, 'month_row_version'),
+            $userId,
+        );
+    }
+
+    /**
      * @param array<string,mixed> $input
      * @return array{entry:array<string,mixed>,month:array<string,mixed>}
      */

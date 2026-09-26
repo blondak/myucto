@@ -247,6 +247,50 @@ final class PayrollTimeAction
         }
     }
 
+    /**
+     * Zrušení chybné směny nebo záznamu času. Oprava jde dál přes uložení
+     * s `supersedes_id`; tohle je cesta pro zápis, který tam vůbec neměl být.
+     *
+     * @param array<string,string> $args
+     */
+    public function cancel(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.time.write',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $kind = ($args['kind'] ?? '') === 'shifts' ? 'shift' : 'entry';
+            $id = $this->routeId($args, 'id');
+            $input = $this->input($request);
+            $month = $this->time->cancelRecord(
+                $this->currentSupplierId($request),
+                $kind,
+                $id,
+                $input,
+                $this->userId($request),
+            );
+            $this->audit(
+                $request,
+                $kind === 'shift' ? 'payroll.time.shift_cancelled' : 'payroll.time.entry_cancelled',
+                $kind === 'shift' ? 'payroll_shift' : 'payroll_time_entry',
+                $id,
+                ['employment_id' => PayrollTimeValue::int($month['employment_id'] ?? null, 'employment_id')],
+            );
+            return Json::ok($response, ['month' => $month]);
+        } catch (PayrollTimeLockedException $e) {
+            return Json::error($response, 'payroll_time_locked', $e->getMessage(), 409);
+        } catch (PayrollTimeConflictException $e) {
+            return $this->conflict($response, $e);
+        } catch (\InvalidArgumentException $e) {
+            return $this->validation($response, $e);
+        }
+    }
+
     public function entry(Request $request, Response $response): Response
     {
         if (($error = $this->authorize(

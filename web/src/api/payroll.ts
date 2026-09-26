@@ -9117,6 +9117,14 @@ export const payrollApi = {
   saveTimeEntry: (payload: PayrollTimeEntryPayload) =>
     api.post<{ entry: PayrollTimeEntry; month: PayrollTimeMonthState }>('/payroll/time/entries', payload)
       .then(response => response.data),
+  /** Zrušení chybné směny nebo záznamu času bez náhrady (oprava jde přes `supersedes_id`). */
+  cancelTimeRecord: (
+    kind: 'shifts' | 'entries',
+    id: number,
+    payload: { employment_id: number; row_version: number; month_row_version: number },
+  ) =>
+    api.post<{ month: PayrollTimeMonthState }>(`/payroll/time/${kind}/${id}/cancel`, payload)
+      .then(response => response.data),
   /**
    * Dávkové uložení buněk měsíční mřížky. `page` a `employmentId` se posílají
    * v query, aby odpověď nesla TU stránku přehledu, kterou má uživatel před

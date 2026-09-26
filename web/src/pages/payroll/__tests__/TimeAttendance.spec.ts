@@ -8,6 +8,8 @@ const m = vi.hoisted(() => ({
   timeMonth: vi.fn(),
   timeHistory: vi.fn(),
   saveTimeEntry: vi.fn(),
+  saveShift: vi.fn(),
+  cancelTimeRecord: vi.fn(),
   saveTimeEntryBatch: vi.fn(),
   previewTimeImport: vi.fn(),
   importTime: vi.fn(),
@@ -33,6 +35,8 @@ vi.mock('@/api/payroll', () => ({
     timeMonth: m.timeMonth,
     timeHistory: m.timeHistory,
     saveTimeEntry: m.saveTimeEntry,
+    saveShift: m.saveShift,
+    cancelTimeRecord: m.cancelTimeRecord,
     saveTimeEntryBatch: m.saveTimeEntryBatch,
     previewTimeImport: m.previewTimeImport,
     importTime: m.importTime,
@@ -238,6 +242,129 @@ describe('TimeAttendance', () => {
     expect(m.saveTimeEntry).toHaveBeenLastCalledWith(
       expect.objectContaining({ difficulty_factor_count: 3 }),
     )
+    wrapper.unmount()
+  })
+
+  /*
+   * Q8-21/22: „Uložit a další den" posunul konec dvakrát (sám a ještě watcher
+   * začátku) — každá další směna končila o den později. A po pátku nabídl sobotu.
+   */
+  it('Uložit a další den drží konec ve stejném dni a přeskočí víkend', async () => {
+    m.routeQuery = { period: '2026-09' }
+    m.timeMonth.mockResolvedValue({
+      items: [row(12, 'Syntetická osoba A')],
+      total: 1,
+      limit: 25,
+      offset: 0,
+    })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    await openRowEditor(wrapper)
+
+    const [start, end] = wrapper.get('[data-test="time-record-form"]').findAll('input[type="datetime-local"]')
+    await start.setValue('2026-09-17T08:00')
+    await flushPromises()
+    expect((end.element as HTMLInputElement).value).toBe('2026-09-17T16:30')
+
+    await wrapper.get('[data-test="time-record-save-next"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="time-record-save-next"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="time-record-save-next"]').trigger('click')
+    await flushPromises()
+
+    const calls = m.saveTimeEntry.mock.calls.map(([payload]) => [payload.starts_at, payload.ends_at])
+    expect(calls).toEqual([
+      ['2026-09-17T08:00:00+02:00', '2026-09-17T16:30:00+02:00'],
+      ['2026-09-18T08:00:00+02:00', '2026-09-18T16:30:00+02:00'],
+      ['2026-09-21T08:00:00+02:00', '2026-09-21T16:30:00+02:00'],
+    ])
+    m.routeQuery = {}
+    wrapper.unmount()
+  })
+
+  it('zápis delší než 24 hodin neuloží a řekne proč', async () => {
+    m.routeQuery = { period: '2026-09' }
+    m.timeMonth.mockResolvedValue({
+      items: [row(12, 'Syntetická osoba A')],
+      total: 1,
+      limit: 25,
+      offset: 0,
+    })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    await openRowEditor(wrapper)
+
+    const [start, end] = wrapper.get('[data-test="time-record-form"]').findAll('input[type="datetime-local"]')
+    await start.setValue('2026-09-15T08:00')
+    await flushPromises()
+    await end.setValue('2026-09-16T16:30')
+    await flushPromises()
+    expect(wrapper.get('[data-test="time-record-save-blocked"]').text()).toBe('payroll.time.editor.blocked_too_long')
+    expect(wrapper.get('[data-test="time-record-save"]').attributes('disabled')).toBeDefined()
+    m.routeQuery = {}
+    wrapper.unmount()
+  })
+
+  it('ukáže zápisy měsíce a chybnou směnu jde upravit jako novou revizi', async () => {
+    m.routeQuery = { period: '2026-09' }
+    m.saveShift.mockResolvedValue({})
+    m.cancelTimeRecord.mockResolvedValue({})
+    const item = {
+      ...row(12, 'Syntetická osoba A'),
+      shifts: [{
+        id: 5,
+        employment_id: 12,
+        calendar_id: null,
+        series_key: 's',
+        revision_no: 1,
+        starts_at: '2026-09-15T08:00:00+02:00',
+        ends_at: '2026-09-16T16:30:00+02:00',
+        timezone_name: 'Europe/Prague',
+        break_minutes: 30,
+        net_minutes: 1920,
+        remote_work: false,
+        standby_minutes: 0,
+        status: 'published',
+        row_version: 3,
+      }],
+      entries: [],
+    }
+    m.timeMonth.mockResolvedValue({ items: [item], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    await openRowEditor(wrapper)
+
+    const record = wrapper.get('[data-test="time-record-shift-5"]')
+    expect(record.find('[data-test="time-record-too-long"]').exists()).toBe(true)
+    await record.get('[data-test="time-record-edit"]').trigger('click')
+    await flushPromises()
+    const [, end] = wrapper.get('[data-test="time-record-form"]').findAll('input[type="datetime-local"]')
+    expect((end.element as HTMLInputElement).value).toBe('2026-09-16T16:30')
+    await end.setValue('2026-09-15T16:30')
+    await flushPromises()
+    await wrapper.get('[data-test="time-record-save"]').trigger('submit')
+    await flushPromises()
+    expect(m.saveShift).toHaveBeenLastCalledWith(expect.objectContaining({
+      starts_at: '2026-09-15T08:00:00+02:00',
+      ends_at: '2026-09-15T16:30:00+02:00',
+      supersedes_id: 5,
+      row_version: 3,
+    }))
+
+    await openRowEditor(wrapper)
+    await wrapper.get('[data-test="time-record-shift-5"] [data-test="time-record-cancel"]').trigger('click')
+    await flushPromises()
+    const confirm = document.body.querySelector<HTMLButtonElement>('[data-test="time-record-cancel-confirm"]')
+    expect(confirm).not.toBeNull()
+    confirm!.click()
+    await flushPromises()
+    expect(m.cancelTimeRecord).toHaveBeenCalledWith('shifts', 5, {
+      employment_id: 12,
+      row_version: 3,
+      month_row_version: 1,
+    })
+    m.routeQuery = {}
     wrapper.unmount()
   })
 

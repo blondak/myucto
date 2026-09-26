@@ -122,6 +122,44 @@ export function payrollDayPlans(
 }
 
 /**
+ * „Uložit a další den" v editoru: začátek i konec se posunou na NEJBLIŽŠÍ další
+ * pracovní den téhož měsíce, oba o stejný počet dní. Směna 08:00–16:30 tak
+ * zůstane osmihodinová a noční směna přes půlnoc si svůj den navíc ponechá.
+ *
+ * Why: posun začátku dřív hlídal ještě watcher, který konec posunul podruhé —
+ * každá další směna pak končila o den později (32 h). Víkendy a svátky se
+ * přeskakují podle kalendáře vztahu, bez něj podle pondělí až pátku. Když
+ * v měsíci další pracovní den není, zůstává zadání, jak je.
+ */
+export function payrollEditorNextWorkday(
+  startsAt: string,
+  endsAt: string,
+  period: string,
+  plans: ReadonlyMap<string, PayrollGridDayPlan>,
+): { startsAt: string; endsAt: string } {
+  const startDay = startsAt.slice(0, 10)
+  const base = Date.parse(`${startDay}T00:00:00Z`)
+  if (Number.isNaN(base)) return { startsAt, endsAt }
+  for (let offset = 1; offset <= 31; offset += 1) {
+    const candidate = new Date(base + offset * 86_400_000).toISOString().slice(0, 10)
+    if (!candidate.startsWith(`${period}-`)) break
+    const plan = plans.get(candidate)
+    const weekday = new Date(`${candidate}T00:00:00Z`).getUTCDay()
+    const workday = plan ? plan.kind === 'workday' : weekday !== 0 && weekday !== 6
+    if (!workday) continue
+    const endBase = Date.parse(`${endsAt.slice(0, 10)}T00:00:00Z`)
+    const endDay = Number.isNaN(endBase)
+      ? candidate
+      : new Date(endBase + offset * 86_400_000).toISOString().slice(0, 10)
+    return {
+      startsAt: `${candidate}${startsAt.slice(10)}`,
+      endsAt: `${endDay}${endsAt.slice(10)}`,
+    }
+  }
+  return { startsAt, endsAt }
+}
+
+/**
  * Hodiny z políčka na minuty.
  *
  * Účetní píše „8", „8:30" i „7,5" — všechny tři tvary se berou, protože
