@@ -440,6 +440,52 @@ final class PayrollAbsenceRepository
     }
 
     /**
+     * Začátek sociální události, jejíž součástí je tahle nepřítomnost.
+     *
+     * Neschopnost zapsaná po částech (typicky po měsících nebo prodloužením)
+     * je jedna událost: schválené nepřítomnosti téhož druhu a vztahu, které na
+     * sebe den po dni navazují, se sčítají zpět až k té první. Vrací id, první
+     * den a dny okna vyčerpané před ní ({@see carriedWindowDays}).
+     *
+     * @return array{id:int,date_from:string,carried_days:int}|null
+     */
+    public function contiguousChainStart(int $supplierId, int $absenceId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "WITH RECURSIVE chain AS (
+                 SELECT id, employment_id, absence_type, date_from, sickness_window_carried_days
+                   FROM payroll_absences
+                  WHERE supplier_id = ? AND id = ?
+                 UNION ALL
+                 SELECT previous.id, previous.employment_id, previous.absence_type,
+                        previous.date_from, previous.sickness_window_carried_days
+                   FROM payroll_absences previous
+                   JOIN chain
+                     ON previous.employment_id = chain.employment_id
+                    AND previous.absence_type = chain.absence_type
+                    AND previous.date_to = DATE_SUB(chain.date_from, INTERVAL 1 DAY)
+                  WHERE previous.supplier_id = ?
+                    AND previous.status = 'approved'
+             )
+             SELECT id, date_from, sickness_window_carried_days
+               FROM chain
+              ORDER BY date_from ASC, id ASC
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $absenceId, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $row['id'],
+            'date_from' => (string) $row['date_from'],
+            'carried_days' => self::carriedWindowDays($row),
+        ];
+    }
+
+    /**
      * Sjednaná týdenní pracovní doba jako DECIMAL(5,2) na celé minuty;
      * nesouměřitelné hodnoty zahodí.
      */

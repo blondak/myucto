@@ -148,8 +148,16 @@ final class PayrollComponentDefaults
                 ['NAHRADA_MZDY_SVATEK', 'Náhrada mzdy za svátek', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
                 ['NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL', 'Náhrada mzdy při překážkách na straně zaměstnavatele', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
                 ['NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC', 'Náhrada mzdy při překážkách na straně zaměstnance', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
-                // Náhrada mzdy při DPN je zákonem osvobozená a není vyměřovacím
-                // základem pojistného. JMHZ a exekuční model zůstávají shodné
+                // Náhrada mzdy při DPN a karanténě je od daně OSVOBOZENÁ podle
+                // § 6 odst. 9 písm. p) ZDP (do 31. 12. 2023 písm. t), viz NSS
+                // 6 Ads 216/2023), a to do výše minimálního nároku § 192 odst. 2
+                // ZP. Není to omyl, ač se to tak čte: zdanit by ji znamenalo
+                // přeplatit daň. Jen nadstandardní část podle § 192 odst. 3 ZP
+                // je zdanitelná, proto ji ruční vstup na tuhle složku nepustí
+                // ({@see \MyInvoice\Repository\Payroll\PayrollInputRepository}).
+                // Osvobozený příjem není vyměřovacím základem pojistného (§ 5
+                // odst. 1 z. č. 589/1992 Sb., § 3 odst. 1 z. č. 592/1992 Sb.).
+                // JMHZ a exekuční model zůstávají shodné
                 // s obecnou náhradou mzdy; jejich odlišný režim by vyžadoval
                 // samostatné zákonné pravidlo, které tento katalog neodhaduje.
                 ['NAHRADA_MZDY_DPN', 'Náhrada mzdy při DPN', 'compensation', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'included', 'included', 'included', null, 'statutory_exempt'],

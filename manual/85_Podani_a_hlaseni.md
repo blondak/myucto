@@ -1298,7 +1298,13 @@ začne hlídat lhůtu NEMPRI ode dne události. Nad seznamem nepřítomností se
 ukáže, co se stalo (případ založen s termínem NEMPRI, prodloužen, navázán na
 existující), a odkaz **Otevřít případy dávek**. Neschopnost zapsaná po
 měsících tvoří jeden případ: navazující nepřítomnost prodlouží jeho konec.
-Nevznikne-li případ (například firma nemá kód OSSZ), hláška řekne proč
+Neschopnost nebo karanténa do 14 kalendářních dnů případ nezaloží: celou ji
+kryje náhrada mzdy (§ 192 zákoníku práce) a nemocenské náleží až od 15. dne
+(§ 26 odst. 1 zákona č. 187/2006 Sb.), takže se ČSSZ nic nepředává. Případ
+vznikne, jakmile neschopnost 14. den přesáhne, i když ji tam dotáhne teprve
+navazující nepřítomnost; začíná pak prvním dnem neschopnosti. K ručně
+založenému případu do 14 dnů hlídač termínů lhůtu neukáže a NEMPRI se
+nepřipraví. Nevznikne-li případ (například firma nemá kód OSSZ), hláška řekne proč
 a nepřítomnost se schválí i tak. Zrušením nepřítomnosti se zruší i případ,
 ze kterého ještě nebylo připravené podání; případ s podáním zůstává
 a vyřešíte ho opravným podáním. Případ můžete založit i ručně na záložce

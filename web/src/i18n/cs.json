@@ -11026,6 +11026,7 @@
       "sickness_event_outside_protection_period": "Sociální událost vznikla po uplynutí ochranné lhůty po skončení zaměstnání (§ 15 zák. č. 187/2006 Sb.). Nárok z tohoto vztahu nevznikl.",
       "sickness_protection_period_excluded": "Z tohoto vztahu ochranná lhůta neplyne (dohoda o provedení práce, malý rozsah nebo student o prázdninách). Nárok po skončení zaměstnání nevznikl.",
       "hzupn_not_for_benefit_kind": "Hlášení při ukončení pracovní neschopnosti se podává jen u nemocenského.",
+      "nempri_within_wage_compensation_window": "Neschopnost nebo karanténa nepřesáhla 14 kalendářních dnů. Celou ji kryje náhrada mzdy (§ 192 zákoníku práce), nemocenské náleží až od 15. dne (§ 26 odst. 1 zák. č. 187/2006 Sb.), takže se ČSSZ nic nepředává. Trvá-li neschopnost déle, opravte v případu den skončení.",
       "hzupn_return_before_incapacity": "Den návratu do práce nemůže předcházet vzniku pracovní neschopnosti.",
       "dlo_employer_consent_invalid": "Rozhodnutí zaměstnavatele o dlouhodobém ošetřovném musí být souhlas, nebo odmítnutí.",
       "dlo_employer_consent_missing": "Vyberte, zda zaměstnavatel s dlouhodobou péčí souhlasil, nebo ji odmítl.",
