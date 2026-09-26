@@ -1066,6 +1066,57 @@ final class PayrollRegistrationActionTest extends TestCase
         );
     }
 
+    /**
+     * Důvod skončení má jediný zdroj — záznam na kartě vztahu. Odhláška A2
+     * ho nesmí tvrdit jinak; dřív se oba údaje zadávaly nezávisle a mohly
+     * se rozejít (A2 „výpověď zaměstnance", potvrzení pro ÚP „dohoda").
+     */
+    public function testTerminationEventMustMatchTheTerminationRecord(): void
+    {
+        $this->seedTrustedReceipt();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_terminations
+                (supplier_id, employment_id, termination_method, legal_ground)
+             VALUES (?, ?, "agreement", "none")',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $payload = fn (string $reason): array => [
+            'environment' => 'test',
+            'interaction' => 'termination',
+            'effective_on' => '2026-08-25',
+            'ended_by_death' => false,
+            'unemployment' => [
+                'mode' => 'provided',
+                'average_net_earnings' => 25_000,
+                'pension_periods' => [['from' => self::START_ON, 'to' => '2026-08-25']],
+                'employment_type' => '1',
+                'termination_reason' => $reason,
+            ],
+        ];
+        $mismatch = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody($payload('3')),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $mismatch->getStatusCode(), (string) $mismatch->getBody());
+        self::assertStringContainsString('Skončení vztahu', $this->json($mismatch)['error']['message']);
+
+        $match = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody($payload('2')),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $match->getStatusCode(), (string) $match->getBody());
+    }
+
     public function testA3ChangeReplaysTheSameFrozenBusinessEvent(): void
     {
         $this->db->pdo()->prepare(

@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
 use DOMDocument;
 use DOMElement;
 use DOMXPath;
+use MyInvoice\Repository\Payroll\PayrollEmploymentTerminationRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationA2EvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationEventRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
@@ -15,6 +16,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
+use MyInvoice\Service\Payroll\Termination\PayrollTerminationReason;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -57,6 +59,7 @@ final readonly class PayrollRegistrationEventService
         private PayrollEmploymentJmhzEvidenceCatalog $jmhzEvidence,
         private PayrollRegistrationA2EvidenceRepository $a2Evidence,
         private ClockInterface $clock,
+        private PayrollEmploymentTerminationRepository $terminations,
     ) {}
 
     /** @param array<string,mixed> $input @return array<string,mixed> */
@@ -660,21 +663,67 @@ final readonly class PayrollRegistrationEventService
             );
         }
 
+        $unemployment = $this->unemployment(
+            $input['unemployment'] ?? null,
+            $scenario,
+            $activityCode,
+            $endedByDeath,
+            $context,
+        );
+        $this->assertMatchesTerminationRecord($supplierId, $employmentId, $endedByDeath, $unemployment);
+
         return [
             'end_on' => $effectiveOn,
             'activity_code' => $activityCode,
             'relationship_detail_code' => $detail,
             'a2_scenario' => $scenario,
             'ended_by_death' => $endedByDeath,
-            'unemployment' => $this->unemployment(
-                $input['unemployment'] ?? null,
-                $scenario,
-                $activityCode,
-                $endedByDeath,
-                $context,
-            ),
+            'unemployment' => $unemployment,
             'jmhz_correction_evidence' => $evidence->toArray(),
         ];
+    }
+
+    /**
+     * Důvod skončení má jediný zdroj — záznam o skončení na kartě vztahu
+     * (PayrollTerminationReason). Je-li vyplněný, odhláška A2 ho nesmí
+     * tvrdit jinak: kód důvodu pro Úřad práce i příznak úmrtí se musí shodovat.
+     * Bez záznamu zůstává A2 beze změny (ruční zadání jako dosud).
+     *
+     * @param array<string,mixed>|null $unemployment
+     */
+    private function assertMatchesTerminationRecord(
+        int $supplierId,
+        int $employmentId,
+        ?bool $endedByDeath,
+        ?array $unemployment,
+    ): void {
+        $record = $this->terminations->find($supplierId, $employmentId);
+        if ($record === null) {
+            return;
+        }
+        $reason = new PayrollTerminationReason(
+            (string) $record['termination_method'],
+            (string) $record['legal_ground'],
+        );
+        if ($endedByDeath !== null && $endedByDeath !== $reason->endedByDeath()) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a2_termination_record_mismatch',
+                'Přepínač „Skončení úmrtím" neodpovídá způsobu skončení zapsanému na kartě'
+                    . ' vztahu v části Skončení vztahu. Opravte jedno z nich, ať obě místa'
+                    . ' tvrdí totéž.',
+            );
+        }
+        $code = $unemployment['termination_reason'] ?? null;
+        if (is_string($code) && $code !== $reason->regzecReasonCode()) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a2_termination_record_mismatch',
+                "Důvod ukončení pro Úřad práce ({$code}) neodpovídá důvodu skončení zapsanému"
+                    . ' na kartě vztahu v části Skončení vztahu (kód '
+                    . $reason->regzecReasonCode() . '). Použijte „Předvyplnit ze skončení"'
+                    . ' ve formuláři odhlášky, nebo opravte důvod na kartě vztahu.'
+                    . PayrollRegistrationFieldVocabulary::reference('unemployment'),
+            );
+        }
     }
 
     private function a2Plan(

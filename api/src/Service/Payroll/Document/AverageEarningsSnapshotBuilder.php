@@ -7,8 +7,10 @@ namespace MyInvoice\Service\Payroll\Document;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAverageEarningRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentExitRevisionRepository;
+use MyInvoice\Repository\Payroll\PayrollEmploymentTerminationRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Termination\PayrollTerminationReason;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 
 /**
@@ -38,6 +40,7 @@ final class AverageEarningsSnapshotBuilder
         private readonly AverageEarningsMonthlyConverter $converter,
         private readonly PayrollSensitiveData $sensitiveData,
         private readonly SecretEncryption $encryption,
+        private readonly PayrollEmploymentTerminationRepository $terminations,
     ) {}
 
     /**
@@ -69,6 +72,14 @@ final class AverageEarningsSnapshotBuilder
         $evidence = $withNet
             ? $this->validator->validateCertificate($evidenceInput)
             : $this->validator->validateStatement($evidenceInput);
+        if ($withNet) {
+            $this->assertMatchesTerminationRecord(
+                $supplierId,
+                $employmentId,
+                (string) $evidence['termination_reason_kind'],
+                $evidence['employee_stated_reason'],
+            );
+        }
 
         $sources = $this->revisions->lockCertificateSources(
             $supplierId,
@@ -323,6 +334,40 @@ final class AverageEarningsSnapshotBuilder
             $this->databaseToday(),
             $withNet,
         );
+    }
+
+    /**
+     * Způsob skončení v potvrzení pro Úřad práce má jediný zdroj — záznam
+     * o skončení na kartě vztahu. Je-li vyplněný, potvrzení ho nesmí tvrdit
+     * jinak. Bez záznamu zůstává ruční volba jako dosud.
+     */
+    private function assertMatchesTerminationRecord(
+        int $supplierId,
+        int $employmentId,
+        string $kind,
+        ?string $statedReason,
+    ): void {
+        $record = $this->terminations->find($supplierId, $employmentId);
+        if ($record === null) {
+            return;
+        }
+        $reason = new PayrollTerminationReason(
+            (string) $record['termination_method'],
+            (string) $record['legal_ground'],
+        );
+        if ($kind !== $reason->unemploymentOfficeKind()) {
+            throw new EmploymentExitReadinessException(
+                'termination_reason_mismatch',
+                'Způsob skončení v potvrzení neodpovídá skončení zapsanému na kartě'
+                    . ' vztahu (Skončení vztahu). Potvrzení bere způsob skončení odtamtud.',
+            );
+        }
+        if ($statedReason !== null && !$reason->statedReasonAllowed()) {
+            throw new EmploymentExitReadinessException(
+                'termination_reason_mismatch',
+                'Důvod uvedený zaměstnancem se k tomuto způsobu skončení netiskne.',
+            );
+        }
     }
 
     private static function assertPurpose(string $purpose): bool
