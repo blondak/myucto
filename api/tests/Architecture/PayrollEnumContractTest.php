@@ -73,6 +73,9 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const UNION_DOMAIN = [
+        // Kam vede proklik z hlášky přípravy registrace (chybějící údaj, upozornění)
+        'payroll.ts::PayrollRegistrationProblemTarget'
+            => 'const:MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityRequirements::TARGETS',
         // Návrh kontací z převzatého zaúčtování (přechod z jiného mzdového programu)
         'payrollPostingMap.ts::PayrollPostingMapSource'
             => 'const:MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalStore::SOURCES',

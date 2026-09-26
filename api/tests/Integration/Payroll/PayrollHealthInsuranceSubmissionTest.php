@@ -200,12 +200,14 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         );
         self::assertSame(25, $capability['change_codes']['total']);
         // Mapování druh → kód dokládá anotace připnutého XSD, ale jen tam,
-        // kde schéma určuje jediný kód; opravy a přestup zůstávají otevřené.
+        // kde schéma určuje jediný kód; opravy zůstávají otevřené. Přestup
+        // má kód podle směru (odcházející „O", přijímající „P").
         self::assertSame(
             [
                 'employment_start',
                 'employment_end',
                 'single_day_employment',
+                'insurer_change',
                 'maternity_leave_start',
                 'parental_leave_start',
                 'maternity_or_parental_leave_end',

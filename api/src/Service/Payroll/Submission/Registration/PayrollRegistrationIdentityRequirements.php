@@ -39,6 +39,7 @@ final class PayrollRegistrationIdentityRequirements
     /** Kam proklik vede: karta osoby, nebo nastavení mezd zaměstnavatele. */
     public const TARGET_PERSON = 'person';
     public const TARGET_EMPLOYER_SETTINGS = 'employer_settings';
+    public const TARGETS = [self::TARGET_PERSON, self::TARGET_EMPLOYER_SETTINGS];
 
     /**
      * Údaje identity, které nese datová věta u OBOU agend, v pořadí,

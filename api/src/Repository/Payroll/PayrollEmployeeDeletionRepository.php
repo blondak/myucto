@@ -188,6 +188,9 @@ final class PayrollEmployeeDeletionRepository
             // Provedené zúčtování mazání blokuje dál, takže se tím nemaže nic,
             // o co by se pak někdo opřel.
             'payroll_annual_settlement_certificates',
+            // Žádost o potvrzení zdanitelných příjmů (§ 38j odst. 3) je pracovní
+            // záznam lhůty, ne vydané potvrzení — bez osoby nemá co hlídat.
+            'payroll_taxable_income_confirmation_requests',
         ],
         'insurance' => [
             'payroll_person_health_coverage_history',

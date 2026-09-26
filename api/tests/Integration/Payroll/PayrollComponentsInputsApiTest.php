@@ -264,6 +264,7 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'MZDA_HODINOVA',
             'MZDA_MESICNI',
             'MZDA_UKOLOVA',
+            'NAHRADA_271CA',
             'NAHRADA_KONKURENCNI_DOLOZKA',
             'NAHRADA_MZDY',
             'NAHRADA_MZDY_DOVOLENA',

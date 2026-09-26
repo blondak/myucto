@@ -60,7 +60,7 @@ final class PayrollAbsenceValidator
      * `$takeover` = nepřítomnost převzatá ze zpracovaných mezd předchozího
      * programu. Náhradu za ni už obsahuje převzatá mzda a zdroj druh překážky
      * nenese, takže se u ní druh nevyžaduje; bez druhu se ale v MyÚčtu nikdy
-     * nematerializuje náhrada ({@see \MyInvoice\Action\Payroll\PayrollAbsenceAction::decision()}).
+     * nematerializuje náhrada (`PayrollAbsenceAction::decision()`).
      *
      * @param array<string,mixed> $body
      * @return array<string,mixed>

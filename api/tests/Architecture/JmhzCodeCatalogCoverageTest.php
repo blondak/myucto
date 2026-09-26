@@ -68,6 +68,8 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
         'jmhz_external_codebooks_verified_for_period' => 'field',
         'jmhz_functional_benefits_status' => 'field',
         'jmhz_identity' => 'route',
+        // Původ identifikátoru osoby (source_origin), ne kód blokace.
+        'jmhz_import' => 'enum',
         'jmhz_import_form' => 'other',
         'jmhz_import_step' => 'other',
         'jmhz_mapping' => 'key',

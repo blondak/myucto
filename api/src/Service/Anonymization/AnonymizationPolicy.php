@@ -264,7 +264,7 @@ final class AnonymizationPolicy
         'payment_cards' => ['analytic_suffix' => 'keep', 'holder_name' => 'person_name', 'label' => 'text', 'last4' => 'card_last4', 'note' => 'text'],
         'payment_order_items' => ['constant_symbol' => 'keep', 'currency' => 'keep', 'message' => 'text', 'payee_account_number' => 'bank_account', 'payee_bank_code' => 'keep', 'payee_bic' => 'keep', 'payee_iban' => 'iban', 'payee_name' => 'party_name', 'specific_symbol' => 'symbol', 'variable_symbol' => 'symbol'],
         'payment_orders' => ['currency' => 'keep', 'note' => 'text', 'payer_account_label' => 'text', 'payer_account_number' => 'bank_account', 'payer_bank_code' => 'keep', 'payer_bic' => 'keep', 'payer_iban' => 'iban'],
-        'payroll_absences' => ['note' => 'text', 'timezone_name' => 'keep'],
+        'payroll_absences' => ['compensation_rate_reason' => 'text', 'note' => 'text', 'timezone_name' => 'keep'],
         'payroll_accident_insurance_rates' => ['institution_code' => 'keep'],
         'payroll_agenda_matrix' => ['agenda_code' => 'keep', 'ruleset_hash' => 'keep', 'ruleset_id' => 'keep'],
         'payroll_annual_document_batch_attempts' => ['error_code' => 'keep', 'error_message' => 'text', 'lease_token' => 'keep'],
