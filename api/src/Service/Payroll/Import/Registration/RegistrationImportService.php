@@ -70,21 +70,25 @@ final class RegistrationImportService
         mixed $files,
         mixed $pairs = null,
         mixed $relationTypes = null,
+        mixed $terminations = null,
     ): array {
         $this->environment($environment);
         $pairMap = $this->pairs($pairs);
         $relationTypeMap = $this->relationTypes($relationTypes);
+        $terminationKeys = $this->terminations($terminations);
         $read = $this->read($supplierId, $files);
         $records = [];
         $registrationPlans = [];
         foreach ($read['registrations'] as $item) {
+            $key = RegistrationImportPlanner::key($item['sha256'], $item['record']->position);
             $plan = $this->planner->plan(
                 $supplierId,
                 $environment,
                 $item['record'],
                 $item['file'],
                 $item['sha256'],
-                $relationTypeMap[RegistrationImportPlanner::key($item['sha256'], $item['record']->position)] ?? null,
+                $relationTypeMap[$key] ?? null,
+                isset($terminationKeys[$key]),
             );
             $registrationPlans[] = $plan;
             // Odvozená věta vztahu, který evidence už vede beze změny, by náhled
@@ -157,9 +161,11 @@ final class RegistrationImportService
         bool $autoApproveAverages = false,
         bool $applyTakeover = false,
         mixed $relationTypes = null,
+        mixed $terminations = null,
     ): array {
         $this->environment($environment);
         $relationTypeMap = $this->relationTypes($relationTypes);
+        $terminationKeys = $this->terminations($terminations);
         if (!$evidenceConfirmed) {
             throw new \InvalidArgumentException(
                 'Potvrďte, že soubory odpovídají podáním přijatým ČSSZ. Import podle nich zapisuje '
@@ -218,7 +224,7 @@ final class RegistrationImportService
             }
         }
         foreach ($ordered as $item) {
-            $result = $this->applyRegistration($supplierId, $environment, $item, $officeId, $userId, $ip, $userAgent, $relationTypeMap);
+            $result = $this->applyRegistration($supplierId, $environment, $item, $officeId, $userId, $ip, $userAgent, $relationTypeMap, $terminationKeys);
             $results[(string) $result['key']] = $result;
         }
 
@@ -369,14 +375,17 @@ final class RegistrationImportService
         ?string $ip,
         ?string $userAgent,
         array $relationTypeMap = [],
+        array $terminationKeys = [],
     ): array {
+        $recordKey = RegistrationImportPlanner::key($item['sha256'], $item['record']->position);
         $plan = $this->planner->plan(
             $supplierId,
             $environment,
             $item['record'],
             $item['file'],
             $item['sha256'],
-            $relationTypeMap[RegistrationImportPlanner::key($item['sha256'], $item['record']->position)] ?? null,
+            $relationTypeMap[$recordKey] ?? null,
+            isset($terminationKeys[$recordKey]),
         );
         $key = (string) $plan['key'];
         if ($plan['blocker'] !== null) {
@@ -828,6 +837,31 @@ final class RegistrationImportService
                 throw new \InvalidArgumentException('Volba druhu vztahu obsahuje neplatný klíč věty nebo druh vztahu.');
             }
             $result[$key] = $type;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Věty exportu ČSSZ, u kterých účetní potvrdila ukončení trvajícího
+     * vztahu ke konci pojistného vztahu z exportu: seznam klíčů vět.
+     *
+     * @return array<string,true>
+     */
+    private function terminations(mixed $keys): array
+    {
+        if ($keys === null) {
+            return [];
+        }
+        if (!is_array($keys) || !array_is_list($keys)) {
+            throw new \InvalidArgumentException('Potvrzená ukončení vztahů musí být seznam klíčů vět.');
+        }
+        $result = [];
+        foreach ($keys as $key) {
+            if (!is_string($key) || preg_match(self::KEY_PATTERN, $key) !== 1) {
+                throw new \InvalidArgumentException('Potvrzená ukončení vztahů obsahují neplatný klíč věty.');
+            }
+            $result[$key] = true;
         }
 
         return $result;

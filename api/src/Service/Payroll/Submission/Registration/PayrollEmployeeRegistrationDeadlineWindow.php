@@ -16,6 +16,10 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
  * `derived = false` znamená, že lhůta podle dnešních pravidel neexistuje
  * (událost před 1. 7. 2026) — `dueOn` je pak jen den události, podání se
  * hlásí jako opožděné a `notice` říká proč.
+ *
+ * `statutory = false` znamená, že podání žádnou zákonnou lhůtu nemá (storno
+ * A8 z jiného důvodu než nenastoupení). `dueOn` je pak jen informační milník
+ * a nic se nehlásí jako „po lhůtě".
  */
 final readonly class PayrollEmployeeRegistrationDeadlineWindow
 {
@@ -27,5 +31,6 @@ final readonly class PayrollEmployeeRegistrationDeadlineWindow
         public string $rulesetHash,
         public bool $derived = true,
         public ?string $notice = null,
+        public bool $statutory = true,
     ) {}
 }

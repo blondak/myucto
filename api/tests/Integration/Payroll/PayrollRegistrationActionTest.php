@@ -469,6 +469,118 @@ final class PayrollRegistrationActionTest extends TestCase
         );
     }
 
+    /**
+     * Rozhodnutí 26. 9. 2026 (bod 8): zaměstnanec převzatý z ONZ bez
+     * dohlášení A3 smí dostat odhlášku A2 s ručně zapsaným OIČ a ID PPV,
+     * pokud je účetní výslovně ověří v Seznamu zaměstnanců ČSSZ. Dřív A2
+     * padala, dokud ČSSZ nepřijala A3.
+     */
+    public function testA2ForOnzEmployeeWithoutA3PassesAfterExplicitVerification(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('10', null, self::START_ON);
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+                'identifiers_verified_in_cssz_list' => true,
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $event = $this->registrationService->listEvents($this->supplierId, 'test', $this->employmentId);
+        self::assertSame('termination', $event[0]['interaction']);
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $this->json($response)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
+        $xml = $this->storedArtifactXml((int) $this->json($prepared)['submission_id']);
+        self::assertStringContainsString('act="2"', $xml);
+        self::assertStringContainsString('ikmpsv="1000000001"', $xml);
+    }
+
+    /**
+     * Pojistka rozhodnutí bodu 8: ručně potvrzené ID PPV nesmí nést jiný
+     * vztah — odhláška by ukončila cizí vztah téže osoby. Hlídá to unikátní
+     * index nad otiskem hodnoty; druhý zápis téhož čísla neprojde.
+     */
+    public function testSameIdPpvCannotBeRecordedForAnotherEmployment(): void
+    {
+        $this->seedRegistrationEventPrerequisites('10', null, self::START_ON);
+        $other = $this->insertAdditionalEmployment('reg-duplicate-id-ppv');
+
+        try {
+            $this->identities->assignManualJmhzIdentity(
+                $this->supplierId,
+                $other,
+                'test',
+                null,
+                '200000000000000000002',
+                self::START_ON,
+                'synthetic-duplicate-id-ppv',
+                true,
+                $this->userId,
+            );
+            self::fail('Stejné ID PPV se zapsalo k druhému vztahu.');
+        } catch (\PDOException $exception) {
+            self::assertSame('23000', $exception->getCode());
+        }
+    }
+
+    /**
+     * Čísla z importu exportu zaměstnanců ČSSZ (Seznam zaměstnanců) jsou
+     * podklad sama o sobě — A2 projde bez dalšího potvrzení.
+     */
+    public function testA2ForOnzEmployeeTrustsIdentifiersFromCsszEmployeeExport(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('10', null, self::START_ON, null, null, true);
+        $this->identities->assignManualJmhzIdentity(
+            $this->supplierId,
+            $this->employmentId,
+            'test',
+            '1000000001',
+            '200000000000000000002',
+            self::START_ON,
+            'jmhz-registration-import:synthetic-export:1',
+            true,
+            $this->userId,
+            false,
+            'cssz_employee_export',
+        );
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+    }
+
     public function testA2RejectsManualIdPpvProvenance(): void
     {
         $this->seedTrustedReceipt();
@@ -1809,6 +1921,215 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(1, $this->countSubmissions());
     }
 
+    /**
+     * § 19 odst. 1 písm. a) zákona č. 323/2025 Sb.: přihlásit PŘED nástupem,
+     * nejdřív osm dnů předem — a to i plnou registrací A1. Dřív šla A1 až po
+     * nástupu (`full_registration_data = metadata && work_started`), takže
+     * zaměstnavatel, který chtěl registraci vyřídit najednou, musel čekat
+     * na den, kdy už byl v prodlení.
+     */
+    public function testCzechEmployeeBeforeStartCanFileFullRegistrationA1(): void
+    {
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
+        $this->saveA1ProfileFor(self::START_ON, '1', '1');
+
+        $response = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'registration_mode' => 'full',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertSame('REGZEC25', $body['agenda_code']);
+        self::assertSame('direct_full_registration', $body['interaction']);
+        self::assertTrue($body['before_start_choice']);
+        self::assertSame(self::START_ON, $body['deadline']['due_on']);
+        self::assertSame('2026-08-14', $body['deadline']['earliest_registration_on']);
+        $xml = $this->storedArtifactXml((int) $body['submission_id']);
+        self::assertStringContainsString('act="1"', $xml);
+        self::assertStringContainsString(' fro="' . self::START_ON . '"', $xml);
+    }
+
+    /**
+     * Cizinec se přihlašuje VŽDY plnou registrací a VŽDY před nástupem.
+     * Hláška validátoru mu to radila, přitom podání A1 před nástupem padalo
+     * na „nemá vyplněné všechny povinné údaje".
+     */
+    public function testForeignEmployeeBeforeStartFilesRegzecA1WithoutChoosing(): void
+    {
+        $this->identities->saveIdentityFacts(
+            $this->supplierId,
+            $this->employeeId,
+            $this->identityId,
+            2,
+            [
+                'title_prefix' => 'Ing.',
+                'birth_date' => '1991-02-03',
+                'birth_place' => 'Testov',
+                'birth_country_code' => 'SK',
+                'citizenship_country_code' => 'SK',
+                'sex' => 'female',
+            ],
+        );
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
+        $payload = $this->completeA1Payload();
+        $payload['proof_identity'] = [
+            'type_code' => 'P',
+            'number' => 'SYN000001',
+            'foreign_issuer' => null,
+            'country_code' => 'SK',
+        ];
+        $payload['foreign_worker'] = [
+            'free_access' => true,
+            'free_access_reason_code' => '1',
+            'permit_type_code' => null,
+            'issuing_labour_office_code' => null,
+            'permit_identifier' => null,
+            'permit_from' => null,
+            'permit_to' => null,
+        ];
+        $saved = ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($payload),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        self::assertSame(
+            'verified',
+            $this->json($saved)['profile']['status'],
+            json_encode($this->json($saved)['profile']['problems'] ?? [], JSON_UNESCAPED_UNICODE) ?: '',
+        );
+
+        $response = $this->post();
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertSame('REGZEC25', $body['agenda_code']);
+        self::assertFalse($body['before_start_choice']);
+        self::assertSame(self::START_ON, $body['deadline']['due_on']);
+    }
+
+    /**
+     * Storno A8 z jiného důvodu než nenastoupení (tady chybný variabilní
+     * symbol): příloha se zdůvodněním jde do podání a lhůta NENÍ zákonná.
+     * Dřív aplikace takové storno odmítla a každé A8 vedla s osmi dny.
+     */
+    public function testA8ForOtherReasonCarriesExplanationAndHasNoStatutoryDeadline(): void
+    {
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON);
+        $this->saveA1ProfileFor(self::START_ON, '1', '1');
+        $a1 = $this->json(($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'registration_mode' => 'full',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        $this->markRegistrationAccepted((int) $a1['submission_id']);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, start_date = ?, status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::TODAY, self::TODAY, $this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET effective_from = ?
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([self::TODAY, $this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_external_ids SET valid_from = ?
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([self::TODAY, $this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_external_ids SET valid_from = ?
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([self::TODAY, $this->supplierId, $this->employeeId]);
+
+        $missing = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'cancellation',
+                'effective_on' => self::TODAY,
+                'source_reference' => 'synthetic-a8-wrong-vs',
+                'source_submission_id' => $a1['submission_id'],
+                'not_started' => false,
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(422, $missing->getStatusCode(), (string) $missing->getBody());
+        self::assertSame(
+            'registration_a8_explanation_attachment_required',
+            $this->json($missing)['error']['code'],
+        );
+
+        $approved = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'cancellation',
+                'effective_on' => self::TODAY,
+                'source_reference' => 'synthetic-a8-wrong-vs',
+                'source_submission_id' => $a1['submission_id'],
+                'not_started' => false,
+                'explanation_attachment' => [
+                    'name' => 'zduvodneni-storna.pdf',
+                    'description' => 'Přihlášeno pod chybným variabilním symbolem',
+                    'data_base64' => base64_encode('%PDF-synthetic-explanation'),
+                ],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $approved->getStatusCode(), (string) $approved->getBody());
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $this->json($approved)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
+        $body = $this->json($prepared);
+        self::assertFalse($body['deadline']['statutory']);
+        self::assertSame('2026-09-20', $body['deadline']['due_on']);
+        self::assertSame('cz-regzec-cancellation-other-2026-07.v1', $body['deadline']['ruleset_id']);
+        $xml = $this->storedArtifactXml((int) $body['submission_id']);
+        self::assertStringContainsString('act="8"', $xml);
+        self::assertStringContainsString('notstart="N"', $xml);
+        self::assertStringContainsString('name="zduvodneni-storna.pdf"', $xml);
+    }
+
+    /** Dřív než osm dnů před nástupem A1 nejde — stejně jako P1. */
+    public function testFullRegistrationA1IsRefusedMoreThanEightDaysBeforeStart(): void
+    {
+        $startOn = '2026-09-01';
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET start_date = ?
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$startOn, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', $startOn, null, null, true);
+        $this->saveA1ProfileFor($startOn, '1', '1');
+
+        $response = ($this->action)->preview(
+            $this->request('GET')->withQueryParams([
+                'environment' => 'test',
+                'registration_mode' => 'full',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        $error = $this->json($response)['error'];
+        self::assertSame('registration_regzec_a1_start_window_invalid', $error['code']);
+        self::assertStringContainsString('24.08.2026', $error['message']);
+    }
+
     public function testLateRegistrationDoesNotBypassIncompleteA1Guard(): void
     {
         $this->db->pdo()->prepare(
@@ -2579,6 +2900,72 @@ final class PayrollRegistrationActionTest extends TestCase
 
         $accepted = $approve('4');
         self::assertSame(201, $accepted->getStatusCode(), (string) $accepted->getBody());
+    }
+
+    /**
+     * A2 nese 10378 (odstupné náleží) a 10531 (odstupné § 67 odst. 1) podle
+     * záznamu Skončení vztahu. Skončení z organizačních důvodů odstupné
+     * zakládá — odhláška, která ho zamlčí, se neschválí.
+     */
+    public function testA2SettlementMustMatchTheTerminationRecord(): void
+    {
+        $this->seedTrustedReceipt();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25", status = "ended"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
+        $termination = Bootstrap::buildContainer()->get(
+            \MyInvoice\Service\Payroll\Termination\PayrollEmploymentTerminationService::class,
+        );
+        $termination->save($this->supplierId, $this->employmentId, [
+            'termination_method' => 'agreement',
+            'legal_ground' => 'organizational',
+        ], $this->userId);
+        $approve = fn (array $settlement) => ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+                'ended_by_death' => false,
+                'unemployment' => [
+                    'mode' => 'provided',
+                    'average_net_earnings' => '25000',
+                    'pension_periods' => [['from' => self::START_ON, 'to' => '2026-08-25']],
+                    'employment_type' => '1',
+                    'termination_reason' => '4',
+                ] + $settlement,
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        $silenced = $approve(['entitlement' => false]);
+        self::assertSame(422, $silenced->getStatusCode(), (string) $silenced->getBody());
+        self::assertSame(
+            'registration_a2_settlement_record_mismatch',
+            $this->json($silenced)['error']['code'],
+        );
+        $wrongKind = $approve(['entitlement' => true, 'paid_in_full' => true, 'replacement' => '50000']);
+        self::assertSame(
+            'registration_a2_settlement_record_mismatch',
+            $this->json($wrongKind)['error']['code'],
+        );
+
+        $accepted = $approve(['entitlement' => true, 'paid_in_full' => true, 'golden_handshake' => '50000']);
+        self::assertSame(201, $accepted->getStatusCode(), (string) $accepted->getBody());
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $this->json($accepted)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        $xml = $this->storedArtifactXml((int) $this->json($prepared)['submission_id']);
+        self::assertStringContainsString('belong="A"', $xml);
+        self::assertStringContainsString('goldenhandshake="50000"', $xml);
     }
 
     /**

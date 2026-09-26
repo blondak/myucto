@@ -5978,6 +5978,11 @@
           "manual_only": "The A3 data message in this build does not carry this detail — file it another way and then close the proposal manually.",
           "health_insurer_hoz": "A change of insurer is reported to both insurers in the bulk notification (HOZ): a deregistration (code O) to the previous one and a registration (code P) to the new one. Prepare both on the Health insurers tab for the month of the change, then close this proposal.",
           "open_hoz": "Prepare HOZ for {period}",
+          "gap": {
+            "registration_change_permanent_address_incomplete": "The new residential address is on the person card, but the house number is not kept separately there. Complete the address in the A1 registration profile and save it — the change can then be reported with one click.",
+            "registration_change_foreign_permit_incomplete": "The work permit changed (new validity), but the app does not know the number of the new decision. Fill in the permit type, number and validity in the A1 registration profile and save it."
+          },
+          "open_profile": "Complete in A1 profile",
           "file": "Report the change",
           "dismiss": "Handle manually",
           "dismiss_note": "How you met the obligation",
@@ -6018,7 +6023,8 @@
         "window": "Can be filed from {from}, no later than {to}.",
         "employer_window": "Note: this is the first employee. File the employer's own registration no later than {to} — after that date the employer status is presumed by law.",
         "registration_window": {
-          "not_derived": "The start date {start} precedes 1 July 2026, when the current registration duty took effect. File the registration without undue delay — the app does not derive a deadline under the former rules and treats the filing as late."
+          "not_derived": "The start date {start} precedes 1 July 2026, when the current registration duty took effect. File the registration without undue delay — the app does not derive a deadline under the former rules and treats the filing as late.",
+          "not_statutory": "This filing has no statutory deadline. Until {milestone} the monthly report can be cancelled together with it without manual processing; later, file a corrective report."
         },
         "completion": {
           "action": "Supplement data (A3)",
@@ -6064,6 +6070,12 @@
             "employer_variable_symbol": "Employer variable symbol at ČSSZ",
             "cssz_workplace_code": "Social security administration code"
           }
+        },
+        "before_start": {
+          "label": "Registration before start",
+          "partial": "Partial registration (PREZEC P1)",
+          "full": "Full registration (REGZEC A1)",
+          "hint": "The employee must be registered before starting work, at the earliest 8 days in advance (Section 19(1) of Act No. 323/2025 Coll.). A partial registration needs only the basic data; the rest is added within 8 days after the start. You can file the full A1 registration right away once the A1 profile is complete; if the employee starts on a different day, file a correction A4, and if they never start, a cancellation A8."
         },
         "send_test": "Send to test",
         "send_production": "Send to production",
@@ -6320,7 +6332,16 @@
           "foreign_identifier": "Foreign insurance number",
           "foreign_sector": "District / administrative area",
           "not_started_confirmation": "I confirm that the relation is recorded as a non-appearance and that the selected date is the original planned start date.",
-          "a8_hint": "This path can cancel only a proven non-appearance. Any other cancellation requires a written explanation and is intentionally not prepared by the application.",
+          "a8_hint": "Report a non-appearance within 8 days of the expected start date (Section 19(4) of Act No. 323/2025 Coll.). The relationship must be recorded as not started.",
+          "a8_reason": "Reason for cancellation",
+          "a8_reason_not_started": "The employee did not start",
+          "a8_reason_other": "Other reason (wrong variable symbol, activity type, invalidated relationship)",
+          "a8_other_hint": "A cancellation for another reason has no statutory deadline, but the ČSSZ processes it only with a written explanation attached. Until the 20th day of the following month the monthly report can be cancelled together with it; later, file a corrective report.",
+          "a8_attachment": "Attach explanation",
+          "a8_attachment_missing": "No explanation attached yet.",
+          "a8_attachment_description": "Attachment description (optional)",
+          "identifiers_verified": "I verified the OIČ and ID PPV in the employee list on the ČSSZ ePortal",
+          "identifiers_verified_hint": "Only for an employee taken over from an earlier notification (ONZ) whose numbers do not come from a ČSSZ protocol, an accepted A3 completion or an imported ČSSZ employee export. The A2 deregistration can then be filed without the A3 completion, which stays as a separate duty.",
           "select_placeholder": "Select…"
         }
       },

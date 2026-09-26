@@ -8,9 +8,10 @@ namespace MyInvoice\Service\Payroll\Submission\Registration\Change;
  * Převod nalezených rozdílů na vstup existujícího schválení události A3.
  *
  * Detekce umí najít víc, než umí tenhle core podat. To není nedodělek, který
- * se má zamlčet: změnou (A3) se tu hlásí titul, doručovací adresa, daňová
- * rezidence, zdravotní pojišťovna, nejvyšší vzdělání a pracovní údaje
- * (postavení, režim, místo výkonu, profese, pozice…). Změna bližšího určení
+ * se má zamlčet: změnou (A3) se tu hlásí titul, trvalý pobyt, doručovací
+ * adresa, daňová rezidence, zdravotní pojišťovna, nejvyšší vzdělání,
+ * přístup cizince na trh práce a pracovní údaje (postavení, režim, místo
+ * výkonu, profese, pozice…). Změna bližšího určení
  * vztahu je uzavřená kvůli povinné příloze s vysvětlením
  * ({@see \MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEventService}).
  *
@@ -31,6 +32,11 @@ final class PayrollRegistrationChangeDeltaPlanner
     ];
 
     private const CONTACT_ADDRESS_OPTIONAL = ['orientation_number', 'ruian_point'];
+
+    /** Trvalý pobyt: ulice může chybět (obec bez ulic), číslo popisné ne. */
+    private const PERMANENT_ADDRESS_REQUIRED = [
+        'house_number', 'postal_code', 'city', 'country_code',
+    ];
 
     /**
      * Pracovní údaje, které A3 nese (EDV 1.4.0.6, sloupec A3-OST). Druh
@@ -136,6 +142,48 @@ final class PayrollRegistrationChangeDeltaPlanner
                     ];
                     break;
 
+                case str_starts_with($finding->path, 'permanent_address.'):
+                    if (array_key_exists('permanent_address', $changes)
+                        || in_array('permanent_address', array_column($unsupported, 'path'), true)
+                    ) {
+                        break;
+                    }
+                    $permanent = $this->address(
+                        $current,
+                        'permanent_address',
+                        self::PERMANENT_ADDRESS_REQUIRED,
+                        ['street', 'orientation_number', 'ruian_point'],
+                    );
+                    if ($permanent === null) {
+                        // Kmenová data vedou adresu jedním řádkem; číslo
+                        // popisné zvlášť zná jen profil A1. Návrh zůstane
+                        // otevřený a proklik vede do profilu.
+                        $unsupported[] = [
+                            'path' => 'permanent_address',
+                            'reason_code' => 'registration_change_permanent_address_incomplete',
+                        ];
+                        break;
+                    }
+                    $changes['permanent_address'] = $permanent;
+                    break;
+
+                case str_starts_with($finding->path, 'foreign_worker.'):
+                    if (array_key_exists('foreign_worker', $changes)
+                        || in_array('foreign_worker', array_column($unsupported, 'path'), true)
+                    ) {
+                        break;
+                    }
+                    $worker = $this->foreignWorker($current, $findings);
+                    if ($worker === null) {
+                        $unsupported[] = [
+                            'path' => 'foreign_worker',
+                            'reason_code' => 'registration_change_foreign_permit_incomplete',
+                        ];
+                        break;
+                    }
+                    $changes['foreign_worker'] = $worker;
+                    break;
+
                 case str_starts_with($finding->path, 'contact_address.'):
                     if (array_key_exists('contact_address', $changes)) {
                         break;
@@ -201,6 +249,87 @@ final class PayrollRegistrationChangeDeltaPlanner
         }
 
         return $employment;
+    }
+
+    /**
+     * @param list<string> $required
+     * @param list<string> $optional
+     * @return array<string,string>|null
+     */
+    private function address(
+        PayrollRegistrationReportableProfile $current,
+        string $block,
+        array $required,
+        array $optional,
+    ): ?array {
+        $address = [];
+        foreach ($required as $field) {
+            $value = $current->get("{$block}.{$field}");
+            if ($value === null) {
+                return null;
+            }
+            $address[$field] = $value;
+        }
+        foreach ($optional as $field) {
+            $value = $current->get("{$block}.{$field}");
+            if ($value !== null) {
+                $address[$field] = $value;
+            }
+        }
+        ksort($address, SORT_STRING);
+
+        return $address;
+    }
+
+    /**
+     * Přístup cizince na trh práce: buď volný přístup s důvodem, nebo úplné
+     * povolení. Prodloužení povolení (nové datum „do") bez nového čísla
+     * rozhodnutí se podat nedá — to je jiné rozhodnutí a jeho číslo zná jen
+     * profil A1; návrh pak zůstane otevřený s prokliknutím do profilu.
+     *
+     * @param list<PayrollRegistrationChangeFinding> $findings
+     * @return array<string,string|bool>|null
+     */
+    private function foreignWorker(
+        PayrollRegistrationReportableProfile $current,
+        array $findings,
+    ): ?array {
+        $freeAccess = $current->get('foreign_worker.free_access');
+        if ($freeAccess === '1') {
+            $reason = $current->get('foreign_worker.free_access_reason_code');
+
+            return $reason === null
+                ? null
+                : ['free_access' => true, 'free_access_reason_code' => $reason];
+        }
+        $paths = array_map(
+            static fn (PayrollRegistrationChangeFinding $finding): string => $finding->path,
+            $findings,
+        );
+        $datesChanged = array_intersect(
+            ['foreign_worker.permit_from', 'foreign_worker.permit_to'],
+            $paths,
+        ) !== [];
+        if ($datesChanged && !in_array('foreign_worker.permit_identifier', $paths, true)) {
+            return null;
+        }
+        $worker = ['free_access' => false];
+        foreach ([
+            'permit_type_code', 'permit_identifier', 'permit_from', 'permit_to',
+        ] as $field) {
+            $value = $current->get("foreign_worker.{$field}");
+            if ($value === null) {
+                return null;
+            }
+            $worker[$field] = $value;
+        }
+        $office = $current->get('foreign_worker.issuing_labour_office_code');
+        if ($office !== null) {
+            $worker['issuing_labour_office_code'] = $office;
+        }
+        ksort($worker, SORT_STRING);
+
+        return $worker;
     }
 
     /** @return array<string,string>|null */

@@ -5978,6 +5978,11 @@
           "manual_only": "Tenhle údaj datová věta A3 v aplikaci nenese — podejte ho jinou cestou a návrh pak uzavřete ručně.",
           "health_insurer_hoz": "Přestup se hlásí oběma pojišťovnám hromadným oznámením (HOZ): dosavadní odhláškou (kód O), nové přihláškou (kód P). Obě věty připravíte na záložce Zdravotní pojišťovny za měsíc změny; návrh tady pak uzavřete.",
           "open_hoz": "Připravit HOZ za {period}",
+          "gap": {
+            "registration_change_permanent_address_incomplete": "Nová adresa pobytu je v kartě osoby, ale číslo popisné se tam zvlášť nevede. Doplňte adresu v profilu registrace A1 a uložte ho — změna pak půjde ohlásit jedním kliknutím.",
+            "registration_change_foreign_permit_incomplete": "Povolení k zaměstnání se změnilo (nová platnost), ale číslo nového rozhodnutí aplikace nezná. Doplňte druh, číslo a platnost povolení v profilu registrace A1 a uložte ho."
+          },
+          "open_profile": "Doplnit v profilu A1",
           "file": "Ohlásit změnu",
           "dismiss": "Vyřídit ručně",
           "dismiss_note": "Čím jste povinnost splnili",
@@ -6018,7 +6023,8 @@
         "window": "Podat lze od {from}, nejpozději {to}.",
         "employer_window": "Pozor: jde o prvního zaměstnance. Přihlášku zaměstnavatele do evidence ČSSZ podejte nejpozději {to} — po tomto termínu vzniká fikce zaměstnavatele.",
         "registration_window": {
-          "not_derived": "Nástup {start} je dřívější než 1. 7. 2026, kdy začala platit dnešní registrační povinnost. Přihlášku podejte bez zbytečného odkladu — lhůtu podle tehdejších pravidel aplikace neodvozuje a podání vede jako po lhůtě."
+          "not_derived": "Nástup {start} je dřívější než 1. 7. 2026, kdy začala platit dnešní registrační povinnost. Přihlášku podejte bez zbytečného odkladu — lhůtu podle tehdejších pravidel aplikace neodvozuje a podání vede jako po lhůtě.",
+          "not_statutory": "Toto podání nemá zákonnou lhůtu. Do {milestone} jde spolu s ním stornovat i měsíční hlášení bez referentského zpracování; později podejte opravné hlášení."
         },
         "completion": {
           "action": "Dohlásit údaje (A3)",
@@ -6064,6 +6070,12 @@
             "employer_variable_symbol": "Variabilní symbol zaměstnavatele u ČSSZ",
             "cssz_workplace_code": "Kód správy sociálního zabezpečení"
           }
+        },
+        "before_start": {
+          "label": "Přihlášení před nástupem",
+          "partial": "Částečné přihlášení (PREZEC P1)",
+          "full": "Plná registrace (REGZEC A1)",
+          "hint": "Zaměstnance je nutné přihlásit před nástupem, nejdřív 8 dnů předem (§ 19 odst. 1 zákona č. 323/2025 Sb.). Částečné přihlášení stačí se základními údaji a zbytek se doplní do 8 dnů po nástupu. Plnou registraci A1 můžete podat rovnou, pokud máte vyplněný profil A1; nastoupí-li zaměstnanec jindy, podejte opravu A4, nenastoupí-li vůbec, storno A8."
         },
         "send_test": "Odeslat do testu",
         "send_production": "Odeslat do produkce",
@@ -6320,7 +6332,16 @@
           "foreign_identifier": "Číslo zahraničního pojištění",
           "foreign_sector": "Část obce / správní oblast",
           "not_started_confirmation": "Potvrzuji, že vztah je v evidenci označen jako nenastoupený a vybrané datum je původní plánovaný den nástupu.",
-          "a8_hint": "Touto cestou lze stornovat jen prokazatelně nenastoupený vztah. Jiné storno vyžaduje písemné vysvětlení a aplikace je záměrně nepřipraví.",
+          "a8_hint": "Nenastoupení oznamte do 8 dnů od předpokládaného dne nástupu (§ 19 odst. 4 zákona č. 323/2025 Sb.). Vztah musí být v evidenci označený jako nenastoupený.",
+          "a8_reason": "Důvod storna",
+          "a8_reason_not_started": "Zaměstnanec nenastoupil",
+          "a8_reason_other": "Jiný důvod (chybný variabilní symbol, druh činnosti, zneplatnění vztahu)",
+          "a8_other_hint": "Storno z jiného důvodu nemá zákonnou lhůtu, ČSSZ ho ale zpracuje jen s písemným zdůvodněním v příloze. Do 20. dne následujícího měsíce jde spolu s ním stornovat i měsíční hlášení; později podejte opravné hlášení.",
+          "a8_attachment": "Přiložit zdůvodnění",
+          "a8_attachment_missing": "Zdůvodnění zatím není přiložené.",
+          "a8_attachment_description": "Popis přílohy (nepovinné)",
+          "identifiers_verified": "OIČ a ID PPV jsem ověřil(a) v Seznamu zaměstnanců na ePortálu ČSSZ",
+          "identifiers_verified_hint": "Jen u zaměstnance převzatého z dřívějšího oznámení (ONZ), jehož čísla nejsou z protokolu ČSSZ, přijatého dohlášení A3 ani z importu exportu zaměstnanců ČSSZ. Odhlášku A2 pak jde podat i bez dohlášení A3; to zůstane jako samostatná povinnost.",
           "select_placeholder": "Vyberte…"
         }
       },

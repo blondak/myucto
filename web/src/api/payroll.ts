@@ -4185,6 +4185,8 @@ export interface PayrollRegistrationDeadline {
   /** `false` = lhůta se podle dnešních pravidel neodvozuje (nástup před 1. 7. 2026). */
   derived?: boolean
   notice?: string | null
+  /** `false` = podání zákonnou lhůtu nemá (storno A8 z jiného důvodu), `due_on` je jen milník. */
+  statutory?: boolean
 }
 
 export interface PayrollRegistrationEmployerDeadline {
@@ -4208,6 +4210,11 @@ export interface PayrollRegistrationPreview {
   /** Neblokující upozornění (zástupný variabilní symbol zaměstnavatele…). */
   warnings?: PayrollRegistrationPreviewWarning[]
   official_submission: { supported: false, reason: string }
+  /**
+   * Český zaměstnanec před nástupem: zaměstnavatel volí mezi částečným
+   * přihlášením (P1, výchozí) a plnou registrací A1 (`registration_mode=full`).
+   */
+  before_start_choice?: boolean
 }
 
 /** Kam vede proklik z hlášky přípravy registrace (a jejích upozornění). */
@@ -4233,6 +4240,9 @@ export interface PayrollRegistrationMissingItem {
   target: PayrollRegistrationProblemTarget
 }
 
+/** `full` = plná registrace A1 před nástupem místo výchozího P1. */
+export type PayrollRegistrationMode = 'auto' | 'full'
+
 export interface PayrollRegistrationSubmission {
   submission_id: number
   obligation_id: number
@@ -4247,6 +4257,7 @@ export interface PayrollRegistrationSubmission {
   artifact_sha256: string
   created: boolean
   deadline: PayrollRegistrationDeadline
+  before_start_choice?: boolean
 }
 
 export interface PayrollRegistrationA1Address {
@@ -4589,7 +4600,18 @@ export interface PayrollRegistrationEventInput {
     city?: string
     sector?: string
   }
-  not_started?: true
+  /** A8: `true` = nenastoupil (8 dnů), `false` = jiný důvod se zdůvodněním v příloze. */
+  not_started?: boolean
+  explanation_attachment?: {
+    name: string
+    description: string | null
+    data_base64: string
+  }
+  /**
+   * A2 u zaměstnance převzatého z ONZ bez A3: OIČ a ID PPV ověřené proti
+   * Seznamu zaměstnanců na ePortálu ČSSZ (ručně zapsaná čísla).
+   */
+  identifiers_verified_in_cssz_list?: boolean
 }
 
 /** Ručně spuštěný VREP přenos jedné zmrazené PREZEC/REGZEC registrace. */
@@ -8040,17 +8062,29 @@ export const payrollApi = {
     employmentId: number,
     environment: 'test' | 'production' = 'production',
     eventId?: number | null,
+    mode: PayrollRegistrationMode = 'auto',
   ) => api.get<PayrollRegistrationPreview>(
     `/payroll/submissions/registration/${employmentId}`,
-    { params: { environment, ...(eventId == null ? {} : { event_id: eventId }) } },
+    {
+      params: {
+        environment,
+        ...(eventId == null ? {} : { event_id: eventId }),
+        ...(mode === 'full' ? { registration_mode: 'full' } : {}),
+      },
+    },
   ).then(response => response.data),
   prepareEmploymentRegistration: (
     employmentId: number,
     environment: 'test' | 'production' = 'production',
     eventId?: number | null,
+    mode: PayrollRegistrationMode = 'auto',
   ) => api.post<PayrollRegistrationSubmission>(
     `/payroll/submissions/registration/${employmentId}`,
-    { environment, ...(eventId == null ? {} : { event_id: eventId }) },
+    {
+      environment,
+      ...(eventId == null ? {} : { event_id: eventId }),
+      ...(mode === 'full' ? { registration_mode: 'full' } : {}),
+    },
   ).then(response => response.data),
   employmentRegistrationA1Profile: (
     employmentId: number,

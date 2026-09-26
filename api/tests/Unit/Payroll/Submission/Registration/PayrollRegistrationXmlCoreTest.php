@@ -464,6 +464,39 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
         );
     }
 
+    /**
+     * Storno z jiného důvodu než nenastoupení („Zaměstnanec nenastoupil =
+     * NE") ČSSZ zpracuje jen s písemným zdůvodněním v příloze (zásady REGZEC,
+     * kód akce 8). Dřív šlo připravit jen storno nenastoupení.
+     */
+    public function testA8OtherReasonCarriesTheExplanationAttachmentThroughXsd(): void
+    {
+        $payload = self::payload(
+            self::snapshot('SK'),
+            new PayrollRegistrationInteraction('REGZEC25', 'cancellation', 8),
+            expectedStartOn: null,
+            actualStartOn: null,
+            eventSnapshot: self::eventSnapshot('cancellation', 8, [
+                'not_started' => false,
+                'source_submission_id' => 7,
+                'explanation_attachment' => [
+                    'name' => 'zduvodneni.pdf',
+                    'description' => 'Chybný variabilní symbol',
+                    'data_base64' => base64_encode('%PDF-synthetic'),
+                ],
+                'activity_code' => '1',
+                'relationship_detail_code' => '1',
+            ]),
+        );
+
+        $xml = (new PayrollRegistrationXmlSerializer())->serialize($payload);
+        (new PayrollRegistrationXmlValidator(new PayrollRegistrationSchemaCatalog()))
+            ->validate($payload, $xml);
+
+        self::assertStringContainsString('notstart="N"', $xml);
+        self::assertMatchesRegularExpression('/<attachs>\s*<attach name="zduvodneni\.pdf"/', $xml);
+    }
+
     public function testDirectEventPayloadCannotBypassTheA5ToA8VariantMatrix(): void
     {
         $payload = self::payload(

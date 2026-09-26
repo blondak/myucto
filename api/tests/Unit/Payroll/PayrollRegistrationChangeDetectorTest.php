@@ -256,6 +256,8 @@ final class PayrollRegistrationChangeDetectorTest extends TestCase
         $changed = $this->profile();
         $changed['health_insurance_code'] = '201';
         $changed['permanent_address']['city'] = 'Brno';
+        $changed['pension']['type_code'] = 'S';
+        $changed['pension']['received_from'] = '2026-01-01';
         $current = $builder->build(self::IDENTITY, self::IDENTIFIERS, $changed);
 
         $findings = (new PayrollRegistrationChangeDetector())
@@ -263,11 +265,61 @@ final class PayrollRegistrationChangeDetectorTest extends TestCase
         $plan = (new PayrollRegistrationChangeDeltaPlanner())
             ->plan($findings, $current, '2026-08-29');
 
-        self::assertSame(['health_insurance_code' => '201'], $plan['changes']);
-        self::assertSame([[
-            'path' => 'permanent_address.city',
-            'reason_code' => 'registration_change_field_not_in_a3_payload',
-        ]], $plan['unsupported']);
+        // Trvalý pobyt nese A3 v elementu `adr` — dřív ho plánovač odmítal
+        // a změna adresy se nedala podat jedním kliknutím.
+        self::assertSame('201', $plan['changes']['health_insurance_code']);
+        self::assertSame('Brno', $plan['changes']['permanent_address']['city']);
+        self::assertSame([
+            [
+                'path' => 'pension.received_from',
+                'reason_code' => 'registration_change_field_not_in_a3_payload',
+            ],
+            [
+                'path' => 'pension.type_code',
+                'reason_code' => 'registration_change_field_not_in_a3_payload',
+            ],
+        ], $plan['unsupported']);
+    }
+
+    /**
+     * Prodloužení povolení cizince se hlásí A3 (element `nocitizen`). Nové
+     * datum „do" bez čísla nového rozhodnutí podat nejde — návrh zůstane
+     * otevřený a čeká, až účetní číslo doplní do profilu A1.
+     */
+    public function testPlannerFilesExtendedForeignPermitOnlyWithNewDecisionNumber(): void
+    {
+        $builder = $this->builder();
+        $withPermit = $this->profile();
+        $withPermit['foreign_worker'] = [
+            'free_access' => false,
+            'free_access_reason_code' => null,
+            'permit_type_code' => '1',
+            'issuing_labour_office_code' => null,
+            'permit_identifier' => 'SYN-PERMIT-1',
+            'permit_from' => '2026-01-01',
+            'permit_to' => '2026-12-31',
+        ];
+        $baseline = $builder->build(self::IDENTITY, self::IDENTIFIERS, $withPermit);
+        $extended = $withPermit;
+        $extended['foreign_worker']['permit_to'] = '2027-12-31';
+        $sameNumber = $builder->build(self::IDENTITY, self::IDENTIFIERS, $extended);
+        $planner = new PayrollRegistrationChangeDeltaPlanner();
+        $detector = new PayrollRegistrationChangeDetector();
+
+        $blocked = $planner->plan($detector->compare($baseline, $sameNumber), $sameNumber, '2026-12-01');
+        self::assertSame([], $plan = $blocked['changes'], json_encode($plan) ?: '');
+        self::assertSame(
+            'registration_change_foreign_permit_incomplete',
+            $blocked['unsupported'][0]['reason_code'],
+        );
+
+        $extended['foreign_worker']['permit_identifier'] = 'SYN-PERMIT-2';
+        $newDecision = $builder->build(self::IDENTITY, self::IDENTIFIERS, $extended);
+        $fileable = $planner->plan($detector->compare($baseline, $newDecision), $newDecision, '2026-12-01');
+        self::assertSame([], $fileable['unsupported']);
+        self::assertSame('SYN-PERMIT-2', $fileable['changes']['foreign_worker']['permit_identifier']);
+        self::assertSame('2027-12-31', $fileable['changes']['foreign_worker']['permit_to']);
+        self::assertFalse($fileable['changes']['foreign_worker']['free_access']);
     }
 
     /** Katalog nesmí mít průnik s měsíčními atributy hlášení. */

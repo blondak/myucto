@@ -521,6 +521,27 @@ od 23. 6. 2026 — u staršího nástupu aplikace rovnou nabídne plnou registra
 Druh činnosti 10 až 16 a výkon trestu jde přihlásit jen s nástupem od
 1. 1. 2026; dřívější datum ohlásí kontrola profilu.
 
+**Přihlášení před nástupem.** Zaměstnance je nutné přihlásit před nástupem,
+nejdřív osm dnů předem (§ 19 odst. 1 písm. a) zákona č. 323/2025 Sb.).
+U zaměstnance s českým občanstvím nabídne náhled volbu **Přihlášení před
+nástupem**: výchozí je **Částečné přihlášení (PREZEC P1)** se základními
+údaji, zbytek se doplní plnou registrací do osmi dnů po nástupu. Máte-li
+profil A1 hotový, zvolte **Plná registrace (REGZEC A1)** a podejte ji rovnou;
+v podání je předpokládaný den nástupu. Nastoupí-li zaměstnanec jindy, podejte
+opravu A4, nenastoupí-li vůbec, storno A8. Cizinec se přihlašuje vždy plnou
+registrací před zahájením práce, volba se u něj neukazuje. Dřív než osm dnů
+před nástupem aplikace přihlášku nepřipraví a napíše, od kterého dne to jde.
+
+**Storno přihlášení (A8).** Ve formuláři události A2–A8 zvolte **A8** a důvod
+storna. **Zaměstnanec nenastoupil** se oznamuje do osmi dnů od předpokládaného
+dne nástupu (§ 19 odst. 4 zákona č. 323/2025 Sb.) a vztah musí být v evidenci
+označený jako nenastoupený. **Jiný důvod** (přihlášení pod chybným variabilním
+symbolem, druh činnosti, který nejde opravit, soudní zneplatnění vztahu)
+zákonnou lhůtu nemá, ČSSZ ho ale zpracuje jen s písemným zdůvodněním —
+přiložte ho tlačítkem **Přiložit zdůvodnění**, bez přílohy storno uložit nejde.
+U takového storna aplikace ukáže jen milník 20. dne následujícího měsíce: do
+něj jde stornovat i měsíční hlášení, později se podává opravné hlášení.
+
 **Postavení v zaměstnání** se vybírá ze seznamu čtyřmístných kódů Klasifikace
 postavení v zaměstnání (NKPZ), kratší kód ČSSZ nepřijme. Aplikace kód navrhne
 podle druhu vztahu a doby určité (1111 a 1112 pracovní poměr na dobu neurčitou
@@ -568,7 +589,9 @@ práce a přílohy). Které sekce se zobrazí, určuje varianta podání a obča
 u varianty 10 odpadá daňová rezidence, zdravotní pojišťovna i doplňující
 skutečnosti, u varianty OST naopak přibývá kontaktní adresa, důchod, zahraniční
 legislativa a vzdělání, a u cizince navíc doklad totožnosti a přístup na trh
-práce. Variantu aplikace odvodí z druhu činnosti a bližšího určení vztahu a
+práce. Občanu EU, EHP nebo Švýcarska aplikace přístup na trh práce předvyplní
+jako volný (důvod 1 — § 87 zákona o zaměstnanosti) a povolení k zaměstnání po
+něm nechce. Variantu aplikace odvodí z druhu činnosti a bližšího určení vztahu a
 napíše ji nad formulář; ručně se nevolí. Úplný JSON zůstal dostupný jako
 read-only náhled **Zobrazit, co odesíláme**.
 
@@ -610,6 +633,16 @@ JMHZ, shodnou korelaci důvěryhodné doručenky a přijatý výsledek daného v
 Chybějící, čekající nebo odmítnutý měsíc přípravu A2 zablokuje a uvede konkrétní
 období. Při přípravě se celý plán pod zámkem znovu ověří a uloží se jeho
 neměnný otisk; pozdější historie se nepřepisuje.
+
+Odhláška A2 nese OIČ a ID PPV, které musí mít doložený původ: protokol o přijetí
+registrace, přijaté dohlášení údajů A3, nebo import exportu zaměstnanců
+z ePortálu ČSSZ (Seznam zaměstnanců). U zaměstnance převzatého z ONZ, jehož
+čísla jste opsali ručně a dohlášení A3 ještě neodešlo, porovnejte čísla se
+Seznamem zaměstnanců na ePortálu ČSSZ a ve formuláři odhlášky zaškrtněte
+**OIČ a ID PPV jsem ověřil(a) v Seznamu zaměstnanců na ePortálu ČSSZ**.
+Odhláška pak projde bez A3; dohlášení A3 zůstává samostatnou povinností
+(u skončeného vztahu s datem skončení). Stejné ID PPV nemůže nést jiný vztah
+firmy — druhý zápis téhož čísla aplikace odmítne.
 
 Samostatná záložka **ZP — oznámení** řeší oznamovací povinnost vůči zdravotní
 pojišťovně, tedy hlášení nástupů, skončení a dalších skutečností v osmidenní
@@ -809,6 +842,18 @@ Lhůta tedy vzniká, i když kartu vůbec neotevřete. Nic se nespouští při s
 uložení údaje, takže po opravě karty se návrh objeví až při nejbližším
 přepočtu.
 
+**Co detekce porovnává.** Výchozím stavem je poslední podání REGZEC, které
+odešlo na ČSSZ (přihláška i každá další změna). Porovnává se s ním profil
+registrace A1 a také **kmenová data na kartě osoby a vztahu**: adresa trvalého
+pobytu, zdravotní pojišťovna, CZ-ISCO, místo výkonu práce a platnost
+pracovního oprávnění cizince. Změníte-li tedy adresu nebo pojišťovnu na kartě
+osoby, návrh vznikne, i když profil A1 zůstal beze změny. Kmenová data vedou
+adresu jedním řádkem a číslo popisné zvlášť neznají; u nové adresy proto
+návrh napíše, že číslo popisné chybí, a tlačítkem **Doplnit v profilu A1**
+otevře profil přímo u adresy. Po uložení profilu jde změnu ohlásit jedním
+kliknutím. Stejně se chová prodloužené povolení k zaměstnání: nové datum
+platnosti aplikace z karty zná, číslo nového rozhodnutí doplníte v profilu.
+
 > ⚠️ Pozor: **změna úvazku ani mzdy se takto nehlásí.** Stanovená i sjednaná
 > týdenní doba, měsíční mzda, hodinová sazba, mzdové složky, odpracované
 > a neodpracované hodiny, přesčasy i daňové údaje jsou měsíční atributy hlášení.
@@ -839,12 +884,13 @@ Schválením ale **nic neodchází**. Vznikne registrační událost; podání s
 připravuje samostatným krokem a odeslání na ČSSZ je krok další. Postup
 odesílání je stejný jako u prvotní registrace.
 
-Jedním kliknutím se ohlásí **titul před jménem, doručovací adresa, daňová
-rezidence, kód zdravotní pojišťovny, nejvyšší dosažené vzdělání a pracovní
-údaje** — postavení v zaměstnání, režim práce, nepřetržitý provoz, místo výkonu
-práce, profese, požadované vzdělání a pozice. Změní-li se kterýkoli pracovní
-údaj, odejde celý pracovní blok v aktuální podobě. Změna jména, adresy pobytu,
-důchodu a dalších údajů se ohlásí větou „Tenhle údaj datová věta A3 v aplikaci
+Jedním kliknutím se ohlásí **titul před jménem, adresa trvalého pobytu,
+doručovací adresa, daňová rezidence, kód zdravotní pojišťovny, nejvyšší
+dosažené vzdělání, přístup cizince na trh práce a pracovní údaje** — postavení
+v zaměstnání, režim práce, nepřetržitý provoz, místo výkonu práce, profese,
+požadované vzdělání a pozice. Změní-li se kterýkoli pracovní údaj, odejde celý
+pracovní blok v aktuální podobě. Změna jména, důchodu a dalších údajů se ohlásí
+větou „Tenhle údaj datová věta A3 v aplikaci
 nenese - podejte ho jinou cestou a návrh pak uzavřete ručně." Nález se
 nezahazuje: povinnost i lhůta existují dál a zůstávají vidět. Jedním kliknutím
 nelze podat ani vymazání hodnoty, ani neúplnou doručovací adresu, ani vznik či
@@ -859,9 +905,11 @@ Nejvyšší vzdělání se tam vybírá ze seznamu.
 Zaměstnance přihlášené do 31. 3. 2026 přes ONZ zná ČSSZ bez údajů, které ONZ
 nevedla: postavení v zaměstnání, režim práce, nepřetržitý provoz, místo výkonu
 práce, profese, pozice, nejvyšší vzdělání a stát daňové rezidence. Zákon je
-ukládá doplnit akcí A3. Dokud ČSSZ dohlášení nepřijme, nemá aplikace čím doložit
-ručně zapsané OIČ a ID PPV, a odhlášku A2 takového zaměstnance proto nepřipraví.
-Přijaté dohlášení čísla potvrdí stejně jako protokol k přihlášce.
+ukládá doplnit akcí A3. Přijaté dohlášení potvrdí ručně zapsané OIČ a ID PPV
+stejně jako protokol k přihlášce. Odhlášku A2 jde ale podat i dřív: s čísly
+z importu exportu zaměstnanců z ePortálu ČSSZ, nebo po výslovném potvrzení,
+že jste ručně zapsaná čísla ověřili v Seznamu zaměstnanců (viz odhláška A2
+výše).
 
 Postup u jednoho zaměstnance:
 

@@ -190,6 +190,7 @@ final readonly class PayrollRegistrationXmlValidator
                 $a1?->employment['relationship_detail_code'] ?? null,
                 $a1 !== null,
             );
+            $this->validateA1BeforeStartWindow($payload);
         } elseif ($payload->interaction->actionCode >= 2) {
             $this->validateEventSnapshot($payload);
         }
@@ -286,7 +287,10 @@ final readonly class PayrollRegistrationXmlValidator
             6 => ($data['foreign_insurance']['current'] ?? null) === 'P',
             7 => ($data['foreign_insurance']['current'] ?? null) === 'S'
                 && is_string($data['foreign_insurance']['identifier'] ?? null),
-            8 => ($data['not_started'] ?? null) === true,
+            8 => ($data['not_started'] ?? null) === true
+                || (($data['not_started'] ?? null) === false
+                    && is_string($data['explanation_attachment']['data_base64'] ?? null)
+                    && is_string($data['explanation_attachment']['name'] ?? null)),
             default => false,
         };
         if (!$valid) {
@@ -319,9 +323,10 @@ final readonly class PayrollRegistrationXmlValidator
                     7 => 'chybí údaj o tom, že příslušnost k českým předpisům '
                         . 'skončila, nebo identifikátor zahraničního pojištění. '
                         . 'Doplňte obojí na kartě osoby.',
-                    8 => 'chybí potvrzení, že zaměstnanec skutečně nenastoupil. '
-                        . 'Storno se podává jen k přihlášení, ke kterému '
-                        . 'nástup nedošel.',
+                    8 => 'chybí potvrzení, že zaměstnanec skutečně nenastoupil, '
+                        . 'nebo u jiného důvodu storna příloha s písemným '
+                        . 'zdůvodněním. Otevřete storno znovu a doplňte jedno '
+                        . 'nebo druhé.',
                     default => 'tenhle druh oznámení zatím neumíme připravit. '
                         . 'Podejte ho přes portál ČSSZ.',
                 },
@@ -333,6 +338,44 @@ final readonly class PayrollRegistrationXmlValidator
      * @param string $label lidský název data, ať hláška nemluví o PREZEC P1
      *                      i tam, kde se kontroluje datum události A2–A8
      */
+    /**
+     * Plná registrace A1 před nástupem: § 19 odst. 1 písm. a) zákona
+     * č. 323/2025 Sb. ukládá přihlásit zaměstnance „nejpozději před okamžikem
+     * nástupu", nejdříve však osm dnů před předpokládaným dnem nástupu. Platí
+     * pro KAŽDÉHO zaměstnance, ne jen pro cizince — zásady REGZEC (verze
+     * 18-06-2026, kód akce 1 a kap. 10 „kombinace akcí") výslovně počítají
+     * s případem „předpokládané datum nástupu bylo oznámeno akcí 1".
+     * Okno je stejné jako u PREZEC P1 (osm kalendářních dnů), takže se obě
+     * cesty nesmí rozejít.
+     */
+    private function validateA1BeforeStartWindow(
+        PayrollRegistrationXmlPayload $payload,
+    ): void {
+        if ($payload->actualStartOn === null) {
+            return;
+        }
+        $start = $this->exactDate(
+            $payload->actualStartOn,
+            'Předpokládané datum nástupu',
+        );
+        $prepared = $this->exactDate(
+            $payload->preparedOn,
+            'Datum vyhotovení podání',
+        );
+        $days = (int) $prepared->diff($start)->format('%r%a');
+        if ($days > 8) {
+            $this->invalid(
+                'registration_regzec_a1_start_window_invalid',
+                'Přihlášku zaměstnance (REGZEC A1) jde podat nejdřív osm dnů '
+                    . 'před nástupem. Mezi vyhotovením ('
+                    . $prepared->format('d.m.Y') . ') a nástupem ('
+                    . $start->format('d.m.Y') . ') je ' . $days . ' dnů — '
+                    . 'přihlášku připravte nejdřív '
+                    . $start->modify('-8 days')->format('d.m.Y') . '.',
+            );
+        }
+    }
+
     private function exactDate(
         ?string $value,
         string $label,

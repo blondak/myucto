@@ -49,6 +49,7 @@ final class RegistrationImportPlanner
         string $fileName,
         string $fileSha256,
         ?string $relationTypeChoice = null,
+        bool $terminationConfirmed = false,
     ): array {
         [$birthNumber, $ecp] = $this->birthNumber($record);
         $birthDate = $record->birthDate
@@ -104,8 +105,12 @@ final class RegistrationImportPlanner
             'warnings' => [],
             'blocker' => null,
             'selectable' => false,
+            // Konec pojistného vztahu z exportu ČSSZ u vztahu, který evidence
+            // vede jako trvající: nabídka ukončení, kterou účetní potvrzuje.
+            'termination_offer' => null,
             '_record' => $record,
             '_file_sha256' => $fileSha256,
+            '_terminate_confirmed' => $terminationConfirmed,
             '_employee_id' => null,
             '_employment_id' => null,
             '_steps' => [
@@ -120,6 +125,7 @@ final class RegistrationImportPlanner
                 'terminate' => null,
                 'correct_start' => null,
                 'identifiers' => ['person' => null, 'employment' => null],
+                'ecp' => null,
             ],
         ];
         if ($record->insuredPersonNumber !== null && $record->birthNumber === null) {
@@ -288,10 +294,14 @@ final class RegistrationImportPlanner
         $this->change($plan, 'relation_type', 'Druh pracovního vztahu', null, $relationType);
         $this->change($plan, 'start_on', 'Nástup', null, $start);
         $this->change($plan, 'health_insurer_code', 'Zdravotní pojišťovna', null, $insurer);
-        if ($birthNumber === null) {
-            $plan['warnings'][] = $ecp !== null
-                ? 'Evidenční číslo pojištěnce (EČP) se z věty nepřevezme, doplňte ho na kartě osoby.'
-                : 'Rodné číslo se z věty nepřevezme — doplňte ho na kartě osoby.';
+        if ($birthNumber === null && $ecp !== null) {
+            // Cizinec bez rodného čísla: EČP je jeho identifikátor pro ČSSZ
+            // (PREZEC `bno`, REGZEC) a podle něj se osoba při dalším importu
+            // najde. Dřív se jen ohlásilo „doplňte ručně".
+            $plan['_steps']['ecp'] = $ecp;
+            $this->change($plan, 'ecp', 'Evidenční číslo pojištěnce (EČP)', null, $this->maskedBirthNumber($ecp));
+        } elseif ($birthNumber === null) {
+            $plan['warnings'][] = 'Rodné číslo se z věty nepřevezme — doplňte ho na kartě osoby.';
         }
 
         $facts = $this->identityFacts($record);
@@ -465,12 +475,17 @@ final class RegistrationImportPlanner
             || $steps['birth_surname'] !== null
             || $steps['addresses'] !== []
             || $steps['health_insurer'] !== null
-            || $steps['activate_on'] !== null;
+            || $steps['activate_on'] !== null
+            || $steps['ecp'] !== null;
         $hasIdentifiers = $steps['identifiers']['person'] !== null || $steps['identifiers']['employment'] !== null;
         $plan['operation'] = match (true) {
             $steps['create_employment'] !== null => 'create_employment',
             $hasWork => 'update',
+            $steps['terminate'] !== null => 'terminate',
             $hasIdentifiers => 'assign_identifiers',
+            // Nepotvrzená nabídka ukončení musí jít vybrat, jinak by u věty,
+            // která jinak nic nemění, nešla ani potvrdit.
+            $plan['termination_offer'] !== null => 'terminate',
             default => 'none',
         };
 
@@ -1129,8 +1144,32 @@ final class RegistrationImportPlanner
         }
         if ($row !== null) {
             if ($row['end_date'] === null && in_array($row['status'], self::OPEN_STATUSES, true)) {
-                $plan['warnings'][] = "Export uvádí konec pojistného vztahu {$end}, vztah {$row['code']} v evidenci "
-                    . 'trvá. Skončení zapište na kartě vztahu, nebo nahrajte odhlášení či hlášení za poslední měsíc.';
+                $start = $row['actual_start_date'] ?? $row['start_date'];
+                if ($end > date('Y-m-d') || (is_string($start) && $end < $start)) {
+                    $plan['warnings'][] = "Export uvádí konec pojistného vztahu {$end}, vztah {$row['code']} v evidenci "
+                        . 'trvá a k tomuto dni ho ukončit nejde. Zkontrolujte datum a skončení zapište na kartě vztahu.';
+
+                    return;
+                }
+                // Konec pojištění z exportu ČSSZ je doklad, že úřad vztah
+                // odhlásil. Import ho sám nezapíše (skončení může nést i jiné
+                // podklady — důvod, vyrovnání dovolené), ale NABÍDNE: účetní
+                // ukončení u věty potvrdí a zapíše se stejnou cestou jako na
+                // kartě vztahu. Bez potvrzení se jen ukáže nabídka.
+                $plan['termination_offer'] = [
+                    'end_on' => $end,
+                    'employment_code' => (string) $row['code'],
+                    'confirmed' => $plan['_terminate_confirmed'] === true,
+                ];
+                if ($plan['_terminate_confirmed'] === true) {
+                    $plan['_steps']['terminate'] = ['target' => 'ended', 'on' => $end];
+                    $plan['employment']['end_on'] = $end;
+                    $this->change($plan, 'end_date', 'Skončení vztahu', null, $end);
+                } else {
+                    $plan['warnings'][] = "Export uvádí konec pojistného vztahu {$end}, vztah {$row['code']} v evidenci "
+                        . 'trvá. Zaškrtněte u věty „Ukončit vztah" a skončení se zapíše; důvod skončení pak doplňte '
+                        . 'na kartě vztahu v části Skončení vztahu.';
+                }
             } elseif ($row['end_date'] !== null && $row['end_date'] !== $end) {
                 $plan['warnings'][] = "Export uvádí konec pojistného vztahu {$end}, vztah {$row['code']} je v evidenci "
                     . "ukončený k {$row['end_date']}. Zkontrolujte, které datum platí.";

@@ -147,6 +147,35 @@ final class PayrollRegistrationA1DraftBuilderTest extends TestCase
         self::assertContains('foreign_worker.permit_identifier', $missing);
     }
 
+    /**
+     * Občan EU/EHP/Švýcarska má volný přístup na trh práce ze zákona (§ 87
+     * zákona o zaměstnanosti). Návrh A1 ho dřív nechal „chybět" a u osoby
+     * bez povolení žádal pracovní oprávnění, které nepotřebuje.
+     */
+    public function testEuCitizenIsPrefilledWithFreeAccessToTheLabourMarket(): void
+    {
+        $draft = (new PayrollRegistrationA1DraftBuilder())->build(
+            self::sources(),
+            ['citizenship_country_code' => 'SK'],
+            null,
+            null,
+            '2026-08-14',
+            0,
+            null,
+        );
+        $missing = self::missingFields($draft);
+
+        self::assertTrue($draft['foreigner']);
+        self::assertTrue($draft['suggested']['foreign_worker']['free_access']);
+        self::assertSame('1', $draft['suggested']['foreign_worker']['free_access_reason_code']);
+        self::assertNull($draft['suggested']['foreign_worker']['permit_from']);
+        self::assertNotContains('foreign_worker.free_access', $missing);
+        self::assertNotContains('foreign_worker.permit', $missing);
+        self::assertNotContains('foreign_worker.permit_identifier', $missing);
+        // Doklad totožnosti zůstává povinný i u občana EU.
+        self::assertContains('proof_identity.number', $missing);
+    }
+
     public function testUnverifiedEvidenceIsReportedRatherThanAssumed(): void
     {
         $sources = self::sources();

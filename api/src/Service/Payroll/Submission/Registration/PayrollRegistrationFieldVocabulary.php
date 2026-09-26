@@ -264,6 +264,13 @@ final class PayrollRegistrationFieldVocabulary
             self::WHERE_RELATIONSHIP,
         ],
         'not_started' => ['potvrzení, že zaměstnanec vůbec nenastoupil', null],
+        'explanation_attachment' => ['písemné zdůvodnění storna', null],
+        'explanation_attachment.name' => ['název souboru se zdůvodněním storna', null],
+        'explanation_attachment.data_base64' => ['obsah souboru se zdůvodněním storna', null],
+        'identifiers_verified_in_cssz_list' => [
+            'potvrzení, že OIČ a ID PPV odpovídají Seznamu zaměstnanců na ePortálu ČSSZ',
+            null,
+        ],
         'ended_by_death' => ['ukončení pracovního vztahu úmrtím', null],
         'changes' => ['seznam měněných údajů', null],
         'corrections' => ['seznam opravovaných údajů', null],

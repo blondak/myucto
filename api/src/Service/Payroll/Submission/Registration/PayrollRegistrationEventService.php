@@ -189,6 +189,8 @@ final readonly class PayrollRegistrationEventService
             $environment,
             $sourceOn,
             $interaction === 'termination',
+            $interaction === 'termination'
+                && ($input['identifiers_verified_in_cssz_list'] ?? null) === true,
         );
         $sourceReference = $this->sourceReference(
             $interaction,
@@ -223,6 +225,11 @@ final readonly class PayrollRegistrationEventService
                 $completion,
                 $sourceOn,
             ) + $this->relationIdentity($context);
+        if ($interaction === 'termination' && is_array($identity['provenance'] ?? null)) {
+            // Doklad, o co se odhláška opírá: protokol, přijaté A3, export
+            // zaměstnanců ČSSZ, nebo výslovné potvrzení účetní u ONZ.
+            $data['identifier_basis'] = $identity['provenance'];
+        }
         $notificationTriggerOn = $this->notificationTriggerOn(
             $interaction,
             $effectiveOn,
@@ -450,13 +457,15 @@ final readonly class PayrollRegistrationEventService
                 $this->endSourceMismatchMessage($effectiveOn, $context),
             );
         }
+        // Jen náhled měsíců k opravě: původ čísel tu nerozhoduje (a u ONZ by
+        // náhled zablokoval dřív, než účetní stihne čísla potvrdit). O původu
+        // rozhoduje až schválení odhlášky.
         $identity = $this->identities->sensitiveJmhzIdentityAt(
             $supplierId,
             (int) ($context['employee_id'] ?? 0),
             $employmentId,
             $environment,
             $effectiveOn,
-            true,
         );
         $external = $this->object(
             $identity['employment_external_identifier'] ?? null,
@@ -703,7 +712,13 @@ final readonly class PayrollRegistrationEventService
             $endedByDeath,
             $context,
         );
-        $this->assertMatchesTerminationRecord($supplierId, $employmentId, $endedByDeath, $unemployment);
+        $this->assertMatchesTerminationRecord(
+            $supplierId,
+            $employmentId,
+            $endedByDeath,
+            $unemployment,
+            (string) ($context['relation_type'] ?? ''),
+        );
 
         return [
             'end_on' => $effectiveOn,
@@ -729,6 +744,7 @@ final readonly class PayrollRegistrationEventService
         int $employmentId,
         ?bool $endedByDeath,
         ?array $unemployment,
+        string $relationType = '',
     ): void {
         $record = $this->terminations->find($supplierId, $employmentId);
         if ($record === null) {
@@ -747,6 +763,40 @@ final readonly class PayrollRegistrationEventService
             );
         }
         $code = $unemployment['termination_reason'] ?? null;
+        $entitlement = $unemployment['entitlement'] ?? null;
+        if (is_string($code)
+            && $code === $reason->regzecReasonCode()
+            && is_string($entitlement)
+        ) {
+            // Odstupné (10378 náleží, 10531 odstupné / 10530 náhrada § 271ca)
+            // plyne ze záznamu o skončení stejně jako důvod — A2 nesmí
+            // tvrdit „náleží" u skončení, které ho nezakládá, ani ho zamlčet.
+            $expected = $reason->a2SettlementKind($relationType);
+            $claimed = $entitlement === 'A'
+                ? (array_key_exists('golden_handshake', $unemployment)
+                    ? 'golden_handshake'
+                    : (array_key_exists('replacement', $unemployment) ? 'replacement' : null))
+                : null;
+            if (($entitlement === 'A') !== ($expected !== null)
+                || ($claimed !== null && $claimed !== $expected)
+            ) {
+                throw new PayrollRegistrationXmlException(
+                    'registration_a2_settlement_record_mismatch',
+                    'Údaj o odstupném v odhlášce neodpovídá záznamu Skončení vztahu: '
+                        . match ($expected) {
+                            'golden_handshake' => 'podle způsobu a důvodu skončení náleží'
+                                . ' odstupné podle § 67 odst. 1 zákoníku práce.',
+                            'replacement' => 'podle způsobu a důvodu skončení náleží'
+                                . ' jednorázová náhrada podle § 271ca zákoníku práce.',
+                            default => 'podle způsobu a důvodu skončení (a druhu vztahu)'
+                                . ' odstupné nenáleží.',
+                        }
+                        . ' Použijte „Předvyplnit ze skončení vztahu", nebo opravte'
+                        . ' záznam na kartě vztahu.'
+                        . PayrollRegistrationFieldVocabulary::reference('unemployment.entitlement'),
+                );
+            }
+        }
         if (is_string($code) && $code !== $reason->regzecReasonCode()) {
             throw new PayrollRegistrationXmlException(
                 'registration_a2_termination_record_mismatch',
@@ -1161,6 +1211,7 @@ final readonly class PayrollRegistrationEventService
                 'title_prefix', 'contact_address', 'tax_residency',
                 'relationship_detail_code', 'health_insurance_code',
                 'highest_education_code', 'employment',
+                'permanent_address', 'foreign_worker',
             ];
         $this->onlyKeys(
             $raw,
@@ -1193,6 +1244,8 @@ final readonly class PayrollRegistrationEventService
                 ),
                 'tax_residency' => $this->taxResidency($value),
                 'contact_address' => $this->contactAddress($value),
+                'permanent_address' => $this->permanentAddress($value),
+                'foreign_worker' => $this->foreignWorkerChange($value),
                 'employment' => $this->employmentChange($value),
                 // Interní kontrakt: klíče už prošly onlyKeys() výš, sem se
                 // uživatelský vstup nedostane. Zůstává technická — akce ji
@@ -1450,15 +1503,28 @@ final readonly class PayrollRegistrationEventService
                     ),
             );
         }
-        if (($input['not_started'] ?? null) !== true) {
+        $notStarted = $input['not_started'] ?? null;
+        if ($notStarted === false) {
+            // Zásady REGZEC (18-06-2026), kód akce 8: storno z jiného důvodu
+            // než nenastoupení (chybný variabilní symbol, nepovolená oprava
+            // druhu činnosti, soudní zneplatnění) je nutné zdůvodnit
+            // samostatnou písemností v příloze podání.
+            return [
+                'not_started' => false,
+                'source_submission_id' => $submissionId,
+                'explanation_attachment' => $this->explanationAttachment(
+                    $input['explanation_attachment'] ?? null,
+                ),
+            ];
+        }
+        if ($notStarted !== true) {
             throw new PayrollRegistrationXmlException(
                 'registration_a8_explanation_attachment_required',
                 $this->actionName(8)
-                    . ' aplikace připraví jen pro zaměstnance, který vůbec'
-                    . ' nenastoupil, a tuhle skutečnost je potřeba ve'
-                    . ' formuláři potvrdit. Jiné storno vyžaduje písemné'
-                    . ' vysvětlení, které aplikace zatím neumí přiložit —'
-                    . ' takové storno vyřiďte s ČSSZ mimo aplikaci.'
+                    . ' potřebuje vědět, proč se podává: buď zaměstnanec vůbec'
+                    . ' nenastoupil (zaškrtněte to ve formuláři), nebo jde'
+                    . ' o jiný důvod — pak přiložte soubor s písemným'
+                    . ' zdůvodněním, bez něj ČSSZ storno nezpracuje.'
                     . PayrollRegistrationFieldVocabulary::reference('not_started'),
             );
         }
@@ -1488,6 +1554,59 @@ final readonly class PayrollRegistrationEventService
         ];
     }
 
+    /**
+     * Soubor se zdůvodněním storna, který jde do přílohy podání A8
+     * (`attachs/attach`). Stejné meze jako přílohy profilu A1: název,
+     * nepoškozený obsah v base64 a rozumná velikost.
+     *
+     * @return array{name:string,description:?string,data_base64:string}
+     */
+    private function explanationAttachment(mixed $value): array
+    {
+        if (!is_array($value) || array_is_list($value)) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a8_explanation_attachment_required',
+                $this->actionName(8)
+                    . ' z jiného důvodu než nenastoupení ČSSZ zpracuje jen'
+                    . ' s písemným zdůvodněním v příloze. Přiložte ve'
+                    . ' formuláři soubor, který důvod storna vysvětluje'
+                    . ' (například chybný variabilní symbol nebo druh'
+                    . ' činnosti).'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'explanation_attachment',
+                    ),
+            );
+        }
+        $name = $this->requiredText(
+            $value['name'] ?? null,
+            'explanation_attachment.name',
+            255,
+        );
+        $data = $value['data_base64'] ?? null;
+        if (!is_string($data) || $data === ''
+            || strlen($data) > 20_000_000
+            || base64_decode($data, true) === false
+        ) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a8_explanation_attachment_invalid',
+                'Soubor se zdůvodněním storna se nepodařilo přečíst, nebo je'
+                    . ' větší než 15 MB. Přiložte ho ve formuláři znovu.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'explanation_attachment.data_base64',
+                    ),
+            );
+        }
+        $description = $value['description'] ?? null;
+
+        return [
+            'name' => $name,
+            'description' => is_string($description) && trim($description) !== ''
+                ? mb_substr(trim($description), 0, 255)
+                : null,
+            'data_base64' => $data,
+        ];
+    }
+
     /** @param array<string,mixed> $context @param array<string,mixed> $input */
     private function notificationTriggerOn(
         string $interaction,
@@ -1510,7 +1629,9 @@ final readonly class PayrollRegistrationEventService
             }
             return $discoveredOn;
         }
-        if ($interaction === 'cancellation') {
+        if ($interaction === 'cancellation'
+            && ($input['not_started'] ?? null) !== false
+        ) {
             return $this->date(
                 $context['start_date'] ?? null,
                 'planned_start_on',
@@ -1665,6 +1786,109 @@ final readonly class PayrollRegistrationEventService
                         . "v zaměstnání (NKPZ), teď je „{$code}“.",
                 ));
             }
+        }
+        ksort($result, SORT_STRING);
+
+        return $result;
+    }
+
+    /**
+     * Trvalý pobyt v A3 (element `adr`). Ulice smí chybět (obec bez ulic),
+     * číslo popisné, PSČ, obec a stát ne.
+     *
+     * @return array<string,string>
+     */
+    private function permanentAddress(mixed $value): array
+    {
+        $raw = $this->object($value, 'permanent_address');
+        $this->onlyKeys($raw, [
+            'street', 'house_number', 'orientation_number', 'postal_code',
+            'city', 'country_code', 'ruian_point',
+        ], 'permanent_address.', 'v podání „' . $this->actionName(3) . '“');
+        $result = [
+            'house_number' => $this->requiredText(
+                $raw['house_number'] ?? null,
+                'permanent_address.house_number',
+                12,
+            ),
+            'postal_code' => $this->requiredText(
+                $raw['postal_code'] ?? null,
+                'permanent_address.postal_code',
+                11,
+            ),
+            'city' => $this->requiredText(
+                $raw['city'] ?? null,
+                'permanent_address.city',
+                50,
+            ),
+            'country_code' => $this->country(
+                $raw['country_code'] ?? null,
+                'permanent_address.country_code',
+            ),
+        ];
+        foreach (['street' => 50, 'orientation_number' => 12, 'ruian_point' => 12] as $key => $max) {
+            if (($raw[$key] ?? null) !== null) {
+                $result[$key] = $this->requiredText($raw[$key], 'permanent_address.' . $key, $max);
+            }
+        }
+        ksort($result, SORT_STRING);
+
+        return $result;
+    }
+
+    /**
+     * Přístup cizince na trh práce v A3 (element `nocitizen`): volný přístup
+     * s důvodem, nebo povolení s druhem, číslem rozhodnutí a platností.
+     *
+     * @return array<string,string|bool>
+     */
+    private function foreignWorkerChange(mixed $value): array
+    {
+        $raw = $this->object($value, 'foreign_worker');
+        $this->onlyKeys($raw, [
+            'free_access', 'free_access_reason_code', 'permit_type_code',
+            'issuing_labour_office_code', 'permit_identifier', 'permit_from',
+            'permit_to',
+        ], 'foreign_worker.', 'v podání „' . $this->actionName(3) . '“');
+        if ($this->bool($raw['free_access'] ?? null, 'foreign_worker.free_access')) {
+            return [
+                'free_access' => true,
+                'free_access_reason_code' => $this->requiredText(
+                    $raw['free_access_reason_code'] ?? null,
+                    'foreign_worker.free_access_reason_code',
+                    4,
+                ),
+            ];
+        }
+        $from = $this->date($raw['permit_from'] ?? null, 'foreign_worker.permit_from');
+        $to = $this->date($raw['permit_to'] ?? null, 'foreign_worker.permit_to');
+        if ($to < $from) {
+            throw new \InvalidArgumentException($this->say(
+                'foreign_worker.permit_to',
+                "nesmí být dřív než začátek platnosti ({$from}).",
+            ));
+        }
+        $result = [
+            'free_access' => false,
+            'permit_type_code' => $this->requiredText(
+                $raw['permit_type_code'] ?? null,
+                'foreign_worker.permit_type_code',
+                4,
+            ),
+            'permit_identifier' => $this->requiredText(
+                $raw['permit_identifier'] ?? null,
+                'foreign_worker.permit_identifier',
+                64,
+            ),
+            'permit_from' => $from,
+            'permit_to' => $to,
+        ];
+        if (($raw['issuing_labour_office_code'] ?? null) !== null) {
+            $result['issuing_labour_office_code'] = $this->requiredText(
+                $raw['issuing_labour_office_code'],
+                'foreign_worker.issuing_labour_office_code',
+                8,
+            );
         }
         ksort($result, SORT_STRING);
 

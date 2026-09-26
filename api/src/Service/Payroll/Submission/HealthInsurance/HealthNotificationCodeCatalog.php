@@ -248,12 +248,8 @@ final class HealthNotificationCodeCatalog
      * vztahuje stejně, takže v českém zdravotním pojištění mají postavení
      * občana EU, ne „cizince ze zemí mimo EU" (kód „C").
      */
-    private const EU_COORDINATION_COUNTRIES = [
-        'AT', 'BE', 'BG', 'CY', 'DE', 'DK', 'EE', 'ES', 'FI', 'FR', 'GR',
-        'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT',
-        'RO', 'SE', 'SI', 'SK',
-        'IS', 'LI', 'NO', 'CH',
-    ];
+    private const EU_COORDINATION_COUNTRIES =
+        \MyInvoice\Service\Payroll\PayrollEuFreeMovementCountries::CODES;
 
     /**
      * Kód nástupu podle státní příslušnosti a toho, zda pojištěnec už má

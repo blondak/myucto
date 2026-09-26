@@ -226,6 +226,16 @@ final class CsszEmployeeExportImportTest extends TestCase
         $identities = $this->container->get(PayrollRegistrationIdentityService::class);
         self::assertTrue($identities->activePersonExternalIdMatches($this->supplierId, $employeeId, 'test', $this->oic));
         self::assertTrue($identities->activeEmploymentExternalIdMatches($this->supplierId, $employmentId, 'test', self::ID_PPV));
+        // Seznam zaměstnanců ČSSZ je podklad, o který se smí opřít odhláška A2
+        // převzatého zaměstnance bez dohlášení A3 (rozhodnutí 26. 9. 2026).
+        self::assertSame('cssz_employee_export', $this->scalar(
+            'SELECT source_origin FROM payroll_employment_external_ids WHERE supplier_id = ? AND employment_id = ?',
+            [$this->supplierId, $employmentId],
+        ));
+        self::assertSame('cssz_employee_export', $this->scalar(
+            'SELECT source_origin FROM payroll_person_external_ids WHERE supplier_id = ? AND employee_id = ?',
+            [$this->supplierId, $employeeId],
+        ));
         self::assertSame('1', $this->scalar(
             'SELECT activity_code FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?',
             [$this->supplierId, $employmentId],
@@ -330,6 +340,56 @@ final class CsszEmployeeExportImportTest extends TestCase
         self::assertSame('create_person', $export['operation'], $this->dump($export));
         self::assertSame('900541/****', $export['person']['birth_number_masked']);
         self::assertTrue($this->hasWarning($export, 'evidenční číslo pojištěnce (EČP)'));
+    }
+
+    /** IMP-11: EČP cizince z exportu se zapíše na kartu osoby (dřív „doplňte ručně"). */
+    public function testForeignerInsuredPersonNumberIsWrittenToThePersonCard(): void
+    {
+        $files = [
+            $this->file('zamestnanci.xml', RegistrationXmlFixtures::csszExport([
+                $this->employee(['RodneCislo' => null, 'EvidencniCisloPojistence' => '9005410005', 'PojistnyVztahOd' => '2026-02-01']),
+            ])),
+        ];
+        $export = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+
+        $result = $this->apply($files, [$export['key']])['results'][0];
+
+        self::assertSame('applied', $result['status'], (string) $result['message']);
+        self::assertContains('ecp', $result['operations']);
+        self::assertSame(1, (int) $this->scalar(
+            'SELECT COUNT(*) FROM payroll_person_identifiers WHERE supplier_id = ? AND employee_id = ? AND identifier_type = "ecp"',
+            [$this->supplierId, (int) $result['employee_id']],
+        ));
+    }
+
+    /**
+     * IMP-12: konec pojistného vztahu z exportu u vztahu, který evidence vede
+     * jako trvající, se nabídne k ukončení; zapíše se až po potvrzení.
+     */
+    public function testInsuranceEndOfRunningEmploymentIsOfferedAndEndsOnlyWhenConfirmed(): void
+    {
+        $a1 = [$this->file('a1.xml', RegistrationXmlFixtures::regzecA1(['bno' => $this->birthNumber, 'start' => '2026-01-01']))];
+        $created = $this->apply($a1, [$this->imports->preview($this->supplierId, 'test', $a1)['records'][0]['key']])['results'][0];
+        $employmentId = (int) $created['employment_id'];
+        $files = [$this->file('zamestnanci.xml', RegistrationXmlFixtures::csszExport([
+            $this->employee(['PojistnyVztahOd' => '2026-01-01', 'PojistnyVztahDo' => '2026-05-31']),
+        ]))];
+
+        $offer = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+        self::assertSame('2026-05-31', $offer['termination_offer']['end_on'], $this->dump($offer));
+        self::assertFalse($offer['termination_offer']['confirmed']);
+        self::assertTrue($offer['selectable']);
+        $this->apply($files, [$offer['key']]);
+        self::assertNull($this->lookup->employment($this->supplierId, $employmentId)['end_date']);
+
+        $confirmed = $this->imports->apply(
+            $this->supplierId, 'test', $files, [$offer['key']], true, null, $this->userId, null,
+            'cssz-export-test', null, false, false, false, false, false, null, [$offer['key']],
+        )['results'][0];
+        self::assertSame('applied', $confirmed['status'], (string) $confirmed['message']);
+        self::assertContains('terminated', $confirmed['operations']);
+        $employment = $this->lookup->employment($this->supplierId, $employmentId);
+        self::assertSame(['2026-05-31', 'ended'], [$employment['end_date'], $employment['status']]);
     }
 
     /**

@@ -51,7 +51,21 @@ final readonly class PayrollRegistrationChangeProposalRepository
                        COALESCE(SUM(t.row_version), 0))
            FROM payroll_employment_terms t
           WHERE t.supplier_id = employment.supplier_id
-            AND t.employment_id = employment.id)
+            AND t.employment_id = employment.id),
+        (SELECT CONCAT(COALESCE(MAX(ad.id), 0), \':\',
+                       COALESCE(SUM(ad.row_version), 0))
+           FROM payroll_person_addresses ad
+          WHERE ad.supplier_id = employment.supplier_id
+            AND ad.employee_id = employment.employee_id),
+        (SELECT CONCAT(COALESCE(MAX(hc.id), 0), \':\',
+                       COALESCE(SUM(hc.row_version), 0))
+           FROM payroll_person_health_coverage_history hc
+          WHERE hc.supplier_id = employment.supplier_id
+            AND hc.employee_id = employment.employee_id),
+        (SELECT COALESCE(MAX(fp.id), 0)
+           FROM payroll_person_foreign_permits fp
+          WHERE fp.supplier_id = employment.supplier_id
+            AND fp.employee_id = employment.employee_id)
       ), 256) USING ascii)';
 
     public function __construct(private Connection $db) {}
@@ -148,15 +162,16 @@ final readonly class PayrollRegistrationChangeProposalRepository
                     AND employment.status NOT IN (\'no_show\', \'archived\')
                     AND EXISTS (
                           SELECT 1
-                            FROM payroll_registration_identity_snapshots snapshot
+                            FROM payroll_submission_parts part
                             JOIN payroll_submissions submission
-                              ON submission.supplier_id = snapshot.supplier_id
-                             AND submission.environment = snapshot.environment
-                             AND submission.id = snapshot.submission_id
-                           WHERE snapshot.supplier_id = employment.supplier_id
-                             AND snapshot.environment = ?
-                             AND snapshot.employment_id = employment.id
-                             AND snapshot.agenda_code = \'REGZEC25\'
+                              ON submission.supplier_id = part.supplier_id
+                             AND submission.environment = part.environment
+                             AND submission.id = part.submission_id
+                           WHERE part.supplier_id = employment.supplier_id
+                             AND part.environment = ?
+                             AND part.subject_reference =
+                                 CONCAT(\'payroll_employment:\', employment.id)
+                             AND part.agenda_code = \'REGZEC25\'
                              AND submission.status IN (
                                    \'submitted\', \'processing\', \'accepted\',
                                    \'partially_accepted\'
@@ -183,6 +198,73 @@ final readonly class PayrollRegistrationChangeProposalRepository
         }
 
         return $result;
+    }
+
+    /**
+     * Poslední registrační podání REGZEC, které vztah SKUTEČNĚ opustilo, jako
+     * výchozí stav detekce: kdy se podání zmrazilo a ke kterému dni hlásilo.
+     *
+     * Proč ne `payroll_registration_identity_snapshots`: ten archiv plní jen
+     * zmrazení s mzdovou revizí a registrační podání do něj nikdy nezapisuje
+     * (sloupec `source_revision_id` je povinný cizí klíč na revizi běhu).
+     * Detekce proti němu proto u žádného vztahu nenašla výchozí stav a návrh
+     * A3 nevznikl nikdy. Podání samo stav nese: zmrazilo se v okamžiku
+     * `prepared_at` z profilu A1 platného v tu chvíli (verze po odeslání se
+     * už nepřepisují, trigger 1716) a k rozhodnému dni `effective_on` —
+     * u přihlášky den nástupu, u navazujícího oznámení den události.
+     *
+     * @return array{submission_id:int,prepared_at:string,effective_on:string}|null
+     */
+    public function latestSubmittedRegistration(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT submission.id AS submission_id,
+                    submission.created_at AS prepared_at,
+                    COALESCE(event.effective_on, employment.actual_start_date,
+                             employment.start_date) AS effective_on
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = part.supplier_id
+                AND employment.id = ?
+               LEFT JOIN payroll_registration_event_snapshots event
+                 ON part.source_entity_type = \'payroll_registration_event\'
+                AND event.supplier_id = part.supplier_id
+                AND event.environment = part.environment
+                AND part.source_entity_reference = CONCAT(\'payroll_registration_event:\', event.id)
+              WHERE part.supplier_id = ?
+                AND part.environment = ?
+                AND part.subject_reference = ?
+                AND part.agenda_code = \'REGZEC25\'
+                AND submission.status IN (
+                      \'submitted\', \'processing\', \'accepted\',
+                      \'partially_accepted\'
+                    )
+              ORDER BY submission.id DESC
+              LIMIT 1'
+        );
+        $statement->execute([
+            $employmentId,
+            $supplierId,
+            $environment,
+            "payroll_employment:{$employmentId}",
+        ]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row) || !is_string($row['effective_on'] ?? null)) {
+            return null;
+        }
+
+        return [
+            'submission_id' => (int) $row['submission_id'],
+            'prepared_at' => (string) $row['prepared_at'],
+            'effective_on' => (string) $row['effective_on'],
+        ];
     }
 
     /** Vodoznak jednoho vztahu (tentýž výpočet jako {@see self::staleEmployments()}). */

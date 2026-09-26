@@ -499,6 +499,19 @@ final class PayrollRegistrationXmlSerializer
                 $this->eventObject($data, 'delta'),
             );
         }
+        if ($action === 8 && is_array($data['explanation_attachment'] ?? null)) {
+            // Storno z jiného důvodu než nenastoupení nese písemné
+            // zdůvodnění jako přílohu (zásady REGZEC, kód akce 8).
+            $attachments = $this->element($document, $namespace, 'attachs');
+            $node = $this->element($document, $namespace, 'attach');
+            $this->setMappedAttributes($node, $data['explanation_attachment'], [
+                'name' => 'name',
+                'description' => 'desc',
+                'data_base64' => 'data',
+            ]);
+            $attachments->appendChild($node);
+            $employee->appendChild($attachments);
+        }
         $employees->appendChild($employee);
         $root->appendChild($employees);
 

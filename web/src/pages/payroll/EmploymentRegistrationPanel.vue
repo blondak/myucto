@@ -10,6 +10,7 @@ import {
   type PayrollJmhzTransportPoll,
   type PayrollJmhzTransportEnvironment,
   type PayrollRegistrationPreview,
+  type PayrollRegistrationMode,
   type PayrollRegistrationEvent,
   type PayrollRegistrationEventInput,
   type PayrollRegistrationEventInteraction,
@@ -69,6 +70,13 @@ const error = ref('')
  * vyřešení vyskočila další.
  */
 const errorProblems = ref<PayrollRegistrationMissingItem[]>([])
+/**
+ * Český zaměstnanec před nástupem: výchozí je částečné přihlášení (P1), plnou
+ * registraci A1 volí účetní výslovně. Volba se ukáže, až server řekne, že
+ * pro vztah přichází v úvahu (`before_start_choice` v náhledu).
+ */
+const registrationMode = ref<PayrollRegistrationMode>('auto')
+const beforeStartChoice = ref(false)
 const preview = ref<PayrollRegistrationPreview | null>(null)
 const submission = ref<PayrollRegistrationSubmission | null>(null)
 const showXml = ref(false)
@@ -133,6 +141,16 @@ const paidInFull = ref<'yes' | 'no'>('no')
 const settlementAmountKind = ref('replacement')
 const settlementAmount = ref('')
 const notStartedConfirmed = ref(false)
+/**
+ * Důvod storna A8. Nenastoupení má osmidenní lhůtu a obejde se bez přílohy;
+ * jiný důvod (chybný variabilní symbol, druh činnosti…) lhůtu nemá, ale ČSSZ
+ * ho zpracuje jen s písemným zdůvodněním v příloze.
+ */
+const cancellationReason = ref<'not_started' | 'other'>('not_started')
+const cancellationAttachment = ref<{ name: string, data_base64: string } | null>(null)
+const cancellationAttachmentDescription = ref('')
+/** A2 u zaměstnance z ONZ: ručně zapsané OIČ/ID PPV ověřená v Seznamu zaměstnanců ČSSZ. */
+const identifiersVerifiedInCsszList = ref(false)
 const a1ProfileOpen = ref(false)
 const a1ProfileLoading = ref(false)
 const a1ProfileSaving = ref(false)
@@ -1201,7 +1219,9 @@ const eventCanSave = computed(() => {
   if (eventInteraction.value === 'cancellation') {
     return sourceSubmissionId.value !== null
       && sourceSubmissionId.value > 0
-      && notStartedConfirmed.value
+      && (cancellationReason.value === 'not_started'
+        ? notStartedConfirmed.value
+        : cancellationAttachment.value !== null)
   }
   return true
 })
@@ -1347,6 +1367,21 @@ function resetEventForm(): void {
   settlementAmountKind.value = 'replacement'
   settlementAmount.value = ''
   notStartedConfirmed.value = false
+  cancellationReason.value = 'not_started'
+  cancellationAttachment.value = null
+  cancellationAttachmentDescription.value = ''
+  identifiersVerifiedInCsszList.value = false
+}
+
+async function addCancellationAttachment(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const buffer = new Uint8Array(await file.arrayBuffer())
+  let binary = ''
+  for (const byte of buffer) binary += String.fromCharCode(byte)
+  cancellationAttachment.value = { name: file.name, data_base64: btoa(binary) }
+  input.value = ''
 }
 
 function eventOptionLabel(event: PayrollRegistrationEvent): string {
@@ -1448,9 +1483,11 @@ async function applyA2Prefill(): Promise<void> {
     return
   }
   entitlement.value = unemployment.entitlement ? 'yes' : 'no'
-  if (unemployment.entitlement && unemployment.settlement_kind && unemployment.settlement_amount) {
+  // Druh (odstupné / náhrada § 271ca) je jistý hned ze záznamu, částka až po
+  // výpočtu nebo zúčtování — bez ní ji účetní doplní, nárok ale nezmizí.
+  if (unemployment.entitlement && unemployment.settlement_kind) {
     settlementAmountKind.value = unemployment.settlement_kind
-    settlementAmount.value = unemployment.settlement_amount
+    if (unemployment.settlement_amount) settlementAmount.value = unemployment.settlement_amount
   }
 }
 
@@ -1526,7 +1563,20 @@ function eventPayload(): PayrollRegistrationEventInput {
   }
   if (eventInteraction.value === 'cancellation') {
     payload.source_submission_id = sourceSubmissionId.value ?? undefined
-    payload.not_started = true
+    if (cancellationReason.value === 'not_started') {
+      payload.not_started = true
+    } else {
+      payload.not_started = false
+      if (cancellationAttachment.value !== null) {
+        payload.explanation_attachment = {
+          ...cancellationAttachment.value,
+          description: optionalText(cancellationAttachmentDescription.value) ?? null,
+        }
+      }
+    }
+  }
+  if (eventInteraction.value === 'termination' && identifiersVerifiedInCsszList.value) {
+    payload.identifiers_verified_in_cssz_list = true
   }
   return payload
 }
@@ -1643,6 +1693,37 @@ function proposalSummary(proposal: PayrollRegistrationChangeProposal): string {
     .join(', ')
 }
 
+/**
+ * Nálezy, které podání A3 blokují jen proto, že údaj chybí v profilu A1:
+ * kmenová data vedou adresu jedním řádkem (bez čísla popisného zvlášť)
+ * a u povolení cizince jen označení, ne číslo rozhodnutí. Proklik otevře
+ * profil přímo u pole; po uložení detekce navrhne podání znovu.
+ */
+const PROFILE_GAP_FIELDS: Record<string, string> = {
+  registration_change_permanent_address_incomplete: 'permanent_address.house_number',
+  registration_change_foreign_permit_incomplete: 'foreign_worker.permit_identifier',
+}
+
+function proposalProfileGaps(
+  proposal: PayrollRegistrationChangeProposal,
+): { reason_code: string, field: string }[] {
+  const seen = new Set<string>()
+  const gaps: { reason_code: string, field: string }[] = []
+  for (const item of proposal.unsupported) {
+    const field = PROFILE_GAP_FIELDS[item.reason_code]
+    if (field === undefined || seen.has(item.reason_code)) continue
+    seen.add(item.reason_code)
+    gaps.push({ reason_code: item.reason_code, field })
+  }
+  return gaps
+}
+
+async function openProfileGap(field: string): Promise<void> {
+  a1ProfileOpen.value = true
+  await nextTick()
+  await focusA1Gap(field)
+}
+
 function proposalActions(
   proposal: PayrollRegistrationChangeProposal,
 ): ActionItem[] {
@@ -1674,6 +1755,7 @@ function proposalActions(
 }
 
 watch(selectedEventId, resetPreparedFiling)
+watch(registrationMode, resetPreparedFiling)
 watch(eventInteraction, () => {
   resetEventForm()
   deltaField.value = deltaFieldOptions.value[0] ?? 'title_prefix'
@@ -1743,21 +1825,36 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
       transport.value = null
       transportMessage.value = ''
       preview.value = selectedEventId.value === null
-        ? await payrollApi.previewEmploymentRegistration(
-            props.employmentId,
-            environment.value,
-          )
+        ? await (registrationMode.value === 'full'
+          ? payrollApi.previewEmploymentRegistration(
+              props.employmentId,
+              environment.value,
+              null,
+              'full',
+            )
+          : payrollApi.previewEmploymentRegistration(
+              props.employmentId,
+              environment.value,
+            ))
         : await payrollApi.previewEmploymentRegistration(
             props.employmentId,
             environment.value,
             selectedEventId.value,
           )
+      if (preview.value.before_start_choice === true) beforeStartChoice.value = true
     } else {
       submission.value = selectedEventId.value === null
-        ? await payrollApi.prepareEmploymentRegistration(
-            props.employmentId,
-            environment.value,
-          )
+        ? await (registrationMode.value === 'full'
+          ? payrollApi.prepareEmploymentRegistration(
+              props.employmentId,
+              environment.value,
+              null,
+              'full',
+            )
+          : payrollApi.prepareEmploymentRegistration(
+              props.employmentId,
+              environment.value,
+            ))
         : await payrollApi.prepareEmploymentRegistration(
             props.employmentId,
             environment.value,
@@ -1900,6 +1997,22 @@ async function copyXml(): Promise<void> {
             <option value="production">{{ t('payroll.people.registration.environment.production') }}</option>
           </select>
         </label>
+        <label
+          v-if="beforeStartChoice && selectedEventId === null"
+          class="flex items-center gap-2 text-xs text-neutral-600"
+          :title="t('payroll.people.registration.before_start.hint')"
+        >
+          <span>{{ t('payroll.people.registration.before_start.label') }}</span>
+          <select
+            v-model="registrationMode"
+            class="rounded-md border border-neutral-300 bg-surface px-2 py-1.5 text-xs text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+            :disabled="busy || submission !== null"
+            data-test="registration-mode"
+          >
+            <option value="auto">{{ t('payroll.people.registration.before_start.partial') }}</option>
+            <option value="full">{{ t('payroll.people.registration.before_start.full') }}</option>
+          </select>
+        </label>
         <button
           v-if="primaryAction !== 'preview'"
           type="button"
@@ -1934,6 +2047,13 @@ async function copyXml(): Promise<void> {
         </button>
       </div>
     </div>
+    <p
+      v-if="beforeStartChoice && selectedEventId === null"
+      class="mt-2 text-xs text-neutral-500"
+      data-test="registration-mode-hint"
+    >
+      {{ t('payroll.people.registration.before_start.hint') }}
+    </p>
 
     <p
       v-if="nothingSentYet"
@@ -3567,13 +3687,32 @@ async function copyXml(): Promise<void> {
               {{ t('payroll.people.registration.changes.open_hoz', { period: proposal.detected_on.slice(0, 7) }) }}
             </RouterLink>
           </div>
-          <p
-            v-else-if="!proposal.fileable"
-            class="mt-1 text-xs text-warning-800"
-            data-test="registration-change-manual"
-          >
-            {{ t('payroll.people.registration.changes.manual_only') }}
-          </p>
+          <template v-else-if="!proposal.fileable">
+            <ul
+              v-if="proposalProfileGaps(proposal).length > 0"
+              class="mt-1 space-y-1 text-xs text-warning-800"
+              data-test="registration-change-profile-gaps"
+            >
+              <li v-for="gap in proposalProfileGaps(proposal)" :key="gap.reason_code">
+                {{ t(`payroll.people.registration.changes.gap.${gap.reason_code}`) }}
+                <button
+                  type="button"
+                  class="ml-1 whitespace-nowrap rounded-full bg-warning-100 px-2 py-0.5 font-medium underline underline-offset-2 hover:bg-warning-200 hover:text-warning-900 focus:outline-none focus:ring-2 focus:ring-warning-500/40"
+                  :data-test="`registration-change-open-profile-${gap.reason_code}`"
+                  @click="openProfileGap(gap.field)"
+                >
+                  {{ t('payroll.people.registration.changes.open_profile') }}
+                </button>
+              </li>
+            </ul>
+            <p
+              v-else
+              class="mt-1 text-xs text-warning-800"
+              data-test="registration-change-manual"
+            >
+              {{ t('payroll.people.registration.changes.manual_only') }}
+            </p>
+          </template>
           <ActionBar :actions="proposalActions(proposal)" />
           <div v-if="dismissOpenFor === proposal.id" class="mt-2 flex flex-wrap gap-2">
             <input
@@ -3722,6 +3861,20 @@ async function copyXml(): Promise<void> {
             <span class="text-xs text-neutral-500">
               {{ a2Prefill ? t('payroll.people.termination.a2_prefill_hint') : t('payroll.people.termination.a2_prefill_missing') }}
             </span>
+          </div>
+          <div class="rounded-md border border-neutral-200 p-3" data-test="registration-a2-identifiers-verified-box">
+            <label class="flex items-start gap-2 text-xs text-neutral-700">
+              <input
+                v-model="identifiersVerifiedInCsszList"
+                type="checkbox"
+                class="mt-0.5 rounded border-neutral-300"
+                data-test="registration-a2-identifiers-verified"
+              />
+              <span>{{ t('payroll.people.registration.event.identifiers_verified') }}</span>
+            </label>
+            <p class="mt-1 text-xs text-neutral-500">
+              {{ t('payroll.people.registration.event.identifiers_verified_hint') }}
+            </p>
           </div>
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label class="text-xs font-medium text-neutral-700">
@@ -3929,11 +4082,46 @@ async function copyXml(): Promise<void> {
             {{ t('payroll.people.registration.event.source_submission_id') }}
             <input v-model.number="sourceSubmissionId" type="number" min="1" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md" data-test="registration-event-source-submission-id" />
           </label>
-          <label class="flex items-start gap-2 text-xs text-neutral-700">
-            <input v-model="notStartedConfirmed" type="checkbox" class="mt-0.5 rounded border-neutral-300" data-test="registration-event-not-started" />
-            <span>{{ t('payroll.people.registration.event.not_started_confirmation') }}</span>
+          <label class="block text-xs font-medium text-neutral-700">
+            {{ t('payroll.people.registration.event.a8_reason') }}
+            <select
+              v-model="cancellationReason"
+              class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md"
+              data-test="registration-event-a8-reason"
+            >
+              <option value="not_started">{{ t('payroll.people.registration.event.a8_reason_not_started') }}</option>
+              <option value="other">{{ t('payroll.people.registration.event.a8_reason_other') }}</option>
+            </select>
           </label>
-          <p class="text-xs text-warning-700">{{ t('payroll.people.registration.event.a8_hint') }}</p>
+          <template v-if="cancellationReason === 'not_started'">
+            <label class="flex items-start gap-2 text-xs text-neutral-700">
+              <input v-model="notStartedConfirmed" type="checkbox" class="mt-0.5 rounded border-neutral-300" data-test="registration-event-not-started" />
+              <span>{{ t('payroll.people.registration.event.not_started_confirmation') }}</span>
+            </label>
+            <p class="text-xs text-warning-700">{{ t('payroll.people.registration.event.a8_hint') }}</p>
+          </template>
+          <template v-else>
+            <p class="text-xs text-neutral-600" data-test="registration-event-a8-other-hint">
+              {{ t('payroll.people.registration.event.a8_other_hint') }}
+            </p>
+            <div class="flex flex-wrap items-center gap-2">
+              <label :class="btnOutline('primary')" class="cursor-pointer whitespace-nowrap">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                {{ t('payroll.people.registration.event.a8_attachment') }}
+                <input type="file" class="sr-only" data-test="registration-event-a8-attachment" @change="addCancellationAttachment" />
+              </label>
+              <span v-if="cancellationAttachment" class="text-xs text-neutral-700" data-test="registration-event-a8-attachment-name">
+                {{ cancellationAttachment.name }}
+              </span>
+              <span v-else class="text-xs text-warning-700">
+                {{ t('payroll.people.registration.event.a8_attachment_missing') }}
+              </span>
+            </div>
+            <label class="block text-xs font-medium text-neutral-700">
+              {{ t('payroll.people.registration.event.a8_attachment_description') }}
+              <input v-model="cancellationAttachmentDescription" maxlength="255" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md" />
+            </label>
+          </template>
         </div>
 
         <div class="mt-5 flex flex-wrap justify-end gap-2">
@@ -3961,7 +4149,12 @@ async function copyXml(): Promise<void> {
       <p class="font-medium text-neutral-900">
         {{ agendaLabel }} · {{ interactionLabel }}
       </p>
-      <p v-if="deadline.derived === false" class="mt-1 text-warning-700" data-test="registration-deadline-not-derived">
+      <p v-if="deadline.statutory === false" class="mt-1" data-test="registration-deadline-not-statutory">
+        {{ t('payroll.people.registration.registration_window.not_statutory', {
+          milestone: formatDate(deadline.due_on),
+        }) }}
+      </p>
+      <p v-else-if="deadline.derived === false" class="mt-1 text-warning-700" data-test="registration-deadline-not-derived">
         {{ t('payroll.people.registration.registration_window.not_derived', {
           start: formatDate(deadline.due_on),
         }) }}

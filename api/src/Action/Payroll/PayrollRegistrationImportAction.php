@@ -45,6 +45,7 @@ final class PayrollRegistrationImportAction
                 $body['files'] ?? null,
                 $body['pairs'] ?? null,
                 $body['relation_types'] ?? null,
+                $body['terminations'] ?? null,
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
@@ -83,6 +84,7 @@ final class PayrollRegistrationImportAction
                 ($body['auto_approve_averages'] ?? false) === true,
                 ($body['apply_takeover'] ?? false) === true,
                 $body['relation_types'] ?? null,
+                $body['terminations'] ?? null,
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);

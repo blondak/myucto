@@ -38,6 +38,7 @@ vi.mock('@/api/payroll', () => ({
     employmentJmhzEvidenceOptions: m.jmhzOptions,
     searchJmhzMunicipalities: m.searchMunicipalities,
     searchCzIsco: m.searchCzIsco,
+    detectEmploymentRegistrationChanges: m.detectChanges,
   },
 }))
 
@@ -387,6 +388,41 @@ describe('EmploymentRegistrationPanel', () => {
     expect(m.preview.mock.invocationCallOrder[0])
       .toBeLessThan(m.prepare.mock.invocationCallOrder[0])
     expect(wrapper.find('[data-test="registration-prepared"]').exists()).toBe(true)
+  })
+
+  it('offers full A1 registration before start and sends the chosen mode', async () => {
+    m.preview.mockResolvedValueOnce({ ...preview, before_start_choice: true })
+    m.preview.mockResolvedValueOnce({
+      ...preview,
+      agenda_code: 'REGZEC25',
+      interaction: 'direct_full_registration',
+      action_code: 1,
+      before_start_choice: true,
+    })
+    m.prepare.mockResolvedValue({
+      ...preparedSubmission('production'),
+      agenda_code: 'REGZEC25',
+      interaction: 'direct_full_registration',
+      before_start_choice: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-test="registration-mode"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    expect(m.preview).toHaveBeenLastCalledWith(5, 'production')
+    expect(wrapper.get('[data-test="registration-mode-hint"]').text())
+      .toBe('payroll.people.registration.before_start.hint')
+
+    await wrapper.get('[data-test="registration-mode"]').setValue('full')
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    expect(m.preview).toHaveBeenLastCalledWith(5, 'production', null, 'full')
+
+    await wrapper.get('[data-test="registration-prepare"]').trigger('click')
+    await flushPromises()
+    expect(m.prepare).toHaveBeenCalledWith(5, 'production', null, 'full')
   })
 
   /**
@@ -1031,6 +1067,125 @@ describe('EmploymentRegistrationPanel', () => {
       interaction: 'cancellation',
       source_submission_id: 44,
       not_started: true,
+    }))
+  })
+
+  it('links an A3 proposal blocked by a missing house number to the A1 profile', async () => {
+    m.detectChanges.mockResolvedValue({
+      as_of: '2026-11-03',
+      reason_code: null,
+      without_baseline: {},
+      proposals: [{
+        id: 41,
+        duty_kind: 'regzec_change',
+        action_code: 3,
+        status: 'open',
+        detected_on: '2026-11-03',
+        due_on: '2026-11-11',
+        deadline_source: '§ 19 odst. 5 zákona č. 323/2025 Sb.',
+        deadline_ruleset_id: 'cz-regzec-follow-up-2026-04.v1',
+        findings: [{ path: 'permanent_address.street', group: 'permanent_address', action_code: 3, sensitive: false, from: 'Dlouhá', to: 'Nová 5' }],
+        changes: { health_insurance_code: '211' },
+        unsupported: [
+          { path: 'permanent_address', reason_code: 'registration_change_permanent_address_incomplete' },
+        ],
+        fileable: false,
+        created: true,
+      }],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const gaps = wrapper.get('[data-test="registration-change-profile-gaps"]')
+    expect(gaps.text()).toContain(
+      'payroll.people.registration.changes.gap.registration_change_permanent_address_incomplete',
+    )
+    expect(wrapper.find('[data-test="registration-change-manual"]').exists()).toBe(false)
+    await wrapper.get(
+      '[data-test="registration-change-open-profile-registration_change_permanent_address_incomplete"]',
+    ).trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-a1-field="permanent_address.house_number"]').exists()).toBe(true)
+  })
+
+  it('sends the explicit ONZ identifier verification with the A2 deregistration', async () => {
+    m.approveEvent.mockResolvedValue({
+      id: 95,
+      employment_id: 5,
+      environment: 'production',
+      interaction: 'termination',
+      action_code: 2,
+      effective_on: '2026-09-15',
+      source_kind: 'employment_exit',
+      source_reference: 'termination',
+      snapshot_fingerprint: 'f'.repeat(64),
+      approved_at: '2026-09-15 11:00:00',
+      consumed: false,
+      created: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-new"]').trigger('click')
+    await wrapper.get('[data-test="registration-event-effective-on"]').setValue('2026-09-15')
+    expect(wrapper.get('[data-test="registration-a2-identifiers-verified-box"]').text())
+      .toContain('payroll.people.registration.event.identifiers_verified_hint')
+    await wrapper.get('[data-test="registration-a2-identifiers-verified"]').setValue(true)
+    await wrapper.get('[data-test="registration-event-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.approveEvent).toHaveBeenCalledWith(5, expect.objectContaining({
+      interaction: 'termination',
+      identifiers_verified_in_cssz_list: true,
+    }))
+  })
+
+  it('files A8 for another reason only with an explanation attachment', async () => {
+    m.approveEvent.mockResolvedValue({
+      id: 94,
+      employment_id: 5,
+      environment: 'production',
+      interaction: 'cancellation',
+      action_code: 8,
+      effective_on: '2026-09-20',
+      source_kind: 'verified_cancellation',
+      source_reference: 'wrong-vs-1',
+      snapshot_fingerprint: 'f'.repeat(64),
+      approved_at: '2026-09-20 11:00:00',
+      consumed: false,
+      created: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-new"]').trigger('click')
+    await wrapper.get('[data-test="registration-event-interaction"]').setValue('cancellation')
+    await wrapper.get('[data-test="registration-event-effective-on"]').setValue('2026-09-20')
+    await wrapper.get('[data-test="registration-event-source-reference"]').setValue('wrong-vs-1')
+    await wrapper.get('[data-test="registration-event-source-submission-id"]').setValue('44')
+    await wrapper.get('[data-test="registration-event-a8-reason"]').setValue('other')
+
+    expect(wrapper.find('[data-test="registration-event-not-started"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="registration-event-a8-other-hint"]').text())
+      .toBe('payroll.people.registration.event.a8_other_hint')
+    expect(wrapper.get('[data-test="registration-event-save"]').attributes('disabled')).toBeDefined()
+
+    const input = wrapper.get('[data-test="registration-event-a8-attachment"]')
+    const file = new File(['%PDF'], 'zduvodneni.pdf', { type: 'application/pdf' })
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+    await flushPromises()
+    expect(wrapper.get('[data-test="registration-event-a8-attachment-name"]').text()).toBe('zduvodneni.pdf')
+
+    await wrapper.get('[data-test="registration-event-save"]').trigger('click')
+    await flushPromises()
+    expect(m.approveEvent).toHaveBeenCalledWith(5, expect.objectContaining({
+      interaction: 'cancellation',
+      source_submission_id: 44,
+      not_started: false,
+      explanation_attachment: {
+        name: 'zduvodneni.pdf',
+        description: null,
+        data_base64: btoa('%PDF'),
+      },
     }))
   })
 

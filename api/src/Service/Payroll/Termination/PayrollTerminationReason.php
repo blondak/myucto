@@ -210,4 +210,33 @@ final readonly class PayrollTerminationReason
     {
         return in_array($this->regzecReasonCode(), ['4', '5'], true);
     }
+
+    /** Vztahy, u kterých zákoník práce odstupné a náhradu § 271ca zná. */
+    public const SEVERANCE_RELATIONS = ['employment', 'small_scale_employment'];
+
+    /**
+     * Co odhláška A2 hlásí o odstupném — jediné místo pro kartu skončení
+     * (předvyplnění) i schválení A2 (kontrola proti záznamu):
+     *
+     *  - `golden_handshake` = odstupné podle § 67 odst. 1 ZP (10531),
+     *  - `replacement` = jednorázová náhrada podle § 271ca ZP (10530),
+     *  - `null` = nic nenáleží, 10378 („náleží") je N nebo se neuvádí.
+     *
+     * Údaj přijme DIS jen u důvodu ukončení 4 nebo 5 (aktualita MPSV
+     * 14. 8. 2026, kontrola 10378 × 10380); dohoda o provedení práce ani
+     * pracovní činnosti odstupné nezakládá.
+     */
+    public function a2SettlementKind(string $relationType): ?string
+    {
+        if (!$this->settlementReportable()
+            || !in_array($relationType, self::SEVERANCE_RELATIONS, true)
+        ) {
+            return null;
+        }
+        if ($this->workInjuryCompensation()) {
+            return 'replacement';
+        }
+
+        return $this->severanceBasis() !== null ? 'golden_handshake' : null;
+    }
 }
