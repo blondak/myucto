@@ -122,6 +122,65 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
         self::assertStringContainsString('<ucetCislo>1000000005</ucetCislo>', $xml);
         self::assertStringContainsString('<bankaKod>0100</bankaKod>', $xml);
         self::assertStringContainsString('<kontaktniPracovnik>Mzdová Účetní</kontaktniPracovnik>', $xml);
+
+        // Příprava zmrazí přesně tutéž větu a případ posune na „připraveno“.
+        $prepared = $this->service(SicknessSubmissionService::class)->prepare(
+            $this->supplierId,
+            'test',
+            (int) $case['id'],
+            SicknessDocumentKind::Nempri,
+            $this->userId,
+        );
+        self::assertSame('ready', $prepared['status']);
+        self::assertSame(hash('sha256', $xml), $prepared['artifact_sha256']);
+        $stored = $this->service(SicknessCaseService::class)
+            ->requireCase($this->supplierId, 'test', (int) $case['id']);
+        self::assertSame('prepared', $stored['status']);
+        self::assertSame((int) $prepared['submission_id'], (int) $stored['nempri_submission_id']);
+    }
+
+    /**
+     * HZUPN „nevrátil se do práce“ s důvodem a datem — celý tok od uložení
+     * případu po věnu, kterou ČSSZ od jiných programů přijímá.
+     */
+    public function testEndOfIncapacityWithoutReturnBuildsHzupn(): void
+    {
+        [, $employmentId] = $this->employee();
+        $cases = $this->service(SicknessCaseService::class);
+        $case = $cases->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'NEM',
+            [
+                'incapacity_from' => '2026-02-09',
+                'decision_number' => 'A1234567',
+            ],
+            $this->userId,
+        );
+        $case = $cases->update(
+            $this->supplierId,
+            'test',
+            (int) $case['id'],
+            (int) $case['row_version'],
+            [
+                'incapacity_to' => '2026-03-15',
+                'issued_on' => '2026-03-16',
+                'returned_to_work' => '0',
+                'return_reason' => 'skončení zaměstnání',
+                'returned_on' => '2026-03-16',
+            ],
+        );
+
+        $preview = $this->service(SicknessSubmissionService::class)->preview(
+            $this->supplierId,
+            'test',
+            (int) $case['id'],
+            SicknessDocumentKind::Hzupn,
+        );
+
+        self::assertStringContainsString('<navratDoPrace>N</navratDoPrace>', (string) $preview['xml']);
+        self::assertStringContainsString('<datumNavratDoPrace>2026-03-16</datumNavratDoPrace>', (string) $preview['xml']);
     }
 
     public function testDecisiveMonthWithoutAnySourceStopsThePreview(): void

@@ -634,7 +634,7 @@ final readonly class SicknessSubmissionService
             $sourceHash,
             $window->earliestNotificationOn,
             $window->dueOn,
-            $window->calendarBasis,
+            $window->obligationCalendarBasis(),
             $window->rulesetId,
             $window->rulesetHash,
             'sickness:' . $environment . ':' . $sourceHash,
