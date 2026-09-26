@@ -47,6 +47,9 @@ final class PremierBackup
     /** @var list<int>|null */
     private ?array $years = null;
 
+    /** @var array{0:?string}|null poslední měsíc mezd, obalený kvůli rozlišení „nespočítáno" a „bez mezd" */
+    private ?array $lastPayrollPeriod = null;
+
     public readonly string $ico;
     public readonly string $dic;
     public readonly string $company;
@@ -120,6 +123,7 @@ final class PremierBackup
         $backup = self::open($dir);
         $counts = $backup->journalCountsByYear();
         $payroll = $backup->hasRows('MZDY');
+        $payrollLast = $payroll ? $backup->lastPayrollPeriod() : null;
         $out = [];
         foreach ($counts as $year => $count) {
             $out[] = [
@@ -131,9 +135,66 @@ final class PremierBackup
                 'entries' => $count,
                 'has_accounting' => true,
                 'has_payroll' => $payroll,
+                'payroll_last' => $payrollLast,
             ];
         }
         return $out;
+    }
+
+    /**
+     * Záloha s údaji, které spočítal přehled nahrání ({@see overview()} v `meta.json`):
+     * roky deníku a poslední měsíc mezd. Kontrola před převodem pak nečte celý deník ani
+     * mzdy znovu - v náhledu průvodce to byl u každého roku zálohy průchod celou zálohou.
+     * Přehled nahraný dřív poslední měsíc mezd nemá; ten se pak dočte ze zálohy.
+     *
+     * @param list<array<string,mixed>> $agendas agendy z `meta.json`
+     */
+    public function withOverview(array $agendas): self
+    {
+        $years = [];
+        $known = true;
+        $last = null;
+        foreach ($agendas as $agenda) {
+            if ((string) ($agenda['ico'] ?? '') !== $this->ico) {
+                continue;
+            }
+            $years[] = (int) $agenda['year'];
+            if ((bool) ($agenda['has_payroll'] ?? false)) {
+                if (!array_key_exists('payroll_last', $agenda)) {
+                    $known = false;
+                }
+                $last = $agenda['payroll_last'] ?? null;
+            }
+        }
+        if ($years === []) {
+            return $this;
+        }
+        sort($years);
+        $this->years = array_values(array_unique($years));
+        if ($known) {
+            $this->lastPayrollPeriod = [$last !== null ? (string) $last : null];
+        }
+        return $this;
+    }
+
+    /** Poslední měsíc zpracovaných mezd v záloze (`MZDY`, `YYYY-MM`), nebo `null`. */
+    public function lastPayrollPeriod(): ?string
+    {
+        if ($this->lastPayrollPeriod !== null) {
+            return $this->lastPayrollPeriod[0];
+        }
+        $last = 0;
+        if ($this->hasRows('MZDY')) {
+            foreach ($this->rows('MZDY') as $row) {
+                $year = (int) ($row['ROK'] ?? 0);
+                $month = (int) ($row['MESIC'] ?? 0);
+                if ($year >= 1990 && $month >= 1 && $month <= 12) {
+                    $last = max($last, $year * 100 + $month);
+                }
+            }
+        }
+        $this->lastPayrollPeriod = [$last === 0 ? null : sprintf('%04d-%02d', intdiv($last, 100), $last % 100)];
+        return $this->lastPayrollPeriod[0];
     }
 
     public function hasTable(string $name): bool

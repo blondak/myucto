@@ -120,7 +120,7 @@ final class PremierImporter
         $period = $this->periods->findByYear($supplierId, $year);
         if ($period !== null) {
             $mapped = $this->map->get($supplierId, PremierImportRepository::KIND_PERIOD, (string) $year) !== null
-                || $this->map->all($supplierId, PremierImportRepository::KIND_JOURNAL_ENTRY) !== [];
+                || $this->map->hasAny($supplierId, PremierImportRepository::KIND_JOURNAL_ENTRY);
             $foreign = $this->journal->foreignEntryCount($supplierId, (int) $period['id']);
             if ($foreign > 0) {
                 $add('error', 'journal_not_empty', "Účetní období {$year} už obsahuje {$foreign} zápisů, které nevznikly převodem z PREMIER. Deník z PREMIER se do rozjetého účetnictví nepřimíchává.", ['entries' => $foreign]);

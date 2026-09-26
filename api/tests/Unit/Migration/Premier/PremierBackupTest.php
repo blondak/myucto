@@ -81,6 +81,38 @@ final class PremierBackupTest extends TestCase
         }
     }
 
+    /**
+     * Náhled průvodce vychází z přehledu nahrání v `meta.json`: kontrola před převodem
+     * každého roku dřív znovu četla celý deník (roky) a mzdy (poslední měsíc) zálohy, u
+     * reálné zálohy desítky sekund. S přehledem se deník ani mzdy nečtou - tady je po
+     * otevření zálohy přepíše prázdná tabulka a hodnoty zůstanou z přehledu.
+     */
+    public function testBackupWithOverviewDoesNotReadJournalOrPayrollAgain(): void
+    {
+        $dir = SyntheticPremierBackup::writeDir($this->tmp . '/data', false, ['payroll' => true]);
+        $overview = PremierBackup::overview($dir);
+        $last = PremierBackup::open($dir)->lastPayrollPeriod();
+        self::assertNotNull($last);
+        foreach ($overview as $agenda) {
+            self::assertTrue($agenda['has_payroll']);
+            self::assertSame($last, $agenda['payroll_last'], 'Přehled nese poslední měsíc mezd.');
+        }
+
+        $backup = PremierBackup::open($dir)->withOverview($overview);
+        copy($dir . '/SET_GLOB.DBF', $dir . '/PUB_UCTO.DBF');
+        copy($dir . '/SET_GLOB.DBF', $dir . '/MZDY.DBF');
+        self::assertSame([2025, 2026], $backup->years());
+        self::assertSame($last, $backup->lastPayrollPeriod());
+        self::assertSame([], PremierBackup::open($dir)->years(), 'Bez přehledu se roky čtou z (teď prázdného) deníku.');
+
+        // Přehled nahraný dřív poslední měsíc mezd nemá: ten se dočte ze zálohy.
+        $legacy = array_map(static function (array $agenda): array {
+            unset($agenda['payroll_last']);
+            return $agenda;
+        }, $overview);
+        self::assertNull(PremierBackup::open($dir)->withOverview($legacy)->lastPayrollPeriod());
+    }
+
     public function testArchiveWithoutJournalIsRejected(): void
     {
         $files = SyntheticPremierBackup::files($this->tmp);

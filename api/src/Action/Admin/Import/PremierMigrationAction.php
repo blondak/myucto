@@ -100,6 +100,10 @@ final class PremierMigrationAction extends AbstractMigrationAction
         $supplierIco = $this->supplierIco($supplierId);
         $preflight = [];
         $defaultYear = null;
+        // Roky deníku a poslední měsíc mezd má přehled nahrání v `meta.json`. Kontrola
+        // každého roku by jinak znovu přečetla celý deník i mzdy zálohy (u zálohy o pár
+        // letech desítky sekund, přes timeout webserveru).
+        $backup = null;
         foreach ((array) ($meta['agendas'] ?? []) as $agenda) {
             if ($supplierIco === '' || (string) $agenda['ico'] !== $supplierIco) {
                 continue;
@@ -107,7 +111,7 @@ final class PremierMigrationAction extends AbstractMigrationAction
             $year = (int) $agenda['year'];
             $defaultYear = max($defaultYear ?? 0, $year);
             try {
-                $backup = PremierBackup::open(PremierUploads::backupDir($supplierId, $token));
+                $backup ??= PremierBackup::open(PremierUploads::backupDir($supplierId, $token))->withOverview((array) $meta['agendas']);
                 $preflight[(string) $year] = $this->importer->preflight($supplierId, $backup, $year);
             } catch (\Throwable $e) {
                 if (!$e instanceof PremierException) {
