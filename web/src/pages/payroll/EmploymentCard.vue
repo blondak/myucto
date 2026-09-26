@@ -372,6 +372,26 @@ function fingerprint(): string {
 
 const dirty = computed(() => baseline.value !== '' && fingerprint() !== baseline.value)
 
+/*
+ * Úvazek se zadává v procentech s desetinnou čárkou („93,75"), server ho drží
+ * v setinách procenta (9375). Dřív pole chtělo přímo 9375 a účetní musela
+ * přepočítávat v hlavě. Nečitelný zápis hodnotu nezmění.
+ */
+const workloadPercent = computed<string>({
+  get: () => {
+    const bps = termsForm.value?.workload_basis_points
+    if (typeof bps !== 'number' || !Number.isFinite(bps)) return ''
+    return (bps / 100).toLocaleString('cs-CZ', { maximumFractionDigits: 2, useGrouping: false })
+  },
+  set: (value: string) => {
+    if (!termsForm.value) return
+    const normalized = value.replace(/\s+/g, '').replace('%', '').replace(',', '.')
+    const percent = Number(normalized)
+    if (normalized === '' || !Number.isFinite(percent)) return
+    termsForm.value.workload_basis_points = Math.min(10000, Math.max(1, Math.round(percent * 100)))
+  },
+})
+
 function hydrate(employment: PayrollEmployment) {
   const terms = employment.terms[0]
   if (!terms) {
@@ -1308,14 +1328,14 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
           </label>
 
           <label :class="FIELD">
-            {{ t('payroll.people.workload_bps') }}
+            {{ t('payroll.people.workload_percent') }}
             <input
-              v-model.number="termsForm.workload_basis_points"
-              type="number"
-              min="1"
-              max="10000"
+              v-model.lazy="workloadPercent"
+              type="text"
+              inputmode="decimal"
               :disabled="!canEditTerms || busy"
               :class="INPUT"
+              :placeholder="t('payroll.people.workload_percent_placeholder')"
               data-test="terms-workload"
             >
           </label>

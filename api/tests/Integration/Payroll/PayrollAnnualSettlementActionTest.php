@@ -77,6 +77,38 @@ final class PayrollAnnualSettlementActionTest extends TestCase
         }
     }
 
+    /** Q8-43: seznam nese začátek vedení mezd, podle něj stránka volí výchozí rok. */
+    public function testListCarriesThePayrollStartPeriod(): void
+    {
+        if (!$this->db->hasTable('payroll_module_state')) {
+            self::markTestSkipped('Chybí tabulka payroll_module_state.');
+        }
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_module_state (supplier_id, status, start_period) VALUES (?, 'setup', ?)
+             ON DUPLICATE KEY UPDATE status = 'setup', start_period = VALUES(start_period)"
+        )->execute([$this->supplierId, '2026-06-01']);
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('GET', '/api/payroll/annual-settlements/2025')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+            ->withAttribute('auth.effective_role', new EffectiveRole(
+                1,
+                'Syntetická mzdová role',
+                'staff',
+                true,
+                ['payroll.documents' => AccessLevel::WRITE->value, 'payroll' => AccessLevel::WRITE->value],
+            ));
+
+        $response = $this->action->list($request, new Response(), ['year' => '2025']);
+
+        self::assertSame(200, $response->getStatusCode());
+        $response->getBody()->rewind();
+        $body = json_decode((string) $response->getBody(), true);
+        self::assertIsArray($body);
+        self::assertSame('2026-06', substr((string) ($body['payroll_start_period'] ?? ''), 0, 7));
+    }
+
     public function testRejectsCaregiverListBeyondDatabasePositionLimit(): void
     {
         $caregiver = [

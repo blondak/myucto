@@ -254,6 +254,29 @@ describe('Roční zúčtování', () => {
     wrapper.unmount()
   })
 
+  /* Q8-43: firma převedená z jiného programu viděla rok, který zúčtoval on. */
+  it('výchozí rok nepředchází začátku vedení mezd v MyÚčtu', async () => {
+    const startYear = new Date().getFullYear() + 1
+    m.listAnnualSettlements.mockResolvedValue(listResponse([person()], { payroll_start_period: `${startYear}-01` }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.listAnnualSettlements.mock.calls[0]?.[0]).toBe(new Date().getFullYear() - 1)
+    expect(m.listAnnualSettlements.mock.calls.at(-1)?.[0]).toBe(startYear)
+    wrapper.unmount()
+  })
+
+  it('rok z odkazu se začátkem vedení mezd nepřepíše', async () => {
+    m.routeQuery = { year: '2024' }
+    m.listAnnualSettlements.mockResolvedValue(listResponse([person()], { payroll_start_period: '2030-01' }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.listAnnualSettlements.mock.calls.at(-1)?.[0]).toBe(2024)
+    m.routeQuery = {}
+    wrapper.unmount()
+  })
+
   it('při selhání načtení ukáže stav „nepovedlo se", ne prázdno', async () => {
     m.listAnnualSettlements.mockRejectedValue(new Error('boom'))
     const wrapper = mountPage()

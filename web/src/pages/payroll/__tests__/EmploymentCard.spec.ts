@@ -498,6 +498,20 @@ describe('EmploymentCard', () => {
       .toBe(4500050)
   })
 
+  /* Q8-11: úvazek se zadával jako 9375 místo 93,75 %. */
+  it('úvazek ukáže i přijme v procentech s desetinnou čárkou', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = await mountCard()
+
+    expect((wrapper.get('[data-test="terms-workload"]').element as HTMLInputElement).value).toBe('100')
+    await wrapper.get('[data-test="terms-workload"]').setValue('93,75')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    expect(vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2].workload_basis_points)
+      .toBe(9375)
+  })
+
   /**
    * Pravděpodobný výdělek (§ 355 ZP) je výjimka, ne běžný krok: u HPP se průměr
    * spočítá z uzavřených běhů sám. Pole proto na kartě není vidět, dokud si ho

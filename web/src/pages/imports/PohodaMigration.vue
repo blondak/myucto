@@ -5,6 +5,7 @@ import { isPohodaUploadReady, pohodaApi, type PohodaKind, type PohodaMessage, ty
 import { useToast } from '@/composables/useToast'
 import { useMigrationWizard } from '@/composables/useMigrationWizard'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import type { PermissionKey } from '@/security/permissions'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
@@ -57,6 +58,18 @@ function list(key: string): string[] {
   const own = tm(ownKey(key)) as unknown[]
   const items = Array.isArray(own) && own.length > 0 ? own : (tm(`pohoda.${key}`) as unknown[])
   return items.map(item => rt(item as Parameters<typeof rt>[0]))
+}
+/*
+ * Export PAMICA název firmy často nenese (jen IČO). Agenda s IČO firmy, ve
+ * které se pracuje, dostane název z MyÚčta, ať v tabulce nesvítí „—" u řádku,
+ * který je zjevně „naše" firma.
+ */
+const supplierStore = useSupplierStore()
+function agendaCompany(agenda: { ico: string; company: string }): string {
+  if (agenda.company) return agenda.company
+  const current = supplierStore.currentSupplier
+  if (current && agenda.ico && agenda.ico === (current.ic ?? '').trim()) return current.company_name
+  return '—'
 }
 const exportHelpItems = computed(() => list('export_help_items'))
 const mdbHelpItems = computed(() => list('mdb_help_items'))
@@ -484,7 +497,7 @@ const actions = computed<ActionItem[]>(() => {
                 </td>
                 <td class="px-3 py-2 font-mono whitespace-nowrap">{{ a.ico || '—' }}</td>
                 <td class="px-3 py-2">
-                  {{ a.company || '—' }}
+                  {{ agendaCompany(a) }}
                   <span v-if="a.ico !== upload.supplier_ico" class="ml-2 rounded-full bg-neutral-100 px-2 py-0.5 text-xs whitespace-nowrap text-neutral-600">{{ tt('other_company') }}</span>
                   <span v-if="!payrollWizard && a.has_accounting === false" class="ml-2 rounded-full bg-primary-50 px-2 py-0.5 text-xs whitespace-nowrap text-primary-700" data-testid="pohoda-payroll-only">{{ tt('payroll_only') }}</span>
                 </td>
@@ -573,8 +586,8 @@ const actions = computed<ActionItem[]>(() => {
         <p class="mb-2 text-sm text-neutral-500">{{ tt(kind === 'payroll' ? 'payroll_dry_run_hint' : 'dry_run_hint', { years: yearsLabel }) }}</p>
         <p v-if="runYears.length > 1" class="mb-2 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700" data-testid="pohoda-dry-run-years-hint">{{ tt('dry_run_years_hint') }}</p>
         <p class="mb-4 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700">{{ tt('dry_run_locks_hint') }}</p>
-        <ImportJobProgress v-if="jobRunning" :job="job" :percent="null" :cancelling="false" :show-cancel="false"
-          counts-key="pohoda.job_counts" background-hint-key="pohoda.background_hint" running-key="pohoda.dry_run_running" />
+        <ImportJobProgress v-if="jobRunning" :job="job" :percent="null" :cancelling="false" :show-cancel="false" :show-count="false"
+          counts-key="pohoda.job_counts" background-hint-key="pohoda.dry_run_background_hint" running-key="pohoda.dry_run_running" />
         <template v-if="jobRuns.length && jobRuns[0].mode === 'dry_run'">
           <p v-if="yearsNotRun.length" class="mb-3 rounded-lg border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-600" data-testid="pohoda-years-not-run">{{ tt('years_not_run', { years: yearsNotRun.join(', ') }) }}</p>
           <MoneyS3Protocol v-if="jobRuns.length === 1" :run="jobRuns[0]" prefix="pohoda" />

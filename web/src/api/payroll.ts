@@ -5679,6 +5679,8 @@ export interface PayrollAnnualSettlementList {
   /** Období mzdy, v němž se přeplatek nejpozději vrací (§ 38ch odst. 5). */
   payout_period: string
   payout_threshold_minor: number
+  /** První měsíc mezd v MyÚčtu (`YYYY-MM`), nebo `null`. */
+  payroll_start_period?: string | null
   items: PayrollAnnualSettlementListItem[]
   /** Počet lidí v CELÉM zúžení, ne na načtené stránce. */
   total: number

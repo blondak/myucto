@@ -80,7 +80,13 @@ function k(key: string): string {
 
 function label(group: string, key: string): string {
   const full = k(`${group}.${key}`)
-  return te(full) ? t(full) : key
+  if (te(full)) return t(full)
+  // Čítače sdílené vrstvy převzatých mezd (PayrollTakeover*) hlásí převod
+  // PAMICA/POHODA i PREMIER stejnými klíči. Popisky k nim vede prostor
+  // `premier` — bez tohoto záložního kroku protokol PAMICA ukazoval surové
+  // klíče typu `leave_existing`.
+  const shared = `premier.${group}.${key}`
+  return te(shared) ? t(shared) : key
 }
 
 function triple(v: [number, number, number]): string {
