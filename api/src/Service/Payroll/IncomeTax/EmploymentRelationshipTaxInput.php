@@ -16,8 +16,6 @@ final readonly class EmploymentRelationshipTaxInput
         public string $payerReference,
         public EmploymentRelationshipKind $kind,
         public array $components,
-        public OtherWithholdingEligibility $otherWithholdingEligibility = OtherWithholdingEligibility::Automatic,
-        public ?string $classificationEvidenceReference = null,
     ) {
         if (trim($relationshipReference) === '') {
             throw new InvalidArgumentException('Employment relationship reference must not be empty.');

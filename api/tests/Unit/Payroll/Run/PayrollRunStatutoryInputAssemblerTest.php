@@ -9,7 +9,6 @@ use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpEmployerSelectio
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibility;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibilitySource;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxCalculator;
-use MyInvoice\Service\Payroll\IncomeTax\OtherWithholdingEligibility;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCalculationStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxRegime;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
@@ -832,97 +831,56 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
     }
 
     /**
-     * Zařazení podle § 6 odst. 4 písm. b) ZDP se u pracovního poměru, zaměstnání
-     * malého rozsahu a DPP neptá — plyne ze zákona samo, takže výpočet dostane
-     * `automatic` a doklad o zařazení k němu nepatří.
+     * Sloupec `other_withholding_eligibility` („prohlášení plátce o účasti na
+     * nemocenském pojištění“, migrace 1403) do výpočtu daně nevstupuje.
+     * § 6 odst. 4 písm. b) ZDP se na účast neptá, jen na úhrn příjmů od
+     * plátce v měsíci pod rozhodnou částkou. Dřív sestavovač z tohoto sloupce
+     * posílal `IneligibleVerified` a jednatel s odměnou 4 400 Kč skončil na
+     * záloze, bez vyplnění pak v ručním posouzení.
+     *
+     * @param string|null $stored uložená hodnota sloupce, `null` = klíč chybí
      */
-    public function testRelationshipsClassifiedByLawKeepAutomaticEligibility(): void
+    #[DataProvider('storedPayerStatements')]
+    public function testStoredPayerStatementDoesNotChangeTheWithholding(?string $stored): void
     {
-        $snapshot = $this->completeSnapshot();
-        $snapshot['people'][0]['employments'][0]['term']
-            ['other_withholding_eligibility'] = 'eligible';
+        $snapshot = $this->directorSnapshot($stored ?? 'unverified', 440_000);
+        if ($stored === null) {
+            unset($snapshot['people'][0]['employments'][0]['term']
+                ['other_withholding_eligibility']);
+        }
 
         $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
-
-        $relationship = $bundle->incomeTax[0]->relationships[0];
-        self::assertSame(
-            OtherWithholdingEligibility::Automatic,
-            $relationship->otherWithholdingEligibility,
-        );
-        self::assertNull($relationship->classificationEvidenceReference);
-    }
-
-    /**
-     * Odměna jednatele naopak zařazení ze zákona nemá — nese ho prohlášení
-     * plátce ve smluvních podmínkách. Sestavovač ho posílal natvrdo jako
-     * `automatic`, takže výpočet každého jednatele bez podepsaného prohlášení
-     * odmítl s `other-withholding-eligibility-unverified`, ať uživatel nastavil
-     * cokoli. Doklad o zařazení míří na verzi podmínek, ve které prohlášení je.
-     *
-     * @param array{0:string,1:OtherWithholdingEligibility} $case
-     */
-    #[DataProvider('payerStatements')]
-    public function testStatutoryBodyTakesEligibilityFromEmploymentTerms(
-        string $stored,
-        OtherWithholdingEligibility $expected,
-    ): void {
-        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble(
-            $this->directorSnapshot($stored),
-        );
 
         self::assertSame([], $bundle->issues);
-        $relationship = $bundle->incomeTax[0]->relationships[0];
-        self::assertSame($expected, $relationship->otherWithholdingEligibility);
-        self::assertSame(
-            'employment-term:99',
-            $relationship->classificationEvidenceReference,
-        );
+        $result = (new MonthlyEmploymentIncomeTaxCalculator(
+            new PayrollRulesetProvider([
+                CzechPayrollRulesets2026::provider()
+                    ->forDate(PayrollRulesetDomain::IncomeTax, '2026-06-30'),
+            ]),
+        ))->calculate($bundle->incomeTax[0]);
+
+        self::assertSame(TaxCalculationStatus::Calculated, $result->status, implode(',', $result->issues));
+        self::assertSame(TaxRegime::Withholding, $result->relationships[0]->regime);
+        self::assertSame(66_000, $result->withholdingTaxMinorUnits);
     }
 
-    /** @return iterable<string,array{string,OtherWithholdingEligibility}> */
-    public static function payerStatements(): iterable
+    /** @return iterable<string,array{?string}> */
+    public static function storedPayerStatements(): iterable
     {
-        yield 'nezakládá účast' => [
-            'eligible',
-            OtherWithholdingEligibility::EligibleVerified,
-        ];
-        yield 'zakládá účast' => [
-            'ineligible',
-            OtherWithholdingEligibility::IneligibleVerified,
-        ];
+        yield 'nezakládá účast' => ['eligible'];
+        yield 'zakládá účast' => ['ineligible'];
+        yield 'nevyplněno' => ['unverified'];
+        yield 'snímek bez klíče' => [null];
     }
 
     /**
-     * Fail-closed: snapshot bez prohlášení (typicky běh uzamčený před migrací
-     * 1403) se nesmí dopočítat jinak, než jak by ho spočítal tehdejší kód.
-     */
-    public function testMissingPayerStatementFallsBackToUnverified(): void
-    {
-        $snapshot = $this->directorSnapshot('eligible');
-        unset($snapshot['people'][0]['employments'][0]['term']
-            ['other_withholding_eligibility']);
-
-        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
-
-        $relationship = $bundle->incomeTax[0]->relationships[0];
-        self::assertSame(
-            OtherWithholdingEligibility::Unverified,
-            $relationship->otherWithholdingEligibility,
-        );
-        self::assertNull($relationship->classificationEvidenceReference);
-    }
-
-    /**
-     * Celá cesta, kvůli které tahle větev vznikla: jednatel s odměnou 4 500 Kč
-     * bez podepsaného prohlášení. Sestavovač vezme prohlášení plátce ze
-     * smluvních podmínek a výpočet doběhne — dřív skončil ručním posouzením,
-     * které se nedalo přebít, protože to byl issue zákonného balíku, ne
-     * validace řádku.
+     * Jednatel s odměnou přesně 4 500 Kč bez podepsaného prohlášení: výpočet
+     * doběhne bez ručního posouzení a daní se zálohou.
      */
     public function testDirectorAtDecisiveAmountCompletesTheStatutoryCalculation(): void
     {
         $bundle = (new PayrollRunStatutoryInputAssembler())->assemble(
-            $this->directorSnapshot('eligible'),
+            $this->directorSnapshot('unverified'),
         );
 
         self::assertSame([], $bundle->issues);
@@ -935,19 +893,18 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
 
         self::assertSame([], $result->issues);
         self::assertSame(TaxCalculationStatus::Calculated, $result->status);
-        // 4 500 Kč je sama rozhodná částka, test § 6 odst. 4 ZDP je ostrý —
-        // účast na nemocenském pojištění vzniká a daní se zálohou.
+        // 4 500 Kč je sama rozhodná částka, test § 6 odst. 4 ZDP je ostrý
+        // („nedosahující“) a daní se zálohou.
         self::assertSame(TaxRegime::Advance, $result->relationships[0]->regime);
         self::assertSame(450_000, $result->advanceTax?->taxableIncomeMinorUnits);
     }
 
     /**
-     * Snapshot jednatele s odměnou 4 500 Kč, který u plátce nepodepsal
-     * prohlášení k dani.
+     * Snapshot jednatele, který u plátce nepodepsal prohlášení k dani.
      *
      * @return array<string,mixed>
      */
-    private function directorSnapshot(string $eligibility): array
+    private function directorSnapshot(string $eligibility, int $amountMinor = 450_000): array
     {
         $snapshot = $this->completeSnapshot();
         $person = &$snapshot['people'][0];
@@ -955,10 +912,10 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
             'not-signed';
         $employment = &$person['employments'][0];
         $employment['employment']['relation_type'] = 'statutory_body';
-        $employment['employment']['monthly_gross_minor'] = 450_000;
+        $employment['employment']['monthly_gross_minor'] = $amountMinor;
         $employment['term']['tax_declaration_signed'] = false;
         $employment['term']['other_withholding_eligibility'] = $eligibility;
-        $employment['inputs'][0]['amount_minor'] = 450_000;
+        $employment['inputs'][0]['amount_minor'] = $amountMinor;
         unset($person, $employment);
 
         // Sleva na poplatníka se bez podepsaného prohlášení uplatnit nedá;

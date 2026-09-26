@@ -230,7 +230,7 @@ function employment(): PayrollEmployment {
 }
 
 describe('doskok na podklady JMHZ', () => {
-  it.each(['office_id', 'weekly_hours', 'other_withholding_eligibility', 'social_employer_rate_category', 'social_part_time_discount_reason'])('zvýrazní konkrétní podmínku %s v uzavřeném vztahu', async field => {
+  it.each(['office_id', 'weekly_hours', 'social_employer_rate_category', 'social_part_time_discount_reason'])('zvýrazní konkrétní podmínku %s v uzavřeném vztahu', async field => {
     HTMLElement.prototype.scrollIntoView = vi.fn()
     const wrapper = await mountCard({ ...employment(), status: 'ended', relation_type: 'dpc' }, { attachTo: document.body })
     await (wrapper.vm as unknown as { focusSection: (panel: string, field: string) => Promise<void> }).focusSection('employment_terms', field)
@@ -628,37 +628,18 @@ describe('EmploymentCard', () => {
   })
 
   /**
-   * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP se ptá jen tam, kde
-   * zařazení neplyne ze samotného druhu vztahu. U pracovního poměru by to bylo
-   * pole, kterým uživatel nemůže nic změnit — backend u něj posílá `automatic`.
+   * Srážku podle § 6 odst. 4 písm. b) ZDP určuje jen úhrn příjmů od plátce
+   * v měsíci, ne účast na nemocenském pojištění. Pole „prohlášení plátce
+   * o účasti“ proto karta nenabízí u žádného druhu vztahu.
    */
-  it.each([
-    ['statutory_body', true],
-    ['dpc', true],
-    ['partner_dependent', true],
-    ['employment', false],
-    ['small_scale_employment', false],
-    ['dpp', false],
-  ] as const)('nabídne zařazení pro srážkovou daň jen u %s (%s)', async (relationType, visible) => {
-    const wrapper = await mountCard({ ...employment(), relation_type: relationType })
+  it.each(['statutory_body', 'dpc', 'partner_dependent', 'employment', 'small_scale_employment', 'dpp'] as const)(
+    'nenabízí prohlášení plátce k srážkové dani u %s',
+    async relationType => {
+      const wrapper = await mountCard({ ...employment(), relation_type: relationType })
 
-    expect(wrapper.find('[data-test="other-withholding-eligibility"]').exists()).toBe(visible)
-  })
-
-  /**
-   * Odpověď „neurčeno" je legitimní stav uložených podmínek, ale nesmí se
-   * z formuláře ztratit — jinak by ho uložení shodilo na jinou hodnotu.
-   */
-  it('předvyplní zařazení pro srážkovou daň z uložených podmínek', async () => {
-    const stored = employment()
-    stored.relation_type = 'statutory_body'
-    stored.terms[0]!.other_withholding_eligibility = 'eligible'
-    const wrapper = await mountCard(stored)
-
-    expect(
-      (wrapper.get('[data-test="other-withholding-eligibility"]').element as HTMLSelectElement).value,
-    ).toBe('eligible')
-  })
+      expect(wrapper.find('[data-test="other-withholding-eligibility"]').exists()).toBe(false)
+    },
+  )
 
   /**
    * Zvýšená sazba § 5a odst. 1 písm. b) a c) platí jen doloženému zařazení.

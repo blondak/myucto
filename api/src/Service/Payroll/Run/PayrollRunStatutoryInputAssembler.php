@@ -18,11 +18,9 @@ use MyInvoice\Service\Payroll\HealthInsurance\HealthOtherEmployerBase;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthPersonMonthInput;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthRelationshipKindMapper;
 use MyInvoice\Service\Payroll\IncomeTax\AnnualTaxAccumulatorInput;
-use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKind;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKindMapper;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipTaxInput;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxInput;
-use MyInvoice\Service\Payroll\IncomeTax\OtherWithholdingEligibility;
 use MyInvoice\Service\Payroll\IncomeTax\TaxChildClaim;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditClaim;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
@@ -1542,66 +1540,17 @@ final class PayrollRunStatutoryInputAssembler
             return null;
         }
 
-        [$eligibility, $classificationEvidence] = $this->otherWithholdingEligibility(
-            $kind,
-            $term,
-            $relationshipReference,
-        );
-
+        // Zařazení podle § 6 odst. 4 ZDP si výpočet odvodí z druhu vztahu
+        // a úhrnu příjmů v měsíci. Sloupec smluvních podmínek
+        // `other_withholding_eligibility` (migrace 1403, „prohlášení plátce
+        // o účasti na pojištění“) se sem vědomě nečte: písm. b) se na účast
+        // neptá, jen na úhrn pod rozhodnou částkou.
         return new EmploymentRelationshipTaxInput(
             $relationshipReference,
             "supplier:{$supplierId}",
             $kind,
             $components,
-            $eligibility,
-            $classificationEvidence,
         );
-    }
-
-    /**
-     * Zařazení vztahu pro § 6 odst. 4 písm. b) ZDP.
-     *
-     * U pracovního poměru, zaměstnání malého rozsahu a DPP plyne odpověď ze
-     * samotného druhu vztahu, takže se posílá `Automatic` a zařadí si ho výpočet.
-     * U odměny jednatele nebo člena statutárního orgánu, u DPČ a u společníka
-     * konajícího práci pro s. r. o. to z druhu vztahu poznat nejde — rozhoduje,
-     * jestli sjednaná odměna dosahuje rozhodné částky pro účast na nemocenském
-     * pojištění — a odpověď proto nese prohlášení plátce ve smluvních podmínkách.
-     *
-     * Neznámá nebo nevyplněná hodnota končí na `Unverified`, tedy ručním
-     * posouzením. Je to fail-closed záměrně: běhy spočítané před migrací 1403
-     * mají snapshot bez tohohle klíče a nesmí se dopočítat jinak, než jak by je
-     * spočítal tehdejší kód.
-     *
-     * @param array<string,mixed> $term
-     * @return array{OtherWithholdingEligibility,?string}
-     */
-    private function otherWithholdingEligibility(
-        EmploymentRelationshipKind $kind,
-        array $term,
-        string $relationshipReference,
-    ): array {
-        if (!$kind->requiresOtherWithholdingStatement()) {
-            return [OtherWithholdingEligibility::Automatic, null];
-        }
-        $eligibility = match ($term['other_withholding_eligibility'] ?? null) {
-            'eligible' => OtherWithholdingEligibility::EligibleVerified,
-            'ineligible' => OtherWithholdingEligibility::IneligibleVerified,
-            default => OtherWithholdingEligibility::Unverified,
-        };
-        if ($eligibility === OtherWithholdingEligibility::Unverified) {
-            return [$eligibility, null];
-        }
-        // Doklad o zařazení je ta verze smluvních podmínek, ve které plátce
-        // prohlášení uložil — je effective-dated a nese autora i důvod změny.
-        $termId = $this->positiveInt($term['id'] ?? null);
-
-        return [
-            $eligibility,
-            $termId === null
-                ? $relationshipReference
-                : "employment-term:{$termId}",
-        ];
     }
 
     /** @param array<string,mixed> $person */

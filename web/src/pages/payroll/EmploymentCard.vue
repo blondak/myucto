@@ -193,16 +193,6 @@ const advancedTermsPrefilled = computed(() => {
 })
 
 /**
- * Zařazení pro srážkovou daň se ptáme jen tam, kde ho z druhu vztahu nejde
- * odvodit. U pracovního poměru, zaměstnání malého rozsahu a DPP odpověď plyne
- * ze zákona sama (backend posílá `automatic`), takže by to bylo pole, kterým
- * uživatel nemůže nic změnit. Zrcadlí
- * EmploymentRelationshipKind::requiresOtherWithholdingStatement().
- */
-const needsOtherWithholdingStatement = computed(
-  () => ['dpc', 'partner_dependent', 'statutory_body'].includes(props.employment.relation_type),
-)
-/**
  * Stav, který se ukazuje: položka doložená dokladem je splněná, i když ji nikdo
  * ručně neodklepl (`effective_status`). Ruční evidence (`status`) zůstává tím,
  * podle čeho se zapisuje — proto se tlačítka řídí dál jí.
@@ -1424,13 +1414,6 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                 <select v-model="termsForm.tax_regime" :disabled="!canEditTerms || busy" :class="INPUT">
                   <option v-for="mode in ['advance','withholding','foreign','manual_review']" :key="mode" :value="mode">{{ t(`payroll.people.tax_regime.${mode}`) }}</option>
                 </select>
-              </label>
-              <label v-if="needsOtherWithholdingStatement" :class="FIELD">
-                {{ t('payroll.people.other_withholding_eligibility_label') }}
-                <select v-model="termsForm.other_withholding_eligibility" :disabled="!canEditTerms || busy" :class="INPUT" data-test="other-withholding-eligibility" data-a1-field="other_withholding_eligibility">
-                  <option v-for="state in ['unverified','eligible','ineligible']" :key="state" :value="state">{{ t(`payroll.people.other_withholding_eligibility.${state}`) }}</option>
-                </select>
-                <span :class="HINT">{{ t('payroll.people.other_withholding_eligibility_hint') }}</span>
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.foreign_country') }}
