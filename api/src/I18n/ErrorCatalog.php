@@ -19,6 +19,9 @@ final class ErrorCatalog
     /** @var array<string,string> CZ → EN */
     private const MAP = [
         'ARES je dočasně nedostupný.' => 'ARES is temporarily unavailable.',
+        'Přešifrování je potřeba potvrdit.' => 'The re-encryption has to be confirmed.',
+        'Přebalení je potřeba potvrdit.' => 'The re-wrap has to be confirmed.',
+        'Smazání nešifrovaných dokumentů osob po výmazu je nevratné a je potřeba ho potvrdit zvlášť.' => 'Deleting unencrypted documents of erased persons is irreversible and has to be confirmed separately.',
         'Aktuální heslo není správné.' => 'Current password is incorrect.',
         'Aplikace ještě není inicializovaná. Otevřete /setup pro vytvoření admin účtu.' => 'Application is not initialized yet. Open /setup to create the admin account.',
         'Chybí invoice_id.' => 'Missing invoice_id.',

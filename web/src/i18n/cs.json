@@ -24358,7 +24358,83 @@
       "fail": "Problém",
       "skip": "Nezjištěno"
     },
+    "payroll_archive": {
+      "title": "Šifrování mzdového archivu",
+      "legacy_intro": "Na disku leží {count} mzdových dokumentů z doby před zavedením šifrování. Kdokoli s přístupem k serveru nebo k záloze si je může přečíst.",
+      "files": "{count} souborů",
+      "encrypt": "Zašifrovat archiv",
+      "cli_hint": "Totéž bez omezení délky běhu: php api/bin/payroll-archive-reencrypt.php (manuál 999.9.4).",
+      "rewrap_intro": "Po výměně šifrovacího klíče je starým klíčem ještě zašifrováno {count} mzdových údajů. Dokud nejsou převedené, nejde starý klíč odebrat z konfigurace.",
+      "unknown_key": "{count} údajů je zašifrováno klíčem, který v konfiguraci není. Bez původního klíče je nejde přečíst ani převést. Správce serveru ho musí vrátit do app.secret_encryption_previous_keys.",
+      "rewrap": "Přebalit na nový klíč",
+      "dialog_title": "Zašifrovat mzdový archiv",
+      "dialog_intro": "Každý dokument se zašifruje klíčem osoby, které patří. Zapsaná kopie se ověří proti otisku originálu a originál se smaže až po shodě. Dokumenty půjde stahovat dál beze změny.",
+      "orphans_label": "Zašifrovat i soubory bez vazby na mzdový doklad",
+      "orphans_hint": "Zašifrují se klíčem firmy, nic se nemaže. Bez této volby zůstanou čitelné a kontrola je bude hlásit dál.",
+      "purge_label": "Smazat nešifrované dokumenty osob po výmazu",
+      "purge_hint": "Klíč osoby po výmazu už neexistuje, proto dokument nejde zašifrovat. Výmaz říká, že obsah nesmí zůstat čitelný.",
+      "purge_ack": "Rozumím, že smazání je nevratné a dokumenty už nepůjde obnovit.",
+      "purge_ack_required": "Pro smazání dokumentů osob po výmazu nejdřív potvrďte, že je smazání nevratné.",
+      "preview_title": "Náhled",
+      "result_title": "Výsledek",
+      "loading": "Načítám náhled…",
+      "preview_partial": "Náhled ukazuje první dávku, dalších {count} souborů se zpracuje v dalších dávkách.",
+      "stopped": "Zpracování se zastavilo, {count} souborů zbývá. Podívejte se na soubory níže a spusťte to znovu.",
+      "done": "Hotovo. Kontroly se znovu načetly.",
+      "failed": "Akci se nepodařilo dokončit.",
+      "cancel": "Zrušit",
+      "close": "Zavřít",
+      "confirm": "Zašifrovat",
+      "running": "Probíhá…",
+      "rewrap_title": "Přebalit mzdové údaje na nový klíč",
+      "rewrap_dialog": "Převede {count} mzdových údajů, datových klíčů dokumentů a exportů ze starého klíče na aktuální. Obsah se nemění, jen klíč, kterým je zašifrovaný.",
+      "rewrap_confirm": "Přebalit",
+      "rewrapped": "Přebaleno",
+      "rewrap_failed": "Selhalo",
+      "rewrap_remaining": "Zbývá",
+      "rewrap_done": "Starým klíčem už není zašifrováno nic. Požádejte správce serveru o odebrání starého klíče z app.secret_encryption_previous_keys.",
+      "status": {
+        "encrypted": "Zašifrováno",
+        "would_encrypt": "Zašifruje se",
+        "orphan_skipped": "Bez vazby na mzdový doklad, ponecháno",
+        "erased_skipped": "Osoba po výmazu, ponecháno",
+        "would_purge": "Osoba po výmazu, smaže se",
+        "erased_purged": "Osoba po výmazu, smazáno",
+        "integrity_mismatch": "Obsah neodpovídá otisku, k ručnímu posouzení",
+        "failed": "Selhalo"
+      }
+    },
     "checks": {
+      "payroll_archive_encryption": {
+        "label": "Nešifrované mzdové dokumenty",
+        "impact": "Výplatní pásky a mzdové listy z doby před zavedením šifrování leží na disku čitelně i v zálohách.",
+        "fix": "Spusťte Zašifrovat archiv v panelu nahoře.",
+        "actual_label": "Nešifrovaných souborů",
+        "expected_label": "Očekáváno"
+      },
+      "payroll_key_rotation": {
+        "label": "Rotace šifrovacího klíče",
+        "impact": "Část mzdových údajů je zašifrovaná starým klíčem, který proto musí zůstat v konfiguraci.",
+        "fix": "Spusťte Přebalit na nový klíč v panelu nahoře.",
+        "actual_label": "Údajů pod starým klíčem",
+        "expected_label": "Očekáváno",
+        "values": {
+          "no_rotation": "rotace neprobíhá"
+        },
+        "variants": {
+          "unknown_key": {
+            "label": "Mzdové údaje zašifrované neznámým klíčem",
+            "impact": "Údaje zašifrované klíčem, který v konfiguraci není, nejde přečíst ani převést.",
+            "fix": "Vraťte původní klíč do app.secret_encryption_previous_keys a pak spusťte Přebalit na nový klíč.",
+            "actual_label": "Údajů pod neznámým klíčem"
+          },
+          "retire_old_key": {
+            "label": "Starý šifrovací klíč lze odebrat",
+            "impact": "Všechny mzdové údaje už jsou zašifrované novým klíčem, starý klíč v konfiguraci je zbytečné riziko.",
+            "fix": "Odeberte starý klíč z app.secret_encryption_previous_keys. Nejdřív ověřte, že ho nepotřebují jiné části aplikace (TOTP, bankovní napojení, certifikáty)."
+          }
+        }
+      },
       "php_version": {
         "label": "Verze PHP",
         "impact": "Aplikace používá jazykové prvky, které starší PHP neumí — část stránek skončí chybou.",

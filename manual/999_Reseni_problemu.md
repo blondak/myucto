@@ -521,7 +521,8 @@ Kontroluje se verze PHP a povinná rozšíření, klíčové hodnoty `php.ini`
 (`memory_limit`, limity nahrávání, časové pásmo, OPcache), verze a nastavení
 MariaDB, dostupnost Redisu, volné místo a práva zápisu, shoda časových pásem,
 stav databázových migrací, struktura databáze proti migracím (viz 999.9.3),
-poslední běhy plánovaných úloh, stav licence a dostupnost novější verze aplikace.
+poslední běhy plánovaných úloh, stav licence, dostupnost novější verze aplikace
+a šifrování mzdového archivu (viz 999.9.4).
 
 Nálezy jsou seřazené od problémů k varováním, takže shora dolů odpovídají
 pořadí, v jakém má smysl je řešit.
@@ -628,6 +629,48 @@ přinést (najdeš ji podle názvu objektu v adresáři `db/migrations`). U migr
 evidované jako proběhlá to znamená smazat její řádek z tabulky `migrations`
 a spustit `php api/bin/migrate.php` znovu, migrace jsou opakovatelně spustitelné.
 Druhou cestou je obnova ze zálohy pořízené stejnou verzí aplikace.
+
+### 999.9.4 Šifrování mzdového archivu a rotace klíče
+
+Kontrola **Nešifrované mzdové dokumenty** počítá výplatní pásky, mzdové listy
+a další mzdová PDF, která vznikla před zavedením šifrování a leží na disku
+čitelně. Nad seznamem kontrol se pak zobrazí panel s počtem souborů po firmách
+a tlačítkem **Zašifrovat archiv**. Dialog nejdřív ukáže náhled (kolik souborů se
+zašifruje, kolik je bez vazby na mzdový doklad), po potvrzení běží přešifrování
+po dávkách, dokud nezbude nic ke zpracování.
+
+Každý soubor se zašifruje klíčem osoby, které patří. Zapsaná kopie se hned
+přečte zpět a porovná s otiskem originálu; originál se smaže teprve po shodě.
+Dokumenty jdou stahovat dál beze změny.
+
+- **Soubory bez vazby na mzdový doklad** se zašifrují klíčem firmy. Bez této
+  volby zůstanou beze změny a kontrola je hlásí dál.
+- **Dokumenty osob po výmazu** nejde zašifrovat, protože klíč osoby už
+  neexistuje. Volba **Smazat nešifrované dokumenty osob po výmazu** je smaže.
+  Smazání je nevratné, proto se potvrzuje ještě jedním zaškrtnutím.
+
+Kontrola **Rotace šifrovacího klíče** se objeví, jakmile správce serveru
+nastaví nový `app.secret_encryption_key` a původní klíč přesune do
+`app.secret_encryption_previous_keys`. Ukazuje, kolik mzdových údajů je ještě
+zašifrovaných starým klíčem. Tlačítko **Přebalit na nový klíč** je převede.
+Když už starým klíčem není zašifrované nic, kontrola vyzve k odebrání starého
+klíče z konfigurace, teprve tím rotace končí. Hodnota zašifrovaná klíčem, který
+v konfiguraci vůbec není, se hlásí jako problém: bez původního klíče ji nejde
+přečíst ani převést.
+
+Obě akce smí spustit jen správce instalace a zapisují se do activity logu
+(jen počty). Totéž jde z příkazové řádky, bez omezení délky běhu:
+
+```bash
+php api/bin/payroll-archive-reencrypt.php --status            # stav bez zápisu
+php api/bin/payroll-archive-reencrypt.php --dry-run           # náhled přešifrování
+php api/bin/payroll-archive-reencrypt.php                     # zašifrovat archiv
+php api/bin/payroll-archive-reencrypt.php --include-orphans   # včetně souborů bez vazby
+php api/bin/payroll-archive-reencrypt.php --rewrap            # archiv + přebalení na aktuální klíč
+```
+
+Na Windows `cmd\payroll-archive-reencrypt.cmd`, na Linuxu
+`cmd/payroll-archive-reencrypt.sh` se stejnými parametry.
 
 ## 999.10 Hlášení chyb
 

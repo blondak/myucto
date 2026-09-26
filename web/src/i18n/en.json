@@ -24358,7 +24358,83 @@
       "fail": "Problem",
       "skip": "Not determined"
     },
+    "payroll_archive": {
+      "title": "Payroll archive encryption",
+      "legacy_intro": "{count} payroll documents from before encryption was introduced are stored on disk in readable form. Anyone with access to the server or a backup can read them.",
+      "files": "{count} files",
+      "encrypt": "Encrypt archive",
+      "cli_hint": "The same without a run time limit: php api/bin/payroll-archive-reencrypt.php (manual 999.9.4).",
+      "rewrap_intro": "After the encryption key was replaced, {count} payroll values are still encrypted with the old key. The old key cannot be removed from the configuration until they are converted.",
+      "unknown_key": "{count} values are encrypted with a key that is not in the configuration. They cannot be read or converted without the original key. The server administrator must put it back into app.secret_encryption_previous_keys.",
+      "rewrap": "Re-wrap to the new key",
+      "dialog_title": "Encrypt the payroll archive",
+      "dialog_intro": "Each document is encrypted with the key of the person it belongs to. The written copy is verified against the fingerprint of the original, and the original is deleted only after they match. Documents can still be downloaded as before.",
+      "orphans_label": "Also encrypt files not linked to any payroll document",
+      "orphans_hint": "They are encrypted with the company key; nothing is deleted. Without this option they stay readable and the check keeps reporting them.",
+      "purge_label": "Delete unencrypted documents of erased persons",
+      "purge_hint": "The key of an erased person no longer exists, so the document cannot be encrypted. The erasure means its content must not stay readable.",
+      "purge_ack": "I understand the deletion is irreversible and the documents cannot be restored.",
+      "purge_ack_required": "To delete documents of erased persons, first confirm that the deletion is irreversible.",
+      "preview_title": "Preview",
+      "result_title": "Result",
+      "loading": "Loading preview…",
+      "preview_partial": "The preview shows the first batch; {count} more files will be processed in further batches.",
+      "stopped": "Processing stopped with {count} files remaining. Review the files below and run it again.",
+      "done": "Done. The checks have been reloaded.",
+      "failed": "The action could not be completed.",
+      "cancel": "Cancel",
+      "close": "Close",
+      "confirm": "Encrypt",
+      "running": "Running…",
+      "rewrap_title": "Re-wrap payroll data to the new key",
+      "rewrap_dialog": "Converts {count} payroll values, document data keys and exports from the old key to the current one. The content does not change, only the key it is encrypted with.",
+      "rewrap_confirm": "Re-wrap",
+      "rewrapped": "Re-wrapped",
+      "rewrap_failed": "Failed",
+      "rewrap_remaining": "Remaining",
+      "rewrap_done": "Nothing is encrypted with the old key any more. Ask the server administrator to remove the old key from app.secret_encryption_previous_keys.",
+      "status": {
+        "encrypted": "Encrypted",
+        "would_encrypt": "Will be encrypted",
+        "orphan_skipped": "Not linked to a payroll document, kept",
+        "erased_skipped": "Erased person, kept",
+        "would_purge": "Erased person, will be deleted",
+        "erased_purged": "Erased person, deleted",
+        "integrity_mismatch": "Content does not match its fingerprint, needs manual review",
+        "failed": "Failed"
+      }
+    },
     "checks": {
+      "payroll_archive_encryption": {
+        "label": "Unencrypted payroll documents",
+        "impact": "Payslips and payroll sheets from before encryption was introduced are readable on disk and in backups.",
+        "fix": "Run Encrypt archive in the panel above.",
+        "actual_label": "Unencrypted files",
+        "expected_label": "Expected"
+      },
+      "payroll_key_rotation": {
+        "label": "Encryption key rotation",
+        "impact": "Some payroll data is encrypted with the old key, which therefore has to stay in the configuration.",
+        "fix": "Run Re-wrap to the new key in the panel above.",
+        "actual_label": "Values under the old key",
+        "expected_label": "Expected",
+        "values": {
+          "no_rotation": "no rotation in progress"
+        },
+        "variants": {
+          "unknown_key": {
+            "label": "Payroll data encrypted with an unknown key",
+            "impact": "Data encrypted with a key that is not in the configuration cannot be read or converted.",
+            "fix": "Put the original key back into app.secret_encryption_previous_keys, then run Re-wrap to the new key.",
+            "actual_label": "Values under an unknown key"
+          },
+          "retire_old_key": {
+            "label": "The old encryption key can be removed",
+            "impact": "All payroll data is now encrypted with the new key; keeping the old key in the configuration is an unnecessary risk.",
+            "fix": "Remove the old key from app.secret_encryption_previous_keys. First make sure no other part of the application needs it (TOTP, bank connections, certificates)."
+          }
+        }
+      },
       "php_version": {
         "label": "PHP version",
         "impact": "The application uses language features older PHP does not support — some pages will fail.",

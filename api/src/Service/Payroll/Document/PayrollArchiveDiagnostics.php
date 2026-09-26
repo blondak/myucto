@@ -27,7 +27,7 @@ final class PayrollArchiveDiagnostics
 {
     public const CHECK_ARCHIVE = 'payroll_archive_encryption';
     public const CHECK_ROTATION = 'payroll_key_rotation';
-    private const MANUAL = '101_Bezpecnost';
+    private const MANUAL = '999_Reseni_problemu';
 
     public function __construct(
         private readonly PayrollArchiveReencryptionService $archive,

@@ -17,7 +17,7 @@ declare(strict_types=1);
  * `app.secret_encryption_previous_keys`) přebalí všechny mzdové `enc:v2:`
  * hodnoty v databázi, datové klíče dokumentů a soubory exportů na nový klíč.
  * `--status` jen vypíše, kolik hodnot ještě nese starý klíč. Postup je
- * popsaný v manuálu, kapitola 101 (Bezpečnost).
+ * popsaný v manuálu, kapitola 999.9.4.
  *
  * Použití:
  *   php api/bin/payroll-archive-reencrypt.php --dry-run
