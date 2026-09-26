@@ -66,7 +66,7 @@ final class PayrollDependantRepository
         $statement = $this->db->pdo()->prepare(
             'SELECT id, relation, full_name, given_name, family_name,
                     birth_date, birth_number_masked,
-                    birth_number_hash, ztp_p, student, existence_from,
+                    birth_number_hash, ztp_p, ztp_p_granted_on, student, existence_from,
                     existence_to, note, row_version, created_at, updated_at
                FROM payroll_dependants
               WHERE supplier_id = ? AND employee_id = ?
@@ -95,6 +95,7 @@ final class PayrollDependantRepository
                     $existenceTo,
                     $effectiveOn,
                     $frozenThrough,
+                    $row['ztp_p_granted_on'] === null ? null : (string) $row['ztp_p_granted_on'],
                 );
             }
 
@@ -114,6 +115,12 @@ final class PayrollDependantRepository
                     : (string) $row['birth_number_masked'],
                 'has_birth_number' => $row['birth_number_hash'] !== null,
                 'ztp_p' => (bool) $row['ztp_p'],
+                'ztp_p_granted_on' => $row['ztp_p_granted_on'] === null
+                    ? null
+                    : (string) $row['ztp_p_granted_on'],
+                'ztp_p_double_from' => $row['ztp_p_granted_on'] === null
+                    ? null
+                    : ChildCreditClaimWindow::ztpPEarliestFrom((string) $row['ztp_p_granted_on']),
                 'student' => (bool) $row['student'],
                 'existence_from' => $existenceFrom,
                 'existence_to' => $existenceTo,
@@ -158,9 +165,9 @@ final class PayrollDependantRepository
                     'INSERT INTO payroll_dependants
                         (supplier_id, employee_id, relation, full_name,
                          given_name, family_name, birth_date,
-                         ztp_p, student, existence_from, existence_to, note,
+                         ztp_p, ztp_p_granted_on, student, existence_from, existence_to, note,
                          created_by, updated_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 );
                 $insert->execute([
                     $supplierId,
@@ -171,6 +178,7 @@ final class PayrollDependantRepository
                     $data['family_name'],
                     $data['birth_date'],
                     (int) $data['ztp_p'],
+                    $data['ztp_p_granted_on'] ?? null,
                     (int) $data['student'],
                     $data['existence_from'],
                     $data['existence_to'],
@@ -458,13 +466,19 @@ final class PayrollDependantRepository
                             . ' uplatněný v dvojnásobné výši.',
                         );
                     }
+                    if ((bool) $claim['ztp_p']) {
+                        $this->assertZtpPFrom(
+                            (string) $claim['effective_from'],
+                            $data['ztp_p_granted_on'] ?? null,
+                        );
+                    }
                 }
 
                 $update = $this->db->pdo()->prepare(
                     'UPDATE payroll_dependants
                         SET relation = ?, full_name = ?, given_name = ?,
                             family_name = ?, birth_date = ?,
-                            ztp_p = ?, student = ?, existence_from = ?,
+                            ztp_p = ?, ztp_p_granted_on = ?, student = ?, existence_from = ?,
                             existence_to = ?, note = ?, updated_by = ?,
                             row_version = row_version + 1
                       WHERE supplier_id = ? AND employee_id = ? AND id = ?
@@ -477,6 +491,7 @@ final class PayrollDependantRepository
                     $data['family_name'],
                     $data['birth_date'],
                     (int) $data['ztp_p'],
+                    $data['ztp_p_granted_on'] ?? null,
                     (int) $data['student'],
                     $data['existence_from'],
                     $data['existence_to'],
@@ -550,32 +565,34 @@ final class PayrollDependantRepository
                 $userAgent,
             ): void {
                 $dependant = $this->lockDependant($supplierId, $employeeId, $dependantId);
-                $this->assertClaimable($supplierId, $employeeId, $dependant, $data, 0);
-                $id = $this->insertClaim(
-                    $supplierId,
-                    $employeeId,
-                    $dependantId,
-                    $data,
-                    $userId,
-                );
-                $this->activityLogger->log(
-                    'payroll.dependant_claim.created',
-                    $userId,
-                    'payroll_employee',
-                    $employeeId,
-                    [
-                        'dependant_id' => $dependantId,
-                        'claim_id' => $id,
-                        'child_order' => $data['child_order'],
-                        'credit_status' => $data['credit_status'],
-                        'ztp_p' => $data['ztp_p'],
-                        'effective_from' => $data['effective_from'],
-                        'effective_to' => $data['effective_to'],
-                    ],
-                    $ip,
-                    $userAgent,
-                    $supplierId,
-                );
+                foreach ($this->splitAtZtpPGrant($data, $dependant) as $part) {
+                    $this->assertClaimable($supplierId, $employeeId, $dependant, $part, 0);
+                    $id = $this->insertClaim(
+                        $supplierId,
+                        $employeeId,
+                        $dependantId,
+                        $part,
+                        $userId,
+                    );
+                    $this->activityLogger->log(
+                        'payroll.dependant_claim.created',
+                        $userId,
+                        'payroll_employee',
+                        $employeeId,
+                        [
+                            'dependant_id' => $dependantId,
+                            'claim_id' => $id,
+                            'child_order' => $part['child_order'],
+                            'credit_status' => $part['credit_status'],
+                            'ztp_p' => $part['ztp_p'],
+                            'effective_from' => $part['effective_from'],
+                            'effective_to' => $part['effective_to'],
+                        ],
+                        $ip,
+                        $userAgent,
+                        $supplierId,
+                    );
+                }
             },
         );
     }
@@ -915,6 +932,12 @@ final class PayrollDependantRepository
                 'Dvojnásobné zvýhodnění vyžaduje, aby osoba byla vedena jako ZTP/P.',
             );
         }
+        if ($data['ztp_p']) {
+            $this->assertZtpPFrom(
+                $data['effective_from'],
+                ($dependant['ztp_p_granted_on'] ?? null) === null ? null : (string) $dependant['ztp_p_granted_on'],
+            );
+        }
         $this->assertWithinExistence(
             $data['effective_from'],
             $data['effective_to'],
@@ -1036,6 +1059,62 @@ final class PayrollDependantRepository
     }
 
     /**
+     * Nárok s dvojnásobkem ZTP/P, který začíná dřív, než průkaz platil od
+     * počátku měsíce, se při založení rozdělí: do měsíce přiznání běží
+     * v základní výši, od prvního celého měsíce dvojnásobně. Účetní tak
+     * zadá jeden nárok a pravidlo § 35c odst. 10 se uplatní samo.
+     *
+     * @param ClaimInput $data
+     * @param array<string,mixed> $dependant
+     * @return list<ClaimInput>
+     */
+    private function splitAtZtpPGrant(array $data, array $dependant): array
+    {
+        $grantedOn = $dependant['ztp_p_granted_on'] ?? null;
+        if (!$data['ztp_p'] || $grantedOn === null) {
+            return [$data];
+        }
+        $doubleFrom = ChildCreditClaimWindow::ztpPEarliestFrom((string) $grantedOn);
+        if ($data['effective_from'] >= $doubleFrom) {
+            return [$data];
+        }
+        $single = $data;
+        $single['ztp_p'] = false;
+        if ($data['effective_to'] !== null && $data['effective_to'] < $doubleFrom) {
+            return [$single];
+        }
+        $single['effective_to'] = (new DateTimeImmutable($doubleFrom))
+            ->modify('-1 day')
+            ->format('Y-m-d');
+        $double = $data;
+        $double['effective_from'] = $doubleFrom;
+
+        return [$single, $double];
+    }
+
+    /**
+     * Dvojnásobek ZTP/P nejdřív za měsíc, na jehož počátku průkaz platil
+     * (§ 35c odst. 7 a 10 ZDP). Bez evidovaného dne přiznání se nekontroluje.
+     */
+    private function assertZtpPFrom(string $claimFrom, ?string $grantedOn): void
+    {
+        if ($grantedOn === null) {
+            return;
+        }
+        $doubleFrom = ChildCreditClaimWindow::ztpPEarliestFrom($grantedOn);
+        if ($claimFrom < $doubleFrom) {
+            throw new \InvalidArgumentException(sprintf(
+                'Dvojnásobné zvýhodnění (ZTP/P) náleží až od %s — průkaz byl přiznán %s'
+                . ' a zvýhodnění se uplatní za měsíc, na jehož počátku průkaz platil.'
+                . ' Nárok ve dvojnásobné výši zadejte od %s, do té doby v základní výši.',
+                (new DateTimeImmutable($doubleFrom))->format('j. n. Y'),
+                (new DateTimeImmutable($grantedOn))->format('j. n. Y'),
+                (new DateTimeImmutable($doubleFrom))->format('j. n. Y'),
+            ));
+        }
+    }
+
+    /**
      * Období nároku proti období vyživování — pravidlo „na jehož počátku"
      * a jeho výjimky drží {@see ChildCreditClaimWindow}.
      */
@@ -1145,7 +1224,7 @@ final class PayrollDependantRepository
         int $dependantId,
     ): array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT id, relation, ztp_p, birth_date, existence_from, existence_to,
+            'SELECT id, relation, ztp_p, ztp_p_granted_on, birth_date, existence_from, existence_to,
                     birth_number_hash, row_version
                FROM payroll_dependants
               WHERE supplier_id = ? AND employee_id = ? AND id = ?
@@ -1227,6 +1306,7 @@ final class PayrollDependantRepository
         ?string $existenceTo,
         string $effectiveOn,
         ?string $frozenThrough,
+        ?string $ztpPGrantedOn = null,
     ): array {
         $from = (string) $claim['effective_from'];
         $to = $claim['effective_to'] === null ? null : (string) $claim['effective_to'];
@@ -1261,6 +1341,12 @@ final class PayrollDependantRepository
             $claim['claim_reason'] === null ? null : (string) $claim['claim_reason'],
         )) {
             $blockers[] = 'outside_existence';
+        }
+        // Starší nárok se ZTP/P zapsaný dřív, než se den přiznání evidoval.
+        if ((bool) $claim['ztp_p'] && $ztpPGrantedOn !== null
+            && $from < ChildCreditClaimWindow::ztpPEarliestFrom($ztpPGrantedOn)
+        ) {
+            $blockers[] = 'ztp_p_before_grant';
         }
         if ($claim['superseded_by_id'] !== null) {
             $blockers[] = 'superseded';

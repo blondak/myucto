@@ -68,6 +68,7 @@ const dependantForm = reactive({
   birth_date: '',
   birth_number: '',
   ztp_p: false,
+  ztp_p_granted_on: '',
   student: false,
   existence_from: '',
   existence_to: '',
@@ -126,6 +127,24 @@ const claimFromTooEarly = computed(() => claimEarliestFrom.value !== null
   && claimForm.effective_from < claimEarliestFrom.value)
 const claimToTooLate = computed(() => claimLatestTo.value !== null
   && (claimForm.effective_to === '' || claimForm.effective_to > claimLatestTo.value))
+/*
+ * Dvojnásobek ZTP/P náleží od prvního měsíce, na jehož počátku průkaz platil.
+ * Server nárok zadaný dřív při založení sám rozdělí; formulář to jen předem
+ * říká, aby účetní nebyla překvapená dvěma řádky.
+ */
+const claimZtpPDoubleFrom = computed(() => editingDependant.value?.ztp_p_double_from ?? null)
+const claimZtpPSplits = computed(() => claimForm.ztp_p
+  && claimZtpPDoubleFrom.value !== null
+  && claimForm.effective_from !== ''
+  && claimForm.effective_from < claimZtpPDoubleFrom.value)
+/*
+ * Den přiznání je povinný u nově označeného držitele průkazu. U staršího
+ * záznamu, který ZTP/P nesl už dřív, se jen doporučí — jinak by nešlo opravit
+ * ani jméno dítěte, dokud někdo nedohledá rozhodnutí.
+ */
+const ztpPGrantMissing = computed(() => dependantForm.ztp_p
+  && dependantForm.ztp_p_granted_on === ''
+  && !(editingDependant.value?.ztp_p ?? false))
 
 const listActions = computed<ActionItem[]>(() => [{
   key: 'add-dependant',
@@ -197,6 +216,7 @@ function openDependantEditor(dependant: PayrollDependant | null): void {
   dependantForm.birth_date = dependant?.birth_date ?? ''
   dependantForm.birth_number = ''
   dependantForm.ztp_p = dependant?.ztp_p ?? false
+  dependantForm.ztp_p_granted_on = dependant?.ztp_p_granted_on ?? ''
   dependantForm.student = dependant?.student ?? false
   dependantForm.existence_from = dependant?.existence_from ?? ''
   dependantForm.existence_to = dependant?.existence_to ?? ''
@@ -317,6 +337,9 @@ function dependantPayload(): PayrollDependantPayload {
     family_name: dependantForm.family_name.trim() || null,
     birth_date: dependantForm.birth_date,
     ztp_p: dependantForm.ztp_p,
+    ztp_p_granted_on: dependantForm.ztp_p && dependantForm.ztp_p_granted_on !== ''
+      ? dependantForm.ztp_p_granted_on
+      : null,
     student: dependantForm.student,
     existence_from: dependantForm.existence_from,
     existence_to: dependantForm.existence_to === '' ? null : dependantForm.existence_to,
@@ -366,6 +389,10 @@ function claimPayload(): PayrollDependantClaimPayload {
 
 async function save(): Promise<void> {
   if (!props.canWrite || saving.value) return
+  if (editor.value === 'dependant' && ztpPGrantMissing.value) {
+    errorMessage.value = t('payroll.people.dependants.ztp_p_grant.required')
+    return
+  }
   saving.value = true
   errorMessage.value = ''
   try {
@@ -732,8 +759,18 @@ function creditLabel(claim: PayrollDependantClaim): string {
           <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.event_month.existence_to_hint') }}</span>
         </label>
         <label class="flex items-center gap-2 text-sm text-neutral-700">
-          <input v-model="dependantForm.ztp_p" type="checkbox" class="rounded border-neutral-300 text-payroll-600">
+          <input v-model="dependantForm.ztp_p" type="checkbox" class="rounded border-neutral-300 text-payroll-600" data-test="dependant-ztp-p">
           {{ t('payroll.people.dependants.form.ztp_p') }}
+        </label>
+        <label v-if="dependantForm.ztp_p" :class="labelClass" data-test="dependant-ztp-p-granted">
+          {{ t('payroll.people.dependants.ztp_p_grant.label') }} <RequiredMark v-if="!(editingDependant?.ztp_p ?? false)" />
+          <DateInput v-model="dependantForm.ztp_p_granted_on" :class="inputClass" data-test="dependant-ztp-p-granted-on" />
+          <span
+            v-if="ztpPGrantMissing"
+            class="mt-1 block rounded-md bg-warning-50 px-2 py-1 text-xs text-warning-700"
+            data-test="dependant-ztp-p-granted-missing"
+          >{{ t('payroll.people.dependants.ztp_p_grant.required') }}</span>
+          <span v-else class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.ztp_p_grant.hint') }}</span>
         </label>
         <label class="flex items-center gap-2 text-sm text-neutral-700">
           <input v-model="dependantForm.student" type="checkbox" class="rounded border-neutral-300 text-payroll-600">
@@ -815,10 +852,21 @@ function creditLabel(claim: PayrollDependantClaim): string {
         </label>
         <label v-if="!claimedByOther" :class="labelClass">
           <span class="flex items-center gap-2 text-sm text-neutral-700">
-            <input v-model="claimForm.ztp_p" type="checkbox" class="rounded border-neutral-300 text-payroll-600">
+            <input v-model="claimForm.ztp_p" type="checkbox" class="rounded border-neutral-300 text-payroll-600" data-test="claim-ztp-p">
             {{ t('payroll.people.dependants.form.claim_ztp_p') }}
           </span>
-          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.event_month.ztp_p_hint') }}</span>
+          <span
+            v-if="claimZtpPSplits && editingClaimId === null"
+            class="mt-1 block rounded-md bg-info-50 px-2 py-1 text-xs text-info-700"
+            data-test="claim-ztp-p-split"
+          >{{ t('payroll.people.dependants.ztp_p_grant.split', { date: claimZtpPDoubleFrom }) }}</span>
+          <span
+            v-else-if="claimZtpPSplits"
+            class="mt-1 block rounded-md bg-warning-50 px-2 py-1 text-xs text-warning-700"
+            data-test="claim-ztp-p-too-early"
+          >{{ t('payroll.people.dependants.ztp_p_grant.too_early', { date: claimZtpPDoubleFrom }) }}</span>
+          <span v-else-if="claimZtpPDoubleFrom" class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.ztp_p_grant.double_from', { date: claimZtpPDoubleFrom }) }}</span>
+          <span v-else class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.event_month.ztp_p_hint') }}</span>
         </label>
         <label class="flex items-center gap-2 text-sm text-neutral-700">
           <input v-model="claimForm.shared_household_confirmed" type="checkbox" class="rounded border-neutral-300 text-payroll-600">

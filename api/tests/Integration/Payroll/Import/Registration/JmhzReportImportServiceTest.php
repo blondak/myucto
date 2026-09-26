@@ -15,6 +15,7 @@ use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportLookup;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportService;
+use MyInvoice\Service\Payroll\PayrollDependantValidator;
 use MyInvoice\Service\Payroll\PayrollOpeningBalanceService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -684,6 +685,78 @@ final class JmhzReportImportServiceTest extends TestCase
         self::assertCount(1, $dependants[0]['claims'], (string) $result['message']);
         self::assertSame('2026-05-01', $dependants[0]['claims'][0]['effective_from']);
         self::assertSame([], $dependants[0]['claims'][0]['blockers']);
+    }
+
+    /**
+     * DAN-6: dítě osvojené (nebo převzaté do péče) v průběhu měsíce hlášení.
+     * Měsíc osvojení do nároku patří (§ 35c odst. 10 ZDP), vztah k dítěti je
+     * v evidenci. Import dřív posílal důvod nároku `null`, nárok nezapsal
+     * a skončil varováním „zapište ručně".
+     */
+    public function testChildAdoptedDuringTheReportedMonthIsClaimedForThatMonth(): void
+    {
+        [$employeeId] = $this->registerEmployee(withIdentifiers: true);
+        foreach ([['Dita', 'child_adopted', '2026-05-12'], ['Emil', 'child_in_care', '2026-05-20']] as [$name, $relation, $from]) {
+            $this->container->get(PayrollDependantRepository::class)->createDependant(
+                $this->supplierId,
+                $employeeId,
+                $this->container->get(PayrollDependantValidator::class)->validateDependant([
+                    'relation' => $relation,
+                    'full_name' => "{$name} Testovací",
+                    'given_name' => $name,
+                    'family_name' => 'Testovací',
+                    'birth_date' => '2020-03-03',
+                    'birth_number' => null,
+                    'ztp_p' => false,
+                    'student' => false,
+                    'existence_from' => $from,
+                    'existence_to' => null,
+                    'note' => null,
+                ]),
+                '2026-05-01',
+                $this->userId,
+                null,
+                null,
+            );
+        }
+        $files = [$this->file('jmhz-5.xml', JmhzReportFixtures::report([JmhzReportFixtures::person([
+            'oic' => $this->oic,
+            'id_ppv' => $this->idPpv,
+            'children' => [
+                [
+                    'identity' => ['given_name' => 'Dita', 'family_name' => 'Testovací', 'birth_date' => '2020-03-03'],
+                    'ztp_p' => false,
+                    'order' => '1',
+                ],
+                [
+                    'identity' => ['given_name' => 'Emil', 'family_name' => 'Testovací', 'birth_date' => '2020-03-03'],
+                    'ztp_p' => false,
+                    'order' => '2',
+                ],
+            ],
+            'other_caregivers' => [],
+        ])], 2026, 5))];
+
+        $key = $this->imports->preview($this->supplierId, 'test', $files)['records'][0]['key'];
+        $result = $this->apply($files, [$key])['results'][0];
+        self::assertSame('applied', $result['status'], (string) $result['message']);
+        self::assertStringNotContainsString('zapište ručně', (string) $result['message']);
+
+        $claims = [];
+        foreach ($this->container->get(PayrollDependantRepository::class)
+            ->overview($this->supplierId, $employeeId, '2026-05-01')['dependants'] as $dependant) {
+            self::assertCount(1, $dependant['claims'], (string) $result['message']);
+            $claims[$dependant['given_name']] = [
+                $dependant['claims'][0]['effective_from'],
+                $dependant['claims'][0]['claim_reason'],
+                $dependant['claims'][0]['blockers'],
+            ];
+        }
+        ksort($claims);
+        self::assertSame([
+            'Dita' => ['2026-05-01', 'adoption', []],
+            'Emil' => ['2026-05-01', 'foster_care', []],
+        ], $claims);
     }
 
     /** @return array{0:int,1:int} [employee_id, employment_id] */

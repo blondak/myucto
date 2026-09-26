@@ -6472,6 +6472,7 @@ export type PayrollDependantBlocker =
   | 'other_claimant_not_excluded'
   | 'declaration_missing'
   | 'outside_existence'
+  | 'ztp_p_before_grant'
   | 'superseded'
 
 export interface PayrollDependantCredit {
@@ -6524,6 +6525,10 @@ export interface PayrollDependant {
   birth_number_masked: string | null
   has_birth_number: boolean
   ztp_p: boolean
+  /** Den přiznání průkazu ZTP/P; null = neevidováno (starší záznam, import). */
+  ztp_p_granted_on?: string | null
+  /** První měsíc dvojnásobného zvýhodnění odvozený ze dne přiznání (§ 35c odst. 10). */
+  ztp_p_double_from?: string | null
   student: boolean
   existence_from: string
   existence_to: string | null
@@ -6548,6 +6553,7 @@ export interface PayrollDependantPayload {
   birth_date: string
   birth_number?: string | null
   ztp_p: boolean
+  ztp_p_granted_on?: string | null
   student: boolean
   existence_from: string
   existence_to: string | null

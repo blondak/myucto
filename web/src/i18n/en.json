@@ -4687,7 +4687,16 @@
           "other_claimant_not_excluded": "It is not documented that the other taxpayer does not claim the credit.",
           "declaration_missing": "A signed taxpayer declaration is missing at the start of the claim.",
           "outside_existence": "The claim falls outside the period in which the person is a dependant.",
+          "ztp_p_before_grant": "The ZTP/P double credit starts before the card was valid at the start of a month. End the claim at the end of the grant month and enter the double credit from the next one.",
           "superseded": "This version of the claim was replaced by a newer one."
+        },
+        "ztp_p_grant": {
+          "label": "ZTP/P card granted from",
+          "hint": "The day from which the card was granted (per the labour office decision). The double credit applies from the first month at whose start the card was valid.",
+          "required": "Enter the day the ZTP/P card was granted. It determines the month from which the double credit applies.",
+          "double_from": "The double credit applies from {date} based on the grant date on the child card.",
+          "split": "The double credit applies only from {date}. The claim will be saved in two parts: the basic amount until then, double from {date}.",
+          "too_early": "The double credit applies only from {date}. Change the start of the claim, or end it at the end of the previous month and enter the double credit as a new claim from {date}."
         },
         "form": {
           "person_title": "Dependant",
@@ -4736,7 +4745,7 @@
           "effective_from_too_early": "The claim can start on {date} at the earliest. Support starts during a month, which counts only for birth, adoption, placement into care or start of study; choose it as the reason for the claim.",
           "effective_to_hint": "{date} at the latest, i.e. the end of the month in which support ends.",
           "effective_to_too_late": "The claim can last until {date} at the latest, the end of the month in which support ends.",
-          "ztp_p_hint": "The double amount applies from the month at whose start the entitlement to the ZTP/P card was granted. If it was granted during a month, end the current claim at the end of that month and enter the ZTP/P claim from the next one."
+          "ztp_p_hint": "The double amount applies from the month at whose start the entitlement to the ZTP/P card was granted. Enter the grant date on the child card and the application will split the claim accordingly."
         }
       },
       "quick_edit": {

@@ -4687,7 +4687,16 @@
           "other_claimant_not_excluded": "Není doloženo, že druhý poplatník zvýhodnění neuplatňuje.",
           "declaration_missing": "K počátku nároku chybí podepsané prohlášení poplatníka.",
           "outside_existence": "Nárok je mimo období, kdy je osoba vedena jako vyživovaná.",
+          "ztp_p_before_grant": "Dvojnásobek ZTP/P začíná dřív, než průkaz platil od počátku měsíce. Nárok ukončete koncem měsíce přiznání a dvojnásobek zadejte od dalšího.",
           "superseded": "Tato verze nároku byla nahrazena novější."
+        },
+        "ztp_p_grant": {
+          "label": "Průkaz ZTP/P přiznán od",
+          "hint": "Den, od kterého byl průkaz přiznán (podle rozhodnutí úřadu práce). Dvojnásobek náleží od prvního měsíce, na jehož počátku průkaz platil.",
+          "required": "Vyplňte den přiznání průkazu ZTP/P. Podle něj aplikace určí, od kterého měsíce náleží dvojnásobné zvýhodnění.",
+          "double_from": "Dvojnásobek náleží od {date} podle dne přiznání průkazu na kartě dítěte.",
+          "split": "Dvojnásobek náleží až od {date}. Nárok se uloží ve dvou částech: do té doby v základní výši, od {date} dvojnásobně.",
+          "too_early": "Dvojnásobek náleží až od {date}. Změňte začátek nároku, nebo ho ukončete koncem předchozího měsíce a dvojnásobek zadejte jako nový nárok od {date}."
         },
         "form": {
           "person_title": "Vyživovaná osoba",
@@ -4736,7 +4745,7 @@
           "effective_from_too_early": "Nárok může začít nejdříve {date}. Vyživování začíná v průběhu měsíce; ten patří do nároku jen při narození, osvojení, převzetí do péče nebo zahájení studia. Událost zvolte jako důvod uplatnění.",
           "effective_to_hint": "Nejpozději {date}, tedy do konce měsíce, ve kterém vyživování končí.",
           "effective_to_too_late": "Nárok může trvat nejdéle do {date}, konce měsíce, ve kterém vyživování končí.",
-          "ztp_p_hint": "Dvojnásobek náleží od měsíce, na jehož počátku byl přiznán nárok na průkaz ZTP/P. Při přiznání v průběhu měsíce ukončete dosavadní nárok koncem měsíce a nárok se ZTP/P zadejte od dalšího."
+          "ztp_p_hint": "Dvojnásobek náleží od měsíce, na jehož počátku byl přiznán nárok na průkaz ZTP/P. Zapište na kartě dítěte den přiznání průkazu, aplikace pak nárok podle něj rozdělí sama."
         }
       },
       "quick_edit": {

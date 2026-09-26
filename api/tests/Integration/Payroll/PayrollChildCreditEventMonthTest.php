@@ -223,6 +223,83 @@ final class PayrollChildCreditEventMonthTest extends TestCase
         self::assertSame([5, 6, 7, 8, 9, 10, 11, 12], $annual['ztp_p']);
     }
 
+    /**
+     * DAN-7: průkaz ZTP/P přiznaný 12. května. Dvojnásobek náleží až za
+     * červen, první měsíc, na jehož počátku průkaz platil (§ 35c odst. 7
+     * a 10 ZDP). Účetní zadá den přiznání na kartě dítěte a jeden nárok se
+     * ZTP/P od ledna; zápis ho rozdělí a výpočet i roční zúčtování dostanou
+     * květen v základní výši. Dřív šlo pravidlo jen z nápovědy a nárok od
+     * ledna dal dvojnásobek i za měsíce před přiznáním.
+     */
+    public function testZtpPGrantedMidMonthDoublesTheCreditOnlyFromTheNextMonth(): void
+    {
+        $child = $this->createChild([
+            'birth_date' => '2019-02-02',
+            'existence_from' => '2019-02-02',
+            'ztp_p' => true,
+            'ztp_p_granted_on' => '2026-05-12',
+        ]);
+
+        $response = $this->postClaim($child, $this->claim(['ztp_p' => true]));
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $dependant = $this->json($response)['dependants'][0];
+        self::assertSame('2026-05-12', $dependant['ztp_p_granted_on']);
+        self::assertSame('2026-06-01', $dependant['ztp_p_double_from']);
+        $claims = array_map(
+            static fn (array $claim): array => [$claim['effective_from'], $claim['effective_to'], $claim['ztp_p'], $claim['blockers']],
+            $dependant['claims'],
+        );
+        usort($claims, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+        self::assertSame([
+            ['2026-01-01', '2026-05-31', false, []],
+            ['2026-06-01', null, true, []],
+        ], $claims);
+
+        self::assertSame(self::MONTHLY_FIRST_CHILD, $this->monthlyChildCredit('2026-05-31'));
+        self::assertSame(2 * self::MONTHLY_FIRST_CHILD, $this->monthlyChildCredit('2026-06-30'));
+        $annual = $this->annualMonths();
+        self::assertSame([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], $annual['claimed']);
+        self::assertSame([6, 7, 8, 9, 10, 11, 12], $annual['ztp_p']);
+    }
+
+    /** Průkaz platný od prvního dne měsíce otevírá dvojnásobek už za ten měsíc. */
+    public function testZtpPGrantedOnTheFirstDayDoublesThatMonth(): void
+    {
+        $child = $this->createChild([
+            'birth_date' => '2019-02-02',
+            'existence_from' => '2019-02-02',
+            'ztp_p' => true,
+            'ztp_p_granted_on' => '2026-05-01',
+        ]);
+
+        $response = $this->postClaim($child, $this->claim(['ztp_p' => true, 'effective_from' => '2026-05-01']));
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertCount(1, $this->json($response)['dependants'][0]['claims']);
+        self::assertSame(2 * self::MONTHLY_FIRST_CHILD, $this->monthlyChildCredit('2026-05-31'));
+    }
+
+    public function testZtpPGrantDateWithoutTheCardIsRejected(): void
+    {
+        $response = $this->action->create(
+            $this->request("/api/payroll/people/{$this->employeeId}/dependants", [
+                'relation' => 'child_own',
+                'full_name' => 'Syntetické Dítě',
+                'birth_date' => '2019-02-02',
+                'birth_number' => null,
+                'ztp_p' => false,
+                'ztp_p_granted_on' => '2026-05-12',
+                'student' => false,
+                'existence_from' => '2019-02-02',
+                'existence_to' => null,
+                'note' => null,
+            ]),
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+    }
+
     public function testChildMovingInMidMonthWithoutStartEventStartsNextMonth(): void
     {
         $child = $this->createChild([

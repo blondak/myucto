@@ -26,6 +26,28 @@ final class ChildCreditClaimWindowTest extends TestCase
         yield 'pokračující studium není zahájení' => ['2007-03-03', '2026-10-20', 'study_continues', '2026-11-01'];
     }
 
+    public function testZtpPDoubleStartsInTheFirstMonthTheCardHeldAtItsStart(): void
+    {
+        self::assertSame('2026-05-01', ChildCreditClaimWindow::ztpPEarliestFrom('2026-05-01'));
+        self::assertSame('2026-06-01', ChildCreditClaimWindow::ztpPEarliestFrom('2026-05-02'));
+        self::assertSame('2027-01-01', ChildCreditClaimWindow::ztpPEarliestFrom('2026-12-31'));
+    }
+
+    public function testRelationGivesTheStartEventReason(): void
+    {
+        self::assertSame('adoption', ChildCreditClaimWindow::reasonForRelation('child_adopted'));
+        self::assertSame('foster_care', ChildCreditClaimWindow::reasonForRelation('child_in_care'));
+        self::assertNull(ChildCreditClaimWindow::reasonForRelation('child_own'));
+        self::assertNull(ChildCreditClaimWindow::reasonForRelation('child_of_spouse'));
+        foreach (['child_adopted', 'child_in_care'] as $relation) {
+            self::assertContains(
+                ChildCreditClaimWindow::reasonForRelation($relation),
+                ChildCreditClaimWindow::START_EVENT_REASONS,
+            );
+            self::assertContains($relation, PayrollDependantValidator::CHILD_RELATIONS);
+        }
+    }
+
     #[DataProvider('starts')]
     public function testEarliestClaimStart(
         string $birthDate,
