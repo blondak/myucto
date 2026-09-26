@@ -264,6 +264,42 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         self::assertSame(25, $sections[0]['excluded_days']['docasNeschopnost']);
     }
 
+    /**
+     * Pracující důchodce: roční evidenční list (znění do 31. 12. 2025) se
+     * za něj sestavuje dál. Metodická pomůcka ČSSZ k ELDP, příklad 8: po
+     * přiznání starobního důchodu zaměstnavatel „musí založit nový ELDP na
+     * období po odeslání ELDP přiloženého k žádosti o důchod". Doba pojištění
+     * při pobírání důchodu zvyšuje důchod. Měsíční hlášení JMHZ třídu ELDP
+     * u poživatele důchodu neuvádí (metodika MPSV k JMHZ), to je ale jiný
+     * režim; test hlídá, aby se oba nesjednotily.
+     */
+    public function testWorkingPensionerStillGetsAnnualStatementUnderTheOldLaw(): void
+    {
+        $revisions = array_map(function (array $revision): array {
+            $input = json_decode($revision['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+            $input['people'][0]['statutory_evidence'] = [
+                'social' => ['working_pensioner_discount' => ['status' => 'verified']],
+            ];
+            $inputJson = CanonicalJson::encode($input);
+            $result = json_decode($revision['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+            $result['source_snapshot_hash'] = hash('sha256', $inputJson);
+            $resultJson = CanonicalJson::encode($result);
+
+            return [
+                ...$revision,
+                'input_snapshot_json' => $inputJson,
+                'input_snapshot_hash' => hash('sha256', $inputJson),
+                'result_snapshot_json' => $resultJson,
+                'result_snapshot_hash' => hash('sha256', $resultJson),
+            ];
+        }, $this->wholeYear(2025));
+
+        $sections = $this->build($revisions)->sections();
+
+        self::assertCount(1, $sections);
+        self::assertSame(365, $sections[0]['insurance_days']);
+    }
+
     /** @return list<array<string,mixed>> */
     private function maternityYear(): array
     {

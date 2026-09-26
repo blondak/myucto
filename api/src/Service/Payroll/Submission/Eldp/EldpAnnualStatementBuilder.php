@@ -63,6 +63,18 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
  * - **Odečítané doby** (10375, 10462–10469) — týkají se dob po dosažení
  *   důchodového věku, který modul nezná. Nula je proto podmíněná výslovným
  *   potvrzením mzdové účetní, ne výpočtem.
+ *
+ * ## Pracující důchodce: vědomě jinak než měsíční hlášení
+ *
+ * Měsíční hlášení JMHZ u poživatele starobního důchodu třídu ELDP neuvádí
+ * (JmhzEldpEvidenceBuilder::workingPensioner(), metodika MPSV k JMHZ). Tenhle
+ * samostatný list se ale sestavuje podle znění zákona č. 582/1991 Sb. účinného
+ * do 31. 12. 2025 (rok před 2026, přechod skončení před 1. 4. 2026, výzva
+ * ČSSZ/ÚSSZ), a v tom se za pracujícího důchodce vede dál: Metodická pomůcka
+ * ČSSZ k ELDP, příklad 8 — po přiznání důchodu zaměstnavatel „musí založit
+ * nový ELDP na období po odeslání ELDP přiloženého k žádosti o důchod",
+ * protože doba pojištění při pobírání důchodu důchod zvyšuje. Sjednotit obě
+ * pravidla by pracujícímu důchodci vzalo zvýšení důchodu za rok 2025.
  */
 final class EldpAnnualStatementBuilder
 {
