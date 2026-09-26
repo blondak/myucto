@@ -1687,23 +1687,18 @@ final class PayrollSubmissionService
                 ? null
                 : $this->encryption->encryptFor(
                     $detailsJson,
-                    'payroll-submission-issue:'
-                        . hash(
-                            'sha256',
-                            CanonicalJson::encode([
-                                'supplier_id' => $supplierId,
-                                'environment' =>
-                                    $submission['environment'],
-                                'submission_id' => $submissionId,
-                                'part_id' => $partId,
-                                'severity' => $severity,
-                                'validation_stage' => $validationStage,
-                                'issue_code' => $issueCode,
-                                'entity_type' => $entityType,
-                                'entity_reference' => $entityReference,
-                                'details_hash' => $detailsHash,
-                            ]),
-                        ),
+                    self::issueDetailsContext(
+                        $supplierId,
+                        $submission['environment'],
+                        $submissionId,
+                        $partId,
+                        $severity,
+                        $validationStage,
+                        $issueCode,
+                        $entityType,
+                        $entityReference,
+                        $detailsHash,
+                    ),
                 );
             $issueId = $this->repository->insertIssue(
                 $supplierId,
@@ -1796,7 +1791,38 @@ final class PayrollSubmissionService
             && $artifact['channel'] === $channel;
     }
 
-    private function artifactContext(
+    /** Kontext (AAD) šifrovaných detailů problému podání. */
+    public static function issueDetailsContext(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        ?int $partId,
+        string $severity,
+        string $validationStage,
+        string $issueCode,
+        ?string $entityType,
+        ?string $entityReference,
+        string $detailsHash,
+    ): string {
+        return 'payroll-submission-issue:'
+            . hash(
+                'sha256',
+                CanonicalJson::encode([
+                    'supplier_id' => $supplierId,
+                    'environment' => $environment,
+                    'submission_id' => $submissionId,
+                    'part_id' => $partId,
+                    'severity' => $severity,
+                    'validation_stage' => $validationStage,
+                    'issue_code' => $issueCode,
+                    'entity_type' => $entityType,
+                    'entity_reference' => $entityReference,
+                    'details_hash' => $detailsHash,
+                ]),
+            );
+    }
+
+    public static function artifactContext(
         int $supplierId,
         string $environment,
         int $submissionId,
@@ -1933,7 +1959,7 @@ final class PayrollSubmissionService
             ->format('Y-m-d H:i:s');
     }
 
-    private static function formOutcomeErrorsContext(
+    public static function formOutcomeErrorsContext(
         int $supplierId,
         string $environment,
         int $submissionId,

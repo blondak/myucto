@@ -1079,7 +1079,7 @@ final class PayrollSheetSnapshotBuilder
         return $result;
     }
 
-    private function encryptionContext(
+    public static function encryptionContext(
         int $supplierId,
         int $employeeId,
         int $taxYear,

@@ -2038,7 +2038,7 @@ class AnnualTaxCertificateSnapshotBuilder
         );
     }
 
-    private function encryptionContext(
+    public static function encryptionContext(
         int $supplierId,
         int $employeeId,
         int $taxYear,

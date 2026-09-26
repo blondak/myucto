@@ -218,7 +218,7 @@ final class PayrollPaymentExportStorage
         return $realDirectory;
     }
 
-    private function context(int $supplierId, string $storageKey): string
+    public static function context(int $supplierId, string $storageKey): string
     {
         return "payroll-payment-export-storage:{$supplierId}:{$storageKey}";
     }

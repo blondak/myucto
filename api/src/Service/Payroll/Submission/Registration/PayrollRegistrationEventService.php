@@ -1802,7 +1802,7 @@ final readonly class PayrollRegistrationEventService
         return $this->requiredText($value, 'source_reference', 191);
     }
 
-    private function context(int $supplierId, int $employmentId, string $manifestHash): string
+    public static function context(int $supplierId, int $employmentId, string $manifestHash): string
     {
         return "payroll-registration-event:{$supplierId}:{$employmentId}:{$manifestHash}";
     }

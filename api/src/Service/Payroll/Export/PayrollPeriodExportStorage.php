@@ -229,7 +229,7 @@ final class PayrollPeriodExportStorage
         return $realRoot;
     }
 
-    private function context(int $supplierId, string $storageKey): string
+    public static function context(int $supplierId, string $storageKey): string
     {
         return "payroll-period-export-storage:{$supplierId}:{$storageKey}";
     }

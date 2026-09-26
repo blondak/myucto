@@ -184,6 +184,81 @@ final class PayrollDocumentKeyRing
         return $stmt->rowCount();
     }
 
+    /**
+     * Přebalí datové klíče na aktuální master klíč (rotace master klíče).
+     *
+     * Obsah dokumentů je zašifrovaný DEKem, ne master klíčem, takže soubory
+     * na disku se při rotaci nepřepisují, stačí přebalit tuhle tabulku. Zápis
+     * je compare-and-swap na původní zabalenou hodnotu: souběžný krypto-výmaz
+     * (který `wrapped_key` vyprázdní) tím nemůže být přepsán zpět.
+     *
+     * @return array{total:int,current:int,rewrapped:int,would_rewrap:int,destroyed:int,failed:int}
+     */
+    public function rewrapAll(?int $supplierId = null, bool $dryRun = true): array
+    {
+        $sql = 'SELECT supplier_id, subject_id, wrapped_key, destroyed_at
+                  FROM payroll_document_data_keys'
+            . ($supplierId === null ? '' : ' WHERE supplier_id = ?')
+            . ' ORDER BY supplier_id, subject_id';
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($supplierId === null ? [] : [$supplierId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $result = [
+            'total' => count($rows),
+            'current' => 0,
+            'rewrapped' => 0,
+            'would_rewrap' => 0,
+            'destroyed' => 0,
+            'failed' => 0,
+        ];
+        $update = $this->db->pdo()->prepare(
+            'UPDATE payroll_document_data_keys
+                SET wrapped_key = ?
+              WHERE supplier_id = ? AND subject_id = ?
+                AND wrapped_key = ? AND destroyed_at IS NULL',
+        );
+        foreach ($rows as $row) {
+            if ($row['destroyed_at'] !== null) {
+                ++$result['destroyed'];
+                continue;
+            }
+            $sid = (int) $row['supplier_id'];
+            $subject = (int) $row['subject_id'];
+            $wrapped = (string) $row['wrapped_key'];
+            try {
+                $rewrapped = $this->encryption->rewrapFor(
+                    $wrapped,
+                    self::context($sid, $subject),
+                );
+                if ($rewrapped === null) {
+                    ++$result['current'];
+                    continue;
+                }
+                if ($dryRun) {
+                    ++$result['would_rewrap'];
+                    continue;
+                }
+                // DEK se po přebalení musí rozbalit na tentýž klíč, jinak by
+                // všechny dokumenty subjektu přestaly jít přečíst.
+                if (!hash_equals(
+                    $this->unwrap($sid, $subject, $wrapped),
+                    $this->unwrap($sid, $subject, $rewrapped),
+                )) {
+                    throw new \RuntimeException('Rewrapped data key differs.');
+                }
+                $update->execute([$rewrapped, $sid, $subject, $wrapped]);
+                $update->rowCount() === 1
+                    ? ++$result['rewrapped']
+                    : ++$result['failed'];
+            } catch (\Throwable) {
+                ++$result['failed'];
+            }
+        }
+
+        return $result;
+    }
+
     /** @return array<string,mixed>|null */
     private function row(int $supplierId, int $subjectId): ?array
     {

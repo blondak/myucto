@@ -22,6 +22,7 @@ import {
   type LogPreview,
 } from '@/api/diagnostics'
 import EnvironmentCheckList from '@/components/system/EnvironmentCheckList.vue'
+import PayrollArchiveEncryptionPanel from '@/components/system/PayrollArchiveEncryptionPanel.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
@@ -220,6 +221,9 @@ const canBuild = computed(() => {
           </button>
         </div>
       </section>
+
+      <!-- Náprava šifrování mzdového archivu: jen když kontrola něco našla. -->
+      <PayrollArchiveEncryptionPanel v-if="report" :checks="report.checks" @changed="load" />
 
       <!-- Kontroly -->
       <section v-if="report" class="rounded-lg border border-neutral-200 bg-surface p-5">

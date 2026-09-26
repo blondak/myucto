@@ -94,7 +94,47 @@ export interface LogPreview {
   truncated: boolean
 }
 
+/** Volby přešifrování mzdového archivu. Zápis vyžaduje `confirm`. */
+export interface PayrollArchiveReencryptOptions {
+  dry_run?: boolean
+  include_orphans?: boolean
+  purge_erased?: boolean
+  confirm?: boolean
+  confirm_purge?: boolean
+}
+
+/** Výsledek jedné dávky přešifrování (server zpracuje nejvýš ~200 souborů). */
+export interface PayrollArchiveReencryptResult {
+  dry_run: boolean
+  processed: number
+  remaining: number
+  counts: Record<string, number>
+  problems: { supplier_id: number; storage_key: string; status: string }[]
+}
+
+/** Výsledek jedné dávky přebalení na aktuální klíč. */
+export interface PayrollKeyRewrapResult {
+  dry_run: boolean
+  rewrapped: number
+  would_rewrap: number
+  failed: number
+  remaining: number
+  unknown: number
+}
+
 export const diagnosticsApi = {
+  /** Přešifruje dávku nešifrovaných mzdových dokumentů (Diagnostika). */
+  payrollArchiveReencrypt: (payload: PayrollArchiveReencryptOptions) =>
+    api
+      .post<PayrollArchiveReencryptResult>('/admin/diagnostics/payroll-archive/reencrypt', payload)
+      .then((r) => r.data),
+
+  /** Přebalí dávku mzdových šifrovaných hodnot na aktuální klíč. */
+  payrollKeyRewrap: (payload: { dry_run?: boolean; confirm?: boolean }) =>
+    api
+      .post<PayrollKeyRewrapResult>('/admin/diagnostics/payroll-archive/rewrap', payload)
+      .then((r) => r.data),
+
   /**
    * Kontrola prostředí před prvním setupem. Veřejná, ale jen dokud instalace
    * nemá admina — po setupu vrací 409 a platí `report()`.

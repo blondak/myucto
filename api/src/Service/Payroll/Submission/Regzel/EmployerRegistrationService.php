@@ -390,7 +390,7 @@ final readonly class EmployerRegistrationService
         ];
     }
 
-    private function encryptionContext(
+    public static function encryptionContext(
         int $supplierId,
         string $environment,
         string $sourceHash,

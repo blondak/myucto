@@ -433,7 +433,7 @@ final readonly class JmhzEldpEvidenceSnapshotService
         return $payload;
     }
 
-    private function encryptionContext(
+    public static function encryptionContext(
         int $supplierId,
         string $environment,
         int $revisionId,

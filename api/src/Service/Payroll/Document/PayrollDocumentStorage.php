@@ -32,9 +32,14 @@ use MyInvoice\Infrastructure\Config\RuntimePaths;
  * ── Legacy plaintext ────────────────────────────────────────────────────────
  * Dokumenty uložené před touhle změnou leží nezašifrované na staré cestě
  * `sup-{id}/{hh}/{hash}`. Čtení je najde a vrátí (ověřené hashem), zápis už
- * tam nikdy nemíří. Přešifrování archivu je věc samostatného obslužného
- * skriptu, ne téhle třídy — jde o přepis souborů, na které se odkazuje
- * neměnná evidence.
+ * tam nikdy nemíří. Přešifrování archivu řídí
+ * {@see PayrollArchiveReencryptionService}; tahle třída mu dává jen primitiva
+ * nad rozvržením cest (výpis legacy souborů, čtení BEZ fallbacku na legacy).
+ *
+ * ── Rotace master klíče ─────────────────────────────────────────────────────
+ * Soubory jsou zašifrované datovým klíčem subjektu, ne master klíčem. Rotace
+ * master klíče proto soubory nepřepisuje, přebalí se jen zabalené DEKy
+ * v `payroll_document_data_keys` ({@see PayrollDocumentKeyRing::rewrapAll()}).
  */
 final class PayrollDocumentStorage
 {
@@ -221,6 +226,141 @@ final class PayrollDocumentStorage
         }
 
         return true;
+    }
+
+    /**
+     * Přečte ŠIFROVANOU kopii subjektu, bez fallbacku na legacy plaintext.
+     *
+     * Slouží k ověření přešifrování: kdyby čtení při chybějící kopii spadlo do
+     * legacy větve jako {@see readVerified()}, ověření by „prošlo" nad
+     * originálem, ne nad tím, co se skutečně zapsalo.
+     */
+    public function readEncryptedVerified(
+        int $supplierId,
+        string $storageKey,
+        int $subjectId,
+    ): string {
+        self::assertKey($storageKey);
+        $encrypted = $this->resolve(
+            self::subjectDir($supplierId, $subjectId),
+            $storageKey,
+        );
+        if ($encrypted === null) {
+            throw new \RuntimeException('Encrypted payroll document copy was not found.');
+        }
+        $bytes = $this->decrypt(
+            $supplierId,
+            $subjectId,
+            $storageKey,
+            (string) file_get_contents($encrypted),
+        );
+        if (!hash_equals($storageKey, hash('sha256', $bytes))) {
+            throw new \RuntimeException('Payroll document integrity check failed.');
+        }
+
+        return $bytes;
+    }
+
+    /**
+     * Obsah nešifrovaného souboru ze starého rozvržení, ověřený hashem.
+     *
+     * @return string|null `null`, když tam soubor není
+     * @throws \RuntimeException obsah neodpovídá názvu souboru; takový soubor
+     *         se nesmí přešifrovat ani smazat, patří k ručnímu posouzení
+     */
+    public function readLegacyPlaintext(int $supplierId, string $storageKey): ?string
+    {
+        self::assertKey($storageKey);
+        $legacy = $this->resolve(self::legacyBaseDir($supplierId), $storageKey);
+        if ($legacy === null) {
+            return null;
+        }
+        $bytes = file_get_contents($legacy);
+        if (!is_string($bytes) || !hash_equals($storageKey, hash('sha256', $bytes))) {
+            throw new \RuntimeException('Payroll document integrity check failed.');
+        }
+
+        return $bytes;
+    }
+
+    /**
+     * Klíče nešifrovaných souborů firmy ve starém rozvržení `sup-{id}/{hh}/{hash}`.
+     *
+     * Bere jen to, co aplikace sama zapisovala: dvouznakový hex adresář
+     * a v něm soubor pojmenovaný sha256 malými písmeny, jehož první dva znaky
+     * odpovídají adresáři. Podadresáře subjektů (`subj-*`), dočasné soubory
+     * (`.tmp-*`) a symbolické odkazy se přeskakují, za odkazem by mohl ležet
+     * soubor mimo úložiště.
+     *
+     * @return \Generator<int,string>
+     */
+    public function legacyPlaintextKeys(int $supplierId): \Generator
+    {
+        $base = self::legacyBaseDir($supplierId);
+        if (!is_dir($base) || is_link($base)) {
+            return;
+        }
+        $realBase = realpath($base);
+        if ($realBase === false) {
+            return;
+        }
+        $shards = scandir($realBase);
+        if ($shards === false) {
+            return;
+        }
+        sort($shards, SORT_STRING);
+        foreach ($shards as $shard) {
+            if (preg_match('/^[a-f0-9]{2}$/D', $shard) !== 1) {
+                continue;
+            }
+            $dir = $realBase . DIRECTORY_SEPARATOR . $shard;
+            if (is_link($dir) || !is_dir($dir)) {
+                continue;
+            }
+            $files = scandir($dir);
+            if ($files === false) {
+                continue;
+            }
+            sort($files, SORT_STRING);
+            foreach ($files as $file) {
+                if (preg_match('/^[a-f0-9]{64}$/D', $file) !== 1
+                    || !str_starts_with($file, $shard)
+                ) {
+                    continue;
+                }
+                $path = $dir . DIRECTORY_SEPARATOR . $file;
+                if (is_link($path) || !is_file($path)) {
+                    continue;
+                }
+                yield $file;
+            }
+        }
+    }
+
+    /**
+     * Firmy, které mají na disku adresář mzdových dokumentů.
+     *
+     * @return list<int>
+     */
+    public static function archivedSupplierIds(): array
+    {
+        $root = RuntimePaths::storage('payroll-documents');
+        if (!is_dir($root)) {
+            return [];
+        }
+        $ids = [];
+        foreach (scandir($root) ?: [] as $entry) {
+            if (preg_match('/^sup-([1-9][0-9]{0,9})$/D', $entry, $match) !== 1) {
+                continue;
+            }
+            $path = $root . DIRECTORY_SEPARATOR . $entry;
+            if (is_dir($path) && !is_link($path)) {
+                $ids[] = (int) $match[1];
+            }
+        }
+        sort($ids);
+
+        return $ids;
     }
 
     /** Kořen dokumentů firmy — základ pro obě rozvržení cest. */

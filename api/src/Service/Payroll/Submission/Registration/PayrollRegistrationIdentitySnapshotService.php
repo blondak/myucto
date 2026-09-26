@@ -430,7 +430,7 @@ final readonly class PayrollRegistrationIdentitySnapshotService
      *   agenda_code:string,effective_on:string
      * } $scope
      */
-    private function encryptionContext(
+    public static function encryptionContext(
         array $scope,
         string $snapshotFingerprint,
         string $sourceManifestHash,

@@ -298,8 +298,7 @@ final class PayrollPaymentBatchBuilder
                     'instruction_ciphertext' =>
                         $this->encryption->encryptFor(
                             $instructionJson,
-                            "payroll-payment-item:{$supplierId}:"
-                                . $itemReference,
+                            self::itemContext($supplierId, $itemReference),
                         ),
                     'instruction_hash' => $instructionHash,
                     'liabilities' => $group['liabilities'],
@@ -343,7 +342,7 @@ final class PayrollPaymentBatchBuilder
             $snapshotHash = hash('sha256', $snapshotJson);
             $snapshotCiphertext = $this->encryption->encryptFor(
                 $snapshotJson,
-                "payroll-payment-batch:{$supplierId}:{$batchReference}",
+                self::batchContext($supplierId, $batchReference),
             );
             $batchId = $this->batches->insertBatch(
                 $supplierId,
@@ -1548,5 +1547,17 @@ final class PayrollPaymentBatchBuilder
         }
 
         return $left + $right;
+    }
+
+    /** Kontext (AAD) šifrovaného pokynu platební položky. */
+    public static function itemContext(int $supplierId, string $itemReference): string
+    {
+        return "payroll-payment-item:{$supplierId}:" . $itemReference;
+    }
+
+    /** Kontext (AAD) šifrovaného snapshotu platební dávky. */
+    public static function batchContext(int $supplierId, string $batchReference): string
+    {
+        return "payroll-payment-batch:{$supplierId}:{$batchReference}";
     }
 }
