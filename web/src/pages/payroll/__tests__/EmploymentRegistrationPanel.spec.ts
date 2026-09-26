@@ -21,6 +21,7 @@ const m = vi.hoisted(() => ({
   searchCzIsco: vi.fn(),
   detectChanges: vi.fn(),
   current: vi.fn(),
+  locale: 'cs',
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -61,8 +62,8 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
-    te: () => false,
-    locale: { value: 'cs' },
+    te: (key: string) => key.startsWith('payroll.people.registration.a1.problem.'),
+    locale: { get value() { return m.locale } },
   }),
 }))
 
@@ -282,6 +283,7 @@ describe('EmploymentRegistrationPanel', () => {
     setActivePinia(createPinia())
     useAuthStore().submissionTestEnvironmentAllowed = true
     m.current.mockResolvedValue(null)
+    m.locale = 'cs'
     vi.stubGlobal('crypto', {
       randomUUID: vi.fn(() => '00000000-0000-4000-8000-000000000001'),
     })
@@ -2018,6 +2020,51 @@ describe('EmploymentRegistrationPanel', () => {
     await flushPromises()
 
     expect(m.a1Profile.mock.calls.length).toBe(loads + 1)
+  })
+
+  it('bod 5: v anglickém UI přeloží hlášku problému pole A1 podle klíče', async () => {
+    m.locale = 'en'
+    m.checkA1Profile.mockResolvedValue({
+      complete: false,
+      problems: [{
+        field: 'employment.position_name',
+        code: 'registration_regzec_a1_field_value_invalid',
+        message: 'Název pozice je delší, než ČSSZ přijme.',
+        message_key: 'too_long',
+        params: { max: 255, length: 300 },
+      }],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper.get('[data-test="registration-a1-check"]').trigger('click')
+    await flushPromises()
+
+    const text = wrapper.get('[data-test="registration-a1-problem-text-0"]').text()
+    expect(text).toContain('payroll.people.registration.a1.problem.too_long')
+    expect(text).toContain('"max":255')
+    expect(text).not.toContain('delší, než ČSSZ')
+  })
+
+  it('bod 5: v češtině zůstane úplná věta serveru', async () => {
+    m.checkA1Profile.mockResolvedValue({
+      complete: false,
+      problems: [{
+        field: 'employment.position_name',
+        code: 'registration_regzec_a1_field_value_invalid',
+        message: 'Název pozice je delší, než ČSSZ přijme.',
+        message_key: 'too_long',
+        params: { max: 255, length: 300 },
+      }],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper.get('[data-test="registration-a1-check"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-a1-problem-text-0"]').text())
+      .toBe('Název pozice je delší, než ČSSZ přijme.')
   })
 
   it('UI-27: prošlou lhůtu označí červeným upozorněním', async () => {

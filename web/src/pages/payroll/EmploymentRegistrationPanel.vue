@@ -59,7 +59,7 @@ const props = defineProps<{
   masterDataVersion?: number
 }>()
 
-const { t, te } = useI18n()
+const { t, te, locale } = useI18n()
 const { errorMessage: serverErrorMessage } = usePayrollServerMessage()
 const {
   request: sendConfirmRequest,
@@ -405,10 +405,26 @@ function a1Missing(path: string): string | null {
   return a1MissingByField.value[path] ?? null
 }
 
+/**
+ * Hláška problému pole A1 v jazyce UI. Česká věta serveru je bohatší (říká
+ * i kde se údaj vyplňuje), proto zůstává v češtině; v jiném jazyce se hláška
+ * složí z jazykově nezávislého klíče a parametrů. Bez klíče zůstane věta serveru.
+ */
+function a1ProblemText(problem: PayrollRegistrationA1Problem): string {
+  const key = problem.message_key
+    ? `payroll.people.registration.a1.problem.${problem.message_key}`
+    : ''
+  if (locale.value === 'cs' || key === '' || !te(key)) return problem.message
+  return t(key, {
+    field: problem.field ? registrationA1FieldLabel(problem.field, t) : '',
+    ...(problem.params ?? {}),
+  })
+}
+
 const a1ProblemsByField = computed(() => {
   const map: Record<string, string> = {}
   for (const problem of a1Problems.value) {
-    if (problem.field !== null) map[problem.field] ??= problem.message
+    if (problem.field !== null) map[problem.field] ??= a1ProblemText(problem)
   }
   return map
 })
@@ -2403,7 +2419,7 @@ async function copyXml(): Promise<void> {
           <ul class="mt-1 space-y-1 text-xs text-danger-800">
             <li v-for="(problem, index) in a1Problems" :key="`${problem.field ?? ''}-${index}`">
               <span v-if="problem.field" class="font-medium">{{ registrationA1FieldLabel(problem.field, t) }}</span>
-              <span v-if="problem.field"> — </span>{{ problem.message }}
+              <span v-if="problem.field"> — </span><span :data-test="`registration-a1-problem-text-${index}`">{{ a1ProblemText(problem) }}</span>
               <button
                 v-if="problem.field"
                 type="button"

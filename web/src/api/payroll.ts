@@ -4412,6 +4412,9 @@ export interface PayrollRegistrationA1Problem {
   field: string | null
   code: string
   message: string
+  /** Jazykově nezávislý tvar hlášky (missing, too_long, digits, country, date, status_*). */
+  message_key?: string | null
+  params?: Record<string, string | number>
 }
 
 export interface PayrollRegistrationA1Profile extends PayrollRegistrationA1ProfilePayload {

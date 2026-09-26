@@ -6148,6 +6148,16 @@
           "check_failed": "The check could not be run.",
           "problems_title": "What blocks filing ({count})",
           "problems_hint": "You can still save — the draft stays on the server. Filing becomes possible once this list is empty.",
+          "problem": {
+            "missing": "{field} is missing — the ČSSZ registration (REGZEC A1) cannot be filed without it.",
+            "too_long": "{field} is longer than ČSSZ accepts: at most {max} characters, it now has {length}.",
+            "digits": "{field} must be a numeric code of exactly {length} digits.",
+            "country": "{field} must be a two-letter country code, for example CZ or SK.",
+            "date": "{field} must be a date in the format YYYY-MM-DD, for example 2026-08-05.",
+            "status_for_activity": "{field}: for activity type “{activity}” only {allowed} is allowed, it is now “{value}”.",
+            "status_format": "{field} must be a four-digit code from the NKPZ classification, it is now “{value}”.",
+            "status_unknown": "{field} is not in the NKPZ classification, it is now “{value}”. Pick a code from the list."
+          },
           "gap_open": "Fill in →",
           "gap_unreachable": "Could not locate {field} on screen. Please report it - this is a navigation bug.",
           "saved": "Version {version} was stored and is ready for a new A1 preview.",

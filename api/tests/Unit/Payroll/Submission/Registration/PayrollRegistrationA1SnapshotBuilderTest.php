@@ -154,6 +154,43 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
         );
     }
 
+    /**
+     * V anglickém UI se ukazovala česká věta serveru. Každá hláška pole
+     * proto nese jazykově nezávislý klíč a parametry, podle kterých ji
+     * frontend přeloží.
+     */
+    public function testProblemsCarryATranslatableKeyAndParameters(): void
+    {
+        $source = self::source('1', '1');
+        $source['permanent_address']['country_code'] = 'CZE';
+        $source['health_insurance_code'] = '11';
+        $source['employment']['actual_start_on'] = '2026-13-45';
+        $source['employment']['position_name'] = str_repeat('a', 300);
+        $source['facts']['highest_education_code'] = null;
+
+        $problems = (new PayrollRegistrationA1SnapshotBuilder())->problems(
+            $source,
+            self::identity(),
+            self::scope(),
+        );
+        $byField = [];
+        foreach ($problems as $problem) {
+            $byField[(string) $problem['field']] = $problem;
+        }
+
+        self::assertSame('country', $byField['permanent_address.country_code']['message_key']);
+        self::assertSame('digits', $byField['health_insurance_code']['message_key']);
+        self::assertSame(['length' => 3], $byField['health_insurance_code']['params']);
+        self::assertSame('date', $byField['employment.actual_start_on']['message_key']);
+        self::assertSame('too_long', $byField['employment.position_name']['message_key']);
+        self::assertSame(
+            ['max' => 255, 'length' => 300],
+            $byField['employment.position_name']['params'],
+        );
+        self::assertSame('missing', $byField['facts.highest_education_code']['message_key']);
+        self::assertSame([], $byField['facts.highest_education_code']['params']);
+    }
+
     /** Přísný režim nemá kam dát `field`, takže cesta jde do závorky. */
     public function testStrictModeKeepsTheTechnicalPathInBrackets(): void
     {

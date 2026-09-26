@@ -21,7 +21,7 @@ final class PayrollRegistrationA1SnapshotBuilder
     /**
      * Sbírané vady; `null` znamená přísný režim, kde se místo sbírání hází.
      *
-     * @var list<array{field:?string,code:string,message:string}>|null
+     * @var list<array{field:?string,code:string,message:string,message_key:?string,params:array<string,int|string>}>|null
      */
     private ?array $problems = null;
 
@@ -65,7 +65,7 @@ final class PayrollRegistrationA1SnapshotBuilder
      * @param array<string,mixed> $input
      * @param array<string,mixed> $identity
      * @param array<string,mixed> $scope
-     * @return list<array{field:?string,code:string,message:string}>
+     * @return list<array{field:?string,code:string,message:string,message_key:?string,params:array<string,int|string>}>
      */
     public function problems(
         array $input,
@@ -424,6 +424,12 @@ final class PayrollRegistrationA1SnapshotBuilder
                 'u druhu činnosti „' . $employment['activity_code'] . '" smí být '
                     . 'jen ' . implode(' nebo ', $allowed) . ', teď je „'
                     . $employment['employment_status_code'] . '".',
+                'status_for_activity',
+                [
+                    'activity' => (string) $employment['activity_code'],
+                    'allowed' => implode(', ', $allowed),
+                    'value' => (string) $employment['employment_status_code'],
+                ],
             );
         }
 
@@ -475,6 +481,7 @@ final class PayrollRegistrationA1SnapshotBuilder
                     . ' chybí — registraci na ČSSZ (REGZEC A1) bez toho podat '
                     . 'nejde. ' . PayrollRegistrationFieldVocabulary::describe($key),
                 'identity.' . $key,
+                'missing',
             );
         }
     }
@@ -531,6 +538,8 @@ final class PayrollRegistrationA1SnapshotBuilder
                     . 'v zaměstnání (NKPZ), například 1111 pro pracovní poměr '
                     . 'na dobu neurčitou; kratší kód ČSSZ nepřijme. Teď je „'
                     . $value . '".',
+                'status_format',
+                ['value' => $value],
             );
 
             return null;
@@ -540,6 +549,8 @@ final class PayrollRegistrationA1SnapshotBuilder
                 'employment_status_code',
                 'není v číselníku Klasifikace postavení v zaměstnání (NKPZ), '
                     . 'teď je „' . $value . '". Vyberte kód z nabídky.',
+                'status_unknown',
+                ['value' => $value],
             );
 
             return null;
@@ -792,6 +803,8 @@ final class PayrollRegistrationA1SnapshotBuilder
                 $key,
                 'je delší, než ČSSZ přijme: vejde se do ' . self::chars($max)
                     . ', teď jich má ' . $length . '. Zkraťte hodnotu.',
+                'too_long',
+                ['max' => $max, 'length' => $length],
             );
 
             return '';
@@ -832,6 +845,8 @@ final class PayrollRegistrationA1SnapshotBuilder
             $this->malformed(
                 $key,
                 "musí být číselný kód o přesně {$length} číslicích.",
+                'digits',
+                ['length' => $length],
             );
 
             return '';
@@ -850,6 +865,7 @@ final class PayrollRegistrationA1SnapshotBuilder
             $this->malformed(
                 $key,
                 'musí být dvoupísmenná zkratka státu, například CZ nebo SK.',
+                'country',
             );
 
             return '';
@@ -895,6 +911,7 @@ final class PayrollRegistrationA1SnapshotBuilder
             $this->malformed(
                 $key,
                 'musí být datum ve tvaru RRRR-MM-DD, například 2026-08-05.',
+                'date',
             );
 
             return '';
@@ -944,6 +961,7 @@ final class PayrollRegistrationA1SnapshotBuilder
                 . ' chybí — registraci na ČSSZ (REGZEC A1) bez toho podat nejde. '
                 . PayrollRegistrationFieldVocabulary::describe($path),
             $path,
+            'missing',
         );
     }
 
@@ -953,14 +971,21 @@ final class PayrollRegistrationA1SnapshotBuilder
      * „Chybí" by tady lhalo — účetní by koukala na vyplněné pole a hledala
      * prázdné. `$expectation` proto musí říct, JAK má hodnota vypadat.
      */
-    private function malformed(string $field, string $expectation): void
-    {
+    /** @param array<string,int|string> $params */
+    private function malformed(
+        string $field,
+        string $expectation,
+        string $messageKey,
+        array $params = [],
+    ): void {
         $path = $this->prefix . $field;
         $this->fail(
             'registration_regzec_a1_field_value_invalid',
             PayrollRegistrationFieldVocabulary::label($path) . ' ' . $expectation
                 . ' ' . PayrollRegistrationFieldVocabulary::describe($path),
             $path,
+            $messageKey,
+            $params,
         );
     }
 
@@ -972,8 +997,20 @@ final class PayrollRegistrationA1SnapshotBuilder
         $this->fail($code, $message, $field);
     }
 
-    private function fail(string $code, string $message, ?string $field): void
-    {
+    /**
+     * `message_key` + `params` nesou jazykově nezávislý tvar hlášky: frontend
+     * ji podle nich přeloží (v anglickém UI se dřív ukazovala česká věta
+     * serveru). Bez klíče se ukáže `message`.
+     *
+     * @param array<string,int|string> $params
+     */
+    private function fail(
+        string $code,
+        string $message,
+        ?string $field,
+        ?string $messageKey = null,
+        array $params = [],
+    ): void {
         if ($this->problems === null) {
             // Přísný režim nemá kam dát `field`, takže technická cesta jde do
             // závorky na konec věty. Bez ní by podpora nedohledala pole.
@@ -995,6 +1032,8 @@ final class PayrollRegistrationA1SnapshotBuilder
             'field' => $field,
             'code' => $code,
             'message' => $message,
+            'message_key' => $messageKey,
+            'params' => $params,
         ];
     }
 
