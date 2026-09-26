@@ -56,9 +56,24 @@ final class SicknessXmlBuilderTest extends TestCase
             strpos($xml, '<pobiraDuchod>'),
             strpos($xml, '<pracoval>'),
         );
-        // Rozhodné období se od 1. 4. 2026 vykazuje výhradně měsíčním
-        // hlášením (§ 97 odst. 4), takže do datové věty nesmí.
+        // Bez měsíců mimo měsíční hlášení a bez pravděpodobného příjmu nemá
+        // věta rozhodné období co nést.
         self::assertStringNotContainsString('rozhodneObdobi', $xml);
+    }
+
+    /**
+     * Příjem z malého rozsahu je v XSD v celých Kč. Případ ho drží v haléřích
+     * a dřív se do věty psal bez převodu — XSD ho pustilo (je to jen celé
+     * číslo), ale ČSSZ by přečetla stonásobek.
+     */
+    public function testSmallScopeIncomeIsSentInWholeCrowns(): void
+    {
+        $payload = $this->nempriPayload(['smallScopeIncomeMinor' => 350_050]);
+        $xml = $this->nempri->serialize($payload);
+
+        $this->validator->validateNempri($payload, $xml);
+
+        self::assertStringContainsString('<prijemMalyRozsah>3501</prijemMalyRozsah>', $xml);
     }
 
     public function testNempriForCompensatoryAllowanceOmitsUnpaidLeaveSection(): void
@@ -79,24 +94,79 @@ final class SicknessXmlBuilderTest extends TestCase
     }
 
     /**
-     * Datová věta, kterou zaměstnavatel nemůže naplnit, se nesestaví. Otcovská
-     * povinně nese `zadostODavku` s údaji o dítěti — ty podává pojištěnec podle
-     * § 109 odst. 1 písm. b) bodu 1 zák. č. 187/2006 Sb.
+     * ČSSZ páruje oznámení o nemocenském s eNeschopenkou podle čísla
+     * rozhodnutí. Dřív bylo číslo povinné jen u opravného podání, takže šla
+     * připravit věta, kterou ČSSZ nezpracuje.
      */
-    public function testNempriRefusesBenefitKindsThatNeedEmployeeApplication(): void
+    public function testNempriRequiresDecisionNumberOutsideForeignCase(): void
     {
-        $payload = $this->nempriPayload([
-            'benefitKind' => SicknessBenefitKind::Opp,
+        $payload = $this->nempriPayload(['decisionNumber' => null]);
+
+        try {
+            $this->validator->validateNempri($payload, $this->nempri->serialize($payload));
+            self::fail('Nemocenské bez čísla rozhodnutí ČSSZ nespáruje.');
+        } catch (SicknessException $exception) {
+            self::assertSame('nempri_decision_number_missing', $exception->validationCode);
+        }
+
+        $foreign = $this->nempriPayload(['decisionNumber' => null, 'foreignCase' => true]);
+        $this->validator->validateNempri($foreign, $this->nempri->serialize($foreign));
+        self::assertTrue(true);
+    }
+
+    public function testHzupnRequiresConfirmationNumberOutsideForeignCase(): void
+    {
+        $payload = $this->hzupnPayload(['confirmationNumber' => null]);
+
+        try {
+            $this->validator->validateHzupn($payload, $this->hzupn->serialize($payload), '2026-08-03');
+            self::fail('Hlášení bez čísla rozhodnutí ČSSZ nespáruje s neschopenkou.');
+        } catch (SicknessException $exception) {
+            self::assertSame('hzupn_confirmation_number_missing', $exception->validationCode);
+        }
+
+        $foreign = $this->hzupnPayload(['confirmationNumber' => null, 'foreignCase' => true]);
+        $this->validator->validateHzupn($foreign, $this->hzupn->serialize($foreign), '2026-08-03');
+        self::assertTrue(true);
+    }
+
+    /**
+     * „Nevrátil se do práce“ s důvodem a datem (nástup na PPM, skončení
+     * zaměstnání) ČSSZ přijímá. Validátor datum bez příznaku návratu dřív
+     * zakazoval, takže takové hlášení nešlo sestavit.
+     */
+    public function testHzupnAcceptsNoReturnWithReasonAndDate(): void
+    {
+        $payload = $this->hzupnPayload([
+            'returnedToWork' => false,
+            'returnReason' => 'skončení zaměstnání',
+            'returnedOn' => '2026-08-20',
+            'hoursWorkedLastDay' => null,
+            'shiftHoursLastDay' => null,
+            'workIntervals' => [],
+        ]);
+        $xml = $this->hzupn->serialize($payload);
+
+        $this->validator->validateHzupn($payload, $xml, '2026-08-03');
+
+        self::assertStringContainsString('<navratDoPrace>N</navratDoPrace>', $xml);
+        self::assertStringContainsString('<datumNavratDoPrace>2026-08-20</datumNavratDoPrace>', $xml);
+        self::assertStringContainsString('<duvodNavratDoPrace>skončení zaměstnání</duvodNavratDoPrace>', $xml);
+    }
+
+    public function testHzupnNoReturnNeedsReason(): void
+    {
+        $payload = $this->hzupnPayload([
+            'returnedToWork' => false,
+            'returnReason' => null,
+            'returnedOn' => null,
         ]);
 
         try {
-            $this->validator->validateNempri($payload, '<NEMPRI/>');
-            self::fail('Otcovská se nesmí sestavit z údajů zaměstnavatele.');
+            $this->validator->validateHzupn($payload, $this->hzupn->serialize($payload), '2026-08-03');
+            self::fail('Hlášení „nevrátil se“ bez důvodu nic neříká.');
         } catch (SicknessException $exception) {
-            self::assertSame(
-                'nempri_paternity_application_data_not_held',
-                $exception->validationCode,
-            );
+            self::assertSame('hzupn_return_reason_missing', $exception->validationCode);
         }
     }
 

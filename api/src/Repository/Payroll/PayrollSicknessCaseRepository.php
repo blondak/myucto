@@ -47,11 +47,23 @@ final readonly class PayrollSicknessCaseRepository
         string $environment,
         ?int $employmentId = null,
     ): array {
+        // `probable_income_suggestion_minor` je NÁVRH pravděpodobné výše příjmu:
+        // sjednaná měsíční hrubá mzda z podmínek účinných ke dni události.
+        // Do věty nejde sám — jde tam jen to, co účetní u případu potvrdí.
         $sql =
             'SELECT sickness.*, employee.full_name,
                     employment.code AS employment_code,
                     employment.start_date AS employment_start_date,
-                    employment.end_date AS employment_end_date
+                    employment.end_date AS employment_end_date,
+                    (SELECT terms.monthly_gross_minor
+                       FROM payroll_employment_terms terms
+                      WHERE terms.supplier_id = sickness.supplier_id
+                        AND terms.employment_id = sickness.employment_id
+                        AND terms.effective_from <= sickness.incapacity_from
+                        AND (terms.effective_to IS NULL
+                             OR terms.effective_to >= sickness.incapacity_from)
+                      ORDER BY terms.effective_from DESC, terms.id DESC
+                      LIMIT 1) AS probable_income_suggestion_minor
                FROM payroll_sickness_cases sickness
                JOIN payroll_employees employee
                  ON employee.supplier_id = sickness.supplier_id
@@ -94,7 +106,7 @@ final readonly class PayrollSicknessCaseRepository
                     employment.start_date,
                     employment.actual_start_date,
                     employment.end_date,
-                    employment.effective_status,
+                    employment.status,
                     employee.full_name,
                     terms.activity_code,
                     supplier.company_name AS employer_name,
@@ -331,8 +343,213 @@ final readonly class PayrollSicknessCaseRepository
         }
     }
 
+    /**
+     * Ručně doplněné měsíce rozhodného období, klíčované `YYYY-MM`.
+     *
+     * @return array<string,array{income_minor:int,excluded_days:int}>
+     */
+    public function decisiveMonths(
+        int $supplierId,
+        string $environment,
+        int $caseId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT period_year, period_month, countable_income_minor, excluded_days
+               FROM payroll_sickness_case_decisive_months
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND case_id = ?
+              ORDER BY period_year, period_month'
+        );
+        $statement->execute([$supplierId, $environment, $caseId]);
+        $months = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $months[sprintf('%04d-%02d', (int) $row['period_year'], (int) $row['period_month'])] = [
+                'income_minor' => (int) $row['countable_income_minor'],
+                'excluded_days' => (int) $row['excluded_days'],
+            ];
+        }
+
+        return $months;
+    }
+
+    /**
+     * Přepíše ruční měsíce rozhodného období. Přepis ze stejného důvodu jako
+     * u dnů práce: smazaný měsíc nesmí ve větě zůstat.
+     *
+     * @param array<string,array{income_minor:int,excluded_days:int}> $months
+     */
+    public function replaceDecisiveMonths(
+        int $supplierId,
+        string $environment,
+        int $caseId,
+        array $months,
+    ): void {
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_sickness_case_decisive_months
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND case_id = ?'
+        )->execute([$supplierId, $environment, $caseId]);
+        if ($months === []) {
+            return;
+        }
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_sickness_case_decisive_months
+                 (supplier_id, environment, case_id, period_year, period_month,
+                  countable_income_minor, excluded_days)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        );
+        foreach ($months as $period => $month) {
+            [$year, $number] = array_map('intval', explode('-', $period));
+            $insert->execute([
+                $supplierId,
+                $environment,
+                $caseId,
+                $year,
+                $number,
+                $month['income_minor'],
+                $month['excluded_days'],
+            ]);
+        }
+    }
+
+    /**
+     * Vyživovaná osoba zaměstnance, kterou případ uvádí jako dítě nebo
+     * ošetřovanou osobu. Rodné číslo zůstává zašifrované; odhalí ho až služba,
+     * která sestavuje větu.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function dependant(
+        int $supplierId,
+        int $employeeId,
+        int $dependantId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, full_name, given_name, family_name, birth_date,
+                    birth_number_ciphertext
+               FROM payroll_dependants
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND id = ?'
+        );
+        $statement->execute([$supplierId, $employeeId, $dependantId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Výplatní profil osoby: způsob výplaty mzdy, účet, na který mzda chodí
+     * ke dni události, a adresa bydliště.
+     *
+     * Účet se vybírá stejně jako pro výplatu: aktivní, účinný k datu, s největším
+     * podílem; při shodě ten s pozdějším začátkem účinnosti.
+     *
+     * @return array{
+     *   payout_method:?string,
+     *   account:?array{id:int,ciphertext:string,hash:string},
+     *   address:?array{street_line:string,city:string,postal_code:string,country_code:string}
+     * }
+     */
+    public function payoutTarget(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+    ): array {
+        $pdo = $this->db->pdo();
+        $profile = $pdo->prepare(
+            'SELECT payout_method FROM payroll_employee_profiles
+              WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $profile->execute([$supplierId, $employeeId]);
+        $method = $profile->fetchColumn();
+
+        $account = $pdo->prepare(
+            'SELECT id, bank_account_ciphertext, HEX(bank_account_hash) AS bank_account_hash
+               FROM payroll_person_accounts
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND is_active = 1
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY allocation_basis_points DESC, effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $account->execute([$supplierId, $employeeId, $onDate, $onDate]);
+        $accountRow = $account->fetch(PDO::FETCH_ASSOC);
+
+        $address = $pdo->prepare(
+            'SELECT street_line, city, postal_code, country_code
+               FROM payroll_person_addresses
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND address_type = "residence"
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $address->execute([$supplierId, $employeeId, $onDate, $onDate]);
+        $addressRow = $address->fetch(PDO::FETCH_ASSOC);
+
+        return [
+            'payout_method' => is_string($method) ? $method : null,
+            'account' => is_array($accountRow)
+                ? [
+                    'id' => (int) $accountRow['id'],
+                    'ciphertext' => (string) $accountRow['bank_account_ciphertext'],
+                    'hash' => strtolower((string) $accountRow['bank_account_hash']),
+                ]
+                : null,
+            'address' => is_array($addressRow)
+                ? [
+                    'street_line' => (string) $addressRow['street_line'],
+                    'city' => (string) $addressRow['city'],
+                    'postal_code' => (string) $addressRow['postal_code'],
+                    'country_code' => (string) $addressRow['country_code'],
+                ]
+                : null,
+        ];
+    }
+
+    /**
+     * Transakce, která se umí vnořit do už běžící (savepointem).
+     *
+     * `Connection` žádnou metodu `transaction()` nemá; dřívější volání
+     * `$this->db->transaction()` proto shodilo každé založení případu
+     * i každou úpravu dnů práce. Stejný vzor jako `PayrollSubmissionRepository`.
+     */
     public function transaction(callable $work): mixed
     {
-        return $this->db->transaction($work);
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        $savepoint = null;
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        } else {
+            $savepoint = 'payroll_sickness_' . bin2hex(random_bytes(6));
+            $pdo->exec('SAVEPOINT ' . $savepoint);
+        }
+
+        try {
+            $result = $work();
+            if ($ownsTransaction) {
+                $pdo->commit();
+            } elseif ($savepoint !== null) {
+                $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+            }
+
+            return $result;
+        } catch (\Throwable $exception) {
+            if ($ownsTransaction) {
+                $pdo->rollBack();
+            } elseif ($savepoint !== null) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
+                $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+            }
+            throw $exception;
+        }
     }
 }

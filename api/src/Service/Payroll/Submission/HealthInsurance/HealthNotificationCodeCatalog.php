@@ -127,9 +127,11 @@ final class HealthNotificationCodeCatalog
      * v `api/xsd/zp/2025-v8/hromadneOznameniZamestnavatele_2025_v8.xsd`.
      *
      * Doslovné znění schématu k použitým písmenům:
-     * - `P` — „nástup do zaměstnání",
+     * - `P` — „nástup do zaměstnání", u cizince viz {@see self::employmentStartCode()},
      * - `O` — „ukončení zaměstnání (u zaměstnance přihlášeného kódy „P", „A",
      *   „E" nebo „C")",
+     * - `Q` — „jednodenní zaměstnání. Použije se v případě, kdy zaměstnání
+     *   vznikne a zanikne v jeden den",
      * - `M` — „nástup zaměstnankyně na mateřskou dovolenou NEBO osoby na
      *   rodičovskou dovolenou" (schéma obě dovolené vede pod jedním kódem,
      *   proto sem míří dva druhy povinnosti),
@@ -140,6 +142,7 @@ final class HealthNotificationCodeCatalog
     private const DOCUMENTED_CODE_FOR_DUTY = [
         HealthNotificationDutyKind::EmploymentStart->value => 'P',
         HealthNotificationDutyKind::EmploymentEnd->value => 'O',
+        HealthNotificationDutyKind::SingleDayEmployment->value => 'Q',
         HealthNotificationDutyKind::MaternityLeaveStart->value => 'M',
         HealthNotificationDutyKind::ParentalLeaveStart->value => 'M',
         HealthNotificationDutyKind::MaternityOrParentalLeaveEnd->value => 'U',
@@ -198,5 +201,98 @@ final class HealthNotificationCodeCatalog
         HealthNotificationDutyKind $kind,
     ): bool {
         return isset(self::DOCUMENTED_CODE_FOR_DUTY[$kind->value]);
+    }
+
+    /**
+     * Státy, jejichž občan se podle schématu hlásí kódem „A"/„E" jako „občan
+     * EU pojištěný v ČR". Vedle členských států EU jsou tu i státy EHP
+     * a Švýcarsko: koordinační nařízení (ES) č. 883/2004 se na jejich občany
+     * vztahuje stejně, takže v českém zdravotním pojištění mají postavení
+     * občana EU, ne „cizince ze zemí mimo EU" (kód „C").
+     */
+    private const EU_COORDINATION_COUNTRIES = [
+        'AT', 'BE', 'BG', 'CY', 'DE', 'DK', 'EE', 'ES', 'FI', 'FR', 'GR',
+        'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT',
+        'RO', 'SE', 'SI', 'SK',
+        'IS', 'LI', 'NO', 'CH',
+    ];
+
+    /**
+     * Kód nástupu podle státní příslušnosti a toho, zda pojištěnec už má
+     * přidělené číslo pojištěnce.
+     *
+     * Doslovné znění `kodZmenyZamestnaceTyp` v připnutém HOZ XSD:
+     * - `P` — nástup zaměstnance s trvalým pobytem na území ČR „nebo
+     *   zaměstnance s dlouhodobým pobytem, který má již přiděleno číslo
+     *   pojištěnce",
+     * - `A` — „nástup do zaměstnání občana EU pojištěného v ČR, který má již
+     *   přiděleno číslo pojištěnce",
+     * - `E` — „první přihlášení zaměstnance - občana EU pojištěného v ČR",
+     * - `C` — „první přihlášení zaměstnance - cizince ze zemí mimo EU, který
+     *   nemá trvalý pobyt na území ČR".
+     *
+     * „Přidělené číslo" se tu pozná podle rodného čísla v evidenci osoby —
+     * je to jediný identifikátor, který aplikace drží a který schéma bere jako
+     * číslo pojištěnce. Evidenční číslo ČSSZ (EČP) číslem pojištěnce zdravotní
+     * pojišťovny není, takže cizinec jen s EČP se hlásí jako první přihlášení.
+     *
+     * @param string|null $citizenshipCountryCode ISO 3166-1 alfa-2; `null` nebo
+     *        `CZ` = občan ČR, u kterého se kód neodvozuje od cizinecké větve
+     */
+    public function employmentStartCode(
+        ?string $citizenshipCountryCode,
+        bool $hasAssignedInsuranceNumber,
+    ): string {
+        $country = $citizenshipCountryCode === null
+            ? null
+            : strtoupper(trim($citizenshipCountryCode));
+        if ($country === null || $country === '' || $country === 'CZ') {
+            return 'P';
+        }
+        $eu = in_array($country, self::EU_COORDINATION_COUNTRIES, true);
+        if ($hasAssignedInsuranceNumber) {
+            return $eu ? 'A' : 'P';
+        }
+
+        return $eu ? 'E' : 'C';
+    }
+
+    /** Je kód prvním přihlášením cizince, který ještě číslo pojištěnce nemá? */
+    public function isFirstRegistrationCode(string $code): bool
+    {
+        return $code === 'E' || $code === 'C';
+    }
+
+    /**
+     * Číslo pojištěnce pro první přihlášení cizince: pohlaví a datum narození
+     * ve tvaru `MDDMMRRRR` (muž) nebo `ZDDMMRRRR` (žena), jak ho předepisuje
+     * dokumentace prvku `cisloPojistence` v HOZ XSD („Příklad: M05071980").
+     * Bez doloženého pohlaví a data narození se číslo nevymýšlí.
+     */
+    public function firstRegistrationInsuranceNumber(
+        ?string $sex,
+        ?string $birthDate,
+    ): string {
+        $prefix = match ($sex) {
+            'male' => 'M',
+            'female' => 'Z',
+            default => null,
+        };
+        $date = is_string($birthDate)
+            ? \DateTimeImmutable::createFromFormat('!Y-m-d', $birthDate)
+            : false;
+        if ($prefix === null
+            || !$date instanceof \DateTimeImmutable
+            || $date->format('Y-m-d') !== $birthDate
+        ) {
+            throw new HealthNotificationException(
+                'zp_first_registration_identity_missing',
+                'První přihlášení cizince bez přiděleného čísla pojištěnce se '
+                . 'hlásí pohlavím a datem narození (tvar MDDMMRRRR / ZDDMMRRRR). '
+                . 'Doplňte je v kartě osoby.',
+            );
+        }
+
+        return $prefix . $date->format('dmY');
     }
 }

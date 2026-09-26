@@ -34,6 +34,7 @@ import { personalNumberLabel } from './employmentLifecycleUi'
 import {
   payrollSicknessCasesApi,
   type PayrollSicknessBenefitKind,
+  type PayrollSicknessCareReason,
   type PayrollSicknessCase,
   type PayrollSicknessCaseInput,
   type PayrollSicknessDispatched,
@@ -44,6 +45,7 @@ import {
 } from '@/api/payrollSicknessCases'
 import {
   payrollApi,
+  type PayrollDependant,
   type PayrollEmployment,
   type PayrollRegzelEnvironment,
 } from '@/api/payroll'
@@ -83,6 +85,13 @@ const newIncapacityFrom = ref('')
 const editingId = ref<number | null>(null)
 const draft = ref<PayrollSicknessCaseInput>({})
 const draftWorkDays = ref<PayrollSicknessWorkInterval[]>([])
+const draftCareDays = ref<PayrollSicknessWorkInterval[]>([])
+/** Ručně doplněné měsíce rozhodného období; příjem se edituje v Kč. */
+const draftDecisiveMonths = ref<{ period: string, income_czk: string, excluded_days: number }[]>([])
+/** Příjem z malého rozsahu se zadává v Kč; server ho drží v haléřích. */
+const draftSmallScopeIncomeCzk = ref('')
+/** Vyživované osoby zaměstnance — z nich se vybírá dítě nebo ošetřovaná osoba. */
+const dependants = ref<PayrollDependant[]>([])
 const previewXml = ref<{ id: number, document: string, xml: string } | null>(null)
 const receiptDate = ref<Record<number, string>>({})
 const receiptReason = ref<Record<number, string>>({})
@@ -106,11 +115,19 @@ const dispatchingKey = ref<string | null>(null)
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 
 /**
- * Druhy dávky, u kterých aplikace datovou větu SESTAVÍ. `CtNem` i `CtVpm`
- * obsahují výhradně potvrzení zaměstnavatele; ostatní povinně nesou žádost
- * o dávku s údaji, které podává pojištěnec, ne zaměstnavatel.
+ * Druhy dávky, jejichž věta nese i žádost o dávku. Zaměstnavatel ji podle
+ * § 97 odst. 1 zákona o nemocenském pojištění přijímá a předává — údaje opisuje
+ * z žádosti, kterou mu zaměstnanec předal.
  */
-const SERIALIZABLE: PayrollSicknessBenefitKind[] = ['NEM', 'VPM']
+const APPLICATION_KINDS: PayrollSicknessBenefitKind[] = ['OSE', 'DLO', 'OPP', 'PPM']
+/** Ošetřovné a dlouhodobé ošetřovné nesou akce vznik / trvání / ukončení. */
+const ACTION_KINDS: PayrollSicknessBenefitKind[] = ['OSE', 'DLO']
+/** HZUPN se podává jen při ukončení pracovní neschopnosti, tedy u nemocenského. */
+const HZUPN_KINDS: PayrollSicknessBenefitKind[] = ['NEM']
+
+const careReasons: PayrollSicknessCareReason[] = [
+  'ill', 'quarantine', 'cannot_care', 'school_closed',
+]
 
 const benefitKinds: PayrollSicknessBenefitKind[] = [
   'NEM', 'VPM', 'OPP', 'PPM', 'OSE', 'DLO',
@@ -132,17 +149,119 @@ const canCreate = computed(() =>
 const editing = computed(() =>
   items.value.find(item => item.id === editingId.value) ?? null)
 
-/** Neplacené volno má prvek jen u nemocenského, ne u vyrovnávacího příspěvku. */
-const draftHasUnpaidLeaveSection = computed(() =>
-  editing.value?.benefit_kind === 'NEM')
+const draftKind = computed(() => editing.value?.benefit_kind ?? null)
 
+/** Neplacené volno má prvek u nemocenského a ošetřovného, ne u VPM, PPM a otcovské. */
+const draftHasUnpaidLeaveSection = computed(() =>
+  draftKind.value === 'NEM' || draftKind.value === 'OSE' || draftKind.value === 'DLO')
+const draftHasApplication = computed(() =>
+  draftKind.value !== null && APPLICATION_KINDS.includes(draftKind.value))
+const draftHasActions = computed(() =>
+  draftKind.value !== null && ACTION_KINDS.includes(draftKind.value))
+const draftHasHzupn = computed(() =>
+  draftKind.value !== null && HZUPN_KINDS.includes(draftKind.value))
+
+const dependantOptions = computed(() =>
+  dependants.value.map(dependant => ({
+    value: dependant.id,
+    label: `${dependant.full_name} (${dependant.birth_date})`,
+  })))
+
+const caredDependantId = computed<number | null>({
+  get: () => draft.value.cared_dependant_id ?? null,
+  set: value => {
+    draft.value.cared_dependant_id = value
+  },
+})
+
+/**
+ * „Vrátil se do práce“ má tři stavy: neuvedeno, ano, ne. Select pracuje
+ * s textem, případ s číslem nebo `null`.
+ */
+const returnedToWorkChoice = computed<string>({
+  get: () => draft.value.returned_to_work === null || draft.value.returned_to_work === undefined
+    ? ''
+    : String(draft.value.returned_to_work),
+  set: value => {
+    draft.value.returned_to_work = value === '' ? null : Number(value)
+  },
+})
+
+/** Návrh pravděpodobného příjmu: sjednaná měsíční hrubá mzda v celých Kč. */
+const probableIncomeSuggestion = computed(() => {
+  const minor = editing.value?.probable_income_suggestion_minor
+  return typeof minor === 'number' && minor > 0 ? Math.round(minor / 100) : null
+})
+
+function suggestProbableIncome(): void {
+  if (probableIncomeSuggestion.value !== null) {
+    draft.value.probable_income_czk = probableIncomeSuggestion.value
+  }
+}
+
+/** Kč z textového pole („12 345,50“) na haléře; prázdné = `null`. */
+function czkToMinor(value: string): number | null {
+  const normalized = value.replace(/\s+/g, '').replace(',', '.')
+  if (normalized === '') return null
+  const amount = Number(normalized)
+  return Number.isFinite(amount) ? Math.round(amount * 100) : null
+}
+
+function minorToCzk(value: number | null | undefined): string {
+  return typeof value === 'number' ? String(value / 100) : ''
+}
+
+/** Kód poslední chyby ze serveru a případ, u kterého vznikla — pro proklik. */
+const errorCode = ref<string | null>(null)
+const errorCase = ref<PayrollSicknessCase | null>(null)
+
+/**
+ * Server vrací chybu jako `{ error: { code, message } }`. Dřív se tu četlo
+ * `data.error` jako text, takže místo věty se ukázal objekt.
+ */
 function message(err: unknown): string {
+  errorCode.value = null
   if (isAxiosError(err)) {
-    const data = err.response?.data as { message?: string, error?: string } | undefined
-    return data?.message || data?.error || t('payroll.sicknessCases.errors.generic')
+    const data = err.response?.data as {
+      message?: string
+      error?: string | { code?: string, message?: string }
+    } | undefined
+    if (data?.error && typeof data.error === 'object') {
+      errorCode.value = data.error.code ?? null
+      return data.error.message || t('payroll.sicknessCases.errors.generic')
+    }
+    return data?.message
+      || (typeof data?.error === 'string' ? data.error : '')
+      || t('payroll.sicknessCases.errors.generic')
   }
   return t('payroll.sicknessCases.errors.generic')
 }
+
+/** Chyby, které se opravují na kartě osoby (identita, účet, adresa, vyživovaná osoba). */
+const PERSON_CARD_ERRORS = [
+  'nempri_payment_connection_missing',
+  'nempri_payment_connection_invalid',
+  'nempri_payment_address_invalid',
+  'nempri_birth_number_missing',
+  'sickness_identity_incomplete',
+  'nempri_cared_person_not_found',
+]
+/** Chybějící převzaté mzdy se doplňují v Kontrole převodu mezd. */
+const RECONCILIATION_ERRORS = ['nempri_decisive_month_missing']
+
+/**
+ * Kam s chybou: karta osoby, kontrola převodu, nebo editor tohoto případu.
+ * Blokátor bez místa, kde se opraví, by účetní nechal hádat.
+ */
+const errorFix = computed<{ kind: 'person' | 'reconciliation' | 'edit', item: PayrollSicknessCase } | null>(() => {
+  const item = errorCase.value
+  const code = errorCode.value
+  if (item === null || code === null) return null
+  if (PERSON_CARD_ERRORS.includes(code)) return { kind: 'person', item }
+  if (RECONCILIATION_ERRORS.includes(code)) return { kind: 'reconciliation', item }
+  if (code.startsWith('nempri_') || code.startsWith('hzupn_')) return { kind: 'edit', item }
+  return null
+})
 
 async function load(): Promise<void> {
   loading.value = true
@@ -232,14 +351,69 @@ function edit(item: PayrollSicknessCase): void {
     hours_worked_last_day: item.hours_worked_last_day,
     shift_hours_last_day: item.shift_hours_last_day,
     additional_note: item.additional_note,
+    action_start: item.action_start ?? 1,
+    action_continuation: item.action_continuation ?? 0,
+    action_end: item.action_end ?? 0,
+    application_from: item.application_from ?? null,
+    application_to: item.application_to ?? null,
+    cared_dependant_id: item.cared_dependant_id ?? null,
+    cared_first_name: item.cared_first_name ?? null,
+    cared_last_name: item.cared_last_name ?? null,
+    cared_birth_date: item.cared_birth_date ?? null,
+    care_reason: item.care_reason ?? null,
+    school_name: item.school_name ?? null,
+    school_business_id: item.school_business_id ?? null,
+    shared_household: item.shared_household ?? 0,
+    lone_caregiver: item.lone_caregiver ?? 0,
+    child_under_16: item.child_under_16 ?? 0,
+    other_maternity_claim: item.other_maternity_claim ?? 0,
+    cared_personally: item.cared_personally ?? 0,
+    relationship_code: item.relationship_code ?? null,
+    alternation: item.alternation ?? 0,
+    paternity_reason: item.paternity_reason ?? null,
+    maternity_care_reason: item.maternity_care_reason ?? null,
+    child_order: item.child_order ?? null,
+    worked_last_day: item.worked_last_day ?? 0,
+    planned_shifts: item.planned_shifts ?? 0,
+    planned_shifts_worked: item.planned_shifts_worked ?? 0,
+    probable_income_czk: item.probable_income_czk ?? null,
+    contact_worker_name: item.contact_worker_name ?? null,
+    contact_worker_phone: item.contact_worker_phone ?? null,
+    contact_worker_email: item.contact_worker_email ?? null,
   }
   draftWorkDays.value = item.work_days.map(interval => ({ ...interval }))
+  draftCareDays.value = (item.care_days ?? []).map(interval => ({ ...interval }))
+  draftDecisiveMonths.value = (item.decisive_months ?? []).map(month => ({
+    period: month.period,
+    income_czk: minorToCzk(month.income_minor),
+    excluded_days: month.excluded_days,
+  }))
+  draftSmallScopeIncomeCzk.value = minorToCzk(item.small_scope_income_minor)
+  dependants.value = []
+  if (APPLICATION_KINDS.includes(item.benefit_kind)) {
+    void loadDependants(item.employee_id)
+  }
+}
+
+/**
+ * Vyživované osoby pro výběr dítěte nebo ošetřované osoby. Selhání načtení
+ * formulář nezablokuje: osobu jde zadat i ručně jménem a datem narození.
+ */
+async function loadDependants(employeeId: number): Promise<void> {
+  try {
+    dependants.value = (await payrollApi.personDependants(employeeId)).dependants
+  } catch {
+    dependants.value = []
+  }
 }
 
 function cancelEdit(): void {
   editingId.value = null
   draft.value = {}
   draftWorkDays.value = []
+  draftCareDays.value = []
+  draftDecisiveMonths.value = []
+  draftSmallScopeIncomeCzk.value = ''
 }
 
 function addWorkInterval(): void {
@@ -248,6 +422,26 @@ function addWorkInterval(): void {
 
 function removeWorkInterval(index: number): void {
   draftWorkDays.value.splice(index, 1)
+}
+
+function addCareInterval(): void {
+  draftCareDays.value.push({ from: '', to: '' })
+}
+
+function removeCareInterval(index: number): void {
+  draftCareDays.value.splice(index, 1)
+}
+
+function addDecisiveMonth(): void {
+  draftDecisiveMonths.value.push({ period: '', income_czk: '', excluded_days: 0 })
+}
+
+function removeDecisiveMonth(index: number): void {
+  draftDecisiveMonths.value.splice(index, 1)
+}
+
+function completeIntervals(intervals: PayrollSicknessWorkInterval[]): PayrollSicknessWorkInterval[] {
+  return intervals.filter(interval => interval.from !== '' && interval.to !== '')
 }
 
 /** Jediné Uložit pro celý editor — sekce se neukládají po částech. */
@@ -264,9 +458,16 @@ async function save(): Promise<void> {
       item.row_version,
       {
         ...draft.value,
-        work_days: draftWorkDays.value.filter(
-          interval => interval.from !== '' && interval.to !== '',
-        ),
+        small_scope_income_minor: czkToMinor(draftSmallScopeIncomeCzk.value),
+        work_days: completeIntervals(draftWorkDays.value),
+        care_days: completeIntervals(draftCareDays.value),
+        decisive_months: draftDecisiveMonths.value
+          .filter(month => month.period !== '')
+          .map(month => ({
+            period: month.period,
+            income_minor: czkToMinor(month.income_czk) ?? 0,
+            excluded_days: Number(month.excluded_days) || 0,
+          })),
       },
     )
     success.value = t('payroll.sicknessCases.saved')
@@ -274,6 +475,7 @@ async function save(): Promise<void> {
     await load()
   } catch (err) {
     error.value = message(err)
+    errorCase.value = item
   } finally {
     saving.value = false
   }
@@ -295,6 +497,7 @@ async function preview(
   } catch (err) {
     previewXml.value = null
     error.value = message(err)
+    errorCase.value = item
   } finally {
     busyId.value = null
   }
@@ -313,6 +516,7 @@ async function prepare(
     await load()
   } catch (err) {
     error.value = message(err)
+    errorCase.value = item
   } finally {
     busyId.value = null
   }
@@ -463,13 +667,13 @@ function dispatchAction(
 }
 
 /**
- * Akce řádku. „Připravit NEMPRI" se u dávek, které aplikace sestavit neumí,
- * NESKRÝVÁ — zůstává zašedlá i s větou proč. Skrytá akce vypadá jako
- * neexistující povinnost, kdežto zašedlá říká, že povinnost je a splnit ji
- * musí člověk jinde.
+ * Akce řádku. NEMPRI jde sestavit u každého druhu dávky; chybí-li v žádosti
+ * údaj, řekne to server konkrétní větou při náhledu nebo přípravě. HZUPN se
+ * nabízí jen u nemocenského — jiná dávka hlášení při ukončení neschopnosti
+ * nemá, a tak by akce tvrdila povinnost, která neexistuje.
  */
 function actionsFor(item: PayrollSicknessCase): ActionItem[] {
-  const serializable = SERIALIZABLE.includes(item.benefit_kind)
+  const hzupn = HZUPN_KINDS.includes(item.benefit_kind)
   const open = item.status !== 'accepted' && item.status !== 'cancelled'
 
   return [
@@ -488,8 +692,6 @@ function actionsFor(item: PayrollSicknessCase): ActionItem[] {
       key: 'preview-nempri',
       label: t('payroll.sicknessCases.actions.previewNempri'),
       icon: 'eye',
-      disabled: !serializable,
-      disabledReason: t('payroll.sicknessCases.hints.benefitKindNotSerializable'),
       loading: busyId.value === item.id,
       run: () => void preview(item, 'nempri'),
     },
@@ -497,10 +699,10 @@ function actionsFor(item: PayrollSicknessCase): ActionItem[] {
       key: 'prepare-nempri',
       label: t('payroll.sicknessCases.actions.prepareNempri'),
       icon: 'check',
-      disabled: !canWrite.value || !serializable || item.nempri_submission_id !== null,
+      disabled: !canWrite.value || item.nempri_submission_id !== null,
       disabledReason: item.nempri_submission_id !== null
         ? t('payroll.sicknessCases.hints.alreadyPrepared')
-        : t('payroll.sicknessCases.hints.benefitKindNotSerializable'),
+        : t('payroll.sicknessCases.hints.readOnly'),
       loading: busyId.value === item.id,
       run: () => void prepare(item, 'nempri'),
     },
@@ -509,6 +711,7 @@ function actionsFor(item: PayrollSicknessCase): ActionItem[] {
       key: 'preview-hzupn',
       label: t('payroll.sicknessCases.actions.previewHzupn'),
       icon: 'eye',
+      show: hzupn,
       disabled: item.incapacity_to === null,
       disabledReason: t('payroll.sicknessCases.hints.incapacityEndRequired'),
       loading: busyId.value === item.id,
@@ -518,6 +721,7 @@ function actionsFor(item: PayrollSicknessCase): ActionItem[] {
       key: 'prepare-hzupn',
       label: t('payroll.sicknessCases.actions.prepareHzupn'),
       icon: 'check',
+      show: hzupn,
       disabled: !canWrite.value
         || item.incapacity_to === null
         || item.hzupn_submission_id !== null,
@@ -653,9 +857,43 @@ onMounted(() => void load())
       />
     </div>
 
-    <p v-if="error" class="rounded-lg bg-red-50 p-3 text-sm text-red-700" data-test="sickness-case-error">
-      {{ error }}
-    </p>
+    <div v-if="error" class="rounded-lg bg-red-50 p-3 text-sm text-red-700" data-test="sickness-case-error">
+      <p>{{ error }}</p>
+      <div v-if="errorFix" class="mt-2 flex flex-wrap items-center gap-2" data-test="sickness-case-error-fix">
+        <span class="text-xs">
+          {{ t('payroll.sicknessCases.errorFix.where', { name: errorFix.item.full_name }) }}
+        </span>
+        <RouterLink
+          v-if="errorFix.kind === 'person'"
+          :to="{ name: 'payroll-people', query: { person: String(errorFix.item.employee_id) } }"
+          class="font-semibold underline"
+          data-test="sickness-case-error-fix-person"
+        >
+          {{ t('payroll.sicknessCases.errorFix.personCard') }}
+        </RouterLink>
+        <RouterLink
+          v-else-if="errorFix.kind === 'reconciliation'"
+          :to="{ path: '/payroll/imports', query: { tab: 'reconciliation' } }"
+          class="font-semibold underline"
+          data-test="sickness-case-error-fix-reconciliation"
+        >
+          {{ t('payroll.sicknessCases.errorFix.reconciliation') }}
+        </RouterLink>
+        <ActionBar
+          v-if="errorFix.kind === 'edit' || errorFix.kind === 'reconciliation'"
+          :actions="[{
+            key: 'error-fix-edit',
+            label: t('payroll.sicknessCases.errorFix.editCase'),
+            icon: 'edit',
+            variant: 'primary',
+            show: editingId !== errorFix.item.id,
+            disabled: !canWrite,
+            disabledReason: t('payroll.sicknessCases.hints.readOnly'),
+            run: () => edit(errorFix!.item),
+          }]"
+        />
+      </div>
+    </div>
     <p v-if="success" class="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700" data-test="sickness-case-success">
       {{ success }}
     </p>
@@ -711,7 +949,22 @@ onMounted(() => void load())
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.incapacityTo') }}</span>
                 <DateInput v-model="draft.incapacity_to" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-incapacity-to" />
               </label>
+              <label class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.correction" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-correction">
+                {{ t('payroll.sicknessCases.form.correction') }}
+              </label>
+              <label class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.foreign_case" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-foreign">
+                {{ t('payroll.sicknessCases.form.foreignCase') }}
+              </label>
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.additionalNote') }}</span>
+                <input v-model="draft.additional_note" type="text" maxlength="200" class="w-full rounded-lg border border-neutral-300 p-2 text-sm">
+              </label>
             </div>
+            <p class="mt-2 text-xs text-neutral-500">
+              {{ t('payroll.sicknessCases.form.decisionNumberHint') }}
+            </p>
           </section>
 
           <section>
@@ -755,10 +1008,294 @@ onMounted(() => void load())
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.unpaidLeaveFrom') }}</span>
                 <DateInput v-model="draft.unpaid_leave_from" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" />
               </label>
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.smallScopeIncome') }}</span>
+                <input v-model="draftSmallScopeIncomeCzk" type="text" inputmode="decimal" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-small-scope-income">
+              </label>
+            </div>
+            <p class="mt-2 text-xs text-neutral-500">
+              {{ t('payroll.sicknessCases.form.smallScopeIncomeHint') }}
+            </p>
+          </section>
+
+          <section v-if="draftHasApplication" data-test="sickness-case-application">
+            <h4 class="mb-2 text-xs font-semibold uppercase text-neutral-500">
+              {{ t('payroll.sicknessCases.sections.application') }}
+            </h4>
+            <p class="mb-2 text-xs text-neutral-500">
+              {{ t('payroll.sicknessCases.form.applicationHint') }}
+            </p>
+            <div v-if="draftHasActions" class="mb-3 flex flex-wrap gap-4" data-test="sickness-case-actions">
+              <label class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.action_start" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-action-start">
+                {{ t('payroll.sicknessCases.form.actionStart') }}
+              </label>
+              <label class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.action_continuation" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-action-continuation">
+                {{ t('payroll.sicknessCases.form.actionContinuation') }}
+              </label>
+              <label class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.action_end" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-action-end">
+                {{ t('payroll.sicknessCases.form.actionEnd') }}
+              </label>
+              <p class="w-full text-xs text-neutral-500">
+                {{ t('payroll.sicknessCases.form.actionsHint') }}
+              </p>
+            </div>
+            <div class="grid gap-3 md:grid-cols-3">
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.applicationFrom') }}</span>
+                <DateInput v-model="draft.application_from" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-application-from" />
+              </label>
+              <label v-if="draftKind !== 'OPP' && draftKind !== 'PPM'" class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.applicationTo') }}</span>
+                <DateInput v-model="draft.application_to" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" />
+              </label>
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">
+                  {{ draftKind === 'OPP' || draftKind === 'PPM'
+                    ? t('payroll.sicknessCases.form.child')
+                    : t('payroll.sicknessCases.form.caredPerson') }}
+                </span>
+                <SearchableSelect
+                  v-model="caredDependantId"
+                  :options="dependantOptions"
+                  data-test="sickness-case-cared-dependant"
+                />
+              </label>
+            </div>
+            <p class="mt-1 text-xs text-neutral-500">
+              {{ t('payroll.sicknessCases.form.caredPersonHint') }}
+            </p>
+            <div v-if="!draft.cared_dependant_id" class="mt-2 grid gap-3 md:grid-cols-3" data-test="sickness-case-cared-manual">
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.caredFirstName') }}</span>
+                <input v-model="draft.cared_first_name" type="text" maxlength="100" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-cared-first-name">
+              </label>
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.caredLastName') }}</span>
+                <input v-model="draft.cared_last_name" type="text" maxlength="100" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-cared-last-name">
+              </label>
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.caredBirthDate') }}</span>
+                <DateInput v-model="draft.cared_birth_date" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" />
+              </label>
+            </div>
+
+            <div v-if="draftKind === 'OSE'" class="mt-3 grid gap-3 md:grid-cols-3">
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.careReason') }}</span>
+                <select v-model="draft.care_reason" class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm" data-test="sickness-case-care-reason">
+                  <option :value="null">—</option>
+                  <option v-for="reason in careReasons" :key="reason" :value="reason">
+                    {{ t(`payroll.sicknessCases.careReasons.${reason}`) }}
+                  </option>
+                </select>
+              </label>
+              <label v-if="draft.care_reason === 'school_closed'" class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.schoolName') }}</span>
+                <input v-model="draft.school_name" type="text" maxlength="200" class="w-full rounded-lg border border-neutral-300 p-2 text-sm">
+              </label>
+              <label v-if="draft.care_reason === 'school_closed'" class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.schoolBusinessId') }}</span>
+                <input v-model="draft.school_business_id" type="text" maxlength="35" class="w-full rounded-lg border border-neutral-300 p-2 text-sm">
+              </label>
+            </div>
+
+            <div class="mt-3 grid gap-3 md:grid-cols-3">
+              <label v-if="draftHasActions" class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.relationshipCode') }}</span>
+                <input v-model="draft.relationship_code" type="text" maxlength="3" class="w-full rounded-lg border border-neutral-300 p-2 text-sm uppercase" data-test="sickness-case-relationship-code">
+              </label>
+              <label v-if="draftKind === 'OPP'" class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.paternityReason') }}</span>
+                <input v-model="draft.paternity_reason" type="text" maxlength="3" class="w-full rounded-lg border border-neutral-300 p-2 text-sm uppercase" data-test="sickness-case-paternity-reason">
+              </label>
+              <label v-if="draftKind === 'PPM'" class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.maternityCareReason') }}</span>
+                <input v-model="draft.maternity_care_reason" type="text" maxlength="3" class="w-full rounded-lg border border-neutral-300 p-2 text-sm uppercase">
+              </label>
+              <label v-if="draftKind === 'PPM'" class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.childOrder') }}</span>
+                <input v-model.number="draft.child_order" type="number" min="1" max="10" class="w-full rounded-lg border border-neutral-300 p-2 text-sm">
+              </label>
+            </div>
+            <p v-if="draftHasActions || draftKind === 'OPP' || draftKind === 'PPM'" class="mt-1 text-xs text-neutral-500">
+              {{ t('payroll.sicknessCases.form.codebookHint') }}
+            </p>
+
+            <div v-if="draftHasActions" class="mt-3 grid gap-3 md:grid-cols-3" data-test="sickness-case-declarations">
+              <label class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.shared_household" type="checkbox" :true-value="1" :false-value="0">
+                {{ t('payroll.sicknessCases.form.sharedHousehold') }}
+              </label>
+              <label v-if="draftKind === 'OSE'" class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.lone_caregiver" type="checkbox" :true-value="1" :false-value="0">
+                {{ t('payroll.sicknessCases.form.loneCaregiver') }}
+              </label>
+              <label v-if="draftKind === 'OSE'" class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.child_under_16" type="checkbox" :true-value="1" :false-value="0">
+                {{ t('payroll.sicknessCases.form.childUnder16') }}
+              </label>
+              <label class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.other_maternity_claim" type="checkbox" :true-value="1" :false-value="0">
+                {{ t('payroll.sicknessCases.form.otherMaternityClaim') }}
+              </label>
+              <label class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.cared_personally" type="checkbox" :true-value="1" :false-value="0">
+                {{ t('payroll.sicknessCases.form.caredPersonally') }}
+              </label>
+              <label v-if="draftKind === 'DLO'" class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.alternation" type="checkbox" :true-value="1" :false-value="0">
+                {{ t('payroll.sicknessCases.form.alternation') }}
+              </label>
+              <p class="text-xs text-neutral-500 md:col-span-3">
+                {{ t('payroll.sicknessCases.form.declarationsHint') }}
+              </p>
+            </div>
+
+            <div v-if="draftHasActions" class="mt-3" data-test="sickness-case-care-days">
+              <span class="mb-1 block text-sm text-neutral-700">{{ t('payroll.sicknessCases.form.careDays') }}</span>
+              <div
+                v-for="(interval, index) in draftCareDays"
+                :key="index"
+                class="mb-2 flex flex-wrap items-end gap-2"
+              >
+                <label class="block text-sm">
+                  <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.careFrom') }}</span>
+                  <DateInput v-model="interval.from" class="rounded-lg border border-neutral-300 p-2 text-sm" />
+                </label>
+                <label class="block text-sm">
+                  <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.careTo') }}</span>
+                  <DateInput v-model="interval.to" class="rounded-lg border border-neutral-300 p-2 text-sm" />
+                </label>
+                <ActionBar :actions="[{
+                  key: `care-remove-${index}`,
+                  label: t('payroll.sicknessCases.actions.removeWorkInterval'),
+                  icon: 'trash',
+                  variant: 'danger',
+                  run: () => removeCareInterval(index),
+                }]" />
+              </div>
+              <ActionBar :actions="[{
+                key: 'care-add',
+                label: t('payroll.sicknessCases.actions.addCareInterval'),
+                icon: 'plus',
+                variant: 'neutral',
+                run: () => addCareInterval(),
+              }]" />
+            </div>
+
+            <div v-if="draftKind !== 'PPM'" class="mt-3 grid gap-3 md:grid-cols-3" data-test="sickness-case-payout-basis">
+              <label v-if="draftKind === 'OSE'" class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.worked_last_day" type="checkbox" :true-value="1" :false-value="0">
+                {{ t('payroll.sicknessCases.form.workedLastDay') }}
+              </label>
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.shiftHoursLastDay') }}</span>
+                <input v-model="draft.shift_hours_last_day" type="text" inputmode="decimal" class="w-full rounded-lg border border-neutral-300 p-2 text-sm">
+              </label>
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.hoursWorkedLastDay') }}</span>
+                <input v-model="draft.hours_worked_last_day" type="text" inputmode="decimal" class="w-full rounded-lg border border-neutral-300 p-2 text-sm">
+              </label>
+              <label class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.planned_shifts" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-planned-shifts">
+                {{ t('payroll.sicknessCases.form.plannedShifts') }}
+              </label>
+              <label v-if="draftKind !== 'DLO'" class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.planned_shifts_worked" type="checkbox" :true-value="1" :false-value="0">
+                {{ t('payroll.sicknessCases.form.plannedShiftsWorked') }}
+              </label>
             </div>
           </section>
 
-          <section>
+          <section data-test="sickness-case-decisive-period">
+            <h4 class="mb-2 text-xs font-semibold uppercase text-neutral-500">
+              {{ t('payroll.sicknessCases.sections.decisivePeriod') }}
+            </h4>
+            <p class="mb-2 text-xs text-neutral-500">
+              {{ t('payroll.sicknessCases.form.decisivePeriodHint') }}
+            </p>
+            <div class="mb-3 flex flex-wrap items-end gap-2">
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.probableIncome') }}</span>
+                <input v-model.number="draft.probable_income_czk" type="number" min="0" step="1" class="w-40 rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-probable-income">
+              </label>
+              <ActionBar :actions="[{
+                key: 'suggest-probable-income',
+                label: probableIncomeSuggestion === null
+                  ? t('payroll.sicknessCases.actions.suggestProbableIncome')
+                  : t('payroll.sicknessCases.actions.suggestProbableIncomeValue', { amount: probableIncomeSuggestion }),
+                icon: 'coin',
+                variant: 'neutral',
+                disabled: probableIncomeSuggestion === null,
+                disabledReason: t('payroll.sicknessCases.hints.probableIncomeNoSuggestion'),
+                run: () => suggestProbableIncome(),
+              }]" />
+            </div>
+            <p class="mb-2 text-xs text-neutral-500">
+              {{ t('payroll.sicknessCases.form.probableIncomeHint') }}
+            </p>
+            <div
+              v-for="(month, index) in draftDecisiveMonths"
+              :key="index"
+              class="mb-2 flex flex-wrap items-end gap-2"
+              :data-test="`sickness-case-decisive-month-${index}`"
+            >
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.decisiveMonth') }}</span>
+                <input v-model="month.period" type="month" class="rounded-lg border border-neutral-300 p-2 text-sm">
+              </label>
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.countableIncome') }}</span>
+                <input v-model="month.income_czk" type="text" inputmode="decimal" class="w-36 rounded-lg border border-neutral-300 p-2 text-sm">
+              </label>
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.excludedDays') }}</span>
+                <input v-model.number="month.excluded_days" type="number" min="0" max="31" class="w-24 rounded-lg border border-neutral-300 p-2 text-sm">
+              </label>
+              <ActionBar :actions="[{
+                key: `decisive-remove-${index}`,
+                label: t('payroll.sicknessCases.actions.removeWorkInterval'),
+                icon: 'trash',
+                variant: 'danger',
+                run: () => removeDecisiveMonth(index),
+              }]" />
+            </div>
+            <ActionBar :actions="[{
+              key: 'decisive-add',
+              label: t('payroll.sicknessCases.actions.addDecisiveMonth'),
+              icon: 'plus',
+              variant: 'neutral',
+              run: () => addDecisiveMonth(),
+            }]" />
+          </section>
+
+          <section data-test="sickness-case-contact">
+            <h4 class="mb-2 text-xs font-semibold uppercase text-neutral-500">
+              {{ t('payroll.sicknessCases.sections.contact') }}
+            </h4>
+            <div class="grid gap-3 md:grid-cols-3">
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.contactName') }}</span>
+                <input v-model="draft.contact_worker_name" type="text" maxlength="100" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-contact-name">
+              </label>
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.contactPhone') }}</span>
+                <input v-model="draft.contact_worker_phone" type="tel" maxlength="33" class="w-full rounded-lg border border-neutral-300 p-2 text-sm">
+              </label>
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.contactEmail') }}</span>
+                <input v-model="draft.contact_worker_email" type="email" maxlength="250" class="w-full rounded-lg border border-neutral-300 p-2 text-sm">
+              </label>
+            </div>
+            <p class="mt-2 text-xs text-neutral-500">
+              {{ t('payroll.sicknessCases.form.paymentConnectionHint') }}
+            </p>
+          </section>
+
+          <section v-if="draftHasHzupn">
             <h4 class="mb-2 text-xs font-semibold uppercase text-neutral-500">
               {{ t('payroll.sicknessCases.sections.endOfIncapacity') }}
             </h4>
@@ -770,13 +1307,25 @@ onMounted(() => void load())
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.issuedOn') }}</span>
                 <DateInput v-model="draft.issued_on" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-issued-on" />
               </label>
-              <label class="flex items-center gap-2 text-sm">
-                <input v-model.number="draft.returned_to_work" type="checkbox" :true-value="1" :false-value="0">
-                {{ t('payroll.sicknessCases.returnedToWork') }}
+              <label class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.returnedToWork') }}</span>
+                <select v-model="returnedToWorkChoice" class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm" data-test="sickness-case-returned-to-work">
+                  <option value="">—</option>
+                  <option value="1">{{ t('payroll.sicknessCases.form.returnedYes') }}</option>
+                  <option value="0">{{ t('payroll.sicknessCases.form.returnedNo') }}</option>
+                </select>
+              </label>
+              <label v-if="returnedToWorkChoice === '0'" class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.returnReason') }}</span>
+                <input v-model="draft.return_reason" type="text" maxlength="200" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-return-reason">
               </label>
               <label class="block text-sm">
-                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.returnedOn') }}</span>
-                <DateInput v-model="draft.returned_on" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" />
+                <span class="mb-1 block text-neutral-700">
+                  {{ returnedToWorkChoice === '0'
+                    ? t('payroll.sicknessCases.form.returnReasonDate')
+                    : t('payroll.sicknessCases.returnedOn') }}
+                </span>
+                <DateInput v-model="draft.returned_on" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-returned-on" />
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.hoursWorkedLastDay') }}</span>
@@ -791,7 +1340,9 @@ onMounted(() => void load())
 
           <section>
             <h4 class="mb-2 text-xs font-semibold uppercase text-neutral-500">
-              {{ t('payroll.sicknessCases.sections.workDays') }}
+              {{ draftHasHzupn
+                ? t('payroll.sicknessCases.sections.workDays')
+                : t('payroll.sicknessCases.sections.workDaysBenefit') }}
             </h4>
             <p class="mb-2 text-xs text-neutral-500">
               {{ t('payroll.sicknessCases.hints.workDays') }}

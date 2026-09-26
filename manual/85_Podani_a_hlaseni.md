@@ -863,8 +863,31 @@ Tiskopis ale zrušen nebyl a v aplikaci jej připravíte ve třech výjimkách:
   jejího doručení; od tohoto dne běží lhůta osmi dnů.
 
 Nad formulářem vždy stojí věta, jestli evidenční list pro zvolený rok a pracovní
-vztah vůbec vzniká, a proč. Není-li přípustný, tlačítko přípravy zůstane
-nedostupné.
+vztah vůbec vzniká, a proč. Není-li přípustný, věta jmenuje konkrétní důvod —
+například že zaměstnání v roce 2026 trvá, nebo že skončilo až po 31. 3. 2026 —
+a tlačítko přípravy zůstane nedostupné. Chybějící údaje v evidenčním listu,
+který sestavuje ČSSZ, opravte opravným měsíčním hlášením.
+
+Evidenční list se sestaví pro **pracovní poměr** (včetně zaměstnání malého
+rozsahu), **dohodu o pracovní činnosti** i **dohodu o provedení práce**. Kód
+řádku se skládá z druhu činnosti ČSSZ (např. `1++`, `A++`, `T++`). U dohod se
+do doby pojištění počítají jen měsíce, ve kterých se dohoda účastnila
+pojištění; ostatní měsíce řádku se vyznačí „X". Dohoda, která se v roce
+neúčastnila ani jednou, evidenční list nemá.
+
+**Příjem zúčtovaný po skončení zaměstnání** (doplatek, odměna vyplacená
+v dalším měsíci) se zapíše samostatným řádkem s kódem `1P+` (u dohody
+o pracovní činnosti `AP+`) — jen vyměřovacím základem, bez údajů „Od", „Do"
+a bez dnů. Měsíc po skončení bez vyměřovacího základu se do listu nezapisuje.
+Skončilo-li zaměstnání už v předchozím roce, vznikne list jen s tímto řádkem.
+
+Pod souhrnem je přehled **Údaje tiskopisu k opisu**: typ evidenčního listu
+(`01` za rok nebo na výzvu, `02` při skončení zaměstnání, `51` a `52` opravný),
+„zaměstnán od", datum vyhotovení a u každého řádku měsíce „X". Kontrolní XML
+tyto údaje nenese, proto je opište spolu s řádky listu. **Datum vyhotovení**
+můžete zadat; nesmí předcházet údaji „Do" žádného řádku, jinak by ČSSZ list
+odmítla chybou 251 a aplikace ho proto nesestaví. Když datum nezadáte, použije
+se konec posledního zúčtovaného měsíce.
 
 Přijde-li výzva ještě v průběhu vykazovaného roku a pracovní vztah trvá,
 aplikace sestaví list jen do posledního měsíce, za který existuje aktuální
@@ -873,6 +896,16 @@ poslední den měsíce, za který byl zaměstnanci naposledy zúčtován příje
 Budoucí měsíce se nevyžadují. Chybí-li ale některá revize uvnitř takto
 vymezeného období, příprava zůstane zablokovaná, protože by nebylo možné
 doložit souvislou dobu pojištění ani vyměřovací základ.
+
+### Opravný evidenční list
+
+Zmrazený evidenční list se nepřepisuje. Změní-li se podklad po zmrazení
+(doplatek, opravná mzdová revize), řádná příprava skončí hláškou, že list je
+zmrazený s jiným obsahem. Zaškrtněte **Opravný evidenční list** a list připravte
+znovu: vznikne nový list typu `51` (oprava ročního listu) nebo `52` (oprava
+listu při skončení) s odkazem na list, který opravuje, a s vlastní povinností
+i kontrolním XML. Nezměnil-li se podklad, opravný list se nesestaví. Od té
+chvíle panel ukazuje nejnovější list rozsahu.
 
 ### Rok přechodu z jiného mzdového programu
 
@@ -921,6 +954,19 @@ Záložky zdravotních pojišťoven oddělují dvě povinnosti:
 - **HOZ** je hromadné oznámení zaměstnavatele. Aplikace povinnosti odvodí,
   sestaví z nich datovou větu XML i PDF a obojí zmrazí. Připravený soubor není
   odeslaný — odeslání datovou schránkou musíte potvrdit sami.
+
+Kód změny v HOZ se určuje podle skutečnosti a podle zaměstnance:
+
+- **Nástup** má kód `P`. U cizince rozhoduje státní příslušnost na kartě osoby
+  a to, zda má v evidenci rodné číslo: občan EU, EHP nebo Švýcarska s rodným
+  číslem se hlásí kódem `A`, bez něj jako první přihlášení kódem `E`; cizinec
+  ze třetí země bez rodného čísla kódem `C`. U prvního přihlášení se místo
+  čísla pojištěnce uvede pohlaví a datum narození (`M05071980`, `Z12101982`),
+  takže je musí mít karta osoby vyplněné.
+- **Skončení** má kód `O`.
+- **Jednodenní zaměstnání** — vznikne a skončí týž den — se hlásí jedinou větou
+  s kódem `Q`, ne přihláškou a odhláškou.
+- **Mateřská a rodičovská** mají kódy `M` a `U`.
 - **PPZ** je měsíční přehled o platbě pojistného. Ze schválené revize se
   sestaví a zmrazí pouze formát doložený pro vybranou pojišťovnu. Připravený
   soubor není odeslaný. Řádný přehled se podává do 20. dne následujícího
@@ -991,10 +1037,66 @@ Odeslání není splnění povinnosti: tu splní až doručení územní správ�
 sociálního zabezpečení. Skutečnou doručenku nebo protokol proto uložte jako
 firemní dokument do DMS a výsledek zapište u případu.
 
-U dávek, kde datová věta nese i žádost o dávku s údaji, které podává
-pojištěnec (ošetřovné, peněžitá pomoc v mateřství, otcovská, dlouhodobé
-ošetřovné), MyÚčto podání nesestavuje. Případ v evidenci zůstává i s hlídanou
-lhůtou a tiskopis vyřídíte na ePortálu ČSSZ.
+### 85.15.1 Co vyplnit u případu
+
+Tlačítkem **Upravit** otevřete editor případu. Má jedno společné **Uložit**
+ve spodní liště a tyto sekce:
+
+- **Případ** — kód OSSZ, **číslo rozhodnutí**, den skončení, **Opravné
+  podání**, **Zahraniční případ** a další sdělení pro OSSZ. Číslo rozhodnutí
+  (u eNeschopenky a eOČR číslo z rozhodnutí lékaře) je u nemocenského,
+  ošetřovného a dlouhodobého ošetřovného povinné a HZUPN ho vyžaduje vždy;
+  bez něj ČSSZ podání nespáruje. Nemusí ho mít jen zahraniční případ.
+  Otcovská, peněžitá pomoc v mateřství a vyrovnávací příspěvek číslo
+  rozhodnutí nemají. Opravné podání nahradí dřívější podání se stejným číslem
+  rozhodnutí.
+- **Potvrzení zaměstnavatele** — mimo jiné **příjem ze zaměstnání malého
+  rozsahu** v celých korunách.
+- **Žádost o dávku** (ošetřovné, dlouhodobé ošetřovné, otcovská, peněžitá
+  pomoc v mateřství). Zaměstnavatel žádost přijímá a předává ČSSZ, údaje proto
+  opisujete ze žádosti, kterou vám zaměstnanec předal. U ošetřovného
+  zaškrtněte **akce** Vznik, Trvání nebo Ukončení — alespoň jednu. Potvrzení
+  zaměstnavatele, rozhodné období a den, od kterého se o dávku žádá, se
+  posílají jen s akcí Vznik; u samotného trvání nebo ukončení je ČSSZ
+  odmítá. Při střídání ošetřujících osob první osoba péči ukončí a druhá podá
+  vlastní žádost se vznikem. Dítě nebo ošetřovanou osobu vyberte z
+  vyživovaných osob na kartě zaměstnance — rodné číslo se doplní samo; osobu
+  mimo evidenci zadejte jménem, příjmením a datem narození. Dále vyplňte
+  důvod péče, kód vztahu (u otcovské důvod otcovské), dny, kdy zaměstnanec
+  pečoval, a podklady pro výplatu (směny v posledním dni a v období dávky).
+  Prohlášení, které zaměstnanec v žádosti nevyplnil, nechte nezaškrtnuté:
+  podle zásad NEMPRI se uvede „NE“ a žádost se kvůli tomu nezdrží. Hranice
+  žádosti jsou předvyplněné dny případu.
+- **Rozhodné období** — viz níže.
+- **Kontaktní pracovník** — jméno, telefon a e-mail osoby, na kterou se OSSZ
+  obrátí.
+- **Ukončení neschopnosti** (jen nemocenské, pro HZUPN) — zda se zaměstnanec
+  vrátil do práce. Když se nevrátil (nástup na peněžitou pomoc v mateřství,
+  skončení zaměstnání), zvolte **Ne**, uveďte důvod a den, ke kterému nastal.
+
+**Způsob výplaty mzdy** se do NEMPRI doplní sám z výplatního profilu
+zaměstnance: účet, na který chodí mzda, zahraniční IBAN, nebo adresa bydliště,
+když se mzda vyplácí v hotovosti. U výplaty přes partnera se nevyplňuje. Chybí-li
+účet nebo nejde-li adresu rozložit na ulici, číslo popisné a PSČ, příprava se
+zastaví a pod chybou je odkaz na kartu osoby.
+
+### 85.15.2 Rozhodné období a pravděpodobný příjem
+
+Měsíce rozhodného období, za které MyÚčto podalo jednotné měsíční hlášení, si
+ČSSZ vezme z něj. Měsíce před rokem 2026 a měsíce před začátkem vedení mezd
+v MyÚčtu v žádném hlášení z MyÚčta nejsou, a tak je NEMPRI nese samo:
+započitatelný příjem a vyloučené dny se berou z převzatých mezd. Chybí-li
+k měsíci převzatá mzda, příprava se zastaví s výčtem měsíců a odkazem na
+**Kontrolu převodu mezd**; měsíc můžete také doplnit ručně v sekci
+**Rozhodné období** případu. Ručně zadaný měsíc má přednost před převzatým.
+
+Onemocní-li zaměstnanec krátce po nástupu a rozhodné období má méně než
+30 dnů, vychází ČSSZ z **pravděpodobné výše příjmu**. Zadejte ji v sekci
+**Rozhodné období**; tlačítko **Navrhnout z mzdy** předvyplní sjednanou
+měsíční hrubou mzdu. Bez ní se NEMPRI v takovém případě nepřipraví.
+
+Do NEMPRI se zapisuje skutečný den nástupu do zaměstnání, ne sjednaný den
+ze smlouvy. HZUPN se nabízí jen u nemocenského.
 
 Po ručním splnění lze u NEMPRI nebo HZUPN zapsat zaměstnance, referenci
 případu, referenci doručenky, datum a ID firemního DMS dokumentu. Server

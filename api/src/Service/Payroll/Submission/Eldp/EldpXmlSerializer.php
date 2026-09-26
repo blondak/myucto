@@ -43,8 +43,19 @@ final class EldpXmlSerializer
         foreach ($statement->sections() as $section) {
             $lines[] = '  <eldp>';
             $lines[] = '    ' . self::element('kod', self::text($section, 'code'));
-            $lines[] = '    ' . self::element('platnostOd', self::text($section, 'valid_from'));
-            $lines[] = '    ' . self::element('platnostDo', self::text($section, 'valid_to'));
+            /*
+             * Řádek příjmu zúčtovaného po skončení zaměstnání („P+") dobu
+             * pojištění nenese, takže nemá ani „Od" a „Do"; `platnostOd`
+             * a `platnostDo` jsou v `eldpType` nepovinné. Ostatní sekce je mít
+             * musí — prázdné datum u nich je vada podkladu, ne vynechání.
+             */
+            $postTermination = str_ends_with(self::text($section, 'code'), 'P+');
+            if (!$postTermination || ($section['valid_from'] ?? null) !== null) {
+                $lines[] = '    ' . self::element('platnostOd', self::text($section, 'valid_from'));
+            }
+            if (!$postTermination || ($section['valid_to'] ?? null) !== null) {
+                $lines[] = '    ' . self::element('platnostDo', self::text($section, 'valid_to'));
+            }
             $lines[] = '    ' . self::element('pocetDnu', self::number($section, 'insurance_days'));
             $lines[] = '    ' . self::element(
                 'vymerovaciZaklad',

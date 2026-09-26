@@ -1638,11 +1638,15 @@ final readonly class HealthInsuranceSubmissionService
         $code = null;
         $codeReason = null;
         try {
-            $code = $this->codes->codeFor($duty->kind);
+            $code = $this->changeCodeFor($supplierId, $duty, null);
         } catch (HealthNotificationException $exception) {
             // Konkrétní důvod, ne obecné „nepodařilo se" — u každého ze tří
             // nedoložených druhů je jiný a uživatel podle něj pozná, jestli
             // chybí doklad, nebo povinnost.
+            $codeReason = $exception->getMessage();
+        } catch (\DomainException $exception) {
+            // Překrývající se historická identita: kód nástupu (P/A/E/C) se
+            // bez jednoznačné státní příslušnosti určit nedá.
             $codeReason = $exception->getMessage();
         }
         $channel = null;
@@ -1901,16 +1905,82 @@ final readonly class HealthInsuranceSubmissionService
             );
         }
 
+        $code = $this->changeCodeFor($supplierId, $duty, $identity);
+        $firstRegistrationNumber = null;
+        if ($this->codes->isFirstRegistrationCode($code)) {
+            try {
+                $firstRegistrationNumber = $this->codes->firstRegistrationInsuranceNumber(
+                    is_string($identity['sex'] ?? null) ? $identity['sex'] : null,
+                    is_string($identity['birth_date'] ?? null)
+                        ? $identity['birth_date']
+                        : null,
+                );
+            } catch (HealthNotificationException $exception) {
+                throw new HealthNotificationException(
+                    $exception->errorCode,
+                    sprintf(
+                        'Nástup zaměstnance %s %s (id %d) dne %s se hlásí jako první přihlášení cizince (kód %s): '
+                        . 'místo čísla pojištěnce jde pohlaví a datum narození. Doplňte je na kartě '
+                        . 'osoby v Mzdy → Osoby (/payroll/people?person=%d), oddíl Identita a adresy.',
+                        $firstName,
+                        $lastName,
+                        $duty->employeeId,
+                        $duty->occurredOn,
+                        $code,
+                        $duty->employeeId,
+                    ),
+                );
+            }
+        }
+
         return new HealthNotificationChange(
-            changeCode: $this->codes->codeFor($duty->kind),
+            changeCode: $code,
             changedOn: $duty->occurredOn,
-            insuranceNumber: $this->insuranceNumberFor(
-                $supplierId,
-                $duty->employeeId,
-            ),
+            insuranceNumber: $firstRegistrationNumber !== null
+                ? $firstRegistrationNumber
+                : $this->insuranceNumberFor(
+                    $supplierId,
+                    $duty->employeeId,
+                ),
             firstName: $firstName,
             lastName: $lastName,
         );
+    }
+
+    /**
+     * Kód změny jedné povinnosti. U nástupu rozhoduje státní příslušnost
+     * a přidělené číslo pojištěnce ({@see HealthNotificationCodeCatalog::employmentStartCode()});
+     * dřív nástup cizince vždy dostal „P", takže první přihlášení občana EU
+     * („E") ani cizince ze třetí země („C") vzniknout nemohlo.
+     *
+     * @param array<string,mixed>|null $identity identita osoby ke dni skutečnosti
+     */
+    private function changeCodeFor(
+        int $supplierId,
+        HealthNotificationDuty $duty,
+        ?array $identity,
+    ): string {
+        if ($duty->kind !== HealthNotificationDutyKind::EmploymentStart) {
+            return $this->codes->codeFor($duty->kind);
+        }
+        $identity ??= $this->identities->identityAt(
+            $supplierId,
+            $duty->employeeId,
+            $duty->occurredOn,
+        );
+        $citizenship = is_array($identity)
+            && is_string($identity['citizenship_country_code'] ?? null)
+                ? $identity['citizenship_country_code']
+                : null;
+        $hasBirthNumber = false;
+        foreach ($this->identities->identifiers($supplierId, $duty->employeeId) as $stored) {
+            if ($stored['identifier_type'] === 'birth_number') {
+                $hasBirthNumber = true;
+                break;
+            }
+        }
+
+        return $this->codes->employmentStartCode($citizenship, $hasBirthNumber);
     }
 
     /**

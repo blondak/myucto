@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Eldp;
 
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverMonth;
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverYear;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookCatalog;
@@ -65,7 +66,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
  */
 final class EldpAnnualStatementBuilder
 {
-    public const BUILDER_VERSION = 'eldp-annual-statement.v2';
+    public const BUILDER_VERSION = 'eldp-annual-statement.v3';
 
     private const MONTH_NAMES = [
         1 => 'leden', 2 => 'únor', 3 => 'březen', 4 => 'duben',
@@ -247,8 +248,18 @@ final class EldpAnnualStatementBuilder
                 'detail' => ['period_start' => $periodStart, 'employment_id' => $employmentId],
             ];
         }
+        $postTerminationMonths = [];
         foreach (array_keys($months) as $periodStart) {
             if (!in_array($periodStart, $requiredMonths, true)) {
+                /*
+                 * Revize za měsíc PO skončení vztahu je dodatečně zúčtovaný
+                 * příjem (odměna, doplatek). Evidenční list ho zapisuje řádkem
+                 * „P+" ({@see self::postTerminationLine()}), ne blokátorem.
+                 */
+                if ($employment['end'] !== null && $periodStart > $employment['end']) {
+                    $postTerminationMonths[] = (string) $periodStart;
+                    continue;
+                }
                 $label = self::monthLabel((string) $periodStart);
                 $blockers[] = [
                     'code' => 'eldp_month_outside_employment',
@@ -281,10 +292,31 @@ final class EldpAnnualStatementBuilder
                 $lines[] = $line;
             }
         }
+        foreach ($postTerminationMonths as $periodStart) {
+            $line = $this->postTerminationLine(
+                $employmentId,
+                $months[$periodStart],
+                $employment,
+                $blockers,
+            );
+            if ($line !== null) {
+                $lines[] = $line;
+            }
+        }
         if ($blockers !== []) {
             throw EldpValidationException::blocked($blockers);
         }
-        if ($lines === []) {
+        /*
+         * Dohoda, která se v roce ani jednou neúčastnila pojištění, evidenční
+         * list nemá: všechny její měsíce by byly „X". U pracovního poměru to
+         * neplatí — rok bez započitatelného příjmu (např. celoroční neplacené
+         * volno) se do listu zapisuje s nulou dnů a vyznačenými měsíci.
+         */
+        $participating = array_filter(
+            $lines,
+            static fn (array $line): bool => $line['participates'] === true,
+        );
+        if ($lines === [] || $participating === []) {
             throw new EldpValidationException(
                 'eldp_no_insurance_period',
                 'Za vykazovaný rok nevznikla doba důchodového pojištění.',
@@ -317,13 +349,25 @@ final class EldpAnnualStatementBuilder
             );
         }
         $lastLine = $lines[count($lines) - 1];
+        $datedLines = array_values(array_filter(
+            $lines,
+            static fn (array $line): bool => $line['post_termination'] === false,
+        ));
         // Skončí-li vztah přesně posledním dnem roku, evidenční list pokrývá
         // celý rok a platí řádná lhůta do 30. dubna. Mimořádná lhůta „do
         // jednoho měsíce po konečném vyúčtování“ patří jen skončení v průběhu
-        // roku.
+        // roku. Konečné vyúčtování je poslední zúčtovaný měsíc včetně
+        // dodatečně zúčtovaného příjmu „P+".
         if ($requestedByAuthority) {
             $window = $this->deadlines->forAuthorityRequest(
                 (string) $authorityRequestReceivedOn,
+            );
+        } elseif ($participationEnd !== null
+            && $participationEnd < sprintf('%04d-01-01', $year)
+        ) {
+            $window = $this->deadlines->forPostTerminationIncome(
+                $year,
+                $lastLine['period_end'],
             );
         } elseif ($participationEnd !== null
             && $participationEnd < sprintf('%04d-12-31', $year)
@@ -336,6 +380,19 @@ final class EldpAnnualStatementBuilder
         } else {
             $window = $this->deadlines->forYear($year);
         }
+        $periodFrom = $datedLines !== []
+            ? $datedLines[0]['insurance_from']
+            : $lines[0]['period_start'];
+        $periodTo = $datedLines !== []
+            ? $datedLines[count($datedLines) - 1]['insurance_to']
+            : $lastLine['period_end'];
+        $form = $this->form(
+            $confirmation,
+            $window->statementKind,
+            $employment['start'],
+            $sections,
+            $lastLine['period_end'],
+        );
 
         /*
          * Poctivost dokladu: převzatá část se nikde neschová. Jde do podkladu
@@ -361,9 +418,10 @@ final class EldpAnnualStatementBuilder
                 'employment_id' => $employmentId,
                 'year' => $year,
                 'statement_kind' => $window->statementKind,
-                'period_from' => $lines[0]['insurance_from'],
-                'period_to' => $lastLine['insurance_to'],
+                'period_from' => $periodFrom,
+                'period_to' => $periodTo,
             ],
+            'form' => $form,
             'eligibility' => [
                 'rule' => $eligibility['rule'],
                 // Do neměnného snapshotu patří i to, jestli šlo o běžnou roční
@@ -644,32 +702,11 @@ final class EldpAnnualStatementBuilder
         }
         [$employeeId, $data] = $entry;
         $relation = $data['employment']['relation_type'] ?? null;
-        if ($relation !== 'employment') {
-            $blockers[] = [
-                'code' => 'eldp_relationship_kind_unsupported',
-                'message' => "Evidenční list zatím podporuje jen pracovní poměr; za {$label} je vztah typu "
-                    . (is_string($relation) ? $relation : 'neznámý') . '.',
-                'detail' => ['period_start' => $periodStart, 'relation_type' => $relation],
-            ];
-
+        $activityCode = $this->activityCode($data, $relation, $label, $periodStart, $blockers);
+        if ($activityCode === null) {
             return null;
         }
-        $term = $data['term'] ?? null;
-        $activityCode = is_array($term) ? ($term['activity_code'] ?? null) : null;
-        $detailCode = is_array($term) ? ($term['jmhz_relationship_detail_code'] ?? null) : null;
-        if (!is_string($activityCode)
-            || preg_match('/^[1-9]$/D', $activityCode) !== 1
-            || $detailCode !== '1'
-        ) {
-            $blockers[] = [
-                'code' => 'eldp_activity_unsupported',
-                'message' => "Za {$label} není druh činnosti 1–9 s bližším určením Žádné; "
-                    . 'kód ELDP by se musel odvodit jinak, než modul umí.',
-                'detail' => ['period_start' => $periodStart, 'activity_code' => $activityCode],
-            ];
-
-            return null;
-        }
+        $socialKind = self::socialKind($relation);
         $relationship = $this->socialRelationship(
             is_array($month['result'] ?? null) ? $month['result'] : [],
             $employeeId,
@@ -677,9 +714,47 @@ final class EldpAnnualStatementBuilder
             $label,
             $periodStart,
             $blockers,
+            $socialKind,
         );
         if ($relationship === null) {
             return null;
+        }
+        $insuranceFrom = max($periodStart, $employment['start']);
+        $insuranceTo = $employment['end'] === null
+            ? $periodEnd
+            : min($periodEnd, $employment['end']);
+        if ($insuranceFrom > $insuranceTo) {
+            return null;
+        }
+        /*
+         * DPČ a DPP se důchodového pojištění účastní jen v měsících, kdy
+         * zúčtovaný příjem dosáhl rozhodné částky (§ 7 odst. 1 písm. a) bod 2
+         * zákona č. 187/2006 Sb.). Měsíc bez účasti není dobou pojištění:
+         * sekce jde dál se svým kódem a měsíc se v listu vyznačí „X", přesně
+         * jako měsíc pracovního poměru bez započitatelného příjmu.
+         */
+        if (($relationship['participation']['status'] ?? null) === 'does_not_participate') {
+            return [
+                'period_start' => $periodStart,
+                'period_end' => $periodEnd,
+                'source' => 'revision',
+                'revision_id' => $month['revision_id'],
+                'run_id' => $month['run_id'],
+                'input_snapshot_hash' => $month['input_snapshot_hash'],
+                'result_snapshot_hash' => $month['result_snapshot_hash'],
+                'insurance_from' => $insuranceFrom,
+                'insurance_to' => $insuranceTo,
+                'insurance_days' => 0,
+                'assessment_base_czk' => 0,
+                'code' => $activityCode . '++',
+                'participates' => false,
+                'post_termination' => false,
+                'excluded' => [
+                    'components' => array_fill_keys(EldpExcludedPeriodDeriver::COMPONENTS, 0),
+                    'total' => 0,
+                    'provenance' => [],
+                ],
+            ];
         }
         $uncapped = $relationship['assessment_base_minor_units'] ?? null;
         $capped = $relationship['capped_assessment_base_minor_units'] ?? null;
@@ -712,13 +787,6 @@ final class EldpAnnualStatementBuilder
             return null;
         }
 
-        $insuranceFrom = max($periodStart, $employment['start']);
-        $insuranceTo = $employment['end'] === null
-            ? $periodEnd
-            : min($periodEnd, $employment['end']);
-        if ($insuranceFrom > $insuranceTo) {
-            return null;
-        }
         $absences = $data['absences'] ?? null;
         if (!is_array($absences) || !array_is_list($absences)) {
             $blockers[] = [
@@ -796,8 +864,191 @@ final class EldpAnnualStatementBuilder
             'insurance_days' => $days,
             'assessment_base_czk' => intdiv($uncapped, 100),
             'code' => $activityCode . '++',
+            'participates' => true,
+            'post_termination' => false,
             'excluded' => $excluded,
         ];
+    }
+
+    /**
+     * Řádek „příjem zúčtovaný po skončení zaměstnání" (kód `1P+`, `AP+`).
+     *
+     * Číselník kódů ELDP (ID 10240) má pro tenhle případ vlastní kód:
+     * „1P+ – jeden prac. poměr u zaměst. – dodat. zúčtování příjmů po skončení
+     * výdělečné čin." Takový řádek nenese dobu pojištění — jen vyměřovací
+     * základ; data „Od" a „Do" ani počet dnů se u něj nevyplňují (přijatý
+     * evidenční list jiného mzdového programu je u 1P+ nechává prázdné). Dřív
+     * každá revize za měsíc po skončení vztahu zablokovala celý list.
+     *
+     * Měsíc po skončení bez vyměřovacího základu do listu nepatří vůbec.
+     *
+     * @param array<string,mixed> $month
+     * @param array{employee_id:int,start:string,end:string|null} $employment
+     * @param list<array{code:string,message:string,detail:array<string,mixed>}> $blockers
+     * @return array<string,mixed>|null
+     */
+    private function postTerminationLine(
+        int $employmentId,
+        array $month,
+        array $employment,
+        array &$blockers,
+    ): ?array {
+        $periodStart = (string) $month['period_start'];
+        $label = self::monthLabel($periodStart);
+        $periodEnd = (new \DateTimeImmutable($periodStart))
+            ->modify('last day of this month')->format('Y-m-d');
+        $input = $month['input'];
+        $entry = is_array($input)
+            ? $this->findEmploymentEntry($input, $employmentId)
+            : null;
+        if ($entry === null) {
+            return null;
+        }
+        [$employeeId, $data] = $entry;
+        $relation = $data['employment']['relation_type'] ?? null;
+        $activityCode = $this->activityCode($data, $relation, $label, $periodStart, $blockers);
+        if ($activityCode === null) {
+            return null;
+        }
+        $relationship = $this->socialRelationship(
+            is_array($month['result'] ?? null) ? $month['result'] : [],
+            $employeeId,
+            $employmentId,
+            $label,
+            $periodStart,
+            $blockers,
+            self::socialKind($relation),
+            true,
+        );
+        if ($relationship === null) {
+            return null;
+        }
+        $base = $relationship['capped_assessment_base_minor_units'] ?? null;
+        if (!is_int($base) || $base <= 0) {
+            return null;
+        }
+        if ($base !== ($relationship['assessment_base_minor_units'] ?? null)
+            || $base % 100 !== 0
+            || intdiv($base, 100) > 9_999_999_999
+        ) {
+            $blockers[] = [
+                'code' => 'eldp_assessment_base_not_whole_czk',
+                'message' => "Vyměřovací základ příjmu zúčtovaného po skončení zaměstnání za {$label} "
+                    . 'není celé Kč bez krácení ročním maximem.',
+                'detail' => ['period_start' => $periodStart],
+            ];
+
+            return null;
+        }
+        $code = $activityCode . 'P+';
+        if (!in_array($code, self::POST_TERMINATION_CODES, true)) {
+            $blockers[] = [
+                'code' => 'eldp_post_termination_code_missing',
+                'message' => "Za {$label} je příjem zúčtovaný po skončení vztahu, ale číselník kódů "
+                    . "ELDP pro druh činnosti {$activityCode} kód „P+“ nezná.",
+                'detail' => ['period_start' => $periodStart, 'activity_code' => $activityCode],
+            ];
+
+            return null;
+        }
+
+        return [
+            'period_start' => $periodStart,
+            'period_end' => $periodEnd,
+            'source' => 'revision',
+            'revision_id' => $month['revision_id'],
+            'run_id' => $month['run_id'],
+            'input_snapshot_hash' => $month['input_snapshot_hash'],
+            'result_snapshot_hash' => $month['result_snapshot_hash'],
+            'insurance_from' => null,
+            'insurance_to' => null,
+            'insurance_days' => 0,
+            'assessment_base_czk' => intdiv($base, 100),
+            'code' => $code,
+            'participates' => true,
+            'post_termination' => true,
+            'excluded' => [
+                'components' => array_fill_keys(EldpExcludedPeriodDeriver::COMPONENTS, 0),
+                'total' => 0,
+                'provenance' => [],
+            ],
+        ];
+    }
+
+    /**
+     * Kódy „P+" z číselníku kódů ELDP (ID 10240) připnutého datového slovníku
+     * JMHZ. Pro dohodu o provedení práce číselník kód dodatečného zúčtování
+     * nemá, proto se u ní nevymýšlí.
+     */
+    private const POST_TERMINATION_CODES = [
+        '1P+', '2P+', '3P+', '4P+', '5P+', '6P+', '7P+', '8P+', '9P+',
+        'AP+', 'BP+', 'CP+', 'DP+', 'EP+', 'FP+', 'GP+', 'HP+', 'IP+', 'JP+',
+    ];
+
+    /**
+     * Druh sociálního vztahu, pod kterým výsledek výpočtu vede pracovní vztah.
+     * Zaměstnání malého rozsahu je pro sociální pojištění pracovní poměr
+     * (stejně jako v {@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEldpEvidenceBuilder}).
+     */
+    private static function socialKind(mixed $relation): ?string
+    {
+        return match ($relation) {
+            'employment', 'small_scale_employment' => 'employment',
+            'dpc' => 'dpc',
+            'dpp' => 'dpp',
+            default => null,
+        };
+    }
+
+    /**
+     * Druh činnosti ČSSZ, ze kterého se skládá kód sekce. Rodinu druhu
+     * činnosti ke druhu vztahu ověřuje jediné pravidlo
+     * {@see PayrollEmploymentJmhzActivityFamily::matches()} — totéž, podle
+     * kterého se kód skládá v měsíčním hlášení.
+     *
+     * @param array<string,mixed> $data
+     * @param list<array{code:string,message:string,detail:array<string,mixed>}> $blockers
+     */
+    private function activityCode(
+        array $data,
+        mixed $relation,
+        string $label,
+        string $periodStart,
+        array &$blockers,
+    ): ?string {
+        if (self::socialKind($relation) === null) {
+            $blockers[] = [
+                'code' => 'eldp_relationship_kind_unsupported',
+                'message' => "Evidenční list podporuje pracovní poměr, dohodu o pracovní činnosti "
+                    . "a dohodu o provedení práce; za {$label} je vztah typu "
+                    . (is_string($relation) ? $relation : 'neznámý') . '.',
+                'detail' => ['period_start' => $periodStart, 'relation_type' => $relation],
+            ];
+
+            return null;
+        }
+        $term = $data['term'] ?? null;
+        $activityCode = is_array($term) ? ($term['activity_code'] ?? null) : null;
+        $detailCode = is_array($term) ? ($term['jmhz_relationship_detail_code'] ?? null) : null;
+        if (!is_string($activityCode)
+            || ($detailCode !== null && !is_string($detailCode))
+            || !PayrollEmploymentJmhzActivityFamily::matches(
+                (string) $relation,
+                $activityCode,
+                $detailCode,
+            )
+        ) {
+            $blockers[] = [
+                'code' => 'eldp_activity_unsupported',
+                'message' => "Za {$label} neodpovídá druh činnosti ČSSZ druhu pracovního vztahu; "
+                    . 'kód ELDP by se musel odvodit jinak, než modul umí.',
+                'detail' => ['period_start' => $periodStart, 'activity_code' => $activityCode],
+            ];
+
+            return null;
+        }
+
+        return $activityCode;
     }
 
     /**
@@ -917,18 +1168,27 @@ final class EldpAnnualStatementBuilder
             'takeover_source' => $month->source,
         ];
 
-        if ($month->relationType !== 'employment') {
+        if (!in_array($month->relationType, ['employment', 'dpc', 'dpp'], true)) {
             $blockers[] = [
                 'code' => 'eldp_takeover_relationship_kind_unsupported',
-                'message' => "Převzatý měsíc {$label} nemá druh vztahu pracovní poměr ("
-                    . ($month->relationType ?? 'neuvedeno') . '); evidenční list zatím jiný neumí.'
+                'message' => "Převzatý měsíc {$label} nemá druh vztahu pracovní poměr, DPČ ani DPP ("
+                    . ($month->relationType ?? 'neuvedeno') . '); evidenční list jiný neumí.'
                     . $where,
                 'detail' => $detail + ['relation_type' => $month->relationType],
             ];
 
             return null;
         }
-        $code = $month->eldpCode();
+        $code = $month->relationType === 'employment'
+            ? $month->eldpCode()
+            : ($month->activityCode !== null
+                && PayrollEmploymentJmhzActivityFamily::matches(
+                    $month->relationType,
+                    $month->activityCode,
+                    null,
+                )
+                    ? $month->activityCode . '++'
+                    : null);
         if ($code === null) {
             $blockers[] = [
                 'code' => 'eldp_takeover_activity_missing',
@@ -1073,6 +1333,8 @@ final class EldpAnnualStatementBuilder
             'insurance_days' => $days,
             'assessment_base_czk' => intdiv($base, 100),
             'code' => $code,
+            'participates' => $month->pensionParticipation,
+            'post_termination' => false,
             'excluded' => [
                 'components' => array_fill_keys(EldpExcludedPeriodDeriver::COMPONENTS, 0),
                 'total' => 0,
@@ -1101,6 +1363,91 @@ final class EldpAnnualStatementBuilder
     }
 
     /**
+     * Údaje tiskopisu, které datová věta JMHZ `eldpType` nenese, ale ČSSZ je
+     * u samostatného evidenčního listu čte: typ listu, „zaměstnán od" a datum
+     * vyhotovení. Kontrolní XML je proto nemá a obrazovka je ukazuje k opisu.
+     *
+     * - **Typ** `01` = evidenční list za rok nebo na výzvu, `02` = při skončení
+     *   zaměstnání (přijaté listy jiných mzdových programů takhle rozlišují
+     *   roční a ukončovací list). Opravný list nese `5` + druhou číslici
+     *   opravovaného typu (`51`, `52`) a odkaz na opravovaný list.
+     * - **Datum vyhotovení** nesmí předcházet údaji „Do" žádného řádku — ČSSZ
+     *   takový list odmítne chybou 251 („Datum vyhotovení ELDP předchází datum
+     *   v údaji Do"). Nezadá-li ho účetní, bere se nejdřívější přípustné datum:
+     *   konec posledního zúčtovaného měsíce. Den přípravy by rozbil
+     *   idempotenci — list připravený znovu jiný den by měl jiný obsah.
+     *
+     * @param array<string,mixed> $confirmation
+     * @param list<array<string,mixed>> $sections
+     * @return array<string,mixed>
+     */
+    private function form(
+        array $confirmation,
+        string $statementKind,
+        string $employedFrom,
+        array $sections,
+        string $lastSettlementEnd,
+    ): array {
+        $latestTo = null;
+        foreach ($sections as $section) {
+            if (is_string($section['valid_to'])
+                && ($latestTo === null || $section['valid_to'] > $latestTo)
+            ) {
+                $latestTo = $section['valid_to'];
+            }
+        }
+        $preparedOn = $confirmation['prepared_on'] ?? null;
+        if ($preparedOn === null || $preparedOn === '') {
+            $preparedOn = max($latestTo ?? $lastSettlementEnd, $lastSettlementEnd);
+        }
+        if (!is_string($preparedOn) || !self::isDate($preparedOn)) {
+            throw new EldpValidationException(
+                'eldp_prepared_on_invalid',
+                'Datum vyhotovení evidenčního listu musí být platné datum RRRR-MM-DD.',
+            );
+        }
+        if ($latestTo !== null && $preparedOn < $latestTo) {
+            throw new EldpValidationException(
+                'eldp_prepared_on_before_period_end',
+                "Datum vyhotovení {$preparedOn} předchází datu „Do“ ({$latestTo}); ČSSZ "
+                    . 'takový evidenční list odmítne chybou 251. Zadejte datum vyhotovení '
+                    . 'nejdříve v den „Do“.',
+            );
+        }
+        $type = $statementKind === 'termination' ? '02' : '01';
+        $corrects = $confirmation['corrects'] ?? null;
+        $correction = null;
+        if ($corrects !== null) {
+            $correctedType = is_array($corrects) ? ($corrects['eldp_type'] ?? null) : null;
+            $correctedId = is_array($corrects) ? ($corrects['statement_id'] ?? null) : null;
+            $correctedOn = is_array($corrects) ? ($corrects['prepared_on'] ?? null) : null;
+            if (!in_array($correctedType, ['01', '02'], true)
+                || !is_int($correctedId)
+                || $correctedId <= 0
+                || ($correctedOn !== null && (!is_string($correctedOn) || !self::isDate($correctedOn)))
+            ) {
+                throw new EldpValidationException(
+                    'eldp_correction_reference_invalid',
+                    'Opravný evidenční list musí odkazovat na zmrazený opravovaný list.',
+                );
+            }
+            $type = '5' . substr($correctedType, 1);
+            $correction = [
+                'statement_id' => $correctedId,
+                'eldp_type' => $correctedType,
+                'prepared_on' => $correctedOn,
+            ];
+        }
+
+        return [
+            'eldp_type' => $type,
+            'employed_from' => $employedFrom,
+            'prepared_on' => $preparedOn,
+            'corrects' => $correction,
+        ];
+    }
+
+    /**
      * Sekce evidenčního listu: souvislé měsíce se stejným kódem ELDP.
      *
      * @param list<array<string,mixed>> $lines
@@ -1110,7 +1457,12 @@ final class EldpAnnualStatementBuilder
     {
         $sections = [];
         $current = null;
+        $postTermination = [];
         foreach ($lines as $line) {
+            if ($line['post_termination'] === true) {
+                $postTermination[$line['code']][] = $line;
+                continue;
+            }
             $continues = $current !== null
                 && $current['code'] === $line['code']
                 && (new \DateTimeImmutable($current['valid_to']))
@@ -1133,10 +1485,24 @@ final class EldpAnnualStatementBuilder
                     'excluded_days_total' => 0,
                     'deducted_days_total' => 0,
                     'excluded_days_provenance' => [],
+                    'months_without_insurance' => [],
                 ];
             }
             /** @var array<string,mixed> $current */
             $current['valid_to'] = $line['insurance_to'];
+            /*
+             * Měsíc uvnitř sekce, který není dobou pojištění (§ 11 odst. 2
+             * zákona č. 155/1995 Sb., DPČ/DPP bez účasti), se v tiskopisu
+             * vyznačuje „X" v řádku měsíců. Datová věta JMHZ `eldpType` pro to
+             * prvek nemá; údaj proto nese podklad a obrazovka evidenčního listu.
+             */
+            if ($line['insurance_days'] === 0) {
+                $current['months_without_insurance'][] = (int) substr(
+                    (string) $line['period_start'],
+                    5,
+                    2,
+                );
+            }
             $current['insurance_days'] += $line['insurance_days'];
             $current['assessment_base_czk'] += $line['assessment_base_czk'];
             foreach ($line['excluded']['components'] as $key => $value) {
@@ -1151,6 +1517,26 @@ final class EldpAnnualStatementBuilder
         }
         if ($current !== null) {
             $sections[] = $current;
+        }
+        /*
+         * Dodatečně zúčtovaný příjem po skončení vztahu tvoří vlastní řádek
+         * bez „Od", „Do" a dnů — jen s kódem „P+" a vyměřovacím základem.
+         */
+        foreach ($postTermination as $code => $postLines) {
+            $sections[] = [
+                'ordinal' => count($sections) + 1,
+                'code' => (string) $code,
+                'valid_from' => null,
+                'valid_to' => null,
+                'insurance_days' => 0,
+                'assessment_base_czk' => array_sum(array_column($postLines, 'assessment_base_czk')),
+                'excluded_days' => array_fill_keys(EldpExcludedPeriodDeriver::COMPONENTS, 0),
+                'excluded_days_total' => 0,
+                'deducted_days_total' => 0,
+                'excluded_days_provenance' => [],
+                'months_without_insurance' => [],
+                'post_termination_periods' => array_values(array_column($postLines, 'period_start')),
+            ];
         }
         foreach ($sections as $section) {
             $componentSum = array_sum($section['excluded_days']);
@@ -1229,6 +1615,8 @@ final class EldpAnnualStatementBuilder
         string $label,
         string $periodStart,
         array &$blockers,
+        ?string $expectedKind = 'employment',
+        bool $postTermination = false,
     ): ?array {
         $people = $result['people'] ?? null;
         $matched = null;
@@ -1271,10 +1659,22 @@ final class EldpAnnualStatementBuilder
             }
         }
         $participation = is_array($match) ? ($match['participation'] ?? null) : null;
+        $status = is_array($participation) ? ($participation['status'] ?? null) : null;
+        /*
+         * Pracovní poměr bez účasti je rozpor, který list nesmí překrýt. DPČ
+         * a DPP se naopak účastní jen v některých měsících, takže neúčast je
+         * u nich doložený stav měsíce, ne chybějící podklad. U příjmu
+         * zúčtovaného po skončení vztahu rozhoduje jen vyměřovací základ.
+         */
+        $acceptedStatuses = $postTermination
+            ? ['participates', 'does_not_participate']
+            : ($expectedKind === 'employment'
+                ? ['participates']
+                : ['participates', 'does_not_participate']);
         if (!is_array($match)
-            || ($match['kind'] ?? null) !== 'employment'
-            || !is_array($participation)
-            || ($participation['status'] ?? null) !== 'participates'
+            || $expectedKind === null
+            || ($match['kind'] ?? null) !== $expectedKind
+            || !in_array($status, $acceptedStatuses, true)
         ) {
             $blockers[] = [
                 'code' => 'eldp_social_participation_missing',

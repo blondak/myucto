@@ -55,6 +55,14 @@ describe('mzdové úkony mají konkrétní nápravu', () => {
       .toBe('/payroll/runs?period=2025-03')
   })
 
+  it('datum vyhotovení a opravný list opraví na formuláři evidenčního listu', () => {
+    for (const code of ['eldp_prepared_on_before_period_end', 'eldp_scope_already_frozen', 'eldp_correction_without_change']) {
+      const guidance = eldpRemediation({ code, message: '' }, 12, 2025)
+      expect(guidance.path).toBe('/payroll/submissions/eldp')
+      expect(guidance.actionKey).toBe('payroll.remediation.actions.eldp_form')
+    }
+  })
+
   it('nese konkrétní měsíc absence i období použití průměru', () => {
     expect(eldpRemediation({ code: 'eldp_absence_overlap_unsupported', message: '', detail: { employment_id: 44, period_start: '2025-03-01' } }, 12, 2025).path)
       .toBe('/payroll/absences?employment=44&tab=absences&period=2025-03')

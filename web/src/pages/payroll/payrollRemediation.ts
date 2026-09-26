@@ -49,6 +49,13 @@ export const eldpRemediationCodes: Record<string, string> = {
   eldp_takeover_excluded_days_breakdown_missing: 'takeover',
   eldp_takeover_assessment_base_missing: 'takeover',
   eldp_takeover_assessment_base_not_whole_czk: 'takeover',
+  eldp_post_termination_code_missing: 'unsupported',
+  // Náprava je na téže obrazovce: datum vyhotovení a volba opravného listu.
+  eldp_prepared_on_before_period_end: 'prepared_on',
+  eldp_prepared_on_invalid: 'prepared_on',
+  eldp_scope_already_frozen: 'correction',
+  eldp_correction_without_change: 'correction',
+  eldp_correction_without_original: 'correction',
 }
 
 export function eldpRemediation(blocker: EldpBlocker, selectedEmploymentId: number | null, year: number) {
@@ -69,6 +76,9 @@ export function eldpRemediation(blocker: EldpBlocker, selectedEmploymentId: numb
     path = `/payroll/people?employment=${employmentId}`
       + (kind === 'activity' ? '&panel=employment_terms&field=activity_code' : '')
     action = 'terms'
+  } else if (['prepared_on', 'correction'].includes(kind)) {
+    path = '/payroll/submissions/eldp'
+    action = 'eldp_form'
   } else if (['absence_dates', 'absence_overlap', 'income_month'].includes(kind) && hasEmployment) {
     path = `/payroll/absences?employment=${employmentId}&tab=absences`
       + (period ? `&period=${period}` : '')

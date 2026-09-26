@@ -21,6 +21,13 @@ enum HealthNotificationDutyKind: string
     /** Skončení takového zaměstnání. */
     case EmploymentEnd = 'employment_end';
 
+    /**
+     * Zaměstnání, které vzniklo a zaniklo v jeden den. Je to JEDNA skutečnost,
+     * ne nástup a skončení: schéma pro ni má vlastní kód a dvojice vět by
+     * pojišťovně oznámila dvě události, které se nestaly.
+     */
+    case SingleDayEmployment = 'single_day_employment';
+
     /** Změna údajů dosud oznámených pojišťovně (jméno, adresa, číslo pojištěnce). */
     case EmployeeDataChange = 'employee_data_change';
 

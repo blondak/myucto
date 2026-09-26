@@ -66,6 +66,7 @@ final readonly class EldpStatementService
      * @param array<string,mixed> $confirmation
      * @return array{
      *   statement_id:int,created:bool,statement_kind:string,
+     *   eldp_type:string,corrects_statement_id:int|null,
      *   section_count:int,insurance_days:int,excluded_days_total:int,
      *   due_on:string,earliest_submission_on:string,
      *   obligation_id:int,submission_id:int,part_id:int,artifact_id:int,
@@ -132,6 +133,7 @@ final readonly class EldpStatementService
                 $confirmationFingerprint,
                 $createdBy,
             );
+            $boundStatementId = null;
             if (!$claimed) {
                 $claim = $this->repository->findClaimForUpdate(
                     $supplierId,
@@ -156,6 +158,48 @@ final readonly class EldpStatementService
                         'Idempotentní opakování evidenčního listu má jiný obsah potvrzení.',
                     );
                 }
+                $boundStatementId = $claim['statement_id'];
+            }
+
+            $correction = ($confirmation['correction'] ?? false) === true;
+            $latest = $this->repository->findByScopeForUpdate(
+                $supplierId,
+                $environment,
+                $employmentId,
+                $year,
+            );
+            /*
+             * Opakování už zapsaného požadavku (idempotentní klíč je navázaný
+             * na list) se porovnává s TÍM listem, ne s posledním v rozsahu —
+             * jinak by opakovaný opravný list opravoval sám sebe.
+             */
+            $target = $boundStatementId !== null
+                ? $this->repository->find($supplierId, $environment, $boundStatementId)
+                : null;
+            $buildConfirmation = $confirmation;
+            unset($buildConfirmation['corrects']);
+            $corrected = null;
+            if ($correction) {
+                $corrected = $target !== null
+                    ? ($target['corrects_statement_id'] === null
+                        ? null
+                        : $this->repository->find(
+                            $supplierId,
+                            $environment,
+                            (int) $target['corrects_statement_id'],
+                        ))
+                    : $latest;
+                if ($corrected === null) {
+                    throw new EldpValidationException(
+                        'eldp_correction_without_original',
+                        "Za rok {$year} zatím žádný evidenční list zmrazený není, takže není "
+                            . 'co opravovat. Připravte řádný evidenční list.',
+                    );
+                }
+                $buildConfirmation['corrects'] = self::correctionReference(
+                    $corrected,
+                    $this->decrypt($corrected),
+                );
             }
 
             $statement = $this->builder->build(
@@ -163,7 +207,7 @@ final readonly class EldpStatementService
                 $employmentId,
                 $year,
                 $this->repository->revisionsForYear($supplierId, $year),
-                $confirmation,
+                $buildConfirmation,
                 $this->takeover->forEmployment($supplierId, $employmentId, $year),
             );
             $xml = $this->serializer->serialize($statement);
@@ -224,12 +268,22 @@ final readonly class EldpStatementService
                 'source_manifest_sha256' => $manifestHash,
             ]));
 
-            $existing = $this->repository->findByScopeForUpdate(
-                $supplierId,
-                $environment,
-                $employmentId,
-                $year,
-            );
+            /*
+             * Který zmrazený list je „ten samý požadavek": u opakovaného
+             * opravného listu ten, na který je navázaný klíč, jinak poslední
+             * list rozsahu. Opravný list bez zapsaného klíče se naopak
+             * zakládá vždy nový — pokud podklad opravdu změnil.
+             */
+            $existing = $correction ? $target : ($target ?? $latest);
+            if ($correction && $existing === null && $corrected !== null
+                && self::sameContent($this->decrypt($corrected), $statement->payload)
+            ) {
+                throw new EldpValidationException(
+                    'eldp_correction_without_change',
+                    "Podklad evidenčního listu za rok {$year} se od zmrazeného listu "
+                        . 'nezměnil, takže opravný list nemá co opravit.',
+                );
+            }
             if ($existing !== null) {
                 if (!hash_equals(
                     (string) $existing['request_fingerprint'],
@@ -237,8 +291,9 @@ final readonly class EldpStatementService
                 )) {
                     throw new EldpValidationException(
                         'eldp_scope_already_frozen',
-                        "Evidenční list za rok {$year} je už zmrazený s jiným obsahem; "
-                            . 'změněný podklad vyžaduje opravné podání, ne přepsání.',
+                        "Evidenční list za rok {$year} je už zmrazený s jiným obsahem. "
+                            . 'Zmrazený list se nepřepisuje: změněný podklad podejte jako '
+                            . 'opravný evidenční list (volba „Opravný evidenční list").',
                     );
                 }
                 $statementId = $existing['id'];
@@ -252,6 +307,12 @@ final readonly class EldpStatementService
                         'employee_id' => $scope['employee_id'],
                         'employment_id' => $employmentId,
                         'statement_year' => $year,
+                        'statement_sequence' => $corrected === null
+                            ? 1
+                            : (int) ($latest['statement_sequence'] ?? 1) + 1,
+                        'corrects_statement_id' => $corrected === null
+                            ? null
+                            : (int) $corrected['id'],
                         'statement_kind' => $scope['statement_kind'],
                         'period_from' => $scope['period_from'],
                         'period_to' => $scope['period_to'],
@@ -326,6 +387,8 @@ final readonly class EldpStatementService
                 'statement_id' => $statementId,
                 'created' => $created,
                 'statement_kind' => (string) $scope['statement_kind'],
+                'eldp_type' => (string) ($statement->payload['form']['eldp_type'] ?? ''),
+                'corrects_statement_id' => $corrected === null ? null : (int) $corrected['id'],
                 'section_count' => $totals['section_count'],
                 'insurance_days' => $totals['insurance_days'],
                 'excluded_days_total' => $totals['excluded_days_total'],
@@ -413,6 +476,8 @@ final readonly class EldpStatementService
 
         return [
             'id' => $stored['id'],
+            'statement_sequence' => $stored['statement_sequence'] ?? 1,
+            'corrects_statement_id' => $stored['corrects_statement_id'] ?? null,
             'statement_kind' => $stored['statement_kind'],
             'period_from' => $stored['period_from'],
             'period_to' => $stored['period_to'],
@@ -764,7 +829,73 @@ final readonly class EldpStatementService
             'note' => is_string($confirmation['note'] ?? null)
                 ? trim($confirmation['note'])
                 : null,
+            'correction' => ($confirmation['correction'] ?? false) === true,
+            'prepared_on' => is_string($confirmation['prepared_on'] ?? null)
+                && $confirmation['prepared_on'] !== ''
+                    ? $confirmation['prepared_on']
+                    : null,
         ];
+    }
+
+    /**
+     * Odkaz opravného listu na list, který opravuje: jeho typ a datum
+     * vyhotovení. Listy sestavené dřív (bez údajů tiskopisu ve snapshotu)
+     * dostanou typ ze svého druhu — roční `01`, ukončovací `02`.
+     *
+     * @param array<string,mixed> $stored
+     * @param array<string,mixed> $payload
+     * @return array{statement_id:int,eldp_type:string,prepared_on:?string}
+     */
+    private static function correctionReference(array $stored, array $payload): array
+    {
+        $form = is_array($payload['form'] ?? null) ? $payload['form'] : [];
+        $type = $form['eldp_type'] ?? null;
+        if (!is_string($type) || $type === '') {
+            $type = $stored['statement_kind'] === 'termination' ? '02' : '01';
+        }
+        // Oprava opravného listu opravuje týž původní typ (51 → 01).
+        $type = '0' . substr($type, 1);
+
+        return [
+            'statement_id' => (int) $stored['id'],
+            'eldp_type' => $type,
+            'prepared_on' => is_string($form['prepared_on'] ?? null)
+                ? $form['prepared_on']
+                : null,
+        ];
+    }
+
+    /**
+     * Mění opravný list něco, co ČSSZ z listu čte? Porovnávají se sekce,
+     * období a „zaměstnán od" — ne typ, odkaz na opravovaný list ani datum
+     * vyhotovení, které se u opravy mění vždy.
+     *
+     * @param array<string,mixed> $previous
+     * @param array<string,mixed> $next
+     */
+    private static function sameContent(array $previous, array $next): bool
+    {
+        $content = static fn (array $payload): string => CanonicalJson::encode([
+            'sections' => array_map(
+                static fn (mixed $section): array => is_array($section)
+                    ? array_diff_key($section, ['months_without_insurance' => true, 'post_termination_periods' => true])
+                    : [],
+                is_array($payload['eldp_sections'] ?? null) ? $payload['eldp_sections'] : [],
+            ),
+            'period_from' => $payload['scope']['period_from'] ?? null,
+            'period_to' => $payload['scope']['period_to'] ?? null,
+            'employed_from' => is_array($payload['form'] ?? null)
+                ? ($payload['form']['employed_from'] ?? null)
+                : null,
+            'months_without_insurance' => array_map(
+                static fn (mixed $section): mixed => is_array($section)
+                    ? ($section['months_without_insurance'] ?? [])
+                    : [],
+                is_array($payload['eldp_sections'] ?? null) ? $payload['eldp_sections'] : [],
+            ),
+        ]);
+
+        return hash_equals($content($previous), $content($next));
     }
 
     public static function employmentReference(int $employmentId): string

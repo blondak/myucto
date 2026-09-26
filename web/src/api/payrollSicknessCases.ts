@@ -37,6 +37,20 @@ export interface PayrollSicknessWorkInterval {
   to: string
 }
 
+/** Důvod péče u ošetřovného (`onemocnela` … `uzavrenaSkola`). */
+export type PayrollSicknessCareReason = 'ill' | 'quarantine' | 'cannot_care' | 'school_closed'
+
+/**
+ * Ručně doplněný měsíc rozhodného období. Posílá se jen za měsíce, které
+ * nepokrývá měsíční hlášení z MyÚčta a ke kterým chybí převzatá mzda.
+ */
+export interface PayrollSicknessDecisiveMonth {
+  /** `RRRR-MM` */
+  period: string
+  income_minor: number
+  excluded_days: number
+}
+
 export interface PayrollSicknessCase {
   id: number
   employee_id: number
@@ -83,6 +97,43 @@ export interface PayrollSicknessCase {
   hzupn_submission_id: number | null
   row_version: number
   work_days: PayrollSicknessWorkInterval[]
+  // ── žádost o dávku (OSE, DLO, OPP, PPM) ──
+  action_start: number
+  action_continuation: number
+  action_end: number
+  application_from: string | null
+  application_to: string | null
+  cared_dependant_id: number | null
+  cared_first_name: string | null
+  cared_last_name: string | null
+  cared_birth_date: string | null
+  care_reason: PayrollSicknessCareReason | null
+  school_name: string | null
+  school_business_id: string | null
+  shared_household: number | null
+  lone_caregiver: number | null
+  child_under_16: number | null
+  other_maternity_claim: number | null
+  other_parental_claim: number | null
+  other_person_s57: number | null
+  cared_personally: number | null
+  care_days: PayrollSicknessWorkInterval[]
+  relationship_code: string | null
+  alternation: number | null
+  paternity_reason: string | null
+  maternity_care_reason: string | null
+  child_order: number | null
+  worked_last_day: number | null
+  planned_shifts: number | null
+  planned_shifts_worked: number | null
+  // ── rozhodné období a kontakt ──
+  probable_income_czk: number | null
+  /** Návrh pravděpodobného příjmu: sjednaná měsíční hrubá mzda v haléřích. */
+  probable_income_suggestion_minor?: number | null
+  decisive_months: PayrollSicknessDecisiveMonth[]
+  contact_worker_name: string | null
+  contact_worker_phone: string | null
+  contact_worker_email: string | null
 }
 
 export interface PayrollSicknessCasePreview {
@@ -176,6 +227,7 @@ export type PayrollSicknessCaseInput = Partial<
     | 'nempri_submission_id'
     | 'hzupn_submission_id'
     | 'row_version'
+    | 'probable_income_suggestion_minor'
   >
 >
 

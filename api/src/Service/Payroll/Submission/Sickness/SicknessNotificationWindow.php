@@ -32,4 +32,18 @@ final readonly class SicknessNotificationWindow
         public string $legalReference,
         public string $sourceStatus,
     ) {}
+
+    /**
+     * Kalendář lhůty v registru povinností (`calendar_days` / `business_days`).
+     *
+     * `calendarBasis` tady nese PRAVIDLO, podle kterého se termín spočítal
+     * („immediately“, „next_working_day_after_payday“). Registr povinností
+     * přijímá jen druh kalendáře a pravidlo odmítl, takže „Připravit NEMPRI“
+     * spadlo dřív, než vzniklo podání. Obě pravidla končí termínem na nejbližší
+     * pracovní den podle zák. č. 245/2000 Sb., tedy v pracovních dnech.
+     */
+    public function obligationCalendarBasis(): string
+    {
+        return 'business_days';
+    }
 }

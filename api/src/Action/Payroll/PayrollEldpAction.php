@@ -133,6 +133,12 @@ final class PayrollEldpAction
                     'authority_request_received_on' =>
                         $this->nullableString($body, 'authority_request_received_on'),
                     'note' => $this->string($body, 'note'),
+                    // Opravný list a datum vyhotovení jsou volitelné: klient,
+                    // který je neposílá, sestaví řádný list jako dřív.
+                    'correction' => array_key_exists('correction', $body)
+                        ? $this->bool($body, 'correction')
+                        : false,
+                    'prepared_on' => $this->nullableString($body, 'prepared_on'),
                 ],
                 $this->string($body, 'idempotency_key'),
                 $this->requiredUserId($request),
@@ -156,6 +162,8 @@ final class PayrollEldpAction
             [
                 'employment_id' => $employmentId,
                 'statement_kind' => $result['statement_kind'],
+                'eldp_type' => $result['eldp_type'],
+                'corrects_statement_id' => $result['corrects_statement_id'],
                 'due_on' => $result['due_on'],
                 'submission_id' => $result['submission_id'],
                 'submission_status' => $result['submission_status'],

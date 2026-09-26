@@ -7,27 +7,28 @@ namespace MyInvoice\Service\Payroll\Submission\Sickness;
 /**
  * Obsah jednoho e-podání NEMPRI25.
  *
- * ## Co tu vědomě NENÍ
+ * ## Rozhodné období
  *
- * **`rozhodneObdobi`.** Od 1. 4. 2026 se údaje potřebné pro výpočet dávek
- * sdělují VÝHRADNĚ jednotným měsíčním hlášením — § 97 odst. 4 věta první
- * zák. č. 187/2006 Sb.: „Údaje potřebné pro výpočet dávek je zaměstnavatel
- * povinen sdělit prostřednictvím jednotného měsíčního hlášení podle zákona
- * o jednotném měsíčním hlášení zaměstnavatele" a věta druhá je vymezuje jako
- * „vyměřovací základy pro pojistné na nemocenské a důchodové pojištění podle
- * § 18 odst. 2 a vyloučené dny podle § 18 odst. 7". `CtRozhodneObdobi` je
- * v XSD `minOccurs="0"` právě proto. Vyplnit započitatelný příjem sem
- * i do JMHZ by znamenalo dvě verze téhož čísla, které se mohou rozejít.
+ * § 97 odst. 4 zák. č. 187/2006 Sb. ukládá sdělovat vyměřovací základy
+ * a vyloučené dny jednotným měsíčním hlášením. To ale pokrývá jen měsíce, za
+ * které hlášení z MyÚčta skutečně odešlo. Měsíce rozhodného období před rokem
+ * 2026 a před začátkem vedení mezd v MyÚčtu v žádném hlášení z MyÚčta nejsou;
+ * bez nich by ÚSSZ neměla z čeho denní vyměřovací základ spočítat. Věta je
+ * proto nese v `rozhodneObdobi` — výklad a pravidla jsou
+ * v {@see NempriDecisivePeriodResolver}.
+ *
+ * ## Platební spojení
+ *
+ * § 97 odst. 2 věta druhá ukládá předat s podklady „údaje o způsobu výplaty
+ * mzdy, platu nebo odměny“. Věta proto nese `platebniSpojeni` podle výplatního
+ * profilu zaměstnance; viz {@see NempriPaymentConnection}.
+ *
+ * ## Co tu vědomě NENÍ
  *
  * **`prilohy`.** `CtPrilohy` umí 1 až 9 příloh v base64. § 97 odst. 1 věta
  * třetí je vyžaduje, jen když zaměstnanec předal podklady v listinné podobě
  * — tedy u dokladů, které aplikace nedrží. Přidat sem prázdnou přílohovou
  * část by tvrdilo, že žádné takové podklady nejsou.
- *
- * **`platebniSpojeni`.** Způsob výplaty dávky si volí POJIŠTĚNEC v žádosti,
- * ne zaměstnavatel. Zaměstnavatel podle § 97 odst. 2 věty první sděluje
- * „údaje o způsobu výplaty mzdy, platu nebo odměny", což je jiný údaj než
- * účet, na který má chodit dávka.
  */
 final readonly class NempriXmlPayload
 {
@@ -74,5 +75,8 @@ final readonly class NempriXmlPayload
         public ?string $contactWorkerName = null,
         public ?string $contactWorkerPhone = null,
         public ?string $contactWorkerEmail = null,
+        public ?NempriBenefitApplication $application = null,
+        public ?NempriDecisivePeriod $decisivePeriod = null,
+        public ?NempriPaymentConnection $paymentConnection = null,
     ) {}
 }

@@ -7131,6 +7131,34 @@
       "manualCompletionNotice": "Download the control XML, verify the values and complete the filing manually in the current official CSSA interface. We do not label the file as directly importable.",
       "downloadControlXml": "Download control XML",
       "downloading": "Downloading control XML…",
+      "formSheet": {
+        "title": "Form data to copy",
+        "description": "The control XML carries only the rows of the sheet. Copy the type, \"employed since\", date of preparation and the \"X\" months into the form from this overview.",
+        "type": "Record sheet type",
+        "types": {
+          "01": "01 – for the year or on request",
+          "02": "02 – on termination of employment",
+          "51": "51 – corrective to type 01",
+          "52": "52 – corrective to type 02"
+        },
+        "employedFrom": "Employed since",
+        "preparedOn": "Date of preparation",
+        "corrects": "Corrects record sheet no. {id}",
+        "code": "Code",
+        "period": "From – to",
+        "days": "Days",
+        "base": "Assessment base",
+        "monthsX": "\"X\" months",
+        "postTermination": "income accounted after the employment ended",
+        "none": "—"
+      },
+      "correction": {
+        "label": "Corrective record sheet",
+        "hint": "A frozen sheet is never overwritten. If the source data changed after freezing (additional pay, payroll correction), prepare a corrective sheet — it replaces the latest sheet for this year and employment.",
+        "preparedOn": "Date of preparation (optional)",
+        "preparedOnHint": "Must not precede the \"To\" date of any row (ČSSZ would reject the sheet with error 251). If left empty, the end of the last accounted month is used.",
+        "created": "The corrective record sheet was built as a control document."
+      },
       "manual": {
         "title": "Record manual completion",
         "description": "After completing the filing in the official interface, select an active company DMS document and enter the result reference and date. The application reads and fingerprints the actual document bytes on the server.",
@@ -9012,6 +9040,7 @@
       "kind": {
         "employment_start": "Employment start",
         "employment_end": "Employment end",
+        "single_day_employment": "Single-day employment",
         "employee_data_change": "Data change",
         "insurer_change": "Change of insurer",
         "maternity_leave_start": "Maternity leave start",
@@ -9284,7 +9313,11 @@
         "case": "Case",
         "employerConfirmation": "Employer confirmation",
         "endOfIncapacity": "End of incapacity",
-        "workDays": "Days worked during incapacity"
+        "workDays": "Days worked during incapacity",
+        "workDaysBenefit": "Days worked during the benefit period",
+        "application": "Benefit application",
+        "decisivePeriod": "Decisive period",
+        "contact": "Contact person"
       },
       "benefitKinds": {
         "NEM": "Sickness benefit",
@@ -9316,12 +9349,16 @@
         "recordAccepted": "Record acceptance",
         "recordRejected": "Record rejection",
         "addWorkInterval": "Add interval",
-        "removeWorkInterval": "Remove"
+        "removeWorkInterval": "Remove",
+        "addCareInterval": "Add care days",
+        "addDecisiveMonth": "Add month",
+        "suggestProbableIncome": "Suggest from wage",
+        "suggestProbableIncomeValue": "Suggest from wage (CZK {amount})"
       },
       "hints": {
         "createRequirements": "Select a person, an employment and the social event start date first.",
         "readOnly": "You do not have write access to payroll submissions.",
-        "benefitKindNotSerializable": "For this benefit the data message also carries the benefit application with details about the child or the cared-for person. Those are filed by the insured person; the employer does not hold them and the app will not invent them — prepare the submission on the authority's portal. The case stays here with its deadline tracked.",
+        "probableIncomeNoSuggestion": "The employment has no agreed monthly wage on the event date to base a suggestion on. Enter the amount manually.",
         "incapacityEndRequired": "The end-of-incapacity report can only be filed once the incapacity has ended. Fill in the end date.",
         "alreadyPrepared": "The submission is already prepared. Send it with Send via data box, or file a correction with the decision number.",
         "receiptDateRequired": "Fill in the date the submission was delivered to the authority, from the protocol.",
@@ -9348,6 +9385,74 @@
       },
       "errors": {
         "generic": "The operation could not be completed."
+      },
+      "careReasons": {
+        "ill": "Illness or injury",
+        "quarantine": "Ordered quarantine",
+        "cannot_care": "The person caring for the child cannot provide care",
+        "school_closed": "School or facility closed"
+      },
+      "form": {
+        "correction": "Corrective submission",
+        "foreignCase": "Foreign case (decision issued outside CZ and SK)",
+        "additionalNote": "Additional note for the social security office",
+        "decisionNumberHint": "The decision number (for e-sick-notes and e-care-notes the number from the doctor's decision) is mandatory for sickness, care and long-term care benefits; without it the authority cannot match the submission. Only a foreign case may omit it. A corrective submission replaces the earlier one with the same decision number.",
+        "smallScopeIncome": "Income from small-scope employment (CZK)",
+        "smallScopeIncomeHint": "Fill in only for small-scope employment, in whole crowns.",
+        "applicationHint": "Copy the details from the application the employee handed to you. The employer accepts the application and forwards it to the authority (section 97(1) of the Sickness Insurance Act).",
+        "actionStart": "Start",
+        "actionContinuation": "Continuation",
+        "actionEnd": "End",
+        "actionsHint": "Tick at least one action. The employer confirmation, the decisive period and the start date of the claim are sent only with the Start action. When caregivers alternate, the first one ends the care and the second one files their own application with Start.",
+        "applicationFrom": "Claims the benefit from",
+        "applicationTo": "Claims the benefit until",
+        "child": "Child",
+        "caredPerson": "Cared-for person",
+        "caredPersonHint": "Pick a dependant from the employee's card — the birth number is filled in automatically. If the person is not on record, enter the first name, last name and date of birth.",
+        "caredFirstName": "First name",
+        "caredLastName": "Last name",
+        "caredBirthDate": "Date of birth",
+        "careReason": "Reason for care",
+        "schoolName": "Name of the school or facility",
+        "schoolBusinessId": "Company ID of the school or facility",
+        "relationshipCode": "Relationship code to the cared-for person",
+        "paternityReason": "Paternity reason (code)",
+        "maternityCareReason": "Reason for care (code)",
+        "childOrder": "Child order",
+        "codebookHint": "Copy the codes from the application; they are values of the authority's code list (1 to 3 characters, digits and capital letters).",
+        "sharedHousehold": "Lives with the cared-for person in a shared household",
+        "loneCaregiver": "Is a single caregiver",
+        "childUnder16": "Cares for a child under 16",
+        "otherMaternityClaim": "Another person is entitled to maternity benefit for the child",
+        "caredPersonally": "Provided the care personally",
+        "alternation": "Caregivers alternate",
+        "declarationsHint": "If the employee left a statement blank in the application, leave it unticked — under the NEMPRI rules it is reported as \"NO\" and the application is not held up.",
+        "careDays": "Days of care",
+        "careFrom": "Cared from",
+        "careTo": "Cared until",
+        "workedLastDay": "Worked on the last day before the care",
+        "plannedShifts": "Had shifts scheduled on the benefit days",
+        "plannedShiftsWorked": "Worked the scheduled shifts",
+        "decisivePeriodHint": "Months for which MyÚčto filed the monthly report are taken from it by the authority. The other months of the decisive period (before 2026 and before payroll started in MyÚčto) are taken from the imported payroll. If an imported wage is missing for a month, add the month here manually.",
+        "probableIncome": "Probable monthly income (CZK)",
+        "probableIncomeHint": "Fill in when the decisive period is shorter than 30 days (illness shortly after starting). The suggestion is based on the agreed monthly gross wage.",
+        "decisiveMonth": "Month",
+        "countableIncome": "Countable income (CZK)",
+        "excludedDays": "Excluded days",
+        "contactName": "Full name",
+        "contactPhone": "Phone",
+        "contactEmail": "E-mail",
+        "paymentConnectionHint": "The way the wage is paid is added to the notification automatically from the employee's payout profile (the account the wage goes to, or the address when paid in cash).",
+        "returnedYes": "Yes",
+        "returnedNo": "No",
+        "returnReason": "Reason for not returning",
+        "returnReasonDate": "Date the reason took effect"
+      },
+      "errorFix": {
+        "where": "Fix for {name}:",
+        "personCard": "Open the person card",
+        "reconciliation": "Open payroll migration check",
+        "editCase": "Edit case"
       }
     },
     "employerSettings": {
@@ -9390,7 +9495,8 @@
         "entries": "Review attendance for this employment",
         "imports": "Open attendance imports",
         "average": "Complete this employment’s average earnings",
-        "takeover": "Open payroll takeover review"
+        "takeover": "Open payroll takeover review",
+        "eldp_form": "Edit the record sheet form"
       },
       "eldp": {
         "period": "Reporting period: {period}.",
@@ -9410,7 +9516,9 @@
           "income_month": "No countable income was paid in the month and the recorded absences cannot decide whether the month is an insurance period (sickness combined with unpaid leave, the month of childbirth, or a month with neither income nor absence).",
           "unknown": "A preparation error must be investigated by support.",
           "takeover": "A payroll month taken over from the previous program lacks a value the pension evidence sheet needs, or it contradicts the payroll kept in MyÚčto.",
-          "takeover_revision": "MyÚčto calculates payroll for the indicated month but has no approved revision; data taken over from the previous program must not replace it."
+          "takeover_revision": "MyÚčto calculates payroll for the indicated month but has no approved revision; data taken over from the previous program must not replace it.",
+          "prepared_on": "The date of preparation precedes the \"To\" date of a row; ČSSZ rejects such a record sheet with error 251.",
+          "correction": "A record sheet for this year and employment is already frozen, or the corrective sheet has nothing to correct."
         },
         "steps": {
           "no_revisions": "In Payroll, select the reporting year and check the months during which the employment existed. Complete genuinely missing calculations and approvals. If payroll was processed elsewhere, do not create fictitious calculations; contact support about historical evidence.",
@@ -9428,7 +9536,9 @@
           "income_month": "Open this employment’s absences and verify the absences in the indicated month. If an absence or forgotten pay is missing, add it and recalculate payroll. If the records are accurate, the law decides only about the whole month and the application cannot resolve it; process that month manually and do not change anything just to pass validation.",
           "unknown": "Contact support with the reporting year, employment and technical details below. Do not change employee data or approved payroll blindly because of this error.",
           "takeover": "Open the payroll takeover review, fill in the missing value for the indicated month (activity kind, insured days, assessment base, employment dates) and repeat the takeover. Do not estimate the value: the evidence sheet feeds a pension calculation. If the previous program never issued it, file the evidence sheet for that month outside the application.",
-          "takeover_revision": "Open payroll for the indicated month, finish the calculation and approve the current revision, or discard the draft run. Only then prepare the evidence sheet again. Taken-over data will not substitute the month so that a draft calculation with different figures cannot stay hidden."
+          "takeover_revision": "Open payroll for the indicated month, finish the calculation and approve the current revision, or discard the draft run. Only then prepare the evidence sheet again. Taken-over data will not substitute the month so that a draft calculation with different figures cannot stay hidden.",
+          "prepared_on": "In Date of preparation enter a day no earlier than the last \"To\" date (on termination, the end date or later), or clear the field to use the end of the last accounted month.",
+          "correction": "If the source data changed after freezing, tick Corrective record sheet and prepare it again. If nothing changed, no corrective sheet is needed; if no sheet exists yet, prepare the regular one first."
         }
       },
       "work": {

@@ -4445,6 +4445,9 @@ export interface PayrollEldpPrepared {
   statement_id: number
   created: boolean
   statement_kind: 'annual' | 'termination'
+  /** Typ tiskopisu: 01 roční/na výzvu, 02 při skončení, 51/52 opravný. */
+  eldp_type?: string
+  corrects_statement_id?: number | null
   section_count: number
   insurance_days: number
   excluded_days_total: number
@@ -4461,6 +4464,9 @@ export interface PayrollEldpPrepared {
 
 export interface PayrollEldpStatement {
   id: number
+  /** 1 = původní list, vyšší = opravný list. */
+  statement_sequence?: number
+  corrects_statement_id?: number | null
   statement_kind: 'annual' | 'termination'
   period_from: string
   period_to: string
@@ -7724,6 +7730,10 @@ export const payrollApi = {
     authority_request_received_on: string | null
     note: string
     idempotency_key: string
+    /** Opravný evidenční list k poslednímu zmrazenému listu rozsahu. */
+    correction?: boolean
+    /** Datum vyhotovení; bez něj server vezme konec posledního zúčtovaného měsíce. */
+    prepared_on?: string | null
   }) =>
     api.post<{ statement: PayrollEldpPrepared }>('/payroll/submissions/eldp', payload)
       .then(response => response.data.statement),
