@@ -44,7 +44,7 @@ final class ListGroupedByMonthTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->invoices = $container->get(InvoiceRepository::class);
             $this->purchases = $container->get(PurchaseInvoiceRepository::class);

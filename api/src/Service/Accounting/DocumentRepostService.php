@@ -70,14 +70,14 @@ final class DocumentRepostService
      * se přepíše na místě. S řádky (potvrzení) už je rozhodnutí definitivní.
      *
      * @param 'invoice'|'purchase_invoice'|'bank' $sourceType
-     * @param list<array{account_code:string, side:string, amount:float}>|null $lines opravené řádky
+     * @param list<array{account_code:string, side:string, amount:float, is_red_storno?:bool}>|null $lines opravené řádky
      *
      * @return array{entry_id:int, entry_date:string, document_no:?string, description:?string,
      *               period_status:?string, locked_until:?string, strategy:string,
      *               needs_reversal:bool, target_date:?string, date_shifted:bool,
      *               reason_code:?string, already_reversed:bool, tax_neutral_available:bool,
      *               tax_neutral_violation:?string,
-     *               lines:list<array{account_code:?string, account_name:?string, side:string, amount:float}>}
+     *               lines:list<array{account_code:?string, account_name:?string, side:string, amount:float, is_red_storno:bool}>}
      *
      * @throws PostingException doklad není zaúčtovaný
      */
@@ -124,6 +124,26 @@ final class DocumentRepostService
             $today,
             $lines === null ? null : $violation === null,
         );
+    }
+
+    /**
+     * Náhled rozhodnutí pro KONKRÉTNÍ opravené řádky, jak je dialog právě má. Jde
+     * touž cestou jako {@see repost()} (u banky přes bankovní invarianty), jen nic
+     * nezapíše. Dialog podle něj ukáže, jestli se zápis přepíše na místě, nebo proč
+     * je potřeba storno. Bez něj by se o tom rozhodovalo až po potvrzení.
+     *
+     * @param 'invoice'|'purchase_invoice'|'bank' $sourceType
+     * @param list<array{account_code:string, side:string, amount:float, is_red_storno?:bool}> $lines
+     *
+     * @return array<string,mixed> totéž co {@see plan()}
+     */
+    public function previewPlan(int $supplierId, string $sourceType, int $docId, array $lines): array
+    {
+        if ($sourceType === 'bank') {
+            $lines = $this->bankPosting->prepareRepostLines($supplierId, $docId, $lines);
+        }
+
+        return $this->plan($supplierId, $sourceType, $docId, $lines);
     }
 
     /**
@@ -237,7 +257,7 @@ final class DocumentRepostService
      * ({@see PostingOriginService} ho z activity_logu pozná a provenienci přebije).
      *
      * @param 'invoice'|'purchase_invoice'|'bank' $sourceType
-     * @param list<array{account_code:string, side:'debit'|'credit', amount:float}> $lines
+     * @param list<array{account_code:string, side:'debit'|'credit', amount:float, is_red_storno?:bool}> $lines
      * @param array<string,mixed> $meta audit kontext (user_id, ip, user_agent) + description
      *
      * @return array{strategy:string, entry_id:int, reversal_entry_id:?int, entry_date:string,
@@ -303,7 +323,12 @@ final class DocumentRepostService
                 ]);
             }
 
-            $postMeta = array_merge($meta, ['entry_date' => $targetDate]);
+            // Řádky z dialogu nenesou cizoměnovou stopu (321 v EUR apod.). Převezme se
+            // z opravovaného zápisu, ať je oprava přepisem nebo stornem a novým zápisem.
+            $postMeta = array_merge($meta, [
+                'entry_date'              => $targetDate,
+                'inherit_line_trace_from' => (int) $plan['entry_id'],
+            ]);
             if ($plan['reason_code'] === 'tax_neutral_rewrite') {
                 // PostingService podmínky ověří znovu sám, pod zámkem zápisu.
                 $postMeta['tax_neutral_rewrite'] = true;
@@ -366,7 +391,7 @@ final class DocumentRepostService
      * překládají TÍMŽ přesměrem syntetiky na jedinou analytiku jako při zápisu, jinak
      * by „518" proti zapsanému „518.100" vypadalo jako změna účtu.
      *
-     * @param list<array{account_code:string, side:string, amount:float}> $lines
+     * @param list<array{account_code:string, side:string, amount:float, is_red_storno?:bool}> $lines
      */
     private function taxNeutralViolation(int $supplierId, int $entryId, string $entryDate, array $lines): ?string
     {
@@ -381,6 +406,7 @@ final class DocumentRepostService
                 'account_id' => $codeMap[$code]['id'],
                 'side'       => (string) ($line['side'] ?? ''),
                 'amount'     => (float) ($line['amount'] ?? 0),
+                'is_red_storno' => (bool) ($line['is_red_storno'] ?? false),
             ];
         }
 
@@ -471,7 +497,7 @@ final class DocumentRepostService
     }
 
     /**
-     * @return list<array{account_code:?string, account_name:?string, side:string, amount:float}>
+     * @return list<array{account_code:?string, account_name:?string, side:string, amount:float, is_red_storno:bool}>
      */
     private function describeLines(int $supplierId, int $entryId): array
     {
@@ -484,6 +510,7 @@ final class DocumentRepostService
                 'account_name' => isset($acc['name']) ? (string) $acc['name'] : null,
                 'side'         => (string) $line['side'],
                 'amount'       => (float) $line['amount'],
+                'is_red_storno' => (bool) ($line['is_red_storno'] ?? false),
             ];
         }
         return $out;

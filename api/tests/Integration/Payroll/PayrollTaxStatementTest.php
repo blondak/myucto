@@ -43,7 +43,7 @@ final class PayrollTaxStatementTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->service = $container->get(TaxStatementService::class);
             $this->repository = $container->get(PayrollTaxStatementRepository::class);
@@ -196,7 +196,7 @@ final class PayrollTaxStatementTest extends TestCase
     public function testApiNeedsThePermissionAndTheEnabledPayrollModule(): void
     {
         $this->seedMonth($this->supplierId, '2025-04-01', 1, 5_000_00, 0, 0);
-        $action = Bootstrap::buildApp()->getContainer()->get(TaxStatementAction::class);
+        $action = Bootstrap::buildContainer()->get(TaxStatementAction::class);
 
         $forbidden = $action->preview($this->request('staff'), new Response());
         self::assertSame(403, $forbidden->getStatusCode());

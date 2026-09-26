@@ -27,7 +27,7 @@ final class PayrollOperationalReconciliationRepositoryTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_operational_reconciliation_issues')) {
             $this->markTestSkipped('Chybí migrace MZ-27 reconciliation.');

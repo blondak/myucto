@@ -82,6 +82,10 @@ function claimShifted(row: DphBookRow): boolean {
   return row.claim_basis === 'received_at'
 }
 
+function isNilRow(row: DphBookRow): boolean {
+  return Math.abs(Number(row.base)) < 0.005 && Math.abs(Number(row.vat)) < 0.005
+}
+
 const anyClaimShifted = computed(() =>
   (preview.value?.sections ?? []).some(s => s.rows.some(claimShifted))
 )
@@ -188,7 +192,7 @@ onMounted(loadPreview)
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="(row, idx) in section.rows" :key="idx"
-                :class="row.is_draft ? 'bg-neutral-50 text-neutral-500 italic' : ''">
+                :class="row.is_draft ? 'bg-neutral-50 text-neutral-500 italic' : (isNilRow(row) ? 'text-neutral-400' : '')">
                 <td class="px-2 py-1.5 whitespace-nowrap font-mono">{{ fmtDate(row.tax_date) }}</td>
                 <td class="px-2 py-1.5 whitespace-nowrap font-mono">{{ fmtDate(row.accounting_date) }}</td>
                 <td class="px-2 py-1.5 whitespace-nowrap" :title="claimBasisHint(row.claim_basis)">
@@ -209,7 +213,10 @@ onMounted(loadPreview)
                   </span>
                   <span class="font-mono">{{ row.direction === 'issued' ? 'VF' : 'PF' }} {{ row.doc_number }}</span>
                 </td>
-                <td class="px-2 py-1.5">{{ row.description }}</td>
+                <td class="px-2 py-1.5">
+                  {{ row.description }}
+                  <span v-if="isNilRow(row)" class="block text-[10px] text-neutral-500 leading-tight">{{ t('reports.dph_book.nil_row_note') }}</span>
+                </td>
                 <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap">{{ fmtMoney(row.base) }}</td>
                 <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap">{{ fmtMoney(row.vat) }}</td>
                 <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap">{{ fmtMoney(row.total) }}</td>
@@ -217,7 +224,11 @@ onMounted(loadPreview)
                 <td class="px-2 py-1.5 font-mono whitespace-nowrap">{{ row.counterparty_dic }}</td>
                 <td class="px-2 py-1.5 font-mono whitespace-nowrap">{{ row.original_doc_number || '' }}</td>
                 <td class="px-2 py-1.5 font-mono whitespace-nowrap">{{ fmtDate(row.tax_date) }}</td>
-                <td class="px-2 py-1.5">{{ row.kh_section || '' }}</td>
+                <td class="px-2 py-1.5">
+                  <span v-if="!row.kh_section && isNilRow(row)" class="text-[10px] text-neutral-500 whitespace-nowrap"
+                    :title="t('reports.dph_book.nil_kh_hint')">{{ t('reports.dph_book.nil_kh') }}</span>
+                  <template v-else>{{ row.kh_section || '' }}</template>
+                </td>
               </tr>
             </tbody>
             <tfoot class="bg-neutral-50 font-semibold">

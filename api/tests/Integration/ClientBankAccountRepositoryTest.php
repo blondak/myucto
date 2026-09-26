@@ -37,7 +37,7 @@ final class ClientBankAccountRepositoryTest extends TestCase
             $this->markTestSkipped('cfg.php missing');
         }
 
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         self::assertNotNull($container);
         $this->pdo = $container->get(Connection::class)->pdo();
         $this->accounts = $container->get(ClientBankAccountRepository::class);

@@ -150,7 +150,6 @@ final class CreditCardConversionService
         $this->posting->postDocument($supplierId, 'bank', $entry['tx_id'], $lines, [
             'entry_date'          => (string) $header['entry_date'],
             'document_date'       => $header['document_date'] ?? null,
-            'document_no'         => $header['document_no'] ?? null,
             'description'         => $header['description'] ?? null,
             'posted'              => true,
             'user_id'             => $userId,

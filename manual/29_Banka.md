@@ -185,7 +185,10 @@ změny. Smazání se odmítne, když pohyb dokládá ještě jiný import.
 Záložka **Všechny pohyby** je společný přehled transakcí napříč výpisy, účty a
 roky. Na rozdíl od fronty **K zaúčtování** ukazuje i již spárované a zaúčtované
 pohyby. U každého řádku vidíš náš zdrojový účet, účet protistrany, výpis,
-párování a stav zaúčtování.
+párování a stav zaúčtování. Filtr **Stav** nabízí stejné stavy párování jako
+detail výpisu. Pod **Nespárováno** jsou pouze pohyby čekající na fakturu;
+vlastní převody, mzdy a pohyby zaúčtované mimo saldokonto se vynechají.
+Filtr **Ignorováno** ukáže i dříve ignorované položky.
 
 Akce jsou stejné jako v detailu konkrétního výpisu: otevření nebo zrušení
 párování, rozdělené párování, vytvoření dokladu, přiložení podkladu, vyžádání
@@ -317,6 +320,17 @@ eviduje jako částečná úhrada přepočtená kurzem faktury. V podvojném
 
 Pro transakce, které se nespárovaly automaticky (typicky chybí VS, nebo
 částka nesedí kvůli devizovému kurzu či bankovnímu poplatku):
+
+Filtr **Nespárováno** v detailu výpisu ukazuje pohyby, které skutečně čekají
+na spárování s dokladem. Nezahrnuje vlastní převody, mzdové platby ani pohyby
+zaúčtované mimo saldokontní účty, například bankovní poplatky, platby kartou
+a daně. Tyto pohyby zůstávají ve výpisu dostupné bez filtru.
+Akce **Nespárované XLSX** stáhne všechny takové pohyby z aktuálního výpisu,
+včetně těch na dalších stránkách. Soubor obsahuje bankovní účet, směr a datum
+platby, text, částku, měnu a poznámky účetní z účetního zápisu. Tlačítko
+**Odeslat klientovi** před odesláním ukáže počet pohybů, účet a adresy aktivních
+klientských uživatelů firmy a vyžádá potvrzení. Odesílá stejný XLSX soubor;
+bez nespárovaných pohybů nebo bez klientského příjemce se nic neodešle.
 
 - Pod stavem **Nespárováno** je vidět důvod, proč transakci automat nevzal,
   například *Žádná vydaná faktura s tímto VS* (platba přišla dřív, než faktura
@@ -471,6 +485,34 @@ u automatického párování. Pokud platby faktury přesto přesahují částku 
 úhrada se nezaúčtuje automaticky a čeká ve frontě **K zaúčtování** na kontrolu
 dvojí úhrady.
 
+### Ruční párování přijaté faktury s nižší platbou
+
+Přijatou fakturu označí ruční párování jako uhrazenou jen tehdy, když platba
+pokryje zbývající částku. Rozdíl do 1,00 (v měně faktury) banka dorovná na
+548/648, korunovou platbu cizoměnové faktury bere v kurzové toleranci jako úhradu
+celé faktury a rozdíl zaúčtuje jako kurzový.
+
+Je-li platba nižší, faktura zůstane **částečně uhrazená** a aplikace nabídne dvě
+možnosti:
+
+- **Nechat částečně uhrazené**: zbytek se doplatí později (další platbou,
+  příkazem k úhradě nebo zápočtem).
+- **Uhradit a vyrovnat rozdíl**: zbytek se hned zaúčtuje jako zápočet proti
+  zvolenému účtu (321 MD / zvolený účet D). Předvolený je účet 648, u cizí měny
+  663. Faktura se tím uzavře.
+
+Vyrovnání rozdílu je dostupné v podvojném účetnictví a s oprávněním k účetnictví.
+V daňové evidenci aplikace jen oznámí, kolik zbývá uhradit.
+
+Korunová platba cizoměnové faktury mimo kurzovou toleranci (částečná úhrada nebo
+druhá platba už uhrazené faktury) se automaticky nezaúčtuje a čeká ve frontě
+**K zaúčtování** na ruční ověření. Závazek na 321 se tak neodúčtuje víc, než kolik
+z faktury zbývá.
+
+Příchozí platba spárovaná s přijatou fakturou (vrácený dobropis, vrácený
+přeplatek) se do uhrazené částky počítá se záporným znaménkem. Vrácený dobropis
+proto nic nedluží a faktura, ke které dodavatel vrátil část peněz, ukáže zbytek.
+
 ## 29.6 Cron — automatický scan
 
 Místo ručního uploadu můžeš nastavit **cron**, který bude pravidelně skenovat
@@ -589,6 +631,15 @@ zápis s tolika řádky na straně 311/321 (resp. 324/314 u záloh), kolik je al
 rozdíl do **1 Kč** (zaokrouhlení, bankovní poplatek v alokaci) se dorovná automaticky
 na účet **648** (výnos) nebo **548** (náklad) — nad tuto toleranci se transakce
 nezaúčtuje sama a čeká na ruční zásah.
+
+**Přijatá faktura se zaokrouhlením** (pole Zaokrouhlení, typicky 16 370,09 +0,91
+= k úhradě 16 371,00) má předpis na 321 v nominálu, zaokrouhlení do DPH nevstupuje.
+Když úhrada přesně odpovídá částce k úhradě, považuje se za plnou úhradu i při
+párování jen podle částky a data: závazek se uzavře nominálem a zaokrouhlení jde
+na 548 (zaplaceno víc) nebo 648 (zaplaceno méně). U dobropisu stejně s příchozí
+vratkou. Úhrady zaúčtované dřív bez tohoto dorovnání srovná
+`php api/bin/purchase-rounding-settlement-backfill.php` (spouští ho i migrace)
+přepisem zápisu úhrady na místě, jen v otevřeném účetním roce.
 
 Než se zápis vytvoří, MyÚčto ověří:
 

@@ -219,3 +219,32 @@ rozdílných řádků přílohy.
 > ⚠️ **Zelená rovnost stran není kontrola věcného zařazení.** Rozvaha je
 > odvozena z účtového rozvrhu a mapy výkazu; podezřelý řádek rozbalte a jeho
 > účty ověřte v opisu.
+
+## 57.8 Rozvaha po účtech
+
+Záložka **Po účtech** nad rozvahou ukáže místo zákonné struktury seznam
+rozvahových účtů tříd 0 až 4 se zůstatkem k rozvahovému dni. Účty jsou
+seřazené po třídách, pod syntetikou jsou její analytiky (přepínač
+**Zobrazit analytiky** je skryje). Syntetika má ve sloupcích **Zůstatek MD**
+a **Zůstatek D** součet debetních a kreditních zůstatků svých analytik, bez
+vzájemného započtení, takže kladný běžný účet a kontokorent zůstanou každý na
+své straně. Každá třída má svůj součet.
+
+Pod součtem rozvahových účtů je zvýrazněný řádek **Výsledek hospodaření**
+(zisk zeleně, ztráta červeně) jako rozdíl `Σ MD − Σ D`. Je k dispozici
+kdykoli během roku bez uzávěrky. Zůstatky jsou vždy před uzavřením účetních
+knih: uzávěrkový zápis se nezapočítává, takže po uzavření roku pohled k poslednímu
+dni období ukazuje přesně to, co uzávěrka převedla na konečný účet rozvažný 702.
+
+Kliknutím na účet se otevře jeho opis od začátku období do rozvahového dne.
+Rozvahový den a filtr dimenze platí stejně jako u výkazu, rozsah výkazu se
+tu nepoužívá. Když se výsledek z rozvahových účtů neliší od výsledku
+z výsledkových účtů ([§ 58.6](58_Vysledovka_druhova.md)), je vše v pořádku;
+rozdíl stránka ohlásí nad tabulkou a obvykle ukazuje na chybu v počátečních
+stavech nebo v uzávěrce minulého roku. Při filtru dimenze obsahují rozvahové
+účty jen řádky s touto hodnotou, takže se jejich výsledek od výsledovky
+lišit může; stránka to pak ukáže jen jako upozornění a za výsledek dimenze
+platí výsledovka.
+
+Export PDF a XLSX z této záložky vytvoří rozvahu po účtech v jednotce zvolené
+přepínačem **Kč / tis. Kč**.

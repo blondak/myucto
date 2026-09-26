@@ -50,7 +50,7 @@ final class InvoiceSettlementServiceTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db       = $container->get(Connection::class);
             $this->service  = $container->get(InvoiceSettlementService::class);
             $this->journal  = $container->get(JournalEntryRepository::class);
@@ -414,7 +414,217 @@ final class InvoiceSettlementServiceTest extends TestCase
         }
     }
 
+    /**
+     * Reálný nález: přijatá faktura ručně spárovaná s NIŽŠÍ platbou byla `paid`, banka
+     * zaúčtovala jen skutečnou platbu a na 321 zůstal nedoplatek. Saldo se spolehlo na
+     * `status='paid'` a doklad ze seznamu otevřených položek vyhodilo — účetní neměla
+     * jak zbytek najít. Uhrazený doklad, jehož evidované úhrady ho nepokrývají, musí
+     * zůstat otevřený svým zbytkem.
+     */
+    public function testPaidPurchaseWithBankShortfallStaysOpenInSaldo(): void
+    {
+        $vendor = $this->client('Dodavatel nedoplatek', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-710', $vendor, 5000.00);
+        $this->postPurchasePredpis($pfId, 5000.00);
+        $this->bankMatch($pfId, 4900.00, 'CZK');
+        $this->markPaid($pfId, self::YEAR . '-06-20');
+
+        $ratio = $this->purchasePaidRatio($pfId, self::YEAR . '-06-30');
+        self::assertEqualsWithDelta(0.98, $ratio, 0.0001, 'Otevřený zůstává nedoplatek 100 z 5 000, ne nic.');
+    }
+
+    /** Haléřový rozdíl (do 1 Kč) dorovná banka na 548/648 — saldo ho nesmí hlásit. */
+    public function testPaidPurchaseWithinRoundingToleranceIsClosedInSaldo(): void
+    {
+        $vendor = $this->client('Dodavatel haléře', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-711', $vendor, 5000.60);
+        $this->postPurchasePredpis($pfId, 5000.60);
+        $this->bankMatch($pfId, 5000.00, 'CZK');
+        $this->markPaid($pfId, self::YEAR . '-06-20');
+
+        self::assertNull($this->purchasePaidRatioOrNull($pfId, self::YEAR . '-06-30'));
+    }
+
+    /**
+     * Vyrovnání nedoplatku na UŽ UHRAZENÉM dokladu: zápočet proti zvolenému účtu
+     * (321 MD / 648 D) zbytek zavře a saldo doklad pustí. Stav ani datum úhrady se nemění.
+     */
+    public function testShortfallOfPaidPurchaseCanBeSettledAgainstAccount(): void
+    {
+        $vendor = $this->client('Dodavatel vyrovnání', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-712', $vendor, 5000.00);
+        $this->postPurchasePredpis($pfId, 5000.00);
+        $this->bankMatch($pfId, 4900.00, 'CZK');
+        $this->markPaid($pfId, self::YEAR . '-06-20');
+
+        $res = $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
+            'settled_on' => self::YEAR . '-06-30', 'amount' => 100.00, 'account_id' => $this->accountId('648'),
+        ], $this->userId);
+
+        $byAcc = $this->linesByAccountCode((int) $res['journal_entry_id']);
+        self::assertEqualsWithDelta(100.00, $byAcc['321']['debit'], 0.001);
+        self::assertEqualsWithDelta(100.00, $byAcc['648']['credit'], 0.001);
+        self::assertSame('paid', $this->purchaseStatus($pfId));
+        self::assertSame(self::YEAR . '-06-20', substr((string) $this->scalar('SELECT paid_at FROM purchase_invoices WHERE id = ' . $pfId), 0, 10));
+        self::assertNull($this->purchasePaidRatioOrNull($pfId, self::YEAR . '-06-30'), 'Po vyrovnání je doklad v saldu uzavřený.');
+
+        // Víc než nedoplatek vyrovnat nejde.
+        try {
+            $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
+                'settled_on' => self::YEAR . '-06-30', 'amount' => 50.00, 'account_id' => $this->accountId('648'),
+            ], $this->userId);
+            self::fail('Na vyrovnaném dokladu už není co započíst.');
+        } catch (SettlementException $e) {
+            self::assertSame('doc_not_payable', $e->errorCode);
+        }
+    }
+
+    /** Ručně „uhrazený" doklad bez evidované úhrady se zápočtem zbytku vyrovnat nesmí. */
+    public function testPaidPurchaseWithoutAnyPaymentIsNotSettleable(): void
+    {
+        $vendor = $this->client('Dodavatel ručně', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-713', $vendor, 5000.00);
+        $this->markPaid($pfId, self::YEAR . '-06-20');
+
+        try {
+            $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
+                'settled_on' => self::YEAR . '-06-30', 'amount' => 5000.00, 'account_id' => $this->accountId('648'),
+            ], $this->userId);
+            self::fail('Doklad bez evidované úhrady nemá nedoplatek k vyrovnání.');
+        } catch (SettlementException $e) {
+            self::assertSame('doc_not_payable', $e->errorCode);
+        }
+    }
+
+    /**
+     * Cizoměnový nedoplatek: EUR faktura 236,84 uhrazená 233,17 EUR. Zbytek 3,67 EUR se
+     * eviduje v měně dokladu a do deníku jde kurzem PŘEDPISU (25,00) — 321 MD 91,75 Kč
+     * s cizoměnovou stopou / 663 D. Jiný kurz by na 321 nechal kurzový drobek.
+     */
+    public function testForeignPurchaseShortfallSettlesAtPredpisRate(): void
+    {
+        $eurId = $this->currencyIdFor('EUR');
+        $vendor = $this->client('Dodavatel EU', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-714', $vendor, 236.84, $eurId, 25.0);
+        $this->postPurchasePredpis($pfId, 5921.00, 'EUR', 25.0, 236.84);
+        $this->bankMatch($pfId, 233.17, 'EUR');
+        $this->markPaid($pfId, self::YEAR . '-06-20');
+
+        self::assertEqualsWithDelta(233.17 / 236.84, $this->purchasePaidRatio($pfId, self::YEAR . '-06-30'), 0.0001);
+
+        $res = $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
+            'settled_on' => self::YEAR . '-06-30', 'amount' => 3.67, 'account_id' => $this->accountId('663'),
+        ], $this->userId);
+
+        $lines = $this->db->pdo()->prepare(
+            'SELECT a.account_code, l.side, l.amount, l.currency_code, l.fx_rate, l.amount_foreign
+               FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.entry_id = ? ORDER BY l.side DESC'
+        );
+        $lines->execute([(int) $res['journal_entry_id']]);
+        $byCode = [];
+        foreach ($lines->fetchAll(PDO::FETCH_ASSOC) as $l) {
+            $byCode[substr((string) $l['account_code'], 0, 3)] = $l;
+        }
+        self::assertEqualsWithDelta(91.75, (float) $byCode['321']['amount'], 0.001);
+        self::assertSame('debit', $byCode['321']['side']);
+        self::assertSame('EUR', $byCode['321']['currency_code']);
+        self::assertEqualsWithDelta(3.67, (float) $byCode['321']['amount_foreign'], 0.001);
+        self::assertEqualsWithDelta(91.75, (float) $byCode['663']['amount'], 0.001);
+        self::assertSame('credit', $byCode['663']['side']);
+        self::assertNull($this->purchasePaidRatioOrNull($pfId, self::YEAR . '-06-30'));
+    }
+
+    /**
+     * KNOWN GAP H3: `payment_matches.amount` je v měně TRANSAKCE. Korunová platba kartou
+     * za eurovou fakturu se dřív sčítala proti eurovému `amount_to_pay` jako koruny.
+     * V kurzové toleranci ji banka odúčtuje celým nominálem — saldo i zbytek dokladu
+     * ji proto musí vidět jako úhradu celé faktury, ne 25násobný přeplatek ani drobek.
+     */
+    public function testCzkPaymentOfForeignPurchaseCountsInDocumentCurrency(): void
+    {
+        $eurId = $this->currencyIdFor('EUR');
+        $vendor = $this->client('Dodavatel karta', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-715', $vendor, 100.00, $eurId, 25.0);
+        $this->postPurchasePredpis($pfId, 2500.00, 'EUR', 25.0, 100.00);
+        $this->bankMatch($pfId, 2530.00, 'CZK');
+
+        $remaining = (float) $this->scalar(
+            'SELECT ' . \MyInvoice\Support\Sql\PurchaseSettledExpr::remaining('p') . ' FROM purchase_invoices p WHERE p.id = ' . $pfId
+        );
+        self::assertEqualsWithDelta(0.0, $remaining, 0.001, 'Zbytek je v měně dokladu: 100 − 100 EUR.');
+        self::assertNull($this->purchasePaidRatioOrNull($pfId, self::YEAR . '-06-30'));
+    }
+
+    /**
+     * USD faktura zaplacená z eurového účtu: kurz mezi měnami aplikace nezná, banka ji
+     * automaticky nezaúčtuje a účetní ji zaúčtuje ručně celou. Syrová eurová částka
+     * se nesmí sčítat jako dolary — vyrobila by „uhrazenou fakturu s nedoplatkem",
+     * který v deníku není (reálný případ při ověření na datech).
+     */
+    public function testForeignPaymentInOtherForeignCurrencyCountsAsFullSettlement(): void
+    {
+        // Testovací DB USD mít nemusí — izolovaný dodavatel si ho založí v rámci transakce.
+        $this->db->pdo()->prepare(
+            "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals)
+             VALUES (?, 'USD', 'USD', '$', 'americký dolar', 'US dollar', 2)"
+        )->execute([$this->supplierId]);
+        $usdId = (int) $this->db->pdo()->lastInsertId();
+        $vendor = $this->client('Dodavatel USD', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-716', $vendor, 400.00, $usdId, 22.5);
+        $this->postPurchasePredpis($pfId, 9000.00, 'USD', 22.5, 400.00);
+        $this->bankMatch($pfId, 361.35, 'EUR');
+        $this->markPaid($pfId, self::YEAR . '-06-20');
+
+        $remaining = (float) $this->scalar(
+            'SELECT ' . \MyInvoice\Support\Sql\PurchaseSettledExpr::remaining('p') . ' FROM purchase_invoices p WHERE p.id = ' . $pfId
+        );
+        self::assertEqualsWithDelta(0.0, $remaining, 0.001);
+        self::assertNull($this->purchasePaidRatioOrNull($pfId, self::YEAR . '-06-30'));
+    }
+
     // ── Helpery ───────────────────────────────────────────────────────────────
+
+    private function currencyIdFor(string $code): int
+    {
+        $id = (int) ($this->db->pdo()->query("SELECT id FROM currencies WHERE code = '{$code}' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
+        if ($id === 0) {
+            self::markTestSkipped($code . ' není v číselníku měn.');
+        }
+        return $id;
+    }
+
+    private function scalar(string $sql): mixed
+    {
+        return $this->db->pdo()->query($sql)->fetchColumn();
+    }
+
+    private function markPaid(int $pfId, string $date): void
+    {
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?")
+            ->execute([$date, $pfId]);
+    }
+
+    /** Odchozí bankovní pohyb spárovaný s přijatou fakturou (částka v měně pohybu). */
+    private function bankMatch(int $pfId, float $amount, string $currency): void
+    {
+        $pdo = $this->db->pdo();
+        $date = self::YEAR . '-06-20';
+        $pdo->prepare(
+            "INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, bank_code, currency, statement_date)
+             VALUES (?, ?, ?, '1000000005', '0100', ?, ?)"
+        )->execute([$this->supplierId, 'settlement-test-' . $pfId . '.gpc', hash('sha256', 'settlement-test-' . $pfId . microtime()), $currency, $date]);
+        $statementId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, match_status)
+             VALUES (?, ?, ?, ?, 'manual')"
+        )->execute([$statementId, $date, -$amount, $currency]);
+        $txId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payment_matches (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type)
+             VALUES (?, ?, ?, ?, 'manual')"
+        )->execute([$this->supplierId, $txId, $pfId, $amount]);
+    }
 
     private function accountId(string $code): int
     {
@@ -471,20 +681,20 @@ final class InvoiceSettlementServiceTest extends TestCase
         return (int) $this->db->pdo()->lastInsertId();
     }
 
-    private function purchaseInvoice(string $number, int $vendorId, float $total): int
+    private function purchaseInvoice(string $number, int $vendorId, float $total, ?int $currencyId = null, ?float $rate = null): int
     {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO purchase_invoices
                 (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date,
-                 due_date, received_at, currency_id, reverse_charge, vendor_snapshot,
+                 due_date, received_at, currency_id, exchange_rate, reverse_charge, vendor_snapshot,
                  total_without_vat, total_vat, total_with_vat, status, vat_classification_code,
                  vat_deduction, created_by)
-             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, 0, "{}", ?, 0, ?, "received", "40", "full", ?)'
+             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, ?, 0, "{}", ?, 0, ?, "received", "40", "full", ?)'
         );
         $issue = self::YEAR . '-06-10';
         $stmt->execute([
             $this->supplierId, $vendorId, $number, $issue, $issue, $issue, $issue,
-            $this->currencyId, $total, $total, $this->userId,
+            $currencyId ?? $this->currencyId, $rate, $total, $total, $this->userId,
         ]);
         return (int) $this->db->pdo()->lastInsertId();
     }
@@ -513,10 +723,14 @@ final class InvoiceSettlementServiceTest extends TestCase
     }
 
     /** Předpis přijaté faktury (501 MD / 321 D) — bez něj doklad na saldokontě vůbec není. */
-    private function postPurchasePredpis(int $pfId, float $amount): int
+    private function postPurchasePredpis(int $pfId, float $amount, ?string $currency = null, ?float $rate = null, ?float $foreign = null): int
     {
         $map = $this->accounts->codeToIdMap($this->supplierId);
         $periodId = (int) ($this->periods->findByYear($this->supplierId, self::YEAR)['id'] ?? 0);
+        $payable = ['account_id' => $map['321']['id'], 'side' => 'credit', 'amount' => $amount];
+        if ($currency !== null) {
+            $payable += ['currency_code' => $currency, 'fx_rate' => $rate, 'amount_foreign' => $foreign];
+        }
 
         return $this->journal->insert([
             'supplier_id' => $this->supplierId,
@@ -530,7 +744,7 @@ final class InvoiceSettlementServiceTest extends TestCase
             'posted_by'   => $this->userId,
         ], [
             ['account_id' => $map['501']['id'], 'side' => 'debit', 'amount' => $amount],
-            ['account_id' => $map['321']['id'], 'side' => 'credit', 'amount' => $amount],
+            $payable,
         ]);
     }
 

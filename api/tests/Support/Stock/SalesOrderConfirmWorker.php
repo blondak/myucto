@@ -24,7 +24,7 @@ if ($supplierId === false || $orderId === false || $idempotencyKey === '' || $re
 }
 
 try {
-    $container = Bootstrap::buildApp()->getContainer();
+    $container = Bootstrap::buildContainer();
     $connection = $container->get(\MyInvoice\Infrastructure\Database\Connection::class);
     $connection->pdo()->exec('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
     $connectionId = (int) $connection->pdo()->query('SELECT CONNECTION_ID()')->fetchColumn();

@@ -411,7 +411,7 @@ final class StockDocumentLifecycleTest extends StockTestCase
         // v jeho konstruktoru. Od chvíle, kdy se middleware resolvují líně (deferred),
         // by ho samotné buildApp() nevytvořilo a konstrukce by spadla až za zónu.
         $container2 = Connection::withoutSharedTestConnection(static function () {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $c->get(Connection::class);
 
             return $c;

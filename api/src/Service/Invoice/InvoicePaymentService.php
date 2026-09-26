@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientBankAccountRepository;
+use MyInvoice\Service\Accounting\GoPay\GoPayPendingService;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use PDO;
@@ -41,6 +42,7 @@ final class InvoicePaymentService
         private readonly ClientBankAccountRepository $clientBankAccounts,
         private readonly FinalFromProformaCreator $finalCreator,
         private readonly PaymentTaxDocumentCreator $taxDocCreator,
+        private readonly GoPayPendingService $goPayPending,
     ) {}
 
     /**
@@ -243,6 +245,20 @@ final class InvoicePaymentService
             throw $e;
         }
 
+        if (GoPayPendingService::sessionFromReference($opts['bank_reference'] ?? null) !== null) {
+            // Úhrada kartou přes GoPay se účtuje dnem platby (MD GoPay / D 311).
+            // Úhrada je v tu chvíli už uložená; chyba účtování ji nesmí shodit —
+            // zůstane vidět v GoPay jako čekající pohyb s chybou k doúčtování.
+            try {
+                $this->goPayPending->recordForPayment(
+                    $paymentId,
+                    isset($opts['created_by']) && (int) $opts['created_by'] > 0 ? (int) $opts['created_by'] : null,
+                );
+            } catch (\Throwable $e) {
+                error_log('GoPay čekající pohyb k úhradě #' . $paymentId . ' nevznikl: ' . $e->getMessage());
+            }
+        }
+
         $this->afterTransition($invoiceId, $transition);
 
         return [
@@ -361,6 +377,8 @@ final class InvoicePaymentService
      * platbu navázané transakce záměrně):
      *   - platba s bankovní vazbou → mazat přes „Zrušit spárování" v detailu výpisu
      *   - platba s vystaveným daňovým dokladem → nejdřív smazat/stornovat doklad
+     *   - GoPay úhrada potvrzená vyúčtováním → nejdřív smazat vyúčtování; zápis
+     *     čekající GoPay úhrady se maže s ní ({@see GoPayPendingService::releaseForPayment()})
      *
      * @return array{became_unpaid: bool, remaining: float}
      */
@@ -393,6 +411,7 @@ final class InvoicePaymentService
             $pdo->beginTransaction();
         }
         try {
+            $this->goPayPending->releaseForPayment($paymentId);
             $pdo->prepare('DELETE FROM invoice_payments WHERE id = ?')->execute([$paymentId]);
             $transition = $this->recomputeLocked($pdo, (int) $payment['invoice_id']);
             if ($ownsTransaction) {
@@ -425,6 +444,7 @@ final class InvoicePaymentService
             $pdo->beginTransaction();
         }
         try {
+            $this->goPayPending->releaseForInvoice($invoiceId);
             $del = $pdo->prepare('DELETE FROM invoice_payments WHERE invoice_id = ?');
             $del->execute([$invoiceId]);
             $count = $del->rowCount();

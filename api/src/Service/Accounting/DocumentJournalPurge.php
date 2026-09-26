@@ -112,8 +112,10 @@ final class DocumentJournalPurge
                     return self::blocked($sourceId, (int) $row['id'], $block);
                 }
             }
-            // Protizápis první: reversed_by je FK se SET NULL.
-            $groups[] = ['source_id' => $sourceId, 'entries' => [$reversal, $entry]];
+            // Původní zápis první: reversed_by je FK se SET NULL, smazání protizápisu napřed
+            // by původní zápis „oživilo" a vedle náhradního zápisu téhož dokladu by narazilo
+            // na unikát aktivního zdroje. Na původní zápis nic neodkazuje.
+            $groups[] = ['source_id' => $sourceId, 'entries' => [$entry, $reversal]];
         }
 
         $deleted = [];
@@ -134,7 +136,7 @@ final class DocumentJournalPurge
 
             [$statusFrom, $statusTo] = $this->unbookSource($supplierId, $sourceType, $group['source_id']);
 
-            $original = $group['entries'][count($group['entries']) - 1];
+            $original = $group['entries'][0];
             $isPair = count($group['entries']) === 2;
             $lockedOverride = false;
             foreach ($group['entries'] as $row) {
@@ -148,7 +150,7 @@ final class DocumentJournalPurge
                 array_filter([
                     'reason'               => $reason,
                     'locked_override'      => $lockedOverride ? $lockedUntil : null,
-                    'reversal_entry_id'    => $isPair ? (int) $group['entries'][0]['id'] : null,
+                    'reversal_entry_id'    => $isPair ? (int) $group['entries'][1]['id'] : null,
                     'period_id'            => (int) $original['period_id'],
                     'entry_date'           => (string) $original['entry_date'],
                     'document_no'          => $original['document_no'],

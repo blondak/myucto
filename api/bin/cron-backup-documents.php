@@ -6,6 +6,11 @@ declare(strict_types=1);
  * Denní záloha sekce Dokumenty — storage/documents/ (VŠECHNY typy souborů, ne
  * jen PDF) → ZIP do storage/backup/{dbname}-documents-YYYY-MM-DD_H-i.zip.
  *
+ * Přibírá i další soubory, které nejdou znovu vyrobit a jinak by byly jen na
+ * disku: účetní archivy (storage/archives), uzávěrkové balíčky
+ * (storage/closing-packages) a loga dodavatelů (storage/supplier-logos). Ty se
+ * ukládají pod původní cestou, rozbalují se do kořene instalace.
+ *
  * Záměrně ODDĚLENO od cron-backup-pdf.php — ten Dokumenty nezahrnuje.
  * Vynechává regenerovatelné náhledy (_thumbs/) a dočasné soubory (.tmp-*).
  * Retention: 30 denních + měsíční (1. v měsíci) drženy 365 dní.
@@ -50,11 +55,6 @@ if (($msg = BackupEncryption::unsupportedReason($zipPassword)) !== null) {
     exit(1);
 }
 
-if (!is_dir(RuntimePaths::storage('documents')) && !is_dir(RuntimePaths::storage('journal'))) {
-    echo "[" . date('Y-m-d H:i:s') . "] backup-documents: storage/documents/ ani storage/journal/ neexistuje, nic k záloze.\n";
-    $run->finish('ok', ['files' => 0, 'note' => 'no documents dir']);
-    exit(0);
-}
 
 $date = date('Y-m-d_H-i');
 $file = "$backupDir/$dbName-documents-$date.zip";
@@ -63,6 +63,20 @@ $file = "$backupDir/$dbName-documents-$date.zip";
 // Sdílený layout je proto překládá přes metadata DB do složek a původních názvů;
 // bez metadata zůstanou v explicitní složce _neprirazene, aby se neztratil bajt.
 $files = (new \MyInvoice\Service\Backup\ReadableDocumentArchiveLayout($db->pdo()))->all();
+
+$extra = \MyInvoice\Service\Backup\BackupFileCollector::collect(
+    [
+        [RuntimePaths::storage('archives'), null, 'storage/archives'],
+        [RuntimePaths::storage('closing-packages'), null, 'storage/closing-packages'],
+        [RuntimePaths::storage('supplier-logos'), null, 'storage/supplier-logos'],
+    ],
+    [],
+    ['.tmp-'],
+    static fn (string $abs): int => fprintf(STDERR, "  ✗ soubor mimo zdrojový adresář, přeskočen: %s\n", $abs),
+);
+foreach ($extra as $source => $entry) {
+    $files[] = ['source' => $source, 'entry' => $entry];
+}
 
 if (count($files) === 0) {
     echo "[" . date('Y-m-d H:i:s') . "] backup-documents: žádné dokumenty k záloze.\n";

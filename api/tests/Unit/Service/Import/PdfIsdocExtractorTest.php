@@ -4,11 +4,16 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Service\Import;
 
+use Mpdf\Mpdf;
+use Mpdf\Output\Destination;
 use MyInvoice\Service\Import\PdfIsdocExtractor;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class PdfIsdocExtractorTest extends TestCase
 {
+    private const ENCRYPTED_FIXTURES = __DIR__ . '/../../../Fixtures/pdf-encrypted/';
+
     private PdfIsdocExtractor $extractor;
 
     protected function setUp(): void
@@ -172,6 +177,71 @@ final class PdfIsdocExtractorTest extends TestCase
         self::assertNotNull($result);
         self::assertStringContainsString('http://isdoc.cz/namespace/2013', $result);
         self::assertStringContainsString('<ID>ISDOCX-1</ID>', $result);
+    }
+
+    /**
+     * iÚčto (mPDF) zamyká PDF Standard security handlerem s prázdným uživatelským
+     * heslem: PDF otevře kdokoliv, ale stream přílohy i její název jsou šifrované.
+     * Bez dešifrování šel doklad s platným ISDOC zbytečně do AI vytěžování.
+     * PDF vyrábí mPDF, tedy nezávislá implementace šifrování (RC4 R2 i R3).
+     */
+    #[DataProvider('mpdfKeyLengths')]
+    public function testExtractsIsdocFromMpdfPdfProtectedWithEmptyUserPassword(int $keyLength): void
+    {
+        $isdocXml = '<?xml version="1.0" encoding="UTF-8"?>'
+            . '<Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.2"><ID>RC4-' . $keyLength . '</ID></Invoice>';
+        // Režim core fontů přepne mb_internal_encoding na windows-1252 a nevrátí ho,
+        // což by rozbilo následující testy s diakritikou.
+        $mbEncoding = mb_internal_encoding();
+        try {
+            $mpdf = new Mpdf(['mode' => 'c', 'tempDir' => sys_get_temp_dir()]);
+            $mpdf->SetProtection(['print', 'copy'], '', 'owner-secret', $keyLength);
+            $mpdf->SetAssociatedFiles([[
+                'content'        => $isdocXml,
+                'name'           => 'invoice.isdoc',
+                'mime'           => 'application/x-isdoc',
+                'description'    => 'ISDOC',
+                'AFRelationship' => 'Source',
+            ]]);
+            $mpdf->WriteHTML('<p>Faktura</p>');
+            $pdf = $mpdf->Output('', Destination::STRING_RETURN);
+        } finally {
+            mb_internal_encoding($mbEncoding);
+        }
+        self::assertStringContainsString('/Encrypt', $pdf);
+        self::assertStringNotContainsString('<ID>RC4-', $pdf, 'příloha musí být v PDF zašifrovaná');
+
+        self::assertSame($isdocXml, $this->extractor->extract($pdf));
+    }
+
+    /** @return array<string, array{int}> */
+    public static function mpdfKeyLengths(): array
+    {
+        return ['RC4 40 bit (R2)' => [40], 'RC4 128 bit (R3)' => [128]];
+    }
+
+    /** AES varianty (V4 AESV2, V5 AESV3 R5 i R6) — fixtures vyrobené pypdf. */
+    #[DataProvider('aesFixtures')]
+    public function testExtractsIsdocFromAesEncryptedPdf(string $fixture): void
+    {
+        $pdf = (string) file_get_contents(self::ENCRYPTED_FIXTURES . $fixture . '.pdf');
+
+        $result = $this->extractor->extract($pdf);
+        self::assertNotNull($result);
+        self::assertStringContainsString('<ID>ENC-' . $fixture . '</ID>', $result);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function aesFixtures(): array
+    {
+        return ['AES-128' => ['aes128'], 'AES-256 R5' => ['aes256-r5'], 'AES-256 R6' => ['aes256-r6']];
+    }
+
+    public function testReturnsNullForPdfWithNonEmptyUserPassword(): void
+    {
+        $pdf = (string) file_get_contents(self::ENCRYPTED_FIXTURES . 'rc4-128-user-password.pdf');
+
+        self::assertNull($this->extractor->extract($pdf));
     }
 
     /**

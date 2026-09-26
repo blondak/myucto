@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\AssetRepository;
+use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Repository\SmallAssetRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Closing\CheckFindingNormalizer;
@@ -35,6 +36,7 @@ final class MonthlyCheckTest extends TestCase
     private Connection $db;
     private PostingService $posting;
     private ClosingService $closing;
+    private ClosingRepository $closingRepository;
     private AccountingPeriodRepository $periods;
     private AssetRepository $assets;
     private SmallAssetRepository $smallAssets;
@@ -52,10 +54,11 @@ final class MonthlyCheckTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db      = $container->get(Connection::class);
             $this->posting = $container->get(PostingService::class);
             $this->closing = $container->get(ClosingService::class);
+            $this->closingRepository = $container->get(ClosingRepository::class);
             $this->periods = $container->get(AccountingPeriodRepository::class);
             $this->assets  = $container->get(AssetRepository::class);
             $this->smallAssets = $container->get(SmallAssetRepository::class);
@@ -154,6 +157,55 @@ final class MonthlyCheckTest extends TestCase
         self::assertFalse($byKey['procurement_111_131_open']['ok']);
         self::assertSame(5000.0, $byKey['procurement_111_131_open']['value']['111']);
         self::assertSame(0.0, $byKey['procurement_111_131_open']['value']['131']);
+    }
+
+    public function testBatchAccountBalancesMatchIndividualBalancesIncludingAnalyticsAndDate(): void
+    {
+        $pdo = $this->db->pdo();
+        $parent = $pdo->prepare('SELECT id FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?');
+        $parent->execute([$this->supplierId, '221']);
+        $parentId = (int) $parent->fetchColumn();
+        self::assertGreaterThan(0, $parentId);
+        $pdo->prepare(
+            'INSERT INTO chart_of_accounts
+                (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active)
+             VALUES (?, ?, ?, ?, ?, 0, ?, 1)'
+        )->execute([$this->supplierId, '221.731', 'Testovací analytika banky', 'asset', 'debit', $parentId]);
+        $pdo->prepare(
+            'INSERT INTO chart_of_accounts
+                (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active)
+             VALUES (?, ?, ?, ?, ?, 0, ?, 1)'
+        )->execute([$this->supplierId, '888.731', 'Test vazby přes rodičovský účet', 'asset', 'debit', $parentId]);
+
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '221.731', 'side' => 'debit', 'amount' => 100],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 100],
+        ], ['entry_date' => self::YEAR . '-03-10', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '888.731', 'side' => 'debit', 'amount' => 25],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 25],
+        ], ['entry_date' => self::YEAR . '-03-11', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '381', 'side' => 'debit', 'amount' => 50],
+            ['account_code' => '221.731', 'side' => 'credit', 'amount' => 50],
+        ], ['entry_date' => self::YEAR . '-04-10', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $codes = ['221', '221.731', '888.731', '381', '999', '221'];
+        foreach ([
+            self::YEAR . '-03-31' => [125.0, 100.0, 25.0, 0.0, 0.0],
+            self::YEAR . '-04-30' => [75.0, 50.0, 25.0, 50.0, 0.0],
+        ] as $asOf => $expected) {
+            $batched = $this->closingRepository->accountBalances($this->supplierId, $codes, $asOf);
+            self::assertSame([221, '221.731', '888.731', 381, 999], array_keys($batched));
+            self::assertSame($expected, array_values($batched));
+            foreach (array_unique($codes) as $code) {
+                self::assertSame(
+                    $this->closingRepository->accountBalance($this->supplierId, $code, $asOf),
+                    $batched[$code],
+                    "Neshodný zůstatek účtu {$code} k {$asOf}.",
+                );
+            }
+        }
     }
 
     public function testFlagsAssetWithoutAccumulatedDepreciation(): void

@@ -48,7 +48,7 @@ final class ChartOfAccountsTransferTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db       = $c->get(Connection::class);
             $this->accounts = $c->get(ChartOfAccountsRepository::class);
             $this->service  = $c->get(ChartOfAccountsImportService::class);

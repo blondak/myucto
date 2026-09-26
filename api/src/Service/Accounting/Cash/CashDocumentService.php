@@ -20,6 +20,7 @@ use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Vat\VatStatusService;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use DateTimeImmutable;
 use PDO;
 
@@ -533,30 +534,16 @@ final class CashDocumentService
             // Vratka úhrady míří na fakturu, která JE zaplacená — běžný filtr „zbývá
             // uhradit" by ji vyfiltroval. Pro vratku se proto nabízí to, na čem už
             // nějaká úhrada visí; H-1 filtr platí jen pro úhradu.
+            // Zbytek = SSOT {@see PurchaseSettledExpr} (banka, pokladna i oba zápočty) —
+            // dřív tu byla vlastní kopie bez zápočtů, takže zčásti započtenou fakturu
+            // našeptávač nabízel k úhradě celou.
+            $remainingSql = PurchaseSettledExpr::remaining('pi');
             $settlementFilter = $refundable
-                ? "AND pi.amount_to_pay
-                          - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
-                                       WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id), 0)
-                          - COALESCE((SELECT SUM(CASE WHEN cd.doc_type = 'out' THEN cd.total_amount ELSE -cd.total_amount END)
-                                        FROM cash_documents cd
-                                       WHERE cd.supplier_id = pi.supplier_id AND cd.purchase_invoice_id = pi.id
-                                         AND cd.status = 'posted'), 0) < pi.amount_to_pay - 0.005"
-                : "AND pi.amount_to_pay
-                          - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
-                                       WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id), 0)
-                          - COALESCE((SELECT SUM(CASE WHEN cd.doc_type = 'out' THEN cd.total_amount ELSE -cd.total_amount END)
-                                        FROM cash_documents cd
-                                       WHERE cd.supplier_id = pi.supplier_id AND cd.purchase_invoice_id = pi.id
-                                         AND cd.status = 'posted'), 0) > 0.005";
+                ? "AND ({$remainingSql}) < pi.amount_to_pay - 0.005"
+                : "AND ({$remainingSql}) > 0.005";
             $stmt = $pdo->prepare(
                 "SELECT pi.id, pi.vendor_invoice_number, pi.varsymbol, pi.issue_date, pi.total_with_vat,
-                        pi.amount_to_pay
-                          - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
-                                       WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id), 0)
-                          - COALESCE((SELECT SUM(CASE WHEN cd.doc_type = 'out' THEN cd.total_amount ELSE -cd.total_amount END)
-                                        FROM cash_documents cd
-                                       WHERE cd.supplier_id = pi.supplier_id AND cd.purchase_invoice_id = pi.id
-                                         AND cd.status = 'posted'), 0) AS remaining,
+                        ({$remainingSql}) AS remaining,
                         pi.document_kind, cur.code AS currency, c.company_name AS partner_name
                    FROM purchase_invoices pi
                    JOIN currencies cur ON cur.id = pi.currency_id
@@ -1301,8 +1288,8 @@ final class CashDocumentService
      * vyrovnání ({@see CashSettlementService::syncPurchase()}).
      *
      * `amount_to_pay` je generovaný sloupec `total_with_vat − advance_paid_amount`, takže
-     * záloha je odečtená už v něm; navíc se odečtou zaúčtované úhrady — bankovní
-     * (`payment_matches`) i hotovostní (`cash_documents` ve stavu 'posted').
+     * záloha je odečtená už v něm; navíc se odečtou úhrady všemi kanály podle
+     * {@see PurchaseSettledExpr} — banka, pokladna ve stavu 'posted' i oba zápočty.
      * `$excludeCashDocumentId` vynechá vlastní doklad, aby reconcile vyrovnání nepočítal
      * svou vlastní úhradu proti sobě.
      */
@@ -1345,19 +1332,14 @@ final class CashDocumentService
 
     public function purchaseRemaining(int $supplierId, int $purchaseInvoiceId, ?int $excludeCashDocumentId = null): float
     {
+        // Vratka (doc_type='in') zbytek k úhradě naopak ZVYŠUJE — řeší to SSOT.
+        $settled = PurchaseSettledExpr::settled('pi', excludeCashDocumentId: $excludeCashDocumentId ?? 0);
         $stmt = $this->db->pdo()->prepare(
-            "SELECT pi.amount_to_pay
-                    - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
-                                 WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id), 0)
-                    -- Vratka (doc_type='in') zbytek k úhradě naopak ZVYŠUJE.
-                    - COALESCE((SELECT SUM(CASE WHEN cd.doc_type = 'out' THEN cd.total_amount ELSE -cd.total_amount END)
-                                  FROM cash_documents cd
-                                 WHERE cd.supplier_id = pi.supplier_id AND cd.purchase_invoice_id = pi.id
-                                   AND cd.status = ? AND cd.id <> ?), 0) AS remaining
+            "SELECT pi.amount_to_pay - ({$settled}) AS remaining
                FROM purchase_invoices pi
               WHERE pi.id = ? AND pi.supplier_id = ?"
         );
-        $stmt->execute(['posted', $excludeCashDocumentId ?? 0, $purchaseInvoiceId, $supplierId]);
+        $stmt->execute([$purchaseInvoiceId, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
         return $row === false ? 0.0 : round((float) $row['remaining'], 2);

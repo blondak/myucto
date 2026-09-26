@@ -89,6 +89,24 @@ final class CardClearingPostingTest extends BankPostingTestCase
         self::assertEqualsWithDelta(0.00, $this->balance('321'), 0.001);
     }
 
+    /** Vypořádání se opírá o týž bankovní výpis jako zápis platby, nese proto jeho číslo dokladu. */
+    public function testSettlementCarriesBankDocumentNumber(): void
+    {
+        $this->card('4321');
+        $pi = $this->postedPurchase(500.00);
+        $tx = $this->cardTx(-500.00, '4321');
+        $this->match($tx, $pi, 500.00);
+
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        $stmt = $this->db->pdo()->prepare('SELECT document_no FROM journal_entries WHERE id = ?');
+        $stmt->execute([(int) $res['entry_id']]);
+        $bankNo = $stmt->fetchColumn();
+        $stmt->execute([(int) $this->liveSettlement($tx)]);
+        self::assertNotEmpty($bankNo);
+        self::assertSame($bankNo, $stmt->fetchColumn());
+    }
+
     public function testRepeatedRunDoesNotDuplicateAnything(): void
     {
         $this->card('4321');

@@ -48,7 +48,7 @@ final class PremierImportTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje - test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->importer = $container->get(PremierImporter::class);
             $this->reconciler = $container->get(PremierReconciler::class);
@@ -433,7 +433,7 @@ final class PremierImportTest extends TestCase
             'SELECT it.oss_applicable, it.total_without_vat, it.total_vat, it.oss_taxable_amount_return, it.oss_vat_amount_return
                FROM invoices i JOIN invoice_items it ON it.invoice_id = i.id WHERE i.supplier_id = ? AND i.varsymbol = ?', $supplierId, false, [SyntheticPremierBackup::OSS_DOCUMENT]));
 
-        $preview = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Oss\OssLedgerService::class)->preview($supplierId, SyntheticPremierBackup::YEAR1, 3);
+        $preview = Bootstrap::buildContainer()->get(\MyInvoice\Service\Oss\OssLedgerService::class)->preview($supplierId, SyntheticPremierBackup::YEAR1, 3);
         $sk = array_column($preview['countries'], null, 'country')[SyntheticPremierBackup::OSS_COUNTRY] ?? null;
         self::assertNotNull($sk, json_encode($preview, JSON_UNESCAPED_UNICODE));
         self::assertEqualsWithDelta(40.0, (float) $sk['base'], 0.001);
@@ -447,7 +447,7 @@ final class PremierImportTest extends TestCase
      */
     public function testForeignCurrencyDocumentsAreTakenOverInTheirCurrencyWithIdenticalReturns(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->foreignRate(SyntheticPremierBackup::OSS_COUNTRY, SyntheticPremierBackup::OSS_RATE);
         $backup = $this->backup(true, ['oss_eur' => true, 'eur_exact' => true]);
         $run = function (bool $withEuro) use ($backup): array {

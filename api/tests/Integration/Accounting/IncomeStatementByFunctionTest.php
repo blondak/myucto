@@ -63,7 +63,7 @@ final class IncomeStatementByFunctionTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db          = $c->get(Connection::class);
             $this->statements  = $c->get(FinancialStatementService::class);
             $this->definitions = $c->get(StatementDefinitionRepository::class);
@@ -322,7 +322,7 @@ final class IncomeStatementByFunctionTest extends TestCase
      */
     public function testPurposeStatementRendersToPdfAndXlsx(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $pdf = $container->get(\MyInvoice\Service\Pdf\IncomeStatementPdfRenderer::class);
         $xlsx = $container->get(\MyInvoice\Service\Accounting\Reports\ReportXlsxExporter::class);
 
@@ -358,7 +358,7 @@ final class IncomeStatementByFunctionTest extends TestCase
      */
     public function testPurposeStatementIsLabelledAsPurposeNotByNature(): void
     {
-        $renderer = Bootstrap::buildApp()->getContainer()
+        $renderer = Bootstrap::buildContainer()
             ->get(\MyInvoice\Service\Pdf\IncomeStatementPdfRenderer::class);
 
         $this->revenue('602', 100_000.00);

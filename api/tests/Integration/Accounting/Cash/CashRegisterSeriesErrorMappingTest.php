@@ -42,7 +42,7 @@ final class CashRegisterSeriesErrorMappingTest extends TestCase
         if (!is_file($rootDir . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('accounting_document_series') || !$this->db->hasTable('cash_registers')) {
             $this->markTestSkipped('Migrace pokladny / řad neproběhly.');

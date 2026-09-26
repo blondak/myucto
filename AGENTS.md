@@ -51,7 +51,7 @@ cd web && pnpm build            # = vue-tsc --noEmit && vite build (npm run buil
 cd web && pnpm type-check       # jen typová kontrola
 
 # PHP testy (PHPUnit 13)
-cd api && php vendor/bin/phpunit                  # vše
+php api/bin/test-parallel.php                     # vše, izolované DB pro workery
 cd api && php vendor/bin/phpunit --filter Xyz     # podmnožina
 
 # Migrace — VŽDY přes migrate.php, NIKDY mysql klientem přímo

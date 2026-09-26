@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed, watch, useId } from 'vue'
+import ListLoadingSpinner from '@/components/ui/ListLoadingSpinner.vue'
+import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import {
@@ -34,6 +36,7 @@ import { journalSourceLink } from '@/utils/journalSourceLink'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import VatBreakdownCell from '@/components/ui/VatBreakdownCell.vue'
 import { useDimensions } from '@/composables/useDimensions'
 
 const { t } = useI18n()
@@ -51,6 +54,8 @@ const loadingMore = ref(false)
 const loadMoreTarget = ref<HTMLElement | null>(null)
 
 const page = ref(1)
+const listBox = ref<HTMLElement | null>(null)
+useFillViewportHeight(listBox)
 const total = ref(0)
 const perPage = ref(50)
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
@@ -145,6 +150,9 @@ async function load(reset = true) {
       dimension_descendants: filters.dimension_descendants,
       sort_key: tbl.sort.value?.key,
       sort_dir: tbl.sort.value?.dir,
+      include_vat_breakdown: tbl.isVisible('vat_breakdown'),
+      include_posting_accounts: tbl.isVisible('debit_accounts') || tbl.isVisible('credit_accounts'),
+      include_dimensions: tbl.isVisible('dimensions'),
     })
     if (seq !== loadSeq) return
     entries.value = reset ? r.items : [...entries.value, ...r.items]
@@ -410,8 +418,41 @@ const COLUMNS: ColumnDef[] = [
   { key: 'entry_id', labelKey: 'accounting.journal.col_entry_id', defaultHidden: true },
   { key: 'created_at', labelKey: 'accounting.journal.created_at', defaultHidden: true },
   { key: 'updated_at', labelKey: 'accounting.journal.col_updated_at', defaultHidden: true },
+  { key: 'vat_breakdown', labelKey: 'invoice.col_vat_breakdown', defaultHidden: true },
+  { key: 'debit_accounts', labelKey: 'invoice.col_debit_accounts', defaultHidden: true },
+  { key: 'credit_accounts', labelKey: 'invoice.col_credit_accounts', defaultHidden: true },
+  { key: 'dimensions', labelKey: 'dimensions.title', defaultHidden: true, available: () => dims.enabled.value },
 ]
 const tbl = useTablePrefs('journal', COLUMNS)
+const COLUMN_PRESETS = [
+  { key: 'default', labelKey: 'common.columns_preset_default', visibleKeys: null },
+  { key: 'complete', labelKey: 'common.columns_preset_full', visibleKeys: COLUMNS.map(c => c.key) },
+]
+const wrapColumns = computed(() => COLUMNS.some(c => c.defaultHidden && tbl.isVisible(c.key)) && COLUMNS.filter(c => tbl.isVisible(c.key)).length + 2 > 10)
+function onListScroll(event: Event) {
+  const el = event.currentTarget as HTMLElement
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 240
+    && !loading.value && !loadingMore.value && page.value < totalPages.value) void load(false)
+}
+watch(() => [tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions')], () => { if (entries.value.length) load() })
+function postingAccounts(entry: JournalEntry, side: 'debit' | 'credit'): string {
+  return [...new Set(entry.posting_lines?.filter(line => line.side === side).map(line => line.account_code) ?? [])].join(', ') || '—'
+}
+function mobileExtraFields(entry: JournalEntry): Array<{ key: string; label: string; value: string }> {
+  const values: Record<string, string> = {
+    document_date: entry.document_date ? formatDate(entry.document_date) : '—',
+    posted_at: entry.posted_at ? formatDate(entry.posted_at) : '—',
+    posted_by: entry.posted_by_name || '—',
+    entry_id: String(entry.id),
+    created_at: formatDateTime(entry.created_at),
+    updated_at: formatDateTime(entry.updated_at),
+    debit_accounts: postingAccounts(entry, 'debit'),
+    credit_accounts: postingAccounts(entry, 'credit'),
+    dimensions: entry.dimension_labels?.join(' · ') || '—',
+  }
+  return COLUMNS.filter(c => c.defaultHidden && c.key !== 'vat_breakdown' && tbl.isVisible(c.key))
+    .map(c => ({ key: c.key, label: t(c.labelKey), value: values[c.key] ?? '—' }))
+}
 function onSortToggle(key: string) {
   tbl.toggleSort(key)
   page.value = 1
@@ -747,7 +788,10 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
     <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div>
         <h1 class="text-2xl font-semibold">{{ t('accounting.journal.title') }}</h1>
-        <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.journal.subtitle') }}</p>
+        <p class="text-sm text-neutral-500 mt-0.5">
+          {{ t('accounting.journal.subtitle') }}
+          <span v-if="!loading && total > 0" class="ml-2 whitespace-nowrap">· {{ t('common.loaded_count', { loaded: entries.length, total }) }}</span>
+        </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <button type="button" :disabled="exporting" :class="btnOutline('primary')" @click="exportFile('pdf')">
@@ -933,7 +977,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       <template #actions>
         <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.journal.reset_filters') }}</button>
         <SavedFiltersMenu :ctrl="saved" />
-        <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+        <ColumnPicker :ctrl="tbl" :presets="COLUMN_PRESETS" />
         <DensityToggle class="hidden md:block" :ctrl="tbl" />
       </template>
     </FilterBar>
@@ -947,18 +991,20 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       :cta="hasActiveFilters() ? t('accounting.journal.reset_filters') : undefined"
       @action="resetFilters" />
 
-    <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+    <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
       <!-- Desktop: tabulka. Na mobilu se jedenáct sloupců deníku nedá zúžit ani
            vodorovným posunem — rozbalený detail se schová do buňky široké jako
            obrazovka a čte se přes scrollbar. Proto stack karet. -->
-      <div class="hidden md:block overflow-x-auto">
-        <table class="w-full text-sm" :class="tbl.densityClass.value">
-          <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+      <div ref="listBox" class="hidden md:block overflow-auto scrollbar-slim" @scroll.passive="onListScroll">
+        <table class="w-full text-sm singleline-list-table" :class="[tbl.densityClass.value, wrapColumns ? 'multirow-table' : '']">
+          <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide sticky top-0 z-20 shadow-sm">
             <tr>
               <th class="px-3 py-2 w-8"></th>
-              <SortableTh v-for="c in COLUMNS.filter(c => tbl.isVisible(c.key))" :key="c.key"
-                :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
-                :align="c.key === 'amount' ? 'right' : 'left'" @toggle="onSortToggle" />
+              <template v-for="c in COLUMNS.filter(c => tbl.isVisible(c.key))" :key="c.key">
+                <th v-if="c.key === 'dimensions'" scope="col" class="px-3 py-2 text-left font-medium">{{ t(c.labelKey) }}</th>
+                <SortableTh v-else :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
+                  :align="c.key === 'amount' ? 'right' : 'left'" :class="c.key === 'description' ? 'wrap-cell' : ''" @toggle="onSortToggle" />
+              </template>
               <th class="px-1 py-2 w-8">
                 <button v-if="tbl.sort.value" type="button" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800"
                   :title="t('common.reset_sort')" :aria-label="t('common.reset_sort')" @click.stop="clearSort">×</button>
@@ -980,13 +1026,18 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                   <span class="inline-block transition-transform" :class="{ 'rotate-90': isExpanded(e.id) }">▸</span>
                 </td>
                 <td v-if="tbl.isVisible('date')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(e.entry_date) }}</td>
-                <td v-if="tbl.isVisible('document_no')" class="px-3 py-2 font-mono text-xs">{{ e.document_no || '—' }}</td>
+                <td v-if="tbl.isVisible('document_no')" class="px-3 py-2 font-mono text-xs">
+                  {{ e.document_no || '—' }}
+                  <div v-if="e.source_bank_ref && e.source_bank_ref !== e.document_no"
+                       class="text-[10px] text-neutral-400 whitespace-nowrap"
+                       :title="t('accounting.journal.bank_ref_hint', { ref: e.source_bank_ref })">{{ e.source_bank_ref }}</div>
+                </td>
                 <td v-if="tbl.isVisible('document_date')" class="px-3 py-2 whitespace-nowrap">{{ e.document_date ? formatDate(e.document_date) : '—' }}</td>
-                <td v-if="tbl.isVisible('description')" class="px-3 py-2">
+                <td v-if="tbl.isVisible('description')" class="px-3 py-2 wrap-cell" :title="e.description || undefined">
                   {{ e.description || '—' }}
                   <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
                 </td>
-                <td v-if="tbl.isVisible('source')" class="px-3 py-2 whitespace-nowrap">
+                <td v-if="tbl.isVisible('source')" class="px-3 py-2 whitespace-nowrap clip-cell">
                   <!-- Jeden řádek: `flex-wrap` lámal odznak automatu a značku
                        vazby pod odkaz a sloupec pak vypadal jako dva různé údaje. -->
                   <div class="flex items-center gap-1.5">
@@ -1042,10 +1093,14 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                 <td v-if="tbl.isVisible('entry_id')" class="px-3 py-2 text-right font-mono text-xs">{{ e.id }}</td>
                 <td v-if="tbl.isVisible('created_at')" class="px-3 py-2 whitespace-nowrap text-xs">{{ formatDateTime(e.created_at) }}</td>
                 <td v-if="tbl.isVisible('updated_at')" class="px-3 py-2 whitespace-nowrap text-xs">{{ formatDateTime(e.updated_at) }}</td>
+                <td v-if="tbl.isVisible('vat_breakdown')" class="px-3 py-2"><VatBreakdownCell :rows="e.vat_breakdown" :currency="e.source_currency || 'CZK'" /></td>
+                <td v-if="tbl.isVisible('debit_accounts')" class="px-3 py-2 font-mono text-xs">{{ postingAccounts(e, 'debit') }}</td>
+                <td v-if="tbl.isVisible('credit_accounts')" class="px-3 py-2 font-mono text-xs">{{ postingAccounts(e, 'credit') }}</td>
+                <td v-if="tbl.isVisible('dimensions')" class="px-3 py-2 text-xs max-w-64 truncate" :title="e.dimension_labels?.join(' · ')">{{ e.dimension_labels?.join(' · ') || '—' }}</td>
                 <td class="w-8"></td>
               </tr>
               <!-- Detail (rozbalený) -->
-              <tr v-if="isExpanded(e.id)">
+              <tr v-if="isExpanded(e.id)" class="table-detail-row">
                 <td :colspan="visibleColCount"
                   class="px-3 py-3 bg-primary-50/60 border-x-2 border-b-2 border-primary-500/60">
                   <div v-if="isDetailLoading(e.id)" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
@@ -1077,6 +1132,9 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                 <span class="text-neutral-400 shrink-0 inline-block transition-transform"
                   :class="{ 'rotate-90': isExpanded(e.id) }">▸</span>
                 <span class="font-mono text-xs text-neutral-600">{{ e.document_no || '—' }}</span>
+                <span v-if="e.source_bank_ref && e.source_bank_ref !== e.document_no"
+                      class="font-mono text-[10px] text-neutral-400 truncate"
+                      :title="t('accounting.journal.bank_ref_hint', { ref: e.source_bank_ref })">{{ e.source_bank_ref }}</span>
               </span>
               <span class="font-mono text-sm font-semibold whitespace-nowrap">
                 {{ formatMoney(e.amount ?? 0) }}
@@ -1101,6 +1159,16 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
               </span>
               <span v-if="e.posted_at" class="text-xs px-2 py-0.5 rounded font-medium bg-success-50 text-success-600">{{ t('accounting.journal.posted') }}</span>
               <span v-else class="text-xs px-2 py-0.5 rounded font-medium bg-neutral-100 text-neutral-500">{{ t('accounting.journal.draft') }}</span>
+            </div>
+            <div v-if="mobileExtraFields(e).length || tbl.isVisible('vat_breakdown')" class="mt-2 border-t border-neutral-200 pt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+              <div v-for="field in mobileExtraFields(e)" :key="field.key" class="min-w-0">
+                <div class="text-neutral-500">{{ field.label }}</div>
+                <div class="font-medium text-neutral-800 break-words">{{ field.value }}</div>
+              </div>
+              <div v-if="tbl.isVisible('vat_breakdown')" class="col-span-2">
+                <div class="text-neutral-500 mb-1">{{ t('invoice.col_vat_breakdown') }}</div>
+                <VatBreakdownCell :rows="e.vat_breakdown" :currency="e.source_currency || 'CZK'" />
+              </div>
             </div>
           </button>
           <!-- Náhled dokladu mimo rozbalovací tlačítko: vnořené tlačítko není
@@ -1129,16 +1197,11 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       </div>
     </div>
 
-    <div v-if="!loading && total > perPage" class="mt-4 text-center text-sm">
-      <span class="text-neutral-500">{{ t('common.loaded_count', { loaded: entries.length, total }) }}</span>
-      <div v-if="page < totalPages" ref="loadMoreTarget" class="mt-2">
-        <button type="button" :disabled="loadingMore" @click="load(false)"
-          :class="btnOutline('primary')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m0 0l-6-6m6 6l6-6" /></svg>
-          {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
-        </button>
+    <div v-if="!loading && total > perPage" class="text-center text-sm">
+      <div v-if="page < totalPages" ref="loadMoreTarget" class="text-center text-sm text-neutral-500 pointer-fine-hidden">
       </div>
     </div>
+    <ListLoadingSpinner :show="loading || loadingMore" />
 
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
       @close="sourceDrawerEntryId = null" @focus-entry="onFocusEntry" />

@@ -674,7 +674,7 @@ znamenat nesprávné účetnictví.
 
 | Kontrola | Co systém porovnává | Jak nález interpretovat a řešit |
 |---|---|---|
-| **K1 — technické a clearingové účty** | Nenulové zůstatky 041/042, 111/131, 261, 314/324, 395 a souvisejících účtů. | Otevři opis účtu a přiřaď zůstatek ke konkrétnímu případu. Nenulový zůstatek může být oprávněný; účetní jej musí doložit nebo doúčtovat, ne mechanicky vynulovat. |
+| **K1 — technické a clearingové účty** | Nenulové zůstatky 041/042, 111/131, 261, 314/324, 395 a souvisejících účtů. | Otevři opis účtu a na záložce [Otevřené položky - párování](55_Hlavni_kniha.md#otevrene-polozky-a-parovani) přiřaď zůstatek ke konkrétnímu případu. Nenulový zůstatek může být oprávněný; účetní jej musí doložit nebo doúčtovat, ne mechanicky vynulovat. |
 | **K2 — neobvyklá strana** | Zůstatek účtu proti jeho běžné straně, včetně záporné pokladny. | Může jít o přeplatek, dobropis či jiné legitimní saldo, ale také o obrácenou kontaci. Rozhoduje věcný podklad a opis účtu. |
 | **K3 — úhrady a saldokonto** | Stav „uhrazeno" proti otevřenému saldu, spárované zálohy a finální doklady s nulou k úhradě. | Ověř vazbu plateb, zálohových a finálních dokladů. Neměň stav jen proto, aby kontrola zezelenala; oprav zdroj párování nebo chybějící účetní zápis. |
 | **K4 — kurz ČNB** | Kurz dokladu proti referenčnímu kurzu ČNB a povolené odchylce. | Pevný kurz či smluvně doložený postup může odchylku vysvětlit. Bez podkladu oprav kurz na zdrojovém dokladu a poté řízeně přeúčtuj. |

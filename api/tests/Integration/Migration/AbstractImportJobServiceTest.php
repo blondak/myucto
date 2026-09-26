@@ -36,7 +36,7 @@ final class AbstractImportJobServiceTest extends TestCase
             $this->markTestSkipped('cfg.php missing');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->jobs = $container->get(ImportJobRepository::class);
             $this->service = new FakeImportJobService($this->jobs, $container->get(PremierImportRepository::class), $container->get(ActivityLogger::class));

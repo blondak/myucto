@@ -38,7 +38,7 @@ final class PayrollEmploymentAgendaSummaryApiTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         self::assertInstanceOf(ContainerInterface::class, $container);
         $connection = $container->get(Connection::class);
         $action = $container->get(PayrollEmploymentAgendaSummaryAction::class);

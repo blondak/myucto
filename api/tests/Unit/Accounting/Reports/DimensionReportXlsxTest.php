@@ -32,6 +32,11 @@ final class DimensionReportXlsxTest extends TestCase
             ],
             'unassigned' => ['revenue' => 0.0, 'cost' => 7.0, 'result' => -7.0],
             'totals' => ['revenue' => 300.0, 'cost' => 107.0, 'result' => 193.0],
+            'companies' => [
+                ['id' => 1, 'name' => 'Firma A', 'revenue' => 300.0, 'cost' => 100.0, 'result' => 200.0],
+                ['id' => 2, 'name' => 'Firma B', 'revenue' => 0.0, 'cost' => 7.0, 'result' => -7.0],
+                ['id' => 3, 'name' => 'Firma bez pohybu', 'revenue' => 0.0, 'cost' => 0.0, 'result' => 0.0],
+            ],
             'matrix' => [
                 'columns' => [['key' => '5', 'value_id' => 5, 'code' => 'P', 'name' => 'Výroba'], ['key' => '', 'value_id' => null, 'code' => '', 'name' => null]],
                 'rows' => [
@@ -59,6 +64,13 @@ final class DimensionReportXlsxTest extends TestCase
         self::assertSame('Náklady', $matrix->getCell('B6')->getValue());
         self::assertEqualsWithDelta(107.0, $matrix->getCell('E7')->getValue(), 0.001);
         self::assertEqualsWithDelta(-7.0, $matrix->getCell('D8')->getValue(), 0.001);
+
+        $companies = $ss->getSheetByName('Po firmách');
+        self::assertNotNull($companies);
+        self::assertSame('Firma A', $companies->getCell('A4')->getValue());
+        self::assertSame('Firma B', $companies->getCell('A5')->getValue());
+        self::assertSame('Celkem', $companies->getCell('A6')->getValue());
+        self::assertEqualsWithDelta(193.0, $companies->getCell('D6')->getValue(), 0.001);
     }
 
     public function testCashFlowAndDimensionLineOnFilteredStatement(): void

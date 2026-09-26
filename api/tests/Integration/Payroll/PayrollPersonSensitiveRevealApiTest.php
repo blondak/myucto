@@ -37,7 +37,7 @@ final class PayrollPersonSensitiveRevealApiTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         self::assertNotNull($container);
         $connection = $container->get(Connection::class);
         $action = $container->get(PayrollPersonSensitiveRevealAction::class);

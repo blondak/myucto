@@ -438,6 +438,9 @@ final class Bootstrap
                 // Tabulka C přílohy č. 1 II. oddílu (VetaG) — bez bindu by rozpad zákonných
                 // OP a rezerv zůstal v produkci prázdný a přiznání by k ř. 62/162 přílohu nemělo.
                 $c->get(\MyInvoice\Service\Tax\Return\LegalProvisionLedgerService::class),
+                // Nezaúčtované odpisy roku do projekce uzávěrky — bez bindu by je náhled DPPO
+                // v produkci tiše vynechal.
+                $c->get(\MyInvoice\Service\Accounting\Assets\DepreciationPostingService::class),
             ),
             // JMHZ transport — poslední dva argumenty jsou volitelné kvůli
             // testovacím dvojníkům (falešný VREP, mockovaný ledger), ale
@@ -504,6 +507,9 @@ final class Bootstrap
                     $c->get(Config::class),
                 );
                 \MyInvoice\Infrastructure\Database\WriteWatcher::attach($cache);
+                if (!defined('PHPUNIT_COMPOSER_INSTALL')) {
+                    \MyInvoice\Infrastructure\Cache\SupplierWriteGenerations::bind($c->get(RedisFactory::class));
+                }
 
                 return $cache;
             },

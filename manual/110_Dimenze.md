@@ -268,10 +268,14 @@ na účtech 59x se vykazuje zvlášť, aby se nemíchala s oběma skupinami nák
 
 Menu **Účetnictví → Výkazy po dimenzi** má dvě záložky. Tlačítko **Export XLSX**
 stáhne aktivní záložku. Výsledovku lze stáhnout také jako PDF.
+Změna dimenze, větve, období nebo dalších filtrů sestavu rovnou znovu načte.
+Nulové hodnoty dimenzí, účty a sloupce bez pohybu se v zobrazení skrývají.
+Zisk se zobrazuje zeleně a ztráta červeně.
 
 **Výsledovka** ukáže pro hodnoty jednoho typu výnosy, náklady a výsledek.
 Nadřízená hodnota sčítá celou větev, řádek **Bez hodnoty** doplní součet do
-výsledku firmy za období. Sestavu lze omezit:
+výsledku firmy za období. Nad tabulkou jsou souhrnné částky a porovnání
+největších zisků a ztrát podle hodnoty. Sestavu lze omezit:
 
 - **Větev**: jen vybraná hodnota a její podřízené (účelová výsledovka projektu
   a jeho etap),
@@ -283,6 +287,21 @@ Volba **Rozpad po účtech** přepne tabulku na syntetické účty: řádky jsou
 výnosů a nákladů, sloupce hodnoty nejvyšší úrovně (nebo vybraná větev či hodnoty
 odpovědné osoby) a Bez hodnoty, poslední řádek je výsledek sloupce. XLSX obsahuje
 strom hodnot i list s rozpadem po účtech.
+
+Pod sestavou jsou odkazy na **Rozvahu**, **Obratovou předvahu** a **Hlavní knihu**.
+Stejné odkazy jsou u každé hodnoty v tabulce a předají její dimenzi i aktuální
+období. Z těchto sestav se lze prokliknout zpět do výsledovky po dimenzi i mezi
+ostatními sestavami. Volby se uchovávají v URL. Navazující sestavy se vztahují
+k aktuální firmě, nikoli k součtu skupiny firem.
+Pokud zvolené datumy zasahují do více účetních období, hlavní kniha otevře
+režim všech období. Rozvaha a obratová předvaha pracují s jedním obdobím:
+vyberou období koncového data, předvaha rozsah omezí a obě stránky na úpravu
+upozorní.
+
+U globálního typu lze zapnout **Sečíst všechny firmy skupiny** a potom volitelný
+**Rozpad po firmách**. Tabulka ukáže výnosy, náklady a výsledek každé přístupné
+firmy pro stejný výběr hodnot a období, nulové firmy vynechá a skončí součtem.
+Při zapnutí rozpadu se tabulka přidá také do PDF a jako samostatný list do XLSX.
 
 **Peněžní tok** počítá tok nepřímou metodou za celou firmu nebo za vybranou
 hodnotu:

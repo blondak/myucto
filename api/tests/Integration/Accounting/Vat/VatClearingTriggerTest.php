@@ -57,7 +57,7 @@ final class VatClearingTriggerTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db       = $container->get(Connection::class);
             $this->clearing = $container->get(VatClearingService::class);
             $this->trigger  = $container->get(VatClearingTrigger::class);

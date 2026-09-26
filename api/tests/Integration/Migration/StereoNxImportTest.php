@@ -51,7 +51,7 @@ final class StereoNxImportTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php') && !getenv('MYINVOICE_DB_NAME')) {
             self::markTestSkipped('Integration database is not configured.');
         }
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         $this->importer = $container->get(StereoNxImporter::class);
         $this->action = $container->get(StereoNxMigrationAction::class);
@@ -452,7 +452,7 @@ final class StereoNxImportTest extends TestCase
         self::assertTrue($report['ok'], json_encode($report, JSON_UNESCAPED_UNICODE));
         self::assertSame('reduced', $this->scalar("SELECT vat_deduction FROM purchase_invoices WHERE supplier_id = ? AND varsymbol = 'PF-1'", [$this->supplierId]));
         self::assertContains('provisional_from_own_year', array_column($report['warnings'], 'code'));
-        $return = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($this->supplierId, 2025, 3, 'monthly');
+        $return = Bootstrap::buildContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class)->build($this->supplierId, 2025, 3, 'monthly');
         self::assertEqualsWithDelta(21.0, (float) ($return['summary']['lines']['40k']['vat'] ?? 0), 0.005);
     }
 
@@ -573,7 +573,7 @@ final class StereoNxImportTest extends TestCase
         $started = $this->call('run', $body, $token);
         self::assertSame(202, $started->getStatusCode(), (string) $started->getBody());
         $jobId = (int) $this->json($started)['job_id'];
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $jobs = $container->get(ImportJobRepository::class);
         self::assertStringNotContainsString(self::PASSWORD, json_encode($jobs->find($jobId, $this->supplierId)['params']));
         $container->get(StereoNxImportJobService::class)->run($jobId);

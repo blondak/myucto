@@ -37,7 +37,7 @@ final class SavedFilterActionTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container    = Bootstrap::buildApp()->getContainer();
+            $container    = Bootstrap::buildContainer();
             $this->db     = $container->get(Connection::class);
             $this->action = $container->get(SavedFilterAction::class);
         } catch (\Throwable $e) {

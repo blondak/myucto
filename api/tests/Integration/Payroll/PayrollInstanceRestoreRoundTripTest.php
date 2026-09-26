@@ -82,7 +82,7 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         }
         $this->config = Config::load($this->rootDir);
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->sourceConnection = $container->get(Connection::class);
             $this->export = $container->get(InstanceExportService::class);
             $this->server = new PDO(
@@ -433,7 +433,7 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         ]);
         $revisionId = (int) $pdo->lastInsertId();
 
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $pdo->prepare('UPDATE supplier SET accounting_mode = "double_entry" WHERE id = ?')
             ->execute([$this->supplierId]);
         $container->get(ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);

@@ -9,6 +9,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\GoPay\GoPayException;
+use MyInvoice\Service\Accounting\GoPay\GoPayPendingService;
 use MyInvoice\Service\Accounting\GoPay\GoPayService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -22,9 +23,38 @@ final class GoPayAction
 
     public function __construct(
         private readonly GoPayService $service,
+        private readonly GoPayPendingService $pending,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
     ) {}
+
+    public function pending(Request $request, Response $response): Response
+    {
+        try {
+            return Json::ok($response, $this->pending->overview($this->currentSupplierId($request)));
+        } catch (\Throwable $e) {
+            return $this->error($response, $e);
+        }
+    }
+
+    public function postPending(Request $request, Response $response): Response
+    {
+        if (!$this->requirePermission($request, $response, 'bank.post', AccessLevel::WRITE, $err)) {
+            return $err;
+        }
+        try {
+            $supplierId = $this->currentSupplierId($request);
+            $result = $this->pending->postPending($supplierId, $this->userId($request));
+            $this->log($request, 'gopay.pending_posted', null, [
+                'created' => $result['created'],
+                'posted' => $result['posted'],
+                'issue_count' => count($result['issues']),
+            ]);
+            return Json::ok($response, $result + ['overview' => $this->pending->overview($supplierId)]);
+        } catch (\Throwable $e) {
+            return $this->error($response, $e);
+        }
+    }
 
     public function settings(Request $request, Response $response): Response
     {

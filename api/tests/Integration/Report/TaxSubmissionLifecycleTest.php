@@ -43,7 +43,7 @@ final class TaxSubmissionLifecycleTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db       = $c->get(Connection::class);
             $this->archiver = $c->get(TaxSubmissionArchiver::class);
             $this->repo     = $c->get(TaxSubmissionRepository::class);

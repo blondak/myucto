@@ -54,7 +54,7 @@ final class PeriodGuardTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db      = $container->get(Connection::class);
             $this->action  = $container->get(AccountingPeriodAction::class);
             $this->periods = $container->get(AccountingPeriodRepository::class);

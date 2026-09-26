@@ -104,6 +104,44 @@ final class JournalRedStornoActionTest extends TestCase
         self::assertSame([true, true], array_column($payload['lines'], 'is_red_storno'));
     }
 
+    public function testRepostPlanPassesRedFlagThroughRequestParser(): void
+    {
+        $pdo = $this->db->pdo();
+        $periodId = (int) $pdo->query("SELECT id FROM accounting_periods WHERE supplier_id={$this->supplierId} AND fiscal_year=2098")->fetchColumn();
+        $accountMap = $pdo->query("SELECT account_code, id FROM chart_of_accounts WHERE supplier_id={$this->supplierId} AND account_code IN ('501', '321')")->fetchAll(\PDO::FETCH_KEY_PAIR);
+        $this->journal->insert([
+            'supplier_id' => $this->supplierId,
+            'period_id' => $periodId,
+            'entry_date' => '2098-03-01',
+            'source_type' => 'purchase_invoice',
+            'source_id' => 900001,
+            'posted_at' => '2098-03-01 12:00:00',
+            'posted_by' => $this->userId,
+        ], [
+            ['account_id' => (int) $accountMap['501'], 'side' => 'debit', 'amount' => 100.0, 'is_red_storno' => true],
+            ['account_id' => (int) $accountMap['321'], 'side' => 'credit', 'amount' => 100.0, 'is_red_storno' => true],
+        ]);
+        $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/accounting/journal/repost-plan/purchase-invoices/900001')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withParsedBody(['lines' => [
+                ['account_code' => '501', 'side' => 'debit', 'amount' => 100.0, 'is_red_storno' => true],
+                ['account_code' => '321', 'side' => 'credit', 'amount' => 100.0, 'is_red_storno' => true],
+            ]]);
+
+        $response = $this->action->repostPlan($request, new Response(), ['source' => 'purchase-invoices', 'id' => '900001']);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $plan = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertNull($plan['tax_neutral_violation']);
+
+        $invalid = $request->withParsedBody(['lines' => [
+            ['account_code' => '501', 'side' => 'debit', 'amount' => 100.0, 'is_red_storno' => 'false'],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 100.0, 'is_red_storno' => true],
+        ]]);
+        self::assertSame(422, $this->action->repostPlan($invalid, new Response(),
+            ['source' => 'purchase-invoices', 'id' => '900001'])->getStatusCode());
+    }
+
     private function create(array $lines): \Psr\Http\Message\ResponseInterface
     {
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/accounting/journal')

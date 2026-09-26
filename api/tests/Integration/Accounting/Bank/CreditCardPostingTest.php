@@ -44,6 +44,9 @@ final class CreditCardPostingTest extends BankPostingTestCase
                  ON DUPLICATE KEY UPDATE level = 'auto'"
             )->execute([$this->supplierId, $op, $this->userId]);
         }
+        // Výchozí režim nákupů je napřímo; tyhle testy ověřují zapnutý mezičlen.
+        $this->container->get(\MyInvoice\Service\Accounting\CreditCard\CreditCardSettingsService::class)
+            ->save($this->supplierId, ['purchase_mode' => 'clearing'], $this->userId);
         $this->cards = $this->container->get(CreditCardAccountRepository::class);
         $this->ccId = $this->cards->create($this->supplierId, [
             'issuer'         => 'kb',

@@ -62,7 +62,7 @@ final class VatReducedDeductionTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db   = $container->get(Connection::class);
             $this->dph  = $container->get(DphPriznaniBuilder::class);
             $this->coef = $container->get(VatCoefficientRepository::class);

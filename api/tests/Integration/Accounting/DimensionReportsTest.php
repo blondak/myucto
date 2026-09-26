@@ -71,7 +71,7 @@ final class DimensionReportsTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->container = $container;
             $this->db = $container->get(Connection::class);
             $this->posting = $container->get(PostingService::class);
@@ -293,11 +293,26 @@ final class DimensionReportsTest extends TestCase
         $dims = ['dimensions' => [(int) $type['id'] => $project]];
         $this->post([['311', 'debit', 800.00], ['602', 'credit', 800.00, $dims]]);
         $this->post([['518', 'debit', 300.00, $dims], ['321', 'credit', 300.00]], $second);
+        $this->post([['518', 'debit', 50.00], ['321', 'credit', 50.00]]);
 
         $alone = $this->profit->build($this->supplierId, (int) $type['id'], self::FROM, self::TO, [$this->supplierId]);
         $group = $this->profit->build($this->supplierId, (int) $type['id'], self::FROM, self::TO, [$this->supplierId, $second]);
         self::assertEqualsWithDelta(800.00, array_column($alone['rows'], null, 'value_id')[$project]['total']['result'], 0.001);
         self::assertEqualsWithDelta(500.00, array_column($group['rows'], null, 'value_id')[$project]['total']['result'], 0.001, 'Skupinový projekt sečte obě firmy.');
+
+        $companies = $this->profit->build($this->supplierId, (int) $type['id'], self::FROM, self::TO,
+            [$this->supplierId, $second], ['companies' => true]);
+        $byCompany = array_column($companies['companies'], null, 'id');
+        self::assertEqualsWithDelta(800.00, $byCompany[$this->supplierId]['revenue'], 0.001);
+        self::assertEqualsWithDelta(50.00, $byCompany[$this->supplierId]['cost'], 0.001);
+        self::assertEqualsWithDelta(300.00, $byCompany[$second]['cost'], 0.001);
+        self::assertEqualsWithDelta($companies['totals']['result'], array_sum(array_column($companies['companies'], 'result')), 0.001);
+
+        $branch = $this->profit->build($this->supplierId, (int) $type['id'], self::FROM, self::TO,
+            [$this->supplierId, $second], ['companies' => true, 'value_id' => $project]);
+        $branchCompanies = array_column($branch['companies'], null, 'id');
+        self::assertEqualsWithDelta(0.00, $branchCompanies[$this->supplierId]['cost'], 0.001);
+        self::assertEqualsWithDelta(500.00, array_sum(array_column($branch['companies'], 'result')), 0.001);
 
         $cf = $this->cashFlow->build(self::FROM, self::TO, [
             $this->supplierId => $this->dimensions->filter($this->supplierId, $project),
@@ -385,9 +400,10 @@ final class DimensionReportsTest extends TestCase
         ]), new Psr7Response())->getStatusCode());
 
         $report = $this->json($action($request->withQueryParams([
-            'type_id' => (string) $typeId, 'from' => self::FROM, 'to' => self::TO, 'scope' => 'group',
+            'type_id' => (string) $typeId, 'from' => self::FROM, 'to' => self::TO, 'scope' => 'group', 'companies' => '1',
         ]), new Psr7Response()));
         self::assertSame([$this->supplierId], ($report['data'] ?? $report)['supplier_ids']);
+        self::assertSame([$this->supplierId], array_column(($report['data'] ?? $report)['companies'], 'id'));
 
         $domainRequest = $request
             ->withoutAttribute(AuthMiddleware::ATTR_API_TOKEN)

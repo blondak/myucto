@@ -27,7 +27,32 @@ Před prvním importem vyberte analytické účty:
 GoPay účet a cílový bankovní účet musí být dvě různé analytiky. Dále nastavte účet
 odesílatele GoPay, kód banky a povolený rozdíl data mezi XML a bankovním pohybem.
 
-## 33.2 Import vyúčtování
+## 33.2 Úhrada faktury v den platby
+
+Úhrada faktury platebním tlačítkem GoPay nese u platby referenci
+`GOPAY:<GoPay ID platby>`. Jakmile se taková úhrada uloží, aplikace ji hned
+zaúčtuje k datu platby zápisem `221 GoPay / 311 Pohledávky`. Pohledávka tím zaniká
+ve stejný den, kdy je faktura v modulu i v saldokontu uhrazená, a hlavní kniha
+se saldokontem souhlasí i na konci měsíce, kdy vyúčtování GoPay ještě nedorazilo.
+Peníze od té chvíle drží GoPay, takže je vidíte na GoPay účtu.
+
+Takové úhrady ukazuje sekce **Čeká na vyúčtování**. Součet sekce je částka, kterou
+GoPay pošle v příštím vyúčtování (před odečtením poplatků a vratek). Při importu
+vyúčtování se platba se stejným GoPay ID, částkou a měnou převezme mezi pohyby
+vyúčtování bez dalšího účetního zápisu. Nesouhlasí-li částka nebo měna, pohyb
+vyúčtování zůstane ve stavu **Ke kontrole**.
+
+Pokud úhradu nelze zaúčtovat hned (faktura ještě není zaúčtovaná, datum platby
+leží v zamčené části účetnictví), úhrada se uloží a v sekci zůstane s důvodem
+chyby. Tlačítko **Zaúčtovat úhrady čekající na vyúčtování** zaúčtuje tyto úhrady
+i starší GoPay úhrady bez zápisu. Opakované použití nic nezdvojí. Totéž dělá
+příkaz `php api/bin/gopay-post-pending.php --apply`.
+
+Smazání úhrady faktury smaže i její zápis ke dni platby, pokud leží v otevřeném a
+nezamčeném období. Úhradu, kterou už převzalo vyúčtování, smazat nelze. Nejdřív je
+potřeba smazat vyúčtování.
+
+## 33.3 Import vyúčtování
 
 1. V administraci GoPay stáhněte Clearing XML za uzavřené období.
 2. Na stránce **Peníze > GoPay** vyberte XML, volitelně přidejte odpovídající PDF
@@ -46,7 +71,7 @@ měny, variabilního symbolu, data a účtu odesílatele. Avízo se nezaúčtuje
 skutečného GPC výpisu se vazba automaticky převede na jeho bankovní pohyb a teprve
 ten vytvoří zápis přijetí převodu `221 Banka / 261 Peníze na cestě`.
 
-## 33.3 Párování dokladů
+## 33.4 Párování dokladů
 
 Platba se páruje přednostně podle GoPay ID uloženého u úhrady faktury. Pokud tam
 ID není, použije se přesné **Číslo objednávky dodavatele** uložené na dokladu spolu
@@ -65,7 +90,7 @@ V účetním deníku je vazba obousměrná. U zaúčtování faktury nebo dobrop
 stejným způsobem vrátit na zaúčtování dokladu. Vazba se odvozuje z uloženého GoPay
 pohybu, takže se zobrazuje i u dříve importovaných vyúčtování.
 
-## 33.4 Účetní zápisy
+## 33.5 Účetní zápisy
 
 Automatické účtování používá následující schéma:
 
@@ -82,7 +107,7 @@ Příchozí bankovní převod se páruje pouze při shodě částky, měny, clea
 variabilního symbolu, časového okna a nastaveného účtu odesílatele. Samotné číslo
 účtu GoPay nestačí, protože stejný účet používají i jiná vyúčtování.
 
-## 33.5 Kontrola výsledku
+## 33.6 Kontrola výsledku
 
 Seznam ukazuje počet všech a zaúčtovaných pohybů. Stav **Hotovo** znamená, že jsou
 zaúčtované všechny pohyby a je spárovaný i bankovní převod. Stav **Vyžaduje
@@ -92,12 +117,14 @@ Původní XML zůstává uložené u vyúčtování a lze je kdykoli znovu stáh
 v detailu vyúčtování dodatečně nahrát, nahradit, stáhnout nebo samostatně smazat.
 Samostatné smazání PDF nemění XML, pohyby ani účetní zápisy.
 
-## 33.6 Smazání importu
+## 33.7 Smazání importu
 
 Admin může importované vyúčtování smazat ze seznamu. Smazání odstraní původní XML,
 přiložené PDF, jednotlivé GoPay pohyby a účetní zápisy, které z nich modul vytvořil. Faktury,
 dobropisy a jejich úhrady zůstanou zachované. Pokud modul pro příchozí převod použil
 účetní zápis, který existoval už před zpracováním XML, tento zápis se nesmaže.
+Úhrady faktur zaúčtované ke dni platby se také nesmažou: vrátí se i se svým zápisem
+do sekce **Čeká na vyúčtování** a příští import je převezme znovu.
 
 Vyúčtování lze smazat jen tehdy, když všechny jeho účetní zápisy patří do otevřeného
 a nezamčeného období a nebyly stornované. Po smazání lze stejné XML znovu importovat.

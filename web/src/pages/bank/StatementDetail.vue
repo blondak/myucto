@@ -48,6 +48,33 @@ async function downloadStatementFile(url: string | undefined, fallbackName: stri
     toast.error(apiErrorMessage(e))
   }
 }
+const sendingUnmatched = ref(false)
+async function sendUnmatchedToClient() {
+  const id = Number(route.params.id)
+  sendingUnmatched.value = true
+  try {
+    const preview = await bankApi.unmatchedRecipients(id)
+    if (preview.count === 0) {
+      toast.error(t('bank.unmatched_export.empty'))
+      return
+    }
+    if (preview.to.length === 0) {
+      toast.error(t('bank.unmatched_export.no_recipients'))
+      return
+    }
+    if (!window.confirm(t('bank.unmatched_export.confirm', {
+      count: preview.count,
+      account: preview.account,
+      recipients: preview.to.join(', '),
+    }))) return
+    const result = await bankApi.sendUnmatched(id)
+    toast.success(t(result.deferred ? 'bank.unmatched_export.queued' : 'bank.unmatched_export.sent', { count: result.count }))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    sendingUnmatched.value = false
+  }
+}
 const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
 
 // Počet transakcí s návrhem zaúčtování (pro chip v headeru) — počítá backend přes
@@ -357,6 +384,24 @@ const statementActions = computed<ActionItem[]>(() => {
       show: auth.canWrite('bank.match'),
       disabled: rematching.value,
       run: () => { void rematchStatement() },
+    },
+    {
+      key: 'unmatched_export',
+      label: t('bank.unmatched_export.download'),
+      icon: 'download',
+      tier: 'secondary',
+      run: () => { void downloadStatementFile(bankApi.unmatchedExportUrl(s.id), 'nesparovane-pohyby.xlsx') },
+    },
+    {
+      key: 'unmatched_send',
+      label: t('bank.unmatched_export.send'),
+      icon: 'send',
+      tier: 'secondary',
+      variant: 'primary',
+      show: auth.canWrite('bank'),
+      loading: sendingUnmatched.value,
+      disabled: sendingUnmatched.value,
+      run: () => { void sendUnmatchedToClient() },
     },
     {
       key: 'gpc',

@@ -726,11 +726,11 @@ final class RecurringGeneratorTest extends TestCase
 
         // ISDOC export: UnitPrice musí být NETTO (ne brutto), UnitPriceTaxInclusive brutto/ks.
         try {
-            $isdoc = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Export\IsdocExporter::class);
+            $isdoc = Bootstrap::buildContainer()->get(\MyInvoice\Service\Export\IsdocExporter::class);
         } catch (\Throwable $e) {
             return; // exporter nedostupný v DI — zbytek testu stačí
         }
-        $repoInv = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Repository\InvoiceRepository::class)->find($result['invoice_id']);
+        $repoInv = Bootstrap::buildContainer()->get(\MyInvoice\Repository\InvoiceRepository::class)->find($result['invoice_id']);
         $xml = $isdoc->buildXml($repoInv);
         $dom = new \DOMDocument();
         $dom->loadXML($xml);
@@ -1562,7 +1562,7 @@ final class RecurringGeneratorTest extends TestCase
         // Plný lifecycle „koncept → vystaveno A ODESLÁNO": ověříme, že issuePeriod při
         // auto_send_email=true dispatchne odeslání. AutoIssueAndSendService mockujeme,
         // ať test nesahá na SMTP — zbytek generátoru je reálný z containeru.
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $issueAndSend = $this->createMock(\MyInvoice\Service\Invoice\AutoIssueAndSendService::class);
         $issueAndSend->expects($this->once())
             ->method('run')
@@ -1606,7 +1606,7 @@ final class RecurringGeneratorTest extends TestCase
         // ta z UI (IssueInvoiceAction) — jinak zůstane vystavená nezaúčtovaná. Samotné
         // zaúčtování si hlídá DocumentAutoPoster (firemní flag + podvojný režim), tady
         // testujeme jen že se hook vůbec zavolá.
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $autoPoster = $this->createMock(\MyInvoice\Service\Accounting\DocumentAutoPoster::class);
         $autoPoster->expects($this->once())
             ->method('maybeAutoPost')

@@ -42,7 +42,7 @@ final class PayrollStatutoryObligationActionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_statutory_obligation_evidence')) {
             $this->markTestSkipped('Migrace 1588 neproběhla.');

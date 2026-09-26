@@ -15,6 +15,7 @@ declare(strict_types=1);
  *   php api/bin/migrate.php                # migrace + auto-backfill
  *   php api/bin/migrate.php --status       # jen stav, žádná akce
  *   php api/bin/migrate.php --no-backfills # migrace BEZ auto-backfillu
+ *   php api/bin/migrate.php --no-analyze   # bez přepočtu statistik optimizeru
  *   php api/bin/migrate.php --until=1073_x.sql # aplikovat nejvýše zadanou migraci
  *   php api/bin/migrate.php --below=1000       # jen migrace s číselnou předponou < 1000
  *   php api/bin/migrate.php --only=1000_user_suppliers.sql,1121_price_list_items.sql
@@ -231,10 +232,19 @@ try {
 // levná a stav po `migrate.php` má být vždy konzistentní.
 $connection->invalidateSchemaCache();
 
+// Statistiky optimizeru účetních tabulek. Importéry si je přepočítají samy (TableStatistics),
+// ale ruční obnova dumpu nebo přenos instance je obejde a optimizer pak volí plné průchody:
+// na produkci po přenosu dat seznam přijatých faktur 1,4 s místo 5 ms. Na 240 MB DB trvá < 1 s.
+if (!in_array('--no-analyze', $argv, true)) {
+    $analyzeStart = microtime(true);
+    \MyInvoice\Infrastructure\Database\TableStatistics::analyze($db, \MyInvoice\Infrastructure\Database\TableStatistics::IMPORTED_ACCOUNTING_TABLES);
+    echo 'Statistiky optimizeru přepočítány (' . (int) round((microtime(true) - $analyzeStart) * 1000) . " ms).\n";
+}
+
 // Auto-backfill po migracích — detekuje stale data a spouští příslušné skripty
 // s --apply. Skip pokud user dal --no-backfills (CI / read-only deploy).
 if (!in_array('--no-backfills', $argv, true)) {
-    runAutoBackfills($db, __DIR__);
+    runAutoBackfills($db, __DIR__, $connection);
 }
 
 /**
@@ -242,7 +252,7 @@ if (!in_array('--no-backfills', $argv, true)) {
  * Idempotentní: prázdné COUNT → skip skript. Výstup skriptu se streamuje na
  * stdout/stderr (passthru), aby uživatel viděl pokrok per řádek.
  */
-function runAutoBackfills(\PDO $db, string $binDir): void
+function runAutoBackfills(\PDO $db, string $binDir, Connection $connection): void
 {
     $checks = [
         [
@@ -310,6 +320,36 @@ function runAutoBackfills(\PDO $db, string $binDir): void
             'reason'  => 'příchozích dokladů v kořeni Dokumentů',
             'count'   => static fn (): int => (new \MyInvoice\Service\PurchaseInvoice\SubmissionFolderBackfill($db))->pending(),
             'script'  => 'backfill-submission-folders.php',
+        ],
+        [
+            // Bankovní zápisy v otevřených obdobích s číslem mimo řadu účtu (migrace 1896),
+            // viz BankDocumentNumberBackfill.
+            'name'    => 'bank-document-series',
+            'reason'  => 'bankovních zápisů k přečíslování na dokladovou řadu účtu',
+            'count'   => static fn (): int => (new \MyInvoice\Service\Accounting\Bank\BankDocumentNumberBackfill($connection))->pending(),
+            'script'  => 'bank-document-series-backfill.php',
+        ],
+        [
+            // Zápisy faktur z automatického zaúčtování a přeúčtování bez čísla dokladu
+            // (jen otevřená období), viz DocumentEntryNumberBackfill.
+            'name'    => 'document-entry-number',
+            'reason'  => 'zápisů faktur bez čísla dokladu',
+            'count'   => static fn (): int => (new \MyInvoice\Service\Accounting\DocumentEntryNumberBackfill($connection))->pending(),
+            'script'  => 'document-entry-number-backfill.php',
+        ],
+        [
+            // Zaúčtované úhrady přijatých faktur s haléřovým zbytkem na 321 (doklad se
+            // zaokrouhlením, dobropis s vratkou), jen otevřená období, přepis na místě.
+            // Viz PurchaseRoundingSettlementBackfill.
+            'name'    => 'purchase-rounding-settlement',
+            'reason'  => 'úhrad přijatých faktur k dorovnání haléřového zbytku',
+            // Náhled běží přes engine účtování (dry-run v transakci), takže služba i její
+            // závislosti musí sdílet JEDNO spojení z kontejneru — s vlastním spojením by
+            // rollback náhledu nezahrnul zápisy enginu.
+            'count'   => static fn (): int => \MyInvoice\Bootstrap::buildApp()->getContainer()
+                ->get(\MyInvoice\Service\Accounting\Bank\PurchaseRoundingSettlementBackfill::class)
+                ->pending(),
+            'script'  => 'purchase-rounding-settlement-backfill.php',
         ],
     ];
 

@@ -42,7 +42,7 @@ final class PayrollEmploymentWorkplaceBulkFillTest extends TestCase
         if (!is_file($rootDir . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_employment_terms')) {
             $this->markTestSkipped('Chybí tabulka podmínek pracovního vztahu.');

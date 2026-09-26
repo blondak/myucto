@@ -27,6 +27,7 @@ import { usePaneDom } from '@/composables/usePaneDom'
 import { allAccountingPeriodsRange, findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportLinks from '@/components/dimensions/DimensionReportLinks.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -96,6 +97,7 @@ async function load() {
   closeMonth()
   try {
     report.value = await accountingApi.getGeneralLedger(queryParams())
+    void router.replace({ query: { ...buildQuery(true), ...(route.query.account_id ? { account_id: route.query.account_id } : {}) } })
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
     report.value = null
@@ -369,11 +371,15 @@ function buildQuery(includeAfterClosing = false): Record<string, string> {
   else q.period_id = String(filters.period_id)
   if (filters.from) q.from = filters.from
   if (filters.to) q.to = filters.to
-  if (filters.analytics) q.analytics = '1'
+  q.analytics = filters.analytics ? '1' : '0'
   if (includeAfterClosing && filters.after_closing) q.after_closing = '1'
   if (filters.vendor) q.vendor = filters.vendor
   if (filters.client) q.client = filters.client
   if (filters.item) q.item = filters.item
+  if (filters.dimension_value_id) {
+    q.dimension_value_id = String(filters.dimension_value_id)
+    if (!filters.dimension_descendants) q.dimension_descendants = '0'
+  }
   return q
 }
 
@@ -386,6 +392,9 @@ function applyQueryToPage(q: Record<string, string>) {
   filters.vendor = q.vendor ?? ''
   filters.client = q.client ?? ''
   filters.item = q.item ?? ''
+  const valueId = Number(q.dimension_value_id)
+  filters.dimension_value_id = Number.isSafeInteger(valueId) && valueId > 0 ? valueId : null
+  filters.dimension_descendants = q.dimension_descendants !== '0'
   load()
 }
 
@@ -476,20 +485,30 @@ onMounted(async () => {
   // Drill-down z karty účtu / jiné sestavy — období, rozsah i rozpad analytik
   // z URL mají přednost před výchozím otevřeným obdobím.
   const q = route.query
+  const fromQuery = typeof q.from === 'string' ? q.from : ''
+  const toQuery = typeof q.to === 'string' ? q.to : ''
+  const queryPeriod = periods.value.find(p => p.starts_on <= fromQuery && p.ends_on >= toQuery)
+  const spansPeriods = !!fromQuery && !!toQuery && !queryPeriod
   const periodId: number | '' = q.all_periods === '1'
     ? ''
-    : (typeof q.period_id === 'string' && q.period_id ? Number(q.period_id) : (def?.id ?? 0))
+    : (typeof q.period_id === 'string' && q.period_id ? Number(q.period_id) : (spansPeriods ? '' : (queryPeriod?.id ?? def?.id ?? 0)))
   if (periodId === 0 || periods.value.length === 0) return
   filters.period_id = periodId
   if (typeof q.from === 'string' && q.from) filters.from = q.from
   if (typeof q.to === 'string' && q.to) filters.to = q.to
+  const valueId = Number(q.dimension_value_id)
+  if (Number.isSafeInteger(valueId) && valueId > 0) filters.dimension_value_id = valueId
+  filters.dimension_descendants = q.dimension_descendants !== '0'
   if (periodId === '') {
     const allRange = allAccountingPeriodsRange(periods.value)
     if (!filters.from) filters.from = allRange.from ?? ''
     if (!filters.to) filters.to = allRange.to ?? ''
   }
-  if (q.analytics === '1') filters.analytics = true
+  if (q.analytics === '1' || q.analytics === '0') filters.analytics = q.analytics === '1'
   if (q.after_closing === '1') filters.after_closing = true
+  if (typeof q.vendor === 'string') filters.vendor = q.vendor
+  if (typeof q.client === 'string') filters.client = q.client
+  if (typeof q.item === 'string') filters.item = q.item
   await load()
   await focusAccountFromQuery()
 })
@@ -620,6 +639,9 @@ onMounted(async () => {
         <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.general_ledger.reset_filters') }}</button>
       </div>
     </div>
+
+    <DimensionReportLinks current="ledger" :from="filters.from || report?.from || ''" :to="filters.to || report?.to || ''"
+      :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants" />
 
     <p v-if="report?.dimension" class="mb-4 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800">
       {{ t('dimensions.filter_active_note') }}
@@ -773,6 +795,9 @@ onMounted(async () => {
                                           class="font-mono text-xs text-primary-600 hover:text-primary-700 hover:underline">
                                           {{ it.document_no || t('accounting.account_statement.journal_link', { id: it.entry_id }) }}
                                         </RouterLink>
+                                        <div v-if="it.source_bank_ref && it.source_bank_ref !== it.document_no"
+                                             class="font-mono text-[10px] text-neutral-400 whitespace-nowrap"
+                                             :title="t('accounting.journal.bank_ref_hint', { ref: it.source_bank_ref })">{{ it.source_bank_ref }}</div>
                                       </td>
                                       <td class="px-2 py-1 font-mono text-xs text-neutral-500">{{ it.account_code }}</td>
                                       <td class="px-2 py-1">{{ it.description || '—' }}</td>

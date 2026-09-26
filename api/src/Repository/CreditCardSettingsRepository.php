@@ -24,7 +24,7 @@ final class CreditCardSettingsRepository
     public const MODES = [self::MODE_CLEARING, self::MODE_DIRECT];
 
     /** Výchozí režim nákupů: závazek vůči bance vzniká platbou, ne dokladem. */
-    public const DEFAULT_MODE = self::MODE_CLEARING;
+    public const DEFAULT_MODE = self::MODE_DIRECT;
 
     /** Výchozí kódy pro nevyplněné účty (null = převzít z nastavení platebních karet). */
     public const DEFAULT_CODES = [

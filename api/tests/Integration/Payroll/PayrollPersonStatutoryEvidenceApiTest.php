@@ -66,7 +66,7 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollPersonStatutoryEvidenceAction::class);
             $this->repository = $container->get(

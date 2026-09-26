@@ -25,6 +25,7 @@ const route = useRoute()
 const toast = useToast()
 
 const accountId = computed(() => Number(route.params.accountId))
+const isClosingAccount = computed(() => /^7(01|02|10)/.test(report.value?.account.code ?? ''))
 
 const report = ref<AccountDetailReport | null>(null)
 const periods = ref<AccountingPeriod[]>([])
@@ -248,6 +249,19 @@ onMounted(async () => {
     </div>
 
     <template v-else>
+      <div v-if="isClosingAccount"
+        class="bg-primary-50 border border-primary-200 text-primary-800 rounded-lg p-3 mb-4 text-sm flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span>{{ t('accounting.accounts.detail.closing_account_hint') }}</span>
+        <RouterLink :to="{ name: 'accounting-balance-sheet', query: { view: 'accounts' } }"
+          class="font-medium text-primary-700 hover:underline whitespace-nowrap">
+          {{ t('accounting.accounts.detail.closing_account_balance_link') }}
+        </RouterLink>
+        <RouterLink :to="{ name: 'accounting-income-statement', query: { view: 'accounts' } }"
+          class="font-medium text-primary-700 hover:underline whitespace-nowrap">
+          {{ t('accounting.accounts.detail.closing_account_income_link') }}
+        </RouterLink>
+      </div>
+
       <!-- Rozsah -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -377,6 +391,9 @@ onMounted(async () => {
                     <RouterLink :to="movementLink(it)" class="font-mono text-xs text-primary-600 hover:text-primary-700 hover:underline">
                       {{ it.document_no || t('accounting.account_statement.journal_link', { id: it.entry_id }) }}
                     </RouterLink>
+                    <div v-if="it.source_bank_ref && it.source_bank_ref !== it.document_no"
+                         class="font-mono text-[10px] text-neutral-400 whitespace-nowrap"
+                         :title="t('accounting.journal.bank_ref_hint', { ref: it.source_bank_ref })">{{ it.source_bank_ref }}</div>
                   </td>
                   <td class="px-3 py-2 font-mono text-xs text-neutral-500">{{ it.account_code }}</td>
                   <td class="px-3 py-2">{{ it.description || '—' }}</td>

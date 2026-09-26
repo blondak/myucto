@@ -15,6 +15,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
+import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -126,6 +127,13 @@ async function upload() {
   }
 }
 
+const reviewInvoiceId = ref<number | null>(null)
+async function onReviewClosed(navigated?: boolean) {
+  const id = reviewInvoiceId.value
+  reviewInvoiceId.value = null
+  if (id && !navigated) await router.push(`/purchase-invoices/${id}/edit`)
+}
+
 async function extract() {
   if (!selected.value || acting.value) return
   acting.value = true
@@ -134,7 +142,9 @@ async function extract() {
     selected.value = fresh
     toast.success(t('purchase_submissions.processed_success'))
     if (fresh.purchase_invoice_id) {
-      await router.push(`/purchase-invoices/${fresh.purchase_invoice_id}/edit`)
+      // Nejdřív kontrola vytěženého (okno se samo zavře, když není co kontrolovat),
+      // pak editor jako dosud.
+      reviewInvoiceId.value = fresh.purchase_invoice_id
     } else {
       await load()
     }
@@ -437,5 +447,6 @@ watch(() => supplierStore.currentSupplierId, () => { selected.value = null; void
         </div>
       </section>
     </div>
+    <ExtractionReviewModal v-if="reviewInvoiceId" :invoice-ids="[reviewInvoiceId]" silent-when-empty @close="onReviewClosed" />
   </div>
 </template>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, watch, computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { taxReturnApi, type TaxpayerType, type TaxReturnVariant, type TaxReturnState, type InsuranceSummary, type AdvanceSchedule, type AdvanceOverride, type AdvancePeriodicity, type AdvanceKind, type TaxReturnProjection, type TaxReturnAddbackSuggestion, type TaxReturnDeductionSuggestion, type ReconcileResult, type FiledImportResult, type TaxReturnBankAccount, type PreFinalizeCheck } from '@/api/taxReturn'
 import { apiErrorMessage } from '@/api/errors'
@@ -16,6 +16,7 @@ import { taxEvidenceApi, type TaxEvidenceClosing, type TaxEvidenceAdjustment } f
 import { downloadApiFile } from '@/utils/downloadFile'
 import { btnOutline, btnFilled, ICONS } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
+import { closingProjectionLabelKey, closingProjectionSource } from '@/utils/closingProjection'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -116,6 +117,7 @@ const taxLosses = computed(() => (state.value as any)?.tax_losses ?? { losses: [
 
 // Feature 1 — projekce závěrkových operací do VH (jen DPPO; null, když nic nezaúčtovaného nečeká).
 const projection = computed<TaxReturnProjection | null>(() => (computed_.value as any)?.projection ?? null)
+const projectionPeriodId = computed<number | null>(() => Number((state.value?.podklady as any)?.period?.id ?? 0) || null)
 // Feature 2 — auto-návrhy připočitatelných / odečitatelných položek k ověření účetní.
 const addbackSuggestions = computed<TaxReturnAddbackSuggestion[]>(() =>
   ((state.value?.podklady as any)?.suggestions?.addbacks as TaxReturnAddbackSuggestion[]) ?? [])
@@ -938,6 +940,19 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
               </tbody>
             </table>
           </div>
+          <div v-if="((state.podklady.securities_sale as any)?.accounts || []).length" class="bg-surface border border-neutral-200 rounded-lg p-4">
+            <div class="text-sm font-semibold mb-2">{{ t('taxReturn.po_securities_title') }}</div>
+            <table class="w-full text-sm">
+              <tbody>
+                <tr><td class="py-1">{{ t('taxReturn.po_securities_shares') }}</td><td class="text-right font-mono whitespace-nowrap">{{ formatMoney(Number((state.podklady.securities_sale as any).shares_cost ?? 0), 'CZK') }}</td></tr>
+                <tr class="border-t border-neutral-100"><td class="py-1">{{ t('taxReturn.po_securities_other') }}</td><td class="text-right font-mono whitespace-nowrap">{{ formatMoney(Number((state.podklady.securities_sale as any).other_cost ?? 0), 'CZK') }}</td></tr>
+                <tr class="border-t border-neutral-100"><td class="py-1">{{ t('taxReturn.po_securities_income') }}</td><td class="text-right font-mono whitespace-nowrap">{{ formatMoney(Number((state.podklady.securities_sale as any).income ?? 0), 'CZK') }}</td></tr>
+                <tr class="border-t border-neutral-100 font-semibold"><td class="py-1">{{ t('taxReturn.po_securities_addback') }}</td><td class="text-right font-mono whitespace-nowrap">{{ formatMoney(Number((state.podklady.securities_sale as any).addback ?? 0), 'CZK') }}</td></tr>
+                <tr v-if="Number((state.podklady.securities_sale as any).review_amount ?? 0) > 0" class="border-t border-neutral-100 text-warning-700"><td class="py-1">{{ t('taxReturn.po_securities_review') }}</td><td class="text-right font-mono whitespace-nowrap">{{ formatMoney(Number((state.podklady.securities_sale as any).review_amount), 'CZK') }}</td></tr>
+              </tbody>
+            </table>
+            <p class="text-xs text-neutral-500 mt-2">{{ t('taxReturn.po_securities_note') }}</p>
+          </div>
         </template>
         <template v-else>
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1316,8 +1331,10 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
             <div v-for="it in projection.items" :key="it.key" class="flex justify-between"
               :class="it.optional ? 'text-neutral-400' : 'text-neutral-700'">
               <span>
-                {{ it.sign >= 0 ? '+' : '−' }} {{ t(it.label_key) }}
+                {{ it.sign >= 0 ? '+' : '−' }} {{ t(closingProjectionLabelKey(it)) }}
                 <span v-if="it.optional" class="text-[10px] uppercase ml-1">· {{ t('taxReturn.projection_optional') }}</span>
+                <RouterLink v-if="closingProjectionSource(it.key, projectionPeriodId)" :to="closingProjectionSource(it.key, projectionPeriodId)!.to"
+                  class="text-xs text-primary-600 hover:underline ml-1">({{ t(closingProjectionSource(it.key, projectionPeriodId)!.labelKey) }})</RouterLink>
               </span>
               <span class="font-mono whitespace-nowrap">{{ it.sign >= 0 ? '+' : '−' }}{{ formatMoney(it.amount, 'CZK') }}</span>
             </div>

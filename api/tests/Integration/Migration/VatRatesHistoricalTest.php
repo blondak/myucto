@@ -34,7 +34,7 @@ final class VatRatesHistoricalTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
-        $pdo = Bootstrap::buildApp()->getContainer()->get(Connection::class)->pdo();
+        $pdo = Bootstrap::buildContainer()->get(Connection::class)->pdo();
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) FROM vat_rates
               WHERE country = 'CZ' AND is_reverse_charge = 0 AND rate_percent = ?

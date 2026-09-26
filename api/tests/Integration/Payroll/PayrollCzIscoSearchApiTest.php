@@ -32,7 +32,7 @@ final class PayrollCzIscoSearchApiTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DI kontejner.');
         }
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         $this->action = $container->get(PayrollCzIscoAction::class);
 

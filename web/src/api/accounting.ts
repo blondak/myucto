@@ -159,6 +159,8 @@ export interface JournalEntry {
   amount_side?: JournalSide | null
   /** Obohaceno v listu jen pro source_type='bank' — drill-down na bankovní výpis. */
   source_statement_id?: number | null
+  /** Jen source_type='bank' — ID pohybu z banky; číslo dokladu nese řadu účtu (BCR-08). */
+  source_bank_ref?: string | null
   /** Obohaceno v listu jen pro source_type='cash' — drill-down na pokladní doklad. */
   source_doc_number?: string | null
   source_register_id?: number | null
@@ -182,6 +184,10 @@ export interface JournalEntry {
    */
   has_related?: boolean
   automation?: AutomationProvenance | null
+  posting_lines?: Array<{ side: JournalSide; amount: number; is_red_storno?: boolean; account_code: string; account_name: string | null }>
+  vat_breakdown?: Array<{ rate: number; base: number; vat: number }>
+  source_currency?: string | null
+  dimension_labels?: string[]
   _warnings?: Array<'entry_date_outside_document_year'>
 }
 
@@ -395,6 +401,8 @@ export interface JournalRelatedItem {
   entry_date: string | null
   entry_document_no: string | null
   entry_posted: boolean
+  /** false = doklad se do deníku neúčtuje nikdy (proforma, zálohová PF); chybějící zápis není nález. */
+  postable?: boolean
 }
 
 export interface JournalRelated {
@@ -509,6 +517,9 @@ export interface JournalHistoryResponse {
 }
 
 export interface JournalFilters {
+  include_vat_breakdown?: boolean
+  include_posting_accounts?: boolean
+  include_dimensions?: boolean
   sort_key?: string
   sort_dir?: 'asc' | 'desc'
   document_no?: string
@@ -1128,6 +1139,7 @@ export interface AccountStatementItem {
   source_type: string
   source_id: number | null
   side: JournalSide
+  is_red_storno?: boolean
   amount: number
   balance: number
   /** Účet ŘÁDKU — u syntetiky je opis složený z jejích analytik. */
@@ -1136,12 +1148,113 @@ export interface AccountStatementItem {
   account_name: string
   /** Obohacení pro drill-down na prvotní doklad — viz utils/journalSourceLink.ts. */
   source_statement_id: number | null
+  source_bank_ref?: string | null
   source_doc_number: string | null
   source_register_id: number | null
   source_asset_id: number | null
   source_asset_name: string | null
   source_settlement_doc_type: string | null
   source_settlement_doc_id: number | null
+  line_id: number
+  line_no: number
+  /** Účty opačné strany téhož zápisu. */
+  counter_accounts: string | null
+  partner: string | null
+  variable_symbol: string | null
+  currency: string
+  amount_foreign: number | null
+  /** Okruh párování, ve kterém řádek leží. */
+  pairing_id: number | null
+}
+
+export interface OpenItemLine {
+  line_id: number
+  line_no: number
+  entry_id: number
+  entry_date: string
+  document_no: string | null
+  description: string | null
+  source_type: string
+  source_id: number | null
+  side: JournalSide
+  is_red_storno?: boolean
+  amount: number
+  open_amount: number
+  open_balance: number
+  balance: number
+  account_id: number
+  account_code: string
+  account_name: string
+  is_reversed: boolean
+  source_statement_id: number | null
+  source_doc_number: string | null
+  source_register_id: number | null
+  source_asset_id: number | null
+  source_settlement_doc_type: string | null
+  source_settlement_doc_id: number | null
+  counter_accounts: string | null
+  partner: string | null
+  variable_symbol: string | null
+  currency: string
+  amount_foreign: number | null
+  pairing_id: number | null
+}
+
+export interface OpenItemsReport {
+  account: { id: number; code: string; name: string; type: AccountType; normal_side: NormalSide | null; is_synthetic: boolean }
+  as_of: string
+  only_open: boolean
+  items: OpenItemLine[]
+  total: number
+  page: number
+  per_page: number
+  line_count: number
+  open_count: number
+  open_md: number
+  open_d: number
+  open_total: number
+  balance: number
+  difference: number
+}
+
+export interface LinePairingItem {
+  entry_id: number
+  line_no: number
+  account_id: number
+  line_id: number | null
+  side: JournalSide | null
+  is_red_storno?: boolean
+  amount: number | null
+  entry_date: string
+  document_no: string | null
+  description: string | null
+  source_type: string
+  source_id: number | null
+  posted: boolean
+}
+
+export interface LinePairing {
+  id: number
+  account_id: number
+  account_code: string
+  account_name: string
+  note: string | null
+  origin: 'manual' | 'suggestion'
+  created_by: number | null
+  created_at: string
+  items: LinePairingItem[]
+  total_md: number
+  total_d: number
+  remainder: number
+  balanced: boolean
+}
+
+export interface PairingSuggestion {
+  kind: 'reversal' | 'amount'
+  account_id: number
+  amount: number
+  days_apart: number
+  lines: Array<{ line_id: number; entry_id: number; entry_date: string; document_no: string | null; description: string | null; side: JournalSide; amount: number }>
 }
 
 export interface AccountStatementReport {
@@ -1422,7 +1535,87 @@ export interface IncomeStatementReport {
   }
 }
 
-// ── Saldokonto (audit 2026-07, D6/1) ───────────────────────────────────────
+// ── Rozvaha a výsledovka po účtech ─────────────────────────────────────────
+export interface StatementAccountLine {
+  account_id: number
+  account_code: string
+  name: string
+  account_type?: string
+  md: number
+  d: number
+  analytics?: StatementAccountLine[]
+}
+
+export type StatementAccountSectionKey = 'operating' | 'financial' | 'unassigned' | 'tax' | 'transfer'
+
+export interface StatementAccountsReport {
+  version_code: string
+  as_of: string
+  entity: StatementEntity
+  period: ReportPeriod
+  closed: boolean
+  dimension?: ReportDimensionFilter | null
+  balance: {
+    classes: { class: string; accounts: StatementAccountLine[]; md: number; d: number }[]
+    md: number
+    d: number
+    profit: number
+  }
+  profit_loss: {
+    sections: {
+      key: StatementAccountSectionKey
+      expenses: StatementAccountLine[]
+      revenues: StatementAccountLine[]
+      expense_total: number
+      revenue_total: number
+      result: number
+    }[]
+    operating_profit: number
+    financial_profit: number
+    profit_before_tax: number
+    profit_after_tax: number
+    profit: number
+  }
+  checks: {
+    profit_balance: number
+    profit_loss: number
+    profit_matches: boolean
+    technical_residual: number
+    unassigned_count: number
+  }
+}
+
+/** Nezaúčtovaná uzávěrková operace z projekce náhledu DPPO (ClosingProjectionCalculator). */
+export interface YearEndClosingItem {
+  key: string
+  label_key: string
+  amount: number
+  sign: 1 | -1
+  /** Návrh k potvrzení účetní (opravné položky, dohady) — zobrazuje se, nesčítá. */
+  optional: boolean
+}
+
+export interface YearEndTaxEstimate {
+  applicable: boolean
+  reason: 'period_closed' | 'taxpayer_fo' | 'income_tax_posted' | 'tax_unavailable' | null
+  message?: string
+  period: { id: number; fiscal_year: number; starts_on: string; ends_on: string; status: string }
+  return_status?: 'none' | 'draft' | 'final'
+  vh_posted?: number
+  closing_items?: YearEndClosingItem[]
+  is_projection?: boolean
+  vh_before_tax?: number
+  increases?: number
+  decreases?: number
+  tax_base?: number
+  tax?: number
+  advances_paid?: number
+  advances_source?: 'return' | 'schedules' | 'none'
+  balance_due?: number
+  vh_after_tax?: number
+}
+
+// ── Saldokonto (audit 2026-07, D6/1)───────────────────────────────────────
 export interface SaldoParams {
   period_id: number
   as_of?: string
@@ -1447,6 +1640,14 @@ export interface SaldoItem {
   paid_czk: number
   remaining_czk: number
   days_overdue: number
+  /** advance_pending = záloha zaplacená na saldokontní účet, čeká na konečnou fakturu. */
+  kind?: 'document' | 'advance_pending'
+  label?: string | null
+  /** Přijatá (poskytnutá) platba zálohy — u advance_pending místo booked_czk. */
+  advance_payment_czk?: number | null
+  /** Daň z daňového dokladu k platbě — u advance_pending místo paid_czk. */
+  advance_vat_czk?: number | null
+  tax_document_id?: number | null
 }
 
 export interface SaldoPartner {
@@ -1529,6 +1730,10 @@ export const POSTING_ERROR_CODES = [
   'entry_reversed', 'empty_entry',
   // Vyúčtování zálohy má víc kandidátů → nelze jednoznačně odečíst zálohovou DPH.
   'advance_settlement_ambiguous',
+  // Vyúčtování zálohy s daňovým dokladem k platbě, který ještě není zaúčtovaný.
+  'advance_tax_document_unposted',
+  // Daňový doklad k platbě nese jen daň OSS — samostatně se neúčtuje.
+  'advance_tax_document_oss',
   // DDKP (daňový doklad k platbě) v reverse-charge režimu se automaticky neúčtuje.
   'ddkp_reverse_charge_unsupported',
   // Přeúčtování: datum je zamčené (§35 soft-close) resp. storno i oprava by padly
@@ -1685,8 +1890,14 @@ export interface RepostPlan {
   reason_code: 'period_not_open' | 'date_locked' | 'entry_reversed' | 'tax_neutral_rewrite' | null
   /** Zamčené datum v otevřeném roce: přesun mezi účty téže třídy bez daňového dopadu se přepíše na místě. */
   tax_neutral_available: boolean
+  /** Proč opravené řádky nejdou přepsat na místě (jen u plánu počítaného nad řádky). */
+  tax_neutral_violation?: RepostTaxNeutralViolation | null
   lines: Array<{ account_code: string | null; account_name: string | null; side: 'debit' | 'credit'; amount: number; is_red_storno?: boolean }>
 }
+
+export type RepostTaxNeutralViolation =
+  | 'unknown_account' | 'special_account' | 'tax_account_changed'
+  | 'amounts_changed' | 'account_class_changed' | 'tax_deductibility_changed'
 
 export interface RepostResult {
   strategy: 'replace' | 'reverse'
@@ -1776,6 +1987,9 @@ export const accountingApi = {
   // Deník
   listJournal: (filters?: JournalFilters) => {
     const params: Record<string, string | number> = {}
+    if (filters?.include_vat_breakdown) params.include_vat_breakdown = 1
+    if (filters?.include_posting_accounts) params.include_posting_accounts = 1
+    if (filters?.include_dimensions) params.include_dimensions = 1
     if (filters?.sort_key) params.sort_key = filters.sort_key
     if (filters?.sort_dir) params.sort_dir = filters.sort_dir
     if (filters?.document_no) params.document_no = filters.document_no
@@ -1832,7 +2046,10 @@ export const accountingApi = {
   // provede, takže se náhled s výsledkem nemůže rozejít.
   repostPlan: (source: JournalPostingSource, id: number) =>
     api.get<RepostPlan>(`/accounting/journal/repost-plan/${source}/${id}`).then(r => r.data),
-  repost: (source: JournalPostingSource, id: number, payload: RepostPayload) =>
+  /** Totéž rozhodnutí nad opravenými řádky z dialogu (na místě × storno), bez zápisu. */
+  repostPlanForLines: (source: JournalPostingSource, id: number, lines: RepostPayload['lines']) =>
+    api.post<RepostPlan>(`/accounting/journal/repost-plan/${source}/${id}`, { lines }).then(r => r.data),
+  repost:(source: JournalPostingSource, id: number, payload: RepostPayload) =>
     api.post<JournalEntryDetail & { repost: RepostResult }>(
       `/accounting/journal/repost/${source}/${id}`, payload).then(r => r.data),
   /** Podle jaké šablony kontace vznikla a kde se ta šablona opraví. */
@@ -2027,10 +2244,32 @@ export const accountingApi = {
     api.post<BalanceInventorySaveResult>(`/accounting/periods/${periodId}/closing/inventory`, payload).then(r => r.data),
   getAccountStatement: (accountId: number, params: { from: string; to: string; page?: number; per_page?: number }) =>
     api.get<AccountStatementReport>(`/accounting/reports/account-statement/${accountId}`, { params }).then(r => r.data),
+  getOpenItems: (accountId: number, params: { as_of: string; only_open: 0 | 1; page?: number; per_page?: number }) =>
+    api.get<OpenItemsReport>(`/accounting/open-items/${accountId}`, { params }).then(r => r.data),
+  getLinePairing: (pairingId: number) =>
+    api.get<LinePairing>(`/accounting/open-items/pairings/${pairingId}`).then(r => r.data),
+  createLinePairing: (accountId: number, lineIds: number[], note?: string | null) =>
+    api.post<LinePairing>(`/accounting/open-items/${accountId}/pairings`, { line_ids: lineIds, note: note ?? null }).then(r => r.data),
+  addLinesToPairing: (pairingId: number, lineIds: number[]) =>
+    api.post<LinePairing>(`/accounting/open-items/pairings/${pairingId}/lines`, { line_ids: lineIds }).then(r => r.data),
+  removeLineFromPairing: (pairingId: number, entryId: number, lineNo: number) =>
+    api.delete<{ pairing: LinePairing | null }>(`/accounting/open-items/pairings/${pairingId}/lines/${entryId}/${lineNo}`).then(r => r.data),
+  deleteLinePairings: (pairingIds: number[]) =>
+    api.post<{ deleted: number }>('/accounting/open-items/pairings/delete', { pairing_ids: pairingIds }).then(r => r.data),
+  getPairingSuggestions: (accountId: number, params: { as_of: string; days: number }) =>
+    api.get<{ as_of: string; days: number; items: PairingSuggestion[] }>(`/accounting/open-items/${accountId}/suggestions`, { params }).then(r => r.data),
+  applyPairingSuggestions: (accountId: number, payload: { as_of: string; days: number; pairs?: number[][] }) =>
+    api.post<{ created: number }>(`/accounting/open-items/${accountId}/suggestions/apply`, payload).then(r => r.data),
   getBalanceSheet: (params: StatementParams) =>
     api.get<BalanceSheetReport>('/accounting/reports/balance-sheet', { params }).then(r => r.data),
   getIncomeStatement: (params: StatementParams) =>
     api.get<IncomeStatementReport>('/accounting/reports/income-statement', { params }).then(r => r.data),
+  /** Rozvaha a výsledovka po účtech s hospodářským výsledkem (zůstatky před uzávěrkou). */
+  getStatementAccounts: (params: Omit<StatementParams, 'scope'>) =>
+    api.get<StatementAccountsReport>('/accounting/reports/statement-accounts', { params }).then(r => r.data),
+  /** Odhad do konce otevřeného roku (náhled DPPO, uzávěrka, odpisy, zálohy) — samostatný request. */
+  getYearEndTaxEstimate: (periodId: number) =>
+    api.get<YearEndTaxEstimate>('/accounting/reports/statement-accounts/tax-estimate', { params: { period_id: periodId } }).then(r => r.data),
   /**
    * VZZ v ÚČELOVÉM členění. Bez úplné mapy funkcí backend výkaz NESESTAVÍ a vrátí
    * `function_map_incomplete` s výčtem nepřiřazených účtů — nepřiřazený náklad by z výkazu

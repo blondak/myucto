@@ -111,3 +111,56 @@ používají stejné období, datum, rozsah, mapu i minulé období jako obrazov
 Účetní jednotka používající členění nákladů podle funkce sestaví samostatnou
 [účelovou výsledovku](59_Vysledovka_ucelova.md); obě varianty mají shodný
 celkový výsledek, ale jinou strukturu provozních nákladů.
+
+## 58.6 Výsledovka po účtech
+
+Záložka **Účet 710 (po účtech)** ukáže nákladové a výnosové účty se zůstatkem od začátku
+období do data sestavení, rozdělené do skupin **Provozní činnost**,
+**Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku
+hospodaření společníkům**. Skupinu určuje stejná mapa jako výkaz (včetně
+výjimek firmy), takže účet je vždy ve skupině, do které ho výkaz započte.
+Náklady jsou ve sloupci **Náklady (MD)**, výnosy ve sloupci **Výnosy (D)**,
+každá skupina končí svým výsledkem.
+
+Pod skupinami následují mezisoučty **Provozní výsledek hospodaření**,
+**Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a
+**po zdanění** a zvýrazněný řádek **Výsledek hospodaření** za účetní období.
+Hodnoty se shodují s řádky výkazu a s výsledkem v rozvaze po účtech
+([§ 57.8](57_Rozvaha.md)). Uzávěrkový zápis se nezapočítává, po uzavření roku
+tak pohled ukazuje obsah konečného účtu 710.
+
+Výsledkový účet, který mapa výkazu nezná, je ve skupině **Účty nezařazené ve
+výkazu**. Výsledek hospodaření ho zahrnuje, výkaz ne, proto stránka nad
+tabulkou upozorní a účet je třeba zařadit výjimkou mapování
+([§ 57.7](57_Rozvaha.md)).
+
+Kliknutím na účet se otevře jeho opis. Export PDF a XLSX z této záložky
+vytvoří výsledovku po účtech v jednotce zvolené přepínačem **Kč / tis. Kč**.
+
+### Odhad do konce roku (nezaúčtováno)
+
+U právnické osoby v roce, který ještě není uzavřený a nemá zaúčtovanou daň
+z příjmů (účet 591), je pod tabulkou blok **Odhad do konce roku
+(nezaúčtováno)**. Nic z něj není v účetnictví a po zaúčtování daně z příjmů
+zmizí. Načítá se samostatně až po tabulce, protože přepočítává náhled
+přiznání k DPPO. Aplikace v něm nic nového nepočítá, jen skládá čísla, která
+už ukazují jiné stránky:
+
+| Řádek | Odkud je |
+|---|---|
+| Výsledek hospodaření průběžně (zaúčtováno) | ř. 10 náhledu DPPO; shoduje se s řádkem Výsledek hospodaření před zdaněním výše (k poslednímu dni období) |
+| Nezaúčtované operace uzávěrky (časové rozlišení drobného majetku a nákladů příštích období, kurzové rozdíly, rozpuštění rozlišení z minulého roku, konečný stav zásob způsobem B) | projekce uzávěrky v náhledu DPPO, odkaz vede na uzávěrku období ([kap. 72](72_Uzaverka.md)) |
+| Odpisy roku podle odpisového plánu (nezaúčtované) | tatáž projekce z karet majetku ([kap. 28](28_Majetek.md)); účetní odpis sníží výsledek, rozdíl proti daňovému odpisu jde do ř. 50 nebo ř. 150 |
+| Opravné položky a dohadné položky | tatáž projekce; jde o návrhy, které účetní teprve potvrdí, proto jsou šedě a do odhadu se nesčítají |
+| Odhad výsledku hospodaření před zdaněním, připočitatelné a odčitatelné položky (ř. 70 a ř. 170 včetně rozdílu nezaúčtovaných odpisů), základ daně, odhad daně | projekce v náhledu DPPO ([§ 43.3](43_Dan_z_prijmu.md)) včetně ručních úprav základu, ztráty, darů a slev |
+| Zaplacené zálohy na daň a odhad doplatku nebo přeplatku | zálohy zadané v přiznání, jinak jistě spárované zálohy z evidence ([§ 43.4](43_Dan_z_prijmu.md)) |
+| Odhad výsledku hospodaření po zdanění | odhad výsledku před zdaněním minus odhad daně |
+
+Blok i náhled DPPO ukazují tatáž čísla. Jakmile se krok uzávěrky nebo odpisy
+roku zaúčtují, položka z projekce zmizí a částka je v průběžném výsledku,
+takže se nic nezapočte dvakrát. Mzdy ani jiné budoucí provozní náklady do
+zbytku roku odhad neobsahuje, jde o uzávěrku k dnešnímu stavu účetnictví.
+
+U každého řádku je odkaz na stránku, ze které číslo pochází. Blok se
+nezobrazí u fyzické osoby, v uzavřeném roce, při filtru dimenze ani
+uživateli bez práva na přiznání k dani z příjmů.

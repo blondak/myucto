@@ -28,7 +28,7 @@ final class AutomationFeedMembershipTest extends TestCase
         $root = dirname(__DIR__, 4);
         if (!is_file($root . '/cfg.php')) $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->feed = $container->get(AutomationFeedService::class);
         } catch (\Throwable $e) {

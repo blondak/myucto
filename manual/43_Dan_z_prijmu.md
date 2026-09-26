@@ -253,9 +253,16 @@ zaokrouhluje dolů, aby odečet nepřekročil zákonné procento.
 Výsledkové zápisy skladové uzávěrky se do výpočtu zahrnují. Technický zápis
 uzavření knih se vylučuje, aby převod na uzávěrkové účty nevynuloval výsledek.
 
-Panel uzávěrkových návrhů může upozornit na neodpisovaný drobný majetek, časové rozlišení,
-kurzové rozdíly, rezervy nebo dohadné položky. Je pouze projekcí: do DPPO vstoupí až
-řádně zaúčtované položky a schválené ruční daňové úpravy. Účetní závěrku dokonči podle
+Panel **Projekce závěrkových operací** ukáže odhad výsledku a daně po zaúčtování
+uzávěrkových kroků, které v neuzavřeném roce ještě zaúčtované nejsou: časové rozlišení
+drobného majetku a nákladů příštích období, kurzové rozdíly, rozpuštění rozlišení
+z minulého roku, konečný stav zásob (způsob B) a odpisy roku podle odpisového plánu.
+Účetní odpis sníží výsledek, rozdíl proti daňovému odpisu jde do ř. 50 nebo ř. 150
+stejně jako u zaúčtovaných odpisů. Opravné a dohadné položky jsou jen návrhy
+k potvrzení, zobrazí se šedě a do projekce se nesčítají. Každá položka odkazuje na
+uzávěrku období, odpisy na Majetek. Zaúčtovaný krok z projekce zmizí, takže se nic
+nezapočte dvakrát. Samotné přiznání (řádky a XML) počítá jen se zaúčtovanými položkami
+a schválenými ručními úpravami. Účetní závěrku dokonči podle
 [kapitoly Účetní závěrka](72_Uzaverka.md).
 
 ## 43.4 Zálohy na daň a pojistné

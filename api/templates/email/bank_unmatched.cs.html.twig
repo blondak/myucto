@@ -1,0 +1,9 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#15131D;">Nespárované bankovní pohyby</h1>
+<p style="margin:0 0 16px;">Dobrý den,</p>
+<p style="margin:0 0 16px;">v příloze zasíláme přehled <strong>{{ count }}</strong> bankovních pohybů na účtu <strong>{{ account }}</strong>, ke kterým zatím chybí doklad nebo potvrzení. Prosíme o doplnění podkladů.</p>
+<p style="margin:0 0 16px;">Poznámky účetní jsou uvedeny přímo u jednotlivých pohybů v souboru XLSX.</p>
+<p style="margin:24px 0 0;font-size:13px;color:#7A748C;">Děkujeme za spolupráci.</p>
+{% endblock %}

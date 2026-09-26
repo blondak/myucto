@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   accountingApi,
   type AccountingPeriod,
@@ -21,13 +21,17 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportLinks from '@/components/dimensions/DimensionReportLinks.vue'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const toast = useToast()
 
 const periods = ref<AccountingPeriod[]>([])
 const report = ref<TrialBalanceReport | null>(null)
 const loading = ref(false)
+const rangeAdjusted = ref(false)
 
 const filters = reactive({
   period_id: '' as number | '',
@@ -67,6 +71,17 @@ async function load() {
   loading.value = true
   try {
     report.value = await accountingApi.getTrialBalance(queryParams())
+    void router.replace({ query: {
+      period_id: String(filters.period_id),
+      from: filters.from || report.value.from,
+      to: filters.to || report.value.to,
+      analytics: filters.analytics ? '1' : '0',
+      ...(filters.after_closing ? { after_closing: '1' } : {}),
+      ...(filters.dimension_value_id ? {
+        dimension_value_id: String(filters.dimension_value_id),
+        dimension_descendants: filters.dimension_descendants ? '1' : '0',
+      } : {}),
+    } })
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
     report.value = null
@@ -76,6 +91,7 @@ async function load() {
 }
 
 function onPeriodChange() {
+  rangeAdjusted.value = false
   const period = findAccountingPeriod(periods.value, filters.period_id)
   if (!period) return
   filters.from = period.starts_on
@@ -157,8 +173,25 @@ onMounted(async () => {
   const def = open.length
     ? open.reduce((a, b) => (b.fiscal_year > a.fiscal_year ? b : a))
     : periods.value[0]
-  if (def) {
-    filters.period_id = def.id
+  const q = route.query
+  const fromQuery = typeof q.from === 'string' ? q.from : ''
+  const toQuery = typeof q.to === 'string' ? q.to : ''
+  const queryPeriod = periods.value.find(p => p.starts_on <= fromQuery && p.ends_on >= toQuery)
+  const explicitPeriod = periods.value.find(p => p.id === Number(q.period_id))
+  const selectedPeriod = explicitPeriod ?? queryPeriod
+    ?? periods.value.find(p => p.starts_on <= toQuery && p.ends_on >= toQuery)
+    ?? periods.value.find(p => p.starts_on <= fromQuery && p.ends_on >= fromQuery)
+    ?? def
+  if (selectedPeriod) {
+    rangeAdjusted.value = !!fromQuery && !!toQuery && !queryPeriod
+    filters.period_id = selectedPeriod.id
+    if (fromQuery) filters.from = fromQuery < selectedPeriod.starts_on ? selectedPeriod.starts_on : fromQuery > selectedPeriod.ends_on ? selectedPeriod.ends_on : fromQuery
+    if (toQuery) filters.to = toQuery > selectedPeriod.ends_on ? selectedPeriod.ends_on : toQuery < selectedPeriod.starts_on ? selectedPeriod.starts_on : toQuery
+    const valueId = Number(q.dimension_value_id)
+    if (Number.isSafeInteger(valueId) && valueId > 0) filters.dimension_value_id = valueId
+    filters.dimension_descendants = q.dimension_descendants !== '0'
+    if (q.analytics === '1' || q.analytics === '0') filters.analytics = q.analytics === '1'
+    filters.after_closing = q.after_closing === '1'
     await load()
   }
 })
@@ -198,12 +231,12 @@ onMounted(async () => {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.trial_balance.filter_from') }}</label>
-          <DateInput v-model="filters.from" @change="load"
+          <DateInput v-model="filters.from" @change="rangeAdjusted = false; load()"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.trial_balance.filter_to') }}</label>
-          <DateInput v-model="filters.to" @change="load"
+          <DateInput v-model="filters.to" @change="rangeAdjusted = false; load()"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div class="flex items-end pb-2">
@@ -225,6 +258,10 @@ onMounted(async () => {
         :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
         @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
     </div>
+
+    <DimensionReportLinks current="trial" :from="filters.from || report?.from || ''" :to="filters.to || report?.to || ''"
+      :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants" />
+    <p v-if="rangeAdjusted" class="mb-3 rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs text-warning-700" data-test="trial-range-adjusted">{{ t('dimensions.trial_range_adjusted') }}</p>
 
     <p v-if="report?.dimension" class="mb-4 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800">
       {{ t('dimensions.filter_active_note') }}

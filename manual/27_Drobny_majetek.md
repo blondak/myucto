@@ -90,6 +90,21 @@ Záporný řádek stejné faktury představující slevu nevytváří zápornou 
 Služba jej poměrně rozloží mezi kladné majetkové řádky a haléřový zbytek přidá
 největší položce. Součet cen karet tak odpovídá čistému nákladu dokladu.
 
+Slevový řádek (Sleva, Rabatt, Aktionsrabatt, Discount, Kupon, Voucher, Promo)
+se přiřadí k položce, kterou zlevňuje, bez ohledu na to, jaký druh výdaje má sám
+na sobě. Stejně ho rozdělí zaúčtování i evidence, takže cena karty sedí na účet
+501. Pravidla přiřazení:
+
+- sleva, která mluví o dopravě („Sleva na dopravné"), patří k dopravě,
+- sleva přesně ve výši dopravy (doprava zdarma) patří k dopravě,
+- sleva, která jmenuje položku („Sleva AlzaPlus+"), patří k té položce,
+- jinak patří ke zboží stejné sazby DPH; doprava, poplatky a služby slevu nenesou,
+  je-li na dokladu i zboží.
+
+Slevový řádek s ručně zvoleným účtem zůstává na svém účtu. Už zaúčtované doklady
+přeúčtuje `php api/bin/purchase-discount-reclass.php` (bez `--apply` jen vypíše
+kandidáty, s `--supplier=N --id=N --apply` přepíše zápis na místě a srovná karty).
+
 U cizoměnového dokladu se cena převede do CZK kurzem uloženým na faktuře.
 Stejný kurz se používá pro evidenční cenu i posouzení částky za kus.
 

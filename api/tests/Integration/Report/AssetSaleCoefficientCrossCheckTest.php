@@ -43,7 +43,7 @@ final class AssetSaleCoefficientCrossCheckTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->suite = $container->get(CrossCheckSuite::class);
         } catch (\Throwable $e) {

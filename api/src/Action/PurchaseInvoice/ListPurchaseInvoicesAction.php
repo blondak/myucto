@@ -7,7 +7,11 @@ namespace MyInvoice\Action\PurchaseInvoice;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Repository\InvoiceListDetailsRepository;
+use MyInvoice\Repository\DimensionListSummaryRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Report\InvoiceKhSections;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -19,7 +23,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Vrací seznam přijatých faktur seskupený po měsících (per tenant).
  * Filtry: status, document_kind, vendor_id, project_id (id | 'none' = bez zakázky),
  * year, month, date_from, date_to, currency, q, unpaid_only, overdue,
- * unpaid_as_of (YYYY-MM-DD — stav úhrady K DATU X, ne dnešní status; viz PurchaseInvoiceRepository::listGroupedByMonth)
+ * unpaid_as_of (YYYY-MM-DD — stav úhrady K DATU X, ne dnešní status; viz PurchaseInvoiceRepository::listGroupedByMonth),
+ * paid_shortfall (uhrazené doklady, které evidované úhrady nepokrývají).
+ * Řádek nese paid_amount / remaining_amount v měně dokladu (SSOT PurchaseSettledExpr).
  */
 final class ListPurchaseInvoicesAction
 {
@@ -28,12 +34,18 @@ final class ListPurchaseInvoicesAction
         private readonly Config $config,
         private readonly DocumentLockService $locks,
         private readonly InvoiceKhSections $khSections,
+        private readonly InvoiceListDetailsRepository $listDetails,
+        private readonly DimensionListSummaryRepository $dimensionSummaries,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
     {
         $q = $request->getQueryParams();
         $filter = (array) ($q['filter'] ?? []);
+        if (($filter['include_dimensions'] ?? null) === '1'
+            && !RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)) {
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
 
         // Neuhrazené K DATU X (task #4) — historický protějšek `unpaid_only`. Validace
         // shodná se SaldoAction::isDate — chybný formát je 422, ne tiché "nefiltrovat".
@@ -60,6 +72,7 @@ final class ListPurchaseInvoicesAction
             'unpaid_as_of'  => $unpaidAsOf !== '' ? $unpaidAsOf : null,
             'unmatched'     => !empty($filter['unmatched']),
             'needs_review'  => !empty($filter['needs_review']),
+            'paid_shortfall' => !empty($filter['paid_shortfall']),
             'payment_ordered' => $filter['payment_ordered'] ?? null,
             'booked'        => $filter['booked'] ?? null,
             'import_batch_id' => $filter['import_batch_id'] ?? null,
@@ -92,11 +105,25 @@ final class ListPurchaseInvoicesAction
         }
         if ($ids !== []) {
             $map = $this->locks->lockedMapForSources((int) $filters['supplier_id'], 'purchase_invoice', $ids);
+            $includeVat = ($filter['include_vat_breakdown'] ?? null) === '1';
+            $includePosting = ($filter['include_posting_accounts'] ?? null) === '1';
+            $details = $includeVat || $includePosting
+                ? $this->listDetails->forDocuments((int) $filters['supplier_id'], 'purchase_invoice', $ids, $includeVat, $includePosting)
+                : [];
+            $dimensionLabels = ($filter['include_dimensions'] ?? null) === '1'
+                ? $this->dimensionSummaries->forDocuments((int) $filters['supplier_id'], 'purchase_invoice', $ids)
+                : [];
             foreach ($result['data'] as &$group) {
                 foreach ($group['invoices'] as &$row) {
                     $lock = $map[(int) $row['id']] ?? null;
                     if ($lock !== null) {
                         $row['locked'] = $lock->toArray();
+                    }
+                    if (isset($details[(int) $row['id']])) {
+                        $row += $details[(int) $row['id']];
+                    }
+                    if (($filter['include_dimensions'] ?? null) === '1') {
+                        $row['dimension_labels'] = $dimensionLabels[(int) $row['id']] ?? [];
                     }
                 }
             }

@@ -47,7 +47,7 @@ final class LicenseActivationActionTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $this->db = Bootstrap::buildApp()->getContainer()->get(Connection::class);
+            $this->db = Bootstrap::buildContainer()->get(Connection::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -404,7 +404,7 @@ final class LicenseActivationActionTest extends TestCase
 
     private function independentConnection(): Connection
     {
-        $config = Bootstrap::buildApp()->getContainer()->get(Config::class);
+        $config = Bootstrap::buildContainer()->get(Config::class);
 
         return Connection::withoutSharedTestConnection(static fn (): Connection => new Connection($config));
     }

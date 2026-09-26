@@ -957,11 +957,16 @@ final class KontrolniHlaseniBuilder
             $hasDic = $g['dic'] !== '';
             // § 101e: „nad 10 000 Kč" = OSTŘE více → přesně 10 000 patří do sumace
             // A.5/B.3, ne do jednotlivé A.4/B.2. Proto '>' (ne '>=').
+            // Limit se posuzuje podle celkové částky DOKLADU včetně daně. U vyúčtování
+            // zálohy je to částka po odpočtu zálohy (doplatek/přeplatek), protože řádek
+            // odpočtu podle § 37a je položkou téhož dokladu: GFŘ, KH Časté dotazy, oddíl VI
+            // (dodavatel): doplatek 8 470 Kč z plnění 60 500 Kč jde do A.5, přeplatek
+            // 15 730 Kč do A.4 („celková hodnota plnění na daňovém dokladu").
             $overLimit = abs($g['total_czk']) > $itemThreshold;
             // Tuzemská zdanitelná část faktury (může být 0 u čistě RC/osvobozeného dokladu).
             // Faktura může přispět SOUČASNĚ do RC sekce (A.1/B.1/A.2) i do A.4/A.5/B.2/B.3
             // (mixed doklad) — proto žádný `continue`, sekce se vyhodnocují nezávisle.
-            $domZero = abs($g['dom_base21']) < 0.005 && abs($g['dom_base12']) < 0.005;
+            $domZero = self::isNilKhAmount($g['dom_base21'], $g['dom_vat21'], $g['dom_base12'], $g['dom_vat12']);
 
             if ($g['source'] === 'sale') {
                 // A.1 — tuzemský režim přenesení (§ 92a–92e, kód 25s). Jen položky sekce A.1.
@@ -1261,6 +1266,24 @@ final class KontrolniHlaseniBuilder
      * (M-9 — pokladní prodej s cizím VAT ID by se do A.4 dostal jako české DIČ
      * osekané na číslice). Jediná definice, žádná kopie regexu.
      */
+    /**
+     * Nemá tuzemská zdanitelná část dokladu (A.4/A.5, B.2/B.3) v žádné sazbě základ ani
+     * daň? Takový doklad se do KH neuvádí: typicky vyúčtování plně předplacené zálohy,
+     * kde položka a odpočet zálohy podle § 37a dají nulu. Plnění vykázal daňový doklad
+     * k přijaté platbě. Stačí jediná nenulová částka (základ nebo daň v kterékoli sazbě)
+     * a doklad v KH zůstává. Jediné místo pravidla pro výkaz i Knihu DPH.
+     */
+    public static function isNilKhAmount(float ...$amounts): bool
+    {
+        foreach ($amounts as $amount) {
+            if (abs($amount) >= 0.005) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public static function isValidCzechDic(?string $dic): bool
     {
         $value = strtoupper(trim((string) $dic));

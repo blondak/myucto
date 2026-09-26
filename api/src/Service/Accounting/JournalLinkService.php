@@ -25,6 +25,11 @@ use PDO;
  *   invoice / purchase_invoice ↔ cash       přes cash_documents.invoice_id / .purchase_invoice_id
  *   invoice / purchase_invoice ↔ settlement přes invoice_settlements.doc_type + .doc_id
  *   invoice          ↔ gopay  přes gopay_movements.invoice_id / credit_note_id
+ *   úhrada zálohy    ↔ daňový doklad k platbě a konečná faktura téže zálohy
+ *                             (parent_invoice_id → proforma; u přijatých
+ *                             advance_purchase_invoice_id / parent_purchase_invoice_id →
+ *                             zálohová PF). Záloha sama zápis nemá, takže bez téhle hrany
+ *                             vede z banky cesta jen na doklad bez zaúčtování.
  *   JAKÝKOLI zápis          ↔ doklad přes journal_entry_document_links (RUČNÍ měkká
  *                             vazba, migrace 1514) — jediná hrana, kterou zakládá
  *                             uživatel, a jediná, kterou má i ruční zápis se
@@ -291,6 +296,46 @@ final class JournalLinkService
             $mark((int) $r['doc_id'], (string) $r['doc_type']);
         }
 
+        // 8) Daňový doklad k platbě a konečná faktura zálohy: protějškem je úhrada ZÁLOHY
+        //    (viz paymentsOfDocument). Stačí, že záloha nějakou úhradu má.
+        if ($invoices !== []) {
+            foreach ($this->rows(
+                "SELECT ch.id FROM invoices ch
+                   JOIN invoices pf ON pf.id = ch.parent_invoice_id AND pf.supplier_id = ch.supplier_id
+                  WHERE ch.supplier_id = ? AND pf.invoice_type = 'proforma'
+                    AND ch.invoice_type IN ('invoice', 'tax_document')
+                    AND ch.id IN (" . $this->placeholders($invoices) . ")
+                    AND (EXISTS (SELECT 1 FROM invoice_payments ip
+                                  WHERE ip.supplier_id = pf.supplier_id AND ip.invoice_id = pf.id
+                                    AND ip.bank_transaction_id IS NOT NULL)
+                         OR EXISTS (SELECT 1 FROM payment_matches pm
+                                     WHERE pm.supplier_id = pf.supplier_id AND pm.invoice_id = pf.id)
+                         OR EXISTS (SELECT 1 FROM cash_documents cd
+                                     WHERE cd.supplier_id = pf.supplier_id AND cd.invoice_id = pf.id))",
+                array_merge([$supplierId], $invoices)
+            ) as $r) {
+                $mark((int) $r['id'], 'invoice');
+            }
+        }
+        if ($purchases !== []) {
+            foreach ($this->rows(
+                "SELECT ch.id FROM purchase_invoices ch
+                   JOIN purchase_invoices adv ON adv.supplier_id = ch.supplier_id
+                    AND adv.id = CASE WHEN ch.document_kind = 'tax_document'
+                                      THEN COALESCE(ch.advance_purchase_invoice_id, ch.parent_purchase_invoice_id)
+                                      ELSE ch.advance_purchase_invoice_id END
+                  WHERE ch.supplier_id = ? AND adv.document_kind = 'advance'
+                    AND ch.id IN (" . $this->placeholders($purchases) . ")
+                    AND (EXISTS (SELECT 1 FROM payment_matches pm
+                                  WHERE pm.supplier_id = adv.supplier_id AND pm.purchase_invoice_id = adv.id)
+                         OR EXISTS (SELECT 1 FROM cash_documents cd
+                                     WHERE cd.supplier_id = adv.supplier_id AND cd.purchase_invoice_id = adv.id))",
+                array_merge([$supplierId], $purchases)
+            ) as $r) {
+                $mark((int) $r['id'], 'purchase_invoice');
+            }
+        }
+
         $out = $linked;
         foreach ($byRef as $key => $entryIds) {
             if (!isset($hits[$key])) continue;
@@ -333,8 +378,8 @@ final class JournalLinkService
 
         $derived = match ($type) {
             'invoice', 'purchase_invoice' => $this->paymentsOfDocument($supplierId, $type, $sourceId),
-            'bank'                        => $this->documentsOfBankTransaction($supplierId, $sourceId),
-            'cash'                        => $this->documentsOfCashDocument($supplierId, $sourceId),
+            'bank'                        => $this->withAdvanceChildren($supplierId, $this->documentsOfBankTransaction($supplierId, $sourceId)),
+            'cash'                        => $this->withAdvanceChildren($supplierId, $this->documentsOfCashDocument($supplierId, $sourceId)),
             'settlement'                  => $this->documentsOfSettlement($supplierId, $sourceId),
             'gopay'                       => $this->documentsOfGoPayMovement($supplierId, $sourceId),
             default                       => [],
@@ -496,7 +541,93 @@ final class JournalLinkService
             $this->addRef($refs, 'settlement', (int) $r['id'], 'payment', (float) $r['amount']);
         }
 
+        // Daňový doklad k platbě i konečná faktura vlastní úhradu nemají — zaplatila se
+        // ZÁLOHA, na kterou ukazují. Bez tohohle by z nich panel „Souvisí" nevedl k bance,
+        // přestože právě ta platba je důvodem jejich vzniku.
+        $advanceId = $this->advanceParentOf($supplierId, $docType, $docId);
+        if ($advanceId !== null) {
+            $this->addRef($refs, $docType, $advanceId, 'document', null);
+            foreach ($this->paymentsOfDocument($supplierId, $docType, $advanceId) as $r) {
+                if ($r['kind'] === $docType) continue;
+                $this->addRef($refs, $r['kind'], $r['id'], $r['relation'], $r['allocated']);
+            }
+        }
+
         return array_values($refs);
+    }
+
+    /**
+     * Záloha, ke které doklad patří: u vydaných proforma přes `parent_invoice_id`
+     * (DDKP i konečná faktura), u přijatých zálohová PF přes `advance_purchase_invoice_id`
+     * (konečná faktura) nebo `parent_purchase_invoice_id` (přijatý DDKP). Dobropis
+     * a penále nesou `parent_*` taky, ale rodičem není záloha, proto kontrola typu rodiče.
+     */
+    private function advanceParentOf(int $supplierId, string $docType, int $docId): ?int
+    {
+        $sql = $docType === 'invoice'
+            ? "SELECT pf.id FROM invoices d
+                 JOIN invoices pf ON pf.id = d.parent_invoice_id AND pf.supplier_id = d.supplier_id
+                WHERE d.id = ? AND d.supplier_id = ? AND pf.invoice_type = 'proforma'
+                  AND d.invoice_type IN ('invoice', 'tax_document')"
+            : "SELECT adv.id FROM purchase_invoices d
+                 JOIN purchase_invoices adv ON adv.supplier_id = d.supplier_id
+                  AND adv.id = CASE WHEN d.document_kind = 'tax_document'
+                                    THEN COALESCE(d.advance_purchase_invoice_id, d.parent_purchase_invoice_id)
+                                    ELSE d.advance_purchase_invoice_id END
+                WHERE d.id = ? AND d.supplier_id = ? AND adv.document_kind = 'advance'";
+        $rows = $this->rows($sql, [$docId, $supplierId]);
+        return $rows === [] ? null : (int) $rows[0]['id'];
+    }
+
+    /**
+     * K úhradě zálohy přidá doklady, které ze zálohy vznikly: daňový doklad k platbě
+     * a konečnou fakturu. Záloha sama zápis v deníku nemá, takže bez nich by z bankovního
+     * zápisu vedla cesta jen na doklad bez zaúčtování.
+     *
+     * @param  list<array{kind:string, id:int, relation:string, allocated:?float}> $refs
+     * @return list<array{kind:string, id:int, relation:string, allocated:?float}>
+     */
+    private function withAdvanceChildren(int $supplierId, array $refs): array
+    {
+        $byKey = [];
+        foreach ($refs as $r) $byKey[$r['kind'] . ':' . $r['id']] = $r;
+
+        $proformas = [];
+        $advances  = [];
+        foreach ($refs as $r) {
+            if ($r['kind'] === 'invoice') $proformas[] = $r['id'];
+            if ($r['kind'] === 'purchase_invoice') $advances[] = $r['id'];
+        }
+        if ($proformas !== []) {
+            foreach ($this->rows(
+                "SELECT ch.id FROM invoices ch
+                   JOIN invoices pf ON pf.id = ch.parent_invoice_id AND pf.supplier_id = ch.supplier_id
+                  WHERE ch.supplier_id = ? AND pf.invoice_type = 'proforma'
+                    AND ch.invoice_type IN ('invoice', 'tax_document') AND ch.status <> 'cancelled'
+                    AND pf.id IN (" . $this->placeholders($proformas) . ')
+                  ORDER BY ch.id',
+                array_merge([$supplierId], $proformas)
+            ) as $r) {
+                $this->addRef($byKey, 'invoice', (int) $r['id'], 'document', null);
+            }
+        }
+        if ($advances !== []) {
+            $in = $this->placeholders($advances);
+            foreach ($this->rows(
+                "SELECT ch.id FROM purchase_invoices ch
+                   JOIN purchase_invoices adv ON adv.supplier_id = ch.supplier_id
+                    AND adv.id = CASE WHEN ch.document_kind = 'tax_document'
+                                      THEN COALESCE(ch.advance_purchase_invoice_id, ch.parent_purchase_invoice_id)
+                                      ELSE ch.advance_purchase_invoice_id END
+                  WHERE ch.supplier_id = ? AND adv.document_kind = 'advance' AND ch.status <> 'cancelled'
+                    AND adv.id IN ({$in})
+                  ORDER BY ch.id",
+                array_merge([$supplierId], $advances)
+            ) as $r) {
+                $this->addRef($byKey, 'purchase_invoice', (int) $r['id'], 'document', null);
+            }
+        }
+        return array_values($byKey);
     }
 
     /**
@@ -672,6 +803,9 @@ final class JournalLinkService
                 'entry_date'        => $entry['entry_date'] ?? null,
                 'entry_document_no' => $entry['document_no'] ?? null,
                 'entry_posted'      => isset($entry['posted_at']) && $entry['posted_at'] !== null,
+                // Záloha (proforma, zálohová PF) se neúčtuje nikdy — do deníku jde až její
+                // úhrada. Chybějící zápis u ní proto není nález, panel ho má ukázat neutrálně.
+                'postable'          => $desc['postable'] ?? true,
             ];
         }
 
@@ -749,7 +883,7 @@ final class JournalLinkService
 
         if ($kind === 'invoice') {
             foreach ($this->rows(
-                "SELECT i.id, i.varsymbol, i.issue_date, i.total_with_vat, i.client_snapshot,
+                "SELECT i.id, i.varsymbol, i.issue_date, i.total_with_vat, i.client_snapshot, i.invoice_type,
                         c.company_name, c.first_name, c.last_name,
                         UPPER(COALESCE(cur.code, 'CZK')) AS currency
                    FROM invoices i
@@ -766,6 +900,7 @@ final class JournalLinkService
                     'amount'   => (float) $r['total_with_vat'],
                     'currency' => (string) $r['currency'],
                     'route'    => ['name' => 'invoice-detail', 'params' => ['id' => $id]],
+                    'postable' => (string) $r['invoice_type'] !== 'proforma',
                 ];
             }
             return $out;
@@ -773,7 +908,7 @@ final class JournalLinkService
 
         if ($kind === 'purchase_invoice') {
             foreach ($this->rows(
-                "SELECT p.id, p.varsymbol, p.vendor_invoice_number, p.issue_date, p.total_with_vat,
+                "SELECT p.id, p.varsymbol, p.vendor_invoice_number, p.issue_date, p.total_with_vat, p.document_kind,
                         p.vendor_snapshot, c.company_name, c.first_name, c.last_name,
                         UPPER(COALESCE(cur.code, 'CZK')) AS currency
                    FROM purchase_invoices p
@@ -790,6 +925,7 @@ final class JournalLinkService
                     'amount'   => (float) $r['total_with_vat'],
                     'currency' => (string) $r['currency'],
                     'route'    => ['name' => 'purchase-invoice-detail', 'params' => ['id' => $id]],
+                    'postable' => (string) $r['document_kind'] !== 'advance',
                 ];
             }
             return $out;
@@ -821,21 +957,24 @@ final class JournalLinkService
         if ($kind === 'gopay') {
             foreach ($this->rows(
                 "SELECT m.id,m.performed_on,m.amount,m.order_id,m.payment_session_id,
-                        m.movement_type,c.id clearing_pk,c.clearing_id,c.currency
+                        m.movement_type,c.id clearing_pk,c.clearing_id,COALESCE(c.currency,m.currency) currency
                    FROM gopay_movements m
-                   JOIN gopay_clearings c ON c.id=m.clearing_id AND c.supplier_id=m.supplier_id
+              LEFT JOIN gopay_clearings c ON c.id=m.clearing_id AND c.supplier_id=m.supplier_id
                   WHERE m.supplier_id=? AND m.id IN ({$in})",
                 array_merge([$supplierId], $ids)
             ) as $r) {
                 $id = (int) $r['id'];
                 $reference = (string) ($r['order_id'] ?: $r['payment_session_id'] ?: ('#' . $id));
+                $pending = $r['clearing_pk'] === null;
                 $out[$id] = [
                     'title' => 'GoPay ' . $reference,
-                    'subtitle' => 'Vyúčtování ' . (string) $r['clearing_id'],
+                    'subtitle' => $pending ? 'Čeká na vyúčtování' : 'Vyúčtování ' . (string) $r['clearing_id'],
                     'date' => (string) $r['performed_on'],
                     'amount' => (float) $r['amount'],
                     'currency' => strtoupper((string) $r['currency']),
-                    'route' => ['name' => 'gopay', 'query' => ['clearing' => (int) $r['clearing_pk']]],
+                    'route' => $pending
+                        ? ['name' => 'gopay']
+                        : ['name' => 'gopay', 'query' => ['clearing' => (int) $r['clearing_pk']]],
                 ];
             }
             return $out;

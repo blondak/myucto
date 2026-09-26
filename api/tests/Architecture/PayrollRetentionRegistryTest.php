@@ -32,7 +32,7 @@ final class PayrollRetentionRegistryTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — schema guard vyžaduje DB.');
         }
         try {
-            $db = Bootstrap::buildApp()->getContainer()?->get(Connection::class);
+            $db = Bootstrap::buildContainer()?->get(Connection::class);
             self::assertInstanceOf(Connection::class, $db);
             $this->db = $db;
             $this->db->pdo();

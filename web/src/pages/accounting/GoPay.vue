@@ -7,6 +7,7 @@ import {
   type GoPayAccountOption,
   type GoPayClearing,
   type GoPayClearingDetail,
+  type GoPayPendingOverview,
   type GoPaySettings,
 } from '@/api/gopay'
 import { useAuthStore } from '@/stores/auth'
@@ -49,6 +50,8 @@ const detailPdfFile = ref<File | null>(null)
 const detailPdfInput = ref<HTMLInputElement | null>(null)
 const pdfUploadingId = ref<number | null>(null)
 const pdfDeletingId = ref<number | null>(null)
+const pending = ref<GoPayPendingOverview | null>(null)
+const postingPending = ref(false)
 
 const form = reactive<GoPaySettings>({
   currency: 'CZK',
@@ -92,11 +95,16 @@ function errorMessage(error: any): string {
 async function load() {
   loading.value = true
   try {
-    const [settings, items] = await Promise.all([gopayApi.settings(), gopayApi.list()])
+    const [settings, items, pendingOverview] = await Promise.all([
+      gopayApi.settings(),
+      gopayApi.list(),
+      gopayApi.pending(),
+    ])
     configured.value = settings.configured
     accountOptions.value = settings.account_options
     applySettings(settings.settings)
     clearings.value = items
+    pending.value = pendingOverview
     const requestedClearing = Number(route.query.clearing ?? 0)
     if (requestedClearing > 0 && items.some(item => item.id === requestedClearing)) {
       selected.value = await gopayApi.detail(requestedClearing)
@@ -105,6 +113,35 @@ async function load() {
     toast.error(errorMessage(error))
   } finally {
     loading.value = false
+  }
+}
+
+async function refreshPending() {
+  try {
+    pending.value = await gopayApi.pending()
+  } catch (error) {
+    toast.error(errorMessage(error))
+  }
+}
+
+async function postPending() {
+  postingPending.value = true
+  try {
+    const result = await gopayApi.postPending()
+    pending.value = result.overview
+    if (result.issues.length === 0) {
+      toast.success(t('gopay.pending.posted', { created: result.created, posted: result.posted }))
+    } else {
+      toast.error(t('gopay.pending.posted_with_issues', {
+        created: result.created,
+        posted: result.posted,
+        issues: result.issues.length,
+      }))
+    }
+  } catch (error) {
+    toast.error(errorMessage(error))
+  } finally {
+    postingPending.value = false
   }
 }
 
@@ -146,6 +183,7 @@ async function importXml() {
     if (xmlFileInput.value) xmlFileInput.value.value = ''
     if (importPdfInput.value) importPdfInput.value.value = ''
     clearings.value = await gopayApi.list()
+    await refreshPending()
     toast.success(result.duplicate ? t('gopay.import.duplicate') : t('gopay.import.success'))
   } catch (error) {
     toast.error(errorMessage(error))
@@ -208,6 +246,7 @@ async function process(clearing: GoPayClearing | GoPayClearingDetail) {
     const detail = await gopayApi.process(clearing.id)
     selected.value = detail
     clearings.value = await gopayApi.list()
+    await refreshPending()
     toast.success(detail.issue_count === 0 ? t('gopay.process.success') : t('gopay.process.review'))
   } catch (error) {
     toast.error(errorMessage(error))
@@ -223,6 +262,7 @@ async function remove(clearing: GoPayClearing | GoPayClearingDetail) {
     await gopayApi.delete(clearing.id)
     if (selected.value?.id === clearing.id) selected.value = null
     clearings.value = await gopayApi.list()
+    await refreshPending()
     toast.success(t('gopay.delete.success'))
   } catch (error) {
     toast.error(errorMessage(error))
@@ -347,6 +387,67 @@ onMounted(load)
           </button>
         </div>
         <p v-if="importDisabledReason" class="mt-2 text-xs text-warning-700">{{ importDisabledReason }}</p>
+      </section>
+
+      <section v-if="configured && pending" class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 px-5 py-4">
+          <div class="min-w-[16rem] flex-1">
+            <h2 class="text-lg font-semibold text-neutral-900">{{ t('gopay.pending.title') }}</h2>
+            <p class="mt-1 text-sm text-neutral-600">{{ t('gopay.pending.description') }}</p>
+            <p v-if="pending.unrecorded_count > 0" class="mt-2 text-xs text-warning-700">{{ t('gopay.pending.unrecorded', { count: pending.unrecorded_count }) }}</p>
+            <p v-if="pending.unposted_count > 0" class="mt-1 text-xs text-warning-700">{{ t('gopay.pending.unposted', { count: pending.unposted_count }) }}</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <div v-for="total in pending.totals" :key="total.currency" class="text-right">
+              <p class="text-xs text-neutral-500">{{ t('gopay.pending.total') }}</p>
+              <p class="text-lg font-semibold tabular-nums text-neutral-900">{{ formatMoney(total.amount, total.currency) }}</p>
+            </div>
+            <button
+              v-if="canConfigure && (pending.unrecorded_count > 0 || pending.unposted_count > 0)"
+              type="button"
+              class="whitespace-nowrap"
+              :class="btnFilled('primary')"
+              :disabled="postingPending"
+              @click="postPending"
+            >
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.check" /></svg>
+              {{ postingPending ? t('gopay.pending.posting') : t('gopay.pending.post_button') }}
+            </button>
+          </div>
+        </div>
+
+        <EmptyState v-if="pending.items.length === 0" dense accent="neutral" icon="inbox" :title="t('gopay.pending.empty')" />
+
+        <div v-else class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-neutral-50 text-left text-xs font-semibold uppercase tracking-wide text-neutral-600">
+              <tr>
+                <th class="px-4 py-3">{{ t('gopay.movement.date') }}</th>
+                <th class="px-4 py-3">{{ t('gopay.movement.document') }}</th>
+                <th class="px-4 py-3">{{ t('gopay.movement.payment_id') }}</th>
+                <th class="px-4 py-3 text-right">{{ t('gopay.movement.amount') }}</th>
+                <th class="px-4 py-3">{{ t('gopay.movement.posting') }}</th>
+                <th class="px-4 py-3">{{ t('gopay.movement.status') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="movement in pending.items" :key="movement.id">
+                <td class="whitespace-nowrap px-4 py-3">{{ formatDate(movement.performed_on) }}</td>
+                <td class="px-4 py-3">
+                  <RouterLink v-if="movement.invoice_id" class="text-primary-700 hover:underline" :to="`/invoices/${movement.invoice_id}`">{{ movement.invoice_number }}</RouterLink>
+                  <span v-else>-</span>
+                </td>
+                <td class="px-4 py-3 font-mono text-xs">{{ movement.payment_session_id || '-' }}</td>
+                <td class="whitespace-nowrap px-4 py-3 text-right tabular-nums">{{ formatMoney(movement.amount, movement.currency) }}</td>
+                <td class="px-4 py-3">{{ movement.journal_document_no || '-' }}</td>
+                <td class="px-4 py-3">
+                  <span class="rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(movement.status)">{{ t(`gopay.movement_status.${movement.status}`) }}</span>
+                  <p v-if="movement.issue_message" class="mt-1 max-w-sm text-xs text-warning-700">{{ movement.issue_message }}</p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">

@@ -43,7 +43,7 @@ final class PayrollPersonQuickEditApiTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
 
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         foreach ([
             'payroll_employee_profiles',

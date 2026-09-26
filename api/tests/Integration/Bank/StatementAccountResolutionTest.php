@@ -50,7 +50,7 @@ final class StatementAccountResolutionTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection (CI runner skipne).');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             if ($container === null) {
                 $this->markTestSkipped('Container nedostupný.');
             }

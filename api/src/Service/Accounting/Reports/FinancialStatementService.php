@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\LedgerReportRepository;
 use MyInvoice\Repository\StatementDefinitionRepository;
+use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use PDO;
 
@@ -332,6 +333,249 @@ final class FinancialStatementService
                 'unmapped_accounts' => $ctx['unmapped'],
             ],
         ];
+    }
+
+    /**
+     * Rozvaha a výsledovka „po účtech" s hospodářským výsledkem k libovolnému dni roku.
+     *
+     * Zůstatky jsou konečné stavy obratové předvahy (trialBalanceRows) se stejnými okny
+     * jako výkazy: rozvahové účty od kotvy počátečního stavu, výsledkové od začátku
+     * období, uzávěrkový zápis vyloučený. Pohled je proto před uzavřením knih i po něm
+     * stejný a po uzávěrce ukazuje přesně to, co uzávěrka převedla na 702 a 710.
+     *
+     * Výsledkové účty se do provozní, finanční části, daně a převodu podílu dělí podle
+     * mapy druhové VZZ (včetně výjimek firmy): řádek, kam výkaz účet zařadí, leží v
+     * definici výkazu před mezisoučtem provozního VH, před finančním VH, mezi VH před
+     * zdaněním a po zdanění, nebo za ním. Účet mimo mapu jde do skupiny „nezařazené"
+     * a VH ho zahrnuje, výkaz VZZ ho ale nemá, proto ho kontroly vypíšou.
+     *
+     * @return array<string,mixed>
+     */
+    public function accountView(int $supplierId, int $periodId, ?string $asOf, ?DimensionFilter $dimension = null): array
+    {
+        $period = $this->periods->findById($supplierId, $periodId);
+        if ($period === null) {
+            throw new ReportException('period_not_found', 'Účetní období #' . $periodId . ' neexistuje.', 404);
+        }
+        if ($asOf === null || $asOf === '') {
+            $asOf = min((string) $period['ends_on'], date('Y-m-d'));
+        }
+        $from = (string) $period['starts_on'];
+
+        $version = $this->definitions->findVersion('income_statement', $asOf);
+        if ($version === null) {
+            throw new ReportException('statement_version_missing', 'Pro rozvahový den ' . $asOf . ' neexistuje verze mapování výkazu.');
+        }
+        $map = $this->maps->accountMap($version, $supplierId, (int) $period['fiscal_year']);
+        $sectionByRow = self::profitLossSections($this->definitions->rows((int) $version['id']));
+
+        $raw = $this->ledger->trialBalanceRows(
+            $supplierId, $from, $asOf, $from, true,
+            $dimension !== null ? ['dimension' => $dimension] : [], true,
+        );
+
+        $balanceLeaves = [];
+        $plLeaves = [];
+        $technicalCents = 0;
+        foreach ($raw as $r) {
+            $delta = self::cents($r['ps_md']) - self::cents($r['ps_d']) + self::cents($r['to_md']) - self::cents($r['to_d']);
+            if ($delta === 0) {
+                continue;
+            }
+            $type = (string) $r['account_type'];
+            $leaf = [
+                'account_id'     => (int) $r['id'],
+                'account_code'   => (string) $r['account_code'],
+                'name'           => (string) $r['name'],
+                'account_type'   => $type,
+                'synthetic_id'   => $r['parent_id'] ?? (int) $r['id'],
+                'synthetic_code' => (string) ($r['parent_code'] ?? $r['account_code']),
+                'synthetic_name' => (string) ($r['parent_name'] ?? $r['name']),
+                'delta'          => $delta,
+            ];
+            if (in_array($type, ['asset', 'liability', 'equity'], true)) {
+                $balanceLeaves[] = $leaf;
+            } elseif ($type === 'revenue' || $type === 'expense') {
+                $section = null;
+                foreach ($this->mapper->entriesFor($map, $leaf['account_code'], null) as $m) {
+                    $section = $sectionByRow[(string) $m['row_code']] ?? null;
+                    if ($section !== null) {
+                        break;
+                    }
+                }
+                $leaf['section'] = $section ?? 'unassigned';
+                $plLeaves[] = $leaf;
+            } elseif ($type === 'closing') {
+                $technicalCents += $delta;
+            }
+        }
+
+        $classes = [];
+        foreach (self::groupSynthetics($balanceLeaves) as $synthetic) {
+            $class = substr((string) $synthetic['account_code'], 0, 1);
+            $classes[$class] ??= ['class' => $class, 'accounts' => [], 'md' => 0, 'd' => 0];
+            $classes[$class]['accounts'][] = $synthetic;
+            $classes[$class]['md'] += self::cents($synthetic['md']);
+            $classes[$class]['d']  += self::cents($synthetic['d']);
+        }
+        ksort($classes, SORT_STRING);
+        $balanceMd = array_sum(array_column($classes, 'md'));
+        $balanceD  = array_sum(array_column($classes, 'd'));
+        $profitBalance = $balanceMd - $balanceD;
+
+        $sections = [];
+        foreach (self::ACCOUNT_VIEW_SECTIONS as $key) {
+            $sections[$key] = ['key' => $key, 'expenses' => [], 'revenues' => [], 'expense_total' => 0, 'revenue_total' => 0];
+        }
+        foreach (self::groupSynthetics($plLeaves, 'section') as $synthetic) {
+            $key = (string) $synthetic['section'];
+            unset($synthetic['section']);
+            $net = self::cents($synthetic['md']) - self::cents($synthetic['d']);
+            if ($synthetic['account_type'] === 'expense') {
+                $sections[$key]['expenses'][] = $synthetic;
+                $sections[$key]['expense_total'] += $net;
+            } else {
+                $sections[$key]['revenues'][] = $synthetic;
+                $sections[$key]['revenue_total'] -= $net;
+            }
+        }
+        $result = [];
+        foreach ($sections as $key => $s) {
+            $result[$key] = $s['revenue_total'] - $s['expense_total'];
+        }
+        $operating   = $result['operating'];
+        $financial   = $result['financial'];
+        $beforeTax   = $operating + $financial + $result['unassigned'];
+        $afterTax    = $beforeTax + $result['tax'];
+        $profitLoss  = $afterTax + $result['transfer'];
+
+        $money = static fn (int $c): float => $c / 100;
+
+        return [
+            'version_code' => (string) $version['version_code'],
+            'as_of'   => $asOf,
+            'entity'  => $this->loadEntity($supplierId),
+            'period'  => $this->periodOut($period),
+            'closed'  => AccountingPeriodStatus::isClosed((string) $period['status']),
+            'dimension' => $dimension?->toArray(),
+            'balance' => [
+                'classes' => array_values(array_map(static fn (array $c): array => [
+                    'class'    => $c['class'],
+                    'accounts' => $c['accounts'],
+                    'md'       => $money($c['md']),
+                    'd'        => $money($c['d']),
+                ], $classes)),
+                'md'     => $money($balanceMd),
+                'd'      => $money($balanceD),
+                'profit' => $money($profitBalance),
+            ],
+            'profit_loss' => [
+                'sections' => array_values(array_map(static fn (array $s): array => [
+                    'key'           => $s['key'],
+                    'expenses'      => $s['expenses'],
+                    'revenues'      => $s['revenues'],
+                    'expense_total' => $money($s['expense_total']),
+                    'revenue_total' => $money($s['revenue_total']),
+                    'result'        => $money($s['revenue_total'] - $s['expense_total']),
+                ], $sections)),
+                'operating_profit'  => $money($operating),
+                'financial_profit'  => $money($financial),
+                'profit_before_tax' => $money($beforeTax),
+                'profit_after_tax'  => $money($afterTax),
+                'profit'            => $money($profitLoss),
+            ],
+            'checks' => [
+                'profit_balance'     => $money($profitBalance),
+                'profit_loss'        => $money($profitLoss),
+                'profit_matches'     => $profitBalance === $profitLoss,
+                'technical_residual' => $money($technicalCents),
+                'unassigned_count'   => count($sections['unassigned']['expenses']) + count($sections['unassigned']['revenues']),
+            ],
+        ];
+    }
+
+    /** Skupiny výsledkových účtů pohledu po účtech, v pořadí výsledovky. */
+    public const ACCOUNT_VIEW_SECTIONS = ['operating', 'financial', 'unassigned', 'tax', 'transfer'];
+
+    /**
+     * Skupina (provozní, finanční, daň, převod podílu) každého řádku druhové VZZ podle
+     * polohy v definici výkazu vůči mezisoučtům. Stejné mezisoučty sčítá calcValue(),
+     * takže účet dostane skupinu, do které ho výkaz opravdu započte.
+     *
+     * @param list<array<string,mixed>> $rows řádky verze seřazené podle position
+     * @return array<string,string> row_code → skupina
+     */
+    private static function profitLossSections(array $rows): array
+    {
+        $after = [
+            'operating_profit'  => 'financial',
+            'financial_profit'  => 'unassigned',
+            'profit_before_tax' => 'tax',
+            'profit_after_tax'  => 'transfer',
+            'profit_current'    => null,
+        ];
+        $section = 'operating';
+        $out = [];
+        foreach ($rows as $r) {
+            if ((string) $r['row_type'] === 'computed') {
+                $key = (string) $r['calc_key'];
+                if (array_key_exists($key, $after)) {
+                    $section = $after[$key];
+                }
+                continue;
+            }
+            if ($section !== null && $section !== 'unassigned') {
+                $out[(string) $r['row_code']] = $section;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Listové účty složené pod syntetiku. MD a D syntetiky jsou součty stran jejích
+     * analytik bez vzájemné kompenzace, takže součty tříd i celé strany sedí na
+     * řádky, jak je sestava zobrazuje.
+     *
+     * @param list<array<string,mixed>> $leaves
+     * @return list<array<string,mixed>>
+     */
+    private static function groupSynthetics(array $leaves, ?string $groupKey = null): array
+    {
+        $out = [];
+        foreach ($leaves as $leaf) {
+            $key = ($groupKey !== null ? $leaf[$groupKey] . '|' . $leaf['account_type'] . '|' : '') . $leaf['synthetic_code'];
+            $md = $leaf['delta'] > 0 ? $leaf['delta'] : 0;
+            $d  = $leaf['delta'] < 0 ? -$leaf['delta'] : 0;
+            if (!isset($out[$key])) {
+                $out[$key] = [
+                    'account_id'   => (int) $leaf['synthetic_id'],
+                    'account_code' => $leaf['synthetic_code'],
+                    'name'         => $leaf['synthetic_name'],
+                    'account_type' => $leaf['account_type'],
+                    'md'           => 0,
+                    'd'            => 0,
+                    'analytics'    => [],
+                ] + ($groupKey !== null ? [$groupKey => $leaf[$groupKey]] : []);
+            }
+            $out[$key]['md'] += $md;
+            $out[$key]['d']  += $d;
+            $out[$key]['analytics'][] = [
+                'account_id'   => $leaf['account_id'],
+                'account_code' => $leaf['account_code'],
+                'name'         => $leaf['name'],
+                'md'           => $md / 100,
+                'd'            => $d / 100,
+            ];
+        }
+        ksort($out, SORT_STRING);
+        return array_values(array_map(static function (array $s): array {
+            if (count($s['analytics']) === 1 && $s['analytics'][0]['account_id'] === $s['account_id']) {
+                $s['analytics'] = [];
+            }
+            $s['md'] /= 100;
+            $s['d'] /= 100;
+            return $s;
+        }, $out));
     }
 
     // ── společné jádro ─────────────────────────────────────────────────────────

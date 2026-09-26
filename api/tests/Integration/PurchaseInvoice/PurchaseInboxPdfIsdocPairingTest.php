@@ -57,7 +57,7 @@ final class PurchaseInboxPdfIsdocPairingTest extends TestCase
         }
 
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             // Config je immutable → scanner sestavíme ručně s inbox_dir mířícím do tempu.
             $config = new Config(

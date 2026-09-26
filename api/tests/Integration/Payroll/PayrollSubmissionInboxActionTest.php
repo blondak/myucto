@@ -30,7 +30,7 @@ final class PayrollSubmissionInboxActionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_submission_inbox_items')) {
             $this->markTestSkipped('Migrace 1309 neproběhla.');

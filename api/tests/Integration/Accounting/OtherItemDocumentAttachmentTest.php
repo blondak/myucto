@@ -41,7 +41,7 @@ final class OtherItemDocumentAttachmentTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('Test vyžaduje místní databázi.');
         }
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         $this->documentsAction = $container->get(DocumentsAction::class);
         $this->linkSearch = $container->get(LinkSearchAction::class);

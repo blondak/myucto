@@ -5,7 +5,7 @@
  * jen role accountant/admin/readonly (nav gate v AppLayout, route RBAC v BE).
  * Každá firma má vlastní kartu: hlavička, co je potřeba udělat, objem dat.
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { portfolioApi, type PortfolioCompany, type PortfolioCheckSummary } from '@/api/portfolio'
@@ -111,17 +111,25 @@ const openCheckSummary = computed<PortfolioCheckSummary | null>(() => {
   return state?.status === 'done' ? state.summary : null
 })
 
+// Nové načtení nebo odchod ze stránky zastaví frontu předchozího běhu. Jinak by
+// se k jejím dotazům přidaly další a server by počítal tytéž firmy vícekrát.
+let checksRun = 0
+onBeforeUnmount(() => { checksRun++ })
+
 async function loadChecks(list: PortfolioCompany[]) {
+  const run = ++checksRun
   const queue = list.filter(c => c.accounting_mode === 'double_entry')
   checks.value = Object.fromEntries(queue.map(c => [c.supplier_id, { status: 'loading' } as CheckState]))
   let next = 0
   const worker = async () => {
-    while (next < queue.length) {
+    while (next < queue.length && run === checksRun) {
       const c = queue[next++]
       try {
         const summary = await portfolioApi.monthlyCheck(c.supplier_id)
+        if (run !== checksRun) return
         checks.value = { ...checks.value, [c.supplier_id]: { status: 'done', summary } }
       } catch {
+        if (run !== checksRun) return
         checks.value = { ...checks.value, [c.supplier_id]: { status: 'error' } }
       }
     }

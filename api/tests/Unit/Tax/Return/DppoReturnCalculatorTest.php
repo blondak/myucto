@@ -181,6 +181,33 @@ final class DppoReturnCalculatorTest extends TestCase
         self::assertSame([['group' => '54', 'amount' => 25000.0], ['group' => '55', 'amount' => 5000.0]], $decrease['line160_appendix']);
     }
 
+    /** § 24/2/w ZDP: převis nabývací ceny prodaných podílů nad příjmy z prodeje je nedaňový → ř. 40. */
+    public function testSecuritiesCostExcessIsAddedOnLine40(): void
+    {
+        $r = $this->calcRun(['vh' => 100000, 'non_deductible_costs' => 1000, 'securities_cost_excess' => 200], []);
+        self::assertSame(1200.0, self::lineValue($r['lines'], 40));
+        self::assertSame(0.0, self::lineValue($r['lines'], 62));
+        self::assertSame(101200.0, self::lineValue($r['lines'], 200));
+        self::assertStringContainsString('§24/2/w', self::lineSource($r['lines'], 40));
+        self::assertSame(1200.0, DppoReturnCalculator::accountingAdjustments(['non_deductible_costs' => 1000, 'securities_cost_excess' => 200])[40],
+            'Převzaté podané přiznání odečítá z ř. 40 část z účetnictví; připočet podílů do ní patří.');
+
+        $none = $this->calcRun(['vh' => 100000, 'securities_cost_excess' => 0], []);
+        self::assertSame(0.0, self::lineValue($none['lines'], 40));
+        self::assertStringNotContainsString('§24/2/w', self::lineSource($none['lines'], 40));
+    }
+
+    /** @param list<array<string,mixed>> $lines */
+    private static function lineSource(array $lines, int $n): string
+    {
+        foreach ($lines as $l) {
+            if ($l['line'] === $n) {
+                return (string) $l['source'];
+            }
+        }
+        throw new \RuntimeException("Řádek $n nenalezen");
+    }
+
     public function testDonationItemsExcludeBelow2000(): void
     {
         // E7 (audit 2026-07): §20/8 — PO odečte jen dary v hodnotě ≥ 2 000 Kč.
@@ -280,6 +307,39 @@ final class DppoReturnCalculatorTest extends TestCase
         self::assertSame(600000.0, $r['projection']['vh_projected']);
         self::assertSame(600000.0, $r['projection']['projected_base']);
         self::assertSame(126000.0, $r['projection']['projected_tax']);
+    }
+
+    /**
+     * Nezaúčtované odpisy v projekci jdou do rozdílu odpisů stejnou cestou jako zaúčtované:
+     * zaúčtováno účetní 10 000 / daňové 10 000 (ř. 50 = 0), nezaúčtováno účetní 30 000 /
+     * daňové 12 000 → ř. 50 projekce = 18 000. Základ 500 000 − 30 000 + 18 000 = 488 000.
+     */
+    public function testProjectedDepreciationUsesSameLine50And150AsPosted(): void
+    {
+        $r = $this->calcRun(
+            [
+                'vh' => 500000,
+                'depreciation' => ['tax' => 10000.0, 'accounting' => 10000.0],
+                'closing_projection' => [
+                    'is_projection' => true,
+                    'vh_posted' => 500000.0,
+                    'vh_projected' => 470000.0,
+                    'depreciation' => ['accounting' => 30000.0, 'tax' => 12000.0],
+                    'items' => [['key' => 'depreciation', 'label_key' => 'x', 'amount' => 30000.0, 'sign' => -1, 'optional' => false]],
+                ],
+            ],
+            []
+        );
+        self::assertSame(500000.0, $r['summary']['base'], 'Zaúčtovaný základ se nemění.');
+        self::assertSame(18000.0, $r['projection']['projected_increases']);
+        self::assertSame(0.0, $r['projection']['projected_decreases']);
+        self::assertSame(488000.0, $r['projection']['projected_base']);
+        self::assertSame(102480.0, $r['projection']['projected_tax']);
+
+        // Tentýž stav po zaúčtování (odpisy v podkladech, projekce bez odpisů) dá stejný základ.
+        $posted = $this->calcRun(['vh' => 470000, 'depreciation' => ['tax' => 22000.0, 'accounting' => 40000.0]], []);
+        self::assertSame(488000.0, $posted['summary']['base']);
+        self::assertSame(102480.0, $posted['tax']);
     }
 
     /** Bez projekce (nebo is_projection=false) je result['projection'] null a posted daň beze změny. */

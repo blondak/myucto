@@ -991,6 +991,11 @@ final class InvoiceRepository
             'amount_czk' => "CASE WHEN cur.code = 'CZK' THEN i.total_with_vat ELSE i.total_with_vat * i.exchange_rate END",
             'base' => 'i.total_without_vat', 'vat' => 'i.total_vat', 'total' => 'i.total_with_vat',
             'project' => 'p.name', 'sent_at' => 'i.sent_at', 'paid_total' => 'i.paid_total',
+            'remaining_amount' => self::remainingSql('i'),
+            'vat_breakdown' => 'i.total_vat',
+            'debit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'debit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = i.supplier_id AND je.source_type = 'invoice' AND je.source_id = i.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL)",
+            'credit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'credit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = i.supplier_id AND je.source_type = 'invoice' AND je.source_id = i.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL)",
+            'locked' => 'i.booked_at',
         ];
         $sortKey = (string) ($filters['sort_key'] ?? '');
         $sortDir = strtolower((string) ($filters['sort_dir'] ?? '')) === 'asc' ? 'ASC' : 'DESC';
@@ -1011,6 +1016,7 @@ final class InvoiceRepository
                        i.currency_id, cur.code AS currency, cur.symbol AS currency_symbol, cur.decimals AS currency_decimals,
                        i.total_without_vat, i.total_vat, i.total_with_vat,
                        i.advance_paid_amount, i.amount_to_pay, i.paid_total,
+                       " . self::remainingSql('i') . " AS remaining_amount,
                        i.status, i.payment_method, i.revenue_category_id, i.exchange_rate,
                        i.sent_at, i.last_reminder_at, i.reminder_count,
                        i.paid_at, i.cancelled_at, i.booked_at,
@@ -2069,6 +2075,22 @@ final class InvoiceRepository
         return ((int) $r['is_eu'] === 1) && ((string) $r['iso2'] !== 'CZ');
     }
 
+    /**
+     * „Zbývá uhradit" vydané faktury v měně dokladu = `amount_to_pay − paid_total`.
+     *
+     * Dvě výjimky, obě ze stejného důvodu jako guard pohledávek v AGENTS.md: faktura
+     * nebo proforma s nulovým `amount_to_pay` (finální doklad k zaplacené proformě) není
+     * dlužná, a doklad `paid` bez jediné evidované platby (ruční „Uhrazeno", převzatá
+     * data) se bere jako uhrazený celý — stejně ho čte `InvoicePaymentService::paymentStatus()`.
+     */
+    private static function remainingSql(string $alias): string
+    {
+        $a = $alias . '.';
+        return "(CASE WHEN {$a}invoice_type IN ('invoice', 'proforma') AND {$a}amount_to_pay <= 0 THEN 0
+                      WHEN {$a}status = 'paid' AND ABS({$a}paid_total) < 0.005 THEN 0
+                      ELSE {$a}amount_to_pay - {$a}paid_total END)";
+    }
+
     private function castInvoice(array $row): array
     {
         $row['id']                  = (int) $row['id'];
@@ -2094,6 +2116,9 @@ final class InvoiceRepository
         }
         foreach (['total_without_vat', 'total_vat', 'total_with_vat', 'rounding', 'advance_paid_amount', 'amount_to_pay', 'paid_total', 'discount_percent'] as $f) {
             if (array_key_exists($f, $row) && $row[$f] !== null) $row[$f] = (float) $row[$f];
+        }
+        if (array_key_exists('remaining_amount', $row) && $row['remaining_amount'] !== null) {
+            $row['remaining_amount'] = round((float) $row['remaining_amount'], 2);
         }
         // Odvozený platební stav (#89) — unpaid/partially_paid/paid/overpaid; NULL pro draft/cancelled.
         if (array_key_exists('paid_total', $row) && array_key_exists('amount_to_pay', $row) && array_key_exists('status', $row)) {

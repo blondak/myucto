@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Infrastructure\Cache\SupplierWriteGenerations;
 use MyInvoice\Http\RequestPath;
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -79,6 +80,8 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
             $response = $this->responseFactory->createResponse(403);
             return Json::error($response, 'forbidden_supplier', 'K této firmě nemáš oprávnění.', 403);
         }
+
+        SupplierWriteGenerations::setRequestSupplier($access->supplierId);
 
         return $handler->handle(
             $request->withAttribute(self::ATTR_CURRENT_ID, $access->supplierId),

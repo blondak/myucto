@@ -16,16 +16,40 @@ V hlavním menu **Přijaté faktury**.
 
 Seznam lze kliknutím na záhlaví sloupce řadit podle údajů dokladu, dodavatele,
 data či částky. Řazení se uplatní na celý filtrovaný výsledek před stránkováním.
+
+Sloupce **Uhrazeno** a **Zbývá uhradit** ukazují, kolik je z faktury zaplaceno
+a kolik zbývá, vždy v měně faktury. Počítají se ze všech úhrad dohromady: banka,
+pokladna, vzájemný zápočet i zápočet proti účtu. Korunová platba cizoměnové
+faktury se přepočte do měny faktury. Faktura označená jako uhrazená bez jakékoli
+evidované úhrady se bere jako uhrazená celá, daňový doklad k platbě (DDKP) nic
+nedluží. Uhrazená faktura, kterou evidované úhrady nepokrývají o víc než 1 Kč
+(u cizí měny přepočteno kurzem faktury), má u stavu štítek **uhrazeno s rozdílem**
+a zbytek zvýrazněný; všechny takové faktury najdete filtrem **Uhrazeno s rozdílem**.
+Haléřový zbytek do 1 Kč dorovnává banka, štítek nedostane. Na mobilu se
+u částečně uhrazené faktury zobrazí obě částky přímo v kartě.
 Přepínač nad tabulkou volí měsíční skupiny nebo souvislý seznam; nastavení se
 ukládá pro přihlášeného uživatele. V měsíčním pohledu zaškrtávací políčko
 v záhlaví označí pouze zobrazené doklady daného měsíce. Nabídka **Sloupce** umožňuje
 doplnit základ daně, DPH, zůstatek k úhradě, zakázku, datum přijetí,
 datum předání k úhradě a oddíl kontrolního hlášení.
-Oddíl KH se načítá z Knihy DPH po zapnutí sloupce.
+  Oddíl KH se načítá z Knihy DPH po zapnutí sloupce.
+  Tento sloupec nemá řazení v seznamu.
+Lze zapnout také **Rozpad DPH** podle sazeb a **Účty MD/Dal** ze zaúčtování;
+v nabídce **Sloupce** jsou sestavy **Výchozí klient** (dosavadní stručný seznam),
+**Výchozí účetní** (DPH, předkontace a oddíl KH) a **Výchozí komplet** (všechny údaje
+včetně oddílu KH). Po volbě sestavy lze jednotlivé sloupce dále měnit.
+Podrobnosti se načtou jen při zobrazení příslušného sloupce. Firma se zapnutými
+dimenzemi může přidat také sloupec **Dimenze** s hodnotami z hlavičky a položek
+dokladu; načítá se jen při zapnutí sloupce. Je-li sloupců více, záhlaví i faktury
+se rozloží do několika řádků a šipka pro náhled položek je vlevo dole u faktury.
+V souvislém seznamu zůstává záhlaví při posunu na očích a tabulka má posuvník
+na spodním okraji.
+Měsíční přehled používá běžně posuvné záhlaví. Na mobilu jsou vybrané údaje
+v kartách faktur.
 Při vzestupném řazení podle DUZP se v měsíčním pohledu zobrazí nejstarší měsíce první.
 První kliknutí na záhlaví sloupce řadí sestupně, druhé vzestupně a třetí vrátí
 výchozí pořadí.
-Křížek v pravém okraji záhlaví tabulky vrátí výchozí řazení.
+Křížek v záhlaví tabulky vrátí výchozí řazení.
 Seznam načítá 50 faktur v jedné dávce. Při posunu dolů se u konce seznamu
 automaticky načte další stránka; tlačítko
 **Načíst další** slouží k ručnímu načtení.
@@ -125,7 +149,9 @@ Nad formulářem je **drag & drop zóna** pro PDF, fotku, ISDOC nebo ISDOCX:
   deterministicky bez AI. Systém ověří IČO odběratele, vyhledá nebo založí
   dodavatele, vytvoří předvyplněný koncept včetně položek, DPH a platebních údajů
   a rovnou ho otevře v editoru ke kontrole. Tato cesta je dostupná i klientské roli
-  s oprávněním vytvářet přijaté faktury.
+  s oprávněním vytvářet přijaté faktury. Vložený ISDOC se načte i z PDF, které
+  vystavitel zamkl proti úpravám (otevře se bez hesla, heslo chrání jen oprávnění),
+  jak to dělají například faktury z iÚčta.
 - Běžné PDF bez vloženého ISDOC nebo fotka se pouze připraví jako příloha. Pole
   vyplníš ručně a originál se po prvním uložení automaticky **archivuje** mimo
   webroot. Pro nestrukturované PDF lze podle oprávnění použít také
@@ -523,7 +549,13 @@ faktury platí zrcadlově.
 
 Po uložení / přechodu na detail:
 
-- Vidíš dodavatele (s IČO/DIČ), datumy, položky, DPH rozpis, totály, K úhradě.
+- Vidíš dodavatele (s IČO/DIČ), datumy, položky, DPH rozpis, totály, K úhradě
+  a pod ní **Uhrazeno** a **Zbývá uhradit** (v měně faktury, ze všech úhrad dohromady).
+- Uhrazená faktura, kterou evidované úhrady nepokrývají (typicky platba nižší
+  o pár korun nebo eur), ukáže upozornění a akci **Vyrovnat zbytek**. Ta zbytek
+  zaúčtuje jako zápočet proti zvolenému účtu (321 MD / zvolený účet D), předvolený
+  je účet 648, u cizí měny 663. Stav ani datum úhrady faktury se nemění, zbytek na
+  321 se tím vyrovná. Stejnou akci nabízí i částečně uhrazená faktura.
 - Karta **Daňové zařazení** nabízí rychlý přehled údajů přímo rozhodujících o DPH:
   reverse charge, plátcovství dodavatele a nárok na odpočet včetně procenta u
   kráceného. Typ dokladu, VAT klasifikaci (kód i popis), daňovou uznatelnost,
@@ -578,8 +610,10 @@ Zápočet jde **stornovat** (v přehledu úhrad v detailu dokladu). Storno vytvo
 a když po vrácení jeho částky zbytek zase vznikne, vrátí doklad ze stavu *Uhrazená* zpět.
 Doklad doplacený jiným kanálem zůstane uhrazený.
 
-Zatím jen doklady v **CZK**; v daňové evidenci se zápočet neúčtuje (deník tam není), ale
-doklad vyrovná stejně.
+U cizoměnové faktury se částka zápočtu zadává v měně faktury a do deníku se převede
+kurzem, kterým je faktura předepsaná na 321, takže na saldokontu nezůstane kurzový
+zbytek. V daňové evidenci se zápočet neúčtuje (deník tam není), ale doklad vyrovná
+stejně.
 
 ### 23.3.2 Propojení zálohy s vyúčtovací fakturou (proti dvojímu započtení)
 

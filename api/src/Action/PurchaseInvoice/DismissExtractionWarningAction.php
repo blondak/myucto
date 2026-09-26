@@ -12,6 +12,7 @@ use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\ExtractionReviewSync;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -19,7 +20,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * POST /api/purchase-invoices/{id}/dismiss-extraction-warning
  *
  * Smaže `extraction_warning` (set NULL) — uživatel označil že fakturu zkontroloval
- * a data jsou OK. UI banner i flag v seznamu pak zmizí.
+ * a data jsou OK. UI banner i flag v seznamu pak zmizí. S tělem `{ section }` smaže
+ * jen tuto část hlášení ({@see ExtractionReviewSync::removeSection()}).
  *
  * Vrátí aktualizovaný invoice payload (stejně jako Get) — frontend ho rovnou nahradí.
  */
@@ -32,6 +34,7 @@ final class DismissExtractionWarningAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly DocumentLockService $locks,
+        private readonly ExtractionReviewSync $reviewSync,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -54,12 +57,23 @@ final class DismissExtractionWarningAction
             $id,
         )) return $denied;
 
-        $this->repo->setExtractionWarning($id, $supplierId, null);
+        // Volitelně jen jedna sekce hlášení ({ section: "…" }) — uživatel vyřešil jeden bod,
+        // zbytek zůstává. Bez těla se maže celé hlášení jako dosud.
+        $body = (array) ($request->getParsedBody() ?? []);
+        $section = is_string($body['section'] ?? null) && trim($body['section']) !== '' ? $body['section'] : null;
+        if ($section !== null) {
+            if (!$this->reviewSync->removeSection($supplierId, $id, $section)) {
+                return Json::error($response, 'section_not_found', 'Tato část hlášení už v dokladu není.', 409);
+            }
+        } else {
+            $this->repo->setExtractionWarning($id, $supplierId, null);
+        }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('purchase_invoice.extraction_warning_dismissed', $user['id'] ?? null, 'purchase_invoice', $id, [
             'previous_warning' => $existing['extraction_warning'] ?? null,
+            'section'          => $section,
         ], $ip, $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, $this->repo->find($id, $supplierId));

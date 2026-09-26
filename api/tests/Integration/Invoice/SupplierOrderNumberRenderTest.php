@@ -26,7 +26,7 @@ final class SupplierOrderNumberRenderTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $this->renderer = Bootstrap::buildApp()->getContainer()->get(InvoicePdfRenderer::class);
+            $this->renderer = Bootstrap::buildContainer()->get(InvoicePdfRenderer::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }

@@ -52,7 +52,7 @@ final class PrecheckUnpostedFalsePositiveTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db      = $container->get(Connection::class);
             $this->closing = $container->get(ClosingRepository::class);
             $this->periods = $container->get(AccountingPeriodRepository::class);

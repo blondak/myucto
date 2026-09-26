@@ -41,12 +41,12 @@ final class MigrationImportRepositoryTest extends TestCase
             $this->markTestSkipped('cfg.php missing');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->pdo = $this->db->pdo();
             // Druhé spojení: named lock drží spojení, ne proces.
             $this->other = Connection::withoutSharedTestConnection(static function (): Connection {
-                $connection = Bootstrap::buildApp()->getContainer()->get(Connection::class);
+                $connection = Bootstrap::buildContainer()->get(Connection::class);
                 $connection->pdo();
                 return $connection;
             });

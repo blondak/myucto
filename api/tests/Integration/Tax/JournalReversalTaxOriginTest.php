@@ -32,7 +32,7 @@ final class JournalReversalTaxOriginTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             self::markTestSkipped('Test vyžaduje lokální testovací databázi.');
         }
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         $this->posting = $container->get(PostingService::class);
         $this->provider = $container->get(DppoReturnDataProvider::class);

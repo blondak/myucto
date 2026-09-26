@@ -38,6 +38,12 @@ final class CardPaymentAutomation
         private readonly ActivityLogger $activity,
     ) {}
 
+    /** Má firma zapnuté kartové vypořádání (378.x)? */
+    public function enabledFor(int $supplierId): bool
+    {
+        return !empty($this->regime->settings($supplierId)['enabled']);
+    }
+
     /** @return array{matched_transaction_id:?int, settlements:int} */
     public function afterPurchaseReady(int $supplierId, int $purchaseInvoiceId, ?int $userId = null): array
     {

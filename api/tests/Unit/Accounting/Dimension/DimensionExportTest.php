@@ -50,6 +50,7 @@ final class DimensionExportTest extends TestCase
             'entity' => ['name' => 'Testovací firma'], 'supplier_ids' => [1], 'restricted' => false,
             'rows' => [['code' => 'P', 'name' => 'Projekt', 'depth' => 0, 'responsible_user_name' => null, 'total' => self::amounts(100, 40)]],
             'unassigned' => self::amounts(0, 10), 'totals' => self::amounts(100, 50),
+            'companies' => [['id' => 1, 'name' => 'Firma A'] + self::amounts(100, 0), ['id' => 2, 'name' => 'Firma B'] + self::amounts(0, 50)],
             'matrix' => ['columns' => [['value_id' => 10, 'code' => 'P', 'name' => 'Projekt']], 'rows' => [['code' => '602', 'name' => 'Výnosy', 'cells' => [100]]]],
         ]));
     }

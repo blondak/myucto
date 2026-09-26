@@ -67,9 +67,9 @@ final class PostingClosingConcurrencyTest extends TestCase
             // Connection vytáhly; od chvíle, kdy se middleware resolvují líně
             // (deferred), by se konstrukce odložila až za zónu a kontejner B by
             // dostal sdílené spojení — test by souběh jen předstíral.
-            $containerA = Bootstrap::buildApp()->getContainer();
+            $containerA = Bootstrap::buildContainer();
             $containerB = Connection::withoutSharedTestConnection(static function () {
-                $c = Bootstrap::buildApp()->getContainer();
+                $c = Bootstrap::buildContainer();
                 $c->get(Connection::class);
 
                 return $c;

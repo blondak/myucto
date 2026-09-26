@@ -41,7 +41,7 @@ final class ExchangeRateApplierDuzpTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection (CI runner skipne).');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             $this->invoices = $c->get(InvoiceRepository::class);
         } catch (\Throwable $e) {

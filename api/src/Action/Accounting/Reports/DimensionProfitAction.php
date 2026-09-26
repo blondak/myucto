@@ -22,12 +22,12 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Výsledovka po dimenzi.
  *
  *   GET /api/accounting/reports/dimension-profit?type_id=&from=&to=
- *       [&scope=group][&value_id=][&responsible_user_id=][&accounts=1]
+ *       [&scope=group][&value_id=][&responsible_user_id=][&accounts=1][&companies=1]
  *   GET /api/accounting/reports/dimension-profit/export — totéž jako XLSX (vždy s rozpadem po účtech)
  *
  * `scope=group` u globálního typu sečte firmy skupiny ({@see DimensionGroupScope}),
  * `value_id` omezí sestavu na větev hodnoty, `responsible_user_id` na hodnoty odpovědné
- * osoby, `accounts=1` přidá rozpad po syntetických účtech.
+ * osoby, `accounts=1` přidá rozpad po syntetických účtech a `companies=1` součty po firmách.
  */
 final class DimensionProfitAction
 {
@@ -190,6 +190,7 @@ final class DimensionProfitAction
             'value_id' => (int) ($q['value_id'] ?? 0) ?: null,
             'responsible_user_id' => (int) ($q['responsible_user_id'] ?? 0) ?: null,
             'accounts' => $forceAccounts || (string) ($q['accounts'] ?? '') === '1',
+            'companies' => (string) ($q['companies'] ?? '') === '1',
         ];
         if ($options['value_id'] !== null) {
             $value = $this->dimensions->findValue($supplierId, $options['value_id']);

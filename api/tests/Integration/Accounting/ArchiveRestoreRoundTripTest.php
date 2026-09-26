@@ -63,7 +63,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
     {
         $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")
             ->execute([$this->supplierId]);
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $items = $container->get(\MyInvoice\Service\Accounting\OtherItemService::class);
         $plans = $container->get(\MyInvoice\Service\Accounting\OtherItemScheduleService::class);
         $partnerId = $this->client();
@@ -152,7 +152,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db         = $c->get(Connection::class);
             $this->archive    = $c->get(ArchiveService::class);
             $this->restore    = $c->get(ArchiveRestoreService::class);
@@ -228,7 +228,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $invoice = $this->saleInvoice('TEST-PROVISION', $this->client(), 50000);
         $period = (int) $this->periods->findByYear($this->supplierId, self::YEAR)['id'];
         $next = (int) $this->periods->findByYear($this->supplierId, self::YEAR + 1)['id'];
-        $repository = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Repository\ClosingRepository::class);
+        $repository = Bootstrap::buildContainer()->get(\MyInvoice\Repository\ClosingRepository::class);
         $this->posting->postDocument($this->supplierId, 'provision', $invoice, [
             ['account_code' => '558', 'side' => 'debit', 'amount' => 10000],
             ['account_code' => '391', 'side' => 'credit', 'amount' => 10000],
@@ -271,7 +271,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $pdo = $this->db->pdo();
         $sid = $this->supplierId;
         $pdo->prepare('UPDATE supplier SET stock_enabled = 1 WHERE id = ?')->execute([$sid]);
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $warehouse = $container->get(\MyInvoice\Repository\WarehouseRepository::class)->insert($sid, ['code' => 'ARCHIVE', 'name' => 'Archiv', 'is_active' => true, 'is_default' => true]);
         $items = [];
         foreach (['COMPONENT', 'PRODUCT', 'SET', 'TRACKED'] as $sku) {
@@ -382,7 +382,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $attribute = (int) $pdo->lastInsertId();
         $pdo->prepare("INSERT INTO stock_attribute_options (supplier_id, attribute_id, code, label) VALUES (?, ?, 'S', 'S')")->execute([$sid, $attribute]);
         $option = (int) $pdo->lastInsertId();
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $masters = $container->get(\MyInvoice\Service\Eshop\ProductMasterService::class);
         $master = $masters->create($sid, ['name' => 'Archiv variant', 'axis_attribute_ids' => [$attribute], 'i18n' => [['locale' => 'cs', 'name' => 'Sdílený název']]]);
         $pdo->prepare("INSERT INTO stock_items (supplier_id, sku, name, unit) VALUES (?, 'ARCHIVE-VARIANT', 'Varianta', 'ks')")->execute([$sid]);

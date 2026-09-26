@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Tax\Return;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\AccountingPeriodStatus;
+use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\Assets\DisposalResiduals;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
@@ -20,6 +22,7 @@ use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
  *   - nedaňové náklady   = Σ nákladů na účtech tax_deductibility='non_deductible' (§25)
  *   - rozdíl odpisů      = depreciation_entries kind tax vs accounting za fiscal_year
  *   - můstek ZC          = rozdíl účetní a daňové ZC prodaného/likvidovaného majetku
+ *   - prodané podíly     = převis 561P nad 661 (§24/2/w, {@see SecuritiesSaleCostLimit})
  *
  * SQL konvence dle ClosingRepository / TaxBaseReportAction (posted_at IS NOT NULL,
  * reversed_by IS NULL, tenant l.supplier_id).
@@ -50,6 +53,8 @@ final class DppoReturnDataProvider
         // Tabulka C přílohy č. 1 II. oddílu (VetaG) — volitelná ze stejného důvodu:
         // bez ní se rozpad zákonných OP a rezerv jen přeskočí a builder varuje.
         private readonly ?LegalProvisionLedgerService $legalProvisions = null,
+        // Nezaúčtované odpisy roku do projekce uzávěrky — volitelná ze stejného důvodu jako $closing.
+        private readonly ?DepreciationPostingService $depreciationPreview = null,
     ) {}
 
     /**
@@ -69,6 +74,8 @@ final class DppoReturnDataProvider
      *   disposal_tax_increase: float, disposal_tax_decrease: float,
      *   disposal_decrease_groups: array<string,float>,
      *   disposals: list<array<string,mixed>>,
+     *   securities_cost_excess: float,
+     *   securities_sale: array<string,mixed>,
      *   closing_projection: array<string,mixed>,
      *   legal_provisions: array<string,mixed>,
      *   suggestions: array{addbacks:list<array<string,mixed>>,deductions:list<array<string,mixed>>,unpaid_liabilities:array<string,mixed>},
@@ -97,6 +104,8 @@ final class DppoReturnDataProvider
                 'disposal_tax_decrease' => 0.0,
                 'disposal_decrease_groups' => [],
                 'disposals' => [],
+                'securities_cost_excess' => 0.0,
+                'securities_sale' => SecuritiesSaleCostLimit::empty(),
                 'closing_projection' => (new ClosingProjectionCalculator())->project(0.0, []),
                 'legal_provisions' => LegalProvisionLedgerService::empty(),
                 'suggestions' => ['addbacks' => [], 'deductions' => []],
@@ -116,7 +125,9 @@ final class DppoReturnDataProvider
         $relatedPartyFlag = $this->relatedPartyCountryFlag($supplierId, $startsOn, $endsOn);
         $relatedPartyAppendix = $this->relatedPartyAppendix($supplierId, $startsOn, $endsOn);
         [$disposalIncrease, $disposalDecrease, $disposals, $disposalWarnings, $disposalDecreaseGroups] = $this->disposalResiduals($supplierId, $startsOn, $endsOn);
-        $projection = $this->closingProjection($supplierId, (int) $period['id'], $endsOn, $vh);
+        $securities = (new SecuritiesSaleCostLimit($this->db))->forPeriod($supplierId, $startsOn, $endsOn);
+        [$securitiesSuggestion, $securitiesWarnings] = $this->securitiesSaleReview($securities);
+        $projection = $this->closingProjection($supplierId, $period, $vh);
         // Tabulka C přílohy č. 1 II. oddílu (VetaG) — zákonné OP k pohledávkám (§8/§8a/§8b/§8c)
         // a zákonné rezervy (§7). Bez služby (unit testy nad SQLite) zůstane prázdný podklad
         // a builder z toho udělá varování, ne tichou nulu.
@@ -124,7 +135,7 @@ final class DppoReturnDataProvider
             ? $this->legalProvisions->forPeriod($supplierId, (int) $period['id'], $startsOn, $endsOn)
             : LegalProvisionLedgerService::empty();
         $suggestions = [
-            'addbacks' => $this->addbackSuggestions($supplierId, $startsOn, $endsOn),
+            'addbacks' => array_merge($this->addbackSuggestions($supplierId, $startsOn, $endsOn), $securitiesSuggestion),
             'deductions' => $this->deductionSuggestions($supplierId, $startsOn, $endsOn),
             // § 23/3/a/12 — dluhy po 30 měsících. Systém je NEPŘIPOČÍTÁVÁ sám: bod 12 má
             // výjimky, které z účetních dat rozpoznat nelze (nedaňový titul, insolvence,
@@ -163,10 +174,14 @@ final class DppoReturnDataProvider
             'disposal_tax_decrease' => $disposalDecrease,
             'disposal_decrease_groups' => $disposalDecreaseGroups,
             'disposals' => $disposals,
+            // § 24 odst. 2 písm. w) — převis nabývací ceny prodaných podílů nad příjmy
+            // z prodeje, automaticky na ř. 40 ({@see SecuritiesSaleCostLimit}).
+            'securities_cost_excess' => $securities['addback'],
+            'securities_sale' => $securities,
             'closing_projection' => $projection,
             'legal_provisions' => $legalProvisions,
             'suggestions' => $suggestions,
-            'warnings' => array_merge($warnings, $disposalWarnings),
+            'warnings' => array_merge($warnings, $disposalWarnings, $securitiesWarnings),
         ];
     }
 
@@ -175,17 +190,39 @@ final class DppoReturnDataProvider
      * read-only náhledy z {@see ClosingService}; skládá je čistý {@see ClosingProjectionCalculator}.
      * Každý krok se do projekce zahrne JEN pokud ještě není zaúčtovaný (jinak už je ve vh_posted):
      * u 381 podle preview['existing'], u fx podle posted zápisu k rozvahovému dni, u rozpuštění 381
-     * z minulého období podle stavu open_next. Bez ClosingService (unit testy) → prázdná projekce.
+     * z minulého období podle stavu open_next, u odpisů podle depreciation_entries roku (náhled
+     * {@see DepreciationPostingService::previewYear()} vrací jen rozdíl proti zaúčtovanému; uzavřený
+     * rok se neprojektuje). Bez ClosingService (unit testy) → prázdná projekce.
      *
+     * @param array<string,mixed> $period
      * @return array<string,mixed>
      */
-    private function closingProjection(int $supplierId, int $periodId, string $endsOn, float $vhPosted): array
+    private function closingProjection(int $supplierId, array $period, float $vhPosted): array
     {
         $calc = new ClosingProjectionCalculator();
         if ($this->closing === null) {
             return $calc->project($vhPosted, []);
         }
+        $periodId = (int) $period['id'];
+        $endsOn = (string) $period['ends_on'];
         $sources = [];
+        // Odpisy a zásoby jen v neuzavřeném roce: uzavřený rok je má zaúčtované (nebo krok
+        // vědomě přeskočený) a jeho náhled se nesmí měnit.
+        $open = !AccountingPeriodStatus::isClosed((string) ($period['status'] ?? ''));
+        try {
+            if ($open && $this->depreciationPreview !== null) {
+                $sources['depreciation'] = $this->depreciationPreview->previewYear($supplierId, (int) $period['fiscal_year']);
+            }
+        } catch (\Throwable) {
+        }
+        try {
+            // Zásoby způsobem B: jen dokud není uzávěrkový slot zaúčtovaný (pak je ve vh_posted).
+            $stock = $open ? $this->closing->stockValuationProjection($supplierId, $periodId) : null;
+            if ($stock !== null && $stock['applicable'] && !$stock['posted']) {
+                $sources['stock'] = $stock;
+            }
+        } catch (\Throwable) {
+        }
         // Každý náhled izolovaně — chyba jednoho kroku (např. chybí kontace) nesmí shodit náhled.
         try {
             $sources['small_asset'] = $this->closing->smallAssetAccrualPreview($supplierId, $periodId);
@@ -278,6 +315,43 @@ final class DppoReturnDataProvider
             ];
         }
         return $out;
+    }
+
+    /**
+     * Prodej podílů a cenných papírů (§ 24 odst. 2 písm. w) ZDP): převis 561P nad 661 jde
+     * na ř. 40 automaticky, zbytek převisu (561C, 561 bez analytiky) jen jako návrh k posouzení
+     * — u dluhopisů a papírů oceňovaných reálnou hodnotou je náklad daňový celý (písm. r).
+     *
+     * @param array<string,mixed> $s výstup {@see SecuritiesSaleCostLimit::forPeriod()}
+     * @return array{0:list<array<string,mixed>>,1:list<string>}
+     */
+    private function securitiesSaleReview(array $s): array
+    {
+        $fmt = static fn (float $v): string => number_format($v, 2, ',', ' ') . ' Kč';
+        $suggestions = [];
+        $warnings = [];
+        if ($s['addback'] > 0.0) {
+            $warnings[] = 'Nabývací cena prodaných podílů (561P, ' . $fmt($s['shares_cost']) . ') převyšuje příjmy '
+                . 'z prodeje podílů a cenných papírů (661, ' . $fmt($s['income']) . '). Převis ' . $fmt($s['addback'])
+                . ' je podle § 24 odst. 2 písm. w) ZDP nedaňový a připočítá se na ř. 40.';
+        }
+        if ($s['shares_cost'] > 0.0) {
+            $warnings[] = 'Prodej podílů: § 24 odst. 2 písm. w) ZDP omezuje nabývací cenu každého podílu příjmem '
+                . 'z jeho vlastního prodeje. Automatický připočet porovnává jen úhrny 561P a 661, je tedy spodní mezí; '
+                . 'ztrátu z jednoho podílu kompenzovanou ziskem z jiného připočtěte ruční položkou. Je-li příjem '
+                . 'z převodu podílu osvobozen (§ 19 odst. 1 písm. ze) ZDP), je nedaňová celá nabývací cena '
+                . 'a příjem patří na ř. 110 — obojí zadejte ručně.';
+        }
+        if ($s['review_amount'] > 0.0) {
+            $suggestions[] = [
+                'account_code' => '561',
+                'name' => 'Prodané cenné papíry nad příjmy z prodeje',
+                'amount' => $s['review_amount'],
+                'hint_key' => 'taxReturn.suggest_561',
+                'already_non_deductible' => false,
+            ];
+        }
+        return [$suggestions, $warnings];
     }
 
     /**

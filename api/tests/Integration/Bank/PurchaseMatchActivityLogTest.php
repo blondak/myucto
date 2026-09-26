@@ -58,7 +58,7 @@ final class PurchaseMatchActivityLogTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             // ActivityLogger injektován → ověřujeme zápis do activity_log; mailer/payments null.
             $this->matcher = new StatementMatcher(

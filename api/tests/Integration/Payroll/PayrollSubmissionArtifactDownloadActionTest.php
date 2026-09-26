@@ -38,7 +38,7 @@ final class PayrollSubmissionArtifactDownloadActionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         self::assertInstanceOf(ContainerInterface::class, $container);
         $db = $container->get(Connection::class);
         self::assertInstanceOf(Connection::class, $db);

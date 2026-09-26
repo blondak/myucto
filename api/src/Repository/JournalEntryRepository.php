@@ -119,6 +119,29 @@ final class JournalEntryRepository
 
         $this->deleteLines($id);
         $this->insertLines($pdo, $id, (int) $header['supplier_id'], $lines);
+
+        // Okruh drží řádek přes (zápis, pořadí), takže přeúčtování ho přežije. Pokud
+        // na stejném pořadí teď sedí jiný účet, položka z okruhu odejde se stopou v auditu.
+        $this->logReleasedPairings(
+            (int) $header['supplier_id'],
+            $id,
+            (new JournalLinePairingRepository($this->db))->releaseStale((int) $header['supplier_id'], $id),
+            'repost',
+        );
+    }
+
+    /**
+     * @param list<array{pairing_id:int, entry_id:int, line_no:int}> $released
+     */
+    private function logReleasedPairings(int $supplierId, int $entryId, array $released, string $reason): void
+    {
+        if ($released === []) {
+            return;
+        }
+        $this->activity->log('accounting.pairing_released', null, 'journal_entry', $entryId, [
+            'reason' => $reason,
+            'items'  => $released,
+        ], null, null, $supplierId);
     }
 
     public function deleteLines(int $entryId): void
@@ -300,7 +323,18 @@ final class JournalEntryRepository
               WHERE id = ? AND supplier_id = ? AND reversed_by IS NULL'
         );
         $stmt->execute([$reversalEntryId, $id, $supplierId]);
-        return $stmt->rowCount() > 0;
+        if ($stmt->rowCount() === 0) {
+            return false;
+        }
+        // Originál se se svým protizápisem vyruší; jeho dřívější spárování s úhradou
+        // by jinak drželo úhradu uzavřenou a protizápis visel otevřený.
+        $this->logReleasedPairings(
+            $supplierId,
+            $id,
+            (new JournalLinePairingRepository($this->db))->releaseEntry($supplierId, $id),
+            'reversal',
+        );
+        return true;
     }
 
     /**
@@ -614,6 +648,9 @@ final class JournalEntryRepository
                 (SELECT pi.vendor_invoice_number FROM purchase_invoices pi WHERE je.source_type = 'purchase_invoice' AND pi.id = je.source_id AND pi.supplier_id = je.supplier_id),
                 (SELECT pi.varsymbol FROM purchase_invoices pi WHERE je.source_type = 'purchase_invoice' AND pi.id = je.source_id AND pi.supplier_id = je.supplier_id))",
             'amount' => $accountFiltered ? 'ABS(' . self::FILTERED_NET_AMOUNT_SUBQUERY . ')' : self::AMOUNT_SUBQUERY,
+            'debit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entry_lines jel JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE jel.entry_id = je.id AND jel.supplier_id = je.supplier_id AND jel.side = 'debit')",
+            'credit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entry_lines jel JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE jel.entry_id = je.id AND jel.supplier_id = je.supplier_id AND jel.side = 'credit')",
+            'vat_breakdown' => "CASE WHEN je.source_type = 'invoice' THEN (SELECT i.total_vat FROM invoices i WHERE i.id = je.source_id AND i.supplier_id = je.supplier_id) WHEN je.source_type = 'purchase_invoice' THEN (SELECT pi.total_vat FROM purchase_invoices pi WHERE pi.id = je.source_id AND pi.supplier_id = je.supplier_id) ELSE NULL END",
         ];
         $sortKey = (string) ($filters['sort_key'] ?? '');
         $sortDir = strtolower((string) ($filters['sort_dir'] ?? '')) === 'asc' ? 'ASC' : 'DESC';
@@ -646,6 +683,7 @@ final class JournalEntryRepository
                        u.name AS posted_by_name,
                        {$amountSelect}
                        COALESCE(bt.statement_id, rev_bt.statement_id) AS source_statement_id,
+                       COALESCE(bt.bank_ref, rev_bt.bank_ref) AS source_bank_ref,
                        COALESCE(cd.doc_number, rev_cd.doc_number) AS source_doc_number,
                        COALESCE(cd.register_id, rev_cd.register_id) AS source_register_id,
                        ast.id AS source_asset_id,
@@ -664,7 +702,11 @@ final class JournalEntryRepository
                          LIMIT {$limit} OFFSET {$offset}) AS pick
                   JOIN journal_entries je ON je.id = pick.id
              LEFT JOIN users u ON u.id = je.posted_by
-             LEFT JOIN journal_entries rev_src ON rev_src.supplier_id = je.supplier_id
+             -- FORCE INDEX: `reversed_by` je skoro všude NULL, optimizér pak odhaduje tisíce
+             -- řádků na lookup a volí BNL přes celou tabulku (0,2 s na stránku u 100 tis. zápisů, roste
+             -- s počtem zápisů). S indexem 1 ms.
+             LEFT JOIN journal_entries rev_src FORCE INDEX (idx_je_supplier_reversed_by)
+                    ON rev_src.supplier_id = je.supplier_id
                     AND rev_src.reversed_by = je.id
              LEFT JOIN bank_transactions rev_bt ON rev_src.source_type = 'bank' AND rev_bt.id = rev_src.source_id
              LEFT JOIN cash_documents rev_cd ON rev_src.source_type = 'cash' AND rev_cd.id = rev_src.source_id
@@ -693,6 +735,15 @@ final class JournalEntryRepository
 
         return ['items' => $items, 'total' => $total];
     }
+
+    /**
+     * Bankovní zápis nese číslo v řadě účtu (BCR-08), ID pohybu z banky zůstává na pohybu.
+     * Vyhledávání podle čísla dokladu ho proto hledá i tam. Jeden placeholder (LIKE).
+     */
+    private const BANK_REF_MATCH = "(je.source_type = 'bank' AND EXISTS(
+                    SELECT 1 FROM bank_transactions bt_ref
+                     WHERE bt_ref.id = je.source_id AND bt_ref.bank_ref LIKE ? ESCAPE '='
+                ))";
 
     /** Korelovaný subselect s celkovou částkou zápisu (Σ MD = Σ Dal u vyváženého zápisu). */
     private const AMOUNT_SUBQUERY =
@@ -928,8 +979,9 @@ final class JournalEntryRepository
                     SELECT 1 FROM purchase_invoices pi
                      WHERE pi.id = je.source_id AND pi.supplier_id = je.supplier_id
                        AND (pi.vendor_invoice_number LIKE ? ESCAPE '=' OR pi.varsymbol LIKE ? ESCAPE '=')
-                )))";
-            array_push($params, $needle, $needle, $needle, $needle);
+                ))
+                OR " . self::BANK_REF_MATCH . ")";
+            array_push($params, $needle, $needle, $needle, $needle, $needle);
         }
         // Fulltext `q` — jedno vyhledávací pole napříč description + čísly dokladů
         // (Featura D, audit 2026-07 follow-up). ORuje se přes stejné zdroje jako
@@ -947,8 +999,9 @@ final class JournalEntryRepository
                     SELECT 1 FROM purchase_invoices pi
                      WHERE pi.id = je.source_id AND pi.supplier_id = je.supplier_id
                        AND (pi.vendor_invoice_number LIKE ? ESCAPE '=' OR pi.varsymbol LIKE ? ESCAPE '=')
-                )))";
-            array_push($params, $needle, $needle, $needle, $needle, $needle);
+                ))
+                OR " . self::BANK_REF_MATCH . ")";
+            array_push($params, $needle, $needle, $needle, $needle, $needle, $needle);
         }
         // Rozsah účtů (Featura D) — EXISTS na journal_entry_lines, indexováno přes
         // idx_jel_supplier_account. Chybějící mez se doplní neutrální hranicí.

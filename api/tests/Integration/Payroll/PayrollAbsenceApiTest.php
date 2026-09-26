@@ -45,7 +45,7 @@ final class PayrollAbsenceApiTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollAbsenceAction::class);
             $this->absences = $container->get(PayrollAbsenceRepository::class);
@@ -590,7 +590,7 @@ final class PayrollAbsenceApiTest extends TestCase
      */
     public function testHolidayInsideSicknessLeavesTheBaseWageByTheObligationFund(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $proration = $container->get(PayrollWageProrationService::class);
         $this->workCalendar();
         $this->insertPublishedShift('2026-07-07 06:00:00', '2026-07-07 14:30:00', 30);

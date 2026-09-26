@@ -58,7 +58,7 @@ final class StatementMatcherPurchaseVsCollisionTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             $this->matcher = new StatementMatcher($this->db, $c->get(FinalFromProformaCreator::class), null);
         } catch (\Throwable $e) {

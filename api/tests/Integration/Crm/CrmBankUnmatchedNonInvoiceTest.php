@@ -5,11 +5,19 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Crm;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Action\Bank\BankStatementAction;
+use MyInvoice\Action\Bank\UnmatchedBankExportAction;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\BankPostingSuggestionRepository;
 use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
+use MyInvoice\Service\Bank\UnmatchedBankExportService;
 use MyInvoice\Service\Crm\CrmAggregationService;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Factory\ResponseFactory;
+use Slim\Psr7\Factory\ServerRequestFactory;
 
 /**
  * Příchozí noha vlastního převodu nemá fakturu, se kterou by se spárovala — protějškem
@@ -45,7 +53,7 @@ final class CrmBankUnmatchedNonInvoiceTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             $this->crm = $c->get(CrmAggregationService::class);
         } catch (\Throwable $e) {
@@ -175,6 +183,118 @@ final class CrmBankUnmatchedNonInvoiceTest extends TestCase
             'Zápis přes 311 je úhrada faktury — ta se párovat má.');
         self::assertSame($before + 1, $this->bankUnmatchedCount(),
             'Do počítadla nespárovaných přibude jen ten pohyb přes 311.');
+    }
+
+    public function testFiltrNesparovanoNeukazujeVyrizenePohybyBezFaktury(): void
+    {
+        $tax = $this->accountId('341');
+        $bank = $this->accountId('221');
+        $receivable = $this->accountId('311');
+        if ($tax === 0 || $bank === 0 || $receivable === 0) {
+            self::markTestSkipped('Osnova tenanta nemá 341/221/311.');
+        }
+
+        $regular = $this->insertIncoming();
+        $transfer = $this->insertIncoming();
+        $this->insertSuggestion($transfer, 'auto_posted');
+        $taxPayment = $this->insertIncoming();
+        $this->insertPostedEntry($taxPayment, $tax, $bank);
+        $invoicePayment = $this->insertIncoming();
+        $this->insertPostedEntry($invoicePayment, $bank, $receivable);
+
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('GET', '/api/bank-statements/' . $this->statementId)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withQueryParams(['status' => 'unmatched']);
+        $action = Bootstrap::buildContainer()->get(BankStatementAction::class);
+        $response = $action->detail($request, (new ResponseFactory())->createResponse(), ['id' => $this->statementId]);
+        self::assertSame(200, $response->getStatusCode());
+        $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $ids = array_map(static fn (array $row): int => (int) $row['id'], $data['transactions']);
+        sort($ids);
+        $expected = [$regular, $invoicePayment];
+        sort($expected);
+        self::assertSame($expected, $ids);
+        self::assertSame(2, $data['transactions_meta']['total']);
+    }
+
+    public function testVsechnyPohybyFiltrujiStavyStejneJakoDetailVypisu(): void
+    {
+        $regular = $this->insertIncoming();
+        $transfer = $this->insertIncoming();
+        $this->insertSuggestion($transfer, 'auto_posted');
+        $matched = $this->insertIncoming();
+        $ignored = $this->insertIncoming();
+        $this->db->pdo()->prepare("UPDATE bank_transactions SET match_status = 'auto_exact' WHERE id = ?")
+            ->execute([$matched]);
+        $this->db->pdo()->prepare("UPDATE bank_transactions SET match_status = 'ignored' WHERE id = ?")
+            ->execute([$ignored]);
+
+        $repository = new BankPostingSuggestionRepository($this->db);
+        $filters = ['scope' => 'all', 'account' => self::TEST_ACCOUNT, 'year' => (int) substr($this->today, 0, 4)];
+        $unmatched = $repository->paginateUnposted($this->supplierId, 100, 0, $filters + ['status' => 'unmatched']);
+        $unmatchedIds = array_map('intval', array_column($unmatched['items'], 'id'));
+        self::assertContains($regular, $unmatchedIds);
+        self::assertNotContains($transfer, $unmatchedIds);
+        self::assertNotContains($matched, $unmatchedIds);
+        self::assertNotContains($ignored, $unmatchedIds);
+
+        $ignoredPage = $repository->paginateUnposted($this->supplierId, 100, 0, $filters + ['status' => 'ignored']);
+        self::assertContains($ignored, array_map('intval', array_column($ignoredPage['items'], 'id')));
+    }
+
+    public function testXlsxObsahujeJenSkutecneNesparovanePohyby(): void
+    {
+        $regular = $this->insertIncoming();
+        $transfer = $this->insertIncoming();
+        $this->insertSuggestion($transfer, 'auto_posted');
+        $other = $this->insertIncoming();
+
+        $service = new UnmatchedBankExportService($this->db);
+        $file = $service->build($this->supplierId, $this->statementId);
+        self::assertSame(2, $file['count']);
+        self::assertSame(self::TEST_ACCOUNT . '/' . self::TEST_BANK_CODE, $file['account']);
+        try {
+            $service->build($this->supplierId + 999999, $this->statementId);
+            self::fail('Cizí firma nesmí exportovat výpis.');
+        } catch (\InvalidArgumentException) {
+        }
+
+        $path = tempnam(sys_get_temp_dir(), 'bank_xlsx_test_');
+        file_put_contents($path, $file['bytes']);
+        try {
+            $sheet = IOFactory::load($path)->getActiveSheet();
+            self::assertSame('Bankovní účet', $sheet->getCell('A5')->getValue());
+            self::assertSame(self::TEST_ACCOUNT . '/' . self::TEST_BANK_CODE, $sheet->getCell('A6')->getValue());
+            self::assertSame('Příchozí', $sheet->getCell('B6')->getValue());
+            self::assertSame(10000.0, (float) $sheet->getCell('E6')->getValue());
+            self::assertSame(10000.0, (float) $sheet->getCell('E7')->getValue());
+            self::assertNull($sheet->getCell('E8')->getValue());
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function testNahledExportuPocitaPouzePohybyKtereCekajiNaDoklad(): void
+    {
+        $this->insertIncoming();
+        $transfer = $this->insertIncoming();
+        $this->insertSuggestion($transfer, 'auto_posted');
+
+        $action = Bootstrap::buildContainer()->get(UnmatchedBankExportAction::class);
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('GET', '/api/bank-statements/' . $this->statementId . '/unmatched-recipients')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId);
+        $response = $action->recipients($request, (new ResponseFactory())->createResponse(), ['id' => $this->statementId]);
+        self::assertSame(200, $response->getStatusCode());
+        $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame(1, $data['count']);
+
+        $sendRequest = (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/bank-statements/' . $this->statementId . '/send-unmatched')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId);
+        $sendResponse = $action->send($sendRequest, (new ResponseFactory())->createResponse(), ['id' => $this->statementId]);
+        self::assertSame(422, $sendResponse->getStatusCode());
     }
 
     private function accountId(string $prefix): int

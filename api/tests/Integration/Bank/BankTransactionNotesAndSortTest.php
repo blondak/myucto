@@ -61,7 +61,7 @@ final class BankTransactionNotesAndSortTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db         = $container->get(Connection::class);
             $this->bank       = $container->get(BankStatementAction::class);
             $this->unposted   = $container->get(BankPostingSuggestionAction::class);

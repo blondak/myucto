@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Bank\EmailNotice;
 
+use MyInvoice\Support\PdfBytes;
 use Webklex\PHPIMAP\ClientManager;
 
 final class WebklexImapMailboxClient implements ImapMailboxClientInterface
@@ -81,7 +82,8 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
             }
             $out = [];
             foreach ($message->getAttachments() as $attachment) {
-                $content = (string) $attachment->getContent();
+                // Hlavička posunutá o prázdný řádek / BOM se opraví, jinak by se faktura tiše přeskočila.
+                $content = PdfBytes::normalize((string) $attachment->getContent());
                 if ($content === '' || !str_starts_with($content, '%PDF')) {
                     continue;
                 }

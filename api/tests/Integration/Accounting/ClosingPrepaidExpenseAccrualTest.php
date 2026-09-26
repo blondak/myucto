@@ -55,7 +55,7 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db      = $container->get(Connection::class);
             $this->posting = $container->get(PostingService::class);
             $this->closing = $container->get(ClosingService::class);

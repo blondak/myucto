@@ -38,7 +38,7 @@ final class PohodaYearSelectionTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje - test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->importer = $container->get(PohodaImporter::class);
         } catch (\Throwable $e) {

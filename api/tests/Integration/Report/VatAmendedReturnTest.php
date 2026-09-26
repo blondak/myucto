@@ -68,7 +68,7 @@ class VatAmendedReturnTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db          = $c->get(Connection::class);
             $this->dph         = $c->get(DphPriznaniBuilder::class);
             $this->kh          = $c->get(KontrolniHlaseniBuilder::class);

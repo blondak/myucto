@@ -41,7 +41,7 @@ final class LedgerInvariantsTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — invarianty vyžadují DB.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->invariants = $container->get(LedgerInvariantService::class);
             // Connection navazuje spojení AŽ při prvním dotazu, takže bez tohohle

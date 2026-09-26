@@ -45,7 +45,7 @@ final class DimensionProfitService
 
     /**
      * @param list<int> $supplierIds firmy do součtu (první je aktuální firma)
-     * @param array{value_id?:?int, responsible_user_id?:?int, accounts?:bool} $options
+     * @param array{value_id?:?int, responsible_user_id?:?int, accounts?:bool, companies?:bool} $options
      * @return array<string,mixed>
      */
     public function build(int $supplierId, int $typeId, string $from, string $to, array $supplierIds, array $options = []): array
@@ -58,9 +58,16 @@ final class DimensionProfitService
         $rootValueId = (int) ($options['value_id'] ?? 0);
         $responsible = (int) ($options['responsible_user_id'] ?? 0);
         $withAccounts = (bool) ($options['accounts'] ?? false);
+        $withCompanies = (bool) ($options['companies'] ?? false);
+
+        $known = [];
+        foreach ($values as $v) {
+            $known[$v['id']] = $v;
+        }
 
         // hodnota ('' = bez hodnoty) => syntetický účet => ['revenue' => haléře, 'cost' => haléře]
         $direct = [];
+        $companyDirect = [];
         $accounts = [];
         foreach ($supplierIds as $sid) {
             foreach ($this->sums($sid, $typeId, $from, $to) as $row) {
@@ -68,14 +75,15 @@ final class DimensionProfitService
                 $code = $row['code'];
                 $direct[$key][$code]['revenue'] = ($direct[$key][$code]['revenue'] ?? 0) + $row['revenue'];
                 $direct[$key][$code]['cost'] = ($direct[$key][$code]['cost'] ?? 0) + $row['cost'];
+                if ($withCompanies) {
+                    $companyKey = $key !== '' && !isset($known[(int) $key]) ? '' : $key;
+                    $companyDirect[$sid][$companyKey][$code]['revenue'] = ($companyDirect[$sid][$companyKey][$code]['revenue'] ?? 0) + $row['revenue'];
+                    $companyDirect[$sid][$companyKey][$code]['cost'] = ($companyDirect[$sid][$companyKey][$code]['cost'] ?? 0) + $row['cost'];
+                }
                 $accounts[$code] ??= ['code' => $code, 'name' => $row['name'], 'account_type' => $row['account_type']];
             }
         }
 
-        $known = [];
-        foreach ($values as $v) {
-            $known[$v['id']] = $v;
-        }
         // Řádky s hodnotou, kterou firma nevidí (firma mezitím skupinu opustila),
         // se nesmí ztratit — patří k řádku „bez hodnoty".
         foreach (array_keys($direct) as $key) {
@@ -155,6 +163,19 @@ final class DimensionProfitService
         ];
         if ($withAccounts) {
             $out['matrix'] = self::matrix($accounts, $roots, $rootTotals, $restricted ? null : $unassigned, $all);
+        }
+        if ($withCompanies) {
+            $out['companies'] = [];
+            foreach ($supplierIds as $sid) {
+                $companyTotal = $restricted ? [] : ($companyDirect[$sid][''] ?? []);
+                foreach ($rows as $row) {
+                    $companyTotal = self::addAccounts($companyTotal, $companyDirect[$sid][(string) $row['value_id']] ?? []);
+                }
+                $out['companies'][] = [
+                    'id' => $sid,
+                    'name' => $this->dimensions->supplierName($sid),
+                ] + self::money(self::collapse($companyTotal));
+            }
         }
         return $out;
     }

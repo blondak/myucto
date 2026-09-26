@@ -34,7 +34,7 @@ final class PayrollPostingEntryDateFiscalYearTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->batches = $container->get(PayrollPostingBatchRepository::class);
         } catch (\Throwable $exception) {

@@ -20,6 +20,7 @@ final class AccountStatementService
         private readonly LedgerReportRepository $ledger,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly AccountingPeriodRepository $periods,
+        private readonly JournalLineContext $context,
     ) {}
 
     /**
@@ -66,14 +67,20 @@ final class AccountStatementService
                 // Drill-down na prvotní doklad — shodná sada polí jako v deníku
                 // (JournalEntryRepository::paginate), aby proklik vedl na tentýž doklad.
                 'source_statement_id'       => $l['source_statement_id'],
-                'source_doc_number'         => $l['source_doc_number'],
+                'source_bank_ref'           => $l['source_bank_ref'] ?? null,
+                'source_doc_number'       => $l['source_doc_number'],
                 'source_register_id'        => $l['source_register_id'],
                 'source_asset_id'           => $l['source_asset_id'],
                 'source_asset_name'         => $l['source_asset_name'],
                 'source_settlement_doc_type' => $l['source_settlement_doc_type'],
                 'source_settlement_doc_id'  => $l['source_settlement_doc_id'],
+                'line_id'        => (int) $l['line_id'],
+                'line_no'        => (int) $l['line_no'],
+                'currency_code'  => $l['currency_code'],
+                'amount_foreign' => $l['amount_foreign'],
             ];
         }
+        $items = $this->context->enrich($supplierId, $items);
 
         $turnovers = $this->ledger->accountTurnovers($supplierId, $accountId, $from, $to, $excludeClosing);
 

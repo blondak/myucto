@@ -25,7 +25,7 @@ const data = ref<CreditCardSettingsResponse | null>(null)
 const form = reactive<Record<CreditCardSettingsField, number | null>>(
   Object.fromEntries(CREDIT_CARD_SETTINGS_FIELDS.map(f => [f, null])) as Record<CreditCardSettingsField, number | null>,
 )
-const purchaseMode = ref<CreditCardPurchaseMode>('clearing')
+const purchaseMode = ref<CreditCardPurchaseMode>('direct')
 
 const canConfigure = computed(() => auth.canWrite('bank.post') && !!data.value?.double_entry)
 

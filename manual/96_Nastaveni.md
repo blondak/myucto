@@ -665,9 +665,9 @@ preference uživatele, platné napříč všemi firmami, ke kterým máš přís
 zaškrtávátky. Některé sloupce (typicky číslo dokladu, částka, akce) jsou
 **povinné** — jsou zašedlé a nejde je odškrtnout. Systém navíc nedovolí
 odškrtnout **úplně poslední** viditelný nepovinný sloupec — tabulka musí mít
-vždy aspoň jeden viditelný sloupec navíc k povinným. Tlačítko **Obnovit
-výchozí** dole vrátí sloupce do stavu, v jakém je stránka nabízí ve výchozím
-stavu.
+vždy aspoň jeden viditelný sloupec navíc k povinným. Na stránkách s připravenými
+sestavami je lze přepnout v horní části nabídky. Na ostatních stránkách vrátí
+tlačítko **Obnovit výchozí** dole sloupce do výchozího stavu.
 
 > 🛈 Některé doplňkové sloupce jsou ve výchozím stavu skryté a
 > zůstanou skryté, dokud si je sám/sama v nabídce **Sloupce** nezaškrtneš —

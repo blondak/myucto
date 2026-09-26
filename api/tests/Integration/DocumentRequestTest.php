@@ -82,7 +82,7 @@ final class DocumentRequestTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db           = $container->get(Connection::class);
             $this->repo          = $container->get(DocumentRequestRepository::class);
             $this->documents     = $container->get(DocumentRepository::class);
@@ -333,6 +333,39 @@ final class DocumentRequestTest extends TestCase
             $folderId = $row['parent_id'];
         }
         return $path;
+    }
+
+    /**
+     * Trello MCUAD #11: dompdf za PHP skriptem s mezerou pošle před hlavičku prázdné
+     * řádky. Prohlížeč PDF otevře, fronta ho odmítala („Obsah souboru neodpovídá jeho
+     * příponě"). Hlavička v prvních 1024 bajtech je podle ISO 32000 v pořádku a do
+     * fronty jde PDF opravené, od `%PDF-`.
+     */
+    public function testPdfWithLeadingBlankLinesIsRepairedAndAccepted(): void
+    {
+        $pdf = "%PDF-1.7\n% synthetic shifted header " . bin2hex(random_bytes(8)) . "\n%%EOF\n";
+        $result = $this->upload->submit(
+            $this->uploadedFile('posunuta-hlavicka.pdf', "\n\n" . $pdf),
+            $this->supplierA,
+            $this->userId,
+            'staff',
+        );
+        $this->trackSubmissionFile($result['submission']);
+
+        self::assertFalse($result['duplicate']);
+        self::assertSame(hash('sha256', $pdf), (string) $result['submission']['document_sha256'],
+            'Uložený originál musí začínat hlavičkou %PDF-.');
+    }
+
+    public function testNonPdfWithPdfExtensionIsStillRejected(): void
+    {
+        $this->expectException(PurchaseInvoiceSubmissionException::class);
+        $this->upload->submit(
+            $this->uploadedFile('nejde-o-pdf.pdf', str_repeat(' ', 1100) . '%PDF-1.4 za oknem 1024 bajtů'),
+            $this->supplierA,
+            $this->userId,
+            'staff',
+        );
     }
 
     public function testExactDedupIsPerTenantAndUnchangedReplacementIsRejected(): void

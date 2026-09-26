@@ -18,6 +18,7 @@ use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Container\ContainerInterface;
 
 #[Group('integration')]
 final class JournalRedStornoTest extends TestCase
@@ -31,6 +32,7 @@ final class JournalRedStornoTest extends TestCase
     private LedgerReportRepository $ledger;
     private PostingService $posting;
     private JournalHistoryService $history;
+    private ContainerInterface $container;
     private int $supplierId;
     private int $periodId;
     private int $userId;
@@ -40,6 +42,7 @@ final class JournalRedStornoTest extends TestCase
     protected function setUp(): void
     {
         $container = Bootstrap::buildApp()->getContainer();
+        $this->container = $container;
         $this->db = $container->get(Connection::class);
         $this->journal = $container->get(JournalEntryRepository::class);
         $this->ledger = $container->get(LedgerReportRepository::class);
@@ -140,6 +143,32 @@ final class JournalRedStornoTest extends TestCase
             ['side' => 'debit', 'amount' => 10.00, 'is_red_storno' => true],
             ['side' => 'credit', 'amount' => 10.00],
         ]);
+    }
+
+    public function testRepostPlanKeepsRedStornoFlagWhenCheckingUnchangedPosting(): void
+    {
+        $entryId = $this->journal->insert([
+            'supplier_id' => $this->supplierId,
+            'period_id' => $this->periodId,
+            'entry_date' => self::YEAR . '-01-15',
+            'source_type' => 'purchase_invoice',
+            'source_id' => 900001,
+            'posted_at' => self::YEAR . '-01-15 12:00:00',
+            'posted_by' => $this->userId,
+        ], [
+            ['account_id' => $this->accounts['518'], 'side' => 'debit', 'amount' => 100.0, 'is_red_storno' => true],
+            ['account_id' => $this->accounts['321'], 'side' => 'credit', 'amount' => 100.0, 'is_red_storno' => true],
+        ]);
+        $plan = $this->container->get(\MyInvoice\Service\Accounting\DocumentRepostService::class)->plan(
+            $this->supplierId, 'purchase_invoice', 900001, [
+                ['account_code' => '518', 'side' => 'debit', 'amount' => 100.0, 'is_red_storno' => true],
+                ['account_code' => '321', 'side' => 'credit', 'amount' => 100.0, 'is_red_storno' => true],
+            ],
+        );
+
+        self::assertSame($entryId, $plan['entry_id']);
+        self::assertNull($plan['tax_neutral_violation']);
+        self::assertSame([true, true], array_column($plan['lines'], 'is_red_storno'));
     }
 
     public function testAmountUpperBoundFindsNegativeRedStornoEntry(): void

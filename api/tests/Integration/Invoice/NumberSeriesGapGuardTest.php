@@ -276,7 +276,7 @@ final class NumberSeriesGapGuardTest extends StockTestCase
     private function secondConnection(): array
     {
         [$db, $gen] = Connection::withoutSharedTestConnection(static function (): array {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             return [$container->get(Connection::class), $container->get(VarsymbolGenerator::class)];
         });
         $this->extraConnections[] = $db;
