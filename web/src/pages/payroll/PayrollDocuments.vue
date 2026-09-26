@@ -29,7 +29,7 @@ import {
   BTN_DISABLED_NOTE,
   ICONS,
 } from '@/components/ui/buttonStyles'
-import { payrollWorkingPeriod } from '@/pages/payroll/payrollComponentsUi'
+import { payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -45,7 +45,7 @@ const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
-const period = ref(payrollWorkingPeriod())
+const period = ref(payrollQueryPeriod(route.query))
 const year = ref(Number(period.value.slice(0, 4)))
 /**
  * Předvýběr z odkazu na kartě zaměstnance (`?person=7&tab=annual`).
@@ -851,6 +851,23 @@ async function loadDocumentBatch(loadItems = false): Promise<void> {
   }
 }
 
+const startingBatchWorker = ref(false)
+
+async function startBatchWorker(): Promise<void> {
+  const batchId = documentBatch.value?.id
+  if (!batchId || startingBatchWorker.value) return
+  startingBatchWorker.value = true
+  try {
+    await payrollApi.runDocumentBatch(batchId)
+    toast.success(t('payroll.documents.batch_worker_started'))
+    await loadDocumentBatch(true)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.documents.batch_worker_start_failed')))
+  } finally {
+    startingBatchWorker.value = false
+  }
+}
+
 async function retryBatchItem(item: PayrollDocumentBatchItem): Promise<void> {
   const batchId = documentBatch.value?.id
   if (!batchId || retryingBatchItemId.value !== null) return
@@ -1177,6 +1194,29 @@ onBeforeUnmount(() => {
       </div>
       <div class="mt-3 h-2 overflow-hidden rounded-full bg-neutral-200" role="progressbar" :aria-valuemin="0" :aria-valuemax="documentBatch.item_count" :aria-valuenow="documentBatch.succeeded_count">
         <div class="h-full bg-success-500 transition-all" :style="{ width: `${documentBatch.item_count ? Math.round(documentBatch.succeeded_count * 100 / documentBatch.item_count) : 0}%` }" />
+      </div>
+      <div
+        v-if="documentBatch.worker_stalled"
+        class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-warning-500/40 bg-surface p-3"
+        data-test="document-batch-stalled"
+        role="alert"
+      >
+        <div class="min-w-0 text-sm text-warning-800">
+          <p class="font-medium">{{ t('payroll.documents.batch_stalled_title') }}</p>
+          <p class="mt-1 text-xs">{{ t('payroll.documents.batch_stalled_hint') }}</p>
+        </div>
+        <button
+          type="button"
+          :class="[btnFilled('warning'), 'whitespace-nowrap']"
+          :disabled="startingBatchWorker"
+          data-test="document-batch-start-worker"
+          @click="startBatchWorker()"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.play" />
+          </svg>
+          {{ t(startingBatchWorker ? 'payroll.documents.batch_worker_starting' : 'payroll.documents.batch_worker_start') }}
+        </button>
       </div>
       <div v-if="documentBatch.bundle_document_id" class="mt-3 flex flex-wrap items-center gap-3">
         <button

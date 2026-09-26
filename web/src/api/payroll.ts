@@ -6178,6 +6178,9 @@ export interface PayrollDocumentBatch {
   started_at: string | null
   completed_at: string | null
   updated_at: string
+  /** Položka čeká déle než tick workeru — fronta stojí (chybí cron). */
+  worker_stalled?: boolean
+  waiting_since?: string | null
 }
 
 export interface PayrollDocumentBatchItem {
@@ -8962,6 +8965,11 @@ export const payrollApi = {
   documentBatch: (batchId: number) =>
     api.get<{ batch: PayrollDocumentBatch }>(
       `/payroll/documents/batches/${batchId}`,
+    ).then(response => response.data.batch),
+  runDocumentBatch: (batchId: number) =>
+    api.post<{ batch: PayrollDocumentBatch }>(
+      `/payroll/documents/batches/${batchId}/run`,
+      {},
     ).then(response => response.data.batch),
   documentBatchItems: (batchId: number, page?: PayrollPageParams) =>
     api.get<{ items: PayrollDocumentBatchItem[], total: number }>(
