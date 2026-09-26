@@ -175,10 +175,18 @@ final class PayrollRunWorkflow
         }
         if ($command === PayrollRunCommand::APPROVE) {
             if ($context->blockerCount > 0) {
-                throw new \DomainException('Mzdový běh obsahuje blokující validace.');
+                throw new \DomainException(sprintf(
+                    'Mzdový běh obsahuje blokující validace (%d). Seznam s odkazy na místo '
+                    . 'opravy je v kontrolách běhu.',
+                    $context->blockerCount,
+                ));
             }
             if ($context->unresolvedOverrideCount > 0) {
-                throw new \DomainException('Mzdový běh obsahuje nevyřešená varování.');
+                throw new \DomainException(sprintf(
+                    'Mzdový běh obsahuje nevyřešená varování (%d). U každého v kontrolách '
+                    . 'běhu schvalte výjimku s odůvodněním, nebo příčinu opravte.',
+                    $context->unresolvedOverrideCount,
+                ));
             }
         }
         if ($command === PayrollRunCommand::POST && !$context->hasPostingBatch) {

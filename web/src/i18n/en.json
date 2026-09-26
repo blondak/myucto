@@ -2629,6 +2629,11 @@
       "enforcement_withheld": "Enforcement withholding and fee",
       "payable_after": "Payable after enforcement",
       "validations": "Run checks",
+      "approve_blocked": {
+        "title": "The run cannot be approved: {count} blocking checks",
+        "hint": "Approval becomes available once {count} blocking checks are resolved (blockers and warnings without an approved exception). Each has a link to where it is fixed; after fixing, refresh the inputs and calculate the payroll again.",
+        "show": "Show checks"
+      },
       "history": {
         "show": "Show history and changes",
         "hide": "Hide history and changes",

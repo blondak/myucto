@@ -2629,6 +2629,11 @@
       "enforcement_withheld": "Exekuční srážka a paušál",
       "payable_after": "K výplatě po srážce",
       "validations": "Kontroly běhu",
+      "approve_blocked": {
+        "title": "Běh nejde schválit: {count} blokujících kontrol",
+        "hint": "Schválit půjde, až se vyřeší {count} blokujících kontrol (blokátory a varování bez schválené výjimky). U každé je odkaz na místo opravy; po opravě obnovte podklady a spočítejte mzdy znovu.",
+        "show": "Zobrazit kontroly"
+      },
       "history": {
         "show": "Zobrazit historii a změny",
         "hide": "Skrýt historii a změny",

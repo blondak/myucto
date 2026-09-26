@@ -646,6 +646,28 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
   }).sort((a, b) => commandWeight(run, a) - commandWeight(run, b))
 }
 
+/*
+ * Co brání schválení běhu, spočítané z validací, které karta už má.
+ *
+ * Schválení s blokátorem server odmítne — jenže až po půlminutě práce a jen
+ * větou „obsahuje blokující validace", bez seznamu. Tlačítko proto čeká,
+ * dokud jsou blokátory nebo varování bez výjimky, a místo zbytečného pokusu
+ * říká kolik jich je a posune na jejich seznam.
+ */
+function approveBlockerCount(run: PayrollRun): number {
+  return run.validations.filter(validation => validation.severity === 'blocker'
+    || (validation.requires_override && !validation.overridden_at)).length
+}
+
+function commandDisabled(run: PayrollRun, command: PayrollRunCommand): boolean {
+  return command === 'approve' && approveBlockerCount(run) > 0
+}
+
+function showValidations(run: PayrollRun): void {
+  document.querySelector(`[data-testid="payroll-run-${run.id}-validations-section"]`)
+    ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 /** Primární akce vlevo, zrušení běhu vždy až úplně vpravo. */
 function commandWeight(run: PayrollRun, command: PayrollRunCommand): number {
   if (primaryCommand(run) === command) return 0
@@ -1634,13 +1656,18 @@ onMounted(load)
               :data-testid="`payroll-run-${run.id}-${command}`"
               class="cursor-pointer"
               :class="commandClass(run, command)"
-              :disabled="saving"
+              :disabled="saving || commandDisabled(run, command)"
+              :title="commandDisabled(run, command) ? t('payroll.runs.approve_blocked.title', { count: approveBlockerCount(run) }) : undefined"
               @click="runCommand(run, command)"
             >
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path :d="commandIcon(command)" />
               </svg>
               {{ commandLabel(command, run) }}
+              <span
+                v-if="commandDisabled(run, command)"
+                :data-testid="`payroll-run-${run.id}-approve-blocker-count`"
+              >({{ approveBlockerCount(run) }})</span>
             </button>
             <button
               v-if="canWrite && run.can_delete"
@@ -1667,6 +1694,21 @@ onMounted(load)
           class="mt-3 max-w-3xl text-sm text-neutral-600"
         >
           {{ commandHint(run) }}
+        </p>
+        <p
+          v-if="visibleCommands(run).includes('approve') && commandDisabled(run, 'approve')"
+          :data-testid="`payroll-run-${run.id}-approve-blocked`"
+          class="mt-2 flex max-w-3xl flex-wrap items-center gap-x-2 gap-y-1 text-sm text-warning-800"
+        >
+          <span>{{ t('payroll.runs.approve_blocked.hint', { count: approveBlockerCount(run) }) }}</span>
+          <button
+            type="button"
+            class="cursor-pointer whitespace-nowrap font-medium text-primary-600 hover:underline"
+            :data-testid="`payroll-run-${run.id}-approve-blocked-show`"
+            @click="showValidations(run)"
+          >
+            {{ t('payroll.runs.approve_blocked.show') }}
+          </button>
         </p>
         <!--
           Otevřená revize počítá ze snímku, který mezitím zastaral. Bez tohohle
@@ -1997,7 +2039,11 @@ onMounted(load)
           :person-names="personNames"
         />
 
-        <div v-if="run.validations.length" class="mt-4 space-y-2">
+        <div
+          v-if="run.validations.length"
+          class="mt-4 scroll-mt-24 space-y-2"
+          :data-testid="`payroll-run-${run.id}-validations-section`"
+        >
           <p class="text-sm font-medium text-warning-700">{{ t('payroll.runs.validations') }}</p>
           <!--
             Nesloučené validace chodí po osobách; u 226 lidí by jich tu viselo

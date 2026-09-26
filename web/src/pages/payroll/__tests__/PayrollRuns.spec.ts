@@ -1418,6 +1418,35 @@ describe('PayrollRuns', () => {
     wrapper.unmount()
   })
 
+  it('s blokujícími kontrolami schválení nepustí, řekne kolik jich je a ukáže je', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      revision_id: 40,
+      available_commands: ['calculate', 'review', 'approve', 'cancel'],
+      validations: [
+        validation({ id: 1, severity: 'blocker', code: 'statutory_calculation_manual_review', requires_override: false }),
+        validation({ id: 2, requires_override: true }),
+        validation({ id: 3, requires_override: true, overridden_at: '2026-09-20 10:00:00' }),
+        validation({ id: 4, requires_override: false }),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const approve = wrapper.get('[data-testid="payroll-run-15-approve"]')
+    expect(approve.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="payroll-run-15-approve-blocker-count"]').text()).toBe('(2)')
+    await approve.trigger('click')
+    expect(m.commandRun).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="payroll-run-15-approve-blocked"]').text())
+      .toContain('payroll.runs.approve_blocked.hint')
+    expect(wrapper.find('[data-testid="payroll-run-15-validations-section"]').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
   // ── Obnovení podkladů otevřené revize (B2) ──────────────────────────────
   //
   // Vstup schválený po zámku přepočet nevidí; schválení by ho tiše vynechalo.
