@@ -2713,6 +2713,7 @@
         },
         "step_sentence": "{base} × {rate} = {raw}, rounded up to whole crowns {rounded}",
         "step_not_recorded": "This revision did not record the intermediate step.",
+        "employee_per_relationship": "Concurrent participating relationships: the contribution is calculated and rounded for each relationship separately.",
         "working_pensioner_discount": "Working pensioner discount",
         "part_time_discount": "Part-time employment discount",
         "employer_title": "Employer contribution",
@@ -4919,13 +4920,34 @@
         "searching_municipality": "Searching municipalities…",
         "no_municipality": "No matching municipality",
         "external_codebook_verified": "Municipality and country are checked against pinned codebooks verified through {date}.",
-        "temporary_assignment_blocker": "A yes temporary assignment still requires the identity of at least one user. JMHZ cannot be prepared until it is completed.",
+        "temporary_assignment_blocker": "For a temporary assignment, enter the user undertaking the employee is assigned to (company ID, or a foreign entity) on the employment card after saving. Without it the monthly report cannot be filed.",
         "state": {
           "unverified": "Not filled in (counts as no)",
           "no": "No",
           "yes": "Yes"
         },
         "default_no_hint": "Unanswered questions count as “no” in the monthly CSSZ report and never block the submission. They stay unanswered in the records so it remains visible that nobody confirmed them explicitly; the submission notes that the value came from reading the default state."
+      },
+      "jmhz_assignment_user": {
+        "kind": "User undertaking the employee is assigned to",
+        "select_kind": "Choose the kind of user",
+        "kind_ico": "Czech company or entrepreneur (company ID)",
+        "kind_foreign": "Foreign entity",
+        "hint": "For a temporary assignment the monthly CSSZ report requires the user's identification (check 103).",
+        "ico": "User's company ID (IČO)",
+        "ico_hint": "Eight digits; the check digit is validated.",
+        "country": "Country of the foreign user",
+        "foreign_id": "Registration number of the foreign user",
+        "foreign_id_hint": "The report accepts exactly eight digits.",
+        "name": "Name of the foreign user"
+      },
+      "jmhz_risk_categorization": {
+        "label": "JMHZ risk categorisation",
+        "select": "Choose the kind of work",
+        "code_6": "Paramedic work (6)",
+        "code_7": "Company fire unit member work (7)",
+        "hint": "For this rate the monthly report states the risk work hours and the risk categorisation code; the hours are the hours worked in the relationship.",
+        "auto_category_4": "For risk employment the monthly report states risk categorisation 1 (category 4 work) and the risk work hours from the hours worked in the relationship."
       },
       "jmhz_questions": {
         "title": "Questions for the monthly CSSZ report",
@@ -5426,6 +5448,12 @@
         "jmhz_apz_instrument_code": "JMHZ APZ instrument",
         "jmhz_functional_benefits_status": "JMHZ functional benefits",
         "jmhz_temporary_assignment_status": "JMHZ temporary assignment",
+        "jmhz_assignment_user_kind": "JMHZ assignment user kind",
+        "jmhz_assignment_user_ico": "JMHZ user company ID",
+        "jmhz_assignment_user_country_code": "JMHZ foreign user country",
+        "jmhz_assignment_user_foreign_id": "JMHZ foreign user registration number",
+        "jmhz_assignment_user_name": "JMHZ foreign user name",
+        "jmhz_risk_categorization_code": "JMHZ risk categorisation",
         "cz_isco_code": "CZ-ISCO",
         "activity_code": "Activity type",
         "social_insurance_participation": "Social insurance",
@@ -6626,7 +6654,9 @@
           "jmhz_scenario1_earnings_vector_incomplete": "Configure payroll components",
           "jmhz_primary_employment_unresolved": "Choose the main relationship",
           "jmhz_scenario1_whole_czk_required": "Check the payroll run",
-          "jmhz_workplace_codebooks_unverified": "Bulk-fill place of work"
+          "jmhz_workplace_codebooks_unverified": "Bulk-fill place of work",
+          "jmhz_temporary_assignment_user_missing": "Fill in the assignment user",
+          "jmhz_risk_categorization_missing": "Fill in the risk categorisation"
         },
         "jmhz_dry_run_show_xml": "Show XML",
         "jmhz_dry_run_hide_xml": "Hide XML",
@@ -6705,6 +6735,8 @@
           "jmhz_scenario1_deductions_unsupported": "Wage deductions are not supported by this profile yet.",
           "jmhz_scenario1_withholding_tax_unsupported": "Withholding tax is not supported by this profile yet.",
           "jmhz_scenario1_concurrent_participation_unsupported": "In this month the employee has more than one concurrent relationship participating in social insurance and the payroll run result was calculated before contributions were calculated per relationship. Open Payroll → Payroll runs, choose “Open correction” on this month's run, calculate the payroll again, approve the new revision and prepare the report again.",
+          "jmhz_temporary_assignment_user_missing": "The employee is temporarily assigned to a user undertaking (employment agency), but the user is not identified. On the employment card, in the ČSSZ evidence section, enter the user's company ID (IČO), or for a foreign entity its country, registration number and name. Then recalculate the payroll run.",
+          "jmhz_risk_categorization_missing": "The relationship is classified as a paramedic or a member of a company fire unit, but it does not say which of the two. On the employment card, in the Exceptional situations section, choose the “JMHZ risk categorisation”. Then recalculate the payroll run.",
           "jmhz_employee_social_discount_relationship_unresolved": "The working pensioner's social insurance discount cannot be assigned to an employment: the relationship that carries the person's contributions does not participate in insurance or has a different assessment base than the one the discount was calculated from. Check participation of the relationships in Payroll → Payroll runs.",
           "jmhz_employee_social_discount_exclusive": "One employment combines the working pensioner discount with the seasonal social insurance discount. Both cannot be applied at the same time; correct one of them.",
           "jmhz_scenario1_annual_fields_unsupported": "Annual attributes are not supported by this profile yet.",

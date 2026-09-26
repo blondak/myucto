@@ -1925,21 +1925,18 @@ final class JmhzScenario1XmlSerializer
             'jmhz_temporary_assignment_status',
             '10251',
         );
-        if ($assignment) {
-            // Identity uživatele (10252/10457/10492-10494) zmrazené nemáme,
-            // takže by se `docasnePrideleni` nedalo naplnit.
-            $this->invalid(
-                'jmhz_xml_temporary_assignment_unsupported',
-                'Dočasné přidělení zatím serializér nestaví.',
-            );
-        }
         $this->text(
             $dom,
             $node,
             JmhzSchemaCatalog::NS_FORM,
             'form:docasnePrideleniEvidovano',
-            'false',
+            $assignment ? 'true' : 'false',
         );
+        if ($assignment) {
+            // Kontrola 103: s 10251 = ANO právě jedna identifikace uživatele,
+            // IČO (10252), nebo zahraniční osoba (10492 + 10493 + 10494).
+            $node->appendChild($this->temporaryAssignment($dom, $term));
+        }
 
         $values = $this->workSummaryValues($employment);
         $fund = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:fondPracovniDoby');
@@ -1967,6 +1964,60 @@ final class JmhzScenario1XmlSerializer
         $node->appendChild($fund);
 
         return $node;
+    }
+
+    /**
+     * Uživatel dočasného přidělení (§ 43a ZP) podle podmínek vztahu.
+     *
+     * @param array<string,mixed> $term
+     */
+    private function temporaryAssignment(DOMDocument $dom, array $term): DOMElement
+    {
+        $wrapper = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:docasnePrideleni');
+        $user = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:uzivatel');
+        $kind = $term['jmhz_assignment_user_kind'] ?? null;
+        if ($kind === 'ico') {
+            $ico = $this->string($term['jmhz_assignment_user_ico'] ?? null, '10252');
+            if (preg_match('/^[0-9]{8}$/', $ico) !== 1) {
+                $this->invalid(
+                    'jmhz_xml_temporary_assignment_user_invalid',
+                    'IČO uživatele dočasného přidělení musí mít osm číslic.',
+                );
+            }
+            $this->text($dom, $user, JmhzSchemaCatalog::NS_FORM, 'form:ico', $ico);
+        } elseif ($kind === 'foreign') {
+            $foreign = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:zahranicniOsoba');
+            $this->text(
+                $dom,
+                $foreign,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:kodStatu',
+                $this->string($term['jmhz_assignment_user_country_code'] ?? null, '10492'),
+            );
+            $this->text(
+                $dom,
+                $foreign,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:identifikace',
+                $this->string($term['jmhz_assignment_user_foreign_id'] ?? null, '10493'),
+            );
+            $this->text(
+                $dom,
+                $foreign,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:nazev',
+                $this->string($term['jmhz_assignment_user_name'] ?? null, '10494'),
+            );
+            $user->appendChild($foreign);
+        } else {
+            $this->invalid(
+                'jmhz_xml_temporary_assignment_user_invalid',
+                'Dočasné přidělení nemá vyplněného uživatele.',
+            );
+        }
+        $wrapper->appendChild($user);
+
+        return $wrapper;
     }
 
     /** @param array<string,mixed> $employment */
@@ -2013,28 +2064,68 @@ final class JmhzScenario1XmlSerializer
          * rozpad (10269–10274) vyplněný ani nulou. Měsíc celého neplaceného
          * volna nebo PPM proto rozpad vynechá; přijatá hlášení to tak mají.
          */
-        if (($values['overtime_millihours'] ?? null) !== null
+        $risk = $this->object($employment['risk_work'] ?? null);
+        $riskCodes = is_array($risk['categorization_codes'] ?? null)
+            ? array_values($risk['categorization_codes'])
+            : [];
+        $hasOvertime = ($values['overtime_millihours'] ?? null) !== null;
+        if (($hasOvertime || $riskCodes !== [])
             && ($values['worked_millihours'] ?? null) !== 0
         ) {
-            // Kontrola ČSSZ hlídá, že přesčas není vyšší než odpracované
-            // hodiny — je to jejich PODMNOŽINA, ne přičtený čas navíc.
-            $overtime = $this->int($values['overtime_millihours'], '10269');
             $worked = $this->int($values['worked_millihours'] ?? null, '10268');
-            if ($overtime > $worked) {
-                $this->invalid(
-                    'jmhz_xml_overtime_exceeds_worked_hours',
-                    'Přesčasové hodiny nesmějí být vyšší než počet'
-                        . ' odpracovaných hodin.',
+            $breakdown = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:rozpad');
+            if ($hasOvertime) {
+                // Kontrola ČSSZ hlídá, že přesčas není vyšší než odpracované
+                // hodiny — je to jejich PODMNOŽINA, ne přičtený čas navíc.
+                $overtime = $this->int($values['overtime_millihours'], '10269');
+                if ($overtime > $worked) {
+                    $this->invalid(
+                        'jmhz_xml_overtime_exceeds_worked_hours',
+                        'Přesčasové hodiny nesmějí být vyšší než počet'
+                            . ' odpracovaných hodin.',
+                    );
+                }
+                $this->text(
+                    $dom,
+                    $breakdown,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:prescas',
+                    $this->decimal($overtime, 3, '10269'),
                 );
             }
-            $breakdown = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:rozpad');
-            $this->text(
-                $dom,
-                $breakdown,
-                JmhzSchemaCatalog::NS_FORM,
-                'form:prescas',
-                $this->decimal($overtime, 3, '10269'),
-            );
+            if ($riskCodes !== []) {
+                /*
+                 * IN29: hodiny v rizikovém zaměstnání, práci záchranáře nebo
+                 * člena HZS podniku (10273) a kategorizace rizika (10274).
+                 * Zařazení platí pro celý vztah, takže hodiny jsou odpracované
+                 * hodiny vztahu (kontrola 57: nepřekročí 10268). Při nule
+                 * odpracovaných hodin se blok nevykazuje (kontrola 282).
+                 */
+                $riskNode = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:riziko');
+                $this->text(
+                    $dom,
+                    $riskNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:hodinyOdpracovanePocet',
+                    $this->decimal($worked, 3, '10273'),
+                );
+                foreach ($riskCodes as $code) {
+                    if (!in_array($code, ['1', '6', '7'], true)) {
+                        $this->invalid(
+                            'jmhz_xml_risk_categorization_invalid',
+                            'Kategorizace rizika musí být z číselníku ČSSZ (1, 6 nebo 7).',
+                        );
+                    }
+                    $this->text(
+                        $dom,
+                        $riskNode,
+                        JmhzSchemaCatalog::NS_FORM,
+                        'form:kategorizaceRizika',
+                        $code,
+                    );
+                }
+                $breakdown->appendChild($riskNode);
+            }
             $hours->appendChild($breakdown);
         }
         $node->appendChild($hours);

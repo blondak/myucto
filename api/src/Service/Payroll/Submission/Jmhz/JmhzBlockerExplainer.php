@@ -84,12 +84,18 @@ final class JmhzBlockerExplainer
         /*
          * Souběh účastných vztahů výpočet počítá po vztazích a hlášení ho
          * vykáže. Nález zbývá jen u revize spočítané dřív, jejíž výsledek
-         * nese pojistné jen za osobu — ten se odhadem dělit nesmí.
+         * nese pojistné jen za osobu, a ten se odhadem dělit nesmí.
          */
         'jmhz_scenario1_concurrent_participation_unsupported' => 'Zaměstnanec má v měsíci víc souběžných pracovních '
             . 'vztahů účastných na sociálním pojištění (nebo pojistné bez účastného vztahu) a výsledek mzdového '
             . 'běhu byl spočítaný dřív, než se pojistné počítalo po vztazích. Nese pojistné jen za osobu, a to se '
             . 'na formuláře vztahů odhadem dělit nesmí.',
+        'jmhz_temporary_assignment_user_missing' => 'Zaměstnanec je dočasně přidělen k uživateli '
+            . '(agentura práce), ale u pracovního vztahu chybí identifikace uživatele. Hlášení ji '
+            . 'u přidělení vyžaduje (kontrola 103 ČSSZ).',
+        'jmhz_risk_categorization_missing' => 'Vztah je zařazený jako zdravotnický záchranář nebo člen '
+            . 'jednotky HZS podniku (§ 5a odst. 1 písm. b) ZPSZ), ale chybí, o který z obou případů '
+            . 'jde. Hlášení ho vykazuje jako kategorizaci rizika (6 nebo 7).',
         'jmhz_scenario1_annual_fields_unsupported' => 'Chybí povinné roční údaje JMHZ.',
         'jmhz_annual_evidence_source_missing' => 'Chybí zmrazená roční evidence zaměstnance pro předchozí zdaňovací období.',
         'jmhz_annual_request_source_missing' => 'Není doloženo, zda zaměstnanec požádal o roční zúčtování.',
@@ -229,8 +235,14 @@ final class JmhzBlockerExplainer
         'jmhz_primary_employment_unresolved' => 'Otevřete Mzdy → Zaměstnanci a na kartě pracovního vztahu '
             . 'označte právě jeden vztah osoby jako hlavní; ostatní souběžné vztahy nechte jako vedlejší.',
         'jmhz_scenario1_concurrent_participation_unsupported' => 'Otevřete Mzdy → Mzdové běhy, u běhu '
-            . 'tohoto měsíce zvolte „Otevřít opravu" a mzdy spočítejte znovu — výpočet pojistné rozdělí '
+            . 'tohoto měsíce zvolte „Otevřít opravu" a mzdy spočítejte znovu, výpočet pojistné rozdělí '
             . 'po vztazích. Novou revizi schvalte a hlášení připravte znovu.',
+        'jmhz_temporary_assignment_user_missing' => 'Otevřete Mzdy → Zaměstnanci, na kartě pracovního '
+            . 'vztahu v části Evidence pro ČSSZ u dočasného přidělení vyplňte IČO uživatele, nebo u '
+            . 'zahraniční osoby stát, registrační číslo a název; uložte a přepočítejte mzdový běh.',
+        'jmhz_risk_categorization_missing' => 'Otevřete Mzdy → Zaměstnanci, na kartě pracovního vztahu '
+            . 'v části Výjimečné situace vyberte u „Kategorizace rizika pro JMHZ" práci zdravotnického '
+            . 'záchranáře, nebo člena jednotky HZS podniku; uložte a přepočítejte mzdový běh.',
         'jmhz_employee_social_discount_relationship_unresolved' => 'Otevřete Mzdy → Mzdové běhy a zkontrolujte '
             . 'účast pracovních vztahů na sociálním pojištění; nesedí-li, hlášení za tento měsíc podejte ručně '
             . 'přes ePortál ČSSZ.',

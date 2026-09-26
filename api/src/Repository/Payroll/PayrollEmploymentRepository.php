@@ -1415,6 +1415,11 @@ final class PayrollEmploymentRepository
                     terms.jmhz_apz_instrument_code,
                     terms.jmhz_functional_benefits_status,
                     terms.jmhz_temporary_assignment_status,
+                    terms.jmhz_assignment_user_kind,
+                    terms.jmhz_assignment_user_ico,
+                    terms.jmhz_assignment_user_country_code,
+                    terms.jmhz_assignment_user_foreign_id,
+                    terms.jmhz_assignment_user_name,
                     terms.jmhz_orchard_discount_eligible,
                     terms.jmhz_specific_legal_fact_applies,
                     terms.jmhz_ozp_employment_support_applies,
@@ -1428,6 +1433,7 @@ final class PayrollEmploymentRepository
                     terms.a1_certificate_until, terms.risky_work,
                     terms.social_employer_rate_category,
                     terms.social_employer_rate_category_evidence,
+                    terms.jmhz_risk_categorization_code,
                     terms.social_part_time_discount_reason,
                     terms.social_part_time_discount_evidence,
                     terms.social_part_time_discount_notified_on,
@@ -1617,8 +1623,12 @@ final class PayrollEmploymentRepository
                  social_part_time_discount_reason, social_part_time_discount_evidence,
                  social_part_time_discount_notified_on,
                  tax_declaration_signed,
-                 is_primary, change_reason, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 is_primary, change_reason, created_by,
+                 jmhz_assignment_user_kind, jmhz_assignment_user_ico,
+                 jmhz_assignment_user_country_code, jmhz_assignment_user_foreign_id,
+                 jmhz_assignment_user_name, jmhz_risk_categorization_code)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                     ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -1667,6 +1677,12 @@ final class PayrollEmploymentRepository
             (int) $data['is_primary'],
             $data['change_reason'],
             $userId,
+            $data['jmhz_assignment_user_kind'] ?? null,
+            $data['jmhz_assignment_user_ico'] ?? null,
+            $data['jmhz_assignment_user_country_code'] ?? null,
+            $data['jmhz_assignment_user_foreign_id'] ?? null,
+            $data['jmhz_assignment_user_name'] ?? null,
+            $data['jmhz_risk_categorization_code'] ?? null,
         ]);
     }
 
@@ -1707,6 +1723,9 @@ final class PayrollEmploymentRepository
                  social_part_time_discount_reason = ?, social_part_time_discount_evidence = ?,
                  social_part_time_discount_notified_on = ?,
                  tax_declaration_signed = ?, is_primary = ?, change_reason = ?,
+                 jmhz_assignment_user_kind = ?, jmhz_assignment_user_ico = ?,
+                 jmhz_assignment_user_country_code = ?, jmhz_assignment_user_foreign_id = ?,
+                 jmhz_assignment_user_name = ?, jmhz_risk_categorization_code = ?,
                  row_version = row_version + 1
                WHERE supplier_id = ? AND id = ?'
         )->execute([
@@ -1753,6 +1772,12 @@ final class PayrollEmploymentRepository
             (int) $data['tax_declaration_signed'],
             (int) $data['is_primary'],
             $data['change_reason'],
+            $data['jmhz_assignment_user_kind'] ?? null,
+            $data['jmhz_assignment_user_ico'] ?? null,
+            $data['jmhz_assignment_user_country_code'] ?? null,
+            $data['jmhz_assignment_user_foreign_id'] ?? null,
+            $data['jmhz_assignment_user_name'] ?? null,
+            $data['jmhz_risk_categorization_code'] ?? null,
             $supplierId,
             $termsId,
         ]);

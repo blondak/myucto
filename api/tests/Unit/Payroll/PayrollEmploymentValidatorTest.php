@@ -421,6 +421,69 @@ final class PayrollEmploymentValidatorTest extends TestCase
         self::assertNull($validated['social_employer_rate_category_evidence']);
     }
 
+    /**
+     * Záchranář a HZS podniku (písm. b) se v JMHZ 10274 rozlišují kódem 6 a 7.
+     * U jiné kategorie kód nemá co dělat a zahodí se.
+     */
+    public function testRiskCategorizationCodeBelongsOnlyToRescueCategory(): void
+    {
+        $input = $this->terms();
+        unset($input['risky_work']);
+        $input['social_employer_rate_category'] = 'rescue_and_company_fire_service';
+        $input['jmhz_risk_categorization_code'] = '6';
+        self::assertSame('6', $this->validator()->terms($input)['jmhz_risk_categorization_code']);
+
+        $input['jmhz_risk_categorization_code'] = '';
+        self::assertNull($this->validator()->terms($input)['jmhz_risk_categorization_code']);
+
+        $input['social_employer_rate_category'] = 'risk_employment';
+        $input['jmhz_risk_categorization_code'] = '7';
+        self::assertNull($this->validator()->terms($input)['jmhz_risk_categorization_code']);
+
+        $input['social_employer_rate_category'] = 'rescue_and_company_fire_service';
+        $input['jmhz_risk_categorization_code'] = '1';
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Kategorizace rizika');
+        $this->validator()->terms($input);
+    }
+
+    /**
+     * Uživatel dočasného přidělení (JMHZ 10252 / 10492–10494) se ukládá jen
+     * u přidělení „ano"; IČO musí projít kontrolním součtem.
+     */
+    public function testTemporaryAssignmentUserIsValidatedAndClearedWithoutAssignment(): void
+    {
+        $input = $this->terms();
+        $input['jmhz_temporary_assignment_status'] = 'yes';
+        $input['jmhz_assignment_user_kind'] = 'ico';
+        $input['jmhz_assignment_user_ico'] = '0000 0027';
+        $validated = $this->validator()->terms($input);
+        self::assertSame('ico', $validated['jmhz_assignment_user_kind']);
+        self::assertSame('00000027', $validated['jmhz_assignment_user_ico']);
+        self::assertNull($validated['jmhz_assignment_user_name']);
+
+        $foreign = $this->terms();
+        $foreign['jmhz_temporary_assignment_status'] = 'yes';
+        $foreign['jmhz_assignment_user_kind'] = 'foreign';
+        $foreign['jmhz_assignment_user_country_code'] = 'de';
+        $foreign['jmhz_assignment_user_foreign_id'] = '12345678';
+        $foreign['jmhz_assignment_user_name'] = 'Synthetische Nutzer GmbH';
+        $validated = $this->validator()->terms($foreign);
+        self::assertSame('DE', $validated['jmhz_assignment_user_country_code']);
+        self::assertNull($validated['jmhz_assignment_user_ico']);
+
+        $input['jmhz_temporary_assignment_status'] = 'no';
+        $cleared = $this->validator()->terms($input);
+        self::assertNull($cleared['jmhz_assignment_user_kind']);
+        self::assertNull($cleared['jmhz_assignment_user_ico']);
+
+        $input['jmhz_temporary_assignment_status'] = 'yes';
+        $input['jmhz_assignment_user_ico'] = '00000028';
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('kontrolní součet');
+        $this->validator()->terms($input);
+    }
+
     public function testUnknownRateCategoryIsRejected(): void
     {
         $input = $this->terms();

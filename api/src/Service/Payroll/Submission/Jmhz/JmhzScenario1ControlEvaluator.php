@@ -209,12 +209,12 @@ final class JmhzScenario1ControlEvaluator
             1, 3, 4, 8, 9, 10, 11, 12, 13, 20, 23, 29, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
             60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
             103, 109, 110, 112, 113, 114, 118, 121, 124, 127, 128, 129, 131, 132, 134, 135, 137, 138, 142, 144, 145, 152,
-            150, 151, 153, 154, 155, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
+            150, 151, 153, 154, 155, 156, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
             204, 207, 208, 209, 213, 215,
             191, 192, 193, 211, 216, 227, 229, 232, 233, 235,
             236, 237, 240, 244, 248, 251,
             253, 255, 260, 265, 267, 269, 270, 271, 272, 273, 275, 282, 283, 284, 286,
-            296, 297, 298, 299, 300, 301, 303, 304, 306, 307, 309, 310, 315, 328, 329, 330, 332,
+            296, 297, 298, 299, 300, 301, 302, 303, 304, 306, 307, 309, 310, 315, 328, 329, 330, 332,
             335, 341, 342, 343, 354, 355,
         ];
     }
@@ -342,6 +342,7 @@ final class JmhzScenario1ControlEvaluator
             45 => $this->shorterWorkingTimeWithinLimit($projection),
             137 => $this->discountReasonRequired($projection),
             138 => $this->shorterWorkingTimeRequiredForReason($projection),
+            156 => $this->riskCategorizationFromCodebook($projection),
             158 => $this->discountReasonFromCodebook($projection),
             188 => $this->employerDiscountOnlyOnOneEmployment($projection),
             191 => $this->annualSettlementMonths($projection),
@@ -489,6 +490,7 @@ final class JmhzScenario1ControlEvaluator
             194 => $this->decemberOnlyEmployerAnnual($projection),
             152, 335 => $this->workplaceMunicipality($projection),
             153 => $this->workplaceCountry($projection),
+            302 => $this->temporaryAssignmentUserCountry($projection),
             154 => $this->activePolicyInstrument($projection),
             155 => $this->activityFromCodebook($projection),
             159 => $this->activePolicyInstrumentRequired($projection),
@@ -922,6 +924,45 @@ final class JmhzScenario1ControlEvaluator
 
             return null;
         });
+    }
+
+    /**
+     * Kontrola 156: kategorizace rizika (10274) musí být z číselníku
+     * `kategorizace_rizika` (1 = kategorie 4, 6 = zdravotnický záchranář,
+     * 7 = člen jednotky HZS podniku). Atribut se může opakovat, ověřuje se
+     * každý výskyt.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function riskCategorizationFromCodebook(JmhzAttributeProjection $projection): array
+    {
+        return $this->againstCodebook(
+            $projection,
+            function (JmhzAttributeProjection $p): array {
+                $catalog = $this->codebooks;
+                if ($catalog === null) {
+                    return [JmhzControlVerdict::unverifiable(
+                        JmhzAttributeProjection::PART_FORM,
+                        'Číselník kategorizace rizika není k dispozici.',
+                    )];
+                }
+
+                return $this->perForm(
+                    $p,
+                    static function (JmhzAttributeScope $form) use ($catalog): ?string {
+                        foreach ($form->all('10274') as $occurrence) {
+                            try {
+                                $catalog->requireValue('kategorizace_rizika', (string) $occurrence->value);
+                            } catch (JmhzCodebookValueException | JmhzCodebookUnavailableException $exception) {
+                                return $exception->getMessage();
+                            }
+                        }
+
+                        return null;
+                    },
+                );
+            },
+        );
     }
 
     /**
@@ -1670,9 +1711,25 @@ final class JmhzScenario1ControlEvaluator
         );
     }
 
-    /** @return list<JmhzControlVerdict> */
-    private function checkWorkplaceCountry(JmhzAttributeProjection $projection): array
+    /**
+     * Kontrola 302: stát zahraničního uživatele dočasného přidělení (10492)
+     * z číselníku států; tentýž číselník jako u státu pracoviště (153).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function temporaryAssignmentUserCountry(JmhzAttributeProjection $projection): array
     {
+        return $this->againstCodebook(
+            $projection,
+            fn (JmhzAttributeProjection $p): array => $this->checkWorkplaceCountry($p, '10492'),
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function checkWorkplaceCountry(
+        JmhzAttributeProjection $projection,
+        string $attributeId = '10231',
+    ): array {
         $catalog = $this->externalCodebooks;
         if ($catalog === null) {
             return [JmhzControlVerdict::unverifiable(
@@ -1685,8 +1742,8 @@ final class JmhzScenario1ControlEvaluator
 
         return $this->perForm(
             $projection,
-            static function (JmhzAttributeScope $form) use ($catalog, $validOn): ?string {
-                $code = $form->value('10231');
+            static function (JmhzAttributeScope $form) use ($catalog, $validOn, $attributeId): ?string {
+                $code = $form->value($attributeId);
                 if ($code === null) {
                     return null;
                 }

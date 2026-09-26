@@ -274,7 +274,7 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
      * Souběh dvou účastných vztahů: měsíční hlášení vykazuje 10370 na
      * formuláři každého vztahu a kontrola 118 ČSSZ chce 7,1 % z jeho 10477
      * zaokrouhleno nahoru. Pojistné osoby je proto součet pojistného vztahů,
-     * ne jedno zaokrouhlení z úhrnu — a stejně tak sleva pracujícího
+     * ne jedno zaokrouhlení z úhrnu. Stejně tak sleva pracujícího
      * důchodce (pokyny MPSV k 10487: u každého zaměstnání samostatně).
      */
     public function testConcurrentParticipatingRelationshipsRoundEmployeeContributionPerRelationship(): void

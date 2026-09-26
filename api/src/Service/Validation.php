@@ -111,7 +111,7 @@ final class Validation
      * 7 číslic s váhami 8..2, zbytek po 11 (a); kontrolní číslice: a=0 → 1, a=1 → 0,
      * jinak 11-a. Volá se až po ověření, že $ic je přesně 8 číslic.
      */
-    private static function icChecksumValid(string $ic): bool
+    public static function icChecksumValid(string $ic): bool
     {
         $digits = array_map('intval', str_split($ic));
         $sum = 0;

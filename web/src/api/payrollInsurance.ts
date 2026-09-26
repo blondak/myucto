@@ -101,6 +101,15 @@ export interface PayrollEmployerSocialCategory {
   contribution_step: PayrollInsuranceStep | null
 }
 
+export interface PayrollSocialRelationshipStep {
+  relationship_id: string
+  capped_assessment_base_minor_units: number
+  before_discount_minor: number
+  working_pensioner_discount_minor: number
+  contribution_step: PayrollInsuranceStep | null
+  discount_step: PayrollInsuranceStep | null
+}
+
 export interface PayrollSocialBreakdown {
   available: true
   unavailable_reason: null
@@ -124,6 +133,12 @@ export interface PayrollSocialBreakdown {
     discount_step: PayrollInsuranceStep | null
     working_pensioner_discount_minor: number | null
     contribution_minor: number | null
+    /**
+     * Souběh účastných vztahů: pojistné se zaokrouhluje po vztazích (JMHZ
+     * kontrola 118) a krok výpočtu nese každý vztah. Prázdné, když stačí
+     * `contribution_step` osoby. Starší odpověď klíč nenese.
+     */
+    relationships?: PayrollSocialRelationshipStep[]
   }
   /**
    * `scope: 'company_month'` — pojistné zaměstnavatele není osobní veličina.

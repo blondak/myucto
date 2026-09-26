@@ -1461,11 +1461,26 @@ final class JmhzPreparationSnapshotBuilder
         ) {
             $issues[] = $this->issue('jmhz_apz_instrument_missing', 'employment', $employmentId, ['10233']);
         }
-        if (($term['jmhz_temporary_assignment_status'] ?? null) === 'yes') {
-            $issues[] = $this->issue('jmhz_temporary_assignment_unsupported', 'employment', $employmentId, ['10252', '10457', '10492', '10493', '10494']);
+        /*
+         * Dočasné přidělení (10251 = ANO) potřebuje identifikaci uživatele,
+         * jinak ho kontrola 103 ČSSZ odmítne. Uživatel se vyplňuje na kartě
+         * pracovního vztahu; termín zmrazený dřív, než ho vztah nesl, ho nemá.
+         */
+        if (($term['jmhz_temporary_assignment_status'] ?? null) === 'yes'
+            && !in_array($term['jmhz_assignment_user_kind'] ?? null, ['ico', 'foreign'], true)
+        ) {
+            $issues[] = $this->issue('jmhz_temporary_assignment_user_missing', 'employment', $employmentId, ['10252', '10492', '10493', '10494']);
         }
-        if (($term['risky_work'] ?? null) === true) {
-            $issues[] = $this->issue('jmhz_risky_work_unsupported', 'employment', $employmentId, ['10273', '10274']);
+        /*
+         * Riziková práce a záchranáři/HZS podniku (§ 5a odst. 1 písm. b, c):
+         * hodiny 10273 jsou odpracované hodiny vztahu a kód 10274 plyne ze
+         * sazbové kategorie: u písm. c) je to vždy 1 (kategorie 4), u písm. b)
+         * musí účetní vybrat 6 nebo 7.
+         */
+        if (($term['social_employer_rate_category'] ?? null) === 'rescue_and_company_fire_service'
+            && !in_array($term['jmhz_risk_categorization_code'] ?? null, ['6', '7'], true)
+        ) {
+            $issues[] = $this->issue('jmhz_risk_categorization_missing', 'employment', $employmentId, ['10274']);
         }
 
         return $defaultInterpretations;

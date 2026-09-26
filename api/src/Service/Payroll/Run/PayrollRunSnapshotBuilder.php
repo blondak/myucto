@@ -464,6 +464,14 @@ final class PayrollRunSnapshotBuilder
                         (string) $row['jmhz_functional_benefits_status'],
                     'jmhz_temporary_assignment_status' =>
                         (string) $row['jmhz_temporary_assignment_status'],
+                    // Uživatel dočasného přidělení (JMHZ 10252, 10492–10494).
+                    'jmhz_assignment_user_kind' => $row['jmhz_assignment_user_kind'] ?? null,
+                    'jmhz_assignment_user_ico' => $row['jmhz_assignment_user_ico'] ?? null,
+                    'jmhz_assignment_user_country_code' =>
+                        $row['jmhz_assignment_user_country_code'] ?? null,
+                    'jmhz_assignment_user_foreign_id' =>
+                        $row['jmhz_assignment_user_foreign_id'] ?? null,
+                    'jmhz_assignment_user_name' => $row['jmhz_assignment_user_name'] ?? null,
                     'jmhz_orchard_discount_eligible' =>
                         (bool) $row['jmhz_orchard_discount_eligible'],
                     'jmhz_specific_legal_fact_applies' =>
@@ -488,6 +496,9 @@ final class PayrollRunSnapshotBuilder
                         (string) $row['social_employer_rate_category'],
                     'social_employer_rate_category_evidence' =>
                         $row['social_employer_rate_category_evidence'],
+                    // Kategorizace rizika JMHZ 10274 u písm. b) (6/7).
+                    'jmhz_risk_categorization_code' =>
+                        $row['jmhz_risk_categorization_code'] ?? null,
                     'social_part_time_discount_reason' =>
                         (string) $row['social_part_time_discount_reason'],
                     'social_part_time_discount_evidence' =>
@@ -1028,6 +1039,11 @@ final class PayrollRunSnapshotBuilder
                     term.jmhz_apz_instrument_code,
                     term.jmhz_functional_benefits_status,
                     term.jmhz_temporary_assignment_status,
+                    term.jmhz_assignment_user_kind,
+                    term.jmhz_assignment_user_ico,
+                    term.jmhz_assignment_user_country_code,
+                    term.jmhz_assignment_user_foreign_id,
+                    term.jmhz_assignment_user_name,
                     term.jmhz_orchard_discount_eligible,
                     term.jmhz_specific_legal_fact_applies,
                     term.jmhz_ozp_employment_support_applies,
@@ -1041,6 +1057,7 @@ final class PayrollRunSnapshotBuilder
                     term.risky_work,
                     term.social_employer_rate_category,
                     term.social_employer_rate_category_evidence,
+                    term.jmhz_risk_categorization_code,
                     term.social_part_time_discount_reason,
                     term.social_part_time_discount_evidence,
                     term.social_part_time_discount_notified_on,

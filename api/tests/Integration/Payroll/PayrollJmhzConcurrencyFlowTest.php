@@ -4,16 +4,20 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
+use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService;
+use MyInvoice\Service\Payroll\PayrollEmploymentTermsBody;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Response;
 
 /**
  * Souběh účastných vztahů, riziková práce, dočasné přidělení a odložený příjem
- * v měsíčním hlášení JMHZ — celou cestou účetní od evidence přes běh až po
+ * v měsíčním hlášení JMHZ, celou cestou účetní od evidence přes běh až po
  * testovací sestavení XML s XSD a kontrolami katalogu.
  */
 #[Group('integration')]
@@ -106,6 +110,182 @@ final class PayrollJmhzConcurrencyFlowTest extends TestCase
                 $social['employee']['relationships'],
             ),
         );
+    }
+
+    /**
+     * Rizikové zaměstnání (§ 5a odst. 1 písm. c) ZPSZ) zadané na kartě
+     * vztahu: hlášení vykáže základ pod písm. c), hodiny rizikové práce
+     * (10273) a kategorizaci rizika 1 (10274) bez dalšího zadávání.
+     */
+    public function testRiskyEmploymentReportsRiskHoursAndCategorization(): void
+    {
+        $person = $this->hire('Radek Rizikový', 'male', '1980-03-14');
+        $this->correctTerms($person['employment_id'], [
+            'social_employer_rate_category' => 'risk_employment',
+            'social_employer_rate_category_evidence' => 'document:synthetic-risk-category-4',
+        ]);
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->pay($person, 4_000_000);
+
+        $xml = $this->submission('risky');
+
+        self::assertStringContainsString('<form:pismenoC>40000</form:pismenoC>', $xml);
+        self::assertSame(1, preg_match('#<form:odpracovaneHodiny><form:pocet>([0-9.]+)</form:pocet>#', $xml, $worked));
+        self::assertStringContainsString(
+            "<form:riziko><form:hodinyOdpracovanePocet>{$worked[1]}</form:hodinyOdpracovanePocet>"
+                . '<form:kategorizaceRizika>1</form:kategorizaceRizika></form:riziko>',
+            $xml,
+        );
+    }
+
+    /**
+     * Záchranář / HZS podniku (písm. b) potřebuje u 10274 rozlišit 6 a 7.
+     * Bez volby hlášení zastaví nález s odkazem na kartu vztahu; po volbě
+     * v podmínkách vztahu se kód promítne.
+     */
+    public function testRescueWorkerRequiresCategorizationChoice(): void
+    {
+        $person = $this->hire('Hana Hasičská', 'female', '1985-08-08');
+        $this->correctTerms($person['employment_id'], [
+            'social_employer_rate_category' => 'rescue_and_company_fire_service',
+            'social_employer_rate_category_evidence' => 'document:synthetic-company-fire-unit',
+        ]);
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->pay($person, 4_000_000);
+
+        $blocked = $this->preparationIssues('rescue-missing');
+        self::assertContains('jmhz_risk_categorization_missing', $blocked);
+    }
+
+    public function testRescueWorkerWithCompanyFireUnitCode(): void
+    {
+        $person = $this->hire('Petr Hasič', 'male', '1983-02-02');
+        $this->correctTerms($person['employment_id'], [
+            'social_employer_rate_category' => 'rescue_and_company_fire_service',
+            'social_employer_rate_category_evidence' => 'document:synthetic-company-fire-unit',
+            'jmhz_risk_categorization_code' => '7',
+        ]);
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->pay($person, 4_000_000);
+
+        $xml = $this->submission('rescue');
+
+        self::assertStringContainsString('<form:pismenoB>40000</form:pismenoB>', $xml);
+        self::assertStringContainsString('<form:kategorizaceRizika>7</form:kategorizaceRizika>', $xml);
+    }
+
+    /**
+     * Agentura práce: dočasné přidělení k uživateli s IČO (10251 = ANO,
+     * 10252). Kontrola 103 chce u přidělení identifikaci uživatele.
+     */
+    public function testTemporaryAssignmentReportsUserIdentification(): void
+    {
+        $person = $this->hire('Agáta Přidělená', 'female', '1992-12-12');
+        $this->correctTerms($person['employment_id'], [
+            'jmhz_temporary_assignment_status' => 'yes',
+            'jmhz_assignment_user_kind' => 'ico',
+            'jmhz_assignment_user_ico' => '00000027',
+        ]);
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->pay($person, 4_000_000);
+
+        $xml = $this->submission('temporary-assignment');
+
+        self::assertStringContainsString(
+            '<form:docasnePrideleniEvidovano>true</form:docasnePrideleniEvidovano>'
+                . '<form:docasnePrideleni><form:uzivatel><form:ico>00000027</form:ico></form:uzivatel></form:docasnePrideleni>',
+            $xml,
+        );
+    }
+
+    public function testTemporaryAssignmentToForeignUser(): void
+    {
+        $person = $this->hire('Olga Zahraniční', 'female', '1990-05-05');
+        $this->correctTerms($person['employment_id'], [
+            'jmhz_temporary_assignment_status' => 'yes',
+            'jmhz_assignment_user_kind' => 'foreign',
+            'jmhz_assignment_user_country_code' => 'DE',
+            'jmhz_assignment_user_foreign_id' => '12345678',
+            'jmhz_assignment_user_name' => 'Synthetische Nutzer GmbH',
+        ]);
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->pay($person, 4_000_000);
+
+        $xml = $this->submission('temporary-assignment-foreign');
+
+        self::assertStringContainsString(
+            '<form:uzivatel><form:zahranicniOsoba><form:kodStatu>DE</form:kodStatu>'
+                . '<form:identifikace>12345678</form:identifikace>'
+                . '<form:nazev>Synthetische Nutzer GmbH</form:nazev></form:zahranicniOsoba></form:uzivatel>',
+            $xml,
+        );
+    }
+
+    public function testTemporaryAssignmentWithoutUserStopsWithGuidance(): void
+    {
+        $person = $this->hire('Bedřich Nepřiřazený', 'male', '1987-07-07');
+        $this->correctTerms($person['employment_id'], [
+            'jmhz_temporary_assignment_status' => 'yes',
+        ]);
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->pay($person, 4_000_000);
+
+        self::assertContains(
+            'jmhz_temporary_assignment_user_missing',
+            $this->preparationIssues('temporary-assignment-missing'),
+        );
+    }
+
+    /**
+     * Oprava platné verze podmínek tak, jak ji posílá karta vztahu: celá
+     * verze z evidence a změněná pole.
+     *
+     * @param array<string,mixed> $changes
+     */
+    private function correctTerms(int $employmentId, array $changes): void
+    {
+        $repository = $this->container->get(PayrollEmploymentRepository::class);
+        $action = $this->container->get(PayrollEmploymentAction::class);
+        self::assertInstanceOf(PayrollEmploymentRepository::class, $repository);
+        self::assertInstanceOf(PayrollEmploymentAction::class, $action);
+        $current = $repository->currentTerms($this->supplierId, $employmentId);
+        self::assertIsArray($current);
+        $rowVersion = (int) $this->scalar(
+            'SELECT row_version FROM payroll_employments WHERE supplier_id = ? AND id = ?',
+            [$this->supplierId, $employmentId],
+        );
+        $body = $changes
+            + PayrollEmploymentTermsBody::fromCurrent($current, 'Syntetická oprava podmínek')
+            + ['row_version' => $rowVersion];
+        // Karta vztahu `risky_work` neposílá, odvodí se ze sazbové kategorie.
+        unset($body['risky_work']);
+        $response = $action->correctTerms(
+            $this->request('PATCH', "/api/payroll/employments/{$employmentId}/terms/current")
+                ->withParsedBody($body),
+            new Response(),
+            ['id' => (string) $employmentId],
+        );
+        self::assertSame(200, $response->getStatusCode(), 'Zaseknutí: karta vztahu. ' . (string) $response->getBody());
+    }
+
+    /**
+     * Běh a příprava hlášení; vrací kódy nálezů přípravy (kde se účetní
+     * zastaví a kam ji hlášení pošle).
+     *
+     * @return list<string>
+     */
+    private function preparationIssues(string $scenario): array
+    {
+        $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, "concurrency-{$scenario}");
+        self::assertSame([], $run['blockers'], 'Zaseknutí: výpočet mzdy. ' . CanonicalJson::encode($run['blockers']));
+        self::assertNotNull($run['approved']);
+        $preparation = $this->prepareJmhz((int) $run['approved']->revision['id'], "concurrency-{$scenario}");
+        self::assertSame(201, $preparation['status'], CanonicalJson::encode($preparation['body']));
+
+        return array_values(array_map(
+            static fn (array $issue): string => (string) ($issue['code'] ?? ''),
+            $preparation['body']['issues'] ?? [],
+        ));
     }
 
     /**

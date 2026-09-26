@@ -375,6 +375,11 @@ function hydrate(employment: PayrollEmployment) {
     jmhz_apz_instrument_code: terms.jmhz_apz_instrument_code,
     jmhz_functional_benefits_status: terms.jmhz_functional_benefits_status,
     jmhz_temporary_assignment_status: terms.jmhz_temporary_assignment_status,
+    jmhz_assignment_user_kind: terms.jmhz_assignment_user_kind ?? null,
+    jmhz_assignment_user_ico: terms.jmhz_assignment_user_ico ?? null,
+    jmhz_assignment_user_country_code: terms.jmhz_assignment_user_country_code ?? null,
+    jmhz_assignment_user_foreign_id: terms.jmhz_assignment_user_foreign_id ?? null,
+    jmhz_assignment_user_name: terms.jmhz_assignment_user_name ?? null,
     jmhz_orchard_discount_eligible: terms.jmhz_orchard_discount_eligible ?? false,
     jmhz_specific_legal_fact_applies: terms.jmhz_specific_legal_fact_applies ?? false,
     jmhz_ozp_employment_support_applies: terms.jmhz_ozp_employment_support_applies ?? false,
@@ -390,6 +395,7 @@ function hydrate(employment: PayrollEmployment) {
     a1_certificate_until: terms.a1_certificate_until,
     social_employer_rate_category: terms.social_employer_rate_category ?? 'ordinary',
     social_employer_rate_category_evidence: terms.social_employer_rate_category_evidence ?? null,
+    jmhz_risk_categorization_code: terms.jmhz_risk_categorization_code ?? null,
     social_part_time_discount_reason: terms.social_part_time_discount_reason ?? 'none',
     social_part_time_discount_evidence: terms.social_part_time_discount_evidence ?? null,
     social_part_time_discount_notified_on: terms.social_part_time_discount_notified_on ?? null,
@@ -450,6 +456,26 @@ void loadPayrollJmhzOptions().then((loaded) => {
 function onApzStatusChange() {
   if (termsForm.value?.jmhz_apz_contribution_status !== 'yes' && termsForm.value) {
     termsForm.value.jmhz_apz_instrument_code = null
+  }
+}
+
+/** Bez přidělení se uživatel neukládá; server by ho stejně zahodil. */
+function onTemporaryAssignmentChange() {
+  const form = termsForm.value
+  if (form === null || form.jmhz_temporary_assignment_status === 'yes') return
+  form.jmhz_assignment_user_kind = null
+  onAssignmentUserKindChange()
+}
+
+/** Pole druhého druhu uživatele se čistí, aby se neposlala osiřelá. */
+function onAssignmentUserKindChange() {
+  const form = termsForm.value
+  if (form === null) return
+  if (form.jmhz_assignment_user_kind !== 'ico') form.jmhz_assignment_user_ico = null
+  if (form.jmhz_assignment_user_kind !== 'foreign') {
+    form.jmhz_assignment_user_country_code = null
+    form.jmhz_assignment_user_foreign_id = null
+    form.jmhz_assignment_user_name = null
   }
 }
 
@@ -1395,12 +1421,49 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.jmhz_evidence.temporary_assignment') }}
-                <select v-model="termsForm.jmhz_temporary_assignment_status" :disabled="!canEditTerms || busy" :class="INPUT">
+                <select v-model="termsForm.jmhz_temporary_assignment_status" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-temporary-assignment" @change="onTemporaryAssignmentChange">
                   <option v-for="state in ['unverified','no','yes']" :key="state" :value="state">{{ t(`payroll.people.jmhz_evidence.state.${state}`) }}</option>
                 </select>
               </label>
             </div>
-            <p v-if="termsForm.jmhz_temporary_assignment_status === 'yes'" class="mt-2 text-xs text-warning-700">{{ t('payroll.people.jmhz_evidence.temporary_assignment_blocker') }}</p>
+            <!--
+              Dočasné přidělení (agentura práce): hlášení chce u 10251 = ANO
+              identifikaci uživatele (kontrola 103): IČO, nebo zahraniční osobu.
+            -->
+            <div v-if="termsForm.jmhz_temporary_assignment_status === 'yes'" :class="[GRID, 'mt-3']" data-test="jmhz-assignment-user">
+              <label :class="FIELD" data-a1-field="jmhz_assignment_user_kind">
+                {{ t('payroll.people.jmhz_assignment_user.kind') }}
+                <select v-model="termsForm.jmhz_assignment_user_kind" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-assignment-user-kind" @change="onAssignmentUserKindChange">
+                  <option :value="null" disabled>{{ t('payroll.people.jmhz_assignment_user.select_kind') }}</option>
+                  <option value="ico">{{ t('payroll.people.jmhz_assignment_user.kind_ico') }}</option>
+                  <option value="foreign">{{ t('payroll.people.jmhz_assignment_user.kind_foreign') }}</option>
+                </select>
+                <span :class="HINT">{{ t('payroll.people.jmhz_assignment_user.hint') }}</span>
+              </label>
+              <label v-if="termsForm.jmhz_assignment_user_kind === 'ico'" :class="FIELD">
+                {{ t('payroll.people.jmhz_assignment_user.ico') }}
+                <input v-model="termsForm.jmhz_assignment_user_ico" inputmode="numeric" maxlength="8" pattern="[0-9]{8}" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-assignment-user-ico">
+                <span :class="HINT">{{ t('payroll.people.jmhz_assignment_user.ico_hint') }}</span>
+              </label>
+              <template v-if="termsForm.jmhz_assignment_user_kind === 'foreign'">
+                <label :class="FIELD">
+                  {{ t('payroll.people.jmhz_assignment_user.country') }}
+                  <select v-model="termsForm.jmhz_assignment_user_country_code" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-assignment-user-country">
+                    <option :value="null" disabled>—</option>
+                    <option v-for="country in (jmhzOptions?.countries ?? []).filter(item => item.code !== 'CZ')" :key="country.code" :value="country.code">{{ country.code }} · {{ country.label }}</option>
+                  </select>
+                </label>
+                <label :class="FIELD">
+                  {{ t('payroll.people.jmhz_assignment_user.foreign_id') }}
+                  <input v-model="termsForm.jmhz_assignment_user_foreign_id" inputmode="numeric" maxlength="8" pattern="[0-9]{8}" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-assignment-user-foreign-id">
+                  <span :class="HINT">{{ t('payroll.people.jmhz_assignment_user.foreign_id_hint') }}</span>
+                </label>
+                <label :class="[FIELD, 'sm:col-span-2']">
+                  {{ t('payroll.people.jmhz_assignment_user.name') }}
+                  <input v-model="termsForm.jmhz_assignment_user_name" maxlength="100" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-assignment-user-name">
+                </label>
+              </template>
+            </div>
           </fieldset>
 
           <!-- 3. Pojištění a daň -->
@@ -1465,6 +1528,22 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                 <input v-model="termsForm.social_employer_rate_category_evidence" maxlength="190" :disabled="!canEditTerms || busy" :class="INPUT" data-test="social-employer-rate-category-evidence">
                 <span :class="HINT">{{ t('payroll.people.social_employer_rate_category_evidence_hint') }}</span>
               </label>
+              <!--
+                Kategorizace rizika pro JMHZ (10274): u písm. b) rozlišuje
+                záchranáře (6) a HZS podniku (7), u písm. c) je vždy 1.
+              -->
+              <label v-if="termsForm.social_employer_rate_category === 'rescue_and_company_fire_service'" :class="[FIELD, 'sm:col-span-2']" data-a1-field="jmhz_risk_categorization_code">
+                {{ t('payroll.people.jmhz_risk_categorization.label') }}
+                <select v-model="termsForm.jmhz_risk_categorization_code" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-risk-categorization">
+                  <option :value="null" disabled>{{ t('payroll.people.jmhz_risk_categorization.select') }}</option>
+                  <option value="6">{{ t('payroll.people.jmhz_risk_categorization.code_6') }}</option>
+                  <option value="7">{{ t('payroll.people.jmhz_risk_categorization.code_7') }}</option>
+                </select>
+                <span :class="HINT">{{ t('payroll.people.jmhz_risk_categorization.hint') }}</span>
+              </label>
+              <p v-if="termsForm.social_employer_rate_category === 'risk_employment'" :class="[HINT, 'sm:col-span-2']" data-test="jmhz-risk-categorization-auto">
+                {{ t('payroll.people.jmhz_risk_categorization.auto_category_4') }}
+              </p>
             </div>
 
             <div :class="GRID">

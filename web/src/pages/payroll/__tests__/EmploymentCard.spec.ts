@@ -696,6 +696,58 @@ describe('EmploymentCard', () => {
     expect(payload?.social_part_time_discount_evidence).toBeNull()
   })
 
+  /**
+   * JMHZ 10274: záchranář (6) a HZS podniku (7) sdílí sazbu písm. b), hlášení
+   * je ale rozlišuje. U písm. c) je kód pevný a karta jen řekne, co se vykáže.
+   */
+  it('u písm. b) se zeptá na kategorizaci rizika a pošle ji, u písm. c) jen vysvětlí', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = await mountCard()
+
+    expect(wrapper.find('[data-test="jmhz-risk-categorization"]').exists()).toBe(false)
+    await wrapper.get('[data-test="social-employer-rate-category"]').setValue('risk_employment')
+    expect(wrapper.find('[data-test="jmhz-risk-categorization"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="jmhz-risk-categorization-auto"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="social-employer-rate-category"]').setValue('rescue_and_company_fire_service')
+    await wrapper.get('[data-test="jmhz-risk-categorization"]').setValue('7')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    const payload = vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2]
+    expect(payload?.social_employer_rate_category).toBe('rescue_and_company_fire_service')
+    expect(payload?.jmhz_risk_categorization_code).toBe('7')
+  })
+
+  /**
+   * Dočasné přidělení (agentura práce): hlášení chce uživatele (kontrola 103).
+   * Karta se na něj ptá až u „ano" a pole druhého druhu uživatele vyčistí.
+   */
+  it('u dočasného přidělení se zeptá na uživatele a pošle jen pole zvoleného druhu', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = await mountCard()
+
+    expect(wrapper.find('[data-test="jmhz-assignment-user"]').exists()).toBe(false)
+    await wrapper.get('[data-test="jmhz-temporary-assignment"]').setValue('yes')
+    await wrapper.get('[data-test="jmhz-assignment-user-kind"]').setValue('foreign')
+    await wrapper.get('[data-test="jmhz-assignment-user-foreign-id"]').setValue('12345678')
+    await wrapper.get('[data-test="jmhz-assignment-user-name"]').setValue('Synthetische Nutzer GmbH')
+    await wrapper.get('[data-test="jmhz-assignment-user-kind"]').setValue('ico')
+    await wrapper.get('[data-test="jmhz-assignment-user-ico"]').setValue('00000027')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    const payload = vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2]
+    expect(payload?.jmhz_temporary_assignment_status).toBe('yes')
+    expect(payload?.jmhz_assignment_user_kind).toBe('ico')
+    expect(payload?.jmhz_assignment_user_ico).toBe('00000027')
+    expect(payload?.jmhz_assignment_user_foreign_id).toBeNull()
+    expect(payload?.jmhz_assignment_user_name).toBeNull()
+
+    await wrapper.get('[data-test="jmhz-temporary-assignment"]').setValue('no')
+    expect(wrapper.find('[data-test="jmhz-assignment-user"]').exists()).toBe(false)
+  })
+
   it('řídí 10502 podle serverové politiky a pro S nastaví pevné Žádné', async () => {
     const wrapper = await mountCard()
 

@@ -30,6 +30,11 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelatio
  *   jmhz_apz_instrument_code:?string,
  *   jmhz_functional_benefits_status:string,
  *   jmhz_temporary_assignment_status:string,
+ *   jmhz_assignment_user_kind:?string,
+ *   jmhz_assignment_user_ico:?string,
+ *   jmhz_assignment_user_country_code:?string,
+ *   jmhz_assignment_user_foreign_id:?string,
+ *   jmhz_assignment_user_name:?string,
  *   jmhz_orchard_discount_eligible:bool,
  *   jmhz_specific_legal_fact_applies:bool,
  *   jmhz_ozp_employment_support_applies:bool,
@@ -46,6 +51,7 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelatio
  *   risky_work:bool,
  *   social_employer_rate_category:string,
  *   social_employer_rate_category_evidence:?string,
+ *   jmhz_risk_categorization_code:?string,
  *   social_part_time_discount_reason:string,
  *   social_part_time_discount_evidence:?string,
  *   social_part_time_discount_notified_on:?string,
@@ -309,7 +315,9 @@ final class PayrollEmploymentValidator
         }
         $functionalBenefits = $this->verifiedState($input, 'jmhz_functional_benefits_status');
         $temporaryAssignment = $this->verifiedState($input, 'jmhz_temporary_assignment_status');
+        $assignmentUser = $this->temporaryAssignmentUser($input, $temporaryAssignment);
         [$rateCategory, $rateCategoryEvidence] = $this->socialEmployerRateCategory($input);
+        $riskCategorization = $this->riskCategorizationCode($input, $rateCategory);
         [$discountReason, $discountEvidence, $discountNotifiedOn] =
             $this->socialPartTimeDiscount($input);
         $activityCode = $this->optionalCode($input, 'activity_code', 32);
@@ -361,6 +369,7 @@ final class PayrollEmploymentValidator
             'jmhz_apz_instrument_code' => $apzCode,
             'jmhz_functional_benefits_status' => $functionalBenefits,
             'jmhz_temporary_assignment_status' => $temporaryAssignment,
+            ...$assignmentUser,
             'jmhz_orchard_discount_eligible' => $this->requiredBool(
                 $input,
                 'jmhz_orchard_discount_eligible',
@@ -396,6 +405,7 @@ final class PayrollEmploymentValidator
             'risky_work' => $rateCategory === 'risk_employment',
             'social_employer_rate_category' => $rateCategory,
             'social_employer_rate_category_evidence' => $rateCategoryEvidence,
+            'jmhz_risk_categorization_code' => $riskCategorization,
             'social_part_time_discount_reason' => $discountReason,
             'social_part_time_discount_evidence' => $discountEvidence,
             'social_part_time_discount_notified_on' => $discountNotifiedOn,
@@ -622,6 +632,112 @@ final class PayrollEmploymentValidator
         $evidence = $this->optionalText($input, 'social_employer_rate_category_evidence', 190);
 
         return [$category, $category === 'ordinary' ? null : $evidence];
+    }
+
+    /**
+     * Kategorizace rizika pro JMHZ (10274) u zdravotnického záchranáře a člena
+     * jednotky HZS podniku. Obojí je § 5a odst. 1 písm. b) ZPSZ, ale hlášení
+     * je rozlišuje kódem 6 a 7 číselníku ČSSZ „Kategorizace rizika". U písm.
+     * c) je kód jednoznačný (1 = práce kategorie 4) a neukládá se.
+     *
+     * Chybějící kód NEBLOKUJE uložení (účetní smí vztah zařadit dřív, než ví,
+     * o který případ jde); hlášení ho pak vyžádá nálezem s odkazem na kartu.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function riskCategorizationCode(array $input, string $rateCategory): ?string
+    {
+        $code = trim($this->inputString($input['jmhz_risk_categorization_code'] ?? ''));
+        if ($rateCategory !== 'rescue_and_company_fire_service') {
+            return null;
+        }
+        if ($code === '') {
+            return null;
+        }
+        if (!in_array($code, ['6', '7'], true)) {
+            throw new \InvalidArgumentException(
+                'Kategorizace rizika pro JMHZ musí být 6 (zdravotnický záchranář)'
+                . ' nebo 7 (člen jednotky HZS podniku).',
+            );
+        }
+
+        return $code;
+    }
+
+    /**
+     * Uživatel, ke kterému agentura práce zaměstnance dočasně přidělila
+     * (§ 43a ZP), JMHZ 10252, resp. 10492 až 10494.
+     *
+     * Kontrola 103 ČSSZ chce u 10251 = ANO buď IČO uživatele, nebo zahraniční
+     * osobu se státem, identifikací a názvem. Bez přidělení se údaje mažou,
+     * aby v podmínkách nezůstal osiřelý uživatel. Nevyplněný uživatel
+     * uložení nebrání, hlášení ho vyžádá nálezem.
+     *
+     * @param array<string,mixed> $input
+     * @return array{
+     *   jmhz_assignment_user_kind:?string,
+     *   jmhz_assignment_user_ico:?string,
+     *   jmhz_assignment_user_country_code:?string,
+     *   jmhz_assignment_user_foreign_id:?string,
+     *   jmhz_assignment_user_name:?string
+     * }
+     */
+    private function temporaryAssignmentUser(array $input, string $status): array
+    {
+        $empty = [
+            'jmhz_assignment_user_kind' => null,
+            'jmhz_assignment_user_ico' => null,
+            'jmhz_assignment_user_country_code' => null,
+            'jmhz_assignment_user_foreign_id' => null,
+            'jmhz_assignment_user_name' => null,
+        ];
+        $kind = trim($this->inputString($input['jmhz_assignment_user_kind'] ?? ''));
+        if ($status !== 'yes' || $kind === '') {
+            return $empty;
+        }
+        if ($kind === 'ico') {
+            $ico = preg_replace('/\s+/', '', $this->inputString($input['jmhz_assignment_user_ico'] ?? ''));
+            if (!is_string($ico) || !self::validIco($ico)) {
+                throw new \InvalidArgumentException(
+                    'IČO uživatele u dočasného přidělení musí mít osm číslic a platný kontrolní součet.',
+                );
+            }
+
+            return ['jmhz_assignment_user_kind' => 'ico', 'jmhz_assignment_user_ico' => $ico] + $empty;
+        }
+        if ($kind !== 'foreign') {
+            throw new \InvalidArgumentException('Druh uživatele u dočasného přidělení není podporován.');
+        }
+        $country = strtoupper(trim($this->inputString($input['jmhz_assignment_user_country_code'] ?? '')));
+        $foreignId = preg_replace('/\s+/', '', $this->inputString($input['jmhz_assignment_user_foreign_id'] ?? ''));
+        $name = $this->optionalText($input, 'jmhz_assignment_user_name', 100);
+        if (preg_match('/^[A-Z]{2}$/', $country) !== 1 || $country === 'CZ') {
+            throw new \InvalidArgumentException(
+                'Zahraniční uživatel u dočasného přidělení potřebuje dvoupísmenný kód cizího státu.',
+            );
+        }
+        if (!is_string($foreignId) || preg_match('/^[0-9]{8}$/', $foreignId) !== 1) {
+            throw new \InvalidArgumentException(
+                'Registrační číslo zahraničního uživatele musí mít pro JMHZ přesně osm číslic.',
+            );
+        }
+        if ($name === null) {
+            throw new \InvalidArgumentException('Doplňte název zahraničního uživatele.');
+        }
+
+        return [
+            'jmhz_assignment_user_kind' => 'foreign',
+            'jmhz_assignment_user_ico' => null,
+            'jmhz_assignment_user_country_code' => $country,
+            'jmhz_assignment_user_foreign_id' => $foreignId,
+            'jmhz_assignment_user_name' => $name,
+        ];
+    }
+
+    private static function validIco(string $ico): bool
+    {
+        return preg_match('/^[0-9]{8}$/', $ico) === 1
+            && \MyInvoice\Service\Validation::icChecksumValid($ico);
     }
 
     /**

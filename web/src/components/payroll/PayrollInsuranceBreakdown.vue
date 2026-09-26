@@ -317,14 +317,24 @@ watch(
           <dl class="space-y-2 text-sm">
             <div class="flex flex-wrap justify-between gap-2 border-b border-neutral-100 pb-2">
               <dt class="text-neutral-600">{{ t('payroll.runs.insurance.employee_rate') }}</dt>
-              <dd class="text-right font-medium tabular-nums" data-testid="social-employee-step">
+              <dd v-if="social.employee.contribution_step || !(social.employee.relationships ?? []).length" class="text-right font-medium tabular-nums" data-testid="social-employee-step">
                 {{ social.employee.contribution_step
                   ? stepSentence(social.employee.contribution_step, social.employee.before_discount_minor)
                   : t('payroll.runs.insurance.step_not_recorded') }}
               </dd>
+              <dd v-else class="min-w-0 text-right text-sm" data-testid="social-employee-relationship-steps">
+                <span class="block text-xs text-neutral-500">{{ t('payroll.runs.insurance.employee_per_relationship') }}</span>
+                <span
+                  v-for="relationship in (social.employee.relationships ?? []).filter(row => row.contribution_step !== null)"
+                  :key="relationship.relationship_id"
+                  class="block font-medium tabular-nums"
+                >
+                  {{ stepSentence(relationship.contribution_step!, relationship.before_discount_minor) }}
+                </span>
+              </dd>
             </div>
             <div
-              v-if="social.employee.discount_step"
+              v-if="social.employee.discount_step || (social.employee.working_pensioner_discount_minor ?? 0) > 0"
               class="flex flex-wrap justify-between gap-2 border-b border-neutral-100 pb-2"
             >
               <dt class="text-neutral-600">{{ t('payroll.runs.insurance.working_pensioner_discount') }}</dt>

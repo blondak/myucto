@@ -544,6 +544,11 @@ final class JmhzScenario1DocumentResolver
                     ],
                     'selector' => $employment['scenario_resolution'] ?? null,
                     'term' => $employment['term'] ?? null,
+                    'risk_work' => $this->riskWork(
+                        $employment['term'] ?? null,
+                        $employmentId,
+                        $blockers,
+                    ),
                     // Doklad, že se nevyplněné „ano/ne" vyložilo jako „ne".
                     // Bez něj serializér nic nedomýšlí (viz
                     // JmhzScenario1XmlSerializer::tristate()).
@@ -1237,7 +1242,7 @@ final class JmhzScenario1DocumentResolver
      * (10477) na formuláři KAŽDÉHO vztahu. Kontrola 118 chce na každém
      * formuláři 7,1 % z jeho 10477 zaokrouhleno nahoru a kontrola 12 součet
      * 10370 rovný úhrnu 10028 pojistné části. Výpočet proto zaokrouhluje po
-     * vztazích a pojistné osoby je jejich součet — a tady se to jen ověří
+     * vztazích a pojistné osoby je jejich součet; tady se to jen ověří
      * a přiřadí formulářům. Nic se nedělí odhadem.
      *
      * `null` = výsledek pojistné po vztazích nenese (revize zmrazená dřív).
@@ -1306,6 +1311,49 @@ final class JmhzScenario1DocumentResolver
         }
 
         return $result;
+    }
+
+    /**
+     * Riziková práce, práce zdravotnického záchranáře a člena jednotky HZS
+     * podniku (JMHZ 10273/10274, interakce IN29).
+     *
+     * Zdrojem je sazbová kategorie vztahu podle § 5a odst. 1 ZPSZ, tatáž,
+     * podle které se vyměřovací základ vykazuje pod 10479 (písm. b) nebo 10480
+     * (písm. c). Kategorizace rizika 10274 z ní plyne: písm. c) = 1 (práce
+     * zařazená do kategorie 4), písm. b) = 6 (záchranář) nebo 7 (HZS podniku)
+     * podle volby na kartě vztahu. Hodiny 10273 jsou odpracované hodiny vztahu
+     * (10268), protože zařazení platí pro celý vztah; kontrola 57 hlídá, že je
+     * nepřekročí.
+     *
+     * `null` = běžná sazba, blok se nevykazuje.
+     *
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @return array{categorization_codes:list<string>}|null
+     */
+    private function riskWork(mixed $term, ?int $employmentId, array &$blockers): ?array
+    {
+        $values = $this->object($term);
+        $category = $values['social_employer_rate_category']
+            ?? (($values['risky_work'] ?? false) === true ? 'risk_employment' : 'ordinary');
+        if ($category === 'risk_employment') {
+            return ['categorization_codes' => ['1']];
+        }
+        if ($category !== 'rescue_and_company_fire_service') {
+            return null;
+        }
+        $code = $values['jmhz_risk_categorization_code'] ?? null;
+        if (!in_array($code, ['6', '7'], true)) {
+            $blockers[] = $this->blocker(
+                'jmhz_risk_categorization_missing',
+                'employment',
+                $employmentId,
+                ['10274'],
+            );
+
+            return null;
+        }
+
+        return ['categorization_codes' => [$code]];
     }
 
     /**
