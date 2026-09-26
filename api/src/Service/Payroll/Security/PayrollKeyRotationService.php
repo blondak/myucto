@@ -821,6 +821,22 @@ final class PayrollKeyRotationService
                 'guard' => 'payroll_key_rewrap_eldp_statements',
                 'updated_at' => false,
             ],
+            // Podání předchozím programem (převod PAMICA, nahrané XML hlášení).
+            // Tabulky nejsou append-only, výjimku z triggeru nepotřebují.
+            [
+                'table' => 'payroll_external_jmhz_submissions',
+                'column' => 'payload_ciphertext',
+                'context' => $sealed(PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD),
+                'guard' => null,
+                'updated_at' => true,
+            ],
+            [
+                'table' => 'payroll_external_jmhz_submission_forms',
+                'column' => 'payload_ciphertext',
+                'context' => $sealed(PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD),
+                'guard' => null,
+                'updated_at' => false,
+            ],
         ];
     }
 }

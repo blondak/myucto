@@ -237,6 +237,64 @@ final class PayrollKeyRotationServiceTest extends TestCase
         }
     }
 
+    /**
+     * Podání předchozím programem (převod PAMICA) přibylo souběžně s rotací
+     * klíče; bez vlastního cíle by jeho obsah zůstal navždy pod starým klíčem.
+     */
+    public function testExternalJmhzSubmissionPayloadIsRewrapped(): void
+    {
+        if (!$this->db->hasTable('payroll_external_jmhz_submissions')) {
+            self::markTestSkipped('Chybí tabulka payroll_external_jmhz_submissions (migrace 1901).');
+        }
+        $old = $this->encryption($this->oldKey, []);
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO payroll_external_jmhz_submissions
+                (supplier_id, environment, source, source_key, document_kind, period, submission_type,
+                 status, form_count, payload_ciphertext, payload_hash, payload_sha256)
+             VALUES (?, 'test', 'pamica', 'MH:1', 'monthly', '2026-07', 'R', 'sent', 1, 'x', ?, ?)",
+        )->execute([$this->supplierId, random_bytes(32), str_repeat('a', 64)]);
+        $submissionId = (int) $pdo->lastInsertId();
+        $pdo->prepare('UPDATE payroll_external_jmhz_submissions SET payload_ciphertext = ? WHERE id = ?')->execute([
+            $old->encryptFor('{"hlaseni":"synteticke"}', PayrollSensitiveData::context(
+                PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD,
+                $this->supplierId,
+                $submissionId,
+            )),
+            $submissionId,
+        ]);
+        $pdo->prepare(
+            "INSERT INTO payroll_external_jmhz_submission_forms
+                (supplier_id, submission_id, position, payload_ciphertext, payload_hash, payload_sha256)
+             VALUES (?, ?, 1, 'x', ?, ?)",
+        )->execute([$this->supplierId, $submissionId, random_bytes(32), str_repeat('b', 64)]);
+        $formId = (int) $pdo->lastInsertId();
+        $pdo->prepare('UPDATE payroll_external_jmhz_submission_forms SET payload_ciphertext = ? WHERE id = ?')->execute([
+            $old->encryptFor('{"formular":"synteticky"}', PayrollSensitiveData::context(
+                PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD,
+                $this->supplierId,
+                $formId,
+            )),
+            $formId,
+        ]);
+
+        $service = $this->service($this->encryption($this->newKey, [$this->oldKey]));
+        self::assertSame(7, $service->status($this->supplierId)['stale_total']);
+        $result = $service->rewrapAll($this->supplierId, false);
+        self::assertSame(0, $result['failed'], json_encode($result));
+        self::assertSame(0, $service->status($this->supplierId)['stale_total']);
+
+        $newOnly = $this->encryption($this->newKey, []);
+        self::assertSame('{"hlaseni":"synteticke"}', $newOnly->decryptFor(
+            $this->column('payroll_external_jmhz_submissions', 'payload_ciphertext', $submissionId),
+            PayrollSensitiveData::context(PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD, $this->supplierId, $submissionId),
+        ));
+        self::assertSame('{"formular":"synteticky"}', $newOnly->decryptFor(
+            $this->column('payroll_external_jmhz_submission_forms', 'payload_ciphertext', $formId),
+            PayrollSensitiveData::context(PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD, $this->supplierId, $formId),
+        ));
+    }
+
     public function testLimitStopsEarly(): void
     {
         $service = $this->service($this->encryption($this->newKey, [$this->oldKey]));
