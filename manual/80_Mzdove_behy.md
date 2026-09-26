@@ -155,8 +155,9 @@ daný měsíc, a nic nezapisuje. Ukáže:
   povolení k pobytu nebo práci, cizí legislativa, formulář A1, zahraniční
   pojištění nebo daňový režim, zahraniční údaj v evidenci), chybějící pracovní
   vztah v měsíci nebo vztah ukončený ve schváleném období,
-- osoby bez zdravotní pojišťovny s odkazem na **Importy → JMHZ registrace**;
-  pojišťovnu hromadná akce nikdy nedoplní,
+- osoby bez zdravotní pojišťovny s odkazem na **Zdravotní pojišťovny
+  hromadně** (popis níže); výchozí stav pojišťovnu nezná, takže ji tahle akce
+  sama nedoplní,
 - osoby bez prohlášení poplatníka.
 
 Existující záznam se nikdy nepřepíše ani neukončí. Údaje platí od prvního dne
@@ -175,6 +176,19 @@ doplněné údaje nevezme. Po uložení nabídne dialog další krok podle stavu
 běhu: u konceptu **Spočítat mzdy**, u rozpracovaného běhu **Obnovit
 podklady** (potom spočítejte mzdy), u zrušeného nebo opravného běhu otevření
 nové revize a u schváleného běhu **Vyžádat opravu**.
+
+#### Zdravotní pojišťovny hromadně
+
+Měsíční hlášení JMHZ ani export zaměstnanců ČSSZ kód zdravotní pojišťovny
+nenesou, takže po převzetí z hlášení ji v evidenci nemá nikdo a výpočet
+zdravotního pojištění skončí chybou. Akce **Zdravotní pojišťovny hromadně** je
+na seznamu **Mzdy → Zaměstnanci**; výsledek importu hlášení na ni odkáže sám,
+když někomu pojišťovna chybí. Tabulka vypíše osoby, kterým ve zvoleném měsíci
+trvá pracovní vztah a pojišťovnu nemají. U každé vyberete pojišťovnu a měsíc,
+od kterého platí (výchozí je měsíc nástupu). Volba **Doplnit prázdné** vyplní
+stejnou pojišťovnu všem, kdo ji zatím vybranou nemají. Osoby bez vybrané
+pojišťovny se přeskočí. Zápis jde osobu po osobě do zákonné evidence stejně
+jako na kartě osoby a výsledek ukáže, u koho se uložit nepodařilo a proč.
 
 ### 80.8.2 Hromadné doplnění místa výkonu práce pro JMHZ
 

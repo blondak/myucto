@@ -136,6 +136,8 @@ export interface RegistrationTakeoverRelation {
   /** Čtvrtletí s průměrem, se kterým počítal předchozí program (`Q/RRRR`). */
   average_quarters: string[]
   leave_minutes: number
+  /** Poslední převzaté hlášení vykazuje srážky ze mzdy — převzetí založí úkol na vztahu. */
+  deductions_recorded?: boolean
 }
 
 /** Převzetí historie mezd z hlášení (společná vrstva převzatých mezd). */

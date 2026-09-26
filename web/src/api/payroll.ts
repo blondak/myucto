@@ -883,6 +883,24 @@ export interface PayrollStatutoryBulkResult {
   failed: Array<{ employee_id: number, message: string }>
 }
 
+export interface PayrollHealthInsurerBulkPreview {
+  period_start: string
+  people: Array<{ employee_id: number, full_name: string, suggested_from: string }>
+}
+
+export interface PayrollHealthInsurerAssignment {
+  employee_id: number
+  insurer_code: string
+  /** První den měsíce, od kterého pojišťovna platí (RRRR-MM-DD). */
+  effective_from: string
+}
+
+export interface PayrollHealthInsurerBulkResult {
+  counts: { applied: number, failed: number }
+  applied: number[]
+  failed: Array<{ employee_id: number, message: string }>
+}
+
 export interface PayrollWorkplaceBulkPreviewItem {
   employment_id: number
   employee_id: number
@@ -7384,6 +7402,17 @@ export const payrollApi = {
     api.post<{ result: PayrollStatutoryBulkResult }>(
       '/payroll/statutory-evidence/bulk-defaults/apply',
       payload,
+    ).then(response => response.data.result),
+  /** Osoby s trvajícím vztahem v měsíci, které nemají zdravotní pojišťovnu. */
+  healthInsurerBulkPreview: (periodStart: string) =>
+    api.post<{ preview: PayrollHealthInsurerBulkPreview }>(
+      '/payroll/statutory-evidence/health-insurer-bulk/preview',
+      { period_start: periodStart },
+    ).then(response => response.data.preview),
+  healthInsurerBulkApply: (assignments: PayrollHealthInsurerAssignment[]) =>
+    api.post<{ result: PayrollHealthInsurerBulkResult }>(
+      '/payroll/statutory-evidence/health-insurer-bulk/apply',
+      { assignments },
     ).then(response => response.data.result),
   /** Náhled hromadného doplnění místa výkonu práce pro JMHZ; `employment_ids: null` = všechny vztahy. */
   workplaceBulkPreview: (payload: { period_start: string, employment_ids?: number[] | null }) =>

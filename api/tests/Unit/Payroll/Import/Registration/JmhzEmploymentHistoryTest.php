@@ -144,6 +144,35 @@ final class JmhzEmploymentHistoryTest extends TestCase
         self::assertSame([], $early->employment->leaveTaken);
     }
 
+    /**
+     * Hlášení nese jen příznak srážek, ne jejich výši ani druh. Když ho má
+     * poslední převzatý měsíc, převzetí založí úkol na vztahu; srážka, která
+     * skončila dřív, úkol nezakládá.
+     */
+    public function testDeductionsFlagInTheLastTakenOverMonthBecomesAFollowUp(): void
+    {
+        $row = ['id' => 7, 'code' => 'ZAM-7', 'start_date' => '2026-01-01', 'actual_start_date' => '2026-01-01', 'end_date' => null, 'relation_type' => 'employment'];
+        $ongoing = $this->history([
+            [2026, 1, [$this->a()]],
+            [2026, 2, [$this->a(['deductions_recorded' => true])]],
+        ]);
+        $ended = $this->history([
+            [2026, 1, [$this->a(['deductions_recorded' => true])]],
+            [2026, 2, [$this->a()]],
+        ]);
+
+        self::assertSame(
+            [JmhzPayrollTakeover::DEDUCTIONS_FOLLOW_UP],
+            JmhzPayrollTakeover::record($ongoing, 'ppv:' . self::PPV_A, 3, $row, '2026-09')->employment->followUps,
+        );
+        self::assertSame([], JmhzPayrollTakeover::record($ended, 'ppv:' . self::PPV_A, 3, $row, '2026-09')->employment->followUps);
+        self::assertSame(
+            [],
+            JmhzPayrollTakeover::record($ongoing, 'ppv:' . self::PPV_A, 3, $row, '2026-02')->employment->followUps,
+            'Měsíc, který už počítá MyÚčto, se nepřebírá.',
+        );
+    }
+
     public function testMonthTotalsSplitPersonIncomeAcrossConcurrentEmployments(): void
     {
         $batch = $this->batch([[2026, 3, [

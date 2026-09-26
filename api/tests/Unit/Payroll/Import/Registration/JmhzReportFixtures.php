@@ -68,6 +68,7 @@ final class JmhzReportFixtures
             'standard_fund' => 168_000,
             'agreed_fund' => 168_000,
             'unworked' => [],
+            'deductions_recorded' => false,
         ];
         $childCredit = null;
         if ($o['declaration'] && $o['children'] !== []) {
@@ -88,7 +89,7 @@ final class JmhzReportFixtures
                 'exempt_income_czk' => null,
                 'employer_contributions_czk' => [],
                 'net_income_czk' => (int) round($o['wage'] * 0.78),
-                'deductions_recorded' => false,
+                'deductions_recorded' => $o['deductions_recorded'],
                 'employee_health_czk' => (int) ceil($o['wage'] * 0.045),
                 'employer_health_czk' => (int) ceil($o['wage'] * 0.09),
                 'employee_social_czk' => (int) ceil($o['social_base'] * 0.071),

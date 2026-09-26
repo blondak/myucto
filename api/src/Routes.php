@@ -1497,6 +1497,15 @@ final class Routes
                 '/statutory-evidence/bulk-defaults/apply',
                 [PayrollStatutoryEvidenceBulkDefaultsAction::class, 'apply'],
             );
+            // Hromadné zadání zdravotní pojišťovny (hlášení JMHZ ji nenese).
+            $g->post(
+                '/statutory-evidence/health-insurer-bulk/preview',
+                [\MyInvoice\Action\Payroll\PayrollHealthInsurerBulkAction::class, 'preview'],
+            );
+            $g->post(
+                '/statutory-evidence/health-insurer-bulk/apply',
+                [\MyInvoice\Action\Payroll\PayrollHealthInsurerBulkAction::class, 'apply'],
+            );
             // Hromadné doplnění místa výkonu práce (obec a stát pro JMHZ).
             $g->post(
                 '/employments/workplace-bulk/preview',

@@ -2028,6 +2028,15 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                 <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.send" /></svg>
                 {{ t('payroll.people.card_save.health_notification') }}
               </RouterLink>
+              <RouterLink
+                v-if="item.item_key === 'takeover_deductions_review' && checklistStatus(item) === 'pending'"
+                :to="{ name: 'payroll-enforcement' }"
+                :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
+                data-test="checklist-deductions-open"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                {{ t('payroll.people.checklist_deductions_open') }}
+              </RouterLink>
               <template v-if="item.status === 'pending'">
                 <button type="button" :class="btnOutlineSm('success')" :disabled="busy" @click="setChecklist(item.item_key, item.row_version, 'completed')">{{ t('payroll.people.complete') }}</button>
                 <button type="button" :class="btnOutlineSm('neutral')" :disabled="busy" :data-test="`checklist-na-${item.item_key}`" @click="setChecklist(item.item_key, item.row_version, 'not_applicable')">{{ t('payroll.people.not_applicable') }}</button>

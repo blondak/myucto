@@ -32,6 +32,8 @@ final readonly class PayrollTakeoverEmployment
      *        ze zdroje; položka bez dokladu chybí a zůstane otevřená
      * @param list<array{period:string,minutes:int}> $leaveTaken čerpání dovolené po měsících před
      *        zahájením vedení mezd v MyÚčtu, pro zdroj, který nenese zůstatek (`$leave`), jen čerpání
+     * @param list<string> $followUps úkoly na vztahu, které převzetí zakládá, protože zdroj
+     *        něco dokládá jen příznakem ({@see PayrollTakeoverEmploymentWriter::followUps()})
      */
     public function __construct(
         public string $personalNumber,
@@ -53,5 +55,6 @@ final readonly class PayrollTakeoverEmployment
         public ?string $idPpv = null,
         public array $checklistNotes = [],
         public array $leaveTaken = [],
+        public array $followUps = [],
     ) {}
 }

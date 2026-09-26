@@ -264,8 +264,8 @@ onMounted(loadPreview)
           <p class="mt-1 text-xs">{{ t('payroll.statutory_bulk.health_hint') }}</p>
           <p class="mt-1 text-xs font-medium">{{ namesSummary(preview.health_insurer_missing) }}</p>
           <RouterLink
-            :to="{ name: 'payroll-imports', query: { tab: 'registration' } }"
-            :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
+            :to="{ name: 'payroll-people', query: { bulk: 'health_insurer' } }"
+            :class="[btnOutlineSm('warning'), 'mt-2 inline-flex']"
             data-test="statutory-bulk-health-link"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>

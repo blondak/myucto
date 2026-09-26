@@ -2441,6 +2441,26 @@
       },
       "open_runs": "Open payroll runs"
     },
+    "health_insurer_bulk": {
+      "title": "Health insurers in bulk",
+      "open": "Health insurers in bulk",
+      "intro": "People whose employment lasts in {period} and who have no health insurer in their statutory records. Neither JMHZ reports nor the ČSSZ export carry it; without it the health insurance calculation fails.",
+      "hint": "Choose the insurer and the month from which it applies with this employer (the start month by default). People without a chosen insurer are skipped. It is written to the statutory records just like on the person card.",
+      "fill_label": "Same insurer for everyone without a choice",
+      "fill_action": "Fill empty",
+      "choose": "Choose an insurer",
+      "insurer": "Health insurer",
+      "from": "from",
+      "apply": "Save insurer ({count})",
+      "nothing_selected": "Choose an insurer for at least one person.",
+      "month_required": "Fill in the month from which the insurer applies for the selected people.",
+      "none_missing": "Everyone with an ongoing employment has a health insurer.",
+      "applied_toast": "Insurer saved for {count} people.",
+      "failed_title": "Not saved for {count} people",
+      "load_failed": "Could not load people without a health insurer.",
+      "apply_failed": "Could not save the insurers.",
+      "retry": "Try again"
+    },
     "statutory_bulk": {
       "title": "Fill in default statutory data",
       "intro": "For people without a foreign element, fills in the missing data that follows from having no ties abroad: Czech tax residence, Czech insurance jurisdiction without an A1 form and, for people under 60, the working pensioner discount not claimed. An existing record is never overwritten. The health insurer is never filled in bulk; only the registration or the employee knows it.",
@@ -2469,8 +2489,8 @@
       "excluded_title": "Excluded people ({count})",
       "excluded_hint": "The bulk fill-in writes nothing for them. Enter the data on the person's card.",
       "health_title": "Without a health insurer ({count})",
-      "health_hint": "The bulk fill-in does not write the health insurer. Take it over from the JMHZ registrations or fill it in on the person's card.",
-      "health_link": "Imports → JMHZ registration",
+      "health_hint": "The default state does not know the insurer. Assign it in bulk in a table (person → insurer from month), take it over from REGZEC registrations, or fill it in on the person card.",
+      "health_link": "Health insurers in bulk",
       "declaration_title": "Taxpayer declaration missing ({count})",
       "declaration_label": "Record the missing declarations as not signed ({count} people)",
       "declaration_hint": "Records the state “not signed”. Without a signed declaration neither the taxpayer credit nor other credits apply. Turn this on only when you know the declarations really were not signed.",
@@ -5254,6 +5274,7 @@
       "checklist_open": "Open: {count}",
       "checklist_all_done": "Done",
       "checklist_predecessor_handled": "Handled by the previous payroll software (before payroll started in MyÚčto)",
+      "checklist_deductions_open": "Record deductions",
       "start_estimated": {
         "title": "Start date {start} is only estimated from the earliest taken-over report",
         "hint": "A JMHZ report without a start date yields the insurance start in the earliest reported month. The employment may have started earlier, and the taken-over wages for the earlier months of the year would then be missing for the annual tax settlement and the tax statement. It does not block the payroll run or the monthly report. Check the start date against the contract: if the employment started earlier, import the reports for the missing months (the start moves automatically) or correct the start in the employment terms; if it is correct, confirm it.",
@@ -5743,7 +5764,8 @@
         "enforcement_insolvency_review": "Enforcement and insolvency: notify the court / bailiff within 7 days",
         "later_income_review": "Later-payment review",
         "eldp_submission": "Pension insurance record (ELDP)",
-        "taxable_income_confirmation": "Confirmation of taxable income"
+        "taxable_income_confirmation": "Confirmation of taxable income",
+        "takeover_deductions_review": "Record wage deductions (the taken-over report shows them)"
       },
       "event": {
         "created": "Relationship created",
@@ -5802,7 +5824,8 @@
         "enforcement_insolvency_review": "Deductions review",
         "later_income_review": "Later payment",
         "eldp_submission": "ELDP",
-        "taxable_income_confirmation": "Taxable income confirmation"
+        "taxable_income_confirmation": "Taxable income confirmation",
+        "takeover_deductions_review": "Deductions from taken-over report"
       },
       "termination": {
         "title": "Termination",
@@ -29397,6 +29420,9 @@
         "blocked_count": "Cannot take over: {count}",
         "wage_from": "from {date}",
         "leave_hours": "{hours} h",
+        "deductions_recorded": "The report shows wage deductions — the takeover creates a task on the employment to record them (Payroll → Deductions and enforcement).",
+        "health_missing": "JMHZ reports do not carry the health insurer. Without it the health insurance calculation fails: {count} people do not have one yet.",
+        "health_missing_action": "Assign insurers in bulk",
         "apply_wages": "Take over wages and employment details"
       },
       "operations": {
@@ -29458,6 +29484,7 @@
         "takeover_relations": "Employments: {count}",
         "takeover_skipped": "Not taken over",
         "takeover_counts": {
+          "follow_ups": "Task to record deductions: {count}",
           "monthly_wage": "Agreed wage: {count}",
           "recurring_wage": "Recurring monthly wage: {count}",
           "averages": "Average earnings: {count}",

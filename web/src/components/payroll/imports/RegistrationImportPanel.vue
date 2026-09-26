@@ -18,7 +18,9 @@ import {
   type RegistrationSubmissionType,
   type RegistrationTakeoverStatus,
 } from '@/api/payrollImports'
+import { payrollApi } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
+import { payrollWorkingPeriod } from '@/pages/payroll/payrollComponentsUi'
 import { useToast } from '@/composables/useToast'
 import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import { formatDate, formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
@@ -195,6 +197,22 @@ async function runPreview(options: { keepResult?: boolean; select?: string[] } =
   }
 }
 
+/*
+ * Hlášení JMHZ ani export ČSSZ zdravotní pojišťovnu nenesou. Po zápisu se proto
+ * zeptá, kolik lidí ji nemá, a výsledek nabídne hromadné zadání — jinak by se
+ * na to přišlo až chybou výpočtu v mzdovém běhu.
+ */
+const healthMissing = ref(0)
+
+async function loadHealthMissing() {
+  try {
+    const preview = await payrollApi.healthInsurerBulkPreview(`${payrollWorkingPeriod()}-01`)
+    healthMissing.value = preview.people.length
+  } catch {
+    healthMissing.value = 0
+  }
+}
+
 async function runApply() {
   if (!canApply.value) return
   error.value = ''
@@ -217,6 +235,7 @@ async function runApply() {
       terminations: [...terminations.value],
     })
     result.value = response
+    void loadHealthMissing()
     const summary = response.summary
     if (response.outcome === 'incomplete' && response.unresolved.length > 0) {
       toast.warning(t('payroll_imports.registration.import_review.incomplete_toast', { count: response.unresolved.length }))
@@ -818,6 +837,7 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                   <tr v-for="relation in takeoverRelations" :key="relation.employment_id" class="align-top">
                     <td class="px-3 py-2">
                       <RouterLink :to="{ name: 'payroll-person', params: { id: relation.employee_id } }" class="font-medium text-payroll-600 hover:underline">{{ relation.label }}</RouterLink>
+                      <p v-if="relation.deductions_recorded" class="mt-0.5 text-[11px] text-warning-700" :data-testid="`takeover-deductions-${relation.employment_id}`">{{ t('payroll_imports.registration.takeover.deductions_recorded') }}</p>
                     </td>
                     <td class="whitespace-nowrap px-3 py-2">{{ dateText(relation.start_on) }}</td>
                     <td class="whitespace-nowrap px-3 py-2">{{ dateText(relation.end_on) }}</td>
@@ -838,6 +858,7 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                 <p v-if="relation.monthly_wage_minor !== null" class="text-xs text-neutral-600">{{ t('payroll_imports.registration.takeover.wage_columns.monthly_wage') }}: <strong class="tabular-nums">{{ formatMoneyMinor(relation.monthly_wage_minor) }}</strong></p>
                 <p v-if="relation.average_quarters.length" class="text-xs text-neutral-600">{{ t('payroll_imports.registration.takeover.wage_columns.averages') }}: {{ relation.average_quarters.join(', ') }}</p>
                 <p v-if="relation.leave_minutes > 0" class="text-xs text-neutral-600">{{ t('payroll_imports.registration.takeover.wage_columns.leave') }}: {{ t('payroll_imports.registration.takeover.leave_hours', { hours: formatHours(minutesToHours(relation.leave_minutes), locale) }) }}</p>
+                <p v-if="relation.deductions_recorded" class="mt-1 text-xs text-warning-700">{{ t('payroll_imports.registration.takeover.deductions_recorded') }}</p>
               </article>
             </div>
           </div>
@@ -1026,6 +1047,21 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
             </button>
           </li>
         </ul>
+      </div>
+      <div
+        v-if="healthMissing > 0"
+        class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning-500/40 bg-warning-50 px-4 py-3 text-sm text-warning-800"
+        data-testid="registration-result-health-missing"
+      >
+        <p>{{ t('payroll_imports.registration.takeover.health_missing', { count: healthMissing }) }}</p>
+        <RouterLink
+          :to="{ name: 'payroll-people', query: { bulk: 'health_insurer' } }"
+          :class="[btnOutlineSm('warning'), 'whitespace-nowrap']"
+          data-testid="registration-result-health-missing-link"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+          {{ t('payroll_imports.registration.takeover.health_missing_action') }}
+        </RouterLink>
       </div>
       <template v-if="result.results.length">
         <p class="mt-1 text-sm text-neutral-600">{{ t('payroll_imports.registration.result_summary', result.summary) }}</p>

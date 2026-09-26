@@ -77,6 +77,14 @@ final class PayrollEmploymentRepository
      *
      * @var array<string,list<string>>
      */
+    /**
+     * Úkoly, které nezakládá fáze vztahu, ale převzetí ze zdroje
+     * ({@see ensureFollowUpItem()}).
+     *
+     * @var list<string>
+     */
+    public const FOLLOW_UP_ITEMS = ['takeover_deductions_review'];
+
     private const CHECKLIST_EXCEPTIONS = [
         'partner_dependent' => ['employment_contract'],
         'statutory_body' => ['employment_contract'],
@@ -2183,6 +2191,41 @@ final class PayrollEmploymentRepository
                 $deadline->sourceStatus,
             ]);
         }
+    }
+
+    /**
+     * Úkol na vztahu mimo zákonný checklist fáze — zakládá ho převzetí, když
+     * zdroj něco dokládá jen příznakem. Existující položka (i vyřízená) se
+     * nechává být, takže opakovaný import úkol nevrátí.
+     *
+     * @return bool true = položka vznikla
+     */
+    public function ensureFollowUpItem(
+        int $supplierId,
+        int $employmentId,
+        string $itemKey,
+        string $dueOn,
+        string $note,
+    ): bool {
+        if (!in_array($itemKey, self::FOLLOW_UP_ITEMS, true)) {
+            throw new \InvalidArgumentException("Neznámý úkol na vztahu: {$itemKey}.");
+        }
+        $insert = $this->db->pdo()->prepare(
+            "INSERT IGNORE INTO payroll_employment_checklist_items
+                (supplier_id, employment_id, phase, item_key, due_date,
+                 deadline_ruleset_id, deadline_source, deadline_source_status, note)
+             VALUES (?, ?, 'change', ?, ?, NULL, ?, 'not_derived', ?)"
+        );
+        $insert->execute([
+            $supplierId,
+            $employmentId,
+            $itemKey,
+            $dueOn,
+            'první mzda v MyÚčtu',
+            mb_substr($note, 0, 500),
+        ]);
+
+        return $insert->rowCount() === 1;
     }
 
     /**

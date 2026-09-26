@@ -195,6 +195,7 @@ final class RoutePermissionMap
         // pro víc osob. Náhled je POST (tělo se seznamem osob) a vypisuje osobní
         // údaje celé firmy, proto stejné právo jako zápis.
         ['POST', '#^/api/payroll/statutory-evidence/bulk-defaults/(preview|apply)$#', 'payroll.person.write', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/statutory-evidence/health-insurer-bulk/(preview|apply)$#', 'payroll.person.write', AccessLevel::WRITE],
         // Hromadné doplnění pracoviště — tentýž zápis jako oprava podmínek na
         // kartě vztahu, jen pro víc vztahů. Náhled je POST se seznamem vztahů.
         ['POST', '#^/api/payroll/employments/workplace-bulk/(preview|apply)$#', 'payroll.employment.write', AccessLevel::WRITE],

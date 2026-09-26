@@ -56,6 +56,7 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import DateInput from '@/components/ui/DateInput.vue'
+import PayrollHealthInsurerBulkDialog from '@/components/payroll/PayrollHealthInsurerBulkDialog.vue'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
 import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplaceBulkFillDialog.vue'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
@@ -118,6 +119,8 @@ const canCreatePerson = computed(() => auth.canWrite('payroll.person.write'))
 const statutoryBulkOpen = ref(false)
 const statutoryBulkEffectiveOn = `${payrollWorkingPeriod()}-01`
 const workplaceBulkOpen = ref(false)
+// Po importu hlášení JMHZ (nenese pojišťovnu) sem vede proklik `?bulk=health_insurer`.
+const healthInsurerBulkOpen = ref(route.query.bulk === 'health_insurer')
 const canWriteEmployment = computed(() => auth.canWrite('payroll.employment.write'))
 const canQuickEditPerson = computed(() =>
   auth.canWrite('payroll.person.write')
@@ -1626,6 +1629,17 @@ onMounted(async () => {
             {{ t('payroll.people.statutory_bulk_action') }}
           </button>
           <button
+            v-if="canQuickEditPerson"
+            type="button"
+            class="whitespace-nowrap"
+            :class="btnOutline('warning')"
+            data-test="health-insurer-bulk-open"
+            @click="healthInsurerBulkOpen = true"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
+            {{ t('payroll.health_insurer_bulk.open') }}
+          </button>
+          <button
             v-if="canWriteEmployment"
             type="button"
             class="whitespace-nowrap"
@@ -1655,6 +1669,13 @@ onMounted(async () => {
       :employee-ids="null"
       period-editable
       @close="statutoryBulkOpen = false"
+      @applied="load"
+    />
+
+    <PayrollHealthInsurerBulkDialog
+      v-if="healthInsurerBulkOpen"
+      :period-start="statutoryBulkEffectiveOn"
+      @close="healthInsurerBulkOpen = false"
       @applied="load"
     />
 

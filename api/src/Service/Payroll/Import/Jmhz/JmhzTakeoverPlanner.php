@@ -122,6 +122,7 @@ final class JmhzTakeoverPlanner
                     $employment->averages,
                 ),
                 'leave_minutes' => array_sum(array_column($employment->leaveTaken, 'minutes')),
+                'deductions_recorded' => in_array(JmhzPayrollTakeover::DEDUCTIONS_FOLLOW_UP, $employment->followUps, true),
             ];
         }
 
@@ -170,6 +171,9 @@ final class JmhzTakeoverPlanner
                 'Čerpání dovolené' => fn (): array => $this->absenceWriter->leaveTaken($supplierId, $employmentId, $employment, $userId, $policy),
                 'Skončení vztahu' => fn (): array => $this->employmentWriter->termination(
                     $supplierId, $employmentId, $employment, date('Y-m-d'), null, $userId, $policy,
+                ),
+                'Úkoly na vztahu' => fn (): array => $this->employmentWriter->followUps(
+                    $supplierId, $employmentId, $employment, (string) $start, $policy,
                 ),
             ];
             foreach ($steps as $step => $work) {

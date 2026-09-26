@@ -2441,6 +2441,26 @@
       },
       "open_runs": "Otevřít mzdové běhy"
     },
+    "health_insurer_bulk": {
+      "title": "Zdravotní pojišťovny hromadně",
+      "open": "Zdravotní pojišťovny hromadně",
+      "intro": "Osoby, kterým v období {period} trvá pracovní vztah a v zákonné evidenci nemají zdravotní pojišťovnu. Hlášení JMHZ ani export ČSSZ ji nenesou; bez ní výpočet zdravotního pojištění skončí chybou.",
+      "hint": "Vyberte pojišťovnu a měsíc, od kterého u zaměstnavatele platí (výchozí je měsíc nástupu). Osoby bez vybrané pojišťovny se přeskočí. Zapisuje se do zákonné evidence stejně jako na kartě osoby.",
+      "fill_label": "Stejná pojišťovna všem bez výběru",
+      "fill_action": "Doplnit prázdné",
+      "choose": "Vyberte pojišťovnu",
+      "insurer": "Zdravotní pojišťovna",
+      "from": "od",
+      "apply": "Uložit pojišťovnu ({count})",
+      "nothing_selected": "Vyberte pojišťovnu aspoň u jedné osoby.",
+      "month_required": "U vybraných osob doplňte měsíc, od kterého pojišťovna platí.",
+      "none_missing": "Všechny osoby s trvajícím vztahem mají zdravotní pojišťovnu.",
+      "applied_toast": "Pojišťovna uložena u {count} osob.",
+      "failed_title": "Neuložilo se u {count} osob",
+      "load_failed": "Seznam osob bez pojišťovny se nepodařilo načíst.",
+      "apply_failed": "Pojišťovny se nepodařilo uložit.",
+      "retry": "Zkusit znovu"
+    },
     "statutory_bulk": {
       "title": "Doplnit výchozí zákonné údaje",
       "intro": "Osobám bez cizího prvku doplní chybějící údaje, které plynou z toho, že s cizinou nemají nic společného: daňovou rezidenci v Česku, českou příslušnost k pojištění bez formuláře A1 a u osob mladších 60 let neuplatňování slevy pracujícího důchodce. Existující záznam se nikdy nepřepíše. Zdravotní pojišťovnu hromadně nedoplníme, zná ji jen registrace nebo zaměstnanec.",
@@ -2469,8 +2489,8 @@
       "excluded_title": "Vyřazené osoby ({count})",
       "excluded_hint": "U nich hromadné doplnění nic nezapíše. Údaje zapište na kartě osoby.",
       "health_title": "Bez zdravotní pojišťovny ({count})",
-      "health_hint": "Pojišťovnu hromadné doplnění nezapisuje. Převezměte ji z registrací JMHZ, nebo ji doplňte na kartě osoby.",
-      "health_link": "Importy → JMHZ registrace",
+      "health_hint": "Výchozí stav pojišťovnu nezná. Zadejte ji hromadně v tabulce (osoba → pojišťovna od měsíce), převezměte z registrací REGZEC, nebo ji doplňte na kartě osoby.",
+      "health_link": "Zdravotní pojišťovny hromadně",
       "declaration_title": "Prohlášení poplatníka chybí ({count})",
       "declaration_label": "Zapsat chybějící prohlášení jako nepodepsané ({count} osob)",
       "declaration_hint": "Zapíše stav „nepodepsal“. Bez podepsaného prohlášení se neuplatní sleva na poplatníka ani další slevy. Zapněte jen tehdy, když víte, že prohlášení opravdu nepodepsali.",
@@ -5254,6 +5274,7 @@
       "checklist_open": "Nesplněno: {count}",
       "checklist_all_done": "Hotovo",
       "checklist_predecessor_handled": "Vyřízeno předchozím programem (před začátkem vedení mezd v MyÚčtu)",
+      "checklist_deductions_open": "Zaevidovat srážky",
       "start_estimated": {
         "title": "Nástup {start} je jen odhad z nejstaršího převzatého hlášení",
         "hint": "Hlášení JMHZ bez data nástupu dá jako nástup začátek pojištění v nejstarším hlášeném měsíci. Vztah mohl trvat už dřív a za dřívější měsíce roku by pak chyběly převzaté mzdy pro roční zúčtování a vyúčtování daně. Mzdový běh ani měsíční hlášení to neblokuje. Ověřte nástup podle smlouvy: trval-li vztah dřív, naimportujte hlášení za chybějící měsíce (nástup se posune sám) nebo nástup opravte v podmínkách vztahu; je-li správně, potvrďte ho.",
@@ -5743,7 +5764,8 @@
         "enforcement_insolvency_review": "Exekuce a insolvence: oznámení soudu / exekutorovi do 7 dnů",
         "later_income_review": "Kontrola pozdějšího doplatku",
         "eldp_submission": "Evidenční list důchodového pojištění (ELDP)",
-        "taxable_income_confirmation": "Potvrzení o zdanitelných příjmech"
+        "taxable_income_confirmation": "Potvrzení o zdanitelných příjmech",
+        "takeover_deductions_review": "Zaevidovat srážky ze mzdy (převzaté hlášení je vykazuje)"
       },
       "event": {
         "created": "Vztah založen",
@@ -5793,6 +5815,7 @@
         "health_insurance_registration": "Registrace ZP",
         "social_jmhz_registration": "Registrace ČSSZ / JMHZ",
         "tax_declaration": "Prohlášení k dani",
+        "takeover_deductions_review": "Srážky z převzatého hlášení",
         "contract_amendment": "Dodatek",
         "health_insurance_change": "Změna ZP",
         "social_jmhz_change": "Změna ČSSZ / JMHZ",
@@ -29397,6 +29420,9 @@
         "blocked_count": "Nelze převzít: {count}",
         "wage_from": "od {date}",
         "leave_hours": "{hours} h",
+        "deductions_recorded": "Hlášení vykazuje srážky ze mzdy — převzetí založí na vztahu úkol zaevidovat je (Mzdy → Srážky a exekuce).",
+        "health_missing": "Hlášení JMHZ zdravotní pojišťovnu nenese. Bez ní výpočet zdravotního pojištění skončí chybou: {count} osob ji zatím nemá.",
+        "health_missing_action": "Zadat pojišťovny hromadně",
         "apply_wages": "Převzít mzdy a údaje vztahů"
       },
       "operations": {
@@ -29458,6 +29484,7 @@
         "takeover_relations": "Vztahů: {count}",
         "takeover_skipped": "Nepřevzato",
         "takeover_counts": {
+          "follow_ups": "Úkol zaevidovat srážky: {count}",
           "monthly_wage": "Sjednaná mzda: {count}",
           "recurring_wage": "Předpis měsíční mzdy: {count}",
           "averages": "Průměrné výdělky: {count}",

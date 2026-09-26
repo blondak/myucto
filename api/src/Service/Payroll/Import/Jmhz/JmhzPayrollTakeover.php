@@ -35,6 +35,9 @@ final class JmhzPayrollTakeover
 {
     public const LABEL = 'hlášení JMHZ';
 
+    /** Úkol na vztahu, když poslední převzaté hlášení vykazuje srážky ze mzdy. */
+    public const DEDUCTIONS_FOLLOW_UP = 'takeover_deductions_review';
+
     public static function policy(): PayrollTakeoverPolicy
     {
         return new PayrollTakeoverPolicy(
@@ -102,6 +105,12 @@ final class JmhzPayrollTakeover
                 oic: $identity['oic'],
                 idPpv: $identity['id_ppv'],
                 leaveTaken: self::leaveTaken($months),
+                // Výši ani druh srážek hlášení nenese, jen příznak. Poslední
+                // převzatý měsíc se srážkami = srážka nejspíš trvá a první mzda
+                // v MyÚčtu ji musí znát.
+                followUps: $latest !== null && $latest->form->deductionsRecorded === true
+                    ? [self::DEDUCTIONS_FOLLOW_UP]
+                    : [],
             ),
         );
     }

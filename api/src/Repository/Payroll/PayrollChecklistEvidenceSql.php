@@ -35,6 +35,7 @@ final class PayrollChecklistEvidenceSql
         'health_insurance_registration' => 'health_start_obligation',
         'health_insurance_deregistration' => 'health_end_obligation',
         'enforcement_insolvency_review' => 'enforcement_termination_notice',
+        'takeover_deductions_review' => 'deduction_record',
     ];
 
     private const DONE = "obligation.status IN ('submitted', 'fulfilled')
@@ -153,6 +154,28 @@ final class PayrollChecklistEvidenceSql
                      'deferred_no_withholding', 'deferred_hold',
                      'ended_at_payer'
                    )
+          )
+          -- Převzaté hlášení vykazuje srážky: splněno, jakmile je u osoby
+          -- zaevidovaná exekuce, insolvence či dohoda o srážce, nebo jiná
+          -- srážka ze mzdy.
+          WHEN 'takeover_deductions_review' THEN EXISTS (
+            SELECT 1
+              FROM payroll_employments evidence_employment
+             WHERE evidence_employment.supplier_id = item.supplier_id
+               AND evidence_employment.id = item.employment_id
+               AND (
+                 EXISTS (
+                   SELECT 1 FROM payroll_enforcement_cases deduction_case
+                    WHERE deduction_case.supplier_id = evidence_employment.supplier_id
+                      AND deduction_case.employee_id = evidence_employment.employee_id
+                 )
+                 OR EXISTS (
+                   SELECT 1 FROM payroll_deduction_agreements agreement
+                    WHERE agreement.supplier_id = evidence_employment.supplier_id
+                      AND agreement.employee_id = evidence_employment.employee_id
+                      AND agreement.status <> 'cancelled'
+                 )
+               )
           )
           ELSE 0
         END";

@@ -574,6 +574,37 @@ final class PayrollTakeoverEmploymentWriter
         return $done > 0 ? ['checklist_completed' => $done] : [];
     }
 
+    /**
+     * Úkoly na vztahu, které zdroj dokládá jen příznakem — třeba hlášení JMHZ
+     * vykazuje srážky ze mzdy, ale ne jejich druh, pořadí ani plátce. Bez úkolu
+     * by se srážky převzaly tiše jako nula a první mzda v MyÚčtu by vyšla bez
+     * srážky. Úkol se zakládá jednou (opakovaný import ho nezdvojí) s termínem
+     * prvního dne vedení mezd v MyÚčtu: do první výplaty musí být srážka
+     * zaevidovaná.
+     *
+     * @return array<string,int>
+     */
+    public function followUps(
+        int $supplierId,
+        int $employmentId,
+        PayrollTakeoverEmployment $employment,
+        string $startPeriod,
+        PayrollTakeoverPolicy $policy,
+    ): array {
+        $created = 0;
+        foreach ($employment->followUps as $itemKey) {
+            $created += $this->employments->ensureFollowUpItem(
+                $supplierId,
+                $employmentId,
+                $itemKey,
+                substr($startPeriod, 0, 7) . '-01',
+                $policy->note('úkol založen při převzetí.'),
+            ) ? 1 : 0;
+        }
+
+        return $created > 0 ? ['follow_ups' => $created] : [];
+    }
+
     /** @return array<string,mixed>|null */
     public function employmentById(int $supplierId, int $employmentId): ?array
     {

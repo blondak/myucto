@@ -159,6 +159,13 @@ Kontrola za rok vypíše:
   za chybějící měsíce posune nástup dřív sám. Mzdový běh ani měsíční hlášení
   to neblokuje; vyúčtování daně a uzávěrka roku na to upozorní.
 
+Hlášení JMHZ nese u srážek ze mzdy jen příznak, ne jejich druh ani výši.
+Vykazuje-li je poslední převzaté hlášení, převzetí založí na vztahu úkol
+**Zaevidovat srážky ze mzdy** s termínem prvního měsíce vedení mezd v MyÚčtu
+a tlačítkem do **Mzdy → Srážky a exekuce**. Úkol se splní sám, jakmile je
+u osoby zaevidovaná exekuce, insolvence nebo dohoda o srážce. Zdravotní
+pojišťovnu hlášení nenese vůbec; doplňte ji hromadně (kapitola 80.8.1).
+
 ## 113.10 Vyúčtování daně a uzávěrka roku
 
 Vyúčtování zálohové a srážkové daně naplní převzaté měsíce z počátečních

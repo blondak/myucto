@@ -12,6 +12,7 @@ use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
+use MyInvoice\Service\Payroll\PayrollHealthInsurerWriter;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
 use MyInvoice\Service\Payroll\PayrollPersonProfileValidator;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
@@ -32,16 +33,6 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentit
  */
 final class RegistrationImportWriter
 {
-    private const COVERAGE_FIELDS = [
-        'jurisdiction',
-        'foreign_country_code',
-        'jurisdiction_evidence_reference',
-        'insurer_status',
-        'insurer_code',
-        'insurer_evidence_reference',
-        'health_evidence_document_id',
-    ];
-
     public function __construct(
         private readonly Connection $db,
         private readonly LicenseCapacityGate $license,
@@ -54,6 +45,7 @@ final class RegistrationImportWriter
         private readonly PayrollRegistrationIdentityService $identities,
         private readonly PayrollRegistrationIdentityRepository $registrations,
         private readonly RegistrationImportLookup $lookup,
+        private readonly PayrollHealthInsurerWriter $healthInsurers,
     ) {}
 
     /**
@@ -595,69 +587,7 @@ final class RegistrationImportWriter
         ?string $ip,
         ?string $userAgent,
     ): void {
-        $monthStart = substr($onDate, 0, 7) . '-01';
-        $view = $this->statutory->editorView($supplierId, $employeeId, $onDate)
-            ?? throw new \DomainException('Zákonná evidence zaměstnance nebyla nalezena.');
-        /** @var array<string,list<array<string,mixed>>> $sections */
-        $sections = $view['sections'];
-        $rows = $sections['health_coverages'];
-        $covering = $this->covering($rows, $monthStart, null);
-        if ($covering === null) {
-            if ($rows !== []) {
-                throw new \DomainException(
-                    "Zdravotní pojištění k {$monthStart} v evidenci vedené není a navazuje na jiné období. "
-                    . 'Zapište pojišťovnu ručně v zákonné evidenci osoby.',
-                );
-            }
-            $rows[] = [
-                'jurisdiction' => 'czech_regime_verified',
-                'foreign_country_code' => null,
-                'jurisdiction_evidence_reference' => null,
-                'insurer_status' => 'verified',
-                'insurer_code' => $insurerCode,
-                'insurer_evidence_reference' => null,
-                'health_evidence_document_id' => null,
-                'effective_from' => $monthStart,
-                'effective_to' => null,
-                'evidence_note' => null,
-            ];
-        } elseif ((string) $covering['effective_from'] >= $monthStart) {
-            foreach ($rows as $index => $row) {
-                if ((int) $row['id'] === (int) $covering['id']) {
-                    $rows[$index]['insurer_code'] = $insurerCode;
-                    $rows[$index]['insurer_status'] = 'verified';
-                }
-            }
-        } else {
-            $next = ['id' => null];
-            foreach (self::COVERAGE_FIELDS as $field) {
-                $next[$field] = $covering[$field] ?? null;
-            }
-            $next['insurer_code'] = $insurerCode;
-            $next['insurer_status'] = 'verified';
-            $next['insurer_evidence_reference'] = null;
-            $next['health_evidence_document_id'] = null;
-            $next['effective_from'] = $monthStart;
-            $next['effective_to'] = $covering['effective_to'];
-            $next['evidence_note'] = null;
-            foreach ($rows as $index => $row) {
-                if ((int) $row['id'] === (int) $covering['id']) {
-                    $rows[$index]['effective_to'] = $this->previousDay($monthStart);
-                }
-            }
-            $rows[] = $next;
-        }
-        $sections['health_coverages'] = $rows;
-
-        $this->statutory->save(
-            $supplierId,
-            $employeeId,
-            ['sections' => $sections],
-            $onDate,
-            $userId,
-            $ip,
-            $userAgent,
-        );
+        $this->healthInsurers->assign($supplierId, $employeeId, $insurerCode, $onDate, $userId, $ip, $userAgent);
     }
 
     private function transition(
