@@ -5,7 +5,7 @@ import { onClickOutside } from '@vueuse/core'
 import type { TablePrefsCtrl } from '@/composables/useTablePrefs'
 
 type ColumnPreset = { key: string; labelKey: string; visibleKeys: string[] | null }
-const props = defineProps<{ ctrl: TablePrefsCtrl; presets?: ColumnPreset[] }>()
+const props = defineProps<{ ctrl: TablePrefsCtrl; presets?: ColumnPreset[]; reorderable?: boolean }>()
 const { t } = useI18n()
 
 const root = ref<HTMLElement | null>(null)
@@ -89,7 +89,7 @@ function isPresetActive(preset: ColumnPreset): boolean {
         </div>
         <div class="min-h-0 overflow-y-auto scrollbar-slim py-1">
         <label
-          v-for="col in ctrl.columns.filter(c => c.available?.() !== false)"
+          v-for="col in (reorderable ? ctrl.orderedColumns.value : ctrl.columns).filter(c => c.available?.() !== false)"
           :key="col.key"
           class="flex items-center gap-2.5 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 cursor-pointer"
           :class="col.required ? 'opacity-60 cursor-not-allowed' : ''"
@@ -103,6 +103,12 @@ function isPresetActive(preset: ColumnPreset): boolean {
           />
           <span class="truncate">{{ t(col.labelKey) }}</span>
         </label>
+        </div>
+        <div v-if="reorderable" class="border-t border-neutral-100 p-1">
+          <button type="button" @click="ctrl.resetColumnOrder()" class="cursor-pointer w-full inline-flex items-center gap-2 whitespace-nowrap rounded-md px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-50 hover:text-primary-700">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10a9 9 0 1 1 2.6 8.4M3 4v6h6"/></svg>
+            {{ t('common.column_order_reset') }}
+          </button>
         </div>
         <div v-if="!presets?.length" class="border-t border-neutral-100 mt-1 pt-1">
           <button

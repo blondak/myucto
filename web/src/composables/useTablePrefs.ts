@@ -14,6 +14,25 @@ export interface ColumnDef {
 export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
   const prefs = getPagePrefs(pageKey)
   const ready = ref(false)
+  const orderedColumns = computed(() => {
+    const byKey = new Map(columns.map(column => [column.key, column]))
+    const keys = Array.isArray(prefs.value.column_order) ? prefs.value.column_order : []
+    const result: ColumnDef[] = []
+    for (const key of keys) {
+      const column = byKey.get(key)
+      if (column) { result.push(column); byKey.delete(key) }
+    }
+    return [...result, ...byKey.values()]
+  })
+  function moveColumn(source: string, target: string, after = false): void {
+    if (source === target || !columns.some(c => c.key === source) || !columns.some(c => c.key === target)) return
+    const keys = orderedColumns.value.map(c => c.key).filter(key => key !== source)
+    keys.splice(keys.indexOf(target) + (after ? 1 : 0), 0, source)
+    patchPagePrefs(pageKey, { column_order: keys })
+  }
+  function resetColumnOrder(): void {
+    patchPagePrefs(pageKey, { column_order: null })
+  }
 
   onMounted(async () => { await ensurePrefsLoaded(); ready.value = true })
 
@@ -130,6 +149,7 @@ export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
 
   return {
     columns,
+    orderedColumns, moveColumn, resetColumnOrder,
     isVisible, toggleColumn, resetColumns, setVisibleColumns,
     isDynamicShown, setDynamicShown,
     density, setDensity, densityClass,

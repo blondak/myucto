@@ -32,6 +32,10 @@ import { projectsApi, type Project } from '@/api/projects'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import type { SavedFilter } from '@/api/preferences'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import TableColorsMenu from '@/components/ui/TableColorsMenu.vue'
+import { useTableColors } from '@/composables/useTableColors'
+import { useColumnDrag } from '@/composables/useColumnDrag'
+import ColumnDragHandle from '@/components/ui/ColumnDragHandle.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -336,6 +340,8 @@ const COLUMNS: ColumnDef[] = [
   { key: 'locked', labelKey: 'lock.column' },
 ]
 const tbl = useTablePrefs('purchase_invoices', COLUMNS)
+const colors = useTableColors('purchase_invoices')
+const columnDrag = useColumnDrag(tbl)
 const COLUMN_PRESETS = [
   { key: 'client', labelKey: 'common.columns_preset_client', visibleKeys: null },
   { key: 'accountant', labelKey: 'common.columns_preset_accountant', visibleKeys: [
@@ -368,7 +374,7 @@ function mobileExtraFields(inv: PurchaseInvoiceListItem): Array<{ key: string; l
     credit_accounts: inv.credit_accounts?.join(', ') || '—',
     dimensions: inv.dimension_labels?.join(' · ') || '—',
   }
-  return COLUMNS.filter(c => c.defaultHidden && c.key !== 'vat_breakdown' && tbl.isVisible(c.key))
+  return tbl.orderedColumns.value.filter(c => c.defaultHidden && c.key !== 'vat_breakdown' && tbl.isVisible(c.key))
     .map(c => ({ key: c.key, label: t(c.labelKey), value: values[c.key] ?? '—' }))
 }
 watch(() => [tbl.isVisible('kh'), tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions')], () => { if (groups.value.length) load() })
@@ -716,7 +722,7 @@ const statusBadgeClass = (s: PurchaseInvoiceStatus): string => ({
 // Row class — soft red background pro overdue, soft gray pro cancelled,
 // soft yellow pro faktury s AI extraction_warning (vyžadují kontrolu)
 const rowClass = (inv: PurchaseInvoiceListItem): string => {
-  if (inv.status === 'cancelled') return 'opacity-60'
+  if (inv.status === 'cancelled') return colors.hasColors.value ? '' : 'opacity-60'
   if (isOverdue(inv.due_date, inv.status)) return 'bg-danger-50/30'
   if (inv.extraction_warning) return 'bg-warning-50/50'
   return ''
@@ -1229,7 +1235,8 @@ async function bulkSetKind() {
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
           {{ groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly') }}
         </button>
-        <ColumnPicker :ctrl="tbl" :presets="COLUMN_PRESETS" />
+        <ColumnPicker :ctrl="tbl" :presets="COLUMN_PRESETS" reorderable />
+        <TableColorsMenu :ctrl="tbl" :colors="colors" />
         <DensityToggle class="hidden md:block" :ctrl="tbl" />
       </template>
     </FilterBar>
@@ -1291,9 +1298,9 @@ async function bulkSetKind() {
                       class="w-4 h-4 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
                     />
                   </th>
-                  <template v-for="c in COLUMNS.filter(c => tbl.isVisible(c.key))" :key="c.key">
-                    <th v-if="c.key === 'kh' || c.key === 'dimensions'" scope="col" class="py-2 px-3 text-xs uppercase tracking-wide font-medium text-neutral-500 text-left">{{ t(c.labelKey) }}</th>
-                    <SortableTh v-else :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
+                  <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
+                    <th v-if="c.key === 'kh' || c.key === 'dimensions'" scope="col" class="py-2 px-3 text-xs uppercase tracking-wide font-medium text-neutral-500 text-left" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
+                    <SortableTh v-else v-bind="columnDrag.headerAttrs(c.key)" reorderable :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
                       :align="['amount', 'exchange_rate', 'base', 'vat', 'balance', 'paid_amount', 'remaining_amount'].includes(c.key) ? 'right' : 'left'"
                       @toggle="onSortToggle" />
                   </template>
@@ -1328,17 +1335,18 @@ async function bulkSetKind() {
                       />
                     </div>
                   </td>
-                  <td v-if="tbl.isVisible('number')" class="px-3 py-2.5 font-mono text-xs">
+                  <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
+                <td v-if="c.key === 'number'" :data-custom-color="!!colors.color('number')" :style="colors.cellStyle('number')" class="px-3 py-2.5 font-mono text-xs">
                     <RouterLink class="row-link" :to="`/purchase-invoices/${inv.id}`" @click.stop @auxclick.stop>
                       <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
                       <span v-else class="text-neutral-400">#{{ inv.id }}</span>
                     </RouterLink>
                   </td>
-                  <td v-if="tbl.isVisible('vendor')" class="px-3 py-2.5">
+                  <td v-else-if="c.key === 'vendor'" :data-custom-color="!!colors.color('vendor')" :style="colors.cellStyle('vendor')" class="px-3 py-2.5">
                     <div class="font-medium text-neutral-900 truncate max-w-[15rem]" :title="inv.vendor_company_name">{{ inv.vendor_company_name }}</div>
                   </td>
-                  <td v-if="tbl.isVisible('vendor_ic')" class="px-3 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.vendor_ic || '—' }}</td>
-                  <td v-if="tbl.isVisible('vendor_number')" class="px-3 py-2.5 font-mono text-xs text-neutral-600">
+                  <td v-else-if="c.key === 'vendor_ic'" :data-custom-color="!!colors.color('vendor_ic')" :style="colors.cellStyle('vendor_ic')" class="px-3 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.vendor_ic || '—' }}</td>
+                  <td v-else-if="c.key === 'vendor_number'" :data-custom-color="!!colors.color('vendor_number')" :style="colors.cellStyle('vendor_number')" class="px-3 py-2.5 font-mono text-xs text-neutral-600">
                     <div class="flex items-center gap-1.5">
                       <span
                         v-if="inv.extraction_warning"
@@ -1363,23 +1371,23 @@ async function bulkSetKind() {
                       <span>{{ inv.vendor_invoice_number }}</span>
                     </div>
                   </td>
-                  <td v-if="tbl.isVisible('kind')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ t(`purchase_invoice.document_kind.${inv.document_kind}`) }}</td>
-                  <td v-if="tbl.isVisible('tax_date')" class="px-3 py-2.5 text-center text-xs">
+                  <td v-else-if="c.key === 'kind'" :data-custom-color="!!colors.color('kind')" :style="colors.cellStyle('kind')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ t(`purchase_invoice.document_kind.${inv.document_kind}`) }}</td>
+                  <td v-else-if="c.key === 'tax_date'" :data-custom-color="!!colors.color('tax_date')" :style="colors.cellStyle('tax_date')" class="px-3 py-2.5 text-center text-xs">
                     <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
                   </td>
-                  <td v-if="tbl.isVisible('due_date')" class="px-3 py-2.5 text-center text-xs">
+                  <td v-else-if="c.key === 'due_date'" :data-custom-color="!!colors.color('due_date')" :style="colors.cellStyle('due_date')" class="px-3 py-2.5 text-center text-xs">
                     <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : 'text-neutral-600'">
                       {{ formatDate(inv.due_date) }}
                     </span>
                   </td>
                   <td
-                    v-if="tbl.isVisible('amount')"
+                    v-else-if="c.key === 'amount'" :data-custom-color="!!colors.color('amount')"
                     class="amount-cell px-3 py-2.5 text-right font-mono font-semibold text-neutral-900"
-                    :style="{ '--bar': amountBarWidth(inv, g) }"
+                    :style="{ ...colors.cellStyle('amount'), '--bar': amountBarWidth(inv, g) }"
                   >
                     {{ formatMoney(inv.total_with_vat, inv.currency) }}
                   </td>
-                  <td v-if="tbl.isVisible('status')" class="px-3 py-2.5 text-center">
+                  <td v-else-if="c.key === 'status'" :data-custom-color="!!colors.color('status')" :style="colors.cellStyle('status')" class="px-3 py-2.5 text-center">
                     <span class="text-xs px-2 py-0.5 rounded" :class="statusBadgeClass(inv.status)">
                       {{ t(`purchase_invoice.status.${inv.status}`) }}
                     </span>
@@ -1397,45 +1405,45 @@ async function bulkSetKind() {
                       </span>
                     </div>
                   </td>
-                  <td v-if="tbl.isVisible('paid_amount')" class="px-3 py-2.5 text-right font-mono text-xs text-neutral-600">
+                  <td v-else-if="c.key === 'paid_amount'" :data-custom-color="!!colors.color('paid_amount')" :style="colors.cellStyle('paid_amount')" class="px-3 py-2.5 text-right font-mono text-xs text-neutral-600">
                     <span v-if="showsPayment(inv)">{{ formatMoney(inv.paid_amount ?? 0, inv.currency) }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('remaining_amount')" class="px-3 py-2.5 text-right font-mono text-xs" :class="remainingClass(inv)">
+                  <td v-else-if="c.key === 'remaining_amount'" :data-custom-color="!!colors.color('remaining_amount')" :style="colors.cellStyle('remaining_amount')" class="px-3 py-2.5 text-right font-mono text-xs" :class="remainingClass(inv)">
                     <span v-if="showsPayment(inv)">{{ formatMoney(inv.remaining_amount ?? 0, inv.currency) }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('paid_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
+                  <td v-else-if="c.key === 'paid_at'" :data-custom-color="!!colors.color('paid_at')" :style="colors.cellStyle('paid_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
                     <span v-if="inv.paid_at">{{ formatDate(inv.paid_at) }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('booked_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
+                  <td v-else-if="c.key === 'booked_at'" :data-custom-color="!!colors.color('booked_at')" :style="colors.cellStyle('booked_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
                     <span v-if="inv.booked_at">{{ formatDate(inv.booked_at) }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('exchange_rate')" class="px-3 py-2.5 text-right font-mono text-xs text-neutral-600">
+                  <td v-else-if="c.key === 'exchange_rate'" :data-custom-color="!!colors.color('exchange_rate')" :style="colors.cellStyle('exchange_rate')" class="px-3 py-2.5 text-right font-mono text-xs text-neutral-600">
                     <span v-if="inv.currency !== 'CZK' && inv.exchange_rate">{{ formatRate(inv.exchange_rate) }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('vat_deduction')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
+                  <td v-else-if="c.key === 'vat_deduction'" :data-custom-color="!!colors.color('vat_deduction')" :style="colors.cellStyle('vat_deduction')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
                     {{ vatDeductionLabel(inv) }}
                   </td>
-                  <td v-if="tbl.isVisible('expense_category')" class="px-3 py-2.5 text-xs text-neutral-600">
+                  <td v-else-if="c.key === 'expense_category'" :data-custom-color="!!colors.color('expense_category')" :style="colors.cellStyle('expense_category')" class="px-3 py-2.5 text-xs text-neutral-600">
                     <span v-if="inv.expense_category_label">{{ inv.expense_category_label }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('base')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_without_vat, inv.currency) }}</td>
-                  <td v-if="tbl.isVisible('vat')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_vat, inv.currency) }}</td>
-                  <td v-if="tbl.isVisible('balance')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.amount_to_pay, inv.currency) }}</td>
-                  <td v-if="tbl.isVisible('project')" class="px-3 py-2.5 text-xs text-neutral-600">{{ inv.project_name || '—' }}</td>
-                  <td v-if="tbl.isVisible('received_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ inv.received_at ? formatDate(inv.received_at) : '—' }}</td>
-                  <td v-if="tbl.isVisible('payment_ordered_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ inv.payment_ordered_at ? formatDate(inv.payment_ordered_at) : '—' }}</td>
-                  <td v-if="tbl.isVisible('vat_breakdown')" class="px-3 py-2.5"><VatBreakdownCell :rows="inv.vat_breakdown" :currency="inv.currency" /></td>
-                  <td v-if="tbl.isVisible('debit_accounts')" class="px-3 py-2.5 font-mono text-xs">{{ inv.debit_accounts?.join(', ') || '—' }}</td>
-                  <td v-if="tbl.isVisible('credit_accounts')" class="px-3 py-2.5 font-mono text-xs">{{ inv.credit_accounts?.join(', ') || '—' }}</td>
-                <td v-if="tbl.isVisible('kh')" class="px-3 py-2.5 font-mono text-xs">{{ inv.kh_sections?.join(', ') || '—' }}</td>
-                <td v-if="tbl.isVisible('dimensions')" class="px-3 py-2.5 text-xs max-w-64 truncate" :title="inv.dimension_labels?.join(' · ')">{{ inv.dimension_labels?.join(' · ') || '—' }}</td>
-                  <td v-if="tbl.isVisible('locked')" class="px-2 py-2.5 text-center">
+                  <td v-else-if="c.key === 'base'" :data-custom-color="!!colors.color('base')" :style="colors.cellStyle('base')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_without_vat, inv.currency) }}</td>
+                  <td v-else-if="c.key === 'vat'" :data-custom-color="!!colors.color('vat')" :style="colors.cellStyle('vat')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_vat, inv.currency) }}</td>
+                  <td v-else-if="c.key === 'balance'" :data-custom-color="!!colors.color('balance')" :style="colors.cellStyle('balance')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.amount_to_pay, inv.currency) }}</td>
+                  <td v-else-if="c.key === 'project'" :data-custom-color="!!colors.color('project')" :style="colors.cellStyle('project')" class="px-3 py-2.5 text-xs text-neutral-600">{{ inv.project_name || '—' }}</td>
+                  <td v-else-if="c.key === 'received_at'" :data-custom-color="!!colors.color('received_at')" :style="colors.cellStyle('received_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ inv.received_at ? formatDate(inv.received_at) : '—' }}</td>
+                  <td v-else-if="c.key === 'payment_ordered_at'" :data-custom-color="!!colors.color('payment_ordered_at')" :style="colors.cellStyle('payment_ordered_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ inv.payment_ordered_at ? formatDate(inv.payment_ordered_at) : '—' }}</td>
+                  <td v-else-if="c.key === 'vat_breakdown'" :data-custom-color="!!colors.color('vat_breakdown')" :style="colors.cellStyle('vat_breakdown')" class="px-3 py-2.5"><VatBreakdownCell :rows="inv.vat_breakdown" :currency="inv.currency" /></td>
+                  <td v-else-if="c.key === 'debit_accounts'" :data-custom-color="!!colors.color('debit_accounts')" :style="colors.cellStyle('debit_accounts')" class="px-3 py-2.5 font-mono text-xs">{{ inv.debit_accounts?.join(', ') || '—' }}</td>
+                  <td v-else-if="c.key === 'credit_accounts'" :data-custom-color="!!colors.color('credit_accounts')" :style="colors.cellStyle('credit_accounts')" class="px-3 py-2.5 font-mono text-xs">{{ inv.credit_accounts?.join(', ') || '—' }}</td>
+                <td v-else-if="c.key === 'kh'" :data-custom-color="!!colors.color('kh')" :style="colors.cellStyle('kh')" class="px-3 py-2.5 font-mono text-xs">{{ inv.kh_sections?.join(', ') || '—' }}</td>
+                <td v-else-if="c.key === 'dimensions'" :data-custom-color="!!colors.color('dimensions')" :style="colors.cellStyle('dimensions')" class="px-3 py-2.5 text-xs max-w-64 truncate" :title="inv.dimension_labels?.join(' · ')">{{ inv.dimension_labels?.join(' · ') || '—' }}</td>
+                  <td v-else-if="c.key === 'locked'" :data-custom-color="!!colors.color('locked')" :style="colors.cellStyle('locked')" class="px-2 py-2.5 text-center">
                     <PostingBadge v-if="inv.locked?.journal_entry_id"
                       :booked-at="inv.booked_at" :journal-entry-id="inv.locked.journal_entry_id" />
                     <svg v-else-if="inv.locked?.is_locked" class="w-4 h-4 inline-block text-neutral-400"
@@ -1445,6 +1453,7 @@ async function bulkSetKind() {
                       <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z" />
                     </svg>
                   </td>
+                </template>
                   <td class="px-1 py-2.5 w-8 text-center" @click.stop>
                     <button type="button"
                       class="cursor-pointer inline-flex h-6 w-6 items-center justify-center rounded text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700"
@@ -1514,7 +1523,7 @@ async function bulkSetKind() {
               />
               <div class="flex-1 min-w-0">
                 <div class="flex items-baseline justify-between gap-2">
-                  <div class="font-medium text-neutral-900 truncate flex items-center gap-1.5">
+                  <div class="font-medium text-neutral-900 truncate flex items-center gap-1.5" :data-custom-color="!!colors.color('vendor')" :style="colors.cellStyle('vendor')">
                     <span
                       v-if="inv.extraction_warning"
                       :title="t('purchase_invoice.extraction.needs_review_tooltip')"
@@ -1537,15 +1546,15 @@ async function bulkSetKind() {
                     </span>
                     <span class="truncate">{{ inv.vendor_company_name }}</span>
                   </div>
-                  <div class="font-mono text-sm whitespace-nowrap">
+                  <div class="font-mono text-sm whitespace-nowrap" :data-custom-color="!!colors.color('amount')" :style="colors.cellStyle('amount')">
                     {{ formatMoney(inv.total_with_vat, inv.currency) }}
                   </div>
                 </div>
                 <div class="flex items-baseline justify-between gap-2 mt-1 text-xs text-neutral-500">
                   <div class="font-mono truncate">
-                    <RouterLink class="row-link" :to="`/purchase-invoices/${inv.id}`" @click.stop @auxclick.stop>{{ inv.varsymbol || '#' + inv.id }}</RouterLink>
+                    <RouterLink class="row-link" :data-custom-color="!!colors.color('number')" :style="colors.cellStyle('number')" :to="`/purchase-invoices/${inv.id}`" @click.stop @auxclick.stop>{{ inv.varsymbol || '#' + inv.id }}</RouterLink>
                     <span class="text-neutral-400"> · </span>
-                    <span>{{ inv.vendor_invoice_number }}</span>
+                    <span :data-custom-color="!!colors.color('vendor_number')" :style="colors.cellStyle('vendor_number')">{{ inv.vendor_invoice_number }}</span>
                   </div>
                   <span class="inline-flex items-center gap-1">
                     <PostingBadge v-if="inv.locked?.journal_entry_id"
@@ -1556,7 +1565,7 @@ async function bulkSetKind() {
                       <title>{{ lockTitle(inv) }}</title>
                       <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z" />
                     </svg>
-                    <span class="text-xs px-1.5 py-0.5 rounded whitespace-nowrap" :class="statusBadgeClass(inv.status)">
+                    <span class="text-xs px-1.5 py-0.5 rounded whitespace-nowrap" :class="statusBadgeClass(inv.status)" :data-custom-color="!!colors.color('status')" :style="colors.cellStyle('status')">
                       {{ t(`purchase_invoice.status.${inv.status}`) }}
                     </span>
                   </span>
@@ -1568,18 +1577,18 @@ async function bulkSetKind() {
                   </span>
                 </div>
                 <div class="flex items-center justify-between gap-2 mt-1 text-xs text-neutral-500">
-                  <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
-                  <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : ''">
+                  <span :class="taxDateClass(inv.tax_date, inv.issue_date)" :data-custom-color="!!colors.color('tax_date')" :style="colors.cellStyle('tax_date')">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
+                  <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : ''" :data-custom-color="!!colors.color('due_date')" :style="colors.cellStyle('due_date')">
                     {{ t('purchase_invoice.fields.due_date') }}: {{ formatDate(inv.due_date) }}
                   </span>
                 </div>
                 <!-- Částečná úhrada / nedoplatek: na mobilu jinak není kde to poznat. -->
                 <div v-if="showsPayment(inv) && (inv.paid_amount ?? 0) > 0.005 && (inv.remaining_amount ?? 0) > 0.005"
                   class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mt-1 text-xs">
-                  <span class="text-neutral-500">
+                  <span class="text-neutral-500" :data-custom-color="!!colors.color('paid_amount')" :style="colors.cellStyle('paid_amount')">
                     {{ t('purchase_invoice.col_paid_amount') }}: <span class="font-mono text-neutral-700">{{ formatMoney(inv.paid_amount ?? 0, inv.currency) }}</span>
                   </span>
-                  <span :class="remainingClass(inv)">
+                  <span :class="remainingClass(inv)" :data-custom-color="!!colors.color('remaining_amount')" :style="colors.cellStyle('remaining_amount')">
                     {{ t('purchase_invoice.col_remaining_amount') }}: <span class="font-mono">{{ formatMoney(inv.remaining_amount ?? 0, inv.currency) }}</span>
                     <span v-if="hasPaidShortfall(inv)"
                       class="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-warning-50 text-warning-700 border border-warning-500/30 whitespace-nowrap">
@@ -1590,11 +1599,11 @@ async function bulkSetKind() {
               </div>
             </div>
             <div v-if="mobileExtraFields(inv).length || tbl.isVisible('vat_breakdown')" class="mt-3 ml-8 border-t border-neutral-200 pt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-              <div v-for="field in mobileExtraFields(inv)" :key="field.key" class="min-w-0">
+              <div v-for="field in mobileExtraFields(inv)" :key="field.key" :data-custom-color="!!colors.color(field.key)" :style="colors.cellStyle(field.key)" class="min-w-0">
                 <div class="text-neutral-500">{{ field.label }}</div>
                 <div class="font-medium text-neutral-800 break-words">{{ field.value }}</div>
               </div>
-              <div v-if="tbl.isVisible('vat_breakdown')" class="col-span-2">
+              <div v-if="tbl.isVisible('vat_breakdown')" class="col-span-2" :data-custom-color="!!colors.color('vat_breakdown')" :style="colors.cellStyle('vat_breakdown')">
                 <div class="text-neutral-500 mb-1">{{ t('invoice.col_vat_breakdown') }}</div>
                 <VatBreakdownCell :rows="inv.vat_breakdown" :currency="inv.currency" />
               </div>

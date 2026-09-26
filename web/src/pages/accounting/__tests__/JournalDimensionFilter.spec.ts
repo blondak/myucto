@@ -44,10 +44,10 @@ vi.mock('vue-i18n', async importOriginal => ({
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true, isDemo: false }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
-vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined), getPagePrefs: () => ref({}) }))
 vi.mock('@/composables/useTablePrefs', () => ({
   useTablePrefs: (_key: string, columns: unknown[]) => ({
-    columns, isVisible: () => true, densityClass: ref(''), setFlag: vi.fn(), flag: () => false,
+    columns, orderedColumns: ref(columns), ready: ref(true), isVisible: () => true, densityClass: ref(''), setFlag: vi.fn(), flag: () => false,
     sort: ref(null), toggleSort: vi.fn(),
   }),
 }))
@@ -80,6 +80,7 @@ function mountJournal() {
         ActivationBanner: true,
         SavedFiltersMenu: true,
         ColumnPicker: true,
+        TableColorsMenu: true,
         DensityToggle: true,
         EmptyState: true,
         DateInput: true,

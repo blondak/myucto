@@ -17,6 +17,10 @@ import { formatDate, formatDateTime, formatMoney } from '@/composables/useFormat
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import TableColorsMenu from '@/components/ui/TableColorsMenu.vue'
+import { useTableColors } from '@/composables/useTableColors'
+import { useColumnDrag } from '@/composables/useColumnDrag'
+import ColumnDragHandle from '@/components/ui/ColumnDragHandle.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -424,6 +428,8 @@ const COLUMNS: ColumnDef[] = [
   { key: 'dimensions', labelKey: 'dimensions.title', defaultHidden: true, available: () => dims.enabled.value },
 ]
 const tbl = useTablePrefs('journal', COLUMNS)
+const colors = useTableColors('journal')
+const columnDrag = useColumnDrag(tbl)
 const COLUMN_PRESETS = [
   { key: 'default', labelKey: 'common.columns_preset_default', visibleKeys: null },
   { key: 'complete', labelKey: 'common.columns_preset_full', visibleKeys: COLUMNS.map(c => c.key) },
@@ -450,7 +456,7 @@ function mobileExtraFields(entry: JournalEntry): Array<{ key: string; label: str
     credit_accounts: postingAccounts(entry, 'credit'),
     dimensions: entry.dimension_labels?.join(' · ') || '—',
   }
-  return COLUMNS.filter(c => c.defaultHidden && c.key !== 'vat_breakdown' && tbl.isVisible(c.key))
+  return tbl.orderedColumns.value.filter(c => c.defaultHidden && c.key !== 'vat_breakdown' && tbl.isVisible(c.key))
     .map(c => ({ key: c.key, label: t(c.labelKey), value: values[c.key] ?? '—' }))
 }
 function onSortToggle(key: string) {
@@ -977,7 +983,8 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       <template #actions>
         <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.journal.reset_filters') }}</button>
         <SavedFiltersMenu :ctrl="saved" />
-        <ColumnPicker :ctrl="tbl" :presets="COLUMN_PRESETS" />
+        <ColumnPicker :ctrl="tbl" :presets="COLUMN_PRESETS" reorderable />
+        <TableColorsMenu :ctrl="tbl" :colors="colors" />
         <DensityToggle class="hidden md:block" :ctrl="tbl" />
       </template>
     </FilterBar>
@@ -1000,9 +1007,9 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide sticky top-0 z-20 shadow-sm">
             <tr>
               <th class="px-3 py-2 w-8"></th>
-              <template v-for="c in COLUMNS.filter(c => tbl.isVisible(c.key))" :key="c.key">
-                <th v-if="c.key === 'dimensions'" scope="col" class="px-3 py-2 text-left font-medium">{{ t(c.labelKey) }}</th>
-                <SortableTh v-else :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
+              <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
+                <th v-if="c.key === 'dimensions'" scope="col" class="px-3 py-2 text-left font-medium" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
+                <SortableTh v-else v-bind="columnDrag.headerAttrs(c.key)" reorderable :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
                   :align="c.key === 'amount' ? 'right' : 'left'" :class="c.key === 'description' ? 'wrap-cell' : ''" @toggle="onSortToggle" />
               </template>
               <th class="px-1 py-2 w-8">
@@ -1017,7 +1024,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                    v akcentu: detail je vysoký přes celou obrazovku a bez toho se
                    při odrolování ztratí, na kterém řádku vlastně pracuju. -->
               <tr class="cursor-pointer" :class="[
-                    e.reversed_by ? 'opacity-60' : '',
+                    e.reversed_by && !colors.hasColors.value ? 'opacity-60' : '',
                     isExpanded(e.id)
                       ? 'bg-primary-50/60 border-x-2 border-t-2 border-primary-500/60'
                       : 'hover:bg-neutral-50',
@@ -1025,19 +1032,20 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                 <td class="px-3 py-2 text-neutral-400">
                   <span class="inline-block transition-transform" :class="{ 'rotate-90': isExpanded(e.id) }">▸</span>
                 </td>
-                <td v-if="tbl.isVisible('date')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(e.entry_date) }}</td>
-                <td v-if="tbl.isVisible('document_no')" class="px-3 py-2 font-mono text-xs">
+                <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
+                <td v-if="c.key === 'date'" :data-custom-color="!!colors.color('date')" :style="colors.cellStyle('date')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(e.entry_date) }}</td>
+                <td v-else-if="c.key === 'document_no'" :data-custom-color="!!colors.color('document_no')" :style="colors.cellStyle('document_no')" class="px-3 py-2 font-mono text-xs">
                   {{ e.document_no || '—' }}
                   <div v-if="e.source_bank_ref && e.source_bank_ref !== e.document_no"
                        class="text-[10px] text-neutral-400 whitespace-nowrap"
                        :title="t('accounting.journal.bank_ref_hint', { ref: e.source_bank_ref })">{{ e.source_bank_ref }}</div>
                 </td>
-                <td v-if="tbl.isVisible('document_date')" class="px-3 py-2 whitespace-nowrap">{{ e.document_date ? formatDate(e.document_date) : '—' }}</td>
-                <td v-if="tbl.isVisible('description')" class="px-3 py-2 wrap-cell" :title="e.description || undefined">
+                <td v-else-if="c.key === 'document_date'" :data-custom-color="!!colors.color('document_date')" :style="colors.cellStyle('document_date')" class="px-3 py-2 whitespace-nowrap">{{ e.document_date ? formatDate(e.document_date) : '—' }}</td>
+                <td v-else-if="c.key === 'description'" :data-custom-color="!!colors.color('description')" :style="colors.cellStyle('description')" class="px-3 py-2 wrap-cell" :title="e.description || undefined">
                   {{ e.description || '—' }}
                   <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
                 </td>
-                <td v-if="tbl.isVisible('source')" class="px-3 py-2 whitespace-nowrap clip-cell">
+                <td v-else-if="c.key === 'source'" :data-custom-color="!!colors.color('source')" :style="colors.cellStyle('source')" class="px-3 py-2 whitespace-nowrap clip-cell">
                   <!-- Jeden řádek: `flex-wrap` lámal odznak automatu a značku
                        vazby pod odkaz a sloupec pak vypadal jako dva různé údaje. -->
                   <div class="flex items-center gap-1.5">
@@ -1074,7 +1082,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                     </span>
                   </div>
                 </td>
-                <td v-if="tbl.isVisible('amount')" class="px-3 py-2 text-right font-mono">
+                <td v-else-if="c.key === 'amount'" :style="colors.cellStyle('amount')" :data-custom-color="!!colors.color('amount')" class="px-3 py-2 text-right font-mono">
                   {{ formatMoney(e.amount ?? 0) }}
                   <!-- Jen při filtru na účet (account_from/account_to) — jinak by MD/Dal
                        značka naznačovala stranu SOUČTU zápisu, který žádnou jednoznačnou
@@ -1084,19 +1092,20 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                     {{ t(`accounting.journal.side.${e.amount_side}`) }}
                   </span>
                 </td>
-                <td v-if="tbl.isVisible('status')" class="px-3 py-2 text-center">
+                <td v-else-if="c.key === 'status'" :data-custom-color="!!colors.color('status')" :style="colors.cellStyle('status')" class="px-3 py-2 text-center">
                   <span v-if="e.posted_at" class="text-xs px-2 py-0.5 rounded font-medium bg-success-50 text-success-600">{{ t('accounting.journal.posted') }}</span>
                   <span v-else class="text-xs px-2 py-0.5 rounded font-medium bg-neutral-100 text-neutral-500">{{ t('accounting.journal.draft') }}</span>
                 </td>
-                <td v-if="tbl.isVisible('posted_at')" class="px-3 py-2 whitespace-nowrap">{{ e.posted_at ? formatDate(e.posted_at) : '—' }}</td>
-                <td v-if="tbl.isVisible('posted_by')" class="px-3 py-2 truncate max-w-[10rem]">{{ e.posted_by_name || '—' }}</td>
-                <td v-if="tbl.isVisible('entry_id')" class="px-3 py-2 text-right font-mono text-xs">{{ e.id }}</td>
-                <td v-if="tbl.isVisible('created_at')" class="px-3 py-2 whitespace-nowrap text-xs">{{ formatDateTime(e.created_at) }}</td>
-                <td v-if="tbl.isVisible('updated_at')" class="px-3 py-2 whitespace-nowrap text-xs">{{ formatDateTime(e.updated_at) }}</td>
-                <td v-if="tbl.isVisible('vat_breakdown')" class="px-3 py-2"><VatBreakdownCell :rows="e.vat_breakdown" :currency="e.source_currency || 'CZK'" /></td>
-                <td v-if="tbl.isVisible('debit_accounts')" class="px-3 py-2 font-mono text-xs">{{ postingAccounts(e, 'debit') }}</td>
-                <td v-if="tbl.isVisible('credit_accounts')" class="px-3 py-2 font-mono text-xs">{{ postingAccounts(e, 'credit') }}</td>
-                <td v-if="tbl.isVisible('dimensions')" class="px-3 py-2 text-xs max-w-64 truncate" :title="e.dimension_labels?.join(' · ')">{{ e.dimension_labels?.join(' · ') || '—' }}</td>
+                <td v-else-if="c.key === 'posted_at'" :data-custom-color="!!colors.color('posted_at')" :style="colors.cellStyle('posted_at')" class="px-3 py-2 whitespace-nowrap">{{ e.posted_at ? formatDate(e.posted_at) : '—' }}</td>
+                <td v-else-if="c.key === 'posted_by'" :data-custom-color="!!colors.color('posted_by')" :style="colors.cellStyle('posted_by')" class="px-3 py-2 truncate max-w-[10rem]">{{ e.posted_by_name || '—' }}</td>
+                <td v-else-if="c.key === 'entry_id'" :data-custom-color="!!colors.color('entry_id')" :style="colors.cellStyle('entry_id')" class="px-3 py-2 text-right font-mono text-xs">{{ e.id }}</td>
+                <td v-else-if="c.key === 'created_at'" :data-custom-color="!!colors.color('created_at')" :style="colors.cellStyle('created_at')" class="px-3 py-2 whitespace-nowrap text-xs">{{ formatDateTime(e.created_at) }}</td>
+                <td v-else-if="c.key === 'updated_at'" :data-custom-color="!!colors.color('updated_at')" :style="colors.cellStyle('updated_at')" class="px-3 py-2 whitespace-nowrap text-xs">{{ formatDateTime(e.updated_at) }}</td>
+                <td v-else-if="c.key === 'vat_breakdown'" :data-custom-color="!!colors.color('vat_breakdown')" :style="colors.cellStyle('vat_breakdown')" class="px-3 py-2"><VatBreakdownCell :rows="e.vat_breakdown" :currency="e.source_currency || 'CZK'" /></td>
+                <td v-else-if="c.key === 'debit_accounts'" :data-custom-color="!!colors.color('debit_accounts')" :style="colors.cellStyle('debit_accounts')" class="px-3 py-2 font-mono text-xs">{{ postingAccounts(e, 'debit') }}</td>
+                <td v-else-if="c.key === 'credit_accounts'" :data-custom-color="!!colors.color('credit_accounts')" :style="colors.cellStyle('credit_accounts')" class="px-3 py-2 font-mono text-xs">{{ postingAccounts(e, 'credit') }}</td>
+                <td v-else-if="c.key === 'dimensions'" :data-custom-color="!!colors.color('dimensions')" :style="colors.cellStyle('dimensions')" class="px-3 py-2 text-xs max-w-64 truncate" :title="e.dimension_labels?.join(' · ')">{{ e.dimension_labels?.join(' · ') || '—' }}</td>
+                </template>
                 <td class="w-8"></td>
               </tr>
               <!-- Detail (rozbalený) -->
@@ -1126,46 +1135,46 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
         <div v-for="e in entries" :key="`m-${e.id}`"
           :class="isExpanded(e.id) ? 'bg-primary-50/60' : ''">
           <button type="button" class="cursor-pointer w-full text-left p-3 space-y-1.5"
-            :class="e.reversed_by ? 'opacity-60' : ''" @click="toggleExpand(e)">
+            :class="e.reversed_by && !colors.hasColors.value ? 'opacity-60' : ''" @click="toggleExpand(e)">
             <div class="flex items-baseline justify-between gap-2">
               <span class="flex items-baseline gap-1.5 min-w-0">
                 <span class="text-neutral-400 shrink-0 inline-block transition-transform"
                   :class="{ 'rotate-90': isExpanded(e.id) }">▸</span>
-                <span class="font-mono text-xs text-neutral-600">{{ e.document_no || '—' }}</span>
+                <span class="font-mono text-xs text-neutral-600" :data-custom-color="!!colors.color('document_no')" :style="colors.cellStyle('document_no')">{{ e.document_no || '—' }}</span>
                 <span v-if="e.source_bank_ref && e.source_bank_ref !== e.document_no"
                       class="font-mono text-[10px] text-neutral-400 truncate"
                       :title="t('accounting.journal.bank_ref_hint', { ref: e.source_bank_ref })">{{ e.source_bank_ref }}</span>
               </span>
-              <span class="font-mono text-sm font-semibold whitespace-nowrap">
+              <span class="font-mono text-sm font-semibold whitespace-nowrap" :data-custom-color="!!colors.color('amount')" :style="colors.cellStyle('amount')">
                 {{ formatMoney(e.amount ?? 0) }}
                 <span v-if="e.amount_side" class="ml-1 text-xs font-sans font-normal text-neutral-400">
                   {{ t(`accounting.journal.side.${e.amount_side}`) }}
                 </span>
               </span>
             </div>
-            <div class="text-sm text-neutral-900">
+            <div class="text-sm text-neutral-900" :data-custom-color="!!colors.color('description')" :style="colors.cellStyle('description')">
               {{ e.description || '—' }}
               <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
             </div>
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
-              <span class="font-mono">{{ formatDate(e.entry_date) }}</span>
+              <span class="font-mono" :data-custom-color="!!colors.color('date')" :style="colors.cellStyle('date')">{{ formatDate(e.entry_date) }}</span>
               <span class="text-neutral-400">·</span>
-              <span>{{ sourceLabel(e.source_type) }}<template v-if="e.source_asset_name || e.source_id"> {{ e.source_asset_name || ('#' + e.source_id) }}</template></span>
+              <span :data-custom-color="!!colors.color('source')" :style="colors.cellStyle('source')">{{ sourceLabel(e.source_type) }}<template v-if="e.source_asset_name || e.source_id"> {{ e.source_asset_name || ('#' + e.source_id) }}</template></span>
               <AutomationBadge v-if="e.automation?.mode === 'auto'" variant="auto" />
               <span v-if="e.has_related" :title="t('accounting.journal.related.badge_title')" class="inline-flex items-center text-neutral-400">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" />
                 </svg>
               </span>
-              <span v-if="e.posted_at" class="text-xs px-2 py-0.5 rounded font-medium bg-success-50 text-success-600">{{ t('accounting.journal.posted') }}</span>
-              <span v-else class="text-xs px-2 py-0.5 rounded font-medium bg-neutral-100 text-neutral-500">{{ t('accounting.journal.draft') }}</span>
+              <span v-if="e.posted_at" class="text-xs px-2 py-0.5 rounded font-medium bg-success-50 text-success-600" :data-custom-color="!!colors.color('status')" :style="colors.cellStyle('status')">{{ t('accounting.journal.posted') }}</span>
+              <span v-else class="text-xs px-2 py-0.5 rounded font-medium bg-neutral-100 text-neutral-500" :data-custom-color="!!colors.color('status')" :style="colors.cellStyle('status')">{{ t('accounting.journal.draft') }}</span>
             </div>
             <div v-if="mobileExtraFields(e).length || tbl.isVisible('vat_breakdown')" class="mt-2 border-t border-neutral-200 pt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-              <div v-for="field in mobileExtraFields(e)" :key="field.key" class="min-w-0">
+              <div v-for="field in mobileExtraFields(e)" :key="field.key" :data-custom-color="!!colors.color(field.key)" :style="colors.cellStyle(field.key)" class="min-w-0">
                 <div class="text-neutral-500">{{ field.label }}</div>
                 <div class="font-medium text-neutral-800 break-words">{{ field.value }}</div>
               </div>
-              <div v-if="tbl.isVisible('vat_breakdown')" class="col-span-2">
+              <div v-if="tbl.isVisible('vat_breakdown')" class="col-span-2" :data-custom-color="!!colors.color('vat_breakdown')" :style="colors.cellStyle('vat_breakdown')">
                 <div class="text-neutral-500 mb-1">{{ t('invoice.col_vat_breakdown') }}</div>
                 <VatBreakdownCell :rows="e.vat_breakdown" :currency="e.source_currency || 'CZK'" />
               </div>

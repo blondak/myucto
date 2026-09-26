@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { SortPref } from '@/api/preferences'
+import ColumnDragHandle from '@/components/ui/ColumnDragHandle.vue'
 
 const props = withDefaults(defineProps<{
   label: string
   sortKey: string
   sort: SortPref | null
   align?: 'left' | 'right'
+  reorderable?: boolean
 }>(), { align: 'left' })
 
 const emit = defineEmits<{ toggle: [key: string] }>()
@@ -27,6 +29,7 @@ const ariaSort = computed<'ascending' | 'descending' | 'none'>(() =>
     :class="align === 'right' ? 'text-right' : 'text-left'"
   >
     <span class="inline-flex items-center gap-1" :class="align === 'right' ? 'flex-row-reverse' : ''">
+      <ColumnDragHandle v-if="reorderable" />
       <span>{{ label }}</span>
       <!-- neutrální stav bez ikony; šipka jen u aktivního sloupce -->
       <span v-if="dir" aria-hidden="true" class="text-[10px] text-primary-600 leading-none">
