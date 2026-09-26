@@ -229,52 +229,61 @@ final class RegistrationImportService
         }
 
         $batch = $read['batch'];
-        // Konflikty (dva formuláře na tentýž vztah a měsíc) se určí jednou
-        // nad celou dávkou; jednotlivé formuláře se pak plánují znovu těsně
-        // před zápisem.
-        $this->planJmhz($supplierId, $environment, $batch, $pairMap);
         $jmhzSelected = array_values(array_filter(
             $batch->items(),
             static fn (JmhzBatchItem $item): bool => isset($selected[$item->key]),
         ));
         usort($jmhzSelected, static fn (JmhzBatchItem $a, JmhzBatchItem $b): int => $a->sortKey() <=> $b->sortKey());
-        foreach ($jmhzSelected as $item) {
-            $plan = $this->jmhzPlanner->plan($supplierId, $environment, $item, $batch, $pairMap[$item->key] ?? null);
-            $key = $item->key;
-            if ($plan['blocker'] !== null) {
-                $results[$key] = $this->result($key, 'skipped', (string) $plan['blocker'], $plan);
-                continue;
+        // Konflikty (dva formuláře na tentýž vztah a měsíc) se určí jednou
+        // nad celou dávkou; jednotlivé formuláře se pak plánují znovu těsně
+        // před zápisem. Formuláře, které nic nezapíšou, sdílejí načtenou
+        // evidenci; po každém zápisu se další formulář plánuje nad čerstvým stavem.
+        $this->jmhzPlanner->batch(function () use ($supplierId, $environment, $jmhzSelected, $batch, $pairMap, $userId, $ip, $userAgent, &$results): void {
+            $this->planJmhz($supplierId, $environment, $batch, $pairMap);
+            foreach ($jmhzSelected as $item) {
+                $plan = $this->jmhzPlanner->plan($supplierId, $environment, $item, $batch, $pairMap[$item->key] ?? null);
+                $key = $item->key;
+                if ($plan['blocker'] !== null) {
+                    $results[$key] = $this->result($key, 'skipped', (string) $plan['blocker'], $plan);
+                    continue;
+                }
+                if ($plan['operation'] === 'pair_required') {
+                    $results[$key] = $this->result($key, 'skipped', 'Formulář není spárovaný s pracovním vztahem. '
+                        . 'Vyberte vztah, ke kterému patří, a použití zopakujte.', $plan);
+                    continue;
+                }
+                if ($plan['operation'] === 'create_employment') {
+                    $results[$key] = $this->result($key, 'skipped', 'Formulář patří dalšímu pracovnímu vztahu osoby, '
+                        . 'který v evidenci zatím není. Vyberte spolu s ním i větu „Vztah doložený měsíčními hlášeními '
+                        . 'JMHZ“ (nebo export zaměstnanců), která vztah založí, a použití zopakujte.', $plan);
+                    continue;
+                }
+                if (!$plan['selectable']) {
+                    $results[$key] = $this->result(
+                        $key,
+                        'skipped',
+                        $batch->note($key) ?? 'Formulář nemá co zapsat — evidence už odpovídá.',
+                        $plan,
+                    );
+                    continue;
+                }
+                try {
+                    $applied = $this->jmhzWriter->apply($supplierId, $environment, $plan, $userId, $ip, $userAgent);
+                    $results[$key] = ['key' => $key] + $applied;
+                } catch (\Exception $e) {
+                    $results[$key] = $this->result($key, 'failed', $e->getMessage(), $plan);
+                } finally {
+                    $this->jmhzPlanner->forget();
+                }
             }
-            if ($plan['operation'] === 'pair_required') {
-                $results[$key] = $this->result($key, 'skipped', 'Formulář není spárovaný s pracovním vztahem. '
-                    . 'Vyberte vztah, ke kterému patří, a použití zopakujte.', $plan);
-                continue;
-            }
-            if ($plan['operation'] === 'create_employment') {
-                $results[$key] = $this->result($key, 'skipped', 'Formulář patří dalšímu pracovnímu vztahu osoby, '
-                    . 'který v evidenci zatím není. Vyberte spolu s ním i větu „Vztah doložený měsíčními hlášeními '
-                    . 'JMHZ“ (nebo export zaměstnanců), která vztah založí, a použití zopakujte.', $plan);
-                continue;
-            }
-            if (!$plan['selectable']) {
-                $results[$key] = $this->result(
-                    $key,
-                    'skipped',
-                    $batch->note($key) ?? 'Formulář nemá co zapsat — evidence už odpovídá.',
-                    $plan,
-                );
-                continue;
-            }
-            try {
-                $applied = $this->jmhzWriter->apply($supplierId, $environment, $plan, $userId, $ip, $userAgent);
-                $results[$key] = ['key' => $key] + $applied;
-            } catch (\Exception $e) {
-                $results[$key] = $this->result($key, 'failed', $e->getMessage(), $plan);
-            }
-        }
+        });
 
+        // Plány po zápisu formulářů. Historie podání, počáteční stavy ani průměry
+        // párování formulářů nemění, takže stačí je spočítat znovu jen po převzetí
+        // historie mezd.
+        $settled = $batch->items() === [] ? [] : $this->planJmhz($supplierId, $environment, $batch, $pairMap);
         if ($read['reports'] !== []) {
-            $this->recordHistory($supplierId, $environment, $read['reports'], $this->planJmhz($supplierId, $environment, $batch, $pairMap), $userId);
+            $this->recordHistory($supplierId, $environment, $read['reports'], $settled, $userId);
         }
 
         $checklist = ['completed' => 0, 'failed' => []];
@@ -297,12 +306,13 @@ final class RegistrationImportService
         $averages = ['created' => 0, 'approved' => 0, 'skipped' => []];
         $takeover = null;
         if (($applyOpeningBalances || $applyAverages || $applyTakeover) && $batch->items() !== []) {
-            $fresh = array_values($this->planJmhz($supplierId, $environment, $batch, $pairMap));
+            $fresh = array_values($settled);
             // Převzetí historie jde první: schválí průměry, se kterými počítal předchozí
             // program, a návrh průměru z hlášení pak za tatáž čtvrtletí už nevzniká.
             if ($applyTakeover) {
                 $takeover = $this->takeoverPlanner->apply($supplierId, $fresh, $batch, $userId);
-                $fresh = array_values($this->planJmhz($supplierId, $environment, $batch, $pairMap));
+                $settled = $this->planJmhz($supplierId, $environment, $batch, $pairMap);
+                $fresh = array_values($settled);
             }
             if ($applyOpeningBalances) {
                 $openings = $this->openingPlanner->apply($supplierId, $fresh, $batch, $userId);
@@ -311,9 +321,7 @@ final class RegistrationImportService
                 $averages = $this->averagePlanner->apply($supplierId, $fresh, $userId, $autoApproveAverages);
             }
         }
-        $unresolved = $batch->items() === []
-            ? []
-            : self::unresolvedForms($this->planJmhz($supplierId, $environment, $batch, $pairMap));
+        $unresolved = self::unresolvedForms($settled);
 
         return [
             'results' => $list,
@@ -469,6 +477,15 @@ final class RegistrationImportService
      * @return array<string,array<string,mixed>>
      */
     private function planJmhz(int $supplierId, string $environment, JmhzBatch $batch, array $pairs): array
+    {
+        return $this->jmhzPlanner->batch(fn (): array => $this->planJmhzBatch($supplierId, $environment, $batch, $pairs));
+    }
+
+    /**
+     * @param array<string,int> $pairs
+     * @return array<string,array<string,mixed>>
+     */
+    private function planJmhzBatch(int $supplierId, string $environment, JmhzBatch $batch, array $pairs): array
     {
         $plans = [];
         foreach ($batch->items() as $item) {
