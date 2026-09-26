@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\StereoNx;
 
+use MyInvoice\Service\Migration\Shared\MigrationCompanyIdentity;
+
 /**
  * Ověřený tvar firma.bin: TPF0, verze 251, popis polí a jeden řádek.
  * Typové značky: https://docwiki.embarcadero.com/Libraries/Athens/en/System.Classes.TValueType
  * Podporujeme jen nutnou podmnožinu; nikdy nevyhledáváme IČO regulárem v celém blobu.
- * Hodnoty ostatních polí (včetně osobních údajů) nejsou součástí výsledku.
+ * Osobní identifikátory ani pole nesouvisející s firemním profilem nevracíme.
  */
 final class StereoNxCompanyMetadata
 {
@@ -17,7 +19,7 @@ final class StereoNxCompanyMetadata
 
     private function __construct(#[\SensitiveParameter] private readonly string $bytes) {}
 
-    /** @return array{ico:string,dic:string,name:string,vat_payer:bool} */
+    /** @return array{ico:string,dic:string,name:string,vat_payer:bool,company_profile:array<string,?string>} */
     public static function parse(#[\SensitiveParameter] string $bytes): array
     {
         if (strlen($bytes) > 1048576 || !str_starts_with($bytes, 'TPF0')) {
@@ -39,6 +41,7 @@ final class StereoNxCompanyMetadata
         $row = $rows[0];
         $position = 1;
         $identity = [];
+        $profile = [];
         $names = [];
         foreach (array_chunk($schema, 10) as $field) {
             [$name, $type] = $field;
@@ -61,12 +64,43 @@ final class StereoNxCompanyMetadata
                 }
                 $identity[$name] = $value;
             }
+            if (in_array($name, ['ObchJmeno', 'Ulice', 'CisloPopisne', 'CisloOrientacni', 'Misto', 'PSC', 'Stat', 'Email', 'Telefon', 'WWW'], true)) {
+                if ($type !== 'String' || ($value !== null && !is_string($value))) {
+                    throw new StereoNxException('company_metadata_profile', 'Údaje o firmě ve firma.bin nemají očekávaný typ.');
+                }
+                $profile[$name] = $value === null ? null : trim($value);
+            }
         }
         if ($position !== count($row) || count($identity) !== 4 || !preg_match('/^[0-9]{8}$/D', trim($identity['ICO']))) {
             throw new StereoNxException('company_metadata_identity', 'Ve firma.bin chybí jednoznačná identita firmy.');
         }
-        return ['ico' => trim($identity['ICO']), 'dic' => trim($identity['DIC']),
-            'name' => trim($identity['Nazev']), 'vat_payer' => $identity['PlatDPH']];
+        $number = $profile['CisloPopisne'] ?? '';
+        if (($profile['CisloOrientacni'] ?? '') !== '') {
+            $number .= ($number === '' ? '' : '/') . $profile['CisloOrientacni'];
+        }
+        $street = array_filter([$profile['Ulice'] ?? null, $number], static fn (?string $v): bool => $v !== null && $v !== '');
+        $optional = static fn (?string $value): ?string => $value === null || $value === '' ? null : $value;
+        $country = mb_strtoupper($profile['Stat'] ?? '', 'UTF-8');
+        // Existující cílová firma: source_backup je údaj pro porovnání, nikoli
+        // důvod měnit registraci DPH. ARES ani zakládání nové firmy sem nepatří.
+        $company = new MigrationCompanyIdentity(
+            ico: trim($identity['ICO']), name: trim($identity['Nazev']), dic: trim($identity['DIC']),
+            address: ['street' => implode(' ', $street), 'city' => $profile['Misto'] ?? '', 'zip' => $profile['PSC'] ?? ''],
+            vatPayer: $identity['PlatDPH'], vatSource: 'source_backup', taxpayerType: null,
+            nace: null, category: null, audit: null, firstPeriodStart: null, notes: [],
+        );
+        return ['ico' => $company->ico, 'dic' => $company->dic,
+            'name' => $company->name, 'vat_payer' => $company->vatPayer,
+            'company_profile' => [
+                'company_name' => $optional($profile['ObchJmeno'] ?? null) ?? $optional(trim($identity['Nazev'])),
+                'street' => $optional($company->address['street']),
+                'city' => $optional($company->address['city']),
+                'zip' => $optional($company->address['zip']),
+                'email' => $optional($profile['Email'] ?? null),
+                'phone' => $optional($profile['Telefon'] ?? null),
+                'web' => $optional($profile['WWW'] ?? null),
+                'country_code' => in_array($country, ['ČR', 'CZ'], true) ? 'CZ' : null,
+            ]];
     }
 
     private function node(int $depth = 0): mixed

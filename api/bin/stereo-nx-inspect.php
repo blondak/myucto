@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use MyInvoice\Service\Migration\StereoNx\StereoNxBackup;
+use MyInvoice\Service\Migration\StereoNx\StereoNxAccountingJournalPlan;
 use MyInvoice\Service\Migration\StereoNx\StereoNxException;
 use MyInvoice\Service\Migration\StereoNx\StereoNxPaymentReconciliation;
 use MyInvoice\Service\Migration\StereoNx\StereoNxPurchaseRecap;
@@ -11,9 +12,9 @@ use MyInvoice\Service\Migration\StereoNx\StereoNxVat;
 require __DIR__ . '/../vendor/autoload.php';
 
 // Heslo lze poslat standardním vstupem. Není argumentem procesu ani součástí výstupu.
-$options = getopt('', ['archive:', 'company:', 'password-stdin', 'purchases']);
+$options = getopt('', ['archive:', 'company:', 'password-stdin', 'purchases', 'accounting']);
 if (!isset($options['archive'], $options['company']) || !preg_match('/^(0|[1-9][0-9]{0,8})$/D', (string) $options['company'])) {
-    fwrite(STDERR, "Usage: php api/bin/stereo-nx-inspect.php --archive=backup.zip --company=0 [--password-stdin] [--purchases]\n");
+    fwrite(STDERR, "Usage: php api/bin/stereo-nx-inspect.php --archive=backup.zip --company=0 [--password-stdin] [--purchases] [--accounting]\n");
     exit(2);
 }
 $password = null;
@@ -31,6 +32,18 @@ try {
     $tables = $backup->inventory();
     $readable = !array_any($tables, static fn (array $table): bool => $table['status'] !== 'ok');
     $payments = $readable ? StereoNxPaymentReconciliation::check($backup->rows('Cpz'), $backup->rows('CBankap'), $backup->rows('CPokl')) : null;
+    $accounting = null;
+    if (array_key_exists('accounting', $options) && $readable) {
+        $journalPlan = StereoNxAccountingJournalPlan::build(
+            iterator_to_array($backup->rows('Cdenik'), false),
+            iterator_to_array($backup->rows('Lrozvrh'), false),
+        );
+        // Do diagnostiky patří pouze souhrny, nikdy čísla dokladů nebo řádky deníku.
+        $accounting = ['ok' => $journalPlan['ok'], 'summary' => $journalPlan['summary'],
+            'blocker_counts' => array_count_values(array_column($journalPlan['blockers'], 'code')),
+            'warning_counts' => array_count_values(array_column($journalPlan['warnings'], 'code'))];
+        unset($journalPlan);
+    }
     $purchases = null;
     if (array_key_exists('purchases', $options) && $readable) {
         $mapper = new StereoNxPurchaseRecap(new StereoNxVat($backup->rows('Lsdph')));
@@ -65,9 +78,11 @@ try {
         'tables' => $tables,
         'payments' => $payments,
         'purchase_recap' => $purchases,
+        'accounting_journal' => $accounting,
         'limitations' => ['Kontrola zdroje není zkouška importu nanečisto. Databázovou zkoušku a převod spusťte v průvodci Stereo NX v aplikaci.'],
     ], JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), PHP_EOL;
-    exit($readable && ($payments['ok'] ?? false) && ($purchases === null || ($purchases['errors'] === [] && $purchases['with_items_unmapped'] === 0)) ? 0 : 1);
+    exit($readable && ($payments['ok'] ?? false) && ($accounting === null || $accounting['ok'])
+        && ($purchases === null || ($purchases['errors'] === [] && $purchases['with_items_unmapped'] === 0)) ? 0 : 1);
 } catch (StereoNxException $e) {
     fwrite(STDERR, $e->errorCode . ': ' . $e->getMessage() . PHP_EOL);
     exit(1);

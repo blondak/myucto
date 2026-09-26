@@ -22,6 +22,39 @@ class CompanyProfileCarryOver
         private readonly CompanyProfileImporter $importer,
     ) {}
 
+    /** Neprázdné kontaktní údaje zdroje odlišné od cíle; účetní režim sem nepatří.
+     * @param list<string> $fields @return array<string,string> */
+    public static function suggestions(array $source, array $target, array $fields): array
+    {
+        $out = [];
+        foreach ($fields as $field) {
+            $value = $source[$field] ?? null;
+            if (is_string($value) && trim($value) !== '' && trim((string) ($target[$field] ?? '')) !== trim($value)) {
+                $out[$field] = trim($value);
+            }
+        }
+        return $out;
+    }
+
+    /** Výběrové převzetí po náhledu; volající drží zámek firmy a zapisuje běžnou správou firmy.
+     * @param list<string> $allowed @param callable(string,string):\RuntimeException $error
+     * @return array<string,string> */
+    public static function selected(array $suggestions, array $target, array $fields, array $expected, array $allowed, callable $error): array
+    {
+        $out = [];
+        foreach ($fields as $field) {
+            if (!is_string($field) || !in_array($field, $allowed, true)
+                || !array_key_exists($field, $expected) || !is_string($expected[$field])) {
+                throw $error('company_profile_selection', 'Vyberte konkrétní údaje firmy k převzetí.');
+            }
+            if (trim((string) ($target[$field] ?? '')) !== $expected[$field]) {
+                throw $error('company_profile_changed', 'Údaje firmy se od zobrazení náhledu změnily. Načtěte náhled znovu a zkontrolujte výběr.');
+            }
+            if (isset($suggestions[$field])) $out[$field] = $suggestions[$field];
+        }
+        return $out;
+    }
+
     /**
      * Profil nastavení firmy před převodem, null = není co odkládat.
      *

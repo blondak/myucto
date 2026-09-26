@@ -24,6 +24,53 @@ use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
  */
 final class JournalEntryLinker
 {
+    /** Převzatý doklad stále patří cílové firmě. */
+    public function hasDocument(int $supplierId, string $sourceType, int $documentId): bool
+    {
+        $table = match ($sourceType) {
+            'invoice' => 'invoices',
+            'purchase_invoice' => 'purchase_invoices',
+            default => throw new \InvalidArgumentException('Unsupported linked document type.'),
+        };
+        $stmt = $this->db->pdo()->prepare("SELECT 1 FROM {$table} WHERE id = ? AND supplier_id = ?");
+        $stmt->execute([$documentId, $supplierId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /** Ruční převzatý zápis nebo zápis již navázaný na stejný doklad. */
+    public function hasLinkableEntry(int $supplierId, int $entryId, string $date, string $sourceType, int $sourceId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT entry_date, source_type, source_id, reversed_by FROM journal_entries WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([$entryId, $supplierId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        return $row !== false && (string) $row['entry_date'] === $date && $row['reversed_by'] === null
+            && (($row['source_type'] === 'manual' && $row['source_id'] === null)
+                || ($row['source_type'] === $sourceType && (int) $row['source_id'] === $sourceId));
+    }
+
+    /** Pohyb bez prokázané vazby na deník zůstane uživateli ke kontrole. */
+    public function markUnverifiedMovement(int $supplierId, string $kind, int $movementId,
+        string $reason, string $note): void
+    {
+        if ($kind === 'bank') {
+            $this->db->pdo()->prepare("UPDATE bank_transactions t JOIN bank_statements s ON s.id=t.statement_id
+                SET t.match_status=CASE WHEN t.match_status='unmatched' AND NOT EXISTS (
+                    SELECT 1 FROM payment_matches pm
+                    WHERE pm.supplier_id=s.supplier_id AND pm.bank_transaction_id=t.id
+                ) THEN 'ignored' ELSE t.match_status END,
+                    t.match_reason=?, t.ignore_note=?
+                WHERE t.id=? AND s.supplier_id=? AND t.match_status <> 'ignored'
+                  AND (t.match_reason IS NULL OR t.match_reason=?)")
+                ->execute([$reason, $note, $movementId, $supplierId, $reason]);
+            return;
+        }
+        if ($kind !== 'cash') throw new \InvalidArgumentException('Unsupported movement type.');
+        $this->db->pdo()->prepare("UPDATE cash_documents SET status='draft' WHERE id=? AND supplier_id=? AND status <> 'draft'")
+            ->execute([$movementId, $supplierId]);
+    }
+
     /**
      * @param string $sourceName název zdroje v 2. pádě do poznámek vazeb („Money S3",
      *        „Pohody", „PREMIER")

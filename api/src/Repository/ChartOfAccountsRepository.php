@@ -166,6 +166,13 @@ final class ChartOfAccountsRepository
         return $stmt->rowCount() > 0;
     }
 
+    /** Daňový příznak převzatého výsledkového účtu. */
+    public function setTaxDeductibility(int $supplierId, int $id, string $value): void
+    {
+        $this->db->pdo()->prepare('UPDATE chart_of_accounts SET tax_deductibility = ? WHERE id = ? AND supplier_id = ?')
+            ->execute([$value, $id, $supplierId]);
+    }
+
     /**
      * Smaže účet. Volající MUSÍ nejdřív ověřit, že na něm nic nevisí
      * ({@see \MyInvoice\Service\Accounting\ChartAccountUsage}) — repository

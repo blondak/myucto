@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\StereoNx;
 
 use MyInvoice\Repository\ImportJobRepository;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Migration\Shared\AbstractImportJobService;
+use MyInvoice\Service\Migration\Shared\ChunkedUploadStore;
+use MyInvoice\Service\Migration\Shared\MigrationCompanyLock;
 use MyInvoice\Service\Auth\SecretEncryption;
 use Psr\Log\LoggerInterface;
 
@@ -24,17 +28,27 @@ use Psr\Log\LoggerInterface;
  * Heslo zálohy (když ho uživatel zadal) jde do parametrů jobu zašifrované a vázané
  * na firmu a zálohu; job ho po přečtení z řádku odebere.
  */
-final class StereoNxImportJobService
+final class StereoNxImportJobService extends AbstractImportJobService
 {
     public const SOURCE = 'stereo_nx_import';
     public const FAILED = 'Převod se nepodařilo dokončit; zkontrolujte stav dat.';
 
+    protected const LOG_PREFIX = 'Stereo NX';
+    protected const UPLOAD_NOUN = 'zálohy';
+    protected const EXCEPTION_CLASS = StereoNxException::class;
+    protected const RUN_FAILED = self::FAILED;
+
     public function __construct(
-        private readonly ImportJobRepository $jobs,
+        ImportJobRepository $jobs,
         private readonly StereoNxImporter $importer,
+        private readonly StereoNxAccountingImporter $accountingImporter,
         private readonly SecretEncryption $secrets,
         private readonly LoggerInterface $log,
-    ) {}
+        ActivityLogger $logger,
+        private readonly MigrationCompanyLock $companyLock,
+    ) {
+        parent::__construct($jobs, null, $logger);
+    }
 
     /** Kontext šifrování hesla v parametrech jobu: heslo nejde použít s jinou zálohou ani firmou. */
     public static function passwordContext(int $supplierId, string $token): string
@@ -42,13 +56,39 @@ final class StereoNxImportJobService
         return 'stereo-nx-backup:' . $supplierId . ':' . $token;
     }
 
-    public function run(int $jobId): void
+    protected function uploads(): ChunkedUploadStore
     {
-        $job = $this->jobs->findById($jobId);
-        if ($job === null || !$this->jobs->markRunning($jobId)) {
-            return;
-        }
-        $supplierId = (int) $job['supplier_id'];
+        return StereoNxUploads::store();
+    }
+
+    protected function supportsPrepareJob(): bool
+    {
+        return false;
+    }
+
+    protected function extractUpload(string $part, int $supplierId, string $token): mixed
+    {
+        throw new \LogicException('Stereo NX zpracovává nahranou zálohu v průvodci.');
+    }
+
+    protected function describeUpload(mixed $extracted, int $supplierId, string $token): array
+    {
+        throw new \LogicException('Stereo NX zpracovává nahranou zálohu v průvodci.');
+    }
+
+    protected function acquireCompanyLock(int $supplierId): bool
+    {
+        return $this->companyLock->acquire(self::SOURCE, $supplierId);
+    }
+
+    protected function releaseCompanyLock(int $supplierId): void
+    {
+        $this->companyLock->release(self::SOURCE, $supplierId);
+    }
+
+    /** @param array<string,mixed> $job */
+    protected function runLocked(int $jobId, array $job, int $supplierId): void
+    {
         $userId = (int) ($job['created_by'] ?? 0);
         $params = is_array($job['params'] ?? null) ? $job['params'] : [];
         $token = (string) ($params['token'] ?? '');
@@ -57,6 +97,7 @@ final class StereoNxImportJobService
         $dryRun = $mode === 'dry_run';
         $blankCountryIsCz = ($params['blank_country_is_cz'] ?? false) === true;
         $hash = (string) ($params['sha256'] ?? '');
+        $accountingMode = (string) ($params['accounting_mode'] ?? 'tax_evidence');
 
         try {
             $password = isset($params['password_enc'])
@@ -78,20 +119,28 @@ final class StereoNxImportJobService
 
         try {
             $backup = StereoNxBackup::open(StereoNxUploads::archive($supplierId, $token), $company, $password);
-            $report = StereoNxUploads::locked($supplierId, $token, function (array $locked) use ($jobId, $supplierId, $userId, $token, $company, $mode, $dryRun, $backup, $hash, $blankCountryIsCz): array {
+            $report = StereoNxUploads::locked($supplierId, $token, function (array $locked) use ($jobId, $supplierId, $userId, $token, $company, $mode, $dryRun, $backup, $hash, $blankCountryIsCz, $accountingMode): array {
                 if (($locked['status'] ?? '') !== 'ready' || $hash === '' || !hash_equals((string) ($locked['sha256'] ?? ''), $hash)) {
                     throw new StereoNxException('upload_changed', 'Nahraná záloha se změnila.');
                 }
                 if ($mode === 'import' && (($locked['dry_run_company'] ?? null) !== $company
-                    || ($locked['dry_run_blank_country_is_cz'] ?? null) !== $blankCountryIsCz)) {
+                    || ($locked['dry_run_blank_country_is_cz'] ?? null) !== $blankCountryIsCz
+                    || ($locked['dry_run_accounting_mode'] ?? 'tax_evidence') !== $accountingMode)) {
                     throw new StereoNxException('dry_run_required', 'Před převodem spusťte úspěšnou zkoušku nanečisto.');
                 }
-                $report = $this->importer->run($backup, $supplierId, $userId, $dryRun, $blankCountryIsCz);
+                $importer = match ($accountingMode) {
+                    'tax_evidence' => $this->importer,
+                    'double_entry' => $this->accountingImporter,
+                    default => throw new StereoNxException('target_mismatch', 'Nepodporovaný režim účetnictví.'),
+                };
+                $report = $importer->run($backup, $supplierId, $userId, $dryRun, $blankCountryIsCz);
                 if ($dryRun) {
                     $locked['dry_run_company'] = ($report['ok'] ?? false) === true ? $company : null;
+                    $locked['dry_run_accounting_mode'] = ($report['ok'] ?? false) === true ? $accountingMode : null;
                     $locked['dry_run_blank_country_is_cz'] = ($report['ok'] ?? false) === true ? $blankCountryIsCz : null;
                 } else {
                     $locked['dry_run_company'] = null;
+                    $locked['dry_run_accounting_mode'] = null;
                     $locked['dry_run_blank_country_is_cz'] = null;
                     $locked['imported_at'] = time();
                 }
@@ -122,7 +171,7 @@ final class StereoNxImportJobService
         $written = is_array($report['written'] ?? null) ? $report['written'] : [];
         $this->jobs->updateProgress($jobId, [
             'processed' => 1,
-            'created_count' => (int) (($written['issued'] ?? 0) + ($written['purchases'] ?? 0)),
+            'created_count' => (int) (($written['issued'] ?? 0) + ($written['purchases'] ?? 0) + ($written['journal_entries_created'] ?? 0)),
             'failed_count' => is_array($report['errors'] ?? null) ? count($report['errors']) : 0,
             'current_step' => 'Hotovo',
         ]);

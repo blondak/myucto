@@ -9,13 +9,17 @@ use MyInvoice\Repository\MovementClassificationRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
-use MyInvoice\Service\Migration\Pohoda\PartnerImporter as PohodaPartners;
+use MyInvoice\Service\Migration\Shared\BankAccountRegistrar;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
+use MyInvoice\Service\Migration\Shared\MigrationHomeCurrency;
+use MyInvoice\Service\Migration\Shared\MigratedPaymentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedCashNumber;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
 use MyInvoice\Service\Migration\Shared\MigratedPurchaseDocument;
 use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
+use MyInvoice\Service\Migration\Shared\BankStatementImportWriter;
 use MyInvoice\Service\Migration\Shared\PartnerIdentityMatcher;
 use MyInvoice\Service\Migration\Shared\VatCoefficientSeeder;
 use MyInvoice\Service\Stats\StatsRecomputer;
@@ -41,9 +45,26 @@ final class StereoNxImporter
         'tax_date_supply_mismatch' => 'datum DPH a den uskutečnění plnění se liší',
         'vat_register_mismatch' => 'údaje dokladu nesouhlasí se zdrojovou evidencí DPH',
         'mixed_vat_deduction' => 'doklad kombinuje položky s různým nárokem na odpočet DPH',
+        'purchase_lines_aggregated' => 'položky přijatého dokladu byly sloučeny podle rekapitulace DPH',
+        'advance_application_unlinked' => 'čerpání zálohy není navázáno na původní zálohový doklad',
+        'issued_lines_aggregated' => 'položky vydaného dokladu byly sloučeny podle rekapitulace DPH',
+        'foreign_currency_rate_mismatch' => 'korunová částka dokladu neodpovídá částce v cizí měně a uloženému kurzu',
+        'foreign_currency_vat_base_mismatch' => 'korunový základ DPH nesouhlasí s přepočtenou částkou dokladu',
+        'foreign_currency_vat_unverified' => 'daňové zařazení cizoměnového dokladu vyžaduje kontrolu',
+        'document_tax_mapping_unverified' => 'daňové rozdělení dokladu se nepodařilo ověřit',
+        'document_tax_date_missing' => 'zdroj neobsahuje úplné datum plnění nebo DPH',
+        'cancelled_document_review' => 'stornovaný doklad vyžaduje kontrolu vazby na původní doklad',
+        'document_kind_unverified' => 'zdrojový typ dokladu nemá přímý ekvivalent',
     ];
 
+    public static function reviewLabel(string $code): string
+    {
+        return self::REVIEW_LABELS[$code] ?? 'neověřený údaj ze zdrojové zálohy';
+    }
+
     private readonly MigrationVatRateLookup $rates;
+    private readonly MigrationHomeCurrency $homeCurrency;
+    private readonly MigratedPaymentWriter $payments;
     private readonly MigratedCashNumber $cashNumbers;
 
     public function __construct(
@@ -59,7 +80,143 @@ final class StereoNxImporter
         private readonly PartnerIdentityMatcher $identity,
     ) {
         $this->rates = new MigrationVatRateLookup($db);
+        $this->homeCurrency = new MigrationHomeCurrency($db);
+        $this->payments = new MigratedPaymentWriter($db);
         $this->cashNumbers = new MigratedCashNumber($db);
+    }
+
+    /** Sdílený zápis adresáře pro účetní převod, bez dokladů a bez vlastní transakce.
+     * @param array<string,array<string,mixed>> $partners
+     * @param array{ico:string} $identity
+     */
+    public function writeAccountingPartners(array $partners, array $identity, int $companyIndex, int $supplierId): array
+    {
+        if (!$this->db->pdo()->inTransaction()) {
+            throw new StereoNxException('transaction_required', 'Zápis adresáře vyžaduje transakci převodu.');
+        }
+        $context = ['supplier_id' => $supplierId, 'ico' => $identity['ico'], 'company_index' => $companyIndex,
+            'currency_id' => $this->currencyId($supplierId), 'ids' => ['client' => []], 'written' => ['clients' => 0]];
+        foreach ($partners as $record) $this->importClient($context, $record);
+        return $context['written'];
+    }
+
+    /** Zápis účetních dokladů po samostatně převedeném adresáři, bez vlastní transakce. */
+    public function writeAccountingDocuments(array $plan, int $supplierId, int $userId): array
+    {
+        if (!$this->db->pdo()->inTransaction()) {
+            throw new StereoNxException('transaction_required', 'Zápis účetních dokladů vyžaduje transakci převodu.');
+        }
+        $ico = trim((string) ($plan['identity']['ico'] ?? ''));
+        $companyIndex = (int) ($plan['source_company_index'] ?? -1);
+        $context = [
+            'supplier_id' => $supplierId, 'user_id' => $userId, 'ico' => $ico, 'company_index' => $companyIndex,
+            'currency_id' => $this->currencyId($supplierId), 'ids' => ['client' => [], 'issued' => [], 'purchase' => []],
+            'new_documents' => ['issued' => [], 'purchase' => []], 'actual_review_documents' => [],
+            'written' => ['issued' => 0, 'purchases' => 0],
+        ];
+        foreach ($plan['clients'] ?? [] as $client) {
+            $key = (string) ($client['source_key'] ?? '');
+            $mapped = $this->map->get($supplierId, $ico, $companyIndex, 'client', $key);
+            if ($mapped === null) throw new StereoNxException('document_partner_missing', 'Adresář musí být převeden před doklady.');
+            $context['ids']['client'][$key] = $mapped['target_id'];
+        }
+        foreach ($plan['issued'] ?? [] as $record) $this->importDocument($context, 'issued', $record);
+        foreach ($plan['purchases'] ?? [] as $record) $this->importDocument($context, 'purchase', $record);
+        foreach (['issued' => 'issued', 'purchases' => 'purchase'] as $section => $kind) {
+            foreach ($plan[$section] ?? [] as $record) {
+                if (($record['requires_draft'] ?? false) !== true) continue;
+                $key = (string) ($record['source_key'] ?? '');
+                $index = $kind . "\0" . $key;
+                $planned = array_values(array_unique(array_map('strval', $record['review_codes'] ?? [])));
+                if (!isset($context['actual_review_documents'][$index])) {
+                    $context['actual_review_documents'][$index] = [
+                        'kind' => $kind, 'source_key' => $key,
+                        'document_no' => (string) ($record['document_no'] ?? ''),
+                        'review_codes' => $planned,
+                        'target_id' => $context['ids'][$kind][$key] ?? null,
+                    ];
+                } else {
+                    $context['actual_review_documents'][$index]['review_codes'] = array_values(array_unique([
+                        ...$context['actual_review_documents'][$index]['review_codes'], ...$planned,
+                    ]));
+                    $context['actual_review_documents'][$index]['target_id'] = $context['ids'][$kind][$key] ?? null;
+                }
+            }
+        }
+        return ['counts' => $context['written'], 'warnings' => [],
+            'review_documents' => array_values($context['actual_review_documents'])];
+    }
+
+    /** Zápis fyzické banky a pokladny bez projekce účetního deníku a bez vlastní transakce. */
+    public function writeAccountingPayments(array $plan, int $supplierId, int $userId): array
+    {
+        if (!$this->db->pdo()->inTransaction()) {
+            throw new StereoNxException('transaction_required', 'Zápis banky a pokladny vyžaduje transakci převodu.');
+        }
+        $ico = trim((string) ($plan['identity']['ico'] ?? ''));
+        $companyIndex = (int) ($plan['source_company_index'] ?? -1);
+        $context = [
+            'supplier_id' => $supplierId, 'user_id' => $userId, 'ico' => $ico, 'company_index' => $companyIndex,
+            'ids' => ['issued' => [], 'purchase' => [], 'bank_account' => [], 'bank_statement' => [], 'bank' => [], 'cash' => []],
+            'new_documents' => ['issued' => [], 'purchase' => []], 'new_statements' => [],
+            'touched_documents' => ['issued' => [], 'purchase' => []], 'touched_statements' => [], 'zero_cash' => [],
+            'bank_writer' => new BankStatementImportWriter($this->db, 'stereo-nx'),
+            'written' => ['bank_accounts' => 0, 'bank_statements' => 0, 'bank_transactions' => 0,
+                'cash_transactions' => 0, 'payments' => 0, 'skipped_zero_cash' => 0],
+        ];
+        foreach ($plan['payments'] ?? [] as $payment) {
+            $kind = (string) ($payment['document_kind'] ?? '');
+            $key = (string) ($payment['document_key'] ?? '');
+            if (!in_array($kind, ['issued', 'purchase'], true) || $key === '') {
+                throw new StereoNxException('payment_link_invalid', 'Vazba úhrady má nepodporovaný druh.');
+            }
+            if (isset($context['ids'][$kind][$key])) continue;
+            $section = $kind === 'issued' ? 'issued' : 'purchases';
+            $sources = array_values(array_filter($plan['documents'][$section] ?? [],
+                static fn (array $document): bool => ($document['source_key'] ?? null) === $key));
+            if (count($sources) !== 1) {
+                throw new StereoNxException('payment_document_missing', 'Úhrada nemá jednoznačný zdrojový doklad.');
+            }
+            $target = $this->mappedDocument($context, $kind, $sources[0]);
+            if ($target === null) throw new StereoNxException('payment_document_missing', 'Doklady musí být převedeny před úhradami.');
+            $context['ids'][$kind][$key] = $target;
+        }
+        foreach ($plan['bank_accounts'] ?? [] as $record) {
+            $wasMapped = $this->map->get($supplierId, $ico, $companyIndex, 'bank_account', (string) ($record['source_key'] ?? '')) !== null;
+            $this->importBankAccount($context, $record);
+            if (!$wasMapped) $context['written']['bank_accounts']++;
+        }
+        foreach ($plan['bank_statements'] ?? [] as $record) $this->importBankStatement($context, $record);
+        foreach ($plan['bank_transactions'] ?? [] as $record) $this->importBankTransaction($context, $record);
+        foreach ($plan['cash_transactions'] ?? [] as $record) $this->importCashTransaction($context, $record);
+        foreach ($plan['payments'] ?? [] as $record) $this->importPayment($context, $record);
+        $linkReviews = (new StereoNxMovementJournalLinks($this->db, $this->map))->write($context, $plan);
+        $allReviews = [];
+        foreach ([...($plan['reviews'] ?? []), ...$linkReviews] as $review) {
+            $reviewKey = $review['kind'] . ':' . $review['source_key'];
+            if (isset($allReviews[$reviewKey])) {
+                $allReviews[$reviewKey]['review_codes'] = array_values(array_unique([
+                    ...$allReviews[$reviewKey]['review_codes'], ...$review['review_codes'],
+                ]));
+            } else $allReviews[$reviewKey] = $review;
+        }
+        $plan['reviews'] = array_values($allReviews);
+        $this->refreshBalances($context);
+        $reviews = [];
+        foreach ($plan['reviews'] ?? [] as $review) {
+            $kind = (string) ($review['kind'] ?? ''); $key = (string) ($review['source_key'] ?? '');
+            $review['target_id'] = $key !== '' ? ($context['ids'][$kind][$key] ?? null) : null;
+            if ($kind === 'bank') {
+                $review['statement_id'] = $context['ids']['bank_statement'][(string) ($review['statement_key'] ?? '')] ?? null;
+            }
+            unset($review['statement_key']);
+            $reviews[] = $review;
+        }
+        unset($context['written']['skipped_zero_cash']);
+        return ['counts' => $context['written'], 'warnings' => $linkReviews === [] ? [] : [[
+            'level' => 'warning', 'code' => 'movement_journal_unverified',
+            'message' => 'Pohyby bez ověřené kontace zůstaly mimo automatické účtování: banka jako ignorovaná, pokladna jako koncept. Před obnovením ověřte vazbu na převzatý deník.',
+        ]], 'review_movements' => $reviews];
     }
 
     /**
@@ -77,6 +234,7 @@ final class StereoNxImporter
             'review_documents' => [],
         ];
         try {
+            StereoNxCompanyCompatibility::assertAccountingMode($backup->companyIdentity(), 'tax_evidence');
             $plan = $this->sourcePlan->build($backup, $blankCountryIsCz);
             $report['counts'] = $plan['counts'] ?? [];
             $reviewReasons = [];
@@ -297,7 +455,7 @@ final class StereoNxImporter
             return $out;
         }
         $identity = $plan['identity'] ?? [];
-        if (PohodaPartners::ico((string) ($supplier['ic'] ?? '')) !== ($identity['ico'] ?? null)) {
+        if (PartnerIdentityMatcher::ico((string) ($supplier['ic'] ?? '')) !== ($identity['ico'] ?? null)) {
             $error('ico_mismatch', 'IČO firmy v záloze a vybrané firmy se neshoduje.');
         }
         if (($identity['vat_payer'] ?? null) !== true || (int) $supplier['is_vat_payer'] !== 1) {
@@ -324,19 +482,7 @@ final class StereoNxImporter
             }
         }
         $years = array_values(array_unique(array_map(static fn (string $d): int => (int) substr($d, 0, 4), $dates)));
-        $period = $this->db->pdo()->prepare('SELECT status FROM accounting_periods
-            WHERE supplier_id = ? AND starts_on <= ? AND ends_on >= ? LIMIT 1');
-        $lockStmt = $this->db->pdo()->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ?');
-        $lockStmt->execute([$supplierId]);
-        $lockedUntil = $lockStmt->fetchColumn();
-        foreach (array_unique($dates) as $date) {
-            $period->execute([$supplierId, $date, $date]);
-            $status = $period->fetchColumn();
-            if ($status !== false && $status !== 'open') $error('period_closed', 'Cílové účetní období je uzavřené.');
-            if ($lockedUntil !== false && $lockedUntil !== null && $date <= $lockedUntil) {
-                $error('date_locked', 'Datum zdrojového dokladu nebo pohybu spadá do uzamčeného období.');
-            }
-        }
+        array_push($out, ...StereoNxTargetDates::findings($this->db, $supplierId, $dates));
         foreach ($years as $year) {
             foreach ([['invoices', 'issued', 'issue_date', 'vydané faktury'],
                 ['purchase_invoices', 'purchase', 'issue_date', 'přijaté faktury'],
@@ -387,12 +533,12 @@ final class StereoNxImporter
         $hash = self::sourceHash($record);
         $existing = $this->mapped($ctx, 'client', $key, $hash);
         if ($existing !== null) { $ctx['ids']['client'][$key] = $existing; return; }
-        $ico = PohodaPartners::ico((string) ($record['ico'] ?? ''));
+        $ico = PartnerIdentityMatcher::ico((string) ($record['ico'] ?? ''));
         if ($ico !== '') {
             $matched = $this->identity->clientByIco($ctx['supplier_id'], $ico);
             if ($matched !== null) {
-                $sourceDic = PohodaPartners::vatId((string) ($record['dic'] ?? ''));
-                $targetDic = PohodaPartners::vatId((string) ($matched['dic'] ?? ''));
+                $sourceDic = PartnerIdentityMatcher::vatId((string) ($record['dic'] ?? ''));
+                $targetDic = PartnerIdentityMatcher::vatId((string) ($matched['dic'] ?? ''));
                 if ($sourceDic !== '' && $targetDic !== '' && $sourceDic !== $targetDic) {
                     throw new StereoNxException('client_identity_conflict', 'Existující partner má při stejném IČO jiné DIČ.');
                 }
@@ -411,22 +557,16 @@ final class StereoNxImporter
         }
         $countryId = $this->countryId($country);
         if ($countryId <= 0) throw new StereoNxException('country_unsupported', 'Země partnera nemá jednoznačné zařazení.');
-        $pdo = $this->db->pdo();
-        $pdo->prepare('INSERT INTO clients
-            (supplier_id, company_name, ic, dic, street, city, zip, country_id, main_email, phone,
-             currency_default_id, is_customer, is_vendor, is_vat_payer, note, auto_send_reminders)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, 0)')->execute([
-            $ctx['supplier_id'], mb_substr($name, 0, 190), $ico !== '' ? $ico : null,
-            PohodaPartners::vatId((string) ($record['dic'] ?? '')) ?: null,
-            mb_substr((string) ($record['street'] ?? ''), 0, 190),
-            mb_substr((string) ($record['city'] ?? ''), 0, 120),
-            mb_substr((string) ($record['zip'] ?? ''), 0, 10), $countryId,
-            mb_substr((string) ($record['email'] ?? ''), 0, 190) ?: null,
-            mb_substr((string) ($record['phone'] ?? ''), 0, 40) ?: null,
-            $ctx['currency_id'], ($record['row']['PlatDPH'] ?? null) === true ? 1 : 0,
-            ($record['country_unresolved'] ?? false) ? 'Převzato ze Stereo NX; zemi nutno ověřit.' : 'Převzato ze Stereo NX',
+        $id = $this->identity->insertImportedClient($ctx['supplier_id'], [
+            'name' => $name, 'ico' => $ico, 'dic' => (string) ($record['dic'] ?? ''),
+            'street' => (string) ($record['street'] ?? ''), 'city' => (string) ($record['city'] ?? ''),
+            'zip' => (string) ($record['zip'] ?? ''), 'email' => (string) ($record['email'] ?? ''),
+            'phone' => (string) ($record['phone'] ?? ''), 'country_id' => $countryId,
+            'currency_id' => $ctx['currency_id'],
+            'is_vat_payer' => ($record['row']['PlatDPH'] ?? null) === true,
+            'note' => ($record['country_unresolved'] ?? false)
+                ? 'Převzato ze Stereo NX; zemi nutno ověřit.' : 'Převzato ze Stereo NX',
         ]);
-        $id = (int) $pdo->lastInsertId();
         $this->put($ctx, 'client', $key, $hash, $id);
         $ctx['ids']['client'][$key] = $id;
         $ctx['written']['clients']++;
@@ -437,9 +577,7 @@ final class StereoNxImporter
     {
         $key = $this->key($record);
         $hash = self::sourceHash($record);
-        $currentLabelHash = self::sourceHash($record, false);
-        $existing = $this->mapped($ctx, $kind, $key, $hash,
-            $currentLabelHash !== $hash ? $currentLabelHash : null);
+        $existing = $this->mappedDocument($ctx, $kind, $record);
         if ($existing !== null) { $ctx['ids'][$kind][$key] = $existing; return; }
         $partnerId = $ctx['ids']['client'][(string) ($record['partner_key'] ?? '')] ?? null;
         if ($partnerId === null) throw new StereoNxException('document_partner_missing', 'Doklad odkazuje na neznámého partnera.');
@@ -481,7 +619,7 @@ final class StereoNxImporter
         }
         $note = 'Převzato ze Stereo NX.';
         if ($reviewCodes !== []) {
-            $labels = array_map(static fn (string $code): string => self::REVIEW_LABELS[$code] ?? 'neověřený údaj ze zdrojové zálohy', $reviewCodes);
+            $labels = array_map(static fn (string $code): string => self::reviewLabel($code), $reviewCodes);
             $note .= ' K ruční kontrole: ' . implode('; ', array_unique($labels)) . '.';
         }
         if ($sourceVatDate !== $tax) $note .= ' Zdrojové datum pro DPH: ' . $sourceVatDate . '; DUZP: ' . $tax . '.';
@@ -493,24 +631,49 @@ final class StereoNxImporter
                 if ($value !== '') $snapshot[$field] = $value;
             }
         }
-        $snapshotJson = PohodaPartners::snapshotJson($snapshot);
+        $snapshotJson = (string) json_encode([
+            'company_name' => $snapshot['name'], 'street' => $snapshot['street'], 'city' => $snapshot['city'],
+            'zip' => $snapshot['zip'], 'ic' => $snapshot['ico'], 'dic' => $snapshot['dic'],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         $vs = preg_replace('/\D/', '', (string) ($record['variable_symbol'] ?? '')) ?? '';
         $vs = strlen($vs) <= 10 ? ($vs !== '' ? $vs : null) : null;
         // Zdrojový plán převádí jen doklady v Kč s kurzem 1 (StereoNxIssuedDocuments,
         // StereoNxPurchaseRecap), režim cen a přenesenou povinnost nese záznam plánu.
         $pricesIncludeVat = (bool) ($record['prices_include_vat'] ?? false);
         $reverseCharge = (bool) ($record['reverse_charge'] ?? false);
+        $currencyCode = strtoupper(trim((string) ($record['currency_code'] ?? 'CZK')));
+        $currencyId = $this->currencyIdForCode($ctx['supplier_id'], 'CZK');
+        $exchangeRate = null;
+        if ($currencyCode !== 'CZK') {
+            $decision = (new ForeignCurrencyTakeover($this->db))->decide(
+                $ctx['supplier_id'], $currencyCode, (float) ($record['exchange_rate'] ?? 0), 1.0,
+                (array) ($record['foreign_takeover_items'] ?? []),
+                (float) ($record['foreign_home_total'] ?? 0),
+                array_key_exists('foreign_takeover_blocked', $record)
+                    ? $record['foreign_takeover_blocked'] : 'zdroj nemá ověřené korunové částky',
+            );
+            if (!$decision->inForeignCurrency()) {
+                if (str_starts_with((string) $decision->reason, 'měna ')) {
+                    throw new StereoNxException('currency_missing',
+                        'Cílová firma nemá měnu ' . $currencyCode . '; založte ji v Nastavení měn a převod zopakujte.');
+                }
+                throw new StereoNxException('document_foreign_unverified',
+                    'Cizoměnový doklad nelze bezpečně převzít: ' . $decision->reason . '.');
+            }
+            $currencyId = $decision->currencyId;
+            $exchangeRate = $decision->rate;
+        }
         if ($kind === 'issued') {
             $id = $this->writer->insertIssued(new MigratedIssuedDocument(
                 supplierId: $ctx['supplier_id'],
-                invoiceType: 'invoice',
+                invoiceType: (string) ($record['target_document_kind'] ?? 'invoice'),
                 clientId: $partnerId,
                 varsymbol: $number,
                 issueDate: $issue,
                 taxDate: $tax,
                 dueDate: $due,
-                currencyId: $ctx['currency_id'],
-                exchangeRate: null,
+                currencyId: $currencyId,
+                exchangeRate: $exchangeRate,
                 pricesIncludeVat: $pricesIncludeVat,
                 reverseCharge: $reverseCharge,
                 noteAboveItems: $sourceNote !== '' ? mb_substr($sourceNote, 0, 1000) : null,
@@ -537,14 +700,14 @@ final class StereoNxImporter
                 vendorIsVatPayer: $liveSnapshot['is_vat_payer'],
                 varsymbol: $number,
                 vendorInvoiceNumber: mb_substr($vendorNumber, 0, 50),
-                documentKind: 'invoice',
+                documentKind: (string) ($record['target_document_kind'] ?? 'invoice'),
                 issueDate: $issue,
                 taxDate: $tax,
                 dueDate: $due,
                 receivedAt: max($issue, $tax),
                 receivedAtSource: 'import',
-                currencyId: $ctx['currency_id'],
-                exchangeRate: null,
+                currencyId: $currencyId,
+                exchangeRate: $exchangeRate,
                 pricesIncludeVat: $pricesIncludeVat,
                 reverseCharge: $reverseCharge,
                 vendorSnapshot: $snapshotJson,
@@ -636,9 +799,12 @@ final class StereoNxImporter
         if ($existing !== null) { $ctx['ids']['bank_account'][$key] = $existing; return; }
         $number = trim((string) ($record['account_number'] ?? ''));
         if ($number === '') throw new StereoNxException('bank_account_missing', 'Záloha neobsahuje číslo vlastního účtu.');
-        $id = $this->bankAccounts->registerImported($ctx['supplier_id'], $number,
-            $record['bank_code'] ?? null, $record['iban'] ?? null,
-            (string) ($record['currency'] ?? 'CZK'), (string) ($record['label'] ?? 'Stereo NX'), null);
+        $registered = (new BankAccountRegistrar($this->db, $this->bankAccounts))->register($ctx['supplier_id'], [
+            $key => ['number' => $number, 'bank' => (string) ($record['bank_code'] ?? ''),
+                'iban' => (string) ($record['iban'] ?? ''), 'currency' => (string) ($record['currency'] ?? 'CZK'),
+                'label' => (string) ($record['label'] ?? 'Stereo NX'), 'suffix' => null],
+        ]);
+        $id = $registered[$key] ?? null;
         if ($id === null) throw new StereoNxException('bank_account_conflict', 'Vlastní bankovní účet nelze bezpečně přiřadit vybrané firmě.');
         $this->put($ctx, 'bank_account', $key, $hash, $id);
         $ctx['ids']['bank_account'][$key] = $id;
@@ -660,17 +826,10 @@ final class StereoNxImporter
         if ($account === false) throw new StereoNxException('statement_account_missing', 'Vlastní účet nepatří vybrané firmě.');
         $date = $this->date($record['date'] ?? null);
         $number = mb_substr((string) ($record['document_no'] ?? $key), 0, 20);
-        $pdo = $this->db->pdo();
-        $pdo->prepare('INSERT INTO bank_statements
-            (supplier_id, source, source_ref, file_name, file_hash, account_number, bank_code,
-             currency, statement_number, statement_date, transaction_count, imported_by)
-            VALUES (?, "import", ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)')->execute([
-            $ctx['supplier_id'], mb_substr($key, 0, 190), 'stereo-nx.import',
-            hash('sha256', 'stereo-nx|' . $ctx['supplier_id'] . '|' . $ctx['ico'] . '|' . $ctx['company_index'] . '|' . $key),
-            $account['account_number'], $account['bank_code'], $account['currency'] ?: 'CZK',
-            $number, $date, $ctx['user_id'],
-        ]);
-        $id = (int) $pdo->lastInsertId();
+        $writer = $ctx['bank_writer'] ?? new BankStatementImportWriter($this->db, 'stereo-nx');
+        $id = $writer->createStatement($ctx['supplier_id'], $ctx['ico'] . '|' . $ctx['company_index'] . '|' . $key,
+            $number, (string) $account['account_number'], (string) ($account['bank_code'] ?? ''),
+            (string) ($account['currency'] ?: 'CZK'), $date, $ctx['user_id']);
         $this->put($ctx, 'bank_statement', $key, $hash, $id);
         $ctx['ids']['bank_statement'][$key] = $id;
         $ctx['new_statements'][$key] = $id;
@@ -688,20 +847,20 @@ final class StereoNxImporter
         if ($statementId === null) throw new StereoNxException('transaction_statement_missing', 'Bankovní pohyb nemá výpis.');
         $amount = $this->money($record['amount'] ?? null);
         $date = $this->date($record['date'] ?? null);
-        $pdo = $this->db->pdo();
-        $pdo->prepare('INSERT INTO bank_transactions
-            (source, source_ref, statement_id, posted_at, amount, currency, variable_symbol,
-             counterparty_account, counterparty_bank, counterparty_name, description, import_fingerprint)
-            VALUES ("statement", ?, ?, ?, ?, "CZK", ?, ?, ?, ?, ?, ?)')->execute([
-            mb_substr($key, 0, 190), $statementId, $date, $amount,
-            mb_substr((string) ($record['variable_symbol'] ?? ''), 0, 10) ?: null,
-            mb_substr((string) ($record['counterparty_account'] ?? ''), 0, 40) ?: null,
-            mb_substr((string) ($record['counterparty_bank'] ?? ''), 0, 4) ?: null,
-            mb_substr((string) ($record['counterparty_name'] ?? ''), 0, 190) ?: null,
-            mb_substr((string) ($record['description'] ?? ''), 0, 255) ?: null,
-            hash('sha256', 'stereo-nx|' . $ctx['supplier_id'] . '|' . $ctx['ico'] . '|' . $ctx['company_index'] . '|' . $key),
-        ]);
-        $id = (int) $pdo->lastInsertId();
+        $writer = $ctx['bank_writer'] ?? new BankStatementImportWriter($this->db, 'stereo-nx');
+        $id = $writer->insertTransaction($ctx['supplier_id'], $statementId,
+            $ctx['ico'] . '|' . $ctx['company_index'] . '|' . $key, [
+                'source_ref' => mb_substr($key, 0, 190), 'posted_at' => $date,
+                'amount' => number_format($amount, 2, '.', ''), 'currency' => (string) ($record['currency'] ?? 'CZK'),
+                'variable_symbol' => mb_substr((string) ($record['variable_symbol'] ?? ''), 0, 10) ?: null,
+                'constant_symbol' => mb_substr((string) ($record['constant_symbol'] ?? ''), 0, 10) ?: null,
+                'specific_symbol' => mb_substr((string) ($record['specific_symbol'] ?? ''), 0, 10) ?: null,
+                'counterparty_account' => mb_substr((string) ($record['counterparty_account'] ?? ''), 0, 40) ?: null,
+                'counterparty_bank' => mb_substr((string) ($record['counterparty_bank'] ?? ''), 0, 4) ?: null,
+                'counterparty_name' => mb_substr((string) ($record['counterparty_name'] ?? ''), 0, 190) ?: null,
+                'description' => mb_substr((string) ($record['description'] ?? ''), 0, 255) ?: null,
+                'bank_ref' => null,
+            ]);
         $this->put($ctx, 'bank', $key, $hash, $id);
         $ctx['ids']['bank'][$key] = $id;
         $ctx['touched_statements'][$statementId] = $statementId;
@@ -718,7 +877,7 @@ final class StereoNxImporter
             if (($record['document_key'] ?? null) !== null) {
                 throw new StereoNxException('zero_payment_invalid', 'Nulový pokladní pohyb nemůže být úhradou dokladu.');
             }
-            $registerId = $this->cashRegister($ctx['supplier_id']);
+            $registerId = $this->payments->cashRegister($ctx['supplier_id'], 'Stereo NX');
             if ($this->mapped($ctx, 'cash_zero', $key, $hash) === null) {
                 // Zdrojové nulové otevření pokladny nemá peněžní dopad a cílová
                 // cash_documents nedovoluje posted doklad s nulovou částkou.
@@ -730,20 +889,14 @@ final class StereoNxImporter
         }
         $existing = $this->mapped($ctx, 'cash', $key, $hash);
         if ($existing !== null) { $ctx['ids']['cash'][$key] = $existing; return; }
-        $registerId = $this->cashRegister($ctx['supplier_id']);
+        $registerId = $this->payments->cashRegister($ctx['supplier_id'], 'Stereo NX');
         $date = $this->date($record['date'] ?? null);
-        $pdo = $this->db->pdo();
+        $draft = ($record['requires_draft'] ?? false) === true;
         $number = (string) ($record['document_no'] ?? $key);
-        $number = $this->cashNumbers->allocate($ctx['supplier_id'], [$number], $ctx['protocol'], 'cash', $number);
-        $pdo->prepare('INSERT INTO cash_documents
-            (supplier_id, register_id, doc_number, doc_type, issue_date, description, purpose,
-             total_amount, currency_code, status, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, "other", ?, "CZK", "posted", ?)')->execute([
-            $ctx['supplier_id'], $registerId, $number,
-            $amount >= 0 ? 'in' : 'out', $date,
-            mb_substr((string) ($record['description'] ?? 'Stereo NX'), 0, 255), abs($amount), $ctx['user_id'],
-        ]);
-        $id = (int) $pdo->lastInsertId();
+        $number = $this->cashNumbers->allocate($ctx['supplier_id'], [$number],
+            $ctx['protocol'] ?? new ImportProtocol('import'), 'cash', $number);
+        $id = $this->payments->insertCash($ctx['supplier_id'], $registerId, $number, $date,
+            mb_substr((string) ($record['description'] ?? 'Stereo NX'), 0, 255), $amount, $draft, $ctx['user_id']);
         $this->put($ctx, 'cash', $key, $hash, $id);
         $ctx['ids']['cash'][$key] = $id;
         $ctx['written']['cash_transactions']++;
@@ -770,52 +923,24 @@ final class StereoNxImporter
             $this->validateExistingPayment($ctx['supplier_id'], $kind, $movementType, $docId, $movementId, $amount, $existing);
             return;
         }
-        $pdo = $this->db->pdo();
-        if ($movementType === 'bank') {
-            $pdo->prepare('INSERT INTO payment_matches
-                (supplier_id, bank_transaction_id, invoice_id, purchase_invoice_id, amount, match_type, matched_by_user_id)
-                VALUES (?, ?, ?, ?, ?, "manual", ?)')->execute([
-                $ctx['supplier_id'], $movementId, $kind === 'issued' ? $docId : null,
-                $kind === 'purchase' ? $docId : null, $amount, $ctx['user_id'],
-            ]);
-            $linkId = (int) $pdo->lastInsertId();
-            $pdo->prepare('UPDATE bank_transactions SET match_status = "manual", matched_at = NOW(), matched_by = ?
-                WHERE id = ? AND statement_id IN (SELECT id FROM bank_statements WHERE supplier_id = ?)')
-                ->execute([$ctx['user_id'], $movementId, $ctx['supplier_id']]);
-        } else {
-            $column = $kind === 'issued' ? 'invoice_id' : 'purchase_invoice_id';
-            $purpose = $kind === 'issued' ? 'invoice_payment' : 'purchase_payment';
-            $stmt = $pdo->prepare('SELECT invoice_id, purchase_invoice_id FROM cash_documents WHERE id = ? AND supplier_id = ?');
-            $stmt->execute([$movementId, $ctx['supplier_id']]);
-            $cash = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($cash === false || $cash['invoice_id'] !== null || $cash['purchase_invoice_id'] !== null) {
+        try {
+            $linkId = $this->payments->attach($ctx['supplier_id'], $ctx['user_id'], $kind, $movementType,
+                $docId, $movementId, $amount);
+        } catch (\InvalidArgumentException $e) {
+            if ($e->getMessage() === 'cash_payment_ambiguous') {
                 throw new StereoNxException('cash_payment_ambiguous', 'Pokladní pohyb nelze jednoznačně spárovat s dokladem.');
             }
-            $pdo->prepare("UPDATE cash_documents SET {$column} = ?, purpose = ?, vat_mode = 'none' WHERE id = ? AND supplier_id = ?")
-                ->execute([$docId, $purpose, $movementId, $ctx['supplier_id']]);
-            $linkId = $movementId;
-        }
-        if ($kind === 'issued') {
-            $date = $this->movementDate($movementType, $movementId, $ctx['supplier_id']);
-            $pdo->prepare('INSERT INTO invoice_payments
-                (supplier_id, invoice_id, paid_on, amount, currency, source, bank_transaction_id, created_by)
-                VALUES (?, ?, ?, ?, "CZK", ?, ?, ?)')->execute([
-                $ctx['supplier_id'], $docId, $date, $amount, $movementType,
-                $movementType === 'bank' ? $movementId : null, $ctx['user_id'],
-            ]);
-            $paymentId = (int) $pdo->lastInsertId();
-            if ($movementType === 'cash') {
-                $pdo->prepare('UPDATE cash_documents SET invoice_payment_id = ? WHERE id = ? AND supplier_id = ?')
-                    ->execute([$paymentId, $movementId, $ctx['supplier_id']]);
+            if ($e->getMessage() === 'payment_currency_unverified') {
+                throw new StereoNxException('payment_currency_unverified',
+                    'Úhradu dokladu v cizí měně nelze z korunového pohybu převést bez ověřené částky v měně dokladu.');
             }
+            throw new StereoNxException('payment_target_missing', 'Úhrada odkazuje na doklad nebo pohyb mimo vybranou firmu.');
         }
         $this->put($ctx, $mapKind, $key, $hash, $linkId);
         $ctx['touched_documents'][$kind][$docId] = $docId;
         if ($movementType === 'bank') {
-            $stmt = $pdo->prepare('SELECT statement_id FROM bank_transactions WHERE id = ?');
-            $stmt->execute([$movementId]);
-            $statementId = (int) $stmt->fetchColumn();
-            if ($statementId > 0) $ctx['touched_statements'][$statementId] = $statementId;
+            $statementId = $this->payments->statementId($ctx['supplier_id'], $movementId);
+            if ($statementId !== null) $ctx['touched_statements'][$statementId] = $statementId;
         }
         $ctx['written']['payments']++;
     }
@@ -884,56 +1009,29 @@ final class StereoNxImporter
     /** @param array<string,mixed> $ctx */
     private function refreshBalances(array $ctx): void
     {
-        $pdo = $this->db->pdo();
-        foreach (array_unique([...array_values($ctx['new_documents']['issued']), ...array_values($ctx['touched_documents']['issued'])]) as $id) {
-            $pdo->prepare('UPDATE invoices SET paid_total =
-                (SELECT COALESCE(SUM(amount), 0) FROM invoice_payments WHERE supplier_id = ? AND invoice_id = ?),
-                paid_at = (SELECT MAX(paid_on) FROM invoice_payments WHERE supplier_id = ? AND invoice_id = ?)
-                WHERE supplier_id = ? AND id = ?')->execute([
-                $ctx['supplier_id'], $id, $ctx['supplier_id'], $id, $ctx['supplier_id'], $id,
-            ]);
-            $pdo->prepare('UPDATE invoices SET status = "paid" WHERE supplier_id = ? AND id = ? AND status <> "draft"
-                AND paid_total >= total_with_vat - 0.01')->execute([$ctx['supplier_id'], $id]);
-        }
-        foreach (array_unique([...array_values($ctx['new_documents']['purchase']), ...array_values($ctx['touched_documents']['purchase'])]) as $id) {
-            $pdo->prepare('UPDATE purchase_invoices SET paid_amount_invoice_ccy =
-                (SELECT COALESCE(SUM(pm.amount), 0) FROM payment_matches pm
-                  WHERE pm.supplier_id = ? AND pm.purchase_invoice_id = ?)
-                + (SELECT COALESCE(SUM(cd.total_amount), 0) FROM cash_documents cd
-                    WHERE cd.supplier_id = ? AND cd.purchase_invoice_id = ? AND cd.status = "posted")
-                WHERE supplier_id = ? AND id = ?')->execute([
-                $ctx['supplier_id'], $id, $ctx['supplier_id'], $id, $ctx['supplier_id'], $id,
-            ]);
-            $pdo->prepare('UPDATE purchase_invoices SET status = "paid",
-                paid_at = NULLIF(GREATEST(
-                    COALESCE((SELECT MAX(bt.posted_at) FROM payment_matches pm
-                        JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
-                        WHERE pm.supplier_id = ? AND pm.purchase_invoice_id = ?), "1000-01-01"),
-                    COALESCE((SELECT MAX(cd.issue_date) FROM cash_documents cd
-                        WHERE cd.supplier_id = ? AND cd.purchase_invoice_id = ? AND cd.status = "posted"), "1000-01-01")
-                ), "1000-01-01")
-                WHERE supplier_id = ? AND id = ? AND status <> "draft"
-                  AND paid_amount_invoice_ccy >= total_with_vat - 0.01')->execute([
-                $ctx['supplier_id'], $id, $ctx['supplier_id'], $id, $ctx['supplier_id'], $id,
-            ]);
-        }
-        foreach (array_unique([...array_values($ctx['new_statements']), ...array_values($ctx['touched_statements'])]) as $id) {
-            $pdo->prepare('UPDATE bank_statements SET transaction_count =
-                (SELECT COUNT(*) FROM bank_transactions WHERE statement_id = ?),
-                credit_total = (SELECT COALESCE(SUM(amount), 0) FROM bank_transactions WHERE statement_id = ? AND amount > 0),
-                debit_total = (SELECT COALESCE(SUM(-amount), 0) FROM bank_transactions WHERE statement_id = ? AND amount < 0),
-                matched_count = (SELECT COUNT(*) FROM bank_transactions WHERE statement_id = ? AND match_status <> "unmatched")
-                WHERE id = ? AND supplier_id = ?')->execute([$id, $id, $id, $id, $id, $ctx['supplier_id']]);
-        }
+        $this->payments->refreshBalances($ctx['supplier_id'],
+            [...array_values($ctx['new_documents']['issued']), ...array_values($ctx['touched_documents']['issued'])],
+            [...array_values($ctx['new_documents']['purchase']), ...array_values($ctx['touched_documents']['purchase'])],
+            [...array_values($ctx['new_statements']), ...array_values($ctx['touched_statements'])]);
+    }
+
+    /** Stejná kontrola otisku a vlastnictví pro doklad i jeho následné úhrady. */
+    private function mappedDocument(array $ctx, string $kind, array $record): ?int
+    {
+        return $this->mapped($ctx, $kind, $this->key($record), self::sourceHash($record), [
+            self::sourceHash($record, false), self::sourceHash($record, true, true),
+            self::sourceHash($record, false, true),
+        ]);
     }
 
     /** @param array<string,mixed> $ctx */
-    private function mapped(array $ctx, string $kind, string $key, string $hash, ?string $alternateHash = null): ?int
+    private function mapped(array $ctx, string $kind, string $key, string $hash, string|array|null $alternateHash = null): ?int
     {
         $row = $this->map->get($ctx['supplier_id'], $ctx['ico'], $ctx['company_index'], $kind, $key);
         if ($row === null) return null;
+        $alternates = is_array($alternateHash) ? $alternateHash : ($alternateHash === null ? [] : [$alternateHash]);
         if (!hash_equals($row['source_hash'], $hash)
-            && ($alternateHash === null || !hash_equals($row['source_hash'], $alternateHash))) {
+            && !array_any($alternates, static fn (string $candidate): bool => hash_equals($row['source_hash'], $candidate))) {
             throw new StereoNxException('source_changed', 'Zdrojový záznam se od předchozího převodu změnil; proveďte ruční kontrolu.');
         }
         $table = match ($kind) {
@@ -987,9 +1085,18 @@ final class StereoNxImporter
      * hash porovnává jejich kanonický obsah, ne raw hlavičku programu.
      * @param array<string,mixed> $record
      */
-    private static function sourceHash(array $record, bool $legacyEuReview = true): string
+    private static function sourceHash(array $record, bool $legacyEuReview = true, bool $omitDefaultDocumentFields = false): string
     {
+        // Ověřené korunové částky cizoměnového dokladu jsou součástí identity zdroje.
+        // Změna těchto důkazů musí zastavit opakovaný převod před vrácením starého mapování.
         unset($record['row'], $record['header']);
+        if ($omitDefaultDocumentFields) {
+            // Kompatibilní otisk první verze plánu, která tato odvozená pole neměla.
+            // Odlišná měna, kurz nebo dobropis v otisku naopak zůstávají.
+            if (($record['currency_code'] ?? null) === 'CZK') unset($record['currency_code']);
+            if (array_key_exists('exchange_rate', $record) && $record['exchange_rate'] === null) unset($record['exchange_rate']);
+            if (($record['target_document_kind'] ?? null) === 'invoice') unset($record['target_document_kind']);
+        }
         if ($legacyEuReview && isset($record['review_codes']) && is_array($record['review_codes'])) {
             // Pouhé zpřesnění textu „EU“ nesmí změnit identitu již převedeného
             // dokladu. Všechny ostatní zdrojové hodnoty zůstávají součástí otisku.
@@ -1021,11 +1128,21 @@ final class StereoNxImporter
 
     private function currencyId(int $supplierId): int
     {
-        $stmt = $this->db->pdo()->prepare("SELECT id FROM currencies WHERE supplier_id = ? AND code = 'CZK' LIMIT 1");
-        $stmt->execute([$supplierId]);
-        $id = $stmt->fetchColumn();
-        if ($id === false) throw new StereoNxException('currency_missing', 'Cílová firma nemá měnu CZK.');
-        return (int) $id;
+        $id = $this->homeCurrency->id($supplierId, true);
+        if ($id === 0) throw new StereoNxException('currency_missing',
+            'Cílová firma nemá měnu CZK; založte ji v Nastavení měn a převod zopakujte.');
+        return $id;
+    }
+
+    private function currencyIdForCode(int $supplierId, string $code): int
+    {
+        if (preg_match('/^[A-Z]{3}$/D', $code) !== 1) {
+            throw new StereoNxException('currency_invalid', 'Doklad má neplatnou měnu.');
+        }
+        $id = $this->homeCurrency->idForCode($supplierId, $code);
+        if ($id === 0) throw new StereoNxException('currency_missing',
+            'Cílová firma nemá měnu ' . $code . '; založte ji v Nastavení měn a převod zopakujte.');
+        return $id;
     }
 
     private function countryId(string $code): int
@@ -1061,26 +1178,4 @@ final class StereoNxImporter
             'is_vat_payer' => (int) $row['is_vat_payer'] === 1];
     }
 
-    private function cashRegister(int $supplierId): int
-    {
-        $stmt = $this->db->pdo()->prepare('SELECT id FROM cash_registers WHERE supplier_id = ? AND currency_code = "CZK" ORDER BY is_default DESC, id LIMIT 1');
-        $stmt->execute([$supplierId]);
-        $id = $stmt->fetchColumn();
-        if ($id !== false) return (int) $id;
-        $this->db->pdo()->prepare('INSERT INTO cash_registers (supplier_id, name, currency_code, is_active, is_default)
-            VALUES (?, "Stereo NX", "CZK", 1, 1)')->execute([$supplierId]);
-        return (int) $this->db->pdo()->lastInsertId();
-    }
-
-    private function movementDate(string $kind, int $id, int $supplierId): string
-    {
-        $stmt = $kind === 'bank'
-            ? $this->db->pdo()->prepare('SELECT bt.posted_at FROM bank_transactions bt
-                JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bt.id = ? AND bs.supplier_id = ?')
-            : $this->db->pdo()->prepare('SELECT issue_date FROM cash_documents WHERE id = ? AND supplier_id = ?');
-        $stmt->execute([$id, $supplierId]);
-        $date = $stmt->fetchColumn();
-        if ($date === false) throw new StereoNxException('movement_missing', 'Úhrada odkazuje na pohyb mimo vybranou firmu.');
-        return (string) $date;
-    }
 }

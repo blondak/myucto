@@ -315,7 +315,8 @@ final class StatementMatcher
     /**
      * Důvod posledního neúspěšného automatického párování (#46) — UI ho ukáže
      * u nespárovaného pohybu. Spárováním se důvod maže; už zapsaný stav
-     * (already_recorded) ani chybějící pohyb se nepřepisují.
+     * (already_recorded) ani chybějící pohyb se nepřepisují. Příznak převodu, že pohyb
+     * nesmí do automatického účtování ({@see BankTransactionPostingScope}), párování nemaže.
      *
      * @param array<string,mixed> $result
      * @return array<string,mixed>
@@ -328,7 +329,8 @@ final class StatementMatcher
         $reason = ($result['status'] ?? 'unmatched') === 'unmatched' && is_string($result['reason'] ?? null)
             ? mb_substr($result['reason'], 0, 40)
             : null;
-        $this->db->pdo()->prepare('UPDATE bank_transactions SET match_reason = ? WHERE id = ?')
+        $this->db->pdo()->prepare('UPDATE bank_transactions SET match_reason = ? WHERE id = ? AND '
+                . BankTransactionPostingScope::noMigrationReviewSql('bank_transactions'))
             ->execute([$reason, $transactionId]);
         return $result;
     }

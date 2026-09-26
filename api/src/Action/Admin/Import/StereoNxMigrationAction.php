@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Admin\Import;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Action\Settings\SettingsAction;
+use MyInvoice\Service\Migration\StereoNx\StereoNxCompanyCompatibility;
+use MyInvoice\Service\Migration\StereoNx\StereoNxCompanyProfile;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
@@ -34,6 +37,7 @@ use Psr\Log\LoggerInterface;
  *   POST   /api/admin/imports/stereo-nx/uploads/{token}/complete
  *   GET    /api/admin/imports/stereo-nx/uploads/{token}
  *   POST   /api/admin/imports/stereo-nx/uploads/{token}/preview            {password?}
+ *   POST   /api/admin/imports/stereo-nx/uploads/{token}/company-profile    {company, fields, expected_values}
  *   POST   /api/admin/imports/stereo-nx/uploads/{token}/run                {company, mode, blank_country_is_cz, password?} → {job_id}
  *   GET    /api/admin/imports/stereo-nx/uploads/{token}/runs/{jobId}       výsledek doběhlého jobu
  *   DELETE /api/admin/imports/stereo-nx/uploads/{token}
@@ -45,6 +49,7 @@ final class StereoNxMigrationAction
         private readonly ImportJobRepository $jobs,
         private readonly SecretEncryption $secrets,
         private readonly LoggerInterface $log,
+        private readonly SettingsAction $settings,
     ) {}
 
     public function init(Request $request, Response $response): Response
@@ -169,7 +174,12 @@ final class StereoNxMigrationAction
             foreach ($companies as $company) {
                 $backup = StereoNxBackup::open(StereoNxUploads::archive($sid, $args['token']), $company['index'], $password);
                 $identity = $backup->companyIdentity();
+                $profile = $this->targetProfile($sid);
+                $suggestions = StereoNxCompanyProfile::suggestions($identity, $profile);
+                $current = [];
+                foreach ($suggestions as $field => $_) $current[$field] = trim((string) ($profile[$field] ?? ''));
                 $items[] = ['index' => $company['index'], 'label' => $company['label'],
+                    'profile_suggestions' => $suggestions, 'profile_current' => $current,
                     'identity' => $identity, 'matches_target' => $identity['ico'] === $target['ico']];
             }
             return Json::ok($response, ['companies' => $items, 'target' => $target]);
@@ -225,8 +235,9 @@ final class StereoNxMigrationAction
             $backup = StereoNxBackup::open(StereoNxUploads::archive($sid, $token), $company, $password);
             $identity = $backup->companyIdentity();
             $target = $this->target($sid);
-            if ($identity['ico'] !== $target['ico'] || $target['accounting_mode'] !== 'tax_evidence' || !$identity['vat_payer'] || !$target['vat_payer']) {
-                return Json::error($response, 'target_mismatch', 'Firma musí mít shodné IČO a být plátcem DPH v režimu daňové evidence.', 422);
+            StereoNxCompanyCompatibility::assertAccountingMode($identity, $target['accounting_mode']);
+            if ($identity['ico'] !== $target['ico'] || !in_array($target['accounting_mode'], ['tax_evidence', 'double_entry'], true) || !$identity['vat_payer'] || !$target['vat_payer']) {
+                return Json::error($response, 'target_mismatch', 'Firma musí mít shodné IČO a být plátcem DPH v režimu daňové evidence nebo podvojného účetnictví.', 422);
             }
             if (!$this->db->hasTable('stereo_nx_import_map')) {
                 return Json::error($response, 'migration_required',
@@ -237,7 +248,8 @@ final class StereoNxMigrationAction
                 return Json::error($response, 'archive_changed', 'Nahraná záloha se změnila; nahrajte ji znovu.', 409);
             }
             if ($mode === 'import' && (($state['dry_run_company'] ?? null) !== $company
-                || ($state['dry_run_blank_country_is_cz'] ?? null) !== $blankCountryIsCz)) {
+                || ($state['dry_run_blank_country_is_cz'] ?? null) !== $blankCountryIsCz
+                || ($state['dry_run_accounting_mode'] ?? 'tax_evidence') !== $target['accounting_mode'])) {
                 return Json::error($response, 'dry_run_required', 'Před převodem spusťte úspěšnou zkoušku nanečisto pro zvolenou firmu.', 409);
             }
         } catch (StereoNxException $e) {
@@ -255,7 +267,7 @@ final class StereoNxMigrationAction
                     ['existing_job_id' => $existing['id']]);
             }
         }
-        $params = ['token' => $token, 'company' => $company, 'mode' => $mode, 'blank_country_is_cz' => $blankCountryIsCz, 'sha256' => $hash];
+        $params = ['token' => $token, 'company' => $company, 'mode' => $mode, 'blank_country_is_cz' => $blankCountryIsCz, 'sha256' => $hash, 'accounting_mode' => $target['accounting_mode']];
         if ($password !== null) {
             $params['password_enc'] = $this->secrets->encryptFor($password, StereoNxImportJobService::passwordContext($sid, $token));
         }
@@ -344,6 +356,75 @@ final class StereoNxMigrationAction
             'accounting_mode' => (string) $row['accounting_mode'], 'vat_payer' => (bool) $row['is_vat_payer']];
     }
 
+    /** @param array<string,string> $args */
+    public function fillCompanyProfile(Request $request, Response $response, array $args): Response
+    {
+        if ($denied = $this->deny($request, $response)) return $denied;
+        $body = (array) ($request->getParsedBody() ?? []);
+        $company = filter_var($body['company'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+        if (!is_int($company)) return Json::error($response, 'invalid_selection', 'Vyberte firmu ze zálohy.', 422);
+        $fields = $body['fields'] ?? null;
+        $expected = $body['expected_values'] ?? null;
+        if (!is_array($fields) || !array_is_list($fields) || !is_array($expected)) {
+            return Json::error($response, 'company_profile_selection', 'Vyberte konkrétní údaje firmy k převzetí.', 422);
+        }
+        $pdo = $this->db->pdo();
+        $ownsTransaction = false;
+        $transactionStarted = false;
+        try {
+            $sid = SupplierGuard::currentId($request);
+            $state = $this->ready($sid, $args['token'], $this->userId($request));
+            $path = StereoNxUploads::archive($sid, $args['token']);
+            if (!hash_equals((string) $state['sha256'], (string) hash_file('sha256', $path))) {
+                throw new StereoNxException('archive_changed', 'Nahraná záloha se změnila; nahrajte ji znovu.');
+            }
+            $identity = StereoNxBackup::open($path, $company, $this->password($request))->companyIdentity();
+            $ownsTransaction = !$pdo->inTransaction();
+            if ($ownsTransaction) $pdo->beginTransaction();
+            else $pdo->exec('SAVEPOINT stereo_company_profile');
+            $transactionStarted = true;
+            $target = $this->targetProfile($sid, true);
+            if (!StereoNxCompanyProfile::matchesCompany($identity, $target)) {
+                throw new StereoNxException('ico_mismatch', 'IČO firmy v záloze a vybrané firmy se neshoduje.');
+            }
+            $values = StereoNxCompanyProfile::selected($identity, $target, $fields, $expected);
+            // Sdílená správa firmy zachová oprávnění i validaci; očekávané hodnoty
+            // a zámek brání přepsání souběžné změny po zobrazení náhledu.
+            $result = $this->settings->updateSupplierById($request->withParsedBody($values), new \Slim\Psr7\Response(), ['id' => (string) $sid]);
+            if ($result->getStatusCode() >= 400) {
+                if ($ownsTransaction) $pdo->rollBack();
+                else {
+                    $pdo->exec('ROLLBACK TO SAVEPOINT stereo_company_profile');
+                    $pdo->exec('RELEASE SAVEPOINT stereo_company_profile');
+                }
+                return $result;
+            }
+            if ($ownsTransaction) $pdo->commit();
+            else $pdo->exec('RELEASE SAVEPOINT stereo_company_profile');
+            return Json::ok($response, ['filled_fields' => array_keys($values)]);
+        } catch (\Throwable $e) {
+            if ($transactionStarted && $pdo->inTransaction()) {
+                if ($ownsTransaction) $pdo->rollBack();
+                else {
+                    $pdo->exec('ROLLBACK TO SAVEPOINT stereo_company_profile');
+                    $pdo->exec('RELEASE SAVEPOINT stereo_company_profile');
+                }
+            }
+            if ($e instanceof StereoNxException) return $this->error($response, $e);
+            return Json::error($response, 'company_profile_failed', 'Údaje firmy se nepodařilo doplnit. Zkontrolujte je v nastavení firmy.', 422);
+        }
+    }
+
+    private function targetProfile(int $supplierId, bool $lock = false): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT ic, ' . implode(', ', StereoNxCompanyProfile::FIELDS)
+            . ' FROM supplier WHERE id = ?' . ($lock ? ' FOR UPDATE' : ''));
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false) throw new StereoNxException('target_missing', 'Cílová firma neexistuje.');
+        return $row;
+    }
+
     private function userId(Request $request): int
     {
         return (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
@@ -361,7 +442,8 @@ final class StereoNxMigrationAction
 
     private function error(Response $response, StereoNxException $e): Response
     {
-        $status = in_array($e->errorCode, ['upload_not_found', 'target_missing'], true) ? 404 : 422;
+        $status = $e->errorCode === 'company_profile_changed' ? 409
+            : (in_array($e->errorCode, ['upload_not_found', 'target_missing'], true) ? 404 : 422);
         return Json::error($response, $e->errorCode, $e->getMessage(), $status);
     }
 }

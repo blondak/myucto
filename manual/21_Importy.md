@@ -601,12 +601,16 @@ právě velké dávky jsou důvod, proč import běží na pozadí. Zápis vyža
 oprávnění k importu; všechny výsledky jsou omezené na aktuální firmu. Souběžně
 běží nejvýše jeden import na firmu; pokus o druhý skončí odkazem na ten běžící.
 
-## Převod daňové evidence ze Stereo NX
+## Převod ze Stereo NX
 
 V **Importy → Stereo NX** lze převést ZIP zálohu firemních dat do aktuálně
 vybrané firmy. Zdrojová i cílová firma musí mít stejné IČO, být plátcem DPH
-a cílová firma musí používat **daňovou evidenci**. Podvojné účetnictví tato
-cesta nepřevádí.
+a cílová firma musí používat **daňovou evidenci** nebo **podvojné účetnictví**.
+Rozsah převodu se řídí účetním režimem cílové firmy. Pokud deník v záloze
+jednoznačně ukazuje jiný režim, průvodce převod zastaví a zobrazí oba režimy.
+Odkaz **Nastavení firmy** otevře běžnou správu účetnictví s jejími kontrolami
+změny režimu. Po změně načti zálohu znovu a opakuj zkoušku nanečisto.
+U prázdného či nejednoznačného deníku import režim neodhaduje.
 
 Průvodce používá stejné čtyři kroky jako převody POHODA a PREMIER:
 nahrání zálohy, výběr firmy, zkoušku nanečisto a potvrzení importu.
@@ -619,6 +623,11 @@ nahrání zálohy, výběr firmy, zkoušku nanečisto a potvrzení importu.
 2. Ze seznamu firem v záloze vyber správnou firmu. Pokud prázdná země
    protistrany ve zdroji znamená ČR, zaškrtni odpovídající volbu. Označení
    „EU“ bez konkrétního státu touto volbou určeno není.
+   Pokud se liší firemní údaje, zobrazí se aktuální hodnoty a hodnoty ze
+   zálohy. Označ jednotlivá pole, která chceš převzít z `firma.bin`,
+   a potvrď jejich převzetí. Vyplněné údaje nejsou předem označené.
+   Převzetí používá oprávnění ke správě firmy a při souběžné změně
+   vyžádá nový náhled. IČO, režim účetnictví a plátcovství se tím nemění.
 3. Spusť **Zkoušku nanečisto**. Projde stejnými databázovými operacemi jako
    skutečný převod, ale změny vrátí zpět. Zkontroluj rozsah dat, počty
    dokladů, konceptů a důvody ruční kontroly. Název ZIPu nemusí odpovídat
@@ -631,6 +640,10 @@ nahrání zálohy, výběr firmy, zkoušku nanečisto a potvrzení importu.
    Smaže se pouze nahraná kopie ZIPu po potvrzeném zápisu dokladů;
    zkouška nanečisto ani neúspěšný převod ji nemažou. Pokud odstranění
    selže, import zůstává dokončený a zálohu lze odstranit ze seznamu.
+   Pokud některé agendy nebo údaje zůstávají nepřevedené či ke kontrole,
+   automatické smazání není dostupné. Původní zálohu si uchovej.
+
+### Daňová evidence
 
 Převádí se adresář, vydané faktury s položkami, přijaté faktury,
 bankovní výpisy a pohyby, pokladní pohyby, vazby úhrad a zařazení do
@@ -656,7 +669,62 @@ se nepřepisuje. Chyba během převodu vrátí celý aktuální zápis zpět.
 Podporovaný rozsah je domácí evidence v CZK. Cizoměnové doklady, odpočty
 záloh, nepodporované druhy dokladů, přijaté faktury s vlastními položkami
 nebo naplněné neověřené agendy převod zastaví s vysvětlením. Majetek, mzdy,
-sklad a podvojné účetnictví vyžadují samostatný převod.
+sklad vyžadují samostatný převod.
+
+### Podvojné účetnictví
+
+Převádí se účtový rozvrh a účetní deník včetně počátečních zápisů a
+červeného storna. Záporné kontace zůstávají na původních stranách MD/Dal,
+takže snižují obraty. Období určuje datum účetního případu; případný rozpor
+se samostatným zdrojovým rokem se objeví v protokolu.
+
+Vedle deníku se přebírají adresář, vydané a přijaté faktury, ověřené
+bankovní výpisy a pohyby a pokladní doklady. Doklady se propojí s jejich
+převzatými kontacemi, aby se nevytvořilo duplicitní zaúčtování. Úhrady se
+párují jen při doložené vazbě a shodě částek a směru platby. Pohyby bez
+ověřené vazby zůstávají ke kontrole. Bankovní pohyb bez doložené kontace
+zůstává ignorovaný, pokladní doklad konceptem. Před obnovením automatického
+účtování ověř vazbu na převzatý deník, aby se zápis nevytvořil podruhé.
+Samostatné pokladní pohyby s výslovně vypnutým DPH, nulovým daňovým
+rozpisem a bez odkazu na jiný doklad nevyžadují kontrolu, pokud jejich
+částka, směr a datum souhlasí s převzatými pokladními kontacemi.
+Vydané dobropisy a proformy se přebírají v odpovídajícím druhu dokladu.
+Zdrojové zálohové faktury se převádějí jako vydané proformy nebo přijaté
+zálohové doklady a samy nevstupují do evidence DPH. Chybějící datum DPH
+u takového nedaňového dokladu samo o sobě nevyžaduje kontrolu.
+Původní položky přijatých faktur se zachovají při úplné shodě s rekapitulací
+DPH. Neověřené typy, vazby záloh a daňové členění zůstávají konceptem
+s konkrétním důvodem kontroly; nejde automaticky o stornované doklady.
+Cizoměnové faktury s doloženou měnou
+a kurzem se převezmou; neověřené členění DPH zůstává konceptem. Potřebné
+měny musí existovat v Nastavení měn cílové firmy. Zdrojový účetní deník
+neobsahuje cizoměnové částky, proto se přebírá v CZK. Před kurzovým
+přeceněním zkontroluj a doplň cizoměnové zůstatky. Bankovní pohyby bez
+doloženého kódu měny se nepřevádějí.
+
+Převod zahrnuje také podporované karty dlouhodobého a drobného majetku,
+historické odpisy, sklady, skladové karty a vozidla. Tyto evidence nevytvářejí další účetní zápisy vedle
+převzatého deníku. Dostupnost některých evidencí závisí na zapnutých
+modulech cílové firmy.
+
+Karty zaměstnanců, pracovní vztahy ani mzdové údaje se zatím nepřevádějí.
+Protokol uvádí počty naplněných mzdových tabulek, které v cíli nevznikly.
+Mzdové účetní zápisy ze zdrojového `Cdenik` zůstávají v převzatém deníku,
+ale nezakládají mzdové běhy ani personální evidenci. Zálohu uchovejte pro
+pozdější převod mezd.
+
+Nepřevádí se leasing, skladové doklady a stavy zásob, objednávky ani
+opakované trasy jako skutečně uskutečněné jízdy. Neověřené technické
+zhodnocení se nepřičítá k ceně majetku. Samostatná kontrolní evidence DPH,
+interní doklady a počáteční saldo se nepřebírají jako samostatné doklady;
+jejich kontace mohou být součástí zdrojového deníku. Konkrétní vynechané
+údaje a jejich počty uvádí protokol.
+
+Po úspěšném převodu nabízí protokol odkazy na převzaté doklady a peněžní
+pohyby k ruční kontrole. Zkouška nanečisto odkazy na dočasné záznamy
+nenabízí, protože se všechny její zápisy vracejí zpět.
+
+### Správa záloh
 
 Výchozí heslo je součástí serverového importéru; prohlížeč jej nevyžaduje ani
 neobdrží. Záloha se nerozbaluje do souborů. Nahranou
@@ -667,6 +735,11 @@ tři nahrané zálohy. Odstranění zálohy nemaže již importované doklady.
 Dočasné uploady podléhají úklidu po sedmi dnech.
 Čtení archivu má limit 20 000 položek, nejvýše 64 MiB na soubor a 1 GiB
 celkového rozbaleného obsahu.
+
+Cizoměnový doklad se převádí jen při shodě položek v měně, zdrojového kurzu
+a korunových částek. Neověřené doklady se vypíšou jako nepřevedené; jejich
+zdrojové kontace zůstávají v účetním deníku. Neověřené měnové vazby úhrad
+se automaticky nepárují.
 
 ### Technická kontrola zdroje
 
@@ -685,3 +758,10 @@ Výstupem je JSON se schématem, počty řádků, kontrolou domácích úhrad a
 při volbě `--purchases` také souhrnem přijatých rekapitulací. Neobsahuje
 hodnoty jednotlivých firemních řádků. Tento příkaz **neimportuje data a není
 zkouškou převodu nanečisto**; úplnou zkoušku provede průvodce v aplikaci.
+
+Volba `--accounting` navíc kontroluje zdrojový účetní deník proti účtové
+osnově. Vrací souhrn částek v haléřích, rozsah dat a počty nalezených
+problémů. Rozpor mezi datem účetního případu a zdrojovým rokem ohlásí jako
+upozornění. Kontaci časově řadí podle data účetního případu a původní rok
+uchová samostatně. Personální a mzdové záznamy tato kontrola nevyhodnocuje;
+jejich počty a stav převodu uvádí protokol průvodce.

@@ -27,6 +27,7 @@ use MyInvoice\Service\Accounting\Learning\CorrectionRecorder;
 use MyInvoice\Service\Accounting\Learning\RulePromotionService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
@@ -258,6 +259,9 @@ final class BankPostingService
             if ((string) $tx['match_status'] === 'ignored') {
                 return ['action' => 'skipped', 'reason' => 'ignored'];
             }
+            if (BankTransactionPostingScope::requiresMigrationReview($tx)) {
+                return ['action' => 'skipped', 'reason' => 'migration_review'];
+            }
             // 4b) pohyb spotřebovaný mzdovou platbou účtuje mzdová strana.
             if ($this->skipPayrollPayment($supplierId, $txId)) {
                 return ['action' => 'skipped', 'reason' => 'payroll_payment'];
@@ -346,6 +350,9 @@ final class BankPostingService
     private function matchedOutcome(int $supplierId, array $tx, ?int $userId, bool $activationBackfill = false): array
     {
         $txId = (int) $tx['id'];
+        if (BankTransactionPostingScope::requiresMigrationReview($tx)) {
+            return ['action' => 'skipped', 'reason' => 'migration_review'];
+        }
         if ($this->skipPayrollPayment($supplierId, $txId)) {
             return ['action' => 'skipped', 'reason' => 'payroll_payment'];
         }
@@ -1978,6 +1985,9 @@ final class BankPostingService
         if ($tx === null) {
             return ['action' => 'skipped', 'reason' => 'transaction_not_found'];
         }
+        if (BankTransactionPostingScope::requiresMigrationReview($tx)) {
+            return ['action' => 'skipped', 'reason' => BankTransactionPostingScope::MIGRATION_REVIEW_REASON];
+        }
         if ($this->skipPayrollPayment($supplierId, $txId)) {
             return ['action' => 'skipped', 'reason' => 'payroll_payment'];
         }
@@ -2060,6 +2070,9 @@ final class BankPostingService
         if ($tx === null || (int) ($tx['statement_supplier_id'] ?? 0) !== $supplierId) {
             return ['action' => 'skipped', 'reason' => 'transaction_not_found'];
         }
+        if (BankTransactionPostingScope::requiresMigrationReview($tx)) {
+            return ['action' => 'skipped', 'reason' => BankTransactionPostingScope::MIGRATION_REVIEW_REASON];
+        }
         if ($this->skipPayrollPayment($supplierId, $txId)) {
             return ['action' => 'skipped', 'reason' => 'payroll_payment'];
         }
@@ -2125,6 +2138,9 @@ final class BankPostingService
         }
         if ((string) $tx['match_status'] === 'ignored') {
             return ['status' => 'skipped', 'reason' => 'ignored'];
+        }
+        if (BankTransactionPostingScope::requiresMigrationReview($tx)) {
+            return ['status' => 'skipped', 'reason' => BankTransactionPostingScope::MIGRATION_REVIEW_REASON];
         }
         if (in_array((string) $tx['match_status'], ['auto_exact', 'auto_partial', 'manual'], true)
             || !empty($tx['has_explicit_allocation'])

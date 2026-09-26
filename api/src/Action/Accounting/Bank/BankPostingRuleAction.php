@@ -504,6 +504,7 @@ final class BankPostingRuleAction
                    JOIN bank_statements bs ON bs.id = bt.statement_id
                    JOIN accounting_periods p ON p.supplier_id = ? AND bt.posted_at BETWEEN p.starts_on AND p.ends_on AND p.status = 'open'
                   WHERE bt.source = 'statement' AND bt.amount {$sign} AND bt.match_status = 'unmatched'
+                    AND " . \MyInvoice\Service\Bank\BankTransactionPostingScope::noMigrationReviewSql('bt') . "
                     AND bs.supplier_id = ? AND bt.id < ?
                     AND NOT EXISTS (SELECT 1 FROM journal_entries je WHERE je.supplier_id = ?
                                       AND je.source_type = 'bank' AND je.source_id = bt.id AND je.reversed_by IS NULL)

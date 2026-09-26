@@ -52,6 +52,14 @@ final class CarRepository
         return $row === false ? null : $this->cast($row);
     }
 
+    public function findByRegistration(int $supplierId, string $registration): ?array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM cars WHERE supplier_id = ? AND registration = ?');
+        $stmt->execute([$supplierId, $registration]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : $this->cast($row);
+    }
+
     /**
      * Řidič a režim užívání / odpočtu DPH (migrace 1802). Zvlášť od update(), aby klient
      * API, který nová pole neposílá, nastavení vozidla nevynuloval.
@@ -117,7 +125,8 @@ final class CarRepository
     public function create(int $supplierId, array $data, ?int $userId): int
     {
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
         try {
             if (!empty($data['is_default'])) {
                 $this->clearDefault($supplierId);
@@ -128,10 +137,10 @@ final class CarRepository
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             )->execute($this->bind($supplierId, $data, $userId));
             $id = (int) $pdo->lastInsertId();
-            $pdo->commit();
+            if ($ownTx) $pdo->commit();
             return $id;
         } catch (\Throwable $e) {
-            $pdo->rollBack();
+            if ($ownTx) $pdo->rollBack();
             throw $e;
         }
     }

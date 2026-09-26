@@ -1,0 +1,124 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Migration\StereoNx;
+
+/**
+ * Čistá kontrola zdrojového účetního deníku před převodem.
+ *
+ * Kódy účtů zůstávají zdrojové. Kalendářní rok kontace určuje KdyUcPripad:
+ * porovnání deníku s předvahami Stereo potvrzuje výběr podle tohoto data,
+ * nikoli podle pomocného Rok. Zdrojový Rok se zachová a rozdíl se oznámí.
+ * Cílové účetní období (včetně hospodářského roku) zde ještě nevybíráme.
+ */
+final class StereoNxAccountingJournalPlan
+{
+    /** @param list<array<string,mixed>> $journal @param list<array<string,mixed>> $chart */
+    public static function build(array $journal, array $chart): array
+    {
+        $chartCodes = [];
+        $blockers = [];
+        $warnings = [];
+        foreach ($chart as $index => $row) {
+            $code = trim((string) ($row['Ucet'] ?? ''));
+            if ($code === '') {
+                $blockers[] = ['code' => 'chart_account_missing', 'row' => $index];
+                continue;
+            }
+            $chartKey = '#' . $code;
+            if (isset($chartCodes[$chartKey])) {
+                $blockers[] = ['code' => 'chart_account_duplicate', 'account' => $code];
+                continue;
+            }
+            $chartCodes[$chartKey] = $code;
+            if (strlen($code) > 10) {
+                $blockers[] = ['code' => 'target_account_code_too_long', 'account' => $code];
+            }
+        }
+
+        $entries = [];
+        $keys = [];
+        $debit = 0;
+        $credit = 0;
+        $dates = [];
+        foreach ($journal as $index => $row) {
+            // Jeden zdrojový řádek dokladu má více kontací rozlišených polem Poradi.
+            $parts = array_map(static fn (string $field): string => trim((string) ($row[$field] ?? '')), ['Agenda', 'DoklRada', 'DoklCislo', 'Klic', 'Poradi']);
+            $key = json_encode($parts, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            if (in_array('', $parts, true) || isset($keys[$key])) {
+                $blockers[] = ['code' => in_array('', $parts, true) ? 'journal_identity_missing' : 'journal_identity_duplicate', 'key' => $key, 'row' => $index];
+                continue;
+            }
+            $keys[$key] = true;
+            $date = trim((string) ($row['KdyUcPripad'] ?? ''));
+            $year = $row['Rok'] ?? null;
+            $month = $row['Mesic'] ?? null;
+            if (!is_int($year) || $year < 1900 || $year > 9999) {
+                $blockers[] = ['code' => 'journal_year_invalid', 'key' => $key];
+            }
+            if (!is_int($month) || $month < 1 || $month > 12) {
+                $blockers[] = ['code' => 'journal_month_invalid', 'key' => $key];
+            }
+            if (!self::validDate($date)) {
+                $blockers[] = ['code' => 'journal_date_invalid', 'key' => $key];
+            } else {
+                $dates[] = $date;
+                if (is_int($year) && $year !== (int) substr($date, 0, 4)) {
+                    $warnings[] = ['code' => 'journal_year_mismatch', 'key' => $key];
+                }
+                if (is_int($month) && $month !== (int) substr($date, 5, 2)) {
+                    $blockers[] = ['code' => 'journal_month_mismatch', 'key' => $key];
+                }
+            }
+            $md = trim((string) ($row['UcetMD'] ?? ''));
+            $dal = trim((string) ($row['UcetD'] ?? ''));
+            foreach ([['code' => $md, 'side' => 'debit'], ['code' => $dal, 'side' => 'credit']] as $part) {
+                $account = $part['code'];
+                $side = $part['side'];
+                if ($account === '') {
+                    $blockers[] = ['code' => 'journal_account_missing', 'key' => $key, 'side' => $side];
+                } elseif (!isset($chartCodes['#' . $account])) {
+                    $blockers[] = ['code' => 'journal_account_not_in_chart', 'key' => $key, 'side' => $side, 'account' => $account];
+                }
+                if (strlen($account) > 10) $blockers[] = ['code' => 'target_account_code_too_long', 'key' => $key, 'account' => $account];
+            }
+            $rawAmount = $row['Celkem'] ?? null;
+            if ((!is_int($rawAmount) && !is_float($rawAmount)) || !is_finite((float) $rawAmount)) {
+                $blockers[] = ['code' => 'journal_amount_invalid', 'key' => $key];
+                continue;
+            }
+            $amount = (float) $rawAmount;
+            if (abs($amount) > 999999999999.99) {
+                $blockers[] = ['code' => 'journal_amount_out_of_range', 'key' => $key];
+                continue;
+            }
+            $cents = (int) round($amount * 100, 0, PHP_ROUND_HALF_UP);
+            if (abs($debit) > PHP_INT_MAX - abs($cents)) {
+                $blockers[] = ['code' => 'journal_total_out_of_range', 'key' => $key];
+                continue;
+            }
+            if (!is_int($row['DPH'] ?? null) && !is_float($row['DPH'] ?? null)) {
+                $blockers[] = ['code' => 'journal_tax_amount_invalid', 'key' => $key];
+            } elseif (!is_finite((float) $row['DPH']) || abs((float) $row['DPH']) >= 0.005) {
+                $blockers[] = ['code' => 'journal_tax_amount_unverified', 'key' => $key];
+            }
+            $debit += $cents;
+            $credit += $cents;
+            $entries[] = ['source_key' => $key, 'date' => $date, 'source_year' => $year,
+                'posting_year' => self::validDate($date) ? (int) substr($date, 0, 4) : null,
+                'debit' => $md, 'credit' => $dal, 'amount_cents' => $cents];
+        }
+        sort($dates);
+        return ['ok' => $blockers === [], 'blockers' => $blockers, 'warnings' => $warnings, 'entries' => $entries,
+            'summary' => ['entries' => count($entries), 'debit_cents' => $debit, 'credit_cents' => $credit,
+                'date_from' => $dates[0] ?? null, 'date_to' => $dates[count($dates) - 1] ?? null],
+            'chart_codes' => array_values($chartCodes)];
+    }
+
+    private static function validDate(string $date): bool
+    {
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+        return $parsed !== false && $parsed->format('Y-m-d') === $date;
+    }
+}

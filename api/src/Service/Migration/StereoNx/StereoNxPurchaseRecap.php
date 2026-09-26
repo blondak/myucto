@@ -17,9 +17,11 @@ final class StereoNxPurchaseRecap
 
     /** @param array<string,mixed> $header
      * @return array<string,mixed> */
-    public function plan(array $header): array
+    public function plan(array $header, bool $accounting = false): array
     {
-        if (($header['Agenda'] ?? null) !== 'PF' || ($header['TypDokladu'] ?? null) !== 'F') {
+        $sourceType = $header['TypDokladu'] ?? null;
+        if (($header['Agenda'] ?? null) !== 'PF'
+            || !in_array($sourceType, $accounting ? ['F', 'Z'] : ['F'], true)) {
             throw new StereoNxException('purchase_kind_unsupported', 'Rekapitulaci lze převést jen pro přijatou fakturu.');
         }
         if (($header['Stornovano'] ?? null) !== false) {
@@ -38,7 +40,10 @@ final class StereoNxPurchaseRecap
         $pricesIncludeVat = $header['CenySDPH'];
         $review = $pricesIncludeVat === null ? ['price_mode_unassigned'] : [];
         if (!is_bool($header['ZpracovatDPH'] ?? null)) $review[] = 'vat_participation_unassigned';
-        elseif ($header['ZpracovatDPH'] === false) $review[] = 'vat_participation_disabled';
+        elseif ($header['ZpracovatDPH'] === false && $sourceType !== 'Z') $review[] = 'vat_participation_disabled';
+        if ($accounting && $sourceType === 'Z' && ($header['ZpracovatDPH'] ?? null) === true) {
+            $review[] = 'document_tax_mapping_unverified';
+        }
         $items = [];
         $reverse = null;
         $code = trim((string) ($header['TypDPH'] ?? ''));
@@ -109,6 +114,81 @@ final class StereoNxPurchaseRecap
             'review_codes' => $review, 'requires_draft' => $review !== [],
             'total_without_vat' => $base, 'total_vat' => $vat,
             'total_with_vat' => $total, 'rounding' => $rounding, 'source_total_with_vat' => $sourceTotal];
+    }
+
+    /**
+     * Účetní převod zachová položky jen při úplné shodě s rekapitulací hlavičky.
+     * Daňové zařazení přebírá z téhož ověřeného mapování jako náhradní řádky.
+     * @param array<string,mixed> $header @param list<array<string,mixed>> $sourceItems
+     * @return array<string,mixed>
+     */
+    public function planWithLines(array $header, array $sourceItems): array
+    {
+        $recap = $this->plan($header, true);
+        if ($sourceItems === []) return $recap;
+        $bySlot = [];
+        foreach ($recap['items'] as $item) $bySlot[$item['source_slot']] = $item;
+        $items = [];
+        $sourceSlots = [];
+        $advanceApplied = false;
+        foreach ($sourceItems as $source) {
+            $advanceFlag = $source['Zaloha'] ?? false;
+            if (($source['Stornovano'] ?? null) !== false || !is_bool($advanceFlag)
+                || ($source['ZalohaProforma'] ?? false) !== false) {
+                throw new StereoNxException('purchase_line_unsupported', 'Přijatá položka má neověřený příznak nebo je stornovaná.');
+            }
+            if ($advanceFlag) $advanceApplied = true;
+            $slot = strtolower(trim((string) ($source['TypSazby'] ?? '')));
+            if (!isset($bySlot[$slot])) {
+                throw new StereoNxException('purchase_line_unsupported', 'Přijatá položka nemá odpovídající sazbu v rekapitulaci.');
+            }
+            $base = self::money($source, 'ZakladDPH');
+            $sourceVat = self::money($source, 'CelkemDPH');
+            $rate = self::number($source, 'SazbaDPH');
+            $quantity = self::number($source, 'Mnozstvi');
+            $unit = self::number($source, 'JednCena');
+            $discount = $source['ProcSlevy'] ?? 0;
+            if ((!is_int($discount) && !is_float($discount)) || !is_finite((float) $discount)
+                || $discount < 0 || $discount > 100 || $quantity === 0.0
+                || abs($rate - (float) $bySlot[$slot]['vat_rate_snapshot']) > 0.001) {
+                throw new StereoNxException('purchase_line_unsupported', 'Neověřená sazba, množství nebo sleva přijaté položky.');
+            }
+            $chargedVat = $recap['reverse_charge'] ? 0.0 : $sourceVat;
+            $gross = round($base + $chargedVat, 2);
+            $priced = $recap['prices_include_vat'] === true ? $gross : $base;
+            if (abs(round($quantity * $unit * (1 - $discount / 100), 2) - $priced) > 0.011) {
+                throw new StereoNxException('purchase_line_unsupported', 'Cena přijaté položky nesouhlasí se zdrojovým základem.');
+            }
+            $items[] = $bySlot[$slot];
+            $last = count($items) - 1;
+            $items[$last]['description'] = trim((string) ($source['Text'] ?? ''));
+            $items[$last]['quantity'] = $quantity;
+            $items[$last]['unit_price'] = round($priced / $quantity, 6);
+            $items[$last]['unit_price_without_vat'] = $items[$last]['unit_price'];
+            $items[$last]['source_unit_price'] = $unit;
+            $items[$last]['source_discount_percent'] = (float) $discount;
+            $items[$last]['total_without_vat'] = $base;
+            $items[$last]['total_vat'] = $chargedVat;
+            $items[$last]['total_with_vat'] = $gross;
+            $items[$last]['source_self_assessed_vat'] = $recap['reverse_charge'] ? $sourceVat : 0.0;
+            $sourceSlots[$slot]['base'] = round(($sourceSlots[$slot]['base'] ?? 0) + $base, 2);
+            $sourceSlots[$slot]['vat'] = round(($sourceSlots[$slot]['vat'] ?? 0) + $sourceVat, 2);
+        }
+        foreach ($bySlot as $slot => $recapItem) {
+            $expectedVat = $recap['reverse_charge']
+                ? $recapItem['source_self_assessed_vat'] : $recapItem['total_vat'];
+            if (abs(($sourceSlots[$slot]['base'] ?? 0) - $recapItem['total_without_vat']) > 0.011
+                || abs(($sourceSlots[$slot]['vat'] ?? 0) - $expectedVat) > 0.011) {
+                throw new StereoNxException('purchase_line_unsupported', 'Přijaté položky nesouhlasí s rekapitulací DPH.');
+            }
+        }
+        $recap['origin'] = 'source_lines';
+        $recap['items'] = $items;
+        if ($advanceApplied) {
+            $recap['review_codes'][] = 'advance_application_unlinked';
+            $recap['requires_draft'] = true;
+        }
+        return $recap;
     }
 
     /** @param array<string,mixed> $row */

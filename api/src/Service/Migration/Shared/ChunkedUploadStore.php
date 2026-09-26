@@ -51,7 +51,16 @@ final class ChunkedUploadStore
         private readonly \Closure $exception,
         private readonly ChunkedUploadMessages $messages,
         private readonly array $activityGlobs = [],
-    ) {}
+        private readonly int $tokenBytes = 8,
+        private readonly string $stateFile = self::STATE_FILE,
+        private readonly string $uploadLockFile = self::UPLOAD_LOCK_FILE,
+    ) {
+        if (!in_array($tokenBytes, [8, 16], true)
+            || preg_match('/^[a-z][a-z0-9._-]*$/D', $stateFile) !== 1
+            || preg_match('/^[a-z][a-z0-9._-]*$/D', $uploadLockFile) !== 1) {
+            throw new \InvalidArgumentException('Invalid upload storage layout.');
+        }
+    }
 
     public function messages(): ChunkedUploadMessages
     {
@@ -65,12 +74,12 @@ final class ChunkedUploadStore
 
     public function newToken(): string
     {
-        return bin2hex(random_bytes(8));
+        return bin2hex(random_bytes($this->tokenBytes));
     }
 
     public function isValid(int $supplierId, string $token): bool
     {
-        return $supplierId > 0 && preg_match(self::TOKEN_PATTERN, $token) === 1;
+        return $supplierId > 0 && preg_match('/^[a-f0-9]{' . ($this->tokenBytes * 2) . '}$/D', $token) === 1;
     }
 
     public function dir(int $supplierId, string $token): string
@@ -116,7 +125,7 @@ final class ChunkedUploadStore
      */
     public function state(int $supplierId, string $token): ?array
     {
-        $path = $this->dir($supplierId, $token) . '/' . self::STATE_FILE;
+        $path = $this->dir($supplierId, $token) . '/' . $this->stateFile;
         if (!is_file($path)) {
             return null;
         }
@@ -127,7 +136,7 @@ final class ChunkedUploadStore
     /** @param array<string,mixed> $state */
     public function writeState(int $supplierId, string $token, array $state): void
     {
-        self::writeJson($this->dir($supplierId, $token) . '/' . self::STATE_FILE, $state);
+        self::writeJson($this->dir($supplierId, $token) . '/' . $this->stateFile, $state);
     }
 
     /**
@@ -227,7 +236,7 @@ final class ChunkedUploadStore
      */
     public function withUploadLock(int $supplierId, string $token, callable $fn): mixed
     {
-        $handle = @fopen($this->dir($supplierId, $token) . '/' . self::UPLOAD_LOCK_FILE, 'c');
+        $handle = @fopen($this->dir($supplierId, $token) . '/' . $this->uploadLockFile, 'c');
         if ($handle === false) {
             throw $this->fail('upload_not_found', $this->messages->uploadNotFound, [], 404);
         }
@@ -297,7 +306,7 @@ final class ChunkedUploadStore
         $limit = time() - self::STALE_DAYS * 86400;
         $removed = 0;
         foreach (glob($this->base($supplierId) . '/*', GLOB_ONLYDIR) ?: [] as $dir) {
-            if (preg_match(self::TOKEN_PATTERN, basename($dir)) === 1 && $this->lastActivity($dir) < $limit && !self::isBusy($dir)) {
+            if ($this->isValid($supplierId, basename($dir)) && $this->lastActivity($dir) < $limit && !self::isBusy($dir)) {
                 $this->removeTree($dir, $supplierId);
                 $removed++;
             }
@@ -315,7 +324,7 @@ final class ChunkedUploadStore
         $idle = [];
         $busy = 0;
         foreach (glob($this->base($supplierId) . '/*', GLOB_ONLYDIR) ?: [] as $dir) {
-            if (preg_match(self::TOKEN_PATTERN, basename($dir)) !== 1) {
+            if (!$this->isValid($supplierId, basename($dir))) {
                 continue;
             }
             if (self::isBusy($dir)) {
@@ -369,7 +378,7 @@ final class ChunkedUploadStore
     private function lastActivity(string $dir): int
     {
         $latest = 0;
-        $files = [$dir . '/' . self::META_FILE, $dir . '/' . self::STATE_FILE, $dir . '/' . $this->partFile];
+        $files = [$dir . '/' . self::META_FILE, $dir . '/' . $this->stateFile, $dir . '/' . $this->partFile];
         foreach ($this->activityGlobs as $pattern) {
             $files = array_merge($files, glob($dir . '/' . $pattern) ?: []);
         }

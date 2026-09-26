@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Migration;
 use MyInvoice\Action\Admin\Import\StereoNxMigrationAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\ImportJobRepository;
@@ -17,6 +18,7 @@ use MyInvoice\Service\Migration\StereoNx\StereoNxImportJobService;
 use MyInvoice\Service\Migration\StereoNx\StereoNxImportMap;
 use MyInvoice\Service\Migration\StereoNx\StereoNxSourcePlan;
 use MyInvoice\Service\Migration\StereoNx\StereoNxUploads;
+use MyInvoice\Service\Migration\Shared\MigrationCompanyLock;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Service\TaxEvidence\CashJournalService;
 use MyInvoice\Tests\Fixtures\StereoNx\SyntheticNx1Archive;
@@ -120,6 +122,27 @@ final class StereoNxImportTest extends TestCase
         self::assertSame($after, $this->snapshot());
         self::assertSame('tax_evidence', $this->scalar('SELECT accounting_mode FROM supplier WHERE id = ?', [$this->supplierId]));
         self::assertSame(0, $after['journal_entries']);
+    }
+
+    public function testJobRefusesSecondImportWhileCompanyLockIsHeld(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $jobs = $container->get(ImportJobRepository::class);
+        $jobId = $jobs->create($this->supplierId, StereoNxImportJobService::SOURCE,
+            ['mode' => 'dry_run', 'token' => str_repeat('a', 32)], $this->userId);
+        $lockDb = Connection::withoutSharedTestConnection(
+            static fn (): Connection => new Connection($container->get(Config::class)));
+        $lock = new MigrationCompanyLock($lockDb);
+        try {
+            self::assertTrue($lock->acquire(StereoNxImportJobService::SOURCE, $this->supplierId));
+            $container->get(StereoNxImportJobService::class)->run($jobId);
+            $job = $jobs->find($jobId, $this->supplierId);
+            self::assertSame('failed', $job['status']);
+            self::assertStringContainsString('už běží', (string) $job['last_error']);
+        } finally {
+            $lock->release(StereoNxImportJobService::SOURCE, $this->supplierId);
+            $lockDb->close();
+        }
     }
 
     public function testDifferentCompanyAndDoubleEntryAreRefusedWithoutWrites(): void
@@ -471,6 +494,77 @@ final class StereoNxImportTest extends TestCase
         self::assertSame($before, $this->snapshot(), 'Client and document inserts performed before the account failure must roll back.');
     }
 
+    public function testAccountingDocumentsCannotBypassAClosedYearOutsideJournalDates(): void
+    {
+        $fixture = \MyInvoice\Tests\Fixtures\StereoNx\SyntheticStereoNxAccountingTables::class;
+        $identity = $fixture::identity();
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE supplier SET ic = ?, accounting_mode = 'double_entry' WHERE id = ?")
+            ->execute([$identity['ico'], $this->supplierId]);
+        $periods = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Repository\AccountingPeriodRepository::class);
+        $period = $periods->create($this->supplierId, 2025, '2025-01-01', '2025-12-31');
+        $pdo->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ? AND supplier_id = ?")
+            ->execute([$period, $this->supplierId]);
+        $documents = SyntheticStereoNxTables::tables();
+        $tables = array_replace($documents, $fixture::tables());
+        $tables['LAdresy'] = $documents['LAdresy'];
+        foreach (['CBanka', 'CBankap', 'CPokl'] as $table) $tables[$table] = [];
+        $path = $this->tmp . '/closed-document-year.zip';
+        SyntheticNx1Archive::write($path, $tables, $identity, self::PASSWORD);
+        $before = $this->snapshot();
+        $report = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Migration\StereoNx\StereoNxAccountingImporter::class)
+            ->run(StereoNxBackup::open($path, 0, self::PASSWORD), $this->supplierId, $this->userId, false);
+        self::assertFalse($report['ok']);
+        self::assertContains('document_date_locked', array_column($report['errors'], 'code'), json_encode($report));
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function testAccountingJobRollsBackDryRunAndImportsJournalIdempotently(): void
+    {
+        $fixture = \MyInvoice\Tests\Fixtures\StereoNx\SyntheticStereoNxAccountingTables::class;
+        $identity = $fixture::identity();
+        $this->db->pdo()->prepare("UPDATE supplier SET ic = ?, dic = ?, accounting_mode = 'double_entry' WHERE id = ?")
+            ->execute([$identity['ico'], $identity['dic'], $this->supplierId]);
+        $path = $this->tmp . '/accounting.zip';
+        SyntheticNx1Archive::write($path, $fixture::tables(), $identity, self::PASSWORD);
+        $bytes = file_get_contents($path);
+        $init = $this->call('init', ['file_name' => 'accounting.zip', 'size' => strlen($bytes)]);
+        self::assertSame(201, $init->getStatusCode());
+        $token = $this->json($init)['token'];
+        $this->tokens[] = $token;
+        self::assertSame(200, $this->chunk($token, 0, $bytes)->getStatusCode());
+        self::assertSame(200, $this->call('complete', [], $token)->getStatusCode());
+        $body = ['company' => 0, 'password' => self::PASSWORD, 'mode' => 'import'];
+        self::assertSame(409, $this->call('run', $body, $token)->getStatusCode());
+        $before = $this->snapshot();
+        $dry = $this->runJob(['mode' => 'dry_run'] + $body, $token);
+        self::assertTrue($dry['report']['ok'], json_encode($dry));
+        self::assertSame('double_entry', $dry['report']['accounting_mode']);
+        self::assertSame($before, $this->snapshot());
+        // A dry run of another accounting mode must not authorize this import.
+        $state = StereoNxUploads::state($this->supplierId, $token);
+        $state['dry_run_accounting_mode'] = 'tax_evidence';
+        StereoNxUploads::save($this->supplierId, $token, $state);
+        self::assertSame(409, $this->call('run', $body, $token)->getStatusCode());
+        $this->runJob(['mode' => 'dry_run'] + $body, $token);
+        $result = $this->runJob($body, $token);
+        self::assertTrue($result['report']['ok'], json_encode($result));
+        self::assertTrue($result['report']['database_writes']);
+        $after = $this->snapshot();
+        self::assertSame(4, $after['journal_entries'] - $before['journal_entries']);
+        $this->runJob(['mode' => 'dry_run'] + $body, $token);
+        $again = $this->runJob($body, $token);
+        self::assertTrue($again['report']['ok'], json_encode($again));
+        self::assertSame($after, $this->snapshot());
+        SyntheticNx1Archive::write($path, $fixture::tables(1400.00), $identity, self::PASSWORD);
+        $changed = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Migration\StereoNx\StereoNxAccountingImporter::class)
+            ->run(StereoNxBackup::open($path, 0, self::PASSWORD), $this->supplierId, $this->userId, false);
+        self::assertFalse($changed['ok']);
+        self::assertFalse($changed['database_writes']);
+        self::assertSame([], $changed['written']);
+        self::assertSame($after, $this->snapshot());
+    }
+
     public function testHttpUploadChecksOwnershipPasswordAndRequiresDryRunBeforeExecute(): void
     {
         $this->backup();
@@ -513,6 +607,40 @@ final class StereoNxImportTest extends TestCase
         self::assertSame(409, $this->call('run', $body, $token)->getStatusCode(), 'Completed import consumes the dry-run gate.');
         self::assertSame(200, $this->call('delete', [], $token)->getStatusCode());
         self::assertFileDoesNotExist(StereoNxUploads::archive($this->supplierId, $token));
+    }
+
+    public function testCompanyProfileAppliesSelectedFieldsAndKeepsSettingsAuthorization(): void
+    {
+        $this->backup();
+        $bytes = file_get_contents($this->tmp . '/backup.zip');
+        $init = $this->call('init', ['file_name' => 'profile.zip', 'size' => strlen($bytes)]);
+        $token = $this->json($init)['token'];
+        $this->tokens[] = $token;
+        self::assertSame(200, $this->chunk($token, 0, $bytes)->getStatusCode());
+        self::assertSame(200, $this->call('complete', [], $token)->getStatusCode());
+        $this->db->pdo()->prepare("UPDATE supplier SET dic = '', company_name = 'Aktuální název' WHERE id = ?")->execute([$this->supplierId]);
+        $body = ['company' => 0, 'password' => self::PASSWORD, 'fields' => ['dic'], 'expected_values' => ['dic' => '']];
+        $preview = $this->json($this->call('preview', $body, $token));
+        self::assertSame(SyntheticStereoNxTables::identity()['dic'], $preview['companies'][0]['profile_suggestions']['dic']);
+        self::assertSame('Aktuální název', $preview['companies'][0]['profile_current']['company_name']);
+        $limited = $this->request($body)->withAttribute('auth.effective_role', new EffectiveRole(9, 'Test', 'staff', false, ['utilities.import' => 2]));
+        $denied = $this->action->fillCompanyProfile($limited, (new ResponseFactory())->createResponse(), ['token' => $token]);
+        self::assertSame(403, $denied->getStatusCode());
+        self::assertSame('', $this->scalar('SELECT dic FROM supplier WHERE id = ?', [$this->supplierId]));
+        $filled = $this->call('fillCompanyProfile', $body, $token);
+        self::assertSame(200, $filled->getStatusCode(), (string) $filled->getBody());
+        self::assertSame(['dic'], $this->json($filled)['filled_fields']);
+        self::assertSame(SyntheticStereoNxTables::identity()['dic'], $this->scalar('SELECT dic FROM supplier WHERE id = ?', [$this->supplierId]));
+        self::assertSame('Aktuální název', $this->scalar('SELECT company_name FROM supplier WHERE id = ?', [$this->supplierId]));
+        self::assertSame(409, $this->call('fillCompanyProfile', $body, $token)->getStatusCode());
+        $overwrite = ['company' => 0, 'password' => self::PASSWORD, 'fields' => ['company_name'], 'expected_values' => ['company_name' => 'Aktuální název']];
+        self::assertSame(['company_name'], $this->json($this->call('fillCompanyProfile', $overwrite, $token))['filled_fields']);
+        self::assertSame(SyntheticStereoNxTables::identity()['name'], $this->scalar('SELECT company_name FROM supplier WHERE id = ?', [$this->supplierId]));
+        $this->db->pdo()->prepare("UPDATE supplier SET dic = '', ic = '99999999' WHERE id = ?")->execute([$this->supplierId]);
+        $mismatch = $this->call('fillCompanyProfile', $body, $token);
+        self::assertSame(422, $mismatch->getStatusCode());
+        self::assertSame('ico_mismatch', $this->json($mismatch)['error']['code']);
+        self::assertSame('', $this->scalar('SELECT dic FROM supplier WHERE id = ?', [$this->supplierId]));
     }
 
     public function testUploadListSurvivesReloadAndAllowsFreeingAFullQuota(): void
@@ -606,7 +734,7 @@ final class StereoNxImportTest extends TestCase
         return (new ServerRequestFactory())->createServerRequest('POST', '/api/admin/imports/stereo-nx')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId])
-            ->withAttribute('auth.effective_role', new EffectiveRole(9, 'Test', 'staff', true, ['utilities.import' => 2]))
+            ->withAttribute('auth.effective_role', new EffectiveRole(9, 'Test', 'staff', true, ['utilities.import' => 2, 'settings.company.write' => 2]))
             ->withParsedBody($body);
     }
 

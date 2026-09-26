@@ -37,5 +37,7 @@ final class MigrationHomeCurrencyTest extends TestCase
         $this->pdo->exec("INSERT INTO currencies VALUES (1, 5, 'EUR', 1)");
         $this->pdo->exec('INSERT INTO supplier VALUES (5, 1)');
         self::assertSame(1, $this->currency->id(5));
+        self::assertSame(0, $this->currency->id(5, true));
+        self::assertSame(1, $this->currency->idForCode(5, 'EUR'));
     }
 }

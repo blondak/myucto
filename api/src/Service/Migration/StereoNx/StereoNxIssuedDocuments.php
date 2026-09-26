@@ -11,9 +11,11 @@ final class StereoNxIssuedDocuments
 
     /** @param array<string,mixed> $header @param list<array<string,mixed>> $sourceItems
      * @return array<string,mixed> */
-    public function plan(array $header, array $sourceItems): array
+    public function plan(array $header, array $sourceItems, bool $accounting = false): array
     {
-        if (($header['Agenda'] ?? null) !== 'VF' || ($header['TypDokladu'] ?? null) !== 'F'
+        $sourceType = $header['TypDokladu'] ?? null;
+        if (($header['Agenda'] ?? null) !== 'VF'
+            || !in_array($sourceType, $accounting ? ['F', 'D', 'P', 'Z'] : ['F'], true)
             || ($header['Stornovano'] ?? null) !== false) {
             throw new StereoNxException('issued_kind_unsupported', 'Nepodporovaný typ vydaného dokladu.');
         }
@@ -26,7 +28,12 @@ final class StereoNxIssuedDocuments
             throw new StereoNxException('issued_price_mode', 'Chybí režim cen vydaného dokladu.');
         }
         $review = is_bool($header['ZpracovatDPH'] ?? null) ? [] : ['vat_participation_unassigned'];
-        if (($header['ZpracovatDPH'] ?? null) === false) $review[] = 'vat_participation_disabled';
+        if (($header['ZpracovatDPH'] ?? null) === false && !in_array($sourceType, ['P', 'Z'], true)) {
+            $review[] = 'vat_participation_disabled';
+        }
+        if ($accounting && in_array($sourceType, ['P', 'Z'], true) && ($header['ZpracovatDPH'] ?? null) === true) {
+            $review[] = 'document_tax_mapping_unverified';
+        }
         $items = [];
         if ($sourceItems === []) {
             $review[] = 'issued_lines_missing';
@@ -40,10 +47,17 @@ final class StereoNxIssuedDocuments
             }
         } else {
             foreach ($sourceItems as $source) {
-                if (($source['Stornovano'] ?? null) !== false || ($source['Zaloha'] ?? false) !== false
-                    || ($source['ZalohaProforma'] ?? false) !== false) {
+                $advanceFlag = $source['Zaloha'] ?? false;
+                $appliesAdvance = $advanceFlag === true;
+                if (($source['Stornovano'] ?? null) !== false
+                    || !is_bool($advanceFlag)
+                    || ($appliesAdvance && !($accounting && $sourceType === 'F'))
+                    || (($source['ZalohaProforma'] ?? false) !== false && !($accounting && in_array($sourceType, ['P', 'Z'], true)))
+                    || ($accounting && in_array($sourceType, ['P', 'Z'], true)
+                        && ($source['ZalohaProforma'] ?? null) !== true)) {
                     throw new StereoNxException('issued_line_unsupported', 'Nepodporovaný typ položky vydaného dokladu.');
                 }
+                if ($appliesAdvance) $review[] = 'advance_application_unlinked';
                 $slot = strtolower(trim((string) ($source['TypSazby'] ?? '')));
                 if (!in_array($slot, ['z', 's', 't', '0'], true)) {
                     throw new StereoNxException('issued_rate_slot', 'Neznámá sazební skupina vydané položky.');

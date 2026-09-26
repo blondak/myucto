@@ -77,6 +77,71 @@ final class StereoNxSourcePlanTest extends TestCase
         self::assertContains('partner_country_unresolved', $conflict['issued'][0]['review_codes']);
     }
 
+    public function testGermanCountryMarkIsRecognizedWithoutDefaultingToCzechia(): void
+    {
+        $tables = SyntheticStereoNxTables::tables();
+        $tables['LAdresy'][0]['Stat'] = 'D';
+        $plan = StereoNxSourcePlan::fromTables($tables, SyntheticStereoNxTables::identity(), true, true);
+
+        self::assertSame('DE', $plan['clients'][0]['country_code']);
+        self::assertFalse($plan['clients'][0]['country_unresolved']);
+        self::assertNotContains('partner_country_unresolved', $plan['issued'][0]['review_codes']);
+    }
+
+    public function testAccountingCreditNoteKeepsSourceLinesAndTargetKind(): void
+    {
+        $tables = SyntheticStereoNxTables::tables();
+        $tables['Svfh'][0]['TypDokladu'] = 'D';
+        $tables['Svfh'][0]['ZaklDPHz'] = -100.0;
+        $tables['Svfh'][0]['DPHz'] = -21.0;
+        $tables['Svfh'][0]['Celkem'] = -121.0;
+        $tables['Svfp'][0]['Mnozstvi'] = -1.0;
+        $tables['Svfp'][0]['ZakladDPH'] = -100.0;
+        $tables['Svfp'][0]['CelkemDPH'] = -21.0;
+        $plan = StereoNxSourcePlan::fromTables($tables, SyntheticStereoNxTables::identity(), true, true);
+
+        self::assertSame('credit_note', $plan['issued'][0]['target_document_kind']);
+        self::assertSame('source_lines', $plan['issued'][0]['origin']);
+        self::assertFalse($plan['issued'][0]['requires_draft']);
+        self::assertNotContains('cancelled_document_review', $plan['issued'][0]['review_codes']);
+    }
+
+    public function testUnknownIssuedTypeNeverPretendsToBeCancelled(): void
+    {
+        $tables = SyntheticStereoNxTables::tables();
+        $tables['Svfh'][0]['TypDokladu'] = 'M';
+        $plan = StereoNxSourcePlan::fromTables($tables, SyntheticStereoNxTables::identity(), true, true);
+
+        self::assertTrue($plan['issued'][0]['requires_draft']);
+        self::assertContains('document_kind_unverified', $plan['issued'][0]['review_codes']);
+        self::assertNotContains('cancelled_document_review', $plan['issued'][0]['review_codes']);
+    }
+
+    public function testAccountingProformaKeepsSourceLinesOutsideVatReview(): void
+    {
+        $tables = SyntheticStereoNxTables::tables();
+        $tables['Svfh'][0]['TypDokladu'] = 'P';
+        $tables['Svfh'][0]['ZpracovatDPH'] = false;
+        $tables['Svfp'][0]['ZalohaProforma'] = true;
+        $plan = StereoNxSourcePlan::fromTables($tables, SyntheticStereoNxTables::identity(), true, true);
+
+        self::assertSame('proforma', $plan['issued'][0]['target_document_kind']);
+        self::assertSame('source_lines', $plan['issued'][0]['origin']);
+        self::assertFalse($plan['issued'][0]['requires_draft']);
+        self::assertNotContains('vat_participation_disabled', $plan['issued'][0]['review_codes']);
+    }
+
+    public function testProformaWithUnexpectedVatFlagNeedsReview(): void
+    {
+        $tables = SyntheticStereoNxTables::tables();
+        $tables['Svfh'][0]['TypDokladu'] = 'P';
+        $tables['Svfp'][0]['ZalohaProforma'] = true;
+        $plan = StereoNxSourcePlan::fromTables($tables, SyntheticStereoNxTables::identity(), true, true);
+
+        self::assertTrue($plan['issued'][0]['requires_draft']);
+        self::assertContains('document_tax_mapping_unverified', $plan['issued'][0]['review_codes']);
+    }
+
     public function testUnlinkedVatMovementIsBlockedBeforeTaxableGrossIsClassified(): void
     {
         $tables = SyntheticStereoNxTables::tables();
