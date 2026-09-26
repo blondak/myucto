@@ -13,6 +13,7 @@ use MyInvoice\Repository\Payroll\JmhzPreparationSnapshotRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlContext;
@@ -1485,23 +1486,68 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
     }
 
     /**
-     * Nad 1500 formulářů test hlášení balíky sestaví, zmrazení k odeslání je
-     * ale zatím neumí - musí to říct dřív, než cokoli založí.
+     * Nad 1500 formulářů se hlášení zmrazí jako jedno podání s dílčími
+     * balíky: součást a artefakt za balík, všechny se stejným GUID podání
+     * a datem vyplnění, souhrn a pojistná část jen v prvním. Opakované
+     * zmrazení vrátí tytéž balíky. Dřív se zmrazení odmítlo a hlášení se
+     * muselo podat ručně přes ePortál.
      */
-    public function testSubmissionOverOneBatchIsRefusedBeforeAnythingIsFrozen(): void
+    public function testSubmissionOverOneBatchIsFrozenAsPackages(): void
     {
-        $payload = $this->resolution()->requireResolvedDocument()->payload;
-        $payload['header']['individual_form_count'] = 1501;
-        $bridge = $this->bridge(new JmhzScenario1Resolution(new JmhzScenario1NormalizedDocument($payload), []));
+        $people = 1501;
+        $resolution = $this->resolutionFor(
+            $this->pvpoj(employerTotal: 248 * $people, people: $people),
+            $this->payloadWithPeople($people),
+        );
+        self::assertSame('resolved', $resolution->status(), CanonicalJson::encode($resolution->blockers));
+        $obligationId = $this->registerObligation();
 
+        $frozen = $this->bridge($resolution)->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $obligationId,
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+
+        self::assertTrue($frozen['created']);
+        self::assertSame('ready', $frozen['status']);
+        self::assertCount(2, $frozen['packages']);
+        self::assertSame([1, 2], array_column($frozen['packages'], 'ordinal'));
+        $first = $this->submissions->artifactBytes($this->supplierId, $frozen['packages'][0]['artifact_id']);
+        $second = $this->submissions->artifactBytes($this->supplierId, $frozen['packages'][1]['artifact_id']);
+        $guid = '<idPodani>' . strtoupper($frozen['submission_guid']) . '</idPodani>';
+        self::assertStringContainsString($guid, $first);
+        self::assertStringContainsString($guid, $second);
+        self::assertStringContainsString('<balikPoradi>1</balikPoradi>', $first);
+        self::assertStringContainsString('<balikPoradi>2</balikPoradi>', $second);
+        self::assertSame(1500, substr_count($first, '</formularOsoby>'));
+        self::assertSame(1, substr_count($second, '</formularOsoby>'));
+        self::assertStringNotContainsString('<pvpoj:PVPOJ>', $second);
+
+        $reader = new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions);
+        self::assertCount(1501, $reader->formGuids($this->supplierId, self::ENVIRONMENT, $frozen['submission_id']));
+        self::assertSame(
+            $frozen['submission_guid'],
+            $reader->identity($this->supplierId, self::ENVIRONMENT, $frozen['submission_id'])->submissionGuid,
+        );
         try {
-            $bridge->bridge($this->supplierId, self::PREPARATION_ID, $this->registerObligation(), self::ENVIRONMENT, $this->userId);
-            self::fail('Hlášení nad jeden balík se nesmí zmrazit jako jediný balík.');
+            $reader->bytes($this->supplierId, self::ENVIRONMENT, $frozen['submission_id']);
+            self::fail('Rozdělené hlášení nesmí vydat jen jednu datovou větu.');
         } catch (JmhzXmlException $exception) {
-            self::assertSame('jmhz_submission_split_unsupported', $exception->validationCode);
-            self::assertStringContainsString('2 dílčích balíků', $exception->getMessage());
+            self::assertSame('jmhz_submission_split_payload', $exception->validationCode);
         }
-        self::assertSame(0, $this->countRows('payroll_submissions'));
+
+        $replayed = $this->bridge($resolution)->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $obligationId,
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        self::assertFalse($replayed['created']);
+        self::assertSame($frozen['packages'], $replayed['packages']);
+        self::assertSame(1, $this->countRows('payroll_submissions'));
     }
 
     /**

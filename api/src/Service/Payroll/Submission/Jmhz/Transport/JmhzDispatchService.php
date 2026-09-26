@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchGate;
+use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 
@@ -110,6 +111,20 @@ readonly class JmhzDispatchService
         ?int $actorUserId,
         string $submissionClass = self::SUBMISSION_CLASS,
     ): JmhzDispatchOutcome {
+        $packages = $this->frozen?->packageArtifacts($supplierId, $environment, $submissionId) ?? [];
+        if ($packages !== []) {
+            return $this->sendPackages(
+                $supplierId,
+                $environment,
+                $submissionId,
+                $payloadXml,
+                $variableSymbol,
+                $idempotencyKey,
+                $actorUserId,
+                $submissionClass,
+                $packages,
+            );
+        }
         $this->assertSendable(
             $supplierId,
             $environment,
@@ -146,6 +161,123 @@ readonly class JmhzDispatchService
             );
         }
         $this->assertNoOpenAttempt($supplierId, $environment, $submissionId, $idempotencyKey);
+
+        return $this->sendDocument(
+            $supplierId,
+            $environment,
+            $submissionId,
+            $payloadXml,
+            $variableSymbol,
+            $idempotencyKey,
+            $actorUserId,
+            $submissionClass,
+        );
+    }
+
+    /**
+     * Odeslání hlášení rozděleného do dílčích balíků.
+     *
+     * Každý balík je u ČSSZ samostatné dílčí podání se stejným GUID podání:
+     * vlastní obálka, vlastní CorrelationID, vlastní protokol. Odesílají se
+     * postupně od prvního (ČSSZ bez přijatého prvního balíku ostatní
+     * nezpracuje); balík, který už odešel, se přeskočí, takže opakované
+     * kliknutí po výpadku uprostřed dopošle jen zbytek. Balík „možná
+     * doručen" zastaví všechno, stejně jako u nerozděleného podání.
+     *
+     * @param list<array{ordinal:int,part_id:int,artifact_id:int,artifact_sha256:string}> $packages
+     */
+    private function sendPackages(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        ?string $payloadXml,
+        string $variableSymbol,
+        string $idempotencyKey,
+        ?int $actorUserId,
+        string $submissionClass,
+        array $packages,
+    ): JmhzDispatchOutcome {
+        if ($payloadXml !== null && trim($payloadXml) !== '') {
+            throw new JmhzTransportException(
+                'jmhz_dispatch_payload_not_frozen',
+                'Rozdělené hlášení se odesílá jen ze zmrazených dílčích balíků.',
+            );
+        }
+        $this->assertSendable(
+            $supplierId,
+            $environment,
+            $submissionId,
+            $submissionClass,
+            $idempotencyKey,
+            true,
+        );
+        $frozen = $this->frozen ?? throw new \LogicException('Zmrazené balíky nejsou k dispozici.');
+        $count = count($packages);
+        $previous = $this->attempts->listForSubmission($supplierId, $environment, $submissionId);
+        $outcome = null;
+        $replayed = null;
+        foreach ($packages as $package) {
+            $key = self::packageIdempotencyKey($idempotencyKey, $package['ordinal']);
+            $sent = false;
+            foreach ($previous as $attempt) {
+                if (!hash_equals($package['artifact_sha256'], (string) ($attempt['request_sha256'] ?? ''))) {
+                    continue;
+                }
+                $replay = $this->attempts->findByIdempotencyKey($key);
+                if ($replay !== null && (int) $replay['id'] === (int) $attempt['id']) {
+                    $replayed = $replay;
+                    $sent = true;
+                    continue;
+                }
+                $reason = PayrollDispatchGate::possiblyDeliveredReason($attempt);
+                if ($reason !== null) {
+                    throw new \DomainException(sprintf('Dílčí balík %d z %d: %s', $package['ordinal'], $count, $reason));
+                }
+                if (!PayrollDispatchGate::attemptAllowsRetry($attempt)) {
+                    $sent = true;
+                }
+            }
+            if ($sent) {
+                continue;
+            }
+            $outcome = $this->sendDocument(
+                $supplierId,
+                $environment,
+                $submissionId,
+                $frozen->packageBytes($supplierId, $package['artifact_id']),
+                $variableSymbol,
+                $key,
+                $actorUserId,
+                $submissionClass,
+            );
+        }
+        if ($outcome !== null) {
+            return $outcome;
+        }
+        if ($replayed !== null) {
+            return new JmhzDispatchOutcome($replayed);
+        }
+
+        throw new \DomainException(
+            'Všechny dílčí balíky hlášení už byly odeslány; pokračujte dotazem na výsledek.',
+        );
+    }
+
+    public static function packageIdempotencyKey(string $idempotencyKey, int $ordinal): string
+    {
+        return $ordinal === 1 ? $idempotencyKey : "{$idempotencyKey}:package:{$ordinal}";
+    }
+
+    private function sendDocument(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        string $payloadXml,
+        string $variableSymbol,
+        string $idempotencyKey,
+        ?int $actorUserId,
+        string $submissionClass,
+    ): JmhzDispatchOutcome {
         $signer = $this->signer($supplierId, $environment);
         $material = $signer->unlock();
 
@@ -299,6 +431,7 @@ readonly class JmhzDispatchService
         int $submissionId,
         string $submissionClass,
         string $idempotencyKey,
+        bool $packagesInFlight = false,
     ): void {
         if ($this->submissions === null) {
             return;
@@ -332,6 +465,12 @@ readonly class JmhzDispatchService
             );
         }
         if ($submission['status'] === self::SENDABLE_STATUS) {
+            return;
+        }
+        // Rozdělené hlášení je po odeslání prvního balíku `submitted`
+        // (případně `processing` po jeho protokolu) a zbylé balíky se musí
+        // dát doposlat. Který balík už odešel, rozhoduje ledger pokusů.
+        if ($packagesInFlight && in_array($submission['status'], ['submitted', 'processing'], true)) {
             return;
         }
         $existing = $this->attempts->findByIdempotencyKey($idempotencyKey);
@@ -696,6 +835,28 @@ readonly class JmhzDispatchService
             . ':' . hash('sha256', $body);
         $declared = $report->payrollRemoteStatus();
         $verifier = $this->receiptVerifier($packageCount);
+        /*
+         * Protokol dílčího balíku patří jeho součásti podání a stav podání
+         * se skládá ze všech balíků ({@see JmhzPackageReceiptVerifier}).
+         */
+        $partId = null;
+        $packages = $this->frozen?->packageArtifacts($supplierId, (string) $attempt['environment'], $submissionId) ?? [];
+        foreach ($packages as $package) {
+            if (hash_equals($package['artifact_sha256'], (string) ($attempt['request_sha256'] ?? ''))) {
+                $partId = $package['part_id'];
+            }
+        }
+        if ($partId !== null && $this->submissions !== null) {
+            $verifier = new JmhzPackageReceiptVerifier(
+                $verifier,
+                $submissions->packageReceiptStatuses(...),
+                $supplierId,
+                (string) $attempt['environment'],
+                $submissionId,
+                $partId,
+                array_column($packages, 'ordinal', 'part_id'),
+            );
+        }
 
         try {
             $this->import(
@@ -709,6 +870,7 @@ readonly class JmhzDispatchService
                 $idempotencyKey,
                 $report->submissionClass,
                 $verifier,
+                partId: $partId,
             );
 
             return;
@@ -730,6 +892,7 @@ readonly class JmhzDispatchService
                 $idempotencyKey,
                 $report->submissionClass,
                 null,
+                partId: $partId,
             );
             // Bez pojmenovaného důvodu by v podání zůstalo jen obecné
             // `receipt_unverified` a nikdo by nezjistil, PROČ se protokol
@@ -976,8 +1139,9 @@ readonly class JmhzDispatchService
         string $declaredRemoteStatus,
         string $idempotencyKey,
         string $submissionClass,
-        ?JmhzReceiptVerifier $verifier,
+        ?PayrollReceiptVerifierInterface $verifier,
         ?int $importedBy = null,
+        ?int $partId = null,
     ): array {
         $submission = $submissions->get($supplierId, $submissionId);
 
@@ -985,7 +1149,7 @@ readonly class JmhzDispatchService
             $supplierId,
             $submissionId,
             (int) $submission['row_version'],
-            null,
+            $partId,
             $body,
             $receiptReference,
             $correlation,

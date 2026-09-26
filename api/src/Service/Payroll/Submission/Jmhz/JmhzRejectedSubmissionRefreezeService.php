@@ -59,6 +59,16 @@ final readonly class JmhzRejectedSubmissionRefreezeService
         int $expectedRowVersion,
         ?int $createdBy,
     ): array {
+        // Zamítnuté rozdělené hlášení (zamítnutý první balík) se nezmrazuje
+        // znovu po jednom artefaktu: nový GUID musí nést všechny balíky naráz.
+        // Připraví se znovu z přípravy hlášení, tlačítkem Odeslat.
+        if ($this->repository->listPackageOutboundXmlArtifacts($supplierId, $environment, $submissionId) !== []) {
+            throw new JmhzXmlException(
+                'jmhz_submission_split_refreeze_unsupported',
+                'Hlášení rozdělené do dílčích balíků nejde znovu zmrazit s novým GUID po jednom balíku.'
+                    . ' Zahoďte zamítnuté podání a hlášení zmrazte znovu z přípravy.',
+            );
+        }
         $artifactId = $this->repository->findOutboundXmlArtifactId($supplierId, $environment, $submissionId);
         $artifact = $artifactId === null ? null : $this->repository->findArtifact($supplierId, $artifactId);
         if ($artifact === null) {

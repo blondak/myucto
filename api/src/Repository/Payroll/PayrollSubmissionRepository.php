@@ -1475,6 +1475,108 @@ final class PayrollSubmissionRepository
         return $ids === [] ? null : (int) $ids[0];
     }
 
+    /**
+     * Dílčí balíky rozděleného hlášení (nad 1500 formulářů): pro každou
+     * součást s referencí `…:package:N` nejnovější odchozí XML, seřazené podle
+     * pořadí balíku. Prázdný seznam = podání se nedělí a platí
+     * {@see self::findOutboundXmlArtifactId()}.
+     *
+     * @return list<array{ordinal:int,part_id:int,artifact_id:int,artifact_sha256:string}>
+     */
+    public function listPackageOutboundXmlArtifacts(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT part.id AS part_id, part.part_reference,
+                    artifact.id AS artifact_id, artifact.artifact_sha256
+               FROM payroll_submission_parts part
+               JOIN payroll_submission_artifacts artifact
+                 ON artifact.supplier_id = part.supplier_id
+                AND artifact.environment = part.environment
+                AND artifact.submission_id = part.submission_id
+                AND artifact.part_id = part.id
+                AND artifact.artifact_kind = "outbound_xml"
+                AND artifact.direction = "outbound"
+              WHERE part.supplier_id = ?
+                AND part.environment = ?
+                AND part.submission_id = ?
+                AND part.part_reference LIKE "%:package:%"
+              ORDER BY part.id, artifact.id',
+        );
+        $statement->execute([$supplierId, $environment, $submissionId]);
+        $byPart = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (preg_match('/:package:(\d+)$/D', (string) $row['part_reference'], $match) !== 1) {
+                continue;
+            }
+            $byPart[(int) $row['part_id']] = [
+                'ordinal' => (int) $match[1],
+                'part_id' => (int) $row['part_id'],
+                'artifact_id' => (int) $row['artifact_id'],
+                'artifact_sha256' => (string) $row['artifact_sha256'],
+            ];
+        }
+        $packages = array_values($byPart);
+        usort($packages, static fn (array $left, array $right): int => $left['ordinal'] <=> $right['ordinal']);
+
+        return $packages;
+    }
+
+    /**
+     * Patří CorrelationID některému pokusu o odeslání TOHOTO podání? Dílčí
+     * balík rozděleného hlášení se odesílá zvlášť a má vlastní CorrelationID;
+     * na podání je zapsané jen CorrelationID prvního balíku. Ledger pokusů
+     * ho plní výhradně z potvrzení převzetí ČSSZ, takže vazbu protokolu na
+     * podání nese dál vlastní záznam aplikace, ne obsah protokolu.
+     */
+    public function transportAttemptHasCorrelation(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        string $correlationReference,
+    ): bool {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_submission_transport_attempts
+              WHERE supplier_id = ? AND environment = ? AND submission_id = ?
+                AND correlation_reference = ?
+              LIMIT 1',
+        );
+        $statement->execute([$supplierId, $environment, $submissionId, $correlationReference]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    /**
+     * Stav posledního ověřeného protokolu každé součásti podání.
+     *
+     * @return array<int,string> id součásti → vzdálený stav
+     */
+    public function latestTrustedReceiptStatusByPart(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT part_id, remote_status
+               FROM payroll_submission_receipts
+              WHERE supplier_id = ? AND environment = ? AND submission_id = ?
+                AND part_id IS NOT NULL
+                AND verification_status = "trusted"
+                AND remote_status IS NOT NULL
+              ORDER BY id',
+        );
+        $statement->execute([$supplierId, $environment, $submissionId]);
+        $statuses = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $statuses[(int) $row['part_id']] = (string) $row['remote_status'];
+        }
+
+        return $statuses;
+    }
+
     private function findOutboundArtifactId(
         int $supplierId,
         string $environment,

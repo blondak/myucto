@@ -378,6 +378,17 @@ final class PayrollSubmissionService
     }
 
     /**
+     * Stav posledního ověřeného protokolu každé součásti podání (dílčí balíky
+     * rozděleného hlášení JMHZ).
+     *
+     * @return array<int,string> id součásti → vzdálený stav
+     */
+    public function packageReceiptStatuses(int $supplierId, string $environment, int $submissionId): array
+    {
+        return $this->repository->latestTrustedReceiptStatusByPart($supplierId, $environment, $submissionId);
+    }
+
+    /**
      * @return array{id:int,submission_row_version:int}
      */
     public function addPart(
@@ -1185,20 +1196,40 @@ final class PayrollSubmissionService
                     'Část protokolu nepatří do stejného podání.',
                 );
             }
+            /*
+             * Dílčí balík rozděleného hlášení JMHZ se odesílá zvlášť a ČSSZ mu
+             * přidělí vlastní CorrelationID; na podání je zapsané jen to první.
+             * Protokol balíku se proto ověřuje proti CorrelationID jeho pokusu
+             * o odeslání — ale jen tehdy, když ho ledger pokusů u TOHOTO
+             * podání opravdu vede. Jiné CorrelationID vazbu nezíská.
+             */
+            $expectedCorrelation = $submission['correlation_reference'];
+            if ($expectedCorrelation !== null
+                && $correlationReference !== null
+                && !hash_equals($expectedCorrelation, $correlationReference)
+                && $this->repository->transportAttemptHasCorrelation(
+                    $supplierId,
+                    $submission['environment'],
+                    $submissionId,
+                    $correlationReference,
+                )
+            ) {
+                $expectedCorrelation = $correlationReference;
+            }
             $verified = $verifier?->verify(
                 $bytes,
                 $channel,
                 $submission['environment'],
-                $submission['correlation_reference'],
+                $expectedCorrelation,
             );
             $trusted = $verified !== null;
             $remoteStatus = $verified?->remoteStatus;
             $verifiedCorrelation = $verified?->correlationReference;
             if ($trusted
-                && $submission['correlation_reference'] !== null
+                && $expectedCorrelation !== null
                 && $verifiedCorrelation !== null
                 && !hash_equals(
-                    $submission['correlation_reference'],
+                    $expectedCorrelation,
                     $verifiedCorrelation,
                 )
             ) {
@@ -1206,8 +1237,9 @@ final class PayrollSubmissionService
                     'Ověřený protokol patří jiné correlation reference.',
                 );
             }
-            $trustedCorrelationReference = $verifiedCorrelation
-                ?? $submission['correlation_reference'];
+            // CorrelationID podání je neměnné; protokol dílčího balíku ho nepřepisuje.
+            $trustedCorrelationReference = $submission['correlation_reference']
+                ?? $verifiedCorrelation;
             $requestFingerprint = hash(
                 'sha256',
                 CanonicalJson::encode([
