@@ -10,7 +10,7 @@ namespace MyInvoice\Service\Payroll\Deadline;
  * `dueOn === null` NENÍ „bez termínu, tak si to udělejte kdy chcete": znamená
  * „lhůta existovat může, ale z události samotné se odvodit nedá" (typicky
  * potvrzení o zdanitelných příjmech — deset dnů běží od ŽÁDOSTI zaměstnance,
- * kterou aplikace neeviduje). Vymyslet v takovém případě datum by bylo horší
+ * dokud ji účetní u položky nezapíše). Vymyslet v takovém případě datum by bylo horší
  * než ho nechat prázdné: varování, které lže, se přestane číst.
  */
 final readonly class PayrollChecklistDeadline

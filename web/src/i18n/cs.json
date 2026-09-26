@@ -5019,6 +5019,9 @@
       "show_detail": "Zobrazit",
       "hide_detail": "Skrýt",
       "timeline_title": "Časová osa a změny",
+      "confirmation_requested_on": "Den žádosti zaměstnance",
+      "confirmation_request_save": "Zapsat žádost",
+      "confirmation_request_hint": "Potvrzení se vydává do 10 dnů od žádosti (§ 38j odst. 3 ZDP). Po zapsání dne žádosti hlídá termín přehled zákonných termínů.",
       "complete": "Splnit",
       "confirm_start": "Potvrdit nástup k {date}",
       "registered_elsewhere": "Už je přihlášený — vyřešeno",
@@ -7788,7 +7791,9 @@
           "checklist": "Lhůta u člověka",
           "registration_change": "Změna k ohlášení",
           "tax_statement": "Vyúčtování daně",
-          "sickness_case": "Dávka nemocenského"
+          "sickness_case": "Dávka nemocenského",
+          "annual_settlement": "Roční zúčtování",
+          "foreign_permit": "Povolení cizince"
         },
         "tax_statement": {
           "form": {
@@ -7796,7 +7801,15 @@
             "dpsvd2": "Vyúčtování srážkové daně (DPSVD2)"
           },
           "subject": "za rok {year}"
-        }
+        },
+        "kind": {
+          "annual_settlement_request": "Zjistit žádosti o roční zúčtování (do 15. 2.)",
+          "annual_settlement_perform": "Provést roční zúčtování (do 31. 3.)",
+          "annual_settlement_refund": "Vrátit přeplatek ze zúčtování se mzdou za březen",
+          "foreign_permit_residence": "Končí povolení k pobytu",
+          "foreign_permit_work": "Končí povolení k zaměstnání"
+        },
+        "annual_settlement_undecided": "{count} lidí s příjmem za rok {year} ještě nemá rozhodnuto, zda o zúčtování žádají"
       },
       "operational_health": {
         "title": "Provozní přehled mezd",

@@ -1181,7 +1181,19 @@ final class PayrollEmploymentRepository
         ?int $userId,
         ?string $ip,
         ?string $userAgent,
+        ?string $requestedOn = null,
     ): array {
+        $deadline = null;
+        if ($requestedOn !== null) {
+            if ($itemKey !== PayrollChecklistDeadlinePolicy::TAXABLE_INCOME_CONFIRMATION_ITEM) {
+                throw new \InvalidArgumentException(
+                    'Den žádosti se zapisuje jen u potvrzení o zdanitelných příjmech.',
+                );
+            }
+            $deadline = (new PayrollChecklistDeadlinePolicy())
+                ->taxableIncomeConfirmationOnRequest($requestedOn);
+        }
+
         return $this->transaction(function () use (
             $supplierId,
             $employmentId,
@@ -1192,6 +1204,7 @@ final class PayrollEmploymentRepository
             $userId,
             $ip,
             $userAgent,
+            $deadline,
         ): array {
             $employment = $this->lockEmployment($supplierId, $employmentId, null);
             $item = $this->db->pdo()->prepare(
@@ -1230,6 +1243,23 @@ final class PayrollEmploymentRepository
             ]);
             if ($update->rowCount() !== 1) {
                 throw new PayrollEmploymentConflictException($expectedVersion);
+            }
+            if ($deadline !== null) {
+                // Lhůta vzniká až žádostí; zapisuje se do téhož řádku, ze
+                // kterého ji čte hlídač termínů, takže se neobjeví dvakrát.
+                $this->db->pdo()->prepare(
+                    'UPDATE payroll_employment_checklist_items
+                        SET due_date = ?, deadline_ruleset_id = ?, deadline_source = ?,
+                            deadline_source_status = ?
+                      WHERE supplier_id = ? AND id = ?'
+                )->execute([
+                    $deadline->dueOn,
+                    $deadline->rulesetId,
+                    $deadline->source,
+                    $deadline->sourceStatus,
+                    $supplierId,
+                    (int) $current['id'],
+                ]);
             }
 
             $this->insertEvent(
@@ -1484,6 +1514,10 @@ final class PayrollEmploymentRepository
                                  \'taxable_income_advance_certificate\',
                                  \'taxable_income_withholding_certificate\'
                                )
+                           -- Stejně jako hlídač termínů: po zapsané žádosti
+                           -- uzavírá položku jen potvrzení vydané od žádosti.
+                           AND (item.due_date IS NULL
+                                OR document.created_at >= item.due_date - INTERVAL 10 DAY)
                       )
                       WHEN \'social_jmhz_registration\' THEN EXISTS (
                         SELECT 1 FROM payroll_obligations obligation

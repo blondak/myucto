@@ -243,6 +243,17 @@ describe('Roční zúčtování', () => {
     expect(m.error).not.toHaveBeenCalled()
   })
 
+  /* Hlídač zákonných termínů odkazuje rovnou na zúčtování konkrétního roku. */
+  it('rok převezme z odkazu', async () => {
+    m.routeQuery = { year: '2024' }
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.listAnnualSettlements.mock.calls[0]?.[0]).toBe(2024)
+    m.routeQuery = {}
+    wrapper.unmount()
+  })
+
   it('při selhání načtení ukáže stav „nepovedlo se", ne prázdno', async () => {
     m.listAnnualSettlements.mockRejectedValue(new Error('boom'))
     const wrapper = mountPage()

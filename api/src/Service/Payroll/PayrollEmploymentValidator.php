@@ -505,6 +505,9 @@ final class PayrollEmploymentValidator
             'row_version' => $version,
             'status' => $status,
             'note' => $this->optionalText($input, 'note', 500),
+            // Den žádosti zaměstnance — jen u potvrzení o zdanitelných
+            // příjmech; od něj běží lhůta § 38j odst. 3 ZDP.
+            'requested_on' => $this->optionalDate($input, 'requested_on'),
         ];
     }
 

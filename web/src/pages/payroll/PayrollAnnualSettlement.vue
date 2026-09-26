@@ -50,7 +50,11 @@ const toast = useToast()
  * Zúčtování se provádí ZA UPLYNULÉ zdaňovací období, takže výchozí rok je
  * loňský — ne letošní, který ještě neskončil.
  */
-const year = ref(new Date().getFullYear() - 1)
+// Rok z odkazu (hlídač termínů vede rovnou na zúčtování konkrétního roku).
+const queryYear = Number(useRoute().query.year)
+const year = ref(Number.isInteger(queryYear) && queryYear >= 2000 && queryYear <= 2199
+  ? queryYear
+  : new Date().getFullYear() - 1)
 const data = ref<PayrollAnnualSettlementList | null>(null)
 const selectedEmployeeId = ref<number | null>(null)
 const preview = ref<PayrollAnnualSettlementPreview | null>(null)

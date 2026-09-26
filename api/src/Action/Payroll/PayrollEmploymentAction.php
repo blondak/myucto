@@ -351,6 +351,7 @@ final class PayrollEmploymentAction
                 $this->userId($request),
                 $this->ip($request),
                 $request->getHeaderLine('User-Agent'),
+                $data['requested_on'],
             );
         } catch (\Throwable $e) {
             return $this->domainError($response, $e);

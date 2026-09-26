@@ -35,9 +35,28 @@ nesplněné, s poznámkou, že se má připravit nové.
 
 Panel **Zákonné termíny** na přehledu mezd ukazuje za celou firmu, co je po
 termínu a co se blíží: podání, odvody, lhůty u lidí (položky nástupního a
-výstupního checklistu), změny k ohlášení, roční vyúčtování daně a dávky
-nemocenského pojištění. Pro zobrazení stačí oprávnění číst podání
-(`payroll.submissions`).
+výstupního checklistu), změny k ohlášení, roční vyúčtování daně, dávky
+nemocenského pojištění, roční zúčtování záloh a konec platnosti povolení
+cizinců. Pro zobrazení stačí oprávnění číst podání (`payroll.submissions`).
+
+**Roční zúčtování záloh** (§ 38ch zákona o daních z příjmů) má v panelu tři
+lhůty za každý rok:
+
+- **Zjistit žádosti o roční zúčtování (do 15. 2.)** — počet lidí s příjmem
+  v roce, u kterých ještě není rozhodnuto, zda o zúčtování žádají. Po 15. 2.
+  položka zmizí, protože požádat už nelze.
+- **Provést roční zúčtování (do 31. 3.)** — každý, kdo požádal a zúčtování
+  ještě nemá. Kdo musí podat daňové přiznání, se nepřipomíná.
+- **Vrátit přeplatek ze zúčtování se mzdou za březen** — provedené zúčtování
+  s přeplatkem, který ještě nevyplatil žádný mzdový běh; termínem je konec
+  dubna, kdy je nejpozději splatná mzda za březen.
+
+Odkaz vede na **Mzdy → Roční zúčtování** rovnou na daný rok a osobu.
+
+**Konec platnosti povolení cizince** (povolení k pobytu nebo k zaměstnání
+zapsané na kartě osoby) se připomíná u lidí s trvajícím vztahem, dokud k němu
+není zapsané navazující povolení téhož druhu. Bez platného povolení nesmí
+cizinec pracovat. Odkaz vede na kartu osoby, kde se nové povolení zapíše.
 
 Povinnosti jsou rozdělené podle naléhavosti (**Po termínu**, **Dnes**, **Do
 pěti dnů**, **Otevřené**) a uvnitř každé fáze **seskupené podle druhu**. Jeden
@@ -58,7 +77,8 @@ Nevyřízené položky checklistu, u kterých zákon lhůtu neukládá nebo ji a
 neodvozuje, jsou ve vlastní sekci **Bez termínu** na konci panelu. Patří sem
 například **Registrace ČSSZ / JMHZ** u nástupu před 1. 7. 2026 (registrační
 povinnost zaměstnance platí až od tohoto dne, takže termín se nedopočítává),
-potvrzení o zdanitelných příjmech nebo kontrola exekucí a insolvence. Tyto
+potvrzení o zdanitelných příjmech bez zapsaného dne žádosti nebo kontrola
+exekucí a insolvence. Tyto
 položky se nezapočítávají do fáze **Po termínu** ani do ostatních počtů
 termínů; skupiny jsou seřazené od největší a rozbalují se stejně jako ostatní.
 

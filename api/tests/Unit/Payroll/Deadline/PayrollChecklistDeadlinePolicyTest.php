@@ -118,6 +118,23 @@ final class PayrollChecklistDeadlinePolicyTest extends TestCase
         self::assertNotNull($deadline->note);
     }
 
+    /** § 38j odst. 3 ZDP: deset dnů od žádosti, přes konec měsíce i roku. */
+    public function testTaxableIncomeConfirmationRunsTenDaysFromRequest(): void
+    {
+        $deadline = $this->policy->taxableIncomeConfirmationOnRequest('2026-12-27');
+
+        self::assertSame('taxable_income_confirmation', $deadline->itemKey);
+        self::assertSame('2027-01-06', $deadline->dueOn);
+        self::assertSame('statute_verified', $deadline->sourceStatus);
+        self::assertStringContainsString('§ 38j odst. 3', (string) $deadline->source);
+    }
+
+    public function testTaxableIncomeConfirmationRejectsInvalidRequestDate(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->policy->taxableIncomeConfirmationOnRequest('2026-02-30');
+    }
+
     public function testInternalReviewsGetNoInventedDeadline(): void
     {
         foreach ([

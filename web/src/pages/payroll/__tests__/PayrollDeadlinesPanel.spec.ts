@@ -400,6 +400,76 @@ describe('PayrollDeadlinesPanel', () => {
       .toBe('payroll.dashboard.deadlines.due_in:2')
   })
 
+  /*
+   * § 38ch ZDP a konec povolení cizince: termíny dřív žily jen na obrazovce
+   * ročního zúčtování a na kartě osoby. Proklik musí vést tam, kde se řeší.
+   */
+  it('links annual settlement and foreign permit duties to their screens', async () => {
+    m.deadlineGroups.mockResolvedValue(overview([
+      group({
+        items: [item({
+          reference: 'annual_settlement_request:2025',
+          source: 'annual_settlement',
+          title: 'annual_settlement_request',
+          subject: '4',
+          period: null,
+          due_on: '2026-02-15',
+          phase: 'due_soon',
+          days_to_due: 3,
+          statement_year: 2025,
+          undecided_count: 4,
+        })],
+      }),
+      group({
+        items: [item({
+          reference: 'annual_settlement_perform:2025:41',
+          source: 'annual_settlement',
+          title: 'annual_settlement_perform',
+          subject: 'Syntetický Žadatel',
+          period: null,
+          due_on: '2026-03-31',
+          statement_year: 2025,
+          employee_id: 41,
+        })],
+      }),
+      group({
+        items: [item({
+          reference: 'payroll_foreign_permit:7',
+          source: 'foreign_permit',
+          title: 'foreign_permit_work',
+          subject: 'Syntetický Cizinec',
+          period: null,
+          due_on: '2026-03-31',
+          employee_id: 52,
+          permit_label: 'Syntetická karta',
+        })],
+      }),
+    ]))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const link = (reference: string) => JSON.parse(
+      wrapper.get(`[data-test="payroll-deadline-link-${reference}"]`).attributes('data-to') ?? '{}',
+    )
+    expect(link('annual_settlement_request:2025')).toEqual({
+      name: 'payroll-annual-settlement',
+      query: { year: '2025' },
+    })
+    expect(link('annual_settlement_perform:2025:41')).toEqual({
+      name: 'payroll-annual-settlement',
+      query: { year: '2025', person: '41' },
+    })
+    expect(link('payroll_foreign_permit:7')).toEqual({
+      name: 'payroll-people',
+      query: { person: '52' },
+    })
+    expect(wrapper.get('[data-test="payroll-deadline-annual_settlement_request:2025"]').text())
+      .toContain('payroll.dashboard.deadlines.annual_settlement_undecided')
+    expect(wrapper.get('[data-test="payroll-deadline-payroll_foreign_permit:7"]').text())
+      .toContain('Syntetický Cizinec · Syntetická karta')
+  })
+
   it('falls back to the raw code when a source code has no translation', async () => {
     m.deadlineGroups.mockResolvedValue(overview([
       group({ items: [item({ reference: 'x', source: 'levy', title: 'risky_savings' })] }),

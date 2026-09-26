@@ -5019,6 +5019,9 @@
       "show_detail": "Show",
       "hide_detail": "Hide",
       "timeline_title": "Timeline and changes",
+      "confirmation_requested_on": "Date of the employee's request",
+      "confirmation_request_save": "Record request",
+      "confirmation_request_hint": "The certificate is issued within 10 days of the request (Section 38j(3) of the Income Tax Act). Once the request date is recorded, the statutory deadline overview tracks it.",
       "complete": "Complete",
       "confirm_start": "Confirm start on {date}",
       "registered_elsewhere": "Already registered — resolved",
@@ -7788,7 +7791,9 @@
           "checklist": "Per-person deadline",
           "registration_change": "Change to report",
           "tax_statement": "Tax statement",
-          "sickness_case": "Sickness benefit"
+          "sickness_case": "Sickness benefit",
+          "annual_settlement": "Annual tax settlement",
+          "foreign_permit": "Foreign worker permit"
         },
         "tax_statement": {
           "form": {
@@ -7796,7 +7801,15 @@
             "dpsvd2": "Withholding tax statement (DPSVD2)"
           },
           "subject": "for {year}"
-        }
+        },
+        "kind": {
+          "annual_settlement_request": "Find out annual settlement requests (by 15 Feb)",
+          "annual_settlement_perform": "Perform the annual tax settlement (by 31 Mar)",
+          "annual_settlement_refund": "Refund the settlement overpayment with the March payroll",
+          "foreign_permit_residence": "Residence permit expires",
+          "foreign_permit_work": "Work permit expires"
+        },
+        "annual_settlement_undecided": "{count} people with income for {year} have not yet decided whether they request the settlement"
       },
       "operational_health": {
         "title": "Payroll operational overview",
