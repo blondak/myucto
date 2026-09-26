@@ -21,6 +21,8 @@ final class PayrollAbsenceOverlapException extends \RuntimeException
         'compensatory_time_off' => 'náhradní volno',
         'unexcused' => 'neomluvená absence',
         'other' => 'jiná nepřítomnost',
+        'public_function' => 'výkon veřejné funkce',
+        'employee_obstacle_unpaid' => 'neplacená překážka na straně zaměstnance',
     ];
 
     private const STATUS_LABELS = [

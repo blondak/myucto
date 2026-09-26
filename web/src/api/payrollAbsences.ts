@@ -11,11 +11,16 @@ import { api } from './client'
  * následek odvozovat neměl. Za neomluveně zameškanou dobu mzda ani náhrada
  * nepřísluší — server proto u tohohle druhu vynucuje `compensation_policy`
  * `none`.
+ *
+ * `public_function` (výkon veřejné funkce, § 200 až 202 ZP) a
+ * `employee_obstacle_unpaid` jsou pracovní volno BEZ náhrady mzdy; placená
+ * překážka zůstává `employee_obstacle`.
  */
 export type AbsenceType =
   | 'vacation' | 'dpn' | 'quarantine' | 'ocr' | 'long_term_care' | 'ppm'
   | 'paternity' | 'parental' | 'unpaid_leave' | 'employee_obstacle'
   | 'employer_obstacle' | 'compensatory_time_off' | 'unexcused' | 'other'
+  | 'public_function' | 'employee_obstacle_unpaid'
 
 export interface PayrollAbsenceEmployment {
   id: number

@@ -88,8 +88,8 @@ final class PayrollJmhzAbsenceHoursDeriver
      *
      * `employee_obstacle` je v aplikaci vždy PLACENÁ překážka — validátor jí
      * vynucuje schválený snapshot průměru a sazbu 100 % — a 10471 je právě
-     * „překážky na straně zaměstnance s náhradou mzdy/platu". Neplacenou
-     * variantu aplikace neeviduje, takže se sem nemůže dostat.
+     * „překážky na straně zaměstnance s náhradou mzdy/platu". Neplacená
+     * varianta má vlastní druh `employee_obstacle_unpaid` a do 10471 nejde.
      */
     private const TYPE_BUCKETS = [
         'vacation' => 'vacation',
@@ -103,6 +103,13 @@ final class PayrollJmhzAbsenceHoursDeriver
         'paternity' => 'paternity',
         'parental' => 'parental',
         'unpaid_leave' => 'unpaid_leave',
+        // Pracovní volno bez náhrady mzdy — výkon veřejné funkce (§ 200 až 202
+        // ZP) a neplacená překážka na straně zaměstnance. Do 10471 nepatří:
+        // ten je podle datového slovníku „překážky na straně zaměstnance
+        // S NÁHRADOU mzdy/platu". Hodiny proto jdou jen do úhrnu 10275 a v ELDP
+        // se dokládají stejně jako neplacené volno.
+        'public_function' => 'unpaid_leave',
+        'employee_obstacle_unpaid' => 'unpaid_leave',
         'unexcused' => 'unexcused',
         // Náhradní volno za přesčas: mzda za dobu čerpání nepřísluší
         // (§ 114 odst. 1 ZP), takže hodiny jdou jen do úhrnu 10275, ne do 10276.

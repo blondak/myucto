@@ -41,6 +41,18 @@ final class PayrollWageReplacementTitleTest extends TestCase
      * rozhodlo o penězích — jinak by se krátilo za jiné hodiny, než za které
      * se náhrada vyplatila.
      */
+    public function testUnpaidPublicFunctionAndObstacleKeepNoWage(): void
+    {
+        self::assertSame(
+            PayrollWageReplacementTitle::Unpaid,
+            PayrollWageReplacementTitle::forAbsenceType('public_function'),
+        );
+        self::assertSame(
+            PayrollWageReplacementTitle::Unpaid,
+            PayrollWageReplacementTitle::forAbsenceType('employee_obstacle_unpaid'),
+        );
+    }
+
     public function testHolidayTreatmentMatchesTheMoneyRules(): void
     {
         self::assertSame(

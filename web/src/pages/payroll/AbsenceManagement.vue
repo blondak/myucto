@@ -133,8 +133,14 @@ const textareaClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surfa
 const absenceTypes: AbsenceType[] = [
   'vacation', 'dpn', 'quarantine', 'ocr', 'long_term_care', 'ppm',
   'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
-  'employer_obstacle', 'compensatory_time_off', 'unexcused', 'other',
+  'employer_obstacle', 'compensatory_time_off', 'unexcused',
+  'public_function', 'employee_obstacle_unpaid', 'other',
 ]
+/*
+ * Druhy, u kterých formulář vysvětlí, co se s nepřítomností stane: náhrada
+ * mzdy se nepočítá a hodiny jdou do hlášení jen jako neodpracované.
+ */
+const UNPAID_EXCUSED_TYPES: readonly string[] = ['public_function', 'employee_obstacle_unpaid']
 const manualLeaveEntryTypes = ['carryover', 'adjustment', 'shortening', 'overdrawn', 'payout']
 /*
  * Období, od kterého firma vede mzdy v MyÚčtu. Čerpání (`taken`) jde zapsat
@@ -294,6 +300,7 @@ const needsAverage = computed(() =>
  * doplní, až porod nastane, i u schválené nepřítomnosti.
  */
 const isMaternity = computed(() => absenceForm.absence_type === 'ppm')
+const isUnpaidExcused = computed(() => UNPAID_EXCUSED_TYPES.includes(absenceForm.absence_type))
 const childbirthEditing = ref<number | null>(null)
 const childbirthDraft = ref('')
 
@@ -1350,6 +1357,13 @@ onMounted(async () => {
               accent="payroll"
               :aria-label="t('payroll_absence.absences.type')"
             />
+            <p
+              v-if="isUnpaidExcused"
+              data-test="absence-unpaid-excused-hint"
+              class="mt-1 text-xs text-neutral-500"
+            >
+              {{ t('payroll_absence.absences.unpaid_excused_hint') }}
+            </p>
           </div>
           <label>
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.from') }}</span>

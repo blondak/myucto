@@ -24145,11 +24145,13 @@
       "paternity": "Otcovská",
       "parental": "Rodičovská",
       "unpaid_leave": "Neplacené volno",
-      "employee_obstacle": "Překážka na straně zaměstnance",
+      "employee_obstacle": "Překážka na straně zaměstnance s náhradou mzdy",
       "employer_obstacle": "Překážka na straně zaměstnavatele",
       "compensatory_time_off": "Náhradní volno za přesčas",
       "unexcused": "Neomluvená absence",
-      "other": "Jiná absence"
+      "other": "Jiná absence",
+      "public_function": "Výkon veřejné funkce (volno bez náhrady)",
+      "employee_obstacle_unpaid": "Překážka na straně zaměstnance bez náhrady mzdy"
     },
     "status": {
       "requested": "Ke schválení",
@@ -24165,6 +24167,7 @@
     "absences": {
       "new": "Nová absence",
       "new_needs_person": "Novou nepřítomnost lze založit až po výběru konkrétního zaměstnance — váže se k pracovnímu vztahu.",
+      "unpaid_excused_hint": "Pracovní volno bez náhrady mzdy (§ 199 až 202 zákoníku práce). Náhrada se nepočítá a mzdový vstup nevznikne; hodiny jdou do měsíčního hlášení jen jako neodpracované (10275), v bloku neplaceného volna. Přiznává-li zákon za funkci náhradu, zadejte ji jako mzdový vstup.",
       "list": "Evidované absence",
       "empty": "Ve zvoleném období nejsou žádné absence.",
       "type": "Druh absence",

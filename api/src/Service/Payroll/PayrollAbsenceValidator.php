@@ -18,11 +18,20 @@ final class PayrollAbsenceValidator
      * druh absence, o který se smí krátit dovolená — kniha dovolené proti němu
      * krácení poměřuje. Vědomě je oddělený od `employee_obstacle`: překážka
      * v práci je nepřítomnost OMLUVENÁ a krátit se za ni nesmí.
+     *
+     * `public_function` (výkon veřejné funkce, § 200 až 202 ZP) a
+     * `employee_obstacle_unpaid` (překážka na straně zaměstnance, za kterou
+     * náhrada mzdy nepřísluší) jsou omluvené nepřítomnosti BEZ náhrady mzdy.
+     * `employee_obstacle` zůstává placenou překážkou — jen tak ji čte hlášení
+     * (10471 „s náhradou mzdy") i ELDP. Obě nové se proto vedou jako pracovní
+     * volno bez náhrady příjmu, stejně jako neplacené volno
+     * ({@see \MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver::UNPAID_EXCUSED_TYPES}).
      */
     private const TYPES = [
         'vacation', 'dpn', 'quarantine', 'ocr', 'long_term_care', 'ppm',
         'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
         'employer_obstacle', 'compensatory_time_off', 'unexcused', 'other',
+        'public_function', 'employee_obstacle_unpaid',
     ];
 
     private const DOMAIN = PayrollRulesetDomain::CompensationAverages;
@@ -79,6 +88,11 @@ final class PayrollAbsenceValidator
             // Za neomluveně zameškanou dobu mzda ani náhrada nepřísluší —
             // zaměstnanec v ní nepracoval a žádná překážka v práci to nekryje.
             'unexcused' => 'none',
+            // Pracovní volno bez náhrady mzdy (§ 199 odst. 1, § 200 až 202 ZP).
+            // Náhradu, kterou zákon u některých veřejných funkcí přiznává,
+            // tahle evidence nepočítá — takový případ zatím vede účetní ručním
+            // mzdovým vstupem.
+            'public_function', 'employee_obstacle_unpaid' => 'none',
             default => 'none',
         };
         if (in_array($type, self::TYPES_WITHIN_QUARTER, true)

@@ -135,6 +135,53 @@ final class PayrollAbsenceApiTest extends TestCase
         self::assertSame(['taken', 'reversal'], $entryTypes->fetchAll(\PDO::FETCH_COLUMN));
     }
 
+    /**
+     * Výkon veřejné funkce (§ 200 až 202 ZP) a neplacená překážka na straně
+     * zaměstnance jsou pracovní volno bez náhrady mzdy: zapíšou se bez
+     * průměrného výdělku, schválí se a žádnou náhradu nezaloží.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('unpaidExcusedTypes')]
+    public function testUnpaidExcusedAbsenceIsRecordedWithoutCompensation(string $type): void
+    {
+        $created = $this->action->create(
+            $this->request('POST')->withParsedBody([
+                ...$this->absencePayload(0),
+                'absence_type' => $type,
+                'average_snapshot_id' => null,
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $absence = $this->json($created)['absence'];
+        self::assertSame($type, $absence['absence_type']);
+        self::assertSame('none', $absence['compensation_policy']);
+
+        $approved = $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+
+        $inputs = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_inputs WHERE supplier_id = ? AND employment_id = ?',
+        );
+        $inputs->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame(0, (int) $inputs->fetchColumn(), 'bez náhrady nevzniká mzdový vstup');
+    }
+
+    /** @return array<string,array{string}> */
+    public static function unpaidExcusedTypes(): array
+    {
+        return [
+            'výkon veřejné funkce' => ['public_function'],
+            'neplacená překážka na straně zaměstnance' => ['employee_obstacle_unpaid'],
+        ];
+    }
+
     public function testDpnRequiresManualEligibilityFlagsAndStoresShiftTrace(): void
     {
         $averageId = $this->createApprovedAverage();

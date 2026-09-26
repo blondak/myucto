@@ -60,6 +60,10 @@ final class JmhzEldpEvidenceBuilder
         'paternity' => ['paternity_millihours'],
         'parental' => ['parental_millihours'],
         'unpaid_leave' => ['unpaid_leave_millihours'],
+        // Pracovní volno bez náhrady mzdy stojí v souhrnu na témž bloku jako
+        // neplacené volno ({@see \MyInvoice\Service\Payroll\Time\PayrollJmhzAbsenceHoursDeriver}).
+        'public_function' => ['unpaid_leave_millihours'],
+        'employee_obstacle_unpaid' => ['unpaid_leave_millihours'],
         'unexcused' => ['unexcused_millihours'],
         'employee_obstacle' => ['employee_obstacle_paid_millihours'],
         'employer_obstacle' => ['employer_obstacle_millihours'],

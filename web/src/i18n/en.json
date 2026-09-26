@@ -24145,11 +24145,13 @@
       "paternity": "Paternity leave",
       "parental": "Parental leave",
       "unpaid_leave": "Unpaid leave",
-      "employee_obstacle": "Employee-side obstacle",
+      "employee_obstacle": "Employee-side obstacle with wage compensation",
       "employer_obstacle": "Employer-side obstacle",
       "compensatory_time_off": "Compensatory time off for overtime",
       "unexcused": "Unexcused absence",
-      "other": "Other absence"
+      "other": "Other absence",
+      "public_function": "Holding a public office (unpaid leave)",
+      "employee_obstacle_unpaid": "Employee-side obstacle without wage compensation"
     },
     "status": {
       "requested": "Pending",
@@ -24165,6 +24167,7 @@
     "absences": {
       "new": "New absence",
       "new_needs_person": "A new absence can only be created for a specific employee — it is tied to an employment.",
+      "unpaid_excused_hint": "Time off without wage compensation (Sections 199–202 of the Labour Code). No compensation input is created; the hours go to the monthly report only as unworked hours (10275), in the unpaid leave block. If the law grants compensation for the office, enter it as a payroll input.",
       "list": "Recorded absences",
       "empty": "No absences in the selected period.",
       "type": "Absence type",
