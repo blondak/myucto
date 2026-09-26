@@ -372,15 +372,48 @@ final readonly class SicknessSubmissionService
             // nárok z tohoto vztahu nevznikl a zaměstnavatel nic nepředává.
             $this->caseService->assertEventCovered($kind, $incapacityFrom, $context, $row);
             $this->caseService->assertLongTermCareNotRefused($kind, $row);
-            $payload = $this->nempriPayload(
-                $supplierId,
-                $environment,
-                $caseId,
-                $row,
-                $kind,
-                $context,
-                $identity,
-            );
+            /*
+             * Chybějící údaje případu se hlásí NAJEDNOU. Dřív náhled spadl na
+             * prvním (pravděpodobný příjem), po doplnění na dalším (číslo
+             * rozhodnutí) a účetní opravovala a zkoušela náhled pořád dokola.
+             */
+            $missing = [];
+            try {
+                $payload = $this->nempriPayload(
+                    $supplierId,
+                    $environment,
+                    $caseId,
+                    $row,
+                    $kind,
+                    $context,
+                    $identity,
+                );
+            } catch (SicknessException $exception) {
+                $missing[] = $exception;
+                $payload = null;
+            }
+            // Jde-li věta sestavit, číslo rozhodnutí ohlídá validátor níž.
+            if ($payload === null
+                && $kind->requiresDecisionNumber()
+                && !(bool) ($row['foreign_case'] ?? false)
+                && $this->nullableText($row['decision_number'] ?? null) === null
+            ) {
+                $missing[] = new SicknessException(
+                    'nempri_decision_number_missing',
+                    'Chybí číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře). '
+                    . 'ČSSZ podle něj oznámení páruje s rozhodnutím; bez něj ho nezpracuje. '
+                    . 'Výjimkou je jen zahraniční případ.',
+                );
+            }
+            if ($payload === null) {
+                throw new SicknessException(
+                    $missing[0]->validationCode,
+                    implode("\n", array_map(
+                        static fn (SicknessException $exception): string => $exception->getMessage(),
+                        $missing,
+                    )),
+                );
+            }
             $xml = $this->nempriSerializer->serialize($payload);
             $this->validator->validateNempri($payload, $xml);
             $window = $this->deadlines->forNempri(

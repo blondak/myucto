@@ -57,6 +57,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 import {
@@ -366,6 +367,9 @@ async function create(): Promise<void> {
 
 function edit(item: PayrollSicknessCase): void {
   editingId.value = item.id
+  // Stará zelená „Případ uložen." nad novou rozdělanou úpravou tvrdila,
+  // že se uložilo i to, co se ještě neodeslalo.
+  success.value = ''
   draft.value = {
     ossz_code: item.ossz_code,
     decision_number: item.decision_number,
@@ -420,7 +424,13 @@ function edit(item: PayrollSicknessCase): void {
     worked_last_day: item.worked_last_day ?? 0,
     planned_shifts: item.planned_shifts ?? 0,
     planned_shifts_worked: item.planned_shifts_worked ?? 0,
-    probable_income_czk: item.probable_income_czk ?? null,
+    // Návrh (sjednaná měsíční hrubá mzda) se předvyplní rovnou. Server ho
+    // použije jen tehdy, když je rozhodné období kratší než 30 dnů, jinak
+    // ho do věty nedá.
+    probable_income_czk: item.probable_income_czk
+      ?? (typeof item.probable_income_suggestion_minor === 'number' && item.probable_income_suggestion_minor > 0
+        ? Math.round(item.probable_income_suggestion_minor / 100)
+        : null),
     contact_worker_name: item.contact_worker_name ?? null,
     contact_worker_phone: item.contact_worker_phone ?? null,
     contact_worker_email: item.contact_worker_email ?? null,
@@ -846,9 +856,22 @@ onMounted(() => void load())
 <template>
   <div class="space-y-4" data-test="sickness-cases-panel">
     <div class="rounded-xl border border-neutral-200 bg-surface p-4">
-      <h3 class="mb-1 text-sm font-semibold text-neutral-900">
-        {{ t('payroll.sicknessCases.title') }}
-      </h3>
+      <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h3 class="text-sm font-semibold text-neutral-900">
+          {{ t('payroll.sicknessCases.title') }}
+        </h3>
+        <!--
+          Případy dávek se vedou zvlášť pro ostrý a testovací provoz. Přepínač
+          je tu stejně jako u registrací: ve vývojové instalaci jde zvolit Test,
+          jinde se ukáže jen štítek Produkce.
+        -->
+        <EnvironmentSwitch
+          v-model="environment"
+          size="sm"
+          data-test="sickness-case-environment"
+          :aria-label="t('payroll.regzel.environment.label')"
+        />
+      </div>
       <p class="mb-3 text-xs text-neutral-600">
         {{ t('payroll.sicknessCases.intro') }}
       </p>
@@ -913,7 +936,7 @@ onMounted(() => void load())
     </div>
 
     <div v-if="error" class="rounded-lg bg-red-50 p-3 text-sm text-red-700" data-test="sickness-case-error">
-      <p>{{ error }}</p>
+      <p class="whitespace-pre-line">{{ error }}</p>
       <div v-if="errorFix" class="mt-2 flex flex-wrap items-center gap-2" data-test="sickness-case-error-fix">
         <span class="text-xs">
           {{ t('payroll.sicknessCases.errorFix.where', { name: errorFix.item.full_name }) }}

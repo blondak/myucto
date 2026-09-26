@@ -202,6 +202,31 @@ describe('PayrollSicknessCasesPanel', () => {
     expect(wrapper.text()).toContain('Jan Novák')
   })
 
+  /* Q8-26/27/28: návrh příjmu předvyplněný, stará zelená hláška zmizí, přepínač prostředí. */
+  it('editor předvyplní pravděpodobný příjem a smaže starou hlášku o uložení', async () => {
+    m.list.mockResolvedValue(listResponse([sicknessCase({ probable_income_suggestion_minor: 3_800_000 })]))
+    m.update.mockResolvedValue(sicknessCase())
+    const wrapper = await mountPanel()
+    expect(wrapper.find('[data-test="sickness-case-environment"], [data-test="environment-switch-production-only"]').exists()).toBe(true)
+
+    const openEditor = async () => {
+      await wrapper.findAll('button')
+        .find(button => button.text().includes('actions.edit'))!
+        .trigger('click')
+      await flushPromises()
+    }
+    await openEditor()
+    expect((wrapper.get('[data-test="sickness-case-probable-income"]').element as HTMLInputElement).value).toBe('38000')
+
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('actions.save'))!
+      .trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="sickness-case-success"]').exists()).toBe(true)
+    await openEditor()
+    expect(wrapper.find('[data-test="sickness-case-success"]').exists()).toBe(false)
+  })
+
   /**
    * HZUPN se podává až po skončení neschopnosti (§ 97 odst. 3). Akce se ale
    * NESKRÝVÁ — skrytá by vypadala jako neexistující povinnost.

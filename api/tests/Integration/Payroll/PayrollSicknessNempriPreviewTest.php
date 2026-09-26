@@ -329,6 +329,37 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
     }
 
     /**
+     * Q8-25: chybějící údaje se hlásily po jednom — nejdřív rozhodné období,
+     * po doplnění číslo rozhodnutí. Náhled je teď vypíše najednou.
+     */
+    public function testPreviewListsAllMissingCaseDataAtOnce(): void
+    {
+        [, $employmentId] = $this->employee();
+        $case = $this->service(SicknessCaseService::class)->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'NEM',
+            ['incapacity_from' => '2026-02-09'],
+            $this->userId,
+        );
+
+        try {
+            $this->service(SicknessSubmissionService::class)->preview(
+                $this->supplierId,
+                'test',
+                (int) $case['id'],
+                SicknessDocumentKind::Nempri,
+            );
+            self::fail('Náhled bez rozhodného období a čísla rozhodnutí nesmí projít.');
+        } catch (SicknessException $exception) {
+            self::assertSame('nempri_decisive_month_missing', $exception->validationCode);
+            self::assertStringContainsString('číslo rozhodnutí', $exception->getMessage());
+            self::assertGreaterThanOrEqual(2, count(explode("\n", $exception->getMessage())));
+        }
+    }
+
+    /**
      * @template T of object
      * @param class-string<T> $class
      * @return T
