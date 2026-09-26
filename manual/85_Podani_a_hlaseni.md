@@ -842,7 +842,10 @@ Záložky zdravotních pojišťoven oddělují dvě povinnosti:
   odeslaný — odeslání datovou schránkou musíte potvrdit sami.
 - **PPZ** je měsíční přehled o platbě pojistného. Ze schválené revize se
   sestaví a zmrazí pouze formát doložený pro vybranou pojišťovnu. Připravený
-  soubor není odeslaný.
+  soubor není odeslaný. Řádný přehled se podává do 20. dne následujícího
+  měsíce. Opravný přehled (z opravné revize ke dříve podanému přehledu) má
+  lhůtu 8 dnů ode dne zjištění chyby (§ 25 odst. 4 zákona č. 592/1992 Sb.);
+  za den zjištění se bere žádost o opravu mzdového běhu.
 
 ### 85.14.1 Kdy vyjde úřední tiskopis a kdy vlastní sestava
 

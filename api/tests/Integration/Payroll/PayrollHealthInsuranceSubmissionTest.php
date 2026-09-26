@@ -854,6 +854,63 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         self::assertFalse($replayed['created']);
     }
 
+    /**
+     * Opravný přehled má lhůtu 8 dnů ode dne ZJIŠTĚNÍ chyby (§ 25 odst. 4
+     * z. 592/1992 Sb.), ne 20. den po mzdovém období. Dřív dostal lhůtu
+     * řádného přehledu (20. 7. u červnové mzdy) — u opravy zjištěné v září
+     * tedy termín, který už dva měsíce uplynul.
+     */
+    public function testCorrectiveOverviewDeadlineRunsFromTheCorrectionRequest(): void
+    {
+        $regular = $this->service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $this->revisionId,
+            '111',
+        );
+        self::assertSame('2026-07-20', $regular['deadline']['due_on']);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_submissions
+                SET status = "accepted", submitted_at = UTC_TIMESTAMP(),
+                    decided_at = UTC_TIMESTAMP(), row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $regular['submission_id']]);
+        $runId = (int) $this->db->pdo()->query(
+            'SELECT run_id FROM payroll_run_revisions WHERE id = ' . $this->revisionId,
+        )->fetchColumn();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_run_events
+                (supplier_id, run_id, event_type, from_status, to_status,
+                 reason, metadata_json, created_at)
+             VALUES (?, ?, "request_correction", "approved", "correction_pending",
+                     "Syntetická oprava", "{}", "2026-09-10 10:00:00")',
+        )->execute([$this->supplierId, $runId]);
+
+        $correctionRevisionId = $this->correctionRevision();
+        $this->revisionId = $correctionRevisionId;
+        $employeeId = (int) $this->db->pdo()->query(
+            'SELECT employee_id FROM payroll_employments WHERE id = ' . $this->employmentId,
+        )->fetchColumn();
+        $this->storeResult($employeeId);
+
+        $correction = $this->service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $correctionRevisionId,
+            '111',
+        );
+
+        $submission = $this->repository->findSubmission(
+            $this->supplierId,
+            $correction['submission_id'],
+        );
+        self::assertIsArray($submission);
+        self::assertSame('correction', $submission['submission_kind']);
+        // 10. 9. + 8 dnů = pátek 18. 9. 2026.
+        self::assertSame('2026-09-18', $correction['deadline']['due_on']);
+        self::assertSame('2026-09-10', $correction['deadline']['earliest_submission_on']);
+    }
+
     public function testInsurerWithoutAnOverviewIsRefused(): void
     {
         $this->expectException(\OutOfBoundsException::class);

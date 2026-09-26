@@ -276,6 +276,154 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
         self::assertNull($result->advanceTax);
     }
 
+    /**
+     * Výjimka z minima zdravotního pojištění (§ 3 odst. 8 a 9 z. 592/1992).
+     *
+     * Do tabulky `payroll_person_health_minimum_reductions` dřív nevedla
+     * žádná zapisovací cesta, výjimka se ze snímku nikdy nedostala do
+     * výpočtu a mzda dorovnávala pojistné do minima, které se nedluží.
+     * Účinnost jde po DNECH (odst. 9 písm. c) krátí minimum poměrně).
+     */
+    public function testMinimumReductionIsStoredPerDayAndReachesTheSnapshot(): void
+    {
+        $payload = $this->completeEvidence();
+        $payload['sections']['health_minimum_reductions'] = [[
+            'reason' => 'state_insured',
+            'evidence_reference' => 'minimum:state-insured-confirmation',
+            'evidence_note' => 'Potvrzení o státním pojištěnci',
+            'effective_from' => '2026-08-10',
+            'effective_to' => null,
+        ]];
+
+        $response = $this->save($payload);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $stored = $this->json($response)['evidence']['sections']['health_minimum_reductions'];
+        self::assertCount(1, $stored);
+        self::assertSame('state_insured', $stored[0]['reason']);
+        self::assertSame('2026-08-10', $stored[0]['effective_from']);
+
+        $snapshot = $this->repository->snapshot(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-08-31',
+        );
+        self::assertIsArray($snapshot);
+        self::assertSame(
+            [['state_insured', '2026-08-10', null]],
+            array_map(
+                static fn (array $row): array => [
+                    $row['reason'],
+                    $row['effective_from'],
+                    $row['effective_to'],
+                ],
+                $snapshot['health']['minimum_reductions'],
+            ),
+        );
+    }
+
+    /** Souběžné výjimky různých důvodů se nepřekrývají; překryv téhož důvodu ano. */
+    public function testOverlappingReductionOfTheSameReasonIsRejected(): void
+    {
+        $payload = $this->completeEvidence();
+        $payload['sections']['health_minimum_reductions'] = [
+            [
+                'reason' => 'ztp_or_ztp_p',
+                'evidence_reference' => 'minimum:ztp-card',
+                'effective_from' => '2026-01-01',
+                'effective_to' => null,
+            ],
+            [
+                'reason' => 'state_insured',
+                'evidence_reference' => null,
+                'effective_from' => '2026-03-01',
+                'effective_to' => '2026-05-31',
+            ],
+        ];
+        $saved = $this->save($payload);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+
+        $overlapping = $this->payloadFrom($this->json($saved)['evidence']);
+        $overlapping['sections']['health_minimum_reductions'][] = [
+            'reason' => 'ztp_or_ztp_p',
+            'evidence_reference' => null,
+            'effective_from' => '2026-06-01',
+            'effective_to' => null,
+        ];
+
+        $response = $this->save($overlapping);
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(2, $this->countRows('payroll_person_health_minimum_reductions'));
+    }
+
+    public function testUnverifiedMinimumReductionIsABlocker(): void
+    {
+        $payload = $this->completeEvidence();
+        $payload['sections']['health_minimum_reductions'] = [[
+            'reason' => 'unverified',
+            'evidence_reference' => null,
+            'effective_from' => '2026-08-01',
+            'effective_to' => null,
+        ]];
+
+        $response = $this->save($payload);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertContains(
+            'health_minimum_reduction_unverified',
+            $this->json($response)['evidence']['blockers'],
+        );
+    }
+
+    /**
+     * Vyměřovací základ u jiného zaměstnavatele (§ 3 odst. 10) jde zadat
+     * a v TÉMŽ uložení na něj jde odkázat volbou plátce doplatku minima.
+     * Dřív se základ nedal zapsat vůbec, takže volba jiného zaměstnavatele
+     * vždy skončila odmítnutím „zvolený zaměstnavatel neexistuje".
+     */
+    public function testOtherEmployerBaseIsStoredAndSelectableAsTopUpPayer(): void
+    {
+        $payload = $this->completeEvidence();
+        $payload['sections']['health_other_employer_bases'] = [[
+            'period_start' => '2026-08-01',
+            'employer_reference' => 'employer:other-1',
+            'assessment_base_minor_units' => 1_500_000,
+            'employment_from' => '2026-01-01',
+            'employment_to' => null,
+            'evidence_reference' => 'minimum:other-employer-confirmation',
+        ]];
+        $payload['sections']['health_month_evidence'][0]['selected_top_up_employer_reference']
+            = 'employer:other-1';
+        $payload['sections']['health_month_evidence'][0]['selected_top_up_employer_evidence_reference']
+            = 'minimum:other-employer-confirmation';
+
+        $response = $this->save($payload);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $stored = $this->json($response)['evidence']['sections']['health_other_employer_bases'];
+        self::assertCount(1, $stored);
+        self::assertSame(1_500_000, (int) $stored[0]['assessment_base_minor_units']);
+
+        $snapshot = $this->repository->snapshot(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-08-31',
+        );
+        self::assertIsArray($snapshot);
+        self::assertSame(
+            'employer:other-1',
+            $snapshot['health']['other_employer_bases'][0]['employer_reference'],
+        );
+        self::assertSame(
+            1_500_000,
+            $snapshot['health']['other_employer_bases'][0]['assessment_base_minor_units'],
+        );
+
+        // Uložené řádky poslané zpět beze změny (celé číslo z DB) projdou.
+        $again = $this->save($this->payloadFrom($this->json($this->show())['evidence']));
+        self::assertSame(200, $again->getStatusCode(), (string) $again->getBody());
+    }
+
     public function testHealthEvidenceDocumentRequiresSessionPermissionAndActiveTenantDocument(): void
     {
         if (!$this->db->hasColumn('payroll_person_health_coverage_history', 'health_evidence_document_id')) {
@@ -830,6 +978,8 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
                     'selected_top_up_employer_reference' => null,
                     'selected_top_up_employer_evidence_reference' => null,
                 ]],
+                'health_minimum_reductions' => [],
+                'health_other_employer_bases' => [],
             ],
         ];
     }

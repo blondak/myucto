@@ -20,7 +20,7 @@ import {
   type PayrollInsuranceStep,
   type PayrollSocialBreakdown,
 } from '@/api/payrollInsurance'
-import { btnOutlineSm } from '@/components/ui/buttonStyles'
+import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PayrollPersonPicker from '@/components/payroll/PayrollPersonPicker.vue'
 
 const props = withDefaults(defineProps<{
@@ -81,6 +81,22 @@ const employerAllocation = computed(() => social.value?.employer.allocation ?? n
 /** Rozpad firemního pojistného po písmenech § 5a odst. 1 — a), b), c). */
 const employerCategories = computed(() => social.value?.employer.categories ?? [])
 
+/**
+ * Proklik na výjimky z minima na kartě osoby týmž povelem `?panel=&field=`,
+ * jakým vedou ostatní hlášky na kartu (PeopleList.focusPanel doskočí
+ * a sekci rozbalí).
+ */
+function minimumExemptionTarget(employeeId: number) {
+  return {
+    name: 'payroll-people',
+    query: {
+      person: String(employeeId),
+      panel: 'statutory_evidence',
+      field: 'statutory.health_minimum_reductions',
+    },
+  }
+}
+
 function personLabel(person: PayrollRunResultPerson): string {
   return props.personNames[person.employee_id]
     || t('payroll.runs.insurance.person_fallback', { id: person.employee_id })
@@ -91,6 +107,14 @@ function money(value: number | null | undefined): string {
     style: 'currency',
     currency: 'CZK',
   }).format((value ?? 0) / 100)
+}
+
+/** Den `RRRR-MM-DD` v jazyce aplikace; poledne kvůli posunu časového pásma. */
+function day(iso: string): string {
+  const date = new Date(`${iso}T12:00:00`)
+  return Number.isNaN(date.getTime())
+    ? iso
+    : new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }).format(date)
 }
 
 function moneyOrUnknown(value: number | null | undefined): string {
@@ -640,6 +664,43 @@ watch(
                 statutory: money(health.minimum.statutory_monthly_minor),
               }) }}
             </p>
+            <!--
+              Doplatek do minima zaskočí hlavně u jednatele s nízkou odměnou:
+              jiné programy ho u orgánů společnosti často nepočítají. Zákon ho
+              ale ukládá každému zaměstnanci bez výjimky. A kde výjimka je,
+              musí jít zadat jedním kliknutím, ne hledáním po kartě osoby.
+            -->
+            <p class="mt-2 text-xs text-payroll-800" data-testid="health-top-up-why">
+              {{ t('payroll.runs.insurance.health_top_up_why') }}
+            </p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <RouterLink
+                v-if="selectedEmployeeId !== null"
+                :to="minimumExemptionTarget(selectedEmployeeId)"
+                :class="btnOutlineSm('primary')"
+                data-testid="health-top-up-exemption-link"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                {{ t('payroll.runs.insurance.health_top_up_exemption_link') }}
+              </RouterLink>
+            </div>
+          </div>
+
+          <div
+            v-if="health.minimum.reduction_evidence.length"
+            class="rounded-lg bg-neutral-50 p-3 text-sm text-neutral-700"
+            data-testid="health-minimum-reductions"
+          >
+            <p class="font-medium">{{ t('payroll.runs.insurance.health_minimum_reductions_title') }}</p>
+            <ul class="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+              <li v-for="reduction in health.minimum.reduction_evidence" :key="`${reduction.reason}-${reduction.from}-${reduction.evidence_reference}`">
+                {{ t('payroll.runs.insurance.health_minimum_reduction_line', {
+                  reason: t(`payroll.people.statutory_evidence.option.reason.${reduction.reason}`),
+                  from: day(reduction.from),
+                  to: day(reduction.to),
+                }) }}
+              </li>
+            </ul>
           </div>
 
           <div

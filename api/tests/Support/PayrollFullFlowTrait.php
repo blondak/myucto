@@ -1040,6 +1040,8 @@ trait PayrollFullFlowTrait
                     'selected_top_up_employer_reference' => null,
                     'selected_top_up_employer_evidence_reference' => null,
                 ]] : [],
+                'health_minimum_reductions' => [],
+                'health_other_employer_bases' => [],
             ],
         ];
     }

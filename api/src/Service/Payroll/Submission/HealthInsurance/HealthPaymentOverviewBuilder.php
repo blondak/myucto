@@ -59,6 +59,15 @@ final class HealthPaymentOverviewBuilder
                 'Mzdové období nezačíná prvním dnem měsíce.',
             );
         }
+        $correctionDiscoveredOn = null;
+        if ($revisionKind === 'correction'
+            && ($revision['correction_discovered_on'] ?? null) !== null
+        ) {
+            $correctionDiscoveredOn = $this->date(
+                $revision['correction_discovered_on'],
+                'revision.correction_discovered_on',
+            );
+        }
         $period = substr($periodStart, 0, 7);
         $periodEnd = (new \DateTimeImmutable($periodStart))
             ->modify('last day of this month')
@@ -155,6 +164,7 @@ final class HealthPaymentOverviewBuilder
                 $rulesetHash,
                 $totals,
                 $people,
+                $correctionDiscoveredOn,
             );
             unset($peopleByInsurer[$reference]);
         }

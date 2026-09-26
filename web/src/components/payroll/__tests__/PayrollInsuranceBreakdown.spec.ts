@@ -331,6 +331,57 @@ describe('PayrollInsuranceBreakdown', () => {
     )
   })
 
+  /**
+   * Jednatel s odměnou pod minimem: převzatý program doplatek nepočítal, my ano
+   * (§ 3 odst. 6 a 10 z. 592/1992). Účetní musí u doplatku vidět PROČ vznikl
+   * a mít jedním kliknutím cestu k výjimce, kde se na osobu nevztahuje.
+   */
+  it('u doplatku vysvětlí proč a nabídne proklik na výjimky z minima na kartě osoby', async () => {
+    const payload = fixture()
+    if (!payload.health.available) throw new Error('fixture')
+    payload.health.minimum = {
+      ...payload.health.minimum,
+      top_up_applied: true,
+      top_up_base_minor: 1_130_000,
+    }
+    const wrapper = await mountWith(payload)
+
+    expect(wrapper.get('[data-testid="health-top-up-why"]').text())
+      .toBe('payroll.runs.insurance.health_top_up_why')
+    const link = wrapper.get('[data-testid="health-top-up-exemption-link"]')
+    expect(link.text()).toContain('payroll.runs.insurance.health_top_up_exemption_link')
+    expect(JSON.parse(link.attributes('data-to') ?? '{}')).toEqual({
+      name: 'payroll-people',
+      query: {
+        person: '31',
+        panel: 'statutory_evidence',
+        field: 'statutory.health_minimum_reductions',
+      },
+    })
+  })
+
+  it('bez doplatku proklik na výjimky nenabízí', async () => {
+    const wrapper = await mountWith(fixture())
+
+    expect(wrapper.find('[data-testid="health-top-up-exemption-link"]').exists()).toBe(false)
+  })
+
+  it('vypíše výjimky, které minimum snížily, i s obdobím', async () => {
+    const payload = fixture()
+    if (!payload.health.available) throw new Error('fixture')
+    payload.health.minimum = {
+      ...payload.health.minimum,
+      reduction_evidence: [
+        { from: '2026-06-01', to: '2026-06-30', reason: 'state_insured', evidence_reference: 'social_discount_claim:7' },
+      ],
+    }
+    const wrapper = await mountWith(payload)
+
+    const list = wrapper.get('[data-testid="health-minimum-reductions"]').text()
+    expect(list).toContain('payroll.runs.insurance.health_minimum_reductions_title')
+    expect(list).toContain('payroll.people.statutory_evidence.option.reason.state_insured')
+  })
+
   it('u starší revize bez zaznamenaného původu nedomýšlí, čím byl doplatek podložený', async () => {
     const payload = fixture()
     if (!payload.health.available) throw new Error('fixture')

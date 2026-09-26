@@ -967,6 +967,72 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
     }
 
     /**
+     * Ověřená sleva pracujícího důchodce (§ 7d z. 589/1992) dokládá pobírání
+     * starobního důchodu → za osobu platí i stát (§ 7 odst. 1 písm. b)
+     * z. 48/1997) → minimum ZP se nepoužije (§ 3 odst. 8 písm. d) z. 592/1992).
+     * Ověřená sleva na dani pro ZTP/P dokládá průkaz ZTP/P (§ 3 odst. 8 písm. a)).
+     * Bez odvození dorovnávala mzda důchodci pojistné do minima, které nedluží.
+     */
+    public function testVerifiedPensionerDiscountAndZtpPCreditExemptFromTheHealthMinimum(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $evidence = &$snapshot['people'][0]['statutory_evidence'];
+        $evidence['social']['working_pensioner_discount']['status'] = 'verified';
+        $evidence['social']['working_pensioner_discount']['evidence_reference'] = 'pension:award-decision';
+        $evidence['income_tax']['credit_claims'][] = [
+            'id' => 8,
+            'effective_from' => '2026-06-01',
+            'effective_to' => null,
+            'row_version' => 1,
+            'credit_kind' => 'ztp-p',
+            'evidence_status' => 'verified',
+            'evidence_reference' => 'credit:ztp-p-card',
+        ];
+        unset($evidence);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNotNull($bundle->healthInsurance);
+        $reductions = array_map(
+            static fn ($reduction): array => [
+                $reduction->from,
+                $reduction->to,
+                $reduction->reason,
+                $reduction->evidenceReference,
+            ],
+            $bundle->healthInsurance->people[0]->minimumReductions,
+        );
+        self::assertSame([
+            ['2026-06-01', '2026-06-30', HealthMinimumReductionReason::StateInsured, 'social_discount_claim:7'],
+            ['2026-06-01', '2026-06-30', HealthMinimumReductionReason::ZtpOrZtpP, 'tax_credit_claim:8'],
+        ], $reductions);
+    }
+
+    /**
+     * Neuplatněná sleva důchodce nic neříká o tom, jestli osoba důchod pobírá,
+     * a sleva na invaliditu se přiznává i bez nároku na invalidní důchod
+     * (§ 35ba odst. 1 písm. c) a d) ZDP). Ani jedno státního pojištěnce nedokládá.
+     */
+    public function testUnclaimedPensionerDiscountAndDisabilityCreditDoNotExempt(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['statutory_evidence']['income_tax']['credit_claims'][] = [
+            'id' => 9,
+            'effective_from' => '2026-06-01',
+            'effective_to' => null,
+            'row_version' => 1,
+            'credit_kind' => 'disability-extended',
+            'evidence_status' => 'verified',
+            'evidence_reference' => 'credit:disability-pension-decision',
+        ];
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNotNull($bundle->healthInsurance);
+        self::assertSame([], $bundle->healthInsurance->people[0]->minimumReductions);
+    }
+
+    /**
      * Celý měsíc neplaceného volna nemá co zadat do vstupů. Výpočet ho proto
      * pustí s prázdným seznamem složek místo blokace „chybí mzdová složka“.
      */

@@ -1076,6 +1076,7 @@ final class PayrollRunStatutoryInputAssembler
                 $periodEnd,
             ),
             ...self::absenceHealthReductions($employments, $periodStart, $periodEnd),
+            ...self::derivedHealthReductions($evidence, $periodStart, $periodEnd),
         ];
         $otherEmployers = $this->healthOtherEmployers(
             $healthEvidence['other_employer_bases'] ?? null,
@@ -2084,8 +2085,14 @@ final class PayrollRunStatutoryInputAssembler
      *   celý měsíc minimum neplatí, za část se poměrně snižuje.
      *
      * Neplacené volno ani neomluvená absence minimum nesnižují (doplatek hradí
-     * zaměstnanec). Otcovská se zatím neodvozuje: zákon ji výslovně
-     * nejmenuje a obecné osobní překážky zůstávají mimo automatiku.
+     * zaměstnanec).
+     *
+     * Otcovská minimum NESNIŽUJE. To je rozhodnutí, ne mezera. Důvody snížení
+     * jsou v § 3 odst. 8 a 9 zákona č. 592/1992 Sb. vyjmenované taxativně
+     * a otcovská poporodní péče mezi nimi není: nejde o státního pojištěnce
+     * (§ 7 odst. 1 zákona č. 48/1997 Sb. jmenuje mateřskou, rodičovskou a PPM,
+     * ne otcovskou) a zákon ji nejmenuje ani v odst. 9 písm. b). Obecné
+     * důležité osobní překážky zůstávají mimo automatiku.
      *
      * Dřív se snížení četlo JEN z ruční evidence, ke které nevedla žádná
      * obrazovka ani API. Měsíc s nemocí nebo PPM proto dorovnával pojistné do
@@ -2133,6 +2140,83 @@ final class PayrollRunStatutoryInputAssembler
                     "absence:{$id}",
                 );
             }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Výjimky z minima, které ZE ZÁKONA plynou z jiné, už doložené evidence
+     * osoby, účetní je nemá zadávat podruhé.
+     *
+     * - Ověřená sleva na pojistném pracujícího důchodce (§ 7d zákona
+     *   č. 589/1992 Sb.) náleží jen poživateli starobního důchodu. Za
+     *   poživatele důchodu platí pojistné i stát (§ 7 odst. 1 písm. b) zákona
+     *   č. 48/1997 Sb.) a na takovou osobu se minimum nevztahuje (§ 3 odst. 8
+     *   písm. d) zákona č. 592/1992 Sb.), v části měsíce se poměrně snižuje
+     *   (odst. 9 písm. c)).
+     * - Ověřená sleva na dani pro držitele průkazu ZTP/P (§ 35ba odst. 1
+     *   písm. e) ZDP) dokládá průkaz ZTP/P, a ten zakládá výjimku podle § 3
+     *   odst. 8 písm. a) zákona č. 592/1992 Sb.
+     *
+     * Záměrně NE:
+     * - `not_claimed` / `unverified` u slevy důchodce: neuplatnění slevy nic
+     *   neříká o tom, jestli osoba důchod pobírá;
+     * - slevy na invaliditu (§ 35ba odst. 1 písm. c) a d) ZDP) se přiznávají
+     *   i tomu, komu nárok na invalidní důchod nevznikl, takže státního
+     *   pojištěnce nedokládají. Invalidní důchodce se zadá jako výjimka ručně.
+     *
+     * Odkaz na doklad nese původ (`social_discount_claim:{id}`,
+     * `tax_credit_claim:{id}`), ať je ve snímku výpočtu vidět, odkud výjimka
+     * přišla.
+     *
+     * @param array<string,mixed> $evidence
+     * @return list<HealthMinimumReductionInterval>
+     */
+    private static function derivedHealthReductions(
+        array $evidence,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        $sources = [];
+        $discount = $evidence['social']['working_pensioner_discount'] ?? null;
+        if (is_array($discount) && ($discount['status'] ?? null) === 'verified') {
+            $sources[] = [
+                $discount,
+                HealthMinimumReductionReason::StateInsured,
+                'social_discount_claim',
+            ];
+        }
+        $credits = $evidence['income_tax']['credit_claims'] ?? null;
+        foreach (is_array($credits) ? $credits : [] as $credit) {
+            if (is_array($credit)
+                && ($credit['credit_kind'] ?? null) === 'ztp-p'
+                && ($credit['evidence_status'] ?? null) === 'verified'
+            ) {
+                $sources[] = [
+                    $credit,
+                    HealthMinimumReductionReason::ZtpOrZtpP,
+                    'tax_credit_claim',
+                ];
+            }
+        }
+
+        $result = [];
+        foreach ($sources as [$row, $reason, $origin]) {
+            $from = $row['effective_from'] ?? null;
+            $to = $row['effective_to'] ?? null;
+            $id = $row['id'] ?? null;
+            if (!is_string($from) || ($to !== null && !is_string($to)) || !is_int($id)
+                || $from > $periodEnd || ($to !== null && $to < $periodStart)
+            ) {
+                continue;
+            }
+            $result[] = new HealthMinimumReductionInterval(
+                max($from, $periodStart),
+                $to === null ? $periodEnd : min($to, $periodEnd),
+                $reason,
+                "{$origin}:{$id}",
+            );
         }
 
         return $result;

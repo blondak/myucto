@@ -688,6 +688,8 @@ final class PartnerDependentJournalEntryTest extends TestCase
                     // § 3 odst. 10 z. 592/1992 Sb.: dopočet do minima hradí
                     // zaměstnanec. Přesně tak ho vede i účetní zadavatele.
                     'health_month_evidence' => [],
+                    'health_minimum_reductions' => [],
+                    'health_other_employer_bases' => [],
                 ],
             ],
             date('Y-m-t', strtotime(self::PERIOD_START)),
