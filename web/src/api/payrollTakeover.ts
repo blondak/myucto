@@ -36,9 +36,23 @@ export interface TakeoverLayerOneSided {
   periods: string[]
 }
 
+/**
+ * Vztah s nástupem jen odhadnutým z nejstaršího převzatého hlášení — mohl trvat
+ * už v dřívějších převzatých měsících, za které převzaté mzdy chybí.
+ */
+export interface TakeoverEstimatedStart {
+  employee_id: number
+  employee_name: string
+  employment_id: number
+  start_on: string
+  possible_months: number[]
+}
+
 export interface TakeoverCheck {
   takeover_months: number[]
   missing_openings: TakeoverGap[]
+  /** Volitelné kvůli starší odpovědi bez klíče. */
+  estimated_starts?: TakeoverEstimatedStart[]
   differences: TakeoverLayerDifference[]
   opening_only: TakeoverLayerOneSided[]
   takeover_only: TakeoverLayerOneSided[]

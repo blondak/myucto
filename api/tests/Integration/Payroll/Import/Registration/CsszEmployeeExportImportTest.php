@@ -143,6 +143,13 @@ final class CsszEmployeeExportImportTest extends TestCase
         $employment = $this->lookup->employment($this->supplierId, $employmentId);
         self::assertSame('active', $employment['status']);
         self::assertSame('2026-01-01', $employment['start_date']);
+        // Odhad z nejstaršího hlášeného měsíce zůstane evidovaný i po zápisu,
+        // ne jen jako varování v náhledu.
+        $flag = $this->container->get(Connection::class)->pdo()->prepare(
+            'SELECT start_estimated FROM payroll_employments WHERE supplier_id = ? AND id = ?'
+        );
+        $flag->execute([$this->supplierId, $employmentId]);
+        self::assertSame(1, (int) $flag->fetchColumn());
         $identities = $this->container->get(PayrollRegistrationIdentityService::class);
         self::assertTrue($identities->activePersonExternalIdMatches($this->supplierId, $employeeId, 'test', $this->oic));
         self::assertTrue($identities->activeEmploymentExternalIdMatches($this->supplierId, $employmentId, 'test', self::ID_PPV));

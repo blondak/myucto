@@ -15,6 +15,7 @@ import { formatDateTime, formatMoneyMinor, formatPeriod } from '@/composables/us
 import { useRoute } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 import TakeoverGapList from '@/components/payroll/takeover/TakeoverGapList.vue'
+import TakeoverEstimatedStartList from '@/components/payroll/takeover/TakeoverEstimatedStartList.vue'
 import TakeoverLayerFindings from '@/components/payroll/takeover/TakeoverLayerFindings.vue'
 
 const props = defineProps<{ initialYear: number }>()
@@ -119,7 +120,7 @@ function blockerTarget(blocker: PayrollYearCloseBlocker): RouteLocationRaw | nul
 
 /** Rozchod převzatých vrstev se řeší v kontrole převzetí, odvody v platbách. */
 function warningTarget(warning: PayrollYearCloseWarning): RouteLocationRaw {
-  return warning.code === 'takeover_layers_mismatch'
+  return warning.code === 'takeover_layers_mismatch' || warning.code === 'takeover_start_estimated'
     ? { name: 'payroll-imports', query: { tab: 'takeover' } }
     : { name: 'payroll-payments' }
 }
@@ -288,6 +289,11 @@ onMounted(load)
               :differences="warning.differences ?? []"
               :opening-only="warning.opening_only ?? []"
               :takeover-only="warning.takeover_only ?? []"
+            />
+            <TakeoverEstimatedStartList
+              v-else-if="warning.code === 'takeover_start_estimated'"
+              class="mt-2 pl-4 text-xs"
+              :rows="warning.estimated_starts ?? []"
             />
             <ul v-else class="mt-1 space-y-0.5 pl-4 text-xs text-neutral-600">
               <li v-for="item in warning.items" :key="item.liability_id">{{ warningItemText(item) }}</li>

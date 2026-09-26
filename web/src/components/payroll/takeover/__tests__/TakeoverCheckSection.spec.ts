@@ -49,6 +49,36 @@ describe('TakeoverCheckSection', () => {
     expect(wrapper.get('[data-test="takeover-opening-only-9"]').text()).toContain('2')
   })
 
+  /** Mezera schovaná za odhadnutým nástupem: kdo, od kdy, které měsíce a proklik na vztah. */
+  it('odhadnutý nástup vypíše jako nález s proklikem na kartu vztahu', () => {
+    const wrapper = mount(TakeoverCheckSection, {
+      props: {
+        check: {
+          takeover_months: [1, 2, 3, 4, 5, 6, 7, 8],
+          missing_openings: [],
+          estimated_starts: [{
+            employee_id: 9,
+            employee_name: 'Syntetická osoba',
+            employment_id: 12,
+            start_on: '2026-03-01',
+            possible_months: [1, 2],
+          }],
+          differences: [],
+          opening_only: [],
+          takeover_only: [],
+        },
+      },
+    })
+
+    expect(wrapper.find('[data-test="takeover-check-ok"]').exists()).toBe(false)
+    const section = wrapper.get('[data-test="takeover-check-estimated-starts"]')
+    expect(section.text()).toContain('Syntetická osoba')
+    expect(section.text()).toContain('1–2')
+    const target = section.get('[data-test="takeover-estimated-start-link-12"]').attributes('data-to')
+    expect(target).toContain('payroll-people')
+    expect(target).toContain('"employment":"12"')
+  })
+
   it('nic nevykreslí, když rok převzaté měsíce nemá', () => {
     const wrapper = mount(TakeoverCheckSection, {
       props: {

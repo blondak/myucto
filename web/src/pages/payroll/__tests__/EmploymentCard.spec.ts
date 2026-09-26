@@ -18,6 +18,7 @@ vi.mock('@/api/payroll', () => ({
     addEmploymentTerms: vi.fn(),
     correctEmploymentTerms: vi.fn(),
     updateEmploymentChecklist: vi.fn(),
+    confirmEmploymentStart: vi.fn(),
     deleteEmployment: vi.fn(),
     // Panel zásad příplatků se na kartě montuje taky — bez tovární funkce by
     // spadl do chybové větve a test by měřil něco jiného, než chce měřit.
@@ -1009,6 +1010,31 @@ describe('EmploymentCard', () => {
     expect(wrapper.get('[data-test="legacy-registration-warning"]').text())
       .toContain('payroll.people.registration_legacy_warning')
     expect(wrapper.findComponent({ name: 'EmploymentRegistrationPanel' }).exists()).toBe(true)
+  })
+
+  it('odhadnutý nástup ukáže s vysvětlením a jde potvrdit', async () => {
+    const estimated: PayrollEmployment = { ...employment(), start_estimated: true, row_version: 4 }
+    const confirmed: PayrollEmployment = { ...estimated, start_estimated: false, row_version: 5 }
+    vi.mocked(payrollApi.confirmEmploymentStart).mockResolvedValue(confirmed)
+    const wrapper = await mountCard(estimated, {
+      props: { employment: estimated, canWrite: true },
+      global: {
+        stubs: {
+          ...actionBarStub,
+          RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)" v-bind="$attrs"><slot /></a>' },
+        },
+      },
+    })
+
+    const banner = wrapper.get('[data-test="employment-start-estimated"]')
+    expect(banner.text()).toContain('payroll.people.start_estimated.title')
+    expect(banner.text()).toContain('payroll.people.start_estimated.hint')
+    expect(banner.find('[data-test="employment-start-import"]').exists()).toBe(true)
+    await banner.get('[data-test="employment-start-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(payrollApi.confirmEmploymentStart).toHaveBeenCalledWith(estimated.id, 4)
+    expect(wrapper.emitted('updated')?.at(-1)).toEqual([confirmed])
   })
 
   it('povinnost vyřízenou předchozím programem neukáže jako nesplněnou ani nenabídne k odškrtnutí', async () => {

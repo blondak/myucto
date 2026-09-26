@@ -315,6 +315,18 @@ final class PayrollYearCloseService
                 'truncated' => count($layers['differences']) > self::WARNING_SAMPLE_LIMIT,
             ];
         }
+        // Odhadnutý nástup z hlášení schová mezeru roku přechodu i před
+        // blokátorem `takeover_months_missing`; tady se aspoň ukáže.
+        $estimated = $this->takeover->estimatedStartGaps($supplierId, $year);
+        if ($estimated !== []) {
+            $warnings[] = [
+                'code' => 'takeover_start_estimated',
+                'count' => count($estimated),
+                'items' => [],
+                'estimated_starts' => array_slice($estimated, 0, self::WARNING_SAMPLE_LIMIT),
+                'truncated' => count($estimated) > self::WARNING_SAMPLE_LIMIT,
+            ];
+        }
 
         return $warnings;
     }

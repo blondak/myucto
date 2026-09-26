@@ -1795,6 +1795,10 @@
       "gaps_hint": "Těmto zaměstnancům v převzatých měsících trval pracovní vztah, ale počáteční stav za ně nic neříká. Doplňte úhrny z předchozího programu, nebo měsíc bez příjmu potvrďte jako nulový.",
       "gap_person": "{name} — měsíce {months}",
       "open_person": "Otevřít kartu",
+      "estimated_starts_title": "Nástup odhadnutý z hlášení — mohou chybět dřívější měsíce",
+      "estimated_starts_hint": "U těchto vztahů hlášení JMHZ nenese datum nástupu, takže se jako nástup vzal začátek pojištění v nejstarším hlášeném měsíci. Pokud vztah trval dřív, chybí za dřívější měsíce převzaté mzdy a roční zúčtování i vyúčtování daně by vyšly z neúplného roku. Naimportujte hlášení za chybějící měsíce (Mzdy → Importy → Registrace a hlášení), nebo nástup na kartě vztahu opravte či potvrďte. Mzdový běh ani měsíční hlášení to neblokuje.",
+      "estimated_start_person": "{name} — nástup {start}, mohl trvat už v měsících {months}",
+      "open_employment": "Otevřít vztah",
       "open_takeover": "Zadat převzaté mzdy",
       "differences_title": "Počáteční stavy a převzaté mzdy si odporují",
       "differences_hint": "Opravte tu stranu, která neodpovídá podkladům předchozího programu. U základu daně může být rozdíl oprávněný (osvobozený příjem je v hrubé mzdě, ne v základu daně).",
@@ -1893,6 +1897,7 @@
       "warnings_title": "Na co upozornit (uzavření to nebrání)",
       "warning": {
         "unknown": "Zůstává {count} nálezů, které tahle verze aplikace neumí pojmenovat.",
+        "takeover_start_estimated": "U {count} pracovních vztahů je nástup jen odhadnutý z nejstaršího převzatého hlášení. Mohly trvat už dřív a za dřívější měsíce roku přechodu by pak chyběly převzaté mzdy pro roční zúčtování a vyúčtování daně.",
         "open_liabilities": "Zůstává {count} mzdových závazků bez doloženého bankovního pohybu. Doloží se samy, až dorazí a spáruje se výpis.",
         "takeover_layers_mismatch": "Převzatá část roku má {count} nálezů: počáteční stavy (z nich počítá roční zúčtování a vyúčtování daně) a převzaté mzdy (z nich vzniká evidenční list důchodového pojištění) si za týž měsíc odporují, nebo měsíc má jen jedna z nich."
       },
@@ -5249,6 +5254,12 @@
       "checklist_open": "Nesplněno: {count}",
       "checklist_all_done": "Hotovo",
       "checklist_predecessor_handled": "Vyřízeno předchozím programem (před začátkem vedení mezd v MyÚčtu)",
+      "start_estimated": {
+        "title": "Nástup {start} je jen odhad z nejstaršího převzatého hlášení",
+        "hint": "Hlášení JMHZ bez data nástupu dá jako nástup začátek pojištění v nejstarším hlášeném měsíci. Vztah mohl trvat už dřív a za dřívější měsíce roku by pak chyběly převzaté mzdy pro roční zúčtování a vyúčtování daně. Mzdový běh ani měsíční hlášení to neblokuje. Ověřte nástup podle smlouvy: trval-li vztah dřív, naimportujte hlášení za chybějící měsíce (nástup se posune sám) nebo nástup opravte v podmínkách vztahu; je-li správně, potvrďte ho.",
+        "confirm": "Nástup je správně",
+        "import": "Importovat hlášení JMHZ"
+      },
       "show_detail": "Zobrazit",
       "hide_detail": "Skrýt",
       "timeline_title": "Časová osa a změny",

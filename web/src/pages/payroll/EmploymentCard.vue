@@ -1016,6 +1016,19 @@ async function setChecklist(itemKey: string, rowVersion: number, status: Payroll
   }
 }
 
+/** Nástup odhadnutý z hlášení je ověřený podle smlouvy a platí beze změny. */
+async function confirmEstimatedStart() {
+  if (busy.value) return
+  busy.value = true
+  try {
+    emit('updated', await payrollApi.confirmEmploymentStart(props.employment.id, props.employment.row_version))
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.mutation_failed')))
+  } finally {
+    busy.value = false
+  }
+}
+
 /**
  * Věta „Smaže se … Tuhle akci nelze vzít zpět." musí JMENOVAT, co přesně zmizí —
  * jinak uživatel potvrzuje naslepo. Vypisují se jen nenulové položky.
@@ -1867,6 +1880,35 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
         </label>
       </div>
     </form>
+
+    <div
+      v-if="employment.start_estimated"
+      class="mt-3 rounded-lg border border-warning-500/40 bg-warning-50 p-3 text-xs text-warning-800"
+      data-test="employment-start-estimated"
+    >
+      <p class="font-medium">{{ t('payroll.people.start_estimated.title', { start: formatDate(employment.actual_start_date ?? employment.start_date) }) }}</p>
+      <p class="mt-1">{{ t('payroll.people.start_estimated.hint') }}</p>
+      <div v-if="canWrite" class="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+          :disabled="busy"
+          data-test="employment-start-confirm"
+          @click="confirmEstimatedStart"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.checkCircle" /></svg>
+          {{ t('payroll.people.start_estimated.confirm') }}
+        </button>
+        <RouterLink
+          :to="{ name: 'payroll-imports', query: { tab: 'registration' } }"
+          :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+          data-test="employment-start-import"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.upload" /></svg>
+          {{ t('payroll.people.start_estimated.import') }}
+        </RouterLink>
+      </div>
+    </div>
 
     <div
       v-if="showOpeningBalances"

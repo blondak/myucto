@@ -206,6 +206,105 @@ final class PayrollTakeoverCoverage
     }
 
     /**
+     * Mezera roku přechodu, kterou evidence sama nevidí: vztah převzatý
+     * z hlášení má nástup jen ODHADNUTÝ z nejstaršího hlášeného měsíce
+     * (`payroll_employments.start_estimated`), takže za dřívější převzaté měsíce
+     * se u něj nic nečeká — přestože mohl trvat a hlášení za ně jen chybí.
+     *
+     * Není to blokátor: mzdový běh ani měsíční hlášení v MyÚčtu na převzatých
+     * měsících nezávisí. Je to upozornění pro roční doklady a vyúčtování daně,
+     * které by bez těch měsíců vyšly z neúplného roku. Vyřeší ho import hlášení
+     * za chybějící měsíce (posune nástup dřív), oprava nástupu na kartě vztahu,
+     * nebo potvrzení, že nástup je správně.
+     *
+     * @return list<array{employee_id:int,employee_name:string,employment_id:int,start_on:string,possible_months:list<int>}>
+     */
+    public function estimatedStartGaps(int $supplierId, int $year): array
+    {
+        $takeover = $this->takeoverMonths($supplierId, $year);
+        if ($takeover === []) {
+            return [];
+        }
+        $statement = $this->db->pdo()->prepare(sprintf(
+            'SELECT id, employee_id, COALESCE(actual_start_date, start_date) AS start_on
+               FROM payroll_employments
+              WHERE supplier_id = ?
+                AND start_estimated = 1
+                AND status IN (%s)
+                AND COALESCE(actual_start_date, start_date) > ?
+                AND COALESCE(actual_start_date, start_date) <= ?
+              ORDER BY employee_id, id',
+            implode(', ', array_fill(0, count(PayrollEmploymentMonths::STATUSES), '?')),
+        ));
+        $statement->execute([
+            $supplierId,
+            ...PayrollEmploymentMonths::STATUSES,
+            sprintf('%04d-01-01', $year),
+            date('Y-m-t', (int) strtotime(sprintf('%04d-%02d-01', $year, max($takeover)))),
+        ]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $startOn = substr((string) $row['start_on'], 0, 10);
+            $startMonth = (int) substr($startOn, 5, 2);
+            $months = array_values(array_filter($takeover, static fn (int $month): bool => $month < $startMonth));
+            if ($months === []) {
+                continue;
+            }
+            $rows[] = [
+                'employee_id' => (int) $row['employee_id'],
+                'employment_id' => (int) $row['id'],
+                'start_on' => $startOn,
+                'possible_months' => $months,
+            ];
+        }
+        if ($rows === []) {
+            return [];
+        }
+        $names = $this->employeeNames($supplierId, array_values(array_unique(array_column($rows, 'employee_id'))));
+
+        return array_map(
+            static fn (array $row): array => [
+                'employee_id' => $row['employee_id'],
+                'employee_name' => $names[$row['employee_id']] ?? ('#' . $row['employee_id']),
+                'employment_id' => $row['employment_id'],
+                'start_on' => $row['start_on'],
+                'possible_months' => $row['possible_months'],
+            ],
+            $rows,
+        );
+    }
+
+    /**
+     * Jedna věta upozornění na odhadnuté nástupy pro vyúčtování, roční doklady
+     * a uzávěrku; jména nenese (souhrnné výstupy), koho se týká, vypisuje
+     * kontrola převzetí.
+     *
+     * @param list<array{possible_months:list<int>}> $estimated
+     */
+    public static function describeEstimatedStarts(array $estimated, int $year): ?string
+    {
+        if ($estimated === []) {
+            return null;
+        }
+        $months = [];
+        foreach ($estimated as $row) {
+            foreach ($row['possible_months'] as $month) {
+                $months[$month] = $month;
+            }
+        }
+
+        return sprintf(
+            'U %d pracovních vztahů je nástup jen odhadnutý z nejstaršího převzatého hlášení, takže mohly '
+                . 'trvat už v měsících %s/%d, za které převzaté mzdy chybí. Naimportujte hlášení JMHZ za tyto '
+                . 'měsíce (Mzdy → Importy → Hlášení JMHZ), nebo nástup opravte či potvrďte na kartě vztahu '
+                . '(Kontrola převzetí vypíše koho).',
+            count($estimated),
+            self::monthRanges(array_values($months)),
+            $year,
+        );
+    }
+
+    /**
      * Srozumitelný popis mezer pro hlášku: „Jana Nováková (1–3), Petr Svoboda (9)".
      *
      * @param list<array{employee_id:int,employee_name:string,missing_months:list<int>}> $gaps

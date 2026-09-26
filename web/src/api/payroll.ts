@@ -5,6 +5,7 @@ import { downloadApiFile } from '@/utils/downloadFile'
 // kódování důkazu se nesmí rozejít se zbytkem aplikace.
 import { stepUpProofBody, type EpoStepUpProof } from './epoSubmissions'
 import type {
+  TakeoverEstimatedStart,
   TakeoverGap,
   TakeoverLayerDifference,
   TakeoverLayerOneSided,
@@ -243,6 +244,11 @@ export interface PayrollEmployment {
   is_primary: boolean
   start_date: string | null
   actual_start_date: string | null
+  /**
+   * Nástup je jen dolní odhad z nejstaršího hlášení JMHZ — vztah mohl trvat dřív.
+   * Volitelné kvůli starší odpovědi bez klíče.
+   */
+  start_estimated?: boolean
   end_date: string | null
   archived_at: string | null
   is_legacy_projection: boolean
@@ -5334,7 +5340,7 @@ export type PayrollYearCloseBlockerCode =
  * doloženého bankovního pohybu; příkaz odešel v den výplaty, výpis dorazí
  * o týdny později. Rozhodnutí zavřít rok patří účetní.
  */
-export type PayrollYearCloseWarningCode = 'open_liabilities' | 'takeover_layers_mismatch'
+export type PayrollYearCloseWarningCode = 'open_liabilities' | 'takeover_layers_mismatch' | 'takeover_start_estimated'
 
 export interface PayrollYearCloseWarningItem {
   liability_id: number
@@ -5357,6 +5363,8 @@ export interface PayrollYearCloseWarning {
   differences?: TakeoverLayerDifference[]
   opening_only?: TakeoverLayerOneSided[]
   takeover_only?: TakeoverLayerOneSided[]
+  /** Jen u `takeover_start_estimated`: vztahy s nástupem odhadnutým z hlášení. */
+  estimated_starts?: TakeoverEstimatedStart[]
 }
 
 export interface PayrollYearCloseBlocker {
@@ -7476,6 +7484,12 @@ export const payrollApi = {
     api.patch<{ employment: PayrollEmployment }>(
       `/payroll/employments/${employmentId}/meal-entitlement-basis`,
       { row_version: rowVersion, meal_entitlement_basis: mealEntitlementBasis },
+    ).then(response => response.data.employment),
+  /** Nástup odhadnutý z hlášení je ověřený a platí beze změny. */
+  confirmEmploymentStart: (employmentId: number, rowVersion: number) =>
+    api.post<{ employment: PayrollEmployment }>(
+      `/payroll/employments/${employmentId}/start-confirmation`,
+      { row_version: rowVersion },
     ).then(response => response.data.employment),
   savePersonProfile: (id: number, payload: PayrollPersonProfilePayload) =>
     api.put<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`, payload)

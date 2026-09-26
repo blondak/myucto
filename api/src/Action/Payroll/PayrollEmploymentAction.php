@@ -273,6 +273,32 @@ final class PayrollEmploymentAction
         return Json::ok($response, ['employment' => $employment]);
     }
 
+    /**
+     * Nástup odhadnutý z hlášení je ověřený (smlouva, přihláška) a platí.
+     *
+     * @param array{id:string} $args
+     */
+    public function confirmStart(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $employment = $this->employments->confirmEstimatedStart(
+                $this->currentSupplierId($request),
+                (int) $args['id'],
+                $this->validator->rowVersion($this->body($request)),
+                $this->userId($request),
+                $this->ip($request),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+
+        return Json::ok($response, ['employment' => $employment]);
+    }
+
     /** @param array{id:string,target:string} $args */
     public function transition(Request $request, Response $response, array $args): Response
     {

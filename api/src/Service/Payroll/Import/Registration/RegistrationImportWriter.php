@@ -147,6 +147,21 @@ final class RegistrationImportWriter
                 );
                 $operations[] = 'start_corrected';
             }
+            // Nástup, který import právě zapsal, je buď doložený (datum nástupu,
+            // export ČSSZ), nebo jen dolní odhad z nejstaršího hlášeného měsíce.
+            // Odhad se eviduje trvale — hlídá podle něj mezeru roku přechodu
+            // {@see \MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage::estimatedStartGaps()}.
+            if ($employmentId !== null && array_intersect(
+                ['person_created', 'employment_created', 'start_corrected'],
+                $operations,
+            ) !== []) {
+                $this->employments->markStartEstimated(
+                    $supplierId,
+                    $employmentId,
+                    $record->startEstimated
+                        || ($record->derivedStart !== null && CsszExportStartResolver::needsCheck($record->derivedStart)),
+                );
+            }
 
             if ($steps['terms'] !== [] && $employmentId !== null) {
                 $this->optional('Podmínky vztahu', $notes, $operations, 'terms', fn () => $this->writeTerms(

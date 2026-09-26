@@ -132,7 +132,8 @@ final class PayrollEmploymentRepository
                     employment.code, employment.relation_type,
                     employment.meal_entitlement_basis, employment.status,
                     employment.is_primary, employment.start_date,
-                    employment.actual_start_date, employment.end_date,
+                    employment.actual_start_date, employment.start_estimated,
+                    employment.end_date,
                     employment.archived_at, employment.is_legacy_projection,
                     ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossToday() . '
                       AS monthly_gross_minor,
@@ -203,6 +204,7 @@ final class PayrollEmploymentRepository
                 'actual_start_date' => $row['actual_start_date'] === null
                     ? null
                     : (string) $row['actual_start_date'],
+                'start_estimated' => (bool) $row['start_estimated'],
                 'end_date' => $row['end_date'] === null ? null : (string) $row['end_date'],
                 'archived_at' => $row['archived_at'] === null ? null : (string) $row['archived_at'],
                 'is_legacy_projection' => (bool) $row['is_legacy_projection'],
@@ -581,7 +583,10 @@ final class PayrollEmploymentRepository
             }
             $update = $this->db->pdo()->prepare(
                 'UPDATE payroll_employments
-                    SET office_id = ?, is_primary = ?, start_date = ?,
+                    SET office_id = ?, is_primary = ?,
+                        start_estimated = CASE WHEN start_date <=> ? AND actual_start_date <=> ?
+                                               THEN start_estimated ELSE 0 END,
+                        start_date = ?,
                         actual_start_date = ?, end_date = ?,
                         monthly_gross_minor =
                             CASE WHEN ? = 1 THEN ? ELSE monthly_gross_minor END,
@@ -591,6 +596,8 @@ final class PayrollEmploymentRepository
             $update->execute([
                 $data['office_id'],
                 (int) $data['is_primary'],
+                $data['planned_start_on'],
+                $data['actual_start_on'],
                 $data['planned_start_on'],
                 $data['actual_start_on'],
                 $data['fixed_term_end_on'],
@@ -729,7 +736,10 @@ final class PayrollEmploymentRepository
             $this->insertTerms($supplierId, $employmentId, $data, $userId);
             $update = $this->db->pdo()->prepare(
                 'UPDATE payroll_employments
-                    SET office_id = ?, is_primary = ?, start_date = ?,
+                    SET office_id = ?, is_primary = ?,
+                        start_estimated = CASE WHEN start_date <=> ? AND actual_start_date <=> ?
+                                               THEN start_estimated ELSE 0 END,
+                        start_date = ?,
                         actual_start_date = ?, end_date = ?,
                         monthly_gross_minor =
                             CASE WHEN ? = 1 THEN ? ELSE monthly_gross_minor END,
@@ -739,6 +749,8 @@ final class PayrollEmploymentRepository
             $update->execute([
                 $data['office_id'],
                 (int) $data['is_primary'],
+                $data['planned_start_on'],
+                $data['actual_start_on'],
                 $data['planned_start_on'],
                 $data['actual_start_on'],
                 $data['fixed_term_end_on'],
@@ -1119,6 +1131,7 @@ final class PayrollEmploymentRepository
                 'UPDATE payroll_employments
                     SET start_date = CASE WHEN start_date IS NULL OR start_date > ? THEN ? ELSE start_date END,
                         actual_start_date = CASE WHEN actual_start_date IS NULL THEN NULL WHEN actual_start_date > ? THEN ? ELSE actual_start_date END,
+                        start_estimated = 0,
                         row_version = row_version + 1
                   WHERE supplier_id = ? AND id = ? AND row_version = ?'
             );
@@ -2170,6 +2183,58 @@ final class PayrollEmploymentRepository
                 $deadline->sourceStatus,
             ]);
         }
+    }
+
+    /**
+     * Příznak „nástup je jen odhad z hlášení". Nemění verzi řádku: je to
+     * vlastnost doložení nástupu, ne údaj, který by kolidoval s rozepsaným
+     * formulářem karty.
+     */
+    public function markStartEstimated(int $supplierId, int $employmentId, bool $estimated): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET start_estimated = ? WHERE supplier_id = ? AND id = ?'
+        )->execute([(int) $estimated, $supplierId, $employmentId]);
+    }
+
+    /**
+     * Uživatel ověřil nástup odhadnutý z hlášení (smlouva, přihláška) a potvrdil
+     * ho beze změny data.
+     *
+     * @return array<string,mixed>
+     */
+    public function confirmEstimatedStart(
+        int $supplierId,
+        int $employmentId,
+        int $expectedVersion,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        return $this->transaction(function () use ($supplierId, $employmentId, $expectedVersion, $userId, $ip, $userAgent): array {
+            $employment = $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
+            $update = $this->db->pdo()->prepare(
+                'UPDATE payroll_employments
+                    SET start_estimated = 0, row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?'
+            );
+            $update->execute([$supplierId, $employmentId, $expectedVersion]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollEmploymentConflictException($expectedVersion);
+            }
+            $this->activityLogger->log(
+                'payroll.employment.start_confirmed',
+                $userId,
+                'payroll_employment',
+                $employmentId,
+                ['start_date' => $employment['actual_start_date'] ?? $employment['start_date']],
+                $ip,
+                $userAgent,
+                $supplierId,
+            );
+
+            return $this->find($supplierId, (int) $employment['employee_id'], $employmentId);
+        });
     }
 
     private function moduleStartPeriod(int $supplierId): ?string

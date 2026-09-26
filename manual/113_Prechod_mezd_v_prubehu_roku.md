@@ -151,6 +151,13 @@ Kontrola za rok vypíše:
 - Měsíce, které mají **jen počáteční stav** (odkaz vede na ruční zadání
   převzatých mezd daného zaměstnance) nebo **jen převzatou mzdu** (odkaz vede
   na kartu zaměstnance, kde se doplní počáteční stav).
+- **Nástup odhadnutý z hlášení:** hlášení JMHZ bez data nástupu dá jako nástup
+  začátek pojištění v nejstarším hlášeném měsíci. Začíná-li řada hlášení třeba
+  v březnu, vztah mohl trvat už v lednu a únoru a převzaté mzdy za ně chybí.
+  Kontrola vypíše koho a za které měsíce, s odkazem na kartu vztahu. Tam jde
+  nástup opravit, nebo potvrdit tlačítkem **Nástup je správně**. Import hlášení
+  za chybějící měsíce posune nástup dřív sám. Mzdový běh ani měsíční hlášení
+  to neblokuje; vyúčtování daně a uzávěrka roku na to upozorní.
 
 ## 113.10 Vyúčtování daně a uzávěrka roku
 

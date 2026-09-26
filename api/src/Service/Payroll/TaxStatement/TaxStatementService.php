@@ -282,6 +282,14 @@ final class TaxStatementService
             );
         }
 
+        $estimated = PayrollTakeoverCoverage::describeEstimatedStarts(
+            $this->takeover->estimatedStartGaps($supplierId, $year),
+            $year,
+        );
+        if ($estimated !== null) {
+            $warnings[] = $estimated;
+        }
+
         $blockers = [];
         $gaps = $this->takeover->gaps($supplierId, $year);
         if ($gaps !== []) {

@@ -67,6 +67,7 @@ final class PayrollMigrationReconciliationService
         $report['takeover_check'] = [
             'takeover_months' => $this->coverage->takeoverMonths($supplierId, $year),
             'missing_openings' => $this->coverage->gaps($supplierId, $year),
+            'estimated_starts' => $this->coverage->estimatedStartGaps($supplierId, $year),
             ...$this->layers->check($supplierId, $year),
         ];
 

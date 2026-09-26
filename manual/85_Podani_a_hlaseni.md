@@ -85,6 +85,13 @@ exekucí a insolvence. Tyto
 položky se nezapočítávají do fáze **Po termínu** ani do ostatních počtů
 termínů; skupiny jsou seřazené od největší a rozbalují se stejně jako ostatní.
 
+Povinnosti z doby **před začátkem vedení mezd v MyÚčtu** (nástup, změna nebo
+skončení vztahu před prvním mzdovým obdobím v nastavení mezd) vyřídil předchozí
+program. Import ani převod mezd je nezakládá, a pokud už na vztahu jsou, karta
+vztahu je ukazuje jako **Vyřízeno předchozím programem**. V přehledu termínů,
+ve varováních mzdového běhu ani mezi nesplněnými povinnostmi se neobjeví.
+Změní-li se začátek vedení mezd, pravidlo se přepočítá samo.
+
 ### 85.4.1 Hromadné označení jako splněné
 
 U skupin z checklistu jde položky odškrtnout najednou:

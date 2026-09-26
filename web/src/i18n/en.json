@@ -1795,6 +1795,10 @@
       "gaps_hint": "These employees' employment lasted in taken-over months, but the opening balance says nothing about them. Enter the totals from the previous program, or confirm a month without income as zero.",
       "gap_person": "{name} — months {months}",
       "open_person": "Open card",
+      "estimated_starts_title": "Start date estimated from reports — earlier months may be missing",
+      "estimated_starts_hint": "For these employments the JMHZ report carries no start date, so the insurance start in the earliest reported month was used. If the employment lasted longer, the taken-over wages for the earlier months are missing and the annual tax settlement and the tax statement would be based on an incomplete year. Import the reports for the missing months (Payroll → Imports → Registrations and reports), or correct or confirm the start on the employment card. It does not block the payroll run or the monthly report.",
+      "estimated_start_person": "{name} — start {start}, may have lasted in months {months}",
+      "open_employment": "Open employment",
       "open_takeover": "Enter taken-over wages",
       "differences_title": "Opening balances and taken-over wages disagree",
       "differences_hint": "Fix the side that does not match the previous program's records. For the tax base a difference can be legitimate (exempt income is in gross pay, not in the tax base).",
@@ -1893,6 +1897,7 @@
       "warnings_title": "Worth knowing (does not prevent closing)",
       "warning": {
         "unknown": "{count} findings remain that this version cannot name.",
+        "takeover_start_estimated": "For {count} employments the start date is only estimated from the earliest taken-over report. They may have started earlier, and the taken-over wages for the earlier months of the transition year would then be missing for the annual tax settlement and the tax statement.",
         "open_liabilities": "{count} payroll liabilities have no bank movement on record yet. They settle themselves once the statement arrives and is matched.",
         "takeover_layers_mismatch": "The taken-over part of the year has {count} findings: opening balances (used by the annual settlement and the tax statement) and taken-over wages (used by the pension insurance record sheet) disagree for the same month, or the month exists in only one of them."
       },
@@ -5249,6 +5254,12 @@
       "checklist_open": "Open: {count}",
       "checklist_all_done": "Done",
       "checklist_predecessor_handled": "Handled by the previous payroll software (before payroll started in MyÚčto)",
+      "start_estimated": {
+        "title": "Start date {start} is only estimated from the earliest taken-over report",
+        "hint": "A JMHZ report without a start date yields the insurance start in the earliest reported month. The employment may have started earlier, and the taken-over wages for the earlier months of the year would then be missing for the annual tax settlement and the tax statement. It does not block the payroll run or the monthly report. Check the start date against the contract: if the employment started earlier, import the reports for the missing months (the start moves automatically) or correct the start in the employment terms; if it is correct, confirm it.",
+        "confirm": "Start date is correct",
+        "import": "Import JMHZ reports"
+      },
       "show_detail": "Show",
       "hide_detail": "Hide",
       "timeline_title": "Timeline and changes",

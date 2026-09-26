@@ -1442,6 +1442,7 @@ final class Routes
             );
             $g->patch('/employments/{id:[0-9]+}/code', [PayrollEmploymentAction::class, 'rename']);
             $g->patch('/employments/{id:[0-9]+}/meal-entitlement-basis', [PayrollEmploymentAction::class, 'setMealEntitlementBasis']);
+            $g->post('/employments/{id:[0-9]+}/start-confirmation', [PayrollEmploymentAction::class, 'confirmStart']);
             $g->post(
                 '/employments/{id:[0-9]+}/transitions/{target:preregistered|active|suspended|ended|archived|no_show}',
                 [PayrollEmploymentAction::class, 'transition'],

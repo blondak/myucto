@@ -4,6 +4,7 @@
  */
 export type {
   TakeoverCheck,
+  TakeoverEstimatedStart,
   TakeoverGap,
   TakeoverLayerDifference,
   TakeoverLayerMetric,
