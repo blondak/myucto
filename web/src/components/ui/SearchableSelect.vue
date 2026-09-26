@@ -1,7 +1,11 @@
 <script setup lang="ts" generic="T extends string | number">
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick, useId } from 'vue'
 
-type Option = { value: T; label: string; secondary?: string }
+/**
+ * `keywords` jsou další názvy, podle kterých se položka má najít, ale nemají
+ * se zobrazovat (oficiální název státu, kód ISO…).
+ */
+type Option = { value: T; label: string; secondary?: string; keywords?: string }
 
 const props = withDefaults(defineProps<{
   modelValue: T | null
@@ -92,15 +96,26 @@ const selected = computed(() => {
 })
 
 // remote: options už přišly z backendu (rodič filtruje přes @search) → nefiltrovat client-side.
+/*
+ * Hledá se bez ohledu na diakritiku a velikost písmen: „cesko" musí najít
+ * „Česko" a „Plzen" „Plzeň" — na klávesnici bez české sady se jinak nedá
+ * vybrat nic. Prohledává se název, druhý řádek i skrytá klíčová slova.
+ */
+function foldForSearch(value: string): string {
+  return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+}
+
 const filtered = computed(() => {
   if (props.remote) return props.options
-  const q = query.value.trim().toLowerCase()
-  if (!q || (selected.value && q === selected.value.label.toLowerCase())) {
+  const raw = query.value.trim()
+  if (!raw || (selected.value && raw.toLowerCase() === selected.value.label.toLowerCase())) {
     return props.options
   }
+  const q = foldForSearch(raw)
   return props.options.filter(o =>
-    o.label.toLowerCase().includes(q) ||
-    (o.secondary?.toLowerCase().includes(q) ?? false)
+    foldForSearch(o.label).includes(q) ||
+    (o.secondary !== undefined && foldForSearch(o.secondary).includes(q)) ||
+    (o.keywords !== undefined && foldForSearch(o.keywords).includes(q))
   )
 })
 

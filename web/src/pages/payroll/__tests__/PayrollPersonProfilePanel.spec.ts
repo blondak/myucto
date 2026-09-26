@@ -281,6 +281,64 @@ describe('PayrollPersonProfilePanel', () => {
     expect(wrapper.get('[data-test="profile-account-value"]').text()).toBe('••••••0005/0100')
   })
 
+  /**
+   * UI-7: štítek sekce „Údaje pro registraci zaměstnance" bere stav ze
+   * serverového seznamu (tatáž kontrola jako příprava registrace). Dřív stačil
+   * vyplněný titul a svítilo „Doplněno", přestože chybělo občanství.
+   */
+  it('štítek registračních údajů říká, co chybí, a po doplnění se přepne', async () => {
+    const value = profile()
+    value.identity_history[0]!.title_prefix = 'Ing.'
+    value.identity_history[0]!.registration_missing = ['identity.citizenship_country_code']
+    mocks.personProfile.mockResolvedValue(value)
+    const wrapper = await mountedPanel()
+
+    const status = wrapper.get('[data-test="registration-identity-status"]')
+    expect(status.text()).toBe('payroll.people.profile.registration_identity_missing')
+
+    const citizenship = wrapper
+      .get('[data-test="identity-citizenship-country"]')
+      .get('input[role="combobox"]')
+    await citizenship.setValue('Česko')
+    await citizenship.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-identity-status"]').text())
+      .toBe('payroll.people.profile.registration_identity_filled')
+  })
+
+  /**
+   * UI-10: bez uloženého rodného příjmení se pole jmenuje „Rodné příjmení"
+   * (ne „Nové rodné příjmení") a nabídne příjmení; s ním jde, dokud ho
+   * uživatel nepřepíše.
+   */
+  it('rodné příjmení se předvyplní příjmením a jde s ním', async () => {
+    const value = profile()
+    value.identity_history[0]!.birth_surname_masked = null
+    mocks.personProfile.mockResolvedValue(value)
+    const wrapper = await mountedPanel()
+
+    const birthSurname = wrapper.get('[data-test="identity-birth-surname"]')
+    expect((birthSurname.element as HTMLInputElement).value).toBe('Zaměstnanec')
+    expect(birthSurname.element.closest('label')!.textContent)
+      .toContain('payroll.people.profile.birth_surname')
+    expect(wrapper.find('[data-test="identity-birth-surname-prefilled"]').exists()).toBe(true)
+
+    const lastName = wrapper.get('[data-a1-field="identity.last_name"]')
+    await lastName.setValue('Nováková')
+    expect((birthSurname.element as HTMLInputElement).value).toBe('Nováková')
+
+    await birthSurname.setValue('Dvořáková')
+    await lastName.setValue('Svobodová')
+    expect((birthSurname.element as HTMLInputElement).value).toBe('Dvořáková')
+
+    mocks.savePersonProfile.mockResolvedValue(profile())
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.savePersonProfile.mock.calls[0]![1].identity_history[0].birth_surname)
+      .toBe('Dvořáková')
+  })
+
   it('bez oprávnění na citlivé údaje tlačítko Zobrazit nenabídne', async () => {
     const wrapper = await mountedPanel()
     await openPayout(wrapper)

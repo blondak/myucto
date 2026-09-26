@@ -4467,6 +4467,9 @@
         "full_name_preview": "Recorded as {name}.",
         "birth_number": "Birth number",
         "birth_date": "Date of birth",
+        "birth_date_from_birth_number": "Filled in from the birth number.",
+        "birth_surname": "Birth surname",
+        "birth_surname_hint": "Prefilled with the surname. The ČSSZ registration requires it - if it differs (e.g. after marriage), overwrite it.",
         "relation_type": "Employment relationship",
         "planned_start": "Planned start",
         "personal_number_hint": "Optional. If you leave it blank, it is assigned automatically.",
@@ -4845,6 +4848,9 @@
         "registration_identity_hint": "Birth details, citizenship and sex for PREZEC/REGZEC. Expand this only on hire or when the record changes.",
         "registration_identity_filled": "Completed",
         "registration_identity_empty": "Not completed yet",
+        "registration_identity_missing": "Missing: {fields}",
+        "birth_surname": "Birth surname",
+        "birth_surname_prefilled_hint": "Prefilled from the surname. If the person changed their surname (e.g. by marriage), correct it.",
         "registration_identity_effective_hint": "These details are stored in the same historical version and apply from the date above.",
         "title_prefix": "Title before name",
         "title_suffix": "Title after name",
@@ -4982,6 +4988,7 @@
       "person_evidence_title": "From the person's statutory evidence",
       "health_insurer": "Health insurer",
       "health_insurer_hint": "It is kept in the person's statutory evidence, not on the relationship — the value is only mirrored here. It decides where health insurance is paid.",
+      "health_insurer_from": "{value} · from {date}",
       "health_insurer_state": {
         "verified": "Verified",
         "unverified": "Unverified",
@@ -6032,6 +6039,31 @@
         "environment": {
           "test": "Test",
           "production": "Production"
+        },
+        "environment_notice": {
+          "production": "Filing goes to ČSSZ PRODUCTION - the registration lands in the live register of insured persons. For a trial run, switch the environment in the top right to Test.",
+          "test": "Filing goes to the ČSSZ TEST environment - it will not register the employee. A real filing requires switching the environment to Production."
+        },
+        "missing": {
+          "title": "Nothing is missing. | The registration cannot be built yet, 1 item is missing. | The registration cannot be built yet, {count} items are missing. | The registration cannot be built yet, {count} items are missing.",
+          "where_person": "person card → Full personal records",
+          "where_employer": "Payroll settings → Employer and payroll units",
+          "open": "Fill in",
+          "open_settings": "Open payroll settings",
+          "variable_symbol_placeholder": "The employer variable symbol looks like a placeholder (a sequence of digits used in examples) rather than the symbol ČSSZ assigned to the company. Check it in the payroll settings of the payroll unit before you send the filing.",
+          "fields": {
+            "first_name": "First name",
+            "last_name": "Surname",
+            "birth_surname": "Birth surname",
+            "birth_place": "Place of birth",
+            "citizenship_country_code": "Citizenship",
+            "sex": "Sex (male or female)",
+            "birth_date": "Date of birth",
+            "birth_country_code": "Country of birth",
+            "identifier": "Birth number or EČP",
+            "employer_variable_symbol": "Employer variable symbol at ČSSZ",
+            "cssz_workplace_code": "Social security administration code"
+          }
         },
         "send_test": "Send to test",
         "send_production": "Send to production",

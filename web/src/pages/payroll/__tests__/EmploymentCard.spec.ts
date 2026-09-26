@@ -595,6 +595,18 @@ describe('EmploymentCard', () => {
     expect(wrapper.emitted('focusStatutoryEvidence')).toHaveLength(1)
   })
 
+  /** UI-4: pojišťovna platná až od nástupu se ukazuje s datem „od", ne jako nezadaná. */
+  it('pojišťovnu platnou od budoucího nástupu ukáže s datem od', async () => {
+    const wrapper = await mountCard({
+      ...employment(),
+      health_insurer: { status: 'verified' as const, code: '111', effective_from: '2099-10-01' },
+    })
+
+    const insurer = wrapper.get('[data-test="employment-health-insurer"]').text()
+    expect(insurer).toContain('payroll.people.health_insurer_from')
+    expect(insurer).not.toContain('payroll.people.health_insurer_state.missing')
+  })
+
   it('bez záznamu v evidenci hlásí nezadáno, ne mlčky nepodepsáno', async () => {
     const wrapper = await mountCard()
 

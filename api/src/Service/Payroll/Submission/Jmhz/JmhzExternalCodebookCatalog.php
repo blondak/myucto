@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\CzIscoCodebook;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class JmhzExternalCodebookCatalog
@@ -177,27 +178,46 @@ final class JmhzExternalCodebookCatalog
         if ($limit < 1 || $limit > 50) {
             throw new \InvalidArgumentException('Limit vyhledávání obcí musí být od 1 do 50.');
         }
-        $needle = mb_strtolower(trim($query), 'UTF-8');
+        /*
+         * Hledá se bez diakritiky a nejlepší shody jdou dopředu. Dřív se
+         * řadilo jen abecedně a bralo prvních dvacet, takže „Praha" skončila
+         * za desítkami obcí s „praha" uprostřed názvu a „Plzen" bez háčku
+         * nenašla nic. Pořadí: shoda celého názvu, začátek názvu, začátek
+         * slova, kdekoli; kód obce se hledá doslova.
+         */
+        $needle = CzIscoCodebook::fold($query);
         if (mb_strlen($needle, 'UTF-8') < 2) {
             throw new \InvalidArgumentException('Pro vyhledání obce zadejte alespoň dva znaky.');
         }
         $result = [];
         foreach ($this->codebookEntries($package, 'obce') as $entry) {
-            if (!$this->entryCovers($entry, $validOn)
-                || (!str_contains($entry['item_code'], $needle)
-                    && !str_contains(mb_strtolower($entry['label'], 'UTF-8'), $needle))
-            ) {
+            if (!$this->entryCovers($entry, $validOn)) {
                 continue;
             }
-            $result[] = ['code' => $entry['item_code'], 'label' => $entry['label']];
+            $label = CzIscoCodebook::fold($entry['label']);
+            $rank = match (true) {
+                $label === $needle || $entry['item_code'] === $needle => 0,
+                str_starts_with($label, $needle) => 1,
+                preg_match('/(^|[\s\-])' . preg_quote($needle, '/') . '/u', $label) === 1 => 2,
+                str_contains($label, $needle) || str_contains($entry['item_code'], $needle) => 3,
+                default => null,
+            };
+            if ($rank === null) {
+                continue;
+            }
+            $result[] = ['code' => $entry['item_code'], 'label' => $entry['label'], 'rank' => $rank];
         }
         usort(
             $result,
-            static fn (array $left, array $right): int => strnatcasecmp($left['label'], $right['label'])
+            static fn (array $left, array $right): int => $left['rank'] <=> $right['rank']
+                ?: strnatcasecmp($left['label'], $right['label'])
                 ?: strcmp($left['code'], $right['code']),
         );
 
-        return array_slice($result, 0, $limit);
+        return array_map(
+            static fn (array $item): array => ['code' => $item['code'], 'label' => $item['label']],
+            array_slice($result, 0, $limit),
+        );
     }
 
     /** @return list<array{code:string,label:string}> */

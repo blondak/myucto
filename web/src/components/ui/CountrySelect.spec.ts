@@ -43,6 +43,33 @@ describe('CountrySelect', () => {
     expect(input.attributes('required')).toBeDefined()
   })
 
+  /**
+   * UI-8: číselník má u Česka z první instalace „Česká republika", jinde
+   * v aplikaci je „Česko". Nabídka ukazuje krátký název a hledá bez
+   * diakritiky podle názvu, formálního názvu i kódu.
+   */
+  it('najde Česko pod krátkým i formálním názvem, bez diakritiky i podle kódu', async () => {
+    m.loadCountries.mockResolvedValue([
+      { id: 1, iso2: 'CZ', iso3: 'CZE', name_cs: 'Česká republika', name_en: 'Czech Republic', is_eu: true },
+      { id: 2, iso2: 'SK', iso3: 'SVK', name_cs: 'Slovensko', name_en: 'Slovakia', is_eu: true },
+      { id: 3, iso2: 'DE', iso3: 'DEU', name_cs: 'Německo', name_en: 'Germany', is_eu: true },
+    ])
+    const wrapper = mount(CountrySelect, { props: { modelValue: '' } })
+    await flushPromises()
+    const input = wrapper.get<HTMLInputElement>('input[role="combobox"]')
+    const optionTexts = () => wrapper.findAll('[role="option"]').map(option => option.text())
+
+    for (const query of ['Česko', 'cesko', 'republika', 'CZE']) {
+      await input.setValue(query)
+      await input.trigger('focus')
+      expect(optionTexts().some(text => text.includes('Česko')), query).toBe(true)
+      expect(optionTexts().some(text => text.includes('Německo')), query).toBe(false)
+    }
+
+    await input.setValue('nemecko')
+    expect(optionTexts().some(text => text.includes('Německo'))).toBe(true)
+  })
+
   it('při výpadku číselníku dovolí ručně zadat ISO kód', async () => {
     m.loadCountries.mockRejectedValue(new Error('offline'))
     const wrapper = mount(CountrySelect, {

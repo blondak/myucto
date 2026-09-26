@@ -84,6 +84,7 @@ final class PayrollPersonCreateService
                 $validated['employee']['birth_date'],
                 $validated['birth_number'],
                 (string) $employment['terms']['planned_start_on'],
+                $validated['birth_surname'],
             );
 
             $this->activityLogger->log(

@@ -110,13 +110,23 @@ const taxDeclarationSigned = computed(() => taxDeclaration.value?.status === 'si
  * druhé zadávací místo pro týž údaj by se s prvním dřív nebo později rozešlo.
  */
 const healthInsurer = computed(() => props.employment.health_insurer)
+/**
+ * U vztahu před nástupem posílá server pojišťovnu platnou ke dni nástupu.
+ * Aby bylo poznat, že ještě neplatí, ukazuje se i s datem „od".
+ */
+const healthInsurerFuture = computed(() => {
+  const from = healthInsurer.value?.effective_from ?? null
+  return from !== null && from > todayIso() ? from : null
+})
 const healthInsurerLabel = computed(() => {
   const insurer = healthInsurer.value
   if (insurer === null) return t('payroll.people.health_insurer_state.missing')
-  if (insurer.status !== 'verified') {
-    return t(`payroll.people.health_insurer_state.${insurer.status}`)
-  }
-  return insurer.code ?? t('payroll.people.health_insurer_state.verified')
+  const value = insurer.status !== 'verified'
+    ? t(`payroll.people.health_insurer_state.${insurer.status}`)
+    : insurer.code ?? t('payroll.people.health_insurer_state.verified')
+  return healthInsurerFuture.value === null
+    ? value
+    : t('payroll.people.health_insurer_from', { value, date: formatDate(healthInsurerFuture.value) })
 })
 const healthInsurerVerified = computed(
   () => healthInsurer.value?.status === 'verified' && healthInsurer.value.code !== null,

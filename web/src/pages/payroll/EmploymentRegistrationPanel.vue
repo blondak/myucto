@@ -25,7 +25,14 @@ import {
   type PayrollEmploymentJmhzEvidenceOptions,
   type PayrollJmhzMunicipalityOption,
   type PayrollTerminationA2Prefill,
+  type PayrollRegistrationMissingItem,
+  type PayrollRegistrationProblemTarget,
 } from '@/api/payroll'
+import {
+  registrationItemLabel,
+  registrationMissingItems,
+} from './registrationMissingItems'
+import { registrationA1FieldLabel } from './registrationA1FieldLabels'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -56,9 +63,20 @@ const {
 } = useProductionSendConfirm()
 const busy = ref(false)
 const error = ref('')
+/**
+ * Všechny chybějící údaje z odmítnuté přípravy — server je posílá najednou,
+ * každý s adresou pole. Seznam nahrazuje dřívější jednu větu, po jejímž
+ * vyřešení vyskočila další.
+ */
+const errorProblems = ref<PayrollRegistrationMissingItem[]>([])
 const preview = ref<PayrollRegistrationPreview | null>(null)
 const submission = ref<PayrollRegistrationSubmission | null>(null)
 const showXml = ref(false)
+/*
+ * Výchozí je vždy produkce a volba se schválně NEpamatuje (rozhodnutí
+ * uživatele): po obnovení stránky se vrací produkce. Ručně zvolený Test je
+ * zato zřetelně vidět u tlačítek i v oznámení pod hlavičkou.
+ */
 const environment = ref<PayrollJmhzTransportEnvironment>('production')
 const transport = ref<PayrollJmhzTransportPoll | null>(null)
 const transportBusy = ref<'send' | 'poll' | 'close' | null>(null)
@@ -509,9 +527,48 @@ const a1AddressFields: {
   { key: 'ruian_point', label: 'payroll.people.registration.a1.address.ruian_point' },
 ]
 
-const a1PayloadPreview = computed(
-  () => JSON.stringify(blankToNull(a1Form.value), null, 2),
-)
+/**
+ * „Co odesíláme" jako čitelný seznam, ne syrový JSON.
+ *
+ * Náhled ukazoval celý objekt formuláře (`"attachments": [], "employment":
+ * {"activity_code": "1" …`) — účetní z něj nepoznala, co je vyplněné, a klíče
+ * neznala. Teď jsou tu jen vyplněné položky s TÝMIŽ popisky jako u polí.
+ */
+const a1PayloadRows = computed(() => {
+  const rows: { path: string, label: string, value: string }[] = []
+  const visit = (value: unknown, path: string): void => {
+    if (value === null || value === undefined) return
+    if (Array.isArray(value)) {
+      if (path === 'attachments') {
+        for (const attachment of value as { name?: string }[]) {
+          rows.push({ path, label: registrationA1FieldLabel(path, t), value: attachment.name ?? '—' })
+        }
+        return
+      }
+      if (value.length > 0) {
+        rows.push({ path, label: registrationA1FieldLabel(path, t), value: String(value.length) })
+      }
+      return
+    }
+    if (typeof value === 'object') {
+      for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+        visit(item, path === '' ? key : `${path}.${key}`)
+      }
+      return
+    }
+    if (typeof value === 'string' && value.trim() === '') return
+    rows.push({
+      path,
+      label: registrationA1FieldLabel(path, t),
+      value: typeof value === 'boolean'
+        ? t(value ? 'common.yes' : 'common.no')
+        : String(value),
+    })
+  }
+  const { effective_on: _effectiveOn, row_version: _rowVersion, ...payload } = blankToNull(a1Form.value)
+  visit(payload, '')
+  return rows
+})
 
 /**
  * Adresa pobytu v ČR má stát předvyplněný na CZ — „v ČR" je přímo v názvu
@@ -605,6 +662,30 @@ async function searchMunicipalities(query: string): Promise<void> {
   }
 }
 
+/**
+ * Obec pracoviště z kódu obce, který přišel ze vztahu.
+ *
+ * Návrh A1 přebíral ze sjednaných podmínek jen kód obce, název ne — pole
+ * „Obec pracoviště" zůstalo prázdné s hláškou „aplikace tento údaj nevede"
+ * a výběr kódu obce neměl popisek, takže hledání „Praha" se hned po první
+ * odpovědi samo vynulovalo. Název se dohledá v TÉMŽ číselníku obcí, ze
+ * kterého se vybírá na kartě vztahu; když se nenajde, pole zůstane prázdné.
+ */
+async function fillWorkplaceCityFromCode(): Promise<void> {
+  const employment = a1Form.value.employment
+  const code = employment.workplace_municipality_code?.trim() ?? ''
+  if (code === '' || (employment.workplace_city ?? '').trim() !== '') return
+  try {
+    const found = (await payrollApi.searchJmhzMunicipalities(code, 5))
+      .find(option => option.code === code)
+    if (found === undefined) return
+    employment.workplace_city = found.label
+    municipalityOptions.value = [found]
+  } catch {
+    /* číselník nedostupný — pole zůstane k vyplnění ručně */
+  }
+}
+
 function selectMunicipality(code: string | null): void {
   const selected = municipalityOptions.value.find(option => option.code === code)
   a1Form.value.employment.workplace_municipality_code = selected?.code ?? code
@@ -658,6 +739,7 @@ async function loadA1Profile(): Promise<void> {
     )) as PayrollRegistrationA1ProfilePayload
     a1Form.value.effective_on = view.draft.effective_on
     a1Form.value.row_version = view.draft.row_version
+    await fillWorkplaceCityFromCode()
     a1Baseline.value = a1Comparable(a1Form.value)
     a1LocalDraftArmed.value = false
     const local = readA1LocalDraft()
@@ -1616,9 +1698,45 @@ onMounted(() => {
   ])
 })
 
+/**
+ * Proklik z chybějícího údaje: údaje osoby vedou na kartu osoby s povelem
+ * `?panel=&field=` (rozbalí „Úplnou osobní evidenci" i sbalenou sekci
+ * a zaostří pole), údaje zaměstnavatele do Nastavení mezd.
+ */
+function problemTarget(
+  target: PayrollRegistrationProblemTarget,
+  panel: string | null,
+  field: string,
+) {
+  if (target === 'employer_settings') {
+    return {
+      name: 'payroll-settings',
+      query: { tab: 'employer' },
+      hash: '#payroll-employer-offices',
+    }
+  }
+  if (panel === null) return null
+  const query: Record<string, string> = {
+    employment: String(props.employmentId),
+    panel,
+    field,
+  }
+  if (props.personId !== undefined) query.person = String(props.personId)
+
+  return { name: 'payroll-people', query }
+}
+
+/**
+ * Do kterého prostředí ČSSZ se podává. Dokud nic neodešlo, musí to být vidět
+ * rovnou u tlačítek — výchozí je produkce a zkouška z testovací instance by
+ * jinak skončila v ostrém registru jen proto, že si nikdo nevšiml přepínače.
+ */
+const nothingSentYet = computed(() => transportAttempt.value === null)
+
 async function run(action: 'preview' | 'prepare'): Promise<void> {
   busy.value = true
   error.value = ''
+  errorProblems.value = []
   try {
     if (action === 'preview') {
       submission.value = null
@@ -1659,10 +1777,13 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
   } catch (exception) {
     // Hláška ze serveru jmenuje konkrétní chybějící údaj — nesmí ji přebít
     // obecný text, jinak uživatel neví, co doplnit.
-    error.value = serverErrorMessage(
-      exception,
-      t('payroll.people.registration.failed'),
-    )
+    errorProblems.value = registrationMissingItems(exception)
+    error.value = errorProblems.value.length > 0
+      ? t('payroll.people.registration.missing.title', errorProblems.value.length)
+      : serverErrorMessage(
+        exception,
+        t('payroll.people.registration.failed'),
+      )
   } finally {
     busy.value = false
   }
@@ -1813,6 +1934,20 @@ async function copyXml(): Promise<void> {
         </button>
       </div>
     </div>
+
+    <p
+      v-if="nothingSentYet"
+      class="mt-3 rounded-md border px-3 py-2 text-xs"
+      :class="environment === 'production'
+        ? 'border-warning-300 bg-warning-50 text-warning-800'
+        : 'border-primary-200 bg-primary-50 text-primary-800'"
+      role="status"
+      :data-test="`registration-environment-notice-${environment}`"
+    >
+      {{ environment === 'production'
+        ? t('payroll.people.registration.environment_notice.production')
+        : t('payroll.people.registration.environment_notice.test') }}
+    </p>
 
     <div class="mt-4 rounded-lg border border-neutral-200 bg-surface p-3" data-test="registration-a1-profile">
       <div class="flex flex-wrap items-start justify-between gap-3">
@@ -1988,7 +2123,7 @@ async function copyXml(): Promise<void> {
           </p>
           <ul class="mt-2 space-y-1.5 text-xs text-warning-800">
             <li v-for="gap in a1Gaps" :key="gap.field">
-              <span class="font-mono">{{ gap.field }}</span> — {{ gap.message }}
+              <span class="font-medium" :data-test="`registration-a1-gap-label-${gap.field}`">{{ registrationA1FieldLabel(gap.field, t) }}</span> — {{ gap.message }}
               <button
                 type="button"
                 class="ml-1 whitespace-nowrap rounded-full bg-warning-100 px-2 py-0.5 font-medium underline underline-offset-2 hover:bg-warning-200 hover:text-warning-900 focus:outline-none focus:ring-2 focus:ring-warning-500/40"
@@ -2025,7 +2160,7 @@ async function copyXml(): Promise<void> {
           </p>
           <ul class="mt-1 space-y-1 text-xs text-danger-800">
             <li v-for="(problem, index) in a1Problems" :key="`${problem.field ?? ''}-${index}`">
-              <span v-if="problem.field" class="font-mono">{{ problem.field }}</span>
+              <span v-if="problem.field" class="font-medium">{{ registrationA1FieldLabel(problem.field, t) }}</span>
               <span v-if="problem.field"> — </span>{{ problem.message }}
               <button
                 v-if="problem.field"
@@ -3270,11 +3405,16 @@ async function copyXml(): Promise<void> {
               ? 'payroll.people.registration.a1.payload_hide'
               : 'payroll.people.registration.a1.payload_show') }}
           </button>
-          <pre
+          <dl
             v-if="a1ShowPayload"
-            class="mt-2 max-h-96 overflow-auto rounded-md bg-neutral-950 p-3 font-mono text-xs text-neutral-100"
+            class="mt-2 grid max-h-96 grid-cols-1 gap-x-4 gap-y-1 overflow-auto rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
             data-test="registration-a1-payload"
-          >{{ a1PayloadPreview }}</pre>
+          >
+            <template v-for="(row, index) in a1PayloadRows" :key="`${row.path}-${index}`">
+              <dt class="text-neutral-500">{{ row.label }}</dt>
+              <dd class="break-words font-medium text-neutral-900">{{ row.value }}</dd>
+            </template>
+          </dl>
         </div>
 
         <!-- Uložení se pouští z lišty dole, ale výsledek hlásí panel nahoře:
@@ -3894,6 +4034,38 @@ async function copyXml(): Promise<void> {
       </p>
     </div>
 
+    <div
+      v-if="(preview?.warnings ?? []).length > 0 && !submission"
+      class="mt-3 rounded-lg border border-warning-300 bg-warning-50 p-3 text-xs text-warning-800"
+      role="status"
+      data-test="registration-preview-warnings"
+    >
+      <p class="font-semibold">{{ t('payroll.people.registration.warnings.title') }}</p>
+      <ul class="mt-1 space-y-2">
+        <li
+          v-for="warning in preview?.warnings ?? []"
+          :key="warning.code"
+          :data-test="`registration-preview-warning-${warning.code}`"
+        >
+          <p>{{ warning.code === 'employer_variable_symbol_placeholder'
+            ? t('payroll.people.registration.missing.variable_symbol_placeholder')
+            : warning.message }}</p>
+          <RouterLink
+            v-if="problemTarget(warning.target, null, warning.field) !== null"
+            :to="problemTarget(warning.target, null, warning.field)!"
+            :class="btnOutline('warning')"
+            class="mt-1 whitespace-nowrap"
+            data-test="registration-preview-warning-link"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.edit" />
+            </svg>
+            {{ t('payroll.people.registration.missing.open_settings') }}
+          </RouterLink>
+        </li>
+      </ul>
+    </div>
+
     <div v-if="preview && !submission" class="mt-3">
       <div class="flex flex-wrap gap-2">
         <button
@@ -3923,14 +4095,41 @@ async function copyXml(): Promise<void> {
       </p>
     </div>
 
-    <p
+    <div
       v-if="error"
       class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
       role="alert"
       data-test="registration-error"
     >
-      {{ error }}
-    </p>
+      <p>{{ error }}</p>
+      <ul v-if="errorProblems.length > 0" class="mt-2 space-y-1.5" data-test="registration-missing-list">
+        <li
+          v-for="problem in errorProblems"
+          :key="problem.field"
+          class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+          :data-test="`registration-missing-${problem.field}`"
+        >
+          <span class="font-medium">{{ registrationItemLabel(problem, t) }}</span>
+          <span class="text-danger-600">
+            {{ problem.target === 'employer_settings'
+              ? t('payroll.people.registration.missing.where_employer')
+              : t('payroll.people.registration.missing.where_person') }}
+          </span>
+          <RouterLink
+            v-if="problemTarget(problem.target, problem.panel, problem.field) !== null"
+            :to="problemTarget(problem.target, problem.panel, problem.field)!"
+            :class="btnOutline('danger')"
+            class="whitespace-nowrap"
+            :data-test="`registration-missing-link-${problem.field}`"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.edit" />
+            </svg>
+            {{ t('payroll.people.registration.missing.open') }}
+          </RouterLink>
+        </li>
+      </ul>
+    </div>
     <ProductionSendConfirmDialog
       v-if="sendConfirmRequest"
       :message="sendConfirmRequest.message"

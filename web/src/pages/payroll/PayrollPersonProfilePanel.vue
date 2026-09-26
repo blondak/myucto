@@ -34,6 +34,7 @@ import { fieldSelector, revealField } from '@/utils/revealField'
 import { accountPickerOptions } from '@/utils/chartAccountOptions'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { todayIso } from './employmentLifecycleUi'
+import { registrationItemLabel } from './registrationMissingItems'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
@@ -73,6 +74,11 @@ interface IdentityFormRow {
   title_suffix: string
   birth_surname_masked: string | null
   birth_surname: string
+  /**
+   * Rodné příjmení se předvyplnilo z příjmení a dokud do něj uživatel nesáhne,
+   * jde s příjmením dál. U prvotního zadání je to skoro vždycky totéž.
+   */
+  birth_surname_prefilled: boolean
   birth_date: string
   birth_place: string
   birth_country_code: string
@@ -80,6 +86,8 @@ interface IdentityFormRow {
   sex: PayrollPersonSex | null
   effective_from: string
   effective_to: string
+  /** Co verzi chybí pro registraci na ČSSZ — stav serveru při načtení. */
+  registration_missing: string[]
 }
 
 interface AddressFormRow {
@@ -756,7 +764,9 @@ function hydrate(value: PayrollPersonProfile) {
     title_prefix: row.title_prefix ?? '',
     title_suffix: row.title_suffix ?? '',
     birth_surname_masked: row.birth_surname_masked,
-    birth_surname: '',
+    // Bez uloženého rodného příjmení se nabídne příjmení — viz `birth_surname_prefilled`.
+    birth_surname: row.birth_surname_masked === null ? (row.last_name ?? '') : '',
+    birth_surname_prefilled: row.birth_surname_masked === null && (row.last_name ?? '') !== '',
     birth_date: row.birth_date ?? '',
     birth_place: row.birth_place ?? '',
     birth_country_code: row.birth_country_code ?? '',
@@ -764,6 +774,7 @@ function hydrate(value: PayrollPersonProfile) {
     sex: row.sex ?? null,
     effective_from: row.effective_from,
     effective_to: row.effective_to ?? '',
+    registration_missing: row.registration_missing ?? [],
   }))
   form.addresses = value.addresses.map(row => ({
     id: row.id,
@@ -1068,17 +1079,57 @@ function accountHasUnsavedChanges(account: AccountFormRow): boolean {
     || account.is_active !== stored.is_active
 }
 
-function hasRegistrationIdentity(row: IdentityFormRow): boolean {
-  return [
-    row.title_prefix,
-    row.title_suffix,
-    row.birth_date,
-    row.birth_place,
-    row.birth_country_code,
-    row.citizenship_country_code,
-    row.sex,
-  ].some(value => value !== null && value.trim() !== '')
+/**
+ * Údaje pro registraci, které téhle verzi ještě chybí.
+ *
+ * Seznam posílá server z téhož pravidla, podle kterého příprava registrace
+ * odmítá (`PayrollRegistrationIdentityRequirements`). Dřív si štítek počítal
+ * stav sám a „Doplněno" svítilo, jakmile byl vyplněný třeba jen titul —
+ * přestože registrace pak hlásila chybějící občanství a rodné příjmení.
+ * Tady se ze serverového seznamu jen odškrtá, co uživatel mezitím vyplnil
+ * do formuláře, aby štítek reagoval ještě před uložením.
+ */
+function registrationOutstanding(row: IdentityFormRow): string[] {
+  const filled = (value: string | null): boolean => value !== null && value.trim() !== ''
+  return row.registration_missing.filter((field) => {
+    switch (field) {
+      case 'identity.first_name': return !filled(row.first_name)
+      case 'identity.last_name': return !filled(row.last_name)
+      case 'identity.birth_surname': return !filled(row.birth_surname)
+      case 'identity.birth_place': return !filled(row.birth_place)
+      case 'identity.citizenship_country_code': return !filled(row.citizenship_country_code)
+      case 'identity.birth_date': return !filled(row.birth_date)
+      case 'identity.birth_country_code': return !filled(row.birth_country_code)
+      case 'identity.sex': return row.sex !== 'male' && row.sex !== 'female'
+      default: return true
+    }
+  })
 }
+
+function registrationOutstandingLabel(row: IdentityFormRow): string {
+  return registrationOutstanding(row)
+    .map(field => registrationItemLabel({ field, label: field }, t).toLowerCase())
+    .join(', ')
+}
+
+/** Rodné příjmení jde s příjmením, dokud ho uživatel sám nepřepíše. */
+function onLastNameInput(row: IdentityFormRow): void {
+  if (row.birth_surname_prefilled) row.birth_surname = row.last_name
+}
+
+function onBirthSurnameInput(row: IdentityFormRow): void {
+  row.birth_surname_prefilled = false
+}
+
+/** U nové verze chybí pro registraci všechno, co karta osoby hlídá. */
+const NEW_IDENTITY_REGISTRATION_MISSING = [
+  'identity.first_name',
+  'identity.last_name',
+  'identity.birth_surname',
+  'identity.birth_place',
+  'identity.citizenship_country_code',
+  'identity.sex',
+]
 
 function addIdentity() {
   form.identity_history.unshift({
@@ -1089,6 +1140,7 @@ function addIdentity() {
     title_suffix: '',
     birth_surname_masked: null,
     birth_surname: '',
+    birth_surname_prefilled: true,
     birth_date: '',
     birth_place: '',
     birth_country_code: '',
@@ -1096,6 +1148,7 @@ function addIdentity() {
     sex: null,
     effective_from: todayIso(),
     effective_to: '',
+    registration_missing: [...NEW_IDENTITY_REGISTRATION_MISSING],
   })
 }
 
@@ -1295,8 +1348,8 @@ onMounted(load)
           <div class="space-y-3">
             <article v-for="(row, index) in form.identity_history" :key="row.id ?? `new-identity-${index}`" :class="cardClass">
               <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-                <label :class="labelClass">{{ t('payroll.people.profile.first_name') }} <RequiredMark /><input v-model="row.first_name" required autocomplete="given-name" :disabled="!canWrite" :class="inputClass"></label>
-                <label :class="labelClass">{{ t('payroll.people.profile.last_name') }} <RequiredMark /><input v-model="row.last_name" required autocomplete="family-name" :disabled="!canWrite" :class="inputClass" :data-a1-field="index === 0 ? 'identity.last_name' : undefined"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.first_name') }} <RequiredMark /><input v-model="row.first_name" required autocomplete="given-name" :disabled="!canWrite" :class="inputClass" :data-a1-field="index === 0 ? 'identity.first_name' : undefined"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.last_name') }} <RequiredMark /><input v-model="row.last_name" required autocomplete="family-name" :disabled="!canWrite" :class="inputClass" :data-a1-field="index === 0 ? 'identity.last_name' : undefined" @input="onLastNameInput(row)"></label>
                 <label :class="[labelClass, 'lg:col-span-2']">{{ t('payroll.people.profile.full_name') }} <RequiredMark /><input v-model="row.full_name" required autocomplete="name" :disabled="!canWrite" :class="inputClass"></label>
                 <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }} <RequiredMark /><DateInput v-model="row.effective_from" required :disabled="!canWrite" :class="inputClass" /></label>
                 <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<DateInput v-model="row.effective_to" :disabled="!canWrite" :class="inputClass" /></label>
@@ -1304,7 +1357,28 @@ onMounted(load)
                   <span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span>
                   <p class="mt-1 font-mono text-sm text-neutral-800">{{ row.birth_surname_masked }}</p>
                 </div>
-                <label v-if="canWrite" :class="[labelClass, 'lg:col-span-2']">{{ t('payroll.people.profile.new_birth_surname') }}<input v-model="row.birth_surname" autocomplete="off" :class="inputClass" :placeholder="t('payroll.people.profile.keep_masked')"></label>
+                <!--
+                  Bez uloženého rodného příjmení se pole jmenuje prostě „Rodné
+                  příjmení" a nabízí příjmení: „Nové rodné příjmení" s nápovědou
+                  „ponechte prázdné" mátlo při prvním zadání, kdy žádné staré není.
+                -->
+                <label v-if="canWrite" :class="[labelClass, 'lg:col-span-2']">
+                  {{ row.birth_surname_masked === null
+                    ? t('payroll.people.profile.birth_surname')
+                    : t('payroll.people.profile.new_birth_surname') }}
+                  <input
+                    v-model="row.birth_surname"
+                    autocomplete="off"
+                    :class="inputClass"
+                    :placeholder="row.birth_surname_masked === null ? '' : t('payroll.people.profile.keep_masked')"
+                    :data-a1-field="index === 0 ? 'identity.birth_surname' : undefined"
+                    data-test="identity-birth-surname"
+                    @input="onBirthSurnameInput(row)"
+                  >
+                  <span v-if="row.birth_surname_masked === null && row.birth_surname_prefilled && row.birth_surname !== ''" class="mt-1 block text-xs font-normal text-neutral-500" data-test="identity-birth-surname-prefilled">
+                    {{ t('payroll.people.profile.birth_surname_prefilled_hint') }}
+                  </span>
+                </label>
               </div>
               <details
                 class="group mt-3 rounded-md border border-payroll-200 bg-neutral-50"
@@ -1320,10 +1394,11 @@ onMounted(load)
                   </span>
                   <span
                     class="rounded-full px-2 py-0.5 text-xs font-medium"
-                    :class="hasRegistrationIdentity(row) ? 'bg-success-50 text-success-700' : 'bg-neutral-100 text-neutral-600'"
-                  >{{ t(hasRegistrationIdentity(row)
-                    ? 'payroll.people.profile.registration_identity_filled'
-                    : 'payroll.people.profile.registration_identity_empty') }}</span>
+                    :class="registrationOutstanding(row).length === 0 ? 'bg-success-50 text-success-700' : 'bg-warning-50 text-warning-800'"
+                    data-test="registration-identity-status"
+                  >{{ registrationOutstanding(row).length === 0
+                    ? t('payroll.people.profile.registration_identity_filled')
+                    : t('payroll.people.profile.registration_identity_missing', { fields: registrationOutstandingLabel(row) }) }}</span>
                 </summary>
                 <div class="grid grid-cols-1 gap-3 border-t border-neutral-200 p-3 md:grid-cols-2 lg:grid-cols-4">
                   <label :class="labelClass">
@@ -1348,11 +1423,12 @@ onMounted(load)
                       :disabled="!canWrite"
                       accent="payroll"
                       data-test="identity-sex"
+                      :data-a1-field="index === 0 ? 'identity.sex' : undefined"
                     />
                   </label>
                   <label :class="labelClass">
                     {{ t('payroll.people.profile.birth_place') }}
-                    <input v-model="row.birth_place" maxlength="128" :disabled="!canWrite" :class="inputClass">
+                    <input v-model="row.birth_place" maxlength="128" :disabled="!canWrite" :class="inputClass" :data-a1-field="index === 0 ? 'identity.birth_place' : undefined" data-test="identity-birth-place">
                   </label>
                   <label :class="labelClass">
                     {{ t('payroll.people.profile.birth_country') }}
@@ -1362,6 +1438,7 @@ onMounted(load)
                       :disabled="!canWrite"
                       accent="payroll"
                       data-test="identity-birth-country"
+                      :data-a1-field="index === 0 ? 'identity.birth_country_code' : undefined"
                     />
                   </label>
                   <label :class="labelClass">

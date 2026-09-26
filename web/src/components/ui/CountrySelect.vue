@@ -49,11 +49,31 @@ const fallbackSelection = computed({
 const visibleCountries = computed(() => props.euOnly
   ? countries.value.filter(country => country.is_eu || country.iso2 === props.modelValue)
   : countries.value)
-const options = computed(() => visibleCountries.value.map(country => ({
-  value: country.iso2,
-  label: locale.value === 'en' ? country.name_en : country.name_cs,
-  secondary: `${country.iso2} · ${country.iso3}`,
-})))
+/**
+ * Krátké názvy států tam, kde číselník vede formální.
+ *
+ * Číselník zemí má u Česka z první instalace „Česká republika", zbytek
+ * aplikace (číselníky ČSSZ, dimenze, ISO/ČSÚ) ale „Česko" — a hledání „Česko"
+ * pak v tomhle výběru nenašlo nic. V datech se název nemění (tiskne se na
+ * dokladech), sjednocuje se jen nabídka; formální název zůstává dohledatelný
+ * přes klíčová slova.
+ */
+const SHORT_NAMES: Record<string, { cs: string, en: string }> = {
+  CZ: { cs: 'Česko', en: 'Czechia' },
+}
+
+const options = computed(() => visibleCountries.value.map((country) => {
+  const official = locale.value === 'en' ? country.name_en : country.name_cs
+  const short = SHORT_NAMES[country.iso2]?.[locale.value === 'en' ? 'en' : 'cs']
+  return {
+    value: country.iso2,
+    label: short ?? official,
+    secondary: `${country.iso2} · ${country.iso3}`,
+    keywords: [official, country.name_cs, country.name_en, short ?? '']
+      .filter(name => name !== '')
+      .join(' '),
+  }
+}))
 
 onMounted(async () => {
   loading.value = true

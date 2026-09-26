@@ -467,6 +467,39 @@ final class PayrollPeopleApiTest extends TestCase
         self::assertNull($legacy->fetchColumn());
     }
 
+    /**
+     * Rodné příjmení vyžaduje registrace u ČSSZ. Zakládací formulář ho nabízí
+     * předvyplněné příjmením — a musí dojít do historické identity, jinak
+     * příprava registrace hned po založení hlásí „rodné příjmení chybí".
+     */
+    public function testCreateStoresBirthSurnameIntoIdentityHistory(): void
+    {
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'accountant',
+                'session',
+                [
+                    ...$this->validCreatePayload('Rodné Příjmení'),
+                    'first_name' => 'Rodné',
+                    'last_name' => 'Příjmení',
+                    'birth_surname' => 'Původní',
+                ],
+            ),
+            new Response(),
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $personId = $this->json($response)['person']['id'];
+        $identity = $this->db->pdo()->prepare(
+            'SELECT birth_surname FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $identity->execute([$this->supplierId, $personId]);
+        self::assertSame('Původní', $identity->fetchColumn());
+    }
+
     public function testCreateRejectsBirthNumberThatSubmissionsWouldRefuse(): void
     {
         $response = $this->action->create(
@@ -760,6 +793,56 @@ final class PayrollPeopleApiTest extends TestCase
             'payroll.person_statutory_evidence.saved',
         ]);
         self::assertSame(1, (int) $log->fetchColumn());
+    }
+
+    /**
+     * Zaměstnanec s nástupem v budoucnu má pojišťovnu zapsanou od nástupu.
+     *
+     * Hodnotilo se to k dnešku, takže karta vztahu ukazovala „Nezadáno"
+     * a seznam hlásil „údaj brání podání" — u člověka, u kterého je všechno
+     * v pořádku. Rozhodný den je u něj den nástupu.
+     */
+    public function testFutureStartIsEvaluatedAtTheStartDateNotToday(): void
+    {
+        if (!$this->db->hasTable('payroll_person_health_coverage_history')) {
+            self::markTestSkipped('Migrace zákonné evidence osoby neproběhla.');
+        }
+        $start = (new \DateTimeImmutable('first day of +2 months'))->format('Y-m-d');
+
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'accountant',
+                'session',
+                [
+                    ...$this->validCreatePayload('Budoucí Nástup'),
+                    'first_name' => 'Budoucí',
+                    'last_name' => 'Nástup',
+                    'planned_start_on' => $start,
+                    'health_insurer_code' => '111',
+                ],
+            ),
+            new Response(),
+        );
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $person = $this->json($response)['person'];
+
+        self::assertNotContains('health_insurance', array_column($person['data_gaps'], 'key'));
+        self::assertSame(
+            ['status' => 'verified', 'code' => '111', 'effective_from' => $start],
+            $person['employments'][0]['health_insurer'],
+        );
+
+        $items = $this->json($this->action->list(
+            $this->request('GET', '/api/payroll/people', 'accountant')
+                ->withQueryParams(['filter' => 'blocking_data']),
+            new Response(),
+        ))['items'];
+        $listed = array_column($items, null, 'id')[$person['id']] ?? null;
+        if ($listed !== null) {
+            self::assertNotContains('health_insurance', array_column($listed['data_gaps'], 'key'));
+        }
     }
 
     /**

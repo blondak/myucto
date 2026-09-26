@@ -291,6 +291,79 @@ final class PayrollPersonDataGapCatalog
         string $employee = 'employee',
         string $profile = 'profile',
     ): array {
+        $expressions = self::expressionsAtToday($employee, $profile);
+        /*
+         * Údaje osoby se hodnotí k ROZHODNÉMU dni, ne slepě k dnešku.
+         *
+         * Zaměstnanec s plánovaným nástupem 1. 10. má pojišťovnu (a často
+         * i adresu nebo prohlášení) zapsanou s platností od dne nástupu.
+         * K dnešku je proto „nezadaná" a karta i seznam hlásily „údaj brání
+         * podání" u člověka, u kterého je všechno v pořádku. Rozhodný den je
+         * dnešek, pokud už osoba někde pracuje; jinak nejbližší budoucí nástup
+         * — právě k němu se podává přihláška i první měsíc.
+         */
+        $reference = self::referenceDateExpression($employee);
+        foreach (self::PERSON_DATED_KEYS as $key) {
+            $expressions[$key] = str_replace('CURRENT_DATE', $reference, $expressions[$key]);
+        }
+
+        return $expressions;
+    }
+
+    /**
+     * Mezery osoby, které se vážou na platnost záznamu v čase — ty se
+     * hodnotí k rozhodnému dni {@see self::referenceDateExpression()}.
+     * Údaje na vztahu (`jmhz_*`) se dál hlásí jen za BĚŽÍCÍ vztah.
+     *
+     * @var list<string>
+     */
+    private const PERSON_DATED_KEYS = [
+        'name',
+        'residence',
+        'health_insurance',
+        'tax_residence',
+        'payout_account',
+        'citizenship',
+        'birth_date',
+        'tax_declaration',
+    ];
+
+    /**
+     * Rozhodný den pro údaje osoby jako SQL výraz.
+     *
+     * Dnešek, když má osoba živý vztah, který už začal; jinak nejbližší
+     * budoucí nástup živého vztahu; bez vztahu zase dnešek. „Živý" znamená
+     * ne ukončený, archivovaný ani nenastoupený.
+     */
+    public static function referenceDateExpression(string $employee = 'employee'): string
+    {
+        return sprintf(
+            "(CASE WHEN EXISTS (
+                SELECT 1 FROM payroll_employments ref_started
+                 WHERE ref_started.supplier_id = %1\$s.supplier_id
+                   AND ref_started.employee_id = %1\$s.id
+                   AND ref_started.status NOT IN ('ended', 'archived', 'no_show')
+                   AND (ref_started.start_date IS NULL
+                        OR ref_started.start_date <= CURDATE()))
+              THEN CURDATE()
+              ELSE COALESCE((
+                SELECT MIN(ref_future.start_date) FROM payroll_employments ref_future
+                 WHERE ref_future.supplier_id = %1\$s.supplier_id
+                   AND ref_future.employee_id = %1\$s.id
+                   AND ref_future.status NOT IN ('ended', 'archived', 'no_show')
+                   AND ref_future.start_date > CURDATE()), CURDATE())
+             END)",
+            $employee,
+        );
+    }
+
+    /**
+     * Výrazy k dnešku; {@see self::expressions()} je pak přesadí na rozhodný den.
+     *
+     * @return array<string,string>
+     */
+    private static function expressionsAtToday(string $employee, string $profile): array
+    {
         $hasRelation = self::hasEmploymentExpression($employee);
 
         return [

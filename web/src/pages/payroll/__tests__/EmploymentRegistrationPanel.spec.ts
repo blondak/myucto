@@ -403,7 +403,9 @@ describe('EmploymentRegistrationPanel', () => {
       .toBe('Praha')
     expect(insurerInput(wrapper).value).toContain('111')
     const missing = wrapper.get('[data-test="registration-a1-missing"]').text()
-    expect(missing).toContain('permanent_address.house_number')
+    // Lidský popisek pole, ne technický klíč (UI-20).
+    expect(missing).not.toContain('permanent_address.house_number')
+    expect(missing).toContain('payroll.people.registration.a1.section.permanent_address · payroll.people.registration.a1.address.house_number')
     expect(missing).toContain('Aplikace vede adresu jedním řádkem včetně čísla.')
   })
 
@@ -1634,6 +1636,122 @@ describe('EmploymentRegistrationPanel', () => {
     await flushPromises()
 
     expect(m.writeA1MasterData).not.toHaveBeenCalled()
+  })
+
+  /**
+   * UI-6/UI-9: příprava vrací VŠECHNY chybějící údaje najednou a každý má
+   * proklik přímo na pole — na kartě osoby, nebo v nastavení mezd.
+   */
+  it('lists every missing item with a link to the exact field', async () => {
+    m.preview.mockRejectedValue({
+      response: {
+        status: 422,
+        data: {
+          error: {
+            code: 'registration_data_incomplete',
+            message: 'Registraci zatím nejde sestavit, chybí: rodné příjmení, státní občanství.',
+            problems: [
+              { field: 'identity.birth_surname', label: 'Rodné příjmení', message: 'Rodné příjmení chybí.', panel: 'registration_identity', target: 'person' },
+              { field: 'identity.citizenship_country_code', label: 'Státní občanství', message: 'Státní občanství chybí.', panel: 'registration_identity', target: 'person' },
+              { field: 'employer_variable_symbol', label: 'Variabilní symbol', message: 'Chybí.', panel: null, target: 'employer_settings' },
+            ],
+          },
+        },
+      },
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+
+    const list = wrapper.get('[data-test="registration-missing-list"]')
+    expect(list.findAll('li')).toHaveLength(3)
+    expect(list.text()).toContain('payroll.people.registration.missing.fields.birth_surname')
+    expect(list.text()).not.toContain('(birth_surname)')
+    const personLink = JSON.parse(wrapper
+      .get('[data-test="registration-missing-link-identity.citizenship_country_code"]')
+      .attributes('data-to')!)
+    expect(personLink).toEqual({
+      name: 'payroll-people',
+      query: {
+        employment: '5',
+        panel: 'registration_identity',
+        field: 'identity.citizenship_country_code',
+        person: '9',
+      },
+    })
+    const settingsLink = JSON.parse(wrapper
+      .get('[data-test="registration-missing-link-employer_variable_symbol"]')
+      .attributes('data-to')!)
+    expect(settingsLink).toMatchObject({ name: 'payroll-settings', query: { tab: 'employer' } })
+    expect(wrapper.get('[data-test="registration-error"]').text())
+      .toContain('payroll.people.registration.missing.title')
+  })
+
+  /** UI-6: dokud nic neodešlo, je zřetelně vidět, kam se podává. Výchozí je produkce. */
+  it('shows which environment the filing goes to while nothing was sent', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect((wrapper.get('[data-test="registration-environment"]').element as HTMLSelectElement).value)
+      .toBe('production')
+    expect(wrapper.find('[data-test="registration-environment-notice-production"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="registration-environment"]').setValue('test')
+    await flushPromises()
+    expect(wrapper.find('[data-test="registration-environment-notice-test"]').exists()).toBe(true)
+  })
+
+  /** UI-11: zástupný variabilní symbol neblokuje, ale náhled na něj upozorní s proklikem. */
+  it('warns about a placeholder employer variable symbol in the preview', async () => {
+    m.preview.mockResolvedValue({
+      ...preview,
+      warnings: [{
+        code: 'employer_variable_symbol_placeholder',
+        field: 'employer_variable_symbol',
+        message: 'Variabilní symbol 9876543210 je řada.',
+        target: 'employer_settings',
+      }],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+
+    const warning = wrapper.get('[data-test="registration-preview-warnings"]')
+    expect(warning.text()).toContain('payroll.people.registration.missing.variable_symbol_placeholder')
+    expect(JSON.parse(wrapper.get('[data-test="registration-preview-warning-link"]').attributes('data-to')!))
+      .toMatchObject({ name: 'payroll-settings', query: { tab: 'employer' } })
+  })
+
+  /** UI-23: „Co odesíláme" je čitelný seznam s popisky, ne syrový JSON. */
+  it('shows the A1 payload as labelled rows instead of raw JSON', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper.get('[data-test="registration-a1-payload-toggle"]').trigger('click')
+
+    const payload = wrapper.get('[data-test="registration-a1-payload"]')
+    expect(payload.element.tagName).toBe('DL')
+    expect(payload.text()).not.toContain('"employment"')
+    expect(payload.text()).toContain('payroll.people.registration.a1.employment.activity_code')
+    expect(payload.text()).toContain('payroll.people.registration.a1.section.permanent_address · payroll.people.registration.a1.address.city')
+  })
+
+  /** UI-21: obec pracoviště se doplní z kódu obce, který přišel ze vztahu. */
+  it('fills the workplace city from the municipality code of the relationship', async () => {
+    m.searchMunicipalities.mockResolvedValue([
+      { code: '554782', label: 'Hlavní město Praha' },
+    ])
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+
+    expect(m.searchMunicipalities).toHaveBeenCalledWith('554782', 5)
+    expect((wrapper.get('[data-test="a1-employment-workplace-city"]').element as HTMLInputElement).value)
+      .toBe('Hlavní město Praha')
+    // Doplnění z kmenových dat není rozepsaná práce — záloha nevznikne.
+    expect(localStorage.getItem(A1_DRAFT_KEY)).toBeNull()
   })
 
   /** „Adresa pobytu v ČR" má stát předvyplněný, trvalý pobyt naopak ne. */
