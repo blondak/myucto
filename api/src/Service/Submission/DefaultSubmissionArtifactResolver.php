@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Submission;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Document\DocumentStorage;
+use MyInvoice\Service\Payroll\Garnishment\EnforcementTerminationNoticeDocument;
 use MyInvoice\Service\Payroll\Garnishment\Xmlzam\XmlzamCooperationArtifactStore;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use PDO;
@@ -28,6 +29,7 @@ final readonly class DefaultSubmissionArtifactResolver implements SubmissionArti
         private PayrollSubmissionService $payroll,
         private XmlzamCooperationArtifactStore $xmlzam,
         private LoggerInterface $logger,
+        private EnforcementTerminationNoticeDocument $enforcementNotices,
     ) {}
 
     public function resolve(int $supplierId, string $artifactKind, int $artifactId): ?array
@@ -37,6 +39,8 @@ final readonly class DefaultSubmissionArtifactResolver implements SubmissionArti
             'payroll_submission' => $this->payrollArtifact($supplierId, $artifactId),
             'payroll_xmlzam' => $this->xmlzam->resolve($supplierId, $artifactId),
             'document' => $this->document($supplierId, $artifactId),
+            // Oznámení soudu / exekutorovi o skončení poměru (§ 295 odst. 2 o. s. ř.).
+            'payroll_enforcement_notice' => $this->enforcementNotices->pdf($supplierId, $artifactId),
             default => null,
         };
     }

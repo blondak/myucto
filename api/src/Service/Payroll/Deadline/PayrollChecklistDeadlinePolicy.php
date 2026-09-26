@@ -67,6 +67,13 @@ final class PayrollChecklistDeadlinePolicy
     /** Navazující hlášení ČSSZ modul odvozuje až od účinnosti REGZEC. */
     private const REGISTRATION_FOLLOW_UP_FROM = '2026-04-01';
 
+    /** § 295 odst. 2 zákona č. 99/1963 Sb. — „do jednoho týdne". */
+    private const ENFORCEMENT_NOTICE_DAYS = 7;
+    private const RULESET_ENFORCEMENT_NOTICE =
+        'cz-payroll-checklist-deadlines.enforcement-notice.v1';
+    private const SOURCE_ENFORCEMENT_NOTICE =
+        '§ 295 odst. 2 zákona č. 99/1963 Sb. (oznámení soudu / exekutorovi do jednoho týdne)';
+
     private const RULESET_CONTRACT = 'cz-payroll-checklist-deadlines.contract.v1';
     private const RULESET_TAX_DECLARATION =
         'cz-payroll-checklist-deadlines.tax-declaration.v1';
@@ -143,6 +150,17 @@ final class PayrollChecklistDeadlinePolicy
             'social_jmhz_change', 'social_jmhz_deregistration' =>
                 $this->registrationFollowUp($itemKey, $eventOn),
             'eldp_submission' => $this->eldpSubmission($itemKey, $eventOn),
+            // § 295 odst. 2 o. s. ř.: plátce mzdy oznámí soudu (exekutorovi)
+            // do jednoho týdne, že u něj povinný přestal pracovat. Znění
+            // ověřené proti zákonu č. 99/1963 Sb. (zakonyprolidi.cz, 9/2026).
+            'enforcement_insolvency_review' => $this->shifted(
+                $itemKey,
+                $eventOn,
+                self::ENFORCEMENT_NOTICE_DAYS,
+                self::RULESET_ENFORCEMENT_NOTICE,
+                self::SOURCE_ENFORCEMENT_NOTICE,
+                'statute_verified',
+            ),
             'taxable_income_confirmation' => $this->notDerived(
                 $itemKey,
                 'Vydává se na žádost zaměstnance do 10 dnů od jejího podání '

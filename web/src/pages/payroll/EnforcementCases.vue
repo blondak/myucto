@@ -43,6 +43,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import EnforcementLegalFacts from '@/pages/payroll/EnforcementLegalFacts.vue'
+import EnforcementTerminationNoticePanel from '@/pages/payroll/EnforcementTerminationNoticePanel.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
@@ -278,11 +279,11 @@ const claimCategories = computed<EnforcementClaimCategory[]>(() =>
     : statutoryClaimCategories,
 )
 const commandByStatus: Partial<Record<EnforcementCaseStatus, EnforcementCaseCommand[]>> = {
-  received: ['mark_final', 'stop'],
-  withhold_and_hold: ['authorize_remittance', 'defer_no_withholding', 'defer_hold', 'stop'],
-  deferred_no_withholding: ['resume_holding', 'resume_remittance', 'stop'],
-  deferred_hold: ['resume_holding', 'resume_remittance', 'stop'],
-  remit: ['defer_no_withholding', 'defer_hold', 'stop'],
+  received: ['mark_final', 'end_at_payer', 'stop'],
+  withhold_and_hold: ['authorize_remittance', 'defer_no_withholding', 'defer_hold', 'release_to_administrator', 'end_at_payer', 'stop'],
+  deferred_no_withholding: ['resume_holding', 'resume_remittance', 'end_at_payer', 'stop'],
+  deferred_hold: ['resume_holding', 'resume_remittance', 'release_to_administrator', 'end_at_payer', 'stop'],
+  remit: ['defer_no_withholding', 'defer_hold', 'release_to_administrator', 'end_at_payer', 'stop'],
 }
 const documentCommands = new Set<EnforcementCaseCommand>([
   'mark_final',
@@ -292,12 +293,22 @@ const documentCommands = new Set<EnforcementCaseCommand>([
   'resume_holding',
   'resume_remittance',
   'stop',
+  'release_to_administrator',
 ])
 const reasonCommands = new Set<EnforcementCaseCommand>([
   'defer_no_withholding',
   'defer_hold',
   'stop',
+  'release_to_administrator',
 ])
+/*
+ * Vydání depozita insolvenčnímu správci potřebuje kromě rozhodnutí i účet
+ * správce — bez něj by nevznikl platební závazek.
+ */
+const administratorAccountId = ref<number | null>(null)
+const administratorAccounts = computed(() =>
+  recipientAccounts.value.filter((account) => account.institution_type === 'other_recipient'),
+)
 const deleteBlockerTranslations: Record<string, string> = {
   claim_exists: 'payroll.enforcement.delete_blocked.claim_exists',
   event_exists: 'payroll.enforcement.delete_blocked.event_exists',
@@ -316,6 +327,7 @@ const transitionCanSubmit = computed(() => {
   const command = pendingCommand.value
   if (!command) return false
   if (documentCommands.has(command) && !selectedDocument.value) return false
+  if (command === 'release_to_administrator' && administratorAccountId.value === null) return false
   return !reasonCommands.has(command) || transitionReason.value.trim().length > 0
 })
 
@@ -515,6 +527,9 @@ const transitionBlockedReason = computed<string | null>(() => {
   }
   if (reasonCommands.has(command) && transitionReason.value.trim().length === 0) {
     return t('payroll.enforcement.transition_blocked_reason')
+  }
+  if (command === 'release_to_administrator' && administratorAccountId.value === null) {
+    return t('payroll.enforcement.administrator_account_missing')
   }
   return null
 })
@@ -838,6 +853,7 @@ function closeTransition() {
   ++documentRequestSequence
   pendingCommand.value = null
   transitionReason.value = ''
+  administratorAccountId.value = null
   documentQuery.value = ''
   documentCandidates.value = []
   selectedDocument.value = null
@@ -1039,6 +1055,9 @@ async function transition(command = pendingCommand.value) {
       decision_document_id: documentCommands.has(command)
         ? selectedDocument.value?.id ?? null
         : null,
+      ...(command === 'release_to_administrator'
+        ? { administrator_account_id: administratorAccountId.value }
+        : {}),
     })
     detail.value = updated
     updateSummary(updated)
@@ -1053,7 +1072,9 @@ async function transition(command = pendingCommand.value) {
 
 function commandVariant(command: EnforcementCaseCommand) {
   if (command === 'stop') return btnOutline('danger')
-  if (command.startsWith('defer')) return btnOutline('warning')
+  if (command.startsWith('defer') || command === 'release_to_administrator' || command === 'end_at_payer') {
+    return btnOutline('warning')
+  }
   if (command === 'authorize_remittance' || command === 'resume_remittance') {
     return btnOutline('success')
   }
@@ -1466,6 +1487,14 @@ onMounted(async () => {
               {{ t('payroll.enforcement.transition_reason') }}
               <textarea v-model="transitionReason" required rows="3" maxlength="500" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
             </label>
+            <label v-if="pendingCommand === 'release_to_administrator'" class="text-xs font-medium text-neutral-600">
+              {{ t('payroll.enforcement.administrator_account') }}
+              <select v-model="administratorAccountId" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="administrator-account">
+                <option :value="null">{{ t('payroll.enforcement.recipient_account_none') }}</option>
+                <option v-for="account in administratorAccounts" :key="account.id" :value="account.id">{{ recipientAccountLabel(account) }}</option>
+              </select>
+              <span class="mt-1 block font-normal text-neutral-500">{{ t('payroll.enforcement.administrator_account_hint') }}</span>
+            </label>
           </div>
           <div class="mt-4 flex flex-wrap justify-end gap-2">
             <button type="button" :class="btnOutline('neutral')" @click="closeTransition"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button>
@@ -1473,6 +1502,12 @@ onMounted(async () => {
             <p v-if="transitionBlockedReason" :class="[BTN_DISABLED_NOTE, 'w-full text-right']" data-test="transition-apply-blocked">{{ transitionBlockedReason }}</p>
           </div>
         </form>
+
+        <EnforcementTerminationNoticePanel
+          v-if="detail.case_kind === 'enforcement' && !['paid', 'stopped'].includes(detail.status)"
+          :case-id="detail.id"
+          :can-write="canWrite"
+        />
 
         <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <section ref="evidenceSection" class="scroll-mt-4 rounded-lg border border-neutral-200 bg-surface p-4">
@@ -1516,6 +1551,7 @@ onMounted(async () => {
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.original') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.original_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.withheld') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.withheld_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.held') }}</dt><dd class="mt-1 font-medium text-warning-600">{{ money(detail.settlement.held_minor) }}</dd></div>
+            <div v-if="detail.settlement.administrator_minor > 0" class="rounded-md border border-neutral-200 px-3 py-2" data-test="settlement-administrator"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.administrator') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.administrator_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.liability') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.liability_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.remitted') }}</dt><dd class="mt-1 font-medium text-success-700">{{ money(detail.settlement.settled_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.remaining_to_withhold') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.remaining_to_withhold_minor) }}</dd></div>

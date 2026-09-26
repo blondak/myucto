@@ -134,6 +134,9 @@ final class PayrollEnforcementLiabilityMaterializer
                     );
                 }
                 $targetAmount = $target['amount_minor'] ?? 0;
+                // Vydání depozita správci je splatné dnem vydání, ne dnem
+                // výplaty mzdy, ze které se částka kdysi srazila.
+                $targetDueOn = $target['due_on'] ?? $dueOn;
                 $priorSigned = $previous['signed_minor'] ?? 0;
                 $delta = $this->subtract($targetAmount, $priorSigned);
                 if ($delta === 0) {
@@ -190,7 +193,7 @@ final class PayrollEnforcementLiabilityMaterializer
                         $existing,
                         $direction,
                         $recipientReference,
-                        $dueOn,
+                        $targetDueOn,
                         $amount,
                         $previousId,
                         $sourceHash,
@@ -206,7 +209,7 @@ final class PayrollEnforcementLiabilityMaterializer
                     PayrollEnforcementPaymentRepository::LIABILITY_KIND,
                     $direction,
                     $recipientReference,
-                    $dueOn,
+                    $targetDueOn,
                     $amount,
                     $previousId,
                     $sourceJson,
@@ -405,6 +408,136 @@ final class PayrollEnforcementLiabilityMaterializer
                     'variable_symbol' => $account['variable_symbol'],
                     'specific_symbol' => $account['specific_symbol'],
                     'constant_symbol' => $account['constant_symbol'],
+                ],
+            ];
+        }
+
+        foreach ($this->administratorTargets($supplierId, $revisionId) as $reference => $target) {
+            if (isset($targets[$reference])) {
+                throw new \DomainException(
+                    'Vydání depozita správci koliduje s jiným závazkem.',
+                );
+            }
+            $targets[$reference] = $target;
+        }
+
+        return $targets;
+    }
+
+    /**
+     * Závazky z depozita vydaného insolvenčnímu správci.
+     *
+     * Po schválení oddlužení nebo prohlášení konkursu patří částky sražené
+     * a deponované za zahájeného řízení do majetkové podstaty (§ 109 odst. 1
+     * písm. c) IZ, R 4/2020). Platí se na účet správce, který vydání nese,
+     * a jsou splatné dnem vydání. Referenci mají vlastní, takže se do
+     * vypořádání pohledávky oprávněného (reference `enforcement:c…:cl…`)
+     * nepočítají — oprávněný z nich nic nedostal.
+     *
+     * @return array<string,array{
+     *   recipient_reference:string,
+     *   amount_minor:int,
+     *   due_on:string,
+     *   sort_key:array{int,string,int},
+     *   release_evidence:array<string,mixed>,
+     *   target_snapshot:array<string,mixed>
+     * }>
+     */
+    private function administratorTargets(int $supplierId, int $revisionId): array
+    {
+        $targets = [];
+        foreach ($this->enforcement->handedToAdministratorForRevision(
+            $supplierId,
+            $revisionId,
+        ) as $row) {
+            if ($row['amount_minor'] <= 0) {
+                continue;
+            }
+            $caseId = $row['case_id'];
+            $account = $this->institutions->find($supplierId, $row['recipient_account_id']);
+            if ($account === null
+                || ($account['institution_type'] ?? null) !== self::INSTITUTION_TYPE
+            ) {
+                throw new \DomainException(
+                    "Účet insolvenčního správce u případu {$caseId} není v katalogu příjemců.",
+                );
+            }
+            $institutionCode = (string) $account['institution_code'];
+            $dueOn = $this->date($row['released_on'], 'den vydání depozita');
+            $accounts = $this->institutions->lockEffectivePaymentTargets(
+                $supplierId,
+                self::INSTITUTION_TYPE,
+                $institutionCode,
+                'CZK',
+                $dueOn,
+            );
+            $matching = array_values(array_filter(
+                $accounts,
+                static fn (array $candidate): bool =>
+                    $candidate['id'] === $row['recipient_account_id'],
+            ));
+            if (count($matching) !== 1) {
+                throw new \DomainException(
+                    "Účet insolvenčního správce u případu {$caseId} není ke dni vydání účinný.",
+                );
+            }
+            $locked = $matching[0];
+            $this->assertVerifiedAccount($supplierId, $dueOn, $locked);
+            $reference = PayrollEnforcementPaymentRepository::administratorLiabilityReference(
+                $caseId,
+                $row['claim_id'],
+                $row['decision_event_id'],
+            );
+            $targets[$reference] = [
+                'recipient_reference' =>
+                    'institution:' . self::INSTITUTION_TYPE
+                    . ":{$institutionCode}:account:{$locked['id']}",
+                'amount_minor' => $row['amount_minor'],
+                'due_on' => $dueOn,
+                'sort_key' => [
+                    ClaimCategory::from($row['claim_category'])->paymentPriorityRank(),
+                    $row['claim_priority_date'] ?? '9999-12-31',
+                    $row['claim_id'],
+                ],
+                'release_evidence' => [
+                    'release_decision_event_id' => $row['decision_event_id'],
+                    'release_decision_document_id' => $row['decision_document_id'],
+                    'release_decision_evidence_hash' => $row['decision_evidence_hash'],
+                ],
+                'target_snapshot' => [
+                    'case_id' => $caseId,
+                    'claim_id' => $row['claim_id'],
+                    'claim_category' => $row['claim_category'],
+                    'recipient_party_id' => null,
+                    'recipient_instruction_document_id' => $row['decision_document_id'],
+                    'recipient_instruction_document_sha256' => $row['decision_evidence_hash'],
+                    'institution_type' => self::INSTITUTION_TYPE,
+                    'institution_code' => $institutionCode,
+                    'payment_target_id' => $locked['id'],
+                    'payment_target_hash' => $locked['bank_account_hash'],
+                    'payment_target_row_version' => $locked['row_version'],
+                    'payment_target_verification_hash' => hash(
+                        'sha256',
+                        CanonicalJson::encode([
+                            'schema_reference' =>
+                                'payroll-institution-payment-target-verification.v1',
+                            'institution_type' => self::INSTITUTION_TYPE,
+                            'institution_code' => $institutionCode,
+                            'payment_target_id' => $locked['id'],
+                            'payment_target_hash' => $locked['bank_account_hash'],
+                            'row_version' => $locked['row_version'],
+                            'variable_symbol' => $locked['variable_symbol'],
+                            'specific_symbol' => $locked['specific_symbol'],
+                            'constant_symbol' => $locked['constant_symbol'],
+                            'source_kind' => $locked['source_kind'],
+                            'source_reference' => $locked['source_reference'],
+                            'verified_on' => $locked['verified_on'],
+                            'verified_by' => $locked['verified_by'],
+                        ]),
+                    ),
+                    'variable_symbol' => $locked['variable_symbol'],
+                    'specific_symbol' => $locked['specific_symbol'],
+                    'constant_symbol' => $locked['constant_symbol'],
                 ],
             ];
         }

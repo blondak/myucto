@@ -594,7 +594,8 @@ final class PayrollEmploymentExitRevisionRepository
                     )
                 )
                 AND ledger.entry_kind IN (
-                    "withheld", "released_to_employee", "adjustment"
+                    "withheld", "released_to_employee", "adjustment",
+                    "released_to_administrator"
                 )
               ORDER BY result.period_start, ledger.id
               FOR UPDATE',
@@ -623,7 +624,9 @@ final class PayrollEmploymentExitRevisionRepository
             }
             $withheld += match ($kind) {
                 'withheld', 'adjustment' => $amount,
-                'released_to_employee' => -$amount,
+                // Vydané insolvenčnímu správci oprávněnému nepřišlo, takže
+                // mezi „dosud provedené srážky" na jeho pohledávku nepatří.
+                'released_to_employee', 'released_to_administrator' => -$amount,
                 default => throw new \UnexpectedValueException(
                     'Ledger obsahuje nepodporovaný druh položky.',
                 ),

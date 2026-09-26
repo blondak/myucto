@@ -25,6 +25,8 @@ trait EnforcementRunFixtureTrait
     use IsolatedSupplierTrait;
 
     private Connection $db;
+    /** Kontejner fixture — jeho služby sdílejí spojení (a tedy transakci) testu. */
+    private \Psr\Container\ContainerInterface $container;
     private PayrollRunCommandService $runs;
     private PayrollRunRepository $runRepository;
     private PayrollStatutoryAccumulatorRepository $accumulators;
@@ -38,6 +40,7 @@ trait EnforcementRunFixtureTrait
     private function bootEnforcementRun(int $grossMinor = 3_500_000): void
     {
         $container = Bootstrap::buildContainer();
+        $this->container = $container;
         $db = $container->get(Connection::class);
         $runs = $container->get(PayrollRunCommandService::class);
         $repository = $container->get(PayrollRunRepository::class);
@@ -223,6 +226,71 @@ trait EnforcementRunFixtureTrait
             ],
             $stmt->fetchAll(\PDO::FETCH_ASSOC),
         );
+    }
+
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    private function service(string $class): object
+    {
+        $service = $this->container->get($class);
+        if (!$service instanceof $class) {
+            throw new \RuntimeException("Služba {$class} není dostupná.");
+        }
+
+        return $service;
+    }
+
+    /** Syntetický firemní dokument (rozhodnutí, vyhláška) v DMS. */
+    private function seedDecisionDocument(string $seed): int
+    {
+        $hash = hash('sha256', "enforcement-decision:{$this->supplierId}:{$seed}");
+        $this->db->pdo()->prepare(
+            'INSERT INTO documents
+                (supplier_id, title, original_name, filename, sha256, mime_type,
+                 size_bytes, doc_type, source, uploaded_by, scope, owner_user_id)
+             VALUES (?, ?, "decision.pdf", ?, ?, "application/pdf", 1, "pdf",
+                     "manual", ?, "company", NULL)',
+        )->execute([
+            $this->supplierId,
+            "Syntetické rozhodnutí {$seed}",
+            "{$hash}.pdf",
+            $hash,
+            $this->actorId,
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function documentSha(int $documentId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT sha256 FROM documents WHERE id = ?');
+        $stmt->execute([$documentId]);
+
+        return (string) $stmt->fetchColumn();
+    }
+
+    private function seedRunParty(int $caseId, string $role, string $name, ?string $reference): void
+    {
+        $documentId = $this->seedDecisionDocument("party-{$caseId}-{$role}");
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_case_parties
+                (supplier_id, case_id, party_role, revision_no, effective_from,
+                 party_name, party_reference, source_document_id,
+                 source_document_sha256, created_by)
+             VALUES (?, ?, ?, 1, "2026-01-01", ?, ?, ?, ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $caseId,
+            $role,
+            $name,
+            $reference,
+            $documentId,
+            $this->documentSha($documentId),
+            $this->actorId,
+        ]);
     }
 
     private function seedRunCase(

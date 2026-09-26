@@ -5396,7 +5396,7 @@
         "termination_document": "Termination document",
         "health_insurance_deregistration": "Health insurer deregistration",
         "social_jmhz_deregistration": "Social security / JMHZ deregistration",
-        "enforcement_insolvency_review": "Enforcement and insolvency review",
+        "enforcement_insolvency_review": "Enforcement and insolvency: notify the court / bailiff within 7 days",
         "later_income_review": "Later-payment review",
         "eldp_submission": "Pension insurance record (ELDP)",
         "taxable_income_confirmation": "Confirmation of taxable income"
@@ -8510,7 +8510,8 @@
         "deferred_no_withholding": "Deferred without withholding",
         "deferred_hold": "Deferred — hold funds",
         "paid": "Paid",
-        "stopped": "Stopped"
+        "stopped": "Stopped",
+        "ended_at_payer": "Ended with us — employment ended"
       },
       "categories": {
         "current_maintenance": "Current maintenance",
@@ -8538,6 +8539,8 @@
         "resume_remittance": "Resume remittance",
         "mark_paid": "Mark as paid",
         "stop": "Stop",
+        "release_to_administrator": "Hand the deposit over to the insolvency administrator",
+        "end_at_payer": "End with us (employment ended)",
         "confirm": {
           "mark_final": "Start withholding and hold funds until the recipient is verified?",
           "authorize_remittance": "Allow remittance of withheld funds to the verified recipient?",
@@ -8546,9 +8549,58 @@
           "resume_holding": "Resume withholding and holding funds?",
           "resume_remittance": "Resume withholding and remittance?",
           "mark_paid": "Mark the zero-balance case as paid?",
-          "stop": "Select the decision and provide a reason for stopping the case."
+          "stop": "Select the decision and provide a reason for stopping the case.",
+          "release_to_administrator": "Once debt relief is approved or bankruptcy is declared, amounts withheld and held during the commenced insolvency proceedings belong to the insolvency administrator (Section 109(1)(c) of the Insolvency Act). Select the insolvency court's decision, the administrator's account and give a reason. A payment liability to the administrator is created and the enforcement is no longer carried out.",
+          "end_at_payer": "End withholding with us? This is only possible once all employments have ended, the final payroll is approved and the notice to the court or bailiff has been issued (Section 295(2) of the Civil Procedure Code). The enforcement is not stopped — it continues with the next payer."
         },
         "confirm_for": "{question}\n\nCase: {name}"
+      },
+      "administrator_account": "Insolvency administrator's account",
+      "administrator_account_hint": "A verified “other recipient” account from Payroll settings → Institution payment accounts.",
+      "administrator_account_missing": "Select the insolvency administrator's account.",
+      "termination_notice": {
+        "title": "End of employment — notice to the court / bailiff",
+        "hint": "The payer must notify the court (bailiff) within one week that the debtor stopped working for them and send a statement of deductions made and paid out, with the order of the claims (Section 295(2) of the Civil Procedure Code). The notice content is frozen when issued.",
+        "load_failed": "The end-of-employment notice could not be loaded.",
+        "ended_on": "Employment ended",
+        "due_on": "Notify by",
+        "overdue": "Overdue",
+        "authority": {
+          "court": "Court",
+          "executor": "Court bailiff"
+        },
+        "withheld_paid": "Withheld / paid to creditor",
+        "new_payer_name": "New payer (if known)",
+        "new_payer_hint": "Optional. Fill in if you know where the debtor started working — the court then notifies them under Section 294(3) of the Civil Procedure Code.",
+        "new_payer_reference": "New payer's company ID or address",
+        "generate": "Issue notice",
+        "regenerate": "Issue again (new version)",
+        "generated": "The notice has been issued.",
+        "generate_failed": "The notice could not be issued.",
+        "revision": "Notice, version {revision}",
+        "not_sent": "Not sent",
+        "sent": "Sent {date} ({channel})",
+        "download": "Download PDF",
+        "download_failed": "The notice PDF could not be downloaded.",
+        "isds_title": "Send via data box (draft)",
+        "recipient_placeholder": "Select the court / bailiff from the codebook",
+        "recipient_missing": "No recipient with a data box ID is in the recipient codebook. Add it under Data box → Recipients, or send the notice another way and record the dispatch.",
+        "enqueue": "Prepare for sending",
+        "queued": "The notice is in the data box queue.",
+        "queued_hint": "Send the message in the Data box section, then record the dispatch here.",
+        "open_databox": "Open data box",
+        "enqueue_failed": "The notice could not be queued.",
+        "mark_sent_title": "Record dispatch",
+        "sent_on": "Dispatch date",
+        "mark_sent": "Record dispatch",
+        "marked_sent": "The dispatch has been recorded.",
+        "mark_failed": "The dispatch could not be recorded.",
+        "channels": {
+          "isds": "data box",
+          "post": "post",
+          "personal": "in person",
+          "other": "other"
+        }
       },
       "recipient_account": "Deduction recipient (payment account catalogue)",
       "recipient_account_none": "Not selected",
@@ -8559,6 +8611,7 @@
         "original": "Original amount",
         "withheld": "Withheld from employee",
         "held": "Held in deposit",
+        "administrator": "Handed over to the insolvency administrator",
         "liability": "Prepared for payment",
         "remitted": "Remitted to recipient",
         "remaining_to_withhold": "Remaining to withhold",
@@ -8575,7 +8628,8 @@
         "remitted": "Remitted to recipient",
         "released_to_employee": "Released to employee",
         "employer_fee": "Employer flat fee",
-        "adjustment": "Adjustment"
+        "adjustment": "Adjustment",
+        "released_to_administrator": "Handed over to the insolvency administrator"
       },
       "validation": {
         "amount": "Enter a non-negative amount with no more than two decimal places."

@@ -1,0 +1,90 @@
+<style>
+  body { font-family: montserrat, dejavusans, sans-serif; font-size: 9.5pt; color: #2B2226; }
+  h1 { font-size: 14pt; margin: 0 0 4pt 0; }
+  h2 { font-size: 10.5pt; margin: 12pt 0 4pt 0; }
+  table.data { width: 100%; border-collapse: collapse; }
+  table.data th, table.data td { border: 0.3pt solid #DEC8D4; padding: 3pt 4pt; vertical-align: top; }
+  table.data th { background: #F7EFF3; text-align: left; font-weight: bold; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  .muted { color: #6B5C66; font-size: 8.5pt; }
+  .addr td { padding: 1pt 0; }
+</style>
+
+<table style="width:100%">
+  <tr>
+    <td style="width:50%;vertical-align:top">
+      <strong>Plátce mzdy</strong><br>
+      {{ employer.name }}<br>
+      IČ {{ employer.identification_number }}<br>
+      {{ employer.address.street_line }}<br>
+      {{ employer.address.postal_code }} {{ employer.address.city }}
+    </td>
+    <td style="width:50%;vertical-align:top">
+      <strong>{{ authority.role == 'executor' ? 'Soudní exekutor' : 'Soud' }}</strong><br>
+      {{ authority.name }}<br>
+      {% if authority.reference %}Spisová značka: {{ authority.reference }}{% endif %}
+    </td>
+  </tr>
+</table>
+
+<h1 style="margin-top:14pt">Oznámení o skončení pracovního poměru povinného</h1>
+<p class="muted">podle § 295 odst. 2 zákona č. 99/1963 Sb., občanský soudní řád{% if authority.role == 'executor' %}, ve spojení s § 52 odst. 1 zákona č. 120/2001 Sb., exekuční řád{% endif %}</p>
+
+<p>
+  Oznamujeme, že povinný <strong>{{ employee.name }}</strong>{% if employee.birth_date %}, nar. {{ employee.birth_date|cz_date }}{% endif %},
+  u nás přestal pracovat dnem <strong>{{ employment.ended_on|cz_date }}</strong>.
+  Srážky ze mzdy jsme prováděli od {{ case.effective_from|cz_date }}.
+</p>
+{% if beneficiary %}
+<p>Oprávněný: {{ beneficiary.name }}{% if beneficiary.reference %} ({{ beneficiary.reference }}){% endif %}</p>
+{% endif %}
+
+<h2>Pohledávky, pro které byl nařízen výkon rozhodnutí, a jejich pořadí</h2>
+<table class="data">
+  <tr>
+    <th>Pořadí</th>
+    <th>Druh pohledávky</th>
+    <th class="num">Výše pohledávky</th>
+    <th class="num">Sraženo</th>
+    <th class="num">Vyplaceno oprávněnému</th>
+    <th class="num">Zbývá</th>
+  </tr>
+  {% for claim in claims %}
+  <tr>
+    <td>{{ loop.index }}. (doručeno {{ claim.order_date|cz_date }})</td>
+    <td>{{ category_labels[claim.category] ?? claim.category }}</td>
+    <td class="num">{{ claim.claim_minor|minor_money }} Kč</td>
+    <td class="num">{{ claim.withheld_minor|minor_money }} Kč</td>
+    <td class="num">{{ claim.paid_out_minor|minor_money }} Kč</td>
+    <td class="num">{{ claim.remaining_minor|minor_money }} Kč</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6">Pohledávky nejsou v evidenci plátce vedeny.</td></tr>
+  {% endfor %}
+  <tr>
+    <th colspan="3">Celkem</th>
+    <th class="num">{{ totals.withheld_minor|minor_money }} Kč</th>
+    <th class="num">{{ totals.paid_out_minor|minor_money }} Kč</th>
+    <th class="num">{{ totals.remaining_minor|minor_money }} Kč</th>
+  </tr>
+</table>
+{% if totals.held_minor > 0 %}
+<p>Sraženo a dosud neodesláno (v depozitu): {{ totals.held_minor|minor_money }} Kč.</p>
+{% endif %}
+{% if totals.administrator_minor > 0 %}
+<p>Vydáno insolvenčnímu správci: {{ totals.administrator_minor|minor_money }} Kč.</p>
+{% endif %}
+
+<h2>Nový plátce mzdy</h2>
+{% if new_payer %}
+<p>{{ new_payer.name }}{% if new_payer.reference %}, {{ new_payer.reference }}{% endif %}</p>
+{% else %}
+<p>Nový plátce mzdy nám není znám.</p>
+{% endif %}
+
+<p style="margin-top:18pt">
+  Datum vystavení: {{ issued_on|cz_date }}<br><br>
+  {{ employer.issuer.name }}<br>
+  <span class="muted">{{ employer.issuer.email }}, {{ employer.issuer.phone }}</span>
+</p>
+<p class="muted" style="margin-top:12pt">Vyhotoveno v MyÚčto.cz ({{ renderer_version }}).</p>

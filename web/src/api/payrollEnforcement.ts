@@ -1,6 +1,7 @@
 import { api } from './client'
 
 export type EnforcementCaseKind = 'enforcement' | 'voluntary_agreement'
+// `ended_at_payer`: srážení u tohoto plátce skončilo se skončením pracovního poměru.
 export type EnforcementCaseStatus =
   | 'received'
   | 'withhold_and_hold'
@@ -9,6 +10,10 @@ export type EnforcementCaseStatus =
   | 'deferred_hold'
   | 'paid'
   | 'stopped'
+  | 'ended_at_payer'
+// `release_to_administrator`: vydání depozita insolvenčnímu správci (schválené
+// oddlužení / konkurs); `end_at_payer`: ukončení případu u plátce po skončení
+// poměru (§ 295 odst. 2 o. s. ř.).
 export type EnforcementCaseCommand =
   | 'mark_final'
   | 'authorize_remittance'
@@ -18,6 +23,8 @@ export type EnforcementCaseCommand =
   | 'resume_remittance'
   | 'mark_paid'
   | 'stop'
+  | 'release_to_administrator'
+  | 'end_at_payer'
 // Pořadí kopíruje § 280 odst. 2 o. s. ř.: nejprve výživné, poté úplata za
 // postupované pohledávky výživného, poté postoupené výživné, poté náhradní
 // výživné a teprve pak ostatní přednostní pohledávky.
@@ -145,7 +152,7 @@ export interface EnforcementLedgerEntry {
   id: number
   claim_id: number | null
   month_result_id: number
-  entry_kind: 'withheld' | 'held' | 'released_for_remittance' | 'remitted' | 'released_to_employee' | 'employer_fee' | 'adjustment'
+  entry_kind: 'withheld' | 'held' | 'released_for_remittance' | 'remitted' | 'released_to_employee' | 'employer_fee' | 'adjustment' | 'released_to_administrator'
   amount_minor_units: number
   actor_user_id: number | null
   decision_event_id: number | null
@@ -185,6 +192,7 @@ export interface EnforcementSettlementClaim {
   outstanding_minor: number
   withheld_minor: number
   held_minor: number
+  administrator_minor: number
   liability_minor: number
   settled_minor: number
   remaining_to_withhold_minor: number
@@ -195,6 +203,7 @@ export interface EnforcementSettlement {
   claims: EnforcementSettlementClaim[]
   withheld_minor: number
   held_minor: number
+  administrator_minor: number
   liability_minor: number
   settled_minor: number
   original_minor: number
@@ -413,6 +422,46 @@ export interface XmlzamResponsePreview {
   }>
 }
 
+/** Způsob odeslání oznámení soudu / exekutorovi. Zrcadlí sloupec `sent_channel`. */
+export type EnforcementTerminationNoticeChannel = 'isds' | 'post' | 'personal' | 'other'
+
+/** Oznámení o skončení poměru povinného (§ 295 odst. 2 o. s. ř.). */
+export interface EnforcementTerminationNotice {
+  id: number
+  case_id: number
+  employee_id: number
+  employment_id: number | null
+  revision_no: number
+  employment_ended_on: string
+  due_on: string
+  new_payer_name: string | null
+  new_payer_reference: string | null
+  snapshot_hash: string
+  sent_on: string | null
+  sent_channel: EnforcementTerminationNoticeChannel | null
+  outbox_id: number | null
+  created_at: string
+}
+
+export interface EnforcementTerminationNoticePreview {
+  due_on: string
+  employment: { ended_on: string }
+  authority: { role: 'court' | 'executor', name: string, reference: string | null }
+  totals: {
+    withheld_minor: number
+    paid_out_minor: number
+    held_minor: number
+    administrator_minor: number
+    remaining_minor: number
+  }
+}
+
+export interface EnforcementTerminationNoticeOverview {
+  notices: EnforcementTerminationNotice[]
+  preview: EnforcementTerminationNoticePreview | null
+  blocked_reason: string | null
+}
+
 export const payrollEnforcementApi = {
   /**
    * Stránka seznamu případů. Filtr i stránkování drží server — bez `limit` se
@@ -532,12 +581,54 @@ export const payrollEnforcementApi = {
       row_version: number
       reason?: string | null
       decision_document_id?: number | null
+      // Jen u `release_to_administrator`: účet insolvenčního správce z katalogu.
+      administrator_account_id?: number | null
     },
   ) =>
     api.post<{ case: EnforcementCaseDetail }>(
       `/payroll/enforcement/cases/${caseId}/commands/${command}`,
       payload,
     ).then(response => response.data.case),
+  terminationNotices: (caseId: number) =>
+    api.get<EnforcementTerminationNoticeOverview>(
+      `/payroll/enforcement/cases/${caseId}/termination-notices`,
+    ).then(response => response.data),
+  generateTerminationNotice: (caseId: number, payload: {
+    new_payer_name?: string | null
+    new_payer_reference?: string | null
+  }) =>
+    api.post<EnforcementTerminationNotice>(
+      `/payroll/enforcement/cases/${caseId}/termination-notices`,
+      payload,
+    ).then(response => response.data),
+  markTerminationNoticeSent: (noticeId: number, payload: {
+    sent_on: string
+    channel: EnforcementTerminationNoticeChannel
+  }) =>
+    api.post<EnforcementTerminationNotice>(
+      `/payroll/enforcement/termination-notices/${noticeId}/sent`,
+      payload,
+    ).then(response => response.data),
+  enqueueTerminationNotice: (noticeId: number, recipientId: number, environment = 'production') =>
+    api.post<{ outbox_id: number, created: boolean }>(
+      `/payroll/enforcement/termination-notices/${noticeId}/isds`,
+      { recipient_id: recipientId, environment },
+    ).then(response => response.data),
+  downloadTerminationNotice: async (noticeId: number): Promise<void> => {
+    const response = await api.get<Blob>(
+      `/payroll/enforcement/termination-notices/${noticeId}/pdf`,
+      { responseType: 'blob' },
+    )
+    const objectUrl = URL.createObjectURL(response.data)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = `oznameni-skonceni-pomeru-${noticeId}.pdf`
+      anchor.click()
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  },
   monthEvidence: (employeeId: number, period: string) =>
     api.get<{ evidence: EnforcementMonthEvidence }>(
       `/payroll/enforcement/people/${employeeId}/month/${period}/evidence`,

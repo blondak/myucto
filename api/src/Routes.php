@@ -886,6 +886,12 @@ final class Routes
                 '/enforcement/cases/{id:[0-9]+}/commands/{command:[a-z_]+}',
                 [PayrollEnforcementAction::class, 'transition'],
             );
+            // Oznámení o skončení poměru povinného (§ 295 odst. 2 o. s. ř.).
+            $g->get('/enforcement/cases/{id:[0-9]+}/termination-notices', [\MyInvoice\Action\Payroll\PayrollEnforcementTerminationNoticeAction::class, 'overview']);
+            $g->post('/enforcement/cases/{id:[0-9]+}/termination-notices', [\MyInvoice\Action\Payroll\PayrollEnforcementTerminationNoticeAction::class, 'generate']);
+            $g->get('/enforcement/termination-notices/{noticeId:[0-9]+}/pdf', [\MyInvoice\Action\Payroll\PayrollEnforcementTerminationNoticeAction::class, 'pdf']);
+            $g->post('/enforcement/termination-notices/{noticeId:[0-9]+}/sent', [\MyInvoice\Action\Payroll\PayrollEnforcementTerminationNoticeAction::class, 'markSent']);
+            $g->post('/enforcement/termination-notices/{noticeId:[0-9]+}/isds', [\MyInvoice\Action\Payroll\PayrollEnforcementTerminationNoticeAction::class, 'enqueue']);
             $g->put(
                 '/enforcement/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/evidence',
                 [PayrollEnforcementAction::class, 'saveMonthEvidence'],

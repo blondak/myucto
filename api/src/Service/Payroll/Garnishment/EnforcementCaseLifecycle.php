@@ -54,6 +54,32 @@ final class EnforcementCaseLifecycle
         if ($command === EnforcementCaseCommand::MarkPaid && $context->outstandingMinorUnits !== 0) {
             throw new DomainException('Případ s nenulovým zůstatkem nelze označit za uhrazený.');
         }
+        if ($command === EnforcementCaseCommand::ReleaseToAdministrator
+            && $context->heldDepositMinorUnits === 0
+        ) {
+            throw new DomainException(
+                'Případ nemá žádné depozitum, které by šlo vydat insolvenčnímu správci.',
+            );
+        }
+        if ($command === EnforcementCaseCommand::EndAtPayer) {
+            // § 295 odst. 2 o. s. ř.: skončení poměru se soudu OZNAMUJE,
+            // nerozhoduje o něm. Případ proto nepotřebuje rozhodnutí, ale musí
+            // být doložené, že poměr opravdu skončil, poslední mzda se srazila
+            // a oznámení existuje — jinak by běh přestal srážet mzdu, kterou
+            // ještě vyplácí.
+            if (!$context->employmentExitSettled) {
+                throw new DomainException(
+                    'Případ lze u plátce ukončit až po skončení všech pracovních vztahů, '
+                    . 'schválení poslední mzdy a vystavení oznámení soudu nebo exekutorovi.',
+                );
+            }
+            if ($context->heldDepositMinorUnits > 0) {
+                throw new DomainException(
+                    'Případ má v depozitu sražené částky. Nejdřív je uvolněte oprávněnému, '
+                    . 'vraťte zaměstnanci nebo vydejte insolvenčnímu správci.',
+                );
+            }
+        }
         if (
             in_array(
                 $command,
@@ -61,6 +87,7 @@ final class EnforcementCaseLifecycle
                     EnforcementCaseCommand::DeferNoWithholding,
                     EnforcementCaseCommand::DeferHold,
                     EnforcementCaseCommand::Stop,
+                    EnforcementCaseCommand::ReleaseToAdministrator,
                 ],
                 true,
             )
@@ -100,6 +127,16 @@ final class EnforcementCaseLifecycle
             [EnforcementCaseStatus::DeferredNoWithholding, EnforcementCaseCommand::Stop],
             [EnforcementCaseStatus::DeferredHold, EnforcementCaseCommand::Stop] =>
                 EnforcementCaseStatus::Stopped,
+            [EnforcementCaseStatus::WithholdAndHold, EnforcementCaseCommand::ReleaseToAdministrator],
+            [EnforcementCaseStatus::Remit, EnforcementCaseCommand::ReleaseToAdministrator],
+            [EnforcementCaseStatus::DeferredHold, EnforcementCaseCommand::ReleaseToAdministrator] =>
+                EnforcementCaseStatus::DeferredNoWithholding,
+            [EnforcementCaseStatus::Received, EnforcementCaseCommand::EndAtPayer],
+            [EnforcementCaseStatus::WithholdAndHold, EnforcementCaseCommand::EndAtPayer],
+            [EnforcementCaseStatus::Remit, EnforcementCaseCommand::EndAtPayer],
+            [EnforcementCaseStatus::DeferredNoWithholding, EnforcementCaseCommand::EndAtPayer],
+            [EnforcementCaseStatus::DeferredHold, EnforcementCaseCommand::EndAtPayer] =>
+                EnforcementCaseStatus::EndedAtPayer,
             default => throw new DomainException(
                 "Příkaz {$command->value} není povolen ze stavu {$from->value}.",
             ),

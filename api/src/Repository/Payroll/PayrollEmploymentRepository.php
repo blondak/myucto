@@ -63,6 +63,7 @@ final class PayrollEmploymentRepository
         'social_jmhz_registration' => 'registration_obligation',
         'health_insurance_registration' => 'health_start_obligation',
         'health_insurance_deregistration' => 'health_end_obligation',
+        'enforcement_insolvency_review' => 'enforcement_termination_notice',
     ];
 
     /**
@@ -1517,6 +1518,33 @@ final class PayrollEmploymentRepository
                                  \':employment_end:%\'
                                )
                            AND obligation.status <> \'cancelled\'
+                      )
+                      -- § 295 odst. 2 o. s. ř.: ke každému případu, který
+                      -- u osoby ke dni skončení běžel, je vystavené oznámení
+                      -- soudu / exekutorovi. Bez jediného případu se položka
+                      -- sama neodškrtne — insolvenci posoudí člověk.
+                      WHEN \'enforcement_insolvency_review\' THEN (
+                        SELECT COUNT(*) > 0
+                               AND SUM(NOT EXISTS (
+                                 SELECT 1
+                                   FROM payroll_enforcement_termination_notices notice
+                                  WHERE notice.supplier_id = enforcement_case.supplier_id
+                                    AND notice.case_id = enforcement_case.id
+                                    AND notice.employment_ended_on = employment.end_date
+                               )) = 0
+                          FROM payroll_employments employment
+                          JOIN payroll_enforcement_cases enforcement_case
+                            ON enforcement_case.supplier_id = employment.supplier_id
+                           AND enforcement_case.employee_id = employment.employee_id
+                         WHERE employment.supplier_id = item.supplier_id
+                           AND employment.id = item.employment_id
+                           AND employment.end_date IS NOT NULL
+                           AND enforcement_case.effective_from <= employment.end_date
+                           AND enforcement_case.status IN (
+                                 \'received\', \'withhold_and_hold\', \'remit\',
+                                 \'deferred_no_withholding\', \'deferred_hold\',
+                                 \'ended_at_payer\'
+                               )
                       )
                       ELSE 0
                     END AS evidence_present

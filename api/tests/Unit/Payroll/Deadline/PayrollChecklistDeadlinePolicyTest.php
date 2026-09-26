@@ -121,7 +121,6 @@ final class PayrollChecklistDeadlinePolicyTest extends TestCase
     public function testInternalReviewsGetNoInventedDeadline(): void
     {
         foreach ([
-            'enforcement_insolvency_review',
             'later_income_review',
             'contract_amendment',
         ] as $itemKey) {
@@ -134,6 +133,26 @@ final class PayrollChecklistDeadlinePolicyTest extends TestCase
             self::assertNotNull($deadline);
             self::assertNull($deadline->dueOn, $itemKey);
         }
+    }
+
+    /**
+     * Kontrola exekucí při skončení NENÍ interní revize bez lhůty: § 295
+     * odst. 2 o. s. ř. ukládá plátci mzdy oznámit soudu (exekutorovi) do
+     * jednoho týdne, že u něj povinný přestal pracovat. Dřív položka termín
+     * neměla a hlídač o ní mlčel.
+     */
+    public function testEnforcementReviewFollowsTheOneWeekNoticeDuty(): void
+    {
+        $deadline = $this->policy->forItem(
+            'enforcement_insolvency_review',
+            '2026-08-31',
+            'employment',
+        );
+
+        self::assertNotNull($deadline);
+        self::assertSame('2026-09-07', $deadline->dueOn);
+        self::assertSame('statute_verified', $deadline->sourceStatus);
+        self::assertStringContainsString('§ 295 odst. 2', (string) $deadline->source);
     }
 
     public function testDeregistrationFollowsTheEightDayRegzecWindow(): void

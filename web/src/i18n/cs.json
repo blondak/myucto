@@ -5396,7 +5396,7 @@
         "termination_document": "Doklad o skončení",
         "health_insurance_deregistration": "Odhlášení zdravotní pojišťovny",
         "social_jmhz_deregistration": "Odhlášení ČSSZ / JMHZ",
-        "enforcement_insolvency_review": "Kontrola exekucí a insolvence",
+        "enforcement_insolvency_review": "Exekuce a insolvence: oznámení soudu / exekutorovi do 7 dnů",
         "later_income_review": "Kontrola pozdějšího doplatku",
         "eldp_submission": "Evidenční list důchodového pojištění (ELDP)",
         "taxable_income_confirmation": "Potvrzení o zdanitelných příjmech"
@@ -8510,7 +8510,8 @@
         "deferred_no_withholding": "Odloženo bez srážení",
         "deferred_hold": "Odloženo — deponovat",
         "paid": "Uhrazeno",
-        "stopped": "Zastaveno"
+        "stopped": "Zastaveno",
+        "ended_at_payer": "Ukončeno u nás — poměr skončil"
       },
       "categories": {
         "current_maintenance": "Běžné výživné",
@@ -8538,6 +8539,8 @@
         "resume_remittance": "Obnovit odesílání",
         "mark_paid": "Označit za uhrazené",
         "stop": "Zastavit",
+        "release_to_administrator": "Vydat depozit insolvenčnímu správci",
+        "end_at_payer": "Ukončit u nás (skončil poměr)",
         "confirm": {
           "mark_final": "Zahájit srážení a částky do ověření příjemce deponovat?",
           "authorize_remittance": "Povolit odesílání sražených částek ověřenému příjemci?",
@@ -8546,9 +8549,58 @@
           "resume_holding": "Obnovit srážení s deponováním částek?",
           "resume_remittance": "Obnovit srážení a odesílání částek?",
           "mark_paid": "Označit případ s nulovým zůstatkem za uhrazený?",
-          "stop": "Vyberte rozhodnutí a uveďte důvod zastavení případu."
+          "stop": "Vyberte rozhodnutí a uveďte důvod zastavení případu.",
+          "release_to_administrator": "Po schválení oddlužení nebo prohlášení konkursu patří částky sražené a deponované za zahájeného insolvenčního řízení insolvenčnímu správci (§ 109 odst. 1 písm. c) IZ). Vyberte rozhodnutí insolvenčního soudu, účet správce a uveďte důvod. Vznikne platební závazek na účet správce a exekuce se dál nevykonává.",
+          "end_at_payer": "Ukončit srážení u nás? Jde to až po skončení všech pracovních vztahů, schválení poslední mzdy a vystavení oznámení soudu nebo exekutorovi (§ 295 odst. 2 o. s. ř.). Exekuce tím zastavena není — pokračuje u dalšího plátce."
         },
         "confirm_for": "{question}\n\nPřípad: {name}"
+      },
+      "administrator_account": "Účet insolvenčního správce",
+      "administrator_account_hint": "Ověřený účet typu „ostatní příjemce\" z Nastavení mezd → Platební účty institucí.",
+      "administrator_account_missing": "Vyberte účet insolvenčního správce.",
+      "termination_notice": {
+        "title": "Skončení pracovního poměru — oznámení soudu / exekutorovi",
+        "hint": "Plátce mzdy musí do jednoho týdne oznámit soudu (exekutorovi), že u něj povinný přestal pracovat, a zaslat vyúčtování provedených a vyplacených srážek s pořadím pohledávek (§ 295 odst. 2 o. s. ř.). Obsah oznámení se při vystavení zmrazí.",
+        "load_failed": "Oznámení o skončení poměru se nenačetlo.",
+        "ended_on": "Poměr skončil",
+        "due_on": "Oznámit do",
+        "overdue": "Po lhůtě",
+        "authority": {
+          "court": "Soud",
+          "executor": "Soudní exekutor"
+        },
+        "withheld_paid": "Sraženo / vyplaceno oprávněnému",
+        "new_payer_name": "Nový plátce mzdy (je-li znám)",
+        "new_payer_hint": "Nepovinné. Uveďte, pokud víte, kam povinný nastoupil — soud ho pak vyrozumí podle § 294 odst. 3 o. s. ř.",
+        "new_payer_reference": "IČO nebo adresa nového plátce",
+        "generate": "Vystavit oznámení",
+        "regenerate": "Vystavit znovu (nová verze)",
+        "generated": "Oznámení je vystavené.",
+        "generate_failed": "Oznámení se nepodařilo vystavit.",
+        "revision": "Oznámení, verze {revision}",
+        "not_sent": "Neodesláno",
+        "sent": "Odesláno {date} ({channel})",
+        "download": "Stáhnout PDF",
+        "download_failed": "PDF oznámení se nepodařilo stáhnout.",
+        "isds_title": "Odeslat datovou schránkou (koncept)",
+        "recipient_placeholder": "Vyberte soud / exekutora z číselníku",
+        "recipient_missing": "Adresát s ID datové schránky není v číselníku příjemců. Doplňte ho v agendě Datová schránka → Příjemci, nebo oznámení odešlete jinak a zaznamenejte odeslání.",
+        "enqueue": "Připravit k odeslání",
+        "queued": "Oznámení je ve frontě datové schránky.",
+        "queued_hint": "Zprávu odešlete v agendě Datová schránka, pak zde zaznamenejte odeslání.",
+        "open_databox": "Otevřít datovou schránku",
+        "enqueue_failed": "Oznámení se nepodařilo zařadit do fronty.",
+        "mark_sent_title": "Zaznamenat odeslání",
+        "sent_on": "Datum odeslání",
+        "mark_sent": "Zaznamenat odeslání",
+        "marked_sent": "Odeslání je zaznamenané.",
+        "mark_failed": "Odeslání se nepodařilo zaznamenat.",
+        "channels": {
+          "isds": "datová schránka",
+          "post": "pošta",
+          "personal": "osobně",
+          "other": "jinak"
+        }
       },
       "recipient_account": "Příjemce srážky (katalog platebních účtů)",
       "recipient_account_none": "Nezvoleno",
@@ -8559,6 +8611,7 @@
         "original": "Původní výše",
         "withheld": "Sraženo zaměstnanci",
         "held": "Drženo v depozitu",
+        "administrator": "Vydáno insolvenčnímu správci",
         "liability": "Připraveno k úhradě",
         "remitted": "Odesláno příjemci",
         "remaining_to_withhold": "Zbývá srazit",
@@ -8575,7 +8628,8 @@
         "remitted": "Odesláno příjemci",
         "released_to_employee": "Vráceno zaměstnanci",
         "employer_fee": "Paušální náhrada zaměstnavatele",
-        "adjustment": "Opravný pohyb"
+        "adjustment": "Opravný pohyb",
+        "released_to_administrator": "Vydáno insolvenčnímu správci"
       },
       "validation": {
         "amount": "Částku zadejte jako nezáporné číslo nejvýše se dvěma desetinnými místy."

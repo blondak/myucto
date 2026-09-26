@@ -173,6 +173,90 @@ final class PayrollEnforcementPaymentRepository
     }
 
     /**
+     * Depozitum vydané insolvenčnímu správci z výsledků jedné revize.
+     *
+     * Každé vydání nese vlastní rozhodnutí (schválení oddlužení / prohlášení
+     * konkursu) a účet správce z katalogu příjemců; splatné je dnem vydání,
+     * ne dnem výplaty mzdy, ze které se částka kdysi srazila.
+     *
+     * @return list<array{
+     *   case_id:int,
+     *   claim_id:int,
+     *   amount_minor:int,
+     *   recipient_account_id:int,
+     *   decision_event_id:int,
+     *   decision_document_id:int,
+     *   decision_evidence_hash:string,
+     *   released_on:string,
+     *   claim_category:string,
+     *   claim_priority_date:?string
+     * }>
+     */
+    public function handedToAdministratorForRevision(
+        int $supplierId,
+        int $revisionId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            "SELECT ledger.case_id, ledger.claim_id,
+                    SUM(ledger.amount_minor_units) AS amount_minor,
+                    ledger.recipient_account_id,
+                    ledger.decision_event_id,
+                    decision_event.decision_document_id,
+                    decision_event.decision_evidence_hash,
+                    DATE(decision_event.created_at) AS released_on,
+                    claim.category AS claim_category,
+                    claim.priority_date AS claim_priority_date
+               FROM payroll_enforcement_ledger ledger
+               JOIN payroll_enforcement_month_results month_result
+                 ON month_result.supplier_id = ledger.supplier_id
+                AND month_result.id = ledger.month_result_id
+               JOIN payroll_enforcement_claims claim
+                 ON claim.supplier_id = ledger.supplier_id
+                AND claim.id = ledger.claim_id
+               JOIN payroll_enforcement_events decision_event
+                 ON decision_event.supplier_id = ledger.supplier_id
+                AND decision_event.id = ledger.decision_event_id
+              WHERE ledger.supplier_id = ?
+                AND month_result.revision_id = ?
+                AND ledger.entry_kind = 'released_to_administrator'
+              GROUP BY ledger.case_id, ledger.claim_id, ledger.recipient_account_id,
+                       ledger.decision_event_id, decision_event.decision_document_id,
+                       decision_event.decision_evidence_hash,
+                       DATE(decision_event.created_at), claim.category,
+                       claim.priority_date
+              ORDER BY ledger.case_id, ledger.claim_id, ledger.decision_event_id"
+        );
+        $statement->execute([$supplierId, $revisionId]);
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $value) {
+            $row = self::row($value, 'vydání depozita správci');
+            $result[] = [
+                'case_id' => self::integer($row, 'case_id'),
+                'claim_id' => self::integer($row, 'claim_id'),
+                'amount_minor' => self::integer($row, 'amount_minor'),
+                'recipient_account_id' => self::integer($row, 'recipient_account_id'),
+                'decision_event_id' => self::integer($row, 'decision_event_id'),
+                'decision_document_id' => self::integer($row, 'decision_document_id'),
+                'decision_evidence_hash' => self::string($row, 'decision_evidence_hash'),
+                'released_on' => self::string($row, 'released_on'),
+                'claim_category' => self::string($row, 'claim_category'),
+                'claim_priority_date' => self::nullableString($row, 'claim_priority_date'),
+            ];
+        }
+
+        return $result;
+    }
+
+    public static function administratorLiabilityReference(
+        int $caseId,
+        int $claimId,
+        int $decisionEventId,
+    ): string {
+        return self::liabilityReference($caseId, $claimId)
+            . ":administrator:e{$decisionEventId}";
+    }
+
+    /**
      * The payment target is never inferred from the case's legacy institution
      * pointer. This returns only the latest documented recipient instruction
      * effective for the particular payroll payment date.
@@ -281,9 +365,15 @@ final class PayrollEnforcementPaymentRepository
                            THEN ledger.amount_minor_units ELSE 0 END
                        ) AS withheld_minor,
                        SUM(
-                         CASE WHEN ledger.entry_kind = 'released_to_employee'
+                         CASE WHEN ledger.entry_kind IN (
+                             'released_to_employee', 'released_to_administrator'
+                           )
                            THEN ledger.amount_minor_units ELSE 0 END
                        ) AS returned_minor,
+                       SUM(
+                         CASE WHEN ledger.entry_kind = 'released_to_administrator'
+                           THEN ledger.amount_minor_units ELSE 0 END
+                       ) AS administrator_minor,
                        SUM(
                          CASE WHEN ledger.entry_kind = 'adjustment'
                            THEN ledger.amount_minor_units ELSE 0 END
@@ -291,7 +381,9 @@ final class PayrollEnforcementPaymentRepository
                        GREATEST(0,
                          SUM(CASE WHEN ledger.entry_kind = 'held'
                            THEN ledger.amount_minor_units ELSE 0 END)
-                         - SUM(CASE WHEN ledger.entry_kind = 'released_to_employee'
+                         - SUM(CASE WHEN ledger.entry_kind IN (
+                             'released_to_employee', 'released_to_administrator'
+                           )
                            THEN ledger.amount_minor_units ELSE 0 END)
                          - GREATEST(
                              SUM(CASE
@@ -316,7 +408,8 @@ final class PayrollEnforcementPaymentRepository
                    AND ledger.claim_id IS NOT NULL
                    AND ledger.entry_kind IN (
                      'withheld', 'held', 'released_for_remittance',
-                     'remitted', 'released_to_employee', 'adjustment'
+                     'remitted', 'released_to_employee', 'adjustment',
+                     'released_to_administrator'
                    )
                    AND (
                      month_result.revision_id IS NULL
@@ -363,6 +456,8 @@ final class PayrollEnforcementPaymentRepository
                     claim.is_active, claim.outstanding_minor_units,
                     COALESCE(ledger_totals.withheld_minor, 0) AS withheld_minor,
                     COALESCE(ledger_totals.returned_minor, 0) AS returned_minor,
+                    COALESCE(ledger_totals.administrator_minor, 0)
+                      AS administrator_minor,
                     COALESCE(ledger_totals.adjustment_minor, 0) AS adjustment_minor,
                     COALESCE(ledger_totals.held_minor, 0) AS held_minor,
                     COALESCE(payment_totals.liability_minor, 0)
@@ -405,6 +500,7 @@ final class PayrollEnforcementPaymentRepository
                 'outstanding_minor' => $outstanding,
                 'withheld_minor' => $withheld,
                 'held_minor' => self::integer($row, 'held_minor'),
+                'administrator_minor' => self::integer($row, 'administrator_minor'),
                 'liability_minor' => self::integer($row, 'liability_minor'),
                 'settled_minor' => $settled,
                 'remaining_to_withhold_minor' => max(
