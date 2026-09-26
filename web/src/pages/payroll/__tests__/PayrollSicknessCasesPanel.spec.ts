@@ -255,7 +255,7 @@ describe('PayrollSicknessCasesPanel', () => {
 
     await wrapper.find('[data-test="sickness-case-action-end"]').setValue(true)
     await wrapper.find('[data-test="sickness-case-care-reason"]').setValue('ill')
-    await wrapper.find('[data-test="sickness-case-relationship-code"]').setValue('AB')
+    await wrapper.find('[data-test="sickness-case-relationship-code"]').setValue('PL')
     await wrapper.find('[data-test="sickness-case-cared-first-name"]').setValue('Dítě')
     await wrapper.find('[data-test="sickness-case-cared-last-name"]').setValue('Testovací')
     await wrapper.find('[data-test="sickness-case-small-scope-income"]').setValue('3500')
@@ -281,7 +281,7 @@ describe('PayrollSicknessCasesPanel', () => {
     expect(payload.action_start).toBe(1)
     expect(payload.action_end).toBe(1)
     expect(payload.care_reason).toBe('ill')
-    expect(payload.relationship_code).toBe('AB')
+    expect(payload.relationship_code).toBe('PL')
     expect(payload.cared_first_name).toBe('Dítě')
     expect(payload.small_scope_income_minor).toBe(350_000)
     expect(payload.probable_income_czk).toBe(42_000)
@@ -289,6 +289,127 @@ describe('PayrollSicknessCasesPanel', () => {
     expect(payload.decisive_months).toEqual([
       { period: '2025-12', income_minor: 3_100_050, excluded_days: 4 },
     ])
+  })
+
+  /**
+   * Kódované prvky NEMPRI se vybírají z číselníků ČSSZ. Ošetřovné a DLO
+   * sdílejí pole, ale ne číselník: u ošetřovného CIS_RODVZTAH, u DLO CIS_VZTAH.
+   * Starý ručně zapsaný kód mimo číselník zůstane v nabídce označený.
+   */
+  it('nabídne vztah z číselníku podle druhu dávky', async () => {
+    m.list.mockResolvedValue(listResponse([
+      sicknessCase({ benefit_kind: 'OSE', relationship_code: 'AB' }),
+      sicknessCase({ benefit_kind: 'DLO', id: 8 }),
+    ]))
+    const wrapper = await mountPanel()
+    await wrapper.findAll('button')
+      .filter(button => button.text().includes('actions.edit'))[0]
+      .trigger('click')
+    await flushPromises()
+
+    const oseOptions = wrapper.findAll('[data-test="sickness-case-relationship-code"] option')
+      .map(option => option.attributes('value') ?? '')
+    expect(oseOptions).toContain('PL')
+    expect(oseOptions).toContain('JIN')
+    expect(oseOptions).not.toContain('3')
+    expect(wrapper.find('[data-test="sickness-case-relationship-code"]').text())
+      .toContain('codebooks.invalidValue')
+
+    actionsOf(wrapper, 'cancel')!.run!()
+    await flushPromises()
+    await wrapper.find('[data-test="sickness-case-8"]').findAll('button')
+      .find(button => button.text().includes('actions.edit'))!
+      .trigger('click')
+    await flushPromises()
+    const dloOptions = wrapper.findAll('[data-test="sickness-case-relationship-code"] option')
+      .map(option => option.attributes('value') ?? '')
+    expect(dloOptions).toContain('3')
+    expect(dloOptions).toContain('29')
+    expect(dloOptions).not.toContain('PL')
+  })
+
+  /**
+   * § 191a ZP: u DLO jde zapsat rozhodnutí zaměstnavatele, u odmítnutí
+   * s důvodem. Důvod se po přepnutí na souhlas neposílá.
+   */
+  it('zapíše odmítnutí dlouhodobé péče s dnem a důvodem', async () => {
+    m.list.mockResolvedValue(listResponse([sicknessCase({ benefit_kind: 'DLO' })]))
+    m.update.mockResolvedValue(sicknessCase())
+    const wrapper = await mountPanel()
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('actions.edit'))!
+      .trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="sickness-case-ltc-refusal-reason"]').exists()).toBe(false)
+    await wrapper.find('[data-test="sickness-case-ltc-consent"]').setValue('refused')
+    await flushPromises()
+    await wrapper.find('[data-test="sickness-case-ltc-consent-on"]').setValue('2026-08-03')
+    await wrapper.find('[data-test="sickness-case-ltc-refusal-reason"]').setValue('Vážné provozní důvody.')
+    await wrapper.find('[data-test="sickness-case-relationship-code"]').setValue('2')
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('actions.save'))!
+      .trigger('click')
+    await flushPromises()
+
+    const payload = m.update.mock.calls[0][3]
+    expect(payload.long_term_care_consent).toBe('refused')
+    expect(payload.long_term_care_consent_on).toBe('2026-08-03')
+    expect(payload.long_term_care_refusal_reason).toBe('Vážné provozní důvody.')
+    expect(payload.relationship_code).toBe('2')
+  })
+
+  it('ukáže ochrannou lhůtu, odmítnutou péči a původ z nepřítomnosti', async () => {
+    m.list.mockResolvedValue(listResponse([
+      sicknessCase({
+        absence_id: 31,
+        protection_period: {
+          status: 'protection_period',
+          employment_end: '2026-07-31',
+          protection_until: '2026-08-07',
+        },
+      }),
+      sicknessCase({
+        id: 8,
+        protection_period: {
+          status: 'outside',
+          reason_code: 'sickness_event_outside_protection_period',
+          message: 'Ochranná lhůta skončila 7. 8.',
+        },
+      }),
+      sicknessCase({
+        id: 9,
+        benefit_kind: 'DLO',
+        long_term_care_consent: 'refused',
+        long_term_care_consent_on: '2026-08-03',
+      }),
+    ]))
+    const wrapper = await mountPanel()
+
+    expect(wrapper.find('[data-test="sickness-case-protection-7"]').text())
+      .toContain('protectionPeriod.within')
+    expect(wrapper.find('[data-test="sickness-case-origin-7"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="sickness-case-protection-outside-8"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="sickness-case-ltc-refused-9"]').text())
+      .toContain('longTermCare.refusedBadge')
+  })
+
+  it('u odmítnuté dlouhodobé péče nabídne opravu v editoru', async () => {
+    m.preview.mockRejectedValue({
+      isAxiosError: true,
+      response: { data: { error: {
+        code: 'dlo_employer_refused',
+        message: 'Zaměstnavatel dlouhodobou péči odmítl.',
+      } } },
+    })
+    const wrapper = await mountPanel()
+
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('actions.previewNempri'))!
+      .trigger('click')
+    await flushPromises()
+
+    expect(actionsOf(wrapper, 'error-fix-edit')?.show).toBe(true)
   })
 
   /**

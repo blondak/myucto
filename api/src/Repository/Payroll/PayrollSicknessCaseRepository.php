@@ -54,7 +54,9 @@ final readonly class PayrollSicknessCaseRepository
             'SELECT sickness.*, employee.full_name,
                     employment.code AS employment_code,
                     employment.start_date AS employment_start_date,
+                    employment.actual_start_date AS employment_actual_start_date,
                     employment.end_date AS employment_end_date,
+                    employment.relation_type AS employment_relation_type,
                     (SELECT terms.monthly_gross_minor
                        FROM payroll_employment_terms terms
                       WHERE terms.supplier_id = sickness.supplier_id
@@ -203,6 +205,9 @@ final readonly class PayrollSicknessCaseRepository
                     sickness.status,
                     sickness.nempri_submission_id,
                     sickness.hzupn_submission_id,
+                    sickness.returned_on,
+                    sickness.lone_caregiver,
+                    sickness.payroll_payment_date,
                     employee.full_name
                FROM payroll_sickness_cases sickness
                JOIN payroll_employees employee
@@ -216,6 +221,64 @@ final readonly class PayrollSicknessCaseRepository
         $statement->execute([$supplierId, $environment]);
 
         return array_values($statement->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Případ, který vznikl z dané absence.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findByAbsence(
+        int $supplierId,
+        string $environment,
+        int $absenceId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT *
+               FROM payroll_sickness_cases
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND absence_id = ?
+              ORDER BY id
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $environment, $absenceId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Otevřený případ téhož druhu, který končí den před `$nextDay`. Neschopnost
+     * zapsaná po měsících je JEDNA sociální událost; navazující absence proto
+     * prodlužuje tentýž případ, dokud z něj nikdo nepodal hlášení o skončení.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function contiguousOpenCase(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $benefitKind,
+        string $nextDay,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT *
+               FROM payroll_sickness_cases
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND employment_id = ?
+                AND benefit_kind = ?
+                AND status IN ("draft", "prepared", "submitted", "rejected")
+                AND hzupn_submission_id IS NULL
+                AND incapacity_to = DATE_SUB(?, INTERVAL 1 DAY)
+              ORDER BY incapacity_from DESC, id DESC
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $environment, $employmentId, $benefitKind, $nextDay]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
     }
 
     /** @param array<string,mixed> $data */

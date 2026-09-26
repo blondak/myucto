@@ -85,7 +85,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
                 'child_under_16' => true,
                 'cared_personally' => true,
                 'care_days' => [['from' => '2026-02-09', 'to' => '2026-02-13']],
-                'relationship_code' => 'AB',
+                'relationship_code' => 'PL',
                 'planned_shifts' => true,
                 'planned_shifts_worked' => false,
                 'contact_worker_name' => 'Mzdová Účetní',
@@ -181,6 +181,105 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
 
         self::assertStringContainsString('<navratDoPrace>N</navratDoPrace>', (string) $preview['xml']);
         self::assertStringContainsString('<datumNavratDoPrace>2026-03-16</datumNavratDoPrace>', (string) $preview['xml']);
+    }
+
+    /**
+     * Kód z cizího číselníku se odmítne už při uložení případu: „PL“ je
+     * vztah u ošetřovného (CIS_RODVZTAH), u dlouhodobého ošetřovného platí
+     * CIS_VZTAH. Dřív šlo uložit cokoli o 1 až 3 znacích.
+     */
+    public function testCaseRefusesCodeFromAnotherCodebookOnSave(): void
+    {
+        [, $employmentId] = $this->employee();
+        $cases = $this->service(SicknessCaseService::class);
+        foreach ([
+            ['OSE', ['relationship_code' => 'AB'], 'nempri_relationship_code_invalid'],
+            ['DLO', ['relationship_code' => 'PL'], 'nempri_relationship_code_invalid'],
+            ['OPP', ['paternity_reason' => '1'], 'nempri_paternity_reason_invalid'],
+            ['NEM', ['maternity_care_reason' => 'ROZ'], 'nempri_maternity_care_reason_not_in_kind'],
+        ] as [$kind, $input, $code]) {
+            try {
+                $cases->create(
+                    $this->supplierId,
+                    'test',
+                    $employmentId,
+                    $kind,
+                    ['incapacity_from' => '2026-02-09', ...$input],
+                    $this->userId,
+                );
+                self::fail("Případ {$kind} s kódem mimo číselník se nesmí uložit.");
+            } catch (SicknessException $exception) {
+                self::assertSame($code, $exception->validationCode);
+            }
+        }
+
+        $dlo = $cases->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'DLO',
+            ['incapacity_from' => '2026-02-09', 'relationship_code' => '3'],
+            $this->userId,
+        );
+        self::assertSame('3', $dlo['relationship_code']);
+    }
+
+    /**
+     * Ochranná lhůta (§ 15 zák. č. 187/2006 Sb.): neschopnost do 7 dnů po
+     * skončení zaměstnání se ještě předává, osmý den už ne. Dřív šlo případ
+     * založit i připravit s jakýmkoli dnem vzniku; seznam případů teď říká,
+     * že případ vznikl v ochranné lhůtě.
+     */
+    public function testProtectionPeriodAfterEmploymentEnd(): void
+    {
+        [, $employmentId] = $this->employee();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET end_date = "2026-03-31", status = "ended"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $employmentId]);
+        $cases = $this->service(SicknessCaseService::class);
+
+        try {
+            $cases->create(
+                $this->supplierId,
+                'test',
+                $employmentId,
+                'NEM',
+                ['incapacity_from' => '2026-04-08', 'decision_number' => 'A1234567'],
+                $this->userId,
+            );
+            self::fail('Neschopnost osmý den po skončení zaměstnání nárok nezakládá.');
+        } catch (SicknessException $exception) {
+            self::assertSame('sickness_event_outside_protection_period', $exception->validationCode);
+        }
+
+        $case = $cases->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'NEM',
+            ['incapacity_from' => '2026-04-07', 'decision_number' => 'A1234567'],
+            $this->userId,
+        );
+        $listed = array_values(array_filter(
+            $cases->list($this->supplierId, 'test', $employmentId),
+            static fn (array $row): bool => (int) $row['id'] === (int) $case['id'],
+        ));
+        self::assertSame('protection_period', $listed[0]['protection_period']['status']);
+        self::assertSame('2026-04-07', $listed[0]['protection_period']['protection_until']);
+
+        try {
+            $cases->update(
+                $this->supplierId,
+                'test',
+                (int) $case['id'],
+                (int) $case['row_version'],
+                ['incapacity_from' => '2026-04-09'],
+            );
+            self::fail('Posunutí vzniku za ochrannou lhůtu nesmí projít.');
+        } catch (SicknessException $exception) {
+            self::assertSame('sickness_event_outside_protection_period', $exception->validationCode);
+        }
     }
 
     public function testDecisiveMonthWithoutAnySourceStopsThePreview(): void

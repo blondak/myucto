@@ -36,9 +36,12 @@ import {
   obstacleRateReasonRequired,
   percentToBasisPoints,
 } from './absenceObstacleUi'
+import type { PayrollAbsenceSicknessCaseOutcome } from '@/api/payrollSicknessCases'
 import DateInput from '@/components/ui/DateInput.vue'
+import { usePayrollServerMessage } from './payrollServerMessage'
 
 const { t } = useI18n()
+const { reasonText } = usePayrollServerMessage()
 const route = useRoute()
 const toast = useToast()
 /*
@@ -734,6 +737,35 @@ const overdrawPrompt = ref<{
   requestedMinutes: number
 } | null>(null)
 
+/**
+ * Co se schválením nebo zrušením nepřítomnosti stalo s případem dávky.
+ *
+ * Lhůta NEMPRI běží od události (§ 97 zák. č. 187/2006 Sb.), proto schválená
+ * neschopnost, OČR nebo mateřská rovnou založí případ. Účetní to musí vidět
+ * i s odkazem, kde případ doplní — a když případ nevznikl, proč.
+ */
+const sicknessNotice = ref<{ text: string, warning: boolean } | null>(null)
+
+function showSicknessNotice(outcome: PayrollAbsenceSicknessCaseOutcome | null | undefined): void {
+  if (!outcome) {
+    sicknessNotice.value = null
+    return
+  }
+  const kind = outcome.benefit_kind
+    ? t(`payroll.sicknessCases.benefitKinds.${outcome.benefit_kind}`)
+    : ''
+  const message = reasonText(outcome.reason_code, outcome.message)
+  const text = outcome.outcome === 'created'
+    ? (outcome.nempri_due_on
+        ? t('payroll.sicknessCases.absenceNotice.created', { kind, due: formatDate(outcome.nempri_due_on) })
+        : t('payroll.sicknessCases.absenceNotice.createdNoDue', { kind }))
+    : t(`payroll.sicknessCases.absenceNotice.${outcome.outcome}`, { kind, message })
+  sicknessNotice.value = {
+    text,
+    warning: outcome.outcome === 'skipped' || outcome.outcome === 'kept',
+  }
+}
+
 async function decide(
   item: PayrollAbsence,
   decision: 'approved' | 'rejected',
@@ -750,6 +782,7 @@ async function decide(
       conflicting_benefit_excluded: review?.noConflictingBenefit ?? false,
       ...(overdrawConfirmed ? { overdraw_confirmed: true } : {}),
     })
+    showSicknessNotice(result?.sickness_case)
     overdrawPrompt.value = null
     toast.success(t(`payroll_absence.messages.${decision}`))
     if (result.calculation?.warning === 'obstacle_without_published_shifts') {
@@ -903,7 +936,8 @@ async function cancel(item: PayrollAbsence) {
   }))) return
   saving.value = true
   try {
-    await payrollAbsenceApi.cancel(item.id, item.row_version)
+    const result = await payrollAbsenceApi.cancel(item.id, item.row_version)
+    showSicknessNotice(result?.sickness_case)
     toast.success(t('payroll_absence.messages.cancelled'))
     await loadData()
   } catch (error: any) {
@@ -1304,6 +1338,24 @@ onMounted(async () => {
 
     <section class="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800">
       {{ t('payroll_absence.review_notice') }}
+    </section>
+
+    <section
+      v-if="sicknessNotice"
+      class="flex flex-wrap items-center gap-2 rounded-xl border p-4 text-sm"
+      :class="sicknessNotice.warning
+        ? 'border-warning-200 bg-warning-50 text-warning-800'
+        : 'border-info-200 bg-info-50 text-info-800'"
+      data-test="absence-sickness-case-notice"
+    >
+      <span>{{ sicknessNotice.text }}</span>
+      <RouterLink
+        to="/payroll/submissions/sickness"
+        class="font-semibold underline"
+        data-test="absence-sickness-case-link"
+      >
+        {{ t('payroll.sicknessCases.absenceNotice.open') }}
+      </RouterLink>
     </section>
 
     <EmptyState

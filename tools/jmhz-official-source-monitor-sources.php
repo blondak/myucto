@@ -77,6 +77,53 @@ return [
         'document_path_prefixes' => ['/dpr/adis/idpr_pub/epo2_info/'],
         'document_extensions' => [],
     ],
+    /*
+     * Definice e-Podání ČSSZ pro dávkové a evidenční tiskopisy mimo JMHZ.
+     * Tady ČSSZ vystavuje definice datových vět, XSD, logické kontroly
+     * a číselníky NEMPRI, HZUPN a ELDP (NEMPRI25 z 9. 3. 2026 přinesl nový
+     * číselník druhů činnosti). Aplikace z nich staví podání s připnutým XSD,
+     * takže nová verze bez hlídače projde naší validací a odmítne ji až ČSSZ.
+     *
+     * `document_links` sleduje jen odkazy: novou verzi ČSSZ vystavuje jako nový
+     * soubor, a přílohy (vzory tisku, archivní verze) mají desítky MB.
+     */
+    'cssz-definice-nempri' => [
+        'label' => 'ČSSZ — Definice e-Podání NEMPRI (a HZUPN, ZZVDPN)',
+        'index_url' => 'https://www.cssz.gov.cz/web/cz/definice-e-podani-nempri',
+        'index_format' => 'document_links',
+        'document_hosts' => ['www.cssz.gov.cz', 'eportal.cssz.cz'],
+        'document_path_prefixes' => ['/documents/'],
+        'document_extensions' => ['docx', 'pdf', 'xlsx', 'xml', 'xsd', 'zip'],
+    ],
+    'cssz-definice-hzupn' => [
+        'label' => 'ČSSZ — Definice e-Podání HZUPN',
+        'index_url' => 'https://www.cssz.gov.cz/web/cz/definice-e-podani-hzupn',
+        'index_format' => 'document_links',
+        'document_hosts' => ['www.cssz.gov.cz', 'eportal.cssz.cz'],
+        'document_path_prefixes' => ['/documents/'],
+        'document_extensions' => ['docx', 'pdf', 'xlsx', 'xml', 'xsd', 'zip'],
+    ],
+    'cssz-definice-eldp' => [
+        'label' => 'ČSSZ — Definice e-Podání ELDP',
+        'index_url' => 'https://www.cssz.gov.cz/web/cz/definice-e-podani-eldp',
+        'index_format' => 'document_links',
+        'document_hosts' => ['www.cssz.gov.cz', 'eportal.cssz.cz'],
+        'document_path_prefixes' => ['/documents/'],
+        'document_extensions' => ['docx', 'pdf', 'xlsx', 'xml', 'xsd', 'zip'],
+    ],
+    /*
+     * REGZEC (registrace zaměstnance) samostatnou stránku „Definice e-Podání"
+     * nemá: ČSSZ definice, XSD a zásady vyplňování vystavuje na stránce Pro
+     * vývojáře JMHZ, soubory leží na vývojářském portálu MPSV i na webu ČSSZ.
+     */
+    'cssz-definice-regzec' => [
+        'label' => 'ČSSZ — Pro vývojáře JMHZ (REGZEC, PREZEC, REGZEL)',
+        'index_url' => 'https://www.cssz.gov.cz/web/cz/pro-vyvojare-jmhz',
+        'index_format' => 'document_links',
+        'document_hosts' => ['www.cssz.gov.cz', 'developers.mpsv.cz'],
+        'document_path_prefixes' => ['/documents/', '/assets/documents/'],
+        'document_extensions' => ['csv', 'docx', 'pdf', 'xlsm', 'xlsx', 'xml', 'xsd', 'zip'],
+    ],
     'cssz-jmhz-eportal' => [
         'label' => 'ePortál ČSSZ — Jednotné měsíční hlášení zaměstnavatele',
         'index_url' => 'https://eportal.cssz.cz/web/portal/-/sluzby/jednotne-mesicni-hlaseni-zamestnavatele',

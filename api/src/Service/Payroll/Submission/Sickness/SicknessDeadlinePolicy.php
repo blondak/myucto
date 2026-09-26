@@ -197,10 +197,22 @@ final class SicknessDeadlinePolicy
      * Hlásit se dá teprve tehdy, když je co hlásit: skutečnost, která může mít
      * vliv na výplatu dávky, vzniká skončením pracovní neschopnosti. Bez dne
      * skončení proto lhůta neexistuje a politika ji nevymýšlí.
+     *
+     * ## Od nástupu, ne od posledního dne neschopnosti
+     *
+     * HZUPN je hlášení o NÁSTUPU do zaměstnání po skončení neschopnosti: ČSSZ
+     * z něj počítá poslední den dávky a skutečnost, kterou hlásí, nastává dnem
+     * nástupu. Poslední den neschopnosti (`incapacity_to`) je den PŘED ním.
+     * Lhůta proto běží od dne nástupu, je-li v případu zapsaný
+     * (`returned_on`, u „nevrátil se" den, ke kterému důvod nastal), jinak od
+     * prvního dne po skončení neschopnosti. Dřív běžela od posledního dne
+     * neschopnosti, tedy od dne, kdy zaměstnanec ještě byl nemocný a nebylo
+     * co hlásit.
      */
     public function forHzupn(
         string $incapacityFrom,
         ?string $incapacityTo,
+        ?string $returnedOn = null,
     ): SicknessNotificationWindow {
         $from = $this->exactDate(
             $incapacityFrom,
@@ -224,10 +236,23 @@ final class SicknessDeadlinePolicy
             );
         }
 
+        $return = $returnedOn === null
+            ? $end->modify('+1 day')
+            : $this->exactDate(
+                $returnedOn,
+                'Den nástupu do zaměstnání musí být datum ve tvaru RRRR-MM-DD.',
+            );
+        if ($return < $from) {
+            throw new SicknessException(
+                'hzupn_return_before_incapacity',
+                'Návrat do práce nemůže předcházet vzniku pracovní neschopnosti.',
+            );
+        }
+
         return $this->window(
-            $end,
-            CzechWorkingDays::shiftToWorkingDay($end),
-            'immediately',
+            $return,
+            CzechWorkingDays::shiftToWorkingDay($return),
+            'immediately_after_return',
             '§ 97 odst. 3 zákona č. 187/2006 Sb.',
             self::SOURCE_DERIVED_IMMEDIACY,
             AbsenceRuleset::forDate($this->rulesets, $incapacityTo),
@@ -298,6 +323,7 @@ final class SicknessDeadlinePolicy
             'ose_support_days_lone_carer' => $absence->careSupportDaysLoneCarer(),
             'vpm_due' => 'next_working_day_after_payday',
             'immediacy_due' => 'next_czech_working_day_from_earliest',
+            'hzupn_earliest' => 'return_to_work_day',
             'sources' => self::SOURCES,
         ]));
     }

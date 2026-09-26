@@ -490,6 +490,68 @@ final class JmhzOfficialSourceMonitorTest extends TestCase
         new JmhzOfficialSourceMonitor($sources, static fn (): string => throw new \LogicException('Bez sítě.'));
     }
 
+    /**
+     * Definice e-Podání ČSSZ (NEMPRI, HZUPN, ELDP, REGZEC) se sledují jako
+     * odkazy: dokumenty se nestahují a nová verze vystavená jako nový soubor
+     * se ohlásí jako přibylý dokument. Duplicitní název (aktuální a archivní
+     * verze) nesmí hlídač shodit.
+     */
+    public function testEpodaniDefinitionPageReportsNewDataSentenceDefinitionWithoutDownloading(): void
+    {
+        $index = 'https://www.cssz.gov.cz/web/cz/definice-e-podani-nempri';
+        $page = static fn (string $extra): string => '<html><body>'
+            . '<a href="/documents/20143/2739697/NEMPRI25.xsd/ccb22dda-af2d-8752-1ba2-7b6742052fc5">NEMPRI25.xsd</a>'
+            . '<a href="/documents/20143/2739697/DV_NEMPRI25_v1_20240324.pdf/28bc0032-1f2b-f2c7-35df-2177e9e380e3">Definice datové věty</a>'
+            . '<a href="https://eportal.cssz.cz/documents/20122/35802/NEMPRI_2020.pdf/ad9969a7-8848-2a93-d841-7e480dc30608?t=1">Definice datové věty</a>'
+            . '<a href="https://example.test/documents/1/2/cizi.pdf/ad9969a7-8848-2a93-d841-7e480dc30608">Cizí</a>'
+            . $extra
+            . '</body></html>';
+        $sources = [
+            'cssz-definice-nempri' => [
+                'label' => 'ČSSZ — Definice e-Podání NEMPRI',
+                'index_url' => $index,
+                'index_format' => 'document_links',
+                'document_hosts' => ['www.cssz.gov.cz', 'eportal.cssz.cz'],
+                'document_path_prefixes' => ['/documents/'],
+                'document_extensions' => ['pdf', 'xsd', 'zip'],
+            ],
+        ];
+
+        $baseline = $this->monitorWith($sources, [$index => $page('')])->monitor($this->statePath());
+        self::assertTrue($baseline['baseline_created']);
+        self::assertSame(3, $baseline['sources'][0]['document_count']);
+
+        $report = $this->monitorWith($sources, [
+            $index => $page('<a href="/documents/20143/3273152/DV_NEMPRI25_v1_20260309.pdf/c2f30a2b-aa02-30b1-3fe0-a9ee439deece">Stáhnout</a>'),
+        ])->monitor($this->statePath());
+
+        self::assertSame(1, $report['change_count']);
+        self::assertSame('added', $report['changes'][0]['kind']);
+        self::assertSame(
+            'https://www.cssz.gov.cz/documents/20143/3273152/DV_NEMPRI25_v1_20260309.pdf/c2f30a2b-aa02-30b1-3fe0-a9ee439deece',
+            $report['changes'][0]['url'],
+        );
+        self::assertSame('DV_NEMPRI25_v1_20260309.pdf', $report['changes'][0]['title']);
+    }
+
+    /** NEMPRI, HZUPN, ELDP a REGZEC jsou v ostré konfiguraci hlídače. */
+    public function testProductionConfigurationWatchesCsszEpodaniDefinitions(): void
+    {
+        $sources = require dirname(__DIR__, 4) . '/tools/jmhz-official-source-monitor-sources.php';
+
+        foreach ([
+            'cssz-definice-nempri' => 'definice-e-podani-nempri',
+            'cssz-definice-hzupn' => 'definice-e-podani-hzupn',
+            'cssz-definice-eldp' => 'definice-e-podani-eldp',
+            'cssz-definice-regzec' => 'pro-vyvojare-jmhz',
+        ] as $id => $slug) {
+            self::assertArrayHasKey($id, $sources);
+            self::assertSame('document_links', $sources[$id]['index_format']);
+            self::assertStringEndsWith('/' . $slug, $sources[$id]['index_url']);
+        }
+        new JmhzOfficialSourceMonitor($sources, static fn (): string => throw new \LogicException('Bez sítě.'));
+    }
+
     public function testMpsvPagesRejectNewsOnUnwatchedPage(): void
     {
         $sources = $this->pagesSources();

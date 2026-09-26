@@ -17,10 +17,12 @@ const m = vi.hoisted(() => ({
   jmhzOptions: vi.fn(),
   searchMunicipalities: vi.fn(),
   searchCzIsco: vi.fn(),
+  detectChanges: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
+    detectEmploymentRegistrationChanges: m.detectChanges,
     previewEmploymentRegistration: m.preview,
     prepareEmploymentRegistration: m.prepare,
     sendEmploymentRegistrationTransport: m.send,
@@ -283,6 +285,45 @@ describe('EmploymentRegistrationPanel', () => {
     m.events.mockResolvedValue([])
     m.a1Profile.mockResolvedValue(a1View())
     m.jmhzOptions.mockResolvedValue(jmhzOptions())
+  })
+
+  /**
+   * Změna pojišťovny na kartě osoby: návrh neřekne jen „podejte jinou
+   * cestou", ale vede na hromadné oznámení (HOZ) za měsíc změny, kde vznikne
+   * odhláška i přihláška.
+   */
+  it('u změny zdravotní pojišťovny odkáže na HOZ za měsíc změny', async () => {
+    m.detectChanges.mockResolvedValue({
+      as_of: '2026-07-02',
+      reason_code: null,
+      without_baseline: {},
+      proposals: [{
+        id: 71,
+        duty_kind: 'health_insurer_change',
+        action_code: null,
+        status: 'open',
+        detected_on: '2026-07-02',
+        due_on: '2026-07-10',
+        deadline_source: '§ 10 odst. 1 písm. b) zákona č. 48/1997 Sb.',
+        deadline_ruleset_id: 'synthetic',
+        findings: [{ path: 'health.insurer_code', group: 'health_insurer' }],
+        changes: {},
+        unsupported: [],
+        fileable: false,
+        created: true,
+      }],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const hoz = wrapper.get('[data-test="registration-change-health-hoz"]')
+    expect(hoz.text()).toContain('payroll.people.registration.changes.health_insurer_hoz')
+    const link = wrapper.get('[data-test="registration-change-open-hoz"]')
+    expect(JSON.parse(link.attributes('data-to') ?? '{}')).toEqual({
+      path: '/payroll/submissions/health',
+      query: { period: '2026-07' },
+    })
+    expect(wrapper.find('[data-test="registration-change-manual"]').exists()).toBe(false)
   })
 
   it('saves the authoritative A1 profile before preview and prepare', async () => {

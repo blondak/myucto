@@ -368,6 +368,10 @@ final readonly class SicknessSubmissionService
         );
 
         if ($document === SicknessDocumentKind::Nempri) {
+            // Událost po skončení vztahu jen v ochranné lhůtě (§ 15); mimo ni
+            // nárok z tohoto vztahu nevznikl a zaměstnavatel nic nepředává.
+            $this->caseService->assertEventCovered($kind, $incapacityFrom, $context, $row);
+            $this->caseService->assertLongTermCareNotRefused($kind, $row);
             $payload = $this->nempriPayload(
                 $supplierId,
                 $environment,
@@ -384,8 +388,16 @@ final readonly class SicknessSubmissionService
                 $incapacityFrom,
                 $incapacityTo,
                 $this->nullableText($row['payroll_payment_date'] ?? null),
+                (bool) ($row['lone_caregiver'] ?? false),
             );
         } else {
+            if (!$kind->hasEndOfIncapacityReport()) {
+                throw new SicknessException(
+                    'hzupn_not_for_benefit_kind',
+                    'Hlášení při ukončení pracovní neschopnosti (HZUPN) se podává jen '
+                    . 'u nemocenského. U tohoto druhu dávky žádné nevzniká.',
+                );
+            }
             $manifest = $this->schemas->manifestFor(CsszSchemaCatalog::HZUPN20);
             $payload = $this->payloads->hzupn(
                 $row,
@@ -397,7 +409,11 @@ final readonly class SicknessSubmissionService
             );
             $xml = $this->hzupnSerializer->serialize($payload);
             $this->validator->validateHzupn($payload, $xml, $incapacityFrom);
-            $window = $this->deadlines->forHzupn($incapacityFrom, $incapacityTo);
+            $window = $this->deadlines->forHzupn(
+                $incapacityFrom,
+                $incapacityTo,
+                $this->nullableText($row['returned_on'] ?? null),
+            );
         }
 
         return [

@@ -84,6 +84,9 @@ final readonly class SicknessCaseService
         'care_days' => 'periods',
         'relationship_code' => 'code',
         'alternation' => 'nullable_bool',
+        'long_term_care_consent' => 'ltc_consent',
+        'long_term_care_consent_on' => 'date',
+        'long_term_care_refusal_reason' => 'text',
         'paternity_reason' => 'code',
         'maternity_care_reason' => 'code',
         'child_order' => 'int',
@@ -96,9 +99,39 @@ final readonly class SicknessCaseService
         'contact_worker_email' => 'text',
     ];
 
+    public const LONG_TERM_CARE_GRANTED = 'granted';
+    public const LONG_TERM_CARE_REFUSED = 'refused';
+
+    /** @var list<string> */
+    public const LONG_TERM_CARE_CONSENTS = [
+        self::LONG_TERM_CARE_GRANTED,
+        self::LONG_TERM_CARE_REFUSED,
+    ];
+
     public function __construct(
         private PayrollSicknessCaseRepository $cases,
+        private SicknessProtectionPeriodPolicy $protection,
     ) {}
+
+    /**
+     * Zaměstnavatel dlouhodobou péči odmítl (§ 191a zákoníku práce), takže
+     * zaměstnanec v práci nechybí a dávka mu nenáleží — žádost se nepředává.
+     *
+     * @param array<string,mixed> $row
+     */
+    public function assertLongTermCareNotRefused(SicknessBenefitKind $kind, array $row): void
+    {
+        if ($kind === SicknessBenefitKind::Dlo
+            && ($row['long_term_care_consent'] ?? null) === self::LONG_TERM_CARE_REFUSED
+        ) {
+            throw new SicknessException(
+                'dlo_employer_refused',
+                'Zaměstnavatel dlouhodobou péči odmítl (' . (string) ($row['long_term_care_consent_on'] ?? '')
+                . '), takže zaměstnanec v práci nechybí a dlouhodobé ošetřovné z tohoto zaměstnání '
+                . 'nenáleží. Změní-li zaměstnavatel rozhodnutí, zapište souhlas v případu dávky.',
+            );
+        }
+    }
 
     /** @return list<array<string,mixed>> */
     public function list(
@@ -113,9 +146,65 @@ final readonly class SicknessCaseService
         );
         foreach ($rows as $index => $row) {
             $rows[$index] = $this->decorate($supplierId, $environment, $row);
+            $rows[$index]['protection_period'] = $this->protectionStatus($row);
         }
 
         return $rows;
+    }
+
+    /**
+     * Vznikla sociální událost za trvání vztahu, nebo v ochranné lhůtě podle
+     * § 15 zák. č. 187/2006 Sb.? Mimo obojí nárok z tohoto vztahu nevznikl
+     * a politika to odmítne s konkrétní větou.
+     *
+     * @param array<string,mixed> $context
+     * @param array<string,mixed> $row
+     * @return array{status:string,employment_end:?string,protection_until:?string,legal_reference:string}
+     */
+    public function assertEventCovered(
+        SicknessBenefitKind $kind,
+        string $eventFrom,
+        array $context,
+        array $row,
+    ): array {
+        return $this->protection->assess($kind, $eventFrom, $context, $row);
+    }
+
+    /**
+     * Stav ochranné lhůty pro seznam. Případ mimo ochrannou lhůtu se tu
+     * neodmítá — už existuje a obrazovka musí říct PROČ z něj podání nepůjde.
+     *
+     * @param array<string,mixed> $row řádek seznamu s `employment_*` sloupci
+     * @return array<string,mixed>
+     */
+    private function protectionStatus(array $row): array
+    {
+        $kind = SicknessBenefitKind::tryFrom((string) ($row['benefit_kind'] ?? ''));
+        if ($kind === null) {
+            return ['status' => 'unknown'];
+        }
+        try {
+            return $this->protection->assess(
+                $kind,
+                (string) $row['incapacity_from'],
+                [
+                    'start_date' => $row['employment_start_date'] ?? null,
+                    'actual_start_date' => $row['employment_actual_start_date'] ?? null,
+                    'end_date' => $row['employment_end_date'] ?? null,
+                    'relation_type' => $row['employment_relation_type'] ?? null,
+                ],
+                $row,
+            );
+        } catch (SicknessException $exception) {
+            return [
+                'status' => 'outside',
+                'employment_end' => $row['employment_end_date'] ?? null,
+                'protection_until' => null,
+                'legal_reference' => SicknessProtectionPeriodPolicy::LEGAL_REFERENCE,
+                'reason_code' => $exception->validationCode,
+                'message' => $exception->getMessage(),
+            ];
+        }
     }
 
     /**
@@ -160,12 +249,15 @@ final readonly class SicknessCaseService
     ): array {
         $kind = $this->benefitKind($benefitKind);
         $values = $this->normalize($input, true);
+        $this->assertCodebooks($kind, $values);
+        $this->assertLongTermCareConsent($kind, $values, []);
         $incapacityFrom = (string) $values['incapacity_from'];
         $context = $this->requireContext(
             $supplierId,
             $employmentId,
             $incapacityFrom,
         );
+        $this->protection->assess($kind, $incapacityFrom, $context, $values);
         $overlapping = $this->cases->overlappingForEmployment(
             $supplierId,
             $environment,
@@ -250,6 +342,21 @@ final readonly class SicknessCaseService
             );
         }
         $values = $this->normalize($input, false);
+        $kind = SicknessBenefitKind::from((string) $row['benefit_kind']);
+        $this->assertCodebooks($kind, $values);
+        $this->assertLongTermCareConsent($kind, $values, $row);
+        if (array_key_exists('incapacity_from', $values) && $values['incapacity_from'] !== null) {
+            $this->protection->assess(
+                $kind,
+                (string) $values['incapacity_from'],
+                $this->requireContext(
+                    $supplierId,
+                    (int) $row['employment_id'],
+                    (string) $values['incapacity_from'],
+                ),
+                [...$row, ...$values],
+            );
+        }
         $this->assertCaredDependant($supplierId, (int) $row['employee_id'], $values);
         $decisiveMonths = $this->decisiveMonthsInput($input);
         if ($values !== []) {
@@ -284,6 +391,34 @@ final readonly class SicknessCaseService
         }
 
         return $this->requireCase($supplierId, $environment, $caseId);
+    }
+
+    /**
+     * Kódy z číselníků ČSSZ se kontrolují už při uložení, ne až při přípravě
+     * podání: kód jiného druhu dávky nebo mimo číselník by jinak ležel
+     * v případu, dokud by ho neodmítla územní správa.
+     *
+     * Kontroluje se jen to, co požadavek mění — starý neplatný kód, který
+     * uživatel právě neopravuje, nesmí zablokovat úpravu jiného pole. Do věty
+     * se stejně nedostane: odmítne ho {@see SicknessXmlValidator}.
+     *
+     * @param array<string,mixed> $values
+     */
+    private function assertCodebooks(SicknessBenefitKind $kind, array $values): void
+    {
+        $touched = array_intersect_key(
+            $values,
+            array_flip(['relationship_code', 'paternity_reason', 'maternity_care_reason']),
+        );
+        if ($touched === []) {
+            return;
+        }
+        NempriCodebook::assertValid(
+            $kind,
+            array_key_exists('relationship_code', $touched) ? $touched['relationship_code'] : null,
+            array_key_exists('paternity_reason', $touched) ? $touched['paternity_reason'] : null,
+            array_key_exists('maternity_care_reason', $touched) ? $touched['maternity_care_reason'] : null,
+        );
     }
 
     /**
@@ -520,6 +655,7 @@ final readonly class SicknessCaseService
                 'Datum v případu musí být ve tvaru RRRR-MM-DD.',
             ),
             'care_reason' => $this->careReason($value),
+            'ltc_consent' => $this->longTermCareConsentValue($value),
             'code' => $this->codebookValue($value),
             'periods' => $this->periodsJson($value),
             default => trim((string) $value),
@@ -538,6 +674,86 @@ final readonly class SicknessCaseService
         }
 
         return $reason;
+    }
+
+    private function longTermCareConsentValue(mixed $value): string
+    {
+        $consent = trim((string) $value);
+        if (!in_array($consent, self::LONG_TERM_CARE_CONSENTS, true)) {
+            throw new SicknessException(
+                'dlo_employer_consent_invalid',
+                'Rozhodnutí zaměstnavatele o dlouhodobém ošetřovném musí být souhlas, nebo odmítnutí.',
+            );
+        }
+
+        return $consent;
+    }
+
+    /**
+     * Rozhodnutí zaměstnavatele podle § 191a zákoníku práce: vyhovět žádosti
+     * o nepřítomnost kvůli dlouhodobé péči musí, „ledaže mu v tom brání vážné
+     * provozní důvody", a odmítnutí písemně zdůvodní. Posuzuje se výsledný
+     * stav případu (uložený + měněný), protože pole přicházejí z jednoho
+     * formuláře, ale uložit jde i jen jedno z nich.
+     *
+     * @param array<string,mixed> $values
+     * @param array<string,mixed> $row
+     */
+    private function assertLongTermCareConsent(SicknessBenefitKind $kind, array $values, array $row): void
+    {
+        $fields = ['long_term_care_consent', 'long_term_care_consent_on', 'long_term_care_refusal_reason'];
+        if (array_intersect_key($values, array_flip($fields)) === []) {
+            return;
+        }
+        $merged = [];
+        foreach ($fields as $field) {
+            $merged[$field] = array_key_exists($field, $values) ? $values[$field] : ($row[$field] ?? null);
+        }
+        if ($merged['long_term_care_consent'] === null) {
+            if ($merged['long_term_care_consent_on'] !== null || $merged['long_term_care_refusal_reason'] !== null) {
+                throw new SicknessException(
+                    'dlo_employer_consent_missing',
+                    'Den rozhodnutí a důvod odmítnutí patří k rozhodnutí zaměstnavatele. '
+                    . 'Vyberte, zda zaměstnavatel s dlouhodobou péčí souhlasil, nebo ji odmítl.',
+                );
+            }
+
+            return;
+        }
+        if ($kind !== SicknessBenefitKind::Dlo) {
+            throw new SicknessException(
+                'dlo_employer_consent_not_in_kind',
+                'Souhlas zaměstnavatele podle § 191a zákoníku práce se eviduje jen u dlouhodobého ošetřovného.',
+            );
+        }
+        if ($merged['long_term_care_consent_on'] === null) {
+            throw new SicknessException(
+                'dlo_employer_consent_date_missing',
+                'Rozhodnutí zaměstnavatele o dlouhodobém ošetřovném musí mít den, kdy ho zaměstnanci sdělil.',
+            );
+        }
+        if ($merged['long_term_care_refusal_reason'] !== null
+            && mb_strlen((string) $merged['long_term_care_refusal_reason']) > 500
+        ) {
+            throw new SicknessException(
+                'dlo_employer_refusal_reason_too_long',
+                'Důvod odmítnutí dlouhodobého ošetřovného může mít nejvýš 500 znaků.',
+            );
+        }
+        if ($merged['long_term_care_consent'] === self::LONG_TERM_CARE_REFUSED) {
+            if ($merged['long_term_care_refusal_reason'] === null) {
+                throw new SicknessException(
+                    'dlo_employer_refusal_reason_missing',
+                    'Odmítnutí dlouhodobého ošetřovného musí zaměstnavatel zdůvodnit vážnými provozními '
+                    . 'důvody (§ 191a zákoníku práce). Doplňte důvod, který zaměstnanci písemně sdělil.',
+                );
+            }
+        } elseif ($merged['long_term_care_refusal_reason'] !== null) {
+            throw new SicknessException(
+                'dlo_employer_refusal_reason_without_refusal',
+                'Důvod odmítnutí se vyplňuje jen tehdy, když zaměstnavatel dlouhodobou péči odmítl.',
+            );
+        }
     }
 
     private function codebookValue(mixed $value): string

@@ -1026,11 +1026,16 @@ final readonly class PayrollDeadlineOverviewService
                     'agenda' => 'NEMPRI',
                     'submitted' => $row['nempri_submission_id'] !== null,
                 ],
-                'hzupn' => [
+            ];
+            // HZUPN hlásí nástup po skončení neschopnosti — jen u nemocenského.
+            // Dřív se lhůta HZUPN vypisovala i u ošetřovného nebo mateřské,
+            // tedy povinnost, která neexistuje.
+            if ($kind->hasEndOfIncapacityReport()) {
+                $documents['hzupn'] = [
                     'agenda' => 'HZUPN',
                     'submitted' => $row['hzupn_submission_id'] !== null,
-                ],
-            ];
+                ];
+            }
             foreach ($documents as $document => $meta) {
                 if ($meta['submitted']) {
                     continue;
@@ -1041,13 +1046,17 @@ final readonly class PayrollDeadlineOverviewService
                             $kind,
                             $incapacityFrom,
                             $incapacityTo,
-                            $row['payroll_payment_date'] === null
+                            ($row['payroll_payment_date'] ?? null) === null
                                 ? null
                                 : (string) $row['payroll_payment_date'],
+                            (bool) ($row['lone_caregiver'] ?? false),
                         )
                         : $this->sicknessDeadlines->forHzupn(
                             $incapacityFrom,
                             $incapacityTo,
+                            ($row['returned_on'] ?? null) === null
+                                ? null
+                                : (string) $row['returned_on'],
                         );
                 } catch (SicknessException) {
                     continue;
@@ -1074,7 +1083,9 @@ final readonly class PayrollDeadlineOverviewService
                     'deadline_source' => $window->legalReference,
                     'deadline_source_status' => $window->sourceStatus,
                     'deadline_ruleset_id' => $window->rulesetId,
-                    'path' => '/payroll/submissions',
+                    // Rovnou na záložku případů dávek, ne na začátek stránky
+                    // podání s měsíčním přehledem.
+                    'path' => '/payroll/submissions/sickness',
                 ];
             }
         }

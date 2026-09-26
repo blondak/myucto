@@ -62,7 +62,7 @@ má vždy přednost před oběma.
 | `cron-document-request-reminders.{cmd,sh}` | Upomínky na nevyřízené požadavky na dodání dokladů |
 | `cron-epo-status.{cmd,sh}` | Bezpečné vyzvedávání dodejek a stavů přímých EPO podání s řízeným odstupem; původní podání nikdy neopakuje |
 | `cron-jmhz-poll.{cmd,sh}` | Dotažení protokolu ČSSZ k měsíčnímu hlášení a uzavření transakce u VREP; neúspěšný dotaz nikdy neuzavře podání (`--limit=N`) |
-| `cron-jmhz-source-monitor.{cmd,ps1,sh}` | Denní read-only sledování veřejných indexů dokumentace JMHZ MPSV/ČSSZ. Do **Systém → Plánované úlohy** ukládá konkrétní nový/změněný dokument, starou a novou verzi, URL a hash; nikdy samo neaktualizuje číselník (`--dry-run`) |
+| `cron-jmhz-source-monitor.{cmd,ps1,sh}` | Denní read-only sledování veřejných indexů dokumentace JMHZ MPSV/ČSSZ, aktualit, struktur EPO a stránek ČSSZ „Definice e-Podání" (NEMPRI, HZUPN, ELDP, REGZEC). Do **Systém → Plánované úlohy** ukládá konkrétní nový/změněný dokument, starou a novou verzi, URL a hash; nikdy samo neaktualizuje číselník (`--dry-run`) |
 | `cron-generate-recurring-invoices.{cmd,sh}` | Generování faktur ze šablon pravidelné fakturace; volitelné rovnou vystavení a odeslání klientovi (`--dry-run`) |
 | `cron-generate-other-items.{cmd,sh}` | Denní idempotentní generování konceptů ostatních pohledávek a závazků z aktivních rozvrhů (`--dry-run`); nikdy samo neúčtuje |
 | `cron-automation-digest.{cmd,sh}` | Ranní souhrn kokpitu Automat podle nastavené hodiny (`--dry-run`, `--hour=N`) |

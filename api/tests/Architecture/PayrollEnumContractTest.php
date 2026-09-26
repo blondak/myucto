@@ -464,6 +464,9 @@ final class PayrollEnumContractTest extends TestCase
         // (`onemocnela`, `narizenaKarantena`, …), takže neznámá by se ztratila.
         'payrollSicknessCases.ts::PayrollSicknessCareReason'
             => 'const:MyInvoice\Service\Payroll\Submission\Sickness\NempriBenefitApplication::CARE_REASONS',
+        // Rozhodnutí zaměstnavatele o dlouhodobé péči (§ 191a ZP).
+        'payrollSicknessCases.ts::PayrollLongTermCareConsent'
+            => 'const:MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseService::LONG_TERM_CARE_CONSENTS',
 
         // Politiky zaměstnavatele
         'payroll.ts::PayrollBusinessDayRule'     => 'policy:payday_business_day_rule',

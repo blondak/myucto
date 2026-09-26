@@ -38,6 +38,7 @@ use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseFromAbsenceService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -68,6 +69,7 @@ final class PayrollAbsenceAction
         private readonly IpMatcher $ipMatcher,
         private readonly AverageEarningBatchService $averageBatch,
         private readonly PayrollObstacleInputMaterializer $obstacleInputs,
+        private readonly SicknessCaseFromAbsenceService $sicknessCases,
     ) {}
 
     public function context(Request $request, Response $response): Response
@@ -163,6 +165,7 @@ final class PayrollAbsenceAction
             $absence = $this->absences->find($supplierId, $id)
                 ?? throw new \InvalidArgumentException('Absence nebyla nalezena.');
             $calculation = null;
+            $sicknessCase = null;
             $pdo = $this->db->pdo();
             $ownsTransaction = !$pdo->inTransaction();
             if ($ownsTransaction) {
@@ -292,6 +295,16 @@ final class PayrollAbsenceAction
                         $this->userId($request),
                     );
                 }
+                // § 97 zák. č. 187/2006 Sb.: lhůta NEMPRI běží od události, ne
+                // od toho, kdy si jí někdo všimne. Schválená absence, ze které
+                // plyne dávka, proto rovnou založí (nebo prodlouží) případ.
+                if ($decision === 'approved') {
+                    $sicknessCase = $this->sicknessCases->onApproved(
+                        $supplierId,
+                        $absence,
+                        $this->userId($request),
+                    );
+                }
                 if ($ownsTransaction) {
                     $pdo->commit();
                 }
@@ -315,7 +328,11 @@ final class PayrollAbsenceAction
                 'current_row_version' => $e->currentVersion,
             ]);
         }
-        return Json::ok($response, ['absence' => $absence, 'calculation' => $calculation]);
+        return Json::ok($response, [
+            'absence' => $absence,
+            'calculation' => $calculation,
+            'sickness_case' => $sicknessCase,
+        ]);
     }
 
     /** @param array<string,string> $args */
@@ -369,6 +386,9 @@ final class PayrollAbsenceAction
                         $this->userId($request),
                     );
                 }
+                $sicknessCase = $before['status'] === 'approved'
+                    ? $this->sicknessCases->onCancelled($supplierId, $id)
+                    : null;
                 if ($ownsTransaction) {
                     $pdo->commit();
                 }
@@ -387,7 +407,7 @@ final class PayrollAbsenceAction
                 'current_row_version' => $e->currentVersion,
             ]);
         }
-        return Json::ok($response, ['absence' => $absence]);
+        return Json::ok($response, ['absence' => $absence, 'sickness_case' => $sicknessCase]);
     }
 
     /**

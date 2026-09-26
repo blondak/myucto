@@ -47,6 +47,20 @@ enum SicknessBenefitKind: string
         return $this === self::Ose || $this === self::Dlo;
     }
 
+    /**
+     * Vzniká u dávky hlášení při ukončení pracovní neschopnosti (HZUPN)?
+     *
+     * Jen u nemocenského: HZUPN hlásí nástup do zaměstnání po skončení
+     * dočasné pracovní neschopnosti nebo karantény. Ošetřovné, otcovská ani
+     * mateřská žádnou neschopnost nemají, takže lhůta HZUPN by u nich tvrdila
+     * povinnost, která neexistuje. Stejné pravidlo drží obrazovka případů
+     * (`HZUPN_KINDS`) i hlídač termínů.
+     */
+    public function hasEndOfIncapacityReport(): bool
+    {
+        return $this === self::Nem;
+    }
+
     /** Nese dávka žádost o dávku (`zadostODavku`)? */
     public function hasApplication(): bool
     {

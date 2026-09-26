@@ -5969,6 +5969,8 @@
           "changed": "Changed: {fields}.",
           "due": "Due {date}",
           "manual_only": "The A3 data message in this build does not carry this detail — file it another way and then close the proposal manually.",
+          "health_insurer_hoz": "A change of insurer is reported to both insurers in the bulk notification (HOZ): a deregistration (code O) to the previous one and a registration (code P) to the new one. Prepare both on the Health insurers tab for the month of the change, then close this proposal.",
+          "open_hoz": "Prepare HOZ for {period}",
           "file": "Report the change",
           "dismiss": "Handle manually",
           "dismiss_note": "How you met the obligation",
@@ -9536,6 +9538,10 @@
         "maternity_or_parental_leave_end": "Maternity or parental leave end",
         "state_category_other": "Other facts where the state is the payer"
       },
+      "insurer_direction": {
+        "outgoing": "Deregistration with the previous insurer (code O) as of {date}",
+        "incoming": "Registration with the new insurer (code P) from {date}"
+      },
       "prepare": {
         "title": "Build the contribution payment overview",
         "description": "Freezes the payment overview for an approved revision, creates both shared XML and text-extractable PDF, and validates the XML against the pinned XSD. The documented attachment format is selected per insurer for ISDS.",
@@ -9903,11 +9909,11 @@
         "careReason": "Reason for care",
         "schoolName": "Name of the school or facility",
         "schoolBusinessId": "Company ID of the school or facility",
-        "relationshipCode": "Relationship code to the cared-for person",
-        "paternityReason": "Paternity reason (code)",
-        "maternityCareReason": "Reason for care (code)",
+        "relationshipCode": "Relationship to the cared-for person",
+        "paternityReason": "Paternity benefit reason",
+        "maternityCareReason": "Reason for taking the child into care",
         "childOrder": "Child order",
-        "codebookHint": "Copy the codes from the application; they are values of the authority's code list (1 to 3 characters, digits and capital letters).",
+        "codebookHint": "Select the values according to the employee's application. The lists are the ČSSZ code lists (www.cssz.gov.cz/web/cz/ciselniky); care benefit and long-term care benefit each have their own list of relationships.",
         "sharedHousehold": "Lives with the cared-for person in a shared household",
         "loneCaregiver": "Is a single caregiver",
         "childUnder16": "Cares for a child under 16",
@@ -9941,6 +9947,90 @@
         "personCard": "Open the person card",
         "reconciliation": "Open payroll migration check",
         "editCase": "Edit case"
+      },
+      "codebooks": {
+        "none": "—",
+        "invalidValue": "{code} (not in the ČSSZ code list, select again)",
+        "paternityReasons": {
+          "OTC": "OTC - father of the child",
+          "ZEM": "ZEM - father of a deceased child",
+          "PEC": "PEC - child taken into care"
+        },
+        "maternityCareReasons": {
+          "DOH": "DOH - agreement (section 32(1)(e) of Act 187/2006)",
+          "ONE": "ONE - long-term illness of the mother",
+          "ROZ": "ROZ - decision of an authority",
+          "UMR": "UMR - death of the mother"
+        },
+        "familyRelationships": {
+          "PL": "PL - relative in the direct line (parent, child, grandparent, grandchild)",
+          "MA": "MA - spouse",
+          "RP": "RP - registered partner",
+          "SDO": "SDO - other person in a shared household",
+          "SO": "SO - sibling",
+          "TCH": "TCH - parent of the spouse or registered partner",
+          "JIN": "JIN - other relationship"
+        },
+        "careRelationships": {
+          "1": "1 - spouse, registered partner",
+          "2": "2 - father/mother",
+          "3": "3 - son/daughter",
+          "4": "4 - brother/sister",
+          "5": "5 - spouse or registered partner of a brother/sister",
+          "6": "6 - partner of a brother/sister",
+          "7": "7 - grandparent",
+          "8": "8 - grandson/granddaughter",
+          "9": "9 - father-in-law/mother-in-law",
+          "10": "10 - son-in-law/daughter-in-law",
+          "11": "11 - nephew/niece",
+          "12": "12 - uncle/aunt",
+          "13": "13 - spouse or registered partner of the father/mother",
+          "14": "14 - registered partner of the son/daughter",
+          "15": "15 - spouse or registered partner of a grandparent",
+          "16": "16 - spouse or registered partner of a grandchild",
+          "17": "17 - spouse or registered partner of a parent-in-law",
+          "18": "18 - spouse or registered partner of a nephew/niece",
+          "19": "19 - spouse or registered partner of an uncle/aunt",
+          "20": "20 - partner of the father/mother",
+          "21": "21 - partner of the son/daughter",
+          "22": "22 - partner of a grandparent",
+          "23": "23 - partner of a grandchild",
+          "24": "24 - partner of a parent-in-law",
+          "25": "25 - partner of a nephew/niece",
+          "26": "26 - partner of an uncle/aunt",
+          "27": "27 - partner of the cared-for person",
+          "28": "28 - other person living with the cared-for person in a household",
+          "29": "29 - other relationship"
+        }
+      },
+      "protectionPeriod": {
+        "within": "Insured event after the employment ended ({end}), within the protection period until {until} (section 15 of Act No. 187/2006 Coll.). NEMPRI is filed with the employment end date.",
+        "outside": "No submission from this case: {message}",
+        "fix": "Check the start date on the case or the end date of the employment."
+      },
+      "origin": {
+        "fromAbsence": "Created from the approved absence. The NEMPRI deadline is monitored from the day of the event.",
+        "openAbsences": "Open absences"
+      },
+      "longTermCare": {
+        "title": "Employer decision on long-term care",
+        "hint": "Section 191a of the Labour Code: the employer must grant absence for long-term care unless serious operational reasons prevent it, and must justify a refusal in writing. Record the decision and the date it was communicated to the employee. A refused case is not forwarded to ČSSZ.",
+        "decision": "Decision",
+        "granted": "Consented",
+        "refused": "Refused",
+        "decidedOn": "Date communicated to the employee",
+        "refusalReason": "Reason for refusal (serious operational reasons)",
+        "refusedBadge": "Employer refused long-term care on {date}"
+      },
+      "absenceNotice": {
+        "created": "Sickness benefit case created ({kind}). NEMPRI is due by {due}.",
+        "createdNoDue": "Sickness benefit case created ({kind}).",
+        "extended": "The absence extended the existing sickness benefit case ({kind}).",
+        "linked": "The absence was linked to the existing sickness benefit case ({kind}).",
+        "cancelled": "The draft sickness benefit case was cancelled together with the absence.",
+        "kept": "The sickness benefit case already has a submission and was kept: {message}",
+        "skipped": "No sickness benefit case was created: {message}",
+        "open": "Open benefit cases"
       }
     },
     "employerSettings": {
@@ -10687,6 +10777,29 @@
       }
     },
     "server_codes": {
+      "nempri_relationship_code_invalid": "The relationship to the cared-for person is not a ČSSZ code-list value for this benefit type. Select it from the list on the benefit case.",
+      "nempri_relationship_code_not_in_kind": "The relationship to the cared-for person is only filled in for care benefit and long-term care benefit.",
+      "nempri_paternity_reason_invalid": "The paternity benefit reason must be OTC, ZEM or PEC. Select it from the list on the benefit case.",
+      "nempri_paternity_reason_not_in_kind": "The paternity benefit reason is only filled in for paternity benefit.",
+      "nempri_maternity_care_reason_invalid": "The reason for taking the child into care must be a value from the CIS_DUVPREVZETI code list. Select it from the list.",
+      "nempri_maternity_care_reason_not_in_kind": "The reason for taking the child into care is only filled in for maternity benefit.",
+      "nempri_maternity_care_reason_with_decision_number": "With a reason for taking the child into care the submission must not carry a decision number. Remove it on the benefit case.",
+      "nempri_maternity_care_child_missing": "When the child was taken into care, the application must name that child.",
+      "sickness_event_after_employment": "The insured event began after the employment ended and this benefit type has no protection period. Check the event start date or the employment end date.",
+      "sickness_event_outside_protection_period": "The insured event began after the protection period following the end of employment (section 15 of Act No. 187/2006 Coll.). No entitlement arose from this employment.",
+      "sickness_protection_period_excluded": "No protection period follows from this employment (agreement to complete a job, small-scope employment or a student during holidays). No entitlement arose after the employment ended.",
+      "hzupn_not_for_benefit_kind": "The notice of ending incapacity for work is only filed for sickness benefit.",
+      "hzupn_return_before_incapacity": "The day of return to work cannot precede the start of the incapacity for work.",
+      "dlo_employer_consent_invalid": "The employer's decision on long-term care must be consent or refusal.",
+      "dlo_employer_consent_missing": "Select whether the employer consented to the long-term care or refused it.",
+      "dlo_employer_consent_not_in_kind": "The employer's consent is only recorded for long-term care benefit.",
+      "dlo_employer_consent_date_missing": "Fill in the date the employer told the employee its decision on long-term care.",
+      "dlo_employer_refusal_reason_missing": "A refusal of long-term care must state the reason: serious operational reasons under section 191a of the Labour Code.",
+      "dlo_employer_refusal_reason_without_refusal": "The refusal reason is only filled in for a refusal.",
+      "dlo_employer_refusal_reason_too_long": "The refusal reason may have at most 500 characters.",
+      "dlo_employer_refused": "The employer refused the long-term care, so long-term care benefit does not arise from this employment and the application is not forwarded.",
+      "sickness_case_actor_missing": "The benefit case was not created automatically. Create it manually under Submissions → Sickness insurance benefits.",
+      "sickness_case_has_submission": "The benefit case already has a prepared or sent submission, so it was not cancelled together with the absence. Check it under Submissions → Sickness insurance benefits.",
       "nempri_care_reason_invalid": "The care reason must be illness, quarantine, inability to care for the child, or closure of a school or facility.",
       "nempri_cared_person_not_found": "The selected person is not a dependant of this employee. Select them again on the case.",
       "nempri_codebook_value_invalid": "A ČSSZ code list value has 1 to 3 characters 0-9 and A-Z.",

@@ -144,6 +144,56 @@ final class PayrollDeadlineOverviewTest extends TestCase
         );
     }
 
+    /**
+     * HZUPN hlásí NÁSTUP po skončení neschopnosti, takže lhůta běží od dne
+     * nástupu, a vzniká jen u nemocenského. Dřív hlídač počítal HZUPN od
+     * posledního dne neschopnosti a vypisoval ho i u ošetřovného.
+     */
+    public function testSicknessCaseDeadlinesFollowReturnToWorkAndOnlySicknessHasHzupn(): void
+    {
+        $this->sicknessCase('NEM', '2026-08-01', '2026-08-12', '2026-08-19');
+        $this->sicknessCase('OSE', '2026-08-03', '2026-08-05', null);
+
+        $overview = $this->service->overview($this->supplierId, 'production');
+        $sickness = array_values(array_filter(
+            $overview['items'],
+            static fn (array $item): bool => $item['source'] === 'sickness_case',
+        ));
+        $byKey = [];
+        foreach ($sickness as $item) {
+            $byKey[$item['benefit_kind'] . ':' . $item['title']] = $item;
+        }
+        ksort($byKey);
+
+        self::assertSame(['NEM:HZUPN', 'NEM:NEMPRI', 'OSE:NEMPRI'], array_keys($byKey));
+        // Nástup ve středu 19. 8. — lhůta HZUPN tentýž den, ne 12. 8.
+        self::assertSame('2026-08-19', $byKey['NEM:HZUPN']['due_on']);
+        self::assertSame('/payroll/submissions/sickness', $byKey['NEM:HZUPN']['path']);
+    }
+
+    private function sicknessCase(string $kind, string $from, string $to, ?string $returnedOn): void
+    {
+        $pdo = $this->db->pdo();
+        $userId = (int) $pdo->query('SELECT MIN(id) FROM users')->fetchColumn();
+        $pdo->prepare(
+            'INSERT INTO payroll_sickness_cases
+                (supplier_id, environment, employee_id, employment_id, benefit_kind,
+                 ossz_code, incapacity_from, incapacity_to, returned_to_work,
+                 returned_on, created_by)
+             VALUES (?, "production", ?, ?, ?, 115, ?, ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentId,
+            $kind,
+            $from,
+            $to,
+            $returnedOn === null ? null : 1,
+            $returnedOn,
+            $userId,
+        ]);
+    }
+
     public function testOverdueChecklistItemIsReported(): void
     {
         $this->checklistItem('social_jmhz_registration', '2026-08-03');

@@ -148,13 +148,42 @@ final class SicknessDeadlinePolicyTest extends TestCase
      * § 97 odst. 3: hlásit se dá teprve tehdy, když je co hlásit. Skončení
      * neschopnosti 2026-08-22 je sobota → termín pondělí 24. 8.
      */
-    public function testEndOfIncapacityReportIsDueOnFirstWorkingDay(): void
+    /**
+     * HZUPN hlásí NÁSTUP do zaměstnání. Poslední den neschopnosti je sobota
+     * 22. 8., nastoupit se dá nejdřív v neděli 23. 8. a lhůta připadne na
+     * pondělí 24. 8.
+     */
+    public function testEndOfIncapacityReportRunsFromTheDayAfterTheLastDayOfIncapacity(): void
     {
         $window = $this->policy->forHzupn('2026-08-01', '2026-08-22');
 
-        self::assertSame('2026-08-22', $window->earliestNotificationOn);
+        self::assertSame('2026-08-23', $window->earliestNotificationOn);
         self::assertSame('2026-08-24', $window->dueOn);
         self::assertStringContainsString('§ 97 odst. 3', $window->legalReference);
+    }
+
+    /**
+     * Zapsaný den nástupu rozhoduje. Neschopnost skončila v pondělí 17. 8.,
+     * zaměstnanec nastoupil až ve středu 26. 8. (dovolená) — lhůta běží od
+     * nástupu, ne od konce neschopnosti. Dřív vycházela na 17. 8., tedy
+     * na den, kdy ještě nebylo co hlásit.
+     */
+    public function testEndOfIncapacityReportRunsFromTheRecordedReturnDay(): void
+    {
+        $window = $this->policy->forHzupn('2026-08-01', '2026-08-17', '2026-08-26');
+
+        self::assertSame('2026-08-26', $window->earliestNotificationOn);
+        self::assertSame('2026-08-26', $window->dueOn);
+    }
+
+    public function testReturnDayBeforeIncapacityIsRefused(): void
+    {
+        try {
+            $this->policy->forHzupn('2026-08-10', '2026-08-17', '2026-08-01');
+            self::fail('Nástup před vznikem neschopnosti nedává smysl.');
+        } catch (SicknessException $exception) {
+            self::assertSame('hzupn_return_before_incapacity', $exception->validationCode);
+        }
     }
 
     public function testEndOfIncapacityReportFailsClosedWhileIncapacityLasts(): void

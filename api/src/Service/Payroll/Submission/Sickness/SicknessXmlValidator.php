@@ -386,15 +386,28 @@ final readonly class SicknessXmlValidator
                 'U uzavřené školy nebo zařízení musí žádost uvést jeho název.',
             );
         }
-        foreach ([
+        // XSD má u všech tří prvků jen `StCiselnik`, takže kód mimo číselník
+        // projde schématem a odmítne ho až územní správa.
+        NempriCodebook::assertValid(
+            $kind,
             $application->relationshipCode,
             $application->paternityReason,
             $application->maternityCareReason,
-        ] as $code) {
-            if ($code !== null && preg_match('/^[0-9A-Z]{1,3}$/D', $code) !== 1) {
+        );
+        // DV NEMPRI25 u `duvodPece`: „Pokud je vyplněno, nesmí být uvedeno
+        // cisloRozhodnuti" a seznam dětí je pak povinný.
+        if ($application->maternityCareReason !== null) {
+            if ($payload->decisionNumber !== null) {
                 $this->invalid(
-                    'nempri_codebook_value_invalid',
-                    'Kód z číselníku ČSSZ má 1 až 3 znaky 0-9 a A-Z.',
+                    'nempri_maternity_care_reason_with_decision_number',
+                    'Peněžitá pomoc v mateřství s důvodem převzetí dítěte do péče nesmí nést '
+                    . 'číslo rozhodnutí. Smažte ho v případu dávky, nebo důvod převzetí.',
+                );
+            }
+            if ($application->person === null) {
+                $this->invalid(
+                    'nempri_maternity_care_child_missing',
+                    'U převzetí dítěte do péče musí žádost uvést převzaté dítě.',
                 );
             }
         }

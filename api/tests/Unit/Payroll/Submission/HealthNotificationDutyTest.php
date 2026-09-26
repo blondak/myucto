@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Payroll\Submission;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationCodeCatalog;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationCodeGroup;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDuty;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyCatalog;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyKind;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
@@ -521,6 +522,24 @@ final class HealthNotificationDutyTest extends TestCase
                 static fn ($duty): string => $duty->insurerCode,
                 $duties,
             ),
+        );
+        [$outgoing, $incoming] = $duties;
+        self::assertSame(HealthNotificationDuty::DIRECTION_OUTGOING, $outgoing->insurerDirection);
+        self::assertSame(HealthNotificationDuty::DIRECTION_INCOMING, $incoming->insurerDirection);
+        self::assertSame('O', $this->codes->codeForDuty($outgoing));
+        self::assertSame('P', $this->codes->codeForDuty($incoming));
+        self::assertTrue($this->codes->isDutyCodeDocumented($outgoing));
+        self::assertSame('2026-06-30', $outgoing->reportedChangeOn());
+        self::assertSame('2026-07-01', $incoming->reportedChangeOn());
+        self::assertNotSame(
+            $outgoing->sourceEventReference(),
+            $incoming->sourceEventReference(),
+        );
+        // Přihláška u nové pojišťovny drží referenci z doby před rozlišením
+        // směru, takže už zaevidované povinnosti zůstávají spárované.
+        self::assertSame(
+            'payroll_health_notification:7:insurer_change:2026-07-01',
+            $incoming->sourceEventReference(),
         );
     }
 
