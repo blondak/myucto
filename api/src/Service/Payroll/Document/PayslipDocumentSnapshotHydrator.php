@@ -26,6 +26,7 @@ final class PayslipDocumentSnapshotHydrator
         string $revisionId,
         string $sourceSnapshotHash,
         string $period,
+        ?int $revisionNumber = null,
     ): PayslipDocumentData {
         $schemaVersion = $snapshot['schema_version'] ?? null;
         if (!is_string($schemaVersion)
@@ -87,6 +88,7 @@ final class PayslipDocumentSnapshotHydrator
             incomeDetailStatus: $detailRecorded
                 ? PayslipDocumentData::INCOME_DETAIL_RECORDED
                 : PayslipDocumentData::INCOME_DETAIL_NOT_RECORDED,
+            revisionNumber: $revisionNumber,
         );
     }
 

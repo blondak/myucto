@@ -45,6 +45,25 @@ final class PayslipPdfRendererTest extends TestCase
         }
     }
 
+    public function testPreviewWithoutRevisionNumberKeepsTheTechnicalIdentifier(): void
+    {
+        $source = SyntheticPayslipFixture::document();
+
+        self::assertNull($source->revisionNumber);
+        self::assertSame($source->revisionId, $source->revisionLabel());
+        self::assertStringContainsString('revize ' . $source->revisionId, PayslipPdfRenderer::footerHtml($source));
+    }
+
+    public function testRejectsNonPositiveRevisionNumber(): void
+    {
+        $source = SyntheticPayslipFixture::document();
+        $this->expectException(\InvalidArgumentException::class);
+
+        new PayslipDocumentData(
+            ...[...get_object_vars($source), 'revisionNumber' => 0],
+        );
+    }
+
     public function testAcceptsNegativeCorrectionLinesWhenAggregatesRemainNonNegative(): void
     {
         $source = SyntheticPayslipFixture::document();

@@ -14,6 +14,7 @@ final class ApprovedRevisionPayslipRepository
     /**
      * @return array{
      *   period_start:string,
+     *   revision_no:int,
      *   result_snapshot_json:string,
      *   result_snapshot_hash:string,
      *   people:list<array<string,mixed>>
@@ -30,6 +31,7 @@ final class ApprovedRevisionPayslipRepository
     /**
      * @return array{
      *   period_start:string,
+     *   revision_no:int,
      *   result_snapshot_json:string,
      *   result_snapshot_hash:string,
      *   people:list<array<string,mixed>>
@@ -46,6 +48,7 @@ final class ApprovedRevisionPayslipRepository
     /**
      * @return array{
      *   period_start:string,
+     *   revision_no:int,
      *   result_snapshot_json:string,
      *   result_snapshot_hash:string,
      *   people:list<array<string,mixed>>
@@ -70,6 +73,7 @@ final class ApprovedRevisionPayslipRepository
             : '("reviewed", "approved")';
         $revision = $this->db->pdo()->prepare(
             'SELECT run.period_start,
+                    revision.revision_no,
                     revision.result_snapshot_json,
                     revision.result_snapshot_hash
                FROM payroll_run_revisions revision
@@ -150,6 +154,7 @@ final class ApprovedRevisionPayslipRepository
 
         return [
             'period_start' => $row['period_start'],
+            'revision_no' => (int) $row['revision_no'],
             'result_snapshot_json' => $row['result_snapshot_json'],
             'result_snapshot_hash' => $row['result_snapshot_hash'],
             'people' => $personRows,

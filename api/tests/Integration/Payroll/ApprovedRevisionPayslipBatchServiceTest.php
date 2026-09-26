@@ -17,6 +17,7 @@ use MyInvoice\Service\Payroll\Document\PayrollDocumentStorage;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentStorageScope;
 use MyInvoice\Service\Payroll\Document\PayslipDocumentData;
 use MyInvoice\Service\Payroll\Document\PayslipDocumentSnapshotHydrator;
+use MyInvoice\Service\Payroll\Document\PayslipPdfRenderer;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Tests\Fixtures\Payroll\SyntheticPayslipFixture;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -137,6 +138,36 @@ final class ApprovedRevisionPayslipBatchServiceTest extends TestCase
         self::assertSame([], $documents->legacyGenerateTransactionStates);
         self::assertSame([false, false], $documents->renderTransactionStates);
         self::assertSame([true, true], $documents->archiveTransactionStates);
+    }
+
+    /**
+     * IMP-9: patička pásky tiskla ID řádku revize („revize revision-8123“),
+     * které účetní nikde v aplikaci nevidí. Nová verze rendereru tiskne
+     * pořadové číslo revize běhu, stejně jako mzdový doklad (IMP-8).
+     */
+    public function testPayslipFooterCarriesTheRunRevisionNumberNotTheRowId(): void
+    {
+        // Syntetická schválená revize má pořadové číslo 3 (viz createApprovedRevision).
+        $documents = new TransactionObservingPayrollDocumentService($this->db);
+        $service = new ApprovedRevisionPayslipBatchService(
+            $this->db,
+            new ApprovedRevisionPayslipRepository($this->db),
+            new PayslipDocumentSnapshotHydrator(),
+            $documents,
+        );
+
+        $service->generate($this->supplierId, $this->runId, $this->revisionId, null);
+
+        self::assertCount(2, $documents->renderedData);
+        foreach ($documents->renderedData as $data) {
+            self::assertSame(3, $data->revisionNumber);
+            $footer = PayslipPdfRenderer::footerHtml($data);
+            self::assertStringContainsString('revize č. 3', $footer);
+            self::assertStringNotContainsString('revision-' . $this->revisionId, $footer);
+            self::assertSame('revision-' . $this->revisionId, $data->revisionId);
+            self::assertSame('č. 3', $data->toTemplateData()['revision_label']);
+        }
+        self::assertSame('mz-16-payslip-v3', PayslipPdfRenderer::VERSION);
     }
 
     public function testSourceChangedDuringRenderingFailsBeforeArchiveWrite(): void
@@ -461,7 +492,7 @@ final class ApprovedRevisionPayslipBatchServiceTest extends TestCase
                  ruleset_manifest_hash, input_snapshot_json,
                  input_snapshot_hash, result_snapshot_json,
                  result_snapshot_hash, idempotency_key_hash)
-             VALUES (?, ?, 1, "approved", "payroll-run-input.v2",
+             VALUES (?, ?, 3, "approved", "payroll-run-input.v2",
                      ?, ?, ?, ?, ?, UNHEX(?))'
         )->execute([
             $this->supplierId,
@@ -605,6 +636,8 @@ final class TransactionObservingPayrollDocumentService extends PayrollDocumentSe
     public array $archiveTransactionStates = [];
     /** @var list<bool> */
     public array $legacyGenerateTransactionStates = [];
+    /** @var list<PayslipDocumentData> */
+    public array $renderedData = [];
 
     private readonly int $initialSavepointCount;
     private bool $sourceMutated = false;
@@ -635,6 +668,7 @@ final class TransactionObservingPayrollDocumentService extends PayrollDocumentSe
 
     public function renderPayslip(PayslipDocumentData $data): PayrollArtifact
     {
+        $this->renderedData[] = $data;
         $this->renderTransactionStates[] = $this->batchSavepointExists();
         if (!$this->sourceMutated && $this->mutateSource !== null) {
             $this->sourceMutated = true;
