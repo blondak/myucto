@@ -2050,6 +2050,7 @@
       "relationship_count": "{count} pracovní vztahy v původním systému",
       "revision_status": "Revize ve stavu {status}",
       "external_person": "Osoba {ref} z původního systému",
+      "not_compared": "Převzaté měsíce {periods} se nesrovnávají: zpracoval je předchozí program a MyÚčto je samo nepřepočítává, takže by se každý osoboměsíc hlásil jako odchylka. Porovnávají se měsíce, které MyÚčto počítá.",
       "unknown_person": "Neurčená osoba",
       "employer_social_note": "Pojistné zaměstnavatele na sociální zabezpečení (jen za firmu, osobní veličina to není):",
       "grain_hint": "Řádek je osoba a měsíc. Převzatá strana se sčítá přes pracovní vztahy, protože pojistné i daň jsou ze zákona veličiny osoby, ne vztahu — rozpočítat je zpět na vztahy by znamenalo vymyslet si alokační klíč.",

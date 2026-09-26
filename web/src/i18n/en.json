@@ -2050,6 +2050,7 @@
       "relationship_count": "{count} employment relationships in the previous system",
       "revision_status": "Revision in status {status}",
       "external_person": "Person {ref} from the previous system",
+      "not_compared": "Taken-over months {periods} are not compared: the previous program processed them and MyÚčto does not recalculate them, so every person-month would show as a deviation. Only months calculated by MyÚčto are compared.",
       "unknown_person": "Unidentified person",
       "employer_social_note": "Employer social security contribution (company-wide only, it is not a per-person amount):",
       "grain_hint": "A row is one person and month. The migrated side is summed across employment relationships, because contributions and tax are by law amounts of the person, not of the relationship — splitting them back would mean inventing an allocation key.",

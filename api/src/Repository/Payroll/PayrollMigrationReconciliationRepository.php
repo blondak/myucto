@@ -26,23 +26,27 @@ final class PayrollMigrationReconciliationRepository
      */
     public function referenceTotals(int $supplierId, int $year, ?string $source = null): array
     {
-        $sql = 'SELECT DATE_FORMAT(period_start, "%Y-%m") AS period,
-                       source, external_person_ref, external_relationship_ref,
-                       employee_id, employment_id,
-                       gross_minor, net_minor, social_base_minor, health_base_minor,
-                       employee_social_minor, employee_health_minor,
-                       employer_social_minor, employer_health_minor,
-                       advance_tax_minor, withholding_tax_minor, tax_bonus_minor
-                  FROM payroll_migration_reference_totals
-                 WHERE supplier_id = ?
-                   AND period_start >= ?
-                   AND period_start < ?';
+        // Jméno osoby (Q15-35): bez něj se řádek bez protějšku ukazoval jen
+        // jako „Osoba 1878 z původního systému".
+        $sql = 'SELECT DATE_FORMAT(totals.period_start, "%Y-%m") AS period,
+                       totals.source, totals.external_person_ref, totals.external_relationship_ref,
+                       totals.employee_id, totals.employment_id, employee.full_name,
+                       totals.gross_minor, totals.net_minor, totals.social_base_minor, totals.health_base_minor,
+                       totals.employee_social_minor, totals.employee_health_minor,
+                       totals.employer_social_minor, totals.employer_health_minor,
+                       totals.advance_tax_minor, totals.withholding_tax_minor, totals.tax_bonus_minor
+                  FROM payroll_migration_reference_totals totals
+             LEFT JOIN payroll_employees employee
+                    ON employee.supplier_id = totals.supplier_id AND employee.id = totals.employee_id
+                 WHERE totals.supplier_id = ?
+                   AND totals.period_start >= ?
+                   AND totals.period_start < ?';
         $parameters = [$supplierId, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)];
         if ($source !== null) {
-            $sql .= ' AND source = ?';
+            $sql .= ' AND totals.source = ?';
             $parameters[] = $source;
         }
-        $sql .= ' ORDER BY period_start, external_person_ref, external_relationship_ref';
+        $sql .= ' ORDER BY totals.period_start, totals.external_person_ref, totals.external_relationship_ref';
 
         $statement = $this->db->pdo()->prepare($sql);
         $statement->execute($parameters);

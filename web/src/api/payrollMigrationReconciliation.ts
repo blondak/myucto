@@ -110,6 +110,8 @@ export interface PayrollMigrationReconciliation {
   source: PayrollMigrationSource | null
   /** Úplnost a shoda převzatých vrstev (počáteční stavy vs. převzaté mzdy). */
   takeover_check?: TakeoverCheck
+  /** Převzaté měsíce před začátkem vedení mezd, které se nesrovnávají (`YYYY-MM`). */
+  takeover_periods_not_compared?: string[]
 }
 
 export const payrollMigrationReconciliationApi = {
