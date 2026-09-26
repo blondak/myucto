@@ -1093,6 +1093,10 @@ function readyPeriodLabel(submission: PayrollJmhzReadySubmission): string {
   })
 }
 
+function isSplitSubmission(submission: PayrollJmhzReadySubmission): boolean {
+  return (submission.package_count ?? 0) > 1
+}
+
 async function dispatchReady(
   submission: PayrollJmhzReadySubmission,
   channel: 'isds' | 'vrep',
@@ -1158,10 +1162,14 @@ async function dispatchReady(
       ? t('payroll.submissions.transport.ready.isds_queued', { id: queued.outbox_id })
       : t('payroll.submissions.transport.ready.isds_already_queued', { id: queued.outbox_id })
   } catch (exception: unknown) {
-    actionError.value = apiErrorMessage(
+    const message = apiErrorMessage(
       exception,
       t('payroll.submissions.transport.ready.dispatch_failed'),
     )
+    // Rozdělené hlášení mohlo část balíků odeslat, než odeslání spadlo.
+    // Bez znovunačtení by obrazovka dál ukazovala starý průběh balíků.
+    if (channel === 'vrep' && isSplitSubmission(submission)) await load()
+    actionError.value = message
   } finally {
     readyDispatchPending.value = null
   }
@@ -1502,9 +1510,12 @@ onMounted(loadVariableSymbols)
                   {{ readyDispatchPending?.id === submission.submission_id
                     && readyDispatchPending.channel === 'vrep'
                     ? t('payroll.submissions.transport.ready.sending')
-                    : t('payroll.submissions.transport.ready.send_vrep') }}
+                    : (submission.packages_sent ?? 0) > 0
+                      ? t('payroll.submissions.transport.ready.packages.send_remaining')
+                      : t('payroll.submissions.transport.ready.send_vrep') }}
                 </button>
                 <button
+                  v-if="!isSplitSubmission(submission)"
                   type="button"
                   :data-test="`transport-ready-isds-${submission.submission_id}`"
                   :class="btnFilled('primary')"
@@ -1520,6 +1531,24 @@ onMounted(loadVariableSymbols)
                     : t('payroll.submissions.transport.ready.send_isds') }}
                 </button>
               </div>
+            </div>
+            <div
+              v-if="isSplitSubmission(submission)"
+              class="mt-3 rounded-lg border border-info-500/30 bg-info-50 p-3 text-sm text-neutral-700"
+              :data-test="`transport-ready-packages-${submission.submission_id}`"
+            >
+              <p class="font-medium text-neutral-900">
+                {{ t('payroll.submissions.transport.ready.packages.progress', {
+                  sent: submission.packages_sent ?? 0,
+                  count: submission.package_count ?? 0,
+                }) }}
+              </p>
+              <p v-if="(submission.packages_sent ?? 0) > 0" class="mt-1">
+                {{ t('payroll.submissions.transport.ready.packages.interrupted') }}
+              </p>
+              <p class="mt-1 text-xs text-neutral-600">
+                {{ t('payroll.submissions.transport.ready.packages.vrep_only') }}
+              </p>
             </div>
             <p class="mt-3 text-xs text-neutral-600">
               {{ t('payroll.submissions.transport.ready.user_action_note') }}
@@ -2064,6 +2093,16 @@ onMounted(loadVariableSymbols)
                   </span>
                   <span class="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700">
                     {{ t('payroll.submissions.transport.attempt_no', { no: attempt.attempt_no }) }}
+                  </span>
+                  <span
+                    v-if="attempt.package_ordinal && (attempt.package_count ?? 0) > 1"
+                    class="rounded-full bg-info-50 px-2.5 py-1 text-xs font-medium text-info-700"
+                    :data-test="`transport-attempt-package-${attempt.id}`"
+                  >
+                    {{ t('payroll.submissions.transport.attempt_package', {
+                      ordinal: attempt.package_ordinal,
+                      count: attempt.package_count,
+                    }) }}
                   </span>
                   <span class="text-xs text-neutral-500">
                     {{ attempt.sent_at

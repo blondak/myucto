@@ -378,14 +378,14 @@ final class PayrollSubmissionService
     }
 
     /**
-     * Stav posledního ověřeného protokolu každé součásti podání (dílčí balíky
-     * rozděleného hlášení JMHZ).
+     * Originál posledního ověřeného protokolu každé součásti podání (dílčí
+     * balíky rozděleného hlášení JMHZ).
      *
-     * @return array<int,string> id součásti → vzdálený stav
+     * @return array<int,int> id součásti → id artefaktu originálu protokolu
      */
-    public function packageReceiptStatuses(int $supplierId, string $environment, int $submissionId): array
+    public function packageReceiptArtifacts(int $supplierId, string $environment, int $submissionId): array
     {
-        return $this->repository->latestTrustedReceiptStatusByPart($supplierId, $environment, $submissionId);
+        return $this->repository->latestTrustedReceiptArtifactByPart($supplierId, $environment, $submissionId);
     }
 
     /**

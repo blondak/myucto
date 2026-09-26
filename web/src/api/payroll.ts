@@ -2953,6 +2953,8 @@ export interface PayrollSubmissionOverviewItem {
   subject_reference: string
   /** Lidsky čitelný `subject_reference`, jen tam, kde jde ověřit — jinak `null`. */
   subject_label: string | null
+  /** Osoba, které se povinnost týká (vztah → zaměstnanec); proklik na kartu. */
+  subject_employee_id?: number | null
   period_start: string
   period_end: string
   obligation_kind: string
@@ -3590,6 +3592,8 @@ export interface PayrollSubmissionDetail {
     subject_reference: string
     /** Lidsky čitelný `subject_reference`, jen tam, kde jde ověřit — jinak `null`. */
     subject_label: string | null
+    /** Osoba, které se podání týká (vztah → zaměstnanec); proklik na kartu. */
+    subject_employee_id?: number | null
     period_start: string
     period_end: string
     submission_kind: string
@@ -3677,6 +3681,8 @@ export interface PayrollSubmissionInboxItem {
   subject_reference: string
   /** Lidsky čitelný `subject_reference`, jen tam, kde jde ověřit — jinak `null`. */
   subject_label: string | null
+  /** Osoba, které se povinnost týká (vztah → zaměstnanec); proklik na kartu. */
+  subject_employee_id?: number | null
   period_start: string
   period_end: string
   due_on: string
@@ -6873,6 +6879,10 @@ export interface PayrollJmhzTransportAttempt {
    * nemá ověřeného dvojníka. Nese ho jen přehled; `null` = není co ověřovat.
    */
   unverified_receipt_id?: number | null
+  /** Dílčí balík rozděleného hlášení, který pokus odeslal; `null` = nerozdělené. */
+  package_ordinal?: number | null
+  /** Počet dílčích balíků hlášení; 0 = nerozdělené. */
+  package_count?: number
 }
 
 /** Výsledek znovu ověření uloženého protokolu ČSSZ. */
@@ -6979,7 +6989,11 @@ export interface PayrollJmhzReadySubmission {
    */
   agenda_code: string
   submission_kind: string
-  submission_status: 'ready'
+  /**
+   * `submitted` / `processing` jen u hlášení rozděleného do dílčích balíků,
+   * kterému odeslání spadlo uprostřed: zbylé balíky se musí dát doposlat.
+   */
+  submission_status: 'ready' | 'submitted' | 'processing'
   corrects_submission_id: number | null
   period_start: string
   period_end: string
@@ -6988,6 +7002,10 @@ export interface PayrollJmhzReadySubmission {
   outbox_dispatch_state: string | null
   outbox_acceptance_state: string | null
   outbox_external_message_id: string | null
+  /** Počet dílčích balíků (hlášení nad 1500 formulářů); 0 = nerozdělené. */
+  package_count?: number
+  /** Kolik balíků už odešlo (pokus, po kterém mohl balík opustit aplikaci). */
+  packages_sent?: number
 }
 
 /**

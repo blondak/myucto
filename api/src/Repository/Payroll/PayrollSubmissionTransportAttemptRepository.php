@@ -278,7 +278,32 @@ final class PayrollSubmissionTransportAttemptRepository
                                AND trusted.verification_status = "trusted"
                                AND trusted.summary_hash = receipt.summary_hash
                         )
-                    ) AS unverified_receipt_id
+                    ) AS unverified_receipt_id,
+                    -- Dílčí balík rozděleného hlášení, který pokus odeslal
+                    -- (podle otisku zmrazeného artefaktu), a počet balíků.
+                    -- U nerozděleného podání obojí NULL / 0.
+                    (SELECT MIN(CAST(SUBSTRING_INDEX(package_part.part_reference, ":package:", -1) AS UNSIGNED))
+                       FROM payroll_submission_parts package_part
+                       JOIN payroll_submission_artifacts package_artifact
+                         ON package_artifact.supplier_id = package_part.supplier_id
+                        AND package_artifact.environment = package_part.environment
+                        AND package_artifact.submission_id = package_part.submission_id
+                        AND package_artifact.part_id = package_part.id
+                        AND package_artifact.artifact_kind = "outbound_xml"
+                        AND package_artifact.direction = "outbound"
+                      WHERE package_part.supplier_id = attempt.supplier_id
+                        AND package_part.environment = attempt.environment
+                        AND package_part.submission_id = attempt.submission_id
+                        AND package_part.part_reference LIKE "%:package:%"
+                        AND package_artifact.artifact_sha256 = attempt.request_sha256
+                    ) AS package_ordinal,
+                    (SELECT COUNT(*)
+                       FROM payroll_submission_parts package_part
+                      WHERE package_part.supplier_id = attempt.supplier_id
+                        AND package_part.environment = attempt.environment
+                        AND package_part.submission_id = attempt.submission_id
+                        AND package_part.part_reference LIKE "%:package:%"
+                    ) AS package_count
                FROM ' . self::TABLE . ' attempt' . $join . $where . '
               ORDER BY attempt.id DESC
               LIMIT ' . $limit . ' OFFSET ' . $offset,
@@ -390,7 +415,8 @@ final class PayrollSubmissionTransportAttemptRepository
      *   submission_status:string,
      *   corrects_submission_id:?int,period_start:string,period_end:string,
      *   created_at:string,outbox_id:?int,outbox_dispatch_state:?string,
-     *   outbox_acceptance_state:?string,outbox_external_message_id:?string
+     *   outbox_acceptance_state:?string,outbox_external_message_id:?string,
+     *   package_count:int,packages_sent:int
      * }>
      */
     public function listReadySubmissions(
@@ -422,6 +448,38 @@ final class PayrollSubmissionTransportAttemptRepository
         $placeholders = implode(', ', array_fill(0, count($agendaCodes), '?'));
         // Filtr období platí i tady — viz listReadySubmissions().
         $filter = ($period ?? PeriodFilter::none())->sqlFor('obligation.period_start');
+        // Dílčí balíky rozděleného hlášení (nad 1500 formulářů). Každý balík
+        // je zvlášť zmrazená datová věta a zvlášť odeslaný pokus; který balík
+        // už odešel, pozná ledger podle otisku zmrazeného artefaktu — přesně
+        // tak, jak to při odeslání dělá JmhzDispatchService::sendPackages().
+        $packageArtifact = 'FROM payroll_submission_parts package_part
+               JOIN payroll_submission_artifacts package_artifact
+                 ON package_artifact.supplier_id = package_part.supplier_id
+                AND package_artifact.environment = package_part.environment
+                AND package_artifact.submission_id = package_part.submission_id
+                AND package_artifact.part_id = package_part.id
+                AND package_artifact.id = (
+                    SELECT MAX(latest.id)
+                      FROM payroll_submission_artifacts latest
+                     WHERE latest.supplier_id = package_part.supplier_id
+                       AND latest.environment = package_part.environment
+                       AND latest.submission_id = package_part.submission_id
+                       AND latest.part_id = package_part.id
+                       AND latest.artifact_kind = "outbound_xml"
+                       AND latest.direction = "outbound"
+                )
+              WHERE package_part.supplier_id = submission.supplier_id
+                AND package_part.environment = submission.environment
+                AND package_part.submission_id = submission.id
+                AND package_part.part_reference LIKE "%:package:%"';
+        $packageSent = 'EXISTS (
+                    SELECT 1 FROM ' . self::TABLE . ' package_attempt
+                     WHERE package_attempt.supplier_id = submission.supplier_id
+                       AND package_attempt.environment = submission.environment
+                       AND package_attempt.submission_id = submission.id
+                       AND package_attempt.request_sha256 = package_artifact.artifact_sha256
+                       AND ' . self::blockingAttemptSql('package_attempt') . '
+                )';
         $statement = $this->db->pdo()->prepare(
             'SELECT submission.id AS submission_id,
                     obligation.agenda_code,
@@ -433,7 +491,9 @@ final class PayrollSubmissionTransportAttemptRepository
                     outbox.id AS outbox_id,
                     outbox.dispatch_state AS outbox_dispatch_state,
                     outbox.acceptance_state AS outbox_acceptance_state,
-                    outbox.external_message_id AS outbox_external_message_id
+                    outbox.external_message_id AS outbox_external_message_id,
+                    (SELECT COUNT(*) ' . $packageArtifact . ') AS package_count,
+                    (SELECT COUNT(*) ' . $packageArtifact . ' AND ' . $packageSent . ') AS packages_sent
                FROM payroll_submissions submission
                JOIN payroll_obligations obligation
                  ON obligation.supplier_id = submission.supplier_id
@@ -459,14 +519,8 @@ final class PayrollSubmissionTransportAttemptRepository
                -- Třetí výjimka je pokus „možná doručeno", u kterého účetní
                -- výslovně potvrdila opakování (`expired` s kódem
                -- `retry_confirmed_by_user`); sám `possibly_delivered` blokuje.
-               -- TOTOŽNÉ pravidlo jako PayrollDispatchGate::attemptAllowsRetry().
-               LEFT JOIN ' . self::TABLE . ' attempt
-                 ON attempt.supplier_id = submission.supplier_id
-                AND attempt.environment = submission.environment
-                AND attempt.submission_id = submission.id
-                AND NOT (attempt.status = "failed" AND attempt.sent_at IS NULL)
-                AND NOT (attempt.status = "expired"
-                         AND attempt.error_code IN ("abandoned_by_user", "retry_confirmed_by_user"))
+               -- TOTOŽNÉ pravidlo jako PayrollDispatchGate::attemptAllowsRetry()
+               -- (viz blockingAttemptSql() a podmínka ve WHERE).
                LEFT JOIN submission_outbox outbox
                  ON outbox.id = (
                     SELECT MAX(candidate.id)
@@ -484,9 +538,32 @@ final class PayrollSubmissionTransportAttemptRepository
                  )
               WHERE submission.supplier_id = ?
                 AND submission.environment = ?
-                AND submission.status = "ready"
                 AND obligation.agenda_code IN (' . $placeholders . ')
-                AND attempt.id IS NULL' . $filter['sql'] . '
+                AND (
+                    (submission.status = "ready"
+                     AND NOT EXISTS (
+                        SELECT 1 FROM ' . self::TABLE . ' attempt
+                         WHERE attempt.supplier_id = submission.supplier_id
+                           AND attempt.environment = submission.environment
+                           AND attempt.submission_id = submission.id
+                           AND ' . self::blockingAttemptSql('attempt') . '
+                     ))
+                    -- Rozdělené hlášení, kterému odeslání spadlo uprostřed:
+                    -- první balík odešel (podání je `submitted`, po jeho
+                    -- protokolu `processing`), další ne. Bez téhle větve
+                    -- zmizelo z nabídky a zbylé balíky nešlo doposlat.
+                    -- Balík „možná doručeno" nabídku zastaví stejně jako
+                    -- u nerozděleného podání: nejdřív se musí dohledat protokol.
+                    OR (submission.status IN ("submitted", "processing")
+                        AND EXISTS (SELECT 1 ' . $packageArtifact . ' AND NOT ' . $packageSent . ')
+                        AND NOT EXISTS (
+                            SELECT 1 FROM ' . self::TABLE . ' unresolved
+                             WHERE unresolved.supplier_id = submission.supplier_id
+                               AND unresolved.environment = submission.environment
+                               AND unresolved.submission_id = submission.id
+                               AND unresolved.status = "possibly_delivered"
+                        ))
+                )' . $filter['sql'] . '
               ORDER BY submission.created_at DESC, submission.id DESC
               LIMIT ' . $limit,
         );
@@ -519,10 +596,25 @@ final class PayrollSubmissionTransportAttemptRepository
                 'outbox_external_message_id' => $row['outbox_external_message_id'] === null
                     ? null
                     : (string) $row['outbox_external_message_id'],
+                'package_count' => (int) $row['package_count'],
+                'packages_sent' => (int) $row['packages_sent'],
             ];
         }
 
         return $rows;
+    }
+
+    /**
+     * Pokus, po kterém MOHLA zpráva opustit aplikaci, a proto blokuje další
+     * odeslání téhož dokumentu. SQL podoba
+     * {@see \MyInvoice\Service\Payroll\Submission\PayrollDispatchGate::attemptAllowsRetry()}
+     * (negovaná); obě musí zůstat totožné.
+     */
+    private static function blockingAttemptSql(string $alias): string
+    {
+        return 'NOT (' . $alias . '.status = "failed" AND ' . $alias . '.sent_at IS NULL)
+                AND NOT (' . $alias . '.status = "expired"
+                         AND ' . $alias . '.error_code IN ("abandoned_by_user", "retry_confirmed_by_user"))';
     }
 
     /**
@@ -1425,14 +1517,14 @@ final class PayrollSubmissionTransportAttemptRepository
         foreach (
             [
                 'id', 'supplier_id', 'submission_id', 'attempt_no',
-                'row_version', 'poll_count', 'close_attempts',
+                'row_version', 'poll_count', 'close_attempts', 'package_count',
             ] as $field
         ) {
             if (array_key_exists($field, $normalized)) {
                 $normalized[$field] = (int) $normalized[$field];
             }
         }
-        foreach (['response_http_status', 'created_by', 'corrects_submission_id', 'unverified_receipt_id'] as $field) {
+        foreach (['response_http_status', 'created_by', 'corrects_submission_id', 'unverified_receipt_id', 'package_ordinal'] as $field) {
             if (array_key_exists($field, $normalized)) {
                 $normalized[$field] = $normalized[$field] === null
                     ? null

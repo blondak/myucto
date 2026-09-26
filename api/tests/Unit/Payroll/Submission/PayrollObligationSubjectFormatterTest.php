@@ -89,6 +89,20 @@ final class PayrollObligationSubjectFormatterTest extends TestCase
         ));
     }
 
+    /**
+     * Registrace, OZUSPOJ a dávky nemocenského vedou vztah jako
+     * `payroll_employment:{id}`; oba tvary musí vést na týž vztah, jinak
+     * přehled a inbox podání neukážou jméno osoby.
+     */
+    public function testEmploymentIdRecognizesBothReferenceShapes(): void
+    {
+        self::assertSame(37, PayrollObligationSubjectFormatter::employmentId('employment:37'));
+        self::assertSame(42, PayrollObligationSubjectFormatter::employmentId('payroll_employment:42'));
+        self::assertNull(PayrollObligationSubjectFormatter::employmentId('payroll_employment:0'));
+        self::assertNull(PayrollObligationSubjectFormatter::employmentId('payroll_run:8'));
+        self::assertNull(PayrollObligationSubjectFormatter::employmentId('payroll_employment:4:x'));
+    }
+
     public function testEmptyInsurerCodeIsSuppressedNotEmptyLabel(): void
     {
         self::assertNull(PayrollObligationSubjectFormatter::humanSubject(

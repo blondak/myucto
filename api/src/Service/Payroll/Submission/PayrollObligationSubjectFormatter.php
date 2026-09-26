@@ -47,12 +47,32 @@ use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissi
  *   užitečný doplněk, protože firma s víc účtárnami by jinak měla dva řádky
  *   bez rozlišení,
  *   cokoliv jiného (typicky `payroll_run:{runId}` bez účtárny, nebo
- *   `employment:{id}` u ELDP/OZUSPOJ/PREZEC/REGZEC) — appka nezná jméno
- *   osoby ani účtárny na tomhle řádku dat a interní ID by nikomu nic
- *   neřeklo, takže se radši NEUKÁŽE NIC, než syrové ID.
+ *   `employment:{id}` / `payroll_employment:{id}` u ELDP/OZUSPOJ/PREZEC/
+ *   REGZEC/NEMPRI) — tahle třída nezná jméno osoby ani účtárny na tomhle
+ *   řádku dat a interní ID by nikomu nic neřeklo, takže se radši NEUKÁŽE NIC,
+ *   než syrové ID. Jméno osoby k vztahu dohledá dotazem
+ *   {@see PayrollObligationSubjectResolver} přes {@see self::employmentId()}.
  */
 final class PayrollObligationSubjectFormatter
 {
+    /**
+     * Id pracovního vztahu, je-li předmětem povinnosti. Registrace, OZUSPOJ
+     * a dávky nemocenského vedou vztah jako `payroll_employment:{id}`, ELDP
+     * a zdravotní pojišťovny jako `employment:{id}`.
+     */
+    public static function employmentId(string $subjectReference): ?int
+    {
+        if (preg_match(
+            '/^(?:payroll_)?employment:([1-9][0-9]*)$/D',
+            $subjectReference,
+            $matches,
+        ) !== 1) {
+            return null;
+        }
+
+        return (int) $matches[1];
+    }
+
     public static function humanSubject(
         string $agendaCode,
         string $subjectReference,

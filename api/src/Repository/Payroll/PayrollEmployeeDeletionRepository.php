@@ -87,15 +87,6 @@ final class PayrollEmployeeDeletionRepository
             'message' => 'Za zaměstnance je evidovaný záměr uplatňovat slevu na pojistném '
                 . '(OZUSPOJ). Je to doklad k odvedenému pojistnému, takže osobu smazat nelze.',
         ],
-        // Nemocenský případ je podklad pro dávku, kterou vyplácí ČSSZ, a evidence
-        // úkonu podle § 97 zákona č. 187/2006 Sb. Smazat osobu i s ním by
-        // odstranilo doklad o tom, co a kdy se úřadu předalo.
-        'sickness' => [
-            'tables' => ['payroll_sickness_cases'],
-            'code' => 'payroll_employee_has_sickness_case',
-            'message' => 'Za zaměstnance je evidovaný nemocenský případ (NEMPRI nebo HZUPN). '
-                . 'Je to podklad pro dávku předaný ČSSZ, takže osobu smazat nelze.',
-        ],
         'calculation' => [
             'tables' => ['payroll_net_results', 'payroll_statutory_accumulator_openings'],
             'code' => 'payroll_employee_has_calculation',
@@ -274,6 +265,10 @@ final class PayrollEmployeeDeletionRepository
         // Odložení vztahu z řádného hlášení je rozhodnutí nad revizí běhu; běh
         // mazání blokuje dřív, tady jde jen o atomickou podmínku.
         'payroll_jmhz_deferrals',
+        // Případ dávky nemocenského pojištění patří ke vztahu: podaný případ
+        // blokuje rekurzí přes vztah (hláška jmenuje vztah i podání ČSSZ),
+        // rozpracovaný bez podání zmizí se vztahem. Po rekurzi tu nesmí zbýt nic.
+        'payroll_sickness_cases',
     ];
 
     public function __construct(

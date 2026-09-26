@@ -10,7 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionDetailRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
-use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectFormatter;
+use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectResolver;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -21,6 +21,7 @@ final class PayrollSubmissionDetailAction
     public function __construct(
         private readonly PayrollSubmissionDetailRepository $repository,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollObligationSubjectResolver $subjects,
     ) {}
 
     /**
@@ -86,12 +87,14 @@ final class PayrollSubmissionDetailAction
         }
 
         // `subject_reference` je interní složený klíč — účetní s ním nic
-        // neudělá. `subject_label` dodává jen to, co jde ověřit ze sdíleného
-        // formátovače; zbytek zůstává `null`, ne hádaný.
-        $detail['submission']['subject_label'] = PayrollObligationSubjectFormatter::humanSubject(
-            $detail['submission']['agenda_code'],
-            $detail['submission']['subject_reference'],
+        // neudělá. `subject_label` dodává jen to, co jde ověřit (jméno osoby
+        // k vztahu, účtárna, pojišťovna); zbytek zůstává `null`, ne hádaný.
+        [$subject] = $this->subjects->resolve(
+            $this->currentSupplierId($request),
+            [$detail['submission']],
         );
+        $detail['submission']['subject_label'] = $subject['subject_label'];
+        $detail['submission']['subject_employee_id'] = $subject['subject_employee_id'];
 
         return Json::ok($response, $detail)
             ->withHeader('Cache-Control', 'private, no-store')

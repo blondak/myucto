@@ -237,6 +237,75 @@ final class PayrollDeletionApiTest extends TestCase
         self::assertSame(1, $this->rowCount('payroll_employees', 'id', $this->employeeId));
     }
 
+    /**
+     * Rozpracovaný případ dávky bez podání je příprava, která nikdy neodešla.
+     * Dřív mazání vztahu spadlo na FK RESTRICT z `payroll_sickness_cases`.
+     */
+    public function testDraftSicknessCaseIsDeletedTogetherWithEmployment(): void
+    {
+        $employment = $this->create('HPP-S1', 'employment', true);
+        $employmentId = (int) $employment['id'];
+        $this->insertSicknessCase($employmentId, 'draft');
+        $this->insertSicknessCase($employmentId, 'cancelled', '2026-03-02');
+
+        $decision = $this->employmentDeletion->canDelete($this->supplierId, $employmentId);
+        self::assertNotNull($decision);
+        self::assertTrue($decision->canDelete);
+        self::assertSame(2, $decision->cascade['sickness']);
+
+        $response = $this->deleteEmployment($employment);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(0, $this->rowCount('payroll_employments', 'id', $employmentId));
+        self::assertSame(0, $this->rowCount('payroll_sickness_cases', 'employment_id', $employmentId));
+    }
+
+    public function testSubmittedSicknessCaseBlocksEmploymentWithExplanation(): void
+    {
+        $employment = $this->create('HPP-S2', 'employment', true);
+        $employmentId = (int) $employment['id'];
+        $this->insertSicknessCase($employmentId, 'draft', '2026-03-02');
+        $this->insertSicknessCase($employmentId, 'submitted');
+
+        $decision = $this->employmentDeletion->canDelete($this->supplierId, $employmentId);
+        self::assertNotNull($decision);
+        self::assertFalse($decision->canDelete);
+        self::assertSame('payroll_employment_has_sickness_submission', $decision->blockerCode);
+
+        $response = $this->deleteEmployment($employment);
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        $error = $this->json($response)['error'];
+        self::assertSame('payroll_employment_has_sickness_submission', $error['code']);
+        self::assertStringContainsString('podání ČSSZ', $error['message']);
+        self::assertStringNotContainsStringIgnoringCase('constraint', $error['message']);
+        self::assertSame(1, $this->rowCount('payroll_employments', 'id', $employmentId));
+        self::assertSame(2, $this->rowCount('payroll_sickness_cases', 'employment_id', $employmentId));
+
+        $employeeDecision = $this->employeeDeletion->canDelete($this->supplierId, $this->employeeId);
+        self::assertNotNull($employeeDecision);
+        self::assertFalse($employeeDecision->canDelete);
+        self::assertSame($employmentId, $employeeDecision->blockedEmploymentId);
+        self::assertStringContainsString('HPP-S2', (string) $employeeDecision->blockerMessage);
+    }
+
+    /**
+     * Mazání osoby hlásilo u JAKÉHOKOLI případu „podklad pro dávku předaný
+     * ČSSZ", i když se z rozpracovaného případu nic nepodalo.
+     */
+    public function testEmployeeWithDraftSicknessCaseIsDeletable(): void
+    {
+        $employment = $this->create('HPP-S3', 'employment', true);
+        $this->insertSicknessCase((int) $employment['id'], 'draft');
+
+        $decision = $this->employeeDeletion->canDelete($this->supplierId, $this->employeeId);
+        self::assertNotNull($decision);
+        self::assertTrue($decision->canDelete, (string) $decision->blockerMessage);
+
+        $response = $this->deleteEmployee($this->employeeId);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(0, $this->rowCount('payroll_employees', 'id', $this->employeeId));
+        self::assertSame(0, $this->rowCount('payroll_sickness_cases', 'employee_id', $this->employeeId));
+    }
+
     public function testForeignTenantSeesNeitherCanDeleteNorDeletes(): void
     {
         $employment = $this->create('HPP-5', 'employment', true);
@@ -694,6 +763,26 @@ final class PayrollDeletionApiTest extends TestCase
             str_repeat('3', 64),
             str_repeat('3', 64),
             "document-{$employeeId}",
+        ]);
+    }
+
+    private function insertSicknessCase(
+        int $employmentId,
+        string $status,
+        string $incapacityFrom = '2026-03-01',
+    ): void {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_sickness_cases
+                (supplier_id, environment, employee_id, employment_id, benefit_kind,
+                 ossz_code, incapacity_from, status, created_by)
+             VALUES (?, 'production', ?, ?, 'NEM', 111, ?, ?, ?)"
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $employmentId,
+            $incapacityFrom,
+            $status,
+            $this->userId,
         ]);
     }
 
