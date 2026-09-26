@@ -8563,7 +8563,25 @@
         "percent": "Zadej procento mezi 0 a 100.",
         "employee": "Vyber zaměstnance, kterému dohoda patří.",
         "title": "Doplň název dohody — pod ním se srážka objeví na výplatním lístku.",
-        "read_only": "Na mzdové vstupy máš jen právo ke čtení, dohodu uložit nemůžeš."
+        "read_only": "Na mzdové vstupy máš jen právo ke čtení, dohodu uložit nemůžeš.",
+        "started_on": "U srážky ze zákona vyplň den zahájení srážek — určuje její pořadí vůči exekucím a dohodám."
+      },
+      "legal_basis_label": "Právní titul srážky",
+      "legal_basis_hint_agreement": "Dohoda o srážkách ze mzdy se zaměstnancem (§ 146 písm. b) zákoníku práce). Pořadí vůči exekucím určuje den doručení dohody.",
+      "legal_basis_hint_statutory": "Srážka ze zákona bez dohody (§ 147 odst. 1 zákoníku práce). Sráží se jen z první třetiny zbytku čisté mzdy jako nepřednostní pohledávka; pořadí určuje den zahájení srážek.",
+      "started_on": "Den zahájení srážek",
+      "started_on_hint": "Od kterého dne se srážka provádí. Určuje pořadí srážky vůči exekucím a dohodám; při stejném dni má zákonná srážka přednost před dohodou.",
+      "legal_basis": {
+        "agreement": "Dohoda o srážkách ze mzdy",
+        "zp_147_1_c": "Záloha na mzdu k vrácení (§ 147 odst. 1 písm. c) ZP)",
+        "zp_147_1_d": "Nevyúčtovaná záloha (§ 147 odst. 1 písm. d) ZP)",
+        "zp_147_1_e": "Náhrada mzdy bez nároku (§ 147 odst. 1 písm. e) ZP)"
+      },
+      "legal_basis_short": {
+        "agreement": "dohoda",
+        "zp_147_1_c": "§ 147/1 c)",
+        "zp_147_1_d": "§ 147/1 d)",
+        "zp_147_1_e": "§ 147/1 e)"
       },
       "kinds": {
         "advance": "Záloha",

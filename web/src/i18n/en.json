@@ -8563,7 +8563,25 @@
         "percent": "Enter a percentage between 0 and 100.",
         "employee": "Select the employee the agreement belongs to.",
         "title": "Fill in the agreement name — the deduction appears under it on the payslip.",
-        "read_only": "You only have read access to payroll inputs, so you cannot save the agreement."
+        "read_only": "You only have read access to payroll inputs, so you cannot save the agreement.",
+        "started_on": "For a statutory deduction, fill in the day deductions started — it sets its rank against garnishments and agreements."
+      },
+      "legal_basis_label": "Legal basis of the deduction",
+      "legal_basis_hint_agreement": "Wage deduction agreement with the employee (Section 146(b) of the Labour Code). The day the agreement was delivered sets its rank against garnishments.",
+      "legal_basis_hint_statutory": "Statutory deduction without an agreement (Section 147(1) of the Labour Code). It is taken only from the first third of the net wage remainder as a non-priority claim; the day deductions started sets its rank.",
+      "started_on": "Deductions started on",
+      "started_on_hint": "The day from which the deduction is taken. It sets the rank against garnishments and agreements; on the same day a statutory deduction precedes an agreement.",
+      "legal_basis": {
+        "agreement": "Wage deduction agreement",
+        "zp_147_1_c": "Wage advance to be returned (Section 147(1)(c) Labour Code)",
+        "zp_147_1_d": "Unsettled advance (Section 147(1)(d) Labour Code)",
+        "zp_147_1_e": "Wage compensation without entitlement (Section 147(1)(e) Labour Code)"
+      },
+      "legal_basis_short": {
+        "agreement": "agreement",
+        "zp_147_1_c": "s. 147(1)(c)",
+        "zp_147_1_d": "s. 147(1)(d)",
+        "zp_147_1_e": "s. 147(1)(e)"
       },
       "kinds": {
         "advance": "Advance",

@@ -22,7 +22,16 @@ final readonly class PayrollDeductionRequest
         public ?int $remainingLimitMinorUnits,
         public bool $active,
         public ?string $deliveredOn = null,
+        /**
+         * Právní titul ({@see DeductionAgreementTerms::LEGAL_BASES}). U srážky
+         * ze zákona (§ 147 odst. 1 písm. c) až e) ZP) nese `deliveredOn` den
+         * zahájení srážek.
+         */
+        public string $legalBasis = 'agreement',
     ) {
+        if (!in_array($legalBasis, DeductionAgreementTerms::LEGAL_BASES, true)) {
+            throw new \InvalidArgumentException('Právní titul srážky není podporovaný.');
+        }
         if ($deductionReference === '') {
             throw new \InvalidArgumentException('Srážka musí mít neprázdný identifikátor.');
         }

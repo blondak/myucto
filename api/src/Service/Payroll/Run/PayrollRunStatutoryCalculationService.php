@@ -529,6 +529,7 @@ final class PayrollRunStatutoryCalculationService
                 $remaining,
                 true,
                 self::deliveredOn($agreement),
+                is_string($agreement['legal_basis'] ?? null) ? $agreement['legal_basis'] : 'agreement',
             );
         }
         return $result;

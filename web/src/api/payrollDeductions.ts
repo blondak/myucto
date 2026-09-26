@@ -8,6 +8,22 @@ export type DeductionAgreementKind =
   | 'damage'
   | 'other'
 
+/**
+ * Právní titul srážky: dohoda o srážkách ze mzdy (§ 146 písm. b) ZP), nebo
+ * srážka ze zákona bez dohody podle § 147 odst. 1 písm. c) až e) ZP
+ * (záloha na mzdu k vrácení, nevyúčtovaná záloha, náhrada mzdy bez nároku).
+ * U srážky ze zákona je `delivered_on` den zahájení srážek a je povinný.
+ */
+export type DeductionLegalBasis =
+  | 'agreement'
+  | 'zp_147_1_c'
+  | 'zp_147_1_d'
+  | 'zp_147_1_e'
+
+export const deductionLegalBases: DeductionLegalBasis[] = [
+  'agreement', 'zp_147_1_c', 'zp_147_1_d', 'zp_147_1_e',
+]
+
 export type DeductionAgreementStatus =
   | 'draft'
   | 'active'
@@ -42,6 +58,7 @@ export interface DeductionAgreementSummary {
   agreement_reference: string
   title: string
   deduction_kind: DeductionAgreementKind
+  legal_basis: DeductionLegalBasis
   status: DeductionAgreementStatus
   priority_no: number
   requested_minor: number
@@ -113,6 +130,7 @@ export interface DeductionAgreementPayload {
   agreement_reference?: string | null
   title: string
   deduction_kind: DeductionAgreementKind
+  legal_basis?: DeductionLegalBasis
   priority_no: number
   requested_minor?: number
   basis_points?: number | null

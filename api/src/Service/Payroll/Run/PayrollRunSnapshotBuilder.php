@@ -2137,6 +2137,11 @@ final class PayrollRunSnapshotBuilder
                 // zaevidovaná dřív, než se datum ukládalo.
                 'delivered_on' => $row['delivered_on'] ?? null,
                 'row_version' => (int) $row['row_version'],
+                // Srážka ze zákona (§ 147 odst. 1 písm. c) až e) ZP), ne dohoda.
+                // Jen tam, kde to platí — snímky dohod zůstávají bajtově stejné.
+                ...((($row['legal_basis'] ?? 'agreement') === 'agreement')
+                    ? []
+                    : ['legal_basis' => (string) $row['legal_basis']]),
             ],
             $rows,
         );

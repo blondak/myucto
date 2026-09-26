@@ -276,6 +276,12 @@ final class PayrollRunGarnishmentProcessor
      * a zůstává jí dosavadní chování, tedy zbytek po exekucích (§ 148 odst. 2
      * zákoníku práce).
      *
+     * Stejnou cestou jde srážka ze zákona podle § 147 odst. 1 písm. c) až e)
+     * zákoníku práce (`legal_basis` ≠ `agreement`): den zahájení srážek je
+     * u ní povinný a soutěží jím o obecnou část s exekucemi stejně jako dohoda
+     * dnem doručení. Pro exekuční jádro jde o týž druh přemostění — nepřednostní
+     * srážka mimo rejstřík, kterou provádí čistá mzda.
+     *
      * @param array<string,mixed> $person
      * @return list<DeductionClaim>
      */

@@ -6,6 +6,7 @@ import { useRoute } from 'vue-router'
 import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 import {
   deductionAgreementKinds,
+  deductionLegalBases,
   deductionPriorityCeiling,
   deductionPriorityFloor,
   payrollDeductionsApi,
@@ -14,6 +15,7 @@ import {
   type DeductionAgreementKind,
   type DeductionAgreementStatus,
   type DeductionAgreementSummary,
+  type DeductionLegalBasis,
 } from '@/api/payrollDeductions'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
@@ -89,6 +91,7 @@ interface AgreementForm {
   employee_id: number | null
   title: string
   deduction_kind: DeductionAgreementKind
+  legal_basis: DeductionLegalBasis
   priority_no: number
   amount_mode: 'amount' | 'percentage'
   amount_czk: string
@@ -109,6 +112,7 @@ function emptyForm(): AgreementForm {
     employee_id: employeeFilter.value,
     title: '',
     deduction_kind: 'meal',
+    legal_basis: 'agreement',
     priority_no: 100,
     amount_mode: 'amount',
     amount_czk: '',
@@ -125,6 +129,23 @@ function emptyForm(): AgreementForm {
   }
 }
 const form = ref<AgreementForm>(emptyForm())
+
+/*
+ * Srážka ze zákona (§ 147 odst. 1 písm. c) až e) ZP) se provádí bez dohody;
+ * pořadí jí dává den ZAHÁJENÍ srážek, proto je povinný. Náhradu škody ze
+ * zákona srážet nelze (§ 147 odst. 3 ZP), takže ten druh se nenabízí.
+ */
+const statutory = computed(() => form.value.legal_basis !== 'agreement')
+const availableKinds = computed<DeductionAgreementKind[]>(() =>
+  statutory.value ? deductionAgreementKinds.filter(kind => kind !== 'damage') : deductionAgreementKinds)
+/** Změna titulu uživatelem (ne načtení dohody) předvyplní druh a den zahájení. */
+function legalBasisChanged() {
+  const basis = form.value.legal_basis
+  if (basis === 'agreement') return
+  // Písm. c) a d) jsou zálohy, písm. e) náhrada mzdy.
+  form.value.deduction_kind = basis === 'zp_147_1_e' ? 'other' : 'advance'
+  if (form.value.delivered_on === '') form.value.delivered_on = form.value.valid_from
+}
 
 function percent(basisPoints: number | null): string {
   if (basisPoints === null) return '—'
@@ -235,6 +256,7 @@ const saveBlockedReason = computed<string | null>(() => {
     return t('payroll.deductions.validation.employee')
   }
   if (form.value.title.trim() === '') return t('payroll.deductions.validation.title')
+  if (statutory.value && form.value.delivered_on === '') return t('payroll.deductions.validation.started_on')
   return null
 })
 
@@ -262,6 +284,7 @@ function fillForm(item: DeductionAgreementDetail) {
     employee_id: item.employee_id,
     title: item.title,
     deduction_kind: item.deduction_kind,
+    legal_basis: item.legal_basis ?? 'agreement',
     priority_no: item.priority_no,
     amount_mode: item.basis_points === null ? 'amount' : 'percentage',
     amount_czk: fromMinor(item.requested_minor),
@@ -317,6 +340,7 @@ function payloadFromForm() {
   const base = {
     title: form.value.title.trim(),
     deduction_kind: form.value.deduction_kind,
+    legal_basis: form.value.legal_basis,
     priority_no: Number(form.value.priority_no),
     total_limit_minor: toMinor(form.value.limit_czk, false),
     valid_from: form.value.valid_from,
@@ -511,6 +535,7 @@ onMounted(load)
                 <td v-if="tbl.isVisible('title')" class="px-4 py-3">
                   {{ item.title }}
                   <span class="ml-1 text-xs text-neutral-500">{{ t(`payroll.deductions.kinds.${item.deduction_kind}`) }}</span>
+                  <span v-if="item.legal_basis && item.legal_basis !== 'agreement'" class="ml-1 rounded-full bg-warning-50 px-2 py-0.5 text-xs text-warning-700" :data-test="`deduction-statutory-${item.id}`">{{ t(`payroll.deductions.legal_basis_short.${item.legal_basis}`) }}</span>
                 </td>
                 <td v-if="tbl.isVisible('status')" class="px-4 py-3">
                   <span class="rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(item.status)">
@@ -550,7 +575,10 @@ onMounted(load)
                 {{ t(`payroll.deductions.status.${item.status}`) }}
               </span>
             </div>
-            <p class="mt-1 break-words text-sm text-neutral-500">{{ item.full_name }}</p>
+            <p class="mt-1 break-words text-sm text-neutral-500">
+              {{ item.full_name }}
+              <span v-if="item.legal_basis && item.legal_basis !== 'agreement'" class="ml-1 rounded-full bg-warning-50 px-2 py-0.5 text-xs text-warning-700">{{ t(`payroll.deductions.legal_basis_short.${item.legal_basis}`) }}</span>
+            </p>
             <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
               <div>
                 <dt class="text-xs text-neutral-500">{{ t('payroll.deductions.requested') }}</dt>
@@ -626,9 +654,22 @@ onMounted(load)
               <input v-model="form.title" required maxlength="190" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
             </label>
             <label class="text-xs font-medium text-neutral-600">
+              {{ t('payroll.deductions.legal_basis_label') }}
+              <select
+                v-model="form.legal_basis"
+                data-test="deduction-legal-basis"
+                :disabled="!!detail && detail.withheld_total_minor > 0"
+                @change="legalBasisChanged"
+                class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-100"
+              >
+                <option v-for="basis in deductionLegalBases" :key="basis" :value="basis">{{ t(`payroll.deductions.legal_basis.${basis}`) }}</option>
+              </select>
+              <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t(statutory ? 'payroll.deductions.legal_basis_hint_statutory' : 'payroll.deductions.legal_basis_hint_agreement') }}</span>
+            </label>
+            <label class="text-xs font-medium text-neutral-600">
               {{ t('payroll.deductions.kind') }}
               <select v-model="form.deduction_kind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
-                <option v-for="kind in deductionAgreementKinds" :key="kind" :value="kind">{{ t(`payroll.deductions.kinds.${kind}`) }}</option>
+                <option v-for="kind in availableKinds" :key="kind" :value="kind">{{ t(`payroll.deductions.kinds.${kind}`) }}</option>
               </select>
             </label>
             <label class="text-xs font-medium text-neutral-600">
@@ -678,10 +719,10 @@ onMounted(load)
               {{ t('payroll.deductions.valid_to') }}
               <DateInput v-model="form.valid_to" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
             </label>
-            <label class="text-xs font-medium text-neutral-600">
-              {{ t('payroll.deductions.delivered_on') }}
-              <DateInput v-model="form.delivered_on" :disabled="!!detail && detail.withheld_total_minor > 0" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-100" />
-              <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('payroll.deductions.delivered_on_hint') }}</span>
+            <label class="text-xs font-medium text-neutral-600" data-test="deduction-delivered-on">
+              {{ t(statutory ? 'payroll.deductions.started_on' : 'payroll.deductions.delivered_on') }}
+              <DateInput v-model="form.delivered_on" :required="statutory" :disabled="!!detail && detail.withheld_total_minor > 0" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-100" />
+              <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t(statutory ? 'payroll.deductions.started_on_hint' : 'payroll.deductions.delivered_on_hint') }}</span>
             </label>
             <label class="text-xs font-medium text-neutral-600">
               {{ t('payroll.deductions.effective_from') }}

@@ -43,6 +43,14 @@ namespace MyInvoice\Service\Payroll\Net;
  * Dohoda BEZ dne doručení se nepřemosťuje a dostane jen to, co exekuce nechaly,
  * přesně jako do 8/2026 (nález E-03). Zpětná kompatibilita existujících dat
  * proto stojí na `deliveredOn === null`.
+ *
+ * ## Srážky ze zákona (§ 147 odst. 1 písm. c) až e) ZP)
+ *
+ * Záloha na mzdu k vrácení, nevyúčtovaná záloha a náhrada mzdy, na kterou
+ * nevzniklo právo, se srážejí BEZ dohody. Řadí se stejným klíčem — dnem
+ * zahájení srážek, který je u nich povinný, takže nikdy nespadnou „za všechny"
+ * jako legacy dohoda bez data. Při shodném dni má přednost zákonný titul
+ * v pořadí výčtu § 147 odst. 1 (c, d, e) před dohodou (nález CYK-B16d).
  */
 final class DeductionPriorityResolver
 {
@@ -59,6 +67,8 @@ final class DeductionPriorityResolver
             PayrollDeductionRequest $left,
             PayrollDeductionRequest $right,
         ): int => self::deliveryKey($left) <=> self::deliveryKey($right)
+            ?: DeductionAgreementTerms::legalBasisRank($left->legalBasis)
+                <=> DeductionAgreementTerms::legalBasisRank($right->legalBasis)
             ?: $left->priority <=> $right->priority
             ?: strcmp($left->deductionReference, $right->deductionReference));
 
@@ -135,7 +145,9 @@ final class DeductionPriorityResolver
         $groups = [];
         $currentKey = null;
         foreach ($deductions as $deduction) {
-            $key = self::deliveryKey($deduction) . "\0" . $deduction->priority;
+            $key = self::deliveryKey($deduction)
+                . "\0" . DeductionAgreementTerms::legalBasisRank($deduction->legalBasis)
+                . "\0" . $deduction->priority;
             if ($groups === [] || $key !== $currentKey) {
                 $groups[] = [];
                 $currentKey = $key;
