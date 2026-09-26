@@ -55,6 +55,7 @@ final class AverageEarningsMonthlyConverter
         array $averageSnapshot,
         string $determinationDate,
         bool $withNet,
+        bool $lockTerms = true,
     ): AverageEarningsMonthlyConversion {
         $hourly = $averageSnapshot['average_hourly_minor'] ?? null;
         if (!is_int($hourly) || $hourly <= 0) {
@@ -77,6 +78,7 @@ final class AverageEarningsMonthlyConverter
             $employmentId,
             $decisiveFrom,
             $decisiveTo,
+            $lockTerms,
         );
         $weeklyHoursMilli = AverageEarningsMonthlyMath::weightedWeeklyHoursMilli(
             $intervals,
@@ -243,13 +245,21 @@ final class AverageEarningsMonthlyConverter
         int $employmentId,
         string $decisiveFrom,
         string $decisiveTo,
+        bool $lock,
     ): array {
-        $rows = $this->revisions->lockDecisivePeriodTerms(
-            $supplierId,
-            $employmentId,
-            $decisiveFrom,
-            $decisiveTo,
-        );
+        $rows = $lock
+            ? $this->revisions->lockDecisivePeriodTerms(
+                $supplierId,
+                $employmentId,
+                $decisiveFrom,
+                $decisiveTo,
+            )
+            : $this->revisions->decisivePeriodTerms(
+                $supplierId,
+                $employmentId,
+                $decisiveFrom,
+                $decisiveTo,
+            );
         if ($rows === []) {
             throw new EmploymentExitReadinessException(
                 'weekly_hours_evidence_missing',
