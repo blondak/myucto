@@ -128,6 +128,154 @@ final class PayrollEmploymentTerminationServiceTest extends TestCase
         ]);
     }
 
+    /**
+     * § 299 odst. 4 o. s. ř.: srážky z odstupného se počítají zvlášť z každého
+     * násobku průměrného výdělku. Počet násobků zadává účetní při založení
+     * (předvyplněný návrhem § 67 ZP) a nese ho množství vstupu.
+     */
+    public function testSeveranceCarriesTheGarnishmentMultipleEnteredByTheAccountant(): void
+    {
+        $this->averageFor($this->employmentId);
+        $proposal = $this->service->save($this->supplierId, $this->employmentId, [
+            'termination_method' => 'employer_notice',
+            'legal_ground' => 'organizational',
+        ], $this->userId);
+        self::assertSame(3, $proposal['severance']['garnishment_multiple'], 'Předvyplněno z § 67 ZP.');
+        self::assertSame('2026-10-31', $proposal['severance']['garnishment_period_to']);
+
+        $overview = $this->service->createSeveranceInput($this->supplierId, $this->employmentId, $this->userId, 4);
+
+        self::assertSame(4_000, (int) $this->inputs('ODSTUPNE')[0]['quantity_milliunits']);
+        self::assertSame(4, $overview['severance']['garnishment_multiple']);
+        self::assertSame('2026-11-30', $overview['severance']['garnishment_period_to']);
+    }
+
+    public function testGarnishmentMultipleOutsideTheRangeIsRejected(): void
+    {
+        $this->averageFor($this->employmentId);
+        $this->service->save($this->supplierId, $this->employmentId, [
+            'termination_method' => 'employer_notice',
+            'legal_ground' => 'organizational',
+        ], $this->userId);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->service->createSeveranceInput($this->supplierId, $this->employmentId, $this->userId, 0);
+    }
+
+    /** § 299 odst. 4 věta druhá o. s. ř. — nástup k jinému plátci v době poskytování odstupného. */
+    public function testOtherIncomeDuringSeverancePeriodIsRecordedOnTheTermination(): void
+    {
+        $overview = $this->service->save($this->supplierId, $this->employmentId, [
+            'termination_method' => 'agreement',
+            'legal_ground' => 'organizational',
+            'other_income_from' => '2026-09-01',
+            'other_payer_applies_protected_amount' => true,
+        ], $this->userId);
+
+        self::assertSame('2026-09-01', $overview['termination']['other_income_from']);
+        self::assertTrue($overview['termination']['other_payer_applies_protected_amount']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->service->save($this->supplierId, $this->employmentId, [
+            'termination_method' => 'agreement',
+            'legal_ground' => 'organizational',
+            'other_payer_applies_protected_amount' => true,
+            'row_version' => $overview['termination']['row_version'],
+        ], $this->userId);
+    }
+
+    /**
+     * § 271ca ZP — pojišťovna vyplácí přímo: mzdový vstup nevzniká (zdvojil by
+     * výplatu), zůstane záznam pro A2.
+     */
+    public function testWorkInjuryCompensationPaidByInsurerCreatesNoInput(): void
+    {
+        $this->averageFor($this->employmentId);
+        $this->service->save($this->supplierId, $this->employmentId, [
+            'termination_method' => 'employer_notice',
+            'legal_ground' => 'health_work_injury',
+        ], $this->userId);
+
+        $overview = $this->service->createWorkInjuryCompensation($this->supplierId, $this->employmentId, [
+            'payer' => 'insurer',
+            'paid_on' => '2026-08-20',
+        ], $this->userId);
+
+        self::assertSame('insurer', $overview['severance']['state']);
+        self::assertSame([], $this->inputs('NAHRADA_271CA'));
+        self::assertSame('replacement', $overview['a2_prefill']['unemployment']['settlement_kind']);
+    }
+
+    public function testWorkInjuryCompensationPaidOnTheLastDayGoesToTheLastMonth(): void
+    {
+        $this->averageFor($this->employmentId);
+        $this->service->save($this->supplierId, $this->employmentId, [
+            'termination_method' => 'agreement',
+            'legal_ground' => 'health_work_injury',
+        ], $this->userId);
+
+        $overview = $this->service->createWorkInjuryCompensation($this->supplierId, $this->employmentId, [
+            'payer' => 'employer',
+            'paid_on' => '2026-07-31',
+        ], $this->userId);
+
+        self::assertSame('created', $overview['severance']['state']);
+        $inputs = $this->inputs('NAHRADA_271CA');
+        self::assertSame(['2026-07-01', 12 * self::MONTHLY_AVERAGE, 12_000], [
+            $inputs[0]['period_start'],
+            (int) $inputs[0]['amount_minor'],
+            (int) $inputs[0]['quantity_milliunits'],
+        ]);
+        $component = $this->db->pdo()->prepare(
+            'SELECT component_kind, tax_treatment, social_treatment, health_treatment, enforcement_treatment
+               FROM payroll_component_definitions WHERE supplier_id = ? AND code = "NAHRADA_271CA"',
+        );
+        $component->execute([$this->supplierId]);
+        self::assertSame(
+            ['severance', 'included', 'excluded', 'excluded', 'included'],
+            array_values($component->fetch(PDO::FETCH_ASSOC) ?: []),
+            'Daň ano, pojistné ne (§ 5 odst. 2 písm. a) z. č. 589/1992 Sb.), srážkám podléhá.',
+        );
+    }
+
+    /** Výplata až v některém z dalších měsíců = odložený příjem typu 1 (JMHZ scénář 8). */
+    public function testWorkInjuryCompensationPaidLaterIsDeferredIncome(): void
+    {
+        $this->averageFor($this->employmentId);
+        $this->service->save($this->supplierId, $this->employmentId, [
+            'termination_method' => 'agreement',
+            'legal_ground' => 'health_work_injury',
+        ], $this->userId);
+
+        $this->service->createWorkInjuryCompensation($this->supplierId, $this->employmentId, [
+            'payer' => 'employer',
+            'paid_on' => '2026-09-15',
+        ], $this->userId);
+
+        self::assertSame('2026-09-01', $this->inputs('NAHRADA_271CA')[0]['period_start']);
+        $deferred = $this->db->pdo()->prepare(
+            'SELECT deferred_type FROM payroll_employment_deferred_incomes
+              WHERE supplier_id = ? AND employment_id = ? AND period_start = "2026-09-01"',
+        );
+        $deferred->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame('1', $deferred->fetchColumn());
+    }
+
+    public function testWorkInjuryCompensationCannotBePaidBeforeTermination(): void
+    {
+        $this->averageFor($this->employmentId);
+        $this->service->save($this->supplierId, $this->employmentId, [
+            'termination_method' => 'agreement',
+            'legal_ground' => 'health_work_injury',
+        ], $this->userId);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->service->createWorkInjuryCompensation($this->supplierId, $this->employmentId, [
+            'payer' => 'employer',
+            'paid_on' => '2026-07-15',
+        ], $this->userId);
+    }
+
     public function testCollectiveAgreementCanOnlyRaiseTheMultiple(): void
     {
         $this->averageFor($this->employmentId);

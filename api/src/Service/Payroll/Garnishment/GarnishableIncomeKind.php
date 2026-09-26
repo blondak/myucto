@@ -14,6 +14,14 @@ enum GarnishableIncomeKind: string
     case MaternityBenefit = 'maternity_benefit';
     case Pension = 'pension';
     case Severance = 'severance';
+    /**
+     * Jeden násobek průměrného výdělku, ze kterého je odvozeno odstupné.
+     * § 299 odst. 4 o. s. ř.: „Z odstupného se srážky vypočítávají zvlášť
+     * z každého násobku průměrného výdělku" — každý násobek je samostatný
+     * měsíční příjem s vlastní nezabavitelnou částkou. Plátce odstupného
+     * nemá nárok na paušální náhradu nákladů (§ 301 odst. 2 o. s. ř.).
+     */
+    case SeveranceMultiple = 'severance_multiple';
     case LoyaltyBenefit = 'loyalty_benefit';
     case TravelReimbursement = 'travel_reimbursement';
     case Unknown = 'unknown';

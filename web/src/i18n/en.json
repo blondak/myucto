@@ -5688,7 +5688,10 @@
           "method": "Choose how the employment ended.",
           "ground": "Choose the legal ground of the termination.",
           "override_reason": "State what the higher severance multiple relies on.",
-          "unsaved": "Save the termination changes first."
+          "unsaved": "Save the termination changes first.",
+          "garnishment_multiple": "Enter the number of multiples for garnishment (1 to 36).",
+          "other_payer_date": "The new payer confirmation relates to the day the other income started — fill it in.",
+          "work_injury_input": "Choose who pays the compensation and the payment date."
         },
         "methods": {
           "employer_notice": "Notice by the employer",
@@ -5745,7 +5748,28 @@
           },
           "proposal": "{multiple}× average monthly earnings {average} = {amount} (statutory minimum {statutory}×).",
           "tenure": "The employment counts from {date} (including a previous employment under Section 67(2)).",
-          "created": "Created as an input for {period}: {amount}."
+          "created": "Created as an input for {period}: {amount}.",
+          "garnishment_multiple_label": "Multiples of average earnings for garnishment",
+          "garnishment_multiple_hint": "Garnishment deductions from severance pay are calculated separately from each multiple of average earnings, each with its own protected amount (Section 299(4) Civil Procedure Code). Prefilled from the Section 67 proposal; change it only for severance agreed otherwise.",
+          "garnishment_info": "Deductions are calculated from {multiple} multiples; the severance period runs until {date}.",
+          "other_income_label": "Debtor's other income from",
+          "other_income_hint": "Fill in only if the employee started working for another payer or got another income (pension, benefit) during the severance period. Under Section 299(4) second sentence the multiples for those months are added to that income.",
+          "other_payer_label": "The new payer applies the protected amount for those months",
+          "other_payer_hint": "Confirm based on the new payer's or the court's notice. Without it the garnishment calculation from severance pay stops, because the other income is unknown."
+        },
+        "work_injury": {
+          "payer_label": "Who pays the compensation",
+          "payer_placeholder": "Choose who pays",
+          "payers": {
+            "employer": "Employer",
+            "insurer": "Insurer directly to the employee"
+          },
+          "paid_on_label": "Payment date",
+          "paid_on_hint": "On the termination day only under a written agreement (Section 271ca(2) Labour Code). A payment in a later month is booked as deferred income (JMHZ scenario 8), which the app confirms right away.",
+          "create": "Create compensation",
+          "created_toast": "The lump-sum compensation is created.",
+          "insurer_state": "The insurer pays the compensation ({date}). No payroll input is created; the A2 deregistration reports it as lump-sum compensation.",
+          "employer_state": "The employer pays the compensation on {date}."
         },
         "death": {
           "title": "Death of the employee (Section 328 Labour Code)",
@@ -5774,7 +5798,8 @@
           "leave": "Leave ledger",
           "enforcement": "Enforcement and insolvency",
           "deductions": "Deduction agreements",
-          "components": "Payroll components"
+          "components": "Payroll components",
+          "inputs": "Payroll inputs"
         },
         "issues": {
           "reason_missing": "How this employment ended is missing. Choose it below — without it the A2 deregistration, the Labour Office certificate and severance pay cannot be prefilled.",
@@ -5787,6 +5812,8 @@
           "leave_overdraft_death": "Overdrawn leave cannot be deducted after the employee's death — the employer's monetary claims end with death (Section 328(2) Labour Code).",
           "severance_relation_not_applicable": "Severance pay applies to an employment contract only, not to an agreement.",
           "work_injury_compensation_manual": "The app does not add the Section 271ca lump-sum compensation to the run — it has no payroll component with a verified classification. Create it manually and report it in A2 as lump-sum compensation.",
+          "work_injury_compensation_ready": "Create the Section 271ca lump-sum compensation below with Create compensation — state who pays it (the employer or directly the insurer) and when.",
+          "severance_garnishment_multiple_missing": "The created severance pay has no number of multiples of average earnings for garnishment (Section 299(4) Civil Procedure Code). Add it as the quantity of the severance input in Payroll inputs.",
           "severance_input_differs": "The created severance pay ({input_amount_minor}) differs from the current proposal. Correct the input in Payroll inputs.",
           "severance_jmhz_mapping_missing": "Component {component_code} has no JMHZ monthly report mapping. Without it the report for the last month cannot be built — map it in Payroll components.",
           "death_no_entitled_survivor": "No close person from the shared household is recorded. The wage claims then become part of the estate — pay out only under the probate decision.",
@@ -5817,9 +5844,14 @@
         "one_per_line": "Enter each fact on a separate line",
         "exposure_confirm": "I confirm that occupational exposure has been assessed and the stated facts are complete.",
         "deductions": "Continuing wage deductions",
-        "deductions_hint": "Enter legal details only for claims found in the closed deduction ledger. Amounts are never entered in this form.",
+        "deductions_hint": "Enter legal details for garnishments (including delivered, not yet verified ones), deduction agreements and insolvency still being deducted on the termination date. For agreements and insolvency, what the records know is prefilled. Amounts are never entered in this form.",
         "claim_count": "Claims: {count}",
         "claim_id": "Recorded claim no. {id}",
+        "source_kind": {
+          "enforcement_claim": "Garnishment",
+          "deduction_agreement": "Deduction agreement",
+          "insolvency": "Insolvency"
+        },
         "beneficiary": "Beneficiary",
         "ordering_authority": "Ordering authority",
         "decision_reference": "Case / decision reference",
@@ -8565,7 +8597,25 @@
         "percent": "Enter a percentage between 0 and 100.",
         "employee": "Select the employee the agreement belongs to.",
         "title": "Fill in the agreement name — the deduction appears under it on the payslip.",
-        "read_only": "You only have read access to payroll inputs, so you cannot save the agreement."
+        "read_only": "You only have read access to payroll inputs, so you cannot save the agreement.",
+        "started_on": "For a statutory deduction, fill in the day deductions started — it sets its rank against garnishments and agreements."
+      },
+      "legal_basis_label": "Legal basis of the deduction",
+      "legal_basis_hint_agreement": "Wage deduction agreement with the employee (Section 146(b) of the Labour Code). The day the agreement was delivered sets its rank against garnishments.",
+      "legal_basis_hint_statutory": "Statutory deduction without an agreement (Section 147(1) of the Labour Code). It is taken only from the first third of the net wage remainder as a non-priority claim; the day deductions started sets its rank.",
+      "started_on": "Deductions started on",
+      "started_on_hint": "The day from which the deduction is taken. It sets the rank against garnishments and agreements; on the same day a statutory deduction precedes an agreement.",
+      "legal_basis": {
+        "agreement": "Wage deduction agreement",
+        "zp_147_1_c": "Wage advance to be returned (Section 147(1)(c) Labour Code)",
+        "zp_147_1_d": "Unsettled advance (Section 147(1)(d) Labour Code)",
+        "zp_147_1_e": "Wage compensation without entitlement (Section 147(1)(e) Labour Code)"
+      },
+      "legal_basis_short": {
+        "agreement": "agreement",
+        "zp_147_1_c": "s. 147(1)(c)",
+        "zp_147_1_d": "s. 147(1)(d)",
+        "zp_147_1_e": "s. 147(1)(e)"
       },
       "kinds": {
         "advance": "Advance",

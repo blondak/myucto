@@ -208,6 +208,54 @@ describe('EmploymentExitDocumentsPanel', () => {
     )
   })
 
+  /*
+   * § 313 odst. 1 písm. e) ZP: zápočtový list nese i dohody o srážkách
+   * a insolvenci. Server je pošle jako zdroje s předvyplněním; formulář je
+   * ukáže a odešle s druhem zdroje.
+   */
+  it('lists agreements and insolvency next to garnishments and submits their kind', async () => {
+    m.employmentExitDocuments.mockResolvedValue(readiness({
+      employment_certificate: {
+        available: true,
+        readiness_code: null,
+        deduction_claim_ids: [91],
+        deduction_sources: [
+          { source_kind: 'enforcement_claim', source_claim_id: 91, label: '', beneficiary: '', ordering_authority: '', decision_reference: '' },
+          { source_kind: 'deduction_agreement', source_claim_id: 7, label: 'Splátka půjčky', beneficiary: 'Syntetický věřitel', ordering_authority: 'Dohoda o srážkách ze mzdy', decision_reference: 'SYNTH-7' },
+          { source_kind: 'insolvency', source_claim_id: 3, label: '', beneficiary: 'Insolvenční správce', ordering_authority: 'Insolvenční soud', decision_reference: '' },
+        ],
+      },
+    }))
+    const wrapper = mount(EmploymentExitDocumentsPanel, {
+      props: { employment: employment(), canWrite: true },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="open-employment-certificate-form"]').trigger('click')
+
+    expect(wrapper.find('[data-test="exit-deduction-deduction_agreement"]').text()).toContain('Splátka půjčky')
+    expect(wrapper.find('[data-test="exit-deduction-insolvency"]').exists()).toBe(true)
+
+    const textareas = wrapper.findAll('textarea')
+    await textareas[0].setValue('Synthetic work')
+    await textareas[1].setValue('Synthetic qualification')
+    const garnishment = wrapper.findAll('[data-test="exit-deduction-enforcement_claim"] input')
+    await garnishment[0].setValue('Synthetic beneficiary')
+    await garnishment[1].setValue('Synthetic authority')
+    await garnishment[2].setValue('TEST-91')
+    await wrapper.findAll('[data-test="exit-deduction-insolvency"] input')[2].setValue('KSPH 00 INS 1/2026')
+    for (const checkbox of wrapper.findAll('input[type="checkbox"]')) {
+      await checkbox.setValue(true)
+    }
+    await wrapper.get('[data-test="employment-certificate-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.generateEmploymentCertificate.mock.calls[0][1].deductions).toEqual([
+      { source_claim_id: 91, beneficiary: 'Synthetic beneficiary', ordering_authority: 'Synthetic authority', decision_reference: 'TEST-91' },
+      { source_claim_id: 7, source_kind: 'deduction_agreement', beneficiary: 'Syntetický věřitel', ordering_authority: 'Dohoda o srážkách ze mzdy', decision_reference: 'SYNTH-7' },
+      { source_claim_id: 3, source_kind: 'insolvency', beneficiary: 'Insolvenční správce', ordering_authority: 'Insolvenční soud', decision_reference: 'KSPH 00 INS 1/2026' },
+    ])
+  })
+
   it('never lets the client type the net amount for the §313(2) certificate', async () => {
     m.employmentExitDocuments.mockResolvedValue(readiness(available()))
     const wrapper = mount(EmploymentExitDocumentsPanel, {

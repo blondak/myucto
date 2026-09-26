@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   settleTerminationLeave: vi.fn(),
   reverseTerminationLeave: vi.fn(),
   createTerminationSeverance: vi.fn(),
+  createTerminationWorkInjuryCompensation: vi.fn(),
   addTerminationSurvivor: vi.fn(),
   removeTerminationSurvivor: vi.fn(),
   assessTerminationDeathTax: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock('@/api/payroll', () => ({
     settleTerminationLeave: m.settleTerminationLeave,
     reverseTerminationLeave: m.reverseTerminationLeave,
     createTerminationSeverance: m.createTerminationSeverance,
+    createTerminationWorkInjuryCompensation: m.createTerminationWorkInjuryCompensation,
     addTerminationSurvivor: m.addTerminationSurvivor,
     removeTerminationSurvivor: m.removeTerminationSurvivor,
     assessTerminationDeathTax: m.assessTerminationDeathTax,
@@ -67,7 +69,7 @@ function overview(overrides: Partial<PayrollTerminationOverview> = {}): PayrollT
     derived: null,
     average: { year: 2026, quarter: 3, snapshot_id: null, hourly_minor: null, monthly_gross_minor: null, monthly_net_minor: null },
     leave_settlement: { year: 2026, state: 'nothing', minutes: 0, balance_minutes: 0, average_hourly_minor: null, amount_minor: 0, input: null },
-    severance: { state: 'reason_missing', kind: null, statutory_multiple: 0, multiple: 0, rule: 'none', tenure_start: null, counted_previous: [], monthly_average_minor: null, amount_minor: 0, input: null },
+    severance: { state: 'reason_missing', kind: null, statutory_multiple: 0, multiple: 0, rule: 'none', tenure_start: null, counted_previous: [], monthly_average_minor: null, amount_minor: 0, garnishment_multiple: null, garnishment_period_to: null, work_injury_payer: null, work_injury_paid_on: null, input: null },
     death: null,
     a2_prefill: null,
     issues: [],
@@ -81,7 +83,9 @@ function saved(): PayrollTerminationOverview {
     termination: {
       id: 1, employment_id: 12, termination_method: 'agreement', legal_ground: 'organizational',
       employee_stated_reason: null, severance_multiple_override: null, severance_override_reason: null,
-      working_time_account_applies: false, death_tax_assessment: null, death_tax_assessed_by: null,
+      working_time_account_applies: false, other_income_from: null, other_payer_applies_protected_amount: false,
+      work_injury_compensation_payer: null, work_injury_compensation_paid_on: null,
+      death_tax_assessment: null, death_tax_assessed_by: null,
       death_tax_assessed_at: null, row_version: 1, updated_at: '2026-08-01 10:00:00',
     },
     derived: {
@@ -90,8 +94,17 @@ function saved(): PayrollTerminationOverview {
       stated_reason_allowed: false,
     },
     leave_settlement: { year: 2026, state: 'payout', minutes: 4800, balance_minutes: 4800, average_hourly_minor: 25000, amount_minor: 2000000, input: null },
-    severance: { state: 'ready', kind: 'severance', statutory_multiple: 3, multiple: 3, rule: 'zp-67-1', tenure_start: '2024-01-01', counted_previous: [], monthly_average_minor: 4348000, amount_minor: 13044000, input: null },
+    severance: { state: 'ready', kind: 'severance', statutory_multiple: 3, multiple: 3, rule: 'zp-67-1', tenure_start: '2024-01-01', counted_previous: [], monthly_average_minor: 4348000, amount_minor: 13044000, garnishment_multiple: 3, garnishment_period_to: '2026-10-31', work_injury_payer: null, work_injury_paid_on: null, input: null },
   })
+}
+
+function workInjury(): PayrollTerminationOverview {
+  const base = saved()
+  return {
+    ...base,
+    termination: { ...base.termination!, termination_method: 'employer_notice', legal_ground: 'health_work_injury' },
+    severance: { ...base.severance, kind: 'work_injury_compensation', statutory_multiple: 12, multiple: 12, amount_minor: 52176000, garnishment_multiple: 12, garnishment_period_to: '2027-07-31' },
+  }
 }
 
 function mountPanel(canWrite = true) {
@@ -164,7 +177,67 @@ describe('EmploymentTerminationPanel', () => {
 
     await wrapper.findAll('button').find(button => button.text().includes('severance.create'))!.trigger('click')
     await flushPromises()
-    expect(m.createTerminationSeverance).toHaveBeenCalledWith(12)
+    expect(m.createTerminationSeverance).toHaveBeenCalledWith(12, 3)
+  })
+
+  /*
+   * § 299 odst. 4 o. s. ř.: počet násobků pro srážky je předvyplněný z § 67 ZP
+   * a jde změnit; mimo rozsah 1–36 se odstupné založit nedá.
+   */
+  it('sends the garnishment multiple entered on the card and rejects an invalid one', async () => {
+    m.employmentTermination.mockResolvedValue(saved())
+    m.createTerminationSeverance.mockResolvedValue(saved())
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const multiple = wrapper.get('[data-test="termination-garnishment-multiple"]')
+    expect((multiple.element as HTMLInputElement).value).toBe('3')
+    await multiple.setValue('0')
+    const create = () => wrapper.findAll('button').find(button => button.text().includes('severance.create'))!
+    expect(create().attributes('disabled')).toBeDefined()
+
+    await multiple.setValue('4')
+    await create().trigger('click')
+    await flushPromises()
+    expect(m.createTerminationSeverance).toHaveBeenCalledWith(12, 4)
+  })
+
+  /** § 299 odst. 4 věta druhá — jiný příjem povinného a potvrzení nového plátce se ukládají se skončením. */
+  it('saves the other income date and the new payer confirmation with the termination', async () => {
+    m.employmentTermination.mockResolvedValue(saved())
+    m.saveEmploymentTermination.mockResolvedValue(saved())
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-test="termination-other-income-from"]').setValue('2026-09-01')
+    await wrapper.get('[data-test="termination-other-payer"]').setValue(true)
+    const save = wrapper.findAll('button').find(button => button.text().includes('payroll.people.termination.save'))
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmploymentTermination).toHaveBeenCalledWith(12, expect.objectContaining({
+      other_income_from: '2026-09-01',
+      other_payer_applies_protected_amount: true,
+    }))
+  })
+
+  /** § 271ca ZP — tlačítko Založit náhradu se ptá na plátce a den výplaty. */
+  it('creates the Section 271ca compensation only after payer and payment date are chosen', async () => {
+    m.employmentTermination.mockResolvedValue(workInjury())
+    m.createTerminationWorkInjuryCompensation.mockResolvedValue(workInjury())
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const create = () => wrapper.findAll('button').find(button => button.text().includes('work_injury.create'))!
+    expect(create().attributes('disabled')).toBeDefined()
+    expect((wrapper.get('[data-test="termination-work-injury-paid-on"]').element as HTMLInputElement).value).toBe('2026-07-31')
+
+    await wrapper.get('[data-test="termination-work-injury-payer"]').setValue('insurer')
+    await wrapper.get('[data-test="termination-work-injury-paid-on"]').setValue('2026-08-20')
+    await create().trigger('click')
+    await flushPromises()
+
+    expect(m.createTerminationWorkInjuryCompensation).toHaveBeenCalledWith(12, { payer: 'insurer', paid_on: '2026-08-20' })
   })
 
   it('does not offer writes to a read-only user', async () => {

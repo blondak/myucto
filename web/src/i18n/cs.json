@@ -5688,7 +5688,10 @@
           "method": "Vyberte způsob skončení.",
           "ground": "Vyberte zákonný důvod skončení.",
           "override_reason": "U vyššího násobku odstupného uveďte, o co se opírá.",
-          "unsaved": "Nejdřív uložte změny skončení."
+          "unsaved": "Nejdřív uložte změny skončení.",
+          "garnishment_multiple": "Zadejte počet násobků průměru pro srážky (1 až 36).",
+          "other_payer_date": "Potvrzení nového plátce se váže ke dni vzniku jiného příjmu — vyplňte ho.",
+          "work_injury_input": "Vyberte, kdo náhradu vyplácí, a den výplaty."
         },
         "methods": {
           "employer_notice": "Výpověď zaměstnavatele",
@@ -5745,7 +5748,28 @@
           },
           "proposal": "{multiple}× průměrný měsíční výdělek {average} = {amount} (zákonné minimum {statutory}×).",
           "tenure": "Trvání pracovního poměru se počítá od {date} (včetně předchozího poměru podle § 67 odst. 2 ZP).",
-          "created": "Založeno jako vstup za {period}: {amount}."
+          "created": "Založeno jako vstup za {period}: {amount}.",
+          "garnishment_multiple_label": "Počet násobků průměru pro srážky",
+          "garnishment_multiple_hint": "Z odstupného se exekuční srážky počítají zvlášť z každého násobku průměrného výdělku, každý s vlastní nezabavitelnou částkou (§ 299 odst. 4 o. s. ř.). Předvyplněno z návrhu podle § 67 ZP; změňte jen u jinak sjednaného odstupného.",
+          "garnishment_info": "Srážky se počítají z {multiple} násobků, doba poskytování odstupného do {date}.",
+          "other_income_label": "Jiný příjem povinného od",
+          "other_income_hint": "Vyplňte, jen pokud zaměstnanec během doby poskytování odstupného nastoupil k jinému plátci nebo mu vznikl jiný příjem (důchod, podpora). Násobky za tyto měsíce se podle § 299 odst. 4 věty druhé o. s. ř. sčítají s tím příjmem.",
+          "other_payer_label": "Nezabavitelnou částku za tyto měsíce započítává nový plátce",
+          "other_payer_hint": "Potvrďte podle oznámení nového plátce nebo soudu. Bez potvrzení výpočet srážek z odstupného zastaví, protože druhý příjem nezná."
+        },
+        "work_injury": {
+          "payer_label": "Kdo náhradu vyplácí",
+          "payer_placeholder": "Vyberte plátce náhrady",
+          "payers": {
+            "employer": "Zaměstnavatel",
+            "insurer": "Pojišťovna přímo zaměstnanci"
+          },
+          "paid_on_label": "Den výplaty",
+          "paid_on_hint": "V den skončení jen podle písemné dohody (§ 271ca odst. 2 ZP). Výplata v dalším měsíci se zúčtuje jako odložený příjem (JMHZ scénář 8) a aplikace ho rovnou potvrdí.",
+          "create": "Založit náhradu",
+          "created_toast": "Jednorázová náhrada je založená.",
+          "insurer_state": "Náhradu vyplácí pojišťovna ({date}). Mzdový vstup nevzniká; v odhlášce A2 se uvede jako jednorázová náhrada.",
+          "employer_state": "Náhradu vyplácí zaměstnavatel {date}."
         },
         "death": {
           "title": "Úmrtí zaměstnance (§ 328 ZP)",
@@ -5774,7 +5798,8 @@
           "leave": "Kniha dovolené",
           "enforcement": "Exekuce a insolvence",
           "deductions": "Dohody o srážkách",
-          "components": "Mzdové složky"
+          "components": "Mzdové složky",
+          "inputs": "Mzdové vstupy"
         },
         "issues": {
           "reason_missing": "Chybí způsob skončení tohoto vztahu. Vyberte ho níže — bez něj nejde předvyplnit odhlášku A2, potvrzení pro Úřad práce ani odstupné.",
@@ -5787,6 +5812,8 @@
           "leave_overdraft_death": "Přečerpanou dovolenou po úmrtí zaměstnance nelze srazit — peněžitá práva zaměstnavatele smrtí zanikají (§ 328 odst. 2 ZP).",
           "severance_relation_not_applicable": "Odstupné náleží jen z pracovního poměru, u dohody ne.",
           "work_injury_compensation_manual": "Jednorázovou náhradu podle § 271ca ZP aplikace do běhu nezakládá — chybí jí mzdová složka s ověřeným zařazením. Založte ji ručně a v odhlášce A2 uveďte jako jednorázovou náhradu.",
+          "work_injury_compensation_ready": "Jednorázovou náhradu podle § 271ca ZP založte níže tlačítkem Založit náhradu — uveďte, kdo ji vyplácí (zaměstnavatel, nebo přímo pojišťovna) a kdy.",
+          "severance_garnishment_multiple_missing": "U založeného odstupného chybí počet násobků průměru, ze kterých se počítají srážky (§ 299 odst. 4 o. s. ř.). Doplňte ho jako množství u vstupu odstupného v Mzdových vstupech.",
           "severance_input_differs": "Založené odstupné ({input_amount_minor}) se liší od současného návrhu. Opravte vstup v Mzdových vstupech.",
           "severance_jmhz_mapping_missing": "Složka {component_code} nemá zařazení do měsíčního hlášení JMHZ. Bez něj se hlášení za poslední měsíc nesestaví — zařaďte ji v Mzdové složky.",
           "death_no_entitled_survivor": "Není zapsaná žádná osoba blízká ze společné domácnosti. Mzdová práva se pak stávají předmětem dědictví — vyplácejte až podle rozhodnutí o dědictví.",
@@ -5817,9 +5844,14 @@
         "one_per_line": "Každou skutečnost uveďte na samostatný řádek",
         "exposure_confirm": "Potvrzuji, že pracovní expozice byla posouzena a uvedené skutečnosti jsou úplné.",
         "deductions": "Pokračující srážky ze mzdy",
-        "deductions_hint": "Vyplňte právní údaje jen k nárokům nalezeným v uzavřené evidenci srážek. Částky se do formuláře nezadávají.",
+        "deductions_hint": "Vyplňte právní údaje k exekucím (i doručeným, dosud neověřeným), dohodám o srážkách a insolvenci, které se ke dni skončení ze mzdy srážejí. U dohod a insolvence je předvyplněno, co zná evidence. Částky se do formuláře nezadávají.",
         "claim_count": "Nároky: {count}",
         "claim_id": "Evidovaný nárok č. {id}",
+        "source_kind": {
+          "enforcement_claim": "Exekuce",
+          "deduction_agreement": "Dohoda o srážkách",
+          "insolvency": "Insolvence"
+        },
         "beneficiary": "Oprávněný",
         "ordering_authority": "Orgán, který srážku nařídil",
         "decision_reference": "Spisová značka / rozhodnutí",
@@ -8565,7 +8597,25 @@
         "percent": "Zadej procento mezi 0 a 100.",
         "employee": "Vyber zaměstnance, kterému dohoda patří.",
         "title": "Doplň název dohody — pod ním se srážka objeví na výplatním lístku.",
-        "read_only": "Na mzdové vstupy máš jen právo ke čtení, dohodu uložit nemůžeš."
+        "read_only": "Na mzdové vstupy máš jen právo ke čtení, dohodu uložit nemůžeš.",
+        "started_on": "U srážky ze zákona vyplň den zahájení srážek — určuje její pořadí vůči exekucím a dohodám."
+      },
+      "legal_basis_label": "Právní titul srážky",
+      "legal_basis_hint_agreement": "Dohoda o srážkách ze mzdy se zaměstnancem (§ 146 písm. b) zákoníku práce). Pořadí vůči exekucím určuje den doručení dohody.",
+      "legal_basis_hint_statutory": "Srážka ze zákona bez dohody (§ 147 odst. 1 zákoníku práce). Sráží se jen z první třetiny zbytku čisté mzdy jako nepřednostní pohledávka; pořadí určuje den zahájení srážek.",
+      "started_on": "Den zahájení srážek",
+      "started_on_hint": "Od kterého dne se srážka provádí. Určuje pořadí srážky vůči exekucím a dohodám; při stejném dni má zákonná srážka přednost před dohodou.",
+      "legal_basis": {
+        "agreement": "Dohoda o srážkách ze mzdy",
+        "zp_147_1_c": "Záloha na mzdu k vrácení (§ 147 odst. 1 písm. c) ZP)",
+        "zp_147_1_d": "Nevyúčtovaná záloha (§ 147 odst. 1 písm. d) ZP)",
+        "zp_147_1_e": "Náhrada mzdy bez nároku (§ 147 odst. 1 písm. e) ZP)"
+      },
+      "legal_basis_short": {
+        "agreement": "dohoda",
+        "zp_147_1_c": "§ 147/1 c)",
+        "zp_147_1_d": "§ 147/1 d)",
+        "zp_147_1_e": "§ 147/1 e)"
       },
       "kinds": {
         "advance": "Záloha",

@@ -60,7 +60,7 @@ const exposureAssessmentComplete = ref(false)
 const deductionAssessmentComplete = ref(false)
 const pensionCategoryAssessmentComplete = ref(false)
 const correctionReason = ref('')
-const deductions = ref<PayrollEmploymentCertificateDeductionEvidence[]>([])
+const deductions = ref<Array<PayrollEmploymentCertificateDeductionEvidence & { label: string }>>([])
 const pensionPeriods = ref<PayrollEmploymentCertificatePensionPeriod[]>([])
 const pensionCategoryOptions: Array<{
   value: PayrollEmploymentCertificatePensionPeriod['category']
@@ -241,12 +241,26 @@ function resetEvidence(): void {
   requestedPurpose.value = ''
   statementCorrectionReason.value = ''
   pensionPeriods.value = []
-  deductions.value = deductionClaimIds.value.map(sourceClaimId => ({
-    source_claim_id: sourceClaimId,
-    beneficiary: '',
-    ordering_authority: '',
-    decision_reference: '',
-  }))
+  // Exekuce, dohody o srážkách i insolvence (§ 313 odst. 1 písm. e) ZP);
+  // u dohody a insolvence server předvyplní, co zná z evidence.
+  const sources = employmentReadiness.value?.deduction_sources
+  deductions.value = sources !== undefined
+    ? sources.map(source => ({
+      source_claim_id: source.source_claim_id,
+      source_kind: source.source_kind,
+      label: source.label,
+      beneficiary: source.beneficiary,
+      ordering_authority: source.ordering_authority,
+      decision_reference: source.decision_reference,
+    }))
+    : deductionClaimIds.value.map(sourceClaimId => ({
+      source_claim_id: sourceClaimId,
+      source_kind: 'enforcement_claim' as const,
+      label: '',
+      beneficiary: '',
+      ordering_authority: '',
+      decision_reference: '',
+    }))
 }
 
 async function load(): Promise<void> {
@@ -295,6 +309,7 @@ async function generate(): Promise<void> {
     deduction_assessment_complete: deductionAssessmentComplete.value,
     deductions: deductions.value.map(row => ({
       source_claim_id: row.source_claim_id,
+      ...(row.source_kind && row.source_kind !== 'enforcement_claim' ? { source_kind: row.source_kind } : {}),
       beneficiary: row.beneficiary.trim(),
       ordering_authority: row.ordering_authority.trim(),
       decision_reference: row.decision_reference.trim(),
@@ -553,9 +568,11 @@ onMounted(() => void load())
                 {{ t('payroll.people.exit_documents.claim_count', { count: deductions.length }) }}
               </span>
             </div>
-            <div v-for="row in deductions" :key="row.source_claim_id" class="mt-3 grid grid-cols-1 gap-3 rounded-lg border border-neutral-200 p-3 sm:grid-cols-3">
+            <div v-for="row in deductions" :key="`${row.source_kind ?? 'enforcement_claim'}-${row.source_claim_id}`" class="mt-3 grid grid-cols-1 gap-3 rounded-lg border border-neutral-200 p-3 sm:grid-cols-3" :data-test="`exit-deduction-${row.source_kind ?? 'enforcement_claim'}`">
               <p class="text-xs font-medium text-neutral-700 sm:col-span-3">
-                {{ t('payroll.people.exit_documents.claim_id', { id: row.source_claim_id }) }}
+                <span class="mr-1 rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-600">{{ t(`payroll.people.exit_documents.source_kind.${row.source_kind ?? 'enforcement_claim'}`) }}</span>
+                <template v-if="(row.source_kind ?? 'enforcement_claim') === 'enforcement_claim'">{{ t('payroll.people.exit_documents.claim_id', { id: row.source_claim_id }) }}</template>
+                <template v-else>{{ row.label }}</template>
               </p>
               <label class="text-xs text-neutral-600">{{ t('payroll.people.exit_documents.beneficiary') }}<input v-model="row.beneficiary" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
               <label class="text-xs text-neutral-600">{{ t('payroll.people.exit_documents.ordering_authority') }}<input v-model="row.ordering_authority" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>

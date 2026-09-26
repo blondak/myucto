@@ -101,11 +101,11 @@ body { font-family: montserrat, dejavusans, sans-serif; font-size: 8.2pt; color:
     <tbody>
     {% for deduction in deductions %}
       <tr>
-        <td><strong>{{ deduction.beneficiary }}</strong><br>{{ deduction.decision_reference }}</td>
-        <td>{{ deduction.claim_amount_minor_units|minor_money }} Kč</td>
+        <td><strong>{{ deduction.beneficiary }}</strong><br>{{ deduction.decision_reference }}{% if deduction.source_kind is defined and deduction.source_kind == 'deduction_agreement' %}<br>dohoda o srážkách ze mzdy{% elseif deduction.source_kind is defined and deduction.source_kind == 'insolvency' %}<br>insolvence{% endif %}</td>
+        <td>{% if deduction.claim_amount_minor_units is null %}{% if deduction.source_kind is defined and deduction.source_kind == 'insolvency' %}podle rozhodnutí insolvenčního soudu{% else %}bez celkového limitu{% endif %}{% else %}{{ deduction.claim_amount_minor_units|minor_money }} Kč{% endif %}</td>
         <td>{{ deduction.withheld_amount_minor_units|minor_money }} Kč</td>
-        <td>{{ deduction.remaining_amount_minor_units|minor_money }} Kč</td>
-        <td>{{ deduction.priority_date|cz_date }}<br>{{ deduction.ordering_authority }}</td>
+        <td>{% if deduction.remaining_amount_minor_units is null %}—{% else %}{{ deduction.remaining_amount_minor_units|minor_money }} Kč{% endif %}</td>
+        <td>{% if deduction.priority_date is null %}{% if deduction.source_kind is defined and deduction.source_kind == 'insolvency' %}podle insolvenčního zákona{% else %}pořadí dosud neověřeno{% endif %}{% else %}{{ deduction.priority_date|cz_date }}{% endif %}<br>{{ deduction.ordering_authority }}</td>
       </tr>
     {% endfor %}
     </tbody>

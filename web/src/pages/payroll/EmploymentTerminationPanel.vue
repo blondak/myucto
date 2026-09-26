@@ -9,6 +9,7 @@ import {
   type PayrollTerminationMethod,
   type PayrollTerminationOverview,
   type PayrollTerminationSurvivorRelationship,
+  type PayrollWorkInjuryCompensationPayer,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
@@ -45,6 +46,14 @@ const statedReason = ref('')
 const overrideMultiple = ref('')
 const overrideReason = ref('')
 const workingTimeAccount = ref(false)
+// § 299 odst. 4 o. s. ř. — srážky z odstupného po násobcích a jiný příjem
+// povinného v době poskytování odstupného.
+const garnishmentMultiple = ref('')
+const otherIncomeFrom = ref('')
+const otherPayerConfirmed = ref(false)
+// § 271ca ZP — kdo jednorázovou náhradu vyplácí a kdy.
+const workInjuryPayer = ref<PayrollWorkInjuryCompensationPayer | ''>('')
+const workInjuryPaidOn = ref('')
 const taxAssessment = ref('')
 const survivorName = ref('')
 const survivorRelationship = ref<PayrollTerminationSurvivorRelationship>('spouse_partner')
@@ -86,6 +95,8 @@ const dirty = computed(() => {
     || String(record.severance_multiple_override ?? '') !== overrideMultiple.value.trim()
     || (record.severance_override_reason ?? '') !== overrideReason.value.trim()
     || record.working_time_account_applies !== workingTimeAccount.value
+    || (record.other_income_from ?? '') !== otherIncomeFrom.value
+    || (record.other_payer_applies_protected_amount ?? false) !== otherPayerConfirmed.value
 })
 
 const formBlockReason = computed(() => {
@@ -96,8 +107,16 @@ const formBlockReason = computed(() => {
   if (overrideMultiple.value.trim() !== '' && overrideReason.value.trim() === '') {
     return t('payroll.people.termination.blocked.override_reason')
   }
+  if (otherPayerConfirmed.value && otherIncomeFrom.value === '') {
+    return t('payroll.people.termination.blocked.other_payer_date')
+  }
   return ''
 })
+
+// `type="number"` vrací přes v-model číslo, prázdné pole řetězec.
+const garnishmentMultipleValid = computed(() => /^\d+$/.test(String(garnishmentMultiple.value).trim())
+  && Number(garnishmentMultiple.value) >= 1 && Number(garnishmentMultiple.value) <= 36)
+const workInjuryReady = computed(() => workInjuryPayer.value !== '' && workInjuryPaidOn.value !== '')
 
 function applyOverview(overview: PayrollTerminationOverview): void {
   data.value = overview
@@ -110,6 +129,12 @@ function applyOverview(overview: PayrollTerminationOverview): void {
     : String(record.severance_multiple_override)
   overrideReason.value = record?.severance_override_reason ?? ''
   workingTimeAccount.value = record?.working_time_account_applies ?? false
+  otherIncomeFrom.value = record?.other_income_from ?? ''
+  otherPayerConfirmed.value = record?.other_payer_applies_protected_amount ?? false
+  garnishmentMultiple.value = overview.severance.garnishment_multiple === null
+    ? ''
+    : String(overview.severance.garnishment_multiple)
+  workInjuryPaidOn.value = overview.severance.work_injury_paid_on ?? overview.employment.end_date
   taxAssessment.value = record?.death_tax_assessment ?? ''
   emit('loaded', overview)
 }
@@ -155,6 +180,8 @@ function save(): Promise<void> {
       ? overrideReason.value.trim()
       : null,
     working_time_account_applies: severanceGround.value && ground.value === 'organizational' && workingTimeAccount.value,
+    other_income_from: otherIncomeFrom.value || null,
+    other_payer_applies_protected_amount: otherIncomeFrom.value !== '' && otherPayerConfirmed.value,
     ...(data.value?.termination ? { row_version: data.value.termination.row_version } : {}),
   }), 'payroll.people.termination.saved')
 }
@@ -241,9 +268,33 @@ const actions = computed<ActionItem[]>(() => [
     tier: 'secondary',
     variant: 'success',
     show: props.canWrite && severance.value?.state === 'ready' && severance.value.kind === 'severance',
-    disabled: busy.value || dirty.value,
-    disabledReason: dirty.value ? t('payroll.people.termination.blocked.unsaved') : undefined,
-    run: () => void mutate(() => payrollApi.createTerminationSeverance(props.employmentId), 'payroll.people.termination.severance.created_toast'),
+    disabled: busy.value || dirty.value || !garnishmentMultipleValid.value,
+    disabledReason: dirty.value
+      ? t('payroll.people.termination.blocked.unsaved')
+      : !garnishmentMultipleValid.value ? t('payroll.people.termination.blocked.garnishment_multiple') : undefined,
+    run: () => void mutate(
+      () => payrollApi.createTerminationSeverance(props.employmentId, Number(garnishmentMultiple.value)),
+      'payroll.people.termination.severance.created_toast',
+    ),
+  },
+  {
+    key: 'termination-work-injury',
+    label: t('payroll.people.termination.work_injury.create'),
+    icon: 'plus',
+    tier: 'secondary',
+    variant: 'success',
+    show: props.canWrite && severance.value?.state === 'ready' && severance.value.kind === 'work_injury_compensation',
+    disabled: busy.value || dirty.value || !workInjuryReady.value,
+    disabledReason: dirty.value
+      ? t('payroll.people.termination.blocked.unsaved')
+      : !workInjuryReady.value ? t('payroll.people.termination.blocked.work_injury_input') : undefined,
+    run: () => void mutate(
+      () => payrollApi.createTerminationWorkInjuryCompensation(props.employmentId, {
+        payer: workInjuryPayer.value as PayrollWorkInjuryCompensationPayer,
+        paid_on: workInjuryPaidOn.value,
+      }),
+      'payroll.people.termination.work_injury.created_toast',
+    ),
   },
   {
     key: 'termination-leave-reverse',
@@ -299,6 +350,8 @@ function issueLink(issue: PayrollTerminationIssue): { to: string, label: string 
       return { to: '/payroll/deduction-agreements', label: t('payroll.people.termination.links.deductions') }
     case 'severance_jmhz_mapping_missing':
       return { to: '/payroll/components', label: t('payroll.people.termination.links.components') }
+    case 'severance_garnishment_multiple_missing':
+      return { to: `/payroll/quick-inputs?employment=${employmentId}`, label: t('payroll.people.termination.links.inputs') }
     default:
       return null
   }
@@ -423,6 +476,49 @@ onMounted(() => void load())
         <p v-if="severance.input" class="mt-1 text-xs text-success-700">
           {{ t('payroll.people.termination.severance.created', { period: severance.input.period_start.slice(0, 7), amount: formatMoneyMinor(severance.input.amount_minor) }) }}
         </p>
+        <p v-if="severance.state === 'insurer'" class="mt-1 text-xs text-success-700" data-test="termination-work-injury-insurer">
+          {{ t('payroll.people.termination.work_injury.insurer_state', { date: formatDate(severance.work_injury_paid_on ?? '') }) }}
+        </p>
+        <p v-else-if="severance.work_injury_payer === 'employer'" class="mt-1 text-xs text-neutral-600">
+          {{ t('payroll.people.termination.work_injury.employer_state', { date: formatDate(severance.work_injury_paid_on ?? '') }) }}
+        </p>
+        <p v-if="severance.state === 'created' && severance.garnishment_multiple !== null && severance.garnishment_period_to" class="mt-1 text-xs text-neutral-600" data-test="termination-severance-garnishment">
+          {{ t('payroll.people.termination.severance.garnishment_info', { multiple: severance.garnishment_multiple, date: formatDate(severance.garnishment_period_to) }) }}
+        </p>
+
+        <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <label v-if="severance.state === 'ready' && severance.kind === 'severance'" :class="FIELD">
+            {{ t('payroll.people.termination.severance.garnishment_multiple_label') }}
+            <input v-model="garnishmentMultiple" type="number" min="1" max="36" :class="INPUT" :disabled="!canWrite || busy" data-test="termination-garnishment-multiple">
+            <span :class="HINT">{{ t('payroll.people.termination.severance.garnishment_multiple_hint') }}</span>
+          </label>
+          <template v-if="severance.state === 'ready' && severance.kind === 'work_injury_compensation'">
+            <label :class="FIELD">
+              {{ t('payroll.people.termination.work_injury.payer_label') }}
+              <select v-model="workInjuryPayer" :class="INPUT" :disabled="!canWrite || busy" data-test="termination-work-injury-payer">
+                <option value="" disabled>{{ t('payroll.people.termination.work_injury.payer_placeholder') }}</option>
+                <option v-for="value in (['employer', 'insurer'] as const)" :key="value" :value="value">{{ t(`payroll.people.termination.work_injury.payers.${value}`) }}</option>
+              </select>
+            </label>
+            <label :class="FIELD">
+              {{ t('payroll.people.termination.work_injury.paid_on_label') }}
+              <input v-model="workInjuryPaidOn" type="date" :min="data.employment.end_date" :class="INPUT" :disabled="!canWrite || busy" data-test="termination-work-injury-paid-on">
+              <span :class="HINT">{{ t('payroll.people.termination.work_injury.paid_on_hint') }}</span>
+            </label>
+          </template>
+          <label :class="FIELD">
+            {{ t('payroll.people.termination.severance.other_income_label') }}
+            <input v-model="otherIncomeFrom" type="date" :class="INPUT" :disabled="!canWrite || busy" data-test="termination-other-income-from">
+            <span :class="HINT">{{ t('payroll.people.termination.severance.other_income_hint') }}</span>
+          </label>
+          <label v-if="otherIncomeFrom !== ''" class="flex items-start gap-2 text-xs text-neutral-700 sm:col-span-2">
+            <input v-model="otherPayerConfirmed" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy" data-test="termination-other-payer">
+            <span>
+              {{ t('payroll.people.termination.severance.other_payer_label') }}
+              <span :class="HINT">{{ t('payroll.people.termination.severance.other_payer_hint') }}</span>
+            </span>
+          </label>
+        </div>
       </div>
 
       <!-- Úmrtí (§ 328 ZP) -->

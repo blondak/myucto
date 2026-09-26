@@ -17,8 +17,10 @@ use MyInvoice\Service\Payroll\Garnishment\GarnishmentCalculator;
 use MyInvoice\Service\Payroll\Garnishment\GarnishmentInput;
 use MyInvoice\Service\Payroll\Garnishment\GarnishmentResult;
 use MyInvoice\Service\Payroll\Garnishment\GarnishmentStatus;
+use MyInvoice\Service\Payroll\Garnishment\InsolvencyMode;
 use MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentCalculation;
 use MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentRunIntegration;
+use MyInvoice\Service\Payroll\Garnishment\SeveranceMultiple;
 
 final class PayrollRunGarnishmentProcessor
 {
@@ -51,6 +53,7 @@ final class PayrollRunGarnishmentProcessor
                 $person,
                 $employeeId,
                 $netCashPayable,
+                self::statutorySharesFromPerson($person),
             );
             $person['enforcement'] = [
                 'input' => $input->toCanonicalArray(),
@@ -109,12 +112,15 @@ final class PayrollRunGarnishmentProcessor
      * @param array<string,mixed> $snapshot
      * @param array<string,mixed> $baseResult
      * @param array<int,int> $netCashPayableByEmployee
+     * @param array<int,array<string,int>> $statutoryShares daň a pojistné osoby
+     *   (klíče jako v `net_pay`), podle kterých se přiřadí odstupnému
      * @return array<int,int>
      */
     public function voluntaryDeductionCapacities(
         array $snapshot,
         array $baseResult,
         array $netCashPayableByEmployee,
+        array $statutoryShares = [],
     ): array {
         $context = $this->context($snapshot, $baseResult, true);
         $capacities = [];
@@ -124,12 +130,20 @@ final class PayrollRunGarnishmentProcessor
             if ($netCashPayable === null) {
                 continue;
             }
-            [, $result] = $this->evaluate(
+            [$input, $result] = $this->evaluate(
                 $context,
                 $person,
                 $employeeId,
                 $netCashPayable,
+                $statutoryShares[$employeeId] ?? null,
             );
+            // Dohody o srážkách se berou jen ze mzdy měsíce výplaty, ne
+            // z násobků odstupného — viz severanceMultiples(). Kapacita se proto
+            // počítá z výsledku samotné mzdy; pořadí mzda → násobky zaručuje,
+            // že je to přesně táž mzdová část, kterou spočítá i celý výsledek.
+            if ($input->severanceMultiples !== []) {
+                $result = $this->calculator->calculate($input->withoutSeverance());
+            }
             $capacities[$employeeId] =
                 $this->calculator->voluntaryDeductionCapacity($result);
         }
@@ -146,7 +160,8 @@ final class PayrollRunGarnishmentProcessor
      *     payment_date:string,
      *     requires_net_pay:bool,
      *     evidence:array<int,EnforcementPersonMonthEvidence>,
-     *     agreements:array<int,list<DeductionClaim>>
+     *     agreements:array<int,list<DeductionClaim>>,
+     *     severance:array<int,array<int,array{employment_id:int,multiple:?int,end_date:?string,other_income_from:?string,other_payer_applies_protected_amount:bool}>>
      * }
      */
     private function context(
@@ -156,6 +171,7 @@ final class PayrollRunGarnishmentProcessor
     ): array {
         $evidenceByEmployee = [];
         $agreementsByEmployee = [];
+        $severanceByEmployee = [];
         foreach (self::rows($snapshot['people'] ?? null, 'snapshot.people') as $person) {
             $employee = self::row($person['employee'] ?? null, 'snapshot.employee');
             $evidence = self::row(
@@ -166,6 +182,7 @@ final class PayrollRunGarnishmentProcessor
             $evidenceByEmployee[$employeeId] =
                 EnforcementPersonMonthEvidence::fromCanonicalArray($evidence);
             $agreementsByEmployee[$employeeId] = self::bridgedAgreements($person);
+            $severanceByEmployee[$employeeId] = self::severanceInputs($person);
         }
 
         return [
@@ -177,7 +194,66 @@ final class PayrollRunGarnishmentProcessor
                     && isset($baseResult['statutory'])),
             'evidence' => $evidenceByEmployee,
             'agreements' => $agreementsByEmployee,
+            'severance' => $severanceByEmployee,
         ];
+    }
+
+    /**
+     * Vstupy druhu `severance` (odstupné a obdobná plnění při skončení,
+     * § 299 odst. 1 písm. g) o. s. ř.) podle ID vstupu, s počtem násobků
+     * průměrného výdělku z množství vstupu a s okolnostmi skončení vztahu.
+     *
+     * @param array<string,mixed> $person
+     * @return array<int,array{employment_id:int,multiple:?int,end_date:?string,other_income_from:?string,other_payer_applies_protected_amount:bool}>
+     */
+    private static function severanceInputs(array $person): array
+    {
+        $employments = $person['employments'] ?? null;
+        if (!is_array($employments) || !array_is_list($employments)) {
+            return [];
+        }
+        $result = [];
+        foreach ($employments as $employmentSnapshot) {
+            if (!is_array($employmentSnapshot)) {
+                continue;
+            }
+            $employment = $employmentSnapshot['employment'] ?? null;
+            $inputs = $employmentSnapshot['inputs'] ?? null;
+            if (!is_array($employment) || !is_array($inputs)) {
+                continue;
+            }
+            $facts = is_array($employmentSnapshot['severance_garnishment'] ?? null)
+                ? $employmentSnapshot['severance_garnishment']
+                : [];
+            foreach ($inputs as $input) {
+                if (!is_array($input)
+                    || !is_array($input['component'] ?? null)
+                    || ($input['component']['component_kind'] ?? null) !== 'severance'
+                    || !is_int($input['id'] ?? null)
+                ) {
+                    continue;
+                }
+                $quantity = $input['quantity_milliunits'] ?? null;
+                $multiple = is_int($quantity) && $quantity > 0 && $quantity % 1000 === 0
+                    && intdiv($quantity, 1000) <= SeveranceMultiple::MAX_MULTIPLES
+                        ? intdiv($quantity, 1000)
+                        : null;
+                $endDate = $employment['end_date'] ?? null;
+                $otherIncomeFrom = $facts['other_income_from'] ?? null;
+                $result[$input['id']] = [
+                    'employment_id' => (int) ($employment['id'] ?? 0),
+                    'multiple' => $multiple,
+                    'end_date' => is_string($endDate) && $endDate !== '' ? $endDate : null,
+                    'other_income_from' => is_string($otherIncomeFrom) && $otherIncomeFrom !== ''
+                        ? $otherIncomeFrom
+                        : null,
+                    'other_payer_applies_protected_amount' =>
+                        ($facts['other_payer_applies_protected_amount'] ?? false) === true,
+                ];
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -199,6 +275,12 @@ final class PayrollRunGarnishmentProcessor
      * Dohoda bez dne doručení se sem nedostane — pořadí by neměla čím doložit
      * a zůstává jí dosavadní chování, tedy zbytek po exekucích (§ 148 odst. 2
      * zákoníku práce).
+     *
+     * Stejnou cestou jde srážka ze zákona podle § 147 odst. 1 písm. c) až e)
+     * zákoníku práce (`legal_basis` ≠ `agreement`): den zahájení srážek je
+     * u ní povinný a soutěží jím o obecnou část s exekucemi stejně jako dohoda
+     * dnem doručení. Pro exekuční jádro jde o týž druh přemostění — nepřednostní
+     * srážka mimo rejstřík, kterou provádí čistá mzda.
      *
      * @param array<string,mixed> $person
      * @return list<DeductionClaim>
@@ -305,6 +387,7 @@ final class PayrollRunGarnishmentProcessor
         array $person,
         int $employeeId,
         ?int $netCashPayable,
+        ?array $statutoryShares = null,
     ): array {
         $supplierId = $context['supplier_id'];
         $totals = self::row($person['totals'] ?? null, 'result.person.totals');
@@ -354,6 +437,27 @@ final class PayrollRunGarnishmentProcessor
                 $enforcementBase = $cashPayable - $excluded;
             }
         }
+        $evidence = $context['evidence'][$employeeId]
+            ?? throw new \UnexpectedValueException(
+                'Snapshot neobsahuje exekuční důkazy zaměstnance.',
+            );
+        $consistent = !$statutoryUnavailable
+            && $cashPayable >= 0
+            && $enforcementBase >= 0
+            && $enforcementBase <= $cashPayable;
+        $wageBase = $enforcementBase;
+        $severanceMultiples = [];
+        $severanceItems = [];
+        if ($consistent && $enforcementBase > 0) {
+            [$wageBase, $severanceMultiples, $severanceItems] = $this->severanceMultiples(
+                $context,
+                $person,
+                $employeeId,
+                $enforcementBase,
+                $evidence,
+                $statutoryShares,
+            );
+        }
         $income = $statutoryUnavailable
             ? new GarnishableIncomeResult(
                 GarnishmentStatus::ManualReview,
@@ -362,9 +466,7 @@ final class PayrollRunGarnishmentProcessor
                 ['net_pay_result_missing_or_unverified'],
                 [],
             )
-            : ($cashPayable < 0
-                || $enforcementBase < 0
-                || $enforcementBase > $cashPayable
+            : (!$consistent
             ? new GarnishableIncomeResult(
                 GarnishmentStatus::ManualReview,
                 0,
@@ -373,10 +475,10 @@ final class PayrollRunGarnishmentProcessor
                 [],
             )
             : $this->incomeResolver->resolve(array_values(array_filter([
-                $enforcementBase === 0 ? null : new GarnishableIncomeItem(
+                $wageBase === 0 ? null : new GarnishableIncomeItem(
                     "revision-person-{$employeeId}-garnishable",
                     GarnishableIncomeKind::Wage,
-                    $enforcementBase,
+                    $wageBase,
                     "supplier-{$supplierId}",
                 ),
                 $cashPayable === $enforcementBase
@@ -387,11 +489,8 @@ final class PayrollRunGarnishmentProcessor
                         $cashPayable - $enforcementBase,
                         "supplier-{$supplierId}",
                     ),
+                ...$severanceItems,
             ])), true));
-        $evidence = $context['evidence'][$employeeId]
-            ?? throw new \UnexpectedValueException(
-                'Snapshot neobsahuje exekuční důkazy zaměstnance.',
-            );
         $input = new GarnishmentInput(
             $context['period'],
             $context['payment_date'],
@@ -409,9 +508,238 @@ final class PayrollRunGarnishmentProcessor
             $evidence->claimRegisterEvidenceComplete,
             $evidence->spousePensionEvidence,
             $context['agreements'][$employeeId] ?? [],
+            $income->status === GarnishmentStatus::Supported ? $severanceMultiples : [],
         );
 
         return [$input, $this->calculator->calculate($input), $income];
+    }
+
+    /**
+     * Odstupné vyplacené v tomto běhu jako násobky průměrného výdělku
+     * (§ 299 odst. 4 o. s. ř.).
+     *
+     * Srážky se počítají z ČISTÉHO odstupného (§ 277 odst. 1 o. s. ř.: od
+     * příjmu se odečte záloha na daň a pojistné). Odstupné nepodléhá pojistnému
+     * (§ 5 odst. 2 písm. b) z. č. 589/1992 Sb., § 3 odst. 2 písm. b) z. č.
+     * 592/1992 Sb.),
+     * ale je zdanitelným příjmem ze závislé činnosti, takže záloha na daň
+     * osoby je společná pro mzdu i odstupné. Připadne mu poměrná část zálohy
+     * podle jeho podílu na základu daně; pojistné stejně podle podílu na
+     * vyměřovacím základu (u výchozí složky nula). Poměr je deterministický
+     * a nezávisí na pořadí slev na dani.
+     *
+     * Čisté odstupné se rozdělí na tolik stejných násobků, kolika násobkům
+     * průměrného výdělku odpovídá (množství vstupu). Počet násobků zadává
+     * účetní při založení odstupného v kartě Skončení vztahu, předvyplní ho
+     * návrh podle § 67 ZP.
+     *
+     * Rozdělení se dělá jen tam, kde se vůbec může srážet (pohledávka,
+     * insolvence nebo dohoda o srážkách). Jinde zůstává výpočet beze změny —
+     * nic se nesráží a kanonický vstup se nemá čím lišit.
+     *
+     * Dohody o srážkách se provádějí jen ze mzdy měsíce výplaty, ne z násobků.
+     * Dohoda je sjednaná na mzdu za trvání vztahu a měsíční částka dohody se
+     * tak nevynásobí počtem násobků odstupného; je to výklad ve prospěch
+     * zaměstnance.
+     *
+     * @param array<string,mixed> $person
+     * @param array<string,int>|null $shares
+     * @return array{0:int,1:list<SeveranceMultiple>,2:list<GarnishableIncomeItem>}
+     */
+    private function severanceMultiples(
+        array $context,
+        array $person,
+        int $employeeId,
+        int $enforcementBase,
+        EnforcementPersonMonthEvidence $evidence,
+        ?array $shares,
+    ): array {
+        $inputs = $context['severance'][$employeeId] ?? [];
+        if ($inputs === [] || !self::withholdingPossible($evidence, $context['agreements'][$employeeId] ?? [])) {
+            return [$enforcementBase, [], []];
+        }
+        $supplierId = $context['supplier_id'];
+        $resultInputs = [];
+        foreach (self::rows($person['employments'] ?? [], 'result.employments') as $employment) {
+            foreach (self::rows($employment['inputs'] ?? [], 'result.employment.inputs') as $input) {
+                $resultInputs[self::positiveInt($input, 'input_id')] = self::row(
+                    $input['totals'] ?? null,
+                    'result.input.totals',
+                );
+            }
+        }
+        $personTotals = self::row($person['totals'] ?? null, 'result.person.totals');
+        $wageBase = $enforcementBase;
+        /** @var array<int,array{amount:int,overlap:bool,other_payer:bool}> $parts */
+        $parts = [];
+        $manual = [];
+        foreach ($inputs as $inputId => $facts) {
+            $totals = $resultInputs[$inputId] ?? null;
+            if ($totals === null) {
+                continue;
+            }
+            $gross = self::intOrNull($totals, 'enforcement_base_minor') ?? 0;
+            if ($gross <= 0) {
+                continue;
+            }
+            $net = $context['requires_net_pay']
+                ? self::severanceNet($gross, $totals, $personTotals, $shares)
+                : $gross;
+            $itemId = "employment:{$facts['employment_id']}:severance-input-{$inputId}";
+            if ($net === null || $net > $wageBase) {
+                // Bez daně osoby nebo s rozporným základem nejde čisté
+                // odstupné spočítat — do ručního posouzení, ne odhadem.
+                $manual[] = new GarnishableIncomeItem(
+                    $itemId,
+                    GarnishableIncomeKind::Severance,
+                    min($gross, $wageBase),
+                    "supplier-{$supplierId}",
+                );
+                $wageBase -= min($gross, $wageBase);
+                continue;
+            }
+            $wageBase -= $net;
+            if ($facts['multiple'] === null) {
+                $manual[] = new GarnishableIncomeItem(
+                    $itemId,
+                    GarnishableIncomeKind::Severance,
+                    $net,
+                    "supplier-{$supplierId}",
+                );
+                continue;
+            }
+            foreach (SeveranceMultiple::split($net, $facts['multiple']) as $offset => $amount) {
+                $index = $offset + 1;
+                $part = $parts[$index] ?? ['amount' => 0, 'overlap' => false, 'other_payer' => true];
+                $overlap = self::overlapsOtherIncome($facts['end_date'], $facts['other_income_from'], $index);
+                $parts[$index] = [
+                    'amount' => self::add($part['amount'], $amount),
+                    'overlap' => $part['overlap'] || $overlap,
+                    'other_payer' => $part['other_payer']
+                        && (!$overlap || $facts['other_payer_applies_protected_amount']),
+                ];
+            }
+        }
+        ksort($parts);
+        $multiples = [];
+        foreach ($parts as $index => $part) {
+            $multiples[] = new SeveranceMultiple(
+                $index,
+                $part['amount'],
+                $part['overlap'],
+                $part['overlap'] && $part['other_payer'],
+            );
+        }
+
+        return [$wageBase, $multiples, $manual];
+    }
+
+    /**
+     * @param list<DeductionClaim> $agreements
+     */
+    private static function withholdingPossible(
+        EnforcementPersonMonthEvidence $evidence,
+        array $agreements,
+    ): bool {
+        if ($evidence->insolvency->mode !== InsolvencyMode::None || $agreements !== []) {
+            return true;
+        }
+        foreach ($evidence->claims as $claim) {
+            if ($claim->active && $claim->outstandingMinorUnits > 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Čisté odstupné: hrubá částka minus jeho poměrná část zálohy na daň
+     * a pojistného zaměstnance. `null` = daň osoby není k dispozici nebo jí
+     * chybí základ, ze kterého by se poměr spočítal.
+     *
+     * @param array<string,mixed> $inputTotals
+     * @param array<string,mixed> $personTotals
+     * @param array<string,int>|null $shares
+     */
+    private static function severanceNet(
+        int $gross,
+        array $inputTotals,
+        array $personTotals,
+        ?array $shares,
+    ): ?int {
+        if ($shares === null) {
+            return null;
+        }
+        $deductions = 0;
+        foreach ([
+            'tax_base_minor' => ($shares['advance_tax_minor_units'] ?? 0)
+                + ($shares['withholding_tax_minor_units'] ?? 0),
+            'social_base_minor' => $shares['employee_social_minor_units'] ?? 0,
+            'health_base_minor' => $shares['employee_health_minor_units'] ?? 0,
+        ] as $baseKey => $amount) {
+            $part = self::intOrNull($inputTotals, $baseKey) ?? 0;
+            if ($amount <= 0 || $part <= 0) {
+                continue;
+            }
+            $whole = self::intOrNull($personTotals, $baseKey);
+            if ($whole === null || $whole < $part) {
+                return null;
+            }
+            $deductions = self::add(
+                $deductions,
+                intdiv($amount * $part * 2 + $whole, 2 * $whole),
+            );
+        }
+
+        return max(0, $gross - $deductions);
+    }
+
+    /**
+     * Připadá násobek `$index` do doby, kdy má povinný jiný příjem?
+     *
+     * Doba poskytování odstupného se počítá ode dne po skončení: násobek 1
+     * je první měsíc po skončení, násobek 2 druhý atd. Jiný příjem vzniklý
+     * nejpozději posledním dnem toho měsíce se s násobkem sčítá (§ 299 odst. 4
+     * věta druhá o. s. ř.).
+     */
+    private static function overlapsOtherIncome(?string $endDate, ?string $otherIncomeFrom, int $index): bool
+    {
+        if ($otherIncomeFrom === null || $endDate === null) {
+            return false;
+        }
+
+        return $otherIncomeFrom <= SeveranceMultiple::periodEnd($endDate, $index);
+    }
+
+    /**
+     * Daň a pojistné osoby ze zákonného výsledku, ze kterých se přiřadí část
+     * odstupnému. `null`, dokud zákonný výsledek není vypočtený.
+     *
+     * @param array<string,mixed> $person
+     * @return array<string,int>|null
+     */
+    private static function statutorySharesFromPerson(array $person): ?array
+    {
+        $statutory = $person['statutory'] ?? null;
+        if (!is_array($statutory) || ($statutory['status'] ?? null) !== 'calculated') {
+            return null;
+        }
+        $netPay = $statutory['net_pay'] ?? null;
+        if (!is_array($netPay)) {
+            return null;
+        }
+        $shares = [];
+        foreach ([
+            'advance_tax_minor_units',
+            'withholding_tax_minor_units',
+            'employee_social_minor_units',
+            'employee_health_minor_units',
+        ] as $key) {
+            $shares[$key] = is_int($netPay[$key] ?? null) ? $netPay[$key] : 0;
+        }
+
+        return $shares;
     }
 
     /** @param array<string,mixed> $result */

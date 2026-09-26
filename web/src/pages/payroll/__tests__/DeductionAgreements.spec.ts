@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
   peoplePage: vi.fn(),
   person: vi.fn(),
   canWrite: vi.fn(),
+  create: vi.fn(),
 }))
 
 // Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
@@ -23,12 +24,13 @@ vi.mock('vue-router', async (importOriginal) => ({
 
 vi.mock('@/api/payrollDeductions', () => ({
   deductionAgreementKinds: ['advance', 'meal', 'contribution', 'damage', 'other'],
+  deductionLegalBases: ['agreement', 'zp_147_1_c', 'zp_147_1_d', 'zp_147_1_e'],
   deductionPriorityFloor: 10,
   deductionPriorityCeiling: 9999,
   payrollDeductionsApi: {
     agreementsPage: m.agreementsPage,
     agreement: m.agreement,
-    create: vi.fn(),
+    create: m.create,
     update: vi.fn(),
     transition: vi.fn(),
   },
@@ -70,6 +72,7 @@ function summary(overrides: Partial<DeductionAgreementSummary> = {}): DeductionA
     agreement_reference: 'SRZ-1',
     title: 'Stravenky',
     deduction_kind: 'meal',
+    legal_basis: 'agreement',
     status: 'active',
     priority_no: 100,
     requested_minor: 50_000,
@@ -250,6 +253,39 @@ describe('DeductionAgreements', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="deduction-detail-panel"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  /*
+   * § 147 odst. 1 písm. c) až e) ZP: srážka ze zákona bez dohody. Titul se
+   * volí ve formuláři, den zahájení srážek je povinný (předvyplní se začátkem
+   * účinnosti) a náhradu škody ze zákona srážet nelze (§ 147 odst. 3).
+   */
+  it('zadá srážku ze zákona s dnem zahájení srážek a bez náhrady škody', async () => {
+    m.routeQuery = { person: '3' }
+    m.create.mockResolvedValue(detailOf(summary({ id: 40, legal_basis: 'zp_147_1_d', delivered_on: '2026-01-01' })))
+    const wrapper = mount(DeductionAgreements)
+    await flushPromises()
+
+    await wrapper.get('button').trigger('click')
+    await wrapper.get('[data-test="deduction-legal-basis"]').setValue('zp_147_1_d')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="deduction-delivered-on"]').text()).toContain('payroll.deductions.started_on')
+    const kinds = wrapper.findAll('select').find(select => select.findAll('option').some(option => option.attributes('value') === 'meal'))
+    expect(kinds?.findAll('option').map(option => option.attributes('value'))).not.toContain('damage')
+
+    await wrapper.get('input[maxlength="190"]').setValue('Nevyúčtovaná záloha na cestu')
+    await wrapper.get('input[inputmode="decimal"]').setValue('1500')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.create).toHaveBeenCalledTimes(1)
+    expect(m.create.mock.calls[0][0]).toMatchObject({
+      legal_basis: 'zp_147_1_d',
+      delivered_on: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      deduction_kind: 'advance',
+    })
     wrapper.unmount()
   })
 

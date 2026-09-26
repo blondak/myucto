@@ -145,6 +145,19 @@ final class PayrollComponentDefaults
                 // samostatné zákonné pravidlo, které tento katalog neodhaduje.
                 ['NAHRADA_MZDY_DPN', 'Náhrada mzdy při DPN', 'compensation', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'included', 'included', 'included', null, 'statutory_exempt'],
                 ['ODSTUPNE', 'Odstupné', 'severance', 'monetary', 'one_off', 'included', 'excluded', 'excluded', 'excluded', 'included', 'included', 'included', null, null],
+                // Jednorázová náhrada při skončení pracovního poměru pro
+                // pracovní úraz nebo nemoc z povolání (§ 271ca ZP, 12× průměr).
+                // Daň ANO: § 4 odst. 1 písm. d) bod 6 ZDP ji z osvobození
+                // náhrad výslovně vylučuje, je to příjem podle § 6. Pojistné NE:
+                // náhrada škody podle zákoníku práce není vyměřovacím základem
+                // (§ 5 odst. 2 písm. a) z. č. 589/1992 Sb., § 3 odst. 2 písm. a)
+                // z. č. 592/1992 Sb.). Průměrný výdělek NE (není to mzda za práci).
+                // Srážkám podléhá jako „obdobné plnění poskytnuté v souvislosti
+                // se skončením" (§ 299 odst. 1 písm. g) o. s. ř.), proto druh
+                // `severance` — srážky se z ní počítají po násobcích stejně jako
+                // z odstupného. V JMHZ patří do úhrnu zúčtovaného příjmu, ne do
+                // rozpadu mzdy; zařazení je stejně jako u odstupného na účetní.
+                ['NAHRADA_271CA', 'Jednorázová náhrada při skončení (§ 271ca ZP)', 'severance', 'monetary', 'one_off', 'included', 'excluded', 'excluded', 'excluded', 'included', 'included', 'included', null, null],
                 ['NAHRADA_KONKURENCNI_DOLOZKA', 'Náhrada za konkurenční doložku', 'competitive_clause', 'monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
                 ['DOPLATEK_MZDY', 'Doplatek mzdy za minulé období', 'backpay', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['NEPENEZNI_PRIJEM', 'Nepeněžní příjem', 'non_cash', 'non_monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],

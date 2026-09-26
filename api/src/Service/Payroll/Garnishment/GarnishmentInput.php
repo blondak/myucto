@@ -21,6 +21,11 @@ final readonly class GarnishmentInput
      *   o. s. ř. soutěží o obecnou nepřednostní část podle dne doručení plátci
      *   mzdy společně s exekucemi — dohoda doručená dřív musí exekuci ubrat.
      *   Viz {@see GarnishmentCalculator::voluntaryDeductionCapacity()}.
+     * @param list<SeveranceMultiple> $severanceMultiples Odstupné vyplacené
+     *   v tomto běhu rozdělené na násobky průměrného výdělku (§ 299 odst. 4
+     *   o. s. ř.). `income` pak nese jen mzdu BEZ odstupného; každý násobek
+     *   se počítá jako samostatný měsíční příjem, viz
+     *   {@see GarnishmentCalculator::calculate()}.
      */
     public function __construct(
         public string $period,
@@ -40,7 +45,17 @@ final readonly class GarnishmentInput
         public SpousePensionEvidence $spousePensionEvidence =
             SpousePensionEvidence::Unknown,
         public array $voluntaryAgreements = [],
+        public array $severanceMultiples = [],
     ) {
+        $indexes = [];
+        foreach ($severanceMultiples as $multiple) {
+            if (!$multiple instanceof SeveranceMultiple || isset($indexes[$multiple->index])) {
+                throw new InvalidArgumentException(
+                    'Násobky odstupného musí mít jedinečné pořadí měsíce.',
+                );
+            }
+            $indexes[$multiple->index] = true;
+        }
         foreach ($voluntaryAgreements as $agreement) {
             if ($agreement->legalBasis !== DeductionLegalBasis::VoluntaryAgreement) {
                 throw new InvalidArgumentException(
@@ -75,6 +90,34 @@ final readonly class GarnishmentInput
             $this->paymentDate,
             $this->income,
             $claims,
+            $this->eligibleDependants,
+            $this->dependantsEvidenceComplete,
+            $this->eligibleSpouse,
+            $this->spouseEvidenceComplete,
+            $this->pensionEvidence,
+            $this->hasMultiplePayers,
+            $this->protectedAmountOverrideMinorUnits,
+            $this->insolvency,
+            $this->protectedAmountOverrideVerified,
+            $this->claimRegisterEvidenceComplete,
+            $this->spousePensionEvidence,
+            $this->voluntaryAgreements,
+            $this->severanceMultiples,
+        );
+    }
+
+    /** Týž vstup bez násobků odstupného — samotná mzda měsíce výplaty. */
+    public function withoutSeverance(): self
+    {
+        if ($this->severanceMultiples === []) {
+            return $this;
+        }
+
+        return new self(
+            $this->period,
+            $this->paymentDate,
+            $this->income,
+            $this->claims,
             $this->eligibleDependants,
             $this->dependantsEvidenceComplete,
             $this->eligibleSpouse,
@@ -152,6 +195,14 @@ final readonly class GarnishmentInput
             ],
             'payment_date' => $this->paymentDate,
             'period' => $this->period,
+            // Jen u měsíce s odstupným; ostatní snímky zůstávají bajtově stejné.
+            ...($this->severanceMultiples === []
+                ? []
+                : ['severance_multiples' => array_map(
+                    static fn (SeveranceMultiple $multiple): array =>
+                        $multiple->toCanonicalArray(),
+                    self::sortedMultiples($this->severanceMultiples),
+                )]),
             // Klíč chybí, dokud osoba nemá přemostěnou žádnou dohodu — kanonický
             // tvar vstupu se hashuje a bajtově porovnává (idempotence
             // `payroll_enforcement_month_results`), takže snímky pořízené před
@@ -225,6 +276,44 @@ final readonly class GarnishmentInput
             self::bool($evidence, 'claim_register_complete'),
             self::spousePension($evidence),
             self::voluntaryAgreements($data),
+            self::severanceMultiplesFrom($data),
+        );
+    }
+
+    /**
+     * @param list<SeveranceMultiple> $multiples
+     * @return list<SeveranceMultiple>
+     */
+    public static function sortedMultiples(array $multiples): array
+    {
+        usort(
+            $multiples,
+            static fn (SeveranceMultiple $left, SeveranceMultiple $right): int =>
+                $left->index <=> $right->index,
+        );
+
+        return $multiples;
+    }
+
+    /**
+     * @param array<string,mixed> $data
+     * @return list<SeveranceMultiple>
+     */
+    private static function severanceMultiplesFrom(array $data): array
+    {
+        $value = $data['severance_multiples'] ?? null;
+        if ($value === null) {
+            return [];
+        }
+        if (!is_array($value) || !array_is_list($value)) {
+            throw new InvalidArgumentException('severance_multiples must be a list.');
+        }
+
+        return array_map(
+            static fn (mixed $row): SeveranceMultiple => SeveranceMultiple::fromCanonicalArray(
+                self::row($row, 'severance_multiple'),
+            ),
+            $value,
         );
     }
 

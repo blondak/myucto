@@ -19,6 +19,55 @@ final readonly class DeductionAgreementTerms
     public const KINDS = ['advance', 'meal', 'contribution', 'damage', 'other'];
 
     /**
+     * Právní titul srážky.
+     *
+     *  - `agreement` — dohoda o srážkách ze mzdy (§ 146 písm. b) ZP,
+     *    § 2045 a násl. OZ);
+     *  - `zp_147_1_c` — záloha na mzdu, plat nebo odměnu z dohody, kterou je
+     *    zaměstnanec povinen vrátit, protože nebyly splněny podmínky pro její
+     *    přiznání (§ 147 odst. 1 písm. c) ZP);
+     *  - `zp_147_1_d` — nevyúčtovaná záloha na cestovní náhrady nebo jiná
+     *    nevyúčtovaná záloha k plnění pracovních úkolů (písm. d);
+     *  - `zp_147_1_e` — náhrada mzdy za dovolenou, na kterou zaměstnanec
+     *    ztratil právo nebo mu nevzniklo, a náhrada podle § 192, na kterou
+     *    právo nevzniklo (písm. e).
+     *
+     * Srážky podle § 147 odst. 1 písm. c) až e) provádí zaměstnavatel ze
+     * zákona, BEZ dohody se zaměstnancem. Přednostně se ze mzdy srážejí jen
+     * daň a pojistné (§ 148 odst. 1 ZP); ostatní srážky smějí být provedeny jen
+     * v rozsahu výkonu rozhodnutí podle o. s. ř. (§ 148 odst. 2 ZP), tedy
+     * z první třetiny (a nevyužité plně zabavitelné části) zbytku čisté mzdy
+     * po nezabavitelné částce — nejsou přednostní pohledávkou (§ 279 odst. 2
+     * o. s. ř. je nevypočítává). Pořadí se řídí dnem, kdy se srážky začaly
+     * provádět, a vůči exekucím soutěží stejně jako pohledávky podle § 280
+     * odst. 5 o. s. ř. (komentářová literatura k § 147–149 ZP). Při shodném dni
+     * se uplatní pořadí výčtu § 147 odst. 1 (c před d před e) a zákonná srážka
+     * před dohodou.
+     *
+     * Srážka k náhradě škody je možná JEN dohodou (§ 147 odst. 3 ZP).
+     */
+    public const LEGAL_BASES = ['agreement', 'zp_147_1_c', 'zp_147_1_d', 'zp_147_1_e'];
+
+    /**
+     * Pořadí titulu při shodném dni zahájení / doručení: výčet § 147 odst. 1
+     * ZP, dohoda nakonec.
+     */
+    public static function legalBasisRank(string $legalBasis): int
+    {
+        return match ($legalBasis) {
+            'zp_147_1_c' => 1,
+            'zp_147_1_d' => 2,
+            'zp_147_1_e' => 3,
+            default => 4,
+        };
+    }
+
+    public static function isStatutory(string $legalBasis): bool
+    {
+        return $legalBasis !== 'agreement';
+    }
+
+    /**
      * Pásmo 1–9 je rezervované pro zákonné a exekuční pořadí, které se řeší
      * mimo tuto tabulku (modul exekucí). Pořadí uvnitř `DeductionPriorityResolver`
      * ale samo o sobě NIC nezaručuje — exekuce se počítá v jiném kroku pipeline.
@@ -55,6 +104,7 @@ final readonly class DeductionAgreementTerms
          * ukládal — takové se řadí fail-closed až za všechny se známým datem.
          */
         public ?string $deliveredOn = null,
+        public string $legalBasis = 'agreement',
     ) {}
 
     /**
@@ -121,11 +171,31 @@ final readonly class DeductionAgreementTerms
         // dohoda může být doručena dřív (typicky týž den, kdy byla uzavřena)
         // i později. Vylučuje se jen to, co je nesporně chybné — den doručení
         // po skončení účinnosti, kdy by z něj už nemohlo plynout žádné pořadí.
+        $legalBasis = $body['legal_basis'] ?? $current?->legalBasis ?? 'agreement';
+        if (!is_string($legalBasis) || !in_array($legalBasis, self::LEGAL_BASES, true)) {
+            throw new \InvalidArgumentException('Právní titul srážky není podporovaný.');
+        }
         $deliveredOn = self::optionalDate($body['delivered_on'] ?? null, 'delivered_on');
         if ($deliveredOn !== null && $validTo !== null && $deliveredOn > $validTo) {
             throw new \InvalidArgumentException(
-                'Den doručení dohody plátci mzdy nesmí následovat až po konci účinnosti.',
+                self::isStatutory($legalBasis)
+                    ? 'Den zahájení srážek nesmí následovat až po konci účinnosti.'
+                    : 'Den doručení dohody plátci mzdy nesmí následovat až po konci účinnosti.',
             );
+        }
+        if (self::isStatutory($legalBasis)) {
+            if ($deliveredOn === null) {
+                throw new \InvalidArgumentException(
+                    'U srážky podle § 147 odst. 1 zákoníku práce vyplňte den zahájení srážek —'
+                    . ' určuje pořadí srážky vůči exekucím a dohodám.',
+                );
+            }
+            if ($kind === 'damage') {
+                throw new \InvalidArgumentException(
+                    'Náhradu škody lze srážet jen na základě dohody o srážkách ze mzdy'
+                    . ' (§ 147 odst. 3 zákoníku práce), ne ze zákona.',
+                );
+            }
         }
 
         return new self(
@@ -142,6 +212,7 @@ final readonly class DeductionAgreementTerms
             self::optionalText($body['recipient_reference'] ?? null, 'recipient_reference', 190),
             self::optionalText($body['note'] ?? null, 'note', 500),
             $deliveredOn,
+            $legalBasis,
         );
     }
 
@@ -176,7 +247,8 @@ final readonly class DeductionAgreementTerms
         'total_limit_minor' => 'Celkový limit dohody',
         'valid_from' => 'Účinnost od',
         'valid_to' => 'Účinnost do',
-        'delivered_on' => 'Doručeno plátci mzdy',
+        'delivered_on' => 'Doručeno plátci mzdy / zahájení srážek',
+        'legal_basis' => 'Právní titul srážky',
         'recipient_reference' => 'Příjemce',
         'note' => 'Poznámka',
     ];

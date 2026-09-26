@@ -85,7 +85,9 @@ final class PayrollRunIssueGuidance
         'dependants_evidence_incomplete' => ['Evidence vyživovaných osob není úplná. Na kartě zaměstnance doplňte osoby započítávané do nezabavitelné částky a ověřte jejich nárok.', 'dependants'],
         'spouse_allowance_evidence_incomplete|spouse_quarter_pension_evidence_unknown' => ['Není doložen nárok na započtení manžela či partnera do nezabavitelné částky. U vyživovaných osob ověřte příslušný důchod a jeho platnost v rozhodném období.', 'dependants'],
         'income_register_evidence_incomplete' => ['Evidence příjmů pro srážky není úplná. V agendě Exekuce doplňte všechny příjmy zaměstnance a potvrďte úplnost podkladů.', 'enforcement'],
-        'severance_period_split_required' => ['Odstupné není rozděleno na měsíce, za které náleží. V podkladech příjmů pro exekuci doplňte rozdělení odstupného před výpočtem srážky.', 'enforcement'],
+        'severance_period_split_required' => ['U odstupného chybí počet násobků průměrného výdělku, ze kterých se podle § 299 odst. 4 o. s. ř. počítají srážky zvlášť. V kartě Skončení vztahu zadejte počet násobků u odstupného (případně u vstupu odstupného jako množství) a přepočítejte běh.', 'termination'],
+        'severance_multiple_other_income_unresolved' => ['Povinný má v době poskytování odstupného jiný příjem (§ 299 odst. 4 věta druhá o. s. ř.) a násobky za ty měsíce se sčítají s ním. V kartě Skončení vztahu potvrďte, že nezabavitelnou částku za tyto měsíce započítává nový plátce, nebo opravte den vzniku jiného příjmu.', 'termination'],
+        'severance_with_court_determined_insolvency_installment' => ['Odstupné se vyplácí povinnému v oddlužení se soudem určenou měsíční splátkou. Jak splátku uplatnit na násobky odstupného, určuje výrok soudu — v agendě Insolvence ověřte rozhodnutí a srážku z odstupného proveďte podle pokynu insolvenčního správce.', 'insolvency'],
         'kind_requires_manual_review' => ['Druh příjmu vyžaduje ruční posouzení srážek. V agendě Exekuce ověřte, zda a v jaké výši tento příjem podléhá srážkám.', 'enforcement'],
         'multiple_income_payers_require_separate_calculation|multiple_payers_protected_amount_decision_missing|multiple_payers_protected_amount_decision_not_verified' => ['Zaměstnanec má více plátců příjmu a chybí ověřené rozdělení nezabavitelné částky. V agendě Exekuce doplňte rozhodnutí určující částku pro tohoto zaměstnavatele.', 'enforcement'],
         'protected_amount_override_without_multiple_payers|protected_amount_decision_verified_without_multiple_payers' => ['Je zadáno rozdělení nezabavitelné částky, ale není evidováno více plátců příjmu. V agendě Exekuce opravte tento rozpor podle rozhodnutí.', 'enforcement'],
@@ -148,7 +150,7 @@ final class PayrollRunIssueGuidance
             $query = [];
             if ($employeeId !== null) $query['person'] = $employeeId;
             if ($employmentId !== null) $query['employment'] = $employmentId;
-            if ($target !== 'employment') $query['panel'] = in_array($target, ['dependants', 'deferred_income'], true) ? $target : 'statutory_evidence';
+            if ($target !== 'employment') $query['panel'] = in_array($target, ['dependants', 'deferred_income', 'termination'], true) ? $target : 'statutory_evidence';
             if ($target === 'employment') {
                 $query['panel'] = 'employment_terms';
                 if (in_array('part_time_discount_weekly_working_time_missing', $parts, true)) $query['field'] = 'weekly_hours';

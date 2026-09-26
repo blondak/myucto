@@ -50,6 +50,7 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
     private const WITHOUT_DEFAULT = [
         'PROVIZE',
         'ODSTUPNE',
+        'NAHRADA_271CA',
         'DOPLATEK_MZDY',
         'NEPENEZNI_PRIJEM',
         'SOUKROME_VOZIDLO',

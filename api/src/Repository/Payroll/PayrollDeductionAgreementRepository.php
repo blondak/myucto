@@ -26,7 +26,7 @@ final class PayrollDeductionAgreementRepository
 
     private const COLUMNS = 'agreement.id, agreement.supplier_id, agreement.employee_id,
         agreement.agreement_reference, agreement.title, agreement.deduction_kind,
-        agreement.status, agreement.priority_no, agreement.requested_minor,
+        agreement.legal_basis, agreement.status, agreement.priority_no, agreement.requested_minor,
         agreement.basis_points, agreement.basis_amount_minor,
         agreement.total_limit_minor, agreement.withheld_total_minor,
         agreement.valid_from, agreement.valid_to, agreement.delivered_on,
@@ -218,11 +218,11 @@ final class PayrollDeductionAgreementRepository
                 $stmt = $this->db->pdo()->prepare(
                     'INSERT INTO payroll_deduction_agreements
                         (supplier_id, employee_id, agreement_reference, title,
-                         deduction_kind, status, priority_no, requested_minor,
+                         deduction_kind, legal_basis, status, priority_no, requested_minor,
                          basis_points, basis_amount_minor, total_limit_minor,
                          valid_from, valid_to, delivered_on, recipient_reference,
                          note, version_no, created_by, updated_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'
                 );
                 $stmt->execute([
                     $supplierId,
@@ -230,6 +230,7 @@ final class PayrollDeductionAgreementRepository
                     $terms->agreementReference,
                     $terms->title,
                     $terms->deductionKind,
+                    $terms->legalBasis,
                     $status->value,
                     $terms->priorityNo,
                     $terms->requestedMinor,
@@ -296,6 +297,7 @@ final class PayrollDeductionAgreementRepository
                 : (string) $current['delivered_on'];
             if ($withheld > 0
                 && ($terms->deductionKind !== (string) $current['deduction_kind']
+                    || $terms->legalBasis !== (string) ($current['legal_basis'] ?? 'agreement')
                     || $terms->validFrom !== (string) $current['valid_from'])
             ) {
                 throw new \DomainException(
@@ -328,7 +330,7 @@ final class PayrollDeductionAgreementRepository
             // a idempotenci schvalování — update ji záměrně nemění.
             $stmt = $this->db->pdo()->prepare(
                 'UPDATE payroll_deduction_agreements
-                    SET title = ?, deduction_kind = ?,
+                    SET title = ?, deduction_kind = ?, legal_basis = ?,
                         priority_no = ?, requested_minor = ?, basis_points = ?,
                         basis_amount_minor = ?, total_limit_minor = ?,
                         valid_from = ?, valid_to = ?, delivered_on = ?,
@@ -340,6 +342,7 @@ final class PayrollDeductionAgreementRepository
             $stmt->execute([
                 $terms->title,
                 $terms->deductionKind,
+                $terms->legalBasis,
                 $terms->priorityNo,
                 $terms->requestedMinor,
                 $terms->basisPoints,
@@ -464,7 +467,7 @@ final class PayrollDeductionAgreementRepository
     public function versions(int $supplierId, int $agreementId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, version_no, change_kind, title, deduction_kind, status,
+            'SELECT id, version_no, change_kind, title, deduction_kind, legal_basis, status,
                     priority_no, requested_minor, basis_points, basis_amount_minor,
                     total_limit_minor, withheld_total_minor, valid_from, valid_to,
                     delivered_on, recipient_reference, note, effective_from, reason,
@@ -580,12 +583,12 @@ final class PayrollDeductionAgreementRepository
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO payroll_deduction_agreement_versions
                 (supplier_id, agreement_id, employee_id, version_no, change_kind,
-                 title, deduction_kind, status, priority_no, requested_minor,
+                 title, deduction_kind, legal_basis, status, priority_no, requested_minor,
                  basis_points, basis_amount_minor, total_limit_minor,
                  withheld_total_minor, valid_from, valid_to, delivered_on,
                  recipient_reference, note, effective_from, reason, actor_user_id)
              SELECT supplier_id, id, employee_id, version_no, ?, title,
-                    deduction_kind, status, priority_no, requested_minor,
+                    deduction_kind, legal_basis, status, priority_no, requested_minor,
                     basis_points, basis_amount_minor, total_limit_minor,
                     withheld_total_minor, valid_from, valid_to, delivered_on,
                     recipient_reference, note, ?, ?, ?

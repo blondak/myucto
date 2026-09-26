@@ -299,7 +299,7 @@ final class PayrollEmploymentExitRevisionRepository
         $statement = $this->db->pdo()->prepare(
             'SELECT claim.id, claim.case_id, claim.legal_basis,
                     claim.outstanding_minor_units, claim.priority_date,
-                    claim.row_version,
+                    claim.row_version, enforcement_case.status AS case_status,
                     claim.legal_title_verified,
                     claim.order_or_notice_delivered,
                     claim.priority_classification_verified,
@@ -315,7 +315,8 @@ final class PayrollEmploymentExitRevisionRepository
                 AND enforcement_case.employee_id = ?
                 AND claim.is_active = 1
                 AND enforcement_case.status IN (
-                    "withhold_and_hold", "remit", "deferred_hold"
+                    "received", "withhold_and_hold", "remit",
+                    "deferred_no_withholding", "deferred_hold"
                 )
                 AND enforcement_case.effective_from <= ?
                 AND (
@@ -353,13 +354,24 @@ final class PayrollEmploymentExitRevisionRepository
             if ($claimAmount - $withheld === 0) {
                 continue;
             }
-            $this->assertClaimEvidence($claim);
+            // Doručená, ale dosud neověřená exekuce (`received`) do zápočtového
+            // listu patří taky — nový plátce mzdy v ní musí pokračovat (§ 294
+            // odst. 1 o. s. ř.) a o tom, že neověřená je, rozhoduje tento
+            // plátce, ne ten další. Ověření právního podkladu se proto vyžaduje
+            // jen u exekucí, podle kterých se už srazilo.
+            $received = self::text($claim, 'case_status') === 'received';
+            if (!$received) {
+                $this->assertClaimEvidence($claim);
+            }
             $priorityDate = $claim['priority_date'] ?? null;
             if (!is_string($priorityDate) || $priorityDate === '') {
-                throw new EmploymentExitReadinessException(
-                    'deduction_priority_missing',
-                    'Pokračující srážka nemá ověřené datum pořadí.',
-                );
+                if (!$received) {
+                    throw new EmploymentExitReadinessException(
+                        'deduction_priority_missing',
+                        'Pokračující srážka nemá ověřené datum pořadí.',
+                    );
+                }
+                $priorityDate = null;
             }
             $result[] = [
                 'id' => self::positiveInt($claim, 'id'),
@@ -372,6 +384,128 @@ final class PayrollEmploymentExitRevisionRepository
         }
 
         return $result;
+    }
+
+    /**
+     * Dohody o srážkách ze mzdy, podle kterých se ke dni skončení sráží
+     * a dluh ještě není splacený (§ 313 odst. 1 písm. e) ZP: „zda ze
+     * zaměstnancovy mzdy jsou prováděny srážky … v čí prospěch, jak vysoká je
+     * pohledávka … jaká je výše dosud provedených srážek a jaké je pořadí").
+     *
+     * Srážky ze zákona podle § 147 odst. 1 písm. c) až e) ZP sem nepatří:
+     * jsou to pohledávky tohoto zaměstnavatele, které další plátce mzdy
+     * srážet nesmí.
+     *
+     * @return list<array{id:int,agreement_reference:string,title:string,total_limit_minor:?int,withheld_total_minor:int,delivered_on:?string,recipient_reference:?string,row_version:int}>
+     */
+    public function lockContinuingDeductionAgreements(
+        int $supplierId,
+        int $employeeId,
+        string $employmentEndDate,
+    ): array {
+        $this->requireTransaction();
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, agreement_reference, title, total_limit_minor,
+                    withheld_total_minor, delivered_on, recipient_reference,
+                    row_version
+               FROM payroll_deduction_agreements
+              WHERE supplier_id = ? AND employee_id = ?
+                AND legal_basis = "agreement"
+                AND status IN ("active", "paused")
+                AND valid_from <= ?
+                AND (total_limit_minor IS NULL
+                     OR total_limit_minor > withheld_total_minor)
+              ORDER BY COALESCE(delivered_on, "9999-12-31"), priority_no, id
+              FOR UPDATE',
+        );
+        $statement->execute([$supplierId, $employeeId, $employmentEndDate]);
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $fetched) {
+            $row = self::row($fetched, 'dohody o srážkách');
+            $limit = $row['total_limit_minor'] ?? null;
+            $delivered = $row['delivered_on'] ?? null;
+            $recipient = $row['recipient_reference'] ?? null;
+            $result[] = [
+                'id' => self::positiveInt($row, 'id'),
+                'agreement_reference' => self::text($row, 'agreement_reference'),
+                'title' => self::text($row, 'title'),
+                'total_limit_minor' => $limit === null ? null : self::databaseInt($limit, 'total_limit_minor'),
+                'withheld_total_minor' => self::nonNegativeInt($row, 'withheld_total_minor'),
+                'delivered_on' => is_string($delivered) && $delivered !== '' ? $delivered : null,
+                'recipient_reference' => is_string($recipient) && $recipient !== '' ? $recipient : null,
+                'row_version' => self::positiveInt($row, 'row_version'),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Insolvence evidovaná za měsíc skončení (zahájené řízení nebo oddlužení).
+     * Srážky ve prospěch insolvenčního správce, které plátci mzdy ukládá
+     * rozhodnutí o schválení oddlužení (§ 406 odst. 3 písm. d) insolvenčního
+     * zákona), dlužníka provázejí i k dalšímu plátci mzdy, takže patří do
+     * zápočtového listu jako „srážky, které se ze mzdy provádějí". Výše „pohledávky" se u oddlužení neurčuje
+     * částkou — sráží se podle rozhodnutí soudu; dosud provedené srážky jsou
+     * součet srážek odvedených správci.
+     *
+     * @return array{id:int,insolvency_mode:string,row_version:int,withheld_minor_units:int}|null
+     */
+    public function lockContinuingInsolvency(
+        int $supplierId,
+        int $employeeId,
+        string $employmentEndDate,
+    ): ?array {
+        $this->requireTransaction();
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, insolvency_mode, row_version
+               FROM payroll_enforcement_person_month_evidence
+              WHERE supplier_id = ? AND employee_id = ?
+                AND period_start = STR_TO_DATE(DATE_FORMAT(?, "%Y-%m-01"), "%Y-%m-%d")
+                AND insolvency_mode <> "none"
+              FOR UPDATE',
+        );
+        $statement->execute([$supplierId, $employeeId, $employmentEndDate]);
+        $fetched = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($fetched === false) {
+            return null;
+        }
+        $row = self::row($fetched, 'insolvence');
+        $withheld = $this->db->pdo()->prepare(
+            'SELECT COALESCE(SUM(allocation.total_minor_units), 0)
+               FROM payroll_enforcement_allocations allocation
+               JOIN payroll_enforcement_month_results result
+                 ON result.supplier_id = allocation.supplier_id
+                AND result.id = allocation.month_result_id
+          LEFT JOIN payroll_run_revisions result_revision
+                 ON result_revision.supplier_id = result.supplier_id
+                AND result_revision.id = result.revision_id
+              WHERE allocation.supplier_id = ? AND result.employee_id = ?
+                AND allocation.allocation_key = "insolvency-administrator"
+                AND result.result_status = "supported"
+                AND result.period_start <=
+                    STR_TO_DATE(DATE_FORMAT(?, "%Y-%m-01"), "%Y-%m-%d")
+                AND (
+                    result.revision_id IS NULL
+                    OR result.revision_id = (
+                        SELECT approved_revision.id
+                          FROM payroll_run_revisions approved_revision
+                         WHERE approved_revision.supplier_id = result.supplier_id
+                           AND approved_revision.run_id = result_revision.run_id
+                           AND approved_revision.status = "approved"
+                         ORDER BY approved_revision.revision_no DESC
+                         LIMIT 1
+                    )
+                )',
+        );
+        $withheld->execute([$supplierId, $employeeId, $employmentEndDate]);
+
+        return [
+            'id' => self::positiveInt($row, 'id'),
+            'insolvency_mode' => self::text($row, 'insolvency_mode'),
+            'row_version' => self::positiveInt($row, 'row_version'),
+            'withheld_minor_units' => self::databaseInt($withheld->fetchColumn(), 'withheld_minor_units'),
+        ];
     }
 
     /** @return array<string,mixed>|null */
