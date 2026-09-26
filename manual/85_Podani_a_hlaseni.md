@@ -631,6 +631,16 @@ Chybějící, čekající nebo odmítnutý měsíc přípravu A2 zablokuje a uve
 období. Při přípravě se celý plán pod zámkem znovu ověří a uloží se jeho
 neměnný otisk; pozdější historie se nepřepisuje.
 
+Odhláška A2 nese OIČ a ID PPV, které musí mít doložený původ: protokol o přijetí
+registrace, přijaté dohlášení údajů A3, nebo import exportu zaměstnanců
+z ePortálu ČSSZ (Seznam zaměstnanců). U zaměstnance převzatého z ONZ, jehož
+čísla jste opsali ručně a dohlášení A3 ještě neodešlo, porovnejte čísla se
+Seznamem zaměstnanců na ePortálu ČSSZ a ve formuláři odhlášky zaškrtněte
+**OIČ a ID PPV jsem ověřil(a) v Seznamu zaměstnanců na ePortálu ČSSZ**.
+Odhláška pak projde bez A3; dohlášení A3 zůstává samostatnou povinností
+(u skončeného vztahu s datem skončení). Stejné ID PPV nemůže nést jiný vztah
+firmy — druhý zápis téhož čísla aplikace odmítne.
+
 Samostatná záložka **ZP — oznámení** řeší oznamovací povinnost vůči zdravotní
 pojišťovně, tedy hlášení nástupů, skončení a dalších skutečností v osmidenní
 lhůtě. Je to jiná povinnost než měsíční přehled o platbě pojistného, a proto

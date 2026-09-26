@@ -678,6 +678,15 @@ final class RegistrationImportWriter
             'jmhz-registration-import:' . $fileSha256 . ':' . $record->sequence,
             true,
             $userId,
+            false,
+            // Export zaměstnanců z ePortálu ČSSZ je Seznam zaměstnanců, ze
+            // kterého smí odhláška A2 převzatého zaměstnance vycházet i bez
+            // dohlášení A3; ostatní importy jsou opis z cizího programu.
+            match (true) {
+                $record->isCsszExport() => 'cssz_employee_export',
+                $record->isJmhzDerived() => 'jmhz_import',
+                default => 'registration_import',
+            },
         );
     }
 

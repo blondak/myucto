@@ -3656,6 +3656,20 @@ async function copyXml(): Promise<void> {
               {{ a2Prefill ? t('payroll.people.termination.a2_prefill_hint') : t('payroll.people.termination.a2_prefill_missing') }}
             </span>
           </div>
+          <div class="rounded-md border border-neutral-200 p-3" data-test="registration-a2-identifiers-verified-box">
+            <label class="flex items-start gap-2 text-xs text-neutral-700">
+              <input
+                v-model="identifiersVerifiedInCsszList"
+                type="checkbox"
+                class="mt-0.5 rounded border-neutral-300"
+                data-test="registration-a2-identifiers-verified"
+              />
+              <span>{{ t('payroll.people.registration.event.identifiers_verified') }}</span>
+            </label>
+            <p class="mt-1 text-xs text-neutral-500">
+              {{ t('payroll.people.registration.event.identifiers_verified_hint') }}
+            </p>
+          </div>
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.ended_by_death') }}

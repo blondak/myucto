@@ -189,6 +189,8 @@ final readonly class PayrollRegistrationEventService
             $environment,
             $sourceOn,
             $interaction === 'termination',
+            $interaction === 'termination'
+                && ($input['identifiers_verified_in_cssz_list'] ?? null) === true,
         );
         $sourceReference = $this->sourceReference(
             $interaction,
@@ -223,6 +225,11 @@ final readonly class PayrollRegistrationEventService
                 $completion,
                 $sourceOn,
             ) + $this->relationIdentity($context);
+        if ($interaction === 'termination' && is_array($identity['provenance'] ?? null)) {
+            // Doklad, o co se odhláška opírá: protokol, přijaté A3, export
+            // zaměstnanců ČSSZ, nebo výslovné potvrzení účetní u ONZ.
+            $data['identifier_basis'] = $identity['provenance'];
+        }
         $notificationTriggerOn = $this->notificationTriggerOn(
             $interaction,
             $effectiveOn,
@@ -450,13 +457,15 @@ final readonly class PayrollRegistrationEventService
                 $this->endSourceMismatchMessage($effectiveOn, $context),
             );
         }
+        // Jen náhled měsíců k opravě: původ čísel tu nerozhoduje (a u ONZ by
+        // náhled zablokoval dřív, než účetní stihne čísla potvrdit). O původu
+        // rozhoduje až schválení odhlášky.
         $identity = $this->identities->sensitiveJmhzIdentityAt(
             $supplierId,
             (int) ($context['employee_id'] ?? 0),
             $employmentId,
             $environment,
             $effectiveOn,
-            true,
         );
         $external = $this->object(
             $identity['employment_external_identifier'] ?? null,

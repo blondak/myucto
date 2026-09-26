@@ -205,6 +205,8 @@ final class JmhzReportWriter
             $reference,
             true,
             $userId,
+            false,
+            'jmhz_import',
         );
     }
 

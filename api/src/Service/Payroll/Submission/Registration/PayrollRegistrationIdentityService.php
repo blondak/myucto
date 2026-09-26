@@ -793,6 +793,7 @@ final readonly class PayrollRegistrationIdentityService
         string $environment,
         string $onDate,
         bool $requireTrustedReceipt = false,
+        bool $manualIdentifiersConfirmed = false,
     ): array {
         $this->positive($supplierId, 'Firma');
         $this->positive($employeeId, 'Osoba');
@@ -807,6 +808,7 @@ final readonly class PayrollRegistrationIdentityService
             $environment,
             $onDate,
             $requireTrustedReceipt,
+            $manualIdentifiersConfirmed,
         ): array {
             $employment = $this->repository->lockEmployment(
                 $supplierId,
@@ -897,34 +899,39 @@ final readonly class PayrollRegistrationIdentityService
             );
             self::oic($personIdentifier['value']);
             self::idPpv($employmentIdentifier['value']);
+            $provenance = null;
             if ($requireTrustedReceipt) {
-                $this->assertTrustedReceiptSource(
-                    $personIdentifier,
-                    $supplierId,
-                    $environment,
-                    $employeeId,
-                    $employmentId,
-                    'ik_mpsv',
-                    'registration_a2_oic_provenance_invalid',
-                    'person_external_identifier',
-                );
-                $this->assertTrustedReceiptSource(
-                    $employmentIdentifier,
-                    $supplierId,
-                    $environment,
-                    $employeeId,
-                    $employmentId,
-                    'id_ppv',
-                    'registration_a2_id_ppv_provenance_invalid',
-                    'employment_external_identifier',
-                );
+                $provenance = [
+                    'person' => $this->assertTrustedReceiptSource(
+                        $personIdentifier,
+                        $supplierId,
+                        $environment,
+                        $employeeId,
+                        $employmentId,
+                        'ik_mpsv',
+                        'registration_a2_oic_provenance_invalid',
+                        'person_external_identifier',
+                        $manualIdentifiersConfirmed,
+                    ),
+                    'employment' => $this->assertTrustedReceiptSource(
+                        $employmentIdentifier,
+                        $supplierId,
+                        $environment,
+                        $employeeId,
+                        $employmentId,
+                        'id_ppv',
+                        'registration_a2_id_ppv_provenance_invalid',
+                        'employment_external_identifier',
+                        $manualIdentifiersConfirmed,
+                    ),
+                ];
             }
 
             return [
                 'environment' => $environment,
                 'person_external_identifier' => $personIdentifier,
                 'employment_external_identifier' => $employmentIdentifier,
-            ];
+            ] + ($provenance === null ? [] : ['provenance' => $provenance]);
         });
     }
 
@@ -944,7 +951,8 @@ final readonly class PayrollRegistrationIdentityService
         string $identifierType,
         string $validationCode,
         string $fieldPath,
-    ): void {
+        bool $manualConfirmed = false,
+    ): string {
         $receiptId = $identifier['source_receipt_id'];
         $fromReceipt = $identifier['source_kind'] === 'trusted_receipt'
             && $receiptId !== null
@@ -969,21 +977,56 @@ final readonly class PayrollRegistrationIdentityService
                 $identifier['id'],
                 $identifier['row_version'],
             );
-        if (!$fromReceipt && !$fromChange) {
-            throw new PayrollRegistrationIdentitySnapshotException(
-                $validationCode,
-                self::fieldNote(
-                    $fieldPath,
-                    'pochází z ručního zápisu. Změnu REGZEC A2 přijme ČSSZ '
-                    . 'jen s číslem převzatým z protokolu o přijetí, který '
-                    . 'patří téhle firmě a témuž prostředí (ostré, nebo '
-                    . 'testovací). Načtěte protokol a číslo doplňte z něj. '
-                    . 'U zaměstnance přihlášeného dřív přes ONZ nejdřív '
-                    . 'podejte dohlášení údajů (REGZEC A3) — jeho přijetím '
-                    . 'ČSSZ číslo potvrdí.',
-                ),
-            );
+        if ($fromReceipt) {
+            return 'trusted_receipt';
         }
+        if ($fromChange) {
+            return 'accepted_a3';
+        }
+        /*
+         * Zaměstnanec převzatý z ONZ bez dohlášení A3 (rozhodnutí 26. 9. 2026):
+         * § 39 odst. 6 zákona č. 323/2025 Sb. — OIČ a identifikátor zaměstnání
+         * sdělila ČSSZ zaměstnavateli přes aplikaci portálu (Seznam
+         * zaměstnanců) a zaměstnavatel je podle § 20 odst. 4 a § 21 odst. 4
+         * uvádí na podáních. Pořadí A2 → A3 ČSSZ výslovně podporuje (aktualita
+         * 28. 4. 2026). Číslo z validovaného exportu zaměstnanců ČSSZ tedy
+         * stačí; ručně opsané jen s výslovným potvrzením účetní a jen když
+         * stejné ID PPV v evidenci nenese jiný vztah (jinak by odhláška
+         * ukončila cizí vztah téže osoby).
+         */
+        $origin = $identifier['source_kind'] === 'verified_manual_import'
+            ? $this->repository->externalIdentifierOrigin(
+                $supplierId,
+                $identifierType,
+                $identifier['id'],
+            )
+            : null;
+        if ($origin === 'cssz_employee_export') {
+            return 'cssz_employee_export';
+        }
+        // „Stejné ID PPV nenese jiný vztah" drží unikátní index
+        // `uq_payroll_employment_external_id_value` (firma, prostředí, typ,
+        // otisk hodnoty) napříč celou historií — zápis téhož čísla k druhému
+        // vztahu databáze odmítne, takže tu druhá kontrola nemá co chytit.
+        if ($manualConfirmed
+            && $identifier['source_kind'] === 'verified_manual_import'
+        ) {
+            return 'manual_confirmed';
+        }
+        throw new PayrollRegistrationIdentitySnapshotException(
+            $validationCode,
+            self::fieldNote(
+                $fieldPath,
+                'pochází z ručního zápisu. Odhlášku REGZEC A2 aplikace pošle '
+                . 's číslem z protokolu o přijetí registrace, z přijatého '
+                . 'dohlášení údajů (A3) nebo z importu exportu zaměstnanců '
+                . 'z ePortálu ČSSZ. U zaměstnance převzatého z ONZ bez '
+                . 'dohlášení A3 porovnejte čísla se Seznamem zaměstnanců na '
+                . 'ePortálu ČSSZ a ve formuláři odhlášky zaškrtněte, že jste '
+                . 'je ověřili; dohlášení A3 pak zůstane samostatnou '
+                . 'povinností.',
+            ),
+        );
     }
 
     /**
@@ -1295,12 +1338,18 @@ final readonly class PayrollRegistrationIdentityService
         bool $evidenceConfirmed,
         ?int $createdBy,
         bool $replaceExisting = false,
+        string $origin = 'manual',
     ): array {
         $this->positive($supplierId, 'Firma');
         $this->positive($employmentId, 'Pracovní vztah');
         $this->environment($environment);
         $this->date($validFrom, 'Platnost identifikátorů');
         $this->optionalPositive($createdBy, 'Uživatel');
+        $this->allowed(
+            $origin,
+            ['manual', 'cssz_employee_export', 'registration_import', 'jmhz_import'],
+            'Původ identifikátorů od ČSSZ',
+        );
         /*
          * Obojí zůstává výjimkou vědomě: tenhle formulář nic nerozepisuje,
          * je to jednorázový opis dvou čísel z protokolu ČSSZ. Uložit prázdný
@@ -1344,6 +1393,7 @@ final readonly class PayrollRegistrationIdentityService
             $reference,
             $createdBy,
             $replaceExisting,
+            $origin,
         ): array {
             $employment = $this->repository->lockEmployment(
                 $supplierId,
@@ -1351,6 +1401,65 @@ final readonly class PayrollRegistrationIdentityService
             );
             if ($employment === null) {
                 throw new \OutOfBoundsException(self::EMPLOYMENT_NOT_FOUND);
+            }
+            /*
+             * Export zaměstnanců z ePortálu ČSSZ POTVRZUJE už zapsané číslo:
+             * má-li vztah stejnou hodnotu (třeba ručně opsanou), jen se jí
+             * zapíše původ. Nový zápis by narazil na „stejná hodnota, jiný
+             * podklad" a potvrzení by se ztratilo.
+             */
+            $confirmed = ['person' => null, 'employment' => null];
+            if ($origin === 'cssz_employee_export' && !$replaceExisting) {
+                if ($personIdentifier !== null) {
+                    $active = $this->repository->activePersonExternalId(
+                        $supplierId,
+                        $employment['employee_id'],
+                        $environment,
+                        'ik_mpsv',
+                    );
+                    if ($active !== null
+                        && $this->activePersonExternalIdMatches(
+                            $supplierId,
+                            $employment['employee_id'],
+                            $environment,
+                            $personIdentifier,
+                        ) === true
+                    ) {
+                        $this->repository->setExternalIdentifierOrigin(
+                            $supplierId,
+                            'ik_mpsv',
+                            $active['id'],
+                            $origin,
+                        );
+                        $confirmed['person'] = $active;
+                        $personIdentifier = null;
+                    }
+                }
+                if ($employmentIdentifier !== null) {
+                    $active = $this->repository->activeExternalId(
+                        $supplierId,
+                        $employmentId,
+                        $environment,
+                        'id_ppv',
+                    );
+                    if ($active !== null
+                        && $this->activeEmploymentExternalIdMatches(
+                            $supplierId,
+                            $employmentId,
+                            $environment,
+                            $employmentIdentifier,
+                        ) === true
+                    ) {
+                        $this->repository->setExternalIdentifierOrigin(
+                            $supplierId,
+                            'id_ppv',
+                            $active['id'],
+                            $origin,
+                        );
+                        $confirmed['employment'] = $active;
+                        $employmentIdentifier = null;
+                    }
+                }
             }
             if ($employment['start_date'] === null) {
                 throw new \InvalidArgumentException(self::fieldMessage(
@@ -1386,33 +1495,79 @@ final readonly class PayrollRegistrationIdentityService
                 }
             }
 
+            $person = $personIdentifier === null
+                ? null
+                : $this->assignPersonExternalId(
+                    $supplierId,
+                    $employment['employee_id'],
+                    $environment,
+                    $personIdentifier,
+                    $validFrom,
+                    'verified_manual_import',
+                    $reference,
+                    null,
+                    $createdBy,
+                );
+            $employmentExternal = $employmentIdentifier === null
+                ? null
+                : $this->assignEmploymentExternalId(
+                    $supplierId,
+                    $employmentId,
+                    $environment,
+                    $employmentIdentifier,
+                    $validFrom,
+                    'verified_manual_import',
+                    $reference,
+                    null,
+                    $createdBy,
+                );
+            // Původ se zapisuje jen u NOVÉHO řádku — shoda s už vedenou
+            // hodnotou nesmí přepsat, odkud číslo původně přišlo.
+            if ($person !== null && $person['created']) {
+                $this->repository->setExternalIdentifierOrigin(
+                    $supplierId,
+                    'ik_mpsv',
+                    $person['id'],
+                    $origin,
+                );
+            }
+            if ($employmentExternal !== null && $employmentExternal['created']) {
+                $this->repository->setExternalIdentifierOrigin(
+                    $supplierId,
+                    'id_ppv',
+                    $employmentExternal['id'],
+                    $origin,
+                );
+            }
+            if ($person === null && $confirmed['person'] !== null) {
+                $person = [
+                    'id' => $confirmed['person']['id'],
+                    'employee_id' => $confirmed['person']['employee_id'],
+                    'environment' => $confirmed['person']['environment'],
+                    'identifier_type' => $confirmed['person']['identifier_type'],
+                    'value_masked' => $confirmed['person']['value_masked'],
+                    'valid_from' => $confirmed['person']['valid_from'],
+                    'row_version' => $confirmed['person']['row_version'],
+                    'created' => false,
+                ];
+            }
+            if ($employmentExternal === null && $confirmed['employment'] !== null) {
+                $employmentExternal = [
+                    'id' => $confirmed['employment']['id'],
+                    'employment_id' => $confirmed['employment']['employment_id'],
+                    'employee_id' => $confirmed['employment']['employee_id'],
+                    'environment' => $confirmed['employment']['environment'],
+                    'identifier_type' => $confirmed['employment']['identifier_type'],
+                    'value_masked' => $confirmed['employment']['value_masked'],
+                    'valid_from' => $confirmed['employment']['valid_from'],
+                    'row_version' => $confirmed['employment']['row_version'],
+                    'created' => false,
+                ];
+            }
+
             return [
-                'person_external_identifier' => $personIdentifier === null
-                    ? null
-                    : $this->assignPersonExternalId(
-                        $supplierId,
-                        $employment['employee_id'],
-                        $environment,
-                        $personIdentifier,
-                        $validFrom,
-                        'verified_manual_import',
-                        $reference,
-                        null,
-                        $createdBy,
-                    ),
-                'employment_external_identifier' => $employmentIdentifier === null
-                    ? null
-                    : $this->assignEmploymentExternalId(
-                        $supplierId,
-                        $employmentId,
-                        $environment,
-                        $employmentIdentifier,
-                        $validFrom,
-                        'verified_manual_import',
-                        $reference,
-                        null,
-                        $createdBy,
-                    ),
+                'person_external_identifier' => $person,
+                'employment_external_identifier' => $employmentExternal,
             ];
         });
     }

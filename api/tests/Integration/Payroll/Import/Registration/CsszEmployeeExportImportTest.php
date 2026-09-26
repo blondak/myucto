@@ -226,6 +226,16 @@ final class CsszEmployeeExportImportTest extends TestCase
         $identities = $this->container->get(PayrollRegistrationIdentityService::class);
         self::assertTrue($identities->activePersonExternalIdMatches($this->supplierId, $employeeId, 'test', $this->oic));
         self::assertTrue($identities->activeEmploymentExternalIdMatches($this->supplierId, $employmentId, 'test', self::ID_PPV));
+        // Seznam zaměstnanců ČSSZ je podklad, o který se smí opřít odhláška A2
+        // převzatého zaměstnance bez dohlášení A3 (rozhodnutí 26. 9. 2026).
+        self::assertSame('cssz_employee_export', $this->scalar(
+            'SELECT source_origin FROM payroll_employment_external_ids WHERE supplier_id = ? AND employment_id = ?',
+            [$this->supplierId, $employmentId],
+        ));
+        self::assertSame('cssz_employee_export', $this->scalar(
+            'SELECT source_origin FROM payroll_person_external_ids WHERE supplier_id = ? AND employee_id = ?',
+            [$this->supplierId, $employeeId],
+        ));
         self::assertSame('1', $this->scalar(
             'SELECT activity_code FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?',
             [$this->supplierId, $employmentId],

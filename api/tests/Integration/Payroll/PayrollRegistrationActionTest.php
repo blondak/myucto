@@ -469,6 +469,118 @@ final class PayrollRegistrationActionTest extends TestCase
         );
     }
 
+    /**
+     * Rozhodnutí 26. 9. 2026 (bod 8): zaměstnanec převzatý z ONZ bez
+     * dohlášení A3 smí dostat odhlášku A2 s ručně zapsaným OIČ a ID PPV,
+     * pokud je účetní výslovně ověří v Seznamu zaměstnanců ČSSZ. Dřív A2
+     * padala, dokud ČSSZ nepřijala A3.
+     */
+    public function testA2ForOnzEmployeeWithoutA3PassesAfterExplicitVerification(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('10', null, self::START_ON);
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+                'identifiers_verified_in_cssz_list' => true,
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $event = $this->registrationService->listEvents($this->supplierId, 'test', $this->employmentId);
+        self::assertSame('termination', $event[0]['interaction']);
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $this->json($response)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
+        $xml = $this->storedArtifactXml((int) $this->json($prepared)['submission_id']);
+        self::assertStringContainsString('act="2"', $xml);
+        self::assertStringContainsString('ikmpsv="1000000001"', $xml);
+    }
+
+    /**
+     * Pojistka rozhodnutí bodu 8: ručně potvrzené ID PPV nesmí nést jiný
+     * vztah — odhláška by ukončila cizí vztah téže osoby. Hlídá to unikátní
+     * index nad otiskem hodnoty; druhý zápis téhož čísla neprojde.
+     */
+    public function testSameIdPpvCannotBeRecordedForAnotherEmployment(): void
+    {
+        $this->seedRegistrationEventPrerequisites('10', null, self::START_ON);
+        $other = $this->insertAdditionalEmployment('reg-duplicate-id-ppv');
+
+        try {
+            $this->identities->assignManualJmhzIdentity(
+                $this->supplierId,
+                $other,
+                'test',
+                null,
+                '200000000000000000002',
+                self::START_ON,
+                'synthetic-duplicate-id-ppv',
+                true,
+                $this->userId,
+            );
+            self::fail('Stejné ID PPV se zapsalo k druhému vztahu.');
+        } catch (\PDOException $exception) {
+            self::assertSame('23000', $exception->getCode());
+        }
+    }
+
+    /**
+     * Čísla z importu exportu zaměstnanců ČSSZ (Seznam zaměstnanců) jsou
+     * podklad sama o sobě — A2 projde bez dalšího potvrzení.
+     */
+    public function testA2ForOnzEmployeeTrustsIdentifiersFromCsszEmployeeExport(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('10', null, self::START_ON, null, null, true);
+        $this->identities->assignManualJmhzIdentity(
+            $this->supplierId,
+            $this->employmentId,
+            'test',
+            '1000000001',
+            '200000000000000000002',
+            self::START_ON,
+            'jmhz-registration-import:synthetic-export:1',
+            true,
+            $this->userId,
+            false,
+            'cssz_employee_export',
+        );
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+    }
+
     public function testA2RejectsManualIdPpvProvenance(): void
     {
         $this->seedTrustedReceipt();

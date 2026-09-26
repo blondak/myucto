@@ -846,6 +846,61 @@ final class PayrollRegistrationIdentityRepository
     }
 
     /**
+     * Odkud ručně zapsaný identifikátor pochází (migrace 1918). `null` =
+     * starší zápis bez známého původu — volající ho bere jako ruční.
+     */
+    public function externalIdentifierOrigin(
+        int $supplierId,
+        string $identifierType,
+        int $externalId,
+    ): ?string {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT source_origin FROM ' . $this->externalIdTable($identifierType)
+            . ' WHERE supplier_id = ? AND id = ?',
+        );
+        $statement->execute([$supplierId, $externalId]);
+        $origin = $statement->fetchColumn();
+
+        return is_string($origin) && $origin !== '' ? $origin : null;
+    }
+
+    /**
+     * Zapíše původ ručně vedeného identifikátoru. Původ z protokolu ČSSZ nese
+     * `source_kind = trusted_receipt`, sem patří jen ruční opis a importy.
+     */
+    public function setExternalIdentifierOrigin(
+        int $supplierId,
+        string $identifierType,
+        int $externalId,
+        string $origin,
+    ): void {
+        if (!in_array(
+            $origin,
+            ['manual', 'cssz_employee_export', 'registration_import', 'jmhz_import'],
+            true,
+        )) {
+            throw new \InvalidArgumentException('Neznámý původ identifikátoru ČSSZ.');
+        }
+        $this->db->pdo()->prepare(
+            'UPDATE ' . $this->externalIdTable($identifierType)
+            . ' SET source_origin = ?
+              WHERE supplier_id = ? AND id = ?
+                AND source_kind = "verified_manual_import"',
+        )->execute([$origin, $supplierId, $externalId]);
+    }
+
+    private function externalIdTable(string $identifierType): string
+    {
+        return match ($identifierType) {
+            'ik_mpsv' => 'payroll_person_external_ids',
+            'id_ppv' => 'payroll_employment_external_ids',
+            default => throw new \InvalidArgumentException(
+                'Druh registračního identifikátoru není podporovaný.',
+            ),
+        };
+    }
+
+    /**
      * Potvrdila ČSSZ identifikátor přijetím změny/dohlášení (REGZEC A3)?
      *
      * Zaměstnanec přihlášený dřív přes ONZ nemá protokol o přijetí REGZEC
