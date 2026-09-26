@@ -135,10 +135,39 @@ function relationshipRegime(value: PayrollIncomeTaxRelationshipResult['regime'])
   return t(`payroll.runs.tax.regime.${value === 'manual-review' ? 'manual_review' : value}`)
 }
 
+/*
+ * Nálezy zákonného výpočtu chodí i jako složený klíč
+ * `health_insurance:payroll_component_missing:employee:1:employment:1`.
+ * Dřív se vypisoval tak, jak je — účetní v něm musela luštit doménu, druh
+ * problému i interní id. Klíč se proto rozloží a každá část přeloží.
+ */
+const STRUCTURED_ISSUES = new Set([
+  'payroll_component_missing',
+  'annual_accumulator_missing',
+  'tax_declaration_term_conflict',
+  'employment_term_missing',
+])
+const ISSUE_DOMAINS = new Set(['social_insurance', 'health_insurance', 'income_tax', 'income'])
+
 function issueLabel(code: string): string {
-  return knownIssues.has(code)
-    ? t(`payroll.runs.tax.issues.${code}`)
-    : t('payroll.runs.tax.issues.unknown', { code })
+  if (knownIssues.has(code)) return t(`payroll.runs.tax.issues.${code}`)
+  const parts = code.split(':')
+  if (parts.length >= 2) {
+    const domain = ISSUE_DOMAINS.has(parts[0])
+      ? t(`payroll.runs.tax.issue_domains.${parts[0]}`)
+      : t('payroll.runs.tax.issue_domains.other')
+    const kind = parts[1]
+    if (knownIssues.has(kind)) return `${domain}: ${t(`payroll.runs.tax.issues.${kind}`)}`
+    if (STRUCTURED_ISSUES.has(kind)) return `${domain}: ${t(`payroll.runs.tax.structured_issues.${kind}`)}`
+    return t('payroll.runs.tax.structured_issues.other', { domain })
+  }
+  return t('payroll.runs.tax.issues.unknown', { code })
+}
+
+/** `employment:236` → „Pracovní vztah č. 236" místo interního odkazu. */
+function relationshipReferenceLabel(reference: string): string {
+  const match = /^employment:(\d+)$/.exec(reference)
+  return match ? t('payroll.runs.tax.relationship_number', { id: match[1] }) : reference
 }
 
 function unavailableAdvanceLabel(): string {
@@ -377,7 +406,7 @@ function unavailableAdvanceLabel(): string {
           >
             <div>
               <p class="font-medium text-neutral-900">{{ relationshipKind(relationship.kind) }}</p>
-              <p class="mt-0.5 text-xs text-neutral-500">{{ relationship.relationship_reference }}</p>
+              <p class="mt-0.5 text-xs text-neutral-500">{{ relationshipReferenceLabel(relationship.relationship_reference) }}</p>
             </div>
             <p class="font-medium tabular-nums sm:self-center">
               {{ money(relationship.taxable_base_minor_units) }}

@@ -44,6 +44,41 @@ final class PayrollTimeIntervalTest extends TestCase
         self::assertSame(60, $interval->durationMinutes);
     }
 
+    public function testShiftWithEndOneDayLaterIsRejected(): void
+    {
+        // „Uložit a další den" posunul konec o den navíc: 08:00 → druhý den 16:30.
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('24 hodin');
+        PayrollTimeInterval::fromIso(
+            '2026-09-15T08:00:00+02:00',
+            '2026-09-16T16:30:00+02:00',
+            'Europe/Prague',
+        );
+    }
+
+    public function testNightShiftUpToTwentyFourHoursIsAccepted(): void
+    {
+        $interval = PayrollTimeInterval::fromIso(
+            '2026-09-15T08:00:00+02:00',
+            '2026-09-16T08:00:00+02:00',
+            'Europe/Prague',
+        );
+
+        self::assertSame(1440, $interval->durationMinutes);
+    }
+
+    public function testExplicitLongerCapStillAppliesForTrips(): void
+    {
+        $interval = PayrollTimeInterval::fromIso(
+            '2026-09-15T08:00:00+02:00',
+            '2026-09-18T16:30:00+02:00',
+            'Europe/Prague',
+            21,
+        );
+
+        self::assertSame(3 * 1440 + 510, $interval->durationMinutes);
+    }
+
     public function testOffsetThatDoesNotBelongToTimezoneIsRejected(): void
     {
         $this->expectException(\InvalidArgumentException::class);

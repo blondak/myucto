@@ -48,11 +48,20 @@ final class PayrollTimeRepository
         string $periodStart,
         string $periodEnd,
         ?int $employmentId = null,
+        /** Hledání podle jména nebo kódu vztahu; mřížka má stovky řádků po 25. */
+        ?string $search = null,
     ): array {
         $periodLastDay = (new \DateTimeImmutable($periodEnd))
             ->modify('-1 day')
             ->format('Y-m-d');
         $narrowing = $employmentId === null ? '' : ' AND employment.id = ?';
+        $search = $search === null ? '' : trim($search);
+        $searchParams = [];
+        if ($search !== '') {
+            $narrowing .= ' AND (employee.full_name LIKE ? OR employment.code LIKE ?)';
+            $like = '%' . addcslashes($search, '%_\\') . '%';
+            $searchParams = [$like, $like];
+        }
         $stmt = $this->db->pdo()->prepare(
             'WITH effective_employment AS (
                     SELECT employment.*,
@@ -103,6 +112,7 @@ final class PayrollTimeRepository
             $periodStart,
             $periodLastDay,
             ...($employmentId === null ? [] : [$employmentId]),
+            ...$searchParams,
         ]);
         return self::rows($stmt);
     }
@@ -814,6 +824,59 @@ final class PayrollTimeRepository
                 ?? throw new \RuntimeException('Uložený čas se nepodařilo načíst.'),
             'month' => $month,
         ];
+    }
+
+    /**
+     * Zrušení chybné směny nebo záznamu času bez náhrady.
+     *
+     * Zrušená revize dostane stav `superseded` stejně jako revize nahrazená
+     * opravou — přehled, fond, plán i souhrny JMHZ ji tím přestanou počítat,
+     * a řádek zůstává v historii série. Měsíc musí být otevřený, schválený
+     * měsíc se nejdřív znovu otevírá s důvodem.
+     *
+     * @param 'shift'|'entry' $kind
+     * @return array<string,mixed> měsíc po změně
+     */
+    public function cancelRecord(
+        int $supplierId,
+        string $kind,
+        int $employmentId,
+        int $id,
+        int $expectedVersion,
+        int $monthVersion,
+        ?int $userId,
+    ): array {
+        $table = $kind === 'shift' ? 'payroll_shifts' : 'payroll_time_entries';
+        $pdo = $this->db->pdo();
+        $scope = $this->beginTransactionScope();
+        try {
+            $current = $kind === 'shift'
+                ? $this->lockShift($supplierId, $employmentId, $id)
+                : $this->lockEntry($supplierId, $employmentId, $id);
+            $periodStart = (new \DateTimeImmutable(
+                PayrollTimeValue::string($current['starts_at_utc'] ?? null, 'starts_at_utc'),
+                new \DateTimeZone('UTC'),
+            ))->setTimezone(new \DateTimeZone(
+                PayrollTimeValue::string($current['timezone_name'] ?? null, 'timezone_name'),
+            ))->format('Y-m-01');
+            $month = $this->lockOpenMonth($supplierId, $employmentId, $periodStart, $monthVersion, $userId);
+            $currentVersion = PayrollTimeValue::int($current['row_version'] ?? null, 'row_version');
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollTimeConflictException($currentVersion);
+            }
+            $pdo->prepare(
+                "UPDATE {$table}
+                    SET status = 'superseded', row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?"
+            )->execute([$supplierId, $id, $expectedVersion]);
+            $month = $this->touchMonth($month, $userId);
+            $this->commitTransactionScope($scope);
+        } catch (\Throwable $e) {
+            $this->rollBackTransactionScope($scope);
+            throw $e;
+        }
+
+        return $month;
     }
 
     /**

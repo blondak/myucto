@@ -494,8 +494,21 @@ async function clickTab(
 }
 
 describe('PayrollSubmissions', () => {
+  /* Q8-49: přepínač se po každém načtení vracel na ostrý provoz. */
+  it('pamatuje si zvolené testovací prostředí přes nové načtení stránky', async () => {
+    sessionStorage.setItem('myinvoice.payroll.submissionEnvironment', 'test')
+    const wrapper = mount(PayrollSubmissions, { global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+    expect(m.monthlyChecklist.mock.calls[0]?.[0]).toBe('test')
+    expect(sessionStorage.getItem('myinvoice.payroll.submissionEnvironment')).toBe('test')
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
+    // Volbu prostředí si stránka pamatuje v sessionStorage — test ji nesmí
+    // předat dalšímu testu.
+    sessionStorage.clear()
     m.routeParams = {}
     setup()
   })

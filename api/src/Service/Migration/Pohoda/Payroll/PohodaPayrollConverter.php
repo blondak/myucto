@@ -311,7 +311,9 @@ final class PohodaPayrollConverter
                 try {
                     CzechBirthNumber::normalize($birthNumber);
                 } catch (\InvalidArgumentException $e) {
-                    $omitted[] = "osobní číslo {$personalNumber}: rodné číslo z POHODY je neplatné ({$e->getMessage()}), vynecháno - doplňte ho v evidenci zaměstnance.";
+                    // Tentýž soubor 91_mzdy.xml vyrábí POHODA Mzdy i PAMICA —
+                    // hláška proto jmenuje zdroj obecně, ne jen POHODU.
+                    $omitted[] = "osobní číslo {$personalNumber}: rodné číslo z převáděných mezd (POHODA/PAMICA) je neplatné ({$e->getMessage()}), vynecháno - doplňte ho v evidenci zaměstnance.";
                     $birthNumber = '';
                 }
             }

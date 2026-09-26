@@ -209,7 +209,7 @@ onMounted(load)
 
       <!-- Jedno společné Uložit pro všechny rozeditované sekce — sticky, ať je po
            editaci kterékoli sekce po ruce bez scrollování. -->
-      <div v-if="canWrite" class="sticky bottom-4 flex items-center justify-end gap-3 bg-surface/95 backdrop-blur border border-neutral-200 rounded-lg px-4 py-3 shadow-md">
+      <div v-if="canWrite" class="sticky bottom-[calc(var(--app-footer-height,0px)+1rem)] flex items-center justify-end gap-3 bg-surface/95 backdrop-blur border border-neutral-200 rounded-lg px-4 py-3 shadow-md">
         <span v-if="dirtyKeys.length" class="text-xs text-neutral-500">
           {{ t('accounting.statement_notes.unsaved', { count: dirtyKeys.length }) }}
         </span>

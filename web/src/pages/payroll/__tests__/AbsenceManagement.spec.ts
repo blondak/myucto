@@ -1206,6 +1206,32 @@ describe('AbsenceManagement', () => {
    * a všichni odklikávají — dotaz proto otevře až 409 ze serveru, a to jen
    * u toho jednoho případu, kterého se týká.
    */
+  /* Q8-19: DPN bez směn skončila toastem bez cesty dál. */
+  it('DPN bez rozvrhu směn ukáže hlášku s proklikem do docházky vztahu', async () => {
+    m.absencesPage.mockResolvedValue(absencesPage([absence({ absence_type: 'vacation', full_name: 'Syntetická osoba' })]))
+    m.decide.mockRejectedValueOnce({
+      response: { data: { error: {
+        code: 'absence_shifts_missing',
+        message: 'Pracovní vztah nemá v době nepřítomnosti žádnou publikovanou směnu.',
+        employment_id: 12,
+        period: '2026-09',
+      } } },
+    })
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    const approve = wrapper.findAll('button')
+      .find(button => button.text().includes('payroll_absence.actions.approve'))
+    await approve!.trigger('click')
+    await flushPromises()
+
+    const notice = wrapper.get('[data-test="absence-shifts-missing"]')
+    expect(notice.text()).toContain('Syntetická osoba')
+    expect(notice.text()).toContain('publikovanou směnu')
+    expect(wrapper.get('[data-test="absence-shifts-missing-link"]').attributes('href'))
+      .toContain('/payroll/time')
+    wrapper.unmount()
+  })
+
   describe('přečerpaná dovolená', () => {
     function overdrawRejection() {
       return {

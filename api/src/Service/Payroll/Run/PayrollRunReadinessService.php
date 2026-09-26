@@ -149,7 +149,18 @@ final class PayrollRunReadinessService
         }
 
         if ($snapshot !== null) {
-            foreach ($this->groupValidations($snapshot->validations) as $finding) {
+            // Jméno u každého záznamu: 25× „Otevřít místo k opravě" bez jména
+            // neříkalo, koho proklik otevře.
+            $employmentIds = [];
+            foreach ($snapshot->validations as $validation) {
+                if ($validation->entityType === 'employment' && $validation->entityId !== null) {
+                    $employmentIds[$validation->entityId] = $validation->entityId;
+                }
+            }
+            foreach ($this->groupValidations(
+                $snapshot->validations,
+                $this->jmhzProbe->employmentLabels($supplierId, array_values($employmentIds)),
+            ) as $finding) {
                 $findings[] = $finding;
             }
             foreach ($this->institutionAccountFindings(
@@ -383,12 +394,13 @@ final class PayrollRunReadinessService
      * docházku" — potřebuje jeden řádek, počet a jména.
      *
      * @param list<PayrollRunValidation> $validations
+     * @param array<int,string> $labels popisky vztahů podle id
      * @return list<array{
      *   code:string,severity:string,message:string,remediation_path:?string,
      *   count:int,entities:list<array{entity_type:string,entity_id:?int}>
      * }>
      */
-    private function groupValidations(array $validations): array
+    private function groupValidations(array $validations, array $labels = []): array
     {
         $groups = [];
         foreach ($validations as $validation) {
@@ -429,7 +441,9 @@ final class PayrollRunReadinessService
                 $groups[$code]['entities'][] = [
                     'entity_type' => $validation->entityType,
                     'entity_id' => $validation->entityId,
-                    'label' => null,
+                    'label' => $validation->entityType === 'employment' && $validation->entityId !== null
+                        ? ($labels[$validation->entityId] ?? null)
+                        : null,
                     'message' => $validation->message,
                     'remediation_path' => $validation->remediationPath,
                 ];

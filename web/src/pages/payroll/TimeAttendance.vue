@@ -18,12 +18,17 @@ import {
   type PayrollTimeOverview,
   type PayrollTimeOverviewItem,
 } from '@/api/payroll'
+import { payrollAbsenceApi, type PayrollAbsence } from '@/api/payrollAbsences'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import {
   buildPayrollGridBatch,
   formatPayrollGridHours,
   isWorkedCategory,
+  parsePayrollGridHours,
+  payrollAbsenceDays,
   payrollDayPlans,
+  payrollPlannedShifts,
+  payrollEditorNextWorkday,
   payrollGridCellKey,
   payrollGridCellState,
   payrollGridFlags,
@@ -36,7 +41,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
-import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
+import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 import PayrollPeriodScopePicker from '@/components/payroll/PayrollPeriodScopePicker.vue'
 import {
   payrollPeriodRange,
@@ -53,6 +58,7 @@ import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '
 import EmptyState from '@/components/ui/EmptyState.vue'
 import {
   formatPayrollMinutes,
+  payrollIsoToWallTime,
   payrollWallTimeToIso,
 } from '@/pages/payroll/payrollTime'
 import { localPayrollPeriod, payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
@@ -138,8 +144,23 @@ watch([category, recordType], () => { difficultyFactorCount.value = '' })
 const recordBlockedReason = computed<string | null>(() => {
   if (!selected.value) return t('payroll.time.editor.blocked_no_employment')
   if (!startsAt.value || !endsAt.value) return t('payroll.time.editor.blocked_no_range')
+  const minutes = recordWallMinutes.value
+  if (minutes !== null && minutes <= 0) return t('payroll.time.editor.blocked_end_before_start')
+  if (minutes !== null && minutes > 24 * 60) return t('payroll.time.editor.blocked_too_long')
   if (!difficultyFactorsValid.value) return t('payroll.time.editor.blocked_difficulty_factors')
   return null
+})
+/** Délka zápisu podle nástěnného času — stačí na hlídání překlepu v datu. */
+const recordWallMinutes = computed<number | null>(() => {
+  const start = Date.parse(`${startsAt.value}:00Z`)
+  const end = Date.parse(`${endsAt.value}:00Z`)
+  if (Number.isNaN(start) || Number.isNaN(end)) return null
+  return Math.round((end - start) / 60_000)
+})
+const recordLongWarning = computed<string | null>(() => {
+  const minutes = recordWallMinutes.value
+  if (minutes === null || minutes <= 12 * 60 || minutes > 24 * 60) return null
+  return t('payroll.time.editor.long_warning', { hours: formatPayrollMinutes(minutes) })
 })
 const importBlockedReason = computed<string | null>(() =>
   importPreview.value && !importPreview.value.supported
@@ -507,6 +528,27 @@ function relationLabel(type: string): string {
   return t(`payroll.people.relations.${type}`)
 }
 
+/*
+ * Hledání podle jména nebo kódu (Q8-18). Mřížka má 25 řádků na stránku
+ * a firma stovky vztahů — konkrétního člověka šlo dosud najít jen proklikem
+ * z karty. Hledá server, ať se najde i člověk z jiné stránky.
+ */
+const nameSearch = ref('')
+let nameSearchTimer: ReturnType<typeof setTimeout> | null = null
+
+function searchArgs(): [] | [string] {
+  const value = nameSearch.value.trim()
+  return value === '' ? [] : [value]
+}
+
+watch(nameSearch, () => {
+  if (nameSearchTimer) clearTimeout(nameSearchTimer)
+  nameSearchTimer = setTimeout(() => {
+    offset.value = 0
+    void load()
+  }, 300)
+})
+
 async function load() {
   loading.value = true
   loadFailed.value = false
@@ -516,6 +558,7 @@ async function load() {
       incompleteOnly.value,
       { limit: pageSize, offset: offset.value },
       focusEmploymentId.value,
+      ...searchArgs(),
     )
     total.value = overview.value.total
     selectedEmploymentIds.value = []
@@ -580,17 +623,130 @@ function setDefaultTimes() {
 
 function openEditor(item?: PayrollTimeOverviewItem) {
   if (item) employmentId.value = item.employment.id
+  editingRecord.value = null
   setDefaultTimes()
   editorOpen.value = true
 }
 
-/** Posun na následující den v témže měsíci; poslední den zůstane, kde je. */
-function nextEditorDay(date: string): string {
-  const parsed = new Date(`${date}T00:00:00Z`)
-  if (Number.isNaN(parsed.getTime())) return date
-  const next = new Date(parsed.getTime() + 86_400_000)
-  const iso = next.toISOString().slice(0, 10)
-  return iso.startsWith(`${period.value}-`) ? iso : date
+/**
+ * Konec už posunul někdo jiný (Uložit a další den, úprava zápisu) — watcher
+ * níž ho nesmí posunout podruhé, jinak směna 08:00–16:30 skončí o den později.
+ */
+let endAlreadyShifted = false
+
+function setEditorRange(start: string, end: string) {
+  if (start !== startsAt.value) endAlreadyShifted = true
+  startsAt.value = start
+  endsAt.value = end
+}
+
+/*
+ * Zápisy vybraného vztahu v měsíci — aby šla chybná směna najít, opravit
+ * (nová revize přes `supersedes_id`) nebo zrušit. Dřív stránka ukazovala jen
+ * souhrn a počet směn, takže 32hodinová směna šla opravit jen v databázi.
+ */
+type TimeRecordKind = 'shift' | 'entry'
+interface TimeRecordRow {
+  kind: TimeRecordKind
+  id: number
+  rowVersion: number
+  startsAt: string
+  endsAt: string
+  timezone: string
+  netMinutes: number
+  label: string
+  tooLong: boolean
+}
+const editingRecord = ref<{ kind: TimeRecordKind; id: number; rowVersion: number } | null>(null)
+const cancelCandidate = ref<TimeRecordRow | null>(null)
+
+const selectedRecords = computed<TimeRecordRow[]>(() => {
+  const item = selected.value
+  if (!item) return []
+  const span = (start: string, end: string) => (Date.parse(end) - Date.parse(start)) / 60_000
+  const rows: TimeRecordRow[] = [
+    ...(item.shifts ?? []).map(shift => ({
+      kind: 'shift' as const,
+      id: shift.id,
+      rowVersion: shift.row_version,
+      startsAt: shift.starts_at,
+      endsAt: shift.ends_at,
+      timezone: shift.timezone_name,
+      netMinutes: shift.net_minutes,
+      label: t('payroll.time.records.shift'),
+      tooLong: span(shift.starts_at, shift.ends_at) > 12 * 60,
+    })),
+    ...(item.entries ?? []).map(entry => ({
+      kind: 'entry' as const,
+      id: entry.id,
+      rowVersion: entry.row_version,
+      startsAt: entry.starts_at,
+      endsAt: entry.ends_at,
+      timezone: entry.timezone_name,
+      netMinutes: entry.net_minutes,
+      label: t(`payroll.time.category.${entry.category}`),
+      tooLong: span(entry.starts_at, entry.ends_at) > 12 * 60,
+    })),
+  ]
+  return rows.sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt))
+})
+
+function formatRecordRange(row: TimeRecordRow): string {
+  const start = payrollIsoToWallTime(row.startsAt, row.timezone)
+  const end = payrollIsoToWallTime(row.endsAt, row.timezone)
+  const day = (value: string) => `${Number(value.slice(8, 10))}. ${Number(value.slice(5, 7))}.`
+  return start.slice(0, 10) === end.slice(0, 10)
+    ? `${day(start)} ${start.slice(11)}–${end.slice(11)}`
+    : `${day(start)} ${start.slice(11)} – ${day(end)} ${end.slice(11)}`
+}
+
+function editRecord(row: TimeRecordRow) {
+  const item = selected.value
+  if (!item) return
+  recordType.value = row.kind
+  timezone.value = row.timezone
+  if (row.kind === 'shift') {
+    const shift = item.shifts.find(candidate => candidate.id === row.id)
+    if (!shift) return
+    breakMinutes.value = shift.break_minutes
+    remoteWork.value = shift.remote_work
+    standbyMinutes.value = shift.standby_minutes
+    publish.value = shift.status === 'published'
+  } else {
+    const entry = item.entries.find(candidate => candidate.id === row.id)
+    if (!entry) return
+    breakMinutes.value = entry.break_minutes
+    category.value = entry.category
+  }
+  setEditorRange(
+    payrollIsoToWallTime(row.startsAt, row.timezone),
+    payrollIsoToWallTime(row.endsAt, row.timezone),
+  )
+  editingRecord.value = { kind: row.kind, id: row.id, rowVersion: row.rowVersion }
+}
+
+async function confirmCancelRecord() {
+  const row = cancelCandidate.value
+  const item = selected.value
+  if (!row || !item) return
+  saving.value = true
+  try {
+    await payrollApi.cancelTimeRecord(row.kind === 'shift' ? 'shifts' : 'entries', row.id, {
+      employment_id: item.employment.id,
+      row_version: row.rowVersion,
+      month_row_version: item.month.row_version,
+    })
+    toast.success(t('payroll.time.records.cancelled'))
+    if (editingRecord.value?.id === row.id && editingRecord.value.kind === row.kind) {
+      editingRecord.value = null
+    }
+    cancelCandidate.value = null
+    await load()
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error?.message || t('payroll.time.records.cancel_failed'))
+  } finally {
+    saving.value = false
+  }
 }
 
 /**
@@ -608,6 +764,10 @@ function nextEditorDay(date: string): string {
 watch(startsAt, (nove, stare) => {
   const novyDen = nove.slice(0, 10)
   const staryDen = stare?.slice(0, 10) ?? ''
+  if (endAlreadyShifted) {
+    endAlreadyShifted = false
+    return
+  }
   if (novyDen === '' || novyDen === staryDen || endsAt.value === '') return
   const posun = dayDifference(staryDen, novyDen)
   if (posun === null) return
@@ -632,26 +792,35 @@ function shiftDay(day: string, days: number): string {
  * o den. Bez toho stálo pět výjimek v měsíci pět otevření editoru.
  */
 async function saveRecordAndContinue() {
-  const before = startsAt.value.slice(0, 10)
-  await saveRecord(true)
-  if (editorOpen.value) {
-    const day = nextEditorDay(before)
-    startsAt.value = `${day}T${startsAt.value.slice(11)}`
-    endsAt.value = `${day}T${endsAt.value.slice(11)}`
+  const beforeStart = startsAt.value
+  const beforeEnd = endsAt.value
+  // Neuložený den se nepřeskakuje: chyba by jinak zmizela spolu s ním.
+  if (!await saveRecord(true)) return
+  if (editorOpen.value && selected.value) {
+    const next = payrollEditorNextWorkday(
+      beforeStart,
+      beforeEnd,
+      period.value,
+      payrollDayPlans(selected.value, payrollMonthDays(period.value), GRID_FALLBACK_MINUTES),
+    )
+    setEditorRange(next.startsAt, next.endsAt)
   }
 }
 
-async function saveRecord(keepOpen = false) {
-  if (!selected.value) return
+async function saveRecord(keepOpen = false): Promise<boolean> {
+  if (!selected.value) return false
+  // Oprava existujícího zápisu je nová revize téhož druhu; při přepnutí druhu
+  // (směna ↔ skutečnost) jde o nový zápis a původní zůstává.
+  const editing = editingRecord.value?.kind === recordType.value ? editingRecord.value : null
   const common = {
     employment_id: selected.value.employment.id,
     starts_at: payrollWallTimeToIso(startsAt.value, timezone.value),
     ends_at: payrollWallTimeToIso(endsAt.value, timezone.value),
     timezone: timezone.value,
     break_minutes: breakMinutes.value,
-    row_version: 0,
+    row_version: editing?.rowVersion ?? 0,
     month_row_version: selected.value.month.row_version,
-    supersedes_id: null,
+    supersedes_id: editing?.id ?? null,
   }
   saving.value = true
   try {
@@ -675,6 +844,7 @@ async function saveRecord(keepOpen = false) {
       })
     }
     toast.success(t('payroll.time.saved'))
+    editingRecord.value = null
     lastEditorTimes.value = {
       date: startsAt.value.slice(0, 10),
       start: startsAt.value.slice(11, 16),
@@ -682,8 +852,10 @@ async function saveRecord(keepOpen = false) {
     }
     if (!keepOpen) editorOpen.value = false
     await load()
+    return true
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('payroll.time.save_failed'))
+    return false
   } finally {
     saving.value = false
   }
@@ -1671,7 +1843,33 @@ const gridRows = computed(() => visibleItems.value.map(item => {
 }))
 type PayrollGridRow = (typeof gridRows)['value'][number]
 const gridDirtyKeys = computed(() => Object.keys(gridDrafts.value))
-const gridDirtyCount = computed(() => gridDirtyKeys.value.length)
+/*
+ * Čítač na tlačítku počítá jen buňky, které se od uloženého stavu opravdu
+ * liší. Smazaná rozepsaná hodnota už změna není — dřív tlačítko hlásilo
+ * „Uložit (21)" i po vymazání všech jednadvaceti buněk.
+ */
+const gridRowsById = computed(() => new Map(gridRows.value.map(row => [row.item.employment.id, row])))
+const gridDirtyCount = computed(() => Object.entries(gridDrafts.value).filter(([key, value]) => {
+  const [employmentId, date] = key.split('|')
+  const saved = gridRowsById.value.get(Number(employmentId))?.cells.get(date)?.minutes ?? 0
+  return value.trim() !== formatPayrollGridHours(saved)
+}).length)
+
+/** Odpracováno v řádku včetně rozepsaných buněk — ať součet sedí hned, ne až po uložení. */
+function gridRowWorked(row: PayrollGridRow): number {
+  if (!gridEditableCategory.value) return row.workedTotal
+  let total = row.workedTotal
+  for (const day of gridDays.value) {
+    const draft = gridDrafts.value[gridKey(row.item.employment.id, day.date)]
+    if (draft === undefined) continue
+    const parsed = parsePayrollGridHours(draft)
+    const saved = row.cells.get(day.date)?.minutes ?? 0
+    // Nečitelný zápis ani vymazání uloženého dne se neuloží, součet je nemění.
+    if (parsed === false || ((parsed === null || parsed === 0) && saved > 0)) continue
+    total += (parsed ?? 0) - saved
+  }
+  return total
+}
 const gridBlockedReason = computed<string | null>(() => {
   if (!canWrite.value) return t('payroll.time.grid.blocked_no_permission')
   if (gridDirtyCount.value === 0) return t('payroll.time.grid.blocked_nothing_changed')
@@ -1808,28 +2006,112 @@ function focusGridCell(row: number, column: number) {
  * hromadnou akci nepřijde — a svátky ani víkendy se neplní vůbec, protože je
  * kalendář (a v něm `CzechHolidayCalendar`) označuje jako nepracovní.
  */
-function fillWorkdays() {
+async function fillWorkdays() {
   if (gridFillBlockedReason.value) return
+  // Dny schválené nepřítomnosti (DPN, ošetřovné, dovolená…) se neplní — jinak
+  // by v tentýž den vznikla práce i nemoc. Nepřítomnosti se čtou až tady, ať
+  // přehled docházky kvůli nim nezpomalí.
+  let absenceDays = new Map<number, Set<string>>()
+  try {
+    absenceDays = payrollAbsenceDays(await loadMonthAbsences(), period.value)
+  } catch {
+    gridSaveError.value = t('payroll.time.grid.absences_failed')
+    return
+  }
   let filled = 0
+  let skippedAbsence = 0
   let withoutCalendar = 0
   const drafts = { ...gridDrafts.value }
   for (const row of gridRows.value) {
     if (row.item.month.status !== 'open') continue
     if (!row.item.calendar) withoutCalendar += 1
+    const absent = absenceDays.get(row.item.employment.id)
     for (const day of gridDays.value) {
       const cell = row.cells.get(day.date)
       if (!cell?.workday) continue
       const key = gridKey(row.item.employment.id, day.date)
       const current = drafts[key] ?? formatPayrollGridHours(cell.minutes)
       if (current !== '') continue
+      if (absent?.has(day.date)) {
+        skippedAbsence += 1
+        continue
+      }
       drafts[key] = formatPayrollGridHours(row.plannedMinutes(day.date) || GRID_FALLBACK_MINUTES)
       filled += 1
     }
   }
   gridDrafts.value = drafts
-  gridNote.value = withoutCalendar > 0
+  const note = withoutCalendar > 0
     ? t('payroll.time.grid.filled_without_calendar', { count: filled, people: withoutCalendar })
     : t('payroll.time.grid.filled', { count: filled })
+  gridNote.value = skippedAbsence > 0
+    ? `${note} ${t('payroll.time.grid.skipped_absence', { count: skippedAbsence })}`
+    : note
+}
+
+/** Schválené i neschválené nepřítomnosti měsíce, po stránkách po dvou stech. */
+async function loadMonthAbsences(): Promise<PayrollAbsence[]> {
+  const from = `${period.value}-01`
+  const to = payrollMonthDays(period.value).at(-1)?.date ?? from
+  const all: PayrollAbsence[] = []
+  for (let offset = 0, page = 0; page < 10; page += 1) {
+    const result = await payrollAbsenceApi.absencesPage(from, to, focusEmploymentId.value ?? undefined, { limit: 200, offset })
+    all.push(...result.absences)
+    offset += result.absences.length
+    if (result.absences.length === 0 || offset >= result.total) break
+  }
+  return all
+}
+
+/*
+ * Rozvrhnout směny podle kalendáře (Q8-19). Náhrada mzdy při DPN i za
+ * dovolenou se počítá z neodpracovaných směn; bez nich se nepřítomnost
+ * neschválí. Směny se zakládají po jedné (každá zvedá verzi měsíce), jen do
+ * dnů, které ještě směnu nemají, a rovnou publikované.
+ */
+async function planShifts(item: PayrollTimeOverviewItem) {
+  if (!canWrite.value || item.month.status !== 'open') return
+  const plans = payrollDayPlans(item, payrollMonthDays(period.value), GRID_FALLBACK_MINUTES)
+  const existing = new Set((item.shifts ?? []).map(shift =>
+    payrollIsoToWallTime(shift.starts_at, shift.timezone_name).slice(0, 10)))
+  const planned = payrollPlannedShifts(plans, existing)
+  if (planned.length === 0) {
+    toast.info(t('payroll.time.plan_shifts.nothing'))
+    return
+  }
+  saving.value = true
+  let monthVersion = item.month.row_version
+  let created = 0
+  const shiftZone = item.calendar?.timezone_name || 'Europe/Prague'
+  try {
+    for (const shift of planned) {
+      const result = await payrollApi.saveShift({
+        employment_id: item.employment.id,
+        calendar_id: item.calendar?.id ?? null,
+        starts_at: payrollWallTimeToIso(shift.startsAt, shiftZone),
+        ends_at: payrollWallTimeToIso(shift.endsAt, shiftZone),
+        timezone: shiftZone,
+        break_minutes: shift.breakMinutes,
+        remote_work: false,
+        standby_minutes: 0,
+        publish: true,
+        row_version: 0,
+        month_row_version: monthVersion,
+        supersedes_id: null,
+      })
+      monthVersion = result.month.row_version
+      created += 1
+    }
+    toast.success(t('payroll.time.plan_shifts.done', { count: created, name: item.employment.full_name }))
+  } catch (error: any) {
+    toast.error(t('payroll.time.plan_shifts.failed', {
+      count: created,
+      message: error?.response?.data?.error?.message ?? '',
+    }))
+  } finally {
+    saving.value = false
+    await load()
+  }
 }
 
 function previousPeriod(value: string): string {
@@ -1979,6 +2261,7 @@ async function saveGrid() {
         { limit: pageSize, offset: offset.value },
         focusEmploymentId.value,
         incompleteOnly.value,
+        ...searchArgs(),
       )
       // Odpověď dávky nese jen přehled, ne hranici historie — ta se drží
       // z načtení stránky, jinak by značka „historické" po uložení zmizela.
@@ -2113,11 +2396,38 @@ function clearApproveError() {
   approveFailures.value = []
 }
 
-onMounted(() => {
-  void load()
+/*
+ * Proklik z karty (`?employment=…` bez měsíce) otevíral zpracovávaný měsíc.
+ * U člověka, který nastoupí až později, tak stránka hlásila „vztah k firmě
+ * nepatří". Vztah se proto dohledá: začíná-li až po zobrazeném měsíci, otevře
+ * se měsíc nástupu; jinak se prázdno pojmenuje jménem, bez obvinění odkazu.
+ */
+const focusKnownName = ref<string | null>(null)
+
+async function resolveFocusMissing() {
+  focusKnownName.value = null
+  if (!focusMissing.value || focusEmploymentId.value === null) return
+  try {
+    const history = await payrollApi.timeHistory(focusEmploymentId.value, { limit: 1 })
+    focusKnownName.value = history.employment.full_name
+    const start = history.employment.actual_start_date ?? history.employment.start_date
+    const hasExplicitPeriod = payrollQueryValue(route.query, 'period') !== null
+    if (!hasExplicitPeriod && start && start.slice(0, 7) > period.value) {
+      period.value = start.slice(0, 7)
+      void router.replace({ query: { ...route.query, period: period.value } })
+      await load()
+    }
+  } catch {
+    // Vztah se nenašel ani v historii — zůstává hláška o slepém zúžení.
+  }
+}
+
+onMounted(async () => {
   // Rozsah z adresy platí hned při otevření — sdílený odkaz na historii nesmí
   // skončit u měsíční mřížky.
   if (historyVisible.value) void loadHistory()
+  await load()
+  await resolveFocusMissing()
 })
 </script>
 
@@ -2186,6 +2496,17 @@ onMounted(() => {
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>
           {{ t('payroll.time.reload') }}
         </button>
+        <label v-if="!historyVisible && focusEmploymentId === null" class="relative block">
+          <span class="sr-only">{{ t('payroll.time.search_label') }}</span>
+          <svg class="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.search" /></svg>
+          <input
+            v-model="nameSearch"
+            type="search"
+            data-test="payroll-time-search"
+            :placeholder="t('payroll.time.search_placeholder')"
+            class="h-9 w-56 rounded-md border border-neutral-300 bg-surface pl-8 pr-3 text-sm"
+          >
+        </label>
         <label v-if="!historyVisible" class="inline-flex h-9 items-center gap-2 text-sm text-neutral-700">
           <input v-model="incompleteOnly" type="checkbox" class="rounded border-neutral-300 text-payroll-600" @change="reload">
           {{ t('payroll.time.incomplete_only') }}
@@ -2248,7 +2569,7 @@ onMounted(() => {
 
     <section v-if="editorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 shadow-sm sm:p-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
-        <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.time.editor.title') }}</h2>
+        <h2 class="text-lg font-semibold text-neutral-900">{{ editingRecord ? t('payroll.time.records.editing_title') : t('payroll.time.editor.title') }}</h2>
         <button :class="btnOutline('neutral')" @click="editorOpen = false">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
           {{ t('common.cancel') }}
@@ -2362,10 +2683,72 @@ onMounted(() => {
           <p v-if="recordBlockedReason" :class="BTN_DISABLED_NOTE" data-test="time-record-save-blocked">
             {{ recordBlockedReason }}
           </p>
+          <p v-else-if="recordLongWarning" class="text-xs text-warning-700" data-test="time-record-long-warning">
+            {{ recordLongWarning }}
+          </p>
         </div>
       </div>
       </form>
+
+      <div class="mt-6 border-t border-payroll-500/20 pt-4" data-test="time-records">
+        <h3 class="text-sm font-semibold text-neutral-900">
+          {{ t('payroll.time.records.title', { name: selected?.employment.full_name ?? '' }) }}
+        </h3>
+        <p class="mt-1 max-w-prose text-xs text-neutral-600">{{ t('payroll.time.records.hint') }}</p>
+        <p v-if="selectedRecords.length === 0" class="mt-3 text-sm text-neutral-500">{{ t('payroll.time.records.empty') }}</p>
+        <ul v-else class="mt-3 divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-surface">
+          <li
+            v-for="row in selectedRecords"
+            :key="`${row.kind}-${row.id}`"
+            class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
+            :class="editingRecord?.id === row.id && editingRecord?.kind === row.kind ? 'bg-payroll-50' : ''"
+            :data-test="`time-record-${row.kind}-${row.id}`"
+          >
+            <span class="min-w-0">
+              <span class="font-medium text-neutral-900">{{ formatRecordRange(row) }}</span>
+              <span class="text-neutral-600"> · {{ row.label }} · {{ formatPayrollMinutes(row.netMinutes) }} h</span>
+              <span v-if="row.tooLong" class="ml-2 inline-flex rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700" data-test="time-record-too-long">
+                {{ t('payroll.time.records.too_long') }}
+              </span>
+            </span>
+            <span v-if="canWrite && selected?.month.status === 'open'" class="flex flex-wrap gap-2">
+              <button type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" :disabled="saving" data-test="time-record-edit" @click="editRecord(row)">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                {{ t('payroll.time.records.edit') }}
+              </button>
+              <button type="button" :class="[btnOutline('danger'), 'whitespace-nowrap']" :disabled="saving" data-test="time-record-cancel" @click="cancelCandidate = row">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+                {{ t('payroll.time.records.cancel') }}
+              </button>
+            </span>
+          </li>
+        </ul>
+        <p v-if="selected && selected.month.status !== 'open' && selectedRecords.length > 0" class="mt-2 text-xs text-neutral-500">
+          {{ t('payroll.time.records.month_locked') }}
+        </p>
+      </div>
     </section>
+
+    <Modal
+      v-if="cancelCandidate"
+      :title="t('payroll.time.records.cancel_title')"
+      width-class="max-w-md"
+      @close="cancelCandidate = null"
+    >
+      <p class="text-sm text-neutral-700" data-test="time-record-cancel-text">
+        {{ t('payroll.time.records.cancel_text', { range: formatRecordRange(cancelCandidate), kind: cancelCandidate.label }) }}
+      </p>
+      <div class="mt-4 flex flex-wrap justify-end gap-2">
+        <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="cancelCandidate = null">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+          {{ t('common.cancel') }}
+        </button>
+        <button type="button" :class="btnFilled('danger')" :disabled="saving" data-test="time-record-cancel-confirm" @click="confirmCancelRecord">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+          {{ t('payroll.time.records.cancel_confirm') }}
+        </button>
+      </div>
+    </Modal>
 
     <section v-if="importOpen" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
       <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.time.import.title') }}</h2>
@@ -2426,6 +2809,13 @@ onMounted(() => {
     <PayrollFocusNotice
       v-if="focusName"
       :name="focusName"
+      @clear="clearFocus"
+    />
+    <PayrollFocusNotice
+      v-else-if="focusMissing && focusKnownName"
+      :name="focusKnownName"
+      named
+      empty
       @clear="clearFocus"
     />
     <PayrollFocusNotice
@@ -2561,7 +2951,7 @@ onMounted(() => {
                 >•</span>
               </td>
               <td class="px-3 py-1 text-right font-medium text-neutral-700">
-                {{ formatPayrollMinutes(row.workedTotal) }}
+                {{ formatPayrollMinutes(gridRowWorked(row)) }}
               </td>
             </tr>
           </tbody>
@@ -2572,7 +2962,7 @@ onMounted(() => {
         Jedno společné Uložit dole, ne tlačítko u každého řádku — mřížka je
         jeden formulář o sedmi stech políčkách, ne dvacet pět formulářů.
       -->
-      <div class="sticky bottom-0 flex flex-wrap items-center justify-end gap-3 border-t border-neutral-200 bg-surface/95 px-4 py-3">
+      <div class="sticky bottom-[var(--app-footer-height,0px)] flex flex-wrap items-center justify-end gap-3 border-t border-neutral-200 bg-surface/95 px-4 py-3">
         <p class="mr-auto text-xs text-neutral-500">{{ t('payroll.time.grid.keyboard_hint', { primary: primaryModifierLabel }) }}</p>
         <div class="flex flex-col items-end gap-1.5">
           <button
@@ -2762,6 +3152,7 @@ onMounted(() => {
               <td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2">
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :data-work-entries="item.employment.id" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" :data-work-calendar="item.employment.id" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
+                <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('primary')" :disabled="saving" :title="t('payroll.time.plan_shifts.hint')" :data-test="`plan-shifts-${item.employment.id}`" @click="planShifts(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>{{ t('payroll.time.plan_shifts.action') }}</button>
                 <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" :disabled="saving" @click="openApproval(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
                 <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openConsent(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t('payroll.time.overtime.consent_action') }}</button>
                 <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" :disabled="saving" @click="openReopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
@@ -2845,6 +3236,7 @@ onMounted(() => {
             <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openCompensation(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('payroll.time.overtime.compensation_action') }}</button>
             <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :data-work-entries="item.employment.id" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
             <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" :data-work-calendar="item.employment.id" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
+                <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('primary')" :disabled="saving" :title="t('payroll.time.plan_shifts.hint')" :data-test="`plan-shifts-${item.employment.id}`" @click="planShifts(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>{{ t('payroll.time.plan_shifts.action') }}</button>
             <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" @click="openApproval(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
             <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" @click="openReopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
           </div>

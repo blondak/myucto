@@ -675,6 +675,13 @@ function healthBatchSent(results: MobileKeyBatchItemResult[]) {
   selectedHealthKeys.value = new Set()
 }
 
+/*
+ * Kostra se ukazuje jen při PRVNÍM načtení. Při přepnutí prostředí nebo
+ * měsíce zůstává obsah stát (zašedlý), jinak se stránka na okamžik zkrátí
+ * na výšku kostry a prohlížeč uživatele odscrolluje nahoru (Q8-49).
+ */
+const loadedOnce = ref(false)
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -705,6 +712,7 @@ async function load() {
     )
   } finally {
     loading.value = false
+    loadedOnce.value = true
   }
 }
 
@@ -785,7 +793,7 @@ onMounted(load)
       {{ error }}
     </p>
 
-    <div v-if="loading" class="grid grid-cols-2 gap-3 lg:grid-cols-5">
+    <div v-if="loading && !loadedOnce" class="grid grid-cols-2 gap-3 lg:grid-cols-5">
       <div v-for="index in 5" :key="index" class="h-20 animate-pulse rounded-xl bg-neutral-100" />
     </div>
 

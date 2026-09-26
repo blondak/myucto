@@ -1888,7 +1888,7 @@ onMounted(async () => {
       -->
       <div
         v-if="cardSave.hasChanges.value"
-        class="sticky bottom-0 z-20 -mx-3 border-t border-warning-500/40 bg-surface px-3 py-3 shadow-[0_-2px_10px_rgba(21,19,29,0.08)] sm:-mx-4 sm:px-4"
+        class="sticky bottom-[var(--app-footer-height,0px)] z-20 -mx-3 border-t border-warning-500/40 bg-surface px-3 py-3 shadow-[0_-2px_10px_rgba(21,19,29,0.08)] sm:-mx-4 sm:px-4"
         role="region"
         :aria-label="t('payroll.people.card_save.title')"
         data-test="person-card-save-bar"

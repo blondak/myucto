@@ -73,6 +73,16 @@ function sameWallTime(left: WallTime, right: WallTime): boolean {
     && left.minute === right.minute
 }
 
+/** Uložený okamžik zpět do políčka `datetime-local` v zóně zápisu. */
+export function payrollIsoToWallTime(value: string, timezone: string): string {
+  const instant = new Date(value)
+  if (Number.isNaN(instant.getTime())) return ''
+  const rendered = renderedWallTime(instant, timezone)
+  if (!rendered) return ''
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${rendered.year}-${pad(rendered.month)}-${pad(rendered.day)}T${pad(rendered.hour)}:${pad(rendered.minute)}`
+}
+
 export function payrollWallTimeToIso(value: string, timezone: string): string {
   const requested = wallTimeParts(value)
   if (!requested) return ''

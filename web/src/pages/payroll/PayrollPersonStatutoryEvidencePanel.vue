@@ -120,7 +120,17 @@ const employerInsurerCode = ref<string | null>(null)
 const insurerOptions = healthInsurerOptions()
 
 /** Evidence se vyhodnocuje k měsíci; výchozí je ten, ve kterém uživatel je. */
-const effectiveOn = ref(monthEnd(new Date()))
+/*
+ * Evidence se vyhodnocuje ke konci běžného měsíce — u člověka, který teprve
+ * nastoupí, ale k datu nástupu. Jinak panel k 30. 9. hlásil „chybí 4 údaje"
+ * u osoby s nástupem 15. 10., jejíž výchozí evidence platí až od října (Q8-48).
+ */
+function defaultEffectiveOn(): string {
+  const end = monthEnd(new Date())
+  const start = props.employmentStartOn ?? null
+  return start !== null && start > end ? start : end
+}
+const effectiveOn = ref(defaultEffectiveOn())
 
 /**
  * Sekce, které uživatel sám rozbalil. Výchozí stav se počítá (viz
@@ -731,6 +741,15 @@ async function save(): Promise<boolean> {
 
 watch(() => props.personId, () => { editing.value = false; resetSectionToggles(); void load() })
 watch(effectiveOn, () => { editing.value = false; resetSectionToggles(); void load() })
+// Datum nástupu může dorazit až po prvním vykreslení karty; výchozí den se
+// posune jen tehdy, když ho uživatel ještě sám nezměnil.
+watch(() => props.employmentStartOn, (_start, previous) => {
+  const previousDefault = (() => {
+    const end = monthEnd(new Date())
+    return previous != null && previous > end ? previous : end
+  })()
+  if (effectiveOn.value === previousDefault) effectiveOn.value = defaultEffectiveOn()
+})
 onMounted(() => {
   void load()
   void loadDefaultHealthInsurerCode().then((code) => { employerInsurerCode.value = code })
@@ -1190,7 +1209,7 @@ onMounted(() => {
         <div
           v-if="canWrite"
           class="-mx-3 -mb-3 mt-4 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface px-3 py-2"
-          :class="managed ? '' : 'sticky bottom-0'"
+          :class="managed ? '' : 'sticky bottom-[var(--app-footer-height,0px)]'"
         >
           <button
             v-if="defaultsAvailable"

@@ -52,9 +52,10 @@ const toast = useToast()
  */
 // Rok z odkazu (hlídač termínů vede rovnou na zúčtování konkrétního roku).
 const queryYear = Number(useRoute().query.year)
-const year = ref(Number.isInteger(queryYear) && queryYear >= 2000 && queryYear <= 2199
-  ? queryYear
-  : new Date().getFullYear() - 1)
+const hasQueryYear = Number.isInteger(queryYear) && queryYear >= 2000 && queryYear <= 2199
+const year = ref(hasQueryYear ? queryYear : new Date().getFullYear() - 1)
+/** Rok z odkazu se respektuje; výchozí se jednou srovná na začátek vedení mezd. */
+let defaultYearResolved = hasQueryYear
 const data = ref<PayrollAnnualSettlementList | null>(null)
 const selectedEmployeeId = ref<number | null>(null)
 const preview = ref<PayrollAnnualSettlementPreview | null>(null)
@@ -346,6 +347,17 @@ async function load(): Promise<void> {
       { search: search.value.trim(), state: state.value },
     )
     if (sequence !== loadSequence) return
+    // Výchozí rok nesmí ležet před začátkem vedení mezd v MyÚčtu (Q8-43):
+    // firma převedená z jiného programu jinak viděla roční zúčtování roku,
+    // který zpracoval předchozí program, a u všech lidí „Nezpracováno".
+    if (!defaultYearResolved) {
+      defaultYearResolved = true
+      const startYear = Number((response.payroll_start_period ?? '').slice(0, 4))
+      if (Number.isInteger(startYear) && startYear > year.value) {
+        year.value = startYear
+        return
+      }
+    }
     data.value = response
     total.value = response.total
     loadFailed.value = false

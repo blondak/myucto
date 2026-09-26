@@ -151,6 +151,120 @@ final class PayrollTimeApiTest extends TestCase
         self::assertTrue($items[0]['shifts'][0]['remote_work']);
     }
 
+    public function testMonthOverviewSearchesByNameOrCode(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, employment_type,
+                 tax_declaration_signed, tax_credit_taxpayer, child_count,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, ?, ?, ?, 1, 1, 0, 30000, 0, 1)'
+        )->execute([$this->supplierId, 'Hledaný Syntetický', 'employee', 'hpp']);
+        $employeeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payroll_employee_profiles (supplier_id, employee_id, profile_status)
+             VALUES (?, ?, 'legacy')"
+        )->execute([$this->supplierId, $employeeId]);
+        $pdo->prepare(
+            "INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, monthly_gross_minor, is_legacy_projection)
+             VALUES (?, ?, 'SYN-TIME-2', 'employment', 'active', '2026-01-01', 3000000, 0)"
+        )->execute([$this->supplierId, $employeeId]);
+
+        $byName = $this->json($this->action->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => '2026-05', 'q' => 'hledan']),
+            new Response(),
+        ));
+        self::assertSame(1, $byName['total']);
+        self::assertSame('Hledaný Syntetický', $byName['items'][0]['employment']['full_name']);
+
+        $byCode = $this->json($this->action->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => '2026-05', 'q' => 'TIME-1']),
+            new Response(),
+        ));
+        self::assertSame(1, $byCode['total']);
+        self::assertSame('SYN-TIME-1', $byCode['items'][0]['employment']['code']);
+
+        $all = $this->json($this->action->month(
+            $this->request('GET', '/api/payroll/time/month')->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        ));
+        self::assertSame(2, $all['total']);
+    }
+
+    public function testShiftLongerThanDayIsRejectedAndWrongShiftCanBeCancelled(): void
+    {
+        $shiftPayload = fn (string $start, string $end, int $monthVersion): array => [
+            'employment_id' => $this->employmentId,
+            'starts_at' => $start,
+            'ends_at' => $end,
+            'timezone' => 'Europe/Prague',
+            'break_minutes' => 30,
+            'remote_work' => false,
+            'standby_minutes' => 0,
+            'publish' => true,
+            'row_version' => 0,
+            'month_row_version' => $monthVersion,
+            'supersedes_id' => null,
+        ];
+
+        // Konec o den později (chyba „Uložit a další den"): 32 hodin se neuloží.
+        $tooLong = $this->action->shift(
+            $this->request('POST', '/api/payroll/time/shifts')->withParsedBody(
+                $shiftPayload('2026-05-05T08:00:00+02:00', '2026-05-06T16:30:00+02:00', 0),
+            ),
+            new Response(),
+        );
+        self::assertSame(422, $tooLong->getStatusCode());
+        self::assertStringContainsString('24 hodin', $this->json($tooLong)['error']['message']);
+
+        $saved = $this->action->shift(
+            $this->request('POST', '/api/payroll/time/shifts')->withParsedBody(
+                $shiftPayload('2026-05-05T08:00:00+02:00', '2026-05-05T16:30:00+02:00', 0),
+            ),
+            new Response(),
+        );
+        self::assertSame(201, $saved->getStatusCode());
+        $shift = $this->json($saved)['shift'];
+        $month = $this->json($saved)['month'];
+
+        $cancelled = $this->action->cancel(
+            $this->request('POST', '/api/payroll/time/shifts/' . $shift['id'] . '/cancel')
+                ->withParsedBody([
+                    'employment_id' => $this->employmentId,
+                    'row_version' => $shift['row_version'],
+                    'month_row_version' => $month['row_version'],
+                ]),
+            new Response(),
+            ['kind' => 'shifts', 'id' => (string) $shift['id']],
+        );
+        self::assertSame(200, $cancelled->getStatusCode());
+
+        $overview = $this->json($this->action->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        ));
+        self::assertSame([], $overview['items'][0]['shifts']);
+        self::assertSame(0, $overview['items'][0]['summary']['planned_minutes']);
+
+        $again = $this->action->cancel(
+            $this->request('POST', '/api/payroll/time/shifts/' . $shift['id'] . '/cancel')
+                ->withParsedBody([
+                    'employment_id' => $this->employmentId,
+                    'row_version' => $shift['row_version'],
+                    'month_row_version' => $this->json($cancelled)['month']['row_version'],
+                ]),
+            new Response(),
+            ['kind' => 'shifts', 'id' => (string) $shift['id']],
+        );
+        self::assertSame(422, $again->getStatusCode());
+    }
+
     public function testApprovedMonthRejectsChangesAndReopenCreatesRevision(): void
     {
         $entryResponse = $this->saveEntry(monthVersion: 0);

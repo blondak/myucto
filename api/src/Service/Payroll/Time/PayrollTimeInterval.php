@@ -12,8 +12,12 @@ namespace MyInvoice\Service\Payroll\Time;
  */
 final readonly class PayrollTimeInterval
 {
-    /** Strop pro směnu a odpracovaný čas. */
-    public const MAX_DAYS_SHIFT = 7;
+    /**
+     * Strop pro směnu a odpracovaný čas: 24 hodin. Delší souvislý úsek práce
+     * je vždy překlep v datu konce (typicky konec posunutý o den) a tiše by
+     * nafoukl plán, fond i náhradu mzdy při DPN.
+     */
+    public const MAX_DAYS_SHIFT = 1;
 
     public function __construct(
         public string $startsAtUtc,
@@ -70,6 +74,11 @@ final readonly class PayrollTimeInterval
             throw new \InvalidArgumentException('Strop délky intervalu musí být aspoň 1 den.');
         }
         if ($seconds > $maxDays * 24 * 3600) {
+            if ($maxDays === self::MAX_DAYS_SHIFT) {
+                throw new \InvalidArgumentException(
+                    'Směna ani odpracovaný čas nesmí trvat déle než 24 hodin. Zkontrolujte datum konce.'
+                );
+            }
             throw new \InvalidArgumentException(
                 "Jeden časový interval nesmí být delší než {$maxDays} dní."
             );

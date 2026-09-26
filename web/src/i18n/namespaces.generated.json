@@ -330,19 +330,22 @@
     "imports-money-s3": [
       "company_profile",
       "imports",
-      "money_s3"
+      "money_s3",
+      "premier"
     ],
     "imports-pohoda": [
       "company_profile",
       "imports",
       "pamica",
-      "pohoda"
+      "pohoda",
+      "premier"
     ],
     "imports-pamica": [
       "company_profile",
       "imports",
       "pamica",
-      "pohoda"
+      "pohoda",
+      "premier"
     ],
     "imports-premier": [
       "company_profile",
@@ -352,6 +355,7 @@
     "imports-stereo-nx": [
       "company_profile",
       "imports",
+      "premier",
       "stereo_nx"
     ],
     "purchase-invoices-payment-orders": [

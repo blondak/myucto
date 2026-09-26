@@ -514,7 +514,7 @@ onMounted(load)
       </div>
 
       <!-- Jedno společné Uložit pro celou sekci -->
-      <div class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface/95 py-3">
+      <div class="sticky bottom-[var(--app-footer-height,0px)] flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface/95 py-3">
         <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="closeForm">
           {{ t('common.cancel') }}
         </button>

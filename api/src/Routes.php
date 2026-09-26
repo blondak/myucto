@@ -2087,6 +2087,7 @@ final class Routes
             $g->post('/time/shifts', [PayrollTimeAction::class, 'shift']);
             $g->post('/time/entries', [PayrollTimeAction::class, 'entry']);
             $g->post('/time/entries/batch', [PayrollTimeAction::class, 'entryBatch']);
+            $g->post('/time/{kind:shifts|entries}/{id:[0-9]+}/cancel', [PayrollTimeAction::class, 'cancel']);
             $g->post('/time/overtime-consents', [PayrollTimeAction::class, 'overtimeConsent']);
             $g->post('/time/overtime-protections', [PayrollTimeAction::class, 'overtimeProtection']);
             $g->post(

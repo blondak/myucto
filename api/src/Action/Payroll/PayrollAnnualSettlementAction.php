@@ -20,6 +20,7 @@ use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementRequestStatus;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementStatute;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementUnavailableException;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualTaxSettlementService;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -41,6 +42,7 @@ final class PayrollAnnualSettlementAction
         private readonly PayrollModuleAccess $moduleAccess,
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollHistoricalPeriodService $historicalPeriods,
     ) {}
 
     /** @param array<string,string> $args */
@@ -97,6 +99,9 @@ final class PayrollAnnualSettlementAction
             'offset' => $offset,
             'search' => $search,
             'state' => $state,
+            // První měsíc mezd v MyÚčtu: rok před ním zúčtoval předchozí
+            // program a stránka ho nemá nabízet jako výchozí.
+            'payroll_start_period' => $this->historicalPeriods->startPeriod($supplierId),
         ]);
     }
 

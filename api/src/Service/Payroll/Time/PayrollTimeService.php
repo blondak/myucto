@@ -64,6 +64,7 @@ final class PayrollTimeService
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
         ?int $employmentId = null,
+        ?string $search = null,
     ): array {
         // Strop se klampuje i tady, ne jen na HTTP hranici: přehled staví na
         // řádek několik dotazů a náhledů, takže „vypiš všechno" nesmí jít
@@ -86,6 +87,7 @@ final class PayrollTimeService
             $periodStart,
             $periodEnd,
             $employmentId,
+            $search === null ? null : mb_substr(trim($search), 0, 100),
         );
         $shifts = $this->groupByEmployment(
             $this->startingInPeriod(
@@ -743,6 +745,30 @@ final class PayrollTimeService
             $publish,
             $this->nullablePositiveInt($input, 'supersedes_id'),
             $this->nullablePositiveInt($input, 'calendar_id'),
+            $this->nonNegativeInt($input, 'row_version'),
+            $this->nonNegativeInt($input, 'month_row_version'),
+            $userId,
+        );
+    }
+
+    /**
+     * Zrušení chybné směny (`shift`) nebo záznamu času (`entry`) bez náhrady.
+     *
+     * @param 'shift'|'entry' $kind
+     * @param array<string,mixed> $input
+     * @return array<string,mixed> měsíc po změně
+     */
+    public function cancelRecord(int $supplierId, string $kind, int $id, array $input, ?int $userId): array
+    {
+        if ($kind !== 'shift' && $kind !== 'entry') {
+            throw new \InvalidArgumentException('Neznámý druh záznamu docházky.');
+        }
+
+        return $this->repository->cancelRecord(
+            $supplierId,
+            $kind,
+            $this->positiveInt($input, 'employment_id'),
+            $id,
             $this->nonNegativeInt($input, 'row_version'),
             $this->nonNegativeInt($input, 'month_row_version'),
             $userId,

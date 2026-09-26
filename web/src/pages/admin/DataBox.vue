@@ -1894,7 +1894,7 @@ onUnmounted(clearReceiptsTimer)
       </div>
 
       <!-- Jedno společné Uložit pro celou sekci -->
-      <div class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface/95 py-3">
+      <div class="sticky bottom-[var(--app-footer-height,0px)] flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface/95 py-3">
         <button type="button" :class="btnFilled('primary')" :disabled="saving" @click="saveCredential">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
@@ -3490,7 +3490,7 @@ onUnmounted(clearReceiptsTimer)
         </div>
       </div>
 
-      <div class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface/95 py-3">
+      <div class="sticky bottom-[var(--app-footer-height,0px)] flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface/95 py-3">
         <button type="button" :class="btnFilled('primary')" :disabled="saving" @click="saveRecipient">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />

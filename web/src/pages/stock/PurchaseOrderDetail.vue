@@ -613,7 +613,7 @@ onMounted(async () => {
       <div v-else-if="order" class="text-sm text-neutral-400 mb-4">{{ t('stock.orders.no_receipts') }}</div>
 
       <!-- Jediné sdílené „Uložit" — jen v konceptu -->
-      <div v-if="isDraftMode" class="sticky bottom-0 mt-2 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface py-3">
+      <div v-if="isDraftMode" class="sticky bottom-[var(--app-footer-height,0px)] mt-2 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface py-3">
         <RouterLink to="/stock/purchase-orders" :class="btnOutline('neutral')">{{ t('common.cancel') }}</RouterLink>
         <button type="button" @click="saveDraft" :disabled="saving" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.checkCircle" /></svg>

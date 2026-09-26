@@ -942,7 +942,7 @@ function creditLabel(claim: PayrollDependantClaim): string {
 
       <div
         class="-mx-4 mt-4 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface/95 px-4 py-3 sm:-mx-6 sm:px-6"
-        :class="managed ? '' : 'sticky bottom-0'"
+        :class="managed ? '' : 'sticky bottom-[var(--app-footer-height,0px)]'"
       >
         <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="closeEditor">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>

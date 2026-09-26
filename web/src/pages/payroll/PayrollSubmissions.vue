@@ -109,7 +109,27 @@ const snapshotsPage = computed(() =>
 // Prostředí je jedna volba pro celou stránku. Kdyby si je držely jednotlivé
 // záložky samy, přepnutí z TESTU na jinou agendu by uživatele bez upozornění
 // vrátilo do produkce.
-const environment = ref<PayrollRegzelEnvironment>('production')
+//
+// Volba přežije načtení stránky (Q8-49): na vývojové instalaci se přepínač
+// po každém obnovení vracel na ostrý provoz. Pamatuje si ji jen tahle
+// záložka prohlížeče; výchozí zůstává produkce a mimo vývoj ji
+// `useSubmissionEnvironment` na produkci vrátí vždy.
+const ENVIRONMENT_STORAGE_KEY = 'myinvoice.payroll.submissionEnvironment'
+function storedEnvironment(): PayrollRegzelEnvironment {
+  try {
+    return sessionStorage.getItem(ENVIRONMENT_STORAGE_KEY) === 'test' ? 'test' : 'production'
+  } catch {
+    return 'production'
+  }
+}
+const environment = ref<PayrollRegzelEnvironment>(storedEnvironment())
+watch(environment, value => {
+  try {
+    sessionStorage.setItem(ENVIRONMENT_STORAGE_KEY, value)
+  } catch {
+    // Bez úložiště (soukromé okno) platí volba jen do obnovení stránky.
+  }
+})
 const officeId = ref<number | null>(null)
 const error = ref('')
 const success = ref('')

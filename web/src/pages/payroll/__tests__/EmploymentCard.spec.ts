@@ -2,6 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { payrollApi, type PayrollEmployment } from '@/api/payroll'
 import DateInput from '@/components/ui/DateInput.vue'
+import { revealField } from '@/utils/revealField'
+
+vi.mock('@/utils/revealField', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/revealField')>()
+  return { ...actual, revealField: vi.fn(actual.revealField) }
+})
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
@@ -82,7 +88,7 @@ vi.mock('@/pages/payroll/EmploymentDeferredIncomePanel.vue', () => ({
   default: { template: '<div data-test="deferred-income" />' },
 }))
 
-const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
+const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }))
 
 vi.mock('@/composables/useToast', () => ({
   useToast: () => toastMocks,
@@ -492,6 +498,20 @@ describe('EmploymentCard', () => {
       .toBe(4500050)
   })
 
+  /* Q8-11: úvazek se zadával jako 9375 místo 93,75 %. */
+  it('úvazek ukáže i přijme v procentech s desetinnou čárkou', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = await mountCard()
+
+    expect((wrapper.get('[data-test="terms-workload"]').element as HTMLInputElement).value).toBe('100')
+    await wrapper.get('[data-test="terms-workload"]').setValue('93,75')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    expect(vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2].workload_basis_points)
+      .toBe(9375)
+  })
+
   /**
    * Pravděpodobný výdělek (§ 355 ZP) je výjimka, ne běžný krok: u HPP se průměr
    * spočítá z uzavřených běhů sám. Pole proto na kartě není vidět, dokud si ho
@@ -844,7 +864,7 @@ describe('EmploymentCard', () => {
 
   it('nabídne smazání vztahu v „…" a v potvrzení jmenuje, co přesně zmizí', async () => {
     vi.mocked(payrollApi.deleteEmployment).mockResolvedValue({})
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const confirm = vi.spyOn(window, 'confirm')
     const wrapper = await mountCard(employment(), {
       props: { employment: employment(), canWrite: true },
       global: { stubs: actionBarStub },
@@ -853,12 +873,72 @@ describe('EmploymentCard', () => {
     await wrapper.get('[data-test="action-delete-employment"]').trigger('click')
     await flushPromises()
 
-    expect(confirm.mock.calls[0]![0]).toContain('payroll.people.delete.confirm')
-    expect(confirm.mock.calls[0]![0]).toContain('cascade.checklist')
-    expect(confirm.mock.calls[0]![0]).toContain('cascade.terms')
+    const message = document.body.querySelector('[data-test="employment-confirm-message"]')?.textContent ?? ''
+    expect(message).toContain('payroll.people.delete.confirm')
+    expect(message).toContain('cascade.checklist')
+    expect(message).toContain('cascade.terms')
+    expect(payrollApi.deleteEmployment).not.toHaveBeenCalled()
+    document.body.querySelector<HTMLButtonElement>('[data-test="employment-confirm-ok"]')!.click()
+    await flushPromises()
+    expect(confirm).not.toHaveBeenCalled()
     expect(payrollApi.deleteEmployment).toHaveBeenCalledWith(10, 1)
     expect(wrapper.emitted('deleted')).toEqual([[10]])
     confirm.mockRestore()
+    wrapper.unmount()
+  })
+
+  /* PREZEC osoby C se neobjevil ve frontě: předregistrace podání nezakládá. */
+  it('po předregistraci řekne, že PREZEC se připraví v panelu registrace, a sjede na něj', async () => {
+    const planned = employment()
+    planned.status = 'planned'
+    planned.allowed_transitions = ['preregistered']
+    vi.mocked(payrollApi.transitionEmployment).mockReset().mockResolvedValue({ ...planned, status: 'preregistered' })
+    const wrapper = await mountCard(planned, {
+      props: { employment: planned, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    await wrapper.get('[data-test="action-transition-preregistered"]').trigger('click')
+    await flushPromises()
+
+    expect(payrollApi.transitionEmployment).toHaveBeenCalledTimes(1)
+    expect(toastMocks.info).toHaveBeenCalledWith('payroll.people.card_confirm.preregistered_next')
+    expect(vi.mocked(revealField).mock.calls.some(([selector]) => selector === '[data-test="employment-registration"]')).toBe(true)
+    wrapper.unmount()
+  })
+
+  /*
+   * Q8-42: ukončení vztahu se potvrzovalo nativním `window.confirm` a panel
+   * Skončení vztahu (důvod, dohoda, odstupné) se musel hledat až potom.
+   */
+  it('ukončení vztahu potvrdí dialog aplikace a karta pak sjede na Skončení vztahu', async () => {
+    const ended = { ...employment(), status: 'ended' as const, end_date: '2026-10-31' }
+    vi.mocked(payrollApi.transitionEmployment).mockReset().mockResolvedValue(ended)
+    const nativeConfirm = vi.spyOn(window, 'confirm')
+    const active = employment()
+    active.allowed_transitions = ['ended']
+    const wrapper = await mountCard(active, {
+      props: { employment: active, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    await wrapper.get('[data-test="action-transition-ended"]').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector('[data-test="employment-confirm-hint"]')?.textContent)
+      .toContain('payroll.people.card_confirm.end_hint')
+    document.body.querySelector<HTMLButtonElement>('[data-test="employment-confirm-cancel"]')!.click()
+    await flushPromises()
+    expect(payrollApi.transitionEmployment).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="action-transition-ended"]').trigger('click')
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-test="employment-confirm-ok"]')!.click()
+    await flushPromises()
+    expect(nativeConfirm).not.toHaveBeenCalled()
+    expect(payrollApi.transitionEmployment).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(revealField).mock.calls.some(([selector]) => selector === '[data-test="employment-termination"]')).toBe(true)
+    nativeConfirm.mockRestore()
+    wrapper.unmount()
   })
 
   it('důvod, proč smazat nejde, řekne až při pokusu', async () => {
@@ -1186,7 +1266,6 @@ describe('EmploymentCard', () => {
   ])('potvrzení nového nástupu zapíše nulový počáteční stav (souhlas %s)', async (agreed, openingCalls, transitionCalls) => {
     vi.mocked(payrollApi.saveStatutoryOpenings).mockReset().mockResolvedValue({ openings: {} } as never)
     vi.mocked(payrollApi.transitionEmployment).mockReset().mockResolvedValue(employment())
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(agreed)
     const wrapper = await mountCard(employment(), {
       props: { employment: employment(), canWrite: true, payrollStartPeriod: '2025-12-01' },
       global: {
@@ -1206,7 +1285,10 @@ describe('EmploymentCard', () => {
     await wrapper.get('[data-test="action-confirm-start"]').trigger('click')
     await flushPromises()
 
-    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    document.body.querySelector<HTMLButtonElement>(
+      agreed ? '[data-test="employment-confirm-ok"]' : '[data-test="employment-confirm-cancel"]',
+    )!.click()
+    await flushPromises()
     expect(payrollApi.saveStatutoryOpenings).toHaveBeenCalledTimes(openingCalls)
     if (openingCalls > 0) {
       expect(payrollApi.saveStatutoryOpenings).toHaveBeenCalledWith(employment().employee_id, {
@@ -1216,7 +1298,7 @@ describe('EmploymentCard', () => {
       })
     }
     expect(payrollApi.transitionEmployment).toHaveBeenCalledTimes(transitionCalls)
-    confirmSpy.mockRestore()
+    wrapper.unmount()
   })
 
   it('s uloženým počátečním stavem potvrdí nástup bez dotazu', async () => {
@@ -1243,6 +1325,7 @@ describe('EmploymentCard', () => {
     await flushPromises()
 
     expect(confirmSpy).not.toHaveBeenCalled()
+    expect(document.body.querySelector('[data-test="employment-confirm-message"]')).toBeNull()
     expect(payrollApi.saveStatutoryOpenings).not.toHaveBeenCalled()
     expect(payrollApi.transitionEmployment).toHaveBeenCalledTimes(1)
     confirmSpy.mockRestore()
@@ -1357,6 +1440,7 @@ describe('EmploymentCard', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     await action.trigger('click')
     expect(confirmSpy).not.toHaveBeenCalled()
+    expect(document.body.querySelector('[data-test="employment-confirm-message"]')).toBeNull()
     confirmSpy.mockRestore()
   })
 

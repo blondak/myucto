@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Sickness;
 
+use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 
 /**
@@ -49,6 +50,7 @@ final readonly class SicknessCaseFromAbsenceService
 
     public function __construct(
         private PayrollSicknessCaseRepository $cases,
+        private PayrollAbsenceRepository $absences,
         private SicknessCaseService $caseService,
         private SicknessDeadlinePolicy $deadlines,
     ) {}
@@ -61,7 +63,8 @@ final readonly class SicknessCaseFromAbsenceService
     /**
      * @param array<string,mixed> $absence schválená absence
      * @return array{outcome:string,case_id:?int,benefit_kind:?string,nempri_due_on:?string,reason_code:?string,message:?string}|null
-     *         `null` = z absence dávka neplyne
+     *         `null` = z absence dávka neplyne (i neschopnost, která zatím
+     *         nepřesáhla okno náhrady mzdy podle § 192 ZP)
      */
     public function onApproved(int $supplierId, array $absence, ?int $userId): ?array
     {
@@ -126,6 +129,20 @@ final readonly class SicknessCaseFromAbsenceService
                 return $this->result('linked', $existing, $kind);
             }
 
+            // § 26 odst. 1 a § 97 odst. 2 zák. č. 187/2006 Sb.: prvních 14 dnů
+            // neschopnosti kryje náhrada mzdy (§ 192 ZP), dávka ani NEMPRI z nich
+            // nevzniká. Případ se proto zakládá až za událost delší než okno —
+            // i tehdy, když ji přes 14. den dotáhne teprve navazující absence;
+            // začátek se pak bere od první z nich.
+            $chain = $kind === SicknessBenefitKind::Nem
+                ? $this->absences->contiguousChainStart($supplierId, $absenceId)
+                : null;
+            $eventFrom = $chain['date_from'] ?? $from;
+            if (!$this->deadlines->nempriRequired($kind, $eventFrom, $to, $chain['carried_days'] ?? 0)) {
+                return null;
+            }
+            $caseAbsenceId = $chain['id'] ?? $absenceId;
+
             if ($userId === null || $userId <= 0) {
                 return $this->skipped(
                     $kind,
@@ -134,7 +151,7 @@ final readonly class SicknessCaseFromAbsenceService
                 );
             }
             $input = [
-                'incapacity_from' => $from,
+                'incapacity_from' => $eventFrom,
                 'incapacity_to' => $to,
             ];
             if ($kind === SicknessBenefitKind::Ose && ($absence['lone_carer'] ?? false)) {
@@ -153,7 +170,7 @@ final readonly class SicknessCaseFromAbsenceService
                 self::ENVIRONMENT,
                 (int) $created['id'],
                 (int) $created['row_version'],
-                ['absence_id' => $absenceId],
+                ['absence_id' => $caseAbsenceId],
             );
 
             return $this->result('created', $created, $kind);

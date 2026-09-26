@@ -2801,7 +2801,7 @@
           "error": "Výpočet obsahuje chybu"
         },
         "unavailable": {
-          "result_set_missing": "Tato revize nemá uložený zákonný výsledek pojistného, takže není z čeho výpočet doložit. Rozklad se zobrazí až u revize spočtené současnou verzí modulu.",
+          "result_set_missing": "Tato revize nemá uložený zákonný výsledek pojistného, takže není z čeho výpočet doložit. Výsledek se ukládá jen tehdy, když zákonný výpočet doběhne — pokud revize hlásí nálezy „nelze bezpečně uzavřít“ nebo „vyžaduje ruční kontrolu“, opravte je a přepočítejte. Revize spočtené starší verzí modulu rozklad nemají.",
           "schema_unsupported": "Zákonný výsledek této revize je v jiné verzi schématu, než kterou umí rozklad přečíst. Radši nezobrazujeme nic, než abychom částky vyložili špatně.",
           "person_missing": "Tato osoba v uloženém zákonném výsledku revize není, takže její pojistné nemáme z čeho vysvětlit."
         },
@@ -3006,7 +3006,22 @@
           "tax-residence-unverified": "Daňová rezidence není ověřena.",
           "unsupported-tax-year": "Pro rok výpočtu není dostupný podporovaný daňový ruleset.",
           "unknown": "Výpočet vyžaduje kontrolu: {code}"
-        }
+        },
+        "issue_domains": {
+          "social_insurance": "Sociální pojištění",
+          "health_insurance": "Zdravotní pojištění",
+          "income_tax": "Daň z příjmů",
+          "income": "Příjem",
+          "other": "Zákonný výpočet"
+        },
+        "structured_issues": {
+          "payroll_component_missing": "chybí schválená mzdová složka. Doplňte a schvalte ji v měsíčních vstupech.",
+          "annual_accumulator_missing": "chybí počáteční nebo průběžné roční součty zaměstnance.",
+          "tax_declaration_term_conflict": "evidence daňového prohlášení neodpovídá nastavení pracovního vztahu.",
+          "employment_term_missing": "chybí platné podmínky pracovního vztahu k období.",
+          "other": "{domain}: výpočet vyžaduje doplnění podkladů."
+        },
+        "relationship_number": "Pracovní vztah č. {id}"
       },
       "commands": {
         "lock_inputs": "Uzamknout vstupy",
@@ -4178,6 +4193,8 @@
       "subtitle": "Historický pracovní fond, publikovaný plán a auditovaná skutečnost pro každý pracovní vztah.",
       "period": "Období",
       "incomplete_only": "Jen neúplné",
+      "search_label": "Hledat zaměstnance",
+      "search_placeholder": "Hledat jméno nebo kód…",
       "reload": "Obnovit",
       "add": "Přidat čas",
       "load_failed": "Docházku se nepodařilo načíst.",
@@ -4286,6 +4303,22 @@
         "holiday": "Práce ve svátek",
         "difficult_environment": "Ztížené prostředí"
       },
+      "records": {
+        "title": "Zápisy v měsíci — {name}",
+        "hint": "Chybnou směnu nebo čas opravte tlačítkem Upravit (uloží se jako nová verze) nebo ho zrušte. Zápis delší než 12 hodin je označený.",
+        "empty": "Vybraný pracovní vztah zatím v tomto měsíci nemá žádnou směnu ani odpracovaný čas.",
+        "shift": "Plánovaná směna",
+        "too_long": "Delší než 12 h",
+        "edit": "Upravit",
+        "editing_title": "Úprava zápisu docházky",
+        "cancel": "Zrušit",
+        "month_locked": "Měsíc je schválený. Zápisy upravíte po jeho znovuotevření.",
+        "cancel_title": "Zrušit zápis docházky",
+        "cancel_text": "Opravdu zrušit zápis {kind} {range}? Přestane se počítat do plánu, fondu i odpracované doby; v historii zůstane.",
+        "cancel_confirm": "Zrušit zápis",
+        "cancelled": "Zápis byl zrušen.",
+        "cancel_failed": "Zápis se nepodařilo zrušit."
+      },
       "editor": {
         "title": "Nový plán nebo skutečnost",
         "employment": "Pracovní vztah",
@@ -4305,7 +4338,17 @@
         "blocked_no_employment": "Vyberte zaměstnance, kterému se záznam zapíše.",
         "blocked_no_range": "Doplňte začátek i konec směny — bez nich se odpracovaná doba nedá spočítat.",
         "blocked_difficulty_factors": "Zadejte počet ztěžujících vlivů od 1 do 255, nebo pole nechte prázdné.",
+        "blocked_end_before_start": "Konec musí být po začátku. U směny přes půlnoc zadejte u konce následující den.",
+        "blocked_too_long": "Zápis by trval déle než 24 hodin. Zkontrolujte datum konce — nejspíš je o den později, než má být.",
+        "long_warning": "Zápis trvá {hours} h, tedy déle než 12 hodin. Zkontrolujte, že datum konce sedí.",
         "save_and_next": "Uložit a další den"
+      },
+      "plan_shifts": {
+        "action": "Rozvrhnout směny podle kalendáře",
+        "hint": "Založí publikované směny na všechny pracovní dny měsíce podle pracovního kalendáře vztahu (bez kalendáře pondělí až pátek po 8 h). Dny, které už směnu mají, přeskočí. Směny potřebuje náhrada mzdy při DPN i za dovolenou.",
+        "nothing": "Všechny pracovní dny měsíce už směnu mají.",
+        "done": "Založeno směn: {count} ({name}).",
+        "failed": "Rozvrh se zastavil po {count} směnách: {message}"
       },
       "grid": {
         "title": "Měsíční mřížka docházky",
@@ -4336,6 +4379,8 @@
         "saved_partially": "Uložené dny: {saved}. Neuložené: {failed} — zůstávají rozepsané i s důvodem u konkrétní buňky.",
         "save_failed": "Mřížku se nepodařilo uložit.",
         "filled": "Vyplněné dny: {count}. Přepsaly se jen prázdné buňky.",
+        "skipped_absence": "Přeskočené dny schválené nepřítomnosti (DPN, ošetřovné, dovolená…): {count}.",
+        "absences_failed": "Nepřítomnosti měsíce se nepodařilo načíst, proto se nic nevyplnilo — dny nemoci nebo dovolené by jinak dostaly odpracované hodiny. Zkuste to znovu.",
         "filled_without_calendar": "Vyplněné dny: {count}. U {people} vztahů chybí pracovní kalendář, takže se odhadlo pondělí až pátek po osmi hodinách — svátky v takovém odhadu nejsou.",
         "copied": "Zkopírované dny: {count} od {people} zaměstnanců z období {period}. Nedohledaní zaměstnanci: {missing}. Dny, které se do měsíce nevešly: {skipped}.",
         "copy_failed": "Minulý měsíc se nepodařilo načíst.",
@@ -5016,7 +5061,7 @@
           "pending_deactivation": "Po uložení karty se pravidlo deaktivuje a zmizí ze seznamu aktivních. Zůstane u historických výplat, které podle něj proběhly.",
           "unverified_account": "Účet zatím není ověřený — mzdu na něj nepůjde připravit k výplatě, dokud ověření neproběhne.",
           "verify_account": "Ověřit účet",
-          "save_hint": "Změny výplatních pravidel se uloží společně s kartou tlačítkem Uložit nahoře.",
+          "save_hint": "Změny výplatních pravidel se uloží společně s kartou tlačítkem Uložit vše v liště dole na stránce.",
           "summary": {
             "remainder": "Zbytek čisté mzdy",
             "percentage": "{percent} % čisté mzdy",
@@ -5090,6 +5135,8 @@
       "probable_earning_invalid": "Pravděpodobný hodinový výdělek musí být částka, například 280 nebo 280,50.",
       "probable_earning_rationale_required": "K pravděpodobnému výdělku doplňte odůvodnění, z čeho jste ho stanovili.",
       "workload_bps": "Úvazek v setinách procenta",
+      "workload_percent": "Úvazek (%)",
+      "workload_percent_placeholder": "např. 100 nebo 93,75",
       "contract_signed": "Smlouva podepsána",
       "work_place": "Místo výkonu práce",
       "regular_workplace": "Pravidelné pracoviště pro cestovní náhrady",
@@ -5661,6 +5708,24 @@
         "no_show": "Potvrdit, že pracovník nenastoupil?"
       },
       "transition_confirm_for": "{question}\n\nVztah: {code}, k datu {date}",
+      "card_confirm": {
+        "start_title": "Potvrdit nástup",
+        "start_confirm": "Uložit nulový stav a potvrdit nástup",
+        "transition_title": {
+          "ended": "Ukončit pracovní vztah",
+          "archived": "Archivovat pracovní vztah",
+          "no_show": "Označit, že zaměstnanec nenastoupil"
+        },
+        "transition_confirm": {
+          "ended": "Ukončit vztah",
+          "archived": "Archivovat",
+          "no_show": "Nenastoupil"
+        },
+        "end_hint": "Po ukončení karta sjede na panel Skončení vztahu. Tam zadáte způsob a důvod skončení (výpověď, dohoda, § 52), odstupné, proplacení dovolené a podklady pro potvrzení pro úřad práce.",
+        "delete_title": "Smazat pracovní vztah",
+        "delete_confirm": "Smazat vztah",
+        "preregistered_next": "Vztah je předregistrovaný. Přihláška PREZEC ale ještě nevznikla — připravte ji v panelu Registrace ČSSZ tlačítkem Připravit; teprve pak se objeví ve frontě podání."
+      },
       "insurance_mode": {
         "automatic": "Automaticky podle pravidel",
         "included": "Účast vzniká",
@@ -10981,6 +11046,7 @@
       }
     },
     "server_codes": {
+      "nempri_decision_number_missing": "Chybí číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře). ČSSZ podle něj oznámení páruje s rozhodnutím. Doplňte ho v případu dávky.",
       "nempri_relationship_code_invalid": "Vztah ošetřované osoby není kód z číselníku ČSSZ pro tento druh dávky. Vyberte ho v případu dávky ze seznamu.",
       "nempri_relationship_code_not_in_kind": "Vztah ošetřované osoby se vyplňuje jen u ošetřovného a dlouhodobého ošetřovného.",
       "nempri_paternity_reason_invalid": "Důvod otcovské musí být OTC, ZEM nebo PEC. Vyberte ho v případu dávky ze seznamu.",
@@ -10993,6 +11059,7 @@
       "sickness_event_outside_protection_period": "Sociální událost vznikla po uplynutí ochranné lhůty po skončení zaměstnání (§ 15 zák. č. 187/2006 Sb.). Nárok z tohoto vztahu nevznikl.",
       "sickness_protection_period_excluded": "Z tohoto vztahu ochranná lhůta neplyne (dohoda o provedení práce, malý rozsah nebo student o prázdninách). Nárok po skončení zaměstnání nevznikl.",
       "hzupn_not_for_benefit_kind": "Hlášení při ukončení pracovní neschopnosti se podává jen u nemocenského.",
+      "nempri_within_wage_compensation_window": "Neschopnost nebo karanténa nepřesáhla 14 kalendářních dnů. Celou ji kryje náhrada mzdy (§ 192 zákoníku práce), nemocenské náleží až od 15. dne (§ 26 odst. 1 zák. č. 187/2006 Sb.), takže se ČSSZ nic nepředává. Trvá-li neschopnost déle, opravte v případu den skončení.",
       "hzupn_return_before_incapacity": "Den návratu do práce nemůže předcházet vzniku pracovní neschopnosti.",
       "dlo_employer_consent_invalid": "Rozhodnutí zaměstnavatele o dlouhodobém ošetřovném musí být souhlas, nebo odmítnutí.",
       "dlo_employer_consent_missing": "Vyberte, zda zaměstnavatel s dlouhodobou péčí souhlasil, nebo ji odmítl.",
@@ -26052,6 +26119,9 @@
   },
   "payroll_absence": {
     "title": "Absence, dovolená a DPN",
+    "shifts_missing": {
+      "open": "Rozvrhnout směny v docházce"
+    },
     "subtitle": "Evidence nepřítomností, snapshoty průměrného výdělku a auditovatelný ledger dovolené.",
     "manual_review": "Vyžaduje ruční kontrolu",
     "review_notice": "Výsledky jsou pracovní podklad. Před schválením ověřte rozhodné období, započitatelné doby, publikované směny a zákonné podmínky konkrétního zaměstnance.",
@@ -28170,6 +28240,7 @@
     "dry_run_title": "Zkouška nanečisto",
     "dry_run_hint": "Proběhne celý převod vybraných roků ({years}) včetně rekonciliace, na konci se ale všechno vrátí. V MyÚčtu nic nezůstane.",
     "dry_run_locks_hint": "Zkouška běží v jedné databázové transakci. Spouštějte ji mimo běžnou práci ve firmě: zápisy, na které zkouška sáhne, počkají, dokud neskončí.",
+    "dry_run_background_hint": "Zkouška je jedna transakce, proto během běhu nehlásí jednotlivé kroky — celý protokol se všemi kroky se ukáže po jejím konci. Obvykle trvá do minuty; stránku můžete zavřít.",
     "dry_run_start": "Spustit zkoušku nanečisto",
     "dry_run_again": "Zkoušku zopakovat",
     "dry_run_running": "Zkouška nanečisto běží",
@@ -28268,7 +28339,7 @@
       "seeded": "osnova ze šablony",
       "pohoda_accounts": "účtů v osnově POHODY",
       "created": "založeno",
-      "existing": "už převedeno",
+      "existing": "už převedeno dříve (přeskočeno, nic se nezdvojí ani nepřepíše)",
       "entries": "zápisů",
       "lines": "řádků",
       "skipped_rows": "vynechaných řádků",

@@ -368,19 +368,61 @@ final readonly class SicknessSubmissionService
         );
 
         if ($document === SicknessDocumentKind::Nempri) {
+            if (!$this->deadlines->nempriRequired($kind, $incapacityFrom, $incapacityTo)) {
+                throw new SicknessException(
+                    'nempri_within_wage_compensation_window',
+                    'Neschopnost nebo karanténa nepřesáhla 14 kalendářních dnů. Celou ji '
+                    . 'kryje náhrada mzdy (§ 192 zákoníku práce), nemocenské náleží až od '
+                    . '15. dne (§ 26 odst. 1 zák. č. 187/2006 Sb.), takže se ČSSZ nic '
+                    . 'nepředává. Trvá-li neschopnost déle, opravte v případu den skončení.',
+                );
+            }
             // Událost po skončení vztahu jen v ochranné lhůtě (§ 15); mimo ni
             // nárok z tohoto vztahu nevznikl a zaměstnavatel nic nepředává.
             $this->caseService->assertEventCovered($kind, $incapacityFrom, $context, $row);
             $this->caseService->assertLongTermCareNotRefused($kind, $row);
-            $payload = $this->nempriPayload(
-                $supplierId,
-                $environment,
-                $caseId,
-                $row,
-                $kind,
-                $context,
-                $identity,
-            );
+            /*
+             * Chybějící údaje případu se hlásí NAJEDNOU. Dřív náhled spadl na
+             * prvním (pravděpodobný příjem), po doplnění na dalším (číslo
+             * rozhodnutí) a účetní opravovala a zkoušela náhled pořád dokola.
+             */
+            $missing = [];
+            try {
+                $payload = $this->nempriPayload(
+                    $supplierId,
+                    $environment,
+                    $caseId,
+                    $row,
+                    $kind,
+                    $context,
+                    $identity,
+                );
+            } catch (SicknessException $exception) {
+                $missing[] = $exception;
+                $payload = null;
+            }
+            // Jde-li věta sestavit, číslo rozhodnutí ohlídá validátor níž.
+            if ($payload === null
+                && $kind->requiresDecisionNumber()
+                && !(bool) ($row['foreign_case'] ?? false)
+                && $this->nullableText($row['decision_number'] ?? null) === null
+            ) {
+                $missing[] = new SicknessException(
+                    'nempri_decision_number_missing',
+                    'Chybí číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře). '
+                    . 'ČSSZ podle něj oznámení páruje s rozhodnutím; bez něj ho nezpracuje. '
+                    . 'Výjimkou je jen zahraniční případ.',
+                );
+            }
+            if ($payload === null) {
+                throw new SicknessException(
+                    $missing[0]->validationCode,
+                    implode("\n", array_map(
+                        static fn (SicknessException $exception): string => $exception->getMessage(),
+                        $missing,
+                    )),
+                );
+            }
             $xml = $this->nempriSerializer->serialize($payload);
             $this->validator->validateNempri($payload, $xml);
             $window = $this->deadlines->forNempri(

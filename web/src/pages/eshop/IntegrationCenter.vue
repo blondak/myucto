@@ -558,7 +558,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
             </section>
           </div>
 
-          <div v-if="canWrite" class="sticky bottom-0 z-10 rounded-b-lg border-t border-neutral-200 bg-surface/95 p-3 backdrop-blur">
+          <div v-if="canWrite" class="sticky bottom-[var(--app-footer-height,0px)] z-10 rounded-b-lg border-t border-neutral-200 bg-surface/95 p-3 backdrop-blur">
             <ul v-if="formErrors.length" class="mb-2 list-disc space-y-0.5 pl-5 text-sm text-danger-700" data-test="form-errors">
               <li v-for="(error, index) in formErrors" :key="index">{{ error }}</li>
             </ul>

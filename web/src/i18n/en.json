@@ -2801,7 +2801,7 @@
           "error": "The calculation contains an error"
         },
         "unavailable": {
-          "result_set_missing": "This revision has no stored statutory insurance result, so there is nothing to evidence the calculation with. The breakdown appears for revisions calculated by the current version of the module.",
+          "result_set_missing": "This revision has no stored statutory insurance result, so there is nothing to evidence the calculation with. The result is stored only when the statutory calculation finishes — if the revision reports findings such as \"cannot be closed safely\" or \"requires manual review\", fix them and recalculate. Revisions calculated by an older version of the module have no breakdown.",
           "schema_unsupported": "The statutory result of this revision uses a schema version the breakdown cannot read. We would rather show nothing than interpret the amounts incorrectly.",
           "person_missing": "This person is not part of the revision's stored statutory result, so their contributions cannot be explained."
         },
@@ -3006,7 +3006,22 @@
           "tax-residence-unverified": "Tax residence is not verified.",
           "unsupported-tax-year": "No supported tax ruleset is available for the calculation year.",
           "unknown": "The calculation requires review: {code}"
-        }
+        },
+        "issue_domains": {
+          "social_insurance": "Social insurance",
+          "health_insurance": "Health insurance",
+          "income_tax": "Income tax",
+          "income": "Income",
+          "other": "Statutory calculation"
+        },
+        "structured_issues": {
+          "payroll_component_missing": "an approved payroll component is missing. Add and approve it in the monthly inputs.",
+          "annual_accumulator_missing": "the employee's opening or running annual totals are missing.",
+          "tax_declaration_term_conflict": "the tax declaration record does not match the employment settings.",
+          "employment_term_missing": "valid employment terms for the period are missing.",
+          "other": "{domain}: the calculation needs more supporting data."
+        },
+        "relationship_number": "Employment no. {id}"
       },
       "commands": {
         "lock_inputs": "Lock inputs",
@@ -4178,6 +4193,8 @@
       "subtitle": "Historical working-time fund, published schedule and audited actual time for every employment.",
       "period": "Period",
       "incomplete_only": "Incomplete only",
+      "search_label": "Search employees",
+      "search_placeholder": "Search name or code…",
       "reload": "Reload",
       "add": "Add time",
       "load_failed": "Time data could not be loaded.",
@@ -4286,6 +4303,22 @@
         "holiday": "Public holiday work",
         "difficult_environment": "Difficult environment"
       },
+      "records": {
+        "title": "Records this month — {name}",
+        "hint": "Fix a wrong shift or time record with Edit (saved as a new version) or cancel it. Records longer than 12 hours are flagged.",
+        "empty": "The selected employment has no shift or worked time in this month yet.",
+        "shift": "Planned shift",
+        "too_long": "Longer than 12 h",
+        "edit": "Edit",
+        "editing_title": "Edit attendance record",
+        "cancel": "Cancel",
+        "month_locked": "The month is approved. Reopen it to change the records.",
+        "cancel_title": "Cancel attendance record",
+        "cancel_text": "Really cancel the record {kind} {range}? It will no longer count towards the plan, the fund or hours worked; it stays in the history.",
+        "cancel_confirm": "Cancel record",
+        "cancelled": "The record was cancelled.",
+        "cancel_failed": "The record could not be cancelled."
+      },
       "editor": {
         "title": "New schedule or actual time",
         "employment": "Employment",
@@ -4305,7 +4338,17 @@
         "blocked_no_employment": "Pick the employee the record will be written to.",
         "blocked_no_range": "Fill in both the start and the end of the shift — hours worked cannot be calculated without them.",
         "blocked_difficulty_factors": "Enter a number of aggravating factors between 1 and 255, or leave the field empty.",
+        "blocked_end_before_start": "The end must come after the start. For a shift over midnight, set the end to the following day.",
+        "blocked_too_long": "The record would last longer than 24 hours. Check the end date — it is most likely one day later than intended.",
+        "long_warning": "The record lasts {hours} h, i.e. longer than 12 hours. Check that the end date is right.",
         "save_and_next": "Save and next day"
+      },
+      "plan_shifts": {
+        "action": "Schedule shifts from calendar",
+        "hint": "Creates published shifts on all working days of the month from the employment's work calendar (without a calendar Monday to Friday at 8 h). Days that already have a shift are skipped. Sick-pay and vacation compensation need these shifts.",
+        "nothing": "Every working day of the month already has a shift.",
+        "done": "Shifts created: {count} ({name}).",
+        "failed": "Scheduling stopped after {count} shifts: {message}"
       },
       "grid": {
         "title": "Monthly attendance grid",
@@ -4336,6 +4379,8 @@
         "saved_partially": "Days saved: {saved}. Not saved: {failed} — they stay in the grid with the reason on the cell.",
         "save_failed": "The grid could not be saved.",
         "filled": "Days filled: {count}. Only empty cells were touched.",
+        "skipped_absence": "Days of approved absence skipped (sick leave, care, vacation…): {count}.",
+        "absences_failed": "The month's absences could not be loaded, so nothing was filled — days of sickness or vacation would otherwise get worked hours. Try again.",
         "filled_without_calendar": "Days filled: {count}. {people} employments have no work calendar, so Monday to Friday at eight hours was assumed — such an estimate does not know about public holidays.",
         "copied": "Days copied: {count} for {people} employees from {period}. Employees not found: {missing}. Days that do not fit this month: {skipped}.",
         "copy_failed": "The previous month could not be loaded.",
@@ -5016,7 +5061,7 @@
           "pending_deactivation": "Once the profile is saved the rule is deactivated and disappears from the active list. It stays with the historical payouts made under it.",
           "unverified_account": "The account is not verified yet — the wage cannot be prepared for payment until verification is done.",
           "verify_account": "Verify account",
-          "save_hint": "Payout rule changes are saved together with the profile using the Save button above.",
+          "save_hint": "Payout rule changes are saved together with the card using Save all in the bar at the bottom of the page.",
           "summary": {
             "remainder": "Remainder of the net pay",
             "percentage": "{percent} % of the net pay",
@@ -5090,6 +5135,8 @@
       "probable_earning_invalid": "The probable hourly earning must be an amount, for example 280 or 280.50.",
       "probable_earning_rationale_required": "Add a justification explaining how the probable earning was set.",
       "workload_bps": "Workload in hundredths of a percent",
+      "workload_percent": "Workload (%)",
+      "workload_percent_placeholder": "e.g. 100 or 93.75",
       "contract_signed": "Contract signed",
       "work_place": "Place of work",
       "regular_workplace": "Regular workplace for travel expenses",
@@ -5661,6 +5708,24 @@
         "no_show": "Confirm that the worker did not start?"
       },
       "transition_confirm_for": "{question}\n\nEmployment: {code}, effective {date}",
+      "card_confirm": {
+        "start_title": "Confirm start",
+        "start_confirm": "Save zero balances and confirm start",
+        "transition_title": {
+          "ended": "End the employment",
+          "archived": "Archive the employment",
+          "no_show": "Mark as not started"
+        },
+        "transition_confirm": {
+          "ended": "End employment",
+          "archived": "Archive",
+          "no_show": "Did not start"
+        },
+        "end_hint": "After ending, the card scrolls to the Termination panel. There you enter the manner and reason of termination (notice, agreement, § 52), severance pay, leave compensation and the data for the labour office confirmation.",
+        "delete_title": "Delete employment",
+        "delete_confirm": "Delete employment",
+        "preregistered_next": "The employment is pre-registered. The PREZEC registration has not been created yet — prepare it in the ČSSZ Registration panel with Prepare; only then does it appear in the submission queue."
+      },
       "insurance_mode": {
         "automatic": "Automatic from rules",
         "included": "Participating",
@@ -10981,6 +11046,7 @@
       }
     },
     "server_codes": {
+      "nempri_decision_number_missing": "The decision number is missing (for an e-sick-note or eOČR, the number from the doctor's decision). ČSSZ uses it to match the notice to the decision. Fill it in on the benefit case.",
       "nempri_relationship_code_invalid": "The relationship to the cared-for person is not a ČSSZ code-list value for this benefit type. Select it from the list on the benefit case.",
       "nempri_relationship_code_not_in_kind": "The relationship to the cared-for person is only filled in for care benefit and long-term care benefit.",
       "nempri_paternity_reason_invalid": "The paternity benefit reason must be OTC, ZEM or PEC. Select it from the list on the benefit case.",
@@ -10993,6 +11059,7 @@
       "sickness_event_outside_protection_period": "The insured event began after the protection period following the end of employment (section 15 of Act No. 187/2006 Coll.). No entitlement arose from this employment.",
       "sickness_protection_period_excluded": "No protection period follows from this employment (agreement to complete a job, small-scope employment or a student during holidays). No entitlement arose after the employment ended.",
       "hzupn_not_for_benefit_kind": "The notice of ending incapacity for work is only filed for sickness benefit.",
+      "nempri_within_wage_compensation_window": "The incapacity for work or quarantine did not exceed 14 calendar days. It is fully covered by wage compensation (section 192 of the Labour Code) and sickness benefit is only paid from day 15 (section 26(1) of Act No. 187/2006 Coll.), so nothing is sent to the Czech Social Security Administration. If the incapacity lasted longer, correct its end date in the case.",
       "hzupn_return_before_incapacity": "The day of return to work cannot precede the start of the incapacity for work.",
       "dlo_employer_consent_invalid": "The employer's decision on long-term care must be consent or refusal.",
       "dlo_employer_consent_missing": "Select whether the employer consented to the long-term care or refused it.",
@@ -26052,6 +26119,9 @@
   },
   "payroll_absence": {
     "title": "Absence, leave and sickness",
+    "shifts_missing": {
+      "open": "Schedule shifts in attendance"
+    },
     "subtitle": "Absence records, average earning snapshots and an auditable leave ledger.",
     "manual_review": "Manual review required",
     "review_notice": "Results are working papers. Before approval, verify the decisive period, qualifying time, published shifts and statutory conditions for the employee.",
@@ -28170,6 +28240,7 @@
     "dry_run_title": "Dry run",
     "dry_run_hint": "The whole transfer of the selected years ({years}) runs, including reconciliation, and then everything is rolled back. Nothing stays in MyÚčto.",
     "dry_run_locks_hint": "The dry run runs in a single database transaction. Run it outside normal work in the company: entries it touches wait until it ends.",
+    "dry_run_background_hint": "The dry run is one transaction, so it does not report individual steps while running — the full protocol with every step appears when it ends. It usually takes up to a minute; you can close this page.",
     "dry_run_start": "Start dry run",
     "dry_run_again": "Repeat dry run",
     "dry_run_running": "Dry run in progress",
@@ -28268,7 +28339,7 @@
       "seeded": "chart from template",
       "pohoda_accounts": "accounts in the POHODA chart",
       "created": "created",
-      "existing": "already transferred",
+      "existing": "already transferred earlier (skipped, nothing is duplicated or overwritten)",
       "entries": "entries",
       "lines": "lines",
       "skipped_rows": "rows skipped",

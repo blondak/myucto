@@ -5685,6 +5685,8 @@ export interface PayrollAnnualSettlementList {
   /** Období mzdy, v němž se přeplatek nejpozději vrací (§ 38ch odst. 5). */
   payout_period: string
   payout_threshold_minor: number
+  /** První měsíc mezd v MyÚčtu (`YYYY-MM`), nebo `null`. */
+  payroll_start_period?: string | null
   items: PayrollAnnualSettlementListItem[]
   /** Počet lidí v CELÉM zúžení, ne na načtené stránce. */
   total: number
@@ -9096,6 +9098,8 @@ export const payrollApi = {
     incomplete = false,
     page?: PayrollPageParams,
     employmentId?: number | null,
+    /** Hledání podle jména nebo kódu vztahu. */
+    search?: string,
   ) =>
     api.get<PayrollTimeOverview>('/payroll/time/month', {
       params: {
@@ -9103,6 +9107,7 @@ export const payrollApi = {
         incomplete: incomplete ? 1 : 0,
         ...pageParams(page),
         ...(employmentId ? { employment_id: employmentId } : {}),
+        ...(search && search.trim() !== '' ? { q: search.trim() } : {}),
       },
     }).then(response => response.data),
   /**
@@ -9133,6 +9138,14 @@ export const payrollApi = {
   saveTimeEntry: (payload: PayrollTimeEntryPayload) =>
     api.post<{ entry: PayrollTimeEntry; month: PayrollTimeMonthState }>('/payroll/time/entries', payload)
       .then(response => response.data),
+  /** Zrušení chybné směny nebo záznamu času bez náhrady (oprava jde přes `supersedes_id`). */
+  cancelTimeRecord: (
+    kind: 'shifts' | 'entries',
+    id: number,
+    payload: { employment_id: number; row_version: number; month_row_version: number },
+  ) =>
+    api.post<{ month: PayrollTimeMonthState }>(`/payroll/time/${kind}/${id}/cancel`, payload)
+      .then(response => response.data),
   /**
    * Dávkové uložení buněk měsíční mřížky. `page` a `employmentId` se posílají
    * v query, aby odpověď nesla TU stránku přehledu, kterou má uživatel před
@@ -9143,6 +9156,7 @@ export const payrollApi = {
     page?: PayrollPageParams,
     employmentId?: number | null,
     incomplete = false,
+    search?: string,
   ) =>
     api.post<PayrollTimeBatchResult>('/payroll/time/entries/batch', payload, {
       params: {
@@ -9150,6 +9164,7 @@ export const payrollApi = {
         incomplete: incomplete ? 1 : 0,
         ...pageParams(page),
         ...(employmentId ? { employment_id: employmentId } : {}),
+        ...(search && search.trim() !== '' ? { q: search.trim() } : {}),
       },
     }).then(response => response.data),
   saveOvertimeConsent: (payload: {

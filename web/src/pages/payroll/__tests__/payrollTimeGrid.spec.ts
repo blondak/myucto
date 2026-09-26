@@ -6,6 +6,7 @@ import {
   isWorkedCategory,
   parsePayrollGridHours,
   payrollDayPlans,
+  payrollEditorNextWorkday,
   payrollGridCellKey,
   payrollGridCellState,
   payrollGridFlags,
@@ -297,5 +298,32 @@ describe('payrollGridNextPosition', () => {
     expect(payrollGridNextPosition({ row: 0, column: 0 }, 'ArrowLeft', 4, 31)).toBeNull()
     expect(payrollGridNextPosition({ row: 3, column: 30 }, 'Enter', 4, 31)).toBeNull()
     expect(payrollGridNextPosition({ row: 0, column: 0 }, 'ArrowDown', 0, 0)).toBeNull()
+  })
+})
+
+describe('payrollEditorNextWorkday', () => {
+  const plans = (period: string, overrides: Record<string, 'workday' | 'holiday' | 'non_working'> = {}) => {
+    const map = payrollDayPlans({ calendar: null }, payrollMonthDays(period), 480)
+    for (const [date, kind] of Object.entries(overrides)) {
+      map.set(date, { kind, plannedMinutes: kind === 'workday' ? 480 : 0, holidayName: null })
+    }
+    return map
+  }
+
+  it('posune začátek i konec o stejný počet dní a přeskočí víkend', () => {
+    expect(payrollEditorNextWorkday('2026-09-18T08:00', '2026-09-18T16:30', '2026-09', plans('2026-09')))
+      .toEqual({ startsAt: '2026-09-21T08:00', endsAt: '2026-09-21T16:30' })
+  })
+
+  it('noční směně ponechá konec den po začátku', () => {
+    expect(payrollEditorNextWorkday('2026-09-15T22:00', '2026-09-16T06:00', '2026-09', plans('2026-09')))
+      .toEqual({ startsAt: '2026-09-16T22:00', endsAt: '2026-09-17T06:00' })
+  })
+
+  it('přeskočí svátek z kalendáře a na konci měsíce zůstane', () => {
+    expect(payrollEditorNextWorkday('2026-09-25T08:00', '2026-09-25T16:30', '2026-09', plans('2026-09', { '2026-09-28': 'holiday' })))
+      .toEqual({ startsAt: '2026-09-29T08:00', endsAt: '2026-09-29T16:30' })
+    expect(payrollEditorNextWorkday('2026-09-30T08:00', '2026-09-30T16:30', '2026-09', plans('2026-09')))
+      .toEqual({ startsAt: '2026-09-30T08:00', endsAt: '2026-09-30T16:30' })
   })
 })

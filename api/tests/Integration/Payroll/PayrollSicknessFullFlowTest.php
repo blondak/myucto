@@ -64,18 +64,23 @@ final class PayrollSicknessFullFlowTest extends TestCase
         $this->publishShifts($person['employment_id'], self::workdays('2026-06'));
         $dpn = ['first_day_fully_worked' => false, 'insurance_eligibility_confirmed' => true, 'conflicting_benefit_excluded' => true];
 
+        // 8. až 19. 6. je 12 dnů: celé je kryje náhrada mzdy (§ 192 ZP),
+        // nemocenské by náleželo až od 15. dne (§ 26 odst. 1), případ nevzniká.
         $first = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-08', '2026-06-19', (int) $average['id'], $dpn);
-        self::assertSame('created', $first['sickness_case']['outcome'], json_encode($first['sickness_case']) ?: '');
-        self::assertSame('NEM', $first['sickness_case']['benefit_kind']);
-        // § 97 odst. 2: neprodleně po uplynutí prvních 14 dnů, tedy od 22. 6.
-        self::assertSame('2026-06-22', $first['sickness_case']['nempri_due_on']);
-        $caseId = (int) $first['sickness_case']['case_id'];
+        self::assertNull($first['sickness_case'], json_encode($first['sickness_case']) ?: '');
 
-        // Neschopnost zapsaná po částech je jedna událost: druhá absence
-        // prodlouží tentýž případ, žádný druhý nevznikne.
-        $second = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-20', '2026-06-26', (int) $average['id'], $dpn);
-        self::assertSame('extended', $second['sickness_case']['outcome']);
-        self::assertSame($caseId, (int) $second['sickness_case']['case_id']);
+        // Neschopnost zapsaná po částech je jedna událost: prodloužení ji
+        // dotáhne přes 14. den a teprve teď vznikne případ — od prvního dne.
+        $second = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-20', '2026-06-22', (int) $average['id'], $dpn);
+        self::assertSame('created', $second['sickness_case']['outcome'], json_encode($second['sickness_case']) ?: '');
+        self::assertSame('NEM', $second['sickness_case']['benefit_kind']);
+        // § 97 odst. 2: neprodleně po uplynutí prvních 14 dnů, tedy od 22. 6.
+        self::assertSame('2026-06-22', $second['sickness_case']['nempri_due_on']);
+        $caseId = (int) $second['sickness_case']['case_id'];
+
+        $third = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-23', '2026-06-26', (int) $average['id'], $dpn);
+        self::assertSame('extended', $third['sickness_case']['outcome']);
+        self::assertSame($caseId, (int) $third['sickness_case']['case_id']);
 
         $cases = $this->service(SicknessCaseService::class);
         $case = $cases->requireCase($this->supplierId, self::ENVIRONMENT, $caseId);
@@ -108,6 +113,39 @@ final class PayrollSicknessFullFlowTest extends TestCase
         self::assertStringContainsString('<cisloRozhodnuti>A1234567</cisloRozhodnuti>', $nempri);
         $hzupn = (string) $submissions->preview($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Hzupn)['xml'];
         self::assertStringContainsString('<datumNavratDoPrace>2026-06-29</datumNavratDoPrace>', $hzupn);
+    }
+
+    /**
+     * Případ zapsaný ručně k neschopnosti do 14 dnů: dávka z ní neplyne
+     * (§ 26 odst. 1 zák. č. 187/2006 Sb.), hlídač termínů k ní NEMPRI ani HZUPN
+     * neukáže a NEMPRI se připravit nedá.
+     */
+    public function testIncapacityWithinWageCompensationWindowHasNoNempri(): void
+    {
+        $person = $this->sicknessPerson(7, 'Olga Krátká');
+        $this->cashPayout($person['employee_id']);
+        $cases = $this->service(SicknessCaseService::class);
+        $case = $cases->create($this->supplierId, self::ENVIRONMENT, $person['employment_id'], 'NEM', [
+            'incapacity_from' => '2026-06-08',
+            'incapacity_to' => '2026-06-21',
+            'decision_number' => 'A1112223',
+            'daily_working_hours' => '8',
+        ], $this->actors[0]);
+        $caseId = (int) $case['id'];
+
+        $overview = $this->service(PayrollDeadlineOverviewService::class)
+            ->overview($this->supplierId, self::ENVIRONMENT, 400);
+        foreach ($overview['items'] as $item) {
+            self::assertNotSame($caseId, $item['case_id'] ?? null, json_encode($item) ?: '');
+        }
+
+        try {
+            $this->service(SicknessSubmissionService::class)
+                ->preview($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Nempri);
+            self::fail('NEMPRI k neschopnosti do 14 dnů nevzniká.');
+        } catch (SicknessException $exception) {
+            self::assertSame('nempri_within_wage_compensation_window', $exception->validationCode);
+        }
     }
 
     /**

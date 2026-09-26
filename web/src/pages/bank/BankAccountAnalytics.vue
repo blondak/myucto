@@ -232,7 +232,7 @@ onMounted(load)
         </div>
       </div>
 
-      <div v-if="canWrite" class="sticky bottom-4 mt-4 flex items-center justify-end gap-3 bg-surface/95 backdrop-blur border border-neutral-200 rounded-lg px-4 py-3 shadow-md">
+      <div v-if="canWrite" class="sticky bottom-[calc(var(--app-footer-height,0px)+1rem)] mt-4 flex items-center justify-end gap-3 bg-surface/95 backdrop-blur border border-neutral-200 rounded-lg px-4 py-3 shadow-md">
         <span v-if="dirtyCount" class="text-xs text-neutral-500">
           {{ t('bank.analytics.unsaved', { count: dirtyCount }) }}
         </span>
