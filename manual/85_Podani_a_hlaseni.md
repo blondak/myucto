@@ -319,6 +319,48 @@ který nese i pojistné osoby; ostatní vztahy uvádějí příznak NE. Když je
 u pojistného a podává se ručně přes ePortál ČSSZ. Slevu pracujícího důchodce
 a sezónní slevu na pojistném nelze na jednom vztahu uplatnit současně.
 
+### Jak se plní vybrané údaje měsíčního hlášení
+
+- **Čistý příjem** je zdanitelný příjem po odečtení pojistného zaměstnance
+  a zálohy na daň po slevách, bez daňového bonusu. Započítává se do něj i náhrada
+  mzdy za prvních 14 dní nemoci, i když je od daně osvobozená.
+- **Fond pracovní doby** zahrnuje i svátky připadající na pracovní dny. Svátek,
+  ve kterém zaměstnanec nepracoval ani nečerpal jinou nepřítomnost, se při
+  potvrzení docházky přičte k neodpracovaným placeným hodinám. Dialog schválení
+  docházky počet těchto hodin ukazuje.
+- **Náhrady mzdy** mají v hlášení tři údaje: za svátek, za překážky na straně
+  zaměstnavatele a za překážky na straně zaměstnance. Používejte proto složky
+  **Náhrada mzdy za svátek**, **Náhrada mzdy při překážkách na straně
+  zaměstnavatele** a **Náhrada mzdy při překážkách na straně zaměstnance**. Import docházky je zakládá sám
+  (návštěva lékaře a překážky na straně zaměstnavatele).
+- **Přesčas** bez příplatku za přesčas se vykáže s příplatkem za přesčas 0,
+  jak vyžaduje kontrola ČSSZ.
+- **Pravděpodobný průměrný hodinový výdělek** navrhne aplikace u nového vztahu
+  bez odpracované mzdy ze sjednané mzdy a nemá-li ani tu, z minimální mzdy.
+  Návrh vždy potvrzujete v **Mzdy → Absence a průměry**.
+- **Statutární orgán a společník** smějí mít druh činnosti K i N až S;
+  hlášení je v tom případě vykazuje ve větvi pro statutární orgány.
+
+**Vyloučené dny podle § 18 zákona č. 582/1991 Sb.** se rozdělují podle důvodu:
+nemoc v období, kdy zaměstnavatel platí náhradu mzdy, jde do údaje pracovní
+neschopnost; dny, za které vyplácí nemocenské ČSSZ, do údaje vyplacení dávek
+(jen když je u nemoci potvrzený nárok na dávku). Stejně se jako vyplacení dávek
+vykazuje peněžitá pomoc v mateřství, otcovská a ošetřovné do konce podpůrčí
+doby: 9 kalendářních dnů, u zaměstnance, který o dítě pečuje sám, 16 dnů
+(zaškrtnutí **Osamělý zaměstnanec pečující o dítě do 16 let** u ošetřování v **Mzdy → Absence a průměry**),
+u dlouhodobého ošetřovného 90 dnů. Ošetřování nad podpůrčí dobu je omluvená
+nepřítomnost. Nemoc zaznamenaná v již schválené revizi bez období náhrady mzdy
+hlášení zablokuje; revizi přepočtěte opravným během po schválení nemoci.
+
+**Pracující důchodce** nemá v hlášení údaje pro evidenční list (třída, dny
+a vyměřovací základ ELDP), vyloučené dny podle § 18 ale nese dál. Za
+pracujícího důchodce aplikace považuje zaměstnance s ověřenou slevou
+pracujícího důchodce v zákonné evidenci osoby.
+
+Měsíc porodu, ve kterém zaměstnankyně pobírá peněžitou pomoc v mateřství a nemá
+žádný započitatelný příjem, se vykazuje jako měsíc účasti na pojištění, nikoli
+jako vyloučená doba.
+
 ## 85.10 Návaznosti
 
 Identifikátory nastavte v [Nastavení mezd](90_Nastaveni_mezd.md). Firemní přístupy, ruční inbox a odchozí zprávy popisuje kapitola [Datová schránka](97_Datova_schranka.md), globální registraci pro odesílání správcem systému pak [Odesílací brána ISDS](98_Odesilaci_brana_ISDS.md). Zdrojová data pocházejí z [mzdového běhu](80_Mzdove_behy.md); kontrolní soubory a doručenky uchovávejte podle [retenčních lhůt](93_Retencni_lhuty.md).

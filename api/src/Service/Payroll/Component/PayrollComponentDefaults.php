@@ -129,6 +129,16 @@ final class PayrollComponentDefaults
                 // odpracovanou dobou není; zahrnout ji by znamenalo počítat
                 // průměr z průměru.
                 ['NAHRADA_MZDY_DOVOLENA', 'Náhrada mzdy za dovolenou', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
+                // Náhrady mzdy s vlastní kolonkou měsíčního hlášení: za svátek
+                // (§ 115 odst. 3 ZP, 10339), při překážkách na straně
+                // zaměstnavatele (§ 207 až § 210 ZP, 10340) a na straně
+                // zaměstnance (§ 191 až § 206 ZP kromě DPN, 10341). Obecná
+                // NAHRADA_MZDY je nerozliší, takže se dosud vykazovaly jen
+                // v úhrnu 10337 a detail zůstával prázdný. Klasifikace je shodná
+                // s obecnou náhradou mzdy.
+                ['NAHRADA_MZDY_SVATEK', 'Náhrada mzdy za svátek', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
+                ['NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL', 'Náhrada mzdy při překážkách na straně zaměstnavatele', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
+                ['NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC', 'Náhrada mzdy při překážkách na straně zaměstnance', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
                 // Náhrada mzdy při DPN je zákonem osvobozená a není vyměřovacím
                 // základem pojistného. JMHZ a exekuční model zůstávají shodné
                 // s obecnou náhradou mzdy; jejich odlišný režim by vyžadoval

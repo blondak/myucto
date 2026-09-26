@@ -67,7 +67,9 @@ navrhne sama podle § 355 odst. 2 zákoníku práce, a to v tomto pořadí:
    a odpracované hodiny z uzavřených mzdových běhů od nástupu, tedy typicky
    z prvního uzavřeného měsíce;
 2. ze sjednané měsíční mzdy v podmínkách vztahu přepočtené na hodinu
-   koeficientem 4,348 (týdenní pracovní doba × 4,348, § 356 odst. 2).
+   koeficientem 4,348 (týdenní pracovní doba × 4,348, § 356 odst. 2);
+3. nemá-li vztah ani sjednanou mzdu, z minimální mzdy účinné v rozhodném
+   období přepočtené na hodinu při 40hodinové týdenní době.
 
 Odůvodnění návrhu uvádí zdroj i čísla, ze kterých vznikl. Chybí-li běh
 v měsíci, kdy vztah už trval, návrh nevznikne — je potřeba doplnit evidenci.
@@ -224,6 +226,13 @@ Schválená placená dovolená může projít běžným profilem JMHZ jen tehdy,
 souhlasí s publikovanými směnami a potvrzený pracovní souhrn ji vykazuje celou
 jako placené neodpracované hodiny.
 
+**Svátky** patří do fondu pracovní doby i do neodpracovaných hodin. Aplikace
+navrhuje fond včetně svátků připadajících na pracovní dny a při potvrzení sama
+přičte hodiny svátků, ve kterých zaměstnanec nepracoval ani nečerpal jinou
+nepřítomnost, k celkovým i placeným neodpracovaným hodinám (u DPP, DPČ
+a statutárů se svátky nepřičítají). Dialog schválení ukazuje jejich počet, takže
+je do polí sám nepřidávejte. Na slevu na pojistném podle § 7a to nemá vliv.
+
 Běžným profilem JMHZ projdou i **otcovská, rodičovská dovolená, neplacené
 volno, neomluvená absence a překážky v práci**. Otcovská je vyloučenou dobou
 v celé podpůrčí době; zbylé čtyři vyloučenou dobu netvoří a dobu pojištění
@@ -268,9 +277,12 @@ chybný údaj opravíte zrušením nepřítomnosti a novým zápisem.
 
 Vyloučenou dobou evidenčního listu je jen část od začátku osmého týdne před
 očekávaným dnem porodu do dne, který porodu předcházel. Den porodu a doba po
-něm vyloučenou dobou nejsou; měsíc po porodu bez započitatelného příjmu se
-podle § 11 odst. 2 zákona č. 155/1995 Sb. vykáže s nulou dnů pojištění.
-Měsíc, který sahá na očekávaný den porodu nebo za něj, se bez doplněného dne
+něm vyloučenou dobou nejsou. Samotný měsíc porodu bez započitatelného příjmu se
+vykáže jako měsíc pojištění s plným počtem dnů a nulovým základem, protože jeho
+část před porodem je omluvná. Každý další měsíc po porodu bez započitatelného
+příjmu se podle § 11 odst. 2 zákona č. 155/1995 Sb. vykáže s nulou dnů
+pojištění. Dny peněžité pomoci v mateřství i otcovské jdou do hlášení jako
+vyloučené dny s vyplacenou dávkou. Měsíc, který sahá na očekávaný den porodu nebo za něj, se bez doplněného dne
 porodu nesestaví.
 
 Před porodem nelze na peněžitou pomoc nastoupit dřív než od začátku osmého
@@ -278,10 +290,15 @@ týdne před očekávaným dnem porodu. Začíná-li nepřítomnost až porodem 
 něm (předčasný porod, převzetí dítěte do péče, druhá část podpůrčí doby
 zapsaná zvlášť), vyplňte den porodu dítěte rovnou při zápisu.
 
+U **ošetřování člena rodiny** zaškrtněte **Osamělý zaměstnanec pečující o dítě
+do 16 let**, pokud o dítě pečuje sám. Ošetřovné mu pak náleží až 16 kalendářních
+dnů místo 9 (§ 40 odst. 1 zákona č. 187/2006 Sb.) a podle toho měsíční hlášení
+rozdělí dny ošetřování na dny s dávkou a dny omluvené nepřítomnosti bez náhrady.
+U dlouhodobého ošetřovného je podpůrčí doba 90 dnů.
+
 Bezpečně zablokovaný zůstává měsíc bez příjmu, ve kterém se **omluvná
-nepřítomnost potkala s nepřítomností bez příjmu**: nemoc s neplaceným volnem,
-nebo měsíc porodu, kdy je peněžitá pomoc před porodem omluvná a po něm už ne.
-Zákon rozhoduje jen o celém měsíci, takový měsíc proto vyřiďte ručně mimo
+nepřítomnost potkala s nepřítomností bez příjmu**: nemoc nebo měsíc porodu
+s neplaceným volnem či rodičovskou. Zákon rozhoduje jen o celém měsíci, takový měsíc proto vyřiďte ručně mimo
 aplikaci.
 
 > [!IMPORTANT]

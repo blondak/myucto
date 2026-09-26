@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Absence;
 
 use MyInvoice\Service\Payroll\Absence\AverageEarningDerivationService as Derivation;
+use MyInvoice\Service\Payroll\Absence\MinimumWageFloor;
 use MyInvoice\Service\Payroll\Document\AverageEarningsMonthlyMath;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -77,6 +79,28 @@ final class AverageEarningProbableDerivationTest extends TestCase
         self::assertNull(Derivation::probableFromAgreedGross([
             ['id' => 7, 'effective_from' => '2026-06-01', 'monthly_gross_minor' => null, 'weekly_hours' => '40.00'],
         ], '2026-04-01'));
+    }
+
+    /**
+     * Dohoda v prvním měsíci nemá dosaženou ani sjednanou měsíční mzdu.
+     * 10345 je v XSD povinný; spodní mezí pravděpodobného výdělku je
+     * minimální mzda (2026: 134,40 Kč/h), kterou přijatá hlášení vykazují.
+     */
+    public function testMinimumWageIsProposedWhenNoWageCanBeDerived(): void
+    {
+        $floor = MinimumWageFloor::forDate(CzechPayrollRulesets2026::provider(), '2026-07-01');
+        $probable = Derivation::probableFromMinimumWage($floor);
+
+        self::assertSame(13_440, $probable['hourly_minor']);
+        self::assertSame(Derivation::PROBABLE_SOURCE_MINIMUM_WAGE, $probable['source']);
+        self::assertStringContainsString('§ 357 odst. 1', $probable['rationale']);
+
+        $suggestion = Derivation::combine($this->decisiveMonthsWithoutRuns(), 21, false, $probable);
+        self::assertTrue($suggestion['ready']);
+        self::assertSame('probable', $suggestion['source_kind']);
+        self::assertSame(Derivation::PROBABLE_SOURCE_MINIMUM_WAGE, $suggestion['probable_source']);
+        self::assertSame(13_440, $suggestion['probable_hourly_minor']);
+        self::assertNotContains('probable_earning_not_recorded', $suggestion['blockers']);
     }
 
     public function testRecordedProbableEarningKeepsItsSourceLabel(): void

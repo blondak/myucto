@@ -30,7 +30,6 @@ final class JmhzScenarioSelectorResolverTest extends TestCase
     public static function pinnedSelectors(): iterable
     {
         yield 'foster-carer' => ['M', '1', null, 'scenario_2', 'formPestoun.xsd'];
-        yield 'specific-activity' => ['K', '1', null, 'scenario_3', 'formCinnostKS.xsd'];
         yield 'specific-relationship' => ['1', '3', null, 'scenario_3', 'formCinnostKS.xsd'];
         yield 'prison-service' => ['1', '2', null, 'scenario_4', 'formVezen.xsd'];
         yield 'other-income-11' => ['11', '1', null, 'scenario_5', 'formJinyPrijem.xsd'];
@@ -83,16 +82,39 @@ final class JmhzScenarioSelectorResolverTest extends TestCase
         self::assertSame('scenario_1', $resolution['evidence']['scenario_key'] ?? null);
     }
 
-    public function testEnablesOnlyPinnedStatutoryBodySelectorForScenarioThreePreparation(): void
+    /**
+     * Kontrola 343 řadí do `cinnostKS` druhy K a N až S. Prokurista (P),
+     * člen kolektivního orgánu (Q) nebo likvidátor (R) se vykazují stejným
+     * formulářem jako jednatel (S); přijatá hlášení jiného systému nesou P.
+     * Specifická skupina u pracovního poměru (1–9 s bližším určením 3) ale
+     * profil statutára není a zůstává nepodporovaná.
+     *
+     * @return iterable<string,array{string}>
+     */
+    public static function corporateBodyActivities(): iterable
     {
-        $supported = JmhzScenarioSelectorResolver::load()->resolve('S', '1');
-        $otherScenarioThree = JmhzScenarioSelectorResolver::load()->resolve('K', '1');
+        foreach (['K', 'N', 'O', 'P', 'Q', 'R', 'S'] as $code) {
+            yield $code => [$code];
+        }
+    }
+
+    #[DataProvider('corporateBodyActivities')]
+    public function testEnablesCorporateBodyActivitiesForScenarioThreePreparation(string $activityCode): void
+    {
+        $supported = JmhzScenarioSelectorResolver::load()->resolve($activityCode, '1');
 
         self::assertSame('scenario_3', $supported['evidence']['scenario_key'] ?? null);
         self::assertSame('formCinnostKS.xsd', $supported['evidence']['xsd_entrypoint'] ?? null);
         self::assertTrue($supported['preparation_supported']);
         self::assertNull($supported['readiness_issue_code']);
         self::assertSame([], $supported['readiness_attribute_ids']);
+    }
+
+    public function testSpecificGroupEmploymentStaysOutsideScenarioThreePreparation(): void
+    {
+        $otherScenarioThree = JmhzScenarioSelectorResolver::load()->resolve('1', '3');
+
+        self::assertSame('scenario_3', $otherScenarioThree['evidence']['scenario_key'] ?? null);
         self::assertFalse($otherScenarioThree['preparation_supported']);
         self::assertSame(
             'jmhz_scenario_3_preparation_unsupported',

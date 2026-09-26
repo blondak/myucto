@@ -1768,6 +1768,16 @@ final class PayrollRunSnapshotBuilder
                         PayrollJmhzWorkMonthSummaryBuilder::compensatoryTimeOffFields(),
                     );
                 }
+                if (in_array(
+                    $derivationVersion,
+                    PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_HOLIDAYS,
+                    true,
+                )) {
+                    $conditionalFields = array_merge(
+                        $conditionalFields,
+                        PayrollJmhzWorkMonthSummaryBuilder::holidayFields(),
+                    );
+                }
                 foreach ($conditionalFields as $field) {
                     $values[$field] = $row[$field] === null ? null : (int) $row[$field];
                 }
@@ -1927,6 +1937,23 @@ final class PayrollRunSnapshotBuilder
                 ...(($row['absence_type'] ?? null) === 'ppm' ? [
                     'expected_childbirth_date' => $row['expected_childbirth_date'] ?? null,
                     'childbirth_date' => $row['childbirth_date'] ?? null,
+                ] : []),
+                /*
+                 * Nemoc nese okno náhrady mzdy a potvrzení nároku na nemocenské
+                 * ze schváleného výpočtu náhrady; bez výpočtu klíče chybí
+                 * a vyloučené dny § 18 odst. 7 se nerozhodnou. Ošetřování nese
+                 * příznak osamělého zaměstnance (podpůrčí doba 16 dnů). Jen
+                 * u těchto druhů, stejně jako dny porodu, ať se nemění otisk
+                 * ostatních.
+                 */
+                ...(in_array($row['absence_type'] ?? null, ['dpn', 'quarantine'], true)
+                    && ($row['compensation_window_from'] ?? null) !== null ? [
+                        'compensation_window_from' => (string) $row['compensation_window_from'],
+                        'compensation_window_to' => (string) $row['compensation_window_to'],
+                        'insurance_eligibility_confirmed' => (int) $row['insurance_eligibility_confirmed'] === 1,
+                    ] : []),
+                ...(($row['absence_type'] ?? null) === 'ocr' ? [
+                    'lone_carer' => (int) ($row['lone_carer'] ?? 0) === 1,
                 ] : []),
                 'id' => (int) $row['id'],
                 'absence_type' => (string) $row['absence_type'],

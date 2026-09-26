@@ -152,12 +152,12 @@ final class PayrollAbsenceRepository
             $insert = $pdo->prepare(
                 'INSERT INTO payroll_absences
                     (supplier_id, employment_id, absence_type, date_from, date_to,
-                     expected_childbirth_date, childbirth_date,
+                     expected_childbirth_date, childbirth_date, lone_carer,
                      childbirth_recorded_by, childbirth_recorded_at,
                      timezone_name, partial_first_minutes, partial_last_minutes, note,
                      compensation_policy, compensation_rate_basis_points,
                      average_snapshot_id, support_status, status, requested_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, IF(? IS NULL, NULL, NOW()),
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, IF(? IS NULL, NULL, NOW()),
                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $insert->execute([
@@ -168,6 +168,7 @@ final class PayrollAbsenceRepository
                 $data['date_to'],
                 $data['expected_childbirth_date'] ?? null,
                 $childbirth,
+                ($data['lone_carer'] ?? false) === true ? 1 : 0,
                 $childbirth === null ? null : $userId,
                 $childbirth,
                 $data['timezone_name'],
@@ -874,6 +875,9 @@ final class PayrollAbsenceRepository
             $row[$key] = $row[$key] === null ? null : (int) $row[$key];
         }
         $row['correction_pending'] = (bool) $row['correction_pending'];
+        if (array_key_exists('lone_carer', $row)) {
+            $row['lone_carer'] = (bool) $row['lone_carer'];
+        }
         return $row;
     }
 }

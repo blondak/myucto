@@ -30,8 +30,8 @@ final class JmhzBlockerExplainer
             . 'výdělek a zaměstnanec v rozhodném období neodpracoval zákonné minimum '
             . 'dnů, takže se skutečný průměr spočítat nedá. Podle § 355 zákoníku práce '
             . 'se v takovém případě použije pravděpodobný výdělek, který stanoví '
-            . 'zaměstnavatel — aplikace ho vymyslet nesmí. Spodní hranicí je '
-            . 'minimální mzda; nižší hodnotu výpočet průměru sám zvýší.',
+            . 'zaměstnavatel. Bez jiného podkladu ho aplikace navrhne ve výši spodní '
+            . 'meze, minimální mzdy; návrh je potřeba založit a schválit.',
         /*
          * Názvy polí jsou DOSLOVA ty z formuláře (`payroll.people.jmhz_identity`
          * v `web/src/i18n/cs.json`) a ze slovníku
@@ -128,6 +128,7 @@ final class JmhzBlockerExplainer
         'jmhz_eldp_social_relationship_unsupported' => 'Pracovní vztah nemá běžnou účast na sociálním pojištění.',
         'jmhz_eldp_capped_base_unsupported' => 'Vyměřovací základ byl krácen ročním maximem a vyžaduje individuální kontrolu.',
         'jmhz_eldp_assessment_base_not_whole_czk' => 'Vyměřovací základ nelze bezpečně převést na celé koruny pro evidenci důchodového pojištění.',
+        'jmhz_eldp_section18_days_unresolved' => 'Vyloučené dny nemocenského pojištění (§ 18 odst. 7) nejde u tohoto vztahu rozdělit: nemoc je ve mzdovém běhu zmrazená bez okna náhrady mzdy. V měsíci bez vyloučených dob (důchodce, měsíc bez dnů pojištění) je hlášení přesto musí nést.',
         'jmhz_work_summary_v2_missing' => 'Chybí schválený pracovní souhrn měsíce.',
         'jmhz_employer_part_time_discount_unverified' => 'Nárok na slevu za kratší úvazek není doložený.',
         'jmhz_employer_part_time_discount_outcome_missing' => 'Chybí posouzení nároku na slevu za kratší úvazek.',
@@ -183,13 +184,12 @@ final class JmhzBlockerExplainer
         'component_jmhz_manual_review' => 'Otevřete Mzdy → Mzdové složky a potvrďte zařazení.',
         'component_jmhz_treatment_invalid' => 'Otevřete Mzdy → Mzdové složky a opravte nastavení.',
         'jmhz_average_hourly_earning_missing' => 'Otevřete Mzdy → Absence a průměry a doplňte výdělek.',
-        'jmhz_average_hourly_earning_probable_missing' => 'Otevřete Mzdy → Zaměstnanci, '
-            . 'na kartě pracovního vztahu vyplňte v části „Průměrný výdělek" pole '
-            . '„Pravděpodobný hodinový výdělek" a jeho odůvodnění (z čeho jste ho '
-            . 'stanovili — obvyklá výše složek mzdy nebo odměna srovnatelných '
-            . 'zaměstnanců) a uložte novou revizi podmínek. Nemáte-li podklad, '
-            . 'uveďte minimální hodinovou mzdu, tak postupují i jiné mzdové systémy. '
-            . 'Pak se v Mzdy → Absence a průměry průměr nabídne k založení a schválení.',
+        'jmhz_average_hourly_earning_probable_missing' => 'Otevřete Mzdy → Absence a průměry '
+            . 'a založte průměr za čtvrtletí. Když nejde odvodit z dosažené ani sjednané '
+            . 'mzdy, aplikace navrhne spodní mez, minimální hodinovou mzdu; tak postupují '
+            . 'i jiné mzdové systémy. Vyšší pravděpodobný výdělek zadejte na kartě '
+            . 'pracovního vztahu v části „Průměrný výdělek" (pole „Pravděpodobný hodinový '
+            . 'výdělek" s odůvodněním) a má přednost.',
         'jmhz_verified_boolean_missing' => 'Otevřete Mzdy → Zaměstnanci, na kartě pracovního vztahu v části Evidence pro ČSSZ zvolte u všech tří otázek Ano nebo Ne a uložte.',
         'jmhz_work_month_not_approved' => 'Otevřete Mzdy → Pracovní doba a měsíc schvalte.',
         'jmhz_work_summary_v2_missing' => 'Otevřete Mzdy → Pracovní doba a měsíc schvalte.',
@@ -210,6 +210,7 @@ final class JmhzBlockerExplainer
         'jmhz_eldp_social_relationship_unsupported' => 'Otevřete Mzdy → Mzdové běhy a zkontrolujte účast na sociálním pojištění.',
         'jmhz_eldp_capped_base_unsupported' => 'Otevřete Mzdy → Mzdové běhy a zkontrolujte roční maximum pojistného.',
         'jmhz_eldp_assessment_base_not_whole_czk' => 'Otevřete Mzdy → Mzdové běhy a zkontrolujte výsledek sociálního pojištění.',
+        'jmhz_eldp_section18_days_unresolved' => 'Otevřete Mzdy → Mzdové běhy, u měsíce založte opravnou revizi a znovu ji schvalte; nové zmrazení převezme okno náhrady mzdy ze schválené nemoci. Pokud nemoc schválená není, schvalte ji nejdřív v Mzdy → Absence a průměry.',
         'jmhz_ordinary_evidence_missing' => 'Otevřete Mzdová podání → JMHZ a potvrďte právní skutečnosti.',
         'jmhz_attribute_10116_unresolved' => 'Otevřete Mzdová podání → JMHZ a potvrďte právní skutečnosti.',
         'jmhz_attribute_10546_unresolved' => 'Otevřete Mzdová podání → JMHZ a potvrďte právní skutečnosti.',

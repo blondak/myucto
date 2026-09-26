@@ -100,7 +100,9 @@ use PDO;
  *         tedy i z měsíců čtvrtletí, pro které se průměr zjišťuje (věta
  *         první: „od počátku", ne „v" rozhodném období),
  *      3. sjednaná měsíční mzda z podmínek vztahu přepočtená na hodinu
- *         koeficientem § 356 odst. 2 (věta druhá: obvyklá výše složek mzdy).
+ *         koeficientem § 356 odst. 2 (věta druhá: obvyklá výše složek mzdy),
+ *      4. spodní mez, hodinová minimální mzda (§ 357 odst. 1) — dohoda bez
+ *         sjednané měsíční mzdy v prvním měsíci, měsíc bez příjmu.
  *
  *    Odvozuje se JEN u nového vztahu: každý měsíc rozhodného období bez běhu
  *    musí celý ležet před vznikem zaměstnání. Chybějící běh uprostřed trvání
@@ -166,6 +168,7 @@ final class AverageEarningDerivationService
     public const PROBABLE_SOURCE_TERMS = 'terms';
     public const PROBABLE_SOURCE_ACHIEVED_WAGE = 'achieved_wage';
     public const PROBABLE_SOURCE_AGREED_MONTHLY_GROSS = 'agreed_monthly_gross';
+    public const PROBABLE_SOURCE_MINIMUM_WAGE = 'minimum_wage';
 
     public function __construct(
         private readonly Connection $db,
@@ -232,7 +235,10 @@ final class AverageEarningDerivationService
                     $applicationStart,
                     (string) $employmentStart,
                 ),
-            ]) ?? self::probableFromAgreedGross($terms, $applicationStart->format('Y-m-d'));
+            ]) ?? self::probableFromAgreedGross($terms, $applicationStart->format('Y-m-d'))
+                ?? self::probableFromMinimumWage(
+                    MinimumWageFloor::forDate($this->rulesets, $applicationStart->format('Y-m-d')),
+                );
         }
 
         return [
@@ -394,6 +400,40 @@ final class AverageEarningDerivationService
             'term_id' => self::nullableInt($chosen['id'] ?? null),
             'effective_from' => (string) $chosen['effective_from'],
             'source' => self::PROBABLE_SOURCE_AGREED_MONTHLY_GROSS,
+        ];
+    }
+
+    /**
+     * Spodní mez pravděpodobného výdělku: minimální mzda (§ 357 odst. 1 ZP).
+     *
+     * Poslední návrh, když vztah nemá ani mzdu dosaženou od nástupu, ani
+     * sjednanou měsíční mzdu — typicky dohoda v prvním měsíci nebo měsíc bez
+     * příjmu. Atribut 10345 je v XSD povinný a výdělek pod minimální mzdou
+     * zákon nepřipouští, takže minimální mzda je jediné číslo, které z
+     * evidence plyne bez odhadu. Přijatá hlášení jiného systému ji v takovém
+     * měsíci vykazují (2026: 134,40 Kč). Je to NÁVRH: vyšší pravděpodobný
+     * výdělek zadá účetní do podmínek vztahu a ten má přednost.
+     *
+     * Bere se sazba pro obecnou týdenní dobu 40 hodin. Kratší STANOVENOU
+     * týdenní dobu (vyšší hodinové minimum) zohlední výpočet průměru sám při
+     * potvrzení ({@see AverageEarningCalculator}); sjednaný kratší úvazek ani
+     * dohoda hodinové minimum nezvyšují.
+     *
+     * @return array<string,mixed>
+     */
+    public static function probableFromMinimumWage(MinimumWageFloor $floor): array
+    {
+        return [
+            'hourly_minor' => $floor->hourlyMinor,
+            'rationale' => sprintf(
+                'Pravděpodobný výdělek podle § 355 odst. 2 zákoníku práce nejde odvodit'
+                    . ' z dosažené ani sjednané mzdy; navržena spodní mez, hodinová'
+                    . ' minimální mzda %s Kč (§ 357 odst. 1 zákoníku práce).',
+                self::czk($floor->hourlyMinor),
+            ),
+            'term_id' => null,
+            'effective_from' => null,
+            'source' => self::PROBABLE_SOURCE_MINIMUM_WAGE,
         ];
     }
 

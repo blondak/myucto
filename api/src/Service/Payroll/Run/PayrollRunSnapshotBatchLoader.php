@@ -89,6 +89,7 @@ final class PayrollRunSnapshotBatchLoader
                     summary.unpaid_leave_millihours,
                     summary.unexcused_millihours,
                     summary.compensatory_time_off_millihours,
+                    summary.holiday_millihours,
                     summary.confirmation_note,
                     summary.provenance_json,
                     summary.summary_sha256,
@@ -180,19 +181,30 @@ final class PayrollRunSnapshotBatchLoader
         string $periodStart,
         string $periodEnd,
     ): array {
+        // Okno náhrady mzdy a potvrzení nároku na nemocenské ze schváleného
+        // výpočtu náhrady DPN: z nich měsíční hlášení dělí vyloučené dny
+        // § 18 odst. 7 na 10474 a 10475.
         return $this->grouped($this->fetch(
-            'SELECT id, absence_type, date_from, date_to,
-                    expected_childbirth_date, childbirth_date,
-                    partial_first_minutes, partial_last_minutes, timezone_name,
-                    compensation_policy, average_snapshot_id, decided_at,
-                    employment_id AS ' . self::GROUP_KEY . '
-               FROM payroll_absences
-              WHERE supplier_id = ?
-                AND employment_id IN (%s)
-                AND status = "approved"
-                AND date_from <= ?
-                AND date_to >= ?
-              ORDER BY date_from, id',
+            'SELECT absence.id, absence.absence_type, absence.date_from, absence.date_to,
+                    absence.expected_childbirth_date, absence.childbirth_date,
+                    absence.lone_carer,
+                    absence.partial_first_minutes, absence.partial_last_minutes,
+                    absence.timezone_name, absence.compensation_policy,
+                    absence.average_snapshot_id, absence.decided_at,
+                    sickness.compensation_window_from,
+                    sickness.compensation_window_to,
+                    sickness.insurance_eligibility_confirmed,
+                    absence.employment_id AS ' . self::GROUP_KEY . '
+               FROM payroll_absences absence
+               LEFT JOIN payroll_sickness_events sickness
+                 ON sickness.supplier_id = absence.supplier_id
+                AND sickness.absence_id = absence.id
+              WHERE absence.supplier_id = ?
+                AND absence.employment_id IN (%s)
+                AND absence.status = "approved"
+                AND absence.date_from <= ?
+                AND absence.date_to >= ?
+              ORDER BY absence.date_from, absence.id',
             [$supplierId],
             $employmentIds,
             [$periodEnd, $periodStart],

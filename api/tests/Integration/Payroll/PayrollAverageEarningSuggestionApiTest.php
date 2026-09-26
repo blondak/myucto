@@ -166,6 +166,25 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         self::assertStringContainsString('§ 355 odst. 2', (string) $suggestion['probable_rationale']);
     }
 
+    /**
+     * Nový vztah bez uzavřeného běhu i bez sjednané měsíční mzdy (dohoda
+     * v prvním měsíci): návrh je spodní mez, hodinová minimální mzda. Dřív se
+     * zastavil na „pravděpodobný výdělek nezadán" a s ním celé hlášení (10345).
+     */
+    public function testNewEmploymentWithoutAnyWageGetsMinimumWageProposal(): void
+    {
+        $this->startEmploymentOn('2026-07-01');
+
+        $suggestion = $this->suggest(2026, 3);
+
+        self::assertTrue($suggestion['ready']);
+        self::assertSame([], $suggestion['blockers']);
+        self::assertSame('probable', $suggestion['source_kind']);
+        self::assertSame('minimum_wage', $suggestion['probable_source']);
+        // Minimální mzda 2026: 134,40 Kč za hodinu.
+        self::assertSame(13_440, $suggestion['probable_hourly_minor']);
+    }
+
     public function testBulkCreatesAndApprovesTheProposedAverage(): void
     {
         $this->startEmploymentOn('2026-06-01');

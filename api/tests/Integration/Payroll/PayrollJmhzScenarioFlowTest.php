@@ -78,11 +78,40 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         $xml = $this->submission('vacation');
 
         self::assertSame(1, substr_count($xml, '</formularOsoby>'));
-        // Dovolená jde do 10279 a zároveň do placených neodpracovaných 10276.
-        self::assertStringContainsString('<form:hodinyNeodpracCelkem>16.000</form:hodinyNeodpracCelkem>', $xml);
-        self::assertStringContainsString('<form:hodinyNeodpracNahrada>16.000</form:hodinyNeodpracNahrada>', $xml);
+        // Dovolená jde do 10279 a zároveň do placených neodpracovaných 10276;
+        // k ní svátek 6. 7. (pokyny MPSV k 10275/10276), takže 16 + 8 hodin.
+        self::assertStringContainsString('<form:hodinyNeodpracCelkem>24.000</form:hodinyNeodpracCelkem>', $xml);
+        self::assertStringContainsString('<form:hodinyNeodpracNahrada>24.000</form:hodinyNeodpracNahrada>', $xml);
         self::assertStringContainsString('<form:hodinyNeodpracDovol>16.000</form:hodinyNeodpracDovol>', $xml);
         self::assertStringContainsString('<form:vylouceneDobyCelkem>0</form:vylouceneDobyCelkem>', $xml);
+        // 10268 + 10275 = 10260: 160 odpracovaných + 24 neodpracovaných = 184.
+        self::assertStringContainsString('<form:sjednanyFond>184.000</form:sjednanyFond>', $xml);
+        self::assertStringContainsString('<form:pocet>160.000</form:pocet>', $xml);
+    }
+
+    /**
+     * Měsíc bez nepřítomnosti se svátkem v jinak pracovní den (6. 7. 2026).
+     * Pokyny MPSV: stanovený fond 10259 svátky zahrnuje (23 pracovních dnů
+     * = 184 hodin) a jejich neodpracované hodiny patří do 10275 i do 10276,
+     * takže platí 10268 + 10275 = 10260. Hromadné i ruční schválení pošle
+     * neodpracované hodiny prázdné, svátek doplní souhrn sám.
+     */
+    public function testHolidayOnWorkdayIsReportedAsPaidUnworkedHours(): void
+    {
+        $person = $this->hire('Olga Svátek', 'female', '1986-02-14');
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->pay($person, 4_000_000);
+
+        $xml = $this->submission('holiday');
+
+        self::assertStringContainsString('<form:stanovenyFond>184.000</form:stanovenyFond>', $xml);
+        self::assertStringContainsString('<form:sjednanyFond>184.000</form:sjednanyFond>', $xml);
+        self::assertStringContainsString('<form:pocet>176.000</form:pocet>', $xml);
+        self::assertStringContainsString(
+            '<form:neodpracovaneHodiny><form:hodinyNeodpracCelkem>8.000</form:hodinyNeodpracCelkem>'
+                . '<form:hodinyNeodpracNahrada>8.000</form:hodinyNeodpracNahrada></form:neodpracovaneHodiny>',
+            $xml,
+        );
     }
 
     /**
@@ -201,9 +230,9 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
 
         self::assertSame(1, substr_count($xml, '</formularOsoby>'));
         // Náhradní volno: jen úhrn 10275, bez placených 10276 (§ 114 odst. 1 ZP),
-        // celý den je vyloučeným dnem § 18 odst. 7.
-        self::assertStringContainsString('<form:hodinyNeodpracCelkem>8.000</form:hodinyNeodpracCelkem>', $xml);
-        self::assertStringNotContainsString('<form:hodinyNeodpracNahrada>', $xml);
+        // celý den je vyloučeným dnem § 18 odst. 7. Svátek 6. 7. je v obou.
+        self::assertStringContainsString('<form:hodinyNeodpracCelkem>16.000</form:hodinyNeodpracCelkem>', $xml);
+        self::assertStringContainsString('<form:hodinyNeodpracNahrada>8.000</form:hodinyNeodpracNahrada>', $xml);
         self::assertStringContainsString('<form:omluvenaNepritomnost>1</form:omluvenaNepritomnost>', $xml);
     }
 
@@ -231,6 +260,13 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         self::assertSame(1, substr_count($xml, '</formularOsoby>'));
         // Celá DPN je vyloučenou dobou; hodiny se dělí oknem náhrady § 192 ZP.
         self::assertStringContainsString('<form:docasNeschopnost>26</form:docasNeschopnost>', $xml);
+        // Vyloučené dny § 18 odst. 7: 14 dnů v okně náhrady mzdy (10474),
+        // 12 dnů nemocenského s potvrzeným nárokem (10475).
+        self::assertStringContainsString(
+            '<form:vyloucenePar18>26</form:vyloucenePar18><form:omluvenaNepritomnost>0</form:omluvenaNepritomnost>'
+                . '<form:pracovniNeschopnost>14</form:pracovniNeschopnost><form:vyplaceniDavek>12</form:vyplaceniDavek>',
+            $xml,
+        );
         self::assertStringContainsString('<form:hodinyNeodpracNeschop>80.000</form:hodinyNeodpracNeschop>', $xml);
         self::assertStringContainsString('<form:hodinyNeodpracBezNahrady>80.000</form:hodinyNeodpracBezNahrady>', $xml);
         // Pokyny MPSV k 10276: hodiny DPN se neuvádějí. Nemoc s náhradou mzdy
@@ -318,6 +354,84 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         // 6,5 % z 30 000 Kč = 1 950 Kč (§ 7e zák. 589/1992).
         self::assertStringContainsString('<form:slevaZamestnanceEvidovana>true</form:slevaZamestnanceEvidovana>', $xml);
         self::assertStringContainsString('<form:vyseSlevy>1950</form:vyseSlevy>', $xml);
+        // Poživatel starobního důchodu: údaje třídy ELDP se nehlásí, jen
+        // pojištění od–do a 10356 = 0 (metodika MPSV/ČSSZ). Vyměřovací základ
+        // a pojistné zůstávají.
+        self::assertStringContainsString(
+            '<form:eldpSeznam><form:eldp><form:pocetDnu>0</form:pocetDnu></form:eldp></form:eldpSeznam>',
+            $xml,
+        );
+        self::assertStringNotContainsString('<form:kod>', $xml);
+        self::assertStringContainsString('<form:castkaOdvodPojistneho>30000</form:castkaOdvodPojistneho>', $xml);
+    }
+
+    /**
+     * Pracující důchodce v pracovní neschopnosti: sekce bez kódu ELDP, ale
+     * vyloučené dny § 18 odst. 7 nese dál (nemocensky pojištěný zůstává).
+     */
+    public function testWorkingPensionerOnSickLeaveKeepsSection18Days(): void
+    {
+        $person = $this->hire('Petr Důchodce', 'male', '1957-03-11', socialDiscountStatus: 'verified');
+        $sick = self::dateRange('2026-07-13', '2026-07-24');
+        $this->createApprovedAbsence(
+            $person['employment_id'],
+            'dpn',
+            '2026-07-13',
+            '2026-07-24',
+            $person['average_id'],
+            decisionExtra: [
+                'first_day_fully_worked' => false,
+                'insurance_eligibility_confirmed' => true,
+                'conflicting_benefit_excluded' => true,
+            ],
+        );
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD, $sick));
+        $this->pay($person, 2_000_000);
+
+        $xml = $this->submission('pensioner-sick');
+
+        self::assertStringContainsString(
+            '<form:eldp><form:pocetDnu>0</form:pocetDnu><form:vylouceneDny>'
+                . '<form:vyloucenePar18>12</form:vyloucenePar18><form:omluvenaNepritomnost>0</form:omluvenaNepritomnost>'
+                . '<form:pracovniNeschopnost>12</form:pracovniNeschopnost><form:vyplaceniDavek>0</form:vyplaceniDavek>'
+                . '</form:vylouceneDny></form:eldp>',
+            $xml,
+        );
+        self::assertStringNotContainsString('<form:vylouceneDobyCelkem>', $xml);
+    }
+
+    /**
+     * Měsíc porodu bez příjmu (PPM od června, porod 15. 7.): tvar přijatý ČSSZ
+     * v hlášení jiného systému — celý měsíc je dobou pojištění (10356 = 31),
+     * vyloučenou dobou 10357 = 10359 dny před porodem (14) a celý měsíc
+     * vyloučenými dny s vyplacenou dávkou (10475 = 31).
+     */
+    public function testChildbirthMonthWithoutIncome(): void
+    {
+        $person = $this->hire('Věra Porodní', 'female', '1994-05-05');
+        $this->createApprovedAbsence(
+            $person['employment_id'],
+            'ppm',
+            '2026-06-01',
+            '2026-12-31',
+            extra: ['expected_childbirth_date' => '2026-07-20', 'childbirth_date' => '2026-07-15'],
+        );
+        $this->approveMonth($person['employment_id'], []);
+
+        $xml = $this->submission('childbirth-month');
+
+        self::assertStringContainsString('<form:kod>1++</form:kod>', $xml);
+        self::assertStringContainsString('<form:pocetDnu>31</form:pocetDnu>', $xml);
+        self::assertStringContainsString(
+            '<form:vylouceneDobyCelkem>14</form:vylouceneDobyCelkem><form:docasNeschopnost>0</form:docasNeschopnost>'
+                . '<form:penezitaPomocMaterstvi>14</form:penezitaPomocMaterstvi>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<form:vyloucenePar18>31</form:vyloucenePar18><form:omluvenaNepritomnost>0</form:omluvenaNepritomnost>'
+                . '<form:pracovniNeschopnost>0</form:pracovniNeschopnost><form:vyplaceniDavek>31</form:vyplaceniDavek>',
+            $xml,
+        );
     }
 
     public function testChildClaimedByOtherCaregiverAndOwnSecondChild(): void

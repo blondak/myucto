@@ -231,6 +231,47 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
     }
 
     /**
+     * Sekce bez kódu ELDP (poživatel starobního důchodu) vyloučené doby § 16
+     * nenese (kontrola 307), vyloučené dny § 18 odst. 7 ale ano — jsou to
+     * údaje nemocenského pojištění. Dřív je serializér v sekci bez kódu tiše
+     * zahodil.
+     */
+    public function testCodelessSectionStillCarriesSection18Days(): void
+    {
+        $payload = $this->payload();
+        $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+        $section['code'] = null;
+        $section['valid_from'] = null;
+        $section['valid_to'] = null;
+        $section['insurance_days'] = 0;
+        $section['assessment_base_czk'] = null;
+        $section['excluded_days'] = null;
+        $section['excluded_days_total'] = null;
+        $section['section18_days'] = [
+            'omluvenaNepritomnost' => 0,
+            'pracovniNeschopnost' => 12,
+            'vyplaceniDavek' => 0,
+        ];
+        $section['section18_days_total'] = 12;
+        unset($section);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:eldp><form:pocetDnu>0</form:pocetDnu><form:vylouceneDny>'
+                . '<form:vyloucenePar18>12</form:vyloucenePar18>'
+                . '<form:omluvenaNepritomnost>0</form:omluvenaNepritomnost>'
+                . '<form:pracovniNeschopnost>12</form:pracovniNeschopnost>'
+                . '<form:vyplaceniDavek>0</form:vyplaceniDavek></form:vylouceneDny></form:eldp>',
+            preg_replace('/>\s+</', '><', $result['xml']) ?? '',
+        );
+        self::assertSame([], $this->failedControls($result['xml'], [307, 330]));
+    }
+
+    /**
      * `null` v řezu znamená NEUVEDENO. Datový slovník předepisuje
      * 10366 = 10473 + 10474 + 10475, takže vykázat část rozpadu by tvrdilo,
      * že zbytek je nula — a to je stejná chyba jako mlčení, jen hůř
@@ -1657,6 +1698,70 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                 $exception->validationCode,
             );
         }
+    }
+
+    /**
+     * Kontrola 36: přesčas bez složky příplatku za přesčas. Pokyny MPSV u 10333
+     * chtějí „pokud nebyly příplatky proplaceny, uvést 0"; bez zápisu nuly
+     * blokující kontrola 36 podání odmítne.
+     */
+    public function testOvertimeWithoutSurchargeComponentReportsZeroSurcharge(): void
+    {
+        $payload = $this->payload();
+        $values = &$payload['people'][0]['employments'][0]['work_month']
+            ['jmhz_work_summary']['values'];
+        $values['worked_days'] = 16;
+        $values['overtime_millihours'] = 3_000;
+        unset($values);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+        $xml = preg_replace('/>\s+</', '><', $result['xml']) ?? '';
+
+        self::assertStringContainsString(
+            '<form:odmenyNepravidelne>0</form:odmenyNepravidelne>'
+                . '<form:priplatky><form:celkem>0</form:celkem>'
+                . '<form:prescas>0</form:prescas></form:priplatky></form:mzdaRozpad>',
+            $xml,
+        );
+        self::assertSame([], $this->failedControls($result['xml'], [36]));
+    }
+
+    /**
+     * Firma se složkou příplatku za noc, ale bez příplatku za přesčas: úhrn
+     * zůstává ze zdroje a doplní se jen nulový příplatek za přesčas na jeho
+     * místo v sekvenci `priplatkyType`.
+     */
+    public function testOvertimeKeepsFrozenSurchargeTotalAndAddsZeroOvertimeSurcharge(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['earnings_by_attribute_minor'] = [
+            '10328' => 100_000,
+            '10329' => 90_000,
+            '10330' => 0,
+            '10331' => 0,
+            '10332' => 10_000,
+            '10334' => 10_000,
+        ];
+        $values = &$payload['people'][0]['employments'][0]['work_month']
+            ['jmhz_work_summary']['values'];
+        $values['worked_days'] = 16;
+        $values['overtime_millihours'] = 3_000;
+        unset($values);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:priplatky><form:celkem>100</form:celkem>'
+                . '<form:prescas>0</form:prescas><form:nocni>100</form:nocni></form:priplatky>',
+            preg_replace('/>\s+</', '><', $result['xml']) ?? '',
+        );
+        self::assertSame([], $this->failedControls($result['xml'], [29, 36]));
     }
 
     /**

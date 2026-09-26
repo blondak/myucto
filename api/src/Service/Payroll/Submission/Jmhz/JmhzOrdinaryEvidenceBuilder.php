@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceScope;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceSource;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
 use MyInvoice\Service\Payroll\Garnishment\GarnishmentInput;
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class JmhzOrdinaryEvidenceBuilder
@@ -175,7 +176,9 @@ final class JmhzOrdinaryEvidenceBuilder
                     ['partner_dependent', 'statutory_body'],
                     true,
                 )
-                && ($term['activity_code'] ?? null) === 'S'
+                && PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity(
+                    $term['activity_code'] ?? null,
+                )
                 && ($term['jmhz_relationship_detail_code'] ?? null) === '1');
         if ($selection['supported'] !== true || !$supportedProfile) {
             $this->invalid(

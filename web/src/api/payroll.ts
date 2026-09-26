@@ -1289,6 +1289,12 @@ export interface PayrollJmhzWorkSummaryPreview {
     compensatory_time_off_hours: string | null
   }
   issues: Array<{ code: string; message: string }>
+  /*
+   * Svátky v jinak pracovní dny v tisícinách hodiny (od souhrnu v7). Účetní
+   * je nezadává; souhrn je při schválení přičte k 10275 a 10276. `null` =
+   * nejde vyjádřit v celých tisícinách hodiny a měsíc nejde schválit.
+   */
+  holiday_millihours?: number | null
   requires_unworked_hours_followup: boolean
   /** Druhy nepřítomnosti evidované v měsíci, seřazené abecedně. */
   absence_types: string[]

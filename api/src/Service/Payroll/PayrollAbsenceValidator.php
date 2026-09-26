@@ -115,6 +115,21 @@ final class PayrollAbsenceValidator
          * schválení.
          */
         $averageId = $this->nullablePositiveInt($body['average_snapshot_id'] ?? null, 'average_snapshot_id');
+        /*
+         * Osamělý zaměstnanec s dítětem do 16 let má podpůrčí dobu ošetřovného
+         * 16 dnů místo 9 (§ 40 odst. 1 písm. b) zákona č. 187/2006 Sb.). Na ní
+         * stojí vyloučené doby i vyloučené dny měsíčního hlášení, a jinde než
+         * u ošetřování člena rodiny nemá význam.
+         */
+        $loneCarer = $body['lone_carer'] ?? false;
+        if (!is_bool($loneCarer)) {
+            throw new \InvalidArgumentException('Osamělý zaměstnanec musí být ano, nebo ne.');
+        }
+        if ($loneCarer && $type !== 'ocr') {
+            throw new \InvalidArgumentException(
+                'Osamělého zaměstnance (16 dnů ošetřovného) lze označit jen u ošetřování člena rodiny.',
+            );
+        }
         return [
             'employment_id' => $employmentId,
             'absence_type' => $type,
@@ -122,6 +137,7 @@ final class PayrollAbsenceValidator
             'date_to' => $to,
             'expected_childbirth_date' => $expectedChildbirth,
             'childbirth_date' => $childbirth,
+            'lone_carer' => $loneCarer,
             'timezone_name' => $timezone,
             'partial_first_minutes' => $this->nullablePositiveInt(
                 $body['partial_first_minutes'] ?? null,

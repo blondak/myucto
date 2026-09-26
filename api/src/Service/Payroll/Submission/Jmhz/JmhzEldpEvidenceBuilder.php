@@ -111,6 +111,9 @@ final class JmhzEldpEvidenceBuilder
         // zaměstnavatel neplatí, a proto do 10276 nevstupují.
         'employee_obstacle_paid_millihours',
         'employer_obstacle_millihours',
+        // Svátek v jinak pracovní den: mzda se nekrátí nebo náleží náhrada
+        // (pokyny MPSV k 10276). Nese ho až souhrn v7/v8.
+        'holiday_millihours',
     ];
 
     /**
@@ -135,8 +138,10 @@ final class JmhzEldpEvidenceBuilder
      * 10359 nese jen PŘEDPORODNÍ část peněžité pomoci v mateřství, kdežto
      * hodinový blok pracovního souhrnu celou nepřítomnost. Měsíc po porodu
      * proto legitimně vykazuje hodiny PPM bez jediného vyloučeného dne.
+     * Totéž ošetřovné: 10360 končí podpůrčí dobou (9, 16 nebo 90 dnů), hodiny
+     * péče trvají celou nepřítomnost.
      */
-    private const ONE_WAY_EXCLUDED_ATTRIBUTES = ['penezitaPomocMaterstvi'];
+    private const ONE_WAY_EXCLUDED_ATTRIBUTES = ['penezitaPomocMaterstvi', 'osetrovaniClenaRodiny'];
 
     /** @var array{manifest_sha256:string,payload:array<string,mixed>}|null */
     private ?array $specManifest = null;
@@ -203,6 +208,7 @@ final class JmhzEldpEvidenceBuilder
         );
         $relationship = $this->socialRelationship($result, $employeeId, $employmentId);
         $participates = $this->participationMode($relationType, $relationship, $employmentId);
+        $eldpReported = $participates && !self::workingPensioner($input, $employeeId);
         $assessmentBaseMinor = $this->nonNegativeInt(
             $relationship['assessment_base_minor_units'] ?? null,
             'assessment_base_minor_units',
@@ -213,7 +219,7 @@ final class JmhzEldpEvidenceBuilder
         $outsideInsurance = is_array($absences) && array_is_list($absences)
             && $this->monthOutsideInsurancePeriod(
                 $absences,
-                $participates,
+                $eldpReported,
                 $assessmentBaseMinor,
                 $insuranceFrom,
                 $insuranceTo,
@@ -221,11 +227,11 @@ final class JmhzEldpEvidenceBuilder
         $confirmation = [
             'insurance_from' => $insuranceFrom,
             'insurance_to' => $insuranceTo,
-            'valid_from' => $participates ? $insuranceFrom : null,
-            'valid_to' => $participates ? $insuranceTo : null,
-            'insurance_days' => $participates && !$outsideInsurance ? $insuranceDays : 0,
-            'code' => $participates ? $activityCode . '++' : null,
-            'assessment_base_czk' => $participates ? intdiv($assessmentBaseMinor, 100) : null,
+            'valid_from' => $eldpReported ? $insuranceFrom : null,
+            'valid_to' => $eldpReported ? $insuranceTo : null,
+            'insurance_days' => $eldpReported && !$outsideInsurance ? $insuranceDays : 0,
+            'code' => $eldpReported ? $activityCode . '++' : null,
+            'assessment_base_czk' => $eldpReported ? intdiv($assessmentBaseMinor, 100) : null,
             'in03_active' => false,
             'in04_active' => false,
             'confirmation_note' => '',
@@ -350,10 +356,22 @@ final class JmhzEldpEvidenceBuilder
             $this->invalid('jmhz_eldp_social_relationship_unsupported', 'Neúčastný vztah nesmí mít vyměřovací základ sociálního pojištění.');
         }
 
+        /*
+         * Poživatel starobního důchodu (ověřená sleva pracujícího důchodce,
+         * § 7d ZPSZ, tedy důchod po celý měsíc): údaje třídy ELDP se za něj
+         * nehlásí. Metodika MPSV/ČSSZ (7. setkání HRIS a veřejná diskuze
+         * k JMHZ): „na měsíčním hlášení se vyplňuje jen interval Pojištěn od
+         * (10354) – Pojištěn do (10355) a počet kalendářních dnů trvání
+         * pojištění (10356), který se vykáže jako 0". Nemocensky pojištěný
+         * zůstává, takže vyloučené dny § 18 odst. 7 se vykazují dál. Přijatá
+         * hlášení dvou jiných mzdových systémů to tak mají. Vyměřovací základ
+         * a pojistné (10477, 10370) nejsou třída ELDP a zůstávají.
+         */
+        $eldpReported = $participates && !self::workingPensioner($input, $employeeId);
         $insuranceFrom = $this->date($confirmation['insurance_from'] ?? null, 'insurance_from');
         $insuranceTo = $this->date($confirmation['insurance_to'] ?? null, 'insurance_to');
-        $validFrom = $participates ? $this->date($confirmation['valid_from'] ?? null, 'valid_from') : null;
-        $validTo = $participates ? $this->date($confirmation['valid_to'] ?? null, 'valid_to') : null;
+        $validFrom = $eldpReported ? $this->date($confirmation['valid_from'] ?? null, 'valid_from') : null;
+        $validTo = $eldpReported ? $this->date($confirmation['valid_to'] ?? null, 'valid_to') : null;
         $employmentFrom = $employment['actual_start_date'] ?? $employment['start_date'] ?? null;
         $employmentTo = $employment['end_date'] ?? null;
         if (!is_string($employmentFrom)) {
@@ -364,7 +382,7 @@ final class JmhzEldpEvidenceBuilder
         if ($expectedFrom > $expectedTo
             || $insuranceFrom !== $expectedFrom
             || $insuranceTo !== $expectedTo
-            || ($participates && ($validFrom !== $insuranceFrom || $validTo !== $insuranceTo))
+            || ($eldpReported && ($validFrom !== $insuranceFrom || $validTo !== $insuranceTo))
         ) {
             $this->invalid('jmhz_eldp_interval_invalid', 'Interval ELDP musí přesně odpovídat průniku pracovního vztahu s vykazovaným měsícem.');
         }
@@ -372,12 +390,12 @@ final class JmhzEldpEvidenceBuilder
         // před porodem, a to se dá říct jen o intervalu, který odpovídá vztahu.
         $outsideInsurance = $this->monthOutsideInsurancePeriod(
             $absences,
-            $participates,
+            $eldpReported,
             $uncappedBase,
             $insuranceFrom,
             $insuranceTo,
         );
-        $insured = $participates && !$outsideInsurance;
+        $insured = $eldpReported && !$outsideInsurance;
         $days = $insured
             ? $this->positiveInt($confirmation['insurance_days'] ?? null, 'insurance_days')
             : $this->nonNegativeInt($confirmation['insurance_days'] ?? null, 'insurance_days');
@@ -386,7 +404,15 @@ final class JmhzEldpEvidenceBuilder
         if (($insured && $days !== $inclusiveDays) || (!$insured && $days !== 0)) {
             $this->invalid('jmhz_eldp_days_mismatch', 'Počet dnů ELDP neodpovídá inkluzivnímu intervalu.');
         }
-        $excluded = $this->excludedPeriods($absences, $insuranceFrom, $insuranceTo, $days);
+        // Sekce bez třídy ELDP vyloučené doby nevykazuje; odvozují se jen
+        // kvůli kontrole nepřítomností proti pracovnímu souhrnu, takže se
+        // poměřují s intervalem vztahu, ne s nulou dnů pojištění.
+        $excluded = $this->excludedPeriods(
+            $absences,
+            $insuranceFrom,
+            $insuranceTo,
+            $eldpReported ? $days : $inclusiveDays,
+        );
         // Měsíc mimo dobu pojištění vztah a jeho nemocenské pojištění neruší,
         // takže vyloučené dny § 18 odst. 7 se v něm vykazují dál — přijatá
         // hlášení mají u celého měsíce neplaceného volna 31 dnů při nule dnů
@@ -396,6 +422,7 @@ final class JmhzEldpEvidenceBuilder
             $insuranceFrom,
             $insuranceTo,
             $participates ? $inclusiveDays : 0,
+            $eldpReported ? $excluded['total'] : 0,
         );
         $this->assertWorkSummaryConsistency(
             $workSummary,
@@ -411,7 +438,7 @@ final class JmhzEldpEvidenceBuilder
         $code = $confirmation['code'] ?? null;
         $confirmedBase = $confirmation['assessment_base_czk'] ?? null;
         $entryMetadata = null;
-        if ($participates) {
+        if ($eldpReported) {
             if (!is_string($code) || $code !== $activityCode . '++') {
                 $this->invalid('jmhz_eldp_code_activity_mismatch', 'Kód ELDP neodpovídá činnosti pracovního vztahu.');
             }
@@ -432,7 +459,10 @@ final class JmhzEldpEvidenceBuilder
             || ($confirmation['valid_to'] ?? null) !== null
             || $confirmedBase !== null
         ) {
-            $this->invalid('jmhz_eldp_nonparticipation_section_invalid', 'Neúčastná DPP musí mít bezkódovou ELDP sekci s nulou dnů a bez základu.');
+            $this->invalid(
+                'jmhz_eldp_nonparticipation_section_invalid',
+                'Neúčastný vztah i poživatel starobního důchodu mají bezkódovou ELDP sekci s nulou dnů a bez základu.',
+            );
         }
         if (($confirmation['in03_active'] ?? null) !== false
             || ($confirmation['in04_active'] ?? null) !== false
@@ -481,6 +511,8 @@ final class JmhzEldpEvidenceBuilder
                 'social_relationship' => $relationship,
                 'scenario_resolution' => $scenarioResolution,
                 'attribute_ids' => self::ATTRIBUTE_IDS,
+                // Účastný vztah bez třídy ELDP: poživatel starobního důchodu.
+                'working_pensioner' => $participates && !$eldpReported,
             ],
             'insurance_interval' => [
                 'insurance_from' => $insuranceFrom,
@@ -493,9 +525,11 @@ final class JmhzEldpEvidenceBuilder
                 'valid_to' => $validTo,
                 'insurance_days' => $days,
                 'assessment_base_czk' => $confirmedBase,
-                'excluded_days' => $excluded['components'],
-                'excluded_days_total' => $excluded['total'],
-                'excluded_days_provenance' => $excluded['provenance'],
+                // Vyloučené doby § 16 jsou třída ELDP; bez kódu je nesmí nést
+                // žádná sekce (kontrola 307), `null` = NEUVEDENO.
+                'excluded_days' => $eldpReported ? $excluded['components'] : null,
+                'excluded_days_total' => $eldpReported ? $excluded['total'] : null,
+                'excluded_days_provenance' => $eldpReported ? $excluded['provenance'] : [],
                 /*
                  * Vyloučené dny podle § 18 odst. 7 zákona č. 187/2006 Sb.
                  * (10366 a rozpad 10473–10475). Jiná veličina než vyloučené
@@ -526,6 +560,38 @@ final class JmhzEldpEvidenceBuilder
             ],
         ];
         return new JmhzEldpEvidenceSnapshot($payload);
+    }
+
+    /**
+     * Je osoba ve vykazovaném měsíci poživatelem starobního důchodu?
+     *
+     * Rozhoduje ověřený nárok na slevu pracujícího důchodce ze zmrazené zákonné
+     * evidence osoby: sleva podle § 7d ZPSZ náleží za měsíc, ve kterém je
+     * zaměstnanec poživatelem starobního důchodu po celý měsíc, a to je přesně
+     * podmínka, za které se třída ELDP nehlásí. Důchodce, který si slevu
+     * neuplatnil, dostane ELDP dál; metodika to nepovažuje za chybu („Pokud by
+     * zaměstnavatel … vyplnil kompletně údaje třídy ELDP i pro osobu, která
+     * již je poživatelem starobního důchodu, nebude to považováno za chybu").
+     * Opačná chyba — vynechat ELDP někomu, kdo důchod nepobírá — by byla
+     * ztráta doby pojištění, proto se z ničeho jiného nevyvozuje.
+     *
+     * @param array<string,mixed> $input
+     */
+    private static function workingPensioner(array $input, int $employeeId): bool
+    {
+        foreach ((array) ($input['people'] ?? []) as $person) {
+            if (!is_array($person) || (($person['employee'] ?? [])['id'] ?? null) !== $employeeId) {
+                continue;
+            }
+            $evidence = $person['statutory_evidence'] ?? null;
+            $discount = is_array($evidence)
+                ? (($evidence['social'] ?? [])['working_pensioner_discount'] ?? null)
+                : null;
+
+            return is_array($discount) && ($discount['status'] ?? null) === 'verified';
+        }
+
+        return false;
     }
 
     /**
@@ -767,7 +833,14 @@ final class JmhzEldpEvidenceBuilder
                 'Interakce IN08 pracovního souhrnu neodpovídá evidovaným překážkám v práci.',
             );
         }
+        // Svátek v jinak pracovní den je neodpracovaná hodina i bez evidované
+        // nepřítomnosti, takže měsíc se svátkem prochází stejnou kontrolou
+        // úhrnů jako měsíc s nepřítomností.
+        $holidayHours = self::carriesHolidays($summaryVersion)
+            && is_int($values['holiday_millihours'] ?? null)
+            && $values['holiday_millihours'] > 0;
         if ($absences !== []
+            || $holidayHours
             || (self::fromImportSummary($summaryVersion) && ($interactions['IN07'] ?? null) === true)
         ) {
             $this->assertAbsenceSliceWorkSummary(
@@ -808,6 +881,9 @@ final class JmhzEldpEvidenceBuilder
                 self::UNWORKED_FIELDS,
                 self::V3_UNWORKED_FIELDS,
                 ['compensatory_time_off_millihours'],
+                self::carriesHolidays($summaryVersion)
+                    ? PayrollJmhzWorkMonthSummaryBuilder::holidayFields()
+                    : [],
             );
         }
 
@@ -840,7 +916,10 @@ final class JmhzEldpEvidenceBuilder
         string $summaryVersion,
     ): void {
         $supported = self::absenceWorkSummaryFields($summaryVersion);
-        $documented = array_fill_keys(PayrollJmhzWorkMonthSummaryBuilder::importDateFreeSummaryFields(), true);
+        $documented = array_fill_keys([
+            ...PayrollJmhzWorkMonthSummaryBuilder::importDateFreeSummaryFields(),
+            ...PayrollJmhzWorkMonthSummaryBuilder::holidayFields(),
+        ], true);
         foreach ($absences as $absence) {
             foreach ($supported[(string) ($absence['absence_type'] ?? '')] ?? [] as $field) {
                 $documented[$field] = true;
@@ -1007,10 +1086,24 @@ final class JmhzEldpEvidenceBuilder
         );
     }
 
-    /** Bere souhrn odpracovanou dobu ze souhrnu importu docházky (v6)? */
+    /** Bere souhrn odpracovanou dobu ze souhrnu importu docházky (v6, v8)? */
     private static function fromImportSummary(string $summaryVersion): bool
     {
-        return $summaryVersion === PayrollJmhzWorkMonthSummaryBuilder::IMPORT_SUMMARY_DERIVATION_VERSION;
+        return in_array(
+            $summaryVersion,
+            PayrollJmhzWorkMonthSummaryBuilder::IMPORT_SUMMARY_VERSIONS,
+            true,
+        );
+    }
+
+    /** Nese souhrn hodiny svátků v jinak pracovní dny (od v7)? */
+    private static function carriesHolidays(string $summaryVersion): bool
+    {
+        return in_array(
+            $summaryVersion,
+            PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_HOLIDAYS,
+            true,
+        );
     }
 
     /**
@@ -1098,10 +1191,13 @@ final class JmhzEldpEvidenceBuilder
      * Vyloučené dny podle § 18 odst. 7 zákona č. 187/2006 Sb. (10366 a rozpad
      * 10473–10475) pro jeden ELDP řez.
      *
-     * Vrací `null`, když se rozpad ze zmrazeného snapshotu odvodit nedá —
-     * důvody a doklad, proč je vynechání legální, drží
-     * {@see EldpExcludedPeriodDeriver::deriveSection18()}. `null` znamená
-     * NEUVEDENO, ne nulu; serializér pak celý blok vynechá.
+     * Vrací `null`, když se rozpad ze zmrazeného snapshotu odvodit nedá
+     * ({@see EldpExcludedPeriodDeriver::deriveSection18()}). `null` znamená
+     * NEUVEDENO, ne nulu; serializér pak celý blok vynechá. Legální je to jen
+     * tehdy, když sekce vykazuje vyloučené doby (10357 > 0): matice povinností
+     * vede 10366 jako „nepovinné, pokud je vyplněn 10357 > 0". V sekci bez
+     * vyloučených dob (měsíc bez dnů pojištění, poživatel starobního důchodu)
+     * výjimka neplatí a nerozhodnutelný rozpad hlášení zastaví.
      *
      * @param list<array<string,mixed>> $absences
      * @return array{components:array<string,int>,total:int,provenance:list<array<string,mixed>>}|null
@@ -1111,6 +1207,7 @@ final class JmhzEldpEvidenceBuilder
         string $insuranceFrom,
         string $insuranceTo,
         int $insuranceDays,
+        int $excludedPeriodsTotal,
     ): ?array {
         if ($insuranceDays === 0) {
             // Neúčastný vztah (dohoda pod hranicí) nemocensky pojištěný není,
@@ -1124,7 +1221,16 @@ final class JmhzEldpEvidenceBuilder
             $insuranceTo,
         );
         if ($derived['derivable'] !== true) {
-            return null;
+            if ($excludedPeriodsTotal > 0) {
+                return null;
+            }
+            $this->invalid(
+                'jmhz_eldp_section18_days_unresolved',
+                'Vyloučené dny podle § 18 odst. 7 zákona č. 187/2006 Sb. nejde z nepřítomností'
+                    . ' měsíce odvodit (' . implode(', ', $derived['undecidable_types']) . ') a bez'
+                    . ' vyloučených dob je hlášení musí nést. U nemoci znovu schvalte mzdový'
+                    . ' běh, aby se zmrazilo okno náhrady mzdy.',
+            );
         }
         if (array_sum($derived['components']) !== $derived['total']) {
             $this->invalid(
@@ -1191,6 +1297,11 @@ final class JmhzEldpEvidenceBuilder
         }
         if (self::fromImportSummary($summaryVersion)) {
             foreach (PayrollJmhzWorkMonthSummaryBuilder::importDateFreeSummaryFields() as $field) {
+                $filled[$field] = true;
+            }
+        }
+        if (self::carriesHolidays($summaryVersion)) {
+            foreach (PayrollJmhzWorkMonthSummaryBuilder::holidayFields() as $field) {
                 $filled[$field] = true;
             }
         }

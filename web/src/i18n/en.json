@@ -4100,8 +4100,9 @@
         "unworked_question": "Were there unworked hours this month?",
         "obstacles_question": "Were there obstacles to work this month?",
         "hours_unit": "hours",
-        "standard_fund_hint": "How many hours the month has at full time. Prefilled from the statutory weekly hours (40 h) and public holidays — overwrite if yours is shorter.",
-        "agreed_fund_hint": "How many hours this person is contracted to work this month."
+        "standard_fund_hint": "How many hours the month has at full time: 8 hours for every working day including public holidays falling on a working day (MPSV instructions). Prefilled from the statutory weekly hours (40 h) — overwrite if yours is shorter.",
+        "agreed_fund_hint": "How many hours this person is contracted to work this month.",
+        "holiday_hours_hint": "Public holidays on working days: {hours} h. Do not enter them in the unworked hours below — on approval the app adds them to the total and the paid unworked hours itself (MPSV instructions for 10275 and 10276)."
       },
       "bulk": {
         "approve": "Approve selected ({count})",
@@ -4112,7 +4113,7 @@
         "title": "Bulk attendance approval",
         "hint": "{count} employments will be approved with a JMHZ summary. The agreed fund, weekly hours and hours worked come from each employment's own suggestion.",
         "confirm": "Approve ({count})",
-        "standard_fund_hint": "Prefilled from the statutory weekly hours and public holidays — the same for every relationship being approved. Overwrite if yours is shorter.",
+        "standard_fund_hint": "Prefilled from the statutory weekly hours including public holidays on working days — the same for every relationship being approved. Overwrite if yours is shorter. The app adds holidays to the unworked hours itself.",
         "blocked_no_candidates": "The selection contains no employment that can be approved in bulk.",
         "blocked_no_standard_fund": "Fill in the standard monthly fund — without it the JMHZ summary would be incomplete.",
         "excluded": {
@@ -24383,6 +24384,8 @@
       "childbirth": "Date of birth",
       "childbirth_hint": "Only the part of maternity benefit before the birth is an excluded period of the insurance record. You can add the date of birth later, once it happens.",
       "childbirth_missing": "Not filled in",
+      "lone_carer": "Single employee caring for a child under 16",
+      "lone_carer_hint": "Nursing benefit is then paid for up to 16 calendar days instead of 9 (Section 40(1) of the Sickness Insurance Act). The monthly report uses it for the excluded care period (10360) and the benefit days (10475); days beyond the support period are reported as excused absence without compensation (10473).",
       "record_childbirth": "Add date of birth",
       "record_childbirth_save": "Save date of birth",
       "record_childbirth_once": "The date of birth can be added only once. To correct a wrong date, cancel the absence and record it again.",
@@ -24438,7 +24441,8 @@
       "probable_source": {
         "terms": "set in the employment terms",
         "achieved_wage": "from wages achieved since joining (§ 355(2) of the Labour Code)",
-        "agreed_monthly_gross": "from the agreed monthly wage (§ 355(2) of the Labour Code)"
+        "agreed_monthly_gross": "from the agreed monthly wage (§ 355(2) of the Labour Code)",
+        "minimum_wage": "lower limit, the minimum wage (§ 357(1) of the Labour Code) — enter a higher one in the employment terms"
       },
       "blockers": {
         "run_missing": "One month of the decisive period has no payroll run; for a new starter the average is set as probable earnings (§ 355 of the Labour Code)",

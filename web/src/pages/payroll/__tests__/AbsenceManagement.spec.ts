@@ -463,6 +463,29 @@ describe('AbsenceManagement', () => {
     wrapper.unmount()
   })
 
+  /*
+   * Osamělý zaměstnanec má ošetřovné 16 dnů místo 9; podle toho měsíční
+   * hlášení počítá 10360 a 10475. Příznak se nabízí jen u ošetřování.
+   */
+  it('u ošetřování nabídne osamělého zaměstnance a pošle příznak', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    expect(wrapper.find('[data-test="absence-lone-carer"]').exists()).toBe(false)
+
+    ;(wrapper.findComponent('[data-test="absence-type"]') as VueWrapper<any>)
+      .vm.$emit('update:modelValue', 'ocr')
+    await flushPromises()
+    await wrapper.get('[data-test="absence-lone-carer"]').setValue(true)
+    await wrapper.get('[data-test="absence-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.createAbsence).toHaveBeenLastCalledWith(expect.objectContaining({
+      absence_type: 'ocr',
+      lone_carer: true,
+    }))
+    wrapper.unmount()
+  })
+
   it('u jiného druhu než PPM dny porodu neposílá', async () => {
     const wrapper = mount(AbsenceManagement)
     await flushPromises()

@@ -201,6 +201,202 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
+    /**
+     * 10344 podle pokynů MPSV: zdaňovaný příjem (i nepeněžní) po pojistném
+     * a záloze, BEZ daňového bonusu a bez osvobozeného stravenkového
+     * paušálu. Čistá mzda pro srážky (`net_before_deductions`) nese bonus
+     * i paušál, ale zdanitelný oběd ne — do hlášení nepatří.
+     */
+    public function testNetIncomeIsTaxableIncomeAfterContributionsWithoutTaxBonus(): void
+    {
+        $payload = $this->currentPayload();
+        $person = &$payload['people'][0];
+        $tax = &$person['person_summary']['statutory']['income_tax'];
+        $tax['advance_tax']['taxable_income_minor_units'] = 105_000;
+        $tax['advance_tax']['rounded_tax_base_minor_units'] = 105_000;
+        $tax['advance_tax']['tax_before_credits_minor_units'] = 15_750;
+        $tax['advance_tax']['child_credit_minor_units'] = 20_000;
+        $tax['advance_tax']['tax_after_credits_minor_units'] = 0;
+        $tax['advance_tax']['tax_bonus_minor_units'] = 4_250;
+        unset($tax);
+        // Peněžní 100 000 + paušál 3 000 − 7 100 − 4 500 − 0 + bonus 4 250.
+        $person['person_summary']['statutory']['net_pay']['net_before_deductions_minor_units'] = 95_650;
+        $person['employments'][0]['calculation'] = [
+            'employment_id' => 101,
+            'inputs' => [
+                $this->calculationInput(1, 'MZDA_MESICNI', 100_000, 100_000),
+                $this->calculationInput(2, 'STRAVOVANI_ZDANITELNE', 5_000, 5_000),
+                $this->calculationInput(3, 'PRISPEVEK_STRAVOVANI', 3_000, 0),
+            ],
+        ];
+        unset($person);
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withVersionedPayload(
+                $this->preparation(),
+                JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+                $payload,
+            ),
+            $this->pvpoj(),
+        );
+
+        // 105 000 − 7 100 − 4 500 − 0 = 93 400 haléřů.
+        self::assertSame(
+            934,
+            $resolution->candidate?->payload['people'][0]['summary']['net_income_czk'],
+        );
+    }
+
+    /**
+     * Náhrada mzdy při nemoci je v číselníku složek osvobozená, pokyny
+     * MPSV ji ale do 10344 výslovně zahrnují („patří sem i příjmy podle
+     * § 192 ZP").
+     */
+    public function testNetIncomeIncludesExemptSicknessCompensation(): void
+    {
+        $payload = $this->currentPayload();
+        $payload['people'][0]['employments'][0]['calculation'] = [
+            'employment_id' => 101,
+            'inputs' => [
+                $this->calculationInput(1, 'MZDA_MESICNI', 100_000, 100_000),
+                $this->calculationInput(2, 'NAHRADA_MZDY_DPN', 20_000, 0),
+            ],
+        ];
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withVersionedPayload(
+                $this->preparation(),
+                JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+                $payload,
+            ),
+            $this->pvpoj(),
+        );
+
+        // 100 000 + 20 000 − 7 100 − 4 500 − 15 000 = 93 400 haléřů.
+        self::assertSame(
+            934,
+            $resolution->candidate?->payload['people'][0]['summary']['net_income_czk'],
+        );
+    }
+
+    /**
+     * Srážková daň u dohody bez prohlášení se odečítá stejně jako záloha;
+     * měsíc bez příjmu s doplatkem zdravotního pojištění vyjde záporně
+     * a vykáže se nulou.
+     */
+    public function testNetIncomeDeductsWithholdingTaxAndNeverGoesNegative(): void
+    {
+        $payload = $this->currentPayload();
+        $tax = &$payload['people'][0]['person_summary']['statutory']['income_tax'];
+        $tax['advance_tax'] = [
+            'taxable_income_minor_units' => 0,
+            'rounded_tax_base_minor_units' => 0,
+            'tax_before_credits_minor_units' => 0,
+            'non_refundable_credits_minor_units' => 0,
+            'child_credit_minor_units' => 0,
+            'tax_after_credits_minor_units' => 0,
+            'tax_bonus_minor_units' => 0,
+        ];
+        $tax['withholding_base_minor_units'] = 600_000;
+        $tax['withholding_tax_minor_units'] = 90_000;
+        $tax['withholding_groups'] = [['group' => 'dpp']];
+        unset($tax);
+        $payload['people'][0]['person_summary']['statutory']['social_insurance']
+            ['employee_contribution_minor_units'] = 0;
+        $payload['people'][0]['person_summary']['statutory']['health_insurance']
+            ['employee_contribution_minor_units'] = 0;
+        $payload['people'][0]['employments'][0]['calculation'] = [
+            'employment_id' => 101,
+            'inputs' => [$this->calculationInput(1, 'ODMENA_DPP', 600_000, 600_000)],
+        ];
+        $withholding = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withVersionedPayload(
+                $this->preparation(),
+                JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+                $payload,
+            ),
+            $this->pvpoj(),
+        );
+        // 6 000 − 900 Kč.
+        self::assertSame(
+            5_100,
+            $withholding->candidate?->payload['people'][0]['summary']['net_income_czk'],
+        );
+
+        $empty = $this->currentPayload();
+        $tax = &$empty['people'][0]['person_summary']['statutory']['income_tax'];
+        $tax['advance_tax']['taxable_income_minor_units'] = 0;
+        $tax['advance_tax']['rounded_tax_base_minor_units'] = 0;
+        $tax['advance_tax']['tax_before_credits_minor_units'] = 0;
+        $tax['advance_tax']['tax_after_credits_minor_units'] = 0;
+        unset($tax);
+        $empty['people'][0]['person_summary']['statutory']['social_insurance']
+            ['employee_contribution_minor_units'] = 0;
+        $empty['people'][0]['person_summary']['statutory']['health_insurance']
+            ['employee_contribution_minor_units'] = 302_400;
+        $empty['people'][0]['employments'][0]['calculation'] = [
+            'employment_id' => 101,
+            'inputs' => [],
+        ];
+        $withoutIncome = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withVersionedPayload(
+                $this->preparation(),
+                JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+                $empty,
+            ),
+            $this->pvpoj(),
+        );
+        self::assertSame(
+            0,
+            $withoutIncome->candidate?->payload['people'][0]['summary']['net_income_czk'],
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function calculationInput(int $id, string $code, int $amount, int $taxBase): array
+    {
+        return [
+            'input_id' => $id,
+            'component_code' => $code,
+            'totals' => [
+                'source_amount_minor' => $amount,
+                'cash_payable_minor' => $amount,
+                'tax_base_minor' => $taxBase,
+                'social_base_minor' => $taxBase,
+                'health_base_minor' => $taxBase,
+                'average_earning_base_minor' => 0,
+                'enforcement_base_minor' => $amount,
+                'jmhz_amount_minor' => $amount,
+            ],
+        ];
+    }
+
+    /**
+     * Payload aktuální verze přípravy s úplnou ordinary evidence.
+     *
+     * @return array<string,mixed>
+     */
+    private function currentPayload(): array
+    {
+        $payload = $this->preparation()->payload;
+        $payload['schema_reference'] = JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE;
+        $payload['builder_version'] = JmhzPreparationSnapshotBuilder::BUILDER_VERSION;
+        unset($payload['scope']['scenario_key']);
+        $payload['scope']['scenario_set'] = ['scenario_1'];
+        $payload['ordinary_evidence'] = [[
+            'scope' => ['employee_id' => 11, 'employment_id' => 101],
+            'attribute_values' => ['10116' => false, '10546' => false],
+        ]];
+        $payload['source_versions']['ordinary_evidence'] = [[
+            'employment_id' => 101,
+            'id' => 601,
+            'source_manifest_sha256' => str_repeat('4', 64),
+            'snapshot_fingerprint' => str_repeat('5', 64),
+        ]];
+
+        return $payload;
+    }
+
     public function testV11MixedScenarioPreparationCannotBecomeScenarioOneDocument(): void
     {
         $preparation = $this->preparation();

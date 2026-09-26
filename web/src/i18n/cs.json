@@ -4100,8 +4100,9 @@
         "unworked_question": "Byly v měsíci neodpracované hodiny?",
         "obstacles_question": "Byly v měsíci překážky v práci?",
         "hours_unit": "hodin",
-        "standard_fund_hint": "Kolik hodin má měsíc na plný úvazek. Předvyplněno ze zákonné týdenní doby (40 h) a svátků — přepište, pokud u vás platí kratší.",
-        "agreed_fund_hint": "Kolik hodin má za měsíc odpracovat tenhle člověk podle smlouvy."
+        "standard_fund_hint": "Kolik hodin má měsíc na plný úvazek: 8 hodin za každý pracovní den včetně svátků v jinak pracovní den (pokyny MPSV). Předvyplněno ze zákonné týdenní doby (40 h) — přepište, pokud u vás platí kratší.",
+        "agreed_fund_hint": "Kolik hodin má za měsíc odpracovat tenhle člověk podle smlouvy.",
+        "holiday_hours_hint": "Svátky v jinak pracovní dny: {hours} h. Nezadávejte je do neodpracovaných hodin níže — aplikace je při schválení přičte k celkovým i placeným neodpracovaným hodinám sama (pokyny MPSV k 10275 a 10276)."
       },
       "bulk": {
         "approve": "Schválit vybrané ({count})",
@@ -4112,7 +4113,7 @@
         "title": "Hromadné schválení docházky",
         "hint": "Schválí se {count} vztahů se souhrnem JMHZ. Dohodnutý fond, týdenní doba a odpracované hodiny se berou z návrhu pro každý vztah zvlášť.",
         "confirm": "Schválit ({count})",
-        "standard_fund_hint": "Předvyplněno ze zákonné týdenní doby a svátků — pro všechny schvalované vztahy stejné. Přepište, pokud u vás platí kratší.",
+        "standard_fund_hint": "Předvyplněno ze zákonné týdenní doby včetně svátků v jinak pracovní dny — pro všechny schvalované vztahy stejné. Přepište, pokud u vás platí kratší. Svátky přičte aplikace k neodpracovaným hodinám sama.",
         "blocked_no_candidates": "Ve výběru není žádný vztah, který by šel schválit hromadně.",
         "blocked_no_standard_fund": "Vyplňte stanovený měsíční fond — bez něj by souhrn JMHZ nebyl úplný.",
         "excluded": {
@@ -24383,6 +24384,8 @@
       "childbirth": "Den porodu",
       "childbirth_hint": "Vyloučenou dobou evidenčního listu je jen část peněžité pomoci před porodem. Den porodu můžete doplnit později, až nastane.",
       "childbirth_missing": "Nedoplněno",
+      "lone_carer": "Osamělý zaměstnanec pečující o dítě do 16 let",
+      "lone_carer_hint": "Ošetřovné pak náleží až 16 kalendářních dnů místo 9 (§ 40 odst. 1 zákona o nemocenském pojištění). Podle toho měsíční hlášení počítá vyloučenou dobu ošetřování (10360) i dny s dávkou (10475); dny za podpůrčí dobou vykáže jako omluvenou nepřítomnost bez náhrady (10473).",
       "record_childbirth": "Doplnit den porodu",
       "record_childbirth_save": "Uložit den porodu",
       "record_childbirth_once": "Den porodu jde doplnit jen jednou. Chybný údaj opravíte zrušením nepřítomnosti a novým zápisem.",
@@ -24438,7 +24441,8 @@
       "probable_source": {
         "terms": "zadaný v podmínkách vztahu",
         "achieved_wage": "z mzdy dosažené od nástupu (§ 355 odst. 2 ZP)",
-        "agreed_monthly_gross": "ze sjednané měsíční mzdy (§ 355 odst. 2 ZP)"
+        "agreed_monthly_gross": "ze sjednané měsíční mzdy (§ 355 odst. 2 ZP)",
+        "minimum_wage": "spodní mez, minimální mzda (§ 357 odst. 1 ZP) — vyšší zadejte v podmínkách vztahu"
       },
       "blockers": {
         "run_missing": "Za některý měsíc rozhodného období není mzdový běh; u nově nastoupivšího se průměr stanovuje jako pravděpodobný výdělek (§ 355 ZP)",

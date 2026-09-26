@@ -127,10 +127,14 @@ final class EldpMaternityExcludedPeriodTest extends TestCase
         );
     }
 
-    public function testBirthMonthWithoutIncomeIsMixed(): void
+    /**
+     * Měsíc porodu má omluvné dny před porodem, takže dobou pojištění zůstává
+     * celý (tak ho přijala ČSSZ v hlášení jiného systému); souběh to není.
+     */
+    public function testBirthMonthWithoutIncomeIsInsured(): void
     {
         self::assertSame(
-            EldpExcludedPeriodDeriver::MONTH_MIXED,
+            EldpExcludedPeriodDeriver::MONTH_INSURED,
             EldpExcludedPeriodDeriver::insuranceMonthStatus(
                 [$this->ppm('2026-05-01', '2026-11-30', '2026-06-15')],
                 0,

@@ -44,10 +44,15 @@ final class PayrollImportAbsenceCompensationMaterializer
     public const EXTERNAL_ID_PREFIX = 'leave:attendance:';
     private const SAVEPOINT = 'payroll_import_absence_compensation';
 
+    /**
+     * Lékař je překážka na straně zaměstnance (§ 199 ZP), překážka na straně
+     * zaměstnavatele má vlastní složku; obě mají v měsíčním hlášení vlastní
+     * kolonku náhrad (10341, 10340).
+     */
     private const COMPONENTS = [
         'vacation_hours' => 'NAHRADA_MZDY_DOVOLENA',
-        'doctor_hours' => 'NAHRADA_MZDY',
-        'obstacle_employer_hours' => 'NAHRADA_MZDY',
+        'doctor_hours' => 'NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC',
+        'obstacle_employer_hours' => 'NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL',
     ];
 
     private const ENTITLEMENT_BASIS = [

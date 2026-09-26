@@ -455,9 +455,10 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         self::assertSame(25, $section['excluded_days']['penezitaPomocMaterstvi']);
         self::assertSame(25, $section['excluded_days_total']);
         self::assertSame('2026-07-31', $section['excluded_days_provenance'][0]['counted_to']);
-        // Předporodní PPM zakládá dny s vyplacenou dávkou, které zaměstnavatel
-        // nezná, takže rozpad § 18 odst. 7 zůstává neuvedený (10357 > 0).
-        self::assertNull($section['section18_days_total']);
+        // Dny peněžité pomoci v mateřství jsou vyloučené dny § 18 odst. 7
+        // s vyplacenou dávkou (10475), stejně je vykazují jiné mzdové systémy.
+        self::assertSame(25, $section['section18_days_total']);
+        self::assertSame(25, $section['section18_days']['vyplaceniDavek']);
     }
 
     /**
@@ -486,11 +487,51 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         self::assertSame(0, $section['excluded_days']['penezitaPomocMaterstvi']);
     }
 
-    public function testBirthMonthWithoutIncomeStops(): void
+    /**
+     * Měsíc porodu bez příjmu: tvar, který ČSSZ přijala v řádném i opravném
+     * hlášení jiného systému — celý měsíc je dobou pojištění (10356),
+     * vyloučenou dobou 10357 = 10359 jsou dny před porodem a celý měsíc je
+     * vyloučenými dny s vyplacenou dávkou (10475).
+     */
+    public function testBirthMonthWithoutIncomeIsReportedAsInsuredMonth(): void
     {
+        $builder = new JmhzEldpEvidenceBuilder();
         $source = $this->withZeroAssessmentBase(
             $this->maternitySource('2026-06-01', '2026-12-31', '2026-07-20', '2026-07-15', 176_000),
         );
+
+        $section = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        )->payload['eldp_sections'][0];
+
+        self::assertSame('1++', $section['code']);
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame(0, $section['assessment_base_czk']);
+        // 1.–14. 7. před porodem 15. 7.
+        self::assertSame(14, $section['excluded_days_total']);
+        self::assertSame(14, $section['excluded_days']['penezitaPomocMaterstvi']);
+        self::assertSame(31, $section['section18_days_total']);
+        self::assertSame(31, $section['section18_days']['vyplaceniDavek']);
+    }
+
+    /** Porod a jiná nepřítomnost bez příjmu v témž měsíci zůstávají souběhem. */
+    public function testBirthMonthMixedWithUnpaidLeaveStops(): void
+    {
+        $source = $this->withZeroAssessmentBase(
+            $this->maternitySource('2026-07-05', '2026-12-31', '2026-07-20', '2026-07-15', 144_000),
+        );
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['absences'][] = [
+            'id' => 905,
+            'absence_type' => 'unpaid_leave',
+            'date_from' => '2026-07-01',
+            'date_to' => '2026-07-04',
+        ];
+        $source = $this->withInput($source, $input);
 
         $this->expectException(JmhzEldpEvidenceException::class);
         $this->expectExceptionMessage('§ 11 odst. 2');
@@ -886,6 +927,86 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         } catch (JmhzEldpEvidenceException $exception) {
             self::assertSame('jmhz_eldp_work_summary_mismatch', $exception->validationCode);
         }
+    }
+
+    /**
+     * Svátek v jinak pracovní den (souhrn v7) je neodpracovaná placená hodina
+     * i bez evidované nepřítomnosti: úhrny 10275/10276 ho nesou, interakce
+     * IN07 je aktivní a ELDP řez to přijme jako běžný měsíc.
+     */
+    public function testHolidayHoursPassWithoutAbsenceOnVersionSeven(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->holidaySource(8_000, 8_000, 8_000);
+
+        $section = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        )->payload['eldp_sections'][0];
+
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame(0, $section['excluded_days_total']);
+    }
+
+    /** Úhrn, který svátek nenese, nebo ho nenese mezi placenými, neprojde. */
+    public function testHolidayHoursMustBeCarriedByBothTotals(): void
+    {
+        foreach ([[8_000, 0, 8_000], [8_000, 8_000, null], [16_000, 8_000, 8_000]] as [$holiday, $total, $paid]) {
+            try {
+                (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(
+                    7,
+                    101,
+                    $this->holidaySource($holiday, $total, $paid),
+                );
+                self::fail('Úhrny bez svátku musely řez zastavit.');
+            } catch (JmhzEldpEvidenceException $exception) {
+                self::assertSame('jmhz_eldp_work_summary_mismatch', $exception->validationCode);
+            }
+        }
+    }
+
+    /** Starší souhrn svátky nezná, klíč v něm tedy nesmí nic tvrdit. */
+    public function testHolidayHoursAreIgnoredOnOlderWorkSummary(): void
+    {
+        $source = $this->holidaySource(8_000, 8_000, 8_000, 'jmhz-work-month.v5');
+
+        try {
+            (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+            self::fail('Souhrn v5 nemá svátky a úhrny bez nepřítomnosti musí být prázdné.');
+        } catch (JmhzEldpEvidenceException $exception) {
+            self::assertSame('jmhz_eldp_work_summary_mismatch', $exception->validationCode);
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function holidaySource(
+        int $holiday,
+        int $total,
+        ?int $paid,
+        string $version = 'jmhz-work-month.v7',
+    ): array {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $summary = &$input['people'][0]['employments'][0]['time_month']['jmhz_work_summary'];
+        $summary['derivation_version'] = $version;
+        $summary['interactions'] = ['IN07' => true, 'IN08' => false];
+        $summary['values'] += [
+            'maternity_millihours' => null,
+            'paternity_millihours' => null,
+            'parental_millihours' => null,
+            'unpaid_leave_millihours' => null,
+            'unexcused_millihours' => null,
+            'compensatory_time_off_millihours' => null,
+            'holiday_millihours' => $holiday,
+        ];
+        $summary['values']['unworked_total_millihours'] = $total;
+        $summary['values']['unworked_paid_millihours'] = $paid;
+        unset($summary);
+
+        return $this->withInput($source, $input);
     }
 
     /**

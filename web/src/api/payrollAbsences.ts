@@ -51,6 +51,8 @@ export interface PayrollAbsence {
   expected_childbirth_date?: string | null
   /** Jen u `ppm`; doplňuje se jednou, i po schválení (`recordChildbirth`). */
   childbirth_date?: string | null
+  /** Jen u `ocr`: podpůrčí doba ošetřovného 16 dnů místo 9. */
+  lone_carer?: boolean
   partial_first_minutes: number | null
   partial_last_minutes: number | null
   average_snapshot_id: number | null
@@ -87,6 +89,8 @@ export interface AbsencePayload {
   date_to: string
   expected_childbirth_date: string | null
   childbirth_date: string | null
+  /** Jen u `ocr`: osamělý zaměstnanec s dítětem do 16 let, ošetřovné 16 dnů. */
+  lone_carer?: boolean
   timezone_name: string
   partial_first_minutes: number | null
   partial_last_minutes: number | null
@@ -163,7 +167,7 @@ export interface AverageEarningCandidate {
   ready: boolean
   blockers: string[]
   source_kind: 'actual' | 'probable' | null
-  probable_source: 'terms' | 'achieved_wage' | 'agreed_monthly_gross' | null
+  probable_source: 'terms' | 'achieved_wage' | 'agreed_monthly_gross' | 'minimum_wage' | null
   probable_hourly_minor: number | null
   probable_rationale: string | null
   gross_earnings_minor: number | null

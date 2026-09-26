@@ -257,7 +257,10 @@ final class RegistrationXmlReaderTest extends TestCase
         yield 'DPP' => ['T', false, 'dpp'];
         yield 'DPP ZB' => ['ZB', false, 'dpp'];
         yield 'statutár' => ['S', false, 'statutory_body'];
+        yield 'prokurista' => ['P', false, 'statutory_body'];
+        yield 'likvidátor' => ['R', false, 'statutory_body'];
         yield 'neznámý' => ['K', false, null];
+        yield 'pěstoun' => ['M', false, null];
     }
 
     #[DataProvider('activityCodes')]

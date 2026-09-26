@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
 use MyInvoice\Service\Payroll\IncomeTax\TaxRegime;
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 
 final class JmhzScenario1DocumentResolver
@@ -374,7 +376,9 @@ final class JmhzScenario1DocumentResolver
                             ['partner_dependent', 'statutory_body'],
                             true,
                         )
-                            || ($selector['activity_code'] ?? null) !== 'S'
+                            || !PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity(
+                                $selector['activity_code'] ?? null,
+                            )
                             || ($selector['relationship_detail_code'] ?? null) !== '1'))
                 ) {
                     $blockers[] = $this->blocker(
@@ -554,9 +558,7 @@ final class JmhzScenario1DocumentResolver
                             $blockers,
                         ),
                     'net_income_czk' => $this->wholeCzk(
-                        is_int($net['net_before_deductions_minor_units'] ?? null)
-                            ? $net['net_before_deductions_minor_units']
-                            : null,
+                        $this->netIncomeMinor($tax, $social, $health, $net, $employments),
                         '10344',
                         'person',
                         $employeeId,
@@ -1507,6 +1509,92 @@ final class JmhzScenario1DocumentResolver
     }
 
     /**
+     * Čistý příjem (10344) za osobu, v haléřích; ořez záporné hodnoty na nulu
+     * dělá {@see wholeCzk()}.
+     *
+     * Pokyny MPSV k vyplnění MH 1.4.13 u 10344: příjem ze závislé činnosti
+     * „podléhající dani" po odečtení pojistného na sociální zabezpečení,
+     * zdravotního pojištění a zálohy, resp. daně; „do rozhodného příjmu se
+     * nezapočítává daňový bonus … Patří sem i příjmy podle § 192 ZP" a
+     * záporná hodnota se vykáže nulou. Údaj slouží dávkám státní sociální
+     * podpory, ne srážkám ze mzdy, takže se NEpočítá z čisté mzdy pro srážky
+     * (`net_before_deductions_minor_units`): ta podle § 277 OSŘ bonus
+     * obsahuje a nese jen peněžní příjem.
+     *
+     * Skladba:
+     *  + zdaňovaný příjem (základ zálohy 10297 a základ srážkové daně 10307),
+     *    tedy peněžní i nepeněžní plnění, které podléhá dani — zdanitelná
+     *    část stravování, soukromé užití vozidla, jiný nepeněžní příjem;
+     *  + náhrada mzdy při dočasné pracovní neschopnosti (§ 192 ZP), kterou
+     *    číselník složek vede jako osvobozenou; pokyny ji jmenují výslovně;
+     *  − pojistné zaměstnance na sociální zabezpečení PO slevě pracujícího
+     *    důchodce a zdravotní pojištění zaměstnance;
+     *  − záloha po slevách (bez bonusu) a srážková daň.
+     * Nezapočítává se daňový bonus ani vratka nebo doplatek z ročního
+     * zúčtování; osvobozené benefity (stravenkový paušál) dani nepodléhají.
+     * Přijatá hlášení jiného systému (1 437 formulářů) dávají přesně tenhle
+     * součet, bonus v žádném z nich není.
+     *
+     * Příprava zmrazená dřív, než nesla rozpad vstupů po složkách, se vykáže
+     * jako dosud — z čisté mzdy před srážkami bez bonusu.
+     *
+     * @param array<string,mixed> $tax
+     * @param array<string,mixed> $social
+     * @param array<string,mixed> $health
+     * @param array<string,mixed> $net
+     * @param list<array<string,mixed>> $employments
+     */
+    private function netIncomeMinor(
+        array $tax,
+        array $social,
+        array $health,
+        array $net,
+        array $employments,
+    ): ?int {
+        $sicknessCompensation = 0;
+        foreach ($employments as $employment) {
+            $inputs = $this->object($employment['calculation'] ?? null)['inputs'] ?? null;
+            if (!is_array($inputs) || !array_is_list($inputs)) {
+                $legacy = $net['net_before_deductions_minor_units'] ?? null;
+                $bonus = $this->object($tax['advance_tax'] ?? null)['tax_bonus_minor_units'] ?? 0;
+
+                return is_int($legacy) && is_int($bonus) ? $legacy - $bonus : null;
+            }
+            foreach ($this->rows($inputs) as $input) {
+                if (($input['component_code'] ?? null) !== PayrollSicknessInputMaterializer::COMPONENT_CODE) {
+                    continue;
+                }
+                $totals = $this->object($input['totals'] ?? null);
+                $source = $totals['source_amount_minor'] ?? null;
+                $taxBase = $totals['tax_base_minor'] ?? null;
+                if (!is_int($source) || !is_int($taxBase)) {
+                    return null;
+                }
+                // Jen osvobozená část; zdaněná už je v základu zálohy.
+                $sicknessCompensation += $source - $taxBase;
+            }
+        }
+        $advance = $this->object($tax['advance_tax'] ?? null);
+        $parts = [
+            $advance === [] ? 0 : ($advance['taxable_income_minor_units'] ?? null),
+            $tax['withholding_base_minor_units'] ?? 0,
+            $social['employee_contribution_minor_units'] ?? null,
+            $health['employee_contribution_minor_units'] ?? null,
+            $advance === [] ? 0 : ($advance['tax_after_credits_minor_units'] ?? null),
+            $tax['withholding_tax_minor_units'] ?? null,
+        ];
+        foreach ($parts as $part) {
+            if (!is_int($part)) {
+                return null;
+            }
+        }
+        [$advanceBase, $withholdingBase, $employeeSocial, $employeeHealth, $advanceTax, $withholdingTax] = $parts;
+
+        return $advanceBase + $withholdingBase + $sicknessCompensation
+            - $employeeSocial - $employeeHealth - $advanceTax - $withholdingTax;
+    }
+
+    /**
      * @param array<string,mixed> $tax
      * @param list<JmhzScenario1Blocker> $blockers
      */
@@ -2114,8 +2202,8 @@ final class JmhzScenario1DocumentResolver
         }
         /*
          * Srážka ze mzdy hlášení neblokuje. JMHZ o srážkách nechce částky —
-         * 10116 je v XSD prostý boolean a čistá mzda 10344 se vykazuje PŘED
-         * srážkami (`net_before_deductions_minor_units`), takže exekuce,
+         * 10116 je v XSD prostý boolean a čistý příjem 10344 se srážkami
+         * nekrátí (viz netIncomeMinor()), takže exekuce,
          * insolvence ani dohoda o srážkách nemají do vykázaných čísel co
          * mluvit. Samotný příznak nese ordinary evidence, odvozená ze zmrazené
          * revize; tady se proto nekontroluje nic dalšího.

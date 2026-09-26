@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use DOMDocument;
 use DOMElement;
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 
 /**
  * Serializér podporovaných běžných profilů měsíčního hlášení: `scenario_1`
@@ -762,12 +763,15 @@ final class JmhzScenario1XmlSerializer
         array $employment,
     ): DOMElement {
         $selector = $this->object($employment['selector'] ?? null);
-        if (($selector['activity_code'] ?? null) !== 'S'
+        if (!PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity(
+            $selector['activity_code'] ?? null,
+        )
             || ($selector['relationship_detail_code'] ?? null) !== '1'
         ) {
             $this->invalid(
                 'jmhz_xml_scenario_3_profile_unsupported',
-                'Větev činnost K–S podporuje pouze statutární profil S/detail 1.',
+                'Větev činnost K–S podporuje druhy činnosti K a N až S'
+                    . ' s bližším určením „žádné“.',
             );
         }
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:cinnostKS');
@@ -2195,7 +2199,10 @@ final class JmhzScenario1XmlSerializer
          * a jeho tři složky jsou uvnitř povinné, takže je to celý blok, nebo nic.
          * Nenulová složka při nulovém úhrnu je rozpor ve zdrojových datech.
          */
-        $surcharges = $this->wageSurcharges($earnings);
+        $surcharges = $this->wageSurcharges(
+            $earnings,
+            $this->reportsOvertime($this->workSummaryValues($employment)),
+        );
         if ($wageTotal === 0) {
             foreach ([...array_values($components), ...array_values($surcharges)] as $amount) {
                 if ($amount !== 0) {
@@ -2260,10 +2267,18 @@ final class JmhzScenario1XmlSerializer
      * detailů se s úhrnem NEporovnává: datový slovník mezi nimi žádný vzorec
      * nemá a v přijatých hlášeních se rozchází.
      *
+     * Výjimkou je přesčas. Kontrola 36 (blokující) chce při 10269 > 0 vyplněný
+     * i příplatek za práci přesčas 10333 a pokyny MPSV u něj říkají, že
+     * „pokud nebyly v daném měsíci příplatky proplaceny, je nutné uvést 0".
+     * Firma bez složky příplatku za přesčas (přesčas zahrnutý ve mzdě podle
+     * § 114 odst. 3 ZP, nebo náhradní volno) proto dostane 10333 = 0, a protože
+     * `celkem` je v `priplatkyType` povinný, i úhrn 10332 = 0, pokud ho vektor
+     * nenese. Nula tu není dopočet, ale předepsaný zápis „nic se neproplatilo".
+     *
      * @param array<array-key,mixed> $earnings
      * @return array<string,int>
      */
-    private function wageSurcharges(array $earnings): array
+    private function wageSurcharges(array $earnings, bool $overtimeReported = false): array
     {
         $surcharges = [];
         foreach ([
@@ -2278,6 +2293,15 @@ final class JmhzScenario1XmlSerializer
                 continue;
             }
             $surcharges[$element] = $this->int($value, $attributeId);
+        }
+        if ($overtimeReported && !array_key_exists('form:prescas', $surcharges)) {
+            if ($surcharges === []) {
+                $surcharges['form:celkem'] = 0;
+            }
+            // Pořadí prvků určuje `priplatkyType`: úhrn, přesčas, zbytek.
+            $surcharges = array_slice($surcharges, 0, 1, true)
+                + ['form:prescas' => 0]
+                + array_slice($surcharges, 1, null, true);
         }
         if ($surcharges === []) {
             return [];
@@ -2409,6 +2433,22 @@ final class JmhzScenario1XmlSerializer
     }
 
     /**
+     * Vykáže formulář kladné přesčasové hodiny (10269)? Táž podmínka jako
+     * zápis rozpadu v {@see workMonth()}, aby kontrola 36 a příplatek četly
+     * jeden údaj.
+     *
+     * @param array<string,mixed> $values
+     */
+    private function reportsOvertime(array $values): bool
+    {
+        $overtime = $values['overtime_millihours'] ?? null;
+
+        return is_int($overtime)
+            && $overtime > 0
+            && ($values['worked_millihours'] ?? null) !== 0;
+    }
+
+    /**
      * @param array<string,mixed> $employment
      * @return array<string,mixed>
      */
@@ -2431,9 +2471,10 @@ final class JmhzScenario1XmlSerializer
     /**
      * Vyloučené doby ELDP podle § 16 odst. 4 písm. a) zákona č. 155/1995 Sb.
      *
-     * Blok se zapisuje jen tam, kde sekce nese kód ELDP: bez kódu ho kontrola
-     * ČSSZ (atributy 10357 a 10358–10536 bez 10240) odmítne — vyloučená doba
-     * bez doby pojištění nedává smysl.
+     * Vyloučené doby se zapisují jen tam, kde sekce nese kód ELDP: bez kódu je
+     * kontrola 307 ČSSZ (atributy 10357 a 10358–10536 bez 10240) odmítne —
+     * vyloučená doba bez doby pojištění nedává smysl. Vyloučené dny § 18
+     * odst. 7 do výčtu kontroly 307 nepatří a sekce bez kódu je nese také.
      *
      * Rozpad na složky se uvádí jen při nenulovém úhrnu. Kontrola 329 říká, že
      * při 10357 = 0 nesmí být složky vyplněné nenulově, a nulový rozpad nenese
@@ -2467,12 +2508,16 @@ final class JmhzScenario1XmlSerializer
         // § 16 odst. 4), je proto pořád řez, který má co vykázat.
         $hasSection18 = ($section['section18_days_total'] ?? null) !== null;
         if ($total === null && ($components === null || $components === [])) {
-            if (!$hasSection18) {
+            // Bez vyloučených dob a bez vyloučeného dne není co uvést; nulový
+            // blok by v sekci bez kódu nic netvrdil.
+            if (!$hasSection18 || $section['section18_days_total'] === 0) {
                 return;
             }
-            if (!is_string($code) || $code === '') {
-                return;
-            }
+            // Sekce bez kódu ELDP (poživatel starobního důchodu) nese § 18
+            // dál: jsou to údaje nemocenského pojištění, ne třída ELDP, a
+            // kontrola 307 je v sekci bez kódu nezakazuje (MPSV v diskuzi
+            // k JMHZ: u důchodce „vyloučené dny § 18 pro nemocenské se mají
+            // uvádět").
             $block = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vylouceneDny');
             $this->appendEldpSection18Days($dom, $block, $section);
             $entry->appendChild($block);
