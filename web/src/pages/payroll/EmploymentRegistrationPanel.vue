@@ -123,6 +123,16 @@ const paidInFull = ref<'yes' | 'no'>('no')
 const settlementAmountKind = ref('replacement')
 const settlementAmount = ref('')
 const notStartedConfirmed = ref(false)
+/**
+ * Důvod storna A8. Nenastoupení má osmidenní lhůtu a obejde se bez přílohy;
+ * jiný důvod (chybný variabilní symbol, druh činnosti…) lhůtu nemá, ale ČSSZ
+ * ho zpracuje jen s písemným zdůvodněním v příloze.
+ */
+const cancellationReason = ref<'not_started' | 'other'>('not_started')
+const cancellationAttachment = ref<{ name: string, data_base64: string } | null>(null)
+const cancellationAttachmentDescription = ref('')
+/** A2 u zaměstnance z ONZ: ručně zapsané OIČ/ID PPV ověřená v Seznamu zaměstnanců ČSSZ. */
+const identifiersVerifiedInCsszList = ref(false)
 const a1ProfileOpen = ref(false)
 const a1ProfileLoading = ref(false)
 const a1ProfileSaving = ref(false)
@@ -1127,7 +1137,9 @@ const eventCanSave = computed(() => {
   if (eventInteraction.value === 'cancellation') {
     return sourceSubmissionId.value !== null
       && sourceSubmissionId.value > 0
-      && notStartedConfirmed.value
+      && (cancellationReason.value === 'not_started'
+        ? notStartedConfirmed.value
+        : cancellationAttachment.value !== null)
   }
   return true
 })
@@ -1273,6 +1285,21 @@ function resetEventForm(): void {
   settlementAmountKind.value = 'replacement'
   settlementAmount.value = ''
   notStartedConfirmed.value = false
+  cancellationReason.value = 'not_started'
+  cancellationAttachment.value = null
+  cancellationAttachmentDescription.value = ''
+  identifiersVerifiedInCsszList.value = false
+}
+
+async function addCancellationAttachment(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const buffer = new Uint8Array(await file.arrayBuffer())
+  let binary = ''
+  for (const byte of buffer) binary += String.fromCharCode(byte)
+  cancellationAttachment.value = { name: file.name, data_base64: btoa(binary) }
+  input.value = ''
 }
 
 function eventOptionLabel(event: PayrollRegistrationEvent): string {
@@ -1452,7 +1479,20 @@ function eventPayload(): PayrollRegistrationEventInput {
   }
   if (eventInteraction.value === 'cancellation') {
     payload.source_submission_id = sourceSubmissionId.value ?? undefined
-    payload.not_started = true
+    if (cancellationReason.value === 'not_started') {
+      payload.not_started = true
+    } else {
+      payload.not_started = false
+      if (cancellationAttachment.value !== null) {
+        payload.explanation_attachment = {
+          ...cancellationAttachment.value,
+          description: optionalText(cancellationAttachmentDescription.value) ?? null,
+        }
+      }
+    }
+  }
+  if (eventInteraction.value === 'termination' && identifiersVerifiedInCsszList.value) {
+    payload.identifiers_verified_in_cssz_list = true
   }
   return payload
 }
@@ -3822,11 +3862,46 @@ async function copyXml(): Promise<void> {
             {{ t('payroll.people.registration.event.source_submission_id') }}
             <input v-model.number="sourceSubmissionId" type="number" min="1" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md" data-test="registration-event-source-submission-id" />
           </label>
-          <label class="flex items-start gap-2 text-xs text-neutral-700">
-            <input v-model="notStartedConfirmed" type="checkbox" class="mt-0.5 rounded border-neutral-300" data-test="registration-event-not-started" />
-            <span>{{ t('payroll.people.registration.event.not_started_confirmation') }}</span>
+          <label class="block text-xs font-medium text-neutral-700">
+            {{ t('payroll.people.registration.event.a8_reason') }}
+            <select
+              v-model="cancellationReason"
+              class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md"
+              data-test="registration-event-a8-reason"
+            >
+              <option value="not_started">{{ t('payroll.people.registration.event.a8_reason_not_started') }}</option>
+              <option value="other">{{ t('payroll.people.registration.event.a8_reason_other') }}</option>
+            </select>
           </label>
-          <p class="text-xs text-warning-700">{{ t('payroll.people.registration.event.a8_hint') }}</p>
+          <template v-if="cancellationReason === 'not_started'">
+            <label class="flex items-start gap-2 text-xs text-neutral-700">
+              <input v-model="notStartedConfirmed" type="checkbox" class="mt-0.5 rounded border-neutral-300" data-test="registration-event-not-started" />
+              <span>{{ t('payroll.people.registration.event.not_started_confirmation') }}</span>
+            </label>
+            <p class="text-xs text-warning-700">{{ t('payroll.people.registration.event.a8_hint') }}</p>
+          </template>
+          <template v-else>
+            <p class="text-xs text-neutral-600" data-test="registration-event-a8-other-hint">
+              {{ t('payroll.people.registration.event.a8_other_hint') }}
+            </p>
+            <div class="flex flex-wrap items-center gap-2">
+              <label :class="btnOutline('primary')" class="cursor-pointer whitespace-nowrap">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                {{ t('payroll.people.registration.event.a8_attachment') }}
+                <input type="file" class="sr-only" data-test="registration-event-a8-attachment" @change="addCancellationAttachment" />
+              </label>
+              <span v-if="cancellationAttachment" class="text-xs text-neutral-700" data-test="registration-event-a8-attachment-name">
+                {{ cancellationAttachment.name }}
+              </span>
+              <span v-else class="text-xs text-warning-700">
+                {{ t('payroll.people.registration.event.a8_attachment_missing') }}
+              </span>
+            </div>
+            <label class="block text-xs font-medium text-neutral-700">
+              {{ t('payroll.people.registration.event.a8_attachment_description') }}
+              <input v-model="cancellationAttachmentDescription" maxlength="255" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md" />
+            </label>
+          </template>
         </div>
 
         <div class="mt-5 flex flex-wrap justify-end gap-2">
@@ -3854,7 +3929,12 @@ async function copyXml(): Promise<void> {
       <p class="font-medium text-neutral-900">
         {{ agendaLabel }} · {{ interactionLabel }}
       </p>
-      <p v-if="deadline.derived === false" class="mt-1 text-warning-700" data-test="registration-deadline-not-derived">
+      <p v-if="deadline.statutory === false" class="mt-1" data-test="registration-deadline-not-statutory">
+        {{ t('payroll.people.registration.registration_window.not_statutory', {
+          milestone: formatDate(deadline.due_on),
+        }) }}
+      </p>
+      <p v-else-if="deadline.derived === false" class="mt-1 text-warning-700" data-test="registration-deadline-not-derived">
         {{ t('payroll.people.registration.registration_window.not_derived', {
           start: formatDate(deadline.due_on),
         }) }}

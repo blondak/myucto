@@ -198,6 +198,40 @@ final class PayrollEmployeeRegistrationDeadlinePolicyTest extends TestCase
         );
     }
 
+    /**
+     * Storno A8 u NENASTOUPENÍ: osm dnů od předpokládaného nástupu
+     * (§ 19 odst. 4). Dřív spadalo pod jednotný ruleset navazujících
+     * oznámení se zdrojem „§ 17 odst. 5".
+     */
+    public function testCancellationForNoShowRunsEightDaysFromExpectedStart(): void
+    {
+        $window = $this->policy->forCancellation(true, '2026-09-15');
+
+        self::assertSame('2026-09-15', $window->earliestRegistrationOn);
+        self::assertSame('2026-09-23', $window->dueOn);
+        self::assertTrue($window->statutory);
+        self::assertSame('cz-regzec-cancellation-no-show-2026-07.v1', $window->rulesetId);
+        self::assertNotSame(
+            $this->policy->forFollowUp(8, '2026-09-15')->rulesetHash,
+            $window->rulesetHash,
+        );
+    }
+
+    /**
+     * Storno z jiného důvodu „nemá časové omezení" (zásady REGZEC, akce 8):
+     * žádná položka „po lhůtě", jen milník 20. dne následujícího měsíce.
+     */
+    public function testCancellationForOtherReasonHasNoStatutoryDeadline(): void
+    {
+        $window = $this->policy->forCancellation(false, '2026-09-28');
+
+        self::assertFalse($window->statutory);
+        self::assertTrue($window->derived);
+        self::assertSame('2026-10-20', $window->dueOn);
+        self::assertSame('cz-regzec-cancellation-other-2026-07.v1', $window->rulesetId);
+        self::assertStringContainsString('nemá zákonnou lhůtu', (string) $window->notice);
+    }
+
     public function testMalformedStartDateIsRefusedDeterministically(): void
     {
         foreach (['2026-13-01', '15.9.2026', '', '2026-09-31'] as $value) {

@@ -39,6 +39,18 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
         'cz-regzec-after-prezec-2026-07.v1';
 
     /**
+     * Storno A8 má vlastní rulesety. Dřív spadalo pod
+     * {@see self::FOLLOW_UP_RULESET_ID} s jednotnými osmi dny a zdrojem
+     * „§ 17 odst. 5" — to je ale nenastoupení PRVNÍHO zaměstnance do evidence
+     * zaměstnavatelů. Osm dnů platí jen pro nenastoupení zaměstnance
+     * (§ 19 odst. 4), jiné storno lhůtu nemá.
+     */
+    private const CANCELLATION_NO_SHOW_RULESET_ID =
+        'cz-regzec-cancellation-no-show-2026-07.v1';
+    private const CANCELLATION_OTHER_RULESET_ID =
+        'cz-regzec-cancellation-other-2026-07.v1';
+
+    /**
      * Doplnění plné registrace po předregistraci: osm dnů PO nástupu.
      *
      * Smysl PREZEC je přihlásit člověka, u kterého ještě nemáte všechny údaje.
@@ -245,6 +257,74 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
                 'window_opens_on' => 'registration_event_effective_on',
             ]),
         );
+    }
+
+    /**
+     * Storno přihlášení (REGZEC A8).
+     *
+     * - Zaměstnanec NENASTOUPIL: oznámit bez zbytečného odkladu, nejpozději
+     *   do osmi dnů od předpokládaného dne nástupu (§ 19 odst. 4 zákona
+     *   č. 323/2025 Sb.; zásady REGZEC 18-06-2026 — oznámení akcí 8).
+     * - Jiný důvod (chybný variabilní symbol, nepovolená oprava druhu
+     *   činnosti, soudní zneplatnění): storno „nemá časové omezení" (zásady
+     *   REGZEC, kód akce 8). `dueOn` je jen informační milník — 20. den
+     *   následujícího měsíce, do kdy jde spolu s ním stornovat i měsíční
+     *   hlášení bez referentského zpracování.
+     */
+    public function forCancellation(
+        bool $notStarted,
+        string $triggerOn,
+    ): PayrollEmployeeRegistrationDeadlineWindow {
+        $trigger = $this->date($triggerOn);
+        if ($notStarted) {
+            $due = $trigger->modify(
+                '+' . self::NO_SHOW_NOTIFICATION_DAYS . ' days',
+            );
+
+            return new PayrollEmployeeRegistrationDeadlineWindow(
+                $triggerOn,
+                $due->format('Y-m-d'),
+                'calendar_days',
+                self::CANCELLATION_NO_SHOW_RULESET_ID,
+                $this->cancellationHash(self::CANCELLATION_NO_SHOW_RULESET_ID, [
+                    'notification_calendar_days' => self::NO_SHOW_NOTIFICATION_DAYS,
+                    'window_opens_on' => 'expected_employment_start_date',
+                ], self::LEGAL_BASIS['no_show']),
+            );
+        }
+        $milestone = $trigger->modify('first day of next month')
+            ->modify('+19 days');
+
+        return new PayrollEmployeeRegistrationDeadlineWindow(
+            $triggerOn,
+            $milestone->format('Y-m-d'),
+            'calendar_days',
+            self::CANCELLATION_OTHER_RULESET_ID,
+            $this->cancellationHash(self::CANCELLATION_OTHER_RULESET_ID, [
+                'statutory_deadline' => false,
+                'milestone' => 'twentieth_day_of_following_month',
+            ], 'Všeobecné zásady REGZEC (verze 18-06-2026), kód akce 8'),
+            true,
+            'Storno z jiného důvodu než nenastoupení nemá zákonnou lhůtu. '
+                . 'Uvedený den je jen milník: do 20. dne následujícího měsíce '
+                . 'jde spolu se stornem opravit i měsíční hlášení bez '
+                . 'referentského zpracování.',
+            false,
+        );
+    }
+
+    /** @param array<string,mixed> $rule */
+    private function cancellationHash(string $rulesetId, array $rule, string $source): string
+    {
+        return hash('sha256', CanonicalJson::encode([
+            'schema_reference' =>
+                'payroll-employee-registration-deadline-policy.v1',
+            'ruleset_id' => $rulesetId,
+            'effective_from' => self::SUPPORTED_FROM,
+            'calendar_basis' => 'calendar_days',
+            'rule' => $rule,
+            'sources' => ['law' => $source],
+        ]));
     }
 
     /**

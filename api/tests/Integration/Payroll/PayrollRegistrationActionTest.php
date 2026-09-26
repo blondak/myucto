@@ -1901,6 +1901,97 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(self::START_ON, $body['deadline']['due_on']);
     }
 
+    /**
+     * Storno A8 z jiného důvodu než nenastoupení (tady chybný variabilní
+     * symbol): příloha se zdůvodněním jde do podání a lhůta NENÍ zákonná.
+     * Dřív aplikace takové storno odmítla a každé A8 vedla s osmi dny.
+     */
+    public function testA8ForOtherReasonCarriesExplanationAndHasNoStatutoryDeadline(): void
+    {
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON);
+        $this->saveA1ProfileFor(self::START_ON, '1', '1');
+        $a1 = $this->json(($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'registration_mode' => 'full',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        $this->markRegistrationAccepted((int) $a1['submission_id']);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, start_date = ?, status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::TODAY, self::TODAY, $this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET effective_from = ?
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([self::TODAY, $this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_external_ids SET valid_from = ?
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([self::TODAY, $this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_external_ids SET valid_from = ?
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([self::TODAY, $this->supplierId, $this->employeeId]);
+
+        $missing = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'cancellation',
+                'effective_on' => self::TODAY,
+                'source_reference' => 'synthetic-a8-wrong-vs',
+                'source_submission_id' => $a1['submission_id'],
+                'not_started' => false,
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(422, $missing->getStatusCode(), (string) $missing->getBody());
+        self::assertSame(
+            'registration_a8_explanation_attachment_required',
+            $this->json($missing)['error']['code'],
+        );
+
+        $approved = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'cancellation',
+                'effective_on' => self::TODAY,
+                'source_reference' => 'synthetic-a8-wrong-vs',
+                'source_submission_id' => $a1['submission_id'],
+                'not_started' => false,
+                'explanation_attachment' => [
+                    'name' => 'zduvodneni-storna.pdf',
+                    'description' => 'Přihlášeno pod chybným variabilním symbolem',
+                    'data_base64' => base64_encode('%PDF-synthetic-explanation'),
+                ],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $approved->getStatusCode(), (string) $approved->getBody());
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $this->json($approved)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
+        $body = $this->json($prepared);
+        self::assertFalse($body['deadline']['statutory']);
+        self::assertSame('2026-09-20', $body['deadline']['due_on']);
+        self::assertSame('cz-regzec-cancellation-other-2026-07.v1', $body['deadline']['ruleset_id']);
+        $xml = $this->storedArtifactXml((int) $body['submission_id']);
+        self::assertStringContainsString('act="8"', $xml);
+        self::assertStringContainsString('notstart="N"', $xml);
+        self::assertStringContainsString('name="zduvodneni-storna.pdf"', $xml);
+    }
+
     /** Dřív než osm dnů před nástupem A1 nejde — stejně jako P1. */
     public function testFullRegistrationA1IsRefusedMoreThanEightDaysBeforeStart(): void
     {

@@ -376,7 +376,7 @@ final readonly class PayrollRegistrationSubmissionService
                     self::CHECKLIST_ITEM_KEY,
                     $frozen['deadline']->dueOn,
                 );
-            } elseif (in_array(
+            } elseif ($frozen['deadline']->statutory && in_array(
                 $frozen['interaction']->actionCode,
                 [2, 8],
                 true,
@@ -600,6 +600,7 @@ final readonly class PayrollRegistrationSubmissionService
                 $event === null
                     ? $effectiveOn
                     : (string) ($event['notification_trigger_on'] ?? ''),
+                $event,
             ),
             'employer_deadline' => $event === null
                 ? $this->employerDeadline($context)
@@ -800,12 +801,25 @@ final readonly class PayrollRegistrationSubmissionService
         ];
     }
 
-    /** @param array<string,mixed> $context */
+    /**
+     * @param array<string,mixed> $context
+     * @param array<string,mixed>|null $event
+     */
     private function deadlineFor(
         PayrollRegistrationInteraction $interaction,
         array $context,
         ?string $effectiveOn = null,
+        ?array $event = null,
     ): PayrollEmployeeRegistrationDeadlineWindow {
+        if ($interaction->documentType === self::AGENDA_REGZEC
+            && $interaction->actionCode === 8
+            && $effectiveOn !== null
+        ) {
+            return $this->deadlines->forCancellation(
+                ($event['data']['not_started'] ?? true) !== false,
+                $effectiveOn,
+            );
+        }
         if ($interaction->documentType === self::AGENDA_REGZEC
             && $interaction->actionCode >= 2
         ) {
@@ -1127,7 +1141,8 @@ final readonly class PayrollRegistrationSubmissionService
 
     /**
      * @return array{earliest_registration_on:string,due_on:string,
-     *   calendar_basis:string,ruleset_id:string,derived:bool,notice:?string}
+     *   calendar_basis:string,ruleset_id:string,derived:bool,notice:?string,
+     *   statutory:bool}
      */
     private function describeDeadline(
         PayrollEmployeeRegistrationDeadlineWindow $window,
@@ -1139,6 +1154,7 @@ final readonly class PayrollRegistrationSubmissionService
             'ruleset_id' => $window->rulesetId,
             'derived' => $window->derived,
             'notice' => $window->notice,
+            'statutory' => $window->statutory,
         ];
     }
 

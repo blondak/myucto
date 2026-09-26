@@ -1450,15 +1450,28 @@ final readonly class PayrollRegistrationEventService
                     ),
             );
         }
-        if (($input['not_started'] ?? null) !== true) {
+        $notStarted = $input['not_started'] ?? null;
+        if ($notStarted === false) {
+            // Zásady REGZEC (18-06-2026), kód akce 8: storno z jiného důvodu
+            // než nenastoupení (chybný variabilní symbol, nepovolená oprava
+            // druhu činnosti, soudní zneplatnění) je nutné zdůvodnit
+            // samostatnou písemností v příloze podání.
+            return [
+                'not_started' => false,
+                'source_submission_id' => $submissionId,
+                'explanation_attachment' => $this->explanationAttachment(
+                    $input['explanation_attachment'] ?? null,
+                ),
+            ];
+        }
+        if ($notStarted !== true) {
             throw new PayrollRegistrationXmlException(
                 'registration_a8_explanation_attachment_required',
                 $this->actionName(8)
-                    . ' aplikace připraví jen pro zaměstnance, který vůbec'
-                    . ' nenastoupil, a tuhle skutečnost je potřeba ve'
-                    . ' formuláři potvrdit. Jiné storno vyžaduje písemné'
-                    . ' vysvětlení, které aplikace zatím neumí přiložit —'
-                    . ' takové storno vyřiďte s ČSSZ mimo aplikaci.'
+                    . ' potřebuje vědět, proč se podává: buď zaměstnanec vůbec'
+                    . ' nenastoupil (zaškrtněte to ve formuláři), nebo jde'
+                    . ' o jiný důvod — pak přiložte soubor s písemným'
+                    . ' zdůvodněním, bez něj ČSSZ storno nezpracuje.'
                     . PayrollRegistrationFieldVocabulary::reference('not_started'),
             );
         }
@@ -1488,6 +1501,59 @@ final readonly class PayrollRegistrationEventService
         ];
     }
 
+    /**
+     * Soubor se zdůvodněním storna, který jde do přílohy podání A8
+     * (`attachs/attach`). Stejné meze jako přílohy profilu A1: název,
+     * nepoškozený obsah v base64 a rozumná velikost.
+     *
+     * @return array{name:string,description:?string,data_base64:string}
+     */
+    private function explanationAttachment(mixed $value): array
+    {
+        if (!is_array($value) || array_is_list($value)) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a8_explanation_attachment_required',
+                $this->actionName(8)
+                    . ' z jiného důvodu než nenastoupení ČSSZ zpracuje jen'
+                    . ' s písemným zdůvodněním v příloze. Přiložte ve'
+                    . ' formuláři soubor, který důvod storna vysvětluje'
+                    . ' (například chybný variabilní symbol nebo druh'
+                    . ' činnosti).'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'explanation_attachment',
+                    ),
+            );
+        }
+        $name = $this->requiredText(
+            $value['name'] ?? null,
+            'explanation_attachment.name',
+            255,
+        );
+        $data = $value['data_base64'] ?? null;
+        if (!is_string($data) || $data === ''
+            || strlen($data) > 20_000_000
+            || base64_decode($data, true) === false
+        ) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a8_explanation_attachment_invalid',
+                'Soubor se zdůvodněním storna se nepodařilo přečíst, nebo je'
+                    . ' větší než 15 MB. Přiložte ho ve formuláři znovu.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'explanation_attachment.data_base64',
+                    ),
+            );
+        }
+        $description = $value['description'] ?? null;
+
+        return [
+            'name' => $name,
+            'description' => is_string($description) && trim($description) !== ''
+                ? mb_substr(trim($description), 0, 255)
+                : null,
+            'data_base64' => $data,
+        ];
+    }
+
     /** @param array<string,mixed> $context @param array<string,mixed> $input */
     private function notificationTriggerOn(
         string $interaction,
@@ -1510,7 +1576,9 @@ final readonly class PayrollRegistrationEventService
             }
             return $discoveredOn;
         }
-        if ($interaction === 'cancellation') {
+        if ($interaction === 'cancellation'
+            && ($input['not_started'] ?? null) !== false
+        ) {
             return $this->date(
                 $context['start_date'] ?? null,
                 'planned_start_on',

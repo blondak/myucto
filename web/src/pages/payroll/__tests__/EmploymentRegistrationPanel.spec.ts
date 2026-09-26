@@ -1026,6 +1026,56 @@ describe('EmploymentRegistrationPanel', () => {
     }))
   })
 
+  it('files A8 for another reason only with an explanation attachment', async () => {
+    m.approveEvent.mockResolvedValue({
+      id: 94,
+      employment_id: 5,
+      environment: 'production',
+      interaction: 'cancellation',
+      action_code: 8,
+      effective_on: '2026-09-20',
+      source_kind: 'verified_cancellation',
+      source_reference: 'wrong-vs-1',
+      snapshot_fingerprint: 'f'.repeat(64),
+      approved_at: '2026-09-20 11:00:00',
+      consumed: false,
+      created: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-new"]').trigger('click')
+    await wrapper.get('[data-test="registration-event-interaction"]').setValue('cancellation')
+    await wrapper.get('[data-test="registration-event-effective-on"]').setValue('2026-09-20')
+    await wrapper.get('[data-test="registration-event-source-reference"]').setValue('wrong-vs-1')
+    await wrapper.get('[data-test="registration-event-source-submission-id"]').setValue('44')
+    await wrapper.get('[data-test="registration-event-a8-reason"]').setValue('other')
+
+    expect(wrapper.find('[data-test="registration-event-not-started"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="registration-event-a8-other-hint"]').text())
+      .toBe('payroll.people.registration.event.a8_other_hint')
+    expect(wrapper.get('[data-test="registration-event-save"]').attributes('disabled')).toBeDefined()
+
+    const input = wrapper.get('[data-test="registration-event-a8-attachment"]')
+    const file = new File(['%PDF'], 'zduvodneni.pdf', { type: 'application/pdf' })
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+    await flushPromises()
+    expect(wrapper.get('[data-test="registration-event-a8-attachment-name"]').text()).toBe('zduvodneni.pdf')
+
+    await wrapper.get('[data-test="registration-event-save"]').trigger('click')
+    await flushPromises()
+    expect(m.approveEvent).toHaveBeenCalledWith(5, expect.objectContaining({
+      interaction: 'cancellation',
+      source_submission_id: 44,
+      not_started: false,
+      explanation_attachment: {
+        name: 'zduvodneni.pdf',
+        description: null,
+        data_base64: btoa('%PDF'),
+      },
+    }))
+  })
+
   /**
    * Důvod skončení se zadává jednou na kartě vztahu; odhláška A2 si ho odsud
    * předvyplní i s čistým průměrem a odstupným (DIS přijme odstupné jen

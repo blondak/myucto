@@ -287,7 +287,10 @@ final readonly class PayrollRegistrationXmlValidator
             6 => ($data['foreign_insurance']['current'] ?? null) === 'P',
             7 => ($data['foreign_insurance']['current'] ?? null) === 'S'
                 && is_string($data['foreign_insurance']['identifier'] ?? null),
-            8 => ($data['not_started'] ?? null) === true,
+            8 => ($data['not_started'] ?? null) === true
+                || (($data['not_started'] ?? null) === false
+                    && is_string($data['explanation_attachment']['data_base64'] ?? null)
+                    && is_string($data['explanation_attachment']['name'] ?? null)),
             default => false,
         };
         if (!$valid) {
@@ -320,9 +323,10 @@ final readonly class PayrollRegistrationXmlValidator
                     7 => 'chybí údaj o tom, že příslušnost k českým předpisům '
                         . 'skončila, nebo identifikátor zahraničního pojištění. '
                         . 'Doplňte obojí na kartě osoby.',
-                    8 => 'chybí potvrzení, že zaměstnanec skutečně nenastoupil. '
-                        . 'Storno se podává jen k přihlášení, ke kterému '
-                        . 'nástup nedošel.',
+                    8 => 'chybí potvrzení, že zaměstnanec skutečně nenastoupil, '
+                        . 'nebo u jiného důvodu storna příloha s písemným '
+                        . 'zdůvodněním. Otevřete storno znovu a doplňte jedno '
+                        . 'nebo druhé.',
                     default => 'tenhle druh oznámení zatím neumíme připravit. '
                         . 'Podejte ho přes portál ČSSZ.',
                 },

@@ -531,6 +531,16 @@ opravu A4, nenastoupí-li vůbec, storno A8. Cizinec se přihlašuje vždy plnou
 registrací před zahájením práce, volba se u něj neukazuje. Dřív než osm dnů
 před nástupem aplikace přihlášku nepřipraví a napíše, od kterého dne to jde.
 
+**Storno přihlášení (A8).** Ve formuláři události A2–A8 zvolte **A8** a důvod
+storna. **Zaměstnanec nenastoupil** se oznamuje do osmi dnů od předpokládaného
+dne nástupu (§ 19 odst. 4 zákona č. 323/2025 Sb.) a vztah musí být v evidenci
+označený jako nenastoupený. **Jiný důvod** (přihlášení pod chybným variabilním
+symbolem, druh činnosti, který nejde opravit, soudní zneplatnění vztahu)
+zákonnou lhůtu nemá, ČSSZ ho ale zpracuje jen s písemným zdůvodněním —
+přiložte ho tlačítkem **Přiložit zdůvodnění**, bez přílohy storno uložit nejde.
+U takového storna aplikace ukáže jen milník 20. dne následujícího měsíce: do
+něj jde stornovat i měsíční hlášení, později se podává opravné hlášení.
+
 **Postavení v zaměstnání** se vybírá ze seznamu čtyřmístných kódů Klasifikace
 postavení v zaměstnání (NKPZ), kratší kód ČSSZ nepřijme. Aplikace kód navrhne
 podle druhu vztahu a doby určité (1111 a 1112 pracovní poměr na dobu neurčitou

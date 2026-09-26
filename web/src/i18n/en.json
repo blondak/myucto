@@ -5975,7 +5975,8 @@
         "window": "Can be filed from {from}, no later than {to}.",
         "employer_window": "Note: this is the first employee. File the employer's own registration no later than {to} — after that date the employer status is presumed by law.",
         "registration_window": {
-          "not_derived": "The start date {start} precedes 1 July 2026, when the current registration duty took effect. File the registration without undue delay — the app does not derive a deadline under the former rules and treats the filing as late."
+          "not_derived": "The start date {start} precedes 1 July 2026, when the current registration duty took effect. File the registration without undue delay — the app does not derive a deadline under the former rules and treats the filing as late.",
+          "not_statutory": "This filing has no statutory deadline. Until {milestone} the monthly report can be cancelled together with it without manual processing; later, file a corrective report."
         },
         "completion": {
           "action": "Supplement data (A3)",
@@ -6258,7 +6259,16 @@
           "foreign_identifier": "Foreign insurance number",
           "foreign_sector": "District / administrative area",
           "not_started_confirmation": "I confirm that the relation is recorded as a non-appearance and that the selected date is the original planned start date.",
-          "a8_hint": "This path can cancel only a proven non-appearance. Any other cancellation requires a written explanation and is intentionally not prepared by the application.",
+          "a8_hint": "Report a non-appearance within 8 days of the expected start date (Section 19(4) of Act No. 323/2025 Coll.). The relationship must be recorded as not started.",
+          "a8_reason": "Reason for cancellation",
+          "a8_reason_not_started": "The employee did not start",
+          "a8_reason_other": "Other reason (wrong variable symbol, activity type, invalidated relationship)",
+          "a8_other_hint": "A cancellation for another reason has no statutory deadline, but the ČSSZ processes it only with a written explanation attached. Until the 20th day of the following month the monthly report can be cancelled together with it; later, file a corrective report.",
+          "a8_attachment": "Attach explanation",
+          "a8_attachment_missing": "No explanation attached yet.",
+          "a8_attachment_description": "Attachment description (optional)",
+          "identifiers_verified": "I verified the OIČ and ID PPV in the employee list on the ČSSZ ePortal",
+          "identifiers_verified_hint": "Only for an employee taken over from an earlier notification (ONZ) whose numbers do not come from a ČSSZ protocol, an accepted A3 completion or an imported ČSSZ employee export. The A2 deregistration can then be filed without the A3 completion, which stays as a separate duty.",
           "select_placeholder": "Select…"
         }
       },

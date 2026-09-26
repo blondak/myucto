@@ -4178,6 +4178,8 @@ export interface PayrollRegistrationDeadline {
   /** `false` = lhůta se podle dnešních pravidel neodvozuje (nástup před 1. 7. 2026). */
   derived?: boolean
   notice?: string | null
+  /** `false` = podání zákonnou lhůtu nemá (storno A8 z jiného důvodu), `due_on` je jen milník. */
+  statutory?: boolean
 }
 
 export interface PayrollRegistrationEmployerDeadline {
@@ -4566,7 +4568,18 @@ export interface PayrollRegistrationEventInput {
     city?: string
     sector?: string
   }
-  not_started?: true
+  /** A8: `true` = nenastoupil (8 dnů), `false` = jiný důvod se zdůvodněním v příloze. */
+  not_started?: boolean
+  explanation_attachment?: {
+    name: string
+    description: string | null
+    data_base64: string
+  }
+  /**
+   * A2 u zaměstnance převzatého z ONZ bez A3: OIČ a ID PPV ověřené proti
+   * Seznamu zaměstnanců na ePortálu ČSSZ (ručně zapsaná čísla).
+   */
+  identifiers_verified_in_cssz_list?: boolean
 }
 
 /** Ručně spuštěný VREP přenos jedné zmrazené PREZEC/REGZEC registrace. */
