@@ -8496,8 +8496,8 @@
         "insolvency_impact": {
           "none": "No insolvency exception. The calculation follows the employee's ordinary evidence.",
           "alert_only": "Deductions under the existing enforcements are made and kept on deposit (Section 109(1)(c) of the Insolvency Act). Deduction agreements are not withheld. Only the notice of commencement needs to be verified; no recipient is checked because nothing is remitted.",
-          "approved_standard": "The deduction is calculated under the debt-relief regime but remains on hold for now. Payment to the insolvency administrator must be made and documented manually.",
-          "court_determined_amount": "The court-determined monthly instalment is withheld, capped by the statutory attachable part. Payment to the insolvency administrator must be made and documented manually."
+          "approved_standard": "The deduction is calculated under the debt-relief regime. After payroll approval, Prepare liabilities creates a payment liability to the insolvency administrator's verified account.",
+          "court_determined_amount": "The court-determined monthly instalment is withheld, capped by the statutory attachable part. After payroll approval, Prepare liabilities creates a payment liability to the insolvency administrator's verified account."
         },
         "court_amount_czk": "Court-determined monthly instalment (CZK)",
         "insolvency_decision": "The insolvency decision is verified",

@@ -8496,8 +8496,8 @@
         "insolvency_impact": {
           "none": "Bez insolvenční výjimky. Výpočet se řídí běžnými podklady zaměstnance.",
           "alert_only": "Srážky podle dosavadních exekucí se provedou a zůstanou v depozitu (§ 109 odst. 1 písm. c) IZ). Dohody o srážkách se nesrážejí. Stačí ověřit vyhlášku o zahájení řízení; příjemce se neověřuje, nic se neodesílá.",
-          "approved_standard": "Srážka se vypočte podle režimu oddlužení, ale zatím zůstane v depozitu. Úhradu insolvenčnímu správci je nutné provést a doložit ručně.",
-          "court_determined_amount": "Srazí se měsíční splátka určená soudem, nejvýše však zákonná zabavitelná část. Úhradu insolvenčnímu správci je nutné provést a doložit ručně."
+          "approved_standard": "Srážka se vypočte podle režimu oddlužení. Po schválení mzdy z ní akce Připravit závazky vytvoří platební závazek na ověřený účet insolvenčního správce.",
+          "court_determined_amount": "Srazí se měsíční splátka určená soudem, nejvýše však zákonná zabavitelná část. Po schválení mzdy z ní akce Připravit závazky vytvoří platební závazek na ověřený účet insolvenčního správce."
         },
         "court_amount_czk": "Měsíční splátka určená soudem (Kč)",
         "insolvency_decision": "Insolvenční rozhodnutí je ověřené",
