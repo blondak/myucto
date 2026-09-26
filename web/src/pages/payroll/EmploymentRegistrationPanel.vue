@@ -10,6 +10,7 @@ import {
   type PayrollJmhzTransportPoll,
   type PayrollJmhzTransportEnvironment,
   type PayrollRegistrationPreview,
+  type PayrollRegistrationMode,
   type PayrollRegistrationEvent,
   type PayrollRegistrationEventInput,
   type PayrollRegistrationEventInteraction,
@@ -56,6 +57,13 @@ const {
 } = useProductionSendConfirm()
 const busy = ref(false)
 const error = ref('')
+/**
+ * Český zaměstnanec před nástupem: výchozí je částečné přihlášení (P1), plnou
+ * registraci A1 volí účetní výslovně. Volba se ukáže, až server řekne, že
+ * pro vztah přichází v úvahu (`before_start_choice` v náhledu).
+ */
+const registrationMode = ref<PayrollRegistrationMode>('auto')
+const beforeStartChoice = ref(false)
 const preview = ref<PayrollRegistrationPreview | null>(null)
 const submission = ref<PayrollRegistrationSubmission | null>(null)
 const showXml = ref(false)
@@ -1592,6 +1600,7 @@ function proposalActions(
 }
 
 watch(selectedEventId, resetPreparedFiling)
+watch(registrationMode, resetPreparedFiling)
 watch(eventInteraction, () => {
   resetEventForm()
   deltaField.value = deltaFieldOptions.value[0] ?? 'title_prefix'
@@ -1625,21 +1634,36 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
       transport.value = null
       transportMessage.value = ''
       preview.value = selectedEventId.value === null
-        ? await payrollApi.previewEmploymentRegistration(
-            props.employmentId,
-            environment.value,
-          )
+        ? await (registrationMode.value === 'full'
+          ? payrollApi.previewEmploymentRegistration(
+              props.employmentId,
+              environment.value,
+              null,
+              'full',
+            )
+          : payrollApi.previewEmploymentRegistration(
+              props.employmentId,
+              environment.value,
+            ))
         : await payrollApi.previewEmploymentRegistration(
             props.employmentId,
             environment.value,
             selectedEventId.value,
           )
+      if (preview.value.before_start_choice === true) beforeStartChoice.value = true
     } else {
       submission.value = selectedEventId.value === null
-        ? await payrollApi.prepareEmploymentRegistration(
-            props.employmentId,
-            environment.value,
-          )
+        ? await (registrationMode.value === 'full'
+          ? payrollApi.prepareEmploymentRegistration(
+              props.employmentId,
+              environment.value,
+              null,
+              'full',
+            )
+          : payrollApi.prepareEmploymentRegistration(
+              props.employmentId,
+              environment.value,
+            ))
         : await payrollApi.prepareEmploymentRegistration(
             props.employmentId,
             environment.value,
@@ -1779,6 +1803,22 @@ async function copyXml(): Promise<void> {
             <option value="production">{{ t('payroll.people.registration.environment.production') }}</option>
           </select>
         </label>
+        <label
+          v-if="beforeStartChoice && selectedEventId === null"
+          class="flex items-center gap-2 text-xs text-neutral-600"
+          :title="t('payroll.people.registration.before_start.hint')"
+        >
+          <span>{{ t('payroll.people.registration.before_start.label') }}</span>
+          <select
+            v-model="registrationMode"
+            class="rounded-md border border-neutral-300 bg-surface px-2 py-1.5 text-xs text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+            :disabled="busy || submission !== null"
+            data-test="registration-mode"
+          >
+            <option value="auto">{{ t('payroll.people.registration.before_start.partial') }}</option>
+            <option value="full">{{ t('payroll.people.registration.before_start.full') }}</option>
+          </select>
+        </label>
         <button
           v-if="primaryAction !== 'preview'"
           type="button"
@@ -1813,6 +1853,13 @@ async function copyXml(): Promise<void> {
         </button>
       </div>
     </div>
+    <p
+      v-if="beforeStartChoice && selectedEventId === null"
+      class="mt-2 text-xs text-neutral-500"
+      data-test="registration-mode-hint"
+    >
+      {{ t('payroll.people.registration.before_start.hint') }}
+    </p>
 
     <div class="mt-4 rounded-lg border border-neutral-200 bg-surface p-3" data-test="registration-a1-profile">
       <div class="flex flex-wrap items-start justify-between gap-3">

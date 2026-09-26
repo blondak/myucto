@@ -348,6 +348,41 @@ describe('EmploymentRegistrationPanel', () => {
     expect(wrapper.find('[data-test="registration-prepared"]').exists()).toBe(true)
   })
 
+  it('offers full A1 registration before start and sends the chosen mode', async () => {
+    m.preview.mockResolvedValueOnce({ ...preview, before_start_choice: true })
+    m.preview.mockResolvedValueOnce({
+      ...preview,
+      agenda_code: 'REGZEC25',
+      interaction: 'direct_full_registration',
+      action_code: 1,
+      before_start_choice: true,
+    })
+    m.prepare.mockResolvedValue({
+      ...preparedSubmission('production'),
+      agenda_code: 'REGZEC25',
+      interaction: 'direct_full_registration',
+      before_start_choice: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-test="registration-mode"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    expect(m.preview).toHaveBeenLastCalledWith(5, 'production')
+    expect(wrapper.get('[data-test="registration-mode-hint"]').text())
+      .toBe('payroll.people.registration.before_start.hint')
+
+    await wrapper.get('[data-test="registration-mode"]').setValue('full')
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    expect(m.preview).toHaveBeenLastCalledWith(5, 'production', null, 'full')
+
+    await wrapper.get('[data-test="registration-prepare"]').trigger('click')
+    await flushPromises()
+    expect(m.prepare).toHaveBeenCalledWith(5, 'production', null, 'full')
+  })
+
   /**
    * Formulář místo syrového JSONu: hodnoty přijdou předvyplněné ze serveru,
    * u každé je vidět zdroj a co aplikace nevede, se hlásí konkrétně.

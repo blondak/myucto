@@ -520,6 +520,17 @@ od 23. 6. 2026 — u staršího nástupu aplikace rovnou nabídne plnou registra
 Druh činnosti 10 až 16 a výkon trestu jde přihlásit jen s nástupem od
 1. 1. 2026; dřívější datum ohlásí kontrola profilu.
 
+**Přihlášení před nástupem.** Zaměstnance je nutné přihlásit před nástupem,
+nejdřív osm dnů předem (§ 19 odst. 1 písm. a) zákona č. 323/2025 Sb.).
+U zaměstnance s českým občanstvím nabídne náhled volbu **Přihlášení před
+nástupem**: výchozí je **Částečné přihlášení (PREZEC P1)** se základními
+údaji, zbytek se doplní plnou registrací do osmi dnů po nástupu. Máte-li
+profil A1 hotový, zvolte **Plná registrace (REGZEC A1)** a podejte ji rovnou;
+v podání je předpokládaný den nástupu. Nastoupí-li zaměstnanec jindy, podejte
+opravu A4, nenastoupí-li vůbec, storno A8. Cizinec se přihlašuje vždy plnou
+registrací před zahájením práce, volba se u něj neukazuje. Dřív než osm dnů
+před nástupem aplikace přihlášku nepřipraví a napíše, od kterého dne to jde.
+
 **Postavení v zaměstnání** se vybírá ze seznamu čtyřmístných kódů Klasifikace
 postavení v zaměstnání (NKPZ), kratší kód ČSSZ nepřijme. Aplikace kód navrhne
 podle druhu vztahu a doby určité (1111 a 1112 pracovní poměr na dobu neurčitou

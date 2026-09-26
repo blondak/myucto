@@ -5997,6 +5997,12 @@
           "test": "Test",
           "production": "Production"
         },
+        "before_start": {
+          "label": "Registration before start",
+          "partial": "Partial registration (PREZEC P1)",
+          "full": "Full registration (REGZEC A1)",
+          "hint": "The employee must be registered before starting work, at the earliest 8 days in advance (Section 19(1) of Act No. 323/2025 Coll.). A partial registration needs only the basic data; the rest is added within 8 days after the start. You can file the full A1 registration right away once the A1 profile is complete; if the employee starts on a different day, file a correction A4, and if they never start, a cancellation A8."
+        },
         "send_test": "Send to test",
         "send_production": "Send to production",
         "send_failed": "The registration could not be sent.",

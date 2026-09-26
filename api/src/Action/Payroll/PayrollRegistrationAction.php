@@ -200,6 +200,7 @@ final class PayrollRegistrationAction
                 $this->environment($request),
                 $this->employmentId($args),
                 $this->eventId($request),
+                $this->fullRegistrationRequested($request),
             );
         });
     }
@@ -228,6 +229,7 @@ final class PayrollRegistrationAction
                 $this->employmentId($args),
                 $this->userId($request),
                 $this->eventId($request),
+                $this->fullRegistrationRequested($request),
             );
         }, 201);
     }
@@ -517,6 +519,29 @@ final class PayrollRegistrationAction
         }
 
         return (int) $value;
+    }
+
+    /**
+     * Před nástupem českého zaměstnance: `registration_mode=full` volí plnou
+     * registraci A1 místo výchozího částečného přihlášení P1. Kód formuláře
+     * endpoint dál nepřijímá — o agendě rozhoduje resolver, tohle je jen
+     * volba, kterou zákon zaměstnavateli dává.
+     */
+    private function fullRegistrationRequested(Request $request): bool
+    {
+        $body = (array) ($request->getParsedBody() ?? []);
+        $value = $body['registration_mode']
+            ?? ($request->getQueryParams()['registration_mode'] ?? null);
+        if ($value === null || $value === '' || $value === 'auto') {
+            return false;
+        }
+        if ($value !== 'full') {
+            throw new \InvalidArgumentException(
+                'registration_mode musí být auto, nebo full.',
+            );
+        }
+
+        return true;
     }
 
     private function noStore(Response $response): Response

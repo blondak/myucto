@@ -103,6 +103,7 @@ final readonly class PayrollRegistrationSubmissionService
         string $environment,
         int $employmentId,
         ?int $eventId = null,
+        bool $fullRegistrationRequested = false,
     ): array {
         $resolved = $this->resolve(
             $supplierId,
@@ -110,6 +111,7 @@ final readonly class PayrollRegistrationSubmissionService
             $employmentId,
             0,
             $eventId,
+            $fullRegistrationRequested,
         );
 
         return [
@@ -117,6 +119,7 @@ final readonly class PayrollRegistrationSubmissionService
             'agenda_code' => $resolved['interaction']->documentType,
             'interaction' => $resolved['interaction']->interaction,
             'action_code' => $resolved['interaction']->actionCode,
+            'before_start_choice' => $resolved['before_start_choice'],
             'xml' => $resolved['xml'],
             'xml_sha256' => hash('sha256', $resolved['xml']),
             'deadline' => $this->describeDeadline($resolved['deadline']),
@@ -196,6 +199,7 @@ final readonly class PayrollRegistrationSubmissionService
         int $employmentId,
         ?int $createdBy = null,
         ?int $eventId = null,
+        bool $fullRegistrationRequested = false,
     ): array {
         // Povinnost a lhůta vznikají mimo transakci podání a nezávisle na tom,
         // jestli se podání povede připravit. Kdyby vznikaly až spolu s ním,
@@ -219,6 +223,7 @@ final readonly class PayrollRegistrationSubmissionService
             $employmentId,
             0,
             $eventId,
+            $fullRegistrationRequested,
         );
         $obligation = $this->registerObligation(
             $supplierId,
@@ -237,6 +242,7 @@ final readonly class PayrollRegistrationSubmissionService
             $obligation,
             $eventId,
             $problems,
+            $fullRegistrationRequested,
         ): array {
             if (!$this->submissionRepository->lockSupplier($supplierId)) {
                 // Výjimka zůstává: chybí firma, za kterou by se podávalo,
@@ -297,6 +303,7 @@ final readonly class PayrollRegistrationSubmissionService
                 $employmentId,
                 (int) $submission['id'],
                 $eventId,
+                $fullRegistrationRequested,
             );
             $part = $this->submissions->addPart(
                 $supplierId,
@@ -393,6 +400,7 @@ final readonly class PayrollRegistrationSubmissionService
                 'environment' => $environment,
                 'agenda_code' => $frozen['interaction']->documentType,
                 'interaction' => $frozen['interaction']->interaction,
+                'before_start_choice' => $frozen['before_start_choice'],
                 'artifact_sha256' => (string) $artifact['artifact_sha256'],
                 'created' => true,
                 'deadline' => $this->describeDeadline($frozen['deadline']),
@@ -443,7 +451,8 @@ final readonly class PayrollRegistrationSubmissionService
      *   snapshot:PayrollRegistrationIdentitySnapshot,
      *   xml:string,source_hash:string,schema_version:string,
      *   deadline:PayrollEmployeeRegistrationDeadlineWindow,
-     *   employer_deadline:?array<string,string>
+     *   employer_deadline:?array<string,string>,
+     *   before_start_choice:bool
      * }
      */
     private function resolve(
@@ -452,6 +461,7 @@ final readonly class PayrollRegistrationSubmissionService
         int $employmentId,
         int $submissionId,
         ?int $eventId = null,
+        bool $fullRegistrationRequested = false,
     ): array {
         $context = $this->requireContext($supplierId, $employmentId);
         $event = $eventId === null
@@ -470,6 +480,7 @@ final readonly class PayrollRegistrationSubmissionService
             $environment,
             $context,
             $event,
+            $fullRegistrationRequested,
         );
         // Dohlášení údajů jde i za vztah, který už skončil: do 10009 patří den
         // odeslání, identita se ale čte ke dni skončení (dál vztah neexistuje).
@@ -594,6 +605,11 @@ final readonly class PayrollRegistrationSubmissionService
                 ? $this->employerDeadline($context)
                 : null,
             'event_effective_on' => $event === null ? null : $effectiveOn,
+            'before_start_choice' => $event === null
+                && !$interactionContext['work_started']
+                && !$interactionContext['did_not_start']
+                && !$interactionContext['employment_ended']
+                && $citizenship === 'CZ',
             'source_event_reference' => self::sourceEventReference(
                 $employmentId,
                 $eventId,
@@ -722,17 +738,25 @@ final readonly class PayrollRegistrationSubmissionService
 
     /**
      * Fakta pro resolver. `full_registration_data` potvrzuje jen základní
-     * metadata zaměstnavatele a skutečný nástup, nikoli právní úplnost A1;
-     * úplnou variantní sadu samostatně hlídá business matice. Před nástupem
-     * českého občana se za doloženou vědomě nepovažuje: `job/@fro`
-     * je datum SKUTEČNÉHO nástupu a předjímat ho znamená tvrdit ČSSZ událost,
-     * která se ještě nestala. Přesně na tuhle mezeru je PREZEC.
+     * metadata zaměstnavatele, nikoli právní úplnost A1; úplnou variantní
+     * sadu samostatně hlídá business matice a profil A1.
+     *
+     * Nástup NENÍ podmínkou plné registrace. § 19 odst. 1 písm. a) zákona
+     * č. 323/2025 Sb. ukládá přihlásit zaměstnance „nejpozději před okamžikem
+     * nástupu", nejdříve osm dnů předem, a to KAŽDÉHO — zásady REGZEC (verze
+     * 18-06-2026) počítají s případem „předpokládané datum nástupu bylo
+     * oznámeno akcí 1" (při jiném skutečném dni se pak podává oprava A4, při
+     * nenastoupení storno A8). Dřívější podmínka „až po nástupu" zablokovala
+     * přesně cizince, kterým hláška radila podat REGZEC před zahájením práce.
+     * Českému zaměstnanci zůstává výchozí částečné přihlášení (PREZEC P1),
+     * plnou registraci A1 volí zaměstnavatel výslovně
+     * (`$fullRegistrationRequested`).
      *
      * @param array<string,mixed> $context
      * @return array{
      *   work_started:bool,full_registration_data:bool,
      *   pre_registration_accepted:bool,did_not_start:bool,
-     *   employment_ended:bool
+     *   employment_ended:bool,full_registration_requested:bool
      * }
      */
     private function interactionContext(
@@ -740,6 +764,7 @@ final readonly class PayrollRegistrationSubmissionService
         string $environment,
         array $context,
         ?array $event = null,
+        bool $fullRegistrationRequested = false,
     ): array {
         $workStarted = $context['actual_start_date'] !== null
             || in_array(
@@ -753,7 +778,9 @@ final readonly class PayrollRegistrationSubmissionService
 
         return [
             'work_started' => $workStarted,
-            'full_registration_data' => $employerMetadataComplete && $workStarted,
+            'full_registration_data' => $employerMetadataComplete,
+            'full_registration_requested' => $fullRegistrationRequested
+                && $event === null,
             'pre_registration_accepted' =>
                 $this->registrations->hasAcceptedPreRegistration(
                     $supplierId,
@@ -1012,6 +1039,7 @@ final readonly class PayrollRegistrationSubmissionService
             'environment' => $environment,
             'agenda_code' => $stored['agenda_code'],
             'interaction' => $resolved['interaction']->interaction,
+            'before_start_choice' => $resolved['before_start_choice'],
             'artifact_sha256' => $stored['artifact_sha256'],
             'created' => false,
             'deadline' => $this->describeDeadline($resolved['deadline']),

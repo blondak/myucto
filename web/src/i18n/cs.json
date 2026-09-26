@@ -5997,6 +5997,12 @@
           "test": "Test",
           "production": "Produkce"
         },
+        "before_start": {
+          "label": "Přihlášení před nástupem",
+          "partial": "Částečné přihlášení (PREZEC P1)",
+          "full": "Plná registrace (REGZEC A1)",
+          "hint": "Zaměstnance je nutné přihlásit před nástupem, nejdřív 8 dnů předem (§ 19 odst. 1 zákona č. 323/2025 Sb.). Částečné přihlášení stačí se základními údaji a zbytek se doplní do 8 dnů po nástupu. Plnou registraci A1 můžete podat rovnou, pokud máte vyplněný profil A1; nastoupí-li zaměstnanec jindy, podejte opravu A4, nenastoupí-li vůbec, storno A8."
+        },
         "send_test": "Odeslat do testu",
         "send_production": "Odeslat do produkce",
         "send_failed": "Přihlášku se nepodařilo odeslat.",

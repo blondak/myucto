@@ -1809,6 +1809,124 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(1, $this->countSubmissions());
     }
 
+    /**
+     * § 19 odst. 1 písm. a) zákona č. 323/2025 Sb.: přihlásit PŘED nástupem,
+     * nejdřív osm dnů předem — a to i plnou registrací A1. Dřív šla A1 až po
+     * nástupu (`full_registration_data = metadata && work_started`), takže
+     * zaměstnavatel, který chtěl registraci vyřídit najednou, musel čekat
+     * na den, kdy už byl v prodlení.
+     */
+    public function testCzechEmployeeBeforeStartCanFileFullRegistrationA1(): void
+    {
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
+        $this->saveA1ProfileFor(self::START_ON, '1', '1');
+
+        $response = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'registration_mode' => 'full',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertSame('REGZEC25', $body['agenda_code']);
+        self::assertSame('direct_full_registration', $body['interaction']);
+        self::assertTrue($body['before_start_choice']);
+        self::assertSame(self::START_ON, $body['deadline']['due_on']);
+        self::assertSame('2026-08-14', $body['deadline']['earliest_registration_on']);
+        $xml = $this->storedArtifactXml((int) $body['submission_id']);
+        self::assertStringContainsString('act="1"', $xml);
+        self::assertStringContainsString(' fro="' . self::START_ON . '"', $xml);
+    }
+
+    /**
+     * Cizinec se přihlašuje VŽDY plnou registrací a VŽDY před nástupem.
+     * Hláška validátoru mu to radila, přitom podání A1 před nástupem padalo
+     * na „nemá vyplněné všechny povinné údaje".
+     */
+    public function testForeignEmployeeBeforeStartFilesRegzecA1WithoutChoosing(): void
+    {
+        $this->identities->saveIdentityFacts(
+            $this->supplierId,
+            $this->employeeId,
+            $this->identityId,
+            2,
+            [
+                'title_prefix' => 'Ing.',
+                'birth_date' => '1991-02-03',
+                'birth_place' => 'Testov',
+                'birth_country_code' => 'SK',
+                'citizenship_country_code' => 'SK',
+                'sex' => 'female',
+            ],
+        );
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
+        $payload = $this->completeA1Payload();
+        $payload['proof_identity'] = [
+            'type_code' => 'P',
+            'number' => 'SYN000001',
+            'foreign_issuer' => null,
+            'country_code' => 'SK',
+        ];
+        $payload['foreign_worker'] = [
+            'free_access' => true,
+            'free_access_reason_code' => '1',
+            'permit_type_code' => null,
+            'issuing_labour_office_code' => null,
+            'permit_identifier' => null,
+            'permit_from' => null,
+            'permit_to' => null,
+        ];
+        $saved = ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($payload),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        self::assertSame(
+            'verified',
+            $this->json($saved)['profile']['status'],
+            json_encode($this->json($saved)['profile']['problems'] ?? [], JSON_UNESCAPED_UNICODE) ?: '',
+        );
+
+        $response = $this->post();
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertSame('REGZEC25', $body['agenda_code']);
+        self::assertFalse($body['before_start_choice']);
+        self::assertSame(self::START_ON, $body['deadline']['due_on']);
+    }
+
+    /** Dřív než osm dnů před nástupem A1 nejde — stejně jako P1. */
+    public function testFullRegistrationA1IsRefusedMoreThanEightDaysBeforeStart(): void
+    {
+        $startOn = '2026-09-01';
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET start_date = ?
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$startOn, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', $startOn, null, null, true);
+        $this->saveA1ProfileFor($startOn, '1', '1');
+
+        $response = ($this->action)->preview(
+            $this->request('GET')->withQueryParams([
+                'environment' => 'test',
+                'registration_mode' => 'full',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        $error = $this->json($response)['error'];
+        self::assertSame('registration_regzec_a1_start_window_invalid', $error['code']);
+        self::assertStringContainsString('24.08.2026', $error['message']);
+    }
+
     public function testLateRegistrationDoesNotBypassIncompleteA1Guard(): void
     {
         $this->db->pdo()->prepare(

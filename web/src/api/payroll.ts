@@ -4199,7 +4199,15 @@ export interface PayrollRegistrationPreview {
   deadline: PayrollRegistrationDeadline
   employer_registration: PayrollRegistrationEmployerDeadline | null
   official_submission: { supported: false, reason: string }
+  /**
+   * Český zaměstnanec před nástupem: zaměstnavatel volí mezi částečným
+   * přihlášením (P1, výchozí) a plnou registrací A1 (`registration_mode=full`).
+   */
+  before_start_choice?: boolean
 }
+
+/** `full` = plná registrace A1 před nástupem místo výchozího P1. */
+export type PayrollRegistrationMode = 'auto' | 'full'
 
 export interface PayrollRegistrationSubmission {
   submission_id: number
@@ -4215,6 +4223,7 @@ export interface PayrollRegistrationSubmission {
   artifact_sha256: string
   created: boolean
   deadline: PayrollRegistrationDeadline
+  before_start_choice?: boolean
 }
 
 export interface PayrollRegistrationA1Address {
@@ -7965,17 +7974,29 @@ export const payrollApi = {
     employmentId: number,
     environment: 'test' | 'production' = 'production',
     eventId?: number | null,
+    mode: PayrollRegistrationMode = 'auto',
   ) => api.get<PayrollRegistrationPreview>(
     `/payroll/submissions/registration/${employmentId}`,
-    { params: { environment, ...(eventId == null ? {} : { event_id: eventId }) } },
+    {
+      params: {
+        environment,
+        ...(eventId == null ? {} : { event_id: eventId }),
+        ...(mode === 'full' ? { registration_mode: 'full' } : {}),
+      },
+    },
   ).then(response => response.data),
   prepareEmploymentRegistration: (
     employmentId: number,
     environment: 'test' | 'production' = 'production',
     eventId?: number | null,
+    mode: PayrollRegistrationMode = 'auto',
   ) => api.post<PayrollRegistrationSubmission>(
     `/payroll/submissions/registration/${employmentId}`,
-    { environment, ...(eventId == null ? {} : { event_id: eventId }) },
+    {
+      environment,
+      ...(eventId == null ? {} : { event_id: eventId }),
+      ...(mode === 'full' ? { registration_mode: 'full' } : {}),
+    },
   ).then(response => response.data),
   employmentRegistrationA1Profile: (
     employmentId: number,

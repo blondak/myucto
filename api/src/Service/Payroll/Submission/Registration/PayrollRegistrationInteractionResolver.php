@@ -24,7 +24,7 @@ final class PayrollRegistrationInteractionResolver
      *   pre_registration_accepted:bool,did_not_start:bool,
      *   employment_ended:bool,event_interaction:?string,
      *   activity_code?:?string,relationship_detail_code?:?string,
-     *   regzec_variant_data_complete?:bool
+     *   regzec_variant_data_complete?:bool,full_registration_requested?:bool
      * } $context
      */
     public function resolve(
@@ -116,10 +116,11 @@ final class PayrollRegistrationInteractionResolver
             if (!$context['full_registration_data']) {
                 $this->invalid(
                     'registration_interaction_full_data_missing',
-                    'Přihlášení zaměstnance (REGZEC A1) zatím nemá vyplněné '
-                    . 'všechny povinné údaje. Uložit rozpracovaný profil jde, '
-                    . 'podat ho ale až po doplnění — co chybí, ukáže tlačítko '
-                    . 'Kontrola u registrace.',
+                    'Přihlášení zaměstnance (REGZEC A1) nejde sestavit, protože '
+                    . 'u zaměstnavatele chybí název, variabilní symbol mzdové '
+                    . 'účtárny nebo kód správy sociálního zabezpečení. Doplňte '
+                    . 'je v Nastavení mezd a v účtárně vztahu; údaje '
+                    . 'zaměstnance ukáže tlačítko Kontrola u registrace.',
                 );
             }
             $this->assertA1Snapshot($snapshot);
@@ -137,9 +138,10 @@ final class PayrollRegistrationInteractionResolver
             $this->invalid(
                 'registration_interaction_duplicate_p1',
                 'Částečné přihlášení před nástupem (PREZEC P1) už ČSSZ přijala, '
-                . 'takže se podruhé nepodává. Až zaměstnanec nastoupí, '
-                . 'navažte plnou registrací (REGZEC A1); pokud nenastoupil, '
-                . 'podejte oznámení PREZEC P2.',
+                . 'takže se podruhé nepodává. Navažte plnou registrací '
+                . '(REGZEC A1) — v registraci u vztahu zvolte „Plná '
+                . 'registrace A1", jde to i před nástupem; pokud zaměstnanec '
+                . 'nenastoupil, podejte oznámení PREZEC P2.',
             );
         }
 
@@ -165,7 +167,7 @@ final class PayrollRegistrationInteractionResolver
      *   pre_registration_accepted:bool,did_not_start:bool,
      *   employment_ended:bool,event_interaction:?string,
      *   activity_code?:?string,relationship_detail_code?:?string,
-     *   regzec_variant_data_complete?:bool
+     *   regzec_variant_data_complete?:bool,full_registration_requested?:bool
      * } $context
      */
     public function agendaFor(
@@ -178,8 +180,12 @@ final class PayrollRegistrationInteractionResolver
         if ($context['did_not_start']) {
             return 'PREZEC26';
         }
+        // Před nástupem si český zaměstnavatel vybírá: částečné přihlášení
+        // (PREZEC P1) je výchozí, plnou registraci A1 volí výslovně. Zákon
+        // připouští obojí (§ 19 odst. 1 písm. a) a odst. 2 zákona
+        // č. 323/2025 Sb.); cizinec částečně přihlásit nejde.
         if ($context['work_started']
-            || $context['full_registration_data']
+            || ($context['full_registration_requested'] ?? false)
             || $citizenshipCountryCode !== 'CZ'
         ) {
             return 'REGZEC25';
