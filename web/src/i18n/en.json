@@ -3800,6 +3800,18 @@
         "annual_settlement_result": "Annual tax settlement",
         "monthly_bundle": "Monthly ZIP bundle"
       },
+      "payslip_delivery": {
+        "run": "Send payslips: {office}",
+        "running": "Queuing payslips…",
+        "hint": "Sends a secure link to their payslip to every employee who agreed to electronic delivery. A payslip that already has a link is not sent again.",
+        "confirm": "Send payslips ({office}) by secure link to all employees who agreed to electronic delivery?",
+        "queued": "Queued for sending: {queued}, already queued before: {already}.",
+        "none": "The revision has no generated payslips yet. Generate the documents first.",
+        "failed": "The payslips could not be queued for sending.",
+        "title": "Payslip delivery",
+        "summary": "Payslips in total {total}: newly queued {queued}, already queued {already}, skipped {skipped}.",
+        "skipped_intro": "These employees did not receive the payslip. Hand it over another way, or fill in what is missing:"
+      },
       "secure_delivery": {
         "send_link": "Send secure link",
         "sending_link": "Sending…",

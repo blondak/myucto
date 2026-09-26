@@ -3800,6 +3800,18 @@
         "annual_settlement_result": "Roční zúčtování záloh",
         "monthly_bundle": "Měsíční balíček ZIP"
       },
+      "payslip_delivery": {
+        "run": "Rozeslat pásky: {office}",
+        "running": "Zařazuji pásky…",
+        "hint": "Pošle zaměstnancům se souhlasem s elektronickým doručením zabezpečený odkaz na jejich výplatní pásku. Páska, která už odkaz má, se znovu neposílá.",
+        "confirm": "Rozeslat výplatní pásky ({office}) zabezpečeným odkazem všem zaměstnancům, kteří s elektronickým doručením souhlasí?",
+        "queued": "Zařazeno k odeslání: {queued}, už zařazených dřív: {already}.",
+        "none": "Revize zatím nemá vygenerované výplatní pásky. Nejdřív spusťte generování dokumentů.",
+        "failed": "Výplatní pásky se nepodařilo zařadit k odeslání.",
+        "title": "Rozeslání výplatních pásek",
+        "summary": "Pásek celkem {total}: nově zařazeno {queued}, už zařazených {already}, přeskočeno {skipped}.",
+        "skipped_intro": "Těmto zaměstnancům se páska neposlala. Předejte ji jinak, nebo doplňte, co chybí:"
+      },
       "secure_delivery": {
         "send_link": "Poslat zabezpečený odkaz",
         "sending_link": "Odesílám…",

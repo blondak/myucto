@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import type { PayrollEmployerPolicy, PayrollSetupCheck } from '@/api/payroll'
 
 const m = vi.hoisted(() => ({
@@ -389,7 +389,7 @@ describe('EmployerPolicies', () => {
     const fresh = await mountComponent(true, [])
     const freshChannel = fresh.findAllComponents(SearchableSelect)
       .find(select => select.attributes('data-test') === 'policy-delivery-channel')
-    expect((freshChannel!.props('options') as { value: string }[]).map(option => option.value))
+    expect(((freshChannel as unknown as VueWrapper<any>).props('options') as { value: string }[]).map(option => option.value))
       .not.toContain('smime_email')
     expect(fresh.find('[data-test="policy-delivery-unsupported"]').exists()).toBe(false)
     fresh.unmount()
@@ -399,7 +399,7 @@ describe('EmployerPolicies', () => {
     await flushPromises()
     const legacyChannel = legacy.findAllComponents(SearchableSelect)
       .find(select => select.attributes('data-test') === 'policy-delivery-channel')
-    expect((legacyChannel!.props('options') as { value: string }[]).map(option => option.value))
+    expect(((legacyChannel as unknown as VueWrapper<any>).props('options') as { value: string }[]).map(option => option.value))
       .toContain('smime_email')
     expect(legacy.find('[data-test="policy-delivery-unsupported"]').exists()).toBe(true)
     legacy.unmount()

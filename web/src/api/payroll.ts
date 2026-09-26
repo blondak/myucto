@@ -4858,6 +4858,23 @@ export interface PayrollDocumentSecureLinkCreateResult {
   expires_at: string | null
 }
 
+/**
+ * Výsledek hromadného rozeslání pásek revize. Nese jen počty a důvody
+ * přeskočených osob — adresy ani odkazy server nevrací.
+ */
+export interface PayrollRevisionPayslipDeliveryResult {
+  total: number
+  queued: number
+  already_queued: number
+  skipped: {
+    document_id: number
+    employee_id: number
+    employee_name: string
+    reason: PayrollSecureDeliveryBlockedReason
+    message: string
+  }[]
+}
+
 export interface PayrollDocumentRevision {
   run_id: number
   revision_id: number
@@ -8205,6 +8222,11 @@ export const payrollApi = {
   sendDocumentSecureLink: (documentId: number) =>
     api.post<PayrollDocumentSecureLinkCreateResult>(
       `/payroll/documents/${documentId}/secure-links`,
+      {},
+    ).then(response => response.data),
+  sendRevisionPayslips: (runId: number, revisionId: number) =>
+    api.post<PayrollRevisionPayslipDeliveryResult>(
+      `/payroll/runs/${runId}/revisions/${revisionId}/documents/secure-links`,
       {},
     ).then(response => response.data),
   revokeDocumentSecureLink: (documentId: number, linkId: number) =>

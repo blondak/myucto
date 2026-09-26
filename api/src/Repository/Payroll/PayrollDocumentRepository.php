@@ -380,6 +380,44 @@ final class PayrollDocumentRepository
         return array_values($rows);
     }
 
+    /**
+     * Platné výplatní pásky jedné schválené revize — podklad hromadného
+     * rozeslání. Skrytá a nahrazená verze se neposílá: zaměstnanec má dostat
+     * tu, která platí, stejně jako ji ukazuje seznam dokumentů.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function currentPayslipsForRevision(int $supplierId, int $runId, int $revisionId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT document.*, employee.full_name AS employee_name
+               FROM payroll_generated_documents document
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = document.supplier_id
+                AND employee.id = document.employee_id
+          LEFT JOIN payroll_generated_document_hidden hidden
+                 ON hidden.supplier_id = document.supplier_id
+                AND hidden.document_id = document.id
+              WHERE document.supplier_id = ?
+                AND document.run_id = ?
+                AND document.revision_id = ?
+                AND document.document_kind = "payslip"
+                AND hidden.document_id IS NULL
+                AND NOT EXISTS (
+                    SELECT 1 FROM payroll_generated_documents newer
+                     WHERE newer.supplier_id = document.supplier_id
+                       AND newer.supersedes_document_id = document.id
+                )
+              ORDER BY employee.full_name, document.id'
+        );
+        $stmt->execute([$supplierId, $runId, $revisionId]);
+
+        return array_values(array_map(
+            self::cast(...),
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        ));
+    }
+
     /** @return list<array<string,mixed>> */
     public function forRevision(int $supplierId, int $revisionId): array
     {

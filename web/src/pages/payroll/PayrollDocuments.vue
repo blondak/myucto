@@ -13,6 +13,7 @@ import {
   type PayrollDocumentSecureLink,
   type PayrollPeriodExportJob,
   type PayrollPeriodExportScope,
+  type PayrollRevisionPayslipDeliveryResult,
   type PayrollSecureDeliveryBlockedReason,
   type PayrollTaxCertificateKind,
   type PayrollTaxCertificateGenerationPayload,
@@ -744,6 +745,47 @@ async function generateTaxCertificate(
   }
 }
 
+/*
+ * Hromadné rozeslání pásek revize. Každá páska jde touž cestou jako tlačítko
+ * u jednoho dokumentu (stejná brána, souhlas osoby i idempotence), takže
+ * opakované kliknutí nic nepošle dvakrát. Výsledek zůstane na stránce:
+ * účetní potřebuje vidět, komu pásku musí předat jinak.
+ */
+const sendingPayslipsRevisionId = ref<number | null>(null)
+const payslipDelivery = ref<PayrollRevisionPayslipDeliveryResult | null>(null)
+
+async function sendRevisionPayslips(revision: PayrollDocumentList['revisions'][number]): Promise<void> {
+  if (sendingPayslipsRevisionId.value !== null) return
+  if (!window.confirm(t('payroll.documents.payslip_delivery.confirm', {
+    office: revision.office_name || t('payroll.documents.company'),
+  }))) return
+  sendingPayslipsRevisionId.value = revision.revision_id
+  try {
+    const result = await payrollApi.sendRevisionPayslips(revision.run_id, revision.revision_id)
+    payslipDelivery.value = result
+    if (result.total === 0) {
+      toast.warning(t('payroll.documents.payslip_delivery.none'))
+    } else {
+      toast.success(t('payroll.documents.payslip_delivery.queued', {
+        queued: result.queued,
+        already: result.already_queued,
+      }))
+    }
+  } catch (error: any) {
+    const reason = error?.response?.data?.error?.reason as PayrollSecureDeliveryBlockedReason | undefined
+    toast.error(
+      secureDeliveryReasonMessage(reason)
+      ?? apiErrorMessage(error, t('payroll.documents.payslip_delivery.failed')),
+    )
+  } finally {
+    sendingPayslipsRevisionId.value = null
+  }
+}
+
+function payslipSkipReason(row: PayrollRevisionPayslipDeliveryResult['skipped'][number]): string {
+  return secureDeliveryReasonMessage(row.reason) ?? row.message
+}
+
 async function generateBatch(revision: PayrollDocumentList['revisions'][number]): Promise<void> {
   if (generatingBatchId.value !== null) return
   generatingBatchId.value = revision.revision_id
@@ -1038,9 +1080,74 @@ onBeforeUnmount(() => {
               )
             }}
           </button>
+          <button
+            v-for="revision in canGenerate ? data?.revisions ?? [] : []"
+            :key="`send-${revision.revision_id}`"
+            type="button"
+            data-test="send-revision-payslips"
+            :class="btnOutline('success')"
+            class="whitespace-nowrap"
+            :title="t('payroll.documents.payslip_delivery.hint')"
+            :disabled="sendingPayslipsRevisionId !== null"
+            @click="sendRevisionPayslips(revision)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path :d="ICONS.send" />
+            </svg>
+            {{
+              t(
+                sendingPayslipsRevisionId === revision.revision_id
+                  ? 'payroll.documents.payslip_delivery.running'
+                  : 'payroll.documents.payslip_delivery.run',
+                { office: revision.office_name || t('payroll.documents.company') },
+              )
+            }}
+          </button>
         </template>
       </div>
     </header>
+
+    <section
+      v-if="payslipDelivery && activeTab === 'monthly'"
+      class="rounded-lg border p-4"
+      :class="payslipDelivery.skipped.length > 0
+        ? 'border-warning-500/30 bg-warning-50'
+        : 'border-success-500/30 bg-success-50'"
+      data-test="payslip-delivery-report"
+      role="status"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="text-sm font-semibold text-neutral-900">{{ t('payroll.documents.payslip_delivery.title') }}</h2>
+          <p class="mt-1 text-sm text-neutral-700">
+            {{ t('payroll.documents.payslip_delivery.summary', {
+              total: payslipDelivery.total,
+              queued: payslipDelivery.queued,
+              already: payslipDelivery.already_queued,
+              skipped: payslipDelivery.skipped.length,
+            }) }}
+          </p>
+        </div>
+        <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="payslipDelivery = null">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+          {{ t('common.close') }}
+        </button>
+      </div>
+      <template v-if="payslipDelivery.skipped.length > 0">
+        <p class="mt-3 text-sm text-neutral-700">{{ t('payroll.documents.payslip_delivery.skipped_intro') }}</p>
+        <ul class="mt-2 divide-y divide-neutral-100 rounded-md border border-neutral-200 bg-surface text-sm">
+          <li
+            v-for="row in payslipDelivery.skipped"
+            :key="row.document_id"
+            class="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+            data-test="payslip-delivery-skipped"
+          >
+            <span class="font-medium text-neutral-900">{{ row.employee_name }}</span>
+            <span class="text-neutral-600">{{ payslipSkipReason(row) }}</span>
+          </li>
+        </ul>
+      </template>
+    </section>
 
     <section
       v-if="documentBatch"
