@@ -9,20 +9,20 @@
 
       90_majetek.xml   karty majetku, daňové odpisy po letech, účetní odpisy po měsících
       91_mzdy.xml      zaměstnanci, pracovní poměry, zpracované mzdy, srážky a exekuce,
-                       podání pro ČSSZ a zdravotní pojišťovny, platby a číselníky mezd
-                       (bez jmen a rodných čísel)
+                       podání pro ČSSZ a zdravotní pojišťovny včetně obsahu odeslaných
+                       hlášení, platby a číselníky mezd
 
     Skupina mzdy je omezená na rok agendy (podle složky <IČO>_<rok> nebo názvu datového
     souboru) - kmenové údaje a číselníky jsou celé, záznamy vázané na rok jen za ten rok.
 
-    Skript data jen čte, nic v nich nemění. Vynechává sloupce se systémovými údaji
-    (kdo a kdy záznam založil nebo změnil, značky, zámky). U podání a plateb bere jen
-    sloupce, které převod potřebuje - jméno, rodné číslo ani adresu osoby z nich netahá,
-    převod osobu páruje přes pracovní poměr.
+    Skript data jen čte, nic v nich nemění. Tabulky bere celé, vynechává jen čistě
+    systémové sloupce (kdo záznam označil a zamkl, výběr, ruční pořadí). Obsah podání
+    v binárních sloupcích (měsíční hlášení JMHZ, registrace zaměstnanců a další) rozepíše
+    na atributy datového slovníku JMHZ; binární sloupec, který nejde přečíst, vynechá.
 
     Na konci vypíše a zapíše vedle každého XML souboru (`<soubor>-souhrn.txt`) přehled:
-    které tabulky ze seznamu v datovém souboru nejsou, které jsou prázdné, a kolik řádků
-    má každá vytažená tabulka.
+    které tabulky ze seznamu v datovém souboru nejsou, které jsou prázdné, kolik řádků
+    má každá vytažená tabulka a kolik binárních sloupců se přečetlo.
 
     Zdrojem může být:
       - datový soubor POHODY nebo PAMICA (.mdb) - parametr -Mdb,
@@ -66,21 +66,19 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Rozhodné období nemocenských dávek: dvanáct měsíců, každý s datem, příjmem a vyloučenými dny.
-$PohodaNempriObdobi = @()
-foreach ($i in 1..12) { $PohodaNempriObdobi += @("DatR$i", "KcPrijR$i", "VyldnyR$i") }
-
 <#
     Tabulky datového souboru po skupinách, v pořadí zápisu do XML. Chybějící tabulka (jiná
-    verze nebo program) se přeskočí bez chyby.
+    verze nebo program) se přeskočí bez chyby. Mzdová skupina je shodná se seznamem
+    v Export-Pamica.ps1 - při změně upravte oba.
 
-      Sloupce   jen vyjmenované sloupce (ochrana osobních údajů u podání a plateb), jinak všechny
       Kde       podmínka roku (jen skupina mzdy); `{rok}` se nahradí rokem agendy. Bez ní je
                 tabulka v každém roce celá (kmen, číselníky). Bez známého roku se nepoužije -
                 tabulka se vytáhne celá jako dřív.
       Zavisi    tabulka, kterou podmínka potřebuje; když v souboru chybí, přeskočí se obojí
       KdeNebo   sloupec a podmínka navíc (spojí se přes OR), použije se jen když ten sloupec
                 v tabulce je - trvalé mzdové složky visí na pracovním poměru, ne na mzdě
+      BezBlobu  binární sloupce, které se nevytahují ani nezkoušejí číst (doručenky
+                datové schránky jsou ZIP s podepsanou zprávou, ne data podání)
 #>
 $PohodaMdbGroups = [ordered]@{
     majetek = @{
@@ -101,9 +99,17 @@ $PohodaMdbGroups = [ordered]@{
             ZAMpDet        = @{}
             ZAMucet        = @{}
             ZAMpoj         = @{}
-            ZAMzp          = @{ Sloupce = @('ID', 'RefAg', 'RefPomer', 'RelKod', 'RefPoj', 'RefStav', 'DatStav', 'Datum') }
+            ZAMzp          = @{}
             ZAMzivPoj      = @{}
+            ZAMpDov        = @{}
+            ZAMpSra        = @{}
+            ZAMprideleni   = @{}
+            ZAMkval        = @{}
+            ZAMcleneni     = @{}
+            ZAMseznamy     = @{}
+            ZamHist        = @{}
             PracMista      = @{}
+            SocPojSleva    = @{}
             # --- mzdy ---
             MZ             = @{ Kde = 'Rok = {rok}' }
             MZ2            = @{ Kde = 'RefAg IN (SELECT ID FROM [MZ] WHERE Rok = {rok})'; Zavisi = 'MZ' }
@@ -117,56 +123,53 @@ $PohodaMdbGroups = [ordered]@{
             MZdoch         = @{ Kde = 'Rok = {rok}' }
             MZzauct        = @{ Kde = 'Rok = {rok}' }
             MZzauctRoz     = @{ Kde = 'Rok = {rok}' }
+            MZdanKomp      = @{ Kde = 'Rok = {rok}' }
             Dovolena       = @{ Kde = 'Rok = {rok}' }
             zalZAM         = @{}
             # --- srážky a exekuce (včetně příjemce a rozpadu nezabavitelné částky) ---
             ZAMsrazky      = @{}
             rpZAMprijemSraz = @{}
-            # --- podání a hlášení ---
-            RegZAM         = @{ Sloupce = @('ID', 'RelStavDP', 'DatPod', 'DatPrij', 'ElOdeslano') }
-            RegZAMitems    = @{ Sloupce = @('ID', 'RefAg', 'RefZAM', 'RefPomer', 'Sqnr', 'RelTyp', 'OIC', 'IDPPV') }
-            ONZ            = @{ Sloupce = @('ID', 'RelStavDP', 'DatPod', 'DatPrij', 'ElOdeslano') }
-            ONZpol         = @{ Sloupce = @('ID', 'RefAg', 'RefPomer', 'RelTyp', 'PlatneOd', 'PojisteniOd', 'DatVstup', 'DatOdch', 'OSSZ',
-                    'DuvodUkonceni', 'DuvodUkonceniSP', 'Odstupne1', 'Odstupne2', 'Odchodne', 'Odbytne', 'PrumVydelek', 'DDrDuch', 'DatDuchodOd') }
-            ELDP           = @{ Sloupce = @('ID', 'Rok', 'RefStavDP', 'DatPod', 'DatPrij', 'ElOdeslano'); Kde = 'Rok = {rok}' }
-            ELDPpol        = @{ Sloupce = @('ID', 'RefAg', 'Rok', 'TypELDP', 'RefStavDP', 'RefZAMpomer1', 'RefZAMpomer2', 'RefZAMpomer3'); Kde = 'Rok = {rok}' }
-            MH             = @{ Sloupce = @('ID', 'RefID', 'RelTyp', 'RelStavDP', 'RelMesic', 'Rok', 'DatPod', 'DatPrij', 'ElOdeslano',
-                    'DatPodDZMH', 'DatPrijDZMH', 'RelStavDPDZMH'); Kde = 'Rok = {rok}' }
-            MHitems        = @{ Sloupce = @('ID', 'RefAg', 'RefZAM', 'RefPomer', 'RelDruhZ', 'OIC', 'RelTyp', 'Soubeh')
-                Kde = 'RefAg IN (SELECT ID FROM [MH] WHERE Rok = {rok})'; Zavisi = 'MH' }
-            NEMPRI         = @{ Sloupce = @('ID', 'RefStavDP', 'DatPod', 'DatPrij', 'NEMPRI25', 'ElOdeslano')
-                Kde = 'ID IN (SELECT RefAg FROM [NEMPRIpol] WHERE RokMZ = {rok})'; Zavisi = 'NEMPRIpol' }
-            NEMPRIpol      = @{ Sloupce = @('ID', 'RefAg', 'PoradCis', 'RokMZ', 'MesicMZ', 'RefZAMpomer', 'RefMZ', 'RefNeprit', 'CisPotvrz',
-                    'KodOSSZ', 'NazevOSSZ', 'DruhDavky', 'ZamOd', 'ZamDo', 'RelDruhZ', 'RozObdOd', 'RozObdDo') + $PohodaNempriObdobi + @(
-                    'PravVysPrij', 'PocOdHod', 'PracDob', 'Pracoval', 'KcPrijMR', 'PobiraDuch', 'DruhDuch', 'JeStudent', 'SpadaDoPrazd',
-                    'VolnPrvZamest', 'VolnoBezNahr', 'VolnoBezNahrOd', 'VolnoBezNahrDo', 'NastupujePPM', 'NerDVZPPM', 'PrJinPrace',
-                    'Srazka', 'Insolvence', 'PrevodDatum', 'PocetPriloh', 'RefStavDP', 'JeOpravne', 'RelDuvodPece', 'RelDuvodOtcovske',
-                    'OdeDne', 'DoDne', 'RelKodVztah', 'Onemocnela', 'NarizenKaran', 'NemuzePecovat', 'ZarizeniUzavreno', 'SpolecDoma',
-                    'JeOsamely', 'DiteDo16Let', 'JeStridani', 'NarokPPM', 'NarokRP', 'JinaFOParagraf57', 'PecovalOsobne', 'RelKodRodVztah',
-                    'PracovalPoslDenPD', 'PocetHodinPoslDenPD', 'PracDobaPoslDenPD', 'DatNavratDoPrace', 'PlanovSmeny', 'PlanovSmenyOdprac',
-                    'MaVolno', 'Vznik', 'Trvani', 'Ukonceni')
-                Kde = 'RokMZ = {rok}' }
-            HZUPN          = @{ Sloupce = @('ID', 'RefStavDP', 'DatPod', 'DatPrij', 'ElOdeslano')
-                Kde = 'ID IN (SELECT RefAg FROM [HZUPNpol] WHERE RokMZ = {rok})'; Zavisi = 'HZUPNpol' }
-            HZUPNpol       = @{ Sloupce = @('ID', 'RefAg', 'RefZAMpomer', 'RefMZ', 'RefNeprit', 'RefStavDP', 'PoradCis', 'RokMZ', 'MesicMZ',
-                    'Zahranicni', 'CisloPotvrzeni', 'KodOSSZ', 'NazevOSSZ', 'DatumVystaveni', 'OpravnePodani', 'NavratDoPrace',
-                    'DuvodNavratuDoPrace', 'DatumNavratuDoPrace', 'PocetOdpracHodinPoslDenPD', 'PracovniDobaPoslDenPD', 'DuvodPisemnehoVystaveni')
-                Kde = 'RokMZ = {rok}' }
-            RocniZuctovani = @{ Sloupce = @('ID', 'RefZAM', 'Rok', 'RelMes', 'DatumVystaveni', 'DatumUzavreni', 'Uzavreno', 'CelkemRZ',
-                    'Preplatek', 'Doplatek', 'UpravaDane', 'ResStr'); Kde = 'Rok = {rok}' }
+            # --- podání a hlášení (obsah odeslaných podání je v atributových blobech) ---
+            RegZAM         = @{}
+            RegZAMitems    = @{}
+            RegZAMprilohy  = @{}
+            PredRegZAM     = @{}
+            PredRegZAMitems = @{}
+            ONZ            = @{}
+            ONZpol         = @{}
+            ONZduchPoj     = @{}
+            ONZprilohy     = @{}
+            ELDP           = @{ Kde = 'Rok = {rok}' }
+            ELDPpol        = @{ Kde = 'Rok = {rok}' }
+            MH             = @{ Kde = 'Rok = {rok}' }
+            MHitems        = @{ Kde = 'RefAg IN (SELECT ID FROM [MH] WHERE Rok = {rok})'; Zavisi = 'MH' }
+            NEMPRI         = @{ Kde = 'ID IN (SELECT RefAg FROM [NEMPRIpol] WHERE RokMZ = {rok})'; Zavisi = 'NEMPRIpol' }
+            NEMPRIpol      = @{ Kde = 'RokMZ = {rok}' }
+            NEMPRIdeti     = @{ Kde = 'RefPol IN (SELECT ID FROM [NEMPRIpol] WHERE RokMZ = {rok})'; Zavisi = 'NEMPRIpol' }
+            NEMPRIpecovalDny = @{ Kde = 'RefPol IN (SELECT ID FROM [NEMPRIpol] WHERE RokMZ = {rok})'; Zavisi = 'NEMPRIpol' }
+            NEMPRIpraceVeDnech = @{ Kde = 'RefPol IN (SELECT ID FROM [NEMPRIpol] WHERE RokMZ = {rok})'; Zavisi = 'NEMPRIpol' }
+            NEMPRIpracVolno = @{ Kde = 'RefPol IN (SELECT ID FROM [NEMPRIpol] WHERE RokMZ = {rok})'; Zavisi = 'NEMPRIpol' }
+            NEMPRIrozvrhSmen = @{ Kde = 'RefPol IN (SELECT ID FROM [NEMPRIpol] WHERE RokMZ = {rok})'; Zavisi = 'NEMPRIpol' }
+            NEMPRIprilohy  = @{}
+            HZUPN          = @{ Kde = 'ID IN (SELECT RefAg FROM [HZUPNpol] WHERE RokMZ = {rok})'; Zavisi = 'HZUPNpol' }
+            HZUPNpol       = @{ Kde = 'RokMZ = {rok}' }
+            HZUPNpracoval  = @{ Kde = 'RefPol IN (SELECT ID FROM [HZUPNpol] WHERE RokMZ = {rok})'; Zavisi = 'HZUPNpol' }
+            HlaseniCiz     = @{ Kde = 'Rok = {rok}' }
+            PDB            = @{ Kde = 'Rok = {rok}' }
+            PDBprilohy     = @{}
+            VDP            = @{ Kde = 'Rok = {rok}' }
+            VDPprilohy     = @{}
+            RocniZuctovani = @{ Kde = 'Rok = {rok}' }
+            RocniZuctovaniPrilohy = @{}
+            EPodani        = @{ Kde = 'Rok = {rok}' }
+            DataBoxSent    = @{ BezBlobu = @('Dorucenka') }
+            Upominky       = @{}
             # --- platby (příkazy k úhradě mezd, odvodů a srážek) ---
-            Doklady        = @{ Sloupce = @('ID', 'RelTpDokl', 'Cislo', 'RelMes', 'Rok', 'Datum', 'DatUcP', 'DatSplat', 'DatPrik', 'VarSym',
-                    'ParSym', 'SpecSym', 'KonstSym', 'KcCelkem', 'KcP', 'RefCM', 'CmMnoz', 'CmKurs', 'CmCelkem', 'CmP', 'Firma', 'Ucet',
-                    'KodBanky', 'RelForUh', 'SOperace', 'ResPk', 'ResStr', 'ResCin', 'ResZak', 'RelStav', 'RelVyriz', 'DatVyriz', 'RefZAM', 'RelCR')
-                Kde = 'Rok = {rok}' }
-            DokladyPol     = @{ Sloupce = @('ID', 'RefAg', 'Kc', 'ResPk', 'ResStr', 'ResCin', 'ResZak', 'OrderFld')
-                Kde = 'RefAg IN (SELECT ID FROM [Doklady] WHERE Rok = {rok})'; Zavisi = 'Doklady' }
-            BP             = @{ Sloupce = @('ID', 'RelTpBP', 'SEPA', 'Polozky', 'Datum', 'DatSplat', 'DatExport', 'RefUcet', 'KcCelkem',
-                    'CmCelkem', 'KonstSym'); Kde = 'YEAR(Datum) = {rok}' }
-            BPpol          = @{ Sloupce = @('ID', 'RefAg', 'RelAgH', 'RelIDH', 'Cislo', 'Firma', 'DIC', 'Ucet', 'KodBanky', 'KonstSym',
-                    'SpecSym', 'VarSym', 'Kc', 'Cm', 'BpVrac', 'OrderFld', 'RelPoplTp', 'RefPoplUcet', 'PlatTitul', 'RefCM', 'Cizozemec',
-                    'PrijNazev', 'BankaNazev')
-                Kde = 'RefAg IN (SELECT ID FROM [BP] WHERE YEAR(Datum) = {rok})'; Zavisi = 'BP' }
+            Doklady        = @{ Kde = 'Rok = {rok}' }
+            DokladyPol     = @{ Kde = 'RefAg IN (SELECT ID FROM [Doklady] WHERE Rok = {rok})'; Zavisi = 'Doklady' }
+            DokladyPk      = @{ Kde = 'RefAg IN (SELECT ID FROM [Doklady] WHERE Rok = {rok})'; Zavisi = 'Doklady' }
+            BP             = @{ Kde = 'YEAR(Datum) = {rok}' }
+            BPpol          = @{ Kde = 'RefAg IN (SELECT ID FROM [BP] WHERE YEAR(Datum) = {rok})'; Zavisi = 'BP' }
             # --- číselníky ---
             sMZslozky      = @{}
             sMZneprit      = @{}
@@ -178,9 +181,30 @@ $PohodaMdbGroups = [ordered]@{
             sMzDIP         = @{}
             sMzPDP         = @{}
             sSTR           = @{}
+            sDrUkonceni    = @{}
+            sOdstupne      = @{}
+            sKvalifikace   = @{}
+            sUdalosti      = @{}
+            sTurnus        = @{}
+            sUcet          = @{}
+            sBanky         = @{}
+            sKSym          = @{}
+            sCMeny         = @{}
+            sCRady         = @{}
+            sAnalytika     = @{}
+            sMesice        = @{}
+            sMJ            = @{}
+            sFormUh        = @{}
+            sZeme          = @{}
+            sRecordLabels  = @{}
+            LekarDef       = @{}
+            SkoleniDef     = @{}
+            sTypSkoleni    = @{}
             pPK            = @{}
             pOS            = @{}
+            pOSuSk         = @{}
             # --- metadata ---
+            sKonfig        = @{}
             Verze          = @{}
         }
     }
@@ -194,8 +218,100 @@ $PohodaDmSources = @{
     29 = @('pINT', 'pINTpol', 'INT')
 }
 
-# Systémové sloupce, které se nevytahují: kdo a kdy záznam založil a změnil, výběr, značky, zámky.
-$PohodaMdbSkipColumns = @('Oznacil', 'Ucetni', 'Creator', 'DatCreate', 'DatSave', 'Sel', 'Labels', 'Lock', 'Lock1', 'UsrOrder')
+# Čistě systémové sloupce, které se nevytahují: kdo záznam označil, výběr v seznamu,
+# ruční pořadí a zámky. Datum založení a uložení zůstává - podle něj jde poznat pořadí podání.
+$PohodaMdbSkipColumns = @('Oznacil', 'Ucetni', 'Creator', 'Sel', 'UsrOrder')
+
+function Test-PohodaSkipColumn([string]$Name) {
+    return ($PohodaMdbSkipColumns -contains $Name) -or ($Name -match '^Lock\d*$') -or ($Name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$')
+}
+
+# --- atributová data podání -------------------------------------------------
+# Totéž čtení je v Export-Pamica.ps1 (ConvertFrom-PamicaAttributeBlob); při změně upravte obě.
+
+$script:PohodaCp1250 = [Text.Encoding]::GetEncoding(1250)
+
+function Test-PohodaAttributeHeader([byte[]]$Bytes, [int]$Pos) {
+    if ($Pos + 9 -gt $Bytes.Length) { return $false }
+    $section = [BitConverter]::ToInt32($Bytes, $Pos)
+    $attribute = [BitConverter]::ToInt32($Bytes, $Pos + 4)
+    $len = $Bytes[$Pos + 8]
+    if ($section -lt 0 -or $section -gt 64) { return $false }
+    if ($attribute -lt 0 -or $attribute -gt 99999) { return $false }
+    if ($Pos + 9 + $len + 1 -gt $Bytes.Length) { return $false }
+    return $Bytes[$Pos + 9 + $len] -eq 0
+}
+
+<#
+    Atributová data PAMICA (MH.DataAll, MHitems.Data, RegZAMitems.Data a další):
+    int32 verze, int32 počet záznamů, pak záznamy - int32 oddíl, int32 ID atributu
+    datového slovníku JMHZ, 1 bajt délka, text v cp1250, nulový bajt a koncovka.
+    Koncovka je int32 příznak, int32 pořadí v opakované skupině (děti, sekce ELDP)
+    a u měsíčního hlášení ještě int32 druhé pořadí; má tedy 12 nebo 8 bajtů a správná
+    délka se pozná podle toho, že za ní začíná platná hlavička dalšího záznamu.
+    Blob jiného tvaru (obrázek, ZIP) vrátí $null.
+#>
+function ConvertFrom-PohodaAttributeBlob([byte[]]$Bytes) {
+    if ($null -eq $Bytes -or $Bytes.Length -lt 8) { return $null }
+    $version = [BitConverter]::ToInt32($Bytes, 0)
+    $count = [BitConverter]::ToInt32($Bytes, 4)
+    if ($count -lt 0 -or $count -gt 100000) { return $null }
+    $pos = 8
+    $out = New-Object System.Collections.Generic.List[object]
+    for ($i = 0; $i -lt $count; $i++) {
+        if (-not (Test-PohodaAttributeHeader $Bytes $pos)) { return $null }
+        $section = [BitConverter]::ToInt32($Bytes, $pos)
+        $attribute = [BitConverter]::ToInt32($Bytes, $pos + 4)
+        $len = $Bytes[$pos + 8]
+        $text = $script:PohodaCp1250.GetString($Bytes, $pos + 9, $len)
+        $next = $pos + 10 + $len
+        $last = ($i -eq $count - 1)
+        $trailer = 0
+        foreach ($candidate in 12, 8) {
+            $end = $next + $candidate
+            if (($last -and $end -eq $Bytes.Length) -or (-not $last -and (Test-PohodaAttributeHeader $Bytes $end))) {
+                $trailer = $candidate
+                break
+            }
+        }
+        if ($trailer -eq 0) { return $null }
+        $order2 = 0
+        if ($trailer -eq 12) { $order2 = [BitConverter]::ToInt32($Bytes, $next + 8) }
+        $out.Add([pscustomobject]@{
+            Id = $attribute
+            Section = $section
+            Flag = [BitConverter]::ToInt32($Bytes, $next)
+            Order = [BitConverter]::ToInt32($Bytes, $next + 4)
+            Order2 = $order2
+            Value = $text
+        })
+        $pos = $next + $trailer
+    }
+    if ($pos -ne $Bytes.Length) { return $null }
+    return [pscustomobject]@{ Version = $version; Items = $out.ToArray() }
+}
+
+# Znaky, které XML 1.0 nepovoluje (řídicí znaky kromě tabulátoru a konce řádku).
+function Get-PohodaXmlText([string]$Value) {
+    return [regex]::Replace($Value, '[\x00-\x08\x0B\x0C\x0E-\x1F]', '')
+}
+
+<# Zapíše přečtený blob jako `<Sloupec v="1"><a id="10228" t="9" f="1" i="1">hodnota</a>…</Sloupec>`. #>
+function Write-PohodaAttributes($Writer, [string]$Name, $Decoded) {
+    $Writer.WriteStartElement($Name)
+    $Writer.WriteAttributeString('v', [string]$Decoded.Version)
+    foreach ($item in $Decoded.Items) {
+        $Writer.WriteStartElement('a')
+        $Writer.WriteAttributeString('id', [string]$item.Id)
+        $Writer.WriteAttributeString('t', [string]$item.Section)
+        $Writer.WriteAttributeString('f', [string]$item.Flag)
+        if ($item.Order -ne 0) { $Writer.WriteAttributeString('i', [string]$item.Order) }
+        if ($item.Order2 -ne 0) { $Writer.WriteAttributeString('j', [string]$item.Order2) }
+        $Writer.WriteString((Get-PohodaXmlText $item.Value))
+        $Writer.WriteEndElement()
+    }
+    $Writer.WriteEndElement()
+}
 
 function Open-PohodaSource([string]$Mdb, [string]$SqlServer, [string]$Databaze) {
     if ($Mdb) {
@@ -261,12 +377,13 @@ function Write-PohodaValue($Writer, [string]$Name, $Value) {
     if ($Value -is [DBNull] -or $null -eq $Value) { return }
     if ($Value -is [byte[]]) { return }
     $text = switch ($Value.GetType().Name) {
-        'DateTime' { $Value.ToString('yyyy-MM-dd') }
+        # Datum bez času jako dřív; čas se připojí jen tam, kde ho zdroj vede (okamžik podání).
+        'DateTime' { if ($Value.TimeOfDay.Ticks -eq 0) { $Value.ToString('yyyy-MM-dd') } else { $Value.ToString('yyyy-MM-ddTHH:mm:ss') } }
         'Boolean'  { if ($Value) { '1' } else { '0' } }
         'Decimal'  { $Value.ToString([Globalization.CultureInfo]::InvariantCulture) }
         'Double'   { $Value.ToString('R', [Globalization.CultureInfo]::InvariantCulture) }
         'Single'   { $Value.ToString('R', [Globalization.CultureInfo]::InvariantCulture) }
-        default    { [string]$Value }
+        default    { Get-PohodaXmlText ([string]$Value) }
     }
     if ($text -eq '') { return }
     $Writer.WriteElementString($Name, $text)
@@ -275,8 +392,9 @@ function Write-PohodaValue($Writer, [string]$Name, $Value) {
 <#
     Vytáhne skupinu tabulek do XML souboru `$Cil`. Vrátí objekt s počtem řádků celkem
     (`Zaznamu`; 0 = soubor nevznikl, skupina v datovém souboru nemá data), počty řádků
-    po jednotlivých vytažených tabulkách (`Pocty`, uspořádaný slovník) a seznamem tabulek,
-    které v datovém souboru chybí (`Chybejici`).
+    po jednotlivých vytažených tabulkách (`Pocty`, uspořádaný slovník), seznamem tabulek,
+    které v datovém souboru chybí (`Chybejici`), a počty přečtených a nečitelných binárních
+    sloupců (`Bloby`, klíč `tabulka.sloupec`).
 #>
 function Export-PohodaMdbGroup($Conn, [string]$Group, [string]$Cil, [string]$Ico, [string]$Rok) {
     $def = $PohodaMdbGroups[$Group]
@@ -293,7 +411,7 @@ function Export-PohodaMdbGroup($Conn, [string]$Group, [string]$Cil, [string]$Ico
     }
     if ($keyRows -eq 0) {
         if (Test-Path $Cil) { Remove-Item -Force $Cil }
-        return [pscustomobject]@{ Zaznamu = 0; Pocty = [ordered]@{}; Chybejici = $chybejici }
+        return [pscustomobject]@{ Zaznamu = 0; Pocty = [ordered]@{}; Chybejici = $chybejici; Bloby = [ordered]@{} }
     }
     $tmp = "$Cil.tmp"
     $settings = New-Object System.Xml.XmlWriterSettings
@@ -302,6 +420,7 @@ function Export-PohodaMdbGroup($Conn, [string]$Group, [string]$Cil, [string]$Ico
     $w = [System.Xml.XmlWriter]::Create($tmp, $settings)
     $rows = 0
     $counts = [ordered]@{}
+    $blobs = [ordered]@{}
     try {
         $w.WriteStartDocument()
         $w.WriteStartElement('mdbExport')
@@ -319,13 +438,7 @@ function Export-PohodaMdbGroup($Conn, [string]$Group, [string]$Cil, [string]$Ico
             # Celá tabulka do paměti: u drobného majetku se během zápisu dotazuje zdrojový doklad
             # a otevřený reader by druhý dotaz na tomtéž spojení nepustil.
             $present = @((Get-PohodaRows $Conn "SELECT * FROM [$t] WHERE 1 = 0").Columns | ForEach-Object { $_.ColumnName })
-            $select = '*'
-            if ($tdef.Sloupce) {
-                $wanted = @($tdef.Sloupce | Where-Object { $present -contains $_ })
-                if ($wanted.Count -eq 0) { continue }
-                $select = ($wanted | ForEach-Object { "[$_]" }) -join ', '
-            }
-            $sql = "SELECT $select FROM [$t]"
+            $sql = "SELECT * FROM [$t]"
             if ($tdef.Kde -and $Rok) {
                 $kde = $tdef.Kde
                 if ($t -eq 'MZdavky' -and $present -notcontains 'Rok') {
@@ -346,8 +459,21 @@ function Export-PohodaMdbGroup($Conn, [string]$Group, [string]$Cil, [string]$Ico
                 $w.WriteStartElement($t)
                 foreach ($col in $table.Columns) {
                     $name = $col.ColumnName
-                    if ($PohodaMdbSkipColumns -contains $name -or $name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { continue }
-                    Write-PohodaValue $w $name $row[$col]
+                    if ((Test-PohodaSkipColumn $name) -or $tdef.BezBlobu -contains $name) { continue }
+                    $value = $row[$col]
+                    if ($value -is [byte[]]) {
+                        $key = "$t.$name"
+                        if (-not $blobs.Contains($key)) { $blobs[$key] = @{ Read = 0; Unreadable = 0 } }
+                        $decoded = ConvertFrom-PohodaAttributeBlob $value
+                        if ($null -eq $decoded) {
+                            $blobs[$key].Unreadable++
+                        } else {
+                            Write-PohodaAttributes $w $name $decoded
+                            $blobs[$key].Read++
+                        }
+                        continue
+                    }
+                    Write-PohodaValue $w $name $value
                 }
                 if ($t -eq 'DM' -and $table.Columns.Contains('RelAgID') -and $table.Columns.Contains('RefPol')) {
                     $src = Resolve-PohodaDmSource $Conn $row['RelAgID'] $row['RefPol']
@@ -372,7 +498,7 @@ function Export-PohodaMdbGroup($Conn, [string]$Group, [string]$Cil, [string]$Ico
     } else {
         Remove-Item -Force $tmp
     }
-    return [pscustomobject]@{ Zaznamu = $rows; Pocty = $counts; Chybejici = $chybejici }
+    return [pscustomobject]@{ Zaznamu = $rows; Pocty = $counts; Chybejici = $chybejici; Bloby = $blobs }
 }
 
 <#
@@ -395,7 +521,13 @@ function Write-PohodaMdbSummary([string]$Path, [string]$Group, $Result) {
     }
     $lines.Add('Řádky po tabulkách:')
     foreach ($t in $Result.Pocty.Keys) {
-        $lines.Add(("  {0,-18} {1,8}" -f $t, $Result.Pocty[$t]))
+        $lines.Add(("  {0,-22} {1,8}" -f $t, $Result.Pocty[$t]))
+    }
+    if ($Result.Bloby -and $Result.Bloby.Count -gt 0) {
+        $lines.Add('Binární sloupce (přečtené atributy podání / nečitelné):')
+        foreach ($b in $Result.Bloby.Keys) {
+            $lines.Add(("  {0,-28} {1,8} {2,8}" -f $b, $Result.Bloby[$b].Read, $Result.Bloby[$b].Unreadable))
+        }
     }
     Set-Content -LiteralPath $Path -Value $lines -Encoding UTF8
 }
@@ -416,7 +548,7 @@ function Export-PohodaMdbData([string]$Mdb, [string]$SqlServer, [string]$Databaz
             $result = Export-PohodaMdbGroup $conn $g $file $Ico $Rok
             $souhrnPath = Join-Path $Cil ($soubor -replace '\.xml$', '-souhrn.txt')
             Write-PohodaMdbSummary $souhrnPath $g $result
-            [pscustomobject]@{ Skupina = $g; Soubor = $soubor; Zaznamu = $result.Zaznamu; Pocty = $result.Pocty; Chybejici = $result.Chybejici }
+            [pscustomobject]@{ Skupina = $g; Soubor = $soubor; Zaznamu = $result.Zaznamu; Pocty = $result.Pocty; Chybejici = $result.Chybejici; Bloby = $result.Bloby }
         }
     } finally { $conn.Close() }
 }
@@ -459,7 +591,10 @@ foreach ($row in (Export-PohodaMdbData $Mdb $SqlServer $Databaze $Vystup $ico $r
     if ($row.Zaznamu -gt 0) {
         Write-Host ("  {0,-8} {1,-16} {2,8} záznamů" -f $row.Skupina, $row.Soubor, $row.Zaznamu) -ForegroundColor Green
         foreach ($t in $row.Pocty.Keys) {
-            Write-Host ("      {0,-18} {1,8}" -f $t, $row.Pocty[$t])
+            Write-Host ("      {0,-22} {1,8}" -f $t, $row.Pocty[$t])
+        }
+        foreach ($b in $row.Bloby.Keys) {
+            Write-Host ("      {0,-28} přečteno {1,6}, nečitelné {2,6}" -f $b, $row.Bloby[$b].Read, $row.Bloby[$b].Unreadable)
         }
     } else {
         Write-Host ("  {0,-8} v datovém souboru nic není" -f $row.Skupina) -ForegroundColor Yellow
