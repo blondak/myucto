@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Architecture;
 
 use MyInvoice\Security\PermissionCatalog;
+use MyInvoice\Service\System\GlobalSeedTables;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -130,11 +131,12 @@ final class DynamicRolesMigrationTest extends TestCase
         $source = file_get_contents($path);
         self::assertIsString($source, 'Reset skript musi existovat a jit nacist.');
 
-        self::assertStringContainsString(
-            "'role_permissions'            => 'role_id NOT IN (SELECT id FROM roles WHERE system_key IS NOT NULL)'",
-            $source,
+        self::assertSame(
+            'role_id NOT IN (SELECT id FROM roles WHERE system_key IS NOT NULL)',
+            GlobalSeedTables::RESET_PARTIAL['role_permissions'] ?? null,
         );
-        self::assertStringContainsString("'roles'                       => 'system_key IS NULL'", $source);
+        self::assertSame('system_key IS NULL', GlobalSeedTables::RESET_PARTIAL['roles'] ?? null);
+        self::assertStringContainsString('GlobalSeedTables::RESET_PARTIAL', $source);
         self::assertStringContainsString(
             "'roles', 'role_permissions', 'user_suppliers'",
             $source,

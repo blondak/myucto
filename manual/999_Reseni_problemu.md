@@ -672,6 +672,33 @@ php api/bin/payroll-archive-reencrypt.php --rewrap            # archiv + přebal
 Na Windows `cmd\payroll-archive-reencrypt.cmd`, na Linuxu
 `cmd/payroll-archive-reencrypt.sh` se stejnými parametry.
 
+### 999.9.5 Globální číselníky
+
+Kontrola **Globální číselníky** hlídá číselníky, které aplikace dostává
+s migracemi a které nepatří žádné firmě: země, sazby DPH, měrné jednotky,
+výkazy, repo sazby ČNB, sazby DPH členských států, státní svátky, katalog
+klíčových slov nákladů, globální předkontace a klasifikace DPH, příjemce podání
+(ČSSZ, zdravotní pojišťovny) a systémové role. Když některý z nich nemá ani
+jeden řádek, kontrola ho vypíše.
+
+Prázdný číselník migrace samy nevrátí, protože jsou evidované jako proběhlé.
+Typickou příčinou je obnova neúplné zálohy nebo vymazání dat starší verzí
+skriptu `reset.php`. Bez svátků se například lhůty podání a odvodů počítají jen
+z pojistky v kódu.
+
+Chybějící řádky doplní:
+
+```bash
+php api/bin/restore-global-seeds.php            # náhled, nic nezapíše
+php api/bin/restore-global-seeds.php --apply    # doplní chybějící řádky
+```
+
+Na Windows `cmd\restore-global-seeds.ps1`, na Linuxu `cmd/restore-global-seeds.sh`
+se stejnými parametry. Skript přehraje seedy z migrací, nic nemaže a údaje firem
+nechává beze změny. Opakované spuštění nic nezdvojí. Sazby DPH členských států
+doplní `php api/bin/migrate.php`. Číselník, který skript nevrátí, vypíše na konci;
+ten obnovíš ze zálohy pořízené stejnou verzí aplikace.
+
 ## 999.10 Hlášení chyb
 
 Pokud problém nevyřeší tato kapitola, kontaktuj:

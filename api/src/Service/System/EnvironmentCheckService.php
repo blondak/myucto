@@ -884,6 +884,21 @@ final class EnvironmentCheckService
             );
         }
 
+        // Globální číselníky ze seedů migrací. Prázdný migrate.php nevrátí (migrace
+        // jsou evidované jako proběhlé), vrátí ho restore-global-seeds.php.
+        $emptyCodebooks = $this->guard(
+            fn () => (new GlobalSeedRestorer($this->db->pdo(), Bootstrap::rootDir() . '/db/migrations'))->emptyCodebooks(),
+            null,
+        );
+        $checks[] = $this->check(
+            'global_codebooks',
+            $emptyCodebooks === null ? self::STATUS_SKIP : ($emptyCodebooks === [] ? self::STATUS_OK : self::STATUS_FAIL),
+            $emptyCodebooks === null ? '?' : implode(', ', $emptyCodebooks),
+            '',
+            '999_Reseni_problemu',
+            ['empty' => $emptyCodebooks ?? []]
+        );
+
         $checks[] = self::cronHealthCheck((array) ($runtime['cron'] ?? []));
 
         // --- Provozní hygiena ---

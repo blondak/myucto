@@ -26155,6 +26155,12 @@
         "actual_label": "Nespuštěných migrací",
         "expected_label": "Očekáváno"
       },
+      "global_codebooks": {
+        "label": "Globální číselníky",
+        "impact": "Prázdný globální číselník (svátky, sazby, výkazy, příjemci podání…) migrace samy nevrátí. Lhůty, výkazy nebo podání se pak počítají bez něj nebo selžou.",
+        "fix": "Spusťte php api/bin/restore-global-seeds.php --apply (Windows cmd\\restore-global-seeds.ps1). Skript doplní chybějící řádky ze seedů migrací a nic nemaže.",
+        "actual_label": "Prázdné číselníky"
+      },
       "schema_integrity": {
         "label": "Struktura databáze",
         "impact": "Databáze se liší od struktury, kterou vytvářejí migrace. Chybějící tabulka, sloupec nebo index způsobí chyby při ukládání, chybějící trigger nebo auditní historie tiše vypne ochranu dat.",
