@@ -345,6 +345,13 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Termination\PayrollTerminationReason::GROUNDS',
         'payroll.ts::PayrollTerminationSurvivorRelationship'
             => 'db:payroll_employment_survivors.relationship',
+        // Riziková práce, dočasné přidělení a odložený příjem v měsíčním hlášení.
+        'payroll.ts::PayrollAssignmentUserKind'
+            => 'db:payroll_employment_terms.jmhz_assignment_user_kind',
+        'payroll.ts::PayrollRiskCategorizationCode'
+            => 'db:payroll_employment_terms.jmhz_risk_categorization_code',
+        'payrollDeferredIncome.ts::PayrollDeferredIncomeType'
+            => 'db:payroll_employment_deferred_incomes.deferred_type',
 
         // Roční zúčtování (§ 38ch ZDP). Všech šest hodnot chodí po drátě —
         // stav evidence i důvod odmítnutí musí obrazovka umět vypsat větou.

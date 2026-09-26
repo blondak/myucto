@@ -96,6 +96,13 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
         'jmhz_workplace_country_code' => 'field',
         'jmhz_workplace_municipality_code' => 'field',
         'jmhz_xml' => 'enum',
+        // Sloupce podmínek vztahu pro rizikovou práci a dočasné přidělení.
+        'jmhz_assignment_user_country_code' => 'field',
+        'jmhz_assignment_user_foreign_id' => 'field',
+        'jmhz_assignment_user_ico' => 'field',
+        'jmhz_assignment_user_kind' => 'field',
+        'jmhz_assignment_user_name' => 'field',
+        'jmhz_risk_categorization_code' => 'field',
         // Počty a upozornění v protokolu převodu PAMICA (PohodaPayrollJmhzWriter),
         // ne kódy blokací podání.
         'jmhz_data_failed' => 'other',
