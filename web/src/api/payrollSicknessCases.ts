@@ -134,6 +134,39 @@ export interface PayrollSicknessCase {
   contact_worker_name: string | null
   contact_worker_phone: string | null
   contact_worker_email: string | null
+  // ── dlouhodobé ošetřovné: rozhodnutí zaměstnavatele (§ 191a ZP) ──
+  long_term_care_consent?: PayrollLongTermCareConsent | null
+  long_term_care_consent_on?: string | null
+  long_term_care_refusal_reason?: string | null
+  /** Absence, ze které případ vznikl; `null` = založený ručně. */
+  absence_id?: number | null
+  /** Vznik události vůči trvání vztahu a ochranné lhůtě § 15 (jen v seznamu). */
+  protection_period?: PayrollSicknessProtectionPeriod
+}
+
+/** Rozhodnutí zaměstnavatele o nepřítomnosti kvůli dlouhodobé péči. */
+export type PayrollLongTermCareConsent = 'granted' | 'refused'
+
+export interface PayrollSicknessProtectionPeriod {
+  status: 'during_employment' | 'protection_period' | 'outside' | 'unknown'
+  employment_end?: string | null
+  protection_until?: string | null
+  legal_reference?: string
+  reason_code?: string
+  message?: string
+}
+
+/**
+ * Co se schválením nebo zrušením nepřítomnosti stalo s případem dávky.
+ * `null` = z nepřítomnosti žádná dávka neplyne.
+ */
+export interface PayrollAbsenceSicknessCaseOutcome {
+  outcome: 'created' | 'extended' | 'linked' | 'cancelled' | 'kept' | 'skipped'
+  case_id: number | null
+  benefit_kind: PayrollSicknessBenefitKind | null
+  nempri_due_on: string | null
+  reason_code: string | null
+  message: string | null
 }
 
 export interface PayrollSicknessCasePreview {
@@ -228,6 +261,8 @@ export type PayrollSicknessCaseInput = Partial<
     | 'hzupn_submission_id'
     | 'row_version'
     | 'probable_income_suggestion_minor'
+    | 'absence_id'
+    | 'protection_period'
   >
 >
 

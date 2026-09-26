@@ -59,9 +59,15 @@ import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue
 import DateInput from '@/components/ui/DateInput.vue'
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
+import {
+  MATERNITY_CARE_REASONS,
+  PATERNITY_REASONS,
+  isOutsideCodebook,
+  relationshipCodebook,
+} from './nempriCodebooks'
 
 const { t } = useI18n()
-const { errorMessage: serverErrorMessage } = usePayrollServerMessage()
+const { errorMessage: serverErrorMessage, reasonText } = usePayrollServerMessage()
 const auth = useAuthStore()
 const {
   request: sendConfirmRequest,
@@ -163,6 +169,46 @@ const draftHasActions = computed(() =>
 const draftHasHzupn = computed(() =>
   draftKind.value !== null && HZUPN_KINDS.includes(draftKind.value))
 
+interface CodeOption { value: string, label: string, invalid?: boolean }
+
+/**
+ * Nabídka z číselníku ČSSZ. Uložený kód mimo číselník (dřív se kódy psaly
+ * ručně) se v nabídce ponechá s upozorněním, aby ho select tiše nezahodil
+ * a účetní viděla, co je potřeba vybrat znovu.
+ */
+function codeOptions(
+  codes: readonly string[],
+  labelGroup: string,
+  current: string | null | undefined,
+): CodeOption[] {
+  const options: CodeOption[] = codes.map(code => ({
+    value: code,
+    label: t(`payroll.sicknessCases.codebooks.${labelGroup}.${code}`),
+  }))
+  if (isOutsideCodebook(current, codes)) {
+    options.unshift({
+      value: current,
+      label: t('payroll.sicknessCases.codebooks.invalidValue', { code: current }),
+      invalid: true,
+    })
+  }
+  return options
+}
+
+const relationshipOptions = computed<CodeOption[]>(() => {
+  const codebook = relationshipCodebook(draftKind.value)
+  return codebook === null
+    ? []
+    : codeOptions(codebook.codes, codebook.labelGroup, draft.value.relationship_code)
+})
+const paternityReasonOptions = computed<CodeOption[]>(() =>
+  codeOptions(PATERNITY_REASONS, 'paternityReasons', draft.value.paternity_reason))
+const maternityCareReasonOptions = computed<CodeOption[]>(() =>
+  codeOptions(MATERNITY_CARE_REASONS, 'maternityCareReasons', draft.value.maternity_care_reason))
+
+/** Odmítnutí dlouhodobé péče musí nést důvod (§ 191a ZP). */
+const longTermCareRefused = computed(() => draft.value.long_term_care_consent === 'refused')
+
 const dependantOptions = computed(() =>
   dependants.value.map(dependant => ({
     value: dependant.id,
@@ -250,7 +296,14 @@ const errorFix = computed<{ kind: 'person' | 'reconciliation' | 'edit', item: Pa
   if (item === null || code === null) return null
   if (PERSON_CARD_ERRORS.includes(code)) return { kind: 'person', item }
   if (RECONCILIATION_ERRORS.includes(code)) return { kind: 'reconciliation', item }
-  if (code.startsWith('nempri_') || code.startsWith('hzupn_')) return { kind: 'edit', item }
+  if (code.startsWith('nempri_') || code.startsWith('hzupn_') || code.startsWith('dlo_')) {
+    return { kind: 'edit', item }
+  }
+  // Událost po skončení vztahu: opravuje se den vzniku u případu, nebo konec
+  // vztahu na kartě osoby — editor případu nabídne první z obou.
+  if (code.startsWith('sickness_event_') || code === 'sickness_protection_period_excluded') {
+    return { kind: 'edit', item }
+  }
   return null
 })
 
@@ -371,6 +424,9 @@ function edit(item: PayrollSicknessCase): void {
     contact_worker_name: item.contact_worker_name ?? null,
     contact_worker_phone: item.contact_worker_phone ?? null,
     contact_worker_email: item.contact_worker_email ?? null,
+    long_term_care_consent: item.long_term_care_consent ?? null,
+    long_term_care_consent_on: item.long_term_care_consent_on ?? null,
+    long_term_care_refusal_reason: item.long_term_care_refusal_reason ?? null,
   }
   draftWorkDays.value = item.work_days.map(interval => ({ ...interval }))
   draftCareDays.value = (item.care_days ?? []).map(interval => ({ ...interval }))
@@ -449,6 +505,14 @@ async function save(): Promise<void> {
       item.row_version,
       {
         ...draft.value,
+        // Bez rozhodnutí nemá den ani důvod smysl a důvod patří jen
+        // k odmítnutí — server by jinak odmítl celé uložení.
+        long_term_care_consent_on: draft.value.long_term_care_consent
+          ? (draft.value.long_term_care_consent_on ?? null)
+          : null,
+        long_term_care_refusal_reason: longTermCareRefused.value
+          ? (draft.value.long_term_care_refusal_reason ?? null)
+          : null,
         small_scope_income_minor: czkToMinor(draftSmallScopeIncomeCzk.value),
         work_days: completeIntervals(draftWorkDays.value),
         care_days: completeIntervals(draftCareDays.value),
@@ -917,6 +981,51 @@ onMounted(() => void load())
             · {{ t(`payroll.sicknessCases.statuses.${item.status}`) }}
           </span>
         </div>
+        <p
+          v-if="item.protection_period?.status === 'protection_period'"
+          class="mt-2 rounded-lg bg-info-50 p-2 text-xs text-info-800"
+          :data-test="`sickness-case-protection-${item.id}`"
+        >
+          {{ t('payroll.sicknessCases.protectionPeriod.within', {
+            end: item.protection_period.employment_end ?? '',
+            until: item.protection_period.protection_until ?? '',
+          }) }}
+        </p>
+        <div
+          v-else-if="item.protection_period?.status === 'outside'"
+          class="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-warning-50 p-2 text-xs text-warning-800"
+          :data-test="`sickness-case-protection-outside-${item.id}`"
+        >
+          <span>
+            {{ t('payroll.sicknessCases.protectionPeriod.outside', {
+              message: reasonText(item.protection_period.reason_code, item.protection_period.message),
+            }) }}
+            {{ t('payroll.sicknessCases.protectionPeriod.fix') }}
+          </span>
+          <RouterLink
+            :to="{ name: 'payroll-people', query: { person: String(item.employee_id) } }"
+            class="font-semibold underline"
+          >
+            {{ t('payroll.sicknessCases.errorFix.personCard') }}
+          </RouterLink>
+        </div>
+        <p
+          v-if="item.benefit_kind === 'DLO' && item.long_term_care_consent === 'refused'"
+          class="mt-2 rounded-lg bg-warning-50 p-2 text-xs text-warning-800"
+          :data-test="`sickness-case-ltc-refused-${item.id}`"
+        >
+          {{ t('payroll.sicknessCases.longTermCare.refusedBadge', { date: item.long_term_care_consent_on ?? '' }) }}
+        </p>
+        <p
+          v-if="item.absence_id"
+          class="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-500"
+          :data-test="`sickness-case-origin-${item.id}`"
+        >
+          <span>{{ t('payroll.sicknessCases.origin.fromAbsence') }}</span>
+          <RouterLink :to="{ name: 'payroll-absences' }" class="underline">
+            {{ t('payroll.sicknessCases.origin.openAbsences') }}
+          </RouterLink>
+        </p>
 
         <div
           v-if="editingId === item.id"
@@ -1096,15 +1205,30 @@ onMounted(() => void load())
             <div class="mt-3 grid gap-3 md:grid-cols-3">
               <label v-if="draftHasActions" class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.relationshipCode') }}</span>
-                <input v-model="draft.relationship_code" type="text" maxlength="3" class="w-full rounded-lg border border-neutral-300 p-2 text-sm uppercase" data-test="sickness-case-relationship-code">
+                <select v-model="draft.relationship_code" class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm" data-test="sickness-case-relationship-code">
+                  <option :value="null">{{ t('payroll.sicknessCases.codebooks.none') }}</option>
+                  <option v-for="option in relationshipOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
               </label>
               <label v-if="draftKind === 'OPP'" class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.paternityReason') }}</span>
-                <input v-model="draft.paternity_reason" type="text" maxlength="3" class="w-full rounded-lg border border-neutral-300 p-2 text-sm uppercase" data-test="sickness-case-paternity-reason">
+                <select v-model="draft.paternity_reason" class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm" data-test="sickness-case-paternity-reason">
+                  <option :value="null">{{ t('payroll.sicknessCases.codebooks.none') }}</option>
+                  <option v-for="option in paternityReasonOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
               </label>
               <label v-if="draftKind === 'PPM'" class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.maternityCareReason') }}</span>
-                <input v-model="draft.maternity_care_reason" type="text" maxlength="3" class="w-full rounded-lg border border-neutral-300 p-2 text-sm uppercase">
+                <select v-model="draft.maternity_care_reason" class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm" data-test="sickness-case-maternity-care-reason">
+                  <option :value="null">{{ t('payroll.sicknessCases.codebooks.none') }}</option>
+                  <option v-for="option in maternityCareReasonOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
               </label>
               <label v-if="draftKind === 'PPM'" class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.childOrder') }}</span>
@@ -1143,6 +1267,29 @@ onMounted(() => void load())
               <p class="text-xs text-neutral-500 md:col-span-3">
                 {{ t('payroll.sicknessCases.form.declarationsHint') }}
               </p>
+            </div>
+
+            <div v-if="draftKind === 'DLO'" class="mt-3 rounded-lg border border-neutral-200 p-3" data-test="sickness-case-long-term-care-consent">
+              <span class="mb-1 block text-sm font-medium text-neutral-800">{{ t('payroll.sicknessCases.longTermCare.title') }}</span>
+              <p class="mb-2 text-xs text-neutral-500">{{ t('payroll.sicknessCases.longTermCare.hint') }}</p>
+              <div class="grid gap-3 md:grid-cols-3">
+                <label class="block text-sm">
+                  <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.longTermCare.decision') }}</span>
+                  <select v-model="draft.long_term_care_consent" class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm" data-test="sickness-case-ltc-consent">
+                    <option :value="null">{{ t('payroll.sicknessCases.codebooks.none') }}</option>
+                    <option value="granted">{{ t('payroll.sicknessCases.longTermCare.granted') }}</option>
+                    <option value="refused">{{ t('payroll.sicknessCases.longTermCare.refused') }}</option>
+                  </select>
+                </label>
+                <label v-if="draft.long_term_care_consent" class="block text-sm">
+                  <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.longTermCare.decidedOn') }}</span>
+                  <DateInput v-model="draft.long_term_care_consent_on" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-ltc-consent-on" />
+                </label>
+                <label v-if="longTermCareRefused" class="block text-sm md:col-span-3">
+                  <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.longTermCare.refusalReason') }}</span>
+                  <textarea v-model="draft.long_term_care_refusal_reason" maxlength="500" rows="2" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-ltc-refusal-reason" />
+                </label>
+              </div>
             </div>
 
             <div v-if="draftHasActions" class="mt-3" data-test="sickness-case-care-days">

@@ -3413,8 +3413,22 @@ async function copyXml(): Promise<void> {
           <p class="mt-1 text-xs text-neutral-500">
             {{ proposal.deadline_source }}
           </p>
+          <div
+            v-if="proposal.duty_kind === 'health_insurer_change'"
+            class="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-700"
+            data-test="registration-change-health-hoz"
+          >
+            <span>{{ t('payroll.people.registration.changes.health_insurer_hoz') }}</span>
+            <RouterLink
+              :to="{ path: '/payroll/submissions/health', query: { period: proposal.detected_on.slice(0, 7) } }"
+              class="font-semibold underline"
+              data-test="registration-change-open-hoz"
+            >
+              {{ t('payroll.people.registration.changes.open_hoz', { period: proposal.detected_on.slice(0, 7) }) }}
+            </RouterLink>
+          </div>
           <p
-            v-if="!proposal.fileable"
+            v-else-if="!proposal.fileable"
             class="mt-1 text-xs text-warning-800"
             data-test="registration-change-manual"
           >

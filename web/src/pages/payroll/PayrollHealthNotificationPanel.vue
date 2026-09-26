@@ -15,6 +15,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { usePayrollServerMessage } from './payrollServerMessage'
 import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
 import {
@@ -88,7 +89,17 @@ const {
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 
-const period = ref(payrollWorkingPeriod())
+/*
+ * Období lze předat v URL (`?period=RRRR-MM`): karta osoby tak u změny
+ * pojišťovny odkáže rovnou na měsíc, ve kterém se přestup hlásí.
+ */
+const route = useRoute() as ReturnType<typeof useRoute> | undefined
+const routedPeriod = route?.query?.period
+const period = ref(
+  typeof routedPeriod === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(routedPeriod)
+    ? routedPeriod
+    : payrollWorkingPeriod(),
+)
 const filterInsurer = ref<string | null>(null)
 const filterKind = ref<HealthDutyKind | null>(null)
 const filterReported = ref<'all' | 'employer' | 'insured'>('all')
@@ -937,6 +948,13 @@ onMounted(() => {
                 </td>
                 <td v-if="tbl.isVisible('duty')" class="px-4 py-3 text-neutral-700">
                   {{ t(`payroll.health_notifications.kind.${item.kind}`) }}
+                  <span
+                    v-if="item.insurer_direction"
+                    class="block text-xs text-neutral-500"
+                    data-test="health-notification-direction"
+                  >{{ t(`payroll.health_notifications.insurer_direction.${item.insurer_direction}`, {
+                    date: formatDate(item.reported_change_on ?? item.occurred_on),
+                  }) }}</span>
                 </td>
                 <!-- Nadpis buňky je NÁZEV pojišťovny, kód pod ním. „111"
                      účetní s pojišťovnou nespojí; obráceně to bylo jen na
@@ -1006,6 +1024,11 @@ onMounted(() => {
                 <h3 class="font-semibold text-neutral-900">{{ item.full_name }}</h3>
                 <p class="mt-1 text-xs text-neutral-500">
                   {{ t(`payroll.health_notifications.kind.${item.kind}`) }}
+                  <template v-if="item.insurer_direction">
+                    · {{ t(`payroll.health_notifications.insurer_direction.${item.insurer_direction}`, {
+                      date: formatDate(item.reported_change_on ?? item.occurred_on),
+                    }) }}
+                  </template>
                 </p>
               </div>
               <span

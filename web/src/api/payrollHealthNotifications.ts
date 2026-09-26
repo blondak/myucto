@@ -116,6 +116,13 @@ export interface HealthDutyItem {
   kind: HealthDutyKind
   label: string
   insurer_code: string
+  /**
+   * Jen u přestupu: `outgoing` = odhláška „O" u dosavadní pojišťovny,
+   * `incoming` = přihláška „P" u nové.
+   */
+  insurer_direction?: 'outgoing' | 'incoming' | null
+  /** Den změny, který jde do věty (u odhlášky poslední den u dosavadní pojišťovny). */
+  reported_change_on?: string
   occurred_on: string
   reported_by_employer: boolean
   rule: HealthDutyRule

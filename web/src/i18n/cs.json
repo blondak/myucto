@@ -5935,6 +5935,8 @@
           "changed": "Změnilo se: {fields}.",
           "due": "Termín {date}",
           "manual_only": "Tenhle údaj datová věta A3 v aplikaci nenese — podejte ho jinou cestou a návrh pak uzavřete ručně.",
+          "health_insurer_hoz": "Přestup se hlásí oběma pojišťovnám hromadným oznámením (HOZ): dosavadní odhláškou (kód O), nové přihláškou (kód P). Obě věty připravíte na záložce Zdravotní pojišťovny za měsíc změny; návrh tady pak uzavřete.",
+          "open_hoz": "Připravit HOZ za {period}",
           "file": "Ohlásit změnu",
           "dismiss": "Vyřídit ručně",
           "dismiss_note": "Čím jste povinnost splnili",
@@ -9484,6 +9486,10 @@
         "maternity_or_parental_leave_end": "Ukončení mateřské nebo rodičovské",
         "state_category_other": "Ostatní skutečnosti, kde je plátcem stát"
       },
+      "insurer_direction": {
+        "outgoing": "Odhláška u dosavadní pojišťovny (kód O) k {date}",
+        "incoming": "Přihláška u nové pojišťovny (kód P) od {date}"
+      },
       "prepare": {
         "title": "Sestavení přehledu o platbě pojistného",
         "description": "Zmrazí přehled o platbě za schválenou revizi, vytvoří společné XML i vytěžitelné PDF a XML ověří proti připnutému XSD. Pro ISDS se podle pojišťovny vybere doložený formát přílohy.",
@@ -9851,11 +9857,11 @@
         "careReason": "Důvod péče",
         "schoolName": "Název školy nebo zařízení",
         "schoolBusinessId": "IČO školy nebo zařízení",
-        "relationshipCode": "Kód vztahu k ošetřované osobě",
-        "paternityReason": "Důvod otcovské (kód)",
-        "maternityCareReason": "Důvod péče (kód)",
+        "relationshipCode": "Vztah k ošetřované osobě",
+        "paternityReason": "Důvod otcovské",
+        "maternityCareReason": "Důvod převzetí dítěte do péče",
         "childOrder": "Pořadí dítěte",
-        "codebookHint": "Kódy opište z žádosti; jsou to hodnoty číselníku ČSSZ (1 až 3 znaky, číslice a velká písmena).",
+        "codebookHint": "Hodnoty vyberte podle žádosti zaměstnance. Seznamy jsou číselníky ČSSZ (www.cssz.gov.cz/web/cz/ciselniky); ošetřovné a dlouhodobé ošetřovné mají každé vlastní seznam vztahů.",
         "sharedHousehold": "Žije s ošetřovanou osobou ve společné domácnosti",
         "loneCaregiver": "Je osamělý",
         "childUnder16": "Má v péči dítě do 16 let",
@@ -9889,6 +9895,90 @@
         "personCard": "Otevřít kartu osoby",
         "reconciliation": "Otevřít kontrolu převodu mezd",
         "editCase": "Upravit případ"
+      },
+      "codebooks": {
+        "none": "—",
+        "invalidValue": "{code} (není v číselníku ČSSZ, vyberte znovu)",
+        "paternityReasons": {
+          "OTC": "OTC – otec dítěte",
+          "ZEM": "ZEM – otec zemřelého dítěte",
+          "PEC": "PEC – převzetí dítěte do péče"
+        },
+        "maternityCareReasons": {
+          "DOH": "DOH – dohoda (§ 32 odst. 1 písm. e) zák. 187/2006)",
+          "ONE": "ONE – dlouhodobé onemocnění matky",
+          "ROZ": "ROZ – rozhodnutí orgánu",
+          "UMR": "UMR – úmrtí matky"
+        },
+        "familyRelationships": {
+          "PL": "PL – příbuzný v linii přímé (rodič, dítě, prarodič, vnouče)",
+          "MA": "MA – manžel/ka",
+          "RP": "RP – registrovaný partner/ka",
+          "SDO": "SDO – jiná osoba ve společné domácnosti",
+          "SO": "SO – sourozenec",
+          "TCH": "TCH – rodič manžela/ky nebo registrovaného partnera/ky",
+          "JIN": "JIN – jiný vztah"
+        },
+        "careRelationships": {
+          "1": "1 – manžel/ka, registrovaný partner/ka",
+          "2": "2 – otec/matka",
+          "3": "3 – syn/dcera",
+          "4": "4 – bratr/sestra",
+          "5": "5 – manžel/ka, registrovaný partner/ka bratra/sestry",
+          "6": "6 – druh/družka bratra/sestry",
+          "7": "7 – prarodič",
+          "8": "8 – vnuk/vnučka",
+          "9": "9 – tchán/tchyně",
+          "10": "10 – zeť/snacha",
+          "11": "11 – synovec/neteř",
+          "12": "12 – strýc/teta",
+          "13": "13 – manžel/ka, registrovaný partner/ka otce/matky",
+          "14": "14 – registrovaný partner/ka syna/dcery",
+          "15": "15 – manžel/ka, registrovaný partner/ka prarodiče",
+          "16": "16 – manžel/ka, registrovaný partner/ka vnuka/vnučky",
+          "17": "17 – manžel/ka, registrovaný partner/ka tchána/tchyně",
+          "18": "18 – manžel/ka, registrovaný partner/ka synovce/neteře",
+          "19": "19 – manžel/ka, registrovaný partner/ka strýce/tety",
+          "20": "20 – druh/družka otce/matky",
+          "21": "21 – druh/družka syna/dcery",
+          "22": "22 – druh/družka prarodiče",
+          "23": "23 – druh/družka vnuka/vnučky",
+          "24": "24 – druh/družka tchána/tchyně",
+          "25": "25 – druh/družka synovce/neteře",
+          "26": "26 – druh/družka strýce/tety",
+          "27": "27 – druh/družka ošetřované osoby",
+          "28": "28 – jiná fyzická osoba žijící s ošetřovanou osobou v domácnosti",
+          "29": "29 – jiný vztah"
+        }
+      },
+      "protectionPeriod": {
+        "within": "Sociální událost po skončení zaměstnání ({end}), v ochranné lhůtě do {until} (§ 15 zák. č. 187/2006 Sb.). NEMPRI se podá se dnem skončení zaměstnání.",
+        "outside": "Z případu se nic nepodá: {message}",
+        "fix": "Zkontrolujte den vzniku u případu, nebo den skončení pracovního vztahu."
+      },
+      "origin": {
+        "fromAbsence": "Založeno ze schválené nepřítomnosti. Lhůta NEMPRI se hlídá ode dne události.",
+        "openAbsences": "Otevřít nepřítomnosti"
+      },
+      "longTermCare": {
+        "title": "Rozhodnutí zaměstnavatele o dlouhodobé péči",
+        "hint": "§ 191a zákoníku práce: zaměstnavatel musí nepřítomnosti kvůli dlouhodobé péči vyhovět, ledaže mu brání vážné provozní důvody, a odmítnutí písemně zdůvodní. Zapište rozhodnutí a den, kdy ho zaměstnanci sdělil. Odmítnutý případ se ČSSZ nepředává.",
+        "decision": "Rozhodnutí",
+        "granted": "Souhlasil",
+        "refused": "Odmítl",
+        "decidedOn": "Den sdělení zaměstnanci",
+        "refusalReason": "Důvod odmítnutí (vážné provozní důvody)",
+        "refusedBadge": "Zaměstnavatel dlouhodobou péči odmítl {date}"
+      },
+      "absenceNotice": {
+        "created": "Založen případ dávky ({kind}). NEMPRI je potřeba předat do {due}.",
+        "createdNoDue": "Založen případ dávky ({kind}).",
+        "extended": "Nepřítomnost prodloužila existující případ dávky ({kind}).",
+        "linked": "Nepřítomnost se navázala na existující případ dávky ({kind}).",
+        "cancelled": "Rozpracovaný případ dávky se se zrušením nepřítomnosti zrušil.",
+        "kept": "Případ dávky už má podání, a proto zůstal: {message}",
+        "skipped": "Případ dávky nevznikl: {message}",
+        "open": "Otevřít případy dávek"
       }
     },
     "employerSettings": {
@@ -10635,6 +10725,29 @@
       }
     },
     "server_codes": {
+      "nempri_relationship_code_invalid": "Vztah ošetřované osoby není kód z číselníku ČSSZ pro tento druh dávky. Vyberte ho v případu dávky ze seznamu.",
+      "nempri_relationship_code_not_in_kind": "Vztah ošetřované osoby se vyplňuje jen u ošetřovného a dlouhodobého ošetřovného.",
+      "nempri_paternity_reason_invalid": "Důvod otcovské musí být OTC, ZEM nebo PEC. Vyberte ho v případu dávky ze seznamu.",
+      "nempri_paternity_reason_not_in_kind": "Důvod otcovské se vyplňuje jen u otcovské.",
+      "nempri_maternity_care_reason_invalid": "Důvod převzetí dítěte do péče musí být kód z číselníku CIS_DUVPREVZETI. Vyberte ho ze seznamu.",
+      "nempri_maternity_care_reason_not_in_kind": "Důvod převzetí dítěte do péče se vyplňuje jen u peněžité pomoci v mateřství.",
+      "nempri_maternity_care_reason_with_decision_number": "S důvodem převzetí dítěte do péče nesmí podání nést číslo rozhodnutí. Smažte ho v případu dávky.",
+      "nempri_maternity_care_child_missing": "U převzetí dítěte do péče musí žádost uvést převzaté dítě.",
+      "sickness_event_after_employment": "Sociální událost vznikla po skončení zaměstnání a tento druh dávky ochrannou lhůtu nemá. Zkontrolujte den vzniku události nebo skončení vztahu.",
+      "sickness_event_outside_protection_period": "Sociální událost vznikla po uplynutí ochranné lhůty po skončení zaměstnání (§ 15 zák. č. 187/2006 Sb.). Nárok z tohoto vztahu nevznikl.",
+      "sickness_protection_period_excluded": "Z tohoto vztahu ochranná lhůta neplyne (dohoda o provedení práce, malý rozsah nebo student o prázdninách). Nárok po skončení zaměstnání nevznikl.",
+      "hzupn_not_for_benefit_kind": "Hlášení při ukončení pracovní neschopnosti se podává jen u nemocenského.",
+      "hzupn_return_before_incapacity": "Den návratu do práce nemůže předcházet vzniku pracovní neschopnosti.",
+      "dlo_employer_consent_invalid": "Rozhodnutí zaměstnavatele o dlouhodobém ošetřovném musí být souhlas, nebo odmítnutí.",
+      "dlo_employer_consent_missing": "Vyberte, zda zaměstnavatel s dlouhodobou péčí souhlasil, nebo ji odmítl.",
+      "dlo_employer_consent_not_in_kind": "Souhlas zaměstnavatele se eviduje jen u dlouhodobého ošetřovného.",
+      "dlo_employer_consent_date_missing": "Doplňte den, kdy zaměstnavatel rozhodnutí o dlouhodobé péči zaměstnanci sdělil.",
+      "dlo_employer_refusal_reason_missing": "Odmítnutí dlouhodobé péče musí nést důvod — vážné provozní důvody podle § 191a zákoníku práce.",
+      "dlo_employer_refusal_reason_without_refusal": "Důvod odmítnutí se vyplňuje jen u odmítnutí.",
+      "dlo_employer_refusal_reason_too_long": "Důvod odmítnutí může mít nejvýš 500 znaků.",
+      "dlo_employer_refused": "Zaměstnavatel dlouhodobou péči odmítl, takže dlouhodobé ošetřovné z tohoto zaměstnání nenáleží a žádost se nepředává.",
+      "sickness_case_actor_missing": "Případ dávky se nezaložil automaticky. Založte ho ručně v Podání → Dávky nemocenského pojištění.",
+      "sickness_case_has_submission": "Z případu dávky už je připravené nebo odeslané podání, takže se se zrušením absence nezrušil. Zkontrolujte ho v Podání → Dávky nemocenského pojištění.",
       "nempri_care_reason_invalid": "Důvod péče musí být onemocnění, karanténa, nemožnost péče o dítě, nebo uzavření školy či zařízení.",
       "nempri_cared_person_not_found": "Vybraná osoba není vyživovanou osobou tohoto zaměstnance. Vyberte ji u případu znovu.",
       "nempri_codebook_value_invalid": "Kód z číselníku ČSSZ má 1 až 3 znaky 0-9 a A-Z.",

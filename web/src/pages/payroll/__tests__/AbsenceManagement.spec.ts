@@ -330,6 +330,67 @@ describe('AbsenceManagement', () => {
     wrapper.unmount()
   })
 
+  /**
+   * Schválená neschopnost založí případ dávky a lhůtu NEMPRI (§ 97 zák.
+   * č. 187/2006 Sb.). Účetní to musí vidět hned u schválení, s odkazem na
+   * případy dávek; případ, který nevznikl, musí říct proč.
+   */
+  it('po schválení DPN oznámí založený případ dávky s odkazem', async () => {
+    m.decide.mockResolvedValue({
+      absence: { id: 44, status: 'approved' },
+      sickness_case: {
+        outcome: 'created',
+        case_id: 5,
+        benefit_kind: 'NEM',
+        nempri_due_on: '2026-06-29',
+        reason_code: null,
+        message: null,
+      },
+    })
+    const wrapper = mount(AbsenceManagement, { global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+    const checks = wrapper.findAll('[data-test="dpn-review"] input[type="checkbox"]')
+    await checks[0].setValue(true)
+    await checks[1].setValue(true)
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('payroll_absence.actions.approve'))!
+      .trigger('click')
+    await flushPromises()
+
+    const notice = wrapper.get('[data-test="absence-sickness-case-notice"]')
+    expect(notice.text()).toContain('payroll.sicknessCases.absenceNotice.created')
+    expect(wrapper.find('[data-test="absence-sickness-case-link"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('když případ dávky nevznikl, řekne proč', async () => {
+    m.decide.mockResolvedValue({
+      absence: { id: 44, status: 'approved' },
+      sickness_case: {
+        outcome: 'skipped',
+        case_id: null,
+        benefit_kind: 'NEM',
+        nempri_due_on: null,
+        reason_code: 'sickness_ossz_code_missing',
+        message: 'Firma nemá vyplněný kód OSSZ.',
+      },
+    })
+    const wrapper = mount(AbsenceManagement, { global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+    const checks = wrapper.findAll('[data-test="dpn-review"] input[type="checkbox"]')
+    await checks[0].setValue(true)
+    await checks[1].setValue(true)
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('payroll_absence.actions.approve'))!
+      .trigger('click')
+    await flushPromises()
+
+    const notice = wrapper.get('[data-test="absence-sickness-case-notice"]')
+    expect(notice.text()).toContain('payroll.sicknessCases.absenceNotice.skipped')
+    expect(notice.classes()).toContain('bg-warning-50')
+    wrapper.unmount()
+  })
+
   it('exposes all three agenda tabs on the same mobile-safe page', async () => {
     const wrapper = mount(AbsenceManagement)
     await flushPromises()

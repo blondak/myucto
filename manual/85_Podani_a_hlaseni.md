@@ -820,9 +820,10 @@ přepočtu.
 vůči ČSSZ vzniká samostatné oznámení zdravotním pojišťovnám podle § 10 odst. 1
 písm. b) zákona č. 48/1997 Sb. Měsíční hlášení tu druhou povinnost
 **nenahrazuje**. Obě mají vlastní řádek i vlastní termín. Přestup se navíc
-hlásí oběma pojišťovnám, odcházející i přijímající, a protože aplikace sama
-neurčí směr přestupu, tuhle povinnost jedním kliknutím podat nelze; splňte ji
-v oficiálním kanálu a návrh potom uzavřete ručně. U dohod o provedení práce
+hlásí oběma pojišťovnám: dosavadní odhláškou s kódem `O`, nové přihláškou
+s kódem `P`. Návrh u změny pojišťovny proto vede odkazem **Připravit HOZ**
+na záložku **Zdravotní pojišťovny** za měsíc změny; tam vzniknou obě věty
+hromadného oznámení (viz 85.14) a návrh potom uzavřete. U dohod o provedení práce
 a o pracovní činnosti není lhůta vůči pojišťovně osmidenní, ale do 20. dne
 následujícího měsíce, a neposouvá se na pracovní den.
 
@@ -1165,6 +1166,13 @@ Kód změny v HOZ se určuje podle skutečnosti a podle zaměstnance:
   čísla pojištěnce uvede pohlaví a datum narození (`M05071980`, `Z12101982`),
   takže je musí mít karta osoby vyplněné.
 - **Skončení** má kód `O`.
+- **Přestup k jiné pojišťovně** — změnu zapíšete na kartě osoby (zdravotní
+  pojištění od nového dne). Z jedné změny vzniknou dvě věty: u dosavadní
+  pojišťovny odhláška s kódem `O` k poslednímu dni pojištění u ní, u nové
+  pojišťovny přihláška s kódem `P` ke dni změny. V přehledu povinností je
+  u každé z nich napsané, zda jde o odhlášku, nebo přihlášku; hromadné
+  oznámení se sestaví zvlášť za každou pojišťovnu. Lhůta je u obou osm dnů
+  od změny.
 - **Jednodenní zaměstnání** — vznikne a skončí týž den — se hlásí jedinou větou
   s kódem `Q`, ne přihláškou a odhláškou.
 - **Mateřská a rodičovská** mají kódy `M` a `U`.
@@ -1223,6 +1231,19 @@ Záložka **Další povinnosti** ukazuje pro vybraný měsíc přesnou matici to
 co MyÚčto umí a co musí zůstat ruční. NEMPRI je po zavedení JMHZ nahrazené
 jen částečně a HZUPN zůstává samostatným hlášením.
 
+**Případ vzniká sám ze schválené nepřítomnosti.** Schválením dočasné pracovní
+neschopnosti, karantény, ošetřování člena rodiny, dlouhodobé péče, mateřské
+nebo otcovské v **Nepřítomnostech** se založí případ dávky a hlídač termínů
+začne hlídat lhůtu NEMPRI ode dne události. Nad seznamem nepřítomností se
+ukáže, co se stalo (případ založen s termínem NEMPRI, prodloužen, navázán na
+existující), a odkaz **Otevřít případy dávek**. Neschopnost zapsaná po
+měsících tvoří jeden případ: navazující nepřítomnost prodlouží jeho konec.
+Nevznikne-li případ (například firma nemá kód OSSZ), hláška řekne proč
+a nepřítomnost se schválí i tak. Zrušením nepřítomnosti se zruší i případ,
+ze kterého ještě nebylo připravené podání; případ s podáním zůstává
+a vyřešíte ho opravným podáním. Případ můžete založit i ručně na záložce
+**Dávky nemocenského**.
+
 Případ evidujte na záložce **Dávky nemocenského**. Z případu si můžete
 zobrazit náhled datové věty a tlačítkem **Připravit NEMPRI** nebo **Připravit
 HZUPN** ji zmrazit; MyÚčto ji ověří proti připnutému XSD. Odesílá se rovnou
@@ -1263,8 +1284,22 @@ ve spodní liště a tyto sekce:
   vlastní žádost se vznikem. Dítě nebo ošetřovanou osobu vyberte z
   vyživovaných osob na kartě zaměstnance — rodné číslo se doplní samo; osobu
   mimo evidenci zadejte jménem, příjmením a datem narození. Dále vyplňte
-  důvod péče, kód vztahu (u otcovské důvod otcovské), dny, kdy zaměstnanec
-  pečoval, a podklady pro výplatu (směny v posledním dni a v období dávky).
+  důvod péče, vztah k ošetřované osobě (u otcovské důvod otcovské, u mateřské
+  případně důvod převzetí dítěte do péče), dny, kdy zaměstnanec pečoval,
+  a podklady pro výplatu (směny v posledním dni a v období dávky). Vztah
+  i důvody se vybírají ze seznamu podle číselníků ČSSZ: u ošetřovného
+  CIS_RODVZTAH (PL, MA, RP, SDO, SO, TCH, JIN), u dlouhodobého ošetřovného
+  CIS_VZTAH (1 až 29), důvod otcovské OTC, ZEM nebo PEC a důvod převzetí do
+  péče CIS_DUVPREVZETI (DOH, ONE, ROZ, UMR). S důvodem převzetí se číslo
+  rozhodnutí nevyplňuje. Starší ručně zapsaný kód mimo číselník je v nabídce
+  označený a podání s ním neprojde, dokud ho nevyberete znovu.
+- **Rozhodnutí zaměstnavatele o dlouhodobé péči** (jen dlouhodobé
+  ošetřovné) — podle § 191a zákoníku práce musí zaměstnavatel nepřítomnosti
+  vyhovět, ledaže mu brání vážné provozní důvody, a odmítnutí písemně
+  zdůvodní. Vyberte **Souhlasil** nebo **Odmítl**, den, kdy jste rozhodnutí
+  zaměstnanci sdělili, a u odmítnutí důvod. Odmítnutý případ se ČSSZ
+  nepředává: zaměstnanec v práci nechybí a dávka mu z tohoto zaměstnání
+  nenáleží.
   Prohlášení, které zaměstnanec v žádosti nevyplnil, nechte nezaškrtnuté:
   podle zásad NEMPRI se uvede „NE“ a žádost se kvůli tomu nezdrží. Hranice
   žádosti jsou předvyplněné dny případu.
@@ -1274,6 +1309,19 @@ ve spodní liště a tyto sekce:
 - **Ukončení neschopnosti** (jen nemocenské, pro HZUPN) — zda se zaměstnanec
   vrátil do práce. Když se nevrátil (nástup na peněžitou pomoc v mateřství,
   skončení zaměstnání), zvolte **Ne**, uveďte důvod a den, ke kterému nastal.
+  HZUPN hlásí nástup do zaměstnání, a proto se jeho lhůta („neprodleně",
+  § 97 odst. 3 zákona č. 187/2006 Sb.) počítá ode dne nástupu: od zapsaného
+  dne návratu, jinak od dne po skončení neschopnosti.
+
+**Ochranná lhůta.** Vznikne-li neschopnost nebo karanténa až po skončení
+zaměstnání, nemocenské náleží jen v ochranné lhůtě 7 kalendářních dnů
+(nejvýš tolik dnů, kolik pojištění trvalo), peněžitá pomoc v mateřství
+nejvýš do 180 dnů u ženy, jejíž pojištění skončilo v těhotenství (§ 15
+zákona č. 187/2006 Sb.). Z dohody o provedení práce, zaměstnání malého
+rozsahu a zaměstnání studenta jen o prázdninách ochranná lhůta neplyne
+a ostatní dávky ji nemají vůbec. Případ mimo ochrannou lhůtu nejde založit
+ani připravit; u případu v ochranné lhůtě seznam ukáže, do kdy lhůta běží,
+a NEMPRI se podá se dnem skončení zaměstnání.
 
 **Způsob výplaty mzdy** se do NEMPRI doplní sám z výplatního profilu
 zaměstnance: účet, na který chodí mzda, zahraniční IBAN, nebo adresa bydliště,

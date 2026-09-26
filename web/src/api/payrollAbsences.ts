@@ -1,4 +1,15 @@
 import { api } from './client'
+import type { PayrollAbsenceSicknessCaseOutcome } from './payrollSicknessCases'
+
+/**
+ * Výsledek schválení nebo zrušení nepřítomnosti. `sickness_case` říká, co se
+ * stalo s případem dávky nemocenského pojištění (§ 97 zák. č. 187/2006 Sb.):
+ * `null` = z nepřítomnosti žádná dávka neplyne.
+ */
+export interface PayrollAbsenceDecisionResult {
+  absence: PayrollAbsence
+  sickness_case?: PayrollAbsenceSicknessCaseOutcome | null
+}
 
 /**
  * Druhy nepřítomnosti. Pořadí zrcadlí `payroll_absences.absence_type`
@@ -270,12 +281,12 @@ export const payrollAbsenceApi = {
      */
     overdraw_confirmed?: boolean
   }) =>
-    api.post<{ absence: PayrollAbsence }>(`/payroll/time/absences/${id}/decision`, payload)
-      .then(response => response.data.absence),
+    api.post<PayrollAbsenceDecisionResult>(`/payroll/time/absences/${id}/decision`, payload)
+      .then(response => response.data),
   cancel: (id: number, rowVersion: number) =>
-    api.post<{ absence: PayrollAbsence }>(`/payroll/time/absences/${id}/cancel`, {
+    api.post<PayrollAbsenceDecisionResult>(`/payroll/time/absences/${id}/cancel`, {
       row_version: rowVersion,
-    }).then(response => response.data.absence),
+    }).then(response => response.data),
   recordChildbirth: (id: number, rowVersion: number, childbirthDate: string) =>
     api.post<{ absence: PayrollAbsence }>(`/payroll/time/absences/${id}/childbirth`, {
       row_version: rowVersion,

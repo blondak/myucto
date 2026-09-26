@@ -330,6 +330,43 @@ describe('PayrollHealthNotificationPanel', () => {
   })
 
   /**
+   * Přestup: odhláška u dosavadní pojišťovny (O) k poslednímu dni u ní
+   * a přihláška u nové (P). Řádek musí říct, která z obou vět to je.
+   */
+  it('u přestupu pojmenuje odhlášku a přihlášku i s kódem', async () => {
+    m.duties.mockResolvedValue(dutyPage({
+      items: [
+        dutyItem({
+          id: 'payroll_health_notification:12:insurer_change:2026-07-01:outgoing',
+          kind: 'insurer_change',
+          insurer_direction: 'outgoing',
+          reported_change_on: '2026-06-30',
+          occurred_on: '2026-07-01',
+          change_code: { documented: true, code: 'O', reason: null },
+        }),
+        dutyItem({
+          id: 'payroll_health_notification:12:insurer_change:2026-07-01',
+          kind: 'insurer_change',
+          insurer_code: '205',
+          insurer_direction: 'incoming',
+          reported_change_on: '2026-07-01',
+          occurred_on: '2026-07-01',
+          change_code: { documented: true, code: 'P', reason: null },
+        }),
+      ],
+    }))
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+
+    const directions = wrapper.findAll('[data-test="health-notification-direction"]')
+      .map(node => node.text())
+    expect(directions).toHaveLength(2)
+    expect(directions[0]).toContain('insurer_direction.outgoing')
+    expect(directions[1]).toContain('insurer_direction.incoming')
+    expect(wrapper.find('[data-test="health-notification-code-undocumented"]').exists()).toBe(false)
+  })
+
+  /**
    * Selhání načtení nesmí vypadat jako prázdná agenda — u osmidenní lhůty je
    * to nejdražší možná lež.
    */
