@@ -31,6 +31,23 @@ final class CzechBirthNumber
         return (string) preg_replace('/\D/', '', self::normalize($value));
     }
 
+    /**
+     * Hodnota čísla pojištěnce pro úřední podání: platné rodné číslo jen
+     * číslicemi, cokoli jiného (EČP, neplatná hodnota) beze změny, aby ji
+     * validátor daného podání pojmenoval vlastní větou.
+     */
+    public static function forSubmission(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        try {
+            return self::digits($value);
+        } catch (InvalidArgumentException) {
+            return $value;
+        }
+    }
+
     /** @return string kanonický tvar RRMMDD/XXXX */
     public static function normalize(string $value): string
     {

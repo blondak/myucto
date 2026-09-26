@@ -185,9 +185,11 @@ final readonly class SicknessPayloadFactory
             insuredFirstName: self::requiredIdentity($identity, 'first_name'),
             insuredLastName: self::requiredIdentity($identity, 'last_name'),
             insuredTitle: null,
-            insuredBirthNumber: $identity['identifiers']['birth_number']
-                ?? $identity['identifiers']['ecp']
-                ?? null,
+            insuredBirthNumber: \MyInvoice\Service\Payroll\CzechBirthNumber::forSubmission(
+                $identity['identifiers']['birth_number']
+                    ?? $identity['identifiers']['ecp']
+                    ?? null,
+            ),
             insuredBirthDate: self::nullableText(
                 $identity['identity']['birth_date'] ?? null,
             ),
@@ -288,7 +290,8 @@ final readonly class SicknessPayloadFactory
             );
         }
 
-        return $value;
+        // Karta osoby drží RČ jako RRMMDD/XXXX, schéma ČSSZ bere jen číslice.
+        return (string) \MyInvoice\Service\Payroll\CzechBirthNumber::forSubmission($value);
     }
 
     /** @return list<array{from:string,to:string}> */

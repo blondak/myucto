@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\CzechBirthNumber;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriPaymentConnection;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriPaymentConnectionResolver;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessBenefitKind;
@@ -114,6 +115,44 @@ final class NempriPaymentAndPayloadTest extends TestCase
 
         self::assertSame('2026-03-04', $payload->employmentFrom);
         self::assertSame('Mzdová Účetní', $payload->contactWorkerName);
+    }
+
+    /**
+     * Karta osoby drží rodné číslo jako RRMMDD/XXXX; `rodneCislo` v NEMPRI
+     * bere jen číslice, jinak validátor věty odmítne každého českého
+     * zaměstnance.
+     */
+    public function testBirthNumberWithSlashIsSentAsDigits(): void
+    {
+        $payload = (new SicknessPayloadFactory())->nempri(
+            $this->row(),
+            SicknessBenefitKind::Nem,
+            [
+                'start_date' => '2026-03-01',
+                'end_date' => null,
+                'employer_business_id' => '12345678',
+                'employer_name' => 'Testovací zaměstnavatel s.r.o.',
+                'employer_variable_symbol' => '1234567890',
+                'activity_code' => '1',
+            ],
+            [
+                'identity' => ['first_name' => 'Jan', 'last_name' => 'Testovací'],
+                'identifiers' => ['birth_number' => '800101/0006', 'ecp' => null],
+            ],
+            '1.0',
+            'MyUcto',
+            '1.0',
+        );
+
+        self::assertSame('8001010006', $payload->insuredBirthNumber);
+    }
+
+    public function testSubmissionBirthNumberKeepsNonBirthNumbersForTheValidator(): void
+    {
+        self::assertSame('8001010006', CzechBirthNumber::forSubmission('800101/0006'));
+        self::assertSame('1234567890', CzechBirthNumber::forSubmission('1234567890'));
+        self::assertSame('bez-cisla', CzechBirthNumber::forSubmission('bez-cisla'));
+        self::assertNull(CzechBirthNumber::forSubmission(null));
     }
 
     /**
