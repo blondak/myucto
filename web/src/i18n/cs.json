@@ -7575,8 +7575,10 @@
       "account_type": {
         "expense": "nákladový účet",
         "liability": "závazkový účet",
-        "asset": "účet pohledávek"
+        "asset": "účet pohledávek",
+        "revenue": "výnosový účet"
       },
+      "account_not_set": "Nenastaveno — paušál plátce mzdy zůstává na závazku exekučních srážek",
       "accounting": {
         "employment_gross": "Mzda zaměstnance mimo výkon funkce",
         "partner_gross": "Závislý příjem společníka",
@@ -7588,6 +7590,7 @@
         "withholding_tax": "Srážková daň ze závislé činnosti",
         "other_deductions": "Ostatní srážky ze mzdy",
         "enforcement_deductions": "Exekuční a insolvenční srážky",
+        "enforcement_fee_revenue": "Paušální náhrada plátce mzdy",
         "partner_settlement": "Zápočet na účet společníka",
         "risky_savings": "Povinné spoření u rizikové práce",
         "employee_receivable": "Pohledávka za zaměstnancem",
@@ -7677,7 +7680,8 @@
         "employee_receivable": "Kam se překlopí záporná čistá mzda — typicky doplatek zdravotního pojištění do minimálního vyměřovacího základu v měsíci bez peněžního příjmu. Zaměstnanec dluží zaměstnavateli, takže jde o pohledávku (335), ne o závazek.",
         "non_deductible_benefit": "Osvobozená část nepeněžního benefitu (rekreace, sport, kultura, zdraví, tištěné knihy). Podle § 25 odst. 1 písm. h) ZDP je nedaňová právě ta OSVOBOZENÁ část; nadlimitní část se zaměstnanci zdaní a nákladem zůstává. Účet 528 se sám propíše do nedaňových nákladů v přiznání k dani z příjmů.",
         "travel_expense": "Cestovní náhrada je náhrada výdaje podle části sedmé zákoníku práce, ne odměna za práci — do mzdových nákladů nepatří. Protiúčtem zůstává závazkový účet pracovního vztahu, protože se náhrada vyplácí spolu se mzdou.",
-        "enforcement_deductions": "Srážky nařízené soudem, exekutorem nebo insolvenčním správcem. Oddělené od ostatních srážek proto, že se u nich vede pořadí pohledávek a posílají se jinému příjemci než dobrovolné srážky — na společném účtu se saldo obou skupin slije a nejde dohledat."
+        "enforcement_deductions": "Srážky nařízené soudem, exekutorem nebo insolvenčním správcem. Oddělené od ostatních srážek proto, že se u nich vede pořadí pohledávek a posílají se jinému příjemci než dobrovolné srážky — na společném účtu se saldo obou skupin slije a nejde dohledat.",
+        "enforcement_fee_revenue": "Paušál 50 Kč měsíčně, který si plátce mzdy ponechá ze sražené částky jako náhradu nákladů (§ 270 odst. 2 o. s. ř.). Zaměstnanci se srazí, oprávněnému se ale neposílá — bez převodu na výnos by na závazku exekučních srážek zůstával každý měsíc zůstatek. Obvykle 648 Ostatní provozní výnosy. Nechte prázdné, pokud má paušál zůstat na závazku."
       },
       "registration_source_reference_hint": "Nepovinné. Odkaz na výměr nebo rozhodnutí, ze kterého jste variabilní symbol opsali."
     },

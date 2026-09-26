@@ -98,6 +98,7 @@ const defaultAccounts: PayrollEmployerAccounts = {
   withholding_tax_credit: '342',
   other_deductions_credit: '379',
   enforcement_deductions_credit: '379',
+  enforcement_fee_revenue_credit: '648',
   partner_settlement_credit: '365',
   risky_savings_debit: '527',
   risky_savings_credit: '379',
@@ -130,6 +131,8 @@ function chartAccounts(): PayrollAccountOption[] {
     // 335 je jediný AKTIVNÍ účet v sadě — přeplatek čisté mzdy je pohledávka
     // za zaměstnancem, ne závazek.
     chartAccount('335', 'asset'),
+    // Výnos z paušálu plátce mzdy (§ 270 odst. 2 o. s. ř.).
+    chartAccount('648', 'revenue', true, 'Ostatní provozní výnosy'),
     // Analytiky pojistného z migrace 1618. Firma je mít nemusí (pak platí
     // syntetika 336), ale výběr je musí zvládnout — proto jsou v nabídce.
     chartAccount('336.100', 'liability', true, 'Závazek vůči ČSSZ'),
@@ -387,6 +390,8 @@ describe('EmployerSettings — účtová osnova', () => {
     // Ú-13: srážková daň má vlastní předkontaci; firma založená dřív ji má
     // srovnanou na účet zálohové daně, takže se pošle zpátky 342.
     ['withholding_tax_credit', '342'],
+    // Výnos z paušálu plátce mzdy (§ 270 odst. 2 o. s. ř.) — jediný výnosový klíč.
+    ['enforcement_fee_revenue_credit', '648'],
   ] as const)('nabízí předkontaci %s a pošle ji zpět', async (key, code) => {
     const wrapper = await mountPage()
     await openAccounting(wrapper)
@@ -404,6 +409,37 @@ describe('EmployerSettings — účtová osnova', () => {
   })
 
   /*
+   * Výnos z paušálu plátce mzdy je nepovinný: firma bez výnosového účtu
+   * v osnově ho nechá prázdný a nastavení mezd musí jít uložit.
+   */
+  it('nenastavený výnos z paušálu plátce mzdy neblokuje uložení a řekne, co to znamená', async () => {
+    const wrapper = await mountPage(settings({ ...defaultAccounts, enforcement_fee_revenue_credit: '' }))
+    await openAccounting(wrapper)
+
+    const picker = wrapper.findAll('[data-account-key="enforcement_fee_revenue_credit"]')[0]
+    expect(picker.find('input').attributes('aria-invalid')).not.toBe('true')
+    expect(picker.text()).toContain('payroll.employer.account_not_set')
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    expect(m.saveEmployerSettings.mock.calls[0][0].accounts.enforcement_fee_revenue_credit).toBe('')
+    wrapper.unmount()
+  })
+
+  it('výnos z paušálu nabízí jen výnosové účty', async () => {
+    const wrapper = await mountPage(settings({ ...defaultAccounts, enforcement_fee_revenue_credit: '379' }))
+    await openAccounting(wrapper)
+
+    const picker = wrapper.findAll('[data-account-key="enforcement_fee_revenue_credit"]')[0]
+    expect(picker.find('input').attributes('aria-invalid')).toBe('true')
+    expect(picker.text()).toContain('payroll.employer.validation.account_wrong_type')
+    wrapper.unmount()
+  })
+
+  /*
    * Nové předkontace přibyly do sady, o které se účetní nikde nedočte — proto
    * má každá z nich pod názvem větu, co na ten účet patří a proč.
    */
@@ -412,7 +448,7 @@ describe('EmployerSettings — účtová osnova', () => {
     await openAccounting(wrapper)
 
     for (const row of ['risky_savings', 'employee_receivable',
-      'non_deductible_benefit', 'travel_expense', 'withholding_tax']) {
+      'non_deductible_benefit', 'travel_expense', 'withholding_tax', 'enforcement_fee_revenue']) {
       expect(wrapper.find(`[data-account-row-hint="${row}"]`).text())
         .toBe(`payroll.employer.accounting_row_hint.${row}`)
     }

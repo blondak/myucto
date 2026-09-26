@@ -28,6 +28,7 @@ import RegzelProfileSettings from './RegzelProfileSettings.vue'
 import JmhzEmployerAnnualEvidenceSettings from './JmhzEmployerAnnualEvidenceSettings.vue'
 import { codeFromName, OFFICE_CODE_MAX_LENGTH } from '@/utils/slugifyCode'
 import {
+  NULLABLE_PAYROLL_ACCOUNT_KEYS,
   PAYROLL_ACCOUNT_TYPES,
   normalizedPayrollAccountCode,
   payrollAccount,
@@ -81,6 +82,7 @@ const accountRows: Array<{
   { key: 'withholding_tax', debit: null, credit: 'withholding_tax_credit' },
   { key: 'other_deductions', debit: null, credit: 'other_deductions_credit' },
   { key: 'enforcement_deductions', debit: null, credit: 'enforcement_deductions_credit' },
+  { key: 'enforcement_fee_revenue', debit: null, credit: 'enforcement_fee_revenue_credit' },
   { key: 'partner_settlement', debit: null, credit: 'partner_settlement_credit' },
   { key: 'risky_savings', debit: 'risky_savings_debit', credit: 'risky_savings_credit' },
   { key: 'employee_receivable', debit: 'employee_receivable_debit', credit: null },
@@ -111,6 +113,9 @@ const defaultAccounts: PayrollEmployerAccounts = {
   // syntetice 379, kterou má v osnově každá firma.
   other_deductions_credit: '379',
   enforcement_deductions_credit: '379',
+  // Nepovinná — prázdná, dokud se nenačte nastavení firmy (výchozí 648 dá
+  // server jen firmě, která ho v osnově má).
+  enforcement_fee_revenue_credit: '',
   partner_settlement_credit: '365',
   risky_savings_debit: '527',
   risky_savings_credit: '379',
@@ -478,7 +483,14 @@ const ACCOUNT_ROW_HINTS: ReadonlySet<string> = new Set([
   'travel_expense',
   'withholding_tax',
   'enforcement_deductions',
+  'enforcement_fee_revenue',
 ])
+
+/** Řádky, jejichž jediná předkontace smí zůstat nenastavená — bez hvězdičky. */
+function accountRowRequired(row: { debit: AccountKey | null, credit: AccountKey | null }): boolean {
+  return [row.debit, row.credit]
+    .some(key => key !== null && !NULLABLE_PAYROLL_ACCOUNT_KEYS.has(key))
+}
 
 function accountRowHint(key: string): string {
   return ACCOUNT_ROW_HINTS.has(key) ? t(`payroll.employer.accounting_row_hint.${key}`) : ''
@@ -522,6 +534,9 @@ function accountHelp(key: AccountKey): string {
     })
   }
   if (error !== null) return t(`payroll.employer.validation.account_${error}`)
+  if (NULLABLE_PAYROLL_ACCOUNT_KEYS.has(key) && normalizedPayrollAccountCode(form.accounts[key]) === '') {
+    return t('payroll.employer.account_not_set')
+  }
   return payrollAccount(chartAccounts.value, form.accounts[key])?.name ?? ''
 }
 
@@ -889,7 +904,7 @@ onMounted(async () => {
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="row in accountRows" :key="row.key">
                 <th class="px-3 py-3 text-left align-top font-medium text-neutral-900">
-                  {{ accountLabel(row.key) }}<RequiredMark />
+                  {{ accountLabel(row.key) }}<RequiredMark v-if="accountRowRequired(row)" />
                   <span v-if="accountRowHint(row.key)" :data-account-row-hint="row.key" class="mt-1 block max-w-72 text-xs font-normal text-neutral-500">{{ accountRowHint(row.key) }}</span>
                 </th>
                 <td class="px-3 py-3">
@@ -923,7 +938,7 @@ onMounted(async () => {
                       :selected-option="selectedAccountOption(row.credit)"
                       :placeholder="t('payroll.employer.account_placeholder')"
                       :no-results-label="t('payroll.employer.account_no_results')"
-                      :clearable="false"
+                      :clearable="NULLABLE_PAYROLL_ACCOUNT_KEYS.has(row.credit)"
                       :disabled="!canWrite"
                       :invalid="!accountValid(row.credit)"
                       :aria-label="accountAriaLabel(row.key, 'credit')"
@@ -945,7 +960,7 @@ onMounted(async () => {
 
         <div class="grid grid-cols-1 gap-3 md:hidden">
           <article v-for="row in accountRows" :key="row.key" class="rounded-lg border border-neutral-200 p-4">
-            <h3 class="font-medium text-neutral-900">{{ accountLabel(row.key) }}<RequiredMark /></h3>
+            <h3 class="font-medium text-neutral-900">{{ accountLabel(row.key) }}<RequiredMark v-if="accountRowRequired(row)" /></h3>
             <p v-if="accountRowHint(row.key)" class="mt-1 text-xs text-neutral-500">{{ accountRowHint(row.key) }}</p>
             <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div v-if="row.debit" :data-account-key="row.debit" class="min-w-0">
@@ -976,7 +991,7 @@ onMounted(async () => {
                   :selected-option="selectedAccountOption(row.credit)"
                   :placeholder="t('payroll.employer.account_placeholder')"
                   :no-results-label="t('payroll.employer.account_no_results')"
-                  :clearable="false"
+                  :clearable="NULLABLE_PAYROLL_ACCOUNT_KEYS.has(row.credit)"
                   :disabled="!canWrite"
                   :invalid="!accountValid(row.credit)"
                   :aria-label="accountAriaLabel(row.key, 'credit')"

@@ -301,6 +301,60 @@ final class PayrollPostingLineBuilderTest extends TestCase
         self::assertArrayNotHasKey('379.300|credit', $lineMap);
     }
 
+    /**
+     * Paušál plátce mzdy (§ 270 odst. 2 o. s. ř.) se oprávněnému neposílá —
+     * plátce si ho odečte. Bez převodu zůstával na 379.200 a účet se žádnou
+     * platbou nevyrovnal: 50 Kč za každý měsíc s exekucí.
+     */
+    public function testEmployerFlatFeeMovesFromEnforcementLiabilityToRevenue(): void
+    {
+        $result = $this->calculatedResult();
+        $result['people'][0]['enforcement']['result']['employer_flat_fee_minor_units'] = 5_000;
+
+        $preview = $this->builder->build(
+            $this->snapshot(),
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $lineMap = $this->lineMap($preview->lines);
+
+        // Sraženo 50 Kč, celé je paušál: závazek vůči oprávněným je nula.
+        self::assertSame(5_000, $lineMap['379.200|credit']);
+        self::assertSame(5_000, $lineMap['379.200|debit']);
+        self::assertSame(5_000, $lineMap['648|credit']);
+        self::assertSame($preview->debitTotalMinor, $preview->creditTotalMinor);
+
+        // Obě strany 379.200 nesou touž analytiku oprávněného, výnos žádnou.
+        $centers = [];
+        foreach ($preview->lines as $line) {
+            $centers[$line['account_code'] . '|' . $line['side']] = $line['cost_center'] ?? null;
+        }
+        self::assertStringStartsWith('MZ-EX-', (string) $centers['379.200|credit']);
+        self::assertSame($centers['379.200|credit'], $centers['379.200|debit']);
+        self::assertNull($centers['648|credit']);
+    }
+
+    /** Revize zmrazená bez výnosového účtu se zaúčtuje byte-identicky jako dřív. */
+    public function testSnapshotWithoutFeeRevenueAccountKeepsTheFeeOnTheLiability(): void
+    {
+        $accounts = PayrollAccountingDefaults::codes();
+        unset($accounts['enforcement_fee_revenue_credit']);
+        $result = $this->calculatedResult();
+        $result['people'][0]['enforcement']['result']['employer_flat_fee_minor_units'] = 5_000;
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $this->snapshot(),
+            $result,
+            $this->statutorySets(),
+            $accounts,
+        )->lines);
+
+        self::assertSame(5_000, $lineMap['379.200|credit']);
+        self::assertArrayNotHasKey('379.200|debit', $lineMap);
+        self::assertArrayNotHasKey('648|credit', $lineMap);
+    }
+
     /** Nedopočítaný podklad se neúčtuje — schvalování hlídá jiná brána. */
     public function testRiskySavingsInManualReviewIsNotPosted(): void
     {

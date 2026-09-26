@@ -15,6 +15,7 @@ use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
+use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
@@ -1715,6 +1716,14 @@ final class PayrollRunSnapshotBuilder
         }
         $accountSnapshot = [];
         foreach ($accounts as $key => $account) {
+            // Nenastavená nepovinná předkontace se do snapshotu nezmrazí —
+            // zaúčtování ji pak nevidí a účtuje přesně jako dřív (viz
+            // PayrollAccountingDefaults::NULLABLE_ACCOUNTS a SNAPSHOT_GATED_ACCOUNTS).
+            if (is_string($key) && $account === ''
+                && PayrollAccountingDefaults::isNullable($key)
+            ) {
+                continue;
+            }
             if (!is_string($key)
                 || !is_string($account)
                 || preg_match('/^[0-9]{3}[.A-Z0-9]{0,13}$/D', $account) !== 1

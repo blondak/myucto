@@ -198,6 +198,56 @@ final class PayrollEmployerSettingsValidatorTest extends TestCase
         self::assertSame('342', $result['accounts']['withholding_tax_credit']);
     }
 
+    /**
+     * Výnos z paušálu plátce mzdy smí zůstat nenastavený, když firma 648
+     * v osnově nemá — jinak by kvůli nové předkontaci nešlo uložit nastavení.
+     */
+    public function testFeeRevenueAccountMayStayEmptyWithoutRevenueAccountInChart(): void
+    {
+        $accounts = $this->createStub(ChartOfAccountsRepository::class);
+        $map = [];
+        foreach (PayrollAccountingDefaults::ACCOUNTS as $key => $definition) {
+            if ($key === 'enforcement_fee_revenue_credit') {
+                continue;
+            }
+            $map[$definition['code']] = ['id' => 1, 'is_active' => true, 'account_type' => $definition['type']];
+        }
+        $accounts->method('codeToIdMap')->willReturn($map);
+        $input = $this->input('111');
+        $input['accounts']['enforcement_fee_revenue_credit'] = '';
+
+        $result = (new PayrollEmployerSettingsValidator($accounts))->validate(1, $input);
+
+        self::assertSame('', $result['accounts']['enforcement_fee_revenue_credit']);
+    }
+
+    public function testFeeRevenueAccountDefaultsOnlyForClientThatDoesNotSendIt(): void
+    {
+        $missing = $this->input('111');
+        unset($missing['accounts']['enforcement_fee_revenue_credit']);
+        self::assertSame(
+            '648',
+            $this->validator()->validate(1, $missing)['accounts']['enforcement_fee_revenue_credit'],
+        );
+
+        $cleared = $this->input('111');
+        $cleared['accounts']['enforcement_fee_revenue_credit'] = '';
+        self::assertSame(
+            '',
+            $this->validator()->validate(1, $cleared)['accounts']['enforcement_fee_revenue_credit'],
+        );
+    }
+
+    public function testFeeRevenueAccountMustBeRevenueType(): void
+    {
+        $input = $this->input('111');
+        $input['accounts']['enforcement_fee_revenue_credit'] = '379.200';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('očekávaný typ revenue');
+        $this->validator()->validate(1, $input);
+    }
+
     /** Osnova bez jediné analytiky — stav firmy založené před Ú-08 a Ú-13. */
     private function syntheticOnlyValidator(): PayrollEmployerSettingsValidator
     {

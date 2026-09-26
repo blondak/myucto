@@ -8,6 +8,7 @@ use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\Payroll\PayrollPostingReconciliationRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService;
+use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 
 /**
  * MZ-18-W07 — odvozený read model, nic nemění. Pro dané období porovná tři
@@ -295,6 +296,17 @@ final class PayrollPostingReconciliationService
         $resultSnapshot = $this->verifiedResultSnapshot($revision);
         $inputSnapshot = $this->verifiedInputSnapshot($revision);
         $enforcementTotal = $this->enforcementWithheldTotal($resultSnapshot);
+        // Paušál plátce mzdy (§ 270 odst. 2 o. s. ř.) se oprávněnému neposílá.
+        // U revize, jejíž snapshot nese výnosový účet paušálu, ho můstek z 379
+        // převede na výnos — závazek vůči oprávněným je pak sraženo MÍNUS
+        // paušál, stejně jako platební strana. Starší revize zůstávají beze změny.
+        $employerAccounts = $inputSnapshot['employer']['accounting_accounts'] ?? [];
+        $enforcementPayable = PayrollAccountingDefaults::snapshotAllowsSplit(
+            is_array($employerAccounts) ? $employerAccounts : [],
+            'enforcement_fee_revenue_credit',
+        )
+            ? $enforcementTotal - $this->enforcementFeeTotal($resultSnapshot)
+            : $enforcementTotal;
         $employerContributions = $this->employerContributions(
             $supplierId,
             $revision['id'],
@@ -333,7 +345,7 @@ final class PayrollPostingReconciliationService
                 + ($liabilitiesByKind['withholding_tax'] ?? 0)
                 - $taxBonusReceivable,
             'other_deductions' => $liabilitiesByKind['standard_deduction'] ?? 0,
-            'enforcement' => $enforcementTotal,
+            'enforcement' => $enforcementPayable,
             // Zápočet na účet společníka se nevyplácí ani nezůstává na 331/366 —
             // deník i platební strana jsou o něj nižší. Vlastní kategorie
             // `partner_settlement` ho vykazuje a porovnává samostatně.
@@ -520,6 +532,18 @@ final class PayrollPostingReconciliationService
      */
     private function enforcementWithheldTotal(array $decoded): int
     {
+        return $this->enforcementResultSum($decoded, 'total_withheld_minor_units');
+    }
+
+    /** @param array<string,mixed> $decoded ověřený výsledný snapshot revize */
+    private function enforcementFeeTotal(array $decoded): int
+    {
+        return $this->enforcementResultSum($decoded, 'employer_flat_fee_minor_units');
+    }
+
+    /** @param array<string,mixed> $decoded */
+    private function enforcementResultSum(array $decoded, string $field): int
+    {
         if (!is_array($decoded['people'] ?? null)) {
             throw new \UnexpectedValueException(
                 'Výsledný snapshot revize nemá seznam osob.',
@@ -541,7 +565,7 @@ final class PayrollPostingReconciliationService
             if (!is_array($result) || ($result['status'] ?? null) !== 'supported') {
                 continue;
             }
-            $withheld = $result['total_withheld_minor_units'] ?? null;
+            $withheld = $result[$field] ?? null;
             if (!is_int($withheld) || $withheld < 0) {
                 throw new \UnexpectedValueException(
                     'Exekuční výsledek osoby má neplatnou částku.',

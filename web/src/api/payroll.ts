@@ -2641,6 +2641,11 @@ export interface PayrollEmployerAccounts {
    * takže na společném účtu nejde saldo přiřadit k jedné z obou skupin.
    */
   enforcement_deductions_credit: string
+  /**
+   * Výnos z paušální náhrady nákladů plátce mzdy (§ 270 odst. 2 o. s. ř.,
+   * 648). Prázdný řetězec = nenastaveno, paušál zůstává na závazku jako dřív.
+   */
+  enforcement_fee_revenue_credit: string
   partner_settlement_credit: string
   /**
    * Povinný příspěvek zaměstnavatele na spoření u rizikové práce
@@ -2670,9 +2675,10 @@ export interface PayrollAccountOption {
   /**
    * `asset` je tu kvůli `employee_receivable_debit` (335). Nabídka účtů ho
    * posílá až od chvíle, kdy tuhle předkontaci šlo nastavit — bez něj by
-   * jediné pole s pohledávkou nemělo z čeho vybírat.
+   * jediné pole s pohledávkou nemělo z čeho vybírat. `revenue` kvůli výnosu
+   * z paušálu plátce mzdy (`enforcement_fee_revenue_credit`).
    */
-  account_type: 'expense' | 'liability' | 'asset'
+  account_type: 'expense' | 'liability' | 'asset' | 'revenue'
   is_synthetic: boolean
   parent_id: number | null
   is_active: boolean

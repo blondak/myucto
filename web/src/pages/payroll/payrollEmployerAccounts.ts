@@ -20,6 +20,8 @@ export const PAYROLL_ACCOUNT_TYPES: Record<PayrollAccountKey, PayrollAccountOpti
   withholding_tax_credit: 'liability',
   other_deductions_credit: 'liability',
   enforcement_deductions_credit: 'liability',
+  // Výnos z paušálu plátce mzdy (§ 270 odst. 2 o. s. ř.) — jediný výnosový klíč.
+  enforcement_fee_revenue_credit: 'revenue',
   partner_settlement_credit: 'liability',
   risky_savings_debit: 'expense',
   risky_savings_credit: 'liability',
@@ -29,6 +31,15 @@ export const PAYROLL_ACCOUNT_TYPES: Record<PayrollAccountKey, PayrollAccountOpti
   non_deductible_benefit_debit: 'expense',
   travel_expense_debit: 'expense',
 }
+
+/**
+ * Předkontace, které firma smí nechat nenastavené (zrcadlo
+ * PayrollAccountingDefaults::NULLABLE_ACCOUNTS). Prázdná hodnota u nich znamená
+ * „účtovat jako dřív", ne chybu formuláře.
+ */
+export const NULLABLE_PAYROLL_ACCOUNT_KEYS: ReadonlySet<PayrollAccountKey> = new Set<PayrollAccountKey>([
+  'enforcement_fee_revenue_credit',
+])
 
 export function normalizedPayrollAccountCode(value: string): string {
   return value.trim().toUpperCase()
@@ -48,6 +59,7 @@ export function payrollAccountError(
   code: string,
 ): PayrollAccountError | null {
   const normalized = normalizedPayrollAccountCode(code)
+  if (normalized === '' && NULLABLE_PAYROLL_ACCOUNT_KEYS.has(key)) return null
   // Analytika je až 13 znaků za syntetikou — stejně jako
   // PayrollAccountCode::isValid() a PayrollEmployerSettingsValidator. Kratší
   // limit {0,7} tady odmítal kódy, které backend i zbytek aplikace berou

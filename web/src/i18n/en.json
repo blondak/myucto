@@ -7575,8 +7575,10 @@
       "account_type": {
         "expense": "an expense account",
         "liability": "a liability account",
-        "asset": "receivable account"
+        "asset": "receivable account",
+        "revenue": "a revenue account"
       },
+      "account_not_set": "Not set — the payer's flat fee stays on the garnishment liability",
       "accounting": {
         "employment_gross": "Employee wages outside statutory office",
         "partner_gross": "Partner's dependent income",
@@ -7588,6 +7590,7 @@
         "withholding_tax": "Withholding tax on employment",
         "other_deductions": "Other payroll deductions",
         "enforcement_deductions": "Garnishment and insolvency deductions",
+        "enforcement_fee_revenue": "Wage payer's flat fee",
         "partner_settlement": "Set-off against shareholder account",
         "risky_savings": "Risk-work retirement savings",
         "employee_receivable": "Receivable from the employee",
@@ -7677,7 +7680,8 @@
         "employee_receivable": "Where a negative net wage is reclassified — typically health insurance topped up to the minimum assessment base in a month with no cash income. The employee owes the employer, so this is a receivable (335), not a payable.",
         "non_deductible_benefit": "The tax-exempt part of a non-cash benefit (recreation, sport, culture, health care, printed books). Under Section 25(1)(h) of the Income Tax Act it is precisely the EXEMPT part that is non-deductible; the part above the cap is taxed at the employee and stays deductible. Account 528 flows automatically into non-deductible expenses in the corporate income tax return.",
         "travel_expense": "A travel allowance reimburses an expense under Part Seven of the Labour Code; it is not remuneration for work and does not belong in wage expenses. The contra account stays the payable account of the employment relationship, because the allowance is paid together with the wage.",
-        "enforcement_deductions": "Deductions ordered by a court, a bailiff or an insolvency administrator. Kept apart from other deductions because they carry a claim ranking and go to a different recipient than voluntary deductions — on a shared account the two balances merge and cannot be traced."
+        "enforcement_deductions": "Deductions ordered by a court, a bailiff or an insolvency administrator. Kept apart from other deductions because they carry a claim ranking and go to a different recipient than voluntary deductions — on a shared account the two balances merge and cannot be traced.",
+        "enforcement_fee_revenue": "The CZK 50 monthly flat fee the wage payer keeps from the deducted amount to cover its costs (Section 270(2) of the Civil Procedure Code). It is deducted from the employee but not sent to the creditor — without moving it to revenue, a balance would build up on the garnishment liability every month. Usually 648 Other operating revenue. Leave empty to keep the fee on the liability."
       },
       "registration_source_reference_hint": "Optional. A reference to the notice or decision you copied the variable symbol from."
     },

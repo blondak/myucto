@@ -91,6 +91,18 @@ final class PayrollAccountingDefaults
         // Analytiky doplnila do osnovy migrace 1658.
         'other_deductions_credit' => ['code' => '379.100', 'type' => 'liability'],
         'enforcement_deductions_credit' => ['code' => '379.200', 'type' => 'liability'],
+        // Paušální náhrada nákladů plátce mzdy (§ 270 odst. 2 o. s. ř., § 3
+        // nař. vlády č. 595/2006 Sb., 50 Kč měsíčně). Zaměstnanci se srazí
+        // CELÁ částka a účtuje se na 379.200, oprávněnému se ale posílá jen
+        // sražené MÍNUS paušál — paušál si plátce odečte a nechá. Bez převodu
+        // na výnos zůstával na 379.200 každý měsíc zůstatek 50 Kč, který se
+        // žádnou platbou nevyrovnal (379.200 nikdy nevyšlo na nulu).
+        //
+        // Výnos plátce, ne mzda ani refundace nákladu: náhrada nákladů spojených
+        // s prováděním srážek, směrná osnova ji řadí do ostatních provozních
+        // výnosů (648). Výchozí hodnotu dostane jen firma, která 648 v osnově
+        // má; jinak zůstává nenastavená a účtuje se jako dřív.
+        'enforcement_fee_revenue_credit' => ['code' => '648', 'type' => 'revenue'],
         // Protiúčet zápočtu čisté mzdy na účet společníka (331/366 MD / 365 D).
         // Firemní default; konkrétní analytiku (365.100…) drží výplatní pravidlo
         // osoby, viz PayrollPartnerSettlement.
@@ -167,7 +179,28 @@ final class PayrollAccountingDefaults
         'travel_expense_debit',
         'withholding_tax_credit',
         'enforcement_deductions_credit',
+        'enforcement_fee_revenue_credit',
     ];
+
+    /**
+     * Předkontace, kterou firma smí nechat NENASTAVENOU (prázdný řetězec).
+     *
+     * Výnos z paušálu plátce mzdy potřebuje účet, který stávající firma
+     * v osnově mít nemusí. Vynutit výchozí 648 by takové firmě zablokovalo
+     * uložení nastavení mezd („Účet 648 neexistuje"); nenastavený klíč se proto
+     * do snapshotu běhu vůbec nezmrazí a účtuje se přesně jako dřív (viz
+     * SNAPSHOT_GATED_ACCOUNTS).
+     *
+     * @var list<string>
+     */
+    public const NULLABLE_ACCOUNTS = [
+        'enforcement_fee_revenue_credit',
+    ];
+
+    public static function isNullable(string $key): bool
+    {
+        return in_array($key, self::NULLABLE_ACCOUNTS, true);
+    }
 
     /**
      * Účet, na kterém předkontace {@see SNAPSHOT_GATED_ACCOUNTS} SEDĚLA, než
@@ -224,6 +257,10 @@ final class PayrollAccountingDefaults
         // by spadlo na kontrolu cílového otisku.
         'enforcement_deductions_credit',
         'risky_savings_credit',
+        // Paušál plátce mzdy se dosud neúčtoval zvlášť vůbec — zůstával na
+        // závazku 379.200. Převod na výnos by zápis dřív schválené revize
+        // ZMĚNIL, takže platí jen pro snapshot, který klíč nese.
+        'enforcement_fee_revenue_credit',
     ];
 
     /** Výchozí účet klíče, nebo `null` u neznámého klíče. */

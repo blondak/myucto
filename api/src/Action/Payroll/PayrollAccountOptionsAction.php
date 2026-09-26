@@ -40,10 +40,12 @@ final class PayrollAccountOptionsAction
             // (335, migrace 1614): přeplatek čisté mzdy je POHLEDÁVKA za
             // zaměstnancem, ne závazek. Bez aktivních účtů se nabídka toho
             // jediného pole vrátí prázdná a účetní si předkontaci nenastaví,
-            // přestože ji validátor vyžaduje. Ostatní typy (výnos, kapitál)
-            // se dál nepouštějí — žádná mzdová předkontace na ně nemíří.
+            // přestože ji validátor vyžaduje. `revenue` přibyl kvůli výnosu
+            // z paušálu plátce mzdy (`enforcement_fee_revenue_credit`, 648,
+            // migrace 1925). Kapitálové účty se dál nepouštějí — žádná mzdová
+            // předkontace na ně nemíří.
             $type = $account['account_type'] ?? null;
-            if ($type !== 'expense' && $type !== 'liability' && $type !== 'asset') {
+            if (!in_array($type, ['expense', 'liability', 'asset', 'revenue'], true)) {
                 continue;
             }
             $id = $account['id'] ?? null;

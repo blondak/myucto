@@ -107,7 +107,9 @@ final class PayrollAccountOptionsApiTest extends TestCase
         sort($accountTypes);
         // Aktiva přibyla s pohledávkou za zaměstnancem (335) — vzniká při záporné
         // čisté mzdě, typicky když v měsíci bez příjmu doplácí pojistné do minima.
-        self::assertSame(['asset', 'expense', 'liability'], $accountTypes);
+        // Výnosy přibyly s paušální náhradou plátce mzdy (§ 270 odst. 2 o. s. ř.).
+        // Kapitálové účty se nenabízejí — žádná mzdová předkontace na ně nemíří.
+        self::assertSame(['asset', 'expense', 'liability', 'revenue'], $accountTypes);
 
         $byCode = array_column($accounts, null, 'account_code');
         self::assertSame('Mzdové náklady tenanta A', $byCode['521']['name']);
