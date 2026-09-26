@@ -87,6 +87,7 @@ final class CodebookImporter
                 }
             }
         }
+        $this->markExistingRelatedParties($ctx);
 
         // Bankovní spojení jde přes repozitář aplikace: normalizace čísla účtu a odvozené
         // klíče, na kterých stojí párování plateb a hlídání změny účtu dodavatele, patří
@@ -239,6 +240,35 @@ final class CodebookImporter
     {
         $code = AccountCode::fromMoney($moneyCode);
         return $code !== null && isset($ctx->accountIds[$code]) ? $code : null;
+    }
+
+    /**
+     * Spřízněné osoby mezi partnery, které převod nezaložil, ale spároval (kontakt už ve
+     * firmě byl, nebo ho založil dřívější běh). `insertClient()` příznak dává jen nově
+     * zakládaným, takže partner s existující kartou ze sestavy spojených osob vypadl.
+     * Karta už označená si svůj typ vztahu i doložení ponechá.
+     */
+    private function markExistingRelatedParties(ImportContext $ctx): void
+    {
+        $ids = [];
+        foreach ($ctx->options->relatedPartyIcos as $ico) {
+            $clientId = $ctx->clientsByIco[self::ico($ico)] ?? null;
+            if ($clientId !== null) {
+                $ids[$clientId] = $clientId;
+            }
+        }
+        if ($ids === []) {
+            return;
+        }
+        $marks = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE clients SET related_party = 1, related_party_type = COALESCE(related_party_type, 'capital')
+              WHERE supplier_id = ? AND related_party = 0 AND id IN ({$marks})"
+        );
+        $stmt->execute([$ctx->supplierId, ...array_values($ids)]);
+        if ($stmt->rowCount() > 0) {
+            $ctx->protocol->count(self::STEP_PARTNERS, 'related_marked', $stmt->rowCount());
+        }
     }
 
     private function loadClientIndex(ImportContext $ctx): void

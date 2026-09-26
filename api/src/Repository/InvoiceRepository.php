@@ -8,6 +8,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\CzkRecap;
+use MyInvoice\Service\Invoice\InvoiceRounding;
+use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Report\VatLedgerService;
@@ -475,6 +477,9 @@ final class InvoiceRepository
             ? [$advanceId, $advanceTotal, $finalId, $supplierId]
             : [$advanceId, $finalId, $supplierId];
         $this->db->pdo()->prepare($sql)->execute($params);
+        if ($setAdvancePaid && ($final['rounding_mode'] ?? 'none') !== 'none') {
+            (new InvoiceCalculator($this->db))->recompute($finalId);
+        }
     }
 
     /**
@@ -1198,13 +1203,13 @@ final class InvoiceRepository
              issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language,
              note_above_items, note_below_items, advance_paid_amount, discount_percent, varsymbol,
              payment_variable_symbol, supplier_order_number,
-             payment_method, status, vat_classification_code, revenue_category, revenue_category_id,'
+             payment_method, rounding_mode, status, vat_classification_code, revenue_category, revenue_category_id,'
             . ($hasExempt ? ' income_tax_exempt, income_tax_exempt_reason,' : '')
             . ($hasReminders ? ' auto_send_reminders,' : '')
             . ($hasSimplified ? ' is_simplified,' : '')
             . ($hasPriceLevel ? ' price_level_id,' : '')
             . ' created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?,'
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?,'
             . ($hasExempt ? ' ?, ?,' : '')
             . ($hasReminders ? ' ?,' : '')
             . ($hasSimplified ? ' ?,' : '')
@@ -1233,6 +1238,7 @@ final class InvoiceRepository
             self::normalizePaymentVariableSymbol($data['payment_variable_symbol'] ?? null),
             self::normalizeSupplierOrderNumber($data['supplier_order_number'] ?? null),
             $paymentMethod,
+            InvoiceRounding::normalize($data['rounding_mode'] ?? 'auto'),
             !empty($data['vat_classification_code']) ? (string) $data['vat_classification_code'] : null,
             !empty($data['revenue_category']) ? (string) $data['revenue_category'] : null,
             $revenueCategoryId,
@@ -1287,6 +1293,9 @@ final class InvoiceRepository
         $hasPaymentVs = array_key_exists('payment_variable_symbol', $data);
         $paymentVs = $hasPaymentVs ? self::normalizePaymentVariableSymbol($data['payment_variable_symbol']) : null;
 
+        $hasRoundingMode = array_key_exists('rounding_mode', $data);
+        $roundingMode = $hasRoundingMode ? InvoiceRounding::normalize($data['rounding_mode']) : null;
+
         $hasPaymentMethod = array_key_exists('payment_method', $data);
         $paymentMethod = null;
         if ($hasPaymentMethod) {
@@ -1331,6 +1340,7 @@ final class InvoiceRepository
               . ($hasVarsymbol ? ', varsymbol = ?' : '')
               . ($hasPaymentVs ? ', payment_variable_symbol = ?' : '')
               . ($hasPaymentMethod ? ', payment_method = ?' : '')
+              . ($hasRoundingMode ? ', rounding_mode = ?' : '')
               . ($hasType ? ', invoice_type = ?' : '')
               . ' WHERE id = ?'
               . ($requireUnbooked ? ' AND booked_at IS NULL' : '');
@@ -1367,6 +1377,7 @@ final class InvoiceRepository
         if ($hasVarsymbol) $params[] = $manualVarsymbol;
         if ($hasPaymentVs) $params[] = $paymentVs;
         if ($hasPaymentMethod) $params[] = $paymentMethod;
+        if ($hasRoundingMode) $params[] = $roundingMode;
         if ($hasType) $params[] = (string) $data['invoice_type'];
         $params[] = $id;
 

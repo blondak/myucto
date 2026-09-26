@@ -116,6 +116,10 @@ neomezený počet zaměstnanců. Do počtu mzdových uživatelů se počítají 
 uživatelé, kteří mají alespoň v jedné firmě se zapnutými Mzdami účinné právo
 k zápisu do mzdových dat. Mzdy nejsou v objednávce předvolené.
 
+U spravované instalace objednané rovnou s Mzdami se modul Mzdy při zřízení
+zapne na první firmě, kterou objednávka založila. Další firmy si Mzdy zapínají
+v nastavení firmy samy.
+
 > 💡 **Roční předplatné = 10 měsíčních plateb** (dva měsíce zdarma).
 
 Po zaplacení první platby tě myucto.cz vrátí přímo do aplikace. Ta bezpečně

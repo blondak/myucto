@@ -494,8 +494,8 @@ final class RecurringInvoiceGenerator
                    (invoice_type, client_id, project_id, supplier_id, branding_profile_id,
                     issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language,
                     note_above_items, note_below_items, payment_method, discount_percent,
-                    recurring_template_id, revenue_category_id, payment_variable_symbol, status, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?)'
+                    recurring_template_id, revenue_category_id, payment_variable_symbol, rounding_mode, status, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "auto", "draft", ?)'
             );
             $stmt->execute([
                 $type,

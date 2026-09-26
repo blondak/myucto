@@ -14,6 +14,6 @@ SET NAMES utf8mb4;
 
 -- Zachovat také zdroj z pracovní verze importu Stereo NX: tato starší migrace
 -- může být dosud nespustěná, ale databáze již obsahuje jeho převzaté mzdy.
--- Zúžení ENUM by selhalo ještě před následnou migrací 1900.
+-- Zúžení ENUM by selhalo ještě před následnou migrací 1901.
 ALTER TABLE payroll_migration_reference_totals
   MODIFY COLUMN source ENUM('pamica','pohoda','money_s3','other','jmhz','stereo_nx') NOT NULL;

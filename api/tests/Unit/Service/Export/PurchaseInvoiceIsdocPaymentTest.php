@@ -19,6 +19,21 @@ final class PurchaseInvoiceIsdocPaymentTest extends TestCase
 {
     private const XSD = __DIR__ . '/../../../../xsd/isdoc-invoice-6.0.2.xsd';
 
+    public function testReceivedRoundingDoesNotChangeTaxInclusiveTotal(): void
+    {
+        foreach ([-0.44, 0.30] as $rounding) {
+            $xml = $this->export([
+                'totals' => ['without_vat' => 1000.0, 'vat' => 210.0, 'with_vat' => 1210.0, 'rounding' => $rounding],
+                'rounding' => $rounding, 'amount_to_pay' => 1210.0 + $rounding,
+            ]);
+            $this->assertValidIsdoc($xml);
+            self::assertSame('1210.00', $this->xpathOne($xml, '//i:LegalMonetaryTotal/i:TaxInclusiveAmount'));
+            self::assertSame('1210.00', $this->xpathOne($xml, '//i:LegalMonetaryTotal/i:DifferenceTaxInclusiveAmount'));
+            self::assertEqualsWithDelta($rounding, (float) $this->xpathOne($xml, '//i:LegalMonetaryTotal/i:PayableRoundingAmount'), 0.001);
+            self::assertEqualsWithDelta(1210.0 + $rounding, (float) $this->xpathOne($xml, '//i:LegalMonetaryTotal/i:PayableAmount'), 0.001);
+        }
+    }
+
     public function testPaymentVariableSymbolAndBankAccountAreExported(): void
     {
         $xml = $this->export([

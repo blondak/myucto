@@ -34,6 +34,7 @@ final class RuleProposalService
         $monthsBack = max(1, min(60, $monthsBack));
         $historyFilter = $includePostedHistory ? '' : "
                 AND bt.match_status='unmatched' AND hp.source_id IS NULL
+                AND " . \MyInvoice\Service\Bank\BankTransactionPostingScope::noMigrationReviewSql('bt') . "
                 AND NOT EXISTS(SELECT 1 FROM bank_posting_suggestions pending_bps
                                 WHERE pending_bps.supplier_id=? AND pending_bps.bank_transaction_id=bt.id
                                   AND pending_bps.status IN ('pending','needs_input','blocked','approved','auto_posted'))";

@@ -365,8 +365,10 @@ najde nebo založí.
 - **Skupina firem.** Firmy lze zařadit do skupiny aktuální firmy nebo do nové
   skupiny. Zařazení proběhne před převodem, takže zakázky Money se převedou jako
   globální projekty skupiny (viz 103.2). Volba *Firmy dávky jsou spřízněné osoby*
-  označí partnery s IČO jiné firmy dávky nebo skupiny jako spřízněné osoby; pro
-  nezávislé klienty kanceláře ji nezapínejte.
+  označí partnery s IČO jiné firmy dávky nebo skupiny jako spřízněné osoby, a to
+  nově založené i ty, které už v adresáři firmy byly. Karta, která už spřízněnou
+  osobou je, si ponechá svůj typ vztahu i doložení. Pro nezávislé klienty kanceláře
+  volbu nezapínejte.
 
 Zkouška nanečisto založí firmy i celý převod v transakci, která se na konci
 vrátí: nezůstane ani firma, ani protokol u firmy, výsledek je jen v protokolu

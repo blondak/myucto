@@ -14,4 +14,5 @@ ALTER TABLE payroll_posting_map_proposals
 
 -- Původní číslo této větve mezitím obsadila jiná migrace v masteru.
 DELETE FROM migrations WHERE filename IN ('1867_payroll_migration_stereo_nx_source.sql',
-    '1893_payroll_migration_stereo_nx_source.sql', '1892_journal_red_storno.sql');
+    '1893_payroll_migration_stereo_nx_source.sql',
+    '1900_payroll_migration_stereo_nx_source.sql', '1892_journal_red_storno.sql');

@@ -1985,6 +1985,9 @@ final class BankPostingService
         if ($tx === null) {
             return ['action' => 'skipped', 'reason' => 'transaction_not_found'];
         }
+        if (BankTransactionPostingScope::requiresMigrationReview($tx)) {
+            return ['action' => 'skipped', 'reason' => BankTransactionPostingScope::MIGRATION_REVIEW_REASON];
+        }
         if ($this->skipPayrollPayment($supplierId, $txId)) {
             return ['action' => 'skipped', 'reason' => 'payroll_payment'];
         }
@@ -2067,6 +2070,9 @@ final class BankPostingService
         if ($tx === null || (int) ($tx['statement_supplier_id'] ?? 0) !== $supplierId) {
             return ['action' => 'skipped', 'reason' => 'transaction_not_found'];
         }
+        if (BankTransactionPostingScope::requiresMigrationReview($tx)) {
+            return ['action' => 'skipped', 'reason' => BankTransactionPostingScope::MIGRATION_REVIEW_REASON];
+        }
         if ($this->skipPayrollPayment($supplierId, $txId)) {
             return ['action' => 'skipped', 'reason' => 'payroll_payment'];
         }
@@ -2132,6 +2138,9 @@ final class BankPostingService
         }
         if ((string) $tx['match_status'] === 'ignored') {
             return ['status' => 'skipped', 'reason' => 'ignored'];
+        }
+        if (BankTransactionPostingScope::requiresMigrationReview($tx)) {
+            return ['status' => 'skipped', 'reason' => BankTransactionPostingScope::MIGRATION_REVIEW_REASON];
         }
         if (in_array((string) $tx['match_status'], ['auto_exact', 'auto_partial', 'manual'], true)
             || !empty($tx['has_explicit_allocation'])

@@ -2324,6 +2324,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
               <dt>{{ t('invoice.totals.vat_total') }}</dt>
               <dd class="font-mono">{{ formatMoney(invoice.totals.vat, invoice.currency) }}</dd>
             </div>
+            <div v-if="invoice.totals.rounding" class="flex justify-between text-neutral-600">
+              <dt>{{ t('invoice.rounding.label') }}</dt>
+              <dd class="font-mono">{{ formatMoney(invoice.totals.rounding, invoice.currency) }}</dd>
+            </div>
             <!-- Celková částka je závěr celého dokladu — dostává silnější linku,
                  vzduch a o dva stupně větší číslo. Dřív se lišila od mezisoučtů
                  jen barvou a oko po ní muselo hledat. -->

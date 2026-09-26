@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, useId } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { invoicesApi, type Invoice, type InvoicePayload, type InvoiceItem, type WorkReportItem, type WorkReportMaterial, type InvoiceAttachment, type PaymentMethod, type PaymentScheduleRow, type CashSettlementResult } from '@/api/invoices'
+import { invoicesApi, type Invoice, type InvoicePayload, type InvoiceItem, type WorkReportItem, type WorkReportMaterial, type InvoiceAttachment, type PaymentMethod, type InvoiceRoundingMode, type PaymentScheduleRow, type CashSettlementResult } from '@/api/invoices'
 import { useHotkey } from '@/composables/useHotkey'
 import { usePaneDom } from '@/composables/usePaneDom'
 import { focusLastRow } from '@/composables/useRowFocus'
@@ -853,6 +853,7 @@ const form = ref<{
   advance_paid_amount: number
   discount_percent: number
   payment_method: PaymentMethod
+  rounding_mode: InvoiceRoundingMode
   cash_register_id: number | null
   auto_send_reminders: boolean
   exchange_rate: number | null
@@ -887,6 +888,7 @@ const form = ref<{
   advance_paid_amount: 0,
   discount_percent: 0,
   payment_method: 'bank_transfer',
+  rounding_mode: 'auto',
   cash_register_id: null,
   auto_send_reminders: true,
   exchange_rate: null,
@@ -1209,6 +1211,7 @@ onMounted(async () => {
       advance_paid_amount: inv.advance_paid_amount,
       discount_percent: inv.discount_percent ?? 0,
       payment_method: inv.payment_method ?? 'bank_transfer',
+      rounding_mode: inv.rounding_mode ?? 'none',
       cash_register_id: inv.cash_register_id ?? null,
       auto_send_reminders: (inv as { auto_send_reminders?: boolean }).auto_send_reminders ?? true,
       // Slevové položky (item_kind='discount') jsou generované z discount_percent —
@@ -1496,6 +1499,11 @@ function moveDown(index: number) {
   form.value.items.forEach((it, i) => (it.order_index = i))
 }
 
+const roundingAvailable = computed(() =>
+  ['invoice', 'credit_note'].includes(form.value.invoice_type)
+  && form.value.currency === 'CZK'
+  && form.value.payment_method !== 'card')
+
 // Live výpočet sumace na frontendu (server přepočítá při uložení)
 const computed_totals = computed(() => {
   const pricesIncl = form.value.prices_include_vat && supplierIsVatPayer.value
@@ -1567,13 +1575,23 @@ const computed_totals = computed(() => {
     totalVat = round2(totalVat + b.vat)
   }
 
+  const unroundedPayable = round2(totalBase + totalVat - form.value.advance_paid_amount)
+  const shouldRound = roundingAvailable.value
+    && (form.value.rounding_mode === 'whole_czk'
+      || (form.value.rounding_mode === 'auto' && form.value.payment_method === 'cash'))
+  const roundedPayable = shouldRound
+    ? (Math.sign(unroundedPayable) * Math.round(Math.abs(unroundedPayable)) || 0)
+    : unroundedPayable
+  const rounding = round2(roundedPayable - unroundedPayable)
+
   return {
     without_vat: totalBase,
     vat: totalVat,
-    with_vat: round2(totalBase + totalVat),
+    with_vat: round2(totalBase + totalVat + rounding),
+    rounding,
     discount_percent: pct,
     discount_amount: discountAmount,
-    amount_to_pay: round2(totalBase + totalVat - form.value.advance_paid_amount),
+    amount_to_pay: roundedPayable,
     breakdown: Array.from(breakdown.values())
       .map(b => ({ rate: b.rate, base: round2(b.base), vat: round2(b.vat) }))
       .sort((a, b) => b.rate - a.rate),
@@ -2192,6 +2210,7 @@ async function submit() {
       advance_paid_amount: form.value.advance_paid_amount,
       discount_percent: form.value.discount_percent || 0,
       payment_method: form.value.payment_method,
+      rounding_mode: form.value.rounding_mode,
       // Hotovostní vyrovnání (migrace 1327): pokladna se posílá JEN u formy úhrady
       // „Hotově" — jinak natvrdo null, ať přepnutí na převod zruší i dřív založený PPD.
       cash_register_id: form.value.payment_method === 'cash' ? form.value.cash_register_id : null,
@@ -2543,6 +2562,15 @@ async function deleteDraft() {
               <p v-if="form.payment_method !== 'bank_transfer'" class="text-xs text-warning-600 mt-1">
                 {{ t('payment_method.hint') }}
               </p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.rounding.label') }}</label>
+              <select v-model="form.rounding_mode" :disabled="!roundingAvailable" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface disabled:opacity-50">
+                <option value="auto">{{ t('invoice.rounding.auto') }}</option>
+                <option value="none">{{ t('invoice.rounding.none') }}</option>
+                <option value="whole_czk">{{ t('invoice.rounding.whole_czk') }}</option>
+              </select>
+              <p class="text-xs text-neutral-500 mt-1">{{ t(roundingAvailable ? 'invoice.rounding.hint' : 'invoice.rounding.unavailable') }}</p>
             </div>
             <!-- Hotovostní vyrovnání (migrace 1327): pokladna k formě úhrady „Hotově".
                  Nepovinné — bez pokladny se nic nezaúčtuje a faktura zůstane pohledávkou. -->
@@ -3173,6 +3201,10 @@ async function deleteDraft() {
                 <dd class="font-mono">{{ formatMoney(computed_totals.vat, form.currency) }}</dd>
               </div>
             </template>
+            <div v-if="computed_totals.rounding" class="flex justify-between text-neutral-600">
+              <dt>{{ t('invoice.rounding.label') }}</dt>
+              <dd class="font-mono">{{ formatMoney(computed_totals.rounding, form.currency) }}</dd>
+            </div>
             <div class="flex justify-between border-t border-neutral-300 pt-2 mt-2 text-lg font-semibold text-primary-700">
               <dt>{{ t('invoice.totals.total') }}</dt>
               <dd class="font-mono">{{ formatMoney(computed_totals.with_vat, form.currency) }}</dd>

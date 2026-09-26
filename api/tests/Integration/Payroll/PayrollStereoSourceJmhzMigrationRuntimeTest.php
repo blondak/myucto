@@ -13,6 +13,41 @@ use PHPUnit\Framework\TestCase;
 #[Group('integration')]
 final class PayrollStereoSourceJmhzMigrationRuntimeTest extends TestCase
 {
+    public function testRenamedStereoMigrationCleansOnlyOldMarkers(): void
+    {
+        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        $db = $connection->pdo();
+        self::assertStringEndsWith('_test', (string) $db->query('SELECT DATABASE()')->fetchColumn());
+
+        $db->exec('CREATE TEMPORARY TABLE migrations (filename VARCHAR(255) PRIMARY KEY) ENGINE=InnoDB');
+        try {
+            $filenames = [
+                '1867_payroll_migration_stereo_nx_source.sql',
+                '1893_payroll_migration_stereo_nx_source.sql',
+                '1900_payroll_migration_stereo_nx_source.sql',
+                '1892_journal_red_storno.sql',
+                '1900_invoice_rounding_mode.sql',
+                'unrelated_migration.sql',
+            ];
+            $insert = $db->prepare('INSERT INTO migrations (filename) VALUES (?)');
+            foreach ($filenames as $filename) $insert->execute([$filename]);
+
+            $migration = file_get_contents(dirname(__DIR__, 4) . '/db/migrations/1901_payroll_migration_stereo_nx_source.sql');
+            self::assertIsString($migration);
+            self::assertSame(1, preg_match('/DELETE FROM migrations WHERE filename IN \([^;]+\);/s', $migration, $match));
+            $db->exec($match[0]);
+            $db->exec($match[0]);
+
+            self::assertSame(
+                ['1900_invoice_rounding_mode.sql', 'unrelated_migration.sql'],
+                $db->query('SELECT filename FROM migrations ORDER BY filename')->fetchAll(PDO::FETCH_COLUMN),
+            );
+        } finally {
+            $db->exec('DROP TEMPORARY TABLE IF EXISTS migrations');
+            $connection->close();
+        }
+    }
+
     public function testJmhzMigrationKeepsExistingStereoSourceUntilFinalSourceMigration(): void
     {
         $connection = Bootstrap::buildContainer()->get(Connection::class);
@@ -36,7 +71,8 @@ final class PayrollStereoSourceJmhzMigrationRuntimeTest extends TestCase
 
             // Replaying 1892 and then applying the final Stereo migration must be safe.
             $this->applySourceAlter($db, '1892_payroll_takeover_source_jmhz.sql');
-            $this->applySourceAlter($db, '1900_payroll_migration_stereo_nx_source.sql');
+            $this->applySourceAlter($db, '1901_payroll_migration_stereo_nx_source.sql');
+            $this->applySourceAlter($db, '1901_payroll_migration_stereo_nx_source.sql');
             $this->assertSourcesPreserved($db);
         } finally {
             $db->exec('DROP TEMPORARY TABLE IF EXISTS tmp_stereo_source_1892');

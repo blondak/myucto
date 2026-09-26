@@ -399,6 +399,12 @@
         </tr>
         {% endif %}
         {% endif %}
+        {% if invoice.totals.rounding|default(0) != 0 %}
+        <tr>
+          <td class="tot-label">{{ t('Zaokrouhlení', 'Rounding') }}</td>
+          <td class="tot-num nowrap">{{ invoice.totals.rounding|number_format(2, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
+        </tr>
+        {% endif %}
         <tr class="grand">
           <td class="tot-label">{{ t('Celkem', 'Total') }}</td>
           <td class="tot-num nowrap">{{ invoice.totals.with_vat|number_format(2, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
