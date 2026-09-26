@@ -28,6 +28,7 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
     private const MIGRATIONS = [
         '1839_payroll_component_jmhz_kind_default_mappings.sql',
         '1847_payroll_component_jmhz_stravovani_mapping.sql',
+        '1912_payroll_component_jmhz_compensation_detail_mappings.sql',
     ];
 
     /** @var list<string> component_kind z payroll_component_definitions (migrace 1501) */
@@ -55,6 +56,9 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         yield 'jiné plnění' => ['X', 'allowance', 'one_off', 'included', null];
         yield 'kód má přednost před druhem' => ['PRIPLATEK_NOCNI', 'premium', 'one_off', 'included', '10334'];
         yield 'DPN z číselníku' => ['NAHRADA_MZDY_DPN', 'compensation', 'one_off', 'exempt', '10342'];
+        yield 'náhrada za svátek' => ['NAHRADA_MZDY_SVATEK', 'compensation', 'one_off', 'included', '10339'];
+        yield 'překážky zaměstnavatele' => ['NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL', 'compensation', 'one_off', 'included', '10340'];
+        yield 'překážky zaměstnance' => ['NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC', 'compensation', 'one_off', 'included', '10341'];
     }
 
     #[DataProvider('targets')]

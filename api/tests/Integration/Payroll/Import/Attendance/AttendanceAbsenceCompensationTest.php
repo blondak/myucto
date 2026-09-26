@@ -100,8 +100,9 @@ final class AttendanceAbsenceCompensationTest extends TestCase
 
         $inputs = $this->inputs($employmentId);
         self::assertSame([
-            'doctor_hours' => ['NAHRADA_MZDY', 62_500, 2_500, 'draft'],
-            'obstacle_employer_hours' => ['NAHRADA_MZDY', 160_000, 8_000, 'draft'],
+            // Vlastní složky: v hlášení kolonky 10341 a 10340, ne jen úhrn 10337.
+            'doctor_hours' => ['NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC', 62_500, 2_500, 'draft'],
+            'obstacle_employer_hours' => ['NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL', 160_000, 8_000, 'draft'],
             'vacation_hours' => ['NAHRADA_MZDY_DOVOLENA', 400_000, 16_000, 'draft'],
         ], array_map(
             static fn (array $row): array => [$row['component_code'], (int) $row['amount_minor'], (int) $row['quantity_milliunits'], $row['status']],

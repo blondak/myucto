@@ -87,6 +87,9 @@ final class PayrollComponentJmhzMappingDefaults
         // Náhrady mzdy zúčtované; náhrada při DPN má vlastní detailní uzel.
         'NAHRADA_MZDY' => '10337',
         'NAHRADA_MZDY_DOVOLENA' => '10338',
+        'NAHRADA_MZDY_SVATEK' => '10339',
+        'NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL' => '10340',
+        'NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC' => '10341',
         'NAHRADA_MZDY_DPN' => '10342',
         // Jediné jednoznačné zařazení z rozpadu příspěvku zaměstnavatele:
         // příspěvek na dlouhodobou péči má vlastní detailní uzel a žádný jiný
