@@ -80,6 +80,43 @@ async function build(period: string) {
   }
 }
 
+/*
+ * Po převodu jsou k převzetí všechny zpracované měsíce roku najednou — dřív se
+ * převzaly jen klikáním po jednom. Běhy vznikají po sobě (každý je vlastní
+ * rozhodnutí se svým auditem); první chyba dávku zastaví a řekne, u kterého
+ * měsíce, aby se nepřeskočil potichu.
+ */
+const buildable = computed(() => periods.value.filter(row => !row.has_takeover_run && row.row_count > 0))
+const buildingAll = ref(false)
+
+async function buildAll() {
+  if (buildingAll.value || buildable.value.length === 0) return
+  buildingAll.value = true
+  let built = 0
+  try {
+    for (const row of [...buildable.value]) {
+      busy.value = row.period
+      try {
+        await payrollTakeoverRunsApi.build(row.period)
+        built++
+      } catch (error) {
+        toast.error(t('payroll.runs.takeover.build_all_failed', {
+          period: formatPeriod(row.period),
+          built,
+          reason: apiErrorMessage(error, t('payroll.runs.takeover.build_failed')),
+        }))
+        return
+      }
+    }
+    toast.success(t('payroll.runs.takeover.built_all', { count: built }))
+  } finally {
+    busy.value = ''
+    buildingAll.value = false
+    await load()
+    if (built > 0) emit('changed')
+  }
+}
+
 async function toggle(period: string) {
   if (openPeriod.value === period) {
     openPeriod.value = ''
@@ -149,14 +186,29 @@ async function discard() {
           {{ t('payroll.runs.takeover.jmhz_note') }}
         </p>
       </div>
-      <span
-        v-if="overview?.payroll_start_period"
-        class="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-600"
-      >
-        {{ t('payroll.runs.takeover.boundary', {
-          period: formatPeriod(overview.payroll_start_period),
-        }) }}
-      </span>
+      <div class="flex flex-wrap items-center gap-2">
+        <span
+          v-if="overview?.payroll_start_period"
+          class="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-600"
+        >
+          {{ t('payroll.runs.takeover.boundary', {
+            period: formatPeriod(overview.payroll_start_period),
+          }) }}
+        </span>
+        <button
+          v-if="canWrite && buildable.length > 1"
+          :class="btnFilled('primary')"
+          :disabled="busy !== '' || buildingAll"
+          data-testid="payroll-takeover-build-all"
+          class="whitespace-nowrap"
+          @click="buildAll"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path :d="ICONS.download" />
+          </svg>
+          {{ t('payroll.runs.takeover.build_all', { count: buildable.length }) }}
+        </button>
+      </div>
     </div>
 
     <p v-if="loading" class="mt-3 text-sm text-neutral-500">

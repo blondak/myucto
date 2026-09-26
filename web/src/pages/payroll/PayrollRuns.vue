@@ -72,6 +72,46 @@ const paymentDate = ref(fallbackPaymentDate(period.value))
  * nouzový termín.
  */
 const suggestedPaymentDate = ref<string | null>(null)
+/*
+ * Měsíce od začátku vedení mezd před zvoleným obdobím, za které nemá firma
+ * žádný běh. Běh staví na předchozích měsících (roční kumulace, průměry,
+ * zálohová daň); díra po převodu z jiného programu se dřív nikde neukázala.
+ */
+const missingPreviousPeriods = ref<string[]>([])
+
+function openMissingPeriod(next: string) {
+  period.value = next
+  offset.value = 0
+  void load()
+}
+
+/*
+ * Chybějící měsíce zpracoval předchozí program: jedním krokem se začátek
+ * vedení mezd posune za ně a panel převzatých měsíců je nabídne k převzetí.
+ */
+const advanceStartTo = ref<string | null>(null)
+const canSettings = computed(() => auth.canWrite('payroll.settings'))
+const advancingStart = ref(false)
+const takeoverPanelKey = ref(0)
+
+async function advanceStart() {
+  const target = advanceStartTo.value
+  if (target === null || advancingStart.value) return
+  advancingStart.value = true
+  try {
+    const result = await payrollApi.advancePayrollStart(target)
+    toast.success(t('payroll.runs.missing_previous.advanced', {
+      from: formatPeriod(result.moved.from),
+      to: formatPeriod(result.moved.to),
+    }))
+    takeoverPanelKey.value++
+    await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.runs.missing_previous.advance_failed')))
+  } finally {
+    advancingStart.value = false
+  }
+}
 /** Ručně přepsané datum se návrhem ze serveru nepřepisuje zpátky. */
 const paymentDateTouched = ref(false)
 const runs = ref<PayrollRun[]>([])
@@ -717,6 +757,8 @@ async function load() {
     total.value = page.total
     suggestedPaymentDate.value = page.suggested_payment_date ?? null
     readiness.value = page.readiness ?? null
+    missingPreviousPeriods.value = page.missing_previous_periods ?? []
+    advanceStartTo.value = page.advance_start_to ?? null
     // Termín ze sjednané politiky se do formuláře propíše, jen dokud za období
     // žádný běh není a uživatel datum sám nepřepsal — existující běh si svoje
     // datum drží (viz `watch(periodRun)`).
@@ -1574,11 +1616,59 @@ onMounted(load)
       </div>
     </section>
 
+    <div
+      v-if="missingPreviousPeriods.length > 0"
+      data-testid="payroll-runs-missing-previous"
+      class="flex items-start gap-3 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800"
+      role="alert"
+    >
+      <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path :d="ICONS.bell" />
+      </svg>
+      <div class="flex-1 space-y-2">
+        <p class="font-medium">
+          {{ t('payroll.runs.missing_previous.title', { count: missingPreviousPeriods.length, period: formatPeriod(period) }) }}
+        </p>
+        <p>{{ t(advanceStartTo !== null ? 'payroll.runs.missing_previous.hint_takeover' : 'payroll.runs.missing_previous.hint') }}</p>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-if="advanceStartTo !== null && canSettings"
+            type="button"
+            :class="[btnFilled('primary'), 'whitespace-nowrap']"
+            :disabled="advancingStart || loading"
+            data-testid="payroll-runs-advance-start"
+            @click="advanceStart"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.download" /></svg>
+            {{ t('payroll.runs.missing_previous.advance', { period: formatPeriod(advanceStartTo) }) }}
+          </button>
+          <button
+            v-for="missing in missingPreviousPeriods"
+            :key="missing"
+            type="button"
+            :class="[btnOutlineSm('warning'), 'whitespace-nowrap']"
+            :data-testid="`payroll-runs-missing-${missing}`"
+            @click="openMissingPeriod(missing)"
+          >
+            {{ formatPeriod(missing) }}
+          </button>
+          <RouterLink
+            :to="{ name: 'payroll-settings' }"
+            :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+            {{ t('payroll.runs.missing_previous.settings') }}
+          </RouterLink>
+        </div>
+      </div>
+    </div>
+
     <!--
       Rok přechodu z jiného mzdového programu. Panel se sám schová u firmy,
       která žádné převzaté historické měsíce nemá.
     -->
     <PayrollTakeoverRunsPanel
+      :key="takeoverPanelKey"
       :year="takeoverYear"
       :can-write="canWrite"
       @changed="load"

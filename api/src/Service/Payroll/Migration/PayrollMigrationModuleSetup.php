@@ -325,6 +325,144 @@ final class PayrollMigrationModuleSetup
         return $from;
     }
 
+    /**
+     * Posune začátek vedení mezd za měsíce, které zpracoval předchozí program.
+     *
+     * Začátek nastavený dřív (starší export, ruční nastavení) mohl zůstat před
+     * měsíci, které předchozí program mezitím zpracoval a podal. MyÚčto pak
+     * tvrdilo, že je počítá samo, za ně ale žádný běh neexistoval a převzít je
+     * nešlo (převzatý měsíc smí ležet jen před začátkem). Sám převod začátek
+     * NEposouvá — může jít o vědomé rozhodnutí přepočítat podané měsíce —, jen
+     * to ohlásí; posun je krok účetní z obrazovky běhů.
+     *
+     * Posouvá se jen DOPŘEDU, jen když každý přeskočený měsíc má úhrny z převodu
+     * (předchozí program ho zpracoval) a MyÚčto za něj nemá vlastní nezrušený běh.
+     *
+     * @return array{from:string,to:string}
+     * @throws \DomainException když posun nesplní podmínky
+     */
+    public function advanceStartTo(int $supplierId, ?int $userId, string $targetPeriod): array
+    {
+        $target = self::period($targetPeriod);
+        $problem = $this->advanceStartProblem($supplierId, $target);
+        if ($problem !== null) {
+            throw new \DomainException($problem);
+        }
+        $state = $this->state->get($supplierId);
+        $from = self::period((string) $state['start_period']);
+        $this->state->setActivation($supplierId, true, $target . '-01', $state['row_version'], $userId);
+
+        return ['from' => $from, 'to' => $target];
+    }
+
+    /**
+     * Proč začátek vedení mezd NEjde posunout na `$target` (`YYYY-MM`), nebo `null`,
+     * když jde. Jediné pravidlo pro nabídku na obrazovce běhů i pro samotný posun.
+     */
+    public function advanceStartProblem(int $supplierId, string $target): ?string
+    {
+        $target = self::period($target);
+        $state = $this->state->get($supplierId);
+        $current = $state['start_period'];
+        if (!is_string($current) || $current === '' || $state['status'] === 'disabled') {
+            return 'Firma nemá nastavený začátek vedení mezd; nastavte ho v Mzdy → Nastavení → Aktivace.';
+        }
+        $from = self::period($current);
+        if ($target <= $from) {
+            return 'Začátek vedení mezd jde tímhle krokem jen posunout dopředu.';
+        }
+        if (!$this->support->supportsYear((int) substr($target, 0, 4))) {
+            return 'MyÚčto pro rok ' . substr($target, 0, 4) . ' zatím nemá mzdová pravidla.';
+        }
+        $check = $this->startAdvance($supplierId, self::previous($target));
+        if ($check['blocking_runs'] !== []) {
+            return sprintf(
+                'MyÚčto už má vlastní mzdové běhy za %s. Zrušte je, nebo začátek neposouvejte.',
+                implode(', ', array_map(self::monthLabel(...), $check['blocking_runs'])),
+            );
+        }
+        $missing = $this->monthsWithoutReferenceTotals($supplierId, $from, $target);
+        if ($missing !== []) {
+            return sprintf(
+                'Za %s nemá MyÚčto mzdy z předchozího programu, takže by je po posunu nikdo nespočítal. '
+                . 'Převeďte je nebo je spočítejte v MyÚčtu.',
+                implode(', ', array_map(self::monthLabel(...), $missing)),
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * Měsíce v `[$from, $to)`, za které nejsou úhrny zpracovaných mezd z převodu.
+     *
+     * @return list<string>
+     */
+    public function monthsWithoutReferenceTotals(int $supplierId, string $from, string $to): array
+    {
+        if (!$this->db->hasTable('payroll_migration_reference_totals')) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT DISTINCT DATE_FORMAT(period_start, "%Y-%m")
+               FROM payroll_migration_reference_totals
+              WHERE supplier_id = ? AND period_start >= ? AND period_start < ?'
+        );
+        $stmt->execute([$supplierId, $from . '-01', $to . '-01']);
+        $have = array_flip(array_map(static fn (mixed $p): string => (string) $p, $stmt->fetchAll(PDO::FETCH_COLUMN)));
+        $missing = [];
+        for ($cursor = $from; $cursor < $to; $cursor = self::startAfter($cursor)) {
+            if (!isset($have[$cursor])) {
+                $missing[] = $cursor;
+            }
+        }
+
+        return $missing;
+    }
+
+    private static function previous(string $period): string
+    {
+        return (new \DateTimeImmutable($period . '-01'))->modify('-1 month')->format('Y-m');
+    }
+
+    /**
+     * Posun začátku vedení mezd za poslední zpracovaný měsíc — nic nezapisuje.
+     * `to` = null, když začátek už za ním leží. `blocking_runs` = vlastní běhy,
+     * které by posun schoval.
+     *
+     * @return array{from:?string,to:?string,blocking_runs:list<string>}
+     */
+    public function startAdvance(int $supplierId, string $lastPayrollPeriod): array
+    {
+        $none = ['from' => null, 'to' => null, 'blocking_runs' => []];
+        if (!$this->schemaAvailable()) {
+            return $none;
+        }
+        $state = $this->state->get($supplierId);
+        $current = $state['start_period'];
+        if (!is_string($current) || $current === '' || $state['status'] === 'disabled') {
+            return $none;
+        }
+        $currentPeriod = self::period($current);
+        $target = self::startAfter($lastPayrollPeriod);
+        if ($target <= $currentPeriod || !$this->support->supportsYear((int) substr($target, 0, 4))) {
+            return $none;
+        }
+        $runs = $this->db->pdo()->prepare(
+            'SELECT DISTINCT DATE_FORMAT(period_start, "%Y-%m")
+               FROM payroll_runs
+              WHERE supplier_id = ?
+                AND run_kind <> "takeover"
+                AND status <> "cancelled"
+                AND period_start >= ? AND period_start < ?
+              ORDER BY 1'
+        );
+        $runs->execute([$supplierId, $currentPeriod . '-01', $target . '-01']);
+        $blocking = array_map(static fn (mixed $p): string => (string) $p, $runs->fetchAll(PDO::FETCH_COLUMN));
+
+        return ['from' => $currentPeriod, 'to' => $target, 'blocking_runs' => $blocking];
+    }
+
     /** Měsíc po posledních převzatých mzdách (`YYYY-MM`). */
     public static function startAfter(string $lastPayrollPeriod): string
     {

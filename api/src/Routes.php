@@ -2107,6 +2107,7 @@ final class Routes
             $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/reopen', [PayrollTimeAction::class, 'reopen']);
             $g->get('/settings/activation', [PayrollActivationAction::class, 'get']);
             $g->put('/settings/activation', [PayrollActivationAction::class, 'put']);
+            $g->post('/settings/activation/advance-start', [PayrollActivationAction::class, 'advanceStart']);
             $g->get('/settings/account-options', PayrollAccountOptionsAction::class);
             $g->get('/settings/employer', [PayrollEmployerSettingsAction::class, 'get']);
             $g->put('/settings/employer', [PayrollEmployerSettingsAction::class, 'put']);

@@ -169,6 +169,58 @@ final class PayrollMigrationModuleSetupCarryOverTest extends TestCase
         self::assertSame([['2019-03-01', '9990001234', 'synthetic-registration']], $this->registrations());
     }
 
+    /**
+     * Začátek vedení mezd ležel před měsíci, které předchozí program zpracoval
+     * (převod je má v úhrnech), a MyÚčto za ně běh nemá. Převod sám začátek
+     * nemění; posun je vědomý krok a jde jen za měsíce, které předchozí program
+     * zpracoval a MyÚčto nespočítalo.
+     */
+    public function testStartAdvancesOnlyOverMonthsProcessedByPreviousProgram(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')->execute([$this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_module_state (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "active", "2026-06-01", ?, NOW())'
+        )->execute([$this->supplierId, $this->userId]);
+
+        $plain = $this->setup->ensure($this->supplierId, $this->userId, '2026-08');
+        if ($plain['outcome'] !== PayrollMigrationModuleSetup::OUTCOME_READY) {
+            $this->markTestSkipped('Mzdy nejde v testovací instalaci zapnout: ' . $plain['outcome']);
+        }
+        self::assertSame('2026-06', $plain['start_period'], 'Převod začátek sám neposouvá.');
+        self::assertSame(
+            ['from' => '2026-06', 'to' => '2026-09', 'blocking_runs' => []],
+            $this->setup->startAdvance($this->supplierId, '2026-08'),
+        );
+
+        // Bez úhrnů z převodu by po posunu měsíce nikdo nespočítal.
+        self::assertStringContainsString('6/2026, 7/2026, 8/2026', (string) $this->setup->advanceStartProblem($this->supplierId, '2026-09'));
+        $insert = $pdo->prepare(
+            'INSERT INTO payroll_migration_reference_totals
+                (supplier_id, source, period_start, external_person_ref, external_relationship_ref)
+             VALUES (?, "pamica", ?, "SYN-1", "SYN-1-1")'
+        );
+        foreach (['2026-06-01', '2026-07-01', '2026-08-01'] as $month) {
+            $insert->execute([$this->supplierId, $month]);
+        }
+        self::assertNull($this->setup->advanceStartProblem($this->supplierId, '2026-09'));
+        self::assertNotNull($this->setup->advanceStartProblem($this->supplierId, '2026-05'), 'Jen dopředu.');
+
+        // Vlastní běh v mezeře posun zastaví.
+        $pdo->prepare('INSERT INTO payroll_runs (supplier_id, period_start, payment_date) VALUES (?, "2026-07-01", "2026-08-15")')
+            ->execute([$this->supplierId]);
+        $runId = (int) $pdo->lastInsertId();
+        self::assertStringContainsString('7/2026', (string) $this->setup->advanceStartProblem($this->supplierId, '2026-09'));
+        $pdo->prepare('UPDATE payroll_runs SET status = "cancelled" WHERE id = ?')->execute([$runId]);
+
+        $moved = $this->setup->advanceStartTo($this->supplierId, $this->userId, '2026-09');
+        self::assertSame(['from' => '2026-06', 'to' => '2026-09'], $moved);
+        $state = $pdo->prepare('SELECT start_period, status FROM payroll_module_state WHERE supplier_id = ?');
+        $state->execute([$this->supplierId]);
+        self::assertSame(['start_period' => '2026-09-01', 'status' => 'active'], $state->fetch(\PDO::FETCH_ASSOC));
+    }
+
     /** @return list<array{0:string,1:string,2:string}> */
     private function registrations(): array
     {

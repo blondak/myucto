@@ -25,6 +25,55 @@ final class PayrollRunRepository
 
     public const LIST_DEFAULT_LIMIT = 12;
 
+    /** Kolik měsíců zpět se díry před během hledají; víc je chyba nastavení, ne díra. */
+    private const MISSING_PERIODS_LIMIT = 24;
+
+    /**
+     * Měsíce od začátku vedení mezd (`payroll_module_state.start_period`) před
+     * `$periodStart`, za které neexistuje žádný nezrušený běh — vypočtený ani
+     * převzatý. Prázdné, když firma začátek nemá nebo období leží před ním.
+     *
+     * @return list<string> období `YYYY-MM` vzestupně
+     */
+    public function missingPreviousPeriods(int $supplierId, string $periodStart): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT start_period FROM payroll_module_state WHERE supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $start = $stmt->fetchColumn();
+        if (!is_string($start) || $start === '' || substr($start, 0, 7) >= substr($periodStart, 0, 7)) {
+            return [];
+        }
+        $cursor = new \DateTimeImmutable(substr($start, 0, 7) . '-01');
+        $end = new \DateTimeImmutable(substr($periodStart, 0, 7) . '-01');
+        $expected = [];
+        while ($cursor < $end && count($expected) < self::MISSING_PERIODS_LIMIT) {
+            $expected[] = $cursor->format('Y-m-d');
+            $cursor = $cursor->modify('+1 month');
+        }
+        if ($expected === []) {
+            return [];
+        }
+        $present = $this->db->pdo()->prepare(
+            'SELECT DISTINCT period_start
+               FROM payroll_runs
+              WHERE supplier_id = ?
+                AND status <> "cancelled"
+                AND period_start IN (' . implode(',', array_fill(0, count($expected), '?')) . ')'
+        );
+        $present->execute([$supplierId, ...$expected]);
+        $have = array_flip(array_map(
+            static fn (mixed $value): string => substr((string) $value, 0, 10),
+            $present->fetchAll(PDO::FETCH_COLUMN),
+        ));
+
+        return array_values(array_map(
+            static fn (string $period): string => substr($period, 0, 7),
+            array_filter($expected, static fn (string $period): bool => !isset($have[$period])),
+        ));
+    }
+
     /**
      * Seznam mzdových běhů — VÝHRADNĚ lehká data.
      *

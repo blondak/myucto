@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Migration\Pohoda;
 
+use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollConverter;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaPayroll;
 use PHPUnit\Framework\TestCase;
@@ -55,6 +56,41 @@ final class PohodaPayrollExportTest extends TestCase
         self::assertSame(['employees' => 2, 'months' => 2, 'payslips' => 4, 'first' => '2026-01', 'last' => '2026-02'],
             array_intersect_key($agenda['payroll'], array_flip(['employees', 'months', 'payslips', 'first', 'last'])));
         self::assertSame(0, $agenda['counts']['journal']);
+    }
+
+    /**
+     * Export uprostřed měsíce nese i mzdy měsíce, který v předchozím programu ještě
+     * běží. Takový měsíc se nesmí počítat mezi zpracované: převod by ho převzal
+     * a začátek vedení mezd by skočil až za něj, takže by ho nikdo nespočítal.
+     */
+    public function testMonthNotEndedOnExportDayIsOpenNotProcessed(): void
+    {
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+        $xml = (string) file_get_contents($file);
+        file_put_contents($file, str_replace('<mdbExport ', '<mdbExport created="2026-02-15T10:00:00" ', $xml));
+
+        $summary = PohodaExport::payrollSummary($file, (int) SyntheticPohodaPayroll::YEAR);
+        self::assertSame(1, $summary['months']);
+        self::assertSame('2026-01', $summary['last']);
+        self::assertSame('2026-01', $summary['last_overall']);
+        self::assertSame('2026-02-15', $summary['exported_on']);
+        self::assertSame(['2026-02' => 2], $summary['open']);
+
+        $converter = PohodaPayrollConverter::read($file);
+        self::assertSame(['2026-01'], $converter->closedPeriods(2026));
+        self::assertSame(['2026-02' => 2], $converter->openPeriods(2026));
+    }
+
+    public function testOpenPeriodRule(): void
+    {
+        self::assertTrue(PohodaPayrollConverter::openPeriod('2026-09', '2026-09-26'));
+        self::assertTrue(PohodaPayrollConverter::openPeriod('2026-10', '2026-09-26'));
+        self::assertTrue(PohodaPayrollConverter::openPeriod('2026-09', '2026-09-30'));
+        self::assertFalse(PohodaPayrollConverter::openPeriod('2026-08', '2026-09-26'));
+        self::assertFalse(PohodaPayrollConverter::openPeriod('2026-09', '2026-10-01'));
+        self::assertFalse(PohodaPayrollConverter::openPeriod('2026-09', null), 'Bez data exportu se nic nevynechává.');
+        self::assertSame('2026-09-26', PohodaPayrollConverter::exportDate('2026-09-26T14:03:11'));
+        self::assertNull(PohodaPayrollConverter::exportDate(''));
     }
 
     public function testPayrollSummaryCountsOnlyAgendaYear(): void

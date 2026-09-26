@@ -2415,6 +2415,26 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertStringContainsString('pravidelná mzdová složka', (string) $validations[0]['message']);
     }
 
+    /**
+     * Díra mezi začátkem vedení mezd a zvoleným obdobím: měsíce bez jakéhokoli
+     * nezrušeného běhu. Seznam běhů je ukazuje, aby běh nevznikl nad dírou.
+     */
+    public function testMissingPreviousPeriodsListsMonthsWithoutRunSinceStart(): void
+    {
+        self::assertSame(
+            ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05'],
+            $this->runs->missingPreviousPeriods($this->supplierId, '2026-06-01'),
+        );
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_runs (supplier_id, period_start, payment_date) VALUES (?, "2026-03-01", "2026-04-15")'
+        )->execute([$this->supplierId]);
+        self::assertSame(
+            ['2026-01', '2026-02', '2026-04', '2026-05'],
+            $this->runs->missingPreviousPeriods($this->supplierId, '2026-06-01'),
+        );
+        self::assertSame([], $this->runs->missingPreviousPeriods($this->supplierId, '2026-01-01'));
+    }
+
     public function testSnapshotValidationBlocksApprovalWithoutChangingReviewedRun(): void
     {
         $this->db->pdo()->prepare(

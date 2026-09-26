@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Pohoda;
 
+use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollConverter;
 use MyInvoice\Support\CompanyIdNormalizer;
 
 /**
@@ -389,18 +390,22 @@ final class PohodaExport
     /**
      * Přehled mezd z datového souboru (`91_mzdy.xml`) za rok agendy: zaměstnanci v exportu,
      * měsíce a počet zpracovaných mezd, IČO z hlavičky exportu (může chybět).
-     * `last_overall` = poslední zpracovaný měsíc exportu přes všechny roky; podle něj
-     * kontrola před převodem mezd plánuje nastavení modulu Mzdy.
+     * `last_overall` = poslední UZAVŘENÝ měsíc exportu přes všechny roky; podle něj
+     * kontrola před převodem mezd plánuje nastavení modulu Mzdy. Měsíce, které v den
+     * exportu ještě neskončily ({@see PohodaPayrollConverter::openPeriod()}), se do
+     * měsíců ani mezd nepočítají a jdou zvlášť v `open` (měsíc => počet mezd).
      *
      * Přehled se počítá v jobu nahrání a z `meta.json` ho čte náhled průvodce, takže
      * kontrola před převodem soubor mezd znovu nečte. Jeden průchod souborem.
      *
-     * @return array{ico:string,employees:int,months:int,payslips:int,first:?string,last:?string,last_overall:?string}
+     * @return array{ico:string,employees:int,months:int,payslips:int,first:?string,last:?string,last_overall:?string,exported_on:?string,open:array<string,int>}
      */
     public static function payrollSummary(string $file, int $year): array
     {
         $info = PohodaXml::packInfo($file);
+        $exportedOn = PohodaPayrollConverter::exportDate($info['created'] ?? '');
         $periods = [];
+        $open = [];
         $lastOverall = null;
         $employees = 0;
         foreach (PohodaXml::scan($file, ['MZ', 'ZAM']) as $tag => $row) {
@@ -410,12 +415,17 @@ final class PohodaExport
             }
             $rowYear = (int) PohodaXml::text($row, 'Rok');
             $period = sprintf('%04d-%02d', $rowYear, (int) PohodaXml::text($row, 'RelMes'));
+            if (PohodaPayrollConverter::openPeriod($period, $exportedOn)) {
+                $open[$period] = ($open[$period] ?? 0) + 1;
+                continue;
+            }
             $lastOverall = $lastOverall === null || $period > $lastOverall ? $period : $lastOverall;
             if ($rowYear === $year) {
                 $periods[$period] = ($periods[$period] ?? 0) + 1;
             }
         }
         ksort($periods);
+        ksort($open);
         return [
             'ico' => (string) preg_replace('/\D/', '', $info['ico']),
             'employees' => $employees,
@@ -424,6 +434,8 @@ final class PohodaExport
             'first' => $periods === [] ? null : (string) array_key_first($periods),
             'last' => $periods === [] ? null : (string) array_key_last($periods),
             'last_overall' => $lastOverall,
+            'exported_on' => $exportedOn,
+            'open' => $open,
         ];
     }
 

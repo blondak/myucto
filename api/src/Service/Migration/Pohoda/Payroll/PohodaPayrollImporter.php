@@ -79,18 +79,71 @@ final class PohodaPayrollImporter
         return PohodaExport::payrollSummary($file, $year);
     }
 
-    /** Přehled z `meta.json` je úplný (nahraný před přidáním `last_overall` ho nemá). */
+    /**
+     * Přehled z `meta.json` je úplný (nahraný před přidáním `last_overall` ho nemá,
+     * před oddělením rozpracovaných měsíců chybí `open`).
+     */
     public static function summaryComplete(mixed $summary): bool
     {
-        return is_array($summary) && array_key_exists('last_overall', $summary)
+        return is_array($summary) && array_key_exists('last_overall', $summary) && array_key_exists('open', $summary)
             && isset($summary['employees'], $summary['months']) && array_key_exists('first', $summary) && array_key_exists('last', $summary);
     }
 
-    /** Poslední měsíc zpracovaných mezd v exportu (všechny roky), nebo `null`. */
+    /**
+     * Poslední UZAVŘENÝ měsíc mezd v exportu (všechny roky), nebo `null`. Rozpracovaný
+     * měsíc ({@see PohodaPayrollConverter::openPeriod()}) se nepočítá: začátek vedení
+     * mezd za ním by nechal měsíc, který nikdo nespočítá.
+     */
     private static function lastPeriod(PohodaPayrollConverter $converter): ?string
     {
-        $periods = $converter->periods();
+        $periods = $converter->closedPeriods();
         return $periods === [] ? null : (string) max($periods);
+    }
+
+    /**
+     * Začátek vedení mezd leží před posledním měsícem, který PAMICA zpracovala.
+     *
+     * Převod ho sám neposouvá (může jít o vědomé rozhodnutí podané měsíce
+     * v MyÚčtu přepočítat), ale nesmí o tom mlčet: jinak MyÚčto tvrdí, že mzdy
+     * počítá od měsíce, za který žádný běh nemá a převzít ho nejde.
+     *
+     * @return array{code:string,message:string}|null
+     */
+    private function startBehindMessage(int $supplierId, string $last): ?array
+    {
+        $advance = $this->moduleSetup->startAdvance($supplierId, $last);
+        if ($advance['to'] === null) {
+            return null;
+        }
+        if ($advance['blocking_runs'] !== []) {
+            return ['code' => 'payroll_start_behind_takeover_runs', 'message' => sprintf(
+                'Začátek vedení mezd v MyÚčtu je %s, PAMICA ale zpracovala mzdy až do %s a MyÚčto už má za %s vlastní '
+                . 'mzdové běhy. Zkontrolujte, jestli se tyto měsíce nepočítají dvakrát.',
+                $advance['from'], $last, implode(', ', $advance['blocking_runs']),
+            )];
+        }
+        return ['code' => 'payroll_start_behind_takeover', 'message' => sprintf(
+            'Začátek vedení mezd v MyÚčtu je %s, PAMICA ale zpracovala mzdy až do %s. Pokud MyÚčto nemá tyto měsíce '
+            . 'počítat znovu, posuňte začátek na %s v Mzdy → Mzdové běhy (tlačítko u upozornění na chybějící běhy) '
+            . 'a měsíce převezměte tlačítkem „Převzít všechny měsíce".',
+            $advance['from'], $last, $advance['to'],
+        )];
+    }
+
+    /** Věta o rozpracovaných měsících exportu pro kontrolu před převodem i protokol. */
+    private static function openPeriodsMessage(array $open, ?string $exportedOn): string
+    {
+        $parts = [];
+        foreach ($open as $period => $count) {
+            $parts[] = sprintf('%s (%d mezd)', $period, (int) $count);
+        }
+        return sprintf(
+            'Export z %s nese i měsíce, které v den exportu ještě neskončily: %s. Předchozí program je nemohl '
+            . 'uzavřít ani podat, převod je proto nepřebírá a MyÚčto je spočítá samo od začátku vedení mezd. '
+            . 'Pokud je předchozí program přesto uzavřel a podal, vyexportujte data znovu po konci měsíce.',
+            $exportedOn === null ? '?' : date('j. n. Y', (int) strtotime($exportedOn)),
+            implode(', ', $parts),
+        );
     }
 
     /** @return list<string> */
@@ -150,6 +203,12 @@ final class PohodaPayrollImporter
                 $add('warning', 'payroll_start_missing', 'Firma nemá nastavený začátek vedení mezd v MyÚčtu (Mzdy → Nastavení). Převod bez něj nezapíše počáteční stavy ročních kumulací; nastavte první měsíc, který PAMICA nezpracovala, a převod zopakujte.');
             }
         }
+        if ($last !== null && ($plan['start_period'] ?? null) === null) {
+            $stale = $this->startBehindMessage($supplierId, (string) $last);
+            if ($stale !== null) {
+                $add('warning', $stale['code'], $stale['message']);
+            }
+        }
         if ($this->db->hasTable('payroll_employer_settings')) {
             $office = $pdo->prepare('SELECT default_office_id FROM payroll_employer_settings WHERE supplier_id = ?');
             $office->execute([$supplierId]);
@@ -169,6 +228,10 @@ final class PohodaPayrollImporter
             $months = (int) $summary['months'];
             $add('info', 'payroll_summary', sprintf('Mzdy za %d měsíců (%s až %s), zaměstnanců v exportu %d.',
                 $months, (string) $summary['first'], (string) $summary['last'], (int) $summary['employees']), ['months' => $months]);
+        }
+        if ($summary !== null && is_array($summary['open'] ?? null) && $summary['open'] !== []) {
+            $add('warning', 'payroll_open_months', self::openPeriodsMessage($summary['open'], $summary['exported_on'] ?? null),
+                ['open' => $summary['open']]);
         }
         return $out;
     }
@@ -214,8 +277,21 @@ final class PohodaPayrollImporter
             if ($last !== null) {
                 PayrollMigrationModuleSetup::report($protocol, self::STEP_PREFLIGHT,
                     $this->moduleSetup->ensure($supplierId, $userOrNull, $last), 'PAMICA');
+                $stale = $this->startBehindMessage($supplierId, $last);
+                if ($stale !== null) {
+                    $protocol->warn(self::STEP_PREFLIGHT, $stale['code'], $stale['message']);
+                }
             }
-            $months = array_map($converter->month(...), $converter->periods($year));
+            // Jen uzavřené měsíce. Rozpracovaný měsíc (export uprostřed září nese
+            // září i říjen s několika výstupními mzdami) by se jinak převzal jako
+            // hotový a MyÚčto by ho už nespočítalo.
+            $months = array_map($converter->month(...), $converter->closedPeriods($year));
+            $open = $converter->openPeriods($year);
+            if ($open !== []) {
+                $protocol->count(self::STEP_PREFLIGHT, 'open_months', count($open));
+                $protocol->warn(self::STEP_PREFLIGHT, 'payroll_open_months',
+                    self::openPeriodsMessage($open, $converter->exportedOn), ['open' => $open]);
+            }
             // Údaje osob a vztahů se čtou jednou: krok měsíců z nich zapisuje pracoviště
             // průběžně a krok osob pak zbytek.
             $records = PohodaPayrollPeople::read($file, $year);
@@ -397,7 +473,7 @@ final class PohodaPayrollImporter
                 }
                 $this->people->write($supplierId, $userOrNull, $records, $year, $confirmIdentifiers, $protocol, self::STEP_PEOPLE,
                     PohodaPayrollPeople::institutions($file));
-                $this->storeReferenceTotals($supplierId, $file, $year, $protocol);
+                $this->storeReferenceTotals($supplierId, $file, $year, $protocol, $converter->exportedOn);
                 $protocol->finish(self::STEP_PEOPLE);
             }
 
@@ -589,12 +665,17 @@ final class PohodaPayrollImporter
      * se při převodu, ne až při generování sestavy: měsíce po převodu už export nikdo
      * po ruce nemá, a přesně tehdy se historický měsíc přepočítává.
      */
-    private function storeReferenceTotals(int $supplierId, string $file, int $year, ImportProtocol $protocol): void
+    private function storeReferenceTotals(int $supplierId, string $file, int $year, ImportProtocol $protocol, ?string $exportedOn): void
     {
         $matched = $this->people->matchedRelations();
         $totals = [];
         foreach (PohodaXml::records($file, 'MZ') as $mz) {
             if ((int) PohodaXml::text($mz, 'Rok') !== $year) {
+                continue;
+            }
+            // Rozpracovaný měsíc se nepřebírá, takže nemá ani srovnávací úhrny:
+            // počítá ho MyÚčto a pár mezd z předchozího programu by srovnání mátlo.
+            if (PohodaPayrollConverter::openPeriod(sprintf('%04d-%02d', $year, (int) PohodaXml::text($mz, 'RelMes')), $exportedOn)) {
                 continue;
             }
             $pair = $matched[PohodaXml::text($mz, 'RefPomer')] ?? null;

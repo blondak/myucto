@@ -540,6 +540,34 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertSame(1, $this->rows('payroll_offices', $supplierId));
     }
 
+    /**
+     * Export uprostřed února nese i únorové mzdy, které v předchozím programu teprve
+     * běží. Převod je nepřevezme ani jako měsíc, ani jako srovnávací úhrny, a začátek
+     * vedení mezd nové firmy nastaví na únor — měsíc, který MyÚčto musí spočítat.
+     */
+    public function testMonthStillRunningOnExportDayIsNotTakenOver(): void
+    {
+        $supplierId = $this->createIsolatedSupplier($this->db->pdo(), $this->sourceSupplierId);
+        $this->db->pdo()->prepare('UPDATE supplier SET payroll_enabled = 0 WHERE id = ?')->execute([$supplierId]);
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+        file_put_contents($file, str_replace('<mdbExport ', '<mdbExport created="2026-02-15T10:00:00" ', (string) file_get_contents($file)));
+
+        $preflight = $this->importer->preflight($supplierId, $file, SyntheticPohodaPayroll::YEAR);
+        self::assertContains('payroll_open_months', array_column($preflight, 'code'));
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, self::stepCounts($protocol, PohodaPayrollImporter::STEP_MONTHS)['months'] ?? 0, $this->explain($protocol));
+        self::assertSame(1, $this->rows('payroll_attendance_imports', $supplierId));
+        self::assertSame(0, $this->scalar(
+            "SELECT COUNT(*) FROM payroll_migration_reference_totals WHERE supplier_id = ? AND period_start = '2026-02-01'",
+            [$supplierId],
+        ));
+        $start = $this->db->pdo()->prepare('SELECT start_period FROM payroll_module_state WHERE supplier_id = ?');
+        $start->execute([$supplierId]);
+        self::assertSame('2026-02-01', (string) $start->fetchColumn());
+    }
+
     /** Izolovaná firma se zapnutými mzdami a výchozí účtárnou (stejně jako test importu docházky). */
     private function payrollSupplier(): int
     {

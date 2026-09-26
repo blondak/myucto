@@ -2586,6 +2586,9 @@
         "subtitle": "Months processed by the previous payroll program. A taken-over run mirrors them: it is not calculated, not approved and never posted again.",
         "jmhz_note": "The previous program filed the JMHZ reports for these months and MyÚčto does not build corrective reports for them. File the correction where the regular report came from (the previous program or the ČSSZ portal) and carry the corrected totals over to the taken-over wages and the opening balances.",
         "boundary": "MyÚčto calculates payroll from {period}",
+        "build_all": "Take over all months ({count})",
+        "built_all": "Months taken over: {count}.",
+        "build_all_failed": "Taking over stopped at {period} (months taken over: {built}): {reason}",
         "loading": "Loading taken-over months…",
         "rows": "{count} migration rows",
         "state_built": "Taken over",
@@ -2629,6 +2632,15 @@
       "enforcement_withheld": "Enforcement withholding and fee",
       "payable_after": "Payable after enforcement",
       "validations": "Run checks",
+      "missing_previous": {
+        "title": "Before {period}, a payroll run is missing for {count} months since payroll started in MyÚčto",
+        "hint": "Payroll builds on previous months (annual totals, averages, advance tax). Calculate the missing months first. If the previous program processed them, move the payroll start in the payroll settings past them and take them over as taken-over months.",
+        "settings": "Payroll start",
+        "hint_takeover": "The previous payroll program processed these months (MyÚčto has their payroll from the migration) and MyÚčto has no run of its own for them. Move the payroll start and take the months over in the Taken-over months panel below with Take over all months.",
+        "advance": "Move payroll start to {period}",
+        "advanced": "Payroll start moved from {from} to {to}. Take the months over in the Taken-over months panel.",
+        "advance_failed": "The payroll start could not be moved."
+      },
       "approve_blocked": {
         "title": "The run cannot be approved: {count} blocking checks",
         "hint": "Approval becomes available once {count} blocking checks are resolved (blockers and warnings without an approved exception). Each has a link to where it is fixed; after fixing, refresh the inputs and calculate the payroll again.",

@@ -6633,6 +6633,10 @@ export interface PayrollRunsPage {
    * dát TOTÉŽ datum, ze kterého pak visí splatnost odvodů a lhůty hlášení.
    */
   suggested_payment_date: string | null
+  /** Měsíce `YYYY-MM` od začátku vedení mezd před obdobím, za které neexistuje běh. */
+  missing_previous_periods?: string[]
+  /** Období, na které jde posunout začátek vedení mezd (chybějící měsíce zpracoval předchozí program). */
+  advance_start_to?: string | null
 }
 
 export interface PayrollRunCommandResponse {
@@ -7316,6 +7320,12 @@ export const payrollApi = {
       .then(response => response.data),
   setActivation: (payload: { enabled: boolean; start_period: string | null; row_version: number }) =>
     api.put<{ state: PayrollModuleState }>('/payroll/settings/activation', payload).then(response => response.data.state),
+  /** Posun začátku vedení mezd za měsíce zpracované předchozím programem (jen dopředu, server hlídá podmínky). */
+  advancePayrollStart: (startPeriod: string) =>
+    api.post<{ state: PayrollModuleState; moved: { from: string; to: string } }>(
+      '/payroll/settings/activation/advance-start',
+      { start_period: startPeriod },
+    ).then(response => response.data),
   /**
    * Stránka seznamu osob. Filtr i hledání jdou na server — kdyby zužoval
    * prohlížeč, hledal by jen v načtené stránce a člověka ze třetí stránky by

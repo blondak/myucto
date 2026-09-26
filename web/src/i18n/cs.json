@@ -2586,6 +2586,9 @@
         "subtitle": "Měsíce, které zpracoval předchozí mzdový program. Převzatý běh je jejich zrcadlo: nepočítá se, neschvaluje a znovu se nezaúčtovává.",
         "jmhz_note": "Hlášení JMHZ za tyto měsíce podal předchozí program a MyÚčto k nim opravné hlášení nesestaví. Opravu podejte tam, odkud šlo řádné hlášení (předchozí program nebo portál ČSSZ), a opravené úhrny promítněte do převzatých mezd i počátečních stavů.",
         "boundary": "MyÚčto počítá mzdy od {period}",
+        "build_all": "Převzít všechny měsíce ({count})",
+        "built_all": "Převzato měsíců: {count}.",
+        "build_all_failed": "Převzetí se zastavilo u {period} (převzato měsíců: {built}): {reason}",
         "loading": "Načítám převzaté měsíce…",
         "rows": "{count} řádků převodu",
         "state_built": "Převzato",
@@ -2629,6 +2632,15 @@
       "enforcement_withheld": "Exekuční srážka a paušál",
       "payable_after": "K výplatě po srážce",
       "validations": "Kontroly běhu",
+      "missing_previous": {
+        "title": "Před obdobím {period} chybí mzdový běh za {count} měsíců od začátku vedení mezd v MyÚčtu",
+        "hint": "Mzda staví na předchozích měsících (roční úhrny, průměry, zálohová daň). Spočítejte chybějící měsíce dřív. Pokud je zpracoval předchozí program, posuňte v Nastavení mezd začátek vedení mezd za ně a převezměte je jako převzaté měsíce.",
+        "settings": "Začátek vedení mezd",
+        "hint_takeover": "Tyto měsíce zpracoval předchozí mzdový program (MyÚčto má z převodu jejich mzdy) a MyÚčto za ně vlastní běh nemá. Posuňte začátek vedení mezd a měsíce převezměte v panelu Převzaté měsíce níže tlačítkem Převzít všechny měsíce.",
+        "advance": "Posunout začátek vedení mezd na {period}",
+        "advanced": "Začátek vedení mezd posunut z {from} na {to}. Převezměte měsíce v panelu Převzaté měsíce.",
+        "advance_failed": "Začátek vedení mezd se nepodařilo posunout."
+      },
       "approve_blocked": {
         "title": "Běh nejde schválit: {count} blokujících kontrol",
         "hint": "Schválit půjde, až se vyřeší {count} blokujících kontrol (blokátory a varování bez schválené výjimky). U každé je odkaz na místo opravy; po opravě obnovte podklady a spočítejte mzdy znovu.",
