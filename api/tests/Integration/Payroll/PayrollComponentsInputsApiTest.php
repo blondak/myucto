@@ -259,6 +259,7 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'CESTOVNI_NAHRADA',
             'CESTOVNI_NAHRADA_LIMIT',
             'CESTOVNI_NAHRADA_NADLIMIT',
+            'CESTOVNI_NAHRADA_ZALOHA',
             'DOPLATEK_MZDY',
             'MZDA_HODINOVA',
             'MZDA_MESICNI',

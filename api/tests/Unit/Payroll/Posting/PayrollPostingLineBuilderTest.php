@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Payroll\Posting;
 
 use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\Posting\PayrollPostingLineBuilder;
+use MyInvoice\Service\Payroll\Travel\BusinessTripMaterializer;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollPostingLineBuilderTest extends TestCase
@@ -712,6 +713,63 @@ final class PayrollPostingLineBuilderTest extends TestCase
             'gross:employment:101:input:1:debit',
             $travel[0]['allocation_key'],
         );
+    }
+
+    /**
+     * Odpočet zálohy na pracovní cestu (§ 183 ZP) vyrovná pohledávku za
+     * zaměstnancem, na které záloha visí od výplaty z pokladny: MD 331 / D 335.
+     * Náklad cestovného zůstává v plné výši nároku a odpočet nesmí nést klíč
+     * `gross:`, jinak by ho reconciliace četla jako hrubou mzdu.
+     */
+    public function testTravelAdvanceOffsetClearsTheEmployeeReceivable(): void
+    {
+        [$snapshot, $result] = $this->travelRevision();
+        $snapshot['people'][0]['employments'][0]['inputs'][] = [
+            'id' => 4,
+            'amount_minor' => -30_000,
+            'component' => [
+                'code' => BusinessTripMaterializer::COMPONENT_ADVANCE,
+                'component_kind' => 'travel_reimbursement',
+                'accounting_debit_code' => null,
+                'accounting_credit_code' => null,
+            ],
+        ];
+        $result['people'][0]['employments'][0]['inputs'][] = [
+            'input_id' => 4,
+            'totals' => [
+                'source_amount_minor' => -30_000,
+                'cash_payable_minor' => -30_000,
+            ],
+            'accounting' => [
+                'debit_code' => null,
+                'credit_code' => null,
+                'amount_minor' => -30_000,
+            ],
+        ];
+        $result['people'][0]['employments'][0]['totals']['cash_payable_minor'] = 70_000;
+        $result['people'][0]['totals']['cash_payable_minor'] = 570_000;
+        $result['people'][0]['payable_after_enforcement_minor'] = 436_000;
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+        $sets = $this->statutorySets();
+        $sets['net_pay']['people'][0]['result_snapshot']['net_payable_minor_units'] = 441_000;
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $sets,
+            PayrollAccountingDefaults::codes(),
+        );
+        $lineMap = $this->lineMap($preview->lines);
+
+        self::assertSame(100_000, $lineMap['512|debit'], 'náklad cestovného zůstává celý');
+        self::assertSame(30_000, $lineMap['335|credit']);
+        self::assertSame($preview->debitTotalMinor, $preview->creditTotalMinor);
+        $advance = array_values(array_filter(
+            $preview->targetAllocations,
+            static fn (array $allocation): bool => $allocation['account_code'] === '335',
+        ));
+        self::assertCount(1, $advance);
+        self::assertStringStartsWith('travel-advance:', $advance[0]['allocation_key']);
     }
 
     /** Vlastní předkontace složky přebíjí i účet cestovného. */

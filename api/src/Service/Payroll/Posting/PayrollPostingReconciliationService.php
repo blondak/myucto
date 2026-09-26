@@ -8,6 +8,7 @@ use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\Payroll\PayrollPostingReconciliationRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService;
+use MyInvoice\Service\Payroll\Travel\BusinessTripMaterializer;
 
 /**
  * MZ-18-W07 — odvozený read model, nic nemění. Pro dané období porovná tři
@@ -317,8 +318,13 @@ final class PayrollPostingReconciliationService
             // se náklad zaúčtoval podruhé. Porovnává se proto ÚČTOVATELNÁ
             // hrubá mzda; vyloučená částka nemizí, vykazuje ji informativní
             // kategorie `non_monetary_neutral`.
+            //
+            // Odpočet zálohy na pracovní cestu je v kontrolním součtu záporná
+            // složka, ale hrubou mzdou ani nákladem není — můstek ho účtuje
+            // mimo nákladové účty (MD 331 / D 335). Vrací se proto zpátky.
             'gross_wages' => (int) $controlTotals->company['source_amount_minor']
-                - $nonMonetaryNeutral,
+                - $nonMonetaryNeutral
+                - $this->travelAdvanceOffsetTotal($resultSnapshot),
             'employer_contributions' => $employerContributions,
             'social_health_insurance' =>
                 ($liabilitiesByKind['social_insurance'] ?? 0)
@@ -686,6 +692,35 @@ final class PayrollPostingReconciliationService
                     $unposted = $source - $cash;
                     if ($unposted > 0) {
                         $total += $unposted;
+                    }
+                }
+            }
+        }
+
+        return $total;
+    }
+
+    /**
+     * Součet odpočtů záloh na pracovní cesty (záporné číslo, nebo nula).
+     *
+     * @param array<string,mixed> $decoded ověřený výsledný snapshot revize
+     */
+    private function travelAdvanceOffsetTotal(array $decoded): int
+    {
+        $total = 0;
+        foreach ($this->objectList($decoded['people'] ?? null) as $person) {
+            foreach ($this->objectList($person['employments'] ?? null) as $employment) {
+                foreach ($this->objectList($employment['inputs'] ?? null) as $input) {
+                    if (($input['component_code'] ?? null)
+                        !== BusinessTripMaterializer::COMPONENT_ADVANCE
+                    ) {
+                        continue;
+                    }
+                    $source = is_array($input['totals'] ?? null)
+                        ? ($input['totals']['source_amount_minor'] ?? null)
+                        : null;
+                    if (is_int($source)) {
+                        $total += $source;
                     }
                 }
             }

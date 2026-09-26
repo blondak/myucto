@@ -12,9 +12,10 @@ Musí existovat zaměstnanec a vztah. Připravte schválenou cestu, časy, míst
 
 1. Otevřete **Mzdy → Cestovní náhrady** a založte cestu pro správného zaměstnance.
 2. Vyplňte začátek, konec, místo, účel a použitou dopravu.
-3. Doplňte doložené výdaje, poskytnuté zálohy, měny a kurzy.
-4. Zkontrolujte vypočtené stravné a krácení podle poskytnutého jídla.
-5. Schválený výsledek předejte do platby nebo mzdového vstupu podle firemního postupu.
+3. Doplňte doložené výdaje, poskytnutou zálohu, měny a kurzy.
+4. Zvolte, kde se vypořádá rozdíl mezi nárokem a zálohou (**Vypořádání zálohy**: mzdou, nebo pokladnou).
+5. Zkontrolujte vypočtené stravné, krácení podle poskytnutého jídla a vypořádání proti záloze v náhledu.
+6. Schválené vyúčtování promítněte do mzdy tlačítkem **Promítnout do mzdy**.
 
 ## 78.4 Stavy
 
@@ -22,12 +23,13 @@ Cesta může být rozpracovaná, připravená ke kontrole, schválená nebo vypo
 
 ## 78.5 Kontroly a bezpečnost
 
-Ověřte časová pásma, měnu, kurz, zákonné sazby a odpočet zálohy. Přílohy mohou obsahovat osobní údaje; ukládejte je bezpečně. Nepoužívejte cestovní náhradu jako obecnou nezdaněnou mzdovou složku.
+Ověřte časová pásma, měnu, kurz, zákonné sazby a vypořádání zálohy v náhledu. Přílohy mohou obsahovat osobní údaje; ukládejte je bezpečně. Nepoužívejte cestovní náhradu jako obecnou nezdaněnou mzdovou složku.
 
 ## 78.6 Časté chyby
 
 - Chybné datum kurzu nebo měna.
-- Neodečtená záloha či duplicitně vložená účtenka.
+- Záloha vyplacená z pokladny, ale nezadaná do cesty. Aplikace pak do mzdy pošle celý nárok.
+- Duplicitně vložená účtenka.
 - Opomenuté krácení stravného.
 - Schválení bez vazby na skutečný pracovní vztah a účel cesty.
 
@@ -69,10 +71,34 @@ Schválené vyúčtování promítneš tlačítkem **Promítnout do mzdy**; zalo
 vstupy na složkách `CESTOVNI_NAHRADA_LIMIT` a `CESTOVNI_NAHRADA_NADLIMIT`
 v období vyúčtování. Opakované promítnutí nevytvoří duplicitu.
 
+### Vypořádání zálohy
+
+Vyúčtování cesty je nárok minus poskytnutá záloha (§ 183 zákoníku práce).
+Kde se rozdíl vyrovná, určuje u cesty volba **Vypořádání zálohy**:
+
+- **Mzdou** — do mzdy jde celý nárok (obě části se zdaní nebo nezdaní podle
+  zákona) a záloha se z výplaty odečte složkou `CESTOVNI_NAHRADA_ZALOHA`.
+  Odečte se nejvýš celý nárok. Pokud záloha nárok převýšila, přeplatek se ze
+  mzdy nesráží a zaměstnanec ho vrací do pokladny; aplikace ho po promítnutí
+  ohlásí.
+- **Pokladnou** — nezdaněná část se do mzdy nepošle a doplatek (nebo vrácení
+  přeplatku) vyrovnáte pokladním dokladem. Do mzdy jde jen nadlimitní část,
+  protože se musí zdanit a započítat do vyměřovacích základů.
+
+Náhled ukazuje zálohu, dopad do výplaty, doplatek z pokladny a přeplatek, který
+zaměstnanec vrací, přesně tak, jak je promítnutí založí.
+
 V podvojném účetnictví se náhrada účtuje na nákladový účet cestovného (výchozí
 kontace 512) proti závazkovému účtu pracovního vztahu, tedy proti témuž účtu,
-ze kterého se zaměstnanci vyplácí mzda. Účet lze změnit v
-[Nastavení mezd](90_Nastaveni_mezd.md#9081-predkontace-pro-zvlastni-mzdove-situace).
-Na výplatu to nemá vliv — zaměstnanec dostane přesně tutéž částku. Zakládat a
+ze kterého se zaměstnanci vyplácí mzda. Poskytnutou zálohu vyplacenou
+z pokladny účtujte na pohledávku za zaměstnancem (335):
+
+- při vypořádání **mzdou** ji odečet ve výplatě vyrovná zápisem MD 331 / D 335,
+- při vypořádání **pokladnou** zaúčtuje vyúčtování nezdaněnou část MD 512 /
+  D 335 a pokladní doklad doplatku (MD 335 / D 211) nebo vrácení přeplatku
+  (MD 211 / D 335) pohledávku vyrovná.
+
+Účty lze změnit v
+[Nastavení mezd](90_Nastaveni_mezd.md#9081-predkontace-pro-zvlastni-mzdove-situace). Zakládat a
 upravovat cesty smí role s oprávněním pro mzdové vstupy, schválení a promítnutí
 vyžaduje oprávnění pro schvalování.

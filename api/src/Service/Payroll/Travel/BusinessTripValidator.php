@@ -67,6 +67,7 @@ final class BusinessTripValidator
                 'meal_rate_band_3',
             ),
             'advance_minor' => $this->optionalMoney($input['advance'] ?? null, 'advance') ?? 0,
+            'advance_settlement' => $this->advanceSettlement($input['advance_settlement'] ?? null),
             'settlement_period_start' => $this->month(
                 $input['settlement_period'] ?? null,
                 'settlement_period',
@@ -290,6 +291,24 @@ final class BusinessTripValidator
                 : $formatted;
         }
         throw new \InvalidArgumentException("Pole {$field} musí být číslo.");
+    }
+
+    /**
+     * Kde se vypořádá rozdíl nároku a zálohy. Nevyplněné = mzdou, tedy tak,
+     * jak cestovní náhrada tekla dosud.
+     */
+    private function advanceSettlement(mixed $value): string
+    {
+        if ($value === null || $value === '') {
+            return BusinessTripSettlement::MODE_PAYROLL;
+        }
+        if (!is_string($value) || !in_array($value, BusinessTripSettlement::MODES, true)) {
+            throw new \InvalidArgumentException(
+                'Vypořádání zálohy musí být „payroll" (mzdou) nebo „cash" (pokladnou).',
+            );
+        }
+
+        return $value;
     }
 
     private function countryCode(mixed $value): string

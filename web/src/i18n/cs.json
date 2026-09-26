@@ -12922,6 +12922,8 @@
         "vat_clearing": "Zúčtování DPH",
         "card_settlement": "Vypořádání platby kartou",
         "card_writeoff": "Uzavření platby kartou",
+        "payroll_travel": "Vyúčtování pracovní cesty",
+        "payroll_accident_insurance": "Zákonné pojištění odpovědnosti",
         "journal_entry": "Účetní zápis"
       },
       "history": {
@@ -24056,6 +24058,20 @@
       "band": "pásmo {band}",
       "settlement": "Doplatek nebo vratka proti záloze: {amount}",
       "manual_review": "Vyúčtování vyžaduje ruční posouzení a nelze ho schválit:"
+    },
+    "settlement": {
+      "label": "Vypořádání zálohy",
+      "mode_payroll": "Mzdou (záloha se odečte ve výplatě)",
+      "mode_cash": "Pokladnou (do mzdy jen nadlimitní část)",
+      "help_payroll": "Do mzdy jde celý nárok a poskytnutá záloha se z výplaty odečte. Přeplatek zálohy se ze mzdy nesráží, zaměstnanec ho vrací do pokladny.",
+      "help_cash": "Nezdaněnou náhradu vyrovnáte pokladnou (doplatek nebo vrácení přeplatku). Do mzdy jde jen nadlimitní část, protože se musí zdanit. V podvojném účetnictví se nezdaněná část zaúčtuje proti pohledávce za zaměstnancem.",
+      "advance": "Poskytnutá záloha",
+      "payroll_net": "Dopad do výplaty (před zdaněním nadlimitní části)",
+      "cash_payout": "Doplatek z pokladny",
+      "employee_refund": "Zaměstnanec vrací přeplatek zálohy",
+      "refund_notice": "Záloha převýšila nárok. Zaměstnanec vrací do pokladny {amount}.",
+      "cash_payout_notice": "Vyplaťte z pokladny doplatek {amount}.",
+      "posting_skipped": "Nezdaněnou část se nepodařilo zaúčtovat ({reason}). Promítněte vyúčtování znovu, až bude účetní období otevřené."
     },
     "messages": {
       "load_failed": "Pracovní cesty se nepodařilo načíst.",

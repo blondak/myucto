@@ -211,6 +211,118 @@ final class PayrollTravelApiTest extends TestCase
         self::assertSame('excluded', $taxable['average_earning_treatment']);
     }
 
+    /**
+     * § 183 ZP — vyúčtování je nárok MINUS záloha. Záloha vyplacená předem se
+     * při vypořádání mzdou odečte záporným vstupem, daňové zařazení obou částí
+     * nároku zůstává celé.
+     */
+    public function testPayrollSettlementDeductsTheAdvanceFromThePayout(): void
+    {
+        $payload = $this->tripPayload(mealRateBand1: '200');
+        $payload['advance'] = '150';
+        $tripId = $this->approvedTripId($payload);
+
+        $result = $this->materialize($tripId);
+
+        self::assertSame(3, $result['created_count']);
+        self::assertSame([
+            BusinessTripMaterializer::COMPONENT_EXEMPT => 18_500,
+            BusinessTripMaterializer::COMPONENT_TAXABLE => 1_500,
+            BusinessTripMaterializer::COMPONENT_ADVANCE => -15_000,
+        ], $this->travelAmountsByComponent());
+        $settlement = PayrollTimeValue::row($result['settlement'] ?? null, 'settlement');
+        self::assertSame(5_000, $settlement['payroll_net_minor']);
+        self::assertSame(0, $settlement['employee_refund_minor']);
+
+        $replay = $this->materialize($tripId);
+        self::assertSame(0, $replay['created_count']);
+        self::assertSame(3, $replay['replayed_count']);
+    }
+
+    /**
+     * Přeplatek zálohy se ze mzdy nesráží — odečte se nejvýš celý nárok a zbytek
+     * zaměstnanec vrací.
+     */
+    public function testAdvanceAboveEntitlementIsRefundedNotWithheld(): void
+    {
+        $payload = $this->tripPayload(mealRateBand1: '200');
+        $payload['advance'] = '300';
+        $tripId = $this->approvedTripId($payload);
+
+        $settlement = PayrollTimeValue::row(
+            $this->materialize($tripId)['settlement'] ?? null,
+            'settlement',
+        );
+
+        self::assertSame(-20_000, $this->travelAmountsByComponent()[BusinessTripMaterializer::COMPONENT_ADVANCE]);
+        self::assertSame(0, $settlement['payroll_net_minor']);
+        self::assertSame(10_000, $settlement['employee_refund_minor']);
+    }
+
+    /**
+     * Vypořádání pokladnou: nezdaněná část do mzdy nejde (vyplácí ji pokladna),
+     * zdanitelná část ano — do základu daně se dostane jen mzdou. Nezdaněnou
+     * část zaúčtuje vyúčtování MD 512 / D 335 proti záloze.
+     */
+    public function testCashSettlementPostsTheExemptPartAgainstTheAdvance(): void
+    {
+        $this->makeDoubleEntry();
+        $payload = $this->tripPayload(mealRateBand1: '200');
+        $payload['advance'] = '100';
+        $payload['advance_settlement'] = 'cash';
+        $tripId = $this->approvedTripId($payload);
+
+        $result = $this->materialize($tripId);
+
+        self::assertSame(
+            [BusinessTripMaterializer::COMPONENT_TAXABLE => 1_500],
+            $this->travelAmountsByComponent(),
+        );
+        $settlement = PayrollTimeValue::row($result['settlement'] ?? null, 'settlement');
+        self::assertSame(8_500, $settlement['cash_payout_minor']);
+        $posting = PayrollTimeValue::row($result['posting'] ?? null, 'posting');
+        self::assertSame('posted', $posting['status'], (string) json_encode($posting));
+        self::assertSame(
+            ['335|credit' => '185.00', '512|debit' => '185.00'],
+            $this->journalLines(PayrollTimeValue::int($posting['journal_entry_id'] ?? null, 'entry')),
+        );
+
+        $replay = PayrollTimeValue::row(
+            $this->materialize($tripId)['posting'] ?? null,
+            'posting',
+        );
+        self::assertSame('already_posted', $replay['status']);
+    }
+
+    public function testUnknownAdvanceSettlementIsRejected(): void
+    {
+        $payload = $this->tripPayload();
+        $payload['advance_settlement'] = 'bank';
+
+        $response = $this->travel->create(
+            $this->request('POST', '/api/payroll/travel/trips')->withParsedBody($payload),
+            new Response(),
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+    }
+
+    public function testPreviewShowsTheSettlementAgainstTheAdvance(): void
+    {
+        $payload = $this->tripPayload(mealRateBand1: '200');
+        $payload['advance'] = '50';
+        $response = $this->travel->preview(
+            $this->request('POST', '/api/payroll/travel/preview')->withParsedBody($payload),
+            new Response(),
+        );
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $settlement = PayrollTimeValue::row($this->json($response)['settlement'] ?? null, 'settlement');
+        self::assertSame('payroll', $settlement['mode']);
+        self::assertSame(5_000, $settlement['payroll_advance_offset_minor']);
+        self::assertSame(15_000, $settlement['payroll_net_minor']);
+    }
+
     public function testForeignBusinessTripCannotBeApproved(): void
     {
         $payload = $this->tripPayload();
@@ -395,6 +507,76 @@ final class PayrollTravelApiTest extends TestCase
         self::assertSame(252_100, $calculation['entitlement_total_minor']);
         self::assertSame(252_100, $calculation['exempt_total_minor']);
         self::assertSame(0, $calculation['taxable_total_minor']);
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function approvedTripId(array $payload): int
+    {
+        $trip = $this->createTrip($payload);
+        $tripId = PayrollTimeValue::int($trip['id'] ?? null, 'trip_id');
+        $this->approveTrip($tripId, PayrollTimeValue::int($trip['row_version'] ?? null, 'row_version'));
+
+        return $tripId;
+    }
+
+    /** @return array<string,int> kód složky → částka */
+    private function travelAmountsByComponent(): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT component.code, input.amount_minor
+               FROM payroll_inputs input
+               JOIN payroll_component_definitions component
+                 ON component.supplier_id = input.supplier_id
+                AND component.id = input.component_id
+              WHERE input.supplier_id = ? AND input.source_kind = "travel"
+              ORDER BY component.code'
+        );
+        $stmt->execute([$this->supplierId]);
+        $amounts = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $amounts[(string) $row['code']] = (int) $row['amount_minor'];
+        }
+
+        return $amounts;
+    }
+
+    private function makeDoubleEntry(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO supplier_accounting_modes
+                (supplier_id, effective_from, accounting_mode)
+             VALUES (?, "2000-01-01", "double_entry")
+             ON DUPLICATE KEY UPDATE accounting_mode = "double_entry"',
+        )->execute([$this->supplierId]);
+        foreach ([['512', 'expense'], ['335', 'asset']] as [$code, $type]) {
+            $pdo->prepare(
+                'INSERT IGNORE INTO chart_of_accounts
+                    (supplier_id, account_code, name, account_type, is_active)
+                 VALUES (?, ?, ?, ?, 1)',
+            )->execute([$this->supplierId, $code, "Účet {$code}", $type]);
+        }
+    }
+
+    /** @return array<string,string> `účet|strana` → částka */
+    private function journalLines(int $entryId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT account.account_code, line.side, CAST(line.amount AS CHAR) AS amount
+               FROM journal_entry_lines line
+               JOIN chart_of_accounts account
+                 ON account.supplier_id = line.supplier_id
+                AND account.id = line.account_id
+              WHERE line.supplier_id = ? AND line.entry_id = ?
+              ORDER BY account.account_code',
+        );
+        $statement->execute([$this->supplierId, $entryId]);
+        $lines = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $lines["{$row['account_code']}|{$row['side']}"] = (string) $row['amount'];
+        }
+
+        return $lines;
     }
 
     /** @return list<array<string,mixed>> */

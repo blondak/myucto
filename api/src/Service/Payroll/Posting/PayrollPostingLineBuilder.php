@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Accounting\PayrollAccountCode;
 use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollEmploymentAccountingClassifier;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Travel\BusinessTripMaterializer;
 
 final class PayrollPostingLineBuilder
 {
@@ -236,26 +237,41 @@ final class PayrollPostingLineBuilder
                         // a podobně) a náhrada výdaje mzdou není. Analytika
                         // střediska se nepotratí — nese ji sloupec
                         // `cost_center`, který se plní nezávisle na účtu.
-                        $debit = $this->travelExpenseAccount(
+                        $credit = $relationAccounts['gross_credit'];
+                        $advanceAccount = $this->travelAdvanceAccount($component, $accounts);
+                        if ($advanceAccount !== null) {
+                            // Odpočet zálohy není hrubá mzda ani náklad — klíč
+                            // mimo `gross:` ho drží mimo nákladové účty, které
+                            // reconciliace čte jako hrubou mzdu.
+                            $this->addPair(
+                                $allocations,
+                                "travel-advance:employment:{$employmentId}:input:{$inputId}",
+                                $advanceAccount,
+                                $credit,
+                                $cashMinor,
+                                'Odpočet zálohy na pracovní cestu',
+                            );
+                        } else {
+                            $debit = $this->travelExpenseAccount(
                                 $component,
                                 $accounts,
                                 $configuredAccounts,
                             )
-                            ?? $dimensionDebit
-                            ?? $relationAccounts['gross_debit'];
-                        $credit = $relationAccounts['gross_credit'];
-                        $this->addGross(
-                            $allocations,
-                            $baseKey,
-                            $debit,
-                            $credit,
-                            $cashMinor,
-                            $description,
-                            $costCenter,
-                            $inputSnapshot,
-                            $accounts,
-                            $configuredAccounts,
-                        );
+                                ?? $dimensionDebit
+                                ?? $relationAccounts['gross_debit'];
+                            $this->addGross(
+                                $allocations,
+                                $baseKey,
+                                $debit,
+                                $credit,
+                                $cashMinor,
+                                $description,
+                                $costCenter,
+                                $inputSnapshot,
+                                $accounts,
+                                $configuredAccounts,
+                            );
+                        }
                     }
                     if ($cashMinor > 0) {
                         $buckets[$employeeId][] = [
@@ -760,6 +776,28 @@ final class PayrollPostingLineBuilder
         }
 
         return $exempt > 0 ? $exempt : null;
+    }
+
+    /**
+     * Protiúčet odpočtu zálohy na pracovní cestu, nebo `null`.
+     *
+     * Vstup nese zápornou částku, takže dvojice „MD tento účet / D závazek
+     * vztahu" se zapíše obráceně: MD 331 / D 335. Záloha vyplacená z pokladny
+     * visí na pohledávce za zaměstnancem a odpočtem ve výplatě se vyrovná.
+     * Náklad (512) se tím nesnižuje — ten nese nárok zaúčtovaný v plné výši.
+     *
+     * Klíč `employee_receivable_debit` je nepovinný s výchozí 335 a starší
+     * snapshot tuhle složku obsahovat nemůže, takže se zápis dřív schválených
+     * revizí nemění.
+     *
+     * @param array<string,mixed> $component zmrazená složka
+     * @param array<string,string> $accounts
+     */
+    private function travelAdvanceAccount(array $component, array $accounts): ?string
+    {
+        return ($component['code'] ?? null) === BusinessTripMaterializer::COMPONENT_ADVANCE
+            ? $accounts['employee_receivable_debit']
+            : null;
     }
 
     /**

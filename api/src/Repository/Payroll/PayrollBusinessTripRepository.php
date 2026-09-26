@@ -153,8 +153,8 @@ final class PayrollBusinessTripRepository
                      origin_place, destination_place,
                      purpose, transport_mode, meal_rate_band_1_minor,
                      meal_rate_band_2_minor, meal_rate_band_3_minor, advance_minor,
-                     settlement_period_start, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     advance_settlement, settlement_period_start, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -172,6 +172,7 @@ final class PayrollBusinessTripRepository
                 $data['meal_rate_band_2_minor'],
                 $data['meal_rate_band_3_minor'],
                 $data['advance_minor'],
+                $data['advance_settlement'] ?? 'payroll',
                 $data['settlement_period_start'],
                 $userId,
             ]);
@@ -221,7 +222,7 @@ final class PayrollBusinessTripRepository
                         destination_place = ?, purpose = ?, transport_mode = ?,
                         meal_rate_band_1_minor = ?, meal_rate_band_2_minor = ?,
                         meal_rate_band_3_minor = ?, advance_minor = ?,
-                        settlement_period_start = ?,
+                        advance_settlement = ?, settlement_period_start = ?,
                         row_version = row_version + 1
                   WHERE supplier_id = ? AND id = ? AND row_version = ?
                     AND status = "draft"'
@@ -241,6 +242,7 @@ final class PayrollBusinessTripRepository
                 $data['meal_rate_band_2_minor'],
                 $data['meal_rate_band_3_minor'],
                 $data['advance_minor'],
+                $data['advance_settlement'] ?? 'payroll',
                 $data['settlement_period_start'],
                 $supplierId,
                 $id,

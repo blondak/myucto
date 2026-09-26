@@ -20,6 +20,7 @@ import { payrollQueryId } from './payrollAgendaLinks'
 import { payrollAbsenceApi, type PayrollAbsenceEmployment } from '@/api/payrollAbsences'
 import {
   payrollTravelApi,
+  type TravelAdvanceSettlement,
   type TravelCalculation,
   type TravelFuelKind,
   type TravelItemKind,
@@ -125,6 +126,7 @@ const form = reactive({
   meal_rate_band_2: '',
   meal_rate_band_3: '',
   advance: '',
+  advance_settlement: 'payroll' as TravelAdvanceSettlement,
   settlement_period: period.value,
 })
 const items = ref<ItemForm[]>([])
@@ -176,6 +178,10 @@ function clearFocus() {
   offset.value = 0
   void load()
 }
+const advanceSettlementOptions = computed(() => (['payroll', 'cash'] as const).map(mode => ({
+  value: mode,
+  label: t(`payroll_travel.settlement.mode_${mode}`),
+})))
 const transportOptions = computed(() => transportModes.map(mode => ({
   value: mode,
   label: t(`payroll_travel.transport.${mode}`),
@@ -246,6 +252,7 @@ function resetForm(trip: TravelTrip | null) {
     form.meal_rate_band_2 = ''
     form.meal_rate_band_3 = ''
     form.advance = ''
+    form.advance_settlement = 'payroll'
     form.settlement_period = period.value
     items.value = []
     meals.value = []
@@ -265,6 +272,7 @@ function resetForm(trip: TravelTrip | null) {
   form.meal_rate_band_2 = minorToInput(trip.meal_rate_band_2_minor)
   form.meal_rate_band_3 = minorToInput(trip.meal_rate_band_3_minor)
   form.advance = trip.advance_minor > 0 ? minorToInput(trip.advance_minor) : ''
+  form.advance_settlement = trip.advance_settlement ?? 'payroll'
   form.settlement_period = trip.settlement_period_start.slice(0, 7)
   items.value = trip.items.map(item => ({
     item_kind: item.item_kind,
@@ -305,6 +313,7 @@ function payload(): TravelTripPayload {
     meal_rate_band_2: form.meal_rate_band_2 || null,
     meal_rate_band_3: form.meal_rate_band_3 || null,
     advance: form.advance || null,
+    advance_settlement: form.advance_settlement,
     settlement_period: form.settlement_period,
     items: items.value.map(itemPayload),
     free_meals: meals.value.map(meal => ({
@@ -468,6 +477,16 @@ async function materialize(trip: TravelTrip) {
       created: result.created_count,
       replayed: result.replayed_count,
     }))
+    const refund = result.settlement?.employee_refund_minor ?? 0
+    const cashPayout = result.settlement?.cash_payout_minor ?? 0
+    if (refund > 0) {
+      toast.warning(t('payroll_travel.settlement.refund_notice', { amount: money(refund) }))
+    } else if (cashPayout > 0) {
+      toast.info(t('payroll_travel.settlement.cash_payout_notice', { amount: money(cashPayout) }))
+    }
+    if (result.posting?.status === 'skipped') {
+      toast.warning(t('payroll_travel.settlement.posting_skipped', { reason: result.posting.reason ?? '' }))
+    }
     await load()
   } catch (error: unknown) {
     toast.error(apiErrorMessage(error, t('payroll_travel.messages.materialize_failed')))
@@ -847,8 +866,22 @@ onMounted(load)
         </label>
         <label>
           <span :class="labelClass">{{ t('payroll_travel.form.advance') }}</span>
-          <input v-model="form.advance" inputmode="decimal" type="text" :class="fieldClass">
+          <input v-model="form.advance" data-test="travel-advance" inputmode="decimal" type="text" :class="fieldClass">
         </label>
+        <div>
+          <span :class="labelClass">{{ t('payroll_travel.settlement.label') }}</span>
+          <SearchableSelect
+            v-model="form.advance_settlement"
+            :options="advanceSettlementOptions"
+            :clearable="false"
+            accent="payroll"
+            data-test="travel-advance-settlement"
+            :aria-label="t('payroll_travel.settlement.label')"
+          />
+          <p class="mt-1 text-xs text-neutral-500">
+            {{ t(`payroll_travel.settlement.help_${form.advance_settlement}`) }}
+          </p>
+        </div>
       </div>
 
       <!-- Položky vyúčtování -->
@@ -1013,7 +1046,36 @@ onMounted(load)
               {{ money(item.entitlement_minor) }}
             </li>
           </ul>
-          <p class="mt-3 text-sm text-neutral-600">
+          <div
+            v-if="preview.settlement"
+            data-test="travel-settlement-preview"
+            class="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700"
+          >
+            <p class="font-medium text-neutral-900">
+              {{ t(`payroll_travel.settlement.mode_${preview.settlement.mode}`) }}
+            </p>
+            <dl class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div>
+                <dt class="text-xs text-neutral-500">{{ t('payroll_travel.settlement.advance') }}</dt>
+                <dd>{{ money(preview.settlement.advance_minor) }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-neutral-500">{{ t('payroll_travel.settlement.payroll_net') }}</dt>
+                <dd data-test="travel-settlement-payroll">{{ money(preview.settlement.payroll_net_minor) }}</dd>
+              </div>
+              <div v-if="preview.settlement.cash_payout_minor > 0">
+                <dt class="text-xs text-neutral-500">{{ t('payroll_travel.settlement.cash_payout') }}</dt>
+                <dd>{{ money(preview.settlement.cash_payout_minor) }}</dd>
+              </div>
+              <div v-if="preview.settlement.employee_refund_minor > 0">
+                <dt class="text-xs text-neutral-500">{{ t('payroll_travel.settlement.employee_refund') }}</dt>
+                <dd class="font-semibold text-warning-700" data-test="travel-settlement-refund">
+                  {{ money(preview.settlement.employee_refund_minor) }}
+                </dd>
+              </div>
+            </dl>
+          </div>
+          <p v-else class="mt-3 text-sm text-neutral-600">
             {{ t('payroll_travel.preview.settlement', { amount: money(preview.settlement_difference_minor) }) }}
           </p>
         </template>

@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   materialize: vi.fn(),
   context: vi.fn(),
   canWrite: vi.fn(),
+  toastWarning: vi.fn(),
 }))
 
 // Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
@@ -43,7 +44,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn() }),
+  useToast: () => ({ error: vi.fn(), success: vi.fn(), warning: m.toastWarning, info: vi.fn() }),
 }))
 
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
@@ -179,6 +180,95 @@ describe('PayrollTravel', () => {
     expect(m.preview).toHaveBeenCalledTimes(1)
     expect(wrapper.find('[data-test="travel-preview"]').exists()).toBe(true)
     expect(wrapper.findAll('[data-test="travel-save"]')).toHaveLength(1)
+  })
+
+  /*
+   * § 183 ZP — vyúčtování je nárok minus záloha. Formulář musí poslat, kde se
+   * rozdíl vypořádá, a náhled ukázat, co z toho plyne; přeplatek zálohy se ze
+   * mzdy nesráží a uživatel se o něm musí dozvědět.
+   */
+  it('sends the chosen advance settlement and shows the refund in the preview', async () => {
+    m.preview.mockResolvedValue({
+      status: 'supported',
+      blockers: [],
+      ruleset_ids: [],
+      meal_days: [],
+      items: [],
+      entitlement_total_minor: 20000,
+      exempt_total_minor: 18500,
+      taxable_total_minor: 1500,
+      advance_minor: 30000,
+      settlement_difference_minor: -10000,
+      steps: [],
+      settlement: {
+        mode: 'payroll',
+        entitlement_minor: 20000,
+        exempt_minor: 18500,
+        taxable_minor: 1500,
+        advance_minor: 30000,
+        payroll_exempt_minor: 18500,
+        payroll_advance_offset_minor: 20000,
+        payroll_net_minor: 0,
+        cash_payout_minor: 0,
+        employee_refund_minor: 10000,
+      },
+    })
+    const wrapper = mount(PayrollTravel)
+    await flushPromises()
+
+    await wrapper.find('[data-test="travel-new"]').trigger('click')
+    await wrapper.find('[data-test="travel-advance"]').setValue('300')
+    const settlement = wrapper.findComponent('[data-test="travel-advance-settlement"]') as VueWrapper<any>
+    expect(settlement.props('options')).toEqual([
+      expect.objectContaining({ value: 'payroll' }),
+      expect.objectContaining({ value: 'cash' }),
+    ])
+    settlement.vm.$emit('update:modelValue', 'cash')
+    await flushPromises()
+    expect(wrapper.text()).toContain('payroll_travel.settlement.help_cash')
+
+    await wrapper.find('[data-test="travel-preview-button"]').trigger('click')
+    await flushPromises()
+
+    expect(m.preview.mock.calls[0][0]).toEqual(expect.objectContaining({
+      advance: '300',
+      advance_settlement: 'cash',
+    }))
+    expect(wrapper.find('[data-test="travel-settlement-preview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="travel-settlement-refund"]').exists()).toBe(true)
+  })
+
+  it('warns after posting to payroll when the employee has to return part of the advance', async () => {
+    m.listPage.mockResolvedValue(tripsPage([trip({ status: 'approved', advance_minor: 30000 })]))
+    m.materialize.mockResolvedValue({
+      status: 'materialized',
+      trip_id: 7,
+      period: '2026-06',
+      created_count: 3,
+      replayed_count: 0,
+      created: [],
+      replayed: [],
+      settlement: {
+        mode: 'payroll',
+        entitlement_minor: 20000,
+        exempt_minor: 18500,
+        taxable_minor: 1500,
+        advance_minor: 30000,
+        payroll_exempt_minor: 18500,
+        payroll_advance_offset_minor: 20000,
+        payroll_net_minor: 0,
+        cash_payout_minor: 0,
+        employee_refund_minor: 10000,
+      },
+      posting: null,
+    })
+    const wrapper = mount(PayrollTravel)
+    await flushPromises()
+
+    await wrapper.find('[data-test="travel-materialize"]').trigger('click')
+    await flushPromises()
+
+    expect(m.toastWarning).toHaveBeenCalledWith('payroll_travel.settlement.refund_notice')
   })
 
   it('filters employment relations by the employee selected in the editor', async () => {
