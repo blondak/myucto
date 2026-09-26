@@ -2397,6 +2397,54 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertStringContainsString(' relDetail="1"', $xml);
     }
 
+    /**
+     * MPSV 14. 8. 2026: DIS od 13. 8. nepřijímá REGZEC s „odstupné náleží"
+     * (10378), je-li důvod skončení (10380) jiný než 4 nebo 5. Aplikace to
+     * odmítne už při schválení odhlášky; u důvodu 4 nárok projde.
+     */
+    public function testA2SettlementIsAcceptedOnlyForTerminationReasonFourOrFive(): void
+    {
+        $this->seedTrustedReceipt();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25", status = "ended"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
+        $unemployment = static fn (string $reason): array => [
+            'mode' => 'provided',
+            'average_net_earnings' => '25000',
+            'pension_periods' => [['from' => self::START_ON, 'to' => '2026-08-25']],
+            'employment_type' => '1',
+            'termination_reason' => $reason,
+            'entitlement' => true,
+            'paid_in_full' => true,
+            'golden_handshake' => '50000',
+        ];
+        $approve = fn (string $reason) => ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+                'ended_by_death' => false,
+                'unemployment' => $unemployment($reason),
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        $rejected = $approve('3');
+        self::assertSame(422, $rejected->getStatusCode(), (string) $rejected->getBody());
+        self::assertSame(
+            'registration_a2_settlement_forbidden',
+            $this->json($rejected)['error']['code'],
+        );
+        self::assertStringContainsString('4 nebo 5', $this->json($rejected)['error']['message']);
+
+        $accepted = $approve('4');
+        self::assertSame(201, $accepted->getStatusCode(), (string) $accepted->getBody());
+    }
+
     private function startExistingEmployment(
         string $startOn,
         string $activity,
