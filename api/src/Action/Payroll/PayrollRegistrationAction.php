@@ -234,6 +234,31 @@ final class PayrollRegistrationAction
         }, 201);
     }
 
+    /**
+     * Stav existující přihlášky vztahu (připravená, odeslaná, přijatá) pro kartu
+     * po načtení. `submission: null` = žádná živá přihláška není.
+     *
+     * @param array<string,string> $args
+     */
+    public function current(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::READ);
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        return $this->run($response, fn (): array => [
+            'submission' => $this->registrations->currentRegistration(
+                $this->currentSupplierId($request),
+                $this->environment($request),
+                $this->employmentId($args),
+            ),
+        ]);
+    }
+
     /** @param array<string,string> $args */
     public function events(
         Request $request,

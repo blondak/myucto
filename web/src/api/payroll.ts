@@ -4279,6 +4279,16 @@ export interface PayrollRegistrationMissingItem {
 /** `full` = plná registrace A1 před nástupem místo výchozího P1. */
 export type PayrollRegistrationMode = 'auto' | 'full'
 
+export interface PayrollRegistrationCurrent {
+  submission_id: number
+  agenda_code: string
+  status: string
+  created_at: string
+  submitted_at: string | null
+  /** Podání už opustilo frontu (odesláno, zpracováno nebo přijato). */
+  sent: boolean
+}
+
 export interface PayrollRegistrationSubmission {
   submission_id: number
   obligation_id: number
@@ -8135,6 +8145,14 @@ export const payrollApi = {
       },
     },
   ).then(response => response.data),
+  /** Živá přihláška vztahu (P1/A1) po načtení karty; `null` = žádná není. */
+  currentEmploymentRegistration: (
+    employmentId: number,
+    environment: 'test' | 'production' = 'production',
+  ) => api.get<{ submission: PayrollRegistrationCurrent | null }>(
+    `/payroll/submissions/registration/${employmentId}/current`,
+    { params: { environment } },
+  ).then(response => response.data.submission),
   prepareEmploymentRegistration: (
     employmentId: number,
     environment: 'test' | 'production' = 'production',

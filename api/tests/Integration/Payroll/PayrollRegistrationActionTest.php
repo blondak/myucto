@@ -1922,6 +1922,77 @@ final class PayrollRegistrationActionTest extends TestCase
     }
 
     /**
+     * UI-23: karta po obnovení stránky nevěděla, že přihláška už čeká ve
+     * frontě, a nabízela ji připravit znovu. Endpoint `current` vrací stav
+     * existujícího podání; bez živé přihlášky vrací `null`.
+     */
+    public function testCurrentRegistrationReportsThePreparedFiling(): void
+    {
+        $empty = $this->json($this->current());
+        self::assertArrayHasKey('submission', $empty);
+        self::assertNull($empty['submission']);
+
+        $prepared = $this->json($this->post());
+        $current = $this->json($this->current())['submission'];
+
+        self::assertIsArray($current);
+        self::assertSame($prepared['submission_id'], $current['submission_id']);
+        self::assertSame('PREZEC26', $current['agenda_code']);
+        self::assertSame('ready', $current['status']);
+        self::assertFalse($current['sent']);
+    }
+
+    /**
+     * Změněná data po přípravě měla jiný otisk zdroje, takže idempotence
+     * nezabrala a vedle připravené přihlášky vznikla druhá. U ČSSZ by šly
+     * dvě přihlášky téhož vztahu.
+     */
+    public function testChangedDataDoNotCreateSecondRegistrationBesideThePreparedOne(): void
+    {
+        $first = $this->json($this->post());
+        self::assertTrue($first['created']);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_identity_history SET last_name = ? WHERE id = ?',
+        )->execute(['Novotná-Testová', $this->identityId]);
+
+        $response = $this->post();
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(
+            'registration_already_prepared',
+            $this->json($response)['error']['code'],
+        );
+        self::assertSame(1, $this->countSubmissions());
+    }
+
+    /**
+     * Odeslaná přihláška blokuje druhou stejně, jen s jinou radou: změny se
+     * hlásí změnovým, chyby opravným hlášením.
+     */
+    public function testSentRegistrationBlocksSecondRegistrationForTheSameEmployment(): void
+    {
+        $first = $this->json($this->post());
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_submissions
+                SET status = \'submitted\', submitted_at = NOW()
+              WHERE id = ?',
+        )->execute([$first['submission_id']]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_identity_history SET last_name = ? WHERE id = ?',
+        )->execute(['Novotná-Testová', $this->identityId]);
+
+        $response = $this->post();
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(
+            'registration_already_filed',
+            $this->json($response)['error']['code'],
+        );
+        self::assertTrue($this->json($this->current())['submission']['sent']);
+        self::assertSame(1, $this->countSubmissions());
+    }
+
+    /**
      * § 19 odst. 1 písm. a) zákona č. 323/2025 Sb.: přihlásit PŘED nástupem,
      * nejdřív osm dnů předem — a to i plnou registrací A1. Dřív šla A1 až po
      * nástupu (`full_registration_data = metadata && work_started`), takže
@@ -3582,6 +3653,15 @@ final class PayrollRegistrationActionTest extends TestCase
     {
         return ($this->action)->prepare(
             $this->request('POST'),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+    }
+
+    private function current(): \Psr\Http\Message\ResponseInterface
+    {
+        return ($this->action)->current(
+            $this->request('GET'),
             new Response(),
             ['employmentId' => (string) $this->employmentId],
         );

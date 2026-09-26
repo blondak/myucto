@@ -20,6 +20,7 @@ const m = vi.hoisted(() => ({
   searchMunicipalities: vi.fn(),
   searchCzIsco: vi.fn(),
   detectChanges: vi.fn(),
+  current: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -27,6 +28,7 @@ vi.mock('@/api/payroll', () => ({
     detectEmploymentRegistrationChanges: m.detectChanges,
     previewEmploymentRegistration: m.preview,
     prepareEmploymentRegistration: m.prepare,
+    currentEmploymentRegistration: m.current,
     sendEmploymentRegistrationTransport: m.send,
     employmentRegistrationTransportStatus: m.status,
     pollEmploymentRegistrationTransportAttempt: m.poll,
@@ -59,6 +61,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
+    te: () => false,
     locale: { value: 'cs' },
   }),
 }))
@@ -278,6 +281,7 @@ describe('EmploymentRegistrationPanel', () => {
     // Vývojová instalace: výběr testovacího prostředí je dostupný.
     setActivePinia(createPinia())
     useAuthStore().submissionTestEnvironmentAllowed = true
+    m.current.mockResolvedValue(null)
     vi.stubGlobal('crypto', {
       randomUUID: vi.fn(() => '00000000-0000-4000-8000-000000000001'),
     })
@@ -1932,5 +1936,70 @@ describe('EmploymentRegistrationPanel', () => {
       .toContain('czech_residence_hint')
     expect(wrapper.get('[data-test="a1-contact-hint"]').text())
       .toContain('contact_address_hint')
+  })
+
+  it('UI-23: po načtení ukáže připravenou přihlášku a místo přípravy nabídne frontu', async () => {
+    m.current.mockResolvedValue({
+      submission_id: 44,
+      agenda_code: 'PREZEC26',
+      status: 'ready',
+      created_at: '2026-09-20 10:00:00',
+      submitted_at: null,
+      sent: false,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(m.current).toHaveBeenCalledWith(5, 'production')
+    expect(wrapper.get('[data-test="registration-existing-ready"]').text()).toContain('"id":44')
+    expect(wrapper.get('[data-test="registration-open-queue"]').attributes('data-to'))
+      .toBe(JSON.stringify({ name: 'payroll-submissions-tab', params: { tab: 'queue' } }))
+    expect(wrapper.find('[data-test="registration-prepare"]').exists()).toBe(false)
+  })
+
+  it('UI-23: u odeslané přihlášky vysvětlí, že druhá se nepodává', async () => {
+    m.current.mockResolvedValue({
+      submission_id: 45,
+      agenda_code: 'REGZEC25',
+      status: 'accepted',
+      created_at: '2026-09-01 10:00:00',
+      submitted_at: '2026-09-01 11:00:00',
+      sent: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-existing-sent"]').text()).toContain('existing_sent')
+    expect(wrapper.find('[data-test="registration-existing-link"]').exists()).toBe(true)
+  })
+
+  it('UI-27: náhled a příprava jsou dvě tlačítka, příprava až po náhledu', async () => {
+    m.preview.mockResolvedValue({ ...preview, deadline: { ...deadline, due_on: '2999-01-01' } })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const prepare = wrapper.get('[data-test="registration-prepare"]')
+    expect(prepare.attributes('disabled')).toBeDefined()
+    expect(prepare.attributes('title')).toContain('prepare_needs_preview')
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+
+    expect(m.prepare).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="registration-prepare"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-test="registration-deadline-overdue"]').exists()).toBe(false)
+  })
+
+  it('UI-27: prošlou lhůtu označí červeným upozorněním', async () => {
+    m.preview.mockResolvedValue(preview)
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-deadline-overdue"]').text()).toContain('deadline_overdue')
   })
 })

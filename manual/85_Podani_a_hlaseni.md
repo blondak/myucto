@@ -523,6 +523,15 @@ od 23. 6. 2026 — u staršího nástupu aplikace rovnou nabídne plnou registra
 Druh činnosti 10 až 16 a výkon trestu jde přihlásit jen s nástupem od
 1. 1. 2026; dřívější datum ohlásí kontrola profilu.
 
+**Náhled, příprava a stav přihlášky.** V části **Registrace vztahu na ČSSZ**
+jsou dvě samostatná tlačítka: **Zjistit, co se podá** ukáže náhled a lhůtu,
+**Připravit podání** je aktivní až po náhledu a teprve ono zakládá úřední
+podání. Uplynulou lhůtu náhled označí červeným upozorněním. Když už k vztahu
+existuje přihláška, karta to ukáže hned po otevření: připravenou nabídne
+tlačítkem **Otevřít ve frontě** místo nové přípravy, u odeslané nebo přijaté
+napíše její číslo a stav. Druhou přihlášku téhož vztahu aplikace nezaloží ani
+po změně údajů; změny se hlásí změnovým hlášením A3, chyby opravou A4.
+
 **Přihlášení před nástupem.** Zaměstnance je nutné přihlásit před nástupem,
 nejdřív osm dnů předem (§ 19 odst. 1 písm. a) zákona č. 323/2025 Sb.).
 U zaměstnance s českým občanstvím nabídne náhled volbu **Přihlášení před

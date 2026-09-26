@@ -6054,6 +6054,13 @@
         "action_prepare": "Prepare the filing",
         "action_done": "Filing is ready",
         "preview": "Show again",
+        "filing_state": {
+          "prepare_needs_preview": "First click “See what will be filed” and check the preview.",
+          "deadline_overdue": "The filing deadline passed on {due}. File as soon as possible; a late filing may be fined by ČSSZ.",
+          "existing_ready": "A registration for this employment is already prepared in the queue (filing no. {id}, {status}). Do not prepare another one; open it in the queue and send it.",
+          "existing_sent": "A registration for this employment has already been sent to ČSSZ (filing no. {id}, {status}). Report changes with a change notice and errors with a correction.",
+          "open_queue": "Open in queue"
+        },
         "window": "Can be filed from {from}, no later than {to}.",
         "employer_window": "Note: this is the first employee. File the employer's own registration no later than {to} — after that date the employer status is presumed by law.",
         "registration_window": {

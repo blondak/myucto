@@ -6054,6 +6054,13 @@
         "action_prepare": "Připravit podání",
         "action_done": "Podání je připravené",
         "preview": "Zobrazit znovu",
+        "filing_state": {
+          "prepare_needs_preview": "Nejdřív klikněte na „Zjistit, co se podá“ a zkontrolujte náhled.",
+          "deadline_overdue": "Lhůta pro podání uplynula {due}. Podejte co nejdřív, podání po lhůtě může ČSSZ pokutovat.",
+          "existing_ready": "Přihláška k tomuto vztahu už je připravená ve frontě (podání č. {id}, {status}). Druhou nepřipravujte, otevřete ji ve frontě a odešlete.",
+          "existing_sent": "Přihláška k tomuto vztahu už odešla na ČSSZ (podání č. {id}, {status}). Změny se hlásí změnovým hlášením, chyby opravným.",
+          "open_queue": "Otevřít ve frontě"
+        },
         "window": "Podat lze od {from}, nejpozději {to}.",
         "employer_window": "Pozor: jde o prvního zaměstnance. Přihlášku zaměstnavatele do evidence ČSSZ podejte nejpozději {to} — po tomto termínu vzniká fikce zaměstnavatele.",
         "registration_window": {

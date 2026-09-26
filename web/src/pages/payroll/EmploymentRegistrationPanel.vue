@@ -15,6 +15,7 @@ import {
   type PayrollRegistrationEventInput,
   type PayrollRegistrationEventInteraction,
   type PayrollRegistrationSubmission,
+  type PayrollRegistrationCurrent,
   type PayrollRegistrationA1Address,
   type PayrollRegistrationA1Draft,
   type PayrollRegistrationA1Problem,
@@ -56,7 +57,7 @@ const props = defineProps<{
   a2Prefill?: PayrollTerminationA2Prefill | null
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { errorMessage: serverErrorMessage } = usePayrollServerMessage()
 const {
   request: sendConfirmRequest,
@@ -1238,6 +1239,50 @@ const primaryAction = computed<'preview' | 'prepare' | 'done'>(() => {
   return preview.value ? 'prepare' : 'preview'
 })
 
+/**
+ * Živá přihláška vztahu načtená se kartou (UI-23). Bez ní karta po obnovení
+ * stránky nevěděla, že podání už čeká ve frontě, a nabízela ho připravit znovu.
+ */
+const currentRegistration = ref<PayrollRegistrationCurrent | null>(null)
+const QUEUE_ROUTE = { name: 'payroll-submissions-tab', params: { tab: 'queue' } } as const
+
+async function loadCurrentRegistration(): Promise<void> {
+  try {
+    currentRegistration.value = await payrollApi.currentEmploymentRegistration(
+      props.employmentId,
+      environment.value,
+    )
+  } catch {
+    currentRegistration.value = null
+  }
+}
+
+/** Připravená přihláška čeká ve frontě: nová příprava se nenabízí. */
+const registrationInQueue = computed(() => submission.value === null
+  && selectedEventId.value === null
+  && currentRegistration.value !== null
+  && !currentRegistration.value.sent)
+
+const currentRegistrationStatus = computed(() => {
+  const status = currentRegistration.value?.status ?? ''
+  const key = `payroll.submissions.overview.status.${status}`
+  return te(key) ? t(key) : status
+})
+
+function todayIso(): string {
+  const now = new Date()
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
+
+/** Lhůta už uplynula a nic zatím neodešlo (UI-27). */
+const deadlineOverdue = computed(() => {
+  const value = deadline.value
+  if (!value || value.statutory === false || value.derived === false) return false
+  if (transportAttempt.value !== null) return false
+  return typeof value.due_on === 'string' && value.due_on < todayIso()
+})
+
 const agendaLabel = computed(() => {
   const agenda = submission.value?.agenda_code ?? preview.value?.agenda_code
   return agenda ? t(`payroll.people.registration.agenda.${agenda}`) : ''
@@ -1768,7 +1813,7 @@ watch(employmentType, value => {
 watch(environment, async () => {
   selectedEventId.value = null
   resetPreparedFiling()
-  await Promise.all([loadEvents(), loadChangeDetection()])
+  await Promise.all([loadEvents(), loadChangeDetection(), loadCurrentRegistration()])
 })
 onMounted(() => {
   void loadPayrollJmhzOptions().then((loaded) => {
@@ -1779,6 +1824,7 @@ onMounted(() => {
     loadEvents(),
     loadA1Profile(),
     loadChangeDetection(),
+    loadCurrentRegistration(),
   ])
 })
 
@@ -1877,6 +1923,10 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
     // Hláška ze serveru jmenuje konkrétní chybějící údaj — nesmí ji přebít
     // obecný text, jinak uživatel neví, co doplnit.
     errorProblems.value = registrationMissingItems(exception)
+    const code = apiErrorCode(exception)
+    if (code === 'registration_already_prepared' || code === 'registration_already_filed') {
+      void loadCurrentRegistration()
+    }
     error.value = errorProblems.value.length > 0
       ? t('payroll.people.registration.missing.title', errorProblems.value.length)
       : serverErrorMessage(
@@ -2018,23 +2068,46 @@ async function copyXml(): Promise<void> {
             <option value="full">{{ t('payroll.people.registration.before_start.full') }}</option>
           </select>
         </label>
+        <!--
+          Náhled a příprava jsou dvě samostatná tlačítka na stálém místě (UI-27):
+          dřív jedno tlačítko měnilo význam „zjistit → připravit", takže dvojklik
+          rovnou připravil úřední podání.
+        -->
         <button
-          v-if="primaryAction !== 'preview'"
           type="button"
-          :class="btnOutline('neutral')"
+          :class="primaryAction === 'preview' ? btnFilled('primary') : btnOutline('neutral')"
           :disabled="busy"
           data-test="registration-preview"
           @click="run('preview')"
         >
-          {{ t('payroll.people.registration.preview') }}
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.eye" />
+          </svg>
+          {{ busy
+            ? t('common.loading')
+            : t(primaryAction === 'preview'
+              ? 'payroll.people.registration.action_preview'
+              : 'payroll.people.registration.preview') }}
         </button>
-        <button
-          v-if="primaryAction !== 'done'"
-          type="button"
+        <RouterLink
+          v-if="registrationInQueue && currentRegistration"
+          :to="QUEUE_ROUTE"
           :class="btnFilled('primary')"
-          :disabled="busy || (primaryAction !== 'preview' && !canWrite)"
-          :data-test="`registration-${primaryAction === 'preview' ? 'preview' : 'prepare'}`"
-          @click="run(primaryAction === 'preview' ? 'preview' : 'prepare')"
+          data-test="registration-open-queue"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.link" />
+          </svg>
+          {{ t('payroll.people.registration.filing_state.open_queue') }}
+        </RouterLink>
+        <button
+          v-else-if="primaryAction !== 'done'"
+          type="button"
+          :class="primaryAction === 'prepare' ? btnFilled('primary') : btnOutline('primary')"
+          :disabled="busy || primaryAction !== 'prepare' || !canWrite"
+          :title="primaryAction !== 'prepare' ? t('payroll.people.registration.filing_state.prepare_needs_preview') : undefined"
+          data-test="registration-prepare"
+          @click="run('prepare')"
         >
           <svg
             class="h-4 w-4"
@@ -2046,9 +2119,7 @@ async function copyXml(): Promise<void> {
           >
             <path :d="ICONS.check" />
           </svg>
-          {{ busy
-            ? t('common.loading')
-            : t(`payroll.people.registration.action_${primaryAction}`) }}
+          {{ t('payroll.people.registration.action_prepare') }}
         </button>
       </div>
     </div>
@@ -2073,6 +2144,32 @@ async function copyXml(): Promise<void> {
         ? t('payroll.people.registration.environment_notice.production')
         : t('payroll.people.registration.environment_notice.test') }}
     </p>
+
+    <div
+      v-if="currentRegistration && submission === null && selectedEventId === null"
+      class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs"
+      :class="currentRegistration.sent
+        ? 'border-success-500/30 bg-success-50 text-success-800'
+        : 'border-primary-200 bg-primary-50 text-primary-800'"
+      role="status"
+      :data-test="`registration-existing-${currentRegistration.sent ? 'sent' : 'ready'}`"
+    >
+      <span>
+        {{ t(`payroll.people.registration.filing_state.existing_${currentRegistration.sent ? 'sent' : 'ready'}`, {
+          id: currentRegistration.submission_id,
+          status: currentRegistrationStatus,
+        }) }}
+      </span>
+      <RouterLink
+        v-if="currentRegistration.sent"
+        :to="QUEUE_ROUTE"
+        :class="btnOutline('neutral')"
+        class="whitespace-nowrap"
+        data-test="registration-existing-link"
+      >
+        {{ t('payroll.people.registration.filing_state.open_queue') }}
+      </RouterLink>
+    </div>
 
     <div class="mt-4 rounded-lg border border-neutral-200 bg-surface p-3" data-test="registration-a1-profile">
       <div class="flex flex-wrap items-start justify-between gap-3">
@@ -4169,6 +4266,14 @@ async function copyXml(): Promise<void> {
           from: formatDate(deadline.earliest_registration_on),
           to: formatDate(deadline.due_on),
         }) }}
+      </p>
+      <p
+        v-if="deadlineOverdue"
+        class="mt-2 rounded-md border border-danger-500/30 bg-danger-50 px-2 py-1 font-medium text-danger-700"
+        role="alert"
+        data-test="registration-deadline-overdue"
+      >
+        {{ t('payroll.people.registration.filing_state.deadline_overdue', { due: formatDate(deadline.due_on) }) }}
       </p>
       <p
         v-if="preview?.employer_registration"

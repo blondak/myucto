@@ -186,6 +186,84 @@ final class PayrollRegistrationSubmissionRepository
     }
 
     /**
+     * Stavy základního podání (P1/A1), po kterých už další základní podání
+     * k témuž vztahu nevzniká: nové je přípustné jen po zamítnutí, nahrazení
+     * nebo včasném zrušení předchozího.
+     */
+    public const BASE_REGISTRATION_CLOSED_STATUSES = [
+        'rejected',
+        'superseded',
+        'cancelled_in_time',
+    ];
+
+    /**
+     * Nejnovější ŽIVÉ základní registrační podání vztahu (bez podání z událostí
+     * A2–A8): připravené ve frontě, odeslané nebo přijaté. Podklad pro kartu
+     * vztahu po načtení i pro zákaz druhé přihlášky téhož vztahu.
+     *
+     * @return array{
+     *   submission_id:int,agenda_code:string,status:string,created_at:string,
+     *   submitted_at:?string,source_snapshot_hash:string
+     * }|null
+     */
+    public function liveBaseRegistration(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        ?string $agendaCode = null,
+    ): ?array {
+        $closed = self::BASE_REGISTRATION_CLOSED_STATUSES;
+        $parameters = [
+            $supplierId,
+            $environment,
+            self::employmentReference($employmentId),
+            ...$closed,
+        ];
+        $agendaFilter = '';
+        if ($agendaCode !== null) {
+            $agendaFilter = ' AND part.agenda_code = ?';
+            $parameters[] = $agendaCode;
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT submission.id,
+                    part.agenda_code,
+                    submission.status,
+                    submission.created_at,
+                    submission.submitted_at,
+                    submission.source_snapshot_hash
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+              WHERE part.supplier_id = ?
+                AND part.environment = ?
+                AND part.subject_reference = ?
+                AND part.source_entity_type = \'payroll_employment\'
+                AND part.agenda_code IN (\'PREZEC26\', \'REGZEC25\')
+                AND submission.status NOT IN ('
+                . implode(',', array_fill(0, count($closed), '?')) . ')'
+                . $agendaFilter . '
+              ORDER BY submission.id DESC
+              LIMIT 1'
+        );
+        $statement->execute($parameters);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'submission_id' => (int) $row['id'],
+            'agenda_code' => (string) $row['agenda_code'],
+            'status' => (string) $row['status'],
+            'created_at' => (string) $row['created_at'],
+            'submitted_at' => $this->nullableString($row['submitted_at']),
+            'source_snapshot_hash' => (string) $row['source_snapshot_hash'],
+        ];
+    }
+
+    /**
      * @return array{
      *   submission_id:int,agenda_code:string,status:string,
      *   created_at:string,artifact_sha256:?string
