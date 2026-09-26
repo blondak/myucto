@@ -38,7 +38,6 @@ vi.mock('@/api/payroll', () => ({
     employmentJmhzEvidenceOptions: m.jmhzOptions,
     searchJmhzMunicipalities: m.searchMunicipalities,
     searchCzIsco: m.searchCzIsco,
-    detectEmploymentRegistrationChanges: m.detectChanges,
   },
 }))
 
