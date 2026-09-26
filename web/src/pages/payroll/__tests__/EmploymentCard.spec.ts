@@ -6,6 +6,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     transitionEmployment: vi.fn(),
+    saveStatutoryOpenings: vi.fn(),
     renameEmployment: vi.fn(),
     setEmploymentMealEntitlementBasis: vi.fn(),
     addEmploymentTerms: vi.fn(),
@@ -1138,6 +1139,79 @@ describe('EmploymentCard', () => {
       row_version: 1,
       effective_on: '2026-01-01',
     })
+  })
+
+  /**
+   * UX-7: nový nástup potřeboval rozbalit „Počáteční stavy", uložit prázdnou
+   * tabulku a teprve potom potvrdit nástup. Potvrzení teď nulový stav zapíše
+   * samo — po výslovném souhlasu, a jen když ještě uložený není.
+   */
+  it.each([
+    [true, 1, 1],
+    [false, 0, 0],
+  ])('potvrzení nového nástupu zapíše nulový počáteční stav (souhlas %s)', async (agreed, openingCalls, transitionCalls) => {
+    vi.mocked(payrollApi.saveStatutoryOpenings).mockReset().mockResolvedValue({ openings: {} } as never)
+    vi.mocked(payrollApi.transitionEmployment).mockReset().mockResolvedValue(employment())
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(agreed)
+    const wrapper = await mountCard(employment(), {
+      props: { employment: employment(), canWrite: true, payrollStartPeriod: '2025-12-01' },
+      global: {
+        stubs: {
+          ...actionBarStub,
+          PayrollOpeningBalancesPanel: {
+            emits: ['loaded'],
+            template: '<div />',
+            mounted(this: { $emit: (event: string, value: boolean) => void }) {
+              this.$emit('loaded', false)
+            },
+          },
+        },
+      },
+    })
+
+    await wrapper.get('[data-test="action-confirm-start"]').trigger('click')
+    await flushPromises()
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(payrollApi.saveStatutoryOpenings).toHaveBeenCalledTimes(openingCalls)
+    if (openingCalls > 0) {
+      expect(payrollApi.saveStatutoryOpenings).toHaveBeenCalledWith(employment().employee_id, {
+        year: 2026,
+        source_reference: '',
+        months: [],
+      })
+    }
+    expect(payrollApi.transitionEmployment).toHaveBeenCalledTimes(transitionCalls)
+    confirmSpy.mockRestore()
+  })
+
+  it('s uloženým počátečním stavem potvrdí nástup bez dotazu', async () => {
+    vi.mocked(payrollApi.saveStatutoryOpenings).mockReset()
+    vi.mocked(payrollApi.transitionEmployment).mockReset().mockResolvedValue(employment())
+    const confirmSpy = vi.spyOn(window, 'confirm')
+    const wrapper = await mountCard(employment(), {
+      props: { employment: employment(), canWrite: true, payrollStartPeriod: '2025-12-01' },
+      global: {
+        stubs: {
+          ...actionBarStub,
+          PayrollOpeningBalancesPanel: {
+            emits: ['loaded'],
+            template: '<div />',
+            mounted(this: { $emit: (event: string, value: boolean) => void }) {
+              this.$emit('loaded', true)
+            },
+          },
+        },
+      },
+    })
+
+    await wrapper.get('[data-test="action-confirm-start"]').trigger('click')
+    await flushPromises()
+
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(payrollApi.saveStatutoryOpenings).not.toHaveBeenCalled()
+    expect(payrollApi.transitionEmployment).toHaveBeenCalledTimes(1)
+    confirmSpy.mockRestore()
   })
 
   /**

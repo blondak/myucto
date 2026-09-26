@@ -772,8 +772,48 @@ async function saveCode() {
 async function confirmStart() {
   const on = startDate.value
   if (on === null) return
+  if (needsZeroOpening.value) {
+    if (!window.confirm(t('payroll.people.openings.confirm_start_zero', {
+      date: formatDate(on),
+      year: openingStartPeriod.value!.slice(0, 4),
+    }))) return
+    if (!await saveZeroOpening()) return
+  }
   transitionDate.value = on
   await transition('active')
+}
+
+/*
+ * Nový nástup u téhle firmy nemá před nástupem žádnou mzdu, přesto bez
+ * uloženého (nulového) počátečního stavu osoba vypadne ze zákonného výpočtu.
+ * Dřív to znamenalo rozbalit „Počáteční stavy", uložit prázdnou tabulku
+ * a teprve pak potvrdit nástup; teď to potvrzení nástupu zapíše samo, po
+ * výslovném souhlasu. Převzatý zaměstnanec (nástup před startem mezd
+ * v aplikaci) má skutečné úhrny a jde dál přes tabulku.
+ */
+const needsZeroOpening = computed(() => showOpeningBalances.value
+  && !startsBeforePayroll.value
+  && !openingsFilled.value
+  && props.canWrite)
+const openingsVersion = ref(0)
+
+async function saveZeroOpening(): Promise<boolean> {
+  busy.value = true
+  try {
+    await payrollApi.saveStatutoryOpenings(props.employment.employee_id, {
+      year: Number(openingStartPeriod.value!.slice(0, 4)),
+      source_reference: '',
+      months: [],
+    })
+    openingsFilled.value = true
+    openingsVersion.value++
+    return true
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.openings.save_failed')))
+    return false
+  } finally {
+    busy.value = false
+  }
 }
 
 function relationLabel(): string {
@@ -1737,6 +1777,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             : t('payroll.people.openings.hint_new_hire')) }}
       </p>
       <PayrollOpeningBalancesPanel
+        :key="openingsVersion"
         class="mt-3"
         :person-id="employment.employee_id"
         :start-period="openingStartPeriod!"

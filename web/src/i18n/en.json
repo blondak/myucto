@@ -5238,6 +5238,7 @@
       "openings": {
         "title": "This employee started before you began running payroll here",
         "title_new_hire": "Confirm the new employee's opening state",
+        "confirm_start_zero": "Confirm the start on {date}? There was no pay at this company before the start, so a zero opening state for {year} is recorded as well. If this year's pay is being taken over from another program, cancel and enter the totals under Opening states.",
         "hint": "Started {start}, payroll runs from {period}. To make the calculation and the annual settlement add up, the totals from the previous processing need to be filled in.",
         "hint_new_hire": "If there was no earlier payroll for this employee at this company, save an explicit zero opening state below. This does not create fictitious processed months.",
         "done": "The opening state is confirmed — the calculation and annual settlement use it. You can review or correct it below.",

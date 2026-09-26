@@ -5238,6 +5238,7 @@
       "openings": {
         "title": "Zaměstnanec nastoupil dřív, než v MyÚčtu vedete mzdy",
         "title_new_hire": "Potvrďte počáteční stav nového zaměstnance",
+        "confirm_start_zero": "Potvrdit nástup k {date}? Před nástupem u této firmy žádná mzda nebyla, proto se zároveň zapíše nulový počáteční stav za rok {year}. Kdo si mzdu v tomto roce převádí z jiného programu, zruší a úhrny zapíše do Počátečních stavů.",
         "hint": "Nástup {start}, mzdy vedete od {period}. Aby vyšel výpočet i roční zúčtování, bude potřeba doplnit úhrny z předchozího zpracování.",
         "hint_new_hire": "Pokud u této firmy před nástupem žádná mzda nebyla, stačí níže uložit nulový počáteční stav. Nevytvoří se tím žádné fiktivní zpracované měsíce.",
         "done": "Počáteční stav je potvrzený — výpočet i roční zúčtování s ním počítají. Zkontrolovat nebo opravit jej můžete níže.",
